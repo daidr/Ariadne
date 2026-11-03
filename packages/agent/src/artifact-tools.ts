@@ -1,4 +1,64 @@
-import { json, optionalInt, optionalStr, str, ToolInputError, type Tool } from './tool-helpers'
+import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import { boardFromItems, boardSummary, mergeBoard } from './whiteboard'
+import { dashboardFromWidgets, mergeDashboard } from './dashboard'
+import {
+  json,
+  optionalInt,
+  optionalStr,
+  str,
+  ToolInputError,
+  type Tool,
+  type ToolContext,
+} from './tool-helpers'
+
+/** The artifact, if it belongs to this project and is of the kind the tool works on. */
+function ownArtifact(ctx: ToolContext, artifactId: string, kind?: ArtifactKind): ArtifactView {
+  const artifact = ctx.app.getArtifact(artifactId)
+  if (artifact.projectId !== ctx.projectId) {
+    throw new ToolInputError(`No artifact ${artifactId} in this project.`)
+  }
+  if (kind && artifact.kind !== kind) {
+    throw new ToolInputError(`${artifactId} is a ${artifact.kind}, not a ${kind}.`)
+  }
+  return artifact
+}
+
+function baseVersionOf(args: Record<string, unknown>): number {
+  const baseVersion = optionalInt(args, 'baseVersion')
+  if (baseVersion === null) {
+    throw new ToolInputError('"baseVersion" is required: read the artifact first')
+  }
+  return baseVersion
+}
+
+function nodeIdOf(args: Record<string, unknown>): string | null {
+  return optionalStr(args, 'nodeId') || null
+}
+
+function arrayOf(args: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const value = args[key]
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'object' && v !== null)) {
+    throw new ToolInputError(`"${key}" must be an array of objects`)
+  }
+  return value as Record<string, unknown>[]
+}
+
+function stringsOf(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key]
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new ToolInputError(`"${key}" must be an array of strings`)
+  }
+  return value as string[]
+}
+
+const NODE_ID = {
+  type: 'string',
+  description: 'The plan node the artifact belongs to, if any.',
+} as const
+
+// ---- documents ----
 
 const createDocument: Tool = {
   spec: {
@@ -10,18 +70,17 @@ const createDocument: Tool = {
       properties: {
         title: { type: 'string' },
         content: { type: 'string', description: 'Markdown.' },
-        nodeId: { type: 'string', description: 'The plan node the document belongs to, if any.' },
+        nodeId: NODE_ID,
       },
       required: ['title', 'content'],
     },
   },
   run(args, ctx) {
-    const nodeId = optionalStr(args, 'nodeId')
     const artifact = ctx.app.createArtifact(ctx.projectId, {
       kind: 'document',
       title: str(args, 'title'),
       content: str(args, 'content'),
-      nodeId: nodeId || null,
+      nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
     return json({ artifactId: artifact.id, version: artifact.version })
@@ -47,12 +106,8 @@ const updateDocument: Tool = {
   },
   run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    if (ctx.app.getArtifact(artifactId).projectId !== ctx.projectId) {
-      return { content: `No document ${artifactId} in this project.`, isError: true }
-    }
-    const baseVersion = optionalInt(args, 'baseVersion')
-    if (baseVersion === null)
-      throw new ToolInputError('"baseVersion" is required: read the document first')
+    ownArtifact(ctx, artifactId, 'document')
+    const baseVersion = baseVersionOf(args)
     const title = optionalStr(args, 'title')
     const artifact = ctx.app.reviseArtifact(artifactId, {
       content: str(args, 'content'),
@@ -65,10 +120,227 @@ const updateDocument: Tool = {
   },
 }
 
-const readDocument: Tool = {
+// ---- whiteboards ----
+
+const ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', description: 'Your own short id, used by connectors and later edits.' },
+    kind: { type: 'string', enum: ['rect', 'ellipse', 'diamond', 'sticky', 'text'] },
+    text: { type: 'string' },
+    tone: { type: 'string', enum: ['neutral', 'primary', 'success', 'warning', 'danger'] },
+    x: { type: 'number' },
+    y: { type: 'number' },
+    width: { type: 'number' },
+    height: { type: 'number' },
+  },
+  required: ['id'],
+} as const
+
+const CONNECTOR_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    from: { type: 'string', description: 'Item id.' },
+    to: { type: 'string', description: 'Item id.' },
+    label: { type: 'string' },
+    route: { type: 'string', enum: ['straight', 'elbow', 'curve'] },
+    dash: { type: 'string', enum: ['solid', 'dashed', 'dotted', 'dash-dot'] },
+    arrow: { type: 'string', enum: ['none', 'end', 'both'] },
+  },
+  required: ['from', 'to'],
+} as const
+
+const createWhiteboard: Tool = {
   spec: {
-    name: 'read_document',
-    description: 'Read a document of the project, at its newest version or an older one.',
+    name: 'create_whiteboard',
+    description:
+      'Create a whiteboard in the project: shapes, sticky notes and text joined by arrows, for a sketch of an architecture, a flow, a mind map or options side by side. The user can move things, draw and add their own. Leave out x and y and items are laid out for you along the connectors, left to right; give them to place items yourself (canvas pixels, a shape is about 160 by 90).',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        items: { type: 'array', items: ITEM_SCHEMA },
+        connectors: { type: 'array', items: CONNECTOR_SCHEMA },
+        nodeId: NODE_ID,
+      },
+      required: ['title', 'items'],
+    },
+  },
+  run(args, ctx) {
+    const board = boardFromItems(arrayOf(args, 'items'), arrayOf(args, 'connectors'))
+    const artifact = ctx.app.createArtifact(ctx.projectId, {
+      kind: 'whiteboard',
+      title: str(args, 'title'),
+      content: JSON.stringify(board),
+      nodeId: nodeIdOf(args),
+      author: ctx.conversationId,
+    })
+    return json({ artifactId: artifact.id, version: artifact.version })
+  },
+}
+
+const updateWhiteboard: Tool = {
+  spec: {
+    name: 'update_whiteboard',
+    description:
+      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed for you. Everything else on the board stays, including the user's drawings and images. baseVersion is the version you read; if anyone saved since, read it again.",
+    parameters: {
+      type: 'object',
+      properties: {
+        artifactId: { type: 'string' },
+        baseVersion: { type: 'integer' },
+        reason: { type: 'string', description: 'What changed, in one line.' },
+        title: { type: 'string' },
+        items: { type: 'array', items: ITEM_SCHEMA },
+        connectors: { type: 'array', items: CONNECTOR_SCHEMA },
+        removeItems: { type: 'array', items: { type: 'string' } },
+        removeConnectors: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['artifactId', 'baseVersion', 'reason'],
+    },
+  },
+  run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    const current = ownArtifact(ctx, artifactId, 'whiteboard')
+    const baseVersion = baseVersionOf(args)
+    const board = mergeBoard(JSON.parse(current.content) as WhiteboardContent, {
+      items: arrayOf(args, 'items'),
+      connectors: arrayOf(args, 'connectors'),
+      removeItems: stringsOf(args, 'removeItems'),
+      removeConnectors: stringsOf(args, 'removeConnectors'),
+    })
+    const title = optionalStr(args, 'title')
+    const artifact = ctx.app.reviseArtifact(artifactId, {
+      content: JSON.stringify(board),
+      reason: str(args, 'reason'),
+      author: ctx.conversationId,
+      ...(title ? { title } : {}),
+      baseVersion,
+    })
+    return json({ artifactId, version: artifact.version })
+  },
+}
+
+// ---- dashboards ----
+
+const WIDGET_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    type: { type: 'string', enum: ['stat', 'text', 'table', 'chart', 'pivot'] },
+    title: { type: 'string' },
+    props: {
+      type: 'object',
+      description:
+        'stat: { value, prefix?, suffix?, precision? } or { source, field, trend?, delta? } (delta 0.125 shows +12.5%). text: { text, size?: sm|md|lg }. table: { source, path?, columns?: [{ key, title? }] }. chart: { source, path?, kind: line|area|bar|pie, x, y: [fields], labels?: { field: name }, stacked?, horizontal? }. pivot: { source, path?, config: { rows: [fields], columns: [fields], values: [field | { field, aggregate: sum|count|avg|min|max|distinct|median, label? }] } }. Field names may be paths like total.amount.',
+    },
+    w: { type: 'integer', description: 'Width in columns, 1 to 12.' },
+    h: { type: 'integer', description: 'Height in rows of 80px.' },
+  },
+  required: ['id'],
+} as const
+
+const DATA_SCHEMA = {
+  type: 'object',
+  description:
+    'Named data sources the widgets read with props.source: usually an array of row objects, or one object for stat widgets.',
+} as const
+
+const createDashboard: Tool = {
+  spec: {
+    name: 'create_dashboard',
+    description:
+      'Create a dashboard in the project: numbers, tables, charts and pivot tables over data you gathered. It is a snapshot: the data you give is stored with it and never fetched again, and it shows when it was taken. To bring it up to date, update_dashboard with new data. Widgets are placed in order on a 12-column grid unless you give w and h.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        widgets: { type: 'array', items: WIDGET_SCHEMA },
+        data: DATA_SCHEMA,
+        nodeId: NODE_ID,
+      },
+      required: ['title', 'widgets'],
+    },
+  },
+  run(args, ctx) {
+    const data = args.data ?? {}
+    if (typeof data !== 'object' || Array.isArray(data) || data === null) {
+      throw new ToolInputError('"data" must be an object of named data sources')
+    }
+    const content = dashboardFromWidgets(
+      arrayOf(args, 'widgets'),
+      data as Record<string, unknown>,
+      Date.now(),
+    )
+    const artifact = ctx.app.createArtifact(ctx.projectId, {
+      kind: 'dashboard',
+      title: str(args, 'title'),
+      content: JSON.stringify(content),
+      nodeId: nodeIdOf(args),
+      author: ctx.conversationId,
+    })
+    return json({ artifactId: artifact.id, version: artifact.version })
+  },
+}
+
+const updateDashboard: Tool = {
+  spec: {
+    name: 'update_dashboard',
+    description:
+      "Change a dashboard. Widgets are matched by id: a known id changes only the fields you give (props are replaced as a whole; the widget keeps its place), a new id is added at the end. data sets the named sources you give and keeps the others; giving data marks the snapshot as taken now. The user's own layout and widgets stay. baseVersion is the version you read; if anyone saved since, read it again.",
+    parameters: {
+      type: 'object',
+      properties: {
+        artifactId: { type: 'string' },
+        baseVersion: { type: 'integer' },
+        reason: { type: 'string', description: 'What changed, in one line.' },
+        title: { type: 'string' },
+        widgets: { type: 'array', items: WIDGET_SCHEMA },
+        removeWidgets: { type: 'array', items: { type: 'string' } },
+        data: DATA_SCHEMA,
+        removeData: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['artifactId', 'baseVersion', 'reason'],
+    },
+  },
+  run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    const current = ownArtifact(ctx, artifactId, 'dashboard')
+    const baseVersion = baseVersionOf(args)
+    const data = args.data
+    if (data !== undefined && (typeof data !== 'object' || Array.isArray(data) || data === null)) {
+      throw new ToolInputError('"data" must be an object of named data sources')
+    }
+    const content = mergeDashboard(
+      JSON.parse(current.content) as DashboardContent,
+      {
+        widgets: arrayOf(args, 'widgets'),
+        removeWidgets: stringsOf(args, 'removeWidgets'),
+        ...(data ? { data: data as Record<string, unknown> } : {}),
+        removeData: stringsOf(args, 'removeData'),
+      },
+      Date.now(),
+    )
+    const title = optionalStr(args, 'title')
+    const artifact = ctx.app.reviseArtifact(artifactId, {
+      content: JSON.stringify(content),
+      reason: str(args, 'reason'),
+      author: ctx.conversationId,
+      ...(title ? { title } : {}),
+      baseVersion,
+    })
+    return json({ artifactId, version: artifact.version })
+  },
+}
+
+// ---- any kind ----
+
+const readArtifact: Tool = {
+  spec: {
+    name: 'read_artifact',
+    description:
+      "Read an artifact of the project at its newest version or an older one: a document's Markdown, a whiteboard's items and connectors (drawings and images are listed without their pixels), or a dashboard's widgets and data.",
     parameters: {
       type: 'object',
       properties: { artifactId: { type: 'string' }, version: { type: 'integer' } },
@@ -79,22 +351,29 @@ const readDocument: Tool = {
     const version = optionalInt(args, 'version')
     const artifact = ctx.app.getArtifact(str(args, 'artifactId'), version ?? undefined)
     if (artifact.projectId !== ctx.projectId) {
-      return { content: `No document ${artifact.id} in this project.`, isError: true }
+      return { content: `No artifact ${artifact.id} in this project.`, isError: true }
     }
-    return json({
+    const head = {
       artifactId: artifact.id,
+      kind: artifact.kind,
       title: artifact.title,
       version: artifact.version,
       updatedBy: artifact.updatedBy,
-      content: artifact.content,
-    })
+    }
+    if (artifact.kind === 'whiteboard') {
+      return json({ ...head, ...boardSummary(JSON.parse(artifact.content) as WhiteboardContent) })
+    }
+    if (artifact.kind === 'dashboard') {
+      return json({ ...head, content: JSON.parse(artifact.content) as DashboardContent })
+    }
+    return json({ ...head, content: artifact.content })
   },
 }
 
 const listArtifacts: Tool = {
   spec: {
     name: 'list_artifacts',
-    description: "List the project's documents, newest first.",
+    description: "List the project's documents, whiteboards and dashboards, newest first.",
     parameters: { type: 'object', properties: {} },
   },
   run(_args, ctx) {
@@ -111,4 +390,13 @@ const listArtifacts: Tool = {
   },
 }
 
-export const artifactTools: Tool[] = [createDocument, updateDocument, readDocument, listArtifacts]
+export const artifactTools: Tool[] = [
+  createDocument,
+  updateDocument,
+  createWhiteboard,
+  updateWhiteboard,
+  createDashboard,
+  updateDashboard,
+  readArtifact,
+  listArtifacts,
+]

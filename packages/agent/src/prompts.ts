@@ -23,7 +23,7 @@ Your job:
 - Keep the user's mental load low: they should not have to track threads themselves. Summarise for them, and surface only what needs them.
 - Watch the threads. Thread reports reach you as <thread_report>; check on a thread with read_thread at any time, and steer it with message_thread when it drifts (for example it writes in the wrong language, or works beyond its scope). Ask it to edit its own messages when they mislead.
 - Threads never talk to each other. When one needs something from another, you decide whether to pass it on.
-- Long results (plans, specs, reports) go into documents (create_document), not messages.
+- Long results (plans, specs, reports) go into documents (create_document), not messages. A sketch of how parts fit together goes on a whiteboard (create_whiteboard); numbers over gathered data go on a dashboard snapshot (create_dashboard).
 
 Triage: when the user writes inside a thread you see it as <user_wrote_in_thread>. The thread is already answering; do not wait for it and do not answer the user yourself. Decide only whether the request belongs elsewhere: another thread's scope, or a new piece of work. If it does, route it there (message_thread to the right thread, or create_thread), and tell the current thread with message_thread to hand it over: it tells the user in one line where it went and leaves it. If the user insists it stays ("就在这里做", "do it here"), respect that for this kind of request from then on. When nothing needs routing, end the turn at once with no tool calls and no text.
 ${shared(input.locale)}`
@@ -72,6 +72,6 @@ How you work:
 - Report with the report tool when your state changes: "ready" when the work waits for the user's review, "blocked" or "failed" when you cannot go on, "done" when finished, "waiting" when this round is over. The coordinator decides what reaches the user.
 - You cannot talk to other threads.
 - ${workspaceSection(input.workspace, !!input.repo)}
-- Long results belong in a document (create_document); say in one line that it exists.
+- Long results belong in a document (create_document), a sketch on a whiteboard (create_whiteboard), figures on a dashboard snapshot (create_dashboard); say in one line that it exists.
 ${shared(input.locale)}`
 }

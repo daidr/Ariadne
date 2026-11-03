@@ -17,7 +17,7 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     case 'upstream-done':
       return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
     case 'artifact-edited':
-      return `<document_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}" />`
+      return `<artifact_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}">The user saved their own edit; read_artifact before you change it again.</artifact_edited_by_user>`
     case 'checks-failed':
       return `<checks_failed pull_request="${note.number}" commit="${note.headSha.slice(0, 12)}">\nChecks of your pull request failed: ${note.failed.join(', ') || '(unnamed)'}. Others may still be running: repo_status lists them all. Read the failed logs with read_check_log, fix the cause in your workspace, commit and push_branch again; if the default branch moved on, sync_branch and merge it first. If the failure is not caused by your change, report it as blocked with what you found.\n</checks_failed>`
     case 'pull-request-closed':

@@ -23,7 +23,9 @@ bun run check    # 格式、lint、类型检查和测试
 要让 thread 读写代码、运行命令，在右侧“项目来源”里选一个本机目录或 GitHub 仓库。
 
 - 本机目录：git 仓库会为每个 thread 建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，thread 的提交留在这个分支上，合并由你决定。
-- GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。thread 在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时 thread 会被唤醒去修，合并由你决定。公开仓库在每个 thread 第一次推送前会先问你。令牌存在 `~/.ariadne/config.json`，不进事件日志。
+- GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。thread 在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时 thread 会被唤醒去修，合并由你决定。公开仓库第一次推送前会先问你一次，同意后整个项目有效。令牌存在 `~/.ariadne/config.json`，不进事件日志。
+
+协调器和 thread 写的长内容放在“产物”里：文档、画板和仪表盘快照。右侧“产物”页的“全部产物”打开项目的产物总览，可以筛选、搜索，也可以自己新建；每种产物都能直接编辑，每次保存是一个新版本。
 
 | 环境变量                 | 作用                                        | 默认值                   |
 | ------------------------ | ------------------------------------------- | ------------------------ |

@@ -18,6 +18,7 @@ import type {
   ToolCallRecord,
   TurnOutcome,
 } from './events'
+import { checkArtifactContent, previewOf } from './artifact-content'
 import { newId } from './ids'
 import { applyOps, describePlanOps, needsConfirmation } from './plan'
 import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
@@ -47,7 +48,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 9
+export const PROJECTION_VERSION = 10
 
 interface ConversationRow {
   id: string
@@ -112,6 +113,7 @@ interface ArtifactRow {
 
 function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
   return {
+    preview: previewOf(row.kind, row.content),
     id: row.id,
     projectId: row.project_id,
     kind: row.kind,
@@ -482,19 +484,76 @@ export class Ariadne {
   }
 
   /**
-   * Where the user stands on a standing approval a thread asked for: the newest attention
-   * with this purpose decides. `null` when it was never asked.
+   * Where the user stands on a standing approval for the project, as seen by one thread.
+   * A yes holds for every thread of the project. A no holds only for the threads that
+   * waited on that card, so other work may still ask. An answer in words alone (no option
+   * picked) decides nothing. `null` when there is nothing to go by and the thread may ask.
    */
-  approvalFor(threadId: string, purpose: string): 'approved' | 'declined' | 'pending' | null {
-    const row = this.db
-      .query<{ answered: number; choice: number | null }, [string, string]>(
-        `SELECT answered, choice FROM attentions WHERE thread_id = ? AND purpose = ?
-         ORDER BY created_at DESC, id DESC LIMIT 1`,
+  approvalFor(
+    projectId: string,
+    threadId: string,
+    purpose: string,
+  ): 'approved' | 'declined' | 'pending' | null {
+    const approved = this.db
+      .query<{ id: string }, [string, string]>(
+        'SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 1 AND choice = 0 LIMIT 1',
       )
-      .get(threadId, purpose)
-    if (!row) return null
-    if (!row.answered) return 'pending'
-    return row.choice === 0 ? 'approved' : 'declined'
+      .get(projectId, purpose)
+    if (approved) return 'approved'
+    if (this.openApproval(projectId, purpose)) return 'pending'
+    const mine = this.db
+      .query<{ choice: number }, [string, string, string, string]>(
+        `SELECT a.choice FROM attentions a
+         WHERE a.project_id = ? AND a.purpose = ? AND a.answered = 1 AND a.choice IS NOT NULL
+           AND (a.thread_id = ? OR EXISTS (
+             SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = ?))
+         ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
+      )
+      .get(projectId, purpose, threadId, threadId)
+    return mine ? 'declined' : null
+  }
+
+  private openApproval(projectId: string, purpose: string): string | null {
+    return (
+      this.db
+        .query<{ id: string }, [string, string]>(
+          `SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 0
+           ORDER BY created_at, id LIMIT 1`,
+        )
+        .get(projectId, purpose)?.id ?? null
+    )
+  }
+
+  /**
+   * Ask the user for a standing approval, once for the whole project: when a card for it
+   * is already open, the thread joins it and hears the same answer. Returns where the
+   * approval stands afterwards, as `approvalFor` would; `asked` when a new card was opened.
+   */
+  requestApproval(
+    projectId: string,
+    threadId: string,
+    purpose: string,
+    card: () => { question: string; options: AttentionOption[] },
+  ): 'approved' | 'declined' | 'pending' | 'asked' {
+    const state = this.approvalFor(projectId, threadId, purpose)
+    if (state === 'approved' || state === 'declined') return state
+    this.assertThreadIn(projectId, threadId)
+    const open = this.openApproval(projectId, purpose)
+    if (open) {
+      const waiting = this.db
+        .query<{ one: number }, [string, string, string, string]>(
+          `SELECT 1 AS one FROM attentions WHERE id = ? AND thread_id = ?
+           UNION SELECT 1 FROM attention_waiters WHERE attention_id = ? AND thread_id = ?`,
+        )
+        .get(open, threadId, open, threadId)
+      if (waiting) return 'pending'
+      this.store.append([
+        { type: 'attention.joined', projectId, data: { attentionId: open, threadId } },
+      ])
+      return 'pending'
+    }
+    this.openAttention(projectId, { threadId, ...card(), purpose })
+    return 'asked'
   }
 
   openAttention(
@@ -981,6 +1040,7 @@ export class Ariadne {
     this.getProject(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
+    checkArtifactContent(input.kind, input.content)
     if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
       throw new DomainError('error.notFound', { what: input.nodeId })
     }
@@ -1022,6 +1082,7 @@ export class Ariadne {
     }
     const title = input.title?.trim() || current.title
     if (title === current.title && input.content === current.content) return current
+    checkArtifactContent(current.kind, input.content)
     this.store.append([
       {
         type: 'artifact.revised',
