@@ -1,6 +1,7 @@
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import { runTurn, type ResolvedModel } from './runner'
+import type { WorkspaceManager } from './workspaces'
 
 export interface SchedulerOptions {
   app: Ariadne
@@ -12,6 +13,7 @@ export interface SchedulerOptions {
   /** Extra slots only a turn answering the user may take, so the user never waits in line. */
   reservedSlots?: number
   maxSteps?: number
+  workspaces?: WorkspaceManager
 }
 
 interface Running {
@@ -126,6 +128,7 @@ export class Scheduler {
         locale: this.options.locale(),
         signal: controller.signal,
         maxSteps: this.options.maxSteps ?? 40,
+        ...(this.options.workspaces ? { workspaces: this.options.workspaces } : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

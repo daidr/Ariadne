@@ -14,6 +14,12 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     }
     case 'user-in-thread':
       return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}">\n${note.content}\n</user_wrote_in_thread>`
+    case 'upstream-done':
+      return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
+    case 'artifact-edited':
+      return `<document_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}" />`
+    case 'plan-changed-by-user':
+      return `<plan_changed_by_user revision="${note.revisionId}"${note.revertOf ? ` reverts="${note.revertOf}"` : ''}>\n${note.reason}\n</plan_changed_by_user>`
   }
 }
 

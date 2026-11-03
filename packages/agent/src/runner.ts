@@ -6,9 +6,10 @@ import {
 } from '@ariadne/core'
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { ModelProvider } from '@ariadne/plugin-sdk'
-import { coordinatorPrompt, threadPrompt } from './prompts'
-import { coordinatorTools, threadTools, ToolInputError, type Tool, type ToolContext } from './tools'
+import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
+import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
 import { toChatMessages } from './transcript'
+import type { WorkspaceManager } from './workspaces'
 
 /** The model a conversation talks to, with its provider's settings. */
 export interface ResolvedModel {
@@ -27,6 +28,8 @@ export interface TurnOptions {
   signal: AbortSignal
   maxSteps: number
   tools?: Tool[]
+  /** Opens threads' workspaces; without it threads get no file or command tools. */
+  workspaces?: WorkspaceManager
 }
 
 /** Why a turn stopped early, for the user. */
@@ -36,13 +39,45 @@ class TurnError extends Error {
   }
 }
 
-function systemPrompt(app: Ariadne, conversation: ConversationView, locale: Locale): string {
+function threadContext(
+  app: Ariadne,
+  conversation: ConversationView,
+  locale: Locale,
+  hasWorkspace: boolean,
+): ThreadContext {
   const project = app.getProject(conversation.projectId)
-  if (conversation.role === 'coordinator') {
-    return coordinatorPrompt({ projectName: project.name, locale })
-  }
   const thread = app.getThread(conversation.id)
-  return threadPrompt({ projectName: project.name, title: thread.title, locale })
+  const plan = thread.nodeId ? app.getPlan(project.id) : null
+  const node = plan?.nodes.find((n) => n.id === thread.nodeId) ?? null
+  const threads = node ? app.listThreads(project.id) : []
+  const upstream = (node?.dependsOn ?? []).flatMap((id) => {
+    const title = plan?.nodes.find((n) => n.id === id)?.title ?? id
+    return threads
+      .filter((t) => t.nodeId === id && t.lastReport === 'done' && t.lastSummary)
+      .map((t) => ({ node: title, summary: t.lastSummary as string }))
+  })
+  return {
+    projectName: project.name,
+    title: thread.title,
+    locale,
+    node: node
+      ? { title: node.title, description: node.description, acceptance: node.acceptance }
+      : null,
+    upstream,
+    workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
+  }
+}
+
+function systemPrompt(
+  app: Ariadne,
+  conversation: ConversationView,
+  locale: Locale,
+  hasWorkspace: boolean,
+): string {
+  if (conversation.role === 'coordinator') {
+    return coordinatorPrompt({ projectName: app.getProject(conversation.projectId).name, locale })
+  }
+  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace))
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolContext) {
@@ -74,8 +109,10 @@ async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolCo
  */
 export async function runTurn(options: TurnOptions): Promise<void> {
   const { app, conversation, model, signal } = options
-  const tools =
-    options.tools ?? (conversation.role === 'coordinator' ? coordinatorTools : threadTools)
+  const { workspaces } = options
+  const hasWorkspace =
+    conversation.role === 'thread' && !!workspaces?.available(conversation.projectId)
+  const tools = options.tools ?? toolsFor(conversation.role, hasWorkspace)
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
   const turnId = app.startTurn(conversationId, model.label)
@@ -84,7 +121,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     projectId: conversation.projectId,
     conversationId,
     role: conversation.role,
+    locale: options.locale,
     signal,
+    workspace: () => {
+      if (!workspaces || conversation.role !== 'thread') {
+        return Promise.reject(new DomainError('error.noSource'))
+      }
+      return workspaces.forThread(conversation.projectId, conversationId)
+    },
   }
   const titleOf = (threadId: string) => {
     try {
@@ -98,7 +142,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     for (let step = 0; step < options.maxSteps; step++) {
       const sawSeq = app.lastSeq()
       const messages = [
-        { role: 'system' as const, content: systemPrompt(app, conversation, options.locale) },
+        {
+          role: 'system' as const,
+          content: systemPrompt(app, conversation, options.locale, hasWorkspace),
+        },
         ...toChatMessages(app.listTranscript(conversationId), titleOf),
       ]
       let text = ''

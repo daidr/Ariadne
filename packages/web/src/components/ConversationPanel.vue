@@ -12,7 +12,7 @@ import {
   DouText,
 } from 'dou-ui'
 import type { MessageView } from '@ariadne/core'
-import { ChevronLeftIcon, RotateCwIcon, SquareStopIcon } from '@dou-ui/icons'
+import { ChevronLeftIcon, GitBranchIcon, RotateCwIcon, SquareStopIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
@@ -91,6 +91,14 @@ watch(
       <DouText weight="medium" truncate>{{ thread.title }}</DouText>
       <DouTag size="sm" :tone="stageTone[thread.stage]">
         {{ t(`thread.stage.${thread.stage}`) }}
+      </DouTag>
+      <DouTag
+        v-if="thread.workspace?.branch"
+        size="sm"
+        :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
+      >
+        <template #leading><GitBranchIcon /></template>
+        {{ thread.workspace.branch }}
       </DouTag>
     </div>
 

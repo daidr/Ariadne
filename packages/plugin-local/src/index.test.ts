@@ -1,0 +1,85 @@
+import { WorkspacePathError } from '@ariadne/plugin-sdk'
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { branchFor, localDirectoryProvider, run } from './index'
+
+let base: string
+
+beforeEach(async () => {
+  base = await mkdtemp(join(tmpdir(), 'ariadne-local-'))
+})
+
+afterEach(async () => {
+  await rm(base, { recursive: true, force: true })
+})
+
+async function repo(): Promise<string> {
+  const dir = join(base, 'repo')
+  await run(['mkdir', '-p', dir], { cwd: base })
+  const git = (...args: string[]) => run(['git', ...args], { cwd: dir })
+  await git('init', '-q', '-b', 'main')
+  await git('config', 'user.email', 'test@example.com')
+  await git('config', 'user.name', 'test')
+  await writeFile(join(dir, 'README.md'), '# repo\n')
+  await git('add', '.')
+  await git('commit', '-q', '-m', 'init')
+  return dir
+}
+
+describe('local directory', () => {
+  test('a git repository gives each thread its own worktree and branch', async () => {
+    const dir = await repo()
+    const provider = localDirectoryProvider(join(base, 'data'))
+    const { workspace } = await provider.connect({ path: dir })
+    expect(workspace?.isolated).toBe(true)
+    const a = await workspace!.open({ threadId: 'thr_a' })
+    const b = await workspace!.open({ threadId: 'thr_b' })
+    expect(a.branch).toBe('ariadne/thr_a')
+    expect(a.label).not.toBe(b.label)
+
+    await a.writeFile('src/new.ts', 'export {}\n')
+    await expect(b.readFile('src/new.ts')).rejects.toThrow()
+    expect(await a.readFile('README.md')).toBe('# repo\n')
+    expect((await a.list('.')).map((e) => e.name)).toEqual(['README.md', 'src'])
+
+    const status = await a.exec('git status --short && git branch --show-current')
+    expect(status.stdout).toContain('?? src/')
+    expect(status.stdout).toContain('ariadne/thr_a')
+
+    // Opening again reuses the worktree and keeps the work.
+    const again = await workspace!.open({ threadId: 'thr_a' })
+    expect(await again.readFile('src/new.ts')).toBe('export {}\n')
+  })
+
+  test('paths cannot leave the workspace, not even through a link', async () => {
+    const dir = join(base, 'plain')
+    await run(['mkdir', '-p', dir], { cwd: base })
+    await writeFile(join(base, 'secret'), 'no')
+    await symlink(join(base, 'secret'), join(dir, 'link'))
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    expect(workspace?.isolated).toBe(false)
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    await expect(ws.readFile('../secret')).rejects.toThrow(WorkspacePathError)
+    await expect(ws.readFile('link')).rejects.toThrow(WorkspacePathError)
+    await expect(ws.writeFile('/etc/passwd', 'x')).rejects.toThrow(WorkspacePathError)
+    await ws.writeFile('deep/er/file.txt', 'ok')
+    expect(await ws.readFile('deep/er/file.txt')).toBe('ok')
+  })
+
+  test('refuses relative or missing directories', async () => {
+    const provider = localDirectoryProvider(join(base, 'data'))
+    await expect(provider.connect({ path: 'relative' })).rejects.toThrow()
+    await expect(provider.connect({ path: join(base, 'missing') })).rejects.toThrow()
+  })
+
+  test('branch names use the random tail of the thread id', () => {
+    expect(branchFor('thr_01a1a344-64ac-71b6-9cac-f9b91ac96c2d')).toBe('ariadne/f9b91ac96c2d')
+  })
+
+  test('commands time out', async () => {
+    const result = await run(['sleep', '5'], { cwd: base, timeoutMs: 50 })
+    expect(result.exitCode).not.toBe(0)
+  })
+})

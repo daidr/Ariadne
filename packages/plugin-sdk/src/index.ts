@@ -1,6 +1,7 @@
 import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
+export { WorkspacePathError } from './capabilities'
 export { describeHttpError, readServerSentEvents, type ServerSentEvent } from './sse'
 
 /**
@@ -99,6 +100,8 @@ export type Dispose = () => void | Promise<void>
 
 /** What `setup` receives: every method registers something and returns its disposer. */
 export interface PluginContext {
+  /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
+  dataDir: string
   registerContextProvider(provider: ContextProvider<never>): Dispose
   registerModelProvider(provider: ModelProvider<never>): Dispose
 }

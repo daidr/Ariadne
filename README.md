@@ -20,6 +20,8 @@ bun run check    # 格式、lint、类型检查和测试
 
 打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址、API Key 和默认模型名，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
 
+要让 thread 读写代码、运行命令，在右侧“工作目录”里填一个本机目录。git 仓库会为每个 thread 建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，thread 的提交留在这个分支上，合并由你决定。
+
 | 环境变量        | 作用                   | 默认值       |
 | --------------- | ---------------------- | ------------ |
 | `ARIADNE_HOME`  | 数据库与令牌所在的目录 | `~/.ariadne` |
@@ -36,5 +38,6 @@ bun run check    # 格式、lint、类型检查和测试
 | `@ariadne/agent`                    | agent loop、调度、协调器与 thread 的工具     |
 | `@ariadne/plugin-openai-compatible` | OpenAI 兼容协议的模型 provider               |
 | `@ariadne/plugin-anthropic`         | Anthropic 协议的模型 provider                |
+| `@ariadne/plugin-local`             | 本地目录上下文源：工作区与 git worktree      |
 | `@ariadne/server`                   | 本地 HTTP 服务、鉴权、事件流与用户设置       |
 | `@ariadne/web`                      | 浏览器界面                                   |

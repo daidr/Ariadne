@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type {
   ContextProvider,
   Dispose,
@@ -23,11 +24,15 @@ export class PluginHost {
   readonly plugins: Plugin[] = []
   private readonly disposers: Dispose[] = []
 
+  /** `dataRoot` holds one data directory per plugin, named by its id. */
+  constructor(private readonly dataRoot: string) {}
+
   async load(plugin: Plugin): Promise<void> {
     if (this.plugins.some((loaded) => loaded.id === plugin.id)) {
       throw new Error(`plugin ${plugin.id} is already loaded`)
     }
     const ctx: PluginContext = {
+      dataDir: join(this.dataRoot, plugin.id),
       registerModelProvider: register(this.models),
       registerContextProvider: register(this.contexts),
     }

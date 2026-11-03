@@ -4,7 +4,10 @@ import { DouEmpty, DouMenu, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
+import ArtifactList from '../artifacts/ArtifactList.vue'
+import PlanPanel from '../plan/PlanPanel.vue'
 import { openThread, state } from '../store'
+import ProjectSource from './ProjectSource.vue'
 import TodoList from './TodoList.vue'
 
 const tab = ref('plan')
@@ -17,10 +20,11 @@ const stageOf = (id: string | number): ThreadStage =>
 
 <template>
   <div class="side">
+    <ProjectSource />
     <TodoList :todo="state.todo" />
     <DouTabs v-model="tab" class="side-tabs">
       <DouTabPanel value="plan" :label="t('panel.plan')">
-        <DouEmpty size="sm" :description="t('plan.empty')" />
+        <PlanPanel />
       </DouTabPanel>
       <DouTabPanel value="board" :label="t('panel.board')">
         <DouEmpty size="sm" />
@@ -44,7 +48,7 @@ const stageOf = (id: string | number): ThreadStage =>
         <DouEmpty v-else size="sm" />
       </DouTabPanel>
       <DouTabPanel value="artifacts" :label="t('panel.artifacts')">
-        <DouEmpty size="sm" />
+        <ArtifactList />
       </DouTabPanel>
     </DouTabs>
   </div>
@@ -61,6 +65,7 @@ const stageOf = (id: string | number): ThreadStage =>
   flex: 1;
   min-height: 0;
   padding: 8px 16px;
+  overflow-y: auto;
 }
 
 .thread {

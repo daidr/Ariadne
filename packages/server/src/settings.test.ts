@@ -10,7 +10,7 @@ let host: PluginHost
 let path: string
 
 beforeEach(async () => {
-  host = new PluginHost()
+  host = new PluginHost('/tmp/ariadne-test-plugins')
   await host.load(anthropic)
   path = join(mkdtempSync(join(tmpdir(), 'ariadne-settings-')), 'config.json')
 })

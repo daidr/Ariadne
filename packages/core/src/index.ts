@@ -1,4 +1,5 @@
-export { Ariadne, unknownResult, type AriadneOptions } from './ariadne'
+export { Ariadne, unknownResult, type AriadneOptions, type PlanChange } from './ariadne'
+export { applyOps, needsConfirmation, emptyGraph, type PlanGraph } from './plan'
 export { DomainError } from './errors'
 export type * from './events'
 export { newId } from './ids'
