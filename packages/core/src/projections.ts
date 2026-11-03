@@ -469,18 +469,20 @@ export const transcriptProjection: Projection = {
         break
       }
       case 'artifact.revised': {
-        // The author learns that the user changed its document, and sees it next turn.
+        // The agent that last wrote the document learns the user changed it, next turn.
+        // The artifacts projection has already applied this edit, which leaves the last
+        // agent in place.
         const row = db
-          .query<{ created_by: string; title: string }, [string]>(
-            'SELECT created_by, title FROM artifacts WHERE id = ?',
+          .query<{ last_agent: string | null; title: string }, [string]>(
+            'SELECT last_agent, title FROM artifacts WHERE id = ?',
           )
           .get(event.data.artifactId)
-        if (!row || event.data.author !== 'user' || row.created_by === 'user') break
+        if (!row?.last_agent || event.data.author !== 'user') break
         addEntry(
           db,
           event,
           {
-            conversationId: row.created_by,
+            conversationId: row.last_agent,
             kind: 'note',
             payload: {
               type: 'artifact-edited',
@@ -490,6 +492,29 @@ export const transcriptProjection: Projection = {
             },
           },
           false,
+        )
+        break
+      }
+      case 'plan.proposal.stale': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        const proposal = db
+          .query<{ reason: string }, [string]>('SELECT reason FROM plan_proposals WHERE id = ?')
+          .get(event.data.proposalId)
+        if (!coordinator || !proposal) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: coordinator,
+            kind: 'note',
+            payload: {
+              type: 'proposal-stale',
+              proposalId: event.data.proposalId,
+              reason: proposal.reason,
+              staleBecause: event.data.reason,
+            },
+          },
+          true,
         )
         break
       }
@@ -715,13 +740,20 @@ export const planProjection: Projection = {
       attention_id TEXT NOT NULL UNIQUE,
       reason TEXT NOT NULL,
       ops TEXT NOT NULL,
+      revert_of TEXT,
       status TEXT NOT NULL,
+      stale_reason TEXT,
       created_at INTEGER NOT NULL
     )`)
   },
   apply(db, event) {
     switch (event.type) {
       case 'plan.revised': {
+        // A proposal that failed to apply stays visible until the plan changes again.
+        db.run(
+          "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
+          [event.projectId],
+        )
         const before = loadPlanGraph(db, event.projectId)
         // Commands validate before appending; a revision that no longer applies is skipped
         // rather than corrupting the graph.
@@ -763,17 +795,28 @@ export const planProjection: Projection = {
       }
       case 'plan.proposed':
         db.run(
-          `INSERT INTO plan_proposals (id, project_id, attention_id, reason, ops, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'open', ?)`,
+          "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
+          [event.projectId],
+        )
+        db.run(
+          `INSERT INTO plan_proposals (id, project_id, attention_id, reason, ops, revert_of, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`,
           [
             event.data.proposalId,
             event.projectId,
             event.data.attentionId,
             event.data.reason,
             JSON.stringify(event.data.ops),
+            event.data.revertOf,
             event.at,
           ],
         )
+        break
+      case 'plan.proposal.stale':
+        db.run("UPDATE plan_proposals SET status = 'stale', stale_reason = ? WHERE id = ?", [
+          event.data.reason,
+          event.data.proposalId,
+        ])
         break
       case 'attention.answered':
         // Any answer closes the proposal; the first option's `plan.revised` marks it applied.
@@ -801,6 +844,8 @@ export const artifactsProjection: Projection = {
       content TEXT NOT NULL,
       created_by TEXT NOT NULL,
       updated_by TEXT NOT NULL,
+      -- The agent that wrote it last; it hears about the user's edits.
+      last_agent TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -821,8 +866,8 @@ export const artifactsProjection: Projection = {
       case 'artifact.created': {
         const { artifactId, kind, title, nodeId, author, content } = event.data
         db.run(
-          `INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, created_by, updated_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+          `INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, created_by, updated_by, last_agent, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
           [
             artifactId,
             event.projectId,
@@ -832,6 +877,7 @@ export const artifactsProjection: Projection = {
             content,
             author,
             author,
+            author === 'user' ? null : author,
             event.at,
             event.at,
           ],
@@ -846,8 +892,10 @@ export const artifactsProjection: Projection = {
       case 'artifact.revised': {
         const { artifactId, version, title, content, author, reason } = event.data
         db.run(
-          'UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ? WHERE id = ?',
-          [title, version, content, author, event.at, artifactId],
+          `UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ?,
+             last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END
+           WHERE id = ?`,
+          [title, version, content, author, event.at, author, author, artifactId],
         )
         db.run(
           `INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at)

@@ -18,6 +18,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
     case 'artifact-edited':
       return `<document_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}" />`
+    case 'proposal-stale':
+      return `<plan_proposal_not_applied proposal="${note.proposalId}">\nThe user agreed to "${note.reason}", but the plan had changed and it no longer applied (${note.staleBecause}). Nothing changed. Read the plan and propose again if it is still needed.\n</plan_proposal_not_applied>`
     case 'plan-changed-by-user':
       return `<plan_changed_by_user revision="${note.revisionId}"${note.revertOf ? ` reverts="${note.revertOf}"` : ''}>\n${note.reason}\n</plan_changed_by_user>`
   }

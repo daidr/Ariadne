@@ -1,3 +1,4 @@
+import type { LocalizedMessage } from '@ariadne/i18n'
 import { DomainError } from './errors'
 import type { PlanNodeFields, PlanOp } from './events'
 
@@ -70,15 +71,24 @@ export function applyOps(graph: PlanGraph, ops: PlanOp[]): { graph: PlanGraph; i
       case 'update': {
         const node = next.nodes.get(op.id)
         if (!node) invalid(`${where}: no node ${op.id}`)
-        const before: Extract<PlanOp, { op: 'update' }> = { op: 'update', id: op.id }
-        for (const field of ['title', 'description', 'acceptance'] as const) {
+        const fields = ['title', 'description', 'acceptance'] as const
+        for (const field of fields) {
+          const expected = op.expect?.[field]
+          if (expected !== undefined && node[field] !== expected) {
+            invalid(`${where}: ${field} of ${op.id} changed since`)
+          }
+        }
+        const restore: Partial<Omit<PlanNodeFields, 'kind'>> = {}
+        const after: Partial<Omit<PlanNodeFields, 'kind'>> = {}
+        for (const field of fields) {
           const value = op[field]
           if (value === undefined) continue
           if (field === 'title' && !value.trim()) invalid(`${where}: title is empty`)
-          before[field] = node[field]
+          restore[field] = node[field]
           node[field] = field === 'title' ? value.trim() : value
+          after[field] = node[field]
         }
-        inverse.unshift(before)
+        inverse.unshift({ op: 'update', id: op.id, ...restore, expect: after })
         break
       }
       case 'remove': {
@@ -136,6 +146,51 @@ export function needsConfirmation(graph: PlanGraph, ops: PlanOp[]): boolean {
       case 'link':
       case 'unlink':
         return false
+    }
+  })
+}
+
+/**
+ * What a change does, one line per op, for the user to judge before agreeing. Titles come
+ * from the graph as it is now, or from the op for nodes the change adds.
+ */
+export function describePlanOps(
+  graph: PlanGraph,
+  ops: PlanOp[],
+  threadsOn: (nodeId: string) => number,
+): LocalizedMessage[] {
+  const added = new Map<string, string>()
+  for (const op of ops) if (op.op === 'add') added.set(op.id, op.title)
+  const title = (id: string) => graph.nodes.get(id)?.title ?? added.get(id) ?? id
+  return ops.map((op): LocalizedMessage => {
+    switch (op.op) {
+      case 'add':
+        return {
+          key: op.kind === 'milestone' ? 'plan.op.addMilestone' : 'plan.op.add',
+          params: { title: op.title },
+        }
+      case 'remove': {
+        const count = threadsOn(op.id)
+        return count
+          ? { key: 'plan.op.removeWithThreads', params: { title: title(op.id), count } }
+          : { key: 'plan.op.remove', params: { title: title(op.id) } }
+      }
+      case 'update': {
+        if (op.acceptance !== undefined && op.acceptance !== graph.nodes.get(op.id)?.acceptance) {
+          return {
+            key: 'plan.op.acceptance',
+            params: { title: title(op.id), value: op.acceptance || '—' },
+          }
+        }
+        if (op.title !== undefined && op.title !== graph.nodes.get(op.id)?.title) {
+          return { key: 'plan.op.rename', params: { title: title(op.id), value: op.title } }
+        }
+        return { key: 'plan.op.update', params: { title: title(op.id) } }
+      }
+      case 'link':
+        return { key: 'plan.op.link', params: { from: title(op.from), to: title(op.to) } }
+      case 'unlink':
+        return { key: 'plan.op.unlink', params: { from: title(op.from), to: title(op.to) } }
     }
   })
 }

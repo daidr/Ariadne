@@ -53,6 +53,32 @@ describe('local directory', () => {
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
   })
 
+  test('a worktree deleted by hand is recreated on its branch', async () => {
+    const dir = await repo()
+    const provider = localDirectoryProvider(join(base, 'data'))
+    const { workspace } = await provider.connect({ path: dir })
+    const first = await workspace!.open({ threadId: 'thr_a' })
+    await first.exec('echo hi > kept.txt && git add . && git commit -qm kept')
+    await rm(first.label, { recursive: true, force: true })
+    const again = await workspace!.open({ threadId: 'thr_a' })
+    expect(again.branch).toBe(first.branch)
+    expect(await again.readFile('kept.txt')).toBe('hi\n')
+  })
+
+  test('a subdirectory of a repository stays the root inside the worktree', async () => {
+    const dir = await repo()
+    await run(['mkdir', '-p', join(dir, 'pkg')], { cwd: base })
+    await writeFile(join(dir, 'pkg', 'a.txt'), 'a')
+    await run(['git', 'add', '.'], { cwd: dir })
+    await run(['git', 'commit', '-qm', 'pkg'], { cwd: dir })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({
+      path: join(dir, 'pkg'),
+    })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect((await ws.list('.')).map((e) => e.name)).toEqual(['a.txt'])
+    await expect(ws.readFile('../README.md')).rejects.toThrow(WorkspacePathError)
+  })
+
   test('paths cannot leave the workspace, not even through a link', async () => {
     const dir = join(base, 'plain')
     await run(['mkdir', '-p', dir], { cwd: base })

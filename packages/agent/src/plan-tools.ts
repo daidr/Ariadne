@@ -1,5 +1,5 @@
-import { newId, type PlanNodeKind, type PlanOp } from '@ariadne/core'
-import { createTranslator } from '@ariadne/i18n'
+import { newId, type PlanConfirmation, type PlanNodeKind, type PlanOp } from '@ariadne/core'
+import { createTranslator, type Locale } from '@ariadne/i18n'
 import { json, optionalStr, str, ToolInputError, type Tool } from './tool-helpers'
 
 const KINDS: PlanNodeKind[] = ['task', 'milestone', 'decision']
@@ -99,6 +99,23 @@ export function resolvePlanOps(raw: unknown): { ops: PlanOp[]; refs: Record<stri
   return { ops: [...ops, ...links], refs }
 }
 
+/**
+ * The question the user answers before a big change takes effect: the reason, then
+ * every change spelled out, in the user's language.
+ */
+export function confirmation(locale: Locale, reason: string): PlanConfirmation {
+  const t = createTranslator(locale)
+  return {
+    question: (changes) =>
+      [
+        t('plan.confirm.question', { reason }),
+        ...changes.map((change) => `• ${t(change.key, change.params)}`),
+      ].join('\n'),
+    apply: { label: t('plan.confirm.apply'), consequence: t('plan.confirm.applyConsequence') },
+    keep: { label: t('plan.confirm.keep'), consequence: t('plan.confirm.keepConsequence') },
+  }
+}
+
 export const readPlan: Tool = {
   spec: {
     name: 'read_plan',
@@ -119,7 +136,12 @@ export const readPlan: Tool = {
         status: node.status,
         threads: node.threads,
       })),
-      waitingOnUser: plan.proposals.map((p) => ({ proposalId: p.id, reason: p.reason })),
+      waitingOnUser: plan.proposals
+        .filter((p) => p.status === 'open')
+        .map((p) => ({ proposalId: p.id, reason: p.reason })),
+      agreedButNotApplied: plan.proposals
+        .filter((p) => p.status === 'stale')
+        .map((p) => ({ proposalId: p.id, reason: p.reason, because: p.staleReason })),
       recentChanges: plan.revisions.slice(0, 5).map((r) => ({
         revisionId: r.id,
         author: r.author,
@@ -147,16 +169,11 @@ const updatePlan: Tool = {
   run(args, ctx) {
     const reason = str(args, 'reason')
     const { ops, refs } = resolvePlanOps(args.ops)
-    const t = createTranslator(ctx.locale)
     const change = ctx.app.revisePlan(ctx.projectId, {
       author: 'coordinator',
       reason,
       ops,
-      confirmation: {
-        question: t('plan.confirm.question', { reason }),
-        apply: { label: t('plan.confirm.apply'), consequence: t('plan.confirm.applyConsequence') },
-        keep: { label: t('plan.confirm.keep'), consequence: t('plan.confirm.keepConsequence') },
-      },
+      confirmation: confirmation(ctx.locale, reason),
     })
     return json(
       change.status === 'applied'
@@ -174,7 +191,8 @@ const updatePlan: Tool = {
 const revertPlanChange: Tool = {
   spec: {
     name: 'revert_plan_change',
-    description: 'Undo one earlier revision of the plan, e.g. one the user objected to.',
+    description:
+      'Undo one earlier revision of the plan, e.g. one the user objected to. Like update_plan, an undo that removes nodes or changes acceptance or milestones waits for the user to agree.',
     parameters: {
       type: 'object',
       properties: { revisionId: { type: 'string' }, reason: { type: 'string' } },
@@ -182,13 +200,19 @@ const revertPlanChange: Tool = {
     },
   },
   run(args, ctx) {
-    const revisionId = ctx.app.revertPlanRevision(
+    const reason = str(args, 'reason')
+    const change = ctx.app.revertPlanRevision(
       ctx.projectId,
       str(args, 'revisionId'),
       'coordinator',
-      str(args, 'reason'),
+      reason,
+      confirmation(ctx.locale, reason),
     )
-    return json({ status: 'reverted', revisionId })
+    return json(
+      change.status === 'applied'
+        ? { status: 'reverted', revisionId: change.revisionId }
+        : { status: 'waiting for the user to agree', proposalId: change.proposalId },
+    )
   },
 }
 

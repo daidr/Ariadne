@@ -60,7 +60,15 @@ export interface PlanNodeFields {
  */
 export type PlanOp =
   | ({ op: 'add'; id: string } & PlanNodeFields)
-  | ({ op: 'update'; id: string } & Partial<Omit<PlanNodeFields, 'kind'>>)
+  | ({
+      op: 'update'
+      id: string
+      /**
+       * Values the fields must still have, so undoing an edit refuses to overwrite a later
+       * edit of the same field.
+       */
+      expect?: Partial<Omit<PlanNodeFields, 'kind'>>
+    } & Partial<Omit<PlanNodeFields, 'kind'>>)
   | { op: 'remove'; id: string }
   | { op: 'link'; from: string; to: string }
   | { op: 'unlink'; from: string; to: string }
@@ -153,7 +161,16 @@ export interface EventMap {
    * A change big enough to need the user's yes (removing nodes, changing acceptance or
    * milestones). It waits on an attention whose first option applies it.
    */
-  'plan.proposed': { proposalId: string; attentionId: string; reason: string; ops: PlanOp[] }
+  'plan.proposed': {
+    proposalId: string
+    attentionId: string
+    reason: string
+    ops: PlanOp[]
+    /** Set when the proposal undoes an earlier revision. */
+    revertOf: string | null
+  }
+  /** The user agreed, but the plan had moved on and the proposal no longer applied. */
+  'plan.proposal.stale': { proposalId: string; reason: string }
   'artifact.created': {
     artifactId: string
     kind: ArtifactKind

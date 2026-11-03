@@ -129,6 +129,7 @@ export type TranscriptNote =
   | { type: 'upstream-done'; threadId: string; nodeTitle: string; summary: string }
   | { type: 'artifact-edited'; artifactId: string; title: string; version: number }
   | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
+  | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,
@@ -165,7 +166,14 @@ export interface PlanProposalView {
   attentionId: string
   reason: string
   ops: PlanOp[]
-  status: 'open' | 'accepted' | 'applied' | 'rejected'
+  /** What the change does, one line per op, against the plan as it is now. */
+  changes: LocalizedMessage[]
+  /**
+   * `open` waits on the user. `stale` means the user agreed but the plan had moved on, so
+   * it did not take effect; it stays visible until the plan changes again.
+   */
+  status: 'open' | 'stale'
+  staleReason: string | null
   createdAt: number
 }
 
@@ -174,7 +182,7 @@ export interface PlanView {
   nodes: PlanNodeView[]
   /** Newest first. */
   revisions: PlanRevisionView[]
-  /** Changes waiting on the user. */
+  /** Changes waiting on the user, and agreed ones that no longer applied. */
   proposals: PlanProposalView[]
 }
 

@@ -137,7 +137,11 @@ export const branchFor = (threadId: string) => `ariadne/${threadId.slice(-12)}`
 /**
  * A git repository gives every thread its own worktree on branch `ariadne/<id tail>`,
  * created from the repository's current HEAD, so threads never see each other's changes.
- * Any other directory is shared by all threads as it is.
+ * When the directory is a subdirectory of the repository, the workspace is that
+ * subdirectory of the worktree. Any other directory is shared by all threads as it is.
+ *
+ * Worktrees are not removed automatically yet; `git worktree remove <dir>` (and deleting
+ * the `ariadne/*` branch) in the repository cleans one up.
  */
 export function localWorkspaces(input: {
   path: string
@@ -154,6 +158,9 @@ export function localWorkspaces(input: {
       const dir = join(input.dataDir, 'worktrees', key, threadId)
       if (!existsSync(join(dir, '.git'))) {
         await mkdir(dirname(dir), { recursive: true })
+        // A worktree whose directory was deleted by hand is still registered; forget it
+        // first or `worktree add` refuses the branch.
+        await git(repoRoot, 'worktree', 'prune')
         const hasBranch =
           (await git(repoRoot, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))
             .exitCode === 0
@@ -164,7 +171,9 @@ export function localWorkspaces(input: {
           throw new Error(result.stderr.trim() || `git worktree add exited ${result.exitCode}`)
         }
       }
-      return new LocalWorkspace(threadId, dir, branch)
+      // A subdirectory of the repository stays the workspace root inside the worktree.
+      const sub = relative(await realpath(repoRoot), await realpath(input.path))
+      return new LocalWorkspace(threadId, sub ? join(dir, sub) : dir, branch)
     },
   }
 }

@@ -24,7 +24,9 @@ const count = computed(() => items.value.length)
             <DouText v-if="item.thread" variant="secondary" size="sm" truncate>
               {{ item.thread.title }}
             </DouText>
-            <DouText weight="medium">{{ item.attention.question }}</DouText>
+            <DouText weight="medium" class="attention-question">{{
+              item.attention.question
+            }}</DouText>
             <div class="attention-options">
               <DouButton
                 v-for="(option, index) in item.attention.options"
@@ -69,5 +71,8 @@ const count = computed(() => items.value.length)
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.attention-question {
+  white-space: pre-wrap;
 }
 </style>

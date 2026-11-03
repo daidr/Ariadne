@@ -26,7 +26,8 @@ const add = (id: string, title = id, kind: 'task' | 'milestone' = 'task'): PlanO
 })
 
 const confirmation = {
-  question: '协调器想修改计划',
+  question: (changes: { key: string }[]) =>
+    ['协调器想修改计划', ...changes.map((c) => c.key)].join('\n'),
   apply: { label: '同意', consequence: '修改' },
   keep: { label: '保持', consequence: '不变' },
 }
@@ -131,6 +132,97 @@ describe('plan revisions', () => {
     expect(app.getPlan(projectId).proposals).toEqual([])
   })
 
+  test('the confirmation spells out each change, with the threads a removal unhooks', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '调研')] })
+    app.createThread(projectId, { title: 't', nodeId: 'a' })
+    const change = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '合并',
+      ops: [{ op: 'remove', id: 'a' }],
+      confirmation,
+    })
+    if (change.status !== 'proposed') throw new Error('expected a proposal')
+    const [proposal] = app.getPlan(projectId).proposals
+    expect(proposal?.changes).toEqual([
+      { key: 'plan.op.removeWithThreads', params: { title: '调研', count: 1 } },
+    ])
+    expect(JSON.stringify(app.listNeedsMe(projectId)[0])).toContain('plan.op.removeWithThreads')
+  })
+
+  test('a coordinator undo that removes nodes waits for the user too', () => {
+    const first = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '起步',
+      ops: [add('a')],
+    })
+    if (first.status !== 'applied') throw new Error('expected applied')
+    const undo = app.revertPlanRevision(
+      projectId,
+      first.revisionId,
+      'coordinator',
+      '撤销',
+      confirmation,
+    )
+    expect(undo.status).toBe('proposed')
+    expect(app.getPlan(projectId).nodes).toHaveLength(1)
+    if (undo.status !== 'proposed') return
+    app.answerAttention(undo.attentionId, { choice: 0 })
+    const plan = app.getPlan(projectId)
+    expect(plan.nodes).toEqual([])
+    expect(plan.revisions.find((r) => r.id === first.revisionId)?.revertedBy).toBe(
+      plan.revisions[0]?.id,
+    )
+  })
+
+  test('an agreed proposal that no longer applies stays visible and wakes the coordinator', () => {
+    const project = app.getProject(projectId)
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a'), add('b')] })
+    const change = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '删掉 b',
+      ops: [{ op: 'remove', id: 'b' }],
+      confirmation,
+    })
+    if (change.status !== 'proposed') throw new Error('expected a proposal')
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '用户改',
+      ops: [{ op: 'remove', id: 'b' }],
+    })
+    app.answerAttention(change.attentionId, { choice: 0 })
+    const plan = app.getPlan(projectId)
+    expect(plan.nodes.map((n) => n.id)).toEqual(['a'])
+    expect(plan.proposals).toMatchObject([{ id: change.proposalId, status: 'stale' }])
+    expect(plan.proposals[0]?.staleReason).toBeTruthy()
+    expect(app.listTranscript(project.coordinatorId).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'proposal-stale', proposalId: change.proposalId, reason: '删掉 b' },
+    })
+    expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
+    // The next change to the plan clears the notice.
+    app.revisePlan(projectId, { author: 'user', reason: '用户改', ops: [add('c')] })
+    expect(app.getPlan(projectId).proposals).toEqual([])
+  })
+
+  test('undoing an edit refuses when the field changed again since', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '旧')] })
+    const rename = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '改名',
+      ops: [{ op: 'update', id: 'a', title: '新' }],
+    })
+    if (rename.status !== 'applied') throw new Error('expected applied')
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '用户改',
+      ops: [{ op: 'update', id: 'a', title: '用户的名字' }],
+    })
+    expect(() => app.revertPlanRevision(projectId, rename.revisionId, 'user', '')).toThrow(
+      DomainError,
+    )
+    expect(app.getPlan(projectId).nodes[0]?.title).toBe('用户的名字')
+  })
+
   test('node status follows its threads', () => {
     app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a')] })
     const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })
@@ -212,6 +304,26 @@ describe('artifacts', () => {
       kind: 'note',
       note: { type: 'artifact-edited', artifactId: doc.id, version: 2 },
     })
+  })
+})
+
+describe('artifact notes', () => {
+  test("a user's edit goes to the agent that last wrote the document", () => {
+    const writer = app.createThread(projectId, { title: '写' })
+    const editor = app.createThread(projectId, { title: '改' })
+    const doc = app.createArtifact(projectId, {
+      kind: 'document',
+      title: '方案',
+      content: 'a',
+      author: writer.id,
+    })
+    app.reviseArtifact(doc.id, { content: 'b', author: editor.id, reason: '' })
+    app.reviseArtifact(doc.id, { content: 'c', author: 'user', reason: '' })
+    expect(app.listTranscript(editor.id).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'artifact-edited', version: 3 },
+    })
+    expect(app.listTranscript(writer.id).some((e) => e.kind === 'note')).toBe(false)
   })
 })
 

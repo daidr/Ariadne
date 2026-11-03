@@ -17,7 +17,7 @@ import type {
   TurnOutcome,
 } from './events'
 import { newId } from './ids'
-import { applyOps, needsConfirmation } from './plan'
+import { applyOps, describePlanOps, needsConfirmation } from './plan'
 import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
@@ -45,7 +45,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 6
+export const PROJECTION_VERSION = 7
 
 interface ConversationRow {
   id: string
@@ -130,6 +130,16 @@ function nodeStatus(stages: ThreadStage[]): PlanNodeStatus {
   if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'wait'
   if (stages.every((stage) => stage === 'done')) return 'finish'
   return 'process'
+}
+
+/**
+ * How a change that needs the user's yes is put to them. `question` receives what the
+ * change does, one line per op, so the user sees exactly what they agree to.
+ */
+export interface PlanConfirmation {
+  question: (changes: LocalizedMessage[]) => string
+  apply: AttentionOption
+  keep: AttentionOption
 }
 
 /** What `revisePlan` did: applied at once, or waiting on the user's yes. */
@@ -519,8 +529,8 @@ export class Ariadne {
     ]
     // The first option of a plan proposal applies it, if it still fits the plan as it is now.
     const proposal = this.db
-      .query<{ id: string; reason: string; ops: string }, [string]>(
-        "SELECT id, reason, ops FROM plan_proposals WHERE attention_id = ? AND status = 'open'",
+      .query<{ id: string; reason: string; ops: string; revert_of: string | null }, [string]>(
+        "SELECT id, reason, ops, revert_of FROM plan_proposals WHERE attention_id = ? AND status = 'open'",
       )
       .get(attentionId)
     if (proposal && choice === 0) {
@@ -535,14 +545,19 @@ export class Ariadne {
             author: 'coordinator',
             reason: proposal.reason,
             ops,
-            revertOf: null,
+            revertOf: proposal.revert_of,
             proposalId: proposal.id,
           },
         })
       } catch (error) {
-        // The plan moved on since it was proposed; the coordinator sees the answer and
-        // finds the proposal still unapplied in the plan.
         if (!(error instanceof DomainError)) throw error
+        // The plan moved on since it was proposed. Say so: the user sees it did not take
+        // effect, and the coordinator is woken to propose again.
+        events.push({
+          type: 'plan.proposal.stale',
+          projectId: row.project_id,
+          data: { proposalId: proposal.id, reason: String(error.params?.reason ?? error.code) },
+        })
       }
     }
     this.store.append(events)
@@ -699,19 +714,27 @@ export class Ariadne {
           reason: string
           ops: string
           status: PlanProposalView['status']
+          stale_reason: string | null
           created_at: number
         },
         [string]
-      >("SELECT * FROM plan_proposals WHERE project_id = ? AND status = 'open' ORDER BY id")
+      >(
+        "SELECT * FROM plan_proposals WHERE project_id = ? AND status IN ('open', 'stale') ORDER BY id",
+      )
       .all(projectId)
-      .map((row): PlanProposalView => ({
-        id: row.id,
-        attentionId: row.attention_id,
-        reason: row.reason,
-        ops: JSON.parse(row.ops),
-        status: row.status,
-        createdAt: row.created_at,
-      }))
+      .map((row): PlanProposalView => {
+        const ops = JSON.parse(row.ops) as PlanOp[]
+        return {
+          id: row.id,
+          attentionId: row.attention_id,
+          reason: row.reason,
+          ops,
+          changes: this.describePlanChange(projectId, ops),
+          status: row.status,
+          staleReason: row.stale_reason,
+          createdAt: row.created_at,
+        }
+      })
     return { projectId, nodes, revisions, proposals }
   }
 
@@ -722,22 +745,67 @@ export class Ariadne {
    */
   revisePlan(
     projectId: string,
-    input: {
-      author: PlanAuthor
-      reason: string
-      ops: PlanOp[]
-      confirmation?: { question: string; apply: AttentionOption; keep: AttentionOption }
-    },
+    input: { author: PlanAuthor; reason: string; ops: PlanOp[]; confirmation?: PlanConfirmation },
   ): PlanChange {
     this.getProject(projectId)
     const reason = input.reason.trim()
     if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
     if (!input.ops.length) throw new DomainError('error.invalidBody', { reason: 'ops' })
+    return this.changePlan(projectId, input.author, reason, input.ops, null, input.confirmation)
+  }
+
+  /** What a change would do, one line per op, as the user would read it. */
+  describePlanChange(projectId: string, ops: PlanOp[]): LocalizedMessage[] {
+    const threads = this.listThreads(projectId)
+    return describePlanOps(
+      loadPlanGraph(this.db, projectId),
+      ops,
+      (nodeId) => threads.filter((thread) => thread.nodeId === nodeId).length,
+    )
+  }
+
+  /**
+   * Undo a revision, as long as nothing since then conflicts with undoing it. Undoing is a
+   * change like any other: when the coordinator's undo would remove nodes or change
+   * acceptance or milestones, it waits on the user too.
+   */
+  revertPlanRevision(
+    projectId: string,
+    revisionId: string,
+    author: PlanAuthor,
+    reason: string,
+    confirmation?: PlanConfirmation,
+  ): PlanChange {
+    const row = this.db
+      .query<{ inverse: string; reverted_by: string | null; reason: string }, [string, string]>(
+        'SELECT inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
+      )
+      .get(revisionId, projectId)
+    if (!row) throw new DomainError('error.notFound', { what: revisionId })
+    if (row.reverted_by) throw new DomainError('error.planReverted')
+    const ops = JSON.parse(row.inverse) as PlanOp[]
+    return this.changePlan(
+      projectId,
+      author,
+      reason.trim() || row.reason,
+      ops,
+      revisionId,
+      confirmation,
+    )
+  }
+
+  private changePlan(
+    projectId: string,
+    author: PlanAuthor,
+    reason: string,
+    ops: PlanOp[],
+    revertOf: string | null,
+    confirmation: PlanConfirmation | undefined,
+  ): PlanChange {
     const graph = loadPlanGraph(this.db, projectId)
-    applyOps(graph, input.ops)
-    if (input.author === 'coordinator' && needsConfirmation(graph, input.ops)) {
-      if (!input.confirmation)
-        throw new DomainError('error.invalidBody', { reason: 'confirmation' })
+    applyOps(graph, ops)
+    if (author === 'coordinator' && needsConfirmation(graph, ops)) {
+      if (!confirmation) throw new DomainError('error.invalidBody', { reason: 'confirmation' })
       const proposalId = newId('prp')
       const attentionId = newId('att')
       this.store.append([
@@ -747,15 +815,15 @@ export class Ariadne {
           data: {
             attentionId,
             threadId: null,
-            question: input.confirmation.question,
-            options: [input.confirmation.apply, input.confirmation.keep],
+            question: confirmation.question(this.describePlanChange(projectId, ops)),
+            options: [confirmation.apply, confirmation.keep],
             recommended: 0,
           },
         },
         {
           type: 'plan.proposed',
           projectId,
-          data: { proposalId, attentionId, reason, ops: input.ops },
+          data: { proposalId, attentionId, reason, ops, revertOf },
         },
       ])
       return { status: 'proposed', proposalId, attentionId }
@@ -765,51 +833,10 @@ export class Ariadne {
       {
         type: 'plan.revised',
         projectId,
-        data: {
-          revisionId,
-          author: input.author,
-          reason,
-          ops: input.ops,
-          revertOf: null,
-          proposalId: null,
-        },
+        data: { revisionId, author, reason, ops, revertOf, proposalId: null },
       },
     ])
     return { status: 'applied', revisionId }
-  }
-
-  /** Undo a revision, as long as nothing since then conflicts with undoing it. */
-  revertPlanRevision(
-    projectId: string,
-    revisionId: string,
-    author: PlanAuthor,
-    reason: string,
-  ): string {
-    const row = this.db
-      .query<{ inverse: string; reverted_by: string | null; reason: string }, [string, string]>(
-        'SELECT inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
-      )
-      .get(revisionId, projectId)
-    if (!row) throw new DomainError('error.notFound', { what: revisionId })
-    if (row.reverted_by) throw new DomainError('error.planReverted')
-    const ops = JSON.parse(row.inverse) as PlanOp[]
-    applyOps(loadPlanGraph(this.db, projectId), ops)
-    const id = newId('rev')
-    this.store.append([
-      {
-        type: 'plan.revised',
-        projectId,
-        data: {
-          revisionId: id,
-          author,
-          reason: reason.trim() || row.reason,
-          ops,
-          revertOf: revisionId,
-          proposalId: null,
-        },
-      },
-    ])
-    return id
   }
 
   // ---- artifacts ----

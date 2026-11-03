@@ -92,8 +92,8 @@ export function createHandler({ app, token, webDist, scheduler, settings, host }
     async (request, { projectId = '', revisionId = '' }) => {
       const body = await readJson(request)
       const reason = typeof body.reason === 'string' ? body.reason : ''
-      const id = app.revertPlanRevision(projectId, revisionId, 'user', reason)
-      return json({ revisionId: id, plan: app.getPlan(projectId) })
+      app.revertPlanRevision(projectId, revisionId, 'user', reason)
+      return json({ plan: app.getPlan(projectId) })
     },
   )
 
