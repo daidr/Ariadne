@@ -4,6 +4,7 @@ import type {
   ArtifactSummary,
   ConversationView,
   MessageView,
+  PlanOp,
   PlanView,
   ProjectView,
   TodoView,
@@ -195,11 +196,45 @@ export async function refreshPullRequest(threadId: string) {
   await api.refreshPullRequest(threadId).catch(report)
 }
 
+/** Apply the user's own edit of the plan; returns whether it took effect. */
+/**
+ * Change the plan as the user. `conflict` means someone changed a field the edit expected
+ * unchanged; the caller shows that next to the edit instead of as an error.
+ */
+export async function editPlan(
+  reason: string,
+  ops: PlanOp[],
+): Promise<'ok' | 'conflict' | 'failed'> {
+  const project = state.detail?.project
+  if (!project || !ops.length) return 'failed'
+  try {
+    const { plan } = await api.revisePlan(project.id, { reason, ops })
+    // The user may have opened another project while this was on its way.
+    if (state.detail?.project.id === plan.projectId) state.plan = plan
+    return 'ok'
+  } catch (error) {
+    if (error instanceof ApiError && error.localized.key === 'error.planConflict') {
+      // The plan here may lag behind (the event stream dropped for a moment): fetch it, so
+      // the edit shows what changed.
+      try {
+        const { plan } = await api.getPlan(project.id)
+        if (state.detail?.project.id === plan.projectId) state.plan = plan
+      } catch {
+        // The next event brings it.
+      }
+      return 'conflict'
+    }
+    report(error)
+    return 'failed'
+  }
+}
+
 export async function revertPlan(revisionId: string) {
   const project = state.detail?.project
   if (!project) return
   try {
-    state.plan = (await api.revertPlan(project.id, revisionId, t('plan.revertReason'))).plan
+    const { plan } = await api.revertPlan(project.id, revisionId, t('plan.revertReason'))
+    if (state.detail?.project.id === plan.projectId) state.plan = plan
   } catch (error) {
     report(error)
   }

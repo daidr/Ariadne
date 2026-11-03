@@ -9,11 +9,14 @@ import {
   DouFormItem,
   DouInput,
   DouSelect,
+  DouTabPanel,
+  DouTabs,
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError, type ModelKind, type ModelSettings } from '../api'
 import { lt, t, tm } from '../i18n'
+import PluginSettings from './PluginSettings.vue'
 import SettingsFields from './SettingsFields.vue'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -49,6 +52,17 @@ function load(settings: ModelSettings) {
   }))
   defaultProvider.value = settings.default?.provider ?? null
   defaultModel.value = settings.default?.model ?? ''
+}
+
+const tab = ref<'models' | 'plugins'>('models')
+
+/** Reload the protocols only: a plugin added or removed changes them, not the draft. */
+async function reloadKinds() {
+  try {
+    kinds.value = (await api.getModelSettings()).kinds
+  } catch {
+    // The models tab shows the protocols it had.
+  }
 }
 
 watch(open, async (isOpen) => {
@@ -119,66 +133,80 @@ async function save() {
 
 <template>
   <DouDialog v-model:open="open" :title="t('settings.title')" :width="560">
-    <div class="settings">
-      <div class="settings-head">
-        <span>{{ t('settings.providers') }}</span>
-        <DouButton size="sm" variant="outline" :disabled="!kinds.length" @click="addProvider">
-          <template #leading><PlusIcon /></template>
-          {{ t('settings.add') }}
-        </DouButton>
-      </div>
-      <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
-      <DouCard v-for="provider in providers" :key="provider.id" padding="md">
-        <DouForm layout="vertical" size="sm">
-          <div class="settings-row">
-            <DouFormItem :label="t('settings.kind')" class="settings-grow">
-              <DouSelect
-                :model-value="provider.kind"
-                :options="kindOptions"
-                @update:model-value="
-                  (value) => ((provider.kind = String(value)), (provider.secretsSet = []))
-                "
-              />
-            </DouFormItem>
-            <DouFormItem :label="t('settings.name')" class="settings-grow">
-              <DouInput v-model="provider.name" />
-            </DouFormItem>
-          </div>
-          <SettingsFields
-            v-if="kindOf(provider.kind)"
-            :schema="kindOf(provider.kind)!.settings"
-            :values="provider.settings"
-            :secrets-set="provider.secretsSet"
-            @clear-secret="(key) => clearSecret(provider, key)"
-          />
-          <div class="settings-remove">
-            <DouButton size="sm" variant="ghost" tone="danger" @click="removeProvider(provider.id)">
-              <template #leading><TrashIcon /></template>
-              {{ t('settings.remove') }}
+    <DouTabs v-model="tab">
+      <DouTabPanel value="models" :label="t('settings.tab.models')">
+        <div class="settings">
+          <div class="settings-head">
+            <span>{{ t('settings.providers') }}</span>
+            <DouButton size="sm" variant="outline" :disabled="!kinds.length" @click="addProvider">
+              <template #leading><PlusIcon /></template>
+              {{ t('settings.add') }}
             </DouButton>
           </div>
-        </DouForm>
-      </DouCard>
+          <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
+          <DouCard v-for="provider in providers" :key="provider.id" padding="md">
+            <DouForm layout="vertical" size="sm">
+              <div class="settings-row">
+                <DouFormItem :label="t('settings.kind')" class="settings-grow">
+                  <DouSelect
+                    :model-value="provider.kind"
+                    :options="kindOptions"
+                    @update:model-value="
+                      (value) => ((provider.kind = String(value)), (provider.secretsSet = []))
+                    "
+                  />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.name')" class="settings-grow">
+                  <DouInput v-model="provider.name" />
+                </DouFormItem>
+              </div>
+              <SettingsFields
+                v-if="kindOf(provider.kind)"
+                :schema="kindOf(provider.kind)!.settings"
+                :values="provider.settings"
+                :secrets-set="provider.secretsSet"
+                @clear-secret="(key) => clearSecret(provider, key)"
+              />
+              <div class="settings-remove">
+                <DouButton
+                  size="sm"
+                  variant="ghost"
+                  tone="danger"
+                  @click="removeProvider(provider.id)"
+                >
+                  <template #leading><TrashIcon /></template>
+                  {{ t('settings.remove') }}
+                </DouButton>
+              </div>
+            </DouForm>
+          </DouCard>
 
-      <DouForm v-if="providers.length" layout="vertical" size="sm">
-        <div class="settings-row">
-          <DouFormItem :label="t('settings.defaultProvider')" class="settings-grow">
-            <DouSelect v-model="defaultProvider" :options="providerOptions" />
-          </DouFormItem>
-          <DouFormItem
-            :label="t('settings.defaultModel')"
-            :help="t('settings.defaultModelHelp')"
-            class="settings-grow"
-          >
-            <DouInput v-model="defaultModel" />
-          </DouFormItem>
+          <DouForm v-if="providers.length" layout="vertical" size="sm">
+            <div class="settings-row">
+              <DouFormItem :label="t('settings.defaultProvider')" class="settings-grow">
+                <DouSelect v-model="defaultProvider" :options="providerOptions" />
+              </DouFormItem>
+              <DouFormItem
+                :label="t('settings.defaultModel')"
+                :help="t('settings.defaultModelHelp')"
+                class="settings-grow"
+              >
+                <DouInput v-model="defaultModel" />
+              </DouFormItem>
+            </div>
+          </DouForm>
+          <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
-      </DouForm>
-      <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
-    </div>
+      </DouTabPanel>
+      <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
+        <PluginSettings v-if="open" @changed="reloadKinds" />
+      </DouTabPanel>
+    </DouTabs>
     <template #footer="{ close }">
       <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
-      <DouButton tone="primary" :loading="saving" @click="save">{{ t('settings.save') }}</DouButton>
+      <DouButton v-if="tab === 'models'" tone="primary" :loading="saving" @click="save">
+        {{ t('settings.save') }}
+      </DouButton>
     </template>
   </DouDialog>
 </template>

@@ -9,6 +9,7 @@ import {
 } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
+import { checksTone } from '../stage'
 import { refreshPullRequest } from '../store'
 
 // A thread's pull request with how its checks stand; "refresh" asks the repository now.
@@ -16,18 +17,7 @@ const props = defineProps<{ thread: ThreadView; refreshable?: boolean }>()
 const pr = computed(() => props.thread.pullRequest)
 const refreshing = ref(false)
 
-const checksTone = computed(() => {
-  switch (pr.value?.checks.state) {
-    case 'success':
-      return 'success'
-    case 'failure':
-      return 'danger'
-    case 'pending':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
-})
+const tone = computed(() => checksTone(pr.value?.checks.state))
 
 async function refresh() {
   refreshing.value = true
@@ -48,7 +38,7 @@ async function refresh() {
     <DouTag
       v-else-if="pr.checks.state !== 'none'"
       size="sm"
-      :tone="checksTone"
+      :tone="tone"
       :title="pr.checks.failed.join(', ')"
     >
       {{ t(`pr.checks.${pr.checks.state}`) }}

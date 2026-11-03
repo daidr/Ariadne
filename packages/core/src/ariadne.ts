@@ -20,7 +20,7 @@ import type {
 } from './events'
 import { checkArtifactContent, previewOf } from './artifact-content'
 import { newId } from './ids'
-import { applyOps, describePlanOps, needsConfirmation } from './plan'
+import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
 import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
@@ -809,6 +809,12 @@ export class Ariadne {
           id: thread.id,
           title: thread.title,
           stage: thread.stage,
+          pullRequest: thread.pullRequest && {
+            number: thread.pullRequest.number,
+            url: thread.pullRequest.url,
+            state: thread.pullRequest.state,
+            checks: thread.pullRequest.checks,
+          },
         })),
         changedIn: changedIn.get(id) ?? null,
       }
@@ -860,6 +866,7 @@ export class Ariadne {
           reason: row.reason,
           ops,
           changes: this.describePlanChange(projectId, ops),
+          preview: row.status === 'open' ? previewPlanOps(graph, ops) : null,
           status: row.status,
           staleReason: row.stale_reason,
           createdAt: row.created_at,

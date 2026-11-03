@@ -75,7 +75,11 @@ export function applyOps(graph: PlanGraph, ops: PlanOp[]): { graph: PlanGraph; i
         for (const field of fields) {
           const expected = op.expect?.[field]
           if (expected !== undefined && node[field] !== expected) {
-            invalid(`${where}: ${field} of ${op.id} changed since`)
+            // Someone else changed the field since; the user sees which node, not an op.
+            throw new DomainError('error.planConflict', {
+              title: node.title,
+              reason: `${where}: ${field} of ${op.id} changed since`,
+            })
           }
         }
         const restore: Partial<Omit<PlanNodeFields, 'kind'>> = {}
@@ -206,4 +210,114 @@ export function describePlanOps(
         return [{ key: 'plan.op.unlink', params: { from: title(op.from), to: title(op.to) } }]
     }
   })
+}
+
+const KINDS = ['task', 'milestone', 'decision'] as const
+const FIELDS = ['title', 'description', 'acceptance'] as const
+
+/**
+ * Read ops sent from outside (the web's graph editor) strictly: every op names its node
+ * ids and only known fields, so nothing unexpected reaches the event log.
+ */
+export function parsePlanOps(raw: unknown): PlanOp[] {
+  if (!Array.isArray(raw) || !raw.length) invalid('ops must be a non-empty array')
+  const id = (value: unknown, where: string): string => {
+    if (typeof value !== 'string' || !value || value.length > 80) invalid(`${where}: bad id`)
+    return value
+  }
+  const text = (value: unknown, where: string): string | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value !== 'string' || value.length > 20_000) invalid(`${where}: not text`)
+    return value
+  }
+  return raw.map((item: unknown, index): PlanOp => {
+    const where = `ops[${index}]`
+    if (typeof item !== 'object' || item === null) invalid(`${where}: not an object`)
+    const op = item as Record<string, unknown>
+    switch (op.op) {
+      case 'add': {
+        const kind = op.kind ?? 'task'
+        if (!KINDS.includes(kind as never)) invalid(`${where}: bad kind`)
+        return {
+          op: 'add',
+          id: id(op.id, where),
+          kind: kind as PlanNodeFields['kind'],
+          title: text(op.title, where) ?? '',
+          description: text(op.description, where) ?? '',
+          acceptance: text(op.acceptance, where) ?? '',
+        }
+      }
+      case 'update': {
+        const update: Extract<PlanOp, { op: 'update' }> = { op: 'update', id: id(op.id, where) }
+        for (const field of FIELDS) {
+          const value = text(op[field], where)
+          if (value !== undefined) update[field] = value
+        }
+        if (op.expect !== undefined) {
+          if (typeof op.expect !== 'object' || op.expect === null) invalid(`${where}: bad expect`)
+          const expect: Partial<Omit<PlanNodeFields, 'kind'>> = {}
+          for (const field of FIELDS) {
+            const value = text((op.expect as Record<string, unknown>)[field], where)
+            if (value !== undefined) expect[field] = value
+          }
+          update.expect = expect
+        }
+        return update
+      }
+      case 'remove':
+        return { op: 'remove', id: id(op.id, where) }
+      case 'link':
+      case 'unlink':
+        return { op: op.op, from: id(op.from, where), to: id(op.to, where) }
+      default:
+        return invalid(`${where}: unknown op`)
+    }
+  })
+}
+
+/** What a change does to one node or dependency, for drawing it on the graph. */
+export type PlanMark = 'added' | 'removed' | 'changed'
+
+export interface PlanPreview {
+  /** Every node before or after the change, in plan order, removed ones included. */
+  nodes: ({ id: string; mark: PlanMark | null; dependsOn: string[] } & PlanNodeFields)[]
+  edges: { from: string; to: string; mark: Exclude<PlanMark, 'changed'> | null }[]
+}
+
+/**
+ * The plan with a change applied, every node and edge marked by what the change does, so
+ * the web can draw it before the user agrees. `null` when it no longer applies.
+ */
+export function previewPlanOps(graph: PlanGraph, ops: PlanOp[]): PlanPreview | null {
+  let after: PlanGraph
+  try {
+    after = applyOps(graph, ops).graph
+  } catch (error) {
+    if (error instanceof DomainError) return null
+    throw error
+  }
+  const keys = [...new Set([...graph.edges, ...after.edges])]
+  const edges = keys.map((key) => {
+    const [from = '', to = ''] = key.split('>')
+    const mark = !graph.edges.has(key) ? 'added' : after.edges.has(key) ? null : 'removed'
+    return { from, to, mark } as PlanPreview['edges'][number]
+  })
+  const nodes = [...new Set([...graph.order, ...after.order])].map((id) => {
+    const was = graph.nodes.get(id)
+    const now = after.nodes.get(id)
+    const fields = (now ?? was) as PlanNodeFields
+    let mark: PlanMark | null = null
+    if (!was) mark = 'added'
+    else if (!now) mark = 'removed'
+    else if (
+      was.title !== now.title ||
+      was.description !== now.description ||
+      was.acceptance !== now.acceptance
+    ) {
+      mark = 'changed'
+    }
+    const dependsOn = edges.filter((edge) => edge.to === id).map((edge) => edge.from)
+    return { id, ...fields, mark, dependsOn }
+  })
+  return { nodes, edges }
 }

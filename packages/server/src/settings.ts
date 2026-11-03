@@ -3,7 +3,16 @@ import type { ResolvedModel } from '@ariadne/agent'
 import type { PluginHost } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
 import type { SettingsSchema } from '@ariadne/plugin-sdk'
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
 import { BadRequest } from './http'
 
 export interface ModelProviderConfig {
@@ -36,6 +45,22 @@ const defaults = (): UserConfig => ({
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
 })
+
+/** A path made absolute, `~/` expanded and symbolic links followed where it exists. */
+function realPath(path: string): string {
+  const full = resolve(path.startsWith('~/') ? join(homedir(), path.slice(2)) : path)
+  try {
+    return realpathSync(full)
+  } catch {
+    return full
+  }
+}
+
+/** Whether `path` is `dir` or inside it. */
+function insideDir(path: string, dir: string): boolean {
+  const rel = relative(realPath(dir), realPath(path))
+  return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'))
+}
 
 function secretKeys(schema: SettingsSchema | undefined): string[] {
   if (!schema) return []
@@ -139,6 +164,42 @@ export class SettingsStore {
         default: chosen && { provider: chosen.provider, model: chosen.model.trim() },
       },
     }
+    this.save()
+  }
+
+  /**
+   * Load a plugin from a path and remember it, so it loads on every start. Nothing is
+   * remembered when it fails to load.
+   */
+  async addPlugin(input: unknown): Promise<void> {
+    if (typeof input !== 'string' || !input.trim()) throw new BadRequest('path')
+    const path = input.trim()
+    if (this.config.plugins.includes(path)) throw new DomainError('error.pluginExists', { path })
+    // Plugin data directories hold the threads' worktrees and clones of repositories:
+    // code there is written by threads or comes from the repository, not from the user.
+    if (insideDir(path, join(dirname(this.path), 'plugins'))) {
+      throw new DomainError('error.pluginInWorkspace')
+    }
+    try {
+      await this.host.loadFromPath(path)
+    } catch (error) {
+      // The settings page shows the failure from the request; it is not kept.
+      await this.host.unloadPath(path)
+      throw new DomainError('error.pluginLoad', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+    this.config = { ...this.config, plugins: [...this.config.plugins, path] }
+    this.save()
+  }
+
+  /** Unload a plugin loaded from a path and stop loading it on start. */
+  async removePlugin(input: unknown): Promise<void> {
+    if (typeof input !== 'string' || !this.config.plugins.includes(input)) {
+      throw new BadRequest('path')
+    }
+    await this.host.unloadPath(input)
+    this.config = { ...this.config, plugins: this.config.plugins.filter((p) => p !== input) }
     this.save()
   }
 

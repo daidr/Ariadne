@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
 import { DomainError } from './errors'
 import type { PlanOp } from './events'
-import { applyOps, emptyGraph, needsConfirmation } from './plan'
+import { applyOps, emptyGraph, needsConfirmation, parsePlanOps, previewPlanOps } from './plan'
 
 let app: Ariadne
 let projectId: string
@@ -371,5 +371,74 @@ describe('triage', () => {
     })
     expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
     expect(app.getConversation(thread.id).pendingSeq).toBeGreaterThan(0)
+  })
+})
+
+describe('parsePlanOps', () => {
+  test('keeps known fields of each op and fills an add', () => {
+    expect(
+      parsePlanOps([
+        { op: 'add', id: 'a', title: 'A', extra: 1 },
+        { op: 'update', id: 'a', title: 'B', expect: { title: 'A', other: 'x' } },
+        { op: 'link', from: 'a', to: 'b' },
+        { op: 'unlink', from: 'a', to: 'b' },
+        { op: 'remove', id: 'a' },
+      ]),
+    ).toEqual([
+      { op: 'add', id: 'a', kind: 'task', title: 'A', description: '', acceptance: '' },
+      { op: 'update', id: 'a', title: 'B', expect: { title: 'A' } },
+      { op: 'link', from: 'a', to: 'b' },
+      { op: 'unlink', from: 'a', to: 'b' },
+      { op: 'remove', id: 'a' },
+    ])
+  })
+
+  test.each([
+    ['not a list', {}],
+    ['an empty list', []],
+    ['an unknown op', [{ op: 'rename', id: 'a' }]],
+    ['a missing id', [{ op: 'remove' }]],
+    ['a long id', [{ op: 'remove', id: 'x'.repeat(81) }]],
+    ['a bad kind', [{ op: 'add', id: 'a', title: 'A', kind: 'epic' }]],
+    ['a non-text field', [{ op: 'update', id: 'a', title: 3 }]],
+    ['a bad expect', [{ op: 'update', id: 'a', expect: 'A' }]],
+  ])('refuses %s', (_, raw) => {
+    expect(() => parsePlanOps(raw)).toThrow(DomainError)
+  })
+})
+
+describe('previewPlanOps', () => {
+  test('marks what a change adds, removes and changes, keeping removed parts', () => {
+    const graph = applyOps(emptyGraph(), [
+      add('a'),
+      add('b'),
+      { op: 'link', from: 'a', to: 'b' },
+    ]).graph
+    const preview = previewPlanOps(graph, [
+      add('c'),
+      { op: 'link', from: 'a', to: 'c' },
+      { op: 'remove', id: 'b' },
+      { op: 'update', id: 'a', acceptance: 'done when tested' },
+    ])
+    expect(preview?.nodes.map((n) => [n.id, n.mark, n.dependsOn])).toEqual([
+      ['a', 'changed', []],
+      ['b', 'removed', ['a']],
+      ['c', 'added', ['a']],
+    ])
+    expect(preview?.edges).toEqual([
+      { from: 'a', to: 'b', mark: 'removed' },
+      { from: 'a', to: 'c', mark: 'added' },
+    ])
+    expect(previewPlanOps(graph, [{ op: 'remove', id: 'gone' }])).toBeNull()
+  })
+
+  test('an edit of a field changed since is a conflict naming the node', () => {
+    const graph = applyOps(emptyGraph(), [add('a', '甲')]).graph
+    try {
+      applyOps(graph, [{ op: 'update', id: 'a', title: '乙', expect: { title: '丙' } }])
+      expect.unreachable()
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'error.planConflict', params: { title: '甲' } })
+    }
   })
 })

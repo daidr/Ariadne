@@ -5,7 +5,17 @@ export {
   type PlanChange,
   type PlanConfirmation,
 } from './ariadne'
-export { applyOps, describePlanOps, emptyGraph, needsConfirmation, type PlanGraph } from './plan'
+export {
+  applyOps,
+  describePlanOps,
+  emptyGraph,
+  needsConfirmation,
+  parsePlanOps,
+  previewPlanOps,
+  type PlanGraph,
+  type PlanMark,
+  type PlanPreview,
+} from './plan'
 export {
   checkArtifactContent,
   DASHBOARD_WIDGET_TYPES,

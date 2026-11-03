@@ -4,7 +4,7 @@ import {
   type Scheduler,
   type WorkspaceManager,
 } from '@ariadne/agent'
-import { DomainError, emptyContent, type Ariadne } from '@ariadne/core'
+import { DomainError, emptyContent, parsePlanOps, type Ariadne } from '@ariadne/core'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
 import {
@@ -74,6 +74,21 @@ export function createHandler({
       needsMe: app.listNeedsMe(projectId),
     }),
   )
+
+  // Plugins: the built-in ones and those loaded from a path, with why a path failed.
+  add('GET', '/api/plugins', () => json({ plugins: host?.records() ?? [] }))
+
+  add('POST', '/api/plugins', async (request) => {
+    if (!settings) throw new BadRequest('settings')
+    await settings.addPlugin((await readJson(request)).path)
+    return json({ plugins: host?.records() ?? [] })
+  })
+
+  add('POST', '/api/plugins/remove', async (request) => {
+    if (!settings) throw new BadRequest('settings')
+    await settings.removePlugin((await readJson(request)).path)
+    return json({ plugins: host?.records() ?? [] })
+  })
 
   // The kinds of context source plugins offer, with the form each one needs.
   add('GET', '/api/source-kinds', () =>
@@ -161,6 +176,18 @@ export function createHandler({
       return json({ plan: app.getPlan(projectId) })
     },
   )
+
+  // The user edits the plan on the graph. Their changes apply at once and can be undone.
+  add('POST', '/api/projects/:projectId/plan/revise', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const reason = typeof body.reason === 'string' ? body.reason : ''
+    const change = app.revisePlan(projectId, {
+      author: 'user',
+      reason,
+      ops: parsePlanOps(body.ops),
+    })
+    return json({ change, plan: app.getPlan(projectId) })
+  })
 
   add(
     'POST',

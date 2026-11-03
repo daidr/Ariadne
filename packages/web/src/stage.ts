@@ -13,3 +13,17 @@ export const stageTone: Record<
   idle: 'neutral',
   done: 'success',
 }
+
+/** How a pull request's checks are tinted. */
+export function checksTone(state: 'none' | 'pending' | 'success' | 'failure' | undefined) {
+  switch (state) {
+    case 'success':
+      return 'success'
+    case 'failure':
+      return 'danger'
+    case 'pending':
+      return 'warning'
+    default:
+      return 'neutral'
+  }
+}

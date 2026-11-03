@@ -149,3 +149,57 @@ describe('event stream', () => {
     expect(events.map((e) => e.seq)).toEqual([2, 3])
   })
 })
+
+const add = (id: string, title: string) => ({ op: 'add', id, title })
+const errorKey = async (response: Response) =>
+  ((await response.json()) as { error: { key: string } }).error.key
+
+describe('plan edits from the graph', () => {
+  test('apply at once as the user, removals included, and tell the coordinator', async () => {
+    const projectId = app.createProject('P').id
+    const first = await call(`/api/projects/${projectId}/plan/revise`, {
+      method: 'POST',
+      body: {
+        reason: '在计划图上改了 3 处',
+        ops: [add('a', 'A'), add('b', 'B'), { op: 'link', from: 'a', to: 'b' }],
+      },
+    })
+    expect(first.status).toBe(200)
+    const body = (await first.json()) as {
+      change: { status: string }
+      plan: { nodes: { id: string; dependsOn: string[] }[]; revisions: { author: string }[] }
+    }
+    expect(body.change.status).toBe('applied')
+    expect(body.plan.nodes.map((n) => [n.id, n.dependsOn])).toEqual([
+      ['a', []],
+      ['b', ['a']],
+    ])
+    expect(body.plan.revisions[0]?.author).toBe('user')
+
+    // The coordinator would need a yes to remove a node; the user's own edit does not.
+    const removed = await call(`/api/projects/${projectId}/plan/revise`, {
+      method: 'POST',
+      body: { reason: '删除 B', ops: [{ op: 'remove', id: 'b' }] },
+    })
+    expect(((await removed.json()) as { change: { status: string } }).change.status).toBe('applied')
+    expect(app.getPlan(projectId).nodes.map((n) => n.id)).toEqual(['a'])
+    expect(app.getPlan(projectId).proposals).toEqual([])
+  })
+
+  test('refuses malformed ops, changes that do not apply, and an empty reason', async () => {
+    const projectId = app.createProject('P').id
+    const post = (body: unknown) =>
+      call(`/api/projects/${projectId}/plan/revise`, { method: 'POST', body })
+
+    const malformed = await post({ reason: 'x', ops: [{ op: 'drop', id: 'a' }] })
+    expect(malformed.status).toBe(400)
+    expect(await errorKey(malformed)).toBe('error.planInvalid')
+    expect(await errorKey(await post({ reason: 'x', ops: [{ op: 'remove', id: 'nope' }] }))).toBe(
+      'error.planInvalid',
+    )
+    expect(await errorKey(await post({ reason: ' ', ops: [add('a', 'A')] }))).toBe(
+      'error.invalidBody',
+    )
+    expect(app.getPlan(projectId).revisions).toEqual([])
+  })
+})
