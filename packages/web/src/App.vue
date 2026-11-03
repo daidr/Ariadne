@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import {
   DouAlert,
+  DouColorModeButton,
   DouConfigProvider,
   DouLayout,
   DouLayoutAside,
   DouLayoutHeader,
   DouLayoutMain,
   DouText,
+  useColorMode,
 } from 'dou-ui'
 import { onMounted } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
@@ -15,7 +17,10 @@ import ProjectList from './components/ProjectList.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
 import { start, state } from './store'
+import { COLOR_MODE_KEY } from './color-mode'
 
+// Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
+useColorMode({ storageKey: COLOR_MODE_KEY })
 onMounted(start)
 </script>
 
@@ -25,7 +30,10 @@ onMounted(start)
       <DouLayoutHeader :height="48">
         <div class="header">
           <DouText weight="medium">{{ t('app.name') }}</DouText>
-          <AttentionBar />
+          <div class="header-actions">
+            <AttentionBar />
+            <DouColorModeButton />
+          </div>
         </div>
       </DouLayoutHeader>
       <DouAlert v-if="!state.connected" tone="warning" class="banner">
@@ -63,14 +71,6 @@ body,
   margin: 0;
 }
 
-body {
-  font-family: var(--dou-font-family);
-  font-size: var(--dou-font-size-md);
-  line-height: var(--dou-font-line-height);
-  color: var(--dou-color-text);
-  background: var(--dou-color-bg-canvas);
-}
-
 .app {
   height: 100%;
 }
@@ -80,6 +80,12 @@ body {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .banner {
