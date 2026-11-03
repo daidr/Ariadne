@@ -8,6 +8,7 @@ export const projectionTables = [
   'projects',
   'threads',
   'attentions',
+  'attention_waiters',
   'messages',
   'todos',
   'conversations',
@@ -143,6 +144,12 @@ export const attentionsProjection: Projection = {
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, answered)')
+    // The threads that hear an attention's answer: the one that asked and any that joined.
+    db.run(`CREATE TABLE IF NOT EXISTS attention_waiters (
+      attention_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      PRIMARY KEY (attention_id, thread_id)
+    )`)
   },
   apply(db, event) {
     switch (event.type) {
@@ -160,6 +167,12 @@ export const attentionsProjection: Projection = {
             event.at,
           ],
         )
+        break
+      case 'attention.joined':
+        db.run('INSERT OR IGNORE INTO attention_waiters (attention_id, thread_id) VALUES (?, ?)', [
+          event.data.attentionId,
+          event.data.threadId,
+        ])
         break
       case 'attention.answered':
         db.run('UPDATE attentions SET answered = 1, choice = ?, answer_text = ? WHERE id = ?', [
@@ -581,22 +594,30 @@ export const transcriptProjection: Projection = {
         if (!row || !asker) break
         const options = JSON.parse(row.options) as { label: string }[]
         const choice = event.data.choice === null ? null : options[event.data.choice]?.label
-        addEntry(
-          db,
-          event,
-          {
-            conversationId: asker,
-            kind: 'note',
-            payload: {
-              type: 'answer',
-              attentionId: event.data.attentionId,
-              question: row.question,
-              choice: choice ?? null,
-              text: event.data.text,
+        const waiters = db
+          .query<{ thread_id: string }, [string]>(
+            'SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid',
+          )
+          .all(event.data.attentionId)
+          .map((w) => w.thread_id)
+        for (const conversationId of new Set([asker, ...waiters])) {
+          addEntry(
+            db,
+            event,
+            {
+              conversationId,
+              kind: 'note',
+              payload: {
+                type: 'answer',
+                attentionId: event.data.attentionId,
+                question: row.question,
+                choice: choice ?? null,
+                text: event.data.text,
+              },
             },
-          },
-          true,
-        )
+            true,
+          )
+        }
         break
       }
       case 'turn.step':

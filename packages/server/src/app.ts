@@ -4,7 +4,7 @@ import {
   type Scheduler,
   type WorkspaceManager,
 } from '@ariadne/agent'
-import { DomainError, type Ariadne } from '@ariadne/core'
+import { DomainError, emptyContent, type Ariadne } from '@ariadne/core'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
 import {
@@ -176,6 +176,23 @@ export function createHandler({
   add('GET', '/api/projects/:projectId/artifacts', (_request, { projectId = '' }) =>
     json({ artifacts: app.listArtifacts(projectId) }),
   )
+
+  // The user starts an artifact of their own, empty, from the overview.
+  add('POST', '/api/projects/:projectId/artifacts', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const kind = body.kind
+    if (kind !== 'document' && kind !== 'whiteboard' && kind !== 'dashboard') {
+      throw new BadRequest('kind')
+    }
+    if (typeof body.title !== 'string') throw new BadRequest('title')
+    const artifact = app.createArtifact(projectId, {
+      kind,
+      title: body.title,
+      author: 'user',
+      content: emptyContent(kind),
+    })
+    return json({ artifact, versions: app.listArtifactVersions(artifact.id) })
+  })
 
   add('GET', '/api/artifacts/:artifactId', (_request, { artifactId = '' }, url) => {
     const given = url.searchParams.get('version')

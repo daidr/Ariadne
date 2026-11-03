@@ -278,3 +278,152 @@ describe('event log', () => {
     expect(app.listThreads(project.id)).toEqual([])
   })
 })
+
+const card = () => ({
+  question: '推送吗？',
+  options: [
+    { label: '推送', consequence: '推送' },
+    { label: '不推', consequence: '不推' },
+  ],
+})
+
+/** The message key of the domain error `fn` throws, or `null`. */
+function problem(fn: () => unknown): string | null {
+  try {
+    fn()
+  } catch (error) {
+    return error instanceof DomainError ? error.code : String(error)
+  }
+  return null
+}
+
+describe('standing approvals', () => {
+  test('threads asking at once share one card, and a yes holds for the whole project', () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'A' })
+    const b = app.createThread(project.id, { title: 'B' })
+    const c = app.createThread(project.id, { title: 'C' })
+    expect(app.requestApproval(project.id, a.id, 'push', card)).toBe('asked')
+    expect(app.requestApproval(project.id, b.id, 'push', card)).toBe('pending')
+    expect(app.requestApproval(project.id, b.id, 'push', card)).toBe('pending')
+    const cards = app.listOpenAttentions(project.id)
+    expect(cards).toHaveLength(1)
+    expect(
+      app.events({ projectId: project.id }).filter((e) => e.type === 'attention.joined'),
+    ).toHaveLength(1)
+
+    app.answerAttention(cards[0]!.id, { choice: 0 })
+    // Both threads hear the answer and are woken.
+    for (const thread of [a, b]) {
+      expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
+        kind: 'note',
+        note: { type: 'answer', choice: '推送' },
+      })
+    }
+    expect(app.listPendingConversations().map((conversation) => conversation.id)).toEqual(
+      expect.arrayContaining([a.id, b.id]),
+    )
+    // A thread that never asked is covered too.
+    expect(app.approvalFor(project.id, c.id, 'push')).toBe('approved')
+    expect(app.requestApproval(project.id, c.id, 'push', card)).toBe('approved')
+    // Another purpose (another repository) asks again.
+    expect(app.approvalFor(project.id, c.id, 'push:other')).toBeNull()
+  })
+
+  test('a no holds for the threads on that card; an answer in words decides nothing', () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'A' })
+    const b = app.createThread(project.id, { title: 'B' })
+    app.requestApproval(project.id, a.id, 'push', card)
+    const [first] = app.listOpenAttentions(project.id)
+    app.answerAttention(first!.id, { text: '等我看完再说' })
+    expect(app.approvalFor(project.id, a.id, 'push')).toBeNull()
+    // So the thread may ask again later.
+    expect(app.requestApproval(project.id, a.id, 'push', card)).toBe('asked')
+    const [second] = app.listOpenAttentions(project.id)
+    app.answerAttention(second!.id, { choice: 1 })
+    expect(app.approvalFor(project.id, a.id, 'push')).toBe('declined')
+    expect(app.approvalFor(project.id, b.id, 'push')).toBeNull()
+  })
+})
+
+describe('artifact content', () => {
+  test('whiteboards and dashboards must be content their viewers can show', () => {
+    const project = app.createProject('P')
+    const create = (kind: 'whiteboard' | 'dashboard', content: unknown) =>
+      app.createArtifact(project.id, {
+        kind,
+        title: 'T',
+        author: 'user',
+        content: typeof content === 'string' ? content : JSON.stringify(content),
+      })
+    const board = create('whiteboard', {
+      version: 1,
+      nodes: [
+        { id: 'a', type: 'shape', x: 0, y: 0, data: { shape: 'rect', text: 'A' } },
+        { id: 'b', type: 'sticky', x: 240, y: 0 },
+      ],
+      edges: [
+        { id: 'e', source: { node: 'a', port: 'right' }, target: { node: 'b', port: 'left-in' } },
+      ],
+    })
+    expect(board.kind).toBe('whiteboard')
+    expect(problem(() => create('whiteboard', 'not json'))).toBe('error.artifactInvalid')
+    expect(
+      problem(() =>
+        create('whiteboard', {
+          version: 1,
+          nodes: [{ id: 'a', type: 'shape', x: 0, y: 0 }],
+          edges: [
+            {
+              id: 'e',
+              source: { node: 'a', port: 'right' },
+              target: { node: 'x', port: 'left-in' },
+            },
+          ],
+        }),
+      ),
+    ).toBe('error.artifactInvalid')
+    expect(
+      problem(() =>
+        create('whiteboard', {
+          version: 1,
+          nodes: [{ id: 'a', type: 'robot', x: 0, y: 0 }],
+          edges: [],
+        }),
+      ),
+    ).toBe('error.artifactInvalid')
+
+    const dashboard = {
+      version: 1,
+      dashboard: {
+        version: 1,
+        widgets: [
+          { id: 'n', type: 'stat', props: { value: 3 } },
+          {
+            id: 't',
+            type: 'table',
+            props: { source: 'rows' },
+            place: { lg: { x: 0, y: 2, w: 6, h: 4 } },
+          },
+        ],
+      },
+      data: { rows: [{ a: 1 }] },
+    }
+    expect(create('dashboard', dashboard).kind).toBe('dashboard')
+    expect(problem(() => create('dashboard', { ...dashboard, data: {} }))).toBe(
+      'error.artifactInvalid',
+    )
+    // Revisions are checked against the artifact's own kind.
+    const doc = app.createArtifact(project.id, {
+      kind: 'document',
+      title: 'D',
+      author: 'user',
+      content: 'not json',
+    })
+    expect(doc.content).toBe('not json')
+    expect(
+      problem(() => app.reviseArtifact(board.id, { content: '{}', author: 'user', reason: 'x' })),
+    ).toBe('error.artifactInvalid')
+  })
+})

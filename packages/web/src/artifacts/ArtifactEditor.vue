@@ -1,34 +1,37 @@
 <script setup lang="ts">
 import type { ArtifactVersionView, ArtifactView } from '@ariadne/core'
-import { DouEditor, editorKit, type EditorDocument, type PartialBlock } from '@dou-ui/editor'
-import { blocksToMarkdown, markdownToBlocks } from '@dou-ui/editor/markdown'
-import '@dou-ui/editor/style.css'
-import { DouAlert, DouButton, DouSelect, DouText } from 'dou-ui'
-import { ChevronLeftIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
-import { computed, ref, shallowRef, watch } from 'vue'
+import { DouAlert, DouButton, DouInput, DouSelect, DouText } from 'dou-ui'
+import { CheckIcon, ChevronLeftIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
 import { openMain, report, state } from '../store'
 import { authorName } from './author'
+import { kindIcon } from './kinds'
 
 const props = defineProps<{ id: string }>()
 
-const extensions = [editorKit()]
+// Each kind has its own dou-ui package; load only the one in use.
+const bodies = {
+  document: defineAsyncComponent(() => import('./DocumentBody.vue')),
+  whiteboard: defineAsyncComponent(() => import('./WhiteboardBody.vue')),
+  dashboard: defineAsyncComponent(() => import('./DashboardBody.vue')),
+}
+
 const artifact = ref<ArtifactView | null>(null)
 const versions = ref<ArtifactVersionView[]>([])
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
-const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
-/** Markdown of the document as loaded, written the way saving would write it. */
-const baseline = ref('')
+/** Content edited and not saved yet; `null` when nothing changed. */
+const draft = ref<string | null>(null)
 const saving = ref(false)
 const conflict = ref<string | null>(null)
-// Bumped to remount the editor when content is replaced from outside.
-const generation = ref(0)
+const renaming = ref(false)
+const title = ref('')
+const titleInput = ref<InstanceType<typeof DouInput> | null>(null)
 
 const viewingOld = computed(() => !!artifact.value && artifact.value.version !== latest.value)
-const current = computed(() => blocksToMarkdown(doc.value.blocks as never, extensions))
-const dirty = computed(() => !viewingOld.value && current.value !== baseline.value)
+const dirty = computed(() => !viewingOld.value && draft.value !== null)
 
 const versionOptions = computed(() =>
   versions.value.map((v) => ({
@@ -39,10 +42,7 @@ const versionOptions = computed(() =>
 
 function show(next: ArtifactView) {
   artifact.value = next
-  const blocks = markdownToBlocks(next.content, extensions)
-  doc.value = { version: 1, blocks }
-  baseline.value = blocksToMarkdown(blocks, extensions)
-  generation.value++
+  draft.value = null
 }
 
 async function load(version?: number) {
@@ -59,7 +59,10 @@ async function load(version?: number) {
 
 watch(
   () => props.id,
-  () => void load(),
+  () => {
+    renaming.value = false
+    void load()
+  },
   { immediate: true },
 )
 // Someone else saved (an agent, or this user in another tab): reload unless edits are open.
@@ -70,18 +73,31 @@ watch(
   },
 )
 
-async function save(content = current.value, reason = t('artifact.saveReason')) {
-  if (!artifact.value) return
+async function save(
+  input: { content?: string; title?: string; reason?: string } = {},
+): Promise<boolean> {
+  const current = artifact.value
+  if (!current) return false
   saving.value = true
   conflict.value = null
   try {
-    const detail = await api.saveArtifact(props.id, { content, baseVersion: latest.value, reason })
+    const detail = await api.saveArtifact(props.id, {
+      content: input.content ?? draft.value ?? current.content,
+      baseVersion: latest.value,
+      reason: input.reason ?? t('artifact.saveReason'),
+      ...(input.title ? { title: input.title } : {}),
+    })
     versions.value = detail.versions
     latest.value = detail.artifact.version
     show(detail.artifact)
+    return true
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) conflict.value = tm(error.localized)
-    else report(error)
+    // The reason is written for the agent; the user gets a plain line.
+    else if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
+      state.error = t('artifact.invalidSave')
+    } else report(error)
+    return false
   } finally {
     saving.value = false
   }
@@ -89,10 +105,37 @@ async function save(content = current.value, reason = t('artifact.saveReason')) 
 
 function restore() {
   if (!artifact.value) return
-  void save(
-    artifact.value.content,
-    t('artifact.restoreReason', { version: artifact.value.version }),
-  )
+  void save({
+    content: artifact.value.content,
+    reason: t('artifact.restoreReason', { version: artifact.value.version }),
+  })
+}
+
+async function startRename() {
+  title.value = artifact.value?.title ?? ''
+  renaming.value = true
+  await nextTick()
+  titleInput.value?.focus()
+}
+
+async function rename() {
+  const next = title.value.trim()
+  if (!next || next === artifact.value?.title) {
+    renaming.value = false
+    return
+  }
+  // A rename carries no unsaved edits with it: those stay a draft until saved.
+  const kept = draft.value
+  if (
+    await save({
+      content: artifact.value?.content,
+      title: next,
+      reason: t('artifact.renameReason'),
+    })
+  ) {
+    renaming.value = false
+    draft.value = kept
+  }
 }
 
 const time = (at: number) =>
@@ -102,11 +145,42 @@ const time = (at: number) =>
 <template>
   <div class="artifact">
     <div class="artifact-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'conversation' })">
+      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'artifacts' })">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('artifact.back') }}
       </DouButton>
-      <DouText weight="medium" truncate class="artifact-title">{{ artifact?.title }}</DouText>
+      <component :is="kindIcon[artifact.kind]" v-if="artifact" class="artifact-kind" />
+      <form v-if="renaming" class="artifact-title" @submit.prevent="rename">
+        <DouInput
+          ref="titleInput"
+          v-model="title"
+          size="sm"
+          :aria-label="t('artifact.rename')"
+          @keydown.esc="renaming = false"
+        />
+        <DouButton
+          size="sm"
+          variant="ghost"
+          native-type="submit"
+          :aria-label="t('artifact.rename')"
+          :loading="saving"
+        >
+          <CheckIcon />
+        </DouButton>
+      </form>
+      <div v-else class="artifact-title">
+        <DouText weight="medium" truncate>{{ artifact?.title }}</DouText>
+        <DouButton
+          v-if="artifact && !viewingOld"
+          size="sm"
+          variant="ghost"
+          :aria-label="t('artifact.rename')"
+          :title="t('artifact.rename')"
+          @click="startRename"
+        >
+          <PencilIcon />
+        </DouButton>
+      </div>
       <DouText v-if="artifact" variant="tertiary" size="sm" class="artifact-meta">
         {{
           t('artifact.updated', {
@@ -133,7 +207,7 @@ const time = (at: number) =>
         size="sm"
         tone="primary"
         :disabled="!dirty"
-        :loading="saving"
+        :loading="saving && !renaming"
         @click="save()"
       >
         <template #leading><SaveIcon /></template>
@@ -150,12 +224,13 @@ const time = (at: number) =>
       {{ t('artifact.unsaved') }}
     </DouText>
     <div class="artifact-body">
-      <DouEditor
-        :key="generation"
-        v-model="doc"
+      <component
+        :is="bodies[artifact.kind]"
+        v-if="artifact"
+        :content="artifact.content"
         :readonly="viewingOld"
-        :extensions="extensions"
-        :aria-label="artifact?.title"
+        :label="artifact.title"
+        @draft="(content: string | null) => (draft = content)"
       />
     </div>
   </div>
@@ -177,8 +252,16 @@ const time = (at: number) =>
   border-bottom: 1px solid var(--dou-color-border);
 }
 
+.artifact-kind {
+  flex: none;
+  color: var(--dou-color-text-tertiary);
+}
+
 .artifact-title {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -203,7 +286,5 @@ const time = (at: number) =>
 .artifact-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: 16px 24px;
 }
 </style>

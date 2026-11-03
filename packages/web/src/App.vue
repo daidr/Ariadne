@@ -31,6 +31,7 @@ const settingsOpen = ref(false)
 // The flow and document editors are large; load them when first opened.
 const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
 const ArtifactEditor = defineAsyncComponent(() => import('./artifacts/ArtifactEditor.vue'))
+const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
 </script>
 
 <template>
@@ -76,6 +77,7 @@ const ArtifactEditor = defineAsyncComponent(() => import('./artifacts/ArtifactEd
         <DouLayoutMain class="main">
           <PlanMain v-if="state.main.kind === 'plan'" />
           <ArtifactEditor v-else-if="state.main.kind === 'artifact'" :id="state.main.id" />
+          <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
           <ConversationPanel v-else @open-settings="settingsOpen = true" />
         </DouLayoutMain>
         <DouLayoutAside :width="420">

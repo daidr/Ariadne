@@ -1,5 +1,6 @@
 import type {
   AnyStoredEvent,
+  ArtifactKind,
   ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
@@ -162,6 +163,8 @@ export const api = {
       'GET',
       `/api/artifacts/${id}${version === undefined ? '' : `?version=${version}`}`,
     ),
+  createArtifact: (projectId: string, input: { kind: ArtifactKind; title: string }) =>
+    request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),
   saveArtifact: (
     id: string,
     input: { content: string; baseVersion: number; reason: string; title?: string },

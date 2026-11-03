@@ -11,9 +11,12 @@
     "@ariadne/core": "workspace:*",
     "@ariadne/i18n": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
+    "@dou-ui/chart": "0.1.0-alpha.1",
+    "@dou-ui/dashboard": "0.1.0-alpha.1",
     "@dou-ui/editor": "0.1.0-alpha.1",
     "@dou-ui/flow": "0.1.0-alpha.1",
     "@dou-ui/icons": "0.1.0-alpha.1",
+    "@dou-ui/pivot": "0.1.0-alpha.1",
     "dou-ui": "0.1.0-alpha.1",
     "markdown-it": "14.1.0"
   }

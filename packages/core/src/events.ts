@@ -81,7 +81,8 @@ export interface ProjectSource {
   settings: Record<string, unknown>
 }
 
-export type ArtifactKind = 'document'
+/** Markdown documents, whiteboards and dashboard snapshots; see artifact-content.ts. */
+export type ArtifactKind = 'document' | 'whiteboard' | 'dashboard'
 
 /** How the checks of a commit stand, all together. */
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
@@ -121,6 +122,11 @@ export interface EventMap {
     purpose?: string | null
   }
   'attention.answered': { attentionId: string; choice: number | null; text: string | null }
+  /**
+   * Another thread waits on the same standing approval: it hears the answer too, so the
+   * user answers one card instead of one per thread.
+   */
+  'attention.joined': { attentionId: string; threadId: string }
   'message.posted': {
     messageId: string
     /** The coordinator id or a thread id. */

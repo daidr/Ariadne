@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { DouEmpty, DouMenu, DouText } from 'dou-ui'
-import { FileTextIcon } from '@dou-ui/icons'
+import { DouButton, DouDropdown, DouEmpty, DouMenu, DouText } from 'dou-ui'
+import { LayoutGridIcon, PlusIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { locale, t } from '../i18n'
+import { createItems } from './create'
 import { openMain, state } from '../store'
 import { authorName } from './author'
+import { kindIcon } from './kinds'
 
 const items = computed(() =>
   state.artifacts.map((artifact) => ({
     key: artifact.id,
     label: artifact.title,
-    icon: FileTextIcon,
+    icon: kindIcon[artifact.kind],
   })),
 )
 const current = computed(() => (state.main.kind === 'artifact' ? state.main.id : undefined))
@@ -27,6 +29,15 @@ const meta = (id: string | number) => {
 </script>
 
 <template>
+  <DouButton
+    size="sm"
+    variant="ghost"
+    class="artifact-all"
+    @click="openMain({ kind: 'artifacts' })"
+  >
+    <template #leading><LayoutGridIcon /></template>
+    {{ t('artifacts.overview') }}
+  </DouButton>
   <DouMenu
     v-if="items.length"
     :model-value="current"
@@ -42,10 +53,21 @@ const meta = (id: string | number) => {
       </span>
     </template>
   </DouMenu>
-  <DouEmpty v-else size="sm" :description="t('artifacts.empty')" />
+  <DouEmpty v-else size="sm" :description="t('artifacts.empty')">
+    <DouDropdown :items="createItems">
+      <DouButton size="sm" variant="outline">
+        <template #leading><PlusIcon /></template>
+        {{ t('artifacts.create') }}
+      </DouButton>
+    </DouDropdown>
+  </DouEmpty>
 </template>
 
 <style scoped>
+.artifact-all {
+  margin-bottom: 4px;
+}
+
 .artifact-item {
   display: flex;
   flex: 1;

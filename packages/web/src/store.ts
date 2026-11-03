@@ -1,5 +1,6 @@
 import type {
   AnyStoredEvent,
+  ArtifactKind,
   ArtifactSummary,
   ConversationView,
   MessageView,
@@ -13,7 +14,10 @@ import { t, tm } from './i18n'
 
 /** What the middle column shows. */
 export type MainView =
-  { kind: 'conversation' } | { kind: 'plan' } | { kind: 'artifact'; id: string }
+  | { kind: 'conversation' }
+  | { kind: 'plan' }
+  | { kind: 'artifacts' }
+  | { kind: 'artifact'; id: string }
 
 interface State {
   stream: StreamStatus
@@ -141,6 +145,22 @@ export async function retryTurn() {
 /** Show the plan graph large, or an artifact, in the middle column. */
 export function openMain(view: MainView) {
   state.main = view
+}
+
+/** Start an empty artifact of the user's own and open it. */
+export async function createArtifact(kind: ArtifactKind) {
+  const id = state.currentId
+  if (!id) return
+  try {
+    const { artifact } = await api.createArtifact(id, {
+      kind,
+      title: t(`artifact.untitled.${kind}`),
+    })
+    await refreshCurrent()
+    openMain({ kind: 'artifact', id: artifact.id })
+  } catch (error) {
+    report(error)
+  }
 }
 
 /** Save the project's working directory; returns why it was refused, or `null`. */

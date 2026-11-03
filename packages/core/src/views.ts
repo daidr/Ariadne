@@ -202,7 +202,14 @@ export interface ArtifactSummary {
   updatedBy: string
   createdAt: number
   updatedAt: number
+  /** What the overview shows of it without loading the whole content. */
+  preview: ArtifactPreview
 }
+
+export type ArtifactPreview =
+  | { kind: 'document'; excerpt: string }
+  | { kind: 'whiteboard'; items: number; connectors: number; texts: string[] }
+  | { kind: 'dashboard'; widgets: number; takenAt: number | null; titles: string[] }
 
 export interface ArtifactView extends ArtifactSummary {
   content: string

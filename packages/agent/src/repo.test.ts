@@ -270,6 +270,53 @@ describe('repository', () => {
     expect(state.pulls.size).toBe(1)
   })
 
+  test('threads asking to push to a public repository at once share one card', async () => {
+    const { state, repo } = memoryRepo()
+    state.public = true
+    const workspaces = new WorkspaceManager(app, await repoHost(repo))
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'memory-repo', settings: {} })
+    const threads = [
+      app.createThread(project.id, { title: '甲' }),
+      app.createThread(project.id, { title: '乙' }),
+    ]
+    const results: string[] = []
+    const model = fakeModel((request, role) => {
+      if (role === 'coordinator') return say('')
+      const last = request.messages.at(-1)
+      if (last?.role === 'tool') {
+        results.push(last.content)
+        return say('')
+      }
+      return [
+        call(`c${results.length}`, 'push_branch', {}),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    for (const thread of threads) {
+      app.postMessage(project.id, {
+        conversationId: thread.id,
+        kind: 'relay',
+        author: 'coordinator',
+        content: '推送',
+      })
+    }
+    scheduler = new Scheduler({ app, resolveModel: () => model, locale: () => 'zh-CN', workspaces })
+    scheduler.start()
+    await scheduler.idle()
+
+    expect(state.pushed).toEqual([])
+    const cards = app.listOpenAttentions(project.id)
+    expect(cards).toHaveLength(1)
+    expect(results.some((r) => r.includes('already being asked'))).toBe(true)
+
+    // One yes wakes both threads, and both push.
+    app.answerAttention(cards[0]!.id, { choice: 0 })
+    await scheduler.idle()
+    expect(state.pushed).toHaveLength(2)
+    expect(app.listOpenAttentions(project.id)).toEqual([])
+  })
+
   test('without a repository, threads get no repository tools', async () => {
     const model = fakeModel(() => say(''))
     const project = app.createProject('P')

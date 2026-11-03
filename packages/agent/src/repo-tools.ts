@@ -87,44 +87,50 @@ const repoStatus: Tool = {
   },
 }
 
-/** The standing approval a thread needs before its first push to a public repository. */
+/**
+ * The standing approval needed before pushing to a public repository, per repository: a
+ * project that switches to another public repository asks again.
+ */
 export const PUSH_PUBLIC = 'push-public'
 
+export function pushPublicPurpose(remote: string): string {
+  return `${PUSH_PUBLIC}:${remote}`
+}
+
 /**
- * Pushing to a public repository publishes at once and cannot be taken back, so a thread
- * asks the user once before its first push there. Returns a result to hand back to the
- * model instead of pushing, or `null` when the push may go ahead.
+ * Pushing to a public repository publishes at once and cannot be taken back, so the user
+ * is asked once per project before the first push there; threads asking at the same time
+ * share one card. Returns a result to hand back to the model instead of pushing, or
+ * `null` when the push may go ahead.
  */
 async function pushBlocked(ctx: ToolContext, repo: RepoCapability): Promise<ToolResult | null> {
   if (!(await repo.isPublic())) return null
-  const approval = ctx.app.approvalFor(ctx.conversationId, PUSH_PUBLIC)
-  if (approval === 'approved') return null
-  if (approval === 'pending') {
-    return {
-      content:
-        'Waiting for the user to agree to push to this public repository. Do not push until their answer arrives.',
-    }
-  }
-  if (approval === 'declined') {
+  const t = createTranslator(ctx.locale)
+  const state = ctx.app.requestApproval(
+    ctx.projectId,
+    ctx.conversationId,
+    pushPublicPurpose(repo.remote),
+    () => ({
+      question: t('repo.pushPublic.question', { repo: repo.remote }),
+      options: [
+        { label: t('repo.pushPublic.push'), consequence: t('repo.pushPublic.pushConsequence') },
+        { label: t('repo.pushPublic.keep'), consequence: t('repo.pushPublic.keepConsequence') },
+      ],
+    }),
+  )
+  if (state === 'approved') return null
+  if (state === 'declined') {
     return {
       content:
         'The user declined pushing to this public repository. Do not push; keep your work committed on your branch and report "ready" with what is there.',
       isError: true,
     }
   }
-  const t = createTranslator(ctx.locale)
-  ctx.app.openAttention(ctx.projectId, {
-    threadId: ctx.conversationId,
-    question: t('repo.pushPublic.question', { repo: repo.remote }),
-    options: [
-      { label: t('repo.pushPublic.push'), consequence: t('repo.pushPublic.pushConsequence') },
-      { label: t('repo.pushPublic.keep'), consequence: t('repo.pushPublic.keepConsequence') },
-    ],
-    purpose: PUSH_PUBLIC,
-  })
   return {
     content:
-      'This repository is public: what you push is published at once. The user was asked whether you may push; their answer will arrive as a new turn. Call this tool again only if they agree.',
+      state === 'asked'
+        ? 'This repository is public: what you push is published at once. The user was asked whether pushing is allowed; their answer will arrive as a new turn. Call this tool again only if they agree. If they answer in words without choosing, do what they say; you may call it again later, which asks again.'
+        : 'This repository is public, and the user is already being asked whether pushing to it is allowed. Their answer will arrive as a new turn; do not push until then.',
   }
 }
 
