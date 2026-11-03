@@ -57,18 +57,24 @@ function oneOf(item: Record<string, unknown>, key: string, allowed: readonly str
   return value
 }
 
-function kindOf(node: WhiteboardNode): ItemKind | 'drawing' | 'image' {
+/** Kinds the model can see and move but not rewrite: drawn by the user in the editor. */
+type FixedKind = 'drawing' | 'image' | 'node'
+const isFixed = (kind: string): kind is FixedKind =>
+  kind === 'drawing' || kind === 'image' || kind === 'node'
+
+function kindOf(node: WhiteboardNode): ItemKind | FixedKind {
   if (node.type === 'shape') {
     const shape = node.data?.shape
     return SHAPES.includes(shape as never) ? (shape as ItemKind) : 'rect'
   }
   if (node.type === 'sticky' || node.type === 'text') return node.type
-  return node.type === 'ink' ? 'drawing' : 'image'
+  if (node.type === 'ink') return 'drawing'
+  return node.type === 'image' ? 'image' : 'node'
 }
 
 function boxOf(node: WhiteboardNode): Box {
   const kind = kindOf(node)
-  const fallback = kind === 'drawing' || kind === 'image' ? SIZE.rect : SIZE[kind]
+  const fallback = isFixed(kind) ? SIZE.rect : SIZE[kind]
   return {
     x: node.x,
     y: node.y,
@@ -100,7 +106,7 @@ function applyItem(item: Record<string, unknown>, existing?: WhiteboardNode): Wh
   if (!id) throw new ToolInputError('every item needs an "id"')
   const given = oneOf(item, 'kind', KINDS) as ItemKind | undefined
   const before = existing ? kindOf(existing) : undefined
-  if (existing && (before === 'drawing' || before === 'image')) {
+  if (existing && before && isFixed(before)) {
     if (given || item.text !== undefined || item.tone !== undefined) {
       throw new ToolInputError(
         `item "${id}" is a ${before}; it can be moved or removed, not changed`,
@@ -318,6 +324,7 @@ export function boardSummary(board: WhiteboardContent) {
         id: node.id,
         kind,
         ...(typeof data.text === 'string' && data.text ? { text: data.text } : {}),
+        ...(kind === 'node' && typeof data.label === 'string' ? { text: data.label } : {}),
         ...(typeof data.tone === 'string' ? { tone: data.tone } : {}),
         ...(kind === 'image' && typeof data.alt === 'string' ? { alt: data.alt } : {}),
         x,

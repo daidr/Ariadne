@@ -70,6 +70,7 @@ export const en: Record<MessageKey, string> = {
   'artifact.untitled.whiteboard': 'Untitled whiteboard',
   'artifact.untitled.dashboard': 'Untitled dashboard',
   'artifact.rename': 'Rename',
+  'artifact.invalidSave': 'This edit has content that is not supported yet, so it was not saved',
   'artifact.renameReason': 'Renamed',
   'artifact.dashboard.snapshot': 'Static snapshot',
   'artifact.dashboard.takenAt': 'Data as of {time}',

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { DouButton, DouEmpty, DouMenu, DouText } from 'dou-ui'
-import { LayoutGridIcon } from '@dou-ui/icons'
+import { DouButton, DouDropdown, DouEmpty, DouMenu, DouText } from 'dou-ui'
+import { LayoutGridIcon, PlusIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { locale, t } from '../i18n'
+import { createItems } from './create'
 import { openMain, state } from '../store'
 import { authorName } from './author'
 import { kindIcon } from './kinds'
@@ -29,7 +30,6 @@ const meta = (id: string | number) => {
 
 <template>
   <DouButton
-    v-if="items.length"
     size="sm"
     variant="ghost"
     class="artifact-all"
@@ -53,7 +53,14 @@ const meta = (id: string | number) => {
       </span>
     </template>
   </DouMenu>
-  <DouEmpty v-else size="sm" :description="t('artifacts.empty')" />
+  <DouEmpty v-else size="sm" :description="t('artifacts.empty')">
+    <DouDropdown :items="createItems">
+      <DouButton size="sm" variant="outline">
+        <template #leading><PlusIcon /></template>
+        {{ t('artifacts.create') }}
+      </DouButton>
+    </DouDropdown>
+  </DouEmpty>
 </template>
 
 <style scoped>

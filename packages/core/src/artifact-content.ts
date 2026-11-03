@@ -60,8 +60,11 @@ export interface DashboardContent {
   takenAt?: number
 }
 
-/** The whiteboard node types the web registers through `whiteboardKit()`. */
-export const WHITEBOARD_NODE_TYPES = ['shape', 'sticky', 'text', 'ink', 'image'] as const
+/**
+ * The node types the web's whiteboard registers: `whiteboardKit()`'s, and the plain
+ * `default` node from `flowKit()`. Grouping is turned off there, so no `group` nodes.
+ */
+export const WHITEBOARD_NODE_TYPES = ['shape', 'sticky', 'text', 'ink', 'image', 'default'] as const
 /** The dashboard widget types the web registers. */
 export const DASHBOARD_WIDGET_TYPES = ['stat', 'text', 'table', 'chart', 'pivot'] as const
 

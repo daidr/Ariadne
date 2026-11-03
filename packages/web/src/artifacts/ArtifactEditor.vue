@@ -93,7 +93,10 @@ async function save(
     return true
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) conflict.value = tm(error.localized)
-    else report(error)
+    // The reason is written for the agent; the user gets a plain line.
+    else if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
+      state.error = t('artifact.invalidSave')
+    } else report(error)
     return false
   } finally {
     saving.value = false

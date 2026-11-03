@@ -15,7 +15,7 @@ import '@dou-ui/dashboard/style.css'
 import '@dou-ui/chart/style.css'
 import '@dou-ui/pivot/style.css'
 import { DouSwitch, DouTag, DouText } from 'dou-ui'
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { locale, t } from '../i18n'
 
 /**
@@ -36,6 +36,8 @@ const sources = shallowRef<DashboardSources>({})
 const editing = ref(false)
 const dashboard = ref<DashboardExpose | null>(null)
 const generation = ref(0)
+/** The snapshot as loaded, so undoing back to it clears the draft. */
+let baseline = ''
 
 watch(
   () => props.content,
@@ -43,6 +45,7 @@ watch(
     const value = JSON.parse(content) as DashboardContent
     snapshot.value = value
     doc.value = migrateDocument(value.dashboard)
+    baseline = JSON.stringify({ ...value, dashboard: doc.value })
     // Defined once per load: a new function per render would count as a new source.
     sources.value = Object.fromEntries(
       Object.entries(value.data).map(([name, data]) => [name, () => data]),
@@ -59,7 +62,10 @@ watch(
 )
 
 function changed() {
-  emit('draft', JSON.stringify({ ...snapshot.value, dashboard: doc.value }))
+  void nextTick(() => {
+    const current = JSON.stringify({ ...snapshot.value, dashboard: doc.value })
+    emit('draft', current === baseline ? null : current)
+  })
 }
 
 const takenAt = computed(() =>
@@ -85,7 +91,12 @@ const takenAt = computed(() =>
       </label>
     </div>
     <div class="dashboard-main">
-      <DouDashboardPalette v-if="editing" :for="dashboard" class="dashboard-palette" />
+      <DouDashboardPalette
+        v-if="editing"
+        :for="dashboard"
+        direction="horizontal"
+        class="dashboard-palette"
+      />
       <div class="dashboard-grid">
         <DouDashboard
           ref="dashboard"

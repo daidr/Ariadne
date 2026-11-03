@@ -9,12 +9,12 @@ import {
   DouSegmentedControl,
   DouTag,
   DouText,
-  type ContextMenuItem,
 } from 'dou-ui'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
-import { createArtifact, openMain, state } from '../store'
+import { openMain, state } from '../store'
+import { createItems } from './create'
 import { authorName } from './author'
 import { ARTIFACT_KINDS, kindIcon } from './kinds'
 
@@ -31,14 +31,6 @@ const filterOptions = computed(() =>
   (['all', ...ARTIFACT_KINDS] as const).map((kind) => ({
     value: kind,
     label: `${t(kind === 'all' ? 'artifacts.all' : `artifact.kind.${kind}`)} ${counts.value[kind] ?? 0}`,
-  })),
-)
-const createItems = computed<ContextMenuItem[]>(() =>
-  ARTIFACT_KINDS.map((kind) => ({
-    key: kind,
-    label: t(`artifact.kind.${kind}`),
-    icon: kindIcon[kind],
-    run: () => void createArtifact(kind),
   })),
 )
 

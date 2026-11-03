@@ -66,6 +66,7 @@ export const zhCN = {
   'artifact.untitled.whiteboard': '未命名画板',
   'artifact.untitled.dashboard': '未命名仪表盘',
   'artifact.rename': '重命名',
+  'artifact.invalidSave': '这次修改里有当前不支持的内容，没能保存',
   'artifact.renameReason': '重命名',
   'artifact.dashboard.snapshot': '静态快照',
   'artifact.dashboard.takenAt': '数据截至 {time}',
