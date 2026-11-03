@@ -25,6 +25,32 @@ function clip(text: string): string {
   return `[… ${text.length - MAX_OUTPUT} characters cut …]\n${text.slice(-MAX_OUTPUT)}`
 }
 
+/** Credentials the server holds that a thread's commands must never see. */
+const HIDDEN_ENV = new Set([
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+])
+
+/**
+ * The environment for commands a thread runs: the server's own, without its credentials
+ * (Ariadne's local token, GitHub tokens, git config passed through the environment).
+ * This keeps them out of tool results, and so out of the event log and the model's input.
+ * It is not a sandbox: a command can still read files the user can read.
+ */
+export function threadEnv(
+  base: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue
+    if (HIDDEN_ENV.has(key) || key.startsWith('ARIADNE_') || key.startsWith('GIT_CONFIG_')) continue
+    env[key] = value
+  }
+  return env
+}
+
 /** Run a program without a shell. */
 export async function run(
   argv: string[],
@@ -33,14 +59,17 @@ export async function run(
     timeoutMs?: number
     signal?: AbortSignal
     env?: Record<string, string>
+    /** Leave out the server's credentials, for commands a thread asked for. */
+    forThread?: boolean
   },
 ): Promise<ExecResult> {
+  const base = options.forThread ? threadEnv() : process.env
   const proc = Bun.spawn(argv, {
     cwd: options.cwd,
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: 'ignore',
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...options.env },
+    env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
   })
   const kill = () => proc.kill()
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
@@ -117,6 +146,7 @@ export class LocalWorkspace implements Workspace {
     const cwd = await this.resolve(options.cwd ?? '.')
     return run(['bash', '-c', command], {
       cwd,
+      forThread: true,
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     })

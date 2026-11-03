@@ -74,6 +74,13 @@ export interface RepoCapability {
   /** The repository's page, for links. */
   webUrl: string
   defaultBranch(): Promise<string>
+  /** Whether anyone can read the repository: what is pushed there is public at once. */
+  isPublic(): Promise<boolean>
+  /**
+   * Bring the remote's branches into the workspaces as `origin/<branch>`, without moving
+   * any local branch.
+   */
+  fetch(): Promise<void>
   /**
    * Push a branch the workspaces created to the remote. Only the given branch moves;
    * providers refuse to force-push.

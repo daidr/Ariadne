@@ -1,6 +1,14 @@
 import { DomainError, type Ariadne, type ChecksState, type ThreadPullRequest } from '@ariadne/core'
 import type { CheckInfo, PullRequestInfo, RepoCapability } from '@ariadne/plugin-sdk'
-import { json, optionalStr, str, type Tool, type ToolContext } from './tool-helpers'
+import { createTranslator } from '@ariadne/i18n'
+import {
+  json,
+  optionalStr,
+  str,
+  type Tool,
+  type ToolContext,
+  type ToolResult,
+} from './tool-helpers'
 
 /** Conclusions that mean a check did not pass. */
 const FAILING = new Set([
@@ -79,6 +87,82 @@ const repoStatus: Tool = {
   },
 }
 
+/** The standing approval a thread needs before its first push to a public repository. */
+export const PUSH_PUBLIC = 'push-public'
+
+/**
+ * Pushing to a public repository publishes at once and cannot be taken back, so a thread
+ * asks the user once before its first push there. Returns a result to hand back to the
+ * model instead of pushing, or `null` when the push may go ahead.
+ */
+async function pushBlocked(ctx: ToolContext, repo: RepoCapability): Promise<ToolResult | null> {
+  if (!(await repo.isPublic())) return null
+  const approval = ctx.app.approvalFor(ctx.conversationId, PUSH_PUBLIC)
+  if (approval === 'approved') return null
+  if (approval === 'pending') {
+    return {
+      content:
+        'Waiting for the user to agree to push to this public repository. Do not push until their answer arrives.',
+    }
+  }
+  if (approval === 'declined') {
+    return {
+      content:
+        'The user declined pushing to this public repository. Do not push; keep your work committed on your branch and report "ready" with what is there.',
+      isError: true,
+    }
+  }
+  const t = createTranslator(ctx.locale)
+  ctx.app.openAttention(ctx.projectId, {
+    threadId: ctx.conversationId,
+    question: t('repo.pushPublic.question', { repo: repo.remote }),
+    options: [
+      { label: t('repo.pushPublic.push'), consequence: t('repo.pushPublic.pushConsequence') },
+      { label: t('repo.pushPublic.keep'), consequence: t('repo.pushPublic.keepConsequence') },
+    ],
+    purpose: PUSH_PUBLIC,
+  })
+  return {
+    content:
+      'This repository is public: what you push is published at once. The user was asked whether you may push; their answer will arrive as a new turn. Call this tool again only if they agree.',
+  }
+}
+
+const syncBranch: Tool = {
+  spec: {
+    name: 'sync_branch',
+    description:
+      "Fetch the repository's newest commits, then tell how your branch stands against the default branch and against your branch on the remote. It moves nothing: merge origin/<default> or origin/<your branch> yourself with run_command, resolve conflicts, commit, and push again.",
+    parameters: { type: 'object', properties: {} },
+  },
+  async run(_args, ctx) {
+    const repo = await ctx.repo()
+    const workspace = await ctx.workspace()
+    const branch = await branchOf(ctx)
+    await repo.fetch()
+    const defaultBranch = await repo.defaultBranch()
+    const count = async (range: string) => {
+      const result = await workspace.exec(`git rev-list --left-right --count ${range}`)
+      if (result.exitCode !== 0) return null
+      const [ahead, behind] = result.stdout.trim().split(/\s+/).map(Number)
+      return { ahead: ahead ?? 0, behind: behind ?? 0 }
+    }
+    const pr = ctx.app.getThread(ctx.conversationId).pullRequest
+    return json({
+      branch,
+      defaultBranch: {
+        name: `origin/${defaultBranch}`,
+        ...(await count(`HEAD...origin/${defaultBranch}`)),
+      },
+      remoteBranch: await count(`HEAD...origin/${branch}`),
+      hint:
+        pr?.state === 'merged'
+          ? `Your pull request #${pr.number} was merged (squashed). Before new work, merge origin/${defaultBranch} so the next pull request holds only the new changes.`
+          : undefined,
+    })
+  },
+}
+
 const pushBranch: Tool = {
   spec: {
     name: 'push_branch',
@@ -89,6 +173,8 @@ const pushBranch: Tool = {
   async run(_args, ctx) {
     const repo = await ctx.repo()
     const branch = await branchOf(ctx)
+    const blocked = await pushBlocked(ctx, repo)
+    if (blocked) return blocked
     const { sha } = await repo.push(branch)
     return json({ branch, sha })
   },
@@ -112,8 +198,17 @@ const openPullRequest: Tool = {
   async run(args, ctx) {
     const repo = await ctx.repo()
     const branch = await branchOf(ctx)
-    await repo.push(branch)
     const existing = await repo.pullRequestFor(branch)
+    if (existing?.state === 'closed') {
+      // Closing a pull request is usually the user saying no; a new one would undo that.
+      return {
+        content: `Your pull request #${existing.number} was closed without merging, most likely by the user. Do not open another on your own: ask_user whether they want it reopened, or report "blocked" with why.`,
+        isError: true,
+      }
+    }
+    const blocked = await pushBlocked(ctx, repo)
+    if (blocked) return blocked
+    await repo.push(branch)
     const pr =
       existing?.state === 'open'
         ? existing
@@ -164,6 +259,10 @@ function guarded(tool: Tool): Tool {
   }
 }
 
-export const repoTools: Tool[] = [repoStatus, pushBranch, openPullRequest, readCheckLog].map(
-  guarded,
-)
+export const repoTools: Tool[] = [
+  repoStatus,
+  syncBranch,
+  pushBranch,
+  openPullRequest,
+  readCheckLog,
+].map(guarded)

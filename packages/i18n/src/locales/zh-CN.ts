@@ -71,6 +71,12 @@ export const zhCN = {
   'pr.checks.success': '检查通过',
   'pr.checks.failure': '检查失败',
   'pr.refresh': '刷新 PR 状态',
+  'repo.pushPublic.question':
+    'thread 想把分支推送到公开仓库 {repo} 并开 PR。推上去的内容会立即公开，无法撤回。',
+  'repo.pushPublic.push': '允许推送',
+  'repo.pushPublic.pushConsequence': '这个 thread 之后推送自己的分支不再询问',
+  'repo.pushPublic.keep': '先不推送',
+  'repo.pushPublic.keepConsequence': '改动留在本地分支上，thread 不会推送',
   'plan.dismiss': '知道了',
   'plan.view.graph': '图',
   'plan.view.board': '看板',

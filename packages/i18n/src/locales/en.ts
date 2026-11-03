@@ -74,6 +74,12 @@ export const en: Record<MessageKey, string> = {
   'pr.checks.success': 'Checks passed',
   'pr.checks.failure': 'Checks failed',
   'pr.refresh': 'Refresh pull request',
+  'repo.pushPublic.question':
+    'A thread wants to push its branch to the public repository {repo} and open a pull request. What is pushed is public at once and cannot be taken back.',
+  'repo.pushPublic.push': 'Allow pushing',
+  'repo.pushPublic.pushConsequence': 'This thread pushes its own branch without asking again',
+  'repo.pushPublic.keep': 'Do not push yet',
+  'repo.pushPublic.keepConsequence': 'The work stays on the local branch; the thread does not push',
   'plan.dismiss': 'Got it',
   'plan.view.graph': 'Graph',
   'plan.view.board': 'Board',

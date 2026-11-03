@@ -76,13 +76,16 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 
 本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/` 和 `~/.ariadne/plugins/github/worktrees/` 下。
 
-上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。令牌通过环境变量交给 git，不落盘，也不出现在命令行参数里；thread 的 `run_command` 拿不到它，推送只能走下面的工具。
+上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
+
+thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKEN`、`ARIADNE_*`、`GIT_CONFIG_*`），令牌不会意外出现在工具结果、事件日志和模型输入里。这不是沙箱：命令仍以用户身份运行，能读用户能读的文件，也能用用户自己的 git 凭据。“不合并、不推其他分支”靠工具面和提示约束，防的是失误，不是蓄意越权的 thread。
 
 ### 仓库、PR 与 CI
 
-上下文源是托管仓库时，thread 多四个工具：`repo_status`、`push_branch`、`open_pull_request`、`read_check_log`。
+上下文源是托管仓库时，thread 多五个工具：`repo_status`、`sync_branch`、`push_branch`、`open_pull_request`、`read_check_log`。
 
-- thread 推送自己的分支、开 PR 不需要先问用户：只动它自己的 `ariadne/…` 分支，PR 可以关闭，合并由用户决定。推送从不强推；远端分支变过的话推送失败，thread 先合并远端的改动。thread 不能合并 PR，也不能推送其他分支。
+- thread 推送自己的分支、开 PR 不需要先问用户：只动它自己的 `ariadne/…` 分支，PR 可以关闭，合并由用户决定。公开仓库例外：每个 thread 第一次推送前进“需要我”问一次（带 `purpose` 的 Attention，之后按用户的回答放行或拒绝）。用户关掉的 PR，`open_pull_request` 不会再开新的，thread 要问用户或报告受阻。
+- 推送从不强推；远端分支变过的话推送被拒，提示 thread 用 `sync_branch` 取回远端的提交（只更新 `origin/*`，不动本地分支），合并 `origin/<分支>` 或 `origin/<默认分支>` 后再推送。PR 被 squash 合并后继续工作，先合并最新的默认分支，下一个 PR 只含新的改动。
 - 开了 PR 的 thread 由仓库监视器定期（默认每分钟）读取 PR 和最新提交的检查，有变化才记一条 `pull_request.synced`。最新提交的检查失败时记 `checks.failed`，唤醒那个 thread 去读日志、修复、再推送；同一个提交只唤醒一次。PR 被合并或关闭时记 `pull_request.closed`，协调器收到说明。
 - 界面在 thread 标题旁显示 PR 编号、检查状态，可以手动刷新；看板卡片上也显示。
 

@@ -139,6 +139,7 @@ export const attentionsProjection: Projection = {
       answered INTEGER NOT NULL DEFAULT 0,
       choice INTEGER,
       answer_text TEXT,
+      purpose TEXT,
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, answered)')
@@ -147,7 +148,7 @@ export const attentionsProjection: Projection = {
     switch (event.type) {
       case 'attention.opened':
         db.run(
-          'INSERT INTO attentions (id, project_id, thread_id, question, options, recommended, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO attentions (id, project_id, thread_id, question, options, recommended, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [
             event.data.attentionId,
             event.projectId,
@@ -155,6 +156,7 @@ export const attentionsProjection: Projection = {
             event.data.question,
             JSON.stringify(event.data.options),
             event.data.recommended,
+            event.data.purpose ?? null,
             event.at,
           ],
         )

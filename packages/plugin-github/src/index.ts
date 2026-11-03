@@ -64,15 +64,26 @@ async function findToken(
   }
 }
 
-/** Git config passed through the environment, so the token never lands on disk or argv. */
-function authEnv(token: string | null): Record<string, string> {
-  if (!token) return {}
-  const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
-  return {
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: 'http.extraHeader',
-    GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+/** Where `git push` from a workspace goes: nowhere, so every push goes through the tool. */
+const NO_PUSH_URL = 'no-push://use-the-push_branch-tool'
+
+/**
+ * Git config for the server's own git commands, passed through the environment so the
+ * token never lands on disk or argv. The header is bound to the repository's URL, and
+ * hooks are off: the shared clone's config and hooks can be changed from a workspace.
+ */
+function serverGitEnv(remoteUrl: string, token: string | null): Record<string, string> {
+  const config: [string, string][] = [['core.hooksPath', '/dev/null']]
+  if (token) {
+    const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
+    config.push([`http.${remoteUrl}.extraHeader`, `Authorization: Basic ${basic}`])
   }
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length) }
+  config.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key
+    env[`GIT_CONFIG_VALUE_${index}`] = value
+  })
+  return env
 }
 
 function check(result: ExecResult, what: string): ExecResult {
@@ -93,8 +104,14 @@ export function connectRepository(
 ): { workspace: WorkspaceCapability; repo: RepoCapability; api: GitHubApi } {
   const { owner, name } = parseRepository(settings.repository)
   const env = options.env ?? process.env
+  // A token found is kept; none found is looked for again, e.g. after `gh auth login`.
   let token: Promise<string | null> | null = null
-  const getToken = () => (token ??= findToken(settings.token, env))
+  const getToken = async () => {
+    token ??= findToken(settings.token, env)
+    const found = await token
+    if (!found) token = null
+    return found
+  }
   const api = new GitHubApi({
     base: options.apiBase ?? 'https://api.github.com',
     owner,
@@ -104,12 +121,29 @@ export function connectRepository(
   })
   const remoteUrl = `${options.gitBase ?? 'https://github.com'}/${owner}/${name}.git`
   const bare = join(options.dataDir, 'repos', owner, `${name}.git`)
-  let defaultBranch: Promise<string> | null = null
-  const getDefaultBranch = () =>
-    (defaultBranch ??= api.repository().then((repo) => repo.default_branch))
+  let repository: ReturnType<GitHubApi['repository']> | null = null
+  const getRepository = () => {
+    repository ??= api.repository()
+    repository.catch(() => {
+      repository = null
+    })
+    return repository
+  }
+  const getDefaultBranch = async () => (await getRepository()).default_branch
 
   const git = async (cwd: string, ...args: string[]) =>
-    run(['git', ...args], { cwd, timeoutMs: 600_000, env: authEnv(await getToken()) })
+    run(['git', ...args], {
+      cwd,
+      timeoutMs: 600_000,
+      env: serverGitEnv(remoteUrl, await getToken()),
+    })
+
+  /** Fetch by the URL the server knows, never by a remote a workspace could rewrite. */
+  const fetchRemote = async () =>
+    check(
+      await git(bare, 'fetch', '--prune', '-q', remoteUrl, '+refs/heads/*:refs/remotes/origin/*'),
+      'git fetch',
+    )
 
   // Setup and fetches touch the shared clone; one at a time.
   let queue: Promise<unknown> = Promise.resolve()
@@ -130,7 +164,9 @@ export function connectRepository(
         'git config',
       )
     }
-    check(await git(bare, 'fetch', '--prune', '-q', 'origin'), 'git fetch')
+    // A plain `git push` from a workspace fails at once; pushes go through `push`.
+    check(await git(bare, 'config', 'remote.origin.pushurl', NO_PUSH_URL), 'git config')
+    await fetchRemote()
   }
 
   const workspace: WorkspaceCapability = {
@@ -170,12 +206,24 @@ export function connectRepository(
     remote: `${owner}/${name}`,
     webUrl: `${options.gitBase?.startsWith('http') ? options.gitBase : 'https://github.com'}/${owner}/${name}`,
     defaultBranch: getDefaultBranch,
+    isPublic: async () => !(await getRepository()).private,
+    fetch: () => serial(ensureClone),
     push: (branch) =>
       serial(async () => {
         const ref = `refs/heads/${branch}`
         const sha = check(await git(bare, 'rev-parse', '--verify', ref), 'git rev-parse')
         // No "+": a branch that moved on the remote is refused rather than overwritten.
-        check(await git(bare, 'push', '-q', 'origin', `${ref}:${ref}`), 'git push')
+        const pushed = await git(bare, 'push', '-q', '--no-verify', remoteUrl, `${ref}:${ref}`)
+        if (pushed.exitCode !== 0) {
+          const rejected = /rejected|non-fast-forward|fetch first/.test(pushed.stderr)
+          throw new Error(
+            rejected
+              ? `git push was rejected: origin/${branch} has commits your branch does not have. Fetch them (sync_branch), merge origin/${branch} into your branch, then push again. Never force-push.`
+              : `git push failed: ${pushed.stderr.trim() || `exit ${pushed.exitCode}`}`,
+          )
+        }
+        // Keep origin/<branch> in step, so ahead/behind counts are right after a push.
+        await git(bare, 'update-ref', `refs/remotes/origin/${branch}`, sha.stdout.trim())
         return { sha: sha.stdout.trim() }
       }),
     pullRequestFor: (branch) => api.pullRequestFor(branch),

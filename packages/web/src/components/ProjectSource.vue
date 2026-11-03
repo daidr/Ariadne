@@ -15,6 +15,8 @@ const kind = ref<string | null>(null)
 /** Draft settings per kind, so switching kinds back and forth keeps what was typed. */
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
 const secretsSet = ref<string[]>([])
+/** The secrets the stored source has, restored when its kind is chosen again. */
+const storedSecrets = ref<string[]>([])
 
 const source = computed(() => state.detail?.project.source ?? null)
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
@@ -43,6 +45,7 @@ async function edit() {
     kinds.value = list
     kind.value = stored.source?.kind ?? list[0]?.kind ?? null
     secretsSet.value = stored.secretsSet
+    storedSecrets.value = stored.secretsSet
     if (stored.source) drafts[stored.source.kind] = { ...stored.source.settings }
   } catch (error) {
     problem.value = String(error)
@@ -58,12 +61,13 @@ function values(): Record<string, unknown> {
 function chooseKind(next: string) {
   kind.value = next
   // Secrets belong to the stored kind; another kind starts without them.
-  if (next !== source.value?.kind) secretsSet.value = []
+  secretsSet.value = next === source.value?.kind ? storedSecrets.value : []
 }
 
 function clearSecret(key: string) {
   values()[key] = null
   secretsSet.value = secretsSet.value.filter((name) => name !== key)
+  storedSecrets.value = storedSecrets.value.filter((name) => name !== key)
 }
 
 async function save(clear = false) {
@@ -160,7 +164,7 @@ async function save(clear = false) {
 .source-form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 
 .source-problem {

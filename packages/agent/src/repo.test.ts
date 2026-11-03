@@ -34,11 +34,17 @@ function memoryRepo() {
     pulls: new Map<string, PullRequestInfo>(),
     checks: new Map<string, CheckInfo[]>(),
     head: 'sha1',
+    public: false,
+    fetches: 0,
   }
   const repo: RepoCapability = {
     remote: 'acme/app',
     webUrl: 'https://github.com/acme/app',
     defaultBranch: async () => 'main',
+    isPublic: async () => state.public,
+    async fetch() {
+      state.fetches++
+    },
     async push(branch) {
       state.pushed.push(branch)
       return { sha: state.head }
@@ -206,6 +212,62 @@ describe('repository', () => {
       note: { type: 'pull-request-closed', number: 1, merged: true },
     })
     expect(app.getThread(thread.id).pullRequest?.state).toBe('merged')
+  })
+
+  test('a public repository asks the user before the first push; a closed PR is not reopened', async () => {
+    const { state, repo } = memoryRepo()
+    state.public = true
+    const workspaces = new WorkspaceManager(app, await repoHost(repo))
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'memory-repo', settings: {} })
+    const thread = app.createThread(project.id, { title: '实现' })
+
+    const results: string[] = []
+    const model = fakeModel((request, role) => {
+      if (role === 'coordinator') return say('')
+      const last = request.messages.at(-1)
+      if (last?.role === 'tool') {
+        results.push(last.content)
+        return say('')
+      }
+      return [
+        call(`c${results.length}`, 'open_pull_request', { title: '加功能', body: '说明' }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '开 PR',
+    })
+    scheduler = new Scheduler({ app, resolveModel: () => model, locale: () => 'zh-CN', workspaces })
+    scheduler.start()
+    await scheduler.idle()
+
+    expect(state.pushed).toEqual([])
+    expect(results[0]).toContain('public')
+    const [item] = app.listNeedsMe(project.id)
+    if (item?.kind !== 'attention') throw new Error('expected a question')
+    expect(item.attention.question).toContain('acme/app')
+
+    // The user agrees: the thread is woken and its next call pushes.
+    app.answerAttention(item.attention.id, { choice: 0 })
+    await scheduler.idle()
+    expect(state.pushed).toEqual(['ariadne/thread'])
+    expect(app.getThread(thread.id).pullRequest?.number).toBe(1)
+
+    // The user closes the pull request: asking again does not open a new one.
+    state.pulls.set('ariadne/thread', { ...state.pulls.get('ariadne/thread')!, state: 'closed' })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '再开一次',
+    })
+    await scheduler.idle()
+    expect(results.at(-1)).toContain('closed without merging')
+    expect(state.pulls.size).toBe(1)
   })
 
   test('without a repository, threads get no repository tools', async () => {

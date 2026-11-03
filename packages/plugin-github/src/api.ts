@@ -107,10 +107,12 @@ export class GitHubApi {
   }
 
   repository() {
-    return this.request<{ default_branch: string; html_url: string; clone_url: string }>(
-      'GET',
-      this.repoPath,
-    )
+    return this.request<{
+      default_branch: string
+      html_url: string
+      clone_url: string
+      private: boolean
+    }>('GET', this.repoPath)
   }
 
   async pullRequestFor(branch: string): Promise<PullRequestInfo | null> {

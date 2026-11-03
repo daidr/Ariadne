@@ -47,7 +47,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 8
+export const PROJECTION_VERSION = 9
 
 interface ConversationRow {
   id: string
@@ -481,6 +481,22 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
+  /**
+   * Where the user stands on a standing approval a thread asked for: the newest attention
+   * with this purpose decides. `null` when it was never asked.
+   */
+  approvalFor(threadId: string, purpose: string): 'approved' | 'declined' | 'pending' | null {
+    const row = this.db
+      .query<{ answered: number; choice: number | null }, [string, string]>(
+        `SELECT answered, choice FROM attentions WHERE thread_id = ? AND purpose = ?
+         ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .get(threadId, purpose)
+    if (!row) return null
+    if (!row.answered) return 'pending'
+    return row.choice === 0 ? 'approved' : 'declined'
+  }
+
   openAttention(
     projectId: string,
     input: {
@@ -488,6 +504,7 @@ export class Ariadne {
       question: string
       options: AttentionOption[]
       recommended?: number | null
+      purpose?: string | null
     },
   ): AttentionView {
     this.getProject(projectId)
@@ -507,6 +524,7 @@ export class Ariadne {
           question: input.question,
           options: input.options,
           recommended,
+          ...(input.purpose ? { purpose: input.purpose } : {}),
         },
       },
     ])

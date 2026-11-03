@@ -114,6 +114,11 @@ export interface EventMap {
     question: string
     options: AttentionOption[]
     recommended: number | null
+    /**
+     * Set when the system asks for a standing approval (e.g. `push-public`), so a tool can
+     * check later whether the user agreed. The first option means yes.
+     */
+    purpose?: string | null
   }
   'attention.answered': { attentionId: string; choice: number | null; text: string | null }
   'message.posted': {

@@ -43,6 +43,7 @@ beforeEach(async () => {
           default_branch: 'main',
           html_url: 'https://github.com/acme/app',
           clone_url: '',
+          private: true,
         })
       }
       if (url.pathname === '/repos/acme/missing') {
@@ -171,7 +172,49 @@ describe('github repository', () => {
     )
     await git(other, 'push', '-q', '-f', 'origin', ws.branch!)
     await ws.exec('echo 2 > b && git add . && git -c user.email=t@e -c user.name=t commit -qm two')
-    await expect(repo.push(ws.branch!)).rejects.toThrow(/git push failed/)
+    await expect(repo.push(ws.branch!)).rejects.toThrow(/rejected.*sync_branch/)
+
+    // Fetching brings the remote's version in; after a merge the push goes through.
+    await repo.fetch()
+    check(
+      await ws.exec(
+        `git -c user.email=t@e -c user.name=t merge -q --no-edit -X ours origin/${ws.branch}`,
+      ),
+    )
+    await expect(repo.push(ws.branch!)).resolves.toMatchObject({ sha: expect.any(String) })
+  })
+
+  test('the default branch moving on is visible after a fetch', async () => {
+    const { workspace, repo } = connectRepository({ repository: 'acme/app' }, options())
+    const ws = await workspace.open({ threadId: 'thr_dddddddddddd' })
+    const other = join(base, 'other2')
+    await git(base, 'clone', '-q', join(base, 'remote', 'acme', 'app.git'), other)
+    await writeFile(join(other, 'new.txt'), 'n\n')
+    await git(other, 'add', '.')
+    await run(['git', '-c', 'user.email=t@e', '-c', 'user.name=t', 'commit', '-qm', 'n'], {
+      cwd: other,
+    })
+    await git(other, 'push', '-q', 'origin', 'main')
+    expect((await ws.exec('git rev-list --count HEAD..origin/main')).stdout.trim()).toBe('0')
+    await repo.fetch()
+    expect((await ws.exec('git rev-list --count HEAD..origin/main')).stdout.trim()).toBe('1')
+  })
+
+  test('workspaces cannot push themselves or redirect where the server pushes', async () => {
+    const { workspace, repo } = connectRepository({ repository: 'acme/app' }, options())
+    const ws = await workspace.open({ threadId: 'thr_eeeeeeeeeeee' })
+    await ws.exec('echo 1 > a && git add . && git -c user.email=t@e -c user.name=t commit -qm one')
+    const direct = await ws.exec(`git push origin ${ws.branch}`)
+    expect(direct.exitCode).not.toBe(0)
+    // Rewriting origin in the shared clone does not change the server's push target.
+    await ws.exec(`git remote set-url origin file://${join(base, 'elsewhere.git')}`)
+    await ws.exec(
+      `printf '#!/bin/sh\nexit 1\n' > "$(git rev-parse --git-common-dir)/hooks/pre-push" && chmod +x "$(git rev-parse --git-common-dir)/hooks/pre-push"`,
+    )
+    const { sha } = await repo.push(ws.branch!)
+    const remote = await git(join(base, 'remote', 'acme', 'app.git'), 'rev-parse', ws.branch!)
+    expect(remote.stdout.trim()).toBe(sha)
+    expect(await repo.isPublic()).toBe(false)
   })
 })
 
