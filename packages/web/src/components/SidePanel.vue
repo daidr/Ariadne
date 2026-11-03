@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import { DouEmpty, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui'
-import { ref } from 'vue'
+import type { ThreadStage } from '@ariadne/core'
+import { DouEmpty, DouMenu, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui'
+import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { state } from '../store'
+import { stageTone } from '../stage'
+import { openThread, state } from '../store'
 import TodoList from './TodoList.vue'
 
 const tab = ref('plan')
-const stageTone = {
-  answer: 'warning',
-  review: 'primary',
-  blocked: 'danger',
-  queued: 'neutral',
-  working: 'primary',
-  idle: 'neutral',
-  done: 'success',
-} as const
+const threadItems = computed(() =>
+  (state.detail?.threads ?? []).map((thread) => ({ key: thread.id, label: thread.title })),
+)
+const stageOf = (id: string | number): ThreadStage =>
+  state.detail?.threads.find((thread) => thread.id === id)?.stage ?? 'queued'
 </script>
 
 <template>
@@ -28,14 +26,21 @@ const stageTone = {
         <DouEmpty size="sm" />
       </DouTabPanel>
       <DouTabPanel value="threads" :label="t('panel.threads')">
-        <ul v-if="state.detail?.threads.length" class="threads">
-          <li v-for="thread in state.detail.threads" :key="thread.id" class="thread">
-            <DouText truncate>{{ thread.title }}</DouText>
-            <DouTag size="sm" :tone="stageTone[thread.stage]">
-              {{ t(`thread.stage.${thread.stage}`) }}
-            </DouTag>
-          </li>
-        </ul>
+        <DouMenu
+          v-if="threadItems.length"
+          :model-value="state.threadId ?? undefined"
+          :items="threadItems"
+          @select="(key) => openThread(String(key))"
+        >
+          <template #label="{ item }">
+            <span class="thread">
+              <DouText truncate>{{ item.label }}</DouText>
+              <DouTag size="sm" :tone="stageTone[stageOf(item.key)]">
+                {{ t(`thread.stage.${stageOf(item.key)}`) }}
+              </DouTag>
+            </span>
+          </template>
+        </DouMenu>
         <DouEmpty v-else size="sm" />
       </DouTabPanel>
       <DouTabPanel value="artifacts" :label="t('panel.artifacts')">
@@ -58,19 +63,12 @@ const stageTone = {
   padding: 8px 16px;
 }
 
-.threads {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .thread {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
 }
 </style>

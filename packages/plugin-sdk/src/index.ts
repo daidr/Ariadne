@@ -1,6 +1,7 @@
 import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
+export { describeHttpError, readServerSentEvents, type ServerSentEvent } from './sse'
 
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and
@@ -70,17 +71,27 @@ export interface ToolSpec {
 export type ModelStreamPart =
   | { type: 'text'; text: string }
   | ({ type: 'tool-call' } & ToolCall)
+  | { type: 'usage'; input: number; output: number }
   | { type: 'finish'; reason: 'stop' | 'length' | 'tool-calls' | 'error'; error?: string }
+
+/** What the agent loop asks of a model provider for one response. */
+export interface ModelRequest {
+  model: string
+  messages: ChatMessage[]
+  tools: ToolSpec[]
+  signal?: AbortSignal
+}
 
 /** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */
 export interface ModelProvider<Settings = Record<string, unknown>> {
   kind: string
   title: LocalizedText
   settings: SettingsSchema
-  stream(
-    settings: Settings,
-    request: { model: string; messages: ChatMessage[]; tools: ToolSpec[]; signal?: AbortSignal },
-  ): AsyncIterable<ModelStreamPart>
+  /**
+   * Stream one response. Text may arrive in pieces; each tool call arrives whole. Errors
+   * of the remote service end the stream with a `finish` part of reason `error`.
+   */
+  stream(settings: Settings, request: ModelRequest): AsyncIterable<ModelStreamPart>
 }
 
 /** Undo a registration. */
@@ -94,7 +105,7 @@ export interface PluginContext {
 
 export interface Plugin {
   id: string
-  name: string
+  name: LocalizedText
   /** Register contributions. A returned function runs when the plugin unloads. */
   setup(ctx: PluginContext): void | Dispose | Promise<void | Dispose>
 }

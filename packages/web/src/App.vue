@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   DouAlert,
+  DouButton,
   DouColorModeButton,
   DouConfigProvider,
   DouLayout,
@@ -10,9 +11,11 @@ import {
   DouText,
   useColorMode,
 } from 'dou-ui'
-import { onMounted } from 'vue'
+import { SettingsIcon } from '@dou-ui/icons'
+import { onMounted, ref } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
-import CoordinatorChat from './components/CoordinatorChat.vue'
+import ConversationPanel from './components/ConversationPanel.vue'
+import ModelSettings from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
@@ -22,6 +25,8 @@ import { COLOR_MODE_KEY } from './color-mode'
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
 onMounted(start)
+
+const settingsOpen = ref(false)
 </script>
 
 <template>
@@ -32,6 +37,15 @@ onMounted(start)
           <DouText weight="medium">{{ t('app.name') }}</DouText>
           <div class="header-actions">
             <AttentionBar />
+            <DouButton
+              variant="ghost"
+              size="sm"
+              :aria-label="t('settings.open')"
+              :title="t('settings.open')"
+              @click="settingsOpen = true"
+            >
+              <SettingsIcon />
+            </DouButton>
             <DouColorModeButton />
           </div>
         </div>
@@ -56,13 +70,14 @@ onMounted(start)
           <ProjectList />
         </DouLayoutAside>
         <DouLayoutMain class="main">
-          <CoordinatorChat />
+          <ConversationPanel @open-settings="settingsOpen = true" />
         </DouLayoutMain>
         <DouLayoutAside :width="420">
           <SidePanel />
         </DouLayoutAside>
       </DouLayout>
     </DouLayout>
+    <ModelSettings v-model:open="settingsOpen" />
   </DouConfigProvider>
 </template>
 

@@ -17,6 +17,15 @@
         "vue-tsc": "3.3.14",
       },
     },
+    "packages/agent": {
+      "name": "@ariadne/agent",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/core": "workspace:*",
+        "@ariadne/i18n": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@ariadne/core",
       "version": "0.0.0",
@@ -28,6 +37,20 @@
       "name": "@ariadne/i18n",
       "version": "0.0.0",
     },
+    "packages/plugin-anthropic": {
+      "name": "@ariadne/plugin-anthropic",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
+    "packages/plugin-openai-compatible": {
+      "name": "@ariadne/plugin-openai-compatible",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
     "packages/plugin-sdk": {
       "name": "@ariadne/plugin-sdk",
       "version": "0.0.0",
@@ -36,8 +59,12 @@
       "name": "@ariadne/server",
       "version": "0.0.0",
       "dependencies": {
+        "@ariadne/agent": "workspace:*",
         "@ariadne/core": "workspace:*",
         "@ariadne/i18n": "workspace:*",
+        "@ariadne/plugin-anthropic": "workspace:*",
+        "@ariadne/plugin-openai-compatible": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
       },
     },
     "packages/web": {
@@ -46,15 +73,22 @@
       "dependencies": {
         "@ariadne/core": "workspace:*",
         "@ariadne/i18n": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
         "@dou-ui/icons": "0.1.0-alpha.1",
         "dou-ui": "0.1.0-alpha.1",
       },
     },
   },
   "packages": {
+    "@ariadne/agent": ["@ariadne/agent@workspace:packages/agent"],
+
     "@ariadne/core": ["@ariadne/core@workspace:packages/core"],
 
     "@ariadne/i18n": ["@ariadne/i18n@workspace:packages/i18n"],
+
+    "@ariadne/plugin-anthropic": ["@ariadne/plugin-anthropic@workspace:packages/plugin-anthropic"],
+
+    "@ariadne/plugin-openai-compatible": ["@ariadne/plugin-openai-compatible@workspace:packages/plugin-openai-compatible"],
 
     "@ariadne/plugin-sdk": ["@ariadne/plugin-sdk@workspace:packages/plugin-sdk"],
 

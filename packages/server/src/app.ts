@@ -1,5 +1,7 @@
+import type { Scheduler } from '@ariadne/agent'
 import type { Ariadne } from '@ariadne/core'
 import { eventStream } from './events-stream'
+import type { SettingsStore } from './settings'
 import {
   BadRequest,
   errorResponse,
@@ -15,6 +17,9 @@ export interface HandlerOptions {
   token: string
   /** Serve the built web app from here for non-API paths. */
   webDist?: string | null
+  /** Agents and settings; left out in tests that only exercise the domain API. */
+  scheduler?: Scheduler
+  settings?: SettingsStore
 }
 
 type Params = Record<string, string>
@@ -33,7 +38,7 @@ function bearer(request: Request, url: URL): string | null {
 }
 
 /** Build the request handler. Kept separate from `Bun.serve` so tests can call it directly. */
-export function createHandler({ app, token, webDist }: HandlerOptions) {
+export function createHandler({ app, token, webDist, scheduler, settings }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
     routes.push({ method, pattern: new URLPattern({ pathname }), handle })
@@ -54,8 +59,35 @@ export function createHandler({ app, token, webDist }: HandlerOptions) {
   )
 
   add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }) =>
-    json({ messages: app.listMessages(conversationId), todo: app.getTodo(conversationId) }),
+    json({
+      conversation: app.getConversation(conversationId),
+      messages: app.listMessages(conversationId),
+      todo: app.getTodo(conversationId),
+    }),
   )
+
+  add('POST', '/api/conversations/:conversationId/stop', (_request, { conversationId = '' }) => {
+    app.getConversation(conversationId)
+    return json({ stopped: scheduler?.cancel(conversationId) ?? false })
+  })
+
+  add('POST', '/api/conversations/:conversationId/retry', (_request, { conversationId = '' }) => {
+    app.requestTurn(conversationId)
+    return new Response(null, { status: 204 })
+  })
+
+  add('GET', '/api/settings/models', () => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.publicModels())
+  })
+
+  add('PUT', '/api/settings/models', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    settings.updateModels(await readJson(request))
+    return json(settings.publicModels())
+  })
 
   // The user writes to the coordinator or straight into a thread.
   add('POST', '/api/projects/:projectId/messages', async (request, { projectId = '' }) => {
