@@ -1,6 +1,6 @@
 import { PluginHost } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, test } from 'vitest'
@@ -125,5 +125,41 @@ describe('project sources', () => {
     expect(store.sourceSecrets(projectId)).toEqual({})
     expect(readFileSync(path, 'utf8')).not.toContain('tok-1')
     app.close()
+  })
+})
+
+function writePlugin(): string {
+  const root = mkdtempSync(join(tmpdir(), 'ariadne-plugin-'))
+  writeFileSync(
+    join(root, 'index.ts'),
+    `export default { id: 'echo', name: { 'zh-CN': 'Echo' }, setup(ctx) {
+      ctx.registerModelProvider({ kind: 'echo', title: { 'zh-CN': 'Echo' }, settings: { type: 'object', properties: {} }, async *stream() {} })
+    } }`,
+  )
+  return root
+}
+
+describe('plugins from a path', () => {
+  test('load at once and on every start, and stop when removed', async () => {
+    const store = new SettingsStore(path, host)
+    const root = writePlugin()
+    await store.addPlugin(root)
+    expect(host.models.has('echo')).toBe(true)
+    expect(store.publicModels().kinds.map((kind) => kind.kind)).toContain('echo')
+    expect(JSON.parse(readFileSync(path, 'utf8')).plugins).toEqual([root])
+    await expect(store.addPlugin(root)).rejects.toMatchObject({ code: 'error.pluginExists' })
+
+    await store.removePlugin(root)
+    expect(host.models.has('echo')).toBe(false)
+    expect(JSON.parse(readFileSync(path, 'utf8')).plugins).toEqual([])
+  })
+
+  test('a path that fails to load is not remembered', async () => {
+    const store = new SettingsStore(path, host)
+    await expect(store.addPlugin('/nowhere/plugin')).rejects.toMatchObject({
+      code: 'error.pluginLoad',
+    })
+    expect(store.current.plugins).toEqual([])
+    expect(host.records().some((record) => record.status === 'failed')).toBe(false)
   })
 })

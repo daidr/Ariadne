@@ -207,3 +207,81 @@ export function describePlanOps(
     }
   })
 }
+
+const KINDS = ['task', 'milestone', 'decision'] as const
+const FIELDS = ['title', 'description', 'acceptance'] as const
+
+/**
+ * Read ops sent from outside (the web's graph editor) strictly: every op names its node
+ * ids and only known fields, so nothing unexpected reaches the event log.
+ */
+export function parsePlanOps(raw: unknown): PlanOp[] {
+  if (!Array.isArray(raw) || !raw.length) invalid('ops must be a non-empty array')
+  const id = (value: unknown, where: string): string => {
+    if (typeof value !== 'string' || !value || value.length > 80) invalid(`${where}: bad id`)
+    return value
+  }
+  const text = (value: unknown, where: string): string | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value !== 'string' || value.length > 20_000) invalid(`${where}: not text`)
+    return value
+  }
+  return raw.map((item: unknown, index): PlanOp => {
+    const where = `ops[${index}]`
+    if (typeof item !== 'object' || item === null) invalid(`${where}: not an object`)
+    const op = item as Record<string, unknown>
+    switch (op.op) {
+      case 'add': {
+        const kind = op.kind ?? 'task'
+        if (!KINDS.includes(kind as never)) invalid(`${where}: bad kind`)
+        return {
+          op: 'add',
+          id: id(op.id, where),
+          kind: kind as PlanNodeFields['kind'],
+          title: text(op.title, where) ?? '',
+          description: text(op.description, where) ?? '',
+          acceptance: text(op.acceptance, where) ?? '',
+        }
+      }
+      case 'update': {
+        const update: Extract<PlanOp, { op: 'update' }> = { op: 'update', id: id(op.id, where) }
+        for (const field of FIELDS) {
+          const value = text(op[field], where)
+          if (value !== undefined) update[field] = value
+        }
+        if (op.expect !== undefined) {
+          if (typeof op.expect !== 'object' || op.expect === null) invalid(`${where}: bad expect`)
+          const expect: Partial<Omit<PlanNodeFields, 'kind'>> = {}
+          for (const field of FIELDS) {
+            const value = text((op.expect as Record<string, unknown>)[field], where)
+            if (value !== undefined) expect[field] = value
+          }
+          update.expect = expect
+        }
+        return update
+      }
+      case 'remove':
+        return { op: 'remove', id: id(op.id, where) }
+      case 'link':
+      case 'unlink':
+        return { op: op.op, from: id(op.from, where), to: id(op.to, where) }
+      default:
+        return invalid(`${where}: unknown op`)
+    }
+  })
+}
+
+/** A graph from the plan as the views give it, for working out changes in the browser. */
+export function graphOf(
+  nodes: readonly ({ id: string; dependsOn: readonly string[] } & PlanNodeFields)[],
+): PlanGraph {
+  const graph = emptyGraph()
+  for (const node of nodes) {
+    const { kind, title, description, acceptance } = node
+    graph.nodes.set(node.id, { kind, title, description, acceptance })
+    graph.order.push(node.id)
+  }
+  for (const node of nodes)
+    for (const from of node.dependsOn) graph.edges.add(edgeKey(from, node.id))
+  return graph
+}

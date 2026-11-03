@@ -809,6 +809,12 @@ export class Ariadne {
           id: thread.id,
           title: thread.title,
           stage: thread.stage,
+          pullRequest: thread.pullRequest && {
+            number: thread.pullRequest.number,
+            url: thread.pullRequest.url,
+            state: thread.pullRequest.state,
+            checks: thread.pullRequest.checks,
+          },
         })),
         changedIn: changedIn.get(id) ?? null,
       }

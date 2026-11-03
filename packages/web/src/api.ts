@@ -7,6 +7,7 @@ import type {
   ConversationView,
   MessageView,
   NeedsMeItem,
+  PlanOp,
   PlanView,
   ProjectView,
   ThreadView,
@@ -92,6 +93,17 @@ export interface ModelProviderInput {
   settings: Record<string, unknown>
 }
 
+/** A plugin as the server reports it; see `PluginRecord` in the agent package. */
+export interface PluginRecord {
+  id: string | null
+  name: LocalizedText | null
+  source: 'builtin' | 'path'
+  path: string | null
+  status: 'loaded' | 'failed'
+  error: string | null
+  provides: { models: string[]; contexts: string[] }
+}
+
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   default: { provider: string; model: string } | null
@@ -120,6 +132,11 @@ export const api = {
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
+  listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
+  addPlugin: (path: string) =>
+    request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
+  removePlugin: (path: string) =>
+    request<{ plugins: PluginRecord[] }>('POST', '/api/plugins/remove', { path }),
   saveModelSettings: (input: ModelSettingsInput) =>
     request<ModelSettings>('PUT', '/api/settings/models', input),
   postMessage: (projectId: string, conversationId: string, content: string) =>
@@ -150,6 +167,8 @@ export const api = {
     ),
   getPlan: (projectId: string) =>
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
+  revisePlan: (projectId: string, input: { reason: string; ops: PlanOp[] }) =>
+    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/revise`, input),
   revertPlan: (projectId: string, revisionId: string, reason: string) =>
     request<{ plan: PlanView }>(
       'POST',

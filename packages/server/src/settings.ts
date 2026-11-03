@@ -142,6 +142,37 @@ export class SettingsStore {
     this.save()
   }
 
+  /**
+   * Load a plugin from a path and remember it, so it loads on every start. Nothing is
+   * remembered when it fails to load.
+   */
+  async addPlugin(input: unknown): Promise<void> {
+    if (typeof input !== 'string' || !input.trim()) throw new BadRequest('path')
+    const path = input.trim()
+    if (this.config.plugins.includes(path)) throw new DomainError('error.pluginExists', { path })
+    try {
+      await this.host.loadFromPath(path)
+    } catch (error) {
+      // The settings page shows the failure from the request; it is not kept.
+      await this.host.unloadPath(path)
+      throw new DomainError('error.pluginLoad', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+    this.config = { ...this.config, plugins: [...this.config.plugins, path] }
+    this.save()
+  }
+
+  /** Unload a plugin loaded from a path and stop loading it on start. */
+  async removePlugin(input: unknown): Promise<void> {
+    if (typeof input !== 'string' || !this.config.plugins.includes(input)) {
+      throw new BadRequest('path')
+    }
+    await this.host.unloadPath(input)
+    this.config = { ...this.config, plugins: this.config.plugins.filter((p) => p !== input) }
+    this.save()
+  }
+
   /** The secret settings of a project's source, merged in when it connects. */
   sourceSecrets(projectId: string): Record<string, string> {
     return { ...this.config.sourceSecrets[projectId] }

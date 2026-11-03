@@ -151,7 +151,12 @@ export interface PlanNodeView {
   /** Nodes this one depends on. */
   dependsOn: string[]
   status: PlanNodeStatus
-  threads: { id: string; title: string; stage: ThreadStage }[]
+  threads: {
+    id: string
+    title: string
+    stage: ThreadStage
+    pullRequest: Pick<ThreadPullRequest, 'number' | 'url' | 'state' | 'checks'> | null
+  }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */
   changedIn: string | null
 }

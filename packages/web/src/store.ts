@@ -4,6 +4,7 @@ import type {
   ArtifactSummary,
   ConversationView,
   MessageView,
+  PlanOp,
   PlanView,
   ProjectView,
   TodoView,
@@ -193,6 +194,19 @@ export async function dismissProposal(proposalId: string) {
 /** Ask the repository for the thread's pull request now; the event stream refreshes the view. */
 export async function refreshPullRequest(threadId: string) {
   await api.refreshPullRequest(threadId).catch(report)
+}
+
+/** Apply the user's own edit of the plan; returns whether it took effect. */
+export async function editPlan(reason: string, ops: PlanOp[]): Promise<boolean> {
+  const project = state.detail?.project
+  if (!project || !ops.length) return false
+  try {
+    state.plan = (await api.revisePlan(project.id, { reason, ops })).plan
+    return true
+  } catch (error) {
+    report(error)
+    return false
+  }
 }
 
 export async function revertPlan(revisionId: string) {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
 import { DomainError } from './errors'
 import type { PlanOp } from './events'
-import { applyOps, emptyGraph, needsConfirmation } from './plan'
+import { applyOps, emptyGraph, graphOf, needsConfirmation, parsePlanOps } from './plan'
 
 let app: Ariadne
 let projectId: string
@@ -371,5 +371,50 @@ describe('triage', () => {
     })
     expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
     expect(app.getConversation(thread.id).pendingSeq).toBeGreaterThan(0)
+  })
+})
+
+describe('parsePlanOps', () => {
+  test('keeps known fields of each op and fills an add', () => {
+    expect(
+      parsePlanOps([
+        { op: 'add', id: 'a', title: 'A', extra: 1 },
+        { op: 'update', id: 'a', title: 'B', expect: { title: 'A', other: 'x' } },
+        { op: 'link', from: 'a', to: 'b' },
+        { op: 'unlink', from: 'a', to: 'b' },
+        { op: 'remove', id: 'a' },
+      ]),
+    ).toEqual([
+      { op: 'add', id: 'a', kind: 'task', title: 'A', description: '', acceptance: '' },
+      { op: 'update', id: 'a', title: 'B', expect: { title: 'A' } },
+      { op: 'link', from: 'a', to: 'b' },
+      { op: 'unlink', from: 'a', to: 'b' },
+      { op: 'remove', id: 'a' },
+    ])
+  })
+
+  test.each([
+    ['not a list', {}],
+    ['an empty list', []],
+    ['an unknown op', [{ op: 'rename', id: 'a' }]],
+    ['a missing id', [{ op: 'remove' }]],
+    ['a long id', [{ op: 'remove', id: 'x'.repeat(81) }]],
+    ['a bad kind', [{ op: 'add', id: 'a', title: 'A', kind: 'epic' }]],
+    ['a non-text field', [{ op: 'update', id: 'a', title: 3 }]],
+    ['a bad expect', [{ op: 'update', id: 'a', expect: 'A' }]],
+  ])('refuses %s', (_, raw) => {
+    expect(() => parsePlanOps(raw)).toThrow(DomainError)
+  })
+})
+
+describe('graphOf', () => {
+  test('rebuilds the graph from plan views, so the browser can apply changes', () => {
+    const graph = graphOf([
+      { id: 'a', kind: 'task', title: 'A', description: '', acceptance: '', dependsOn: [] },
+      { id: 'b', kind: 'task', title: 'B', description: '', acceptance: '', dependsOn: ['a'] },
+    ])
+    expect(graph.order).toEqual(['a', 'b'])
+    expect([...graph.edges]).toEqual(['a>b'])
+    expect(() => applyOps(graph, [{ op: 'link', from: 'b', to: 'a' }])).toThrow(DomainError)
   })
 })
