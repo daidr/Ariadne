@@ -210,6 +210,87 @@ describe('failures', () => {
   })
 })
 
+describe('answers and guards', () => {
+  test('an answer wakes the thread that asked, even after it reported done', async () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    app.startThread(thread.id)
+    const attention = app.openAttention(project.id, {
+      threadId: thread.id,
+      question: '用哪个方案？',
+      options: [
+        { label: 'A', consequence: '快' },
+        { label: 'B', consequence: '稳' },
+      ],
+    })
+    app.reportThread(thread.id, 'done', '做完了，只差一个决定')
+    app.answerAttention(attention.id, { choice: 1 })
+    // Before a slot picks it up, it shows as queued, not as done.
+    expect(app.getThread(thread.id).stage).toBe('queued')
+
+    const model = fakeModel((_request, role) => (role === 'thread' ? say('按 B 收尾') : say('')))
+    await startScheduler(model).idle()
+    const request = model.requests.find((r) => lastUser(r).includes('<user_answer'))
+    expect(lastUser(request!)).toContain('choice: B')
+    expect(app.listMessages(thread.id).at(-1)?.content).toBe('按 B 收尾')
+    expect(app.getThread(thread.id).stage).toBe('done')
+  })
+
+  test("edit_message and message_thread stay within the caller's own reach", async () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'a' })
+    const b = app.createThread(project.id, { title: 'b' })
+    const other = app.postMessage(project.id, {
+      conversationId: b.id,
+      author: 'thread',
+      content: '原文',
+    })
+    const model = fakeModel((request, role) => {
+      if (answered(request)) return say('')
+      if (role === 'thread') {
+        return [
+          call('t1', 'edit_message', { messageId: other.id, content: '改掉', reason: 'x' }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return [
+        call('c1', 'message_thread', { threadId: project.coordinatorId, content: '自己' }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, { conversationId: a.id, author: 'user', content: '去改 b 的消息' })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'hi',
+    })
+    await startScheduler(model).idle()
+
+    expect(app.listMessages(b.id)[0]?.content).toBe('原文')
+    const errors = [a.id, project.coordinatorId].map(
+      (id) => app.listTranscript(id).find((e) => e.kind === 'tool') as { isError: boolean },
+    )
+    expect(errors.map((e) => e.isError)).toEqual([true, true])
+    expect(app.listMessages(project.coordinatorId).some((m) => m.kind === 'relay')).toBe(false)
+  })
+
+  test('a cut-off reply fails the turn instead of passing as an answer', async () => {
+    const model = fakeModel(() => [
+      { type: 'text', text: '说到一半' },
+      { type: 'finish', reason: 'length' },
+    ])
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'x',
+    })
+    await startScheduler(model).idle()
+    expect(app.getConversation(project.coordinatorId).lastError).toEqual({ key: 'error.truncated' })
+    expect(app.listMessages(project.coordinatorId).map((m) => m.author)).toEqual(['user'])
+  })
+})
+
 describe('control', () => {
   test('the user can stop a turn; it does not restart by itself', async () => {
     const model = fakeModel(
@@ -236,6 +317,36 @@ describe('control', () => {
       lastOutcome: 'cancelled',
       pendingSeq: 0,
     })
+  })
+
+  test('input sent during a stopped turn is still handled', async () => {
+    let first = true
+    const model = fakeModel((request) => {
+      if (!first) return say(`收到：${lastUser(request)}`)
+      first = false
+      return new Promise((resolve) => {
+        request.signal?.addEventListener('abort', () =>
+          resolve([{ type: 'finish', reason: 'stop' }]),
+        )
+      })
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '做 A',
+    })
+    const s = startScheduler(model)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '更正：做 B',
+    })
+    s.cancel(project.coordinatorId)
+    await s.idle()
+    expect(model.requests).toHaveLength(2)
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('收到：更正：做 B')
   })
 
   test('slots limit concurrent turns, but a user message can take the reserved slot', async () => {

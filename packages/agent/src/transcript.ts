@@ -1,4 +1,4 @@
-import type { TranscriptEntry, TranscriptNote } from '@ariadne/core'
+import { unknownResult, type TranscriptEntry, type TranscriptNote } from '@ariadne/core'
 import type { ChatMessage } from '@ariadne/plugin-sdk'
 
 /** How a note reads to the model. Titles are looked up so the model sees names, not ids. */
@@ -51,7 +51,7 @@ export function toChatMessages(
       out.push({
         role: 'tool',
         toolCallId: id,
-        content: result?.content ?? 'The call did not finish.',
+        content: result?.content ?? unknownResult('missing result'),
         ...(result ? (result.isError ? { isError: true } : {}) : { isError: true }),
       })
     }

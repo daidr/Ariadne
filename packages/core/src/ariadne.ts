@@ -32,7 +32,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 4
+export const PROJECTION_VERSION = 5
 
 interface ConversationRow {
   id: string
@@ -46,6 +46,14 @@ interface ConversationRow {
   last_error: string | null
   input_tokens: number
   output_tokens: number
+}
+
+/**
+ * What the model is told about a call whose result was never recorded. Its side effects
+ * may already have happened, so it must check before calling again.
+ */
+export function unknownResult(reason: string): string {
+  return `The result of this call is unknown: the turn ended (${reason}) before it was recorded. It may already have taken effect; check before calling it again.`
 }
 
 function toConversation(row: ConversationRow): ConversationView {
@@ -84,6 +92,7 @@ interface ThreadRow {
   updated_at: number
   open_attentions: number
   turn_id: string | null
+  pending_seq: number | null
   last_outcome: TurnOutcome | null
 }
 
@@ -109,7 +118,7 @@ interface MessageRow {
   edited_since_read: number
 }
 
-const THREAD_SELECT = `SELECT t.*, c.turn_id, c.last_outcome, (
+const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, (
   SELECT count(*) FROM attentions a WHERE a.thread_id = t.id AND a.answered = 0
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
 
@@ -124,6 +133,7 @@ function toThread(row: ThreadRow): ThreadView {
       started: row.started === 1,
       lastReport: row.last_report,
       turnRunning: row.turn_id !== null,
+      turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
     }),
     lastReport: row.last_report,
@@ -294,11 +304,11 @@ export class Ariadne {
     return toConversation(row)
   }
 
-  /** Conversations with unseen input and no turn running, oldest input first. */
+  /** Conversations with unseen input and no turn running, the longest waiting first. */
   listPendingConversations(): ConversationView[] {
     return this.db
       .query<ConversationRow, []>(
-        'SELECT * FROM conversations WHERE pending_seq > 0 AND turn_id IS NULL ORDER BY pending_seq',
+        'SELECT * FROM conversations WHERE pending_seq > 0 AND turn_id IS NULL ORDER BY pending_since',
       )
       .all()
       .map(toConversation)
@@ -470,10 +480,22 @@ export class Ariadne {
     return this.getMessage(messageId)
   }
 
-  /** Only a message's own author may edit it. */
-  editMessage(messageId: string, editor: Author, content: string, reason: string): MessageView {
+  /**
+   * Only a message's own author may edit it: the same kind of author, writing in the same
+   * conversation. One thread cannot edit another thread's messages.
+   */
+  editMessage(
+    messageId: string,
+    editor: { author: Author; conversationId: string },
+    content: string,
+    reason: string,
+  ): MessageView {
     const message = this.getMessage(messageId)
-    if (message.author !== editor || message.kind === 'relay') {
+    if (
+      message.author !== editor.author ||
+      message.conversationId !== editor.conversationId ||
+      message.kind === 'relay'
+    ) {
       throw new DomainError('error.invalidBody', { reason: 'editor' })
     }
     const projectId = this.projectOfMessage(messageId)
@@ -564,7 +586,7 @@ export class Ariadne {
           turnId,
           toolCallId: call.id,
           name: call.name,
-          content: `The call did not finish: the turn ended as ${outcome}.`,
+          content: unknownResult(outcome),
           isError: true,
         },
       })),

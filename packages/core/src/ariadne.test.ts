@@ -55,6 +55,17 @@ describe('thread stages', () => {
     expect(app.getProject(project.id).needsMe).toBe(1)
 
     app.answerAttention(attention.id, { choice: 1 })
+    // The answer wakes the thread: it waits for a slot to read it.
+    expect(app.getThread(thread.id).stage).toBe('queued')
+    const turnId = app.startTurn(thread.id, 'model')
+    expect(app.getThread(thread.id).stage).toBe('working')
+    app.recordStep(thread.id, turnId, {
+      text: '',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+    })
+    app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('review')
     expect(app.reportThread(thread.id, 'done', '完成').stage).toBe('done')
     expect(app.getProject(project.id).needsMe).toBe(0)
@@ -108,21 +119,51 @@ describe('messages', () => {
       content: 'Done.',
     })
 
-    expect(() => app.editMessage(message.id, 'coordinator', '完成。', '改成中文')).toThrow(
-      DomainError,
-    )
+    expect(() =>
+      app.editMessage(
+        message.id,
+        { author: 'coordinator', conversationId: thread.id },
+        '完成。',
+        '改成中文',
+      ),
+    ).toThrow(DomainError)
 
-    const unread = app.editMessage(message.id, 'thread', '完成了。', '用户偏好中文')
+    const unread = app.editMessage(
+      message.id,
+      { author: 'thread', conversationId: thread.id },
+      '完成了。',
+      '用户偏好中文',
+    )
     expect(unread.editedAt).not.toBeNull()
     expect(unread.editedSinceRead).toBe(false)
 
     app.markRead(thread.id, message.id)
-    const edited = app.editMessage(message.id, 'thread', '已完成。', '措辞')
+    const edited = app.editMessage(
+      message.id,
+      { author: 'thread', conversationId: thread.id },
+      '已完成。',
+      '措辞',
+    )
     expect(edited.editedSinceRead).toBe(true)
     expect(edited.editReason).toBe('措辞')
 
     app.markRead(thread.id, message.id)
     expect(app.listMessages(thread.id)[0]?.editedSinceRead).toBe(false)
+  })
+
+  test("one thread cannot edit another thread's message", () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'a' })
+    const b = app.createThread(project.id, { title: 'b' })
+    const message = app.postMessage(project.id, {
+      conversationId: b.id,
+      author: 'thread',
+      content: 'x',
+    })
+    expect(() =>
+      app.editMessage(message.id, { author: 'thread', conversationId: a.id }, 'y', 'z'),
+    ).toThrow(DomainError)
+    expect(app.listMessages(b.id)[0]?.content).toBe('x')
   })
 
   test('marks read only up to a message of the same conversation', () => {
@@ -154,7 +195,9 @@ describe('messages', () => {
       content: '请用中文回复',
     })
     expect(relay.kind).toBe('relay')
-    expect(() => app.editMessage(relay.id, 'coordinator', 'y', 'z')).toThrow(DomainError)
+    expect(() =>
+      app.editMessage(relay.id, { author: 'coordinator', conversationId: thread.id }, 'y', 'z'),
+    ).toThrow(DomainError)
   })
 
   test('rejects a conversation from another project', () => {

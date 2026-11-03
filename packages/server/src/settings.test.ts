@@ -36,6 +36,14 @@ describe('model settings', () => {
     )
   })
 
+  test('null clears a stored secret', () => {
+    const store = new SettingsStore(path, host)
+    store.updateModels(provider({ baseUrl: '', apiKey: 'secret-1' }))
+    store.updateModels(provider({ baseUrl: '', apiKey: null }))
+    expect(store.publicModels().providers[0]?.secretsSet).toEqual([])
+    expect(readFileSync(path, 'utf8')).not.toContain('secret-1')
+  })
+
   test('resolves the default model with schema defaults for empty fields', () => {
     const store = new SettingsStore(path, host)
     expect(store.resolveModel({} as never)).toBeNull()

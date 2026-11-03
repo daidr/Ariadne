@@ -36,6 +36,8 @@ const thread = computed(() =>
     : null,
 )
 const working = computed(() => !!state.conversation?.turn)
+// New input is waiting for a free slot.
+const queued = computed(() => !working.value && (state.conversation?.pendingSeq ?? 0) > 0)
 const failure = computed(() =>
   state.conversation?.lastOutcome === 'failed' && !working.value
     ? state.conversation.lastError
@@ -128,6 +130,9 @@ watch(
         <template #leading><SquareStopIcon /></template>
         {{ t('conversation.stop') }}
       </DouButton>
+    </div>
+    <div v-else-if="queued" class="conversation-status" role="status">
+      <DouText variant="secondary" size="sm">{{ t('conversation.queued') }}</DouText>
     </div>
     <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
       {{ tm(failure) }}

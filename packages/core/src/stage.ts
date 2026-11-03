@@ -9,6 +9,8 @@ export interface StageFacts {
   lastReport: ReportKind | null
   /** A turn of the thread's agent is running now. */
   turnRunning: boolean
+  /** New input waits for a free slot. */
+  turnPending: boolean
   /** The last turn failed (e.g. the model request errored) and waits for a retry. */
   turnFailed: boolean
 }
@@ -19,6 +21,8 @@ export function threadStage(facts: StageFacts): ThreadStage {
   if (facts.openAttentions > 0) return 'answer'
   // Whatever it reported before, a thread with a running turn is at work again.
   if (facts.turnRunning) return 'working'
+  // Waiting for a slot to handle new input, e.g. an answer after it reported done.
+  if (facts.turnPending) return 'queued'
   if (facts.turnFailed) return 'blocked'
   if (facts.lastReport === 'ready') return 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'

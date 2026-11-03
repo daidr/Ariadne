@@ -223,7 +223,9 @@ export const conversationsProjection: Projection = {
       project_id TEXT NOT NULL,
       role TEXT NOT NULL,
       pending_seq INTEGER NOT NULL DEFAULT 0,
+      pending_since INTEGER NOT NULL DEFAULT 0,
       turn_id TEXT,
+      turn_started_seq INTEGER,
       turn_started_at INTEGER,
       model TEXT,
       last_outcome TEXT,
@@ -248,16 +250,19 @@ export const conversationsProjection: Projection = {
         break
       case 'turn.started':
         db.run(
-          'UPDATE conversations SET turn_id = ?, turn_started_at = ?, model = ? WHERE id = ?',
-          [event.data.turnId, event.at, event.data.model, event.data.conversationId],
+          `UPDATE conversations SET turn_id = ?, turn_started_at = ?, turn_started_seq = ?, model = ?
+           WHERE id = ?`,
+          [event.data.turnId, event.at, event.seq, event.data.model, event.data.conversationId],
         )
         break
       case 'turn.step':
         db.run(
+          // Input up to `sawSeq` is handled; anything newer still waits, and is at least that new.
           `UPDATE conversations SET
-             pending_seq = CASE WHEN pending_seq <= ? THEN 0 ELSE pending_seq END,
-             input_tokens = input_tokens + ?, output_tokens = output_tokens + ?
-           WHERE id = ?`,
+             pending_since = CASE WHEN pending_seq <= ?1 THEN 0 ELSE max(pending_since, ?1 + 1) END,
+             pending_seq = CASE WHEN pending_seq <= ?1 THEN 0 ELSE pending_seq END,
+             input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3
+           WHERE id = ?4`,
           [
             event.data.sawSeq,
             event.data.usage?.input ?? 0,
@@ -268,22 +273,39 @@ export const conversationsProjection: Projection = {
         break
       case 'turn.finished': {
         const { outcome, error, conversationId } = event.data
-        // A failed or stopped turn waits for the user instead of retrying by itself; an
-        // interrupted one resumes when the server starts again.
-        const pending = outcome === 'interrupted' ? event.seq : outcome === 'completed' ? null : 0
-        db.run(
-          `UPDATE conversations SET turn_id = NULL, turn_started_at = NULL, last_outcome = ?,
-             last_error = ?, pending_seq = coalesce(?, pending_seq)
-           WHERE id = ?`,
-          [outcome, error ? JSON.stringify(error) : null, pending, conversationId],
-        )
+        const result = [outcome, error ? JSON.stringify(error) : null, conversationId]
+        const end = `turn_id = NULL, turn_started_at = NULL, last_outcome = ?, last_error = ?`
+        if (outcome === 'interrupted') {
+          // Resumes when the server starts again.
+          db.run(
+            `UPDATE conversations SET ${end}, pending_seq = ?,
+               pending_since = CASE WHEN pending_since = 0 THEN ? ELSE pending_since END
+             WHERE id = ?`,
+            [outcome, result[1] ?? null, event.seq, event.seq, conversationId],
+          )
+        } else if (outcome === 'completed') {
+          db.run(`UPDATE conversations SET ${end} WHERE id = ?`, result)
+        } else {
+          // A failed or stopped turn does not retry what started it, but input that arrived
+          // during the turn was never seen and still gets its turn.
+          db.run(
+            `UPDATE conversations SET ${end},
+               pending_since = CASE WHEN pending_seq > turn_started_seq
+                 THEN max(pending_since, turn_started_seq + 1) ELSE 0 END,
+               pending_seq = CASE WHEN pending_seq > turn_started_seq THEN pending_seq ELSE 0 END
+             WHERE id = ?`,
+            result,
+          )
+        }
         break
       }
       case 'turn.requested':
-        db.run('UPDATE conversations SET pending_seq = ?, last_error = NULL WHERE id = ?', [
-          event.seq,
-          event.data.conversationId,
-        ])
+        db.run(
+          `UPDATE conversations SET pending_seq = ?1, last_error = NULL,
+             pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END
+           WHERE id = ?2`,
+          [event.seq, event.data.conversationId],
+        )
         break
     }
   },
@@ -316,10 +338,12 @@ function addEntry(
     ],
   )
   if (wake) {
-    db.run('UPDATE conversations SET pending_seq = ? WHERE id = ?', [
-      event.seq,
-      entry.conversationId,
-    ])
+    db.run(
+      `UPDATE conversations SET pending_seq = ?1,
+         pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END
+       WHERE id = ?2`,
+      [event.seq, entry.conversationId],
+    )
   }
 }
 

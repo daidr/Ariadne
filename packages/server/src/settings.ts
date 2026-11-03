@@ -90,7 +90,10 @@ export class SettingsStore {
     }
   }
 
-  /** Replace the model settings. An empty secret keeps the value already stored. */
+  /**
+   * Replace the model settings. An empty secret keeps the value already stored; `null`
+   * clears it.
+   */
   updateModels(input: unknown): void {
     const body = (input ?? {}) as Partial<ModelsConfig>
     if (!Array.isArray(body.providers)) throw new BadRequest('providers')
@@ -104,7 +107,8 @@ export class SettingsStore {
       const settings = { ...provider.settings }
       const before = this.config.models.providers.find((p) => p.id === provider.id)
       for (const key of secretKeys(this.host.models.get(provider.kind)?.settings)) {
-        if (!settings[key] && before?.kind === provider.kind && before.settings[key]) {
+        if (settings[key] === null) delete settings[key]
+        else if (!settings[key] && before?.kind === provider.kind && before.settings[key]) {
           settings[key] = before.settings[key]
         }
       }

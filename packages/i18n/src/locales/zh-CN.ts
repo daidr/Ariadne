@@ -29,6 +29,7 @@ export const zhCN = {
   'message.edited': '已编辑',
   'message.fromCoordinator': '已收到协调器发来的消息',
   'conversation.working': '正在工作',
+  'conversation.queued': '排队中，有空闲槽位后开始处理新消息',
   'conversation.stop': '停止',
   'conversation.retry': '重试',
   'conversation.openSettings': '去设置',
@@ -45,6 +46,7 @@ export const zhCN = {
   'settings.kind': '协议',
   'settings.name': '名称',
   'settings.secretSet': '已设置，留空则保持不变',
+  'settings.clearSecret': '清除',
   'settings.noProviders': '还没有模型提供方',
   'settings.default': '默认模型',
   'settings.defaultProvider': '提供方',
@@ -65,6 +67,8 @@ export const zhCN = {
   'error.modelUnknown': '找不到模型提供方 {provider}',
   'error.modelRequest': '模型请求失败：{detail}',
   'error.stepLimit': '这一轮的步骤超过了 {limit} 步，已停止',
+  'error.truncated':
+    '模型的回复超出了单次回复的 token 上限，被截断了；可以在模型设置里调高上限后重试',
   'error.interrupted': '服务在这一轮中途停止，已从断点继续',
 } as const
 

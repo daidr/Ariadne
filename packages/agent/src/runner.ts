@@ -116,6 +116,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         else if (part.type === 'usage') usage = { input: part.input, output: part.output }
         else if (part.type === 'finish' && part.reason === 'error') {
           throw new TurnError({ key: 'error.modelRequest', params: { detail: part.error ?? '' } })
+        } else if (part.type === 'finish' && part.reason === 'length') {
+          // A cut-off reply is not an answer, and cut-off tool arguments are not a call.
+          throw new TurnError({ key: 'error.truncated' })
         }
       }
       if (signal.aborted) break

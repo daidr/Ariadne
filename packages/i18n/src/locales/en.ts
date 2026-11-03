@@ -30,6 +30,7 @@ export const en: Record<MessageKey, string> = {
   'message.edited': 'Edited',
   'message.fromCoordinator': 'Received a message from the coordinator',
   'conversation.working': 'Working',
+  'conversation.queued': 'Queued; new input is handled once a slot frees up',
   'conversation.stop': 'Stop',
   'conversation.retry': 'Retry',
   'conversation.openSettings': 'Open settings',
@@ -46,6 +47,7 @@ export const en: Record<MessageKey, string> = {
   'settings.kind': 'Protocol',
   'settings.name': 'Name',
   'settings.secretSet': 'Set; leave empty to keep it',
+  'settings.clearSecret': 'Clear',
   'settings.noProviders': 'No model provider yet',
   'settings.default': 'Default model',
   'settings.defaultProvider': 'Provider',
@@ -66,5 +68,7 @@ export const en: Record<MessageKey, string> = {
   'error.modelUnknown': 'Model provider {provider} was not found',
   'error.modelRequest': 'Model request failed: {detail}',
   'error.stepLimit': 'This turn went over {limit} steps and was stopped',
+  'error.truncated':
+    'The reply went over the per-response token limit and was cut off; raise the limit in model settings and retry',
   'error.interrupted': 'The server stopped mid-turn; work resumed from there',
 }

@@ -83,7 +83,17 @@ function addProvider() {
 
 function removeProvider(id: string) {
   providers.value = providers.value.filter((provider) => provider.id !== id)
-  if (defaultProvider.value === id) defaultProvider.value = providers.value[0]?.id ?? null
+  if (defaultProvider.value === id) {
+    // The model name belonged to the removed provider; do not carry it over.
+    defaultProvider.value = providers.value[0]?.id ?? null
+    defaultModel.value = ''
+  }
+}
+
+/** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
+function clearSecret(provider: DraftProvider, key: string) {
+  provider.settings[key] = null
+  provider.secretsSet = provider.secretsSet.filter((name) => name !== key)
 }
 
 async function save() {
@@ -159,7 +169,13 @@ const asNumber = (value: unknown) => (typeof value === 'number' ? value : null)
                 :show-password="field.secret"
                 :placeholder="field.default"
                 @update:model-value="(value) => (provider.settings[key] = value)"
-              />
+              >
+                <template v-if="field.secret && provider.secretsSet.includes(String(key))" #suffix>
+                  <DouButton size="sm" variant="ghost" @click="clearSecret(provider, String(key))">
+                    {{ t('settings.clearSecret') }}
+                  </DouButton>
+                </template>
+              </DouInput>
               <DouInputNumber
                 v-else-if="field.type === 'number'"
                 :model-value="asNumber(provider.settings[key])"

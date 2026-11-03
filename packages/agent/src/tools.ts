@@ -169,7 +169,12 @@ const editMessage: Tool = {
     },
   },
   run(args, ctx) {
-    ctx.app.editMessage(str(args, 'messageId'), ctx.role, str(args, 'content'), str(args, 'reason'))
+    ctx.app.editMessage(
+      str(args, 'messageId'),
+      { author: ctx.role, conversationId: ctx.conversationId },
+      str(args, 'content'),
+      str(args, 'reason'),
+    )
     return { content: 'Message edited.' }
   },
 }
@@ -234,8 +239,13 @@ const messageThread: Tool = {
     },
   },
   run(args, ctx) {
+    // Only this project's threads: never the coordinator itself, which would wake itself.
+    const threadId = str(args, 'threadId')
+    if (ctx.app.getThread(threadId).projectId !== ctx.projectId) {
+      throw new DomainError('error.notFound', { what: threadId })
+    }
     ctx.app.postMessage(ctx.projectId, {
-      conversationId: str(args, 'threadId'),
+      conversationId: threadId,
       author: 'coordinator',
       kind: 'relay',
       content: str(args, 'content'),
