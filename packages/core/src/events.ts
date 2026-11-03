@@ -1,3 +1,5 @@
+import type { LocalizedMessage } from '@ariadne/i18n'
+
 /** Who wrote a message. */
 export type Author = 'user' | 'coordinator' | 'thread'
 
@@ -23,6 +25,24 @@ export interface AttentionOption {
   label: string
   consequence: string
 }
+
+/** A tool call as the model made it; `arguments` is the model's JSON text, unparsed. */
+export interface ToolCallRecord {
+  id: string
+  name: string
+  arguments: string
+}
+
+export interface TokenUsage {
+  input: number
+  output: number
+}
+
+/**
+ * How a turn ended. `interrupted` means the process stopped mid-turn; `cancelled` means
+ * the user stopped it.
+ */
+export type TurnOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
@@ -51,6 +71,37 @@ export interface EventMap {
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }
   'todo.updated': { conversationId: string; items: TodoItem[] }
+  /** The agent of a conversation began working. */
+  'turn.started': { conversationId: string; turnId: string; model: string }
+  /**
+   * One model response inside a turn. `sawSeq` is the newest event the model's input
+   * included, so inputs up to it count as handled.
+   */
+  'turn.step': {
+    conversationId: string
+    turnId: string
+    text: string
+    toolCalls: ToolCallRecord[]
+    sawSeq: number
+    usage: TokenUsage | null
+  }
+  'tool.finished': {
+    conversationId: string
+    turnId: string
+    toolCallId: string
+    name: string
+    content: string
+    isError: boolean
+  }
+  'turn.finished': {
+    conversationId: string
+    turnId: string
+    outcome: TurnOutcome
+    /** Why it failed, for the user. */
+    error: LocalizedMessage | null
+  }
+  /** The user asked a conversation to try again after a failed turn. */
+  'turn.requested': { conversationId: string }
 }
 
 export type EventType = keyof EventMap

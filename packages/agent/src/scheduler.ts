@@ -1,0 +1,138 @@
+import type { Ariadne, ConversationView } from '@ariadne/core'
+import type { Locale } from '@ariadne/i18n'
+import { runTurn, type ResolvedModel } from './runner'
+
+export interface SchedulerOptions {
+  app: Ariadne
+  /** The model for a conversation; `null` when none is configured. Throwing fails the turn. */
+  resolveModel(conversation: ConversationView): ResolvedModel | null
+  locale(): Locale
+  /** Turns that may run at once. */
+  slots?: number
+  /** Extra slots only a turn answering the user may take, so the user never waits in line. */
+  reservedSlots?: number
+  maxSteps?: number
+}
+
+interface Running {
+  controller: AbortController
+  reserved: boolean
+  done: Promise<void>
+}
+
+/**
+ * Starts a turn for every conversation with unseen input, within the slot limits, and
+ * keeps doing so as events arrive. One turn per conversation at a time.
+ */
+export class Scheduler {
+  private readonly running = new Map<string, Running>()
+  private unsubscribe: (() => void) | null = null
+  private scheduled = false
+  private stopped = false
+
+  constructor(private readonly options: SchedulerOptions) {}
+
+  /** Close turns the last process left running, then follow the log. */
+  start(): void {
+    const { app } = this.options
+    for (const conversation of app.listRunningConversations()) {
+      if (conversation.turn) {
+        app.finishTurn(conversation.id, conversation.turn.id, 'interrupted', {
+          key: 'error.interrupted',
+        })
+      }
+    }
+    this.unsubscribe = app.subscribe(() => this.schedule())
+    this.schedule()
+  }
+
+  isRunning(conversationId: string): boolean {
+    return this.running.has(conversationId)
+  }
+
+  /** Stop a conversation's turn on the user's request. */
+  cancel(conversationId: string): boolean {
+    const running = this.running.get(conversationId)
+    if (!running) return false
+    running.controller.abort('cancelled')
+    return true
+  }
+
+  /** Abort every turn as interrupted, so each resumes on the next start. */
+  async stop(): Promise<void> {
+    this.stopped = true
+    this.unsubscribe?.()
+    const all = [...this.running.values()]
+    for (const running of all) running.controller.abort('interrupted')
+    await Promise.allSettled(all.map((running) => running.done))
+  }
+
+  /** Wait until no turn runs and nothing is pending; for tests. */
+  async idle(): Promise<void> {
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (this.scheduled) continue
+      if (!this.running.size) return
+      await Promise.allSettled([...this.running.values()].map((r) => r.done))
+    }
+  }
+
+  // Appends call listeners synchronously; starting turns from inside one would nest appends.
+  private schedule(): void {
+    if (this.scheduled || this.stopped) return
+    this.scheduled = true
+    queueMicrotask(() => {
+      this.scheduled = false
+      this.fill()
+    })
+  }
+
+  private fill(): void {
+    const { app } = this.options
+    const slots = this.options.slots ?? 3
+    const reservedSlots = this.options.reservedSlots ?? 1
+    for (const conversation of app.listPendingConversations()) {
+      if (this.stopped) return
+      if (this.running.has(conversation.id)) continue
+      const used = [...this.running.values()]
+      const general = used.filter((r) => !r.reserved).length
+      const reserved = used.length - general
+      if (general < slots) this.launch(conversation, false)
+      else if (reserved < reservedSlots && app.pendingIsUserMessage(conversation.id)) {
+        this.launch(conversation, true)
+      }
+    }
+  }
+
+  private launch(conversation: ConversationView, reserved: boolean): void {
+    const { app } = this.options
+    const controller = new AbortController()
+    const done = (async () => {
+      let model: ResolvedModel | null
+      try {
+        model = this.options.resolveModel(conversation)
+      } catch (error) {
+        app.failBeforeTurn(conversation.id, error)
+        return
+      }
+      if (!model) {
+        app.failBeforeTurn(conversation.id, null)
+        return
+      }
+      await runTurn({
+        app,
+        conversation,
+        model,
+        locale: this.options.locale(),
+        signal: controller.signal,
+        maxSteps: this.options.maxSteps ?? 40,
+      })
+    })()
+      .catch((error) => console.error('turn crashed', error))
+      .finally(() => {
+        this.running.delete(conversation.id)
+        this.schedule()
+      })
+    this.running.set(conversation.id, { controller, reserved, done })
+  }
+}

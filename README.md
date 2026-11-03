@@ -18,6 +18,8 @@ bun run check    # 格式、lint、类型检查和测试
 
 本地服务第一次启动时会在 `~/.ariadne/token` 生成访问令牌，并在终端打印带令牌的链接。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可；`bun run build` 之后，本地服务会直接提供构建好的页面。
 
+打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址、API Key 和默认模型名，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
+
 | 环境变量        | 作用                   | 默认值       |
 | --------------- | ---------------------- | ------------ |
 | `ARIADNE_HOME`  | 数据库与令牌所在的目录 | `~/.ariadne` |
@@ -26,10 +28,13 @@ bun run check    # 格式、lint、类型检查和测试
 
 ## 包
 
-| 包                    | 内容                                         |
-| --------------------- | -------------------------------------------- |
-| `@ariadne/i18n`       | 文案与翻译，服务端和前端共用                 |
-| `@ariadne/core`       | 领域模型、SQLite 事件存储与投影              |
-| `@ariadne/plugin-sdk` | 插件、上下文 provider 与模型 provider 的接口 |
-| `@ariadne/server`     | 本地 HTTP 服务、鉴权与事件流                 |
-| `@ariadne/web`        | 浏览器界面                                   |
+| 包                                  | 内容                                         |
+| ----------------------------------- | -------------------------------------------- |
+| `@ariadne/i18n`                     | 文案与翻译，服务端和前端共用                 |
+| `@ariadne/core`                     | 领域模型、SQLite 事件存储与投影              |
+| `@ariadne/plugin-sdk`               | 插件、上下文 provider 与模型 provider 的接口 |
+| `@ariadne/agent`                    | agent loop、调度、协调器与 thread 的工具     |
+| `@ariadne/plugin-openai-compatible` | OpenAI 兼容协议的模型 provider               |
+| `@ariadne/plugin-anthropic`         | Anthropic 协议的模型 provider                |
+| `@ariadne/server`                   | 本地 HTTP 服务、鉴权、事件流与用户设置       |
+| `@ariadne/web`                      | 浏览器界面                                   |

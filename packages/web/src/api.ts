@@ -1,5 +1,6 @@
 import type {
   AnyStoredEvent,
+  ConversationView,
   MessageView,
   NeedsMeItem,
   ProjectView,
@@ -7,6 +8,7 @@ import type {
   TodoView,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
+import type { LocalizedText, SettingsSchema } from '@ariadne/plugin-sdk'
 
 const TOKEN_KEY = 'ariadne.token'
 
@@ -67,13 +69,44 @@ export interface ProjectDetail {
   needsMe: NeedsMeItem[]
 }
 
+export interface ModelKind {
+  kind: string
+  title: LocalizedText
+  settings: SettingsSchema
+}
+
+export interface ModelProviderInput {
+  id: string
+  kind: string
+  name: string
+  settings: Record<string, unknown>
+}
+
+export interface ModelSettingsInput {
+  providers: ModelProviderInput[]
+  default: { provider: string; model: string } | null
+}
+
+export interface ModelSettings extends ModelSettingsInput {
+  kinds: ModelKind[]
+  providers: (ModelProviderInput & { secretsSet: string[] })[]
+}
+
 export const api = {
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
   getConversation: (id: string) =>
-    request<{ messages: MessageView[]; todo: TodoView }>('GET', `/api/conversations/${id}`),
+    request<{ conversation: ConversationView; messages: MessageView[]; todo: TodoView }>(
+      'GET',
+      `/api/conversations/${id}`,
+    ),
+  stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
+  retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
+  getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
+  saveModelSettings: (input: ModelSettingsInput) =>
+    request<ModelSettings>('PUT', '/api/settings/models', input),
   postMessage: (projectId: string, conversationId: string, content: string) =>
     request<{ message: MessageView }>('POST', `/api/projects/${projectId}/messages`, {
       conversationId,

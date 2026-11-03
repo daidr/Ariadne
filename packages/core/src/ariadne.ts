@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { DomainError } from './errors'
+import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   AnyStoredEvent,
   AttentionOption,
@@ -7,6 +8,9 @@ import type {
   MessageKind,
   ReportKind,
   TodoItem,
+  TokenUsage,
+  ToolCallRecord,
+  TurnOutcome,
 } from './events'
 import { newId } from './ids'
 import { defaultProjections, dropProjectionTables } from './projections'
@@ -14,12 +18,51 @@ import { needsUser, threadStage } from './stage'
 import { EventStore, type EventListener } from './store'
 import type {
   AttentionView,
+  ConversationRole,
+  ConversationView,
   MessageView,
   NeedsMeItem,
   ProjectView,
   ThreadView,
   TodoView,
+  TranscriptEntry,
 } from './views'
+
+/**
+ * Bump when a projection's tables or meaning change: on open, a database written with an
+ * older version folds the whole log again. The log itself never changes.
+ */
+export const PROJECTION_VERSION = 4
+
+interface ConversationRow {
+  id: string
+  project_id: string
+  role: ConversationRole
+  pending_seq: number
+  turn_id: string | null
+  turn_started_at: number | null
+  model: string | null
+  last_outcome: TurnOutcome | null
+  last_error: string | null
+  input_tokens: number
+  output_tokens: number
+}
+
+function toConversation(row: ConversationRow): ConversationView {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    role: row.role,
+    pendingSeq: row.pending_seq,
+    turn:
+      row.turn_id === null
+        ? null
+        : { id: row.turn_id, startedAt: row.turn_started_at ?? 0, model: row.model },
+    lastOutcome: row.last_outcome,
+    lastError: row.last_error ? (JSON.parse(row.last_error) as LocalizedMessage) : null,
+    usage: { input: row.input_tokens, output: row.output_tokens },
+  }
+}
 
 interface ProjectRow {
   id: string
@@ -40,6 +83,8 @@ interface ThreadRow {
   created_at: number
   updated_at: number
   open_attentions: number
+  turn_id: string | null
+  last_outcome: TurnOutcome | null
 }
 
 interface AttentionRow {
@@ -64,9 +109,9 @@ interface MessageRow {
   edited_since_read: number
 }
 
-const THREAD_SELECT = `SELECT t.*, (
+const THREAD_SELECT = `SELECT t.*, c.turn_id, c.last_outcome, (
   SELECT count(*) FROM attentions a WHERE a.thread_id = t.id AND a.answered = 0
-) AS open_attentions FROM threads t`
+) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
 
 function toThread(row: ThreadRow): ThreadView {
   return {
@@ -78,6 +123,8 @@ function toThread(row: ThreadRow): ThreadView {
       openAttentions: row.open_attentions,
       started: row.started === 1,
       lastReport: row.last_report,
+      turnRunning: row.turn_id !== null,
+      turnFailed: row.turn_id === null && row.last_outcome === 'failed',
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -133,6 +180,12 @@ export class Ariadne {
       ...(options.now ? { now: options.now } : {}),
     })
     this.db = this.store.db
+    const version =
+      this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0
+    if (version !== PROJECTION_VERSION) {
+      this.rebuildProjections()
+      this.db.run(`PRAGMA user_version = ${PROJECTION_VERSION}`)
+    }
   }
 
   subscribe(listener: EventListener): () => void {
@@ -231,6 +284,62 @@ export class Ariadne {
       items: row ? JSON.parse(row.items) : [],
       updatedAt: row?.updated_at ?? 0,
     }
+  }
+
+  getConversation(conversationId: string): ConversationView {
+    const row = this.db
+      .query<ConversationRow, [string]>('SELECT * FROM conversations WHERE id = ?')
+      .get(conversationId)
+    if (!row) throw new DomainError('error.notFound', { what: conversationId })
+    return toConversation(row)
+  }
+
+  /** Conversations with unseen input and no turn running, oldest input first. */
+  listPendingConversations(): ConversationView[] {
+    return this.db
+      .query<ConversationRow, []>(
+        'SELECT * FROM conversations WHERE pending_seq > 0 AND turn_id IS NULL ORDER BY pending_seq',
+      )
+      .all()
+      .map(toConversation)
+  }
+
+  /** Turns still marked running, e.g. after the process stopped mid-turn. */
+  listRunningConversations(): ConversationView[] {
+    return this.db
+      .query<ConversationRow, []>('SELECT * FROM conversations WHERE turn_id IS NOT NULL')
+      .all()
+      .map(toConversation)
+  }
+
+  /** Everything this conversation's agent has seen, oldest first. */
+  listTranscript(conversationId: string): TranscriptEntry[] {
+    const rows = this.db
+      .query<{ seq: number; kind: string; ref: string | null; payload: string | null }, [string]>(
+        'SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? ORDER BY id',
+      )
+      .all(conversationId)
+    const entries: TranscriptEntry[] = []
+    for (const row of rows) {
+      const payload = row.payload ? JSON.parse(row.payload) : null
+      switch (row.kind) {
+        case 'message': {
+          const message = row.ref ? this.findMessage(row.ref) : null
+          if (message) entries.push({ seq: row.seq, kind: 'message', message })
+          break
+        }
+        case 'note':
+          entries.push({ seq: row.seq, kind: 'note', note: payload })
+          break
+        case 'step':
+          entries.push({ seq: row.seq, kind: 'step', ...payload })
+          break
+        case 'tool':
+          entries.push({ seq: row.seq, kind: 'tool', ...payload })
+          break
+      }
+    }
+    return entries
   }
 
   // ---- commands ----
@@ -387,7 +496,142 @@ export class Ariadne {
     return this.getTodo(conversationId)
   }
 
+  // ---- turns ----
+
+  /** Begin a turn. A thread's first turn also marks the thread started. */
+  startTurn(conversationId: string, model: string): string {
+    const conversation = this.getConversation(conversationId)
+    if (conversation.turn) throw new DomainError('error.turnRunning')
+    const turnId = newId('trn')
+    const projectId = conversation.projectId
+    const events: Parameters<EventStore['append']>[0] = [
+      { type: 'turn.started', projectId, data: { conversationId, turnId, model } },
+    ]
+    const started = this.db
+      .query<{ started: number }, [string]>('SELECT started FROM threads WHERE id = ?')
+      .get(conversationId)
+    if (conversation.role === 'thread' && started?.started === 0) {
+      events.unshift({ type: 'thread.started', projectId, data: { threadId: conversationId } })
+    }
+    this.store.append(events)
+    return turnId
+  }
+
+  recordStep(
+    conversationId: string,
+    turnId: string,
+    step: { text: string; toolCalls: ToolCallRecord[]; sawSeq: number; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([{ type: 'turn.step', projectId, data: { conversationId, turnId, ...step } }])
+  }
+
+  recordToolResult(
+    conversationId: string,
+    turnId: string,
+    result: { toolCallId: string; name: string; content: string; isError: boolean },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'tool.finished', projectId, data: { conversationId, turnId, ...result } },
+    ])
+  }
+
+  /**
+   * End a turn. Tool calls of the turn that never got a result are closed as errors first,
+   * so the transcript stays a valid model input.
+   */
+  finishTurn(
+    conversationId: string,
+    turnId: string,
+    outcome: TurnOutcome,
+    error: LocalizedMessage | null = null,
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    const answered = new Set<string>()
+    const called: ToolCallRecord[] = []
+    for (const entry of this.listTranscript(conversationId)) {
+      if (entry.kind === 'step') called.push(...entry.toolCalls)
+      if (entry.kind === 'tool') answered.add(entry.toolCallId)
+    }
+    const dangling = called.filter((call) => !answered.has(call.id))
+    this.store.append([
+      ...dangling.map((call) => ({
+        type: 'tool.finished' as const,
+        projectId,
+        data: {
+          conversationId,
+          turnId,
+          toolCallId: call.id,
+          name: call.name,
+          content: `The call did not finish: the turn ended as ${outcome}.`,
+          isError: true,
+        },
+      })),
+      { type: 'turn.finished', projectId, data: { conversationId, turnId, outcome, error } },
+    ])
+  }
+
+  /** Whether the newest unseen input of a conversation is a message the user wrote. */
+  pendingIsUserMessage(conversationId: string): boolean {
+    const row = this.db
+      .query<{ author: string }, [string]>(
+        `SELECT m.author FROM conversations c
+           JOIN transcript t ON t.conversation_id = c.id AND t.seq = c.pending_seq
+           JOIN messages m ON m.id = t.ref
+         WHERE c.id = ? AND t.kind = 'message'`,
+      )
+      .get(conversationId)
+    return row?.author === 'user'
+  }
+
+  /**
+   * Record a turn that could not start, e.g. no model is configured, so the user sees why
+   * and can retry. A thread is not marked started by it.
+   */
+  failBeforeTurn(conversationId: string, error: unknown): void {
+    const conversation = this.getConversation(conversationId)
+    const turnId = newId('trn')
+    const projectId = conversation.projectId
+    const localized: LocalizedMessage =
+      error instanceof DomainError
+        ? error.toLocalized()
+        : error === null
+          ? { key: 'error.noModel' }
+          : { key: 'error.modelRequest', params: { detail: String(error) } }
+    this.store.append([
+      { type: 'turn.started', projectId, data: { conversationId, turnId, model: '' } },
+      {
+        type: 'turn.finished',
+        projectId,
+        data: { conversationId, turnId, outcome: 'failed', error: localized },
+      },
+    ])
+  }
+
+  /** Ask a conversation's agent to try again, e.g. after a failed turn. */
+  requestTurn(conversationId: string): void {
+    const conversation = this.getConversation(conversationId)
+    if (conversation.turn) throw new DomainError('error.turnRunning')
+    this.store.append([
+      { type: 'turn.requested', projectId: conversation.projectId, data: { conversationId } },
+    ])
+  }
+
   // ---- helpers ----
+
+  private runningTurn(conversationId: string, turnId: string): string {
+    const conversation = this.getConversation(conversationId)
+    if (conversation.turn?.id !== turnId) throw new DomainError('error.turnNotRunning')
+    return conversation.projectId
+  }
+
+  private findMessage(messageId: string): MessageView | null {
+    const row = this.db
+      .query<MessageRow, [string]>('SELECT * FROM messages WHERE id = ?')
+      .get(messageId)
+    return row ? toMessage(row) : null
+  }
 
   private getMessage(messageId: string): MessageView {
     const row = this.db

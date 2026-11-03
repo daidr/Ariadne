@@ -11,7 +11,11 @@
     "start": "bun src/main.ts"
   },
   "dependencies": {
+    "@ariadne/agent": "workspace:*",
     "@ariadne/core": "workspace:*",
-    "@ariadne/i18n": "workspace:*"
+    "@ariadne/i18n": "workspace:*",
+    "@ariadne/plugin-anthropic": "workspace:*",
+    "@ariadne/plugin-openai-compatible": "workspace:*",
+    "@ariadne/plugin-sdk": "workspace:*"
   }
 }

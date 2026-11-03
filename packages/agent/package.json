@@ -1,0 +1,14 @@
+{
+  "name": "@ariadne/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ariadne/core": "workspace:*",
+    "@ariadne/i18n": "workspace:*",
+    "@ariadne/plugin-sdk": "workspace:*"
+  }
+}
