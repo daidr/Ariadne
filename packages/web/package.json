@@ -1,0 +1,16 @@
+{
+  "name": "@ariadne/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@ariadne/core": "workspace:*",
+    "@ariadne/i18n": "workspace:*",
+    "@dou-ui/icons": "0.1.0-alpha.1",
+    "dou-ui": "0.1.0-alpha.1"
+  }
+}
