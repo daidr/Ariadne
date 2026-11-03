@@ -1,0 +1,17 @@
+{
+  "name": "@ariadne/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun --watch src/main.ts",
+    "start": "bun src/main.ts"
+  },
+  "dependencies": {
+    "@ariadne/core": "workspace:*",
+    "@ariadne/i18n": "workspace:*"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "ariadne-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '@ariadne/server' --filter '@ariadne/web' dev",
+    "build": "bun run --filter @ariadne/web build",
+    "test": "bun --bun vitest run",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "oxlint --deny-warnings",
+    "check": "bun fmt --check && bun run lint && bun run typecheck && bun run test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.5.1",
+    "happy-dom": "21.0.4",
+    "oxlint": "1.91.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vitest": "5.1.0",
+    "vue": "3.5.44",
+    "vue-tsc": "3.3.14"
+  }
+}
