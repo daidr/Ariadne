@@ -37,9 +37,15 @@ export interface ThreadContext {
   /** What the threads of upstream nodes reported when they finished. */
   upstream: { node: string; summary: string }[]
   workspace: { label: string; branch: string | null } | 'none' | 'not-open'
+  /** Whether the workspace is a checkout of a hosted repository. */
+  repo?: boolean
 }
 
-function workspaceSection(workspace: ThreadContext['workspace']): string {
+function repoSection(): string {
+  return `Your workspace is a checkout of the project's repository. When the work is ready for review, commit, then open_pull_request (it pushes your branch): this needs no ask_user, since it only touches your own branch and the user decides whether to merge. Never merge, never push other branches, never force-push. After that, push_branch publishes further commits. Your pull request's checks are watched: when they fail you get <checks_failed>; read the logs (repo_status, read_check_log), fix the cause, commit and push again. Report "ready" with the pull request's link once its checks pass or while they run.`
+}
+
+function workspaceSection(workspace: ThreadContext['workspace'], repo: boolean): string {
   if (workspace === 'none') {
     return 'The project has no working directory, so you have no file or command tools. If the work needs one, report "blocked" and say so.'
   }
@@ -47,7 +53,7 @@ function workspaceSection(workspace: ThreadContext['workspace']): string {
     workspace === 'not-open'
       ? 'It is prepared on first use.'
       : `It is at ${workspace.label}${workspace.branch ? ` on branch ${workspace.branch}` : ''}.`
-  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done". Run the project's checks before you report. Anything irreversible outside the workspace (pushing, deploying, sending) needs ask_user first.`
+  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done". Run the project's checks before you report. ${repo ? `${repoSection()} Anything else irreversible outside the workspace (deploying, sending) needs ask_user first.` : 'Anything irreversible outside the workspace (pushing, deploying, sending) needs ask_user first.'}`
 }
 
 export function threadPrompt(input: ThreadContext): string {
@@ -65,7 +71,7 @@ How you work:
 - Do the work in your brief, and only that. If something else comes up, tell the coordinator in a report instead of doing it.
 - Report with the report tool when your state changes: "ready" when the work waits for the user's review, "blocked" or "failed" when you cannot go on, "done" when finished, "waiting" when this round is over. The coordinator decides what reaches the user.
 - You cannot talk to other threads.
-- ${workspaceSection(input.workspace)}
+- ${workspaceSection(input.workspace, !!input.repo)}
 - Long results belong in a document (create_document); say in one line that it exists.
 ${shared(input.locale)}`
 }

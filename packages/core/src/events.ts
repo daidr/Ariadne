@@ -83,6 +83,19 @@ export interface ProjectSource {
 
 export type ArtifactKind = 'document'
 
+/** How the checks of a commit stand, all together. */
+export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
+
+/** A thread's pull request on the project's repository. */
+export interface ThreadPullRequest {
+  number: number
+  url: string
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  headSha: string
+  checks: { state: ChecksState; failed: string[] }
+}
+
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
   'project.created': { name: string; coordinatorId: string }
@@ -171,6 +184,14 @@ export interface EventMap {
   }
   /** The user agreed, but the plan had moved on and the proposal no longer applied. */
   'plan.proposal.stale': { proposalId: string; reason: string }
+  /** The user has seen that an agreed proposal did not take effect. */
+  'plan.proposal.dismissed': { proposalId: string }
+  /** The thread's pull request as last seen on the repository; written only on a change. */
+  'pull_request.synced': { threadId: string } & ThreadPullRequest
+  /** Checks of the pull request's newest commit failed; the thread gets to fix them. */
+  'checks.failed': { threadId: string; number: number; headSha: string; failed: string[] }
+  /** The pull request was merged or closed. */
+  'pull_request.closed': { threadId: string; number: number; merged: boolean }
   'artifact.created': {
     artifactId: string
     kind: ArtifactKind

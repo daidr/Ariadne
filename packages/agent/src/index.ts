@@ -3,6 +3,8 @@ export { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 export { runTurn, type ResolvedModel, type TurnOptions } from './runner'
 export { Scheduler, type SchedulerOptions } from './scheduler'
 export { resolvePlanOps } from './plan-tools'
+export { repoTools, summarizeChecks, syncThreadPullRequest } from './repo-tools'
+export { RepoWatcher } from './repo-watcher'
 export {
   coordinatorTools,
   threadTools,

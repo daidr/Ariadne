@@ -1,0 +1,13 @@
+{
+  "name": "@ariadne/plugin-github",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ariadne/plugin-local": "workspace:*",
+    "@ariadne/plugin-sdk": "workspace:*"
+  }
+}

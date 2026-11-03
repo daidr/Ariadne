@@ -3,7 +3,7 @@ import { DouAlert, DouButton } from 'dou-ui'
 import { RotateCcwIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t, tm } from '../i18n'
-import { answerAttention, revertPlan, state } from '../store'
+import { answerAttention, dismissProposal, revertPlan, state } from '../store'
 import { latestCoordinatorChange } from './layout'
 
 // The newest change the coordinator made is highlighted on the graph and can be undone here.
@@ -30,6 +30,11 @@ const stale = computed(() => state.plan?.proposals.filter((p) => p.status === 's
     </DouAlert>
     <DouAlert v-for="proposal in stale" :key="proposal.id" tone="danger" role="alert">
       {{ t('plan.stale', { reason: proposal.reason }) }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="dismissProposal(proposal.id)">
+          {{ t('plan.dismiss') }}
+        </DouButton>
+      </template>
     </DouAlert>
     <DouAlert v-if="change" tone="neutral">
       {{ t('plan.lastChange', { reason: change.reason }) }}

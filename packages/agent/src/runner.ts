@@ -44,6 +44,7 @@ function threadContext(
   conversation: ConversationView,
   locale: Locale,
   hasWorkspace: boolean,
+  hasRepo: boolean,
 ): ThreadContext {
   const project = app.getProject(conversation.projectId)
   const thread = app.getThread(conversation.id)
@@ -65,6 +66,7 @@ function threadContext(
       : null,
     upstream,
     workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
+    repo: hasRepo,
   }
 }
 
@@ -73,11 +75,12 @@ function systemPrompt(
   conversation: ConversationView,
   locale: Locale,
   hasWorkspace: boolean,
+  hasRepo: boolean,
 ): string {
   if (conversation.role === 'coordinator') {
     return coordinatorPrompt({ projectName: app.getProject(conversation.projectId).name, locale })
   }
-  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace))
+  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo))
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolContext) {
@@ -110,9 +113,11 @@ async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolCo
 export async function runTurn(options: TurnOptions): Promise<void> {
   const { app, conversation, model, signal } = options
   const { workspaces } = options
-  const hasWorkspace =
-    conversation.role === 'thread' && !!workspaces?.available(conversation.projectId)
-  const tools = options.tools ?? toolsFor(conversation.role, hasWorkspace)
+  const isThread = conversation.role === 'thread'
+  const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
+  const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
+  const tools =
+    options.tools ?? toolsFor(conversation.role, { workspace: hasWorkspace, repo: hasRepo })
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
   const turnId = app.startTurn(conversationId, model.label)
@@ -129,6 +134,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       }
       return workspaces.forThread(conversation.projectId, conversationId)
     },
+    repo: () => {
+      if (!workspaces || !isThread) return Promise.reject(new DomainError('error.noRepo'))
+      return workspaces.repo(conversation.projectId)
+    },
   }
   const titleOf = (threadId: string) => {
     try {
@@ -144,7 +153,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       const messages = [
         {
           role: 'system' as const,
-          content: systemPrompt(app, conversation, options.locale, hasWorkspace),
+          content: systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo),
         },
         ...toChatMessages(app.listTranscript(conversationId), titleOf),
       ]

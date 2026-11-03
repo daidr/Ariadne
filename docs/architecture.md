@@ -59,20 +59,32 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 - 每次修改是一个修订（`plan.revised`），带理由，记下撤销它所需的操作。任何一次修订都可以撤销，只要之后的修改和撤销不冲突：撤销一次编辑时，如果那个字段之后又被改过，撤销会被拒绝，不会覆盖后来的修改。
 - 协调器的小改动立即生效：加节点、改标题和说明、改依赖。界面高亮最近一次修订改到的节点，并提供“撤销”。
 - 大改动先等用户同意：删除节点、修改验收标准、增改里程碑。协调器把一次修改里的这些操作合成一个提议（`plan.proposed`），放进“需要我”，问题里逐条列出会改什么（删除节点时注明上面还有几个 thread）；用户同意后才生效。协调器撤销一次修订也一样：撤销里有大改动（比如撤销“加节点”就是删除），也要先等用户同意。
-- 用户同意时计划已经变了、提议不再适用的话，提议不生效，记为失效（`plan.proposal.stale`）：计划页提示用户这次同意没有生效，协调器收到说明并被唤醒，重新看计划后再提议。计划下一次变化时提示消失。
+- 用户同意时计划已经变了、提议不再适用的话，提议不生效，记为失效（`plan.proposal.stale`）：计划页提示用户这次同意没有生效，协调器收到说明并被唤醒，重新看计划后再提议。提示一直留着，直到用户点“知道了”（`plan.proposal.dismissed`）或协调器发出新的提议，不会因为一次无关的小改动就消失。
+- 计划有两种只读视图：图（依赖关系）和看板（按节点状态分列，卡片上是在做它的 thread、阶段和 PR）。修改计划都通过和协调器对话，或在修改记录里撤销。
 - 节点的状态由在做它的 thread 推出：没有 thread 是“未开始”，有 thread 受阻是“受阻”，等用户回答或审阅是“等你处理”，全部完成是“已完成”，其余是“进行中”。
 - thread 可以绑定到节点。它的系统提示里有节点的说明、验收标准，以及上游节点已完成的 thread 的总结；上游 thread 汇报完成时，下游节点上还在做的 thread 会收到它的总结并被唤醒。
 
 ### 工作区
 
-项目有一个上下文源，目前是本地目录。thread 第一次用文件或命令工具时才准备工作区：
+项目有一个上下文源：本地目录或 GitHub 仓库。thread 第一次用文件或命令工具时才准备工作区：
 
 - git 仓库：从仓库当前的 HEAD 为 thread 建一个 `git worktree`，分支是 `ariadne/<thread id 的末尾>`，thread 之间互不可见。重启后沿用原来的 worktree；worktree 目录被手动删掉的话，先 `git worktree prune` 再在原分支上重建。上下文源是仓库的子目录时，工作区根目录是 worktree 里对应的子目录。
 - 普通目录：所有 thread 共用这个目录。
+- GitHub 仓库：在插件的数据目录里为仓库建一个共享的 bare clone（`~/.ariadne/plugins/github/repos/<owner>/<name>.git`），远端分支取到 `refs/remotes/origin/*`，取远端时不会动到 thread 的分支；每个 thread 从远端默认分支建自己的 worktree 和分支 `ariadne/…`。
 - 文件工具的路径都相对工作区根目录，越出根目录（包括经符号链接）的路径会被拒绝。命令在工作区里用 bash 执行，有超时，输出过长时只保留末尾。
 - 工作区里的命令不需要审批；推送、部署这类影响工作区外、又无法撤销的操作，thread 要先问用户。
 
-本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/` 下。远端仓库接入后再按“共享 bare clone + 每个 thread 一个 worktree”的方式准备。
+本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/` 和 `~/.ariadne/plugins/github/worktrees/` 下。
+
+上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。令牌通过环境变量交给 git，不落盘，也不出现在命令行参数里；thread 的 `run_command` 拿不到它，推送只能走下面的工具。
+
+### 仓库、PR 与 CI
+
+上下文源是托管仓库时，thread 多四个工具：`repo_status`、`push_branch`、`open_pull_request`、`read_check_log`。
+
+- thread 推送自己的分支、开 PR 不需要先问用户：只动它自己的 `ariadne/…` 分支，PR 可以关闭，合并由用户决定。推送从不强推；远端分支变过的话推送失败，thread 先合并远端的改动。thread 不能合并 PR，也不能推送其他分支。
+- 开了 PR 的 thread 由仓库监视器定期（默认每分钟）读取 PR 和最新提交的检查，有变化才记一条 `pull_request.synced`。最新提交的检查失败时记 `checks.failed`，唤醒那个 thread 去读日志、修复、再推送；同一个提交只唤醒一次。PR 被合并或关闭时记 `pull_request.closed`，协调器收到说明。
+- 界面在 thread 标题旁显示 PR 编号、检查状态，可以手动刷新；看板卡片上也显示。
 
 ### 产物
 
@@ -100,7 +112,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 | `repo`      | GitHub、GitLab               | 远端仓库、分支、PR、CI 状态与日志             |
 | `tracker`   | GitHub、GitLab               | Issue 等任务记录                              |
 
-本地 `workspace` 见上文“工作区”。
+`workspace` 和 `repo` 见上文“工作区”和“仓库、PR 与 CI”。
 
 ## 分层
 
@@ -110,7 +122,7 @@ packages/
   core         领域模型、事件存储与投影，不依赖 HTTP
   plugin-sdk   插件作者使用的类型与 definePlugin
   agent        agent loop、调度、协调器与 thread 的工具、插件宿主
-  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录上下文源
+  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录与 GitHub 仓库上下文源
   server       本地 HTTP 服务、鉴权、事件流与用户设置
   web          Vue + dou-ui 的浏览器界面
 ```

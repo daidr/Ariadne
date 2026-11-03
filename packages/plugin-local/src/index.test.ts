@@ -79,6 +79,15 @@ describe('local directory', () => {
     await expect(ws.readFile('../README.md')).rejects.toThrow(WorkspacePathError)
   })
 
+  test('a subdirectory the commit does not track is refused with a clear reason', async () => {
+    const dir = await repo()
+    await run(['mkdir', '-p', join(dir, 'untracked')], { cwd: base })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({
+      path: join(dir, 'untracked'),
+    })
+    await expect(workspace!.open({ threadId: 'thr_a' })).rejects.toThrow(/current commit/)
+  })
+
   test('paths cannot leave the workspace, not even through a link', async () => {
     const dir = join(base, 'plain')
     await run(['mkdir', '-p', dir], { cwd: base })

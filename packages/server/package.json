@@ -15,6 +15,7 @@
     "@ariadne/core": "workspace:*",
     "@ariadne/i18n": "workspace:*",
     "@ariadne/plugin-anthropic": "workspace:*",
+    "@ariadne/plugin-github": "workspace:*",
     "@ariadne/plugin-local": "workspace:*",
     "@ariadne/plugin-openai-compatible": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*"

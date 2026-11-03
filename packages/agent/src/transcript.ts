@@ -18,6 +18,10 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
     case 'artifact-edited':
       return `<document_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}" />`
+    case 'checks-failed':
+      return `<checks_failed pull_request="${note.number}" commit="${note.headSha.slice(0, 12)}">\nChecks of your pull request failed: ${note.failed.join(', ') || '(unnamed)'}. Read their logs with repo_status and read_check_log, fix the cause in your workspace, commit and push_branch again. If the failure is not caused by your change, report it as blocked with what you found.\n</checks_failed>`
+    case 'pull-request-closed':
+      return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
     case 'proposal-stale':
       return `<plan_proposal_not_applied proposal="${note.proposalId}">\nThe user agreed to "${note.reason}", but the plan had changed and it no longer applied (${note.staleBecause}). Nothing changed. Read the plan and propose again if it is still needed.\n</plan_proposal_not_applied>`
     case 'plan-changed-by-user':

@@ -132,6 +132,21 @@ describe('plan revisions', () => {
     expect(app.getPlan(projectId).proposals).toEqual([])
   })
 
+  test('an edit of several fields lists each of them', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '旧')] })
+    const change = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '调整',
+      ops: [{ op: 'update', id: 'a', title: '新', acceptance: '测试通过' }],
+      confirmation,
+    })
+    if (change.status !== 'proposed') throw new Error('expected a proposal')
+    expect(app.getPlan(projectId).proposals[0]?.changes.map((c) => c.key)).toEqual([
+      'plan.op.rename',
+      'plan.op.acceptance',
+    ])
+  })
+
   test('the confirmation spells out each change, with the threads a removal unhooks', () => {
     app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '调研')] })
     app.createThread(projectId, { title: 't', nodeId: 'a' })
@@ -199,8 +214,10 @@ describe('plan revisions', () => {
       note: { type: 'proposal-stale', proposalId: change.proposalId, reason: '删掉 b' },
     })
     expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
-    // The next change to the plan clears the notice.
-    app.revisePlan(projectId, { author: 'user', reason: '用户改', ops: [add('c')] })
+    // An unrelated change keeps the notice; the user dismissing it clears it.
+    app.revisePlan(projectId, { author: 'coordinator', reason: '加一个', ops: [add('c')] })
+    expect(app.getPlan(projectId).proposals).toHaveLength(1)
+    app.dismissPlanProposal(projectId, change.proposalId)
     expect(app.getPlan(projectId).proposals).toEqual([])
   })
 

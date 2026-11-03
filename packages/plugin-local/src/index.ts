@@ -28,14 +28,19 @@ function clip(text: string): string {
 /** Run a program without a shell. */
 export async function run(
   argv: string[],
-  options: { cwd: string; timeoutMs?: number; signal?: AbortSignal },
+  options: {
+    cwd: string
+    timeoutMs?: number
+    signal?: AbortSignal
+    env?: Record<string, string>
+  },
 ): Promise<ExecResult> {
   const proc = Bun.spawn(argv, {
     cwd: options.cwd,
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: 'ignore',
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...options.env },
   })
   const kill = () => proc.kill()
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
@@ -173,7 +178,14 @@ export function localWorkspaces(input: {
       }
       // A subdirectory of the repository stays the workspace root inside the worktree.
       const sub = relative(await realpath(repoRoot), await realpath(input.path))
-      return new LocalWorkspace(threadId, sub ? join(dir, sub) : dir, branch)
+      const root = sub ? join(dir, sub) : dir
+      if (!existsSync(root)) {
+        // The worktree holds only what HEAD tracks.
+        throw new Error(
+          `${sub} is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root`,
+        )
+      }
+      return new LocalWorkspace(threadId, root, branch)
     },
   }
 }

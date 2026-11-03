@@ -1,6 +1,7 @@
-import { PluginHost, Scheduler, WorkspaceManager } from '@ariadne/agent'
 import { Ariadne } from '@ariadne/core'
+import { PluginHost, RepoWatcher, Scheduler, WorkspaceManager } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
+import github from '@ariadne/plugin-github'
 import local from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
 import { join } from 'node:path'
@@ -15,12 +16,15 @@ const host = new PluginHost(join(config.home, 'plugins'))
 await host.load(openAICompatible)
 await host.load(anthropic)
 await host.load(local)
+await host.load(github)
 const settings = new SettingsStore(join(config.home, 'config.json'), host)
 for (const path of settings.current.plugins) {
   await host.loadFromPath(path).catch((error) => console.error(`插件加载失败：${path}`, error))
 }
 
-const workspaces = new WorkspaceManager(app, host)
+const workspaces = new WorkspaceManager(app, host, (projectId) => settings.sourceSecrets(projectId))
+// Pull requests are polled for their checks; ARIADNE_REPO_POLL_MS shortens it for testing.
+const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO_POLL_MS) || 60_000)
 const scheduler = new Scheduler({
   app,
   workspaces,
@@ -30,6 +34,7 @@ const scheduler = new Scheduler({
   reservedSlots: settings.current.concurrency.reserved,
 })
 scheduler.start()
+watcher.start()
 
 const server = Bun.serve({
   hostname: config.hostname,
@@ -43,6 +48,7 @@ const server = Bun.serve({
     scheduler,
     settings,
     host,
+    workspaces,
   }),
 })
 
@@ -51,6 +57,7 @@ console.info(`Ariadne 已启动：http://${server.hostname}:${server.port}/#toke
 async function shutdown() {
   server.stop()
   // Running turns end as interrupted and resume on the next start.
+  await watcher.stop()
   await scheduler.stop()
   await workspaces.dispose()
   await host.unloadAll()

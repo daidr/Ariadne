@@ -64,3 +64,66 @@ describe('model settings', () => {
     ).toThrow()
   })
 })
+
+describe('project sources', () => {
+  test('a source token goes to the config, never into the event log', async () => {
+    const { Ariadne } = await import('@ariadne/core')
+    const { createHandler } = await import('./app')
+    const connected: unknown[] = []
+    await host.load({
+      id: 'fake-repo',
+      name: { 'zh-CN': '假仓库' },
+      setup: (ctx) =>
+        ctx.registerContextProvider({
+          kind: 'fake-repo',
+          title: { 'zh-CN': '假仓库' },
+          settings: {
+            type: 'object',
+            properties: {
+              repository: { type: 'string', title: { 'zh-CN': '仓库' } },
+              token: { type: 'string', secret: true, title: { 'zh-CN': '令牌' } },
+            },
+            required: ['repository'],
+          },
+          provides: ['workspace', 'repo'],
+          async connect(settings: unknown) {
+            connected.push(settings)
+            return {}
+          },
+        } as never),
+    })
+    const app = new Ariadne({ path: ':memory:' })
+    const store = new SettingsStore(path, host)
+    const handle = createHandler({ app, token: 't', settings: store, host })
+    const projectId = app.createProject('P').id
+    const put = (source: unknown) =>
+      handle(
+        new Request(`http://127.0.0.1/api/projects/${projectId}/source`, {
+          method: 'PUT',
+          headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
+          body: JSON.stringify({ source }),
+        }),
+      )
+
+    expect(
+      (await put({ kind: 'fake-repo', settings: { repository: ' a/b ', token: 'tok-1' } })).status,
+    ).toBe(200)
+    expect(connected.at(-1)).toEqual({ repository: 'a/b', token: 'tok-1' })
+    expect(app.getProject(projectId).source).toEqual({
+      kind: 'fake-repo',
+      settings: { repository: 'a/b' },
+    })
+    expect(JSON.stringify(app.events({ projectId }))).not.toContain('tok-1')
+    expect(store.sourceSecrets(projectId)).toEqual({ token: 'tok-1' })
+
+    // Saving again with the token left empty keeps it.
+    await put({ kind: 'fake-repo', settings: { repository: 'a/c', token: '' } })
+    expect(connected.at(-1)).toEqual({ repository: 'a/c', token: 'tok-1' })
+    expect((await put({ kind: 'fake-repo', settings: {} })).status).toBe(400)
+
+    await put(null)
+    expect(store.sourceSecrets(projectId)).toEqual({})
+    expect(readFileSync(path, 'utf8')).not.toContain('tok-1')
+    app.close()
+  })
+})

@@ -144,11 +144,13 @@ export function openMain(view: MainView) {
 }
 
 /** Save the project's working directory; returns why it was refused, or `null`. */
-export async function setSource(path: string | null): Promise<string | null> {
+export async function setSource(
+  source: { kind: string; settings: Record<string, unknown> } | null,
+): Promise<string | null> {
   const project = state.detail?.project
   if (!project) return null
   try {
-    await api.setSource(project.id, path)
+    await api.setSource(project.id, source)
     await refreshCurrent()
     return null
   } catch (error) {
@@ -156,6 +158,21 @@ export async function setSource(path: string | null): Promise<string | null> {
     report(error)
     return null
   }
+}
+
+export async function dismissProposal(proposalId: string) {
+  const project = state.detail?.project
+  if (!project) return
+  try {
+    state.plan = (await api.dismissProposal(project.id, proposalId)).plan
+  } catch (error) {
+    report(error)
+  }
+}
+
+/** Ask the repository for the thread's pull request now; the event stream refreshes the view. */
+export async function refreshPullRequest(threadId: string) {
+  await api.refreshPullRequest(threadId).catch(report)
 }
 
 export async function revertPlan(revisionId: string) {
