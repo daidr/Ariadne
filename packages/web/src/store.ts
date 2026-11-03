@@ -1,10 +1,10 @@
 import type { AnyStoredEvent, MessageView, ProjectView, TodoView } from '@ariadne/core'
 import { reactive } from 'vue'
-import { api, ApiError, followEvents, type ProjectDetail } from './api'
+import { api, ApiError, followEvents, type ProjectDetail, type StreamStatus } from './api'
 import { tm } from './i18n'
 
 interface State {
-  connected: boolean
+  stream: StreamStatus
   projects: ProjectView[]
   currentId: string | null
   detail: ProjectDetail | null
@@ -14,7 +14,7 @@ interface State {
 }
 
 export const state = reactive<State>({
-  connected: false,
+  stream: 'connecting',
   projects: [],
   currentId: null,
   detail: null,
@@ -28,13 +28,18 @@ function report(error: unknown) {
 }
 
 async function refreshProjects() {
-  state.projects = (await api.listProjects()).projects
+  const { projects, lastSeq } = await api.listProjects()
+  state.projects = projects
+  return lastSeq
 }
 
 async function refreshCurrent() {
-  if (!state.currentId) return
-  const detail = await api.getProject(state.currentId)
+  const id = state.currentId
+  if (!id) return
+  const detail = await api.getProject(id)
   const conversation = await api.getConversation(detail.project.coordinatorId)
+  // The user may have switched projects while this was loading; a late answer is stale.
+  if (state.currentId !== id) return
   state.detail = detail
   state.messages = conversation.messages
   state.todo = conversation.todo
@@ -68,25 +73,31 @@ export async function answerAttention(id: string, choice: number) {
   await api.answerAttention(id, choice).catch(report)
 }
 
-// Coalesce bursts of events into one refresh per frame.
+// Coalesce bursts of events into one refresh per frame, remembering every project touched.
 let pending = false
+const touched = new Set<string>()
 function onEvent(event: AnyStoredEvent) {
+  touched.add(event.projectId)
   if (pending) return
   pending = true
   requestAnimationFrame(() => {
     pending = false
+    const current = state.currentId !== null && touched.has(state.currentId)
+    touched.clear()
     void refreshProjects().catch(report)
-    if (event.projectId === state.currentId) void refreshCurrent().catch(report)
+    if (current) void refreshCurrent().catch(report)
   })
 }
 
 export async function start() {
+  let lastSeq = 0
   try {
-    await refreshProjects()
+    lastSeq = await refreshProjects()
     const first = state.projects[0]
     if (first) await openProject(first.id)
   } catch (error) {
     report(error)
   }
-  followEvents(onEvent, (connected) => (state.connected = connected))
+  // Follow from the state just loaded; anything older is already on screen.
+  followEvents(lastSeq, onEvent, (status) => (state.stream = status))
 }

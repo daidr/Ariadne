@@ -29,7 +29,8 @@ export function loadToken(home: string): string {
 export function loadConfig(env: Record<string, string | undefined> = process.env): ServerConfig {
   const home = env.ARIADNE_HOME ?? join(homedir(), '.ariadne')
   mkdirSync(home, { recursive: true, mode: 0o700 })
-  const webDist = new URL('../../web/dist', import.meta.url).pathname
+  // A path, not a URL pathname: those are percent-encoded and break on non-ASCII directories.
+  const webDist = join(import.meta.dir, '../../web/dist')
   return {
     home,
     databasePath: join(home, 'ariadne.sqlite'),

@@ -12,7 +12,14 @@ import { newId } from './ids'
 import { defaultProjections, dropProjectionTables } from './projections'
 import { needsUser, threadStage } from './stage'
 import { EventStore, type EventListener } from './store'
-import type { AttentionView, MessageView, ProjectView, ThreadView, TodoView } from './views'
+import type {
+  AttentionView,
+  MessageView,
+  NeedsMeItem,
+  ProjectView,
+  ThreadView,
+  TodoView,
+} from './views'
 
 interface ProjectRow {
   id: string
@@ -136,6 +143,11 @@ export class Ariadne {
     return this.store.read(options)
   }
 
+  /** Sequence number of the newest event; clients follow the stream from here. */
+  lastSeq(): number {
+    return this.store.lastSeq()
+  }
+
   rebuildProjections(): void {
     this.store.rebuild(dropProjectionTables)
   }
@@ -183,6 +195,24 @@ export class Ariadne {
       .map(toAttention)
   }
 
+  /** The project's "needs me" list: open attentions first, then threads waiting on the user. */
+  listNeedsMe(projectId: string): NeedsMeItem[] {
+    const threads = this.listThreads(projectId)
+    const byId = new Map(threads.map((thread) => [thread.id, thread]))
+    const attentions = this.listOpenAttentions(projectId)
+    const asked = new Set(attentions.map((a) => a.threadId))
+    return [
+      ...attentions.map((attention): NeedsMeItem => ({
+        kind: 'attention',
+        attention,
+        thread: attention.threadId ? (byId.get(attention.threadId) ?? null) : null,
+      })),
+      ...threads
+        .filter((thread) => needsUser(thread.stage) && !asked.has(thread.id))
+        .map((thread): NeedsMeItem => ({ kind: 'thread', thread })),
+    ]
+  }
+
   listMessages(conversationId: string): MessageView[] {
     return this.db
       .query<MessageRow, [string]>('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id')
@@ -225,12 +255,14 @@ export class Ariadne {
 
   createThread(projectId: string, input: { title: string; nodeId?: string | null }): ThreadView {
     this.getProject(projectId)
+    const title = input.title.trim()
+    if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
     const threadId = newId('thr')
     this.store.append([
       {
         type: 'thread.created',
         projectId,
-        data: { threadId, title: input.title.trim(), nodeId: input.nodeId ?? null },
+        data: { threadId, title, nodeId: input.nodeId ?? null },
       },
     ])
     return this.getThread(threadId)
@@ -341,6 +373,10 @@ export class Ariadne {
   }
 
   markRead(conversationId: string, upTo: string): void {
+    const message = this.getMessage(upTo)
+    if (message.conversationId !== conversationId) {
+      throw new DomainError('error.notFound', { what: upTo })
+    }
     const projectId = this.projectOfMessage(upTo)
     this.store.append([{ type: 'message.read', projectId, data: { conversationId, upTo } }])
   }
@@ -383,20 +419,13 @@ export class Ariadne {
   }
 
   private toProject(row: ProjectRow): ProjectView {
-    const openAttentions =
-      this.db
-        .query<{ n: number }, [string]>(
-          'SELECT count(*) AS n FROM attentions WHERE project_id = ? AND answered = 0 AND thread_id IS NULL',
-        )
-        .get(row.id)?.n ?? 0
-    const waitingThreads = this.listThreads(row.id).filter((t) => needsUser(t.stage)).length
     return {
       id: row.id,
       name: row.name,
       coordinatorId: row.coordinator_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      needsMe: openAttentions + waitingThreads,
+      needsMe: this.listNeedsMe(row.id).length,
     }
   }
 }

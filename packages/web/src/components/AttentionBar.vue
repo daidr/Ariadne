@@ -1,19 +1,13 @@
 <script setup lang="ts">
 import { DouBadge, DouButton, DouEmpty, DouPopover, DouText } from 'dou-ui'
-import { needsUser } from '@ariadne/core/stage'
 import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { answerAttention, state } from '../store'
 
-const attentions = computed(() => state.detail?.attentions ?? [])
-const waitingThreads = computed(() =>
-  (state.detail?.threads ?? []).filter(
-    (thread) => needsUser(thread.stage) && !attentions.value.some((a) => a.threadId === thread.id),
-  ),
-)
-// The badge equals the length of the list it opens.
-const count = computed(() => attentions.value.length + waitingThreads.value.length)
+// The server builds the list; the badge is its length, so the two cannot disagree.
+const items = computed(() => state.detail?.needsMe ?? [])
+const count = computed(() => items.value.length)
 </script>
 
 <template>
@@ -25,28 +19,33 @@ const count = computed(() => attentions.value.length + waitingThreads.value.leng
     </DouButton>
     <template #content>
       <div v-if="count" class="attention-list">
-        <div v-for="attention in attentions" :key="attention.id" class="attention">
-          <DouText weight="medium">{{ attention.question }}</DouText>
-          <div class="attention-options">
-            <DouButton
-              v-for="(option, index) in attention.options"
-              :key="index"
-              size="sm"
-              :variant="index === attention.recommended ? 'solid' : 'outline'"
-              :tone="index === attention.recommended ? 'primary' : 'neutral'"
-              :title="option.consequence"
-              @click="answerAttention(attention.id, index)"
-            >
-              {{ option.label }}
-            </DouButton>
+        <template v-for="item in items">
+          <div v-if="item.kind === 'attention'" :key="item.attention.id" class="attention">
+            <DouText v-if="item.thread" variant="secondary" size="sm" truncate>
+              {{ item.thread.title }}
+            </DouText>
+            <DouText weight="medium">{{ item.attention.question }}</DouText>
+            <div class="attention-options">
+              <DouButton
+                v-for="(option, index) in item.attention.options"
+                :key="index"
+                size="sm"
+                :variant="index === item.attention.recommended ? 'solid' : 'outline'"
+                :tone="index === item.attention.recommended ? 'primary' : 'neutral'"
+                :title="option.consequence"
+                @click="answerAttention(item.attention.id, index)"
+              >
+                {{ option.label }}
+              </DouButton>
+            </div>
           </div>
-        </div>
-        <div v-for="thread in waitingThreads" :key="thread.id" class="attention">
-          <DouText weight="medium">{{ thread.title }}</DouText>
-          <DouText variant="secondary" size="sm">
-            {{ t(`thread.stage.${thread.stage}`) }} · {{ thread.lastSummary }}
-          </DouText>
-        </div>
+          <div v-else :key="item.thread.id" class="attention">
+            <DouText weight="medium">{{ item.thread.title }}</DouText>
+            <DouText variant="secondary" size="sm">
+              {{ t(`thread.stage.${item.thread.stage}`) }} · {{ item.thread.lastSummary }}
+            </DouText>
+          </div>
+        </template>
       </div>
       <DouEmpty v-else size="sm" :description="t('attention.empty')" />
     </template>

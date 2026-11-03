@@ -1,7 +1,7 @@
 import type { ReportKind } from './events'
 
 /** What a thread waits on. The first matching rule wins; see docs/architecture.md. */
-export type ThreadStage = 'answer' | 'review' | 'blocked' | 'queued' | 'working' | 'idle' | 'done'
+export type ThreadStage = 'answer' | 'review' | 'blocked' | 'done' | 'queued' | 'idle' | 'working'
 
 export interface StageFacts {
   openAttentions: number
@@ -10,10 +10,12 @@ export interface StageFacts {
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
-  if (facts.lastReport === 'done') return 'done'
+  // An unanswered question outranks everything, even `done`: the thread is not finished
+  // for the user while it still asks them something.
   if (facts.openAttentions > 0) return 'answer'
   if (facts.lastReport === 'ready') return 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
+  if (facts.lastReport === 'done') return 'done'
   if (!facts.started) return 'queued'
   if (facts.lastReport === 'waiting') return 'idle'
   return 'working'

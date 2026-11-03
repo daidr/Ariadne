@@ -1,7 +1,7 @@
 import type {
   AnyStoredEvent,
-  AttentionView,
   MessageView,
+  NeedsMeItem,
   ProjectView,
   ThreadView,
   TodoView,
@@ -64,11 +64,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export interface ProjectDetail {
   project: ProjectView
   threads: ThreadView[]
-  attentions: AttentionView[]
+  needsMe: NeedsMeItem[]
 }
 
 export const api = {
-  listProjects: () => request<{ projects: ProjectView[] }>('GET', '/api/projects'),
+  listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
@@ -85,16 +85,63 @@ export const api = {
     request<void>('POST', `/api/attentions/${id}/answer`, { choice }),
 }
 
-/** Follow the event log. EventSource reconnects by itself and resumes from the last id. */
+export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
+
+/**
+ * Follow the event log from `afterSeq`. EventSource retries network drops on its own but
+ * gives up for good on a non-200 answer (a 401, or a 502 while the dev server restarts),
+ * so a closed source is reopened here with backoff, resuming after the last event seen.
+ */
 export function followEvents(
+  afterSeq: number,
   onEvent: (event: AnyStoredEvent) => void,
-  onStatus: (connected: boolean) => void,
+  onStatus: (status: StreamStatus) => void,
 ): () => void {
-  const source = new EventSource(`/api/events?token=${encodeURIComponent(token() ?? '')}`)
-  source.addEventListener('open', () => onStatus(true))
-  source.addEventListener('error', () => onStatus(false))
-  source.addEventListener('ariadne', (message) => {
-    onEvent(JSON.parse((message as MessageEvent<string>).data))
-  })
-  return () => source.close()
+  let lastSeq = afterSeq
+  let source: EventSource | null = null
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let delay = 500
+  let stopped = false
+
+  const open = () => {
+    const query = `afterSeq=${lastSeq}&token=${encodeURIComponent(token() ?? '')}`
+    const current = new EventSource(`/api/events?${query}`)
+    source = current
+    current.addEventListener('open', () => {
+      delay = 500
+      onStatus('open')
+    })
+    current.addEventListener('ariadne', (message) => {
+      const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
+      lastSeq = Math.max(lastSeq, event.seq)
+      onEvent(event)
+    })
+    current.addEventListener('error', () => {
+      if (stopped) return
+      if (current.readyState !== EventSource.CLOSED) {
+        onStatus('lost')
+        return
+      }
+      // EventSource hides the status code; ask a plain endpoint whether the token is the reason.
+      void api.listProjects().then(
+        () => schedule('lost'),
+        (error) =>
+          schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost'),
+      )
+    })
+  }
+
+  const schedule = (status: StreamStatus) => {
+    onStatus(status)
+    if (stopped || status === 'unauthorized') return
+    retry = setTimeout(open, delay)
+    delay = Math.min(delay * 2, 10_000)
+  }
+
+  open()
+  return () => {
+    stopped = true
+    clearTimeout(retry)
+    source?.close()
+  }
 }

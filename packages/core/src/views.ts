@@ -7,7 +7,7 @@ export interface ProjectView {
   coordinatorId: string
   createdAt: number
   updatedAt: number
-  /** Open attentions plus threads waiting on the user: the "needs me" count. */
+  /** Length of the project's "needs me" list, see `NeedsMeItem`. */
   needsMe: number
 }
 
@@ -51,3 +51,12 @@ export interface TodoView {
   items: TodoItem[]
   updatedAt: number
 }
+
+/**
+ * One entry of the "needs me" list. Every open attention is an entry; a thread that waits
+ * on the user without an open attention (review, blocked) is an entry of its own. Counts
+ * shown anywhere are the length of this list.
+ */
+export type NeedsMeItem =
+  | { kind: 'attention'; attention: AttentionView; thread: ThreadView | null }
+  | { kind: 'thread'; thread: ThreadView }
