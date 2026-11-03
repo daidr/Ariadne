@@ -1,6 +1,16 @@
 export { PluginHost } from './plugins'
-export { coordinatorPrompt, threadPrompt } from './prompts'
+export { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 export { runTurn, type ResolvedModel, type TurnOptions } from './runner'
 export { Scheduler, type SchedulerOptions } from './scheduler'
-export { coordinatorTools, threadTools, ToolInputError, type Tool, type ToolContext } from './tools'
+export { resolvePlanOps } from './plan-tools'
+export {
+  coordinatorTools,
+  threadTools,
+  toolsFor,
+  ToolInputError,
+  type Tool,
+  type ToolContext,
+} from './tools'
+export { shellQuote } from './workspace-tools'
+export { WorkspaceManager } from './workspaces'
 export { describeNote, toChatMessages } from './transcript'

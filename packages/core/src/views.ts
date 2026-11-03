@@ -1,6 +1,11 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
+  ArtifactKind,
   AttentionOption,
+  PlanAuthor,
+  PlanNodeKind,
+  PlanOp,
+  ProjectSource,
   Author,
   MessageKind,
   ReportKind,
@@ -18,6 +23,8 @@ export interface ProjectView {
   updatedAt: number
   /** Length of the project's "needs me" list, see `NeedsMeItem`. */
   needsMe: number
+  /** Where threads work; `null` until the user picks a directory. */
+  source: ProjectSource | null
 }
 
 export interface ThreadView {
@@ -28,6 +35,8 @@ export interface ThreadView {
   stage: ThreadStage
   lastReport: ReportKind | null
   lastSummary: string | null
+  /** The thread's prepared workspace, once it has used one. */
+  workspace: { label: string; branch: string | null } | null
   createdAt: number
   updatedAt: number
 }
@@ -117,3 +126,87 @@ export type TranscriptNote =
       text: string | null
     }
   | { type: 'user-in-thread'; threadId: string; content: string }
+  | { type: 'upstream-done'; threadId: string; nodeTitle: string; summary: string }
+  | { type: 'artifact-edited'; artifactId: string; title: string; version: number }
+  | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
+  | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
+
+/**
+ * How far a plan node is, from the threads working on it: `none` without threads,
+ * `wait` when one needs the user, `error` when one is blocked, `finish` when all are done.
+ */
+export type PlanNodeStatus = 'none' | 'process' | 'wait' | 'error' | 'finish'
+
+export interface PlanNodeView {
+  id: string
+  kind: PlanNodeKind
+  title: string
+  description: string
+  acceptance: string
+  /** Nodes this one depends on. */
+  dependsOn: string[]
+  status: PlanNodeStatus
+  threads: { id: string; title: string; stage: ThreadStage }[]
+  /** The revision that last changed the node, to highlight what the coordinator changed. */
+  changedIn: string | null
+}
+
+export interface PlanRevisionView {
+  id: string
+  author: PlanAuthor
+  reason: string
+  ops: PlanOp[]
+  revertOf: string | null
+  revertedBy: string | null
+  createdAt: number
+}
+
+export interface PlanProposalView {
+  id: string
+  attentionId: string
+  reason: string
+  ops: PlanOp[]
+  /** What the change does, one line per op, against the plan as it is now. */
+  changes: LocalizedMessage[]
+  /**
+   * `open` waits on the user. `stale` means the user agreed but the plan had moved on, so
+   * it did not take effect; it stays visible until the plan changes again.
+   */
+  status: 'open' | 'stale'
+  staleReason: string | null
+  createdAt: number
+}
+
+export interface PlanView {
+  projectId: string
+  nodes: PlanNodeView[]
+  /** Newest first. */
+  revisions: PlanRevisionView[]
+  /** Changes waiting on the user, and agreed ones that no longer applied. */
+  proposals: PlanProposalView[]
+}
+
+export interface ArtifactSummary {
+  id: string
+  projectId: string
+  kind: ArtifactKind
+  title: string
+  nodeId: string | null
+  version: number
+  createdBy: string
+  updatedBy: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ArtifactView extends ArtifactSummary {
+  content: string
+}
+
+export interface ArtifactVersionView {
+  version: number
+  title: string
+  author: string
+  reason: string
+  createdAt: number
+}

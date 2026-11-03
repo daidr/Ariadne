@@ -1,46 +1,13 @@
-import { DomainError, type Ariadne, type ReportKind, type TodoItem } from '@ariadne/core'
-import type { ToolSpec } from '@ariadne/plugin-sdk'
+import { DomainError, type ReportKind, type TodoItem } from '@ariadne/core'
+import { artifactTools } from './artifact-tools'
+import { planTools, readPlan } from './plan-tools'
+import { json, optionalInt, str, ToolInputError, type Tool } from './tool-helpers'
+import { workspaceTools } from './workspace-tools'
 
-export interface ToolContext {
-  app: Ariadne
-  projectId: string
-  conversationId: string
-  role: 'coordinator' | 'thread'
-  signal: AbortSignal
-}
-
-export interface ToolResult {
-  content: string
-  isError?: boolean
-}
-
-export interface Tool {
-  spec: ToolSpec
-  run(args: Record<string, unknown>, ctx: ToolContext): ToolResult | Promise<ToolResult>
-}
-
-/** A bad argument the model can fix; it gets the message back as an error result. */
-export class ToolInputError extends Error {}
-
-function str(args: Record<string, unknown>, key: string): string {
-  const value = args[key]
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new ToolInputError(`"${key}" must be a non-empty string`)
-  }
-  return value
-}
-
-function optionalInt(args: Record<string, unknown>, key: string): number | null {
-  const value = args[key]
-  if (value === undefined || value === null) return null
-  if (!Number.isInteger(value)) throw new ToolInputError(`"${key}" must be an integer`)
-  return value as number
-}
+export { ToolInputError, type Tool, type ToolContext, type ToolResult } from './tool-helpers'
 
 const TODO_STATUSES = ['doing', 'next', 'waiting', 'done'] as const
 const REPORT_KINDS = ['progress', 'waiting', 'ready', 'blocked', 'failed', 'done'] as const
-
-const json = (value: unknown): ToolResult => ({ content: JSON.stringify(value) })
 
 const updateTodo: Tool = {
   spec: {
@@ -211,12 +178,18 @@ const createThread: Tool = {
       properties: {
         title: { type: 'string', description: 'Three to six words, the goal first.' },
         brief: { type: 'string' },
+        nodeId: {
+          type: 'string',
+          description:
+            'The plan node this thread works on. It sees the node, and what its upstream nodes produced.',
+        },
       },
       required: ['title', 'brief'],
     },
   },
   run(args, ctx) {
-    const thread = ctx.app.createThread(ctx.projectId, { title: str(args, 'title') })
+    const nodeId = typeof args.nodeId === 'string' && args.nodeId ? args.nodeId : null
+    const thread = ctx.app.createThread(ctx.projectId, { title: str(args, 'title'), nodeId })
     ctx.app.postMessage(ctx.projectId, {
       conversationId: thread.id,
       author: 'coordinator',
@@ -265,6 +238,7 @@ const listThreads: Tool = {
       ctx.app.listThreads(ctx.projectId).map((t) => ({
         id: t.id,
         title: t.title,
+        nodeId: t.nodeId,
         stage: t.stage,
         lastReport: t.lastReport,
         lastSummary: t.lastSummary,
@@ -321,6 +295,22 @@ export const coordinatorTools: Tool[] = [
   readThread,
   listMessages,
   editMessage,
+  ...planTools,
+  ...artifactTools,
 ]
 
-export const threadTools: Tool[] = [updateTodo, askUser, report, listMessages, editMessage]
+export const threadTools: Tool[] = [
+  updateTodo,
+  askUser,
+  report,
+  listMessages,
+  editMessage,
+  readPlan,
+  ...artifactTools,
+]
+
+/** A thread's tools; the workspace tools only when its project has a directory to work in. */
+export function toolsFor(role: 'coordinator' | 'thread', hasWorkspace: boolean): Tool[] {
+  if (role === 'coordinator') return coordinatorTools
+  return hasWorkspace ? [...threadTools, ...workspaceTools] : threadTools
+}

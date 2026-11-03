@@ -1,8 +1,12 @@
 import type {
   AnyStoredEvent,
+  ArtifactSummary,
+  ArtifactVersionView,
+  ArtifactView,
   ConversationView,
   MessageView,
   NeedsMeItem,
+  PlanView,
   ProjectView,
   ThreadView,
   TodoView,
@@ -92,6 +96,11 @@ export interface ModelSettings extends ModelSettingsInput {
   providers: (ModelProviderInput & { secretsSet: string[] })[]
 }
 
+export interface ArtifactDetail {
+  artifact: ArtifactView
+  versions: ArtifactVersionView[]
+}
+
 export const api = {
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
@@ -116,6 +125,27 @@ export const api = {
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
   answerAttention: (id: string, choice: number) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { choice }),
+  setSource: (projectId: string, path: string | null) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { path }),
+  getPlan: (projectId: string) =>
+    request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
+  revertPlan: (projectId: string, revisionId: string, reason: string) =>
+    request<{ plan: PlanView }>(
+      'POST',
+      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
+      { reason },
+    ),
+  listArtifacts: (projectId: string) =>
+    request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
+  getArtifact: (id: string, version?: number) =>
+    request<ArtifactDetail>(
+      'GET',
+      `/api/artifacts/${id}${version === undefined ? '' : `?version=${version}`}`,
+    ),
+  saveArtifact: (
+    id: string,
+    input: { content: string; baseVersion: number; reason: string; title?: string },
+  ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
 }
 
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'

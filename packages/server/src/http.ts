@@ -12,7 +12,9 @@ export function errorResponse(error: LocalizedMessage, status: number): Response
 /** Map domain errors to HTTP; anything else is a bug and becomes a 500. */
 export function toErrorResponse(error: unknown): Response {
   if (error instanceof DomainError) {
-    return errorResponse(error.toLocalized(), error.code === 'error.notFound' ? 404 : 400)
+    const status =
+      error.code === 'error.notFound' ? 404 : error.code === 'error.artifactConflict' ? 409 : 400
+    return errorResponse(error.toLocalized(), status)
   }
   console.error(error)
   return json({ error: { key: 'error.invalidBody', params: { reason: 'internal' } } }, 500)

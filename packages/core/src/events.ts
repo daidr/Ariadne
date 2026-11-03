@@ -44,11 +44,54 @@ export interface TokenUsage {
  */
 export type TurnOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
+export type PlanNodeKind = 'task' | 'milestone' | 'decision'
+
+export interface PlanNodeFields {
+  kind: PlanNodeKind
+  title: string
+  description: string
+  /** How the user will judge the node finished. */
+  acceptance: string
+}
+
+/**
+ * One change to the plan graph. Node ids are assigned before the event is written, so
+ * replaying a revision always produces the same graph. `link` makes `to` depend on `from`.
+ */
+export type PlanOp =
+  | ({ op: 'add'; id: string } & PlanNodeFields)
+  | ({
+      op: 'update'
+      id: string
+      /**
+       * Values the fields must still have, so undoing an edit refuses to overwrite a later
+       * edit of the same field.
+       */
+      expect?: Partial<Omit<PlanNodeFields, 'kind'>>
+    } & Partial<Omit<PlanNodeFields, 'kind'>>)
+  | { op: 'remove'; id: string }
+  | { op: 'link'; from: string; to: string }
+  | { op: 'unlink'; from: string; to: string }
+
+export type PlanAuthor = 'user' | 'coordinator'
+
+/** Where a project's work happens. Only local directories for now. */
+export interface ProjectSource {
+  kind: string
+  settings: Record<string, unknown>
+}
+
+export type ArtifactKind = 'document'
+
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
   'project.created': { name: string; coordinatorId: string }
   'project.renamed': { name: string }
+  /** The project's context source; `null` removes it. */
+  'project.source.set': { source: ProjectSource | null }
   'thread.created': { threadId: string; title: string; nodeId: string | null }
+  /** A thread's workspace was prepared, e.g. a git worktree on its own branch. */
+  'workspace.opened': { threadId: string; label: string; branch: string | null }
   'thread.started': { threadId: string }
   'thread.reported': { threadId: string; report: ReportKind; summary: string }
   'attention.opened': {
@@ -102,6 +145,49 @@ export interface EventMap {
   }
   /** The user asked a conversation to try again after a failed turn. */
   'turn.requested': { conversationId: string }
+  /**
+   * A change to the plan graph took effect. `revertOf` names the revision it undoes.
+   * `proposalId` names the proposal it carries out, after the user agreed.
+   */
+  'plan.revised': {
+    revisionId: string
+    author: PlanAuthor
+    reason: string
+    ops: PlanOp[]
+    revertOf: string | null
+    proposalId: string | null
+  }
+  /**
+   * A change big enough to need the user's yes (removing nodes, changing acceptance or
+   * milestones). It waits on an attention whose first option applies it.
+   */
+  'plan.proposed': {
+    proposalId: string
+    attentionId: string
+    reason: string
+    ops: PlanOp[]
+    /** Set when the proposal undoes an earlier revision. */
+    revertOf: string | null
+  }
+  /** The user agreed, but the plan had moved on and the proposal no longer applied. */
+  'plan.proposal.stale': { proposalId: string; reason: string }
+  'artifact.created': {
+    artifactId: string
+    kind: ArtifactKind
+    title: string
+    nodeId: string | null
+    /** The coordinator, a thread id, or `user`. */
+    author: string
+    content: string
+  }
+  'artifact.revised': {
+    artifactId: string
+    version: number
+    title: string
+    content: string
+    author: string
+    reason: string
+  }
 }
 
 export type EventType = keyof EventMap

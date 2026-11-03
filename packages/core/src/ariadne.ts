@@ -3,9 +3,13 @@ import { DomainError } from './errors'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   AnyStoredEvent,
+  ArtifactKind,
   AttentionOption,
   Author,
   MessageKind,
+  PlanAuthor,
+  PlanOp,
+  ProjectSource,
   ReportKind,
   TodoItem,
   TokenUsage,
@@ -13,15 +17,24 @@ import type {
   TurnOutcome,
 } from './events'
 import { newId } from './ids'
-import { defaultProjections, dropProjectionTables } from './projections'
-import { needsUser, threadStage } from './stage'
+import { applyOps, describePlanOps, needsConfirmation } from './plan'
+import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
+import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
 import type {
+  ArtifactSummary,
+  ArtifactVersionView,
+  ArtifactView,
   AttentionView,
   ConversationRole,
   ConversationView,
   MessageView,
   NeedsMeItem,
+  PlanNodeStatus,
+  PlanNodeView,
+  PlanProposalView,
+  PlanRevisionView,
+  PlanView,
   ProjectView,
   ThreadView,
   TodoView,
@@ -32,7 +45,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 5
+export const PROJECTION_VERSION = 7
 
 interface ConversationRow {
   id: string
@@ -76,9 +89,63 @@ interface ProjectRow {
   id: string
   name: string
   coordinator_id: string
+  source: string | null
   created_at: number
   updated_at: number
 }
+
+interface ArtifactRow {
+  id: string
+  project_id: string
+  kind: ArtifactKind
+  title: string
+  node_id: string | null
+  version: number
+  content: string
+  created_by: string
+  updated_by: string
+  created_at: number
+  updated_at: number
+}
+
+function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: row.kind,
+    title: row.title,
+    nodeId: row.node_id,
+    version: row.version,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+/** A plan node's status from the stages of the threads working on it. */
+function nodeStatus(stages: ThreadStage[]): PlanNodeStatus {
+  if (!stages.length) return 'none'
+  if (stages.some((stage) => stage === 'blocked')) return 'error'
+  if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'wait'
+  if (stages.every((stage) => stage === 'done')) return 'finish'
+  return 'process'
+}
+
+/**
+ * How a change that needs the user's yes is put to them. `question` receives what the
+ * change does, one line per op, so the user sees exactly what they agree to.
+ */
+export interface PlanConfirmation {
+  question: (changes: LocalizedMessage[]) => string
+  apply: AttentionOption
+  keep: AttentionOption
+}
+
+/** What `revisePlan` did: applied at once, or waiting on the user's yes. */
+export type PlanChange =
+  | { status: 'applied'; revisionId: string }
+  | { status: 'proposed'; proposalId: string; attentionId: string }
 
 interface ThreadRow {
   id: string
@@ -88,6 +155,8 @@ interface ThreadRow {
   started: number
   last_report: ReportKind | null
   last_summary: string | null
+  workspace_label: string | null
+  workspace_branch: string | null
   created_at: number
   updated_at: number
   open_attentions: number
@@ -138,6 +207,10 @@ function toThread(row: ThreadRow): ThreadView {
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
+    workspace:
+      row.workspace_label === null
+        ? null
+        : { label: row.workspace_label, branch: row.workspace_branch },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -376,6 +449,9 @@ export class Ariadne {
     this.getProject(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
+    if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
+      throw new DomainError('error.notFound', { what: input.nodeId })
+    }
     const threadId = newId('thr')
     this.store.append([
       {
@@ -444,13 +520,47 @@ export class Ariadne {
     if (choice !== null && !toAttention(row).options[choice]) {
       throw new DomainError('error.invalidBody', { reason: 'choice' })
     }
-    this.store.append([
+    const events: Parameters<EventStore['append']>[0] = [
       {
         type: 'attention.answered',
         projectId: row.project_id,
         data: { attentionId, choice, text: answer.text ?? null },
       },
-    ])
+    ]
+    // The first option of a plan proposal applies it, if it still fits the plan as it is now.
+    const proposal = this.db
+      .query<{ id: string; reason: string; ops: string; revert_of: string | null }, [string]>(
+        "SELECT id, reason, ops, revert_of FROM plan_proposals WHERE attention_id = ? AND status = 'open'",
+      )
+      .get(attentionId)
+    if (proposal && choice === 0) {
+      const ops = JSON.parse(proposal.ops) as PlanOp[]
+      try {
+        applyOps(loadPlanGraph(this.db, row.project_id), ops)
+        events.push({
+          type: 'plan.revised',
+          projectId: row.project_id,
+          data: {
+            revisionId: newId('rev'),
+            author: 'coordinator',
+            reason: proposal.reason,
+            ops,
+            revertOf: proposal.revert_of,
+            proposalId: proposal.id,
+          },
+        })
+      } catch (error) {
+        if (!(error instanceof DomainError)) throw error
+        // The plan moved on since it was proposed. Say so: the user sees it did not take
+        // effect, and the coordinator is woken to propose again.
+        events.push({
+          type: 'plan.proposal.stale',
+          projectId: row.project_id,
+          data: { proposalId: proposal.id, reason: String(error.params?.reason ?? error.code) },
+        })
+      }
+    }
+    this.store.append(events)
   }
 
   postMessage(
@@ -516,6 +626,346 @@ export class Ariadne {
     this.assertConversationIn(projectId, conversationId)
     this.store.append([{ type: 'todo.updated', projectId, data: { conversationId, items } }])
     return this.getTodo(conversationId)
+  }
+
+  setProjectSource(projectId: string, source: ProjectSource | null): ProjectView {
+    this.getProject(projectId)
+    this.store.append([{ type: 'project.source.set', projectId, data: { source } }])
+    return this.getProject(projectId)
+  }
+
+  /** Record that a thread's workspace is ready, so the user can see where it works. */
+  recordWorkspace(threadId: string, workspace: { label: string; branch: string | null }): void {
+    const thread = this.getThread(threadId)
+    if (
+      thread.workspace?.label === workspace.label &&
+      thread.workspace.branch === workspace.branch
+    ) {
+      return
+    }
+    this.store.append([
+      { type: 'workspace.opened', projectId: thread.projectId, data: { threadId, ...workspace } },
+    ])
+  }
+
+  // ---- plan ----
+
+  getPlan(projectId: string): PlanView {
+    this.getProject(projectId)
+    const graph = loadPlanGraph(this.db, projectId)
+    const changedIn = new Map(
+      this.db
+        .query<{ id: string; changed_in: string | null }, [string]>(
+          'SELECT id, changed_in FROM plan_nodes WHERE project_id = ?',
+        )
+        .all(projectId)
+        .map((row) => [row.id, row.changed_in]),
+    )
+    const threads = this.listThreads(projectId)
+    const dependsOn = new Map<string, string[]>()
+    for (const key of graph.edges) {
+      const [from = '', to = ''] = key.split('>')
+      dependsOn.set(to, [...(dependsOn.get(to) ?? []), from])
+    }
+    const nodes = graph.order.map((id): PlanNodeView => {
+      const node = graph.nodes.get(id) as NonNullable<ReturnType<typeof graph.nodes.get>>
+      const onNode = threads.filter((thread) => thread.nodeId === id)
+      return {
+        id,
+        ...node,
+        dependsOn: dependsOn.get(id) ?? [],
+        status: nodeStatus(onNode.map((thread) => thread.stage)),
+        threads: onNode.map((thread) => ({
+          id: thread.id,
+          title: thread.title,
+          stage: thread.stage,
+        })),
+        changedIn: changedIn.get(id) ?? null,
+      }
+    })
+    const revisions = this.db
+      .query<
+        {
+          id: string
+          author: PlanAuthor
+          reason: string
+          ops: string
+          revert_of: string | null
+          reverted_by: string | null
+          created_at: number
+        },
+        [string]
+      >('SELECT * FROM plan_revisions WHERE project_id = ? ORDER BY seq DESC LIMIT 50')
+      .all(projectId)
+      .map((row): PlanRevisionView => ({
+        id: row.id,
+        author: row.author,
+        reason: row.reason,
+        ops: JSON.parse(row.ops),
+        revertOf: row.revert_of,
+        revertedBy: row.reverted_by,
+        createdAt: row.created_at,
+      }))
+    const proposals = this.db
+      .query<
+        {
+          id: string
+          attention_id: string
+          reason: string
+          ops: string
+          status: PlanProposalView['status']
+          stale_reason: string | null
+          created_at: number
+        },
+        [string]
+      >(
+        "SELECT * FROM plan_proposals WHERE project_id = ? AND status IN ('open', 'stale') ORDER BY id",
+      )
+      .all(projectId)
+      .map((row): PlanProposalView => {
+        const ops = JSON.parse(row.ops) as PlanOp[]
+        return {
+          id: row.id,
+          attentionId: row.attention_id,
+          reason: row.reason,
+          ops,
+          changes: this.describePlanChange(projectId, ops),
+          status: row.status,
+          staleReason: row.stale_reason,
+          createdAt: row.created_at,
+        }
+      })
+    return { projectId, nodes, revisions, proposals }
+  }
+
+  /**
+   * Change the plan. Small changes apply at once and can be reverted. When the coordinator
+   * removes nodes, changes acceptance or touches a milestone, the change waits on the user:
+   * `confirmation` words the question, and its first option applies the change.
+   */
+  revisePlan(
+    projectId: string,
+    input: { author: PlanAuthor; reason: string; ops: PlanOp[]; confirmation?: PlanConfirmation },
+  ): PlanChange {
+    this.getProject(projectId)
+    const reason = input.reason.trim()
+    if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
+    if (!input.ops.length) throw new DomainError('error.invalidBody', { reason: 'ops' })
+    return this.changePlan(projectId, input.author, reason, input.ops, null, input.confirmation)
+  }
+
+  /** What a change would do, one line per op, as the user would read it. */
+  describePlanChange(projectId: string, ops: PlanOp[]): LocalizedMessage[] {
+    const threads = this.listThreads(projectId)
+    return describePlanOps(
+      loadPlanGraph(this.db, projectId),
+      ops,
+      (nodeId) => threads.filter((thread) => thread.nodeId === nodeId).length,
+    )
+  }
+
+  /**
+   * Undo a revision, as long as nothing since then conflicts with undoing it. Undoing is a
+   * change like any other: when the coordinator's undo would remove nodes or change
+   * acceptance or milestones, it waits on the user too.
+   */
+  revertPlanRevision(
+    projectId: string,
+    revisionId: string,
+    author: PlanAuthor,
+    reason: string,
+    confirmation?: PlanConfirmation,
+  ): PlanChange {
+    const row = this.db
+      .query<{ inverse: string; reverted_by: string | null; reason: string }, [string, string]>(
+        'SELECT inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
+      )
+      .get(revisionId, projectId)
+    if (!row) throw new DomainError('error.notFound', { what: revisionId })
+    if (row.reverted_by) throw new DomainError('error.planReverted')
+    const ops = JSON.parse(row.inverse) as PlanOp[]
+    return this.changePlan(
+      projectId,
+      author,
+      reason.trim() || row.reason,
+      ops,
+      revisionId,
+      confirmation,
+    )
+  }
+
+  private changePlan(
+    projectId: string,
+    author: PlanAuthor,
+    reason: string,
+    ops: PlanOp[],
+    revertOf: string | null,
+    confirmation: PlanConfirmation | undefined,
+  ): PlanChange {
+    const graph = loadPlanGraph(this.db, projectId)
+    applyOps(graph, ops)
+    if (author === 'coordinator' && needsConfirmation(graph, ops)) {
+      if (!confirmation) throw new DomainError('error.invalidBody', { reason: 'confirmation' })
+      const proposalId = newId('prp')
+      const attentionId = newId('att')
+      this.store.append([
+        {
+          type: 'attention.opened',
+          projectId,
+          data: {
+            attentionId,
+            threadId: null,
+            question: confirmation.question(this.describePlanChange(projectId, ops)),
+            options: [confirmation.apply, confirmation.keep],
+            recommended: 0,
+          },
+        },
+        {
+          type: 'plan.proposed',
+          projectId,
+          data: { proposalId, attentionId, reason, ops, revertOf },
+        },
+      ])
+      return { status: 'proposed', proposalId, attentionId }
+    }
+    const revisionId = newId('rev')
+    this.store.append([
+      {
+        type: 'plan.revised',
+        projectId,
+        data: { revisionId, author, reason, ops, revertOf, proposalId: null },
+      },
+    ])
+    return { status: 'applied', revisionId }
+  }
+
+  // ---- artifacts ----
+
+  listArtifacts(projectId: string): ArtifactSummary[] {
+    return this.db
+      .query<ArtifactRow, [string]>(
+        'SELECT * FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC, id DESC',
+      )
+      .all(projectId)
+      .map(toArtifactSummary)
+  }
+
+  /** An artifact at its newest version, or at `version`. */
+  getArtifact(artifactId: string, version?: number): ArtifactView {
+    const row = this.db
+      .query<ArtifactRow, [string]>('SELECT * FROM artifacts WHERE id = ?')
+      .get(artifactId)
+    if (!row) throw new DomainError('error.notFound', { what: artifactId })
+    if (version === undefined || version === row.version) {
+      return { ...toArtifactSummary(row), content: row.content }
+    }
+    const old = this.db
+      .query<
+        { title: string; content: string; author: string; created_at: number },
+        [string, number]
+      >(
+        'SELECT title, content, author, created_at FROM artifact_versions WHERE artifact_id = ? AND version = ?',
+      )
+      .get(artifactId, version)
+    if (!old) throw new DomainError('error.notFound', { what: `${artifactId}@${version}` })
+    return {
+      ...toArtifactSummary(row),
+      title: old.title,
+      version,
+      content: old.content,
+      updatedBy: old.author,
+      updatedAt: old.created_at,
+    }
+  }
+
+  listArtifactVersions(artifactId: string): ArtifactVersionView[] {
+    this.getArtifact(artifactId)
+    return this.db
+      .query<
+        { version: number; title: string; author: string; reason: string; created_at: number },
+        [string]
+      >(
+        'SELECT version, title, author, reason, created_at FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC',
+      )
+      .all(artifactId)
+      .map((row) => ({
+        version: row.version,
+        title: row.title,
+        author: row.author,
+        reason: row.reason,
+        createdAt: row.created_at,
+      }))
+  }
+
+  createArtifact(
+    projectId: string,
+    input: {
+      kind: ArtifactKind
+      title: string
+      nodeId?: string | null
+      author: string
+      content: string
+    },
+  ): ArtifactView {
+    this.getProject(projectId)
+    const title = input.title.trim()
+    if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
+    if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
+      throw new DomainError('error.notFound', { what: input.nodeId })
+    }
+    const artifactId = newId('art')
+    this.store.append([
+      {
+        type: 'artifact.created',
+        projectId,
+        data: {
+          artifactId,
+          kind: input.kind,
+          title,
+          nodeId: input.nodeId ?? null,
+          author: input.author,
+          content: input.content,
+        },
+      },
+    ])
+    return this.getArtifact(artifactId)
+  }
+
+  /**
+   * Save a new version. With `baseVersion`, refuse when someone saved in between, so a
+   * user's edit never silently overwrites the agent's (or the other way round).
+   */
+  reviseArtifact(
+    artifactId: string,
+    input: {
+      title?: string
+      content: string
+      author: string
+      reason: string
+      baseVersion?: number
+    },
+  ): ArtifactView {
+    const current = this.getArtifact(artifactId)
+    if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
+      throw new DomainError('error.artifactConflict', { version: current.version })
+    }
+    const title = input.title?.trim() || current.title
+    if (title === current.title && input.content === current.content) return current
+    this.store.append([
+      {
+        type: 'artifact.revised',
+        projectId: current.projectId,
+        data: {
+          artifactId,
+          version: current.version + 1,
+          title,
+          content: input.content,
+          author: input.author,
+          reason: input.reason,
+        },
+      },
+    ])
+    return this.getArtifact(artifactId)
   }
 
   // ---- turns ----
@@ -692,6 +1142,7 @@ export class Ariadne {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       needsMe: this.listNeedsMe(row.id).length,
+      source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
     }
   }
 }

@@ -1,5 +1,5 @@
-import type { Scheduler } from '@ariadne/agent'
-import type { Ariadne } from '@ariadne/core'
+import type { PluginHost, Scheduler } from '@ariadne/agent'
+import { DomainError, type Ariadne } from '@ariadne/core'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
 import {
@@ -20,6 +20,8 @@ export interface HandlerOptions {
   /** Agents and settings; left out in tests that only exercise the domain API. */
   scheduler?: Scheduler
   settings?: SettingsStore
+  /** Context providers, to check a project's directory before saving it. */
+  host?: PluginHost
 }
 
 type Params = Record<string, string>
@@ -38,7 +40,7 @@ function bearer(request: Request, url: URL): string | null {
 }
 
 /** Build the request handler. Kept separate from `Bun.serve` so tests can call it directly. */
-export function createHandler({ app, token, webDist, scheduler, settings }: HandlerOptions) {
+export function createHandler({ app, token, webDist, scheduler, settings, host }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
     routes.push({ method, pattern: new URLPattern({ pathname }), handle })
@@ -57,6 +59,73 @@ export function createHandler({ app, token, webDist, scheduler, settings }: Hand
       needsMe: app.listNeedsMe(projectId),
     }),
   )
+
+  // Where the project's threads work. The directory is checked before it is saved, so a
+  // typo shows up here rather than in a thread's first turn.
+  add('PUT', '/api/projects/:projectId/source', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    if (body.path === null) return json({ project: app.setProjectSource(projectId, null) })
+    const source = {
+      kind: 'local-directory',
+      settings: { path: requireString(body, 'path').trim() },
+    }
+    const provider = host?.contexts.get(source.kind)
+    if (provider) {
+      try {
+        await provider.connect(source.settings as never)
+      } catch (error) {
+        throw new DomainError('error.workspace', {
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+    return json({ project: app.setProjectSource(projectId, source) })
+  })
+
+  add('GET', '/api/projects/:projectId/plan', (_request, { projectId = '' }) =>
+    json({ plan: app.getPlan(projectId) }),
+  )
+
+  add(
+    'POST',
+    '/api/projects/:projectId/plan/revisions/:revisionId/revert',
+    async (request, { projectId = '', revisionId = '' }) => {
+      const body = await readJson(request)
+      const reason = typeof body.reason === 'string' ? body.reason : ''
+      app.revertPlanRevision(projectId, revisionId, 'user', reason)
+      return json({ plan: app.getPlan(projectId) })
+    },
+  )
+
+  add('GET', '/api/projects/:projectId/artifacts', (_request, { projectId = '' }) =>
+    json({ artifacts: app.listArtifacts(projectId) }),
+  )
+
+  add('GET', '/api/artifacts/:artifactId', (_request, { artifactId = '' }, url) => {
+    const given = url.searchParams.get('version')
+    const version = given === null ? undefined : Number(given)
+    if (version !== undefined && !Number.isInteger(version)) throw new BadRequest('version')
+    return json({
+      artifact: app.getArtifact(artifactId, version),
+      versions: app.listArtifactVersions(artifactId),
+    })
+  })
+
+  // The user saves an edit. `baseVersion` is the version they started from.
+  add('PUT', '/api/artifacts/:artifactId', async (request, { artifactId = '' }) => {
+    const body = await readJson(request)
+    const content = body.content
+    if (typeof content !== 'string') throw new BadRequest('content')
+    if (!Number.isInteger(body.baseVersion)) throw new BadRequest('baseVersion')
+    const artifact = app.reviseArtifact(artifactId, {
+      content,
+      author: 'user',
+      reason: typeof body.reason === 'string' ? body.reason : '',
+      baseVersion: body.baseVersion as number,
+      ...(typeof body.title === 'string' ? { title: body.title } : {}),
+    })
+    return json({ artifact, versions: app.listArtifactVersions(artifactId) })
+  })
 
   add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }) =>
     json({

@@ -17,6 +17,12 @@ export interface Workspace {
   id: string
   /** Shown to the user, e.g. a path or `host:path`. */
   label: string
+  /** The branch the workspace works on, when it is a checkout of a repository. */
+  branch: string | null
+  /**
+   * Paths are relative to the workspace root. Implementations refuse paths that leave it,
+   * including through symbolic links, with a `WorkspacePathError`.
+   */
   readFile(path: string): Promise<string>
   writeFile(path: string, content: string): Promise<void>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
@@ -44,4 +50,12 @@ export interface RepoCapability {
   /** `owner/name` or a URL. */
   remote: string
   defaultBranch(): Promise<string>
+}
+
+/** A path that points outside the workspace. */
+export class WorkspacePathError extends Error {
+  constructor(readonly path: string) {
+    super(`${path} is outside the workspace`)
+    this.name = 'WorkspacePathError'
+  }
 }

@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import type { AnyStoredEvent } from './events'
+import type { AnyStoredEvent, PlanNodeFields, PlanOp } from './events'
+import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import type { Projection } from './store'
 
 /** Every projection table, so a rebuild can drop them. */
@@ -11,6 +12,12 @@ export const projectionTables = [
   'todos',
   'conversations',
   'transcript',
+  'plan_nodes',
+  'plan_edges',
+  'plan_revisions',
+  'plan_proposals',
+  'artifacts',
+  'artifact_versions',
 ] as const
 
 export const projectsProjection: Projection = {
@@ -20,6 +27,7 @@ export const projectsProjection: Projection = {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       coordinator_id TEXT NOT NULL,
+      source TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -35,6 +43,13 @@ export const projectsProjection: Projection = {
       case 'project.renamed':
         db.run('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?', [
           event.data.name,
+          event.at,
+          event.projectId,
+        ])
+        break
+      case 'project.source.set':
+        db.run('UPDATE projects SET source = ?, updated_at = ? WHERE id = ?', [
+          event.data.source ? JSON.stringify(event.data.source) : null,
           event.at,
           event.projectId,
         ])
@@ -57,6 +72,8 @@ export const threadsProjection: Projection = {
       started INTEGER NOT NULL DEFAULT 0,
       last_report TEXT,
       last_summary TEXT,
+      workspace_label TEXT,
+      workspace_branch TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -87,6 +104,12 @@ export const threadsProjection: Projection = {
         db.run(
           'UPDATE threads SET last_report = ?, last_summary = ?, updated_at = ? WHERE id = ?',
           [event.data.report, event.data.summary, event.at, event.data.threadId],
+        )
+        break
+      case 'workspace.opened':
+        db.run(
+          'UPDATE threads SET workspace_label = ?, workspace_branch = ?, updated_at = ? WHERE id = ?',
+          [event.data.label, event.data.branch, event.at, event.data.threadId],
         )
         break
     }
@@ -347,6 +370,49 @@ function addEntry(
   }
 }
 
+/**
+ * A thread on a plan node finished: threads working on nodes that depend on it get its
+ * summary, so downstream work builds on what upstream produced.
+ */
+function upstreamDone(
+  db: Database,
+  event: AnyStoredEvent,
+  data: { threadId: string; summary: string },
+) {
+  const source = db
+    .query<{ node_id: string | null; title: string }, [string]>(
+      'SELECT node_id, title FROM threads WHERE id = ?',
+    )
+    .get(data.threadId)
+  if (!source?.node_id) return
+  const node = db
+    .query<{ title: string }, [string]>('SELECT title FROM plan_nodes WHERE id = ?')
+    .get(source.node_id)
+  const downstream = db
+    .query<{ id: string }, [string, string]>(
+      `SELECT t.id FROM threads t JOIN plan_edges e ON e.to_id = t.node_id
+       WHERE e.from_id = ? AND t.project_id = ? AND coalesce(t.last_report, '') != 'done'`,
+    )
+    .all(source.node_id, event.projectId)
+  for (const { id } of downstream) {
+    addEntry(
+      db,
+      event,
+      {
+        conversationId: id,
+        kind: 'note',
+        payload: {
+          type: 'upstream-done',
+          threadId: data.threadId,
+          nodeTitle: node?.title ?? source.title,
+          summary: data.summary,
+        },
+      },
+      true,
+    )
+  }
+}
+
 export type TranscriptKind = 'message' | 'note' | 'step' | 'tool'
 
 /**
@@ -373,7 +439,8 @@ export const transcriptProjection: Projection = {
         if (author === 'user' || kind === 'relay') {
           addEntry(db, event, { conversationId, kind: 'message', ref: messageId }, true)
         }
-        // The coordinator keeps an eye on what the user tells a thread, without a turn.
+        // What the user tells a thread also gets a quick look from the coordinator, which
+        // may hand it to a better place. The thread does not wait for that.
         const coordinator = coordinatorOf(db, event.projectId)
         if (author === 'user' && coordinator && coordinator !== conversationId) {
           addEntry(
@@ -384,7 +451,7 @@ export const transcriptProjection: Projection = {
               kind: 'note',
               payload: { type: 'user-in-thread', threadId: conversationId, content },
             },
-            false,
+            true,
           )
         }
         break
@@ -397,6 +464,77 @@ export const transcriptProjection: Projection = {
           event,
           { conversationId: coordinator, kind: 'note', payload: { type: 'report', ...event.data } },
           event.data.report !== 'progress',
+        )
+        if (event.data.report === 'done') upstreamDone(db, event, event.data)
+        break
+      }
+      case 'artifact.revised': {
+        // The agent that last wrote the document learns the user changed it, next turn.
+        // The artifacts projection has already applied this edit, which leaves the last
+        // agent in place.
+        const row = db
+          .query<{ last_agent: string | null; title: string }, [string]>(
+            'SELECT last_agent, title FROM artifacts WHERE id = ?',
+          )
+          .get(event.data.artifactId)
+        if (!row?.last_agent || event.data.author !== 'user') break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: row.last_agent,
+            kind: 'note',
+            payload: {
+              type: 'artifact-edited',
+              artifactId: event.data.artifactId,
+              title: row.title,
+              version: event.data.version,
+            },
+          },
+          false,
+        )
+        break
+      }
+      case 'plan.proposal.stale': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        const proposal = db
+          .query<{ reason: string }, [string]>('SELECT reason FROM plan_proposals WHERE id = ?')
+          .get(event.data.proposalId)
+        if (!coordinator || !proposal) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: coordinator,
+            kind: 'note',
+            payload: {
+              type: 'proposal-stale',
+              proposalId: event.data.proposalId,
+              reason: proposal.reason,
+              staleBecause: event.data.reason,
+            },
+          },
+          true,
+        )
+        break
+      }
+      case 'plan.revised': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator || event.data.author !== 'user') break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: coordinator,
+            kind: 'note',
+            payload: {
+              type: 'plan-changed-by-user',
+              revisionId: event.data.revisionId,
+              revertOf: event.data.revertOf,
+              reason: event.data.reason,
+            },
+          },
+          false,
         )
         break
       }
@@ -465,6 +603,311 @@ export const transcriptProjection: Projection = {
   },
 }
 
+/** Read a project's plan graph from the projection tables. */
+export function loadPlanGraph(db: Database, projectId: string): PlanGraph {
+  const graph = emptyGraph()
+  const nodes = db
+    .query<PlanNodeFields & { id: string }, [string]>(
+      'SELECT id, kind, title, description, acceptance FROM plan_nodes WHERE project_id = ? ORDER BY position',
+    )
+    .all(projectId)
+  for (const { id, ...fields } of nodes) {
+    graph.nodes.set(id, fields)
+    graph.order.push(id)
+  }
+  const edges = db
+    .query<{ from_id: string; to_id: string }, [string]>(
+      'SELECT from_id, to_id FROM plan_edges WHERE project_id = ?',
+    )
+    .all(projectId)
+  for (const edge of edges) graph.edges.add(`${edge.from_id}>${edge.to_id}`)
+  return graph
+}
+
+/** Replace a project's stored graph with `next`, stamping changed nodes with the revision. */
+function storePlanGraph(
+  db: Database,
+  projectId: string,
+  before: PlanGraph,
+  next: PlanGraph,
+  revisionId: string,
+  at: number,
+) {
+  for (const id of before.order) {
+    if (!next.nodes.has(id)) db.run('DELETE FROM plan_nodes WHERE id = ?', [id])
+  }
+  next.order.forEach((id, position) => {
+    const node = next.nodes.get(id) as PlanNodeFields
+    const old = before.nodes.get(id)
+    const changed =
+      !old ||
+      old.title !== node.title ||
+      old.description !== node.description ||
+      old.acceptance !== node.acceptance
+    if (!old) {
+      db.run(
+        `INSERT INTO plan_nodes (id, project_id, kind, title, description, acceptance, position, changed_in, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          projectId,
+          node.kind,
+          node.title,
+          node.description,
+          node.acceptance,
+          position,
+          revisionId,
+          at,
+          at,
+        ],
+      )
+    } else {
+      db.run(
+        `UPDATE plan_nodes SET title = ?, description = ?, acceptance = ?, position = ?,
+           changed_in = CASE WHEN ? THEN ? ELSE changed_in END,
+           updated_at = CASE WHEN ? THEN ? ELSE updated_at END
+         WHERE id = ?`,
+        [
+          node.title,
+          node.description,
+          node.acceptance,
+          position,
+          changed ? 1 : 0,
+          revisionId,
+          changed ? 1 : 0,
+          at,
+          id,
+        ],
+      )
+    }
+  })
+  db.run('DELETE FROM plan_edges WHERE project_id = ?', [projectId])
+  for (const { from, to } of edgesOf(next)) {
+    db.run('INSERT INTO plan_edges (project_id, from_id, to_id, changed_in) VALUES (?, ?, ?, ?)', [
+      projectId,
+      from,
+      to,
+      before.edges.has(`${from}>${to}`) ? null : revisionId,
+    ])
+  }
+}
+
+/**
+ * The plan graph and its history. Each revision keeps the ops that undo it, computed
+ * against the graph it was applied to, so any revision can be reverted while those ops
+ * still apply.
+ */
+export const planProjection: Projection = {
+  name: 'plan',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS plan_nodes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      acceptance TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      changed_in TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`)
+    db.run('CREATE INDEX IF NOT EXISTS plan_nodes_project ON plan_nodes (project_id, position)')
+    db.run(`CREATE TABLE IF NOT EXISTS plan_edges (
+      project_id TEXT NOT NULL,
+      from_id TEXT NOT NULL,
+      to_id TEXT NOT NULL,
+      changed_in TEXT,
+      PRIMARY KEY (project_id, from_id, to_id)
+    )`)
+    db.run(`CREATE TABLE IF NOT EXISTS plan_revisions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      author TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      ops TEXT NOT NULL,
+      inverse TEXT NOT NULL,
+      revert_of TEXT,
+      reverted_by TEXT,
+      proposal_id TEXT,
+      seq INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`)
+    db.run('CREATE INDEX IF NOT EXISTS plan_revisions_project ON plan_revisions (project_id, seq)')
+    db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      attention_id TEXT NOT NULL UNIQUE,
+      reason TEXT NOT NULL,
+      ops TEXT NOT NULL,
+      revert_of TEXT,
+      status TEXT NOT NULL,
+      stale_reason TEXT,
+      created_at INTEGER NOT NULL
+    )`)
+  },
+  apply(db, event) {
+    switch (event.type) {
+      case 'plan.revised': {
+        // A proposal that failed to apply stays visible until the plan changes again.
+        db.run(
+          "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
+          [event.projectId],
+        )
+        const before = loadPlanGraph(db, event.projectId)
+        // Commands validate before appending; a revision that no longer applies is skipped
+        // rather than corrupting the graph.
+        let result: { graph: PlanGraph; inverse: PlanOp[] }
+        try {
+          result = applyOps(before, event.data.ops)
+        } catch {
+          break
+        }
+        storePlanGraph(db, event.projectId, before, result.graph, event.data.revisionId, event.at)
+        db.run(
+          `INSERT INTO plan_revisions (id, project_id, author, reason, ops, inverse, revert_of, proposal_id, seq, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            event.data.revisionId,
+            event.projectId,
+            event.data.author,
+            event.data.reason,
+            JSON.stringify(event.data.ops),
+            JSON.stringify(result.inverse),
+            event.data.revertOf,
+            event.data.proposalId,
+            event.seq,
+            event.at,
+          ],
+        )
+        if (event.data.revertOf) {
+          db.run('UPDATE plan_revisions SET reverted_by = ? WHERE id = ?', [
+            event.data.revisionId,
+            event.data.revertOf,
+          ])
+        }
+        if (event.data.proposalId) {
+          db.run("UPDATE plan_proposals SET status = 'applied' WHERE id = ?", [
+            event.data.proposalId,
+          ])
+        }
+        break
+      }
+      case 'plan.proposed':
+        db.run(
+          "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
+          [event.projectId],
+        )
+        db.run(
+          `INSERT INTO plan_proposals (id, project_id, attention_id, reason, ops, revert_of, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`,
+          [
+            event.data.proposalId,
+            event.projectId,
+            event.data.attentionId,
+            event.data.reason,
+            JSON.stringify(event.data.ops),
+            event.data.revertOf,
+            event.at,
+          ],
+        )
+        break
+      case 'plan.proposal.stale':
+        db.run("UPDATE plan_proposals SET status = 'stale', stale_reason = ? WHERE id = ?", [
+          event.data.reason,
+          event.data.proposalId,
+        ])
+        break
+      case 'attention.answered':
+        // Any answer closes the proposal; the first option's `plan.revised` marks it applied.
+        db.run(
+          `UPDATE plan_proposals SET status = CASE WHEN ? = 0 THEN 'accepted' ELSE 'rejected' END
+           WHERE attention_id = ? AND status = 'open'`,
+          [event.data.choice, event.data.attentionId],
+        )
+        break
+    }
+  },
+}
+
+/** Artifacts and every version of them. The newest version is copied into `artifacts`. */
+export const artifactsProjection: Projection = {
+  name: 'artifacts',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      node_id TEXT,
+      version INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      -- The agent that wrote it last; it hears about the user's edits.
+      last_agent TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`)
+    db.run('CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts (project_id, updated_at)')
+    db.run(`CREATE TABLE IF NOT EXISTS artifact_versions (
+      artifact_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      author TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (artifact_id, version)
+    )`)
+  },
+  apply(db, event) {
+    switch (event.type) {
+      case 'artifact.created': {
+        const { artifactId, kind, title, nodeId, author, content } = event.data
+        db.run(
+          `INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, created_by, updated_by, last_agent, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+          [
+            artifactId,
+            event.projectId,
+            kind,
+            title,
+            nodeId,
+            content,
+            author,
+            author,
+            author === 'user' ? null : author,
+            event.at,
+            event.at,
+          ],
+        )
+        db.run(
+          `INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at)
+           VALUES (?, 1, ?, ?, ?, '', ?)`,
+          [artifactId, title, content, author, event.at],
+        )
+        break
+      }
+      case 'artifact.revised': {
+        const { artifactId, version, title, content, author, reason } = event.data
+        db.run(
+          `UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ?,
+             last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END
+           WHERE id = ?`,
+          [title, version, content, author, event.at, author, author, artifactId],
+        )
+        db.run(
+          `INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [artifactId, version, title, content, author, reason, event.at],
+        )
+        break
+      }
+    }
+  },
+}
+
 export const defaultProjections: Projection[] = [
   projectsProjection,
   threadsProjection,
@@ -472,6 +915,9 @@ export const defaultProjections: Projection[] = [
   messagesProjection,
   todosProjection,
   conversationsProjection,
+  planProjection,
+  artifactsProjection,
+  // Last: it reads plan edges and attention rows written above for the same event.
   transcriptProjection,
 ]
 
