@@ -1,7 +1,7 @@
 import type { PlanNodeView, PlanRevisionView, PlanView } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
-import { editOf, reasonOf } from './edit'
+import { editOf, mergeIntoForm, reasonOf } from './edit'
 import { freshChanges, toFlowDocument } from './layout'
 
 const node = (id: string, dependsOn: string[] = [], extra: Partial<PlanNodeView> = {}) =>
@@ -169,5 +169,31 @@ describe('freshChanges', () => {
       [0, 0, false],
       [9, 9, true],
     ])
+  })
+})
+
+const fields = (name: string, description: string, acceptance = '') => ({
+  title: name,
+  description,
+  acceptance,
+})
+
+describe('mergeIntoForm', () => {
+  test('takes newer values of fields the user left alone, keeps theirs where they typed', () => {
+    const base = fields('实现', '')
+    const form = fields('实现计划图', '')
+    const next = mergeIntoForm(form, base, fields('实现', '协调器写的说明', '要有测试'))
+    // The description the coordinator wrote comes in; the user's title stays.
+    expect(form).toEqual(fields('实现计划图', '协调器写的说明', '要有测试'))
+    expect(next).toEqual(fields('实现', '协调器写的说明', '要有测试'))
+  })
+
+  test('a field both sides changed keeps the user text and its old starting point', () => {
+    const form = fields('甲', '我的说明')
+    const next = mergeIntoForm(form, fields('甲', ''), fields('甲', '协调器的说明'))
+    expect(form.description).toBe('我的说明')
+    // Saving from here sends only the user's field, expecting the newer value to be kept
+    // out of it until they choose.
+    expect(next.description).toBe('')
   })
 })

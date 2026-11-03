@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PlanView } from '@ariadne/core'
+import type { PlanOp, PlanView } from '@ariadne/core'
 import {
   bezierEdge,
   defineEdgeType,
@@ -56,14 +56,20 @@ const edgeTypes = [
 ]
 // Deleting nodes on the graph asks first, like the side panel does: a node can carry
 // threads that would be detached from the plan.
-const removing = ref<string[] | null>(null)
+const removing = ref<{ nodes: string[]; unlinks: PlanOp[] } | null>(null)
 const askBeforeRemoving = defineFlowExtension({
   name: 'plan-remove-confirm',
   transaction(tr) {
-    const ids = tr.steps.flatMap((step) => (step.type === 'removeNode' ? [step.id] : []))
-    if (!ids.length || !editing.value) return
+    const nodes = tr.steps.flatMap((step) => (step.type === 'removeNode' ? [step.id] : []))
+    if (!nodes.length || !editing.value) return
+    // Edges selected on their own go too, once the user confirms.
+    const unlinks = editOf(
+      tr.steps.filter((step) => step.type === 'removeEdge'),
+      tr.before,
+      '',
+    ).ops.filter((op) => op.op === 'unlink' && !nodes.includes(op.from) && !nodes.includes(op.to))
     tr.cancel(t('plan.removeAsk'))
-    removing.value = ids
+    removing.value = { nodes, unlinks }
   },
 })
 // No groups: a plan node belongs to the plan, not to another node.
@@ -123,7 +129,7 @@ async function onTransaction(tr: FlowTransaction) {
 }
 
 const removeQuestion = computed(() => {
-  const ids = removing.value ?? []
+  const ids = removing.value?.nodes ?? []
   const nodes = (props.plan?.nodes ?? []).filter((node) => ids.includes(node.id))
   const threads = nodes.reduce((sum, node) => sum + node.threads.length, 0)
   if (nodes.length === 1 && nodes[0]) {
@@ -139,10 +145,13 @@ const removeQuestion = computed(() => {
 
 async function confirmRemove() {
   const plan = props.plan
-  const ids = removing.value ?? []
+  const pending = removing.value
   removing.value = null
-  if (!plan || !ids.length) return
-  const ops = ids.map((id) => ({ op: 'remove' as const, id }))
+  if (!plan || !pending) return
+  const ops: PlanOp[] = [
+    ...pending.unlinks,
+    ...pending.nodes.map((id) => ({ op: 'remove' as const, id })),
+  ]
   const titleOf = (id: string) => plan.nodes.find((node) => node.id === id)?.title ?? id
   if ((await editPlan(reasonOf(ops, titleOf, t), ops)) === 'ok') selected.value = null
 }

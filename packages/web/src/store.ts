@@ -213,7 +213,17 @@ export async function editPlan(
     if (state.detail?.project.id === plan.projectId) state.plan = plan
     return 'ok'
   } catch (error) {
-    if (error instanceof ApiError && error.localized.key === 'error.planConflict') return 'conflict'
+    if (error instanceof ApiError && error.localized.key === 'error.planConflict') {
+      // The plan here may lag behind (the event stream dropped for a moment): fetch it, so
+      // the edit shows what changed.
+      try {
+        const { plan } = await api.getPlan(project.id)
+        if (state.detail?.project.id === plan.projectId) state.plan = plan
+      } catch {
+        // The next event brings it.
+      }
+      return 'conflict'
+    }
     report(error)
     return 'failed'
   }

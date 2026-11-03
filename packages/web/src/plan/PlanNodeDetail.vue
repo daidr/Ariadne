@@ -6,7 +6,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
 import { editPlan, openThread } from '../store'
-import { reasonOf } from './edit'
+import { mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
@@ -29,7 +29,11 @@ const differs = (a: Fields, b: Fields) =>
 watch(
   () => [props.node.id, props.node.title, props.node.description, props.node.acceptance],
   ([id], previous) => {
-    if (previous && id === previous[0] && differs(form, base.value)) return
+    if (previous && id === previous[0]) {
+      // Only fields the user changed and someone else changed too are left to them.
+      base.value = mergeIntoForm(form, base.value, fieldsOf(props.node))
+      return
+    }
     base.value = fieldsOf(props.node)
     Object.assign(form, base.value)
   },

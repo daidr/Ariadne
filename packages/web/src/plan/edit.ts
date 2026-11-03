@@ -123,3 +123,25 @@ export function reasonOf(
     ? translate('plan.reason.more', { first: named, count: ops.length })
     : named
 }
+
+export type NodeFields = { title: string; description: string; acceptance: string }
+export const NODE_FIELDS = ['title', 'description', 'acceptance'] as const
+
+/**
+ * Bring a node's newer values into an edit form. A field the user has not touched (still
+ * as it was when they started) takes the newer value at once; a field they changed keeps
+ * their text, and its newer value is left for them to weigh. Returns the new starting
+ * point: the newer value for fields taken over, the old one for fields left to the user.
+ */
+export function mergeIntoForm(form: NodeFields, base: NodeFields, now: NodeFields): NodeFields {
+  const next = { ...base }
+  for (const field of NODE_FIELDS) {
+    const mine = field === 'title' ? form.title.trim() : form[field]
+    // Both sides wrote the same thing: nothing left to weigh.
+    if (mine === now[field]) next[field] = now[field]
+    if (mine !== base[field]) continue
+    form[field] = now[field]
+    next[field] = now[field]
+  }
+  return next
+}
