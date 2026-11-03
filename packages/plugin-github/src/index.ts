@@ -2,6 +2,7 @@ import { LocalWorkspace, run } from '@ariadne/plugin-local'
 import {
   definePlugin,
   type Capabilities,
+  type CommandSandbox,
   type ContextProvider,
   type ExecResult,
   type RepoCapability,
@@ -29,6 +30,8 @@ export interface GitHubProviderOptions {
   gitBase?: string
   fetch?: typeof fetch
   env?: Record<string, string | undefined>
+  /** What thread commands run in; they see their worktree and the clone behind it. */
+  sandbox?: CommandSandbox
 }
 
 /** Branch names stay short: the random tail of the thread id is unique enough. */
@@ -198,7 +201,10 @@ export function connectRepository(
             'git worktree add',
           )
         }
-        return new LocalWorkspace(threadId, dir, branch)
+        return new LocalWorkspace(threadId, dir, branch, {
+          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+          keep: [dir, bare],
+        })
       }),
   }
 
@@ -287,6 +293,7 @@ export default definePlugin({
     return ctx.registerContextProvider(
       githubProvider({
         dataDir: ctx.dataDir,
+        sandbox: ctx.sandbox,
         // Another GitHub host (e.g. GitHub Enterprise), or a stand-in for testing.
         ...(process.env.ARIADNE_GITHUB_API_URL
           ? { apiBase: process.env.ARIADNE_GITHUB_API_URL }

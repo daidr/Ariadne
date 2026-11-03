@@ -12,6 +12,7 @@ import type {
   ProjectView,
   ThreadView,
   TodoView,
+  StoredFile,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { LocalizedText, SettingsSchema } from '@ariadne/plugin-sdk'
@@ -57,11 +58,13 @@ export class ApiError extends Error {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
-  if (body !== undefined) headers['content-type'] = 'application/json'
+  // A file goes as it is, with its own type; anything else as JSON.
+  const raw = body instanceof Blob
+  if (body !== undefined) headers['content-type'] = raw ? body.type : 'application/json'
   const response = await fetch(path, {
     method,
     headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
   })
   if (response.status === 204) return undefined as T
   const data = await response.json()
@@ -119,7 +122,16 @@ export interface ArtifactDetail {
   versions: ArtifactVersionView[]
 }
 
+export interface SandboxStatus {
+  kind: 'bwrap' | 'unshare' | 'sandbox-exec' | null
+  mode: 'auto' | 'off'
+  hidden: string[]
+}
+
 export const api = {
+  uploadFile: (projectId: string, file: Blob) =>
+    request<{ file: StoredFile }>('POST', `/api/projects/${projectId}/files`, file),
+  getSandbox: () => request<{ sandbox: SandboxStatus }>('GET', '/api/sandbox'),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),

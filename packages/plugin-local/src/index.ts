@@ -1,6 +1,7 @@
 import {
   definePlugin,
   WorkspacePathError,
+  type CommandSandbox,
   type ContextProvider,
   type ExecResult,
   type Workspace,
@@ -87,13 +88,27 @@ export async function run(
   }
 }
 
-/** A directory on this machine, with every path kept inside it. */
+/** Commands run as they are, for workspaces made without a host. */
+const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
+
+/**
+ * A directory on this machine, with every path kept inside it. Commands run in `sandbox`,
+ * which keeps `keep` visible: the root, or the whole checkout and the git directory
+ * behind it when the root is part of one.
+ */
 export class LocalWorkspace implements Workspace {
+  private readonly sandbox: CommandSandbox
+  private readonly keep: string[]
+
   constructor(
     readonly id: string,
     readonly root: string,
     readonly branch: string | null,
-  ) {}
+    options: { sandbox?: CommandSandbox; keep?: string[] } = {},
+  ) {
+    this.sandbox = options.sandbox ?? unsandboxed
+    this.keep = options.keep ?? [root]
+  }
 
   get label(): string {
     return this.root
@@ -144,7 +159,7 @@ export class LocalWorkspace implements Workspace {
     options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<ExecResult> {
     const cwd = await this.resolve(options.cwd ?? '.')
-    return run(['bash', '-c', command], {
+    return run(this.sandbox.wrap(['bash', '-c', command], { keep: this.keep }), {
       cwd,
       forThread: true,
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
@@ -182,12 +197,14 @@ export function localWorkspaces(input: {
   path: string
   repoRoot: string | null
   dataDir: string
+  sandbox?: CommandSandbox
 }): WorkspaceCapability {
+  const { sandbox } = input
   return {
     isolated: input.repoRoot !== null,
     async open({ threadId }) {
       const { repoRoot } = input
-      if (!repoRoot) return new LocalWorkspace(threadId, input.path, null)
+      if (!repoRoot) return new LocalWorkspace(threadId, input.path, null, { sandbox })
       const branch = branchFor(threadId)
       const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
       const dir = join(input.dataDir, 'worktrees', key, threadId)
@@ -215,13 +232,23 @@ export function localWorkspaces(input: {
           `${sub} is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root`,
         )
       }
-      return new LocalWorkspace(threadId, root, branch)
+      // git in the worktree writes to the repository's own git directory.
+      const common = (
+        await git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+      ).stdout.trim()
+      return new LocalWorkspace(threadId, root, branch, {
+        sandbox,
+        keep: [dir, ...(common ? [common] : [])],
+      })
     },
   }
 }
 
 /** The "local directory" context source; checkouts go under `dataDir`. */
-export function localDirectoryProvider(dataDir: string): ContextProvider<LocalSettings> {
+export function localDirectoryProvider(
+  dataDir: string,
+  sandbox?: CommandSandbox,
+): ContextProvider<LocalSettings> {
   return {
     kind: 'local-directory',
     title: { 'zh-CN': '本地目录', en: 'Local directory' },
@@ -246,7 +273,7 @@ export function localDirectoryProvider(dataDir: string): ContextProvider<LocalSe
       const info = await stat(path).catch(() => null)
       if (!info?.isDirectory()) throw new Error(`${path} is not a directory`)
       const repoRoot = await gitRoot(path)
-      return { workspace: localWorkspaces({ path, repoRoot, dataDir }) }
+      return { workspace: localWorkspaces({ path, repoRoot, dataDir, sandbox }) }
     },
   }
 }
@@ -256,7 +283,7 @@ export default definePlugin({
   name: { 'zh-CN': '本地目录', en: 'Local directory' },
   setup(ctx) {
     return ctx.registerContextProvider(
-      localDirectoryProvider(ctx.dataDir) as ContextProvider<never>,
+      localDirectoryProvider(ctx.dataDir, ctx.sandbox) as ContextProvider<never>,
     )
   },
 })

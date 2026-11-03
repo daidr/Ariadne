@@ -30,6 +30,7 @@ export {
   type WhiteboardNode,
 } from './artifact-content'
 export { DomainError } from './errors'
+export { FILE_TYPES, MAX_FILE_BYTES, fileUrl, type FileType, type StoredFile } from './files'
 export type * from './events'
 export { newId } from './ids'
 export { defaultProjections, dropProjectionTables } from './projections'

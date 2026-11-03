@@ -18,13 +18,15 @@ import type {
   ToolCallRecord,
   TurnOutcome,
 } from './events'
-import { checkArtifactContent, previewOf } from './artifact-content'
+import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
+import { readFile, saveFile, setupFiles, storeInlineImages, type StoredFile } from './files'
 import { newId } from './ids'
 import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
 import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
 import type {
+  ArtifactPreview,
   ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
@@ -48,7 +50,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 10
+export const PROJECTION_VERSION = 11
 
 interface ConversationRow {
   id: string
@@ -104,16 +106,20 @@ interface ArtifactRow {
   title: string
   node_id: string | null
   version: number
-  content: string
+  preview: string
   created_by: string
   updated_by: string
   created_at: number
   updated_at: number
 }
 
+/** Every column but the content, which lists do not need. */
+const ARTIFACT_COLUMNS =
+  'id, project_id, kind, title, node_id, version, preview, created_by, updated_by, created_at, updated_at'
+
 function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
   return {
-    preview: previewOf(row.kind, row.content),
+    preview: JSON.parse(row.preview) as ArtifactPreview,
     id: row.id,
     projectId: row.project_id,
     kind: row.kind,
@@ -261,8 +267,10 @@ export interface AriadneOptions {
 export class Ariadne {
   readonly store: EventStore
   private readonly db: Database
+  private readonly now: () => number
 
   constructor(options: AriadneOptions) {
+    this.now = options.now ?? Date.now
     this.store = new EventStore({
       path: options.path,
       projections: defaultProjections,
@@ -275,6 +283,7 @@ export class Ariadne {
       this.rebuildProjections()
       this.db.run(`PRAGMA user_version = ${PROJECTION_VERSION}`)
     }
+    setupFiles(this.db)
   }
 
   subscribe(listener: EventListener): () => void {
@@ -981,7 +990,7 @@ export class Ariadne {
   listArtifacts(projectId: string): ArtifactSummary[] {
     return this.db
       .query<ArtifactRow, [string]>(
-        'SELECT * FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC, id DESC',
+        `SELECT ${ARTIFACT_COLUMNS} FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC, id DESC`,
       )
       .all(projectId)
       .map(toArtifactSummary)
@@ -990,7 +999,7 @@ export class Ariadne {
   /** An artifact at its newest version, or at `version`. */
   getArtifact(artifactId: string, version?: number): ArtifactView {
     const row = this.db
-      .query<ArtifactRow, [string]>('SELECT * FROM artifacts WHERE id = ?')
+      .query<ArtifactRow & { content: string }, [string]>('SELECT * FROM artifacts WHERE id = ?')
       .get(artifactId)
     if (!row) throw new DomainError('error.notFound', { what: artifactId })
     if (version === undefined || version === row.version) {
@@ -1034,6 +1043,27 @@ export class Ariadne {
       }))
   }
 
+  // ---- files ----
+
+  /** Keep a file people added to the project, such as an image for a whiteboard. */
+  saveFile(projectId: string, input: { mime: string; data: Uint8Array }): StoredFile {
+    this.getProject(projectId)
+    return saveFile(this.db, projectId, input, this.now())
+  }
+
+  getFile(fileId: string): { mime: string; data: Uint8Array } {
+    const file = readFile(this.db, fileId)
+    if (!file) throw new DomainError('error.notFound', { what: fileId })
+    return file
+  }
+
+  /** A whiteboard's inline images moved into files, before its content is checked. */
+  private storeImages(projectId: string, kind: ArtifactKind, content: string): string {
+    // Inline images make the content larger than the check allows; give them room.
+    if (kind !== 'whiteboard' || content.length > MAX_ARTIFACT_JSON * 8) return content
+    return storeInlineImages(content, (file) => this.saveFile(projectId, file))
+  }
+
   createArtifact(
     projectId: string,
     input: {
@@ -1047,7 +1077,8 @@ export class Ariadne {
     this.getProject(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
-    checkArtifactContent(input.kind, input.content)
+    const content = this.storeImages(projectId, input.kind, input.content)
+    checkArtifactContent(input.kind, content)
     if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
       throw new DomainError('error.notFound', { what: input.nodeId })
     }
@@ -1062,7 +1093,7 @@ export class Ariadne {
           title,
           nodeId: input.nodeId ?? null,
           author: input.author,
-          content: input.content,
+          content,
         },
       },
     ])
@@ -1088,8 +1119,9 @@ export class Ariadne {
       throw new DomainError('error.artifactConflict', { version: current.version })
     }
     const title = input.title?.trim() || current.title
-    if (title === current.title && input.content === current.content) return current
-    checkArtifactContent(current.kind, input.content)
+    const content = this.storeImages(current.projectId, current.kind, input.content)
+    if (title === current.title && content === current.content) return current
+    checkArtifactContent(current.kind, content)
     this.store.append([
       {
         type: 'artifact.revised',
@@ -1098,7 +1130,7 @@ export class Ariadne {
           artifactId,
           version: current.version + 1,
           title,
-          content: input.content,
+          content,
           author: input.author,
           reason: input.reason,
         },

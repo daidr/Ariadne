@@ -427,3 +427,89 @@ describe('artifact content', () => {
     ).toBe('error.artifactInvalid')
   })
 })
+
+const board = (src: string) =>
+  JSON.stringify({
+    version: 1,
+    nodes: [{ id: 'img', type: 'image', x: 0, y: 0, data: { src, alt: 'pic' } }],
+    edges: [],
+  })
+const srcOf = (content: string) =>
+  (JSON.parse(content) as { nodes: { data: { src: string } }[] }).nodes[0]!.data.src
+
+describe('files', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+  const dataUrl = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
+  test('keeps an image once per project, at an address that cannot be guessed', () => {
+    const project = app.createProject('P')
+    const a = app.saveFile(project.id, { mime: 'image/png', data: png })
+    const b = app.saveFile(project.id, { mime: 'image/PNG; charset=binary', data: png })
+    expect(a.id).toMatch(/^fil_[\w-]{24}$/)
+    expect(b.id).toBe(a.id)
+    expect(a.url).toBe(`/api/files/${a.id}`)
+    expect(app.getFile(a.id)).toEqual({ mime: 'image/png', data: png })
+    const other = app.createProject('Q')
+    expect(app.saveFile(other.id, { mime: 'image/png', data: png }).id).not.toBe(a.id)
+  })
+
+  test('refuses other kinds of files and files that are too large', () => {
+    const project = app.createProject('P')
+    const refusal = (mime: string, data: Uint8Array) => {
+      try {
+        app.saveFile(project.id, { mime, data })
+        return null
+      } catch (error) {
+        return (error as DomainError).code
+      }
+    }
+    expect(refusal('image/svg+xml', png)).toBe('error.fileType')
+    expect(refusal('text/html', png)).toBe('error.fileType')
+    expect(refusal('image/png', new Uint8Array(10 * 1024 * 1024 + 1))).toBe('error.fileTooLarge')
+    expect(() => app.getFile('fil_missing')).toThrow(DomainError)
+  })
+
+  test('whiteboard images kept inline are moved into files when saved', () => {
+    const project = app.createProject('P')
+    const created = app.createArtifact(project.id, {
+      kind: 'whiteboard',
+      title: 'Board',
+      author: 'user',
+      content: board(dataUrl),
+    })
+    const src = srcOf(created.content)
+    expect(src).toMatch(/^\/api\/files\/fil_/)
+    expect(app.getFile(src.split('/').at(-1)!).data).toEqual(png)
+    // The same image saved again reuses the file, and nothing changed means no new version.
+    const again = app.reviseArtifact(created.id, {
+      content: board(dataUrl),
+      author: 'user',
+      reason: 'again',
+    })
+    expect(again.version).toBe(1)
+    // Files are not projections: a rebuild keeps them.
+    app.rebuildProjections()
+    expect(app.getFile(src.split('/').at(-1)!).data).toEqual(png)
+    // A document's text is left alone.
+    const doc = app.createArtifact(project.id, {
+      kind: 'document',
+      title: 'Doc',
+      author: 'user',
+      content: `![x](${dataUrl})`,
+    })
+    expect(doc.content).toContain('data:image/png')
+  })
+
+  test('lists carry the summary worked out when the artifact was saved', () => {
+    const project = app.createProject('P')
+    const doc = app.createArtifact(project.id, {
+      kind: 'document',
+      title: 'Doc',
+      author: 'user',
+      content: '# Hello\n\nworld',
+    })
+    app.reviseArtifact(doc.id, { content: '# Bye', author: 'user', reason: 'r' })
+    const [listed] = app.listArtifacts(project.id)
+    expect(listed?.preview).toEqual({ kind: 'document', excerpt: 'Bye' })
+    expect(listed).not.toHaveProperty('content')
+  })
+})

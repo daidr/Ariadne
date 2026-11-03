@@ -203,3 +203,50 @@ describe('plan edits from the graph', () => {
     expect(app.getPlan(projectId).revisions).toEqual([])
   })
 })
+
+describe('files', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9])
+
+  const upload = (projectId: string, type: string) =>
+    handle(
+      new Request(`http://127.0.0.1/api/projects/${projectId}/files`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': type },
+        body: png,
+      }),
+    )
+
+  test('an uploaded image loads by its address without the token, and only same-site', async () => {
+    const project = app.createProject('P')
+    const response = await upload(project.id, 'image/png')
+    expect(response.status).toBe(201)
+    const { file } = (await response.json()) as { file: { url: string } }
+    const served = await call(file.url, {}, false)
+    expect(served.status).toBe(200)
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png)
+    expect(served.headers.get('content-type')).toBe('image/png')
+    expect(served.headers.get('cross-origin-resource-policy')).toBe('same-origin')
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+    expect((await call('/api/files/fil_nothere', {}, false)).status).toBe(404)
+  })
+
+  test('refuses files that are not images, and uploads without the token', async () => {
+    const project = app.createProject('P')
+    expect((await upload(project.id, 'text/html')).status).toBe(400)
+    const anonymous = await handle(
+      new Request(`http://127.0.0.1/api/projects/${project.id}/files`, {
+        method: 'POST',
+        headers: { 'content-type': 'image/png' },
+        body: png,
+      }),
+    )
+    expect(anonymous.status).toBe(401)
+  })
+})
+
+describe('sandbox', () => {
+  test('says when thread commands are not isolated', async () => {
+    const response = await call('/api/sandbox')
+    expect(await response.json()).toEqual({ sandbox: { kind: null, mode: 'auto', hidden: [] } })
+  })
+})

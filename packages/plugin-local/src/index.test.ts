@@ -1,5 +1,5 @@
-import { WorkspacePathError } from '@ariadne/plugin-sdk'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -131,6 +131,30 @@ describe('local directory', () => {
     } finally {
       process.env = saved
     }
+  })
+
+  test('commands run in the sandbox, which keeps the worktree and its git directory', async () => {
+    const dir = await repo()
+    const calls: { argv: string[]; keep: string[] }[] = []
+    const sandbox: CommandSandbox = {
+      kind: 'test',
+      wrap: (argv, { keep }) => {
+        calls.push({ argv, keep })
+        return argv
+      },
+    }
+    const { workspace } = await localDirectoryProvider(join(base, 'data'), sandbox).connect({
+      path: dir,
+    })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect((await ws.exec('echo hi')).stdout).toBe('hi\n')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.argv).toEqual(['bash', '-c', 'echo hi'])
+    const real = await realpath(dir)
+    const [worktree] = calls[0]!.keep
+    expect(worktree?.startsWith(join(base, 'data', 'worktrees'))).toBe(true)
+    expect(worktree?.endsWith('/thr_a')).toBe(true)
+    expect(calls[0]!.keep).toContain(join(real, '.git'))
   })
 
   test('commands time out', async () => {

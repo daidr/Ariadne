@@ -155,6 +155,12 @@ export const zhCN = {
   'project.source.save': '保存',
   'project.source.clear': '移除',
   'project.source.edit': '设置项目来源',
+  'sandbox.missing.title': 'thread 的命令没有隔离',
+  'sandbox.missing.body':
+    '这台机器上找不到可用的沙箱（Linux 需要 bubblewrap 或支持用户命名空间的 unshare，macOS 用系统自带的 sandbox-exec），thread 运行的命令能读到 Ariadne 的令牌和设置，并能以你的身份调用 Ariadne。只把这个项目交给你信任的模型和仓库。',
+  'sandbox.off.title': '工作区沙箱已关闭',
+  'sandbox.off.body':
+    '设置里关掉了沙箱（config.json 的 sandbox.mode 为 off），thread 运行的命令能读到 Ariadne 的令牌和设置，并能以你的身份调用 Ariadne。',
   'thread.workspace': '工作区',
   'thread.branch': '分支 {branch}',
   'todo.title': '待办',
@@ -235,6 +241,8 @@ export const zhCN = {
   'error.planConflict': '「{title}」在你编辑期间被改过了，你的修改没有保存',
   'error.planReverted': '这次修改已经撤销过了',
   'error.artifactConflict': '产物已被更新到第 {version} 版，请刷新后再保存',
+  'error.fileType': '不支持这种文件：{type}（可以用 PNG、JPEG、GIF、WebP、AVIF 图片）',
+  'error.fileTooLarge': '文件太大了，最大 {max} MB',
   'error.artifactInvalid': '产物内容不合法：{reason}',
   'error.noSource': '项目还没有设置工作目录',
   'error.noRepo': '项目的上下文源不是托管仓库，没有分支、PR 和检查',

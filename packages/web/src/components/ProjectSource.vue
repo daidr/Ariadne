@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { DouButton, DouForm, DouFormItem, DouSelect, DouText } from 'dou-ui'
+import { DouAlert, DouButton, DouForm, DouFormItem, DouSelect, DouText } from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PencilIcon } from '@dou-ui/icons'
-import { computed, reactive, ref } from 'vue'
-import { api, type SourceKind } from '../api'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { api, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
 import { setSource, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
@@ -19,6 +19,16 @@ const secretsSet = ref<string[]>([])
 const storedSecrets = ref<string[]>([])
 
 const source = computed(() => state.detail?.project.source ?? null)
+
+// Without a sandbox, thread commands can read Ariadne's token; the user should know.
+const sandbox = ref<SandboxStatus | null>(null)
+onMounted(() => {
+  api.getSandbox().then(
+    (result) => (sandbox.value = result.sandbox),
+    () => {},
+  )
+})
+const unsandboxed = computed(() => !!source.value && sandbox.value?.kind === null)
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
 const kindOptions = computed(() =>
   kinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),
@@ -133,6 +143,14 @@ async function save(clear = false) {
         <PencilIcon />
       </DouButton>
     </div>
+    <DouAlert
+      v-if="unsandboxed && sandbox"
+      tone="warning"
+      role="alert"
+      :title="t(sandbox.mode === 'off' ? 'sandbox.off.title' : 'sandbox.missing.title')"
+    >
+      {{ t(sandbox.mode === 'off' ? 'sandbox.off.body' : 'sandbox.missing.body') }}
+    </DouAlert>
   </section>
 </template>
 
