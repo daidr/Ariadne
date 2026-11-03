@@ -52,6 +52,28 @@ export function threadEnv(
   return env
 }
 
+/**
+ * Git run by the server, outside the sandbox, in a git directory threads write to. It
+ * reads no global or system config (a thread can write the user's `~/.gitconfig`), runs
+ * no hooks and no fsmonitor, and only speaks the protocols given, so whatever a thread
+ * left in the repository cannot make the server's git run a command.
+ */
+export function serverGitEnv(protocols: string[] = ['https']): Record<string, string> {
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_ALLOW_PROTOCOL: protocols.join(':'),
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: 'core.hooksPath',
+    GIT_CONFIG_VALUE_0: '/dev/null',
+    GIT_CONFIG_KEY_1: 'core.fsmonitor',
+    GIT_CONFIG_VALUE_1: 'false',
+  }
+}
+
+/** The parts of a git directory that make git run something: kept read-only for threads. */
+export const gitControlPaths = (gitDir: string) => [join(gitDir, 'config'), join(gitDir, 'hooks')]
+
 /** Run a program without a shell. */
 export async function run(
   argv: string[],
@@ -99,15 +121,17 @@ const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
 export class LocalWorkspace implements Workspace {
   private readonly sandbox: CommandSandbox
   private readonly keep: string[]
+  private readonly readOnly: string[]
 
   constructor(
     readonly id: string,
     readonly root: string,
     readonly branch: string | null,
-    options: { sandbox?: CommandSandbox; keep?: string[] } = {},
+    options: { sandbox?: CommandSandbox; keep?: string[]; readOnly?: string[] } = {},
   ) {
     this.sandbox = options.sandbox ?? unsandboxed
     this.keep = options.keep ?? [root]
+    this.readOnly = options.readOnly ?? []
   }
 
   get label(): string {
@@ -159,12 +183,15 @@ export class LocalWorkspace implements Workspace {
     options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<ExecResult> {
     const cwd = await this.resolve(options.cwd ?? '.')
-    return run(this.sandbox.wrap(['bash', '-c', command], { keep: this.keep }), {
-      cwd,
-      forThread: true,
-      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-      ...(options.signal ? { signal: options.signal } : {}),
-    })
+    return run(
+      this.sandbox.wrap(['bash', '-c', command], { keep: this.keep, readOnly: this.readOnly }),
+      {
+        cwd,
+        forThread: true,
+        ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+      },
+    )
   }
 
   async dispose(): Promise<void> {
@@ -173,12 +200,13 @@ export class LocalWorkspace implements Workspace {
 }
 
 async function gitRoot(path: string): Promise<string | null> {
-  const result = await run(['git', 'rev-parse', '--show-toplevel'], { cwd: path })
+  const result = await git(path, 'rev-parse', '--show-toplevel')
   return result.exitCode === 0 ? result.stdout.trim() : null
 }
 
+// The user's repository needs no network; `file` only for local submodules and the like.
 async function git(cwd: string, ...args: string[]): Promise<ExecResult> {
-  return run(['git', ...args], { cwd })
+  return run(['git', ...args], { cwd, env: serverGitEnv(['file']) })
 }
 
 /** Branch names stay short: the random tail of the thread id is unique enough. */
@@ -232,13 +260,17 @@ export function localWorkspaces(input: {
           `${sub} is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root`,
         )
       }
-      // git in the worktree writes to the repository's own git directory.
+      // git in the worktree writes to the repository's own git directory, but must not
+      // change what makes git run something: the server runs git there, and so does the user.
       const common = (
-        await git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+        await git(repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir')
       ).stdout.trim()
+      // A hooks directory that is missing could be made by a thread; make it first.
+      if (common) await mkdir(join(common, 'hooks'), { recursive: true })
       return new LocalWorkspace(threadId, root, branch, {
         sandbox,
         keep: [dir, ...(common ? [common] : [])],
+        readOnly: common ? gitControlPaths(common) : [],
       })
     },
   }

@@ -84,13 +84,17 @@ thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKE
 thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录（`~/.ariadne`，或 `ARIADNE_HOME`：本地令牌、`config.json` 里的 API Key 和访问令牌、数据库）和浏览器的配置目录（页面把令牌存在浏览器里），也就拿不到令牌去调用本机的 Ariadne 接口。
 
 - 沙箱只遮住这些路径，其余照旧：命令仍以用户身份运行，文件系统的其他部分、网络和用户自己的 git、ssh 凭据都还在，工具链不用另装。想再遮住别的路径（比如 `~/.ssh`），写进 `config.json` 的 `sandbox.hide`。
-- 工作区本身留着：worktree 目录，以及 git 要写的目录（本地仓库的 `.git`、GitHub 的共享 bare clone）。GitHub 的 worktree 在 `~/.ariadne` 下面，所以只遮住它旁边的东西：令牌、设置、数据库和别的 thread 的 worktree 都看不到。工作区就在用户主目录这种情况下，`~/.ariadne` 依然被遮住。
-- Linux 优先用 bubblewrap（`bwrap`）：遮住的目录挂空的 tmpfs，文件挂 `/dev/null`，并有自己的进程列表，看不到服务进程的环境变量。没有 `bwrap` 时用 util-linux 的 `unshare`（需要内核允许非特权用户命名空间）做同样的挂载，命令在嵌套的用户命名空间里仍以用户自己的 uid 运行。macOS 用系统自带的 `sandbox-exec`，拒绝读写遮住的路径，再放开其中工作区要用的。
+- 遮住的目录整个换成空的 tmpfs，再把工作区要用的路径放回去，所以命令运行期间新写进去的文件（比如以先写临时文件再改名的方式保存的 `config.json`）也看不到。工作区本身留着：worktree 目录，以及 git 要写的目录（本地仓库的 `.git`、GitHub 的共享 bare clone）。GitHub 的 worktree 在 `~/.ariadne` 下面，放回去的只有它和共享的 clone，令牌、设置、数据库和别的 thread 的 worktree 都看不到。工作区就在用户主目录这种情况下，`~/.ariadne` 依然被遮住。
+- 服务端之后会在沙箱外运行的东西，thread 只能读不能改：git 目录（本地仓库的 `.git`、共享 clone）里的 `config` 和 `hooks/`，Ariadne 自己的代码目录，设置里加载的插件路径，用户的 `~/.gitconfig` 和 `~/.config/git`。因此 thread 不能用 `git config` 写仓库配置，需要时用 `git -c`。Ariadne 自己的仓库作为工作区时，它的 worktree 和 `.git` 仍然可写，只有 `config`、`hooks` 只读。
+- 服务端自己的 git 命令不读全局和系统配置，不运行 hook 和 fsmonitor，只允许远端用的协议（GitHub 是 `https`，本地仓库不联网）。即使 thread 在别处改了这些配置（比如沙箱不可用时），也不能让服务端的 git 执行命令。
+- 共享 clone 的分支 ref 对所有 thread 可写：一个 thread 能移动别的 thread 的 `ariadne/…` 分支，那个 thread 推送时，推上去的就是被改过的提交。沙箱不防这一点，它防的是令牌和设置。
+- Linux 优先用 bubblewrap（`bwrap`），没有时用 util-linux 的 `unshare`（需要内核允许非特权用户命名空间），挂载方式相同，命令在嵌套的用户命名空间里仍以用户自己的 uid 运行。两种都有自己的进程列表，看不到服务进程和它的环境变量；命令结束时，它留下的后台进程会一起结束。
+- macOS 用系统自带的 `sandbox-exec`，按路径拒绝读写遮住的路径，再放开工作区要用的、锁住只读的。它只管文件，不隔离进程：命令能看到并结束服务进程，退出后留下的后台进程会一直运行（仍在沙箱里）。这比 Linux 弱，文件工具在服务端检查路径和真正打开文件之间，后台进程有机会把文件换成指向遮住目录的符号链接。
 - 启动时检测能用哪一种。都不能用（其他系统，或内核关了用户命名空间）时，命令照现在这样直接运行，启动日志和项目来源下方都会提示 thread 的命令没有隔离。`config.json` 里 `"sandbox": { "mode": "off" }` 可以关掉沙箱，界面同样提示。改动在重启后生效。
 - `git push` 不受影响：推送由服务端自己执行，在沙箱外，用它保存的地址和令牌；thread 在命令里直接推送依然会失败。
-- 插件拿到同一个沙箱（`ctx.sandbox.wrap(argv, { keep })`），第三方的上下文源可以让自己的命令也在里面运行。
+- 插件拿到同一个沙箱（`ctx.sandbox.wrap(argv, { keep, readOnly })`），第三方的上下文源可以让自己的命令也在里面运行。
 
-“不合并、不推其他分支”靠工具面和提示约束，防的是失误，不是蓄意越权的 thread；沙箱防的是 thread 冒用用户在 Ariadne 里的身份，不是把 thread 和用户的整个账户隔开。
+“不合并、不推其他分支”靠工具面和提示约束，防的是失误，不是蓄意越权的 thread；沙箱防的是 thread 冒用用户在 Ariadne 里的身份，不是把 thread 和用户的整个账户隔开：沙箱外的其他文件（比如 shell 的启动脚本）thread 仍然能改。
 
 ### 仓库、PR 与 CI
 
@@ -136,7 +140,7 @@ thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录�
 
 - 第三方插件在“设置 → 插件”里填绝对路径（可以用 `~/`）加载：路径是文件，或者是带 `package.json`（按 `exports["."]`、`module`、`main` 找入口）或 `index.ts` / `index.js` 的目录。入口的默认导出是插件（`definePlugin({ id, name, setup })`）。加载成功后路径写进 `~/.ariadne/config.json` 的 `plugins`，以后每次启动都加载；加载失败的不保存，原因显示在设置里。启动时加载失败的插件也列在设置里，带着原因。
 - 插件的 `setup` 抛错，或者注册了别的插件已有的协议或上下文源，它注册过的东西全部撤回。移除插件时，它注册的协议和上下文源立即撤下；已经连上的工作区要到重启后才断开。改了插件代码要重启 Ariadne 才生效。
-- 插件和服务在同一个进程里运行，能读到服务端的一切（包括令牌和 API Key），只应加载信任的代码。插件只从用户在设置里填的路径加载，不会因为项目的仓库里带了插件就自动执行：GitHub 仓库可能是别人的，打开一个项目不应让仓库里的代码进到服务端进程。Ariadne 的插件数据目录（`~/.ariadne/plugins/`，thread 的 worktree 和仓库的克隆都在这里）下的路径也会被拒绝加载。thread 在自己 worktree 里写的代码因此不会进到服务端进程；它的命令在沙箱里也看不到令牌和设置，见“工作区”。
+- 插件和服务在同一个进程里运行，能读到服务端的一切（包括令牌和 API Key），只应加载信任的代码。插件只从用户在设置里填的路径加载，不会因为项目的仓库里带了插件就自动执行：GitHub 仓库可能是别人的，打开一个项目不应让仓库里的代码进到服务端进程。Ariadne 的插件数据目录（`~/.ariadne/plugins/`，thread 的 worktree 和仓库的克隆都在这里）下的路径也会被拒绝加载。thread 在自己 worktree 里写的代码因此不会进到服务端进程；设置里的插件路径在沙箱里只读，thread 也改不了已加载插件的代码，见“工作区”。
 - 插件只用 `@ariadne/plugin-sdk` 的类型（`import type`）时不需要安装任何东西；运行时用到 SDK 的函数的话，插件要自己带上依赖（或打包）。
 
 ## 能力

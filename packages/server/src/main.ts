@@ -12,7 +12,8 @@ import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
 import local from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { createHandler } from './app'
 import { loadConfig } from './config'
 import { loadUserConfig, SettingsStore } from './settings'
@@ -22,11 +23,20 @@ const app = new Ariadne({ path: config.databasePath })
 
 const configPath = join(config.home, 'config.json')
 // Thread commands must not see the token or the settings, nor a browser that holds the token.
-const sandboxSettings = loadUserConfig(configPath).sandbox
+const userConfig = loadUserConfig(configPath)
+const sandboxSettings = userConfig.sandbox
 const sandbox = createSandbox({
   kind: sandboxSettings.mode === 'off' ? null : await detectSandbox(),
   mode: sandboxSettings.mode,
   hide: [config.home, ...browserProfiles(), ...sandboxSettings.hide],
+  // What the server runs later, outside the sandbox: its own code, the plugins it loads,
+  // and the user's git config.
+  readOnly: [
+    resolve(import.meta.dir, '../../..'),
+    ...userConfig.plugins,
+    join(homedir(), '.gitconfig'),
+    join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'git'),
+  ],
 })
 if (!sandbox.kind) {
   console.warn(

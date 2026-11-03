@@ -38,6 +38,26 @@ export interface HandlerOptions {
 }
 
 type Params = Record<string, string>
+
+/** The body, refused as soon as it grows past `max` bytes, whether or not it gave a length. */
+async function readLimited(request: Request, max: number): Promise<Uint8Array> {
+  const tooLarge = () => new DomainError('error.fileTooLarge', { max: max / 1024 / 1024 })
+  if (Number(request.headers.get('content-length') ?? 0) > max) throw tooLarge()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const chunk of request.body ?? []) {
+    size += chunk.byteLength
+    if (size > max) throw tooLarge()
+    chunks.push(chunk)
+  }
+  const data = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    data.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return data
+}
 type Route = {
   method: string
   pattern: URLPattern
@@ -83,11 +103,7 @@ export function createHandler({
 
   // Files people add, such as whiteboard images. The body is the file itself.
   add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }) => {
-    const length = Number(request.headers.get('content-length') ?? 0)
-    if (length > MAX_FILE_BYTES) {
-      throw new DomainError('error.fileTooLarge', { max: MAX_FILE_BYTES / 1024 / 1024 })
-    }
-    const data = new Uint8Array(await request.arrayBuffer())
+    const data = await readLimited(request, MAX_FILE_BYTES)
     const mime = request.headers.get('content-type') ?? ''
     return json({ file: app.saveFile(projectId, { mime, data }) }, 201)
   })

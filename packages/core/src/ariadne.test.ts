@@ -499,6 +499,35 @@ describe('files', () => {
     expect(doc.content).toContain('data:image/png')
   })
 
+  test('a refused whiteboard keeps none of its images', () => {
+    const project = app.createProject('P')
+    const other = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7, 7, 7])
+    const broken = JSON.stringify({
+      version: 1,
+      nodes: [
+        {
+          id: 'img',
+          type: 'image',
+          x: 0,
+          y: 0,
+          data: { src: `data:image/png;base64,${Buffer.from(other).toString('base64')}` },
+        },
+        { id: 'img', type: 'text', x: 0, y: 0 },
+      ],
+      edges: [],
+    })
+    expect(() =>
+      app.createArtifact(project.id, {
+        kind: 'whiteboard',
+        title: 'Board',
+        author: 'user',
+        content: broken,
+      }),
+    ).toThrow(DomainError)
+    const files = app.store.db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM files').get()
+    expect(files?.n).toBe(0)
+  })
+
   test('lists carry the summary worked out when the artifact was saved', () => {
     const project = app.createProject('P')
     const doc = app.createArtifact(project.id, {

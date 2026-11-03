@@ -1077,11 +1077,15 @@ export class Ariadne {
     this.getProject(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
-    const content = this.storeImages(projectId, input.kind, input.content)
-    checkArtifactContent(input.kind, content)
-    if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
-      throw new DomainError('error.notFound', { what: input.nodeId })
-    }
+    // Images are kept only for content that passes; a refused save leaves no files behind.
+    const content = this.db.transaction(() => {
+      const stored = this.storeImages(projectId, input.kind, input.content)
+      checkArtifactContent(input.kind, stored)
+      if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
+        throw new DomainError('error.notFound', { what: input.nodeId })
+      }
+      return stored
+    })()
     const artifactId = newId('art')
     this.store.append([
       {
@@ -1119,9 +1123,12 @@ export class Ariadne {
       throw new DomainError('error.artifactConflict', { version: current.version })
     }
     const title = input.title?.trim() || current.title
-    const content = this.storeImages(current.projectId, current.kind, input.content)
+    const content = this.db.transaction(() => {
+      const stored = this.storeImages(current.projectId, current.kind, input.content)
+      checkArtifactContent(current.kind, stored)
+      return stored
+    })()
     if (title === current.title && content === current.content) return current
-    checkArtifactContent(current.kind, content)
     this.store.append([
       {
         type: 'artifact.revised',

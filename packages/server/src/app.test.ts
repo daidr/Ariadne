@@ -230,6 +230,33 @@ describe('files', () => {
     expect((await call('/api/files/fil_nothere', {}, false)).status).toBe(404)
   })
 
+  test('a body sent without a length is refused once it grows too large', async () => {
+    const project = app.createProject('P')
+    const chunk = new Uint8Array(1024 * 1024)
+    let sent = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1
+        if (sent > 64) controller.close()
+        else controller.enqueue(chunk)
+      },
+    })
+    const response = await handle(
+      new Request(`http://127.0.0.1/api/projects/${project.id}/files`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'image/png' },
+        body,
+        duplex: 'half',
+      } as RequestInit),
+    )
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: { key: string } }).error.key).toBe(
+      'error.fileTooLarge',
+    )
+    // It stopped reading soon after the limit.
+    expect(sent).toBeLessThan(16)
+  })
+
   test('refuses files that are not images, and uploads without the token', async () => {
     const project = app.createProject('P')
     expect((await upload(project.id, 'text/html')).status).toBe(400)

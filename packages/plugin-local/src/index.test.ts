@@ -1,4 +1,5 @@
 import { WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
+import { existsSync } from 'node:fs'
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -135,11 +136,11 @@ describe('local directory', () => {
 
   test('commands run in the sandbox, which keeps the worktree and its git directory', async () => {
     const dir = await repo()
-    const calls: { argv: string[]; keep: string[] }[] = []
+    const calls: { argv: string[]; keep: string[]; readOnly?: string[] }[] = []
     const sandbox: CommandSandbox = {
       kind: 'test',
-      wrap: (argv, { keep }) => {
-        calls.push({ argv, keep })
+      wrap: (argv, { keep, readOnly }) => {
+        calls.push({ argv, keep, readOnly })
         return argv
       },
     }
@@ -155,6 +156,18 @@ describe('local directory', () => {
     expect(worktree?.startsWith(join(base, 'data', 'worktrees'))).toBe(true)
     expect(worktree?.endsWith('/thr_a')).toBe(true)
     expect(calls[0]!.keep).toContain(join(real, '.git'))
+    expect(calls[0]!.readOnly).toEqual([join(real, '.git', 'config'), join(real, '.git', 'hooks')])
+  })
+
+  test("hooks left in the repository do not run in the server's git", async () => {
+    const dir = await repo()
+    const marker = join(base, 'ran')
+    const hook = join(dir, '.git', 'hooks', 'post-checkout')
+    await writeFile(hook, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 })
+    await run(['git', 'config', 'core.fsmonitor', `touch ${marker}`], { cwd: dir })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    await workspace!.open({ threadId: 'thr_a' })
+    expect(existsSync(marker)).toBe(false)
   })
 
   test('commands time out', async () => {
