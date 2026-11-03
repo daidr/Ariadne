@@ -142,7 +142,12 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
     for (const [index, call] of [...calls].toSorted(([a], [b]) => a - b)) {
       yield { type: 'tool-call', id: call.id || `call_${index}`, ...withoutId(call) }
     }
-    yield { type: 'finish', reason: calls.size ? 'tool-calls' : finishReason(reason) }
+    // A token limit hit while streaming tool arguments still reports `length`, so the runner
+    // treats the call as truncated instead of running it with broken arguments.
+    yield {
+      type: 'finish',
+      reason: calls.size && reason !== 'length' ? 'tool-calls' : finishReason(reason),
+    }
   },
 }
 

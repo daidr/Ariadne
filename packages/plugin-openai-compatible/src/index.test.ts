@@ -97,6 +97,24 @@ describe('openai-compatible provider', () => {
     ])
   })
 
+  test('reports length when the token limit cuts off tool arguments', async () => {
+    reply = () =>
+      sse(
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, id: 'x1', function: { name: 'f', arguments: '{"q"' } }],
+              },
+              finish_reason: 'length',
+            },
+          ],
+        },
+        '[DONE]',
+      )
+    expect((await collect()).at(-1)).toEqual({ type: 'finish', reason: 'length' })
+  })
+
   test('turns an HTTP error into a finish part with the service message', async () => {
     reply = () => Response.json({ error: { message: 'invalid key' } }, { status: 401 })
     expect(await collect()).toEqual([
