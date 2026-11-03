@@ -52,10 +52,7 @@ bun run build
   - dou-ui 缺功能或有 bug 时，正确做法是上报给 Dairyn，而不是绕过去。看到以下迹象要追问是否在绕：用 `:deep()` 或全局选择器覆盖 `.dou-*` 内部样式、`!important`、复制组件内部实现、读写组件私有 DOM 结构、手写本应来自 dou-ui token 的颜色和尺寸。确认是 dou-ui 缺口的，列入报告的“dou-ui 缺口”一节。
   - 主题：整页主题由 `<html>` 上的 `data-dou-theme`（或 `useColorMode()`）提供，不手写 `body` 的背景、文字色、字体 token。
 - **只用 Bun。** 不出现 `package-lock.json`、`yarn.lock`、`pnpm-lock.yaml`；脚本里不用 `npm` / `npx` / `node` / `yarn` / `pnpm`；改了依赖就必须同步更新 `bun.lock`；运行时能力优先用 Bun 内置（如 `bun:sqlite`）。依赖版本写确切版本号。
-- **提交规范。**
-  - 作者必须是 `daidr <daidr@daidr.me>`（`git log --format='%an <%ae>' <base>..HEAD` 检查每一条）。
-  - 提交信息、PR 描述、代码注释里不得有 AI 署名或会话链接：`Co-Authored-By` 指向 AI、`Generated with …`、任何会话 URL 都算。
-  - 提交信息用中文的 conventional commits（`feat:`、`fix(web):` 等）。
+- **提交信息**用中文的 conventional commits（`feat:`、`fix(web):` 等）。
 - **i18n 中文优先。**
   - 用户可见的文字不硬编码在 Vue 模板、组件脚本或服务端响应里，一律走 `@ariadne/i18n`。
   - 新增文案先加到 `zh-CN`（它是 `MessageKey` 的来源），并同时补齐 `en`；两边的占位符 `{name}` 一致。
@@ -125,7 +122,9 @@ bun run build
 - 界面：已在亮色 / 暗色下打开 …… / 未涉及界面
 ```
 
-把报告作为一次 GitHub PR review 提交（类型为 comment，不 approve），阻塞问题尽量作为对应行的行内评论；同时在评审讨论串里回复结论和链接，由协调器转给实现讨论串处理。修复推上来后，只复查修复涉及的部分和原有阻塞问题，不重新做全量评审，除非修复改动很大。
+把报告作为一次 GitHub PR review 提交（类型为 comment，不 approve），阻塞问题尽量作为对应行的行内评论；同时在评审讨论串里回复结论和链接，由协调器转给实现讨论串处理。
+
+修复推上来后，只复查修复涉及的部分和原有阻塞问题，不重新做全量评审，除非修复改动很大。
 
 ## 复盘：bug 漏过评审之后
 
