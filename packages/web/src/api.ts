@@ -93,9 +93,10 @@ export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
  * so a closed source is reopened here with backoff, resuming after the last event seen.
  */
 export function followEvents(
-  afterSeq: number,
+  afterSeq: number | null,
   onEvent: (event: AnyStoredEvent) => void,
   onStatus: (status: StreamStatus) => void,
+  onOpen?: () => void,
 ): () => void {
   let lastSeq = afterSeq
   let source: EventSource | null = null
@@ -104,16 +105,19 @@ export function followEvents(
   let stopped = false
 
   const open = () => {
-    const query = `afterSeq=${lastSeq}&token=${encodeURIComponent(token() ?? '')}`
+    // Without a known position the server starts at its newest event.
+    const from = lastSeq === null ? '' : `afterSeq=${lastSeq}&`
+    const query = `${from}token=${encodeURIComponent(token() ?? '')}`
     const current = new EventSource(`/api/events?${query}`)
     source = current
     current.addEventListener('open', () => {
       delay = 500
       onStatus('open')
+      onOpen?.()
     })
     current.addEventListener('ariadne', (message) => {
       const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
-      lastSeq = Math.max(lastSeq, event.seq)
+      lastSeq = Math.max(lastSeq ?? 0, event.seq)
       onEvent(event)
     })
     current.addEventListener('error', () => {

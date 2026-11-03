@@ -95,7 +95,8 @@ export function createHandler({ app, token, webDist }: HandlerOptions) {
   add('GET', '/api/events', (request, _params, url) => {
     // Without a starting point the stream carries only new events: clients load the
     // current state over REST, so replaying the whole log would be wasted work.
-    const given = url.searchParams.get('afterSeq') ?? request.headers.get('last-event-id')
+    // EventSource reconnects with the same URL plus Last-Event-ID, so the header wins.
+    const given = request.headers.get('last-event-id') ?? url.searchParams.get('afterSeq')
     const afterSeq = given === null ? app.lastSeq() : Number(given)
     if (!Number.isInteger(afterSeq) || afterSeq < 0) throw new BadRequest('afterSeq')
     return eventStream(app, { afterSeq, projectId: url.searchParams.get('projectId') })

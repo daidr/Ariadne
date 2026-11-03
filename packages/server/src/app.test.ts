@@ -139,4 +139,13 @@ describe('event stream', () => {
     const events = await readFrames(response, 2)
     expect(events.map((e) => e.seq)).toEqual([2, 3])
   })
+
+  test('prefers Last-Event-ID over the URL on an automatic reconnect', async () => {
+    const a = app.createProject('A')
+    app.renameProject(a.id, 'A2')
+    const response = await call('/api/events?afterSeq=0', { headers: { 'last-event-id': '1' } })
+    app.renameProject(a.id, 'A3')
+    const events = await readFrames(response, 2)
+    expect(events.map((e) => e.seq)).toEqual([2, 3])
+  })
 })

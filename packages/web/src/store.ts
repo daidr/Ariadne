@@ -89,15 +89,31 @@ function onEvent(event: AnyStoredEvent) {
   })
 }
 
-export async function start() {
-  let lastSeq = 0
+async function load(): Promise<number | null> {
   try {
-    lastSeq = await refreshProjects()
-    const first = state.projects[0]
-    if (first) await openProject(first.id)
+    const lastSeq = await refreshProjects()
+    const target = state.currentId ?? state.projects[0]?.id
+    if (target) await openProject(target)
+    return lastSeq
   } catch (error) {
     report(error)
+    return null
   }
-  // Follow from the state just loaded; anything older is already on screen.
-  followEvents(lastSeq, onEvent, (status) => (state.stream = status))
+}
+
+export async function start() {
+  const lastSeq = await load()
+  // Follow from the state just loaded. If loading failed (say the page opened before the
+  // server), follow from the server's newest event and load once the stream is up.
+  let loaded = lastSeq !== null
+  followEvents(
+    lastSeq,
+    onEvent,
+    (status) => (state.stream = status),
+    () => {
+      if (loaded) return
+      loaded = true
+      void load()
+    },
+  )
 }
