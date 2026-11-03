@@ -179,12 +179,7 @@ const mark = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 12px;
-  color: var(--dou-color-text-secondary, inherit);
-}
-
-.plan-node-pr :deep(svg) {
-  width: 12px;
-  height: 12px;
+  font-size: var(--dou-font-size-sm);
+  color: var(--dou-color-text-secondary);
 }
 </style>

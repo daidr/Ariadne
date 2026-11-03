@@ -4,7 +4,7 @@ import { EyeIcon, EyeOffIcon, RotateCcwIcon } from '@dou-ui/icons'
 import { computed, watch } from 'vue'
 import { t, tm } from '../i18n'
 import { answerAttention, dismissProposal, revertPlan, state } from '../store'
-import { freshChanges, previewOps } from './layout'
+import { freshChanges } from './layout'
 import { acknowledge, loadSeen, planUi, seenRevision } from './ui'
 
 watch(
@@ -17,18 +17,12 @@ const open = computed(() => state.plan?.proposals.filter((p) => p.status === 'op
 const stale = computed(() => state.plan?.proposals.filter((p) => p.status === 'stale') ?? [])
 // What the coordinator changed since the user last said "got it"; marked on the graph.
 const fresh = computed(() =>
-  state.plan ? freshChanges(state.plan, seenRevision(state.plan)).revisions : [],
+  state.plan
+    ? freshChanges(state.plan, seenRevision(state.plan))
+    : { revisions: [], nodes: new Set<string>(), truncated: false },
 )
-const problems = computed(() => {
-  const plan = state.plan
-  const result = new Map<string, string>()
-  if (!plan) return result
-  for (const proposal of open.value) {
-    const problem = previewOps(plan, proposal.ops).problem
-    if (problem) result.set(proposal.id, problem)
-  }
-  return result
-})
+// The server draws each open proposal on the plan; `null` means it no longer fits.
+const unfit = (proposal: { preview: unknown }) => proposal.preview === null
 
 // A preview ends once its proposal is answered.
 watch(open, (proposals) => {
@@ -43,7 +37,7 @@ function togglePreview(id: string) {
 </script>
 
 <template>
-  <div v-if="fresh.length || open.length || stale.length" class="plan-change">
+  <div v-if="fresh.revisions.length || open.length || stale.length" class="plan-change">
     <DouAlert
       v-for="proposal in open"
       :key="proposal.id"
@@ -53,15 +47,15 @@ function togglePreview(id: string) {
       <ul class="plan-ops">
         <li v-for="(line, index) in proposal.changes" :key="index">{{ tm(line) }}</li>
       </ul>
-      <DouText v-if="problems.get(proposal.id)" size="sm" variant="secondary">
-        {{ t('plan.preview.problem', { reason: problems.get(proposal.id) ?? '' }) }}
+      <DouText v-if="unfit(proposal)" size="sm" variant="secondary">
+        {{ t('plan.preview.stale') }}
       </DouText>
       <DouText v-else-if="planUi.previewId === proposal.id" size="sm" variant="secondary">
         {{ t('plan.preview.on') }}
       </DouText>
       <div class="plan-actions">
         <DouButton
-          v-if="!problems.get(proposal.id)"
+          v-if="!unfit(proposal)"
           size="sm"
           variant="ghost"
           :aria-pressed="planUi.previewId === proposal.id"
@@ -90,12 +84,15 @@ function togglePreview(id: string) {
       </template>
     </DouAlert>
     <DouAlert
-      v-if="fresh.length && state.plan"
+      v-if="fresh.revisions.length && state.plan"
       tone="primary"
-      :title="t('plan.fresh.title', { count: fresh.length })"
+      :title="t('plan.fresh.title', { count: fresh.revisions.length })"
     >
+      <DouText v-if="fresh.truncated" size="sm" variant="secondary">
+        {{ t('plan.fresh.truncated') }}
+      </DouText>
       <ul class="plan-ops">
-        <li v-for="revision in fresh" :key="revision.id" class="plan-fresh">
+        <li v-for="revision in fresh.revisions" :key="revision.id" class="plan-fresh">
           <span>{{ revision.reason }}</span>
           <DouButton
             size="sm"

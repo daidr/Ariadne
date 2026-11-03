@@ -9,10 +9,12 @@ export {
   applyOps,
   describePlanOps,
   emptyGraph,
-  graphOf,
   needsConfirmation,
   parsePlanOps,
+  previewPlanOps,
   type PlanGraph,
+  type PlanMark,
+  type PlanPreview,
 } from './plan'
 export {
   checkArtifactContent,

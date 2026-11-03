@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { PlanNodeView, PlanOp } from '@ariadne/core'
-import { DouButton, DouInput, DouPopconfirm, DouTag, DouText, DouTextarea } from 'dou-ui'
+import { DouAlert, DouButton, DouInput, DouPopconfirm, DouTag, DouText, DouTextarea } from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
-import { t, tm } from '../i18n'
+import { t } from '../i18n'
 import { stageTone } from '../stage'
 import { editPlan, openThread } from '../store'
 import { reasonOf } from './edit'
@@ -23,20 +23,33 @@ const fieldsOf = (node: PlanNodeView): Fields => ({
 // The form starts from the node. `base` is what the user started editing from: the plan
 // refreshes whenever any thread moves, and that must not wipe what they are typing.
 const form = reactive<Fields>({ title: '', description: '', acceptance: '' })
-let base: Fields = { title: '', description: '', acceptance: '' }
+const base = ref<Fields>({ title: '', description: '', acceptance: '' })
 const differs = (a: Fields, b: Fields) =>
   a.title.trim() !== b.title || a.description !== b.description || a.acceptance !== b.acceptance
 watch(
   () => [props.node.id, props.node.title, props.node.description, props.node.acceptance],
   ([id], previous) => {
-    if (previous && id === previous[0] && differs(form, base)) return
-    base = fieldsOf(props.node)
-    Object.assign(form, base)
+    if (previous && id === previous[0] && differs(form, base.value)) return
+    base.value = fieldsOf(props.node)
+    Object.assign(form, base.value)
   },
   { immediate: true },
 )
 const dirty = computed(() => differs(form, fieldsOf(props.node)))
+// Fields someone else changed while the user was editing, with their value now. Shown next
+// to the form, so the user decides; nothing they typed is thrown away.
+const changedMeanwhile = computed(() =>
+  FIELDS.filter((field) => props.node[field] !== base.value[field]).map((field) => ({
+    field,
+    value: props.node[field],
+  })),
+)
 const saving = ref(false)
+const labels = {
+  title: 'plan.field.title',
+  description: 'plan.field.description',
+  acceptance: 'plan.acceptance',
+} as const
 
 async function save() {
   const { node } = props
@@ -46,27 +59,43 @@ async function save() {
   const op: Extract<PlanOp, { op: 'update' }> = { op: 'update', id: node.id, expect }
   for (const field of FIELDS) {
     const value = field === 'title' ? form.title.trim() : form[field]
-    if (value === base[field]) continue
+    if (value === base.value[field]) continue
     op[field] = value
-    expect[field] = base[field]
+    expect[field] = base.value[field]
   }
   if (!Object.keys(expect).length) return
   saving.value = true
-  const ok = await editPlan(tm(reasonOf([op], () => node.title)), [op])
+  const result = await editPlan(
+    reasonOf([op], () => node.title, t),
+    [op],
+  )
   saving.value = false
-  if (ok) {
-    // The plan now holds the form; the watch above takes the node over from here.
-    base = { ...form, title: form.title.trim() }
-  } else {
-    // Refused, e.g. the coordinator changed the field meanwhile: start over from the plan.
-    base = fieldsOf(props.node)
-    Object.assign(form, base)
-  }
+  // The plan now holds the form; the watch above takes the node over from here. On a
+  // conflict or a failure the form stays as the user left it.
+  if (result === 'ok') base.value = { ...form, title: form.title.trim() }
+}
+
+/** Keep what the user typed over the newer values, and save it. */
+function keepMine() {
+  base.value = fieldsOf(props.node)
+  void save()
+}
+
+/** Take the newer values for the fields changed meanwhile, dropping the user's edits there. */
+function takeTheirs() {
+  for (const { field, value } of changedMeanwhile.value) form[field] = value
+  base.value = fieldsOf(props.node)
 }
 
 async function remove() {
   const op: PlanOp = { op: 'remove', id: props.node.id }
-  if (await editPlan(tm(reasonOf([op], () => props.node.title)), [op])) emit('removed')
+  if (
+    (await editPlan(
+      reasonOf([op], () => props.node.title, t),
+      [op],
+    )) === 'ok'
+  )
+    emit('removed')
 }
 
 const removeQuestion = computed(() =>
@@ -85,6 +114,22 @@ const removeQuestion = computed(() =>
       <DouTextarea v-model="form.description" size="sm" autosize />
       <DouText variant="secondary" size="sm">{{ t('plan.acceptance') }}</DouText>
       <DouTextarea v-model="form.acceptance" size="sm" autosize />
+      <DouAlert v-if="changedMeanwhile.length" tone="warning" :title="t('plan.conflict')">
+        <dl class="node-detail-conflict">
+          <template v-for="change in changedMeanwhile" :key="change.field">
+            <dt>{{ t(labels[change.field]) }}</dt>
+            <dd>{{ change.value || t('plan.conflict.empty') }}</dd>
+          </template>
+        </dl>
+        <div class="node-detail-actions">
+          <DouButton size="sm" variant="outline" @click="takeTheirs">
+            {{ t('plan.conflict.theirs') }}
+          </DouButton>
+          <DouButton size="sm" tone="primary" :loading="saving" @click="keepMine">
+            {{ t('plan.conflict.mine') }}
+          </DouButton>
+        </div>
+      </DouAlert>
       <div class="node-detail-actions">
         <DouPopconfirm
           :title="removeQuestion"
@@ -100,7 +145,7 @@ const removeQuestion = computed(() =>
         <DouButton
           size="sm"
           tone="primary"
-          :disabled="!dirty || !form.title.trim()"
+          :disabled="!dirty || !form.title.trim() || changedMeanwhile.length > 0"
           :loading="saving"
           @click="save"
         >
@@ -157,8 +202,18 @@ const removeQuestion = computed(() =>
   white-space: pre-wrap;
 }
 
+.node-detail-conflict {
+  margin: 4px 0 0;
+}
+
+.node-detail-conflict dd {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+}
+
 .node-detail-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
 }

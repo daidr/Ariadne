@@ -20,7 +20,7 @@ import type {
 } from './events'
 import { checkArtifactContent, previewOf } from './artifact-content'
 import { newId } from './ids'
-import { applyOps, describePlanOps, needsConfirmation } from './plan'
+import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
 import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
@@ -866,6 +866,7 @@ export class Ariadne {
           reason: row.reason,
           ops,
           changes: this.describePlanChange(projectId, ops),
+          preview: row.status === 'open' ? previewPlanOps(graph, ops) : null,
           status: row.status,
           staleReason: row.stale_reason,
           createdAt: row.created_at,

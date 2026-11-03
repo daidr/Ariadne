@@ -3,6 +3,7 @@ import type { PlanView } from '@ariadne/core'
 import {
   bezierEdge,
   defineEdgeType,
+  defineFlowExtension,
   defineNodeType,
   DouFlowControls,
   DouFlowEditor,
@@ -13,11 +14,12 @@ import {
   type FlowTransaction,
 } from '@dou-ui/flow'
 import '@dou-ui/flow/style.css'
+import { DouButton, DouDialog } from 'dou-ui'
 import { computed, markRaw, ref, watch } from 'vue'
 import { t, tm } from '../i18n'
 import { editPlan } from '../store'
 import { editOf, reasonOf } from './edit'
-import { freshChanges, previewOps, toFlowDocument, touchedBy, type PlanMark } from './layout'
+import { freshChanges, toFlowDocument, touchedBy, type PlanMark } from './layout'
 import PlanNode from './PlanNode.vue'
 import { loadSeen, planUi, savedPositions, savePositions, seenRevision } from './ui'
 
@@ -52,13 +54,25 @@ const edgeTypes = [
     },
   }),
 ]
+// Deleting nodes on the graph asks first, like the side panel does: a node can carry
+// threads that would be detached from the plan.
+const removing = ref<string[] | null>(null)
+const askBeforeRemoving = defineFlowExtension({
+  name: 'plan-remove-confirm',
+  transaction(tr) {
+    const ids = tr.steps.flatMap((step) => (step.type === 'removeNode' ? [step.id] : []))
+    if (!ids.length || !editing.value) return
+    tr.cancel(t('plan.removeAsk'))
+    removing.value = ids
+  },
+})
 // No groups: a plan node belongs to the plan, not to another node.
-const extensions = [flowKit({ group: false })]
+const extensions = [flowKit({ group: false }), askBeforeRemoving]
 
 const openProposals = computed(() => props.plan?.proposals.filter((p) => p.status === 'open') ?? [])
 const preview = computed(() => {
   const proposal = openProposals.value.find((p) => p.id === planUi.previewId)
-  return props.plan && proposal ? previewOps(props.plan, proposal.ops) : null
+  return proposal?.preview ?? null
 })
 watch(
   () => props.plan,
@@ -105,8 +119,32 @@ async function onTransaction(tr: FlowTransaction) {
   if (Object.keys(moved).length) savePositions(plan.projectId, moved)
   if (!ops.length) return
   const titleOf = (id: string) => plan.nodes.find((node) => node.id === id)?.title ?? id
-  const ok = await editPlan(tm(reasonOf(ops, titleOf)), ops)
-  if (!ok) doc.value = source.value
+  if ((await editPlan(reasonOf(ops, titleOf, t), ops)) !== 'ok') doc.value = source.value
+}
+
+const removeQuestion = computed(() => {
+  const ids = removing.value ?? []
+  const nodes = (props.plan?.nodes ?? []).filter((node) => ids.includes(node.id))
+  const threads = nodes.reduce((sum, node) => sum + node.threads.length, 0)
+  if (nodes.length === 1 && nodes[0]) {
+    const title = nodes[0].title
+    return threads
+      ? t('plan.removeConfirmThreads', { title, count: threads })
+      : t('plan.removeConfirm', { title })
+  }
+  return threads
+    ? t('plan.removeSelectedThreads', { count: nodes.length, threads })
+    : t('plan.removeSelected', { count: nodes.length })
+})
+
+async function confirmRemove() {
+  const plan = props.plan
+  const ids = removing.value ?? []
+  removing.value = null
+  if (!plan || !ids.length) return
+  const ops = ids.map((id) => ({ op: 'remove' as const, id }))
+  const titleOf = (id: string) => plan.nodes.find((node) => node.id === id)?.title ?? id
+  if ((await editPlan(reasonOf(ops, titleOf, t), ops)) === 'ok') selected.value = null
 }
 
 const selection = ref<FlowSelection>({ nodes: [], edges: [] })
@@ -142,6 +180,18 @@ watch(selected, (id) => {
   >
     <DouFlowControls :history="false" :tidy="false" placement="bottom-left" />
   </DouFlowEditor>
+  <DouDialog
+    :open="!!removing"
+    :title="t('plan.remove')"
+    :width="420"
+    @update:open="(open) => !open && (removing = null)"
+  >
+    {{ removeQuestion }}
+    <template #footer>
+      <DouButton variant="ghost" @click="removing = null">{{ t('settings.cancel') }}</DouButton>
+      <DouButton tone="danger" @click="confirmRemove">{{ t('plan.remove') }}</DouButton>
+    </template>
+  </DouDialog>
 </template>
 
 <style scoped>

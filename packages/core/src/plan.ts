@@ -75,7 +75,11 @@ export function applyOps(graph: PlanGraph, ops: PlanOp[]): { graph: PlanGraph; i
         for (const field of fields) {
           const expected = op.expect?.[field]
           if (expected !== undefined && node[field] !== expected) {
-            invalid(`${where}: ${field} of ${op.id} changed since`)
+            // Someone else changed the field since; the user sees which node, not an op.
+            throw new DomainError('error.planConflict', {
+              title: node.title,
+              reason: `${where}: ${field} of ${op.id} changed since`,
+            })
           }
         }
         const restore: Partial<Omit<PlanNodeFields, 'kind'>> = {}
@@ -271,17 +275,49 @@ export function parsePlanOps(raw: unknown): PlanOp[] {
   })
 }
 
-/** A graph from the plan as the views give it, for working out changes in the browser. */
-export function graphOf(
-  nodes: readonly ({ id: string; dependsOn: readonly string[] } & PlanNodeFields)[],
-): PlanGraph {
-  const graph = emptyGraph()
-  for (const node of nodes) {
-    const { kind, title, description, acceptance } = node
-    graph.nodes.set(node.id, { kind, title, description, acceptance })
-    graph.order.push(node.id)
+/** What a change does to one node or dependency, for drawing it on the graph. */
+export type PlanMark = 'added' | 'removed' | 'changed'
+
+export interface PlanPreview {
+  /** Every node before or after the change, in plan order, removed ones included. */
+  nodes: ({ id: string; mark: PlanMark | null; dependsOn: string[] } & PlanNodeFields)[]
+  edges: { from: string; to: string; mark: Exclude<PlanMark, 'changed'> | null }[]
+}
+
+/**
+ * The plan with a change applied, every node and edge marked by what the change does, so
+ * the web can draw it before the user agrees. `null` when it no longer applies.
+ */
+export function previewPlanOps(graph: PlanGraph, ops: PlanOp[]): PlanPreview | null {
+  let after: PlanGraph
+  try {
+    after = applyOps(graph, ops).graph
+  } catch (error) {
+    if (error instanceof DomainError) return null
+    throw error
   }
-  for (const node of nodes)
-    for (const from of node.dependsOn) graph.edges.add(edgeKey(from, node.id))
-  return graph
+  const keys = [...new Set([...graph.edges, ...after.edges])]
+  const edges = keys.map((key) => {
+    const [from = '', to = ''] = key.split('>')
+    const mark = !graph.edges.has(key) ? 'added' : after.edges.has(key) ? null : 'removed'
+    return { from, to, mark } as PlanPreview['edges'][number]
+  })
+  const nodes = [...new Set([...graph.order, ...after.order])].map((id) => {
+    const was = graph.nodes.get(id)
+    const now = after.nodes.get(id)
+    const fields = (now ?? was) as PlanNodeFields
+    let mark: PlanMark | null = null
+    if (!was) mark = 'added'
+    else if (!now) mark = 'removed'
+    else if (
+      was.title !== now.title ||
+      was.description !== now.description ||
+      was.acceptance !== now.acceptance
+    ) {
+      mark = 'changed'
+    }
+    const dependsOn = edges.filter((edge) => edge.to === id).map((edge) => edge.from)
+    return { id, ...fields, mark, dependsOn }
+  })
+  return { nodes, edges }
 }

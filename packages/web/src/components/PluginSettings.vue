@@ -9,6 +9,8 @@ import { lt, t, tm } from '../i18n'
 const emit = defineEmits<{ changed: [] }>()
 
 const plugins = ref<PluginRecord[]>([])
+/** Model providers by protocol, to say which stop working when a plugin goes. */
+const providers = ref<{ name: string; kind: string }[]>([])
 const path = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
@@ -31,7 +33,22 @@ async function run(action: () => Promise<{ plugins: PluginRecord[] }>, changed =
   }
 }
 
-onMounted(() => run(() => api.listPlugins(), false))
+onMounted(async () => {
+  await run(() => api.listPlugins(), false)
+  try {
+    providers.value = (await api.getModelSettings()).providers
+  } catch {
+    // The warning just names no providers.
+  }
+})
+
+function removeQuestion(plugin: PluginRecord) {
+  const question = t('plugins.removeConfirm', { name: nameOf(plugin) })
+  const affected = providers.value.filter((p) => plugin.provides.models.includes(p.kind))
+  return affected.length
+    ? `${question}${t('plugins.removeAffects', { names: affected.map((p) => p.name).join('、') })}`
+    : question
+}
 
 async function add() {
   if (await run(() => api.addPlugin(path.value.trim()))) path.value = ''
@@ -86,7 +103,7 @@ const provides = (plugin: PluginRecord) => [...plugin.provides.models, ...plugin
         </div>
         <DouPopconfirm
           v-if="plugin.source === 'path' && plugin.path"
-          :title="t('plugins.removeConfirm', { name: nameOf(plugin) })"
+          :title="removeQuestion(plugin)"
           tone="danger"
           :confirm-text="t('plugins.remove')"
           @confirm="run(() => api.removePlugin(plugin.path!))"

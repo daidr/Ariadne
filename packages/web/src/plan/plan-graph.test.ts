@@ -2,7 +2,7 @@ import type { PlanNodeView, PlanRevisionView, PlanView } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
 import { editOf, reasonOf } from './edit'
-import { freshChanges, previewOps, toFlowDocument } from './layout'
+import { freshChanges, toFlowDocument } from './layout'
 
 const node = (id: string, dependsOn: string[] = [], extra: Partial<PlanNodeView> = {}) =>
   ({
@@ -30,6 +30,8 @@ const revision = (id: string, extra: Partial<PlanRevisionView> = {}): PlanRevisi
 })
 
 const title = (id: string) => id.toUpperCase()
+const translate = (key: string, params?: Record<string, unknown>) =>
+  `${key}${params ? JSON.stringify(params) : ''}`
 
 const plan = (nodes: PlanNodeView[], revisions: PlanRevisionView[] = []): PlanView => ({
   projectId: 'p',
@@ -90,40 +92,45 @@ describe('editOf', () => {
     expect(edit.moved).toEqual({ a: { x: 40, y: 0 }, n: { x: 5, y: 6 } })
   })
 
-  test('the reason names a single change and counts several', () => {
-    expect(reasonOf([{ op: 'link', from: 'a', to: 'b' }], title)).toEqual({
-      key: 'plan.reason.link',
-      params: { from: 'A', to: 'B' },
-    })
-    expect(
-      reasonOf(
-        [
-          { op: 'remove', id: 'a' },
-          { op: 'remove', id: 'b' },
-        ],
-        title,
-      ).key,
-    ).toBe('plan.reason.many')
+  test('the reason names each change, then counts the rest', () => {
+    expect(reasonOf([{ op: 'link', from: 'a', to: 'b' }], title, translate)).toBe(
+      'plan.reason.link{"from":"A","to":"B"}',
+    )
+    const swap = reasonOf(
+      [
+        { op: 'unlink', from: 'a', to: 'b' },
+        { op: 'link', from: 'a', to: 'c' },
+      ],
+      title,
+      translate,
+    )
+    expect(swap).toBe(
+      'plan.reason.unlink{"from":"A","to":"B"}plan.reason.joinplan.reason.link{"from":"A","to":"C"}',
+    )
+    const many = reasonOf(
+      ['a', 'b', 'c', 'd', 'e'].map((id) => ({ op: 'remove' as const, id })),
+      title,
+      translate,
+    )
+    expect(many).toMatch(/^plan\.reason\.more\{"first":".*plan\.reason\.remove.*","count":5\}$/)
   })
 })
 
-describe('previewOps', () => {
-  const current = plan([node('a'), node('b', ['a'])])
+describe('previews', () => {
+  const current = plan([node('a', [], { threads: [] }), node('b', ['a'])])
 
-  test('marks what a change adds, removes and changes, keeping removed parts visible', () => {
-    const preview = previewOps(current, [
-      { op: 'add', id: 'c', kind: 'task', title: 'C', description: '', acceptance: '' },
-      { op: 'link', from: 'a', to: 'c' },
-      { op: 'remove', id: 'b' },
-      { op: 'update', id: 'a', acceptance: 'done when tested' },
-    ])
-    expect(preview.problem).toBeNull()
-    expect(Object.fromEntries(preview.marks)).toEqual({ a: 'changed', b: 'removed', c: 'added' })
-    expect(preview.nodes.map((n) => n.id)).toEqual(['a', 'b', 'c'])
-    expect(preview.edges).toEqual([
-      { from: 'a', to: 'b', mark: 'removed' },
-      { from: 'a', to: 'c', mark: 'added' },
-    ])
+  test('draw the preview from the server, keeping the status of nodes that exist now', () => {
+    const preview = {
+      nodes: [
+        { ...node('a'), mark: 'changed' as const },
+        { ...node('b', ['a']), mark: 'removed' as const },
+        { ...node('c', ['a']), mark: 'added' as const },
+      ],
+      edges: [
+        { from: 'a', to: 'b', mark: 'removed' as const },
+        { from: 'a', to: 'c', mark: 'added' as const },
+      ],
+    }
     const doc = toFlowDocument(current, { preview })
     expect(doc.nodes.map((n) => [n.id, n.data?.mark])).toEqual([
       ['a', 'changed'],
@@ -131,15 +138,6 @@ describe('previewOps', () => {
       ['c', 'added'],
     ])
     expect(doc.edges.find((e) => e.id === 'a>c')?.animated).toBe(true)
-  })
-
-  test('says why a change no longer applies, and the plan is shown as it is', () => {
-    const preview = previewOps(current, [{ op: 'remove', id: 'gone' }])
-    expect(preview.problem).toMatch(/gone/)
-    expect(toFlowDocument(current, { preview }).nodes.map((n) => n.data?.mark)).toEqual([
-      null,
-      null,
-    ])
   })
 })
 
@@ -156,6 +154,10 @@ describe('freshChanges', () => {
     expect(fresh.revisions.map((r) => r.id)).toEqual(['r5', 'r2'])
     expect([...fresh.nodes].toSorted()).toEqual(['a', 'b', 'c'])
     expect(freshChanges(plan([], revisions), 'r5').revisions).toEqual([])
+    // The one seen fell out of the latest revisions the plan lists.
+    const lost = freshChanges(plan([], revisions), 'r0')
+    expect(lost.truncated).toBe(true)
+    expect(lost.revisions.map((r) => r.id)).toEqual(['r5', 'r2', 'r1'])
   })
 
   test('saved positions win over the layout', () => {

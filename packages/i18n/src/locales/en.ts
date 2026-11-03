@@ -124,7 +124,6 @@ export const en: Record<MessageKey, string> = {
   'plan.reason.update': 'Edited "{title}" on the plan graph',
   'plan.reason.link': 'Made "{to}" depend on "{from}" on the plan graph',
   'plan.reason.unlink': 'Made "{to}" stop depending on "{from}" on the plan graph',
-  'plan.reason.many': 'Made {count} changes on the plan graph',
   'plan.field.title': 'Title',
   'plan.field.description': 'Description',
   'plan.save': 'Save',
@@ -142,10 +141,25 @@ export const en: Record<MessageKey, string> = {
   'plan.preview.show': 'Preview on graph',
   'plan.preview.hide': 'Hide preview',
   'plan.preview.on': 'Previewing: green is added, red is removed, blue is changed.',
-  'plan.preview.problem': 'This change no longer fits the plan: {reason}',
   'plan.fresh.title':
     'The coordinator changed the plan {count} times; the nodes it touched are marked',
   'plan.fresh.ack': 'Got it',
+  'plan.preview.stale':
+    'The plan changed since; this proposal no longer fits it and cannot be previewed.',
+  'plan.reason.more': '{first}, and {count} changes in all',
+  'plan.reason.join': '; ',
+  'plan.conflict': 'The coordinator just changed this; it is now:',
+  'plan.conflict.empty': '(empty)',
+  'plan.conflict.mine': 'Keep mine and save again',
+  'plan.conflict.theirs': 'Use the current one',
+  'plan.fresh.truncated':
+    'The plan changed many times while you were away; only the nodes the coordinator touched in the last 50 changes are marked',
+  'plan.removeSelected': 'Remove the {count} selected nodes?',
+  'plan.removeAsk': 'Confirm before removing nodes',
+  'plan.removeSelectedThreads':
+    'Remove the {count} selected nodes? Their {threads} threads will be detached from the plan. You can undo this from the history.',
+  'plugins.removeAffects':
+    'These model providers use it: {names}. They stop working once it is removed.',
   'project.source.none':
     'No project source yet (a local directory or a GitHub repository); threads cannot read or write files or run commands',
   'project.source.save': 'Save',
@@ -222,12 +236,16 @@ export const en: Record<MessageKey, string> = {
   'error.modelUnknown': 'Model provider {provider} was not found',
   'error.pluginExists': 'A plugin from this path is already loaded: {path}',
   'error.pluginLoad': 'Could not load the plugin: {detail}',
+  'error.pluginInWorkspace':
+    "Plugins cannot be loaded from Ariadne's plugin data folder: it holds the threads' workspaces and repository clones",
   'error.modelRequest': 'Model request failed: {detail}',
   'error.stepLimit': 'This turn went over {limit} steps and was stopped',
   'error.truncated':
     'The reply went over the per-response token limit and was cut off; raise the limit in model settings and retry',
   'error.interrupted': 'The server stopped mid-turn; work resumed from there',
   'error.planInvalid': 'Invalid plan change: {reason}',
+  'error.planConflict':
+    '"{title}" was changed while you were editing it; your change was not saved',
   'error.planReverted': 'This change has already been reverted',
   'error.artifactConflict': 'This artifact is now at version {version}; reload before saving',
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',

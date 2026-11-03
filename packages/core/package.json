@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./plan": "./src/plan.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@ariadne/i18n": "workspace:*"

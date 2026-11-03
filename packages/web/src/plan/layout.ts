@@ -3,10 +3,10 @@ import type {
   PlanNodeStatus,
   PlanNodeView,
   PlanOp,
+  PlanPreview,
   PlanRevisionView,
   PlanView,
 } from '@ariadne/core'
-import { applyOps, graphOf } from '@ariadne/core/plan'
 import type { FlowDocument } from '@dou-ui/flow'
 
 /** Space between dependency levels (top to bottom) and between nodes on one level. */
@@ -60,83 +60,24 @@ export function touchedBy(ops: readonly PlanOp[]): Set<string> {
 
 /**
  * The coordinator's changes the user has not seen yet: those newer than `seen`, the
- * revision that was newest when they last said "got it".
+ * revision that was newest when they last said "got it". The plan lists only its latest
+ * revisions; when `seen` is not among them, `truncated` says that older ones are missing.
  */
 export function freshChanges(plan: PlanView | null, seen: string | null) {
   const revisions: PlanRevisionView[] = []
+  let found = false
   for (const revision of plan?.revisions ?? []) {
-    if (revision.id === seen) break
+    if (revision.id === seen) {
+      found = true
+      break
+    }
     if (revision.author === 'coordinator' && !revision.revertedBy && !revision.revertOf) {
       revisions.push(revision)
     }
   }
   const nodes = new Set<string>()
   for (const revision of revisions) for (const id of touchedBy(revision.ops)) nodes.add(id)
-  return { revisions, nodes }
-}
-
-export interface PlanPreview {
-  nodes: PlanNodeView[]
-  marks: Map<string, PlanMark>
-  edges: { from: string; to: string; mark: PlanMark }[]
-  /** Why the change cannot apply to the plan as it is now, if it cannot. */
-  problem: string | null
-}
-
-/** The plan with a change applied, every node and edge marked by what the change does. */
-export function previewOps(plan: PlanView, ops: readonly PlanOp[]): PlanPreview {
-  const before = graphOf(plan.nodes)
-  const current = (from: string, to: string) => before.edges.has(`${from}>${to}`)
-  let after
-  try {
-    after = applyOps(before, [...ops]).graph
-  } catch (error) {
-    return {
-      nodes: plan.nodes,
-      marks: new Map(),
-      edges: [],
-      // `error.planInvalid` names the op that no longer fits in its `reason`.
-      problem: String(
-        (error as { params?: { reason?: unknown } }).params?.reason ??
-          (error instanceof Error ? error.message : error),
-      ),
-    }
-  }
-  const marks = new Map<string, PlanMark>()
-  const byId = new Map(plan.nodes.map((node) => [node.id, node]))
-  const nodes: PlanNodeView[] = []
-  for (const id of new Set([...before.order, ...after.order])) {
-    const was = before.nodes.get(id)
-    const now = after.nodes.get(id)
-    const dependsOn = [...after.edges, ...before.edges]
-      .map((key) => key.split('>'))
-      .filter(([, to]) => to === id)
-      .map(([from]) => from as string)
-    const base = byId.get(id)
-    nodes.push({
-      id,
-      ...(now ?? was)!,
-      dependsOn: [...new Set(dependsOn)],
-      status: base?.status ?? 'none',
-      threads: base?.threads ?? [],
-      changedIn: base?.changedIn ?? null,
-    })
-    if (!was) marks.set(id, 'added')
-    else if (!now) marks.set(id, 'removed')
-    else if (
-      was.title !== now.title ||
-      was.description !== now.description ||
-      was.acceptance !== now.acceptance
-    ) {
-      marks.set(id, 'changed')
-    }
-  }
-  const edges = [...new Set([...before.edges, ...after.edges])].map((key) => {
-    const [from = '', to = ''] = key.split('>')
-    const mark: PlanMark = !current(from, to) ? 'added' : after.edges.has(key) ? null : 'removed'
-    return { from, to, mark }
-  })
-  return { nodes, marks, edges, problem: null }
+  return { revisions, nodes, truncated: !!seen && !found && revisions.length > 0 }
 }
 
 /**
@@ -171,17 +112,26 @@ export function layoutPlan(nodes: PlanNodeView[]): Map<string, { x: number; y: n
 export interface GraphOptions {
   /** Where the user moved nodes; others are laid out by dependency. */
   positions?: Positions
-  /** A change to show on the graph instead of the plan as it is. */
+  /** A change to show on the graph instead of the plan as it is, as the server drew it. */
   preview?: PlanPreview | null
   fresh?: Set<string>
   proposed?: Set<string>
 }
 
 export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}): FlowDocument {
-  const preview = options.preview && !options.preview.problem ? options.preview : null
-  const nodes = preview?.nodes ?? plan?.nodes ?? []
+  const { preview } = options
+  const current = new Map((plan?.nodes ?? []).map((node) => [node.id, node]))
+  // A previewed node keeps the threads and status of the node it is now, if any.
+  const nodes: (PlanNodeView & { mark: PlanMark })[] = preview
+    ? preview.nodes.map((node) => ({
+        ...node,
+        status: current.get(node.id)?.status ?? 'none',
+        threads: current.get(node.id)?.threads ?? [],
+        changedIn: null,
+      }))
+    : (plan?.nodes ?? []).map((node) => ({ ...node, mark: null }))
   const auto = layoutPlan(nodes)
-  const edges =
+  const edges: { from: string; to: string; mark: PlanMark }[] =
     preview?.edges ??
     nodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
   return {
@@ -194,7 +144,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         acceptance: node.acceptance,
         status: node.status,
         threads: node.threads,
-        mark: preview?.marks.get(node.id) ?? null,
+        mark: node.mark,
         fresh: !preview && !!options.fresh?.has(node.id),
         proposed: !preview && !!options.proposed?.has(node.id),
       }

@@ -88,26 +88,38 @@ export function editOf(
   return { ops, moved }
 }
 
+type Translate = (key: MessageKey, params?: MessageParams) => string
+
+/** How many changes the reason names one by one before it only counts the rest. */
+const NAMED = 4
+
 /**
- * Why the plan changed, as the revision records it and the coordinator reads it. One op
- * is named; several are counted.
+ * Why the plan changed, as the revision records it and the coordinator reads it: each
+ * change named, so neither has to work out what "changed 3 things" meant.
  */
 export function reasonOf(
   ops: readonly PlanOp[],
   titleOf: (id: string) => string,
-): { key: MessageKey; params: MessageParams } {
-  if (ops.length !== 1) return { key: 'plan.reason.many', params: { count: ops.length } }
-  const [op] = ops as [PlanOp]
-  switch (op.op) {
-    case 'add':
-      return { key: 'plan.reason.add', params: { title: op.title } }
-    case 'remove':
-      return { key: 'plan.reason.remove', params: { title: titleOf(op.id) } }
-    case 'update':
-      return { key: 'plan.reason.update', params: { title: titleOf(op.id) } }
-    case 'link':
-      return { key: 'plan.reason.link', params: { from: titleOf(op.from), to: titleOf(op.to) } }
-    case 'unlink':
-      return { key: 'plan.reason.unlink', params: { from: titleOf(op.from), to: titleOf(op.to) } }
+  translate: Translate,
+): string {
+  const added = new Map(ops.flatMap((op) => (op.op === 'add' ? [[op.id, op.title]] : [])))
+  const title = (id: string) => added.get(id) ?? titleOf(id)
+  const line = (op: PlanOp) => {
+    switch (op.op) {
+      case 'add':
+        return translate('plan.reason.add', { title: op.title })
+      case 'remove':
+        return translate('plan.reason.remove', { title: title(op.id) })
+      case 'update':
+        return translate('plan.reason.update', { title: title(op.id) })
+      case 'link':
+        return translate('plan.reason.link', { from: title(op.from), to: title(op.to) })
+      case 'unlink':
+        return translate('plan.reason.unlink', { from: title(op.from), to: title(op.to) })
+    }
   }
+  const named = ops.slice(0, NAMED).map(line).join(translate('plan.reason.join'))
+  return ops.length > NAMED
+    ? translate('plan.reason.more', { first: named, count: ops.length })
+    : named
 }

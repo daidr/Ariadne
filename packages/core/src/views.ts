@@ -1,4 +1,5 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
+import type { PlanPreview } from './plan'
 import type {
   ArtifactKind,
   AttentionOption,
@@ -178,6 +179,8 @@ export interface PlanProposalView {
   ops: PlanOp[]
   /** What the change does, one line per op, against the plan as it is now. */
   changes: LocalizedMessage[]
+  /** The plan with the change applied, to draw on the graph; `null` when it no longer applies. */
+  preview: PlanPreview | null
   /**
    * `open` waits on the user. `stale` means the user agreed but the plan had moved on, so
    * it did not take effect; it stays visible until the plan changes again.

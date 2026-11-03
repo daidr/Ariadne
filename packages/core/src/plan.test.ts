@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
 import { DomainError } from './errors'
 import type { PlanOp } from './events'
-import { applyOps, emptyGraph, graphOf, needsConfirmation, parsePlanOps } from './plan'
+import { applyOps, emptyGraph, needsConfirmation, parsePlanOps, previewPlanOps } from './plan'
 
 let app: Ariadne
 let projectId: string
@@ -407,14 +407,38 @@ describe('parsePlanOps', () => {
   })
 })
 
-describe('graphOf', () => {
-  test('rebuilds the graph from plan views, so the browser can apply changes', () => {
-    const graph = graphOf([
-      { id: 'a', kind: 'task', title: 'A', description: '', acceptance: '', dependsOn: [] },
-      { id: 'b', kind: 'task', title: 'B', description: '', acceptance: '', dependsOn: ['a'] },
+describe('previewPlanOps', () => {
+  test('marks what a change adds, removes and changes, keeping removed parts', () => {
+    const graph = applyOps(emptyGraph(), [
+      add('a'),
+      add('b'),
+      { op: 'link', from: 'a', to: 'b' },
+    ]).graph
+    const preview = previewPlanOps(graph, [
+      add('c'),
+      { op: 'link', from: 'a', to: 'c' },
+      { op: 'remove', id: 'b' },
+      { op: 'update', id: 'a', acceptance: 'done when tested' },
     ])
-    expect(graph.order).toEqual(['a', 'b'])
-    expect([...graph.edges]).toEqual(['a>b'])
-    expect(() => applyOps(graph, [{ op: 'link', from: 'b', to: 'a' }])).toThrow(DomainError)
+    expect(preview?.nodes.map((n) => [n.id, n.mark, n.dependsOn])).toEqual([
+      ['a', 'changed', []],
+      ['b', 'removed', ['a']],
+      ['c', 'added', ['a']],
+    ])
+    expect(preview?.edges).toEqual([
+      { from: 'a', to: 'b', mark: 'removed' },
+      { from: 'a', to: 'c', mark: 'added' },
+    ])
+    expect(previewPlanOps(graph, [{ op: 'remove', id: 'gone' }])).toBeNull()
+  })
+
+  test('an edit of a field changed since is a conflict naming the node', () => {
+    const graph = applyOps(emptyGraph(), [add('a', '甲')]).graph
+    try {
+      applyOps(graph, [{ op: 'update', id: 'a', title: '乙', expect: { title: '丙' } }])
+      expect.unreachable()
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'error.planConflict', params: { title: '甲' } })
+    }
   })
 })

@@ -3,7 +3,16 @@ import type { ResolvedModel } from '@ariadne/agent'
 import type { PluginHost } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
 import type { SettingsSchema } from '@ariadne/plugin-sdk'
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
 import { BadRequest } from './http'
 
 export interface ModelProviderConfig {
@@ -36,6 +45,22 @@ const defaults = (): UserConfig => ({
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
 })
+
+/** A path made absolute, `~/` expanded and symbolic links followed where it exists. */
+function realPath(path: string): string {
+  const full = resolve(path.startsWith('~/') ? join(homedir(), path.slice(2)) : path)
+  try {
+    return realpathSync(full)
+  } catch {
+    return full
+  }
+}
+
+/** Whether `path` is `dir` or inside it. */
+function insideDir(path: string, dir: string): boolean {
+  const rel = relative(realPath(dir), realPath(path))
+  return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'))
+}
 
 function secretKeys(schema: SettingsSchema | undefined): string[] {
   if (!schema) return []
@@ -150,6 +175,11 @@ export class SettingsStore {
     if (typeof input !== 'string' || !input.trim()) throw new BadRequest('path')
     const path = input.trim()
     if (this.config.plugins.includes(path)) throw new DomainError('error.pluginExists', { path })
+    // Plugin data directories hold the threads' worktrees and clones of repositories:
+    // code there is written by threads or comes from the repository, not from the user.
+    if (insideDir(path, join(dirname(this.path), 'plugins'))) {
+      throw new DomainError('error.pluginInWorkspace')
+    }
     try {
       await this.host.loadFromPath(path)
     } catch (error) {

@@ -163,3 +163,9 @@ describe('plugins from a path', () => {
     expect(host.records().some((record) => record.status === 'failed')).toBe(false)
   })
 })
+
+test('plugins inside the plugin data folder, where worktrees live, are refused', async () => {
+  const store = new SettingsStore(path, host)
+  const inside = join(path, '..', 'plugins', 'local', 'worktrees', 'x')
+  await expect(store.addPlugin(inside)).rejects.toMatchObject({ code: 'error.pluginInWorkspace' })
+})

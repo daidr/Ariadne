@@ -54,7 +54,13 @@ async function addNode() {
     description: '',
     acceptance: '',
   }
-  if (await editPlan(tm(reasonOf([op], () => op.title)), [op])) selected.value = op.id
+  if (
+    (await editPlan(
+      reasonOf([op], () => op.title, t),
+      [op],
+    )) === 'ok'
+  )
+    selected.value = op.id
 }
 
 const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
