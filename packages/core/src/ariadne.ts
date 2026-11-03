@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { DomainError } from './errors'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
+  AnyNewEvent,
   AnyStoredEvent,
   ArtifactKind,
   AttentionOption,
@@ -11,6 +12,7 @@ import type {
   PlanOp,
   ProjectSource,
   ReportKind,
+  ThreadPullRequest,
   TodoItem,
   TokenUsage,
   ToolCallRecord,
@@ -45,7 +47,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 7
+export const PROJECTION_VERSION = 9
 
 interface ConversationRow {
   id: string
@@ -157,6 +159,7 @@ interface ThreadRow {
   last_summary: string | null
   workspace_label: string | null
   workspace_branch: string | null
+  pull_request: string | null
   created_at: number
   updated_at: number
   open_attentions: number
@@ -211,6 +214,7 @@ function toThread(row: ThreadRow): ThreadView {
       row.workspace_label === null
         ? null
         : { label: row.workspace_label, branch: row.workspace_branch },
+    pullRequest: row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -477,6 +481,22 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
+  /**
+   * Where the user stands on a standing approval a thread asked for: the newest attention
+   * with this purpose decides. `null` when it was never asked.
+   */
+  approvalFor(threadId: string, purpose: string): 'approved' | 'declined' | 'pending' | null {
+    const row = this.db
+      .query<{ answered: number; choice: number | null }, [string, string]>(
+        `SELECT answered, choice FROM attentions WHERE thread_id = ? AND purpose = ?
+         ORDER BY created_at DESC, id DESC LIMIT 1`,
+      )
+      .get(threadId, purpose)
+    if (!row) return null
+    if (!row.answered) return 'pending'
+    return row.choice === 0 ? 'approved' : 'declined'
+  }
+
   openAttention(
     projectId: string,
     input: {
@@ -484,6 +504,7 @@ export class Ariadne {
       question: string
       options: AttentionOption[]
       recommended?: number | null
+      purpose?: string | null
     },
   ): AttentionView {
     this.getProject(projectId)
@@ -503,6 +524,7 @@ export class Ariadne {
           question: input.question,
           options: input.options,
           recommended,
+          ...(input.purpose ? { purpose: input.purpose } : {}),
         },
       },
     ])
@@ -648,7 +670,56 @@ export class Ariadne {
     ])
   }
 
+  /**
+   * Record what the repository says about a thread's pull request. Nothing is written
+   * when nothing changed; a new failure of the newest commit's checks wakes the thread,
+   * and merging or closing tells the coordinator.
+   */
+  syncPullRequest(threadId: string, pullRequest: ThreadPullRequest): void {
+    const thread = this.getThread(threadId)
+    const before = thread.pullRequest
+    if (JSON.stringify(before) === JSON.stringify(pullRequest)) return
+    const projectId = thread.projectId
+    const events: AnyNewEvent[] = [
+      { type: 'pull_request.synced', projectId, data: { threadId, ...pullRequest } },
+    ]
+    const failedBefore =
+      before?.headSha === pullRequest.headSha && before.checks.state === 'failure'
+    if (pullRequest.checks.state === 'failure' && !failedBefore) {
+      events.push({
+        type: 'checks.failed',
+        projectId,
+        data: {
+          threadId,
+          number: pullRequest.number,
+          headSha: pullRequest.headSha,
+          failed: pullRequest.checks.failed,
+        },
+      })
+    }
+    if (pullRequest.state !== 'open' && before?.state === 'open') {
+      events.push({
+        type: 'pull_request.closed',
+        projectId,
+        data: { threadId, number: pullRequest.number, merged: pullRequest.state === 'merged' },
+      })
+    }
+    this.store.append(events)
+  }
+
   // ---- plan ----
+
+  /** The user has read the notice that an agreed proposal did not take effect. */
+  dismissPlanProposal(projectId: string, proposalId: string): void {
+    const row = this.db
+      .query<{ status: string }, [string, string]>(
+        'SELECT status FROM plan_proposals WHERE id = ? AND project_id = ?',
+      )
+      .get(proposalId, projectId)
+    if (!row) throw new DomainError('error.notFound', { what: proposalId })
+    if (row.status !== 'stale') return
+    this.store.append([{ type: 'plan.proposal.dismissed', projectId, data: { proposalId } }])
+  }
 
   getPlan(projectId: string): PlanView {
     this.getProject(projectId)

@@ -1,6 +1,7 @@
 import { DomainError, type ReportKind, type TodoItem } from '@ariadne/core'
 import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
+import { repoTools } from './repo-tools'
 import { json, optionalInt, str, ToolInputError, type Tool } from './tool-helpers'
 import { workspaceTools } from './workspace-tools'
 
@@ -242,6 +243,13 @@ const listThreads: Tool = {
         stage: t.stage,
         lastReport: t.lastReport,
         lastSummary: t.lastSummary,
+        branch: t.workspace?.branch ?? null,
+        pullRequest: t.pullRequest && {
+          number: t.pullRequest.number,
+          url: t.pullRequest.url,
+          state: t.pullRequest.state,
+          checks: t.pullRequest.checks.state,
+        },
       })),
     )
   },
@@ -309,8 +317,18 @@ export const threadTools: Tool[] = [
   ...artifactTools,
 ]
 
-/** A thread's tools; the workspace tools only when its project has a directory to work in. */
-export function toolsFor(role: 'coordinator' | 'thread', hasWorkspace: boolean): Tool[] {
+/**
+ * A thread's tools: the workspace tools only when its project has a directory to work in,
+ * the repository tools only when that directory is a hosted repository.
+ */
+export function toolsFor(
+  role: 'coordinator' | 'thread',
+  source: { workspace: boolean; repo: boolean },
+): Tool[] {
   if (role === 'coordinator') return coordinatorTools
-  return hasWorkspace ? [...threadTools, ...workspaceTools] : threadTools
+  return [
+    ...threadTools,
+    ...(source.workspace ? workspaceTools : []),
+    ...(source.workspace && source.repo ? repoTools : []),
+  ]
 }

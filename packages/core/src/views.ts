@@ -9,6 +9,7 @@ import type {
   Author,
   MessageKind,
   ReportKind,
+  ThreadPullRequest,
   TodoItem,
   ToolCallRecord,
   TurnOutcome,
@@ -37,6 +38,8 @@ export interface ThreadView {
   lastSummary: string | null
   /** The thread's prepared workspace, once it has used one. */
   workspace: { label: string; branch: string | null } | null
+  /** The pull request of the thread's branch, once it opened one. */
+  pullRequest: ThreadPullRequest | null
   createdAt: number
   updatedAt: number
 }
@@ -130,6 +133,8 @@ export type TranscriptNote =
   | { type: 'artifact-edited'; artifactId: string; title: string; version: number }
   | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
   | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
+  | { type: 'checks-failed'; threadId: string; number: number; headSha: string; failed: string[] }
+  | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,

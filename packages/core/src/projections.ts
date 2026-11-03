@@ -74,6 +74,7 @@ export const threadsProjection: Projection = {
       last_summary TEXT,
       workspace_label TEXT,
       workspace_branch TEXT,
+      pull_request TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -112,6 +113,15 @@ export const threadsProjection: Projection = {
           [event.data.label, event.data.branch, event.at, event.data.threadId],
         )
         break
+      case 'pull_request.synced': {
+        const { threadId, ...pullRequest } = event.data
+        db.run('UPDATE threads SET pull_request = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(pullRequest),
+          event.at,
+          threadId,
+        ])
+        break
+      }
     }
   },
 }
@@ -129,6 +139,7 @@ export const attentionsProjection: Projection = {
       answered INTEGER NOT NULL DEFAULT 0,
       choice INTEGER,
       answer_text TEXT,
+      purpose TEXT,
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, answered)')
@@ -137,7 +148,7 @@ export const attentionsProjection: Projection = {
     switch (event.type) {
       case 'attention.opened':
         db.run(
-          'INSERT INTO attentions (id, project_id, thread_id, question, options, recommended, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO attentions (id, project_id, thread_id, question, options, recommended, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [
             event.data.attentionId,
             event.projectId,
@@ -145,6 +156,7 @@ export const attentionsProjection: Projection = {
             event.data.question,
             JSON.stringify(event.data.options),
             event.data.recommended,
+            event.data.purpose ?? null,
             event.at,
           ],
         )
@@ -468,6 +480,27 @@ export const transcriptProjection: Projection = {
         if (event.data.report === 'done') upstreamDone(db, event, event.data)
         break
       }
+      case 'checks.failed':
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.threadId,
+            kind: 'note',
+            payload: { type: 'checks-failed', ...event.data },
+          },
+          true,
+        )
+        break
+      case 'pull_request.closed': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        const payload = { type: 'pull-request-closed', ...event.data }
+        addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, false)
+        if (coordinator) {
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, true)
+        }
+        break
+      }
       case 'artifact.revised': {
         // The agent that last wrote the document learns the user changed it, next turn.
         // The artifacts projection has already applied this edit, which leaves the last
@@ -749,11 +782,6 @@ export const planProjection: Projection = {
   apply(db, event) {
     switch (event.type) {
       case 'plan.revised': {
-        // A proposal that failed to apply stays visible until the plan changes again.
-        db.run(
-          "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
-          [event.projectId],
-        )
         const before = loadPlanGraph(db, event.projectId)
         // Commands validate before appending; a revision that no longer applies is skipped
         // rather than corrupting the graph.
@@ -793,7 +821,14 @@ export const planProjection: Projection = {
         }
         break
       }
+      case 'plan.proposal.dismissed':
+        db.run("UPDATE plan_proposals SET status = 'expired' WHERE id = ? AND status = 'stale'", [
+          event.data.proposalId,
+        ])
+        break
       case 'plan.proposed':
+        // A proposal that failed to apply stays visible until the user dismisses it or the
+        // coordinator proposes again.
         db.run(
           "UPDATE plan_proposals SET status = 'expired' WHERE project_id = ? AND status = 'stale'",
           [event.projectId],

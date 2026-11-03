@@ -1,4 +1,9 @@
-import type { PluginHost, Scheduler } from '@ariadne/agent'
+import {
+  syncThreadPullRequest,
+  type PluginHost,
+  type Scheduler,
+  type WorkspaceManager,
+} from '@ariadne/agent'
 import { DomainError, type Ariadne } from '@ariadne/core'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
@@ -22,6 +27,8 @@ export interface HandlerOptions {
   settings?: SettingsStore
   /** Context providers, to check a project's directory before saving it. */
   host?: PluginHost
+  /** The projects' workspaces and repositories, to refresh a pull request on request. */
+  workspaces?: WorkspaceManager
 }
 
 type Params = Record<string, string>
@@ -40,7 +47,15 @@ function bearer(request: Request, url: URL): string | null {
 }
 
 /** Build the request handler. Kept separate from `Bun.serve` so tests can call it directly. */
-export function createHandler({ app, token, webDist, scheduler, settings, host }: HandlerOptions) {
+export function createHandler({
+  app,
+  token,
+  webDist,
+  scheduler,
+  settings,
+  host,
+  workspaces,
+}: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
     routes.push({ method, pattern: new URLPattern({ pathname }), handle })
@@ -60,30 +75,91 @@ export function createHandler({ app, token, webDist, scheduler, settings, host }
     }),
   )
 
-  // Where the project's threads work. The directory is checked before it is saved, so a
-  // typo shows up here rather than in a thread's first turn.
+  // The kinds of context source plugins offer, with the form each one needs.
+  add('GET', '/api/source-kinds', () =>
+    json({
+      kinds: [...(host?.contexts.values() ?? [])].map((provider) => ({
+        kind: provider.kind,
+        title: provider.title,
+        settings: provider.settings,
+        provides: provider.provides,
+      })),
+    }),
+  )
+
+  add('GET', '/api/projects/:projectId/source', (_request, { projectId = '' }) =>
+    json({
+      source: app.getProject(projectId).source,
+      secretsSet: settings?.sourceSecretsSet(projectId) ?? [],
+    }),
+  )
+
+  // Where the project's threads work. The source is connected before it is saved, so a
+  // typo or a missing permission shows up here rather than in a thread's first turn.
+  // Secret settings (tokens) go to the user's config, never into the event log.
   add('PUT', '/api/projects/:projectId/source', async (request, { projectId = '' }) => {
     const body = await readJson(request)
-    if (body.path === null) return json({ project: app.setProjectSource(projectId, null) })
-    const source = {
-      kind: 'local-directory',
-      settings: { path: requireString(body, 'path').trim() },
+    const previous = app.getProject(projectId).source
+    if (body.source === null) {
+      settings?.saveSourceSecrets(projectId, {})
+      return json({ project: app.setProjectSource(projectId, null) })
     }
-    const provider = host?.contexts.get(source.kind)
+    const input = (body.source ?? {}) as { kind?: unknown; settings?: unknown }
+    const kind = requireString(input as Record<string, unknown>, 'kind')
+    const provider = host?.contexts.get(kind)
+    if (host && !provider) throw new BadRequest('source.kind')
+    const raw = (
+      input.settings && typeof input.settings === 'object' ? input.settings : {}
+    ) as Record<string, unknown>
+    const trimmed = Object.fromEntries(
+      Object.entries(raw).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value.trim() : value,
+      ]),
+    )
+    for (const key of provider?.settings.required ?? []) {
+      if (trimmed[key] === undefined || trimmed[key] === '') throw new BadRequest(`settings.${key}`)
+    }
+    const split = settings
+      ? settings.splitSourceSettings(projectId, kind, trimmed, previous?.kind ?? null)
+      : { settings: trimmed, secrets: {} }
     if (provider) {
       try {
-        await provider.connect(source.settings as never)
+        await provider.connect({ ...split.settings, ...split.secrets } as never)
       } catch (error) {
         throw new DomainError('error.workspace', {
           detail: error instanceof Error ? error.message : String(error),
         })
       }
     }
-    return json({ project: app.setProjectSource(projectId, source) })
+    settings?.saveSourceSecrets(projectId, split.secrets)
+    return json({ project: app.setProjectSource(projectId, { kind, settings: split.settings }) })
   })
+
+  // Read the thread's pull request and checks again now, instead of waiting for the poll.
+  add(
+    'POST',
+    '/api/threads/:threadId/pull-request/refresh',
+    async (_request, { threadId = '' }) => {
+      const thread = app.getThread(threadId)
+      if (workspaces?.hasRepo(thread.projectId)) {
+        await syncThreadPullRequest(app, await workspaces.repo(thread.projectId), threadId)
+      }
+      return json({ thread: app.getThread(threadId) })
+    },
+  )
 
   add('GET', '/api/projects/:projectId/plan', (_request, { projectId = '' }) =>
     json({ plan: app.getPlan(projectId) }),
+  )
+
+  add(
+    'POST',
+    '/api/projects/:projectId/plan/proposals/:proposalId/dismiss',
+    (_request, { projectId = '', proposalId = '' }) => {
+      app.dismissPlanProposal(projectId, proposalId)
+      return json({ plan: app.getPlan(projectId) })
+    },
   )
 
   add(

@@ -79,6 +79,15 @@ describe('local directory', () => {
     await expect(ws.readFile('../README.md')).rejects.toThrow(WorkspacePathError)
   })
 
+  test('a subdirectory the commit does not track is refused with a clear reason', async () => {
+    const dir = await repo()
+    await run(['mkdir', '-p', join(dir, 'untracked')], { cwd: base })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({
+      path: join(dir, 'untracked'),
+    })
+    await expect(workspace!.open({ threadId: 'thr_a' })).rejects.toThrow(/current commit/)
+  })
+
   test('paths cannot leave the workspace, not even through a link', async () => {
     const dir = join(base, 'plain')
     await run(['mkdir', '-p', dir], { cwd: base })
@@ -102,6 +111,26 @@ describe('local directory', () => {
 
   test('branch names use the random tail of the thread id', () => {
     expect(branchFor('thr_01a1a344-64ac-71b6-9cac-f9b91ac96c2d')).toBe('ariadne/f9b91ac96c2d')
+  })
+
+  test("a thread's commands do not see the server's credentials", async () => {
+    const saved = { ...process.env }
+    process.env.GH_TOKEN = 'ghp_probe_secret'
+    process.env.ARIADNE_TOKEN = 'local-secret'
+    process.env.GIT_CONFIG_VALUE_0 = 'Authorization: Basic x'
+    try {
+      const dir = join(base, 'plain')
+      await run(['mkdir', '-p', dir], { cwd: base })
+      const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+      const ws = await workspace!.open({ threadId: 'thr_a' })
+      const result = await ws.exec('env')
+      expect(result.stdout).not.toContain('ghp_probe_secret')
+      expect(result.stdout).not.toContain('local-secret')
+      expect(result.stdout).not.toContain('Authorization')
+      expect(result.stdout).toContain('PATH=')
+    } finally {
+      process.env = saved
+    }
   })
 
   test('commands time out', async () => {

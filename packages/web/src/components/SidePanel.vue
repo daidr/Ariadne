@@ -5,6 +5,7 @@ import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
 import ArtifactList from '../artifacts/ArtifactList.vue'
+import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import { openThread, state } from '../store'
 import ProjectSource from './ProjectSource.vue'
@@ -27,7 +28,8 @@ const stageOf = (id: string | number): ThreadStage =>
         <PlanPanel />
       </DouTabPanel>
       <DouTabPanel value="board" :label="t('panel.board')">
-        <DouEmpty size="sm" />
+        <PlanBoard v-if="state.plan?.nodes.length" :plan="state.plan" compact />
+        <DouEmpty v-else size="sm" :description="t('plan.empty')" />
       </DouTabPanel>
       <DouTabPanel value="threads" :label="t('panel.threads')">
         <DouMenu

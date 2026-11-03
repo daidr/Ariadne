@@ -46,10 +46,59 @@ export interface WorkspaceCapability {
   open(request: WorkspaceRequest): Promise<Workspace>
 }
 
+export interface PullRequestInfo {
+  number: number
+  url: string
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  draft: boolean
+  /** The newest commit of the pull request's branch. */
+  headSha: string
+  base: string
+}
+
+/** One check of a commit, e.g. one CI job. */
+export interface CheckInfo {
+  id: string
+  name: string
+  status: 'queued' | 'in_progress' | 'completed'
+  /** Set once completed: `success`, `failure`, `cancelled`, `skipped`, ... */
+  conclusion: string | null
+  url: string | null
+}
+
+/** A hosted repository: branches, pull requests and the checks that run on them. */
 export interface RepoCapability {
-  /** `owner/name` or a URL. */
+  /** `owner/name`. */
   remote: string
+  /** The repository's page, for links. */
+  webUrl: string
   defaultBranch(): Promise<string>
+  /** Whether anyone can read the repository: what is pushed there is public at once. */
+  isPublic(): Promise<boolean>
+  /**
+   * Bring the remote's branches into the workspaces as `origin/<branch>`, without moving
+   * any local branch.
+   */
+  fetch(): Promise<void>
+  /**
+   * Push a branch the workspaces created to the remote. Only the given branch moves;
+   * providers refuse to force-push.
+   */
+  push(branch: string): Promise<{ sha: string }>
+  /** The open (or newest) pull request whose head is `branch`. */
+  pullRequestFor(branch: string): Promise<PullRequestInfo | null>
+  pullRequest(number: number): Promise<PullRequestInfo>
+  openPullRequest(input: {
+    branch: string
+    base?: string
+    title: string
+    body: string
+    draft?: boolean
+  }): Promise<PullRequestInfo>
+  checks(sha: string): Promise<CheckInfo[]>
+  /** The end of a check's log, for a thread to see why it failed. */
+  checkLog(checkId: string): Promise<string>
 }
 
 /** A path that points outside the workspace. */

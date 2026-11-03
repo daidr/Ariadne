@@ -162,35 +162,48 @@ export function describePlanOps(
   const added = new Map<string, string>()
   for (const op of ops) if (op.op === 'add') added.set(op.id, op.title)
   const title = (id: string) => graph.nodes.get(id)?.title ?? added.get(id) ?? id
-  return ops.map((op): LocalizedMessage => {
+  return ops.flatMap((op): LocalizedMessage[] => {
     switch (op.op) {
       case 'add':
-        return {
-          key: op.kind === 'milestone' ? 'plan.op.addMilestone' : 'plan.op.add',
-          params: { title: op.title },
-        }
+        return [
+          {
+            key: op.kind === 'milestone' ? 'plan.op.addMilestone' : 'plan.op.add',
+            params: { title: op.title },
+          },
+        ]
       case 'remove': {
         const count = threadsOn(op.id)
-        return count
-          ? { key: 'plan.op.removeWithThreads', params: { title: title(op.id), count } }
-          : { key: 'plan.op.remove', params: { title: title(op.id) } }
+        return [
+          count
+            ? { key: 'plan.op.removeWithThreads', params: { title: title(op.id), count } }
+            : { key: 'plan.op.remove', params: { title: title(op.id) } },
+        ]
       }
       case 'update': {
-        if (op.acceptance !== undefined && op.acceptance !== graph.nodes.get(op.id)?.acceptance) {
-          return {
+        // One line per field that changes, so a rename next to new acceptance is not lost.
+        const node = graph.nodes.get(op.id)
+        const lines: LocalizedMessage[] = []
+        if (op.title !== undefined && op.title.trim() !== node?.title) {
+          lines.push({
+            key: 'plan.op.rename',
+            params: { title: title(op.id), value: op.title.trim() },
+          })
+        }
+        if (op.acceptance !== undefined && op.acceptance !== node?.acceptance) {
+          lines.push({
             key: 'plan.op.acceptance',
             params: { title: title(op.id), value: op.acceptance || '—' },
-          }
+          })
         }
-        if (op.title !== undefined && op.title !== graph.nodes.get(op.id)?.title) {
-          return { key: 'plan.op.rename', params: { title: title(op.id), value: op.title } }
+        if (op.description !== undefined && op.description !== node?.description) {
+          lines.push({ key: 'plan.op.update', params: { title: title(op.id) } })
         }
-        return { key: 'plan.op.update', params: { title: title(op.id) } }
+        return lines.length ? lines : [{ key: 'plan.op.update', params: { title: title(op.id) } }]
       }
       case 'link':
-        return { key: 'plan.op.link', params: { from: title(op.from), to: title(op.to) } }
+        return [{ key: 'plan.op.link', params: { from: title(op.from), to: title(op.to) } }]
       case 'unlink':
-        return { key: 'plan.op.unlink', params: { from: title(op.from), to: title(op.to) } }
+        return [{ key: 'plan.op.unlink', params: { from: title(op.from), to: title(op.to) } }]
     }
   })
 }

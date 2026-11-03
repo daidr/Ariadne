@@ -17,6 +17,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
 import { stageTone } from '../stage'
+import PullRequestTag from './PullRequestTag.vue'
 import {
   currentConversationId,
   openThread,
@@ -100,6 +101,7 @@ watch(
         <template #leading><GitBranchIcon /></template>
         {{ thread.workspace.branch }}
       </DouTag>
+      <PullRequestTag :thread="thread" refreshable />
     </div>
 
     <DouChatList v-if="state.messages.length || working" class="conversation-list">

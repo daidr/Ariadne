@@ -44,6 +44,14 @@
         "@ariadne/plugin-sdk": "workspace:*",
       },
     },
+    "packages/plugin-github": {
+      "name": "@ariadne/plugin-github",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
     "packages/plugin-local": {
       "name": "@ariadne/plugin-local",
       "version": "0.0.0",
@@ -70,6 +78,7 @@
         "@ariadne/core": "workspace:*",
         "@ariadne/i18n": "workspace:*",
         "@ariadne/plugin-anthropic": "workspace:*",
+        "@ariadne/plugin-github": "workspace:*",
         "@ariadne/plugin-local": "workspace:*",
         "@ariadne/plugin-openai-compatible": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
@@ -98,6 +107,8 @@
     "@ariadne/i18n": ["@ariadne/i18n@workspace:packages/i18n"],
 
     "@ariadne/plugin-anthropic": ["@ariadne/plugin-anthropic@workspace:packages/plugin-anthropic"],
+
+    "@ariadne/plugin-github": ["@ariadne/plugin-github@workspace:packages/plugin-github"],
 
     "@ariadne/plugin-local": ["@ariadne/plugin-local@workspace:packages/plugin-local"],
 

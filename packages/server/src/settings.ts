@@ -25,6 +25,8 @@ export interface UserConfig {
   plugins: string[]
   models: ModelsConfig
   concurrency: { slots: number; reserved: number }
+  /** Secret settings of each project's context source (e.g. a token), by project id. */
+  sourceSecrets: Record<string, Record<string, string>>
 }
 
 const defaults = (): UserConfig => ({
@@ -32,6 +34,7 @@ const defaults = (): UserConfig => ({
   plugins: [],
   models: { providers: [], default: null },
   concurrency: { slots: 3, reserved: 1 },
+  sourceSecrets: {},
 })
 
 function secretKeys(schema: SettingsSchema | undefined): string[] {
@@ -60,6 +63,7 @@ export class SettingsStore {
         ...stored,
         models: { ...this.config.models, ...stored.models },
         concurrency: { ...this.config.concurrency, ...stored.concurrency },
+        sourceSecrets: { ...stored.sourceSecrets },
       }
     }
   }
@@ -135,6 +139,49 @@ export class SettingsStore {
         default: chosen && { provider: chosen.provider, model: chosen.model.trim() },
       },
     }
+    this.save()
+  }
+
+  /** The secret settings of a project's source, merged in when it connects. */
+  sourceSecrets(projectId: string): Record<string, string> {
+    return { ...this.config.sourceSecrets[projectId] }
+  }
+
+  /** Which secrets of a project's source are set; their values never leave the server. */
+  sourceSecretsSet(projectId: string): string[] {
+    return Object.keys(this.config.sourceSecrets[projectId] ?? {})
+  }
+
+  /**
+   * Split a source's settings: secrets are kept here, the rest is returned for the event
+   * log. An empty secret keeps the stored value, `null` clears it. `kind` changing drops
+   * the old secrets.
+   */
+  splitSourceSettings(
+    projectId: string,
+    kind: string | null,
+    settings: Record<string, unknown>,
+    previousKind: string | null,
+  ): { settings: Record<string, unknown>; secrets: Record<string, string> } {
+    const schema = kind ? this.host.contexts.get(kind)?.settings : undefined
+    const before = previousKind === kind ? this.sourceSecrets(projectId) : {}
+    const plain = { ...settings }
+    const secrets: Record<string, string> = {}
+    for (const key of secretKeys(schema)) {
+      const value = plain[key]
+      delete plain[key]
+      if (value === null) continue
+      if (typeof value === 'string' && value.trim()) secrets[key] = value.trim()
+      else if (before[key]) secrets[key] = before[key]
+    }
+    return { settings: plain, secrets }
+  }
+
+  saveSourceSecrets(projectId: string, secrets: Record<string, string>): void {
+    const all = { ...this.config.sourceSecrets }
+    if (Object.keys(secrets).length) all[projectId] = secrets
+    else delete all[projectId]
+    this.config = { ...this.config, sourceSecrets: all }
     this.save()
   }
 

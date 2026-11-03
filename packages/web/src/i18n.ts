@@ -8,6 +8,7 @@ import {
   type MessageParams,
 } from '@ariadne/i18n'
 import { en as douEn, zhCN as douZhCN } from 'dou-ui'
+import type { LocalizedText } from '@ariadne/plugin-sdk'
 import { computed, ref } from 'vue'
 
 const LOCALE_KEY = 'ariadne.locale'
@@ -46,4 +47,9 @@ export function setLocale(next: Locale): void {
   } catch {
     // Not remembered; still applies to this page.
   }
+}
+
+/** Plugin text in the current locale, falling back to Chinese. */
+export function lt(text: LocalizedText | undefined): string | undefined {
+  return text ? (text[locale.value] ?? text['zh-CN']) : undefined
 }

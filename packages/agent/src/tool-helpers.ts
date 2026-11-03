@@ -1,6 +1,6 @@
 import type { Ariadne } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
-import type { ToolSpec, Workspace } from '@ariadne/plugin-sdk'
+import type { RepoCapability, ToolSpec, Workspace } from '@ariadne/plugin-sdk'
 
 export interface ToolContext {
   app: Ariadne
@@ -11,6 +11,8 @@ export interface ToolContext {
   signal: AbortSignal
   /** The thread's workspace, opened on first use. */
   workspace(): Promise<Workspace>
+  /** The project's hosted repository, when its source is one. */
+  repo(): Promise<RepoCapability>
 }
 
 export interface ToolResult {

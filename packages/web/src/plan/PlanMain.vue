@@ -1,14 +1,43 @@
 <script setup lang="ts">
-import { DouButton, DouEmpty, DouTag, DouText, DouTimeline, DouTimelineItem } from 'dou-ui'
+import {
+  DouButton,
+  DouEmpty,
+  DouSegmentedControl,
+  DouTag,
+  DouText,
+  DouTimeline,
+  DouTimelineItem,
+} from 'dou-ui'
 import { ChevronLeftIcon, RotateCcwIcon } from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { locale, t } from '../i18n'
 import { openMain, revertPlan, state } from '../store'
+import PlanBoard from './PlanBoard.vue'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
 
 const selected = ref<string | null>(null)
+const VIEW_KEY = 'ariadne.planView'
+function savedView(): 'graph' | 'board' {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'graph'
+  } catch {
+    return 'graph'
+  }
+}
+const view = ref<'graph' | 'board'>(savedView())
+watch(view, (next) => {
+  try {
+    localStorage.setItem(VIEW_KEY, next)
+  } catch {
+    // Not remembered; that is fine.
+  }
+})
+const viewOptions = computed(() => [
+  { value: 'graph', label: t('plan.view.graph') },
+  { value: 'board', label: t('plan.view.board') },
+])
 const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
 const time = (at: number) =>
   new Date(at).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
@@ -22,10 +51,20 @@ const time = (at: number) =>
         {{ t('artifact.back') }}
       </DouButton>
       <DouText weight="medium">{{ t('plan.title') }}</DouText>
+      <DouSegmentedControl
+        v-model="view"
+        size="sm"
+        :options="viewOptions"
+        class="plan-main-view"
+        :aria-label="t('plan.title')"
+      />
     </div>
     <div class="plan-main-body">
       <div class="plan-main-graph">
-        <PlanGraph v-if="state.plan?.nodes.length" v-model:selected="selected" :plan="state.plan" />
+        <template v-if="state.plan?.nodes.length">
+          <PlanBoard v-if="view === 'board'" v-model:selected="selected" :plan="state.plan" />
+          <PlanGraph v-else v-model:selected="selected" :plan="state.plan" />
+        </template>
         <DouEmpty v-else :description="t('plan.empty')" />
       </div>
       <aside class="plan-main-side">
@@ -81,6 +120,10 @@ const time = (at: number) =>
   border-bottom: 1px solid var(--dou-color-border);
 }
 
+.plan-main-view {
+  margin-inline-start: auto;
+}
+
 .plan-main-body {
   display: flex;
   flex: 1;
@@ -90,7 +133,10 @@ const time = (at: number) =>
 .plan-main-graph {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .plan-main-side {

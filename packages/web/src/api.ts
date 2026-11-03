@@ -79,6 +79,11 @@ export interface ModelKind {
   settings: SettingsSchema
 }
 
+/** A kind of context source a plugin offers. */
+export interface SourceKind extends ModelKind {
+  provides: string[]
+}
+
 export interface ModelProviderInput {
   id: string
   kind: string
@@ -125,8 +130,23 @@ export const api = {
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
   answerAttention: (id: string, choice: number) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { choice }),
-  setSource: (projectId: string, path: string | null) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { path }),
+  sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
+  getSource: (projectId: string) =>
+    request<{ source: ProjectView['source']; secretsSet: string[] }>(
+      'GET',
+      `/api/projects/${projectId}/source`,
+    ),
+  setSource: (
+    projectId: string,
+    source: { kind: string; settings: Record<string, unknown> } | null,
+  ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  refreshPullRequest: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/pull-request/refresh`),
+  dismissProposal: (projectId: string, proposalId: string) =>
+    request<{ plan: PlanView }>(
+      'POST',
+      `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
+    ),
   getPlan: (projectId: string) =>
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
   revertPlan: (projectId: string, revisionId: string, reason: string) =>
