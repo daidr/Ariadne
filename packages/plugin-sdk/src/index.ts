@@ -98,10 +98,34 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
 /** Undo a registration. */
 export type Dispose = () => void | Promise<void>
 
+/**
+ * Where a thread's commands run. The host picks one when it starts: on Linux a mount and
+ * process namespace (bubblewrap, or `unshare`), on macOS `sandbox-exec`. Inside it,
+ * Ariadne's home directory (its token, settings and event log) and the browsers' profiles
+ * are out of sight, except the paths a workspace keeps. On Linux the command also gets its
+ * own process list, and whatever it leaves running ends with it; `sandbox-exec` only
+ * restricts files, so on macOS the command sees the server's processes and can leave
+ * processes behind.
+ */
+export interface CommandSandbox {
+  /** What isolates commands, e.g. `bwrap`; `null` when they run as they are. */
+  readonly kind: string | null
+  /**
+   * The command line that runs `argv` in the sandbox. `keep` are the paths the command
+   * works in (its checkout, the git directory behind it); they stay visible even inside
+   * a hidden directory. `readOnly` paths can be read but not changed: anything the
+   * server later runs outside the sandbox reads, such as a git directory's `config` and
+   * `hooks`.
+   */
+  wrap(argv: string[], options: { keep: string[]; readOnly?: string[] }): string[]
+}
+
 /** What `setup` receives: every method registers something and returns its disposer. */
 export interface PluginContext {
   /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
   dataDir: string
+  /** Run commands a thread asked for through this. */
+  sandbox: CommandSandbox
   registerContextProvider(provider: ContextProvider<never>): Dispose
   registerModelProvider(provider: ModelProvider<never>): Dispose
 }

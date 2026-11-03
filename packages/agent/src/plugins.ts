@@ -9,6 +9,7 @@ import type {
   Plugin,
   PluginContext,
 } from '@ariadne/plugin-sdk'
+import { noSandbox, type Sandbox } from './sandbox'
 
 /** Where a plugin came from: shipped with Ariadne, or a path on this machine. */
 export type PluginSource = 'builtin' | 'path'
@@ -79,8 +80,14 @@ export class PluginHost {
   /** Paths that failed to load, kept so the settings page can say why. */
   private readonly failed: PluginRecord[] = []
 
-  /** `dataRoot` holds one data directory per plugin, named by its id. */
-  constructor(private readonly dataRoot: string) {}
+  /**
+   * `dataRoot` holds one data directory per plugin, named by its id. `sandbox` is what
+   * plugins run thread commands in.
+   */
+  constructor(
+    private readonly dataRoot: string,
+    readonly sandbox: Sandbox = noSandbox,
+  ) {}
 
   get plugins(): PluginRecord[] {
     return this.loaded.map((entry) => entry.record)
@@ -115,6 +122,7 @@ export class PluginHost {
       }
     const ctx: PluginContext = {
       dataDir: join(this.dataRoot, plugin.id),
+      sandbox: this.sandbox,
       registerModelProvider: register(this.models, provides.models),
       registerContextProvider: register(this.contexts, provides.contexts),
     }

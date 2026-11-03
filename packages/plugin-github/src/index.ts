@@ -1,7 +1,8 @@
-import { LocalWorkspace, run } from '@ariadne/plugin-local'
+import { gitControlPaths, LocalWorkspace, run, serverGitEnv } from '@ariadne/plugin-local'
 import {
   definePlugin,
   type Capabilities,
+  type CommandSandbox,
   type ContextProvider,
   type ExecResult,
   type RepoCapability,
@@ -29,6 +30,8 @@ export interface GitHubProviderOptions {
   gitBase?: string
   fetch?: typeof fetch
   env?: Record<string, string | undefined>
+  /** What thread commands run in; they see their worktree and the clone behind it. */
+  sandbox?: CommandSandbox
 }
 
 /** Branch names stay short: the random tail of the thread id is unique enough. */
@@ -68,21 +71,20 @@ async function findToken(
 const NO_PUSH_URL = 'no-push://use-the-push_branch-tool'
 
 /**
- * Git config for the server's own git commands, passed through the environment so the
- * token never lands on disk or argv. The header is bound to the repository's URL, and
- * hooks are off: the shared clone's config and hooks can be changed from a workspace.
+ * The environment for the server's own git commands: hardened like any server git (no
+ * global config, hooks or fsmonitor; only the remote's protocol), with the token passed
+ * as config so it never lands on disk or argv, and bound to the repository's URL.
  */
-function serverGitEnv(remoteUrl: string, token: string | null): Record<string, string> {
-  const config: [string, string][] = [['core.hooksPath', '/dev/null']]
+function gitEnv(remoteUrl: string, token: string | null): Record<string, string> {
+  const scheme = /^([a-z]+):/.exec(remoteUrl)?.[1] ?? 'https'
+  const env = serverGitEnv([scheme])
   if (token) {
     const basic = Buffer.from(`x-access-token:${token}`).toString('base64')
-    config.push([`http.${remoteUrl}.extraHeader`, `Authorization: Basic ${basic}`])
+    const index = Number(env.GIT_CONFIG_COUNT)
+    env.GIT_CONFIG_COUNT = String(index + 1)
+    env[`GIT_CONFIG_KEY_${index}`] = `http.${remoteUrl}.extraHeader`
+    env[`GIT_CONFIG_VALUE_${index}`] = `Authorization: Basic ${basic}`
   }
-  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length) }
-  config.forEach(([key, value], index) => {
-    env[`GIT_CONFIG_KEY_${index}`] = key
-    env[`GIT_CONFIG_VALUE_${index}`] = value
-  })
   return env
 }
 
@@ -135,7 +137,7 @@ export function connectRepository(
     run(['git', ...args], {
       cwd,
       timeoutMs: 600_000,
-      env: serverGitEnv(remoteUrl, await getToken()),
+      env: gitEnv(remoteUrl, await getToken()),
     })
 
   /** Fetch by the URL the server knows, never by a remote a workspace could rewrite. */
@@ -198,7 +200,15 @@ export function connectRepository(
             'git worktree add',
           )
         }
-        return new LocalWorkspace(threadId, dir, branch)
+        // A hooks directory that is missing could be made by a thread; make it first.
+        await mkdir(join(bare, 'hooks'), { recursive: true })
+        return new LocalWorkspace(threadId, dir, branch, {
+          ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+          keep: [dir, bare],
+          // The server fetches and pushes in the shared clone; its config and hooks stay as
+          // the server set them.
+          readOnly: gitControlPaths(bare),
+        })
       }),
   }
 
@@ -287,6 +297,7 @@ export default definePlugin({
     return ctx.registerContextProvider(
       githubProvider({
         dataDir: ctx.dataDir,
+        sandbox: ctx.sandbox,
         // Another GitHub host (e.g. GitHub Enterprise), or a stand-in for testing.
         ...(process.env.ARIADNE_GITHUB_API_URL
           ? { apiBase: process.env.ARIADNE_GITHUB_API_URL }

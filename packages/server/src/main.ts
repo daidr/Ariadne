@@ -1,23 +1,57 @@
 import { Ariadne } from '@ariadne/core'
-import { PluginHost, RepoWatcher, Scheduler, WorkspaceManager } from '@ariadne/agent'
+import {
+  browserProfiles,
+  createSandbox,
+  detectSandbox,
+  PluginHost,
+  RepoWatcher,
+  Scheduler,
+  WorkspaceManager,
+} from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
 import local from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { createHandler } from './app'
 import { loadConfig } from './config'
-import { SettingsStore } from './settings'
+import { loadUserConfig, SettingsStore } from './settings'
 
 const config = loadConfig()
 const app = new Ariadne({ path: config.databasePath })
 
-const host = new PluginHost(join(config.home, 'plugins'))
+const configPath = join(config.home, 'config.json')
+// Thread commands must not see the token or the settings, nor a browser that holds the token.
+const userConfig = loadUserConfig(configPath)
+const sandboxSettings = userConfig.sandbox
+const sandbox = createSandbox({
+  kind: sandboxSettings.mode === 'off' ? null : await detectSandbox(),
+  mode: sandboxSettings.mode,
+  hide: [config.home, ...browserProfiles(), ...sandboxSettings.hide],
+  // What the server runs later, outside the sandbox: its own code, the plugins it loads,
+  // and the user's git config.
+  readOnly: [
+    resolve(import.meta.dir, '../../..'),
+    ...userConfig.plugins,
+    join(homedir(), '.gitconfig'),
+    join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'git'),
+  ],
+})
+if (!sandbox.kind) {
+  console.warn(
+    sandboxSettings.mode === 'off'
+      ? '工作区沙箱已关闭：thread 的命令能读到 Ariadne 的令牌和设置'
+      : '这台机器上没有可用的工作区沙箱：thread 的命令能读到 Ariadne 的令牌和设置',
+  )
+}
+
+const host = new PluginHost(join(config.home, 'plugins'), sandbox)
 await host.load(openAICompatible)
 await host.load(anthropic)
 await host.load(local)
 await host.load(github)
-const settings = new SettingsStore(join(config.home, 'config.json'), host)
+const settings = new SettingsStore(configPath, host)
 for (const path of settings.current.plugins) {
   await host.loadFromPath(path).catch((error) => console.error(`插件加载失败：${path}`, error))
 }

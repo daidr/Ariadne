@@ -16,3 +16,12 @@ export {
 export { shellQuote } from './workspace-tools'
 export { WorkspaceManager } from './workspaces'
 export { describeNote, toChatMessages } from './transcript'
+export {
+  browserProfiles,
+  createSandbox,
+  detectSandbox,
+  noSandbox,
+  type Sandbox,
+  type SandboxKind,
+  type SandboxStatus,
+} from './sandbox'

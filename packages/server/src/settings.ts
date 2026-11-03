@@ -36,6 +36,11 @@ export interface UserConfig {
   concurrency: { slots: number; reserved: number }
   /** Secret settings of each project's context source (e.g. a token), by project id. */
   sourceSecrets: Record<string, Record<string, string>>
+  /**
+   * How thread commands are isolated, read at start. `off` runs them as they are; `hide`
+   * adds paths they must not see to Ariadne's home and the browsers' profiles.
+   */
+  sandbox: { mode: 'auto' | 'off'; hide: string[] }
 }
 
 const defaults = (): UserConfig => ({
@@ -44,7 +49,29 @@ const defaults = (): UserConfig => ({
   models: { providers: [], default: null },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
+  sandbox: { mode: 'auto', hide: [] },
 })
+
+/** The settings stored at `path`, filled in with the defaults. */
+export function loadUserConfig(path: string): UserConfig {
+  const config = defaults()
+  if (!existsSync(path)) return config
+  const stored = JSON.parse(readFileSync(path, 'utf8')) as Partial<UserConfig>
+  const sandbox = (stored.sandbox ?? {}) as Partial<UserConfig['sandbox']>
+  return {
+    ...config,
+    ...stored,
+    models: { ...config.models, ...stored.models },
+    concurrency: { ...config.concurrency, ...stored.concurrency },
+    sourceSecrets: { ...stored.sourceSecrets },
+    sandbox: {
+      mode: sandbox.mode === 'off' ? 'off' : 'auto',
+      hide: Array.isArray(sandbox.hide)
+        ? sandbox.hide.filter((p): p is string => typeof p === 'string' && p.trim() !== '')
+        : [],
+    },
+  }
+}
 
 /** A path made absolute, `~/` expanded and symbolic links followed where it exists. */
 function realPath(path: string): string {
@@ -80,17 +107,7 @@ export class SettingsStore {
     private readonly path: string,
     private readonly host: PluginHost,
   ) {
-    this.config = defaults()
-    if (existsSync(path)) {
-      const stored = JSON.parse(readFileSync(path, 'utf8')) as Partial<UserConfig>
-      this.config = {
-        ...this.config,
-        ...stored,
-        models: { ...this.config.models, ...stored.models },
-        concurrency: { ...this.config.concurrency, ...stored.concurrency },
-        sourceSecrets: { ...stored.sourceSecrets },
-      }
-    }
+    this.config = loadUserConfig(path)
   }
 
   get current(): Readonly<UserConfig> {

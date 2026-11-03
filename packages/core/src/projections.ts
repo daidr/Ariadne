@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import type { AnyStoredEvent, PlanNodeFields, PlanOp } from './events'
+import { previewOf } from './artifact-content'
+import type { AnyStoredEvent, ArtifactKind, PlanNodeFields, PlanOp } from './events'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import type { Projection } from './store'
 
@@ -886,6 +887,11 @@ export const planProjection: Projection = {
   },
 }
 
+const artifactKind = (db: Database, artifactId: string): ArtifactKind =>
+  db
+    .query<{ kind: ArtifactKind }, [string]>('SELECT kind FROM artifacts WHERE id = ?')
+    .get(artifactId)?.kind ?? 'document'
+
 /** Artifacts and every version of them. The newest version is copied into `artifacts`. */
 export const artifactsProjection: Projection = {
   name: 'artifacts',
@@ -898,6 +904,8 @@ export const artifactsProjection: Projection = {
       node_id TEXT,
       version INTEGER NOT NULL,
       content TEXT NOT NULL,
+      -- The summary lists show (JSON), worked out once per version rather than per list.
+      preview TEXT NOT NULL,
       created_by TEXT NOT NULL,
       updated_by TEXT NOT NULL,
       -- The agent that wrote it last; it hears about the user's edits.
@@ -922,8 +930,8 @@ export const artifactsProjection: Projection = {
       case 'artifact.created': {
         const { artifactId, kind, title, nodeId, author, content } = event.data
         db.run(
-          `INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, created_by, updated_by, last_agent, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO artifacts (id, project_id, kind, title, node_id, version, content, preview, created_by, updated_by, last_agent, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
           [
             artifactId,
             event.projectId,
@@ -931,6 +939,7 @@ export const artifactsProjection: Projection = {
             title,
             nodeId,
             content,
+            JSON.stringify(previewOf(kind, content)),
             author,
             author,
             author === 'user' ? null : author,
@@ -949,9 +958,19 @@ export const artifactsProjection: Projection = {
         const { artifactId, version, title, content, author, reason } = event.data
         db.run(
           `UPDATE artifacts SET title = ?, version = ?, content = ?, updated_by = ?, updated_at = ?,
-             last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END
+             preview = ?, last_agent = CASE WHEN ? = 'user' THEN last_agent ELSE ? END
            WHERE id = ?`,
-          [title, version, content, author, event.at, author, author, artifactId],
+          [
+            title,
+            version,
+            content,
+            author,
+            event.at,
+            JSON.stringify(previewOf(artifactKind(db, artifactId), content)),
+            author,
+            author,
+            artifactId,
+          ],
         )
         db.run(
           `INSERT INTO artifact_versions (artifact_id, version, title, content, author, reason, created_at)

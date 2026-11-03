@@ -1,4 +1,5 @@
 import { run } from '@ariadne/plugin-local'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -215,6 +216,29 @@ describe('github repository', () => {
     const remote = await git(join(base, 'remote', 'acme', 'app.git'), 'rev-parse', ws.branch!)
     expect(remote.stdout.trim()).toBe(sha)
     expect(await repo.isPublic()).toBe(false)
+  })
+
+  test("what a workspace writes into the shared clone's config never runs in the server's git", async () => {
+    const { workspace, repo } = connectRepository({ repository: 'acme/app' }, options())
+    const ws = await workspace.open({ threadId: 'thr_ffffffffffff' })
+    const marker = join(base, 'ran')
+    // Without a sandbox the workspace can write the config; the server's git must still
+    // ignore what would run a command.
+    const remote = `file://${join(base, 'remote')}/`
+    await ws.exec('echo 1 > a && git add . && git -c user.email=t@e -c user.name=t commit -qm one')
+    const planted = await ws.exec(
+      [
+        'git config protocol.ext.allow always',
+        `git config 'url.ext::sh -c touch% ${marker}% #.insteadOf' '${remote}'`,
+        `git config core.fsmonitor 'touch ${marker}-fsmonitor; false'`,
+      ].join(' && '),
+    )
+    expect(planted.exitCode).toBe(0)
+    await expect(repo.fetch()).rejects.toThrow(/not allowed/)
+    await repo.push(ws.branch!).catch(() => undefined)
+    await workspace.open({ threadId: 'thr_gggggggggggg' }).catch(() => undefined)
+    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(`${marker}-fsmonitor`)).toBe(false)
   })
 })
 

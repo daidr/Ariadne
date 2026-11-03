@@ -165,6 +165,12 @@ export const en: Record<MessageKey, string> = {
   'project.source.save': 'Save',
   'project.source.clear': 'Remove',
   'project.source.edit': 'Set the project source',
+  'sandbox.missing.title': 'Thread commands are not isolated',
+  'sandbox.missing.body':
+    "No sandbox is available on this machine (Linux needs bubblewrap, or unshare with user namespaces; macOS uses the built-in sandbox-exec), so commands threads run can read Ariadne's token and settings and call Ariadne as you. Only give this project to models and repositories you trust.",
+  'sandbox.off.title': 'The workspace sandbox is off',
+  'sandbox.off.body':
+    "The sandbox is turned off in the settings (sandbox.mode is off in config.json), so commands threads run can read Ariadne's token and settings and call Ariadne as you.",
   'thread.workspace': 'Workspace',
   'thread.branch': 'Branch {branch}',
   'todo.title': 'Todo',
@@ -248,6 +254,9 @@ export const en: Record<MessageKey, string> = {
     '"{title}" was changed while you were editing it; your change was not saved',
   'error.planReverted': 'This change has already been reverted',
   'error.artifactConflict': 'This artifact is now at version {version}; reload before saving',
+  'error.fileType':
+    'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',
+  'error.fileTooLarge': 'The file is too large; the limit is {max} MB',
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',
   'error.noSource': 'The project has no working directory yet',
   'error.noRepo':

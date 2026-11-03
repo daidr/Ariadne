@@ -4,7 +4,13 @@ import {
   type Scheduler,
   type WorkspaceManager,
 } from '@ariadne/agent'
-import { DomainError, emptyContent, parsePlanOps, type Ariadne } from '@ariadne/core'
+import {
+  DomainError,
+  emptyContent,
+  MAX_FILE_BYTES,
+  parsePlanOps,
+  type Ariadne,
+} from '@ariadne/core'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
 import {
@@ -32,6 +38,26 @@ export interface HandlerOptions {
 }
 
 type Params = Record<string, string>
+
+/** The body, refused as soon as it grows past `max` bytes, whether or not it gave a length. */
+async function readLimited(request: Request, max: number): Promise<Uint8Array> {
+  const tooLarge = () => new DomainError('error.fileTooLarge', { max: max / 1024 / 1024 })
+  if (Number(request.headers.get('content-length') ?? 0) > max) throw tooLarge()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const chunk of request.body ?? []) {
+    size += chunk.byteLength
+    if (size > max) throw tooLarge()
+    chunks.push(chunk)
+  }
+  const data = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    data.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return data
+}
 type Route = {
   method: string
   pattern: URLPattern
@@ -73,6 +99,18 @@ export function createHandler({
       threads: app.listThreads(projectId),
       needsMe: app.listNeedsMe(projectId),
     }),
+  )
+
+  // Files people add, such as whiteboard images. The body is the file itself.
+  add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }) => {
+    const data = await readLimited(request, MAX_FILE_BYTES)
+    const mime = request.headers.get('content-type') ?? ''
+    return json({ file: app.saveFile(projectId, { mime, data }) }, 201)
+  })
+
+  // How thread commands are isolated, so the page can say when they are not.
+  add('GET', '/api/sandbox', () =>
+    json({ sandbox: host?.sandbox.status ?? { kind: null, mode: 'auto', hidden: [] } }),
   )
 
   // Plugins: the built-in ones and those loaded from a path, with why a path failed.
@@ -333,9 +371,32 @@ export function createHandler({
     return new Response(Bun.file(`${webDist}/index.html`))
   }
 
+  /**
+   * A file by its address. An `<img>` cannot send the token, so the random id is what
+   * guards it; other sites may not embed it, and it never changes.
+   */
+  function serveFile(id: string): Response {
+    try {
+      const file = app.getFile(id)
+      return new Response(new Blob([file.data as Uint8Array<ArrayBuffer>]), {
+        headers: {
+          'content-type': file.mime,
+          'cache-control': 'private, max-age=31536000, immutable',
+          'cross-origin-resource-policy': 'same-origin',
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'",
+        },
+      })
+    } catch (error) {
+      return toErrorResponse(error)
+    }
+  }
+
   return async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.pathname === '/api/health') return json({ ok: true })
+    const file = /^\/api\/files\/(fil_[\w-]+)$/.exec(url.pathname)
+    if (file && request.method === 'GET') return serveFile(file[1]!)
     if (!url.pathname.startsWith('/api/')) return serveStatic(url)
 
     const given = bearer(request, url)
