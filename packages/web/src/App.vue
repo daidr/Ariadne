@@ -36,8 +36,11 @@ onMounted(start)
           </div>
         </div>
       </DouLayoutHeader>
-      <DouAlert v-if="!state.connected" tone="warning" class="banner">
+      <DouAlert v-if="state.stream === 'lost'" tone="warning" class="banner">
         {{ t('error.connection') }}
+      </DouAlert>
+      <DouAlert v-else-if="state.stream === 'unauthorized'" tone="danger" class="banner">
+        {{ t('error.unauthorized') }}
       </DouAlert>
       <DouAlert
         v-if="state.error"

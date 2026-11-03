@@ -22,7 +22,7 @@ const stageTone = {
     <TodoList :todo="state.todo" />
     <DouTabs v-model="tab" class="side-tabs">
       <DouTabPanel value="plan" :label="t('panel.plan')">
-        <DouEmpty size="sm" :description="t('coordinator.empty')" />
+        <DouEmpty size="sm" :description="t('plan.empty')" />
       </DouTabPanel>
       <DouTabPanel value="board" :label="t('panel.board')">
         <DouEmpty size="sm" />

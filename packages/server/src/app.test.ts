@@ -106,7 +106,11 @@ describe('event stream', () => {
   test('replays the backlog, then delivers live events for one project', async () => {
     const a = app.createProject('A')
     const b = app.createProject('B')
-    const response = await call(`/api/events?projectId=${a.id}&token=${token}`, {}, false)
+    const response = await call(
+      `/api/events?afterSeq=0&projectId=${a.id}&token=${token}`,
+      {},
+      false,
+    )
     expect(response.headers.get('content-type')).toBe('text/event-stream')
 
     app.renameProject(b.id, 'B2')
@@ -117,6 +121,14 @@ describe('event stream', () => {
       ['project.created', a.id],
       ['project.renamed', a.id],
     ])
+  })
+
+  test('starts at the newest event when no starting point is given', async () => {
+    const a = app.createProject('A')
+    const response = await call('/api/events')
+    app.renameProject(a.id, 'A2')
+    const events = await readFrames(response, 1)
+    expect(events.map((e) => e.type)).toEqual(['project.renamed'])
   })
 
   test('resumes after the last seen sequence number', async () => {

@@ -38,7 +38,7 @@ export function createHandler({ app, token, webDist }: HandlerOptions) {
   const add = (method: string, pathname: string, handle: Route['handle']) =>
     routes.push({ method, pattern: new URLPattern({ pathname }), handle })
 
-  add('GET', '/api/projects', () => json({ projects: app.listProjects() }))
+  add('GET', '/api/projects', () => json({ projects: app.listProjects(), lastSeq: app.lastSeq() }))
 
   add('POST', '/api/projects', async (request) => {
     const body = await readJson(request)
@@ -49,7 +49,7 @@ export function createHandler({ app, token, webDist }: HandlerOptions) {
     json({
       project: app.getProject(projectId),
       threads: app.listThreads(projectId),
-      attentions: app.listOpenAttentions(projectId),
+      needsMe: app.listNeedsMe(projectId),
     }),
   )
 
@@ -93,9 +93,10 @@ export function createHandler({ app, token, webDist }: HandlerOptions) {
   })
 
   add('GET', '/api/events', (request, _params, url) => {
-    const afterSeq = Number(
-      url.searchParams.get('afterSeq') ?? request.headers.get('last-event-id') ?? 0,
-    )
+    // Without a starting point the stream carries only new events: clients load the
+    // current state over REST, so replaying the whole log would be wasted work.
+    const given = url.searchParams.get('afterSeq') ?? request.headers.get('last-event-id')
+    const afterSeq = given === null ? app.lastSeq() : Number(given)
     if (!Number.isInteger(afterSeq) || afterSeq < 0) throw new BadRequest('afterSeq')
     return eventStream(app, { afterSeq, projectId: url.searchParams.get('projectId') })
   })

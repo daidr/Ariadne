@@ -69,6 +69,27 @@ describe('thread stages', () => {
     expect(app.getProject(project.id).needsMe).toBe(2)
   })
 
+  test('keeps "needs me" equal to its list: several questions, or done with a question open', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    app.startThread(thread.id)
+    const ask = (question: string) =>
+      app.openAttention(project.id, { threadId: thread.id, question, options: [] })
+    ask('一？')
+    ask('二？')
+    expect(app.listNeedsMe(project.id).map((item) => item.kind)).toEqual(['attention', 'attention'])
+    expect(app.getProject(project.id).needsMe).toBe(2)
+
+    // Reporting done does not hide an unanswered question.
+    expect(app.reportThread(thread.id, 'done', '完成').stage).toBe('answer')
+    expect(app.getProject(project.id).needsMe).toBe(app.listNeedsMe(project.id).length)
+  })
+
+  test('rejects an empty thread title', () => {
+    const project = app.createProject('P')
+    expect(() => app.createThread(project.id, { title: '  ' })).toThrow(DomainError)
+  })
+
   test('rejects a recommendation outside the options', () => {
     const project = app.createProject('P')
     expect(() =>
@@ -102,6 +123,17 @@ describe('messages', () => {
 
     app.markRead(thread.id, message.id)
     expect(app.listMessages(thread.id)[0]?.editedSinceRead).toBe(false)
+  })
+
+  test('marks read only up to a message of the same conversation', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    const message = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'thread',
+      content: 'a',
+    })
+    expect(() => app.markRead(project.coordinatorId, message.id)).toThrow(DomainError)
   })
 
   test('only the coordinator relays into a thread, and relays cannot be edited', () => {
@@ -170,6 +202,22 @@ describe('event log', () => {
     expect({ threads: app.listThreads(project.id), messages: app.listMessages(thread.id) }).toEqual(
       before,
     )
+  })
+
+  test('a failing listener neither fails the append nor starves later listeners', () => {
+    const seen: string[] = []
+    app.subscribe(() => {
+      throw new Error('closed stream')
+    })
+    app.subscribe((events) => seen.push(...events.map((e) => e.type)))
+    const original = console.error
+    console.error = () => {}
+    try {
+      expect(app.createProject('P').name).toBe('P')
+    } finally {
+      console.error = original
+    }
+    expect(seen).toEqual(['project.created'])
   })
 
   test('rolls back the whole append when a projection fails', () => {

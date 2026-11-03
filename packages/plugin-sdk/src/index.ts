@@ -2,6 +2,12 @@ import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
 
+/**
+ * User-facing text from a plugin, one entry per locale. Chinese is the source language and
+ * must be present; the UI falls back to it when the user's locale is missing.
+ */
+export type LocalizedText = { 'zh-CN': string } & Partial<Record<string, string>>
+
 /** A JSON-schema-like description of a plugin's settings, rendered as a form by the web UI. */
 export interface SettingsSchema {
   type: 'object'
@@ -10,26 +16,49 @@ export interface SettingsSchema {
 }
 
 export type SettingField =
-  | { type: 'string'; title: string; description?: string; secret?: boolean; default?: string }
-  | { type: 'number'; title: string; description?: string; default?: number }
-  | { type: 'boolean'; title: string; description?: string; default?: boolean }
-  | { type: 'enum'; title: string; description?: string; options: string[]; default?: string }
+  | {
+      type: 'string'
+      title: LocalizedText
+      description?: LocalizedText
+      secret?: boolean
+      default?: string
+    }
+  | { type: 'number'; title: LocalizedText; description?: LocalizedText; default?: number }
+  | { type: 'boolean'; title: LocalizedText; description?: LocalizedText; default?: boolean }
+  | {
+      type: 'enum'
+      title: LocalizedText
+      description?: LocalizedText
+      options: string[]
+      default?: string
+    }
 
 /** A kind of context source a plugin contributes, e.g. "local directory". */
 export interface ContextProvider<Settings = Record<string, unknown>> {
   kind: string
-  title: string
+  title: LocalizedText
   settings: SettingsSchema
   provides: CapabilityName[]
   /** Build the capabilities of one configured source. */
   connect(settings: Settings): Promise<Partial<Capabilities>>
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
-  toolCallId?: string
+export interface ToolCall {
+  id: string
+  name: string
+  /** JSON text of the arguments, exactly as the model produced it. */
+  arguments: string
 }
+
+/**
+ * One message of a model request. Both protocols require a tool result to follow the
+ * assistant message that made the call, so assistant turns carry their calls and the whole
+ * request can be rebuilt from the event log.
+ */
+export type ChatMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
 
 export interface ToolSpec {
   name: string
@@ -40,13 +69,13 @@ export interface ToolSpec {
 
 export type ModelStreamPart =
   | { type: 'text'; text: string }
-  | { type: 'tool-call'; id: string; name: string; arguments: string }
+  | ({ type: 'tool-call' } & ToolCall)
   | { type: 'finish'; reason: 'stop' | 'length' | 'tool-calls' | 'error'; error?: string }
 
 /** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */
 export interface ModelProvider<Settings = Record<string, unknown>> {
   kind: string
-  title: string
+  title: LocalizedText
   settings: SettingsSchema
   stream(
     settings: Settings,

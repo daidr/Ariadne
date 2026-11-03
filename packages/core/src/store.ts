@@ -86,7 +86,15 @@ export class EventStore {
         return storedEvent
       }),
     )()
-    for (const listener of this.listeners) listener(stored)
+    // The transaction decides the result. A failing listener is logged and must not keep
+    // the others from seeing these events.
+    for (const listener of this.listeners) {
+      try {
+        listener(stored)
+      } catch (error) {
+        console.error('event listener failed', error)
+      }
+    }
     return stored
   }
 
