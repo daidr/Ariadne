@@ -257,6 +257,8 @@ export type TranscriptEntry =
       /** What the history up to `upTo` said, in short. */
       summary: string
       upTo: number
+      /** What the model thought while summarising; goes back with the notes. */
+      reasoning: ReasoningRecord[]
     }
 
 /** Facts written into a transcript by the system rather than by a person. */

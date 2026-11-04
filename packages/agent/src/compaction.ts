@@ -1,4 +1,4 @@
-import type { CallTiming, TokenUsage, TranscriptEntry } from '@ariadne/core'
+import type { CallTiming, ReasoningRecord, TokenUsage, TranscriptEntry } from '@ariadne/core'
 import type { ChatMessage, ModelStreamPart } from '@ariadne/plugin-sdk'
 import type { ResolvedModel } from './runner'
 import {
@@ -123,10 +123,17 @@ export async function summarise(
   messages: ChatMessage[],
   signal: AbortSignal,
 ): Promise<
-  | { ok: true; text: string; usage: TokenUsage | null; timing: CallTiming }
+  | {
+      ok: true
+      text: string
+      reasoning: ReasoningRecord[]
+      usage: TokenUsage | null
+      timing: CallTiming
+    }
   | { ok: false; detail: string }
 > {
   let text = ''
+  const reasoning: ReasoningRecord[] = []
   let usage: TokenUsage | null = null
   const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
   try {
@@ -137,6 +144,11 @@ export async function summarise(
       signal,
     })) {
       if (part.type === 'text' && part.text) timing.firstOutputAt ??= Date.now()
+      if (part.type === 'reasoning') {
+        timing.firstOutputAt ??= part.startedAt || Date.now()
+        const { type: _, startedAt: __, ...block } = part
+        reasoning.push(block)
+      }
       if (part.type === 'text') text += part.text
       else if (part.type === 'usage') usage = usageOf(part)
       else if (part.type === 'finish' && part.reason === 'error') {
@@ -149,6 +161,6 @@ export async function summarise(
     return { ok: false, detail: String(error) }
   }
   return text.trim()
-    ? { ok: true, text: text.trim(), usage, timing }
+    ? { ok: true, text: text.trim(), reasoning, usage, timing }
     : { ok: false, detail: 'empty summary' }
 }

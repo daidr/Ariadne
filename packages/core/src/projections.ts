@@ -1077,7 +1077,11 @@ export const transcriptProjection: Projection = {
           {
             conversationId: event.data.conversationId,
             kind: 'summary',
-            payload: { summary: event.data.summary, upTo: event.data.upTo },
+            payload: {
+              summary: event.data.summary,
+              upTo: event.data.upTo,
+              reasoning: event.data.reasoning,
+            },
           },
           false,
         )

@@ -123,7 +123,7 @@ export function buildTrace(
           purpose: 'summary',
           finish: 'stop',
           text: event.data.summary,
-          reasoning: [],
+          reasoning: event.data.reasoning.map((block) => ({ text: block.text, redacted: false })),
           toolCalls: [],
         })
         break

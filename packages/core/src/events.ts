@@ -299,6 +299,11 @@ export interface EventMap {
     /** Hash of the call's `prompt.recorded` JSON, as in `StepInput.call`. */
     call: string
     timing: CallTiming
+    /**
+     * What the model thought while summarising, unsigned. It goes back with the notes:
+     * services that think by default (DeepSeek) refuse an assistant message without it.
+     */
+    reasoning: ReasoningRecord[]
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }

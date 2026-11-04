@@ -289,6 +289,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               usage: summary.usage,
               call: callOf(model, null),
               timing: summary.timing,
+              reasoning: summary.reasoning,
             })
           } else {
             compactionFailed = true
