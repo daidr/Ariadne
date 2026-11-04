@@ -1368,6 +1368,7 @@ export class Ariadne {
           stage: thread.stage,
           pullRequest: thread.pullRequest && {
             number: thread.pullRequest.number,
+            ...(thread.pullRequest.reference ? { reference: thread.pullRequest.reference } : {}),
             url: thread.pullRequest.url,
             state: thread.pullRequest.state,
             checks: thread.pullRequest.checks,

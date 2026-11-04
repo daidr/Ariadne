@@ -80,29 +80,30 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 
 ### 工作区
 
-项目有一个上下文源：本地目录、GitHub 仓库或 SSH 远程目录。thread 第一次用文件或命令工具时才准备工作区：
+项目有一个上下文源：本地目录、GitHub 仓库、GitLab 仓库或 SSH 远程目录。thread 第一次用文件或命令工具时才准备工作区：
 
 - git 仓库：从仓库当前的 HEAD 为 thread 建一个 `git worktree`，分支是 `ariadne/<thread id 的末尾>`，thread 之间互不可见。重启后沿用原来的 worktree；worktree 目录被手动删掉的话，先 `git worktree prune` 再在原分支上重建。上下文源是仓库的子目录时，工作区根目录是 worktree 里对应的子目录。
 - 普通目录：所有 thread 共用这个目录。
 - GitHub 仓库：在插件的数据目录里为仓库建一个共享的 bare clone（`~/.ariadne/plugins/github/repos/<owner>/<name>.git`），远端分支取到 `refs/remotes/origin/*`，取远端时不会动到 thread 的分支；每个 thread 从远端默认分支建自己的 worktree 和分支 `ariadne/…`。
+- GitLab 仓库：和 GitHub 一样（共享 clone、worktree、推送都是同一份代码，`@ariadne/plugin-local` 的 `hostedClone`），目录先按实例（主机和端口，再加实例地址里的路径）再按项目的完整路径分层（`~/.ariadne/plugins/gitlab/repos/<主机>/<group>/<sub>/<project>.git`），不同实例上同路径的项目各有各的 clone。支持子组和自建实例：实例地址可以带路径（比如 `https://example.com/gitlab`），留空时用 GitLab.com 或仓库地址里的实例。
 - SSH 远程目录：见下文“SSH 远程工作区”。
 - 文件工具的路径都相对工作区根目录，越出根目录（包括经符号链接）的路径会被拒绝。命令在工作区里用 bash 执行，有超时，输出过长时只保留末尾。
 - 工作区里的命令不需要审批；推送、部署这类影响工作区外、又无法撤销的操作，thread 要先问用户。
 
-新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`vendor`、`.pnpm-store`（任意层级，符号链接除外）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进 thread 的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，thread 自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制；Python 虚拟环境也不复制，它的脚本和 `activate` 用绝对路径指向原来的环境，克隆出来的会装进用户自己的环境。GitHub 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
+新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`vendor`、`.pnpm-store`（任意层级，符号链接除外）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进 thread 的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，thread 自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制；Python 虚拟环境也不复制，它的脚本和 `activate` 用绝对路径指向原来的环境，克隆出来的会装进用户自己的环境。GitHub、GitLab 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
 
-本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/` 和 `~/.ariadne/plugins/github/worktrees/` 下。
+本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下。
 
-上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
+上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。GitLab 令牌（需要 `api` 权限）留空时使用 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN` 或 `GL_TOKEN`，但只发给 `GITLAB_HOST` 指的实例（没设置时是 GitLab.com），否则用 `glab config get token --host <实例>`，调用时清空 glab 也会读的 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`OAUTH_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`，只拿 glab 为这个实例保存的令牌：为一个实例签发的令牌不会被发给别的实例。GitLab 实例地址只接受 https（本机的 localhost 除外），API 请求和服务端的 git（GitHub、GitLab 都是）都不跟随重定向，令牌不会被带到别的主机。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
 
-thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKEN`、`ARIADNE_*`、`GIT_CONFIG_*`），令牌不会意外出现在工具结果、事件日志和模型输入里。
+thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKEN`、`GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`、`OAUTH_TOKEN`、`ARIADNE_*`、`GIT_CONFIG_*`），令牌不会意外出现在工具结果、事件日志和模型输入里。
 
 thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录（`~/.ariadne`，或 `ARIADNE_HOME`：本地令牌、`config.json` 里的 API Key 和访问令牌、数据库）和浏览器的配置目录（页面把令牌存在浏览器里），也就拿不到令牌去调用本机的 Ariadne 接口。
 
 - 沙箱只遮住这些路径，其余照旧：命令仍以用户身份运行，文件系统的其他部分、网络和用户自己的 git、ssh 凭据都还在，工具链不用另装。想再遮住别的路径（比如 `~/.ssh`），写进 `config.json` 的 `sandbox.hide`。
-- 遮住的目录整个换成空的 tmpfs，再把工作区要用的路径放回去，所以命令运行期间新写进去的文件（比如以先写临时文件再改名的方式保存的 `config.json`）也看不到。工作区本身留着：worktree 目录，以及 git 要写的目录（本地仓库的 `.git`、GitHub 的共享 bare clone）。GitHub 的 worktree 在 `~/.ariadne` 下面，放回去的只有它和共享的 clone，令牌、设置、数据库和别的 thread 的 worktree 都看不到。工作区就在用户主目录这种情况下，`~/.ariadne` 依然被遮住。
+- 遮住的目录整个换成空的 tmpfs，再把工作区要用的路径放回去，所以命令运行期间新写进去的文件（比如以先写临时文件再改名的方式保存的 `config.json`）也看不到。工作区本身留着：worktree 目录，以及 git 要写的目录（本地仓库的 `.git`、GitHub 和 GitLab 的共享 bare clone）。GitHub、GitLab 的 worktree 在 `~/.ariadne` 下面，放回去的只有它和共享的 clone，令牌、设置、数据库和别的 thread 的 worktree 都看不到。工作区就在用户主目录这种情况下，`~/.ariadne` 依然被遮住。
 - 服务端之后会在沙箱外运行的东西，thread 只能读不能改：git 目录（本地仓库的 `.git`、共享 clone）里的 `config` 和 `hooks/`，Ariadne 自己的代码目录，设置里加载的插件路径（在设置里加上就立即只读，不用等重启），用户的 `~/.gitconfig` 和 `~/.config/git`。因此 thread 不能用 `git config` 写仓库配置，需要时用 `git -c`。Ariadne 自己的仓库作为工作区时，它的 worktree 和 `.git` 仍然可写，只有 `config`、`hooks` 只读。
-- 服务端自己的 git 命令不读全局和系统配置，不运行 hook 和 fsmonitor，只允许远端用的协议（GitHub 是 `https`，本地仓库不联网）。即使 thread 在别处改了这些配置（比如沙箱不可用时），也不能让服务端的 git 执行命令。
+- 服务端自己的 git 命令不读全局和系统配置，不运行 hook 和 fsmonitor，只允许远端用的协议（GitHub、GitLab 是 `https`，本地仓库不联网）。即使 thread 在别处改了这些配置（比如沙箱不可用时），也不能让服务端的 git 执行命令。
 - 共享 clone 的分支 ref 对所有 thread 可写：一个 thread 能移动别的 thread 的 `ariadne/…` 分支，那个 thread 推送时，推上去的就是被改过的提交。沙箱不防这一点，它防的是令牌和设置。
 - Linux 优先用 bubblewrap（`bwrap`），没有时用 util-linux 的 `unshare`（需要内核允许非特权用户命名空间），挂载方式相同，命令在嵌套的用户命名空间里仍以用户自己的 uid 运行。两种都有自己的进程列表，看不到服务进程和它的环境变量；命令结束时，它留下的后台进程会一起结束。
 - macOS 用系统自带的 `sandbox-exec`，按路径拒绝读写遮住的路径，再放开工作区要用的、锁住只读的。它只管文件，不隔离进程：命令能看到并结束服务进程。这比 Linux 弱，项目来源下方会注明。
@@ -136,15 +137,17 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 - 推送从不强推；远端分支变过的话推送被拒，提示 thread 用 `sync_branch` 取回远端的提交（只更新 `origin/*`，不动本地分支），合并 `origin/<分支>` 或 `origin/<默认分支>` 后再推送。PR 被 squash 合并后继续工作，先合并最新的默认分支，下一个 PR 只含新的改动。
 - 开了 PR 的 thread 由仓库监视器定期（默认每分钟）读取 PR 和最新提交的检查，有变化才记一条 `pull_request.synced`。最新提交的检查失败时记 `checks.failed`，唤醒那个 thread 去读日志、修复、再推送；同一个提交只唤醒一次。连续第 3 次失败时，thread 被告知不要再试，报告受阻、说明试过什么，thread 进入 `blocked`、出现在“需要我”；之后的失败不再唤醒它，只继续计数。检查通过、PR 被合并或关闭，或用户在 thread 里发消息，就重新计数。协调器用 `message_thread` 仍能唤醒它，它推送后的失败照样不唤醒它，直到计数重来。PR 被合并或关闭时记 `pull_request.closed`，协调器收到说明。
 - 界面在 thread 标题旁显示 PR 编号、检查状态，可以手动刷新；看板卡片上也显示。
+- GitLab 上 PR 是 merge request：`PullRequestInfo.reference` 是 `!12`（GitLab 里 `#12` 指 issue），界面和工具结果都用它。草稿 MR 用标题前缀 `Draft:`。检查来自提交的 commit status（流水线里的 job 和外部 CI 报的状态），同名的只取最新一个；允许失败的 job 失败记为 `neutral`，手动 job 记为 `skipped`，都不算失败。日志是 job 的 trace，去掉终端颜色和折叠段标记，外部状态没有日志。`internal` 可见性对实例上所有登录用户可见，按公开仓库处理，第一次推送前同样先问用户。找 thread 分支的 MR 时只认本项目自己的分支，fork 里同名分支的 MR 不算。
 
 ### Issue
 
-上下文源有 `tracker` 能力时（内置的 GitHub 来源有），issue 是工作的上下文。
+上下文源有 `tracker` 能力时（内置的 GitHub、GitLab 来源有），issue 是工作的上下文。
 
 - 协调器和 thread 都能用 `list_issues`、`read_issue` 读 issue，用 `link_issue` 把 issue 关联到计划节点（或取消）；thread 只能关联到自己的节点。关联记成 `plan.issue_linked` / `plan.issue_unlinked`，立即生效，节点详情里列出、写明是谁关联的、能取消；agent 关联或取消时在它自己的对话里显示一行。用户也可以在节点详情里按编号关联。搜索只用词语：`repo:`、`org:`、`is:` 这类限定词和 AND/OR/NOT 会被去掉，结果也只保留本仓库的，令牌能读到的其他仓库不会混进来。删掉节点时它的关联一起删掉。节点的 thread 在系统指令里看到关联的 issue 编号，内容用 `read_issue` 读。
 - issue 的标题、正文和评论是任何能提 issue 的人写的，工具结果里放进以内容哈希命名的数据块（`fenced()`，和项目记忆、AGENTS.md 同一套），并说明它们是信息不是指令。`read_plan` 和系统指令里只放编号，不放标题。
 - 改 issue（`comment_on_issue` 评论、`set_issue_state` 关闭或重新打开）会通知别人、撤不回，只有 thread 能做，而且每次都要用户同意这一个改动：卡片里写着 issue 和完整的评论内容或关闭原因（带 `purpose` 的 Attention，按 issue、动作和内容的完整 SHA-256 区分，正在问的同样改动共用一张卡片）。用户同意后 thread 用同样的参数再调一次才真正执行。一次同意只用于一次改动：执行前记 `issue.writing`（带用到的 attentionId），成功后记 `issue.written`；之后同样的改动（比如关闭、重新打开后再关闭，或再发一遍同样的评论）要重新问，换了内容也要重新问。同意按项目区分。等同一张卡片的几个 thread 共用这次同意：其中一个做了改动，其余的会收到一条通知（谁做的、链接）；还没读到这条通知就再调用的，直接得到“已经做过”，不会被重新问，也不会再发一遍；读到之后再要同样的改动就是新的工作，照常重新问。改动正在进行时（同一进程里请求还没回来），再调用的 thread 被告知“正在做”，并加入这张卡片，结果出来后一起收到通知；正在进行的改动不会被当成“中途断掉”。如果记了 `issue.writing` 却没等到结果（Ariadne 中途停了，或者请求失败），这次同意就作废，thread 被告知先用 `read_issue` 核对改动是否已经生效，没有生效再调用才会重新问用户，不会盲目再做一次；卡片上其余的 thread 也会收到这条消息。拒绝的不做。thread 的对话里显示一行“在 … 下发表了评论 / 关闭了 …”，带链接。
 - issue 请求和仓库请求用同一个服务端的 API 客户端，令牌只在服务端，thread 的命令读不到。
+- GitLab：issue 编号是项目内的 `iid`；搜索用项目自己的 issues 接口，本来就只在这个项目里找；读 issue 时去掉 GitLab 自动写的系统备注（改标签、改描述之类），只留最新 20 条评论；关闭没有原因可选，`not_planned` 和 `completed` 都只是关闭（卡片上仍按 thread 给的原因显示）。
 
 ### 产物
 
@@ -215,7 +218,7 @@ packages/
   core         领域模型、事件存储与投影，不依赖 HTTP
   plugin-sdk   插件作者使用的类型与 definePlugin
   agent        agent loop、调度、协调器与 thread 的工具、插件宿主
-  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录、GitHub 仓库与 SSH 远程目录上下文源
+  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录、GitHub 仓库、GitLab 仓库与 SSH 远程目录上下文源
   server       本地 HTTP 服务、鉴权、事件流与用户设置
   web          Vue + dou-ui 的浏览器界面
 ```

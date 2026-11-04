@@ -162,7 +162,7 @@ export const zhCN = {
     '删除选中的 {count} 个节点？上面共有 {threads} 个 thread 会和计划图脱钩。可以在修改记录里撤销。',
   'plugins.removeAffects': '这些模型提供方正在用它：{names}。移除后它们会无法使用。',
   'project.source.none':
-    '还没有设置项目来源（本地目录或 GitHub 仓库），thread 不能读写文件、运行命令',
+    '还没有设置项目来源（本地目录、GitHub 或 GitLab 仓库、SSH 远程目录），thread 不能读写文件、运行命令',
   'project.source.save': '保存',
   'project.source.clear': '移除',
   'project.source.edit': '设置项目来源',

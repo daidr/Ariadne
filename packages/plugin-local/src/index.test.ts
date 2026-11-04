@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { branchFor, localDirectoryProvider, run, type LocalWorkspace } from './index'
+import { hostedGitEnv } from './hosted'
 
 let base: string
 
@@ -297,5 +298,23 @@ describe('local directory', () => {
   test('commands time out', async () => {
     const result = await run(['sleep', '5'], { cwd: base, timeoutMs: 50 })
     expect(result.exitCode).not.toBe(0)
+  })
+})
+
+describe('hosted repository git', () => {
+  test('credentials are bound to the remote, and git follows no redirect with them', () => {
+    const env = hostedGitEnv('https://git.example.com/a/b.git', { user: 'oauth2', token: 't' })
+    const config = Object.fromEntries(
+      Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [
+        env[`GIT_CONFIG_KEY_${i}`],
+        env[`GIT_CONFIG_VALUE_${i}`],
+      ]),
+    )
+    expect(config['http.followRedirects']).toBe('false')
+    expect(config['http.https://git.example.com/a/b.git.extraHeader']).toBe(
+      `Authorization: Basic ${Buffer.from('oauth2:t').toString('base64')}`,
+    )
+    expect(config['core.hooksPath']).toBe('/dev/null')
+    expect(env.GIT_ALLOW_PROTOCOL).toBe('https')
   })
 })

@@ -32,6 +32,10 @@ export function summarizeChecks(checks: CheckInfo[]): ThreadPullRequest['checks'
   return { state, failed }
 }
 
+/** How the host refers to a pull request in text: `#12`, or `!12` on GitLab. */
+export const pullRequestRef = (pr: { number: number; reference?: string }) =>
+  pr.reference ?? `#${pr.number}`
+
 /** Read the pull request and its checks from the repository and record them. */
 export async function syncThreadPullRequest(
   app: Ariadne,
@@ -50,6 +54,7 @@ export async function syncThreadPullRequest(
   if (!pr) return null
   const synced: ThreadPullRequest = {
     number: pr.number,
+    ...(pr.reference ? { reference: pr.reference } : {}),
     url: pr.url,
     title: pr.title,
     state: pr.state,
@@ -81,7 +86,13 @@ const repoStatus: Tool = {
       repository: repo.remote,
       branch,
       defaultBranch: await repo.defaultBranch(),
-      pullRequest: pr && { number: pr.number, url: pr.url, state: pr.state, headSha: pr.headSha },
+      pullRequest: pr && {
+        number: pr.number,
+        reference: pullRequestRef(pr),
+        url: pr.url,
+        state: pr.state,
+        headSha: pr.headSha,
+      },
       checks: pr ? await repo.checks(pr.headSha) : [],
     })
   },
@@ -163,7 +174,7 @@ const syncBranch: Tool = {
       remoteBranch: await count(`HEAD...origin/${branch}`),
       hint:
         pr?.state === 'merged'
-          ? `Your pull request #${pr.number} was merged (squashed). Before new work, merge origin/${defaultBranch} so the next pull request holds only the new changes.`
+          ? `Your pull request ${pullRequestRef(pr)} was merged (squashed). Before new work, merge origin/${defaultBranch} so the next pull request holds only the new changes.`
           : undefined,
     })
   },
@@ -208,7 +219,7 @@ const openPullRequest: Tool = {
     if (existing?.state === 'closed') {
       // Closing a pull request is usually the user saying no; a new one would undo that.
       return {
-        content: `Your pull request #${existing.number} was closed without merging, most likely by the user. Do not open another on your own: ask_user whether they want it reopened, or report "blocked" with why.`,
+        content: `Your pull request ${pullRequestRef(existing)} was closed without merging, most likely by the user. Do not open another on your own: ask_user whether they want it reopened, or report "blocked" with why.`,
         isError: true,
       }
     }
@@ -227,6 +238,7 @@ const openPullRequest: Tool = {
     await syncThreadPullRequest(ctx.app, repo, ctx.conversationId, pr)
     return json({
       number: pr.number,
+      reference: pullRequestRef(pr),
       url: pr.url,
       state: pr.state,
       alreadyOpen: existing?.state === 'open',

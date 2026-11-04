@@ -8,7 +8,7 @@ import type {
 } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { PluginHost } from './plugins'
-import { summarizeChecks } from './repo-tools'
+import { summarizeChecks, syncThreadPullRequest } from './repo-tools'
 import { RepoWatcher } from './repo-watcher'
 import { Scheduler } from './scheduler'
 import { call, fakeModel, say } from './test-model'
@@ -122,6 +122,25 @@ describe('checks', () => {
       failed: ['a'],
     })
     expect(summarizeChecks([check('a', 'success'), check('b', 'skipped')]).state).toBe('success')
+    // A job allowed to fail (GitLab) does not fail the rest.
+    expect(summarizeChecks([check('a', 'success'), check('b', 'neutral')]).state).toBe('success')
+  })
+
+  test('keep how the host refers to a pull request, e.g. a GitLab merge request', async () => {
+    const { repo } = memoryRepo()
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    await syncThreadPullRequest(app, repo, thread.id, {
+      number: 4,
+      reference: '!4',
+      url: 'https://gitlab.com/acme/app/-/merge_requests/4',
+      title: 't',
+      state: 'open',
+      draft: false,
+      headSha: 'sha1',
+      base: 'main',
+    })
+    expect(app.getThread(thread.id).pullRequest).toMatchObject({ number: 4, reference: '!4' })
   })
 })
 

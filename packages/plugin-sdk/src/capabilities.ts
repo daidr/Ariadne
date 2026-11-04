@@ -49,6 +49,11 @@ export interface WorkspaceCapability {
 
 export interface PullRequestInfo {
   number: number
+  /**
+   * How the host refers to it in text, e.g. `!12` for a GitLab merge request, where `#12`
+   * would link an issue. `#<number>` when left out.
+   */
+  reference?: string
   url: string
   title: string
   state: 'open' | 'closed' | 'merged'

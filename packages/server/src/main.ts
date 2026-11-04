@@ -10,6 +10,7 @@ import {
 } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
+import gitlab from '@ariadne/plugin-gitlab'
 import local from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
 import ssh from '@ariadne/plugin-ssh'
@@ -55,6 +56,7 @@ await host.load(openAICompatible)
 await host.load(anthropic)
 await host.load(local)
 await host.load(github)
+await host.load(gitlab)
 await host.load(ssh)
 const settings = new SettingsStore(configPath, host)
 pluginPaths = () => settings.current.plugins

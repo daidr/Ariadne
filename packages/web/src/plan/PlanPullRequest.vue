@@ -7,7 +7,7 @@ import { checksTone } from '../stage'
 
 // A plan node thread's pull request: its number, and how it or its checks stand.
 defineProps<{
-  pullRequest: Pick<ThreadPullRequest, 'number' | 'url' | 'state' | 'checks'>
+  pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'>
 }>()
 </script>
 
@@ -17,7 +17,7 @@ defineProps<{
       <GitMergeIcon v-if="pullRequest.state === 'merged'" class="plan-pr-icon" />
       <GitPullRequestClosedIcon v-else-if="pullRequest.state === 'closed'" class="plan-pr-icon" />
       <GitPullRequestIcon v-else class="plan-pr-icon" />
-      #{{ pullRequest.number }}
+      {{ pullRequest.reference ?? `#${pullRequest.number}` }}
     </DouLink>
     <DouTag v-if="pullRequest.state !== 'open'" size="sm">
       {{ t(`pr.state.${pullRequest.state}`) }}

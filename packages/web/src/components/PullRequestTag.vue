@@ -32,7 +32,7 @@ async function refresh() {
       <GitMergeIcon v-if="pr.state === 'merged'" class="pr-icon" />
       <GitPullRequestClosedIcon v-else-if="pr.state === 'closed'" class="pr-icon" />
       <GitPullRequestIcon v-else class="pr-icon" />
-      #{{ pr.number }}
+      {{ pr.reference ?? `#${pr.number}` }}
     </DouLink>
     <DouTag v-if="pr.state !== 'open'" size="sm">{{ t(`pr.state.${pr.state}`) }}</DouTag>
     <DouTag
