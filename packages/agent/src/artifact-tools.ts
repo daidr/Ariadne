@@ -1,4 +1,5 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import { plainText } from './markdown-code'
 import { boardFromItems, boardProblems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
 import {
@@ -98,7 +99,7 @@ const updateDocument: Tool = {
   spec: {
     name: 'update_document',
     description:
-      "Save a new version of a document with its full Markdown content. baseVersion is the version you read: if anyone saved since, the call fails and you read it again, so the user's edits are never lost. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks.",
+      "Save a new version of a document with its full Markdown content. baseVersion is the version you read: if anyone saved since, the call fails and you read it again, so the user's edits are never lost. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text.",
     parameters: {
       type: 'object',
       properties: {
@@ -554,7 +555,7 @@ const commentArtifact: Tool = {
   spec: {
     name: 'comment_artifact',
     description:
-      "Comment on a document's text, as the user does in the document: reply in a comment thread (commentThread), or start one on a short passage of its text (quote, copied exactly from one paragraph, without Markdown marks). Keep comments short. Answer the user's comments here, not in a chat message.",
+      "Comment on a document's text, as the user does in the document: reply in a comment thread (commentThread), or start one on a short passage of its text (quote, as the reader sees it, without Markdown marks). Keep comments short. Answer the user's comments here, not in a chat message.",
     parameters: {
       type: 'object',
       properties: {
@@ -583,9 +584,10 @@ const commentArtifact: Tool = {
     }
     const quote = optionalStr(args, 'quote')?.trim()
     if (!quote) throw new ToolInputError('Give commentThread to reply, or quote to start one.')
-    if (!artifact.content.includes(quote)) {
+    // Matched as the page marks it: the text the reader sees, without Markdown marks.
+    if (!plainText(artifact.content).includes(plainText(quote))) {
       throw new ToolInputError(
-        'The quote is not in the document as written: copy a passage of one paragraph exactly, without Markdown marks.',
+        'The quote is not in the document. Copy the text as the reader sees it, without Markdown marks; if it still fails, reply in an existing comment thread or write in chat instead.',
       )
     }
     const created = `cth_${crypto.randomUUID()}`
@@ -593,7 +595,7 @@ const commentArtifact: Tool = {
       type: 'create',
       threadId: created,
       commentId,
-      quote,
+      quote: plainText(quote),
       body,
     })
     return json({ commentThread: created })

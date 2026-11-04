@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitCode } from './markdown-code'
+import { plainText, splitCode } from './markdown-code'
 
 /** The code parts of a split, after checking the parts give the text back. */
 function code(markdown: string): string[] {
@@ -39,5 +39,15 @@ describe('splitCode', () => {
     // Not across a blank line, and not without a closing run.
     expect(code('a `b\n\nc` d')).toEqual([])
     expect(code('a ``b` c')).toEqual([])
+  })
+})
+
+describe('plainText', () => {
+  it('the text as the editor shows it, blocks joined', () => {
+    expect(
+      plainText(
+        '# 方案\n\n开业当天**全场八折**，[官网](https://x.cn)见 `code`。\n\n- [ ] 招募\n> 引用\n\n```\nconst a = 1\n```\n',
+      ),
+    ).toBe('方案开业当天全场八折，官网见 code。招募引用')
   })
 })

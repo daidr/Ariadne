@@ -407,6 +407,7 @@ export const zhCN = {
   'notice.artifactComment': '在{title}里评论：{body}',
   'notice.artifactReply': '在{title}里回复评论：{body}',
   'artifact.comments': '评论',
+  'artifact.commentBy': '{name}：{body}',
   'artifact.commentReplies': '{count} 条回复',
   'artifact.commentGone': '原文已删除 ·',
   'settings.tab.worktrees': '工作区',

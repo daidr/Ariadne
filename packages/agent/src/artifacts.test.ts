@@ -475,6 +475,17 @@ describe('document comments', () => {
     expect(
       (await run('comment_artifact', { artifactId: id, quote: '全场九折', body: '?' })).isError,
     ).toBe(true)
+    // As the reader sees it: across the bold mark, and a quote with marks is stored without them.
+    await ok('comment_artifact', { artifactId: id, quote: '全场八折，送', body: '跨过加粗' })
+    await ok('comment_artifact', { artifactId: id, quote: '**全场八折**', body: '带标记' })
+    expect(app.listArtifactComments(id).map((c) => c.quote)).toEqual([
+      '全场八折',
+      '全场八折，送',
+      '全场八折',
+    ])
+    for (const thread of app.listArtifactComments(id).slice(1)) {
+      app.commentOnArtifact(id, 'user', { type: 'remove', threadId: thread.id })
+    }
     const started = await ok('comment_artifact', {
       artifactId: id,
       quote: '送帆布袋',

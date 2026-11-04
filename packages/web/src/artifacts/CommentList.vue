@@ -65,7 +65,12 @@ function jump(id: string) {
               {{ thread.quote }}
             </DouText>
             <DouText size="sm" truncate>
-              {{ authorName(thread.comments[0]?.author ?? '') }}：{{ thread.comments[0]?.body }}
+              {{
+                t('artifact.commentBy', {
+                  name: authorName(thread.comments[0]?.author ?? ''),
+                  body: thread.comments[0]?.body ?? '',
+                })
+              }}
             </DouText>
             <DouText v-if="thread.comments.length > 1" size="sm" variant="tertiary">
               {{ t('artifact.commentReplies', { count: thread.comments.length - 1 }) }}

@@ -431,6 +431,7 @@ export const en: Record<MessageKey, string> = {
   'notice.artifactComment': 'Commented on {title}: {body}',
   'notice.artifactReply': 'Replied to a comment on {title}: {body}',
   'artifact.comments': 'Comments',
+  'artifact.commentBy': '{name}: {body}',
   'artifact.commentReplies': '{count} replies',
   'artifact.commentGone': 'Text removed ·',
   'settings.tab.worktrees': 'Workspaces',

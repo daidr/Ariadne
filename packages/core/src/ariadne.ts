@@ -2586,7 +2586,7 @@ export class Ariadne {
   listArtifactComments(artifactId: string): ArtifactCommentThreadView[] {
     return this.db
       .query<CommentThreadRow, [string]>(
-        'SELECT * FROM artifact_comments WHERE artifact_id = ? ORDER BY created_at, id',
+        'SELECT * FROM artifact_comments WHERE artifact_id = ? ORDER BY created_at, rowid',
       )
       .all(artifactId)
       .map(toCommentThread)

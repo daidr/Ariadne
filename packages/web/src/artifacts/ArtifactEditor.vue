@@ -110,17 +110,21 @@ const commentProps = computed(() =>
     : {},
 )
 
+/** The longest quote the server keeps (MAX_COMMENT_QUOTE). */
+const MAX_QUOTE = 1000
+
 /** The editor's comment change, sent as the server takes it. */
 function toAction(action: CommentAction, quote: string): ArtifactCommentAction | null {
   switch (action.type) {
     case 'create': {
       const first = action.thread.comments[0]
       if (!first || !quote) return null
+      // A long passage is kept by its opening, which still finds it.
       return {
         type: 'create',
         threadId: action.thread.id,
         commentId: first.id,
-        quote,
+        quote: quote.slice(0, MAX_QUOTE),
         body: first.body,
       }
     }
