@@ -4,7 +4,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { connectRepository, githubProvider, parseRepository } from './index'
+import {
+  connectRepository,
+  githubLinks,
+  githubProvider,
+  parsePullRequestUrl,
+  parseRepository,
+} from './index'
 
 let base: string
 let server: ReturnType<typeof Bun.serve>
@@ -65,6 +71,27 @@ beforeEach(async () => {
         })
       }
       if (url.pathname === '/repos/acme/missing') {
+        return Response.json({ message: 'Not Found' }, { status: 404 })
+      }
+      if (url.pathname === '/repos/acme/app/pulls/34') {
+        return Response.json({
+          number: 34,
+          html_url: 'https://github.com/acme/app/pull/34',
+          title: '项目用量移到 header',
+          state: 'closed',
+          merged_at: '2026-11-04T12:00:00Z',
+          closed_at: '2026-11-04T12:00:00Z',
+          draft: false,
+          head: { sha: 'abc', ref: 'feature' },
+          base: { ref: 'main' },
+          created_at: '2026-11-04T10:00:00Z',
+          user: { login: 'daidr' },
+          additions: 359,
+          deletions: 45,
+          changed_files: 19,
+        })
+      }
+      if (url.pathname === '/repos/acme/app/pulls/35') {
         return Response.json({ message: 'Not Found' }, { status: 404 })
       }
       if (url.pathname === '/repos/acme/app/pulls' && request.method === 'GET') {
@@ -348,5 +375,54 @@ describe('github issues', () => {
     const closed = await tracker.setState(3, 'closed', 'not_planned')
     expect(closed.state).toBe('closed')
     expect(requests.at(-1)?.body).toEqual({ state: 'closed', state_reason: 'not_planned' })
+  })
+})
+
+const at = (url: string, web = 'https://github.com') => parsePullRequestUrl(new URL(url), web)
+
+describe('pull request links', () => {
+  test('reads pull request pages of the host, and nothing else', () => {
+    expect(at('https://github.com/acme/app/pull/34')).toEqual({
+      owner: 'acme',
+      name: 'app',
+      number: 34,
+    })
+    expect(at('https://github.com/acme/app/pull/34/files#diff-1')).toMatchObject({ number: 34 })
+    expect(at('https://github.com/acme/app/pulls')).toBeNull()
+    expect(at('https://github.com/acme/app/issues/34')).toBeNull()
+    expect(at('http://github.com/acme/app/pull/34')).toBeNull()
+    expect(at('https://github.com.evil.example/acme/app/pull/34')).toBeNull()
+    expect(at('https://ghe.example.com/acme/app/pull/1', 'https://ghe.example.com')).toMatchObject({
+      number: 1,
+    })
+    expect(at('https://github.com/acme/app/pull/1', 'https://ghe.example.com')).toBeNull()
+  })
+
+  test('names a link and shows its card with the token', async () => {
+    const links = githubLinks({
+      apiBase: `http://localhost:${server.port}`,
+      env: { GH_TOKEN: 'tok' },
+    })
+    expect(links.match(new URL('https://github.com/acme/app/pull/34'))).toEqual({
+      kind: 'pull-request',
+      label: 'acme/app#34',
+    })
+    expect(links.match(new URL('https://github.com/acme/app'))).toBeNull()
+    expect(await links.preview(new URL('https://github.com/acme/app/pull/34'), {})).toEqual({
+      kind: 'pull-request',
+      repository: 'acme/app',
+      number: 34,
+      url: 'https://github.com/acme/app/pull/34',
+      title: '项目用量移到 header',
+      state: 'merged',
+      draft: false,
+      author: 'daidr',
+      additions: 359,
+      deletions: 45,
+      changedFiles: 19,
+      at: '2026-11-04T12:00:00Z',
+    })
+    expect(requests.at(-1)).toMatchObject({ path: '/repos/acme/app/pulls/34', auth: 'Bearer tok' })
+    expect(await links.preview(new URL('https://github.com/acme/app/pull/35'), {})).toBeNull()
   })
 })

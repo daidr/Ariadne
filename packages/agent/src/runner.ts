@@ -41,6 +41,7 @@ import {
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
+import { withImages } from './tool-helpers'
 
 /** The model a conversation talks to, with its provider's settings. */
 export interface ResolvedModel {
@@ -376,10 +377,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
 
       if (!toolCalls.length) {
         if (text.trim()) {
+          const content = await withImages(ctx, text.trim())
           app.postMessage(conversation.projectId, {
             conversationId,
             author: conversation.role,
-            content: text.trim(),
+            content,
           })
         }
         app.finishTurn(conversationId, turnId, 'completed')

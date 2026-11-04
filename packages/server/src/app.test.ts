@@ -484,3 +484,58 @@ describe('MCP servers', () => {
     await mcp.dispose()
   })
 })
+
+describe('links', () => {
+  test('names links through plugins and shows a card; no plugin, plain links', async () => {
+    expect(
+      await (
+        await call('/api/links', { method: 'POST', body: { urls: ['https://x.test/pull/1'] } })
+      ).json(),
+    ).toEqual({ links: { 'https://x.test/pull/1': null } })
+
+    const host = new PluginHost('/tmp/ariadne-test-plugins')
+    await host.load({
+      id: 'links',
+      name: { 'zh-CN': '链接' },
+      setup: (ctx) =>
+        ctx.registerLinkProvider({
+          kind: 'demo',
+          title: { 'zh-CN': '演示' },
+          match: (url) =>
+            url.pathname.startsWith('/pull/') ? { kind: 'pull-request', label: 'a/b#1' } : null,
+          preview: async (url) => ({
+            kind: 'pull-request',
+            repository: 'a/b',
+            number: 1,
+            url: url.href,
+            title: 'T',
+            state: 'open',
+            draft: true,
+            author: null,
+            additions: 0,
+            deletions: 0,
+            changedFiles: 0,
+            at: '2026-11-04T00:00:00Z',
+          }),
+        }),
+    })
+    handle = createHandler({ app, token, host })
+    const named = await call('/api/links', {
+      method: 'POST',
+      body: { urls: ['https://x.test/pull/1', 'https://x.test/'] },
+    })
+    expect(await named.json()).toEqual({
+      links: {
+        'https://x.test/pull/1': { kind: 'pull-request', label: 'a/b#1' },
+        'https://x.test/': null,
+      },
+    })
+    const card = await call(`/api/links/preview?url=${encodeURIComponent('https://x.test/pull/1')}`)
+    expect(await card.json()).toMatchObject({ preview: { title: 'T', draft: true } })
+    expect((await call('/api/links', { method: 'POST', body: { urls: [1] } })).status).toBe(400)
+    expect((await call('/api/links/preview')).status).toBe(400)
+    expect((await call('/api/links', { method: 'POST', body: { urls: [] } }, false)).status).toBe(
+      401,
+    )
+  })
+})

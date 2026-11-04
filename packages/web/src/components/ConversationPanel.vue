@@ -63,8 +63,9 @@ import StageLabel from './StageLabel.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
 import AgentText from '../markdown/AgentText.vue'
+import MessageImage from '../markdown/MessageImage.vue'
 import MessageLink from '../markdown/MessageLink.vue'
-import { sanitizeUrl } from '../markdown/links'
+import { isBare, sanitizeUrl } from '../markdown/links'
 
 /** `thread` shows the open thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ thread?: boolean }>()
@@ -487,8 +488,16 @@ watch(
             :markdown="sender(message) === 'assistant' && markdown"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
           >
-            <template #markdown-link="{ href, external, children }">
-              <MessageLink :href="href" :external="external" :children="children" />
+            <template #markdown-link="{ node, href, external, children }">
+              <MessageLink
+                :href="href"
+                :external="external"
+                :bare="isBare(node)"
+                :children="children"
+              />
+            </template>
+            <template #markdown-image="{ src, alt, title }">
+              <MessageImage :src="src" :alt="alt" :title="title" />
             </template>
             <template #part="{ part }">
               <DouChatAttachments

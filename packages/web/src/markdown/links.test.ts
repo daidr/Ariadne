@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { innerLink, sanitizeUrl } from './links'
+import { innerLink, isBare, sanitizeUrl } from './links'
 
 describe('message links', () => {
   it('reads thread and artifact links', () => {
@@ -21,7 +21,25 @@ describe('message links', () => {
     expect(sanitizeUrl('thread:thr_1', 'source')).toBeUndefined()
   })
 
-  it('drops images', () => {
+  it('shows only kept images', () => {
+    expect(innerLink('file:fil_Ab-9')).toEqual({ kind: 'file', id: 'fil_Ab-9' })
+    expect(innerLink('file:/etc/passwd')).toBeNull()
+    expect(sanitizeUrl('file:fil_Ab-9', 'image')).toBe('/api/files/fil_Ab-9')
+    expect(sanitizeUrl('file:fil_Ab-9', 'link')).toBe('file:fil_Ab-9')
     expect(sanitizeUrl('https://example.com/a.png', 'image')).toBeUndefined()
+    expect(sanitizeUrl('shots/a.png', 'image')).toBeUndefined()
+    expect(sanitizeUrl('thread:thr_1', 'image')).toBeUndefined()
+  })
+})
+
+const text = (value: string) => ({ type: 'text', value })
+
+describe('bare links', () => {
+  it('tells an address written alone from a link with words', () => {
+    expect(isBare({ href: 'https://a.test/x', children: [text('https://a.test/x')] })).toBe(true)
+    expect(isBare({ href: 'https://a.test/x', children: [text('这个 PR')] })).toBe(false)
+    expect(
+      isBare({ href: 'https://a.test/x', children: [text('https://a.test/x'), text('!')] }),
+    ).toBe(false)
   })
 })

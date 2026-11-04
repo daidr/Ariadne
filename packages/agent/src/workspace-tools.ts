@@ -1,5 +1,6 @@
 import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
 import { FileTooLargeError, type Workspace } from '@ariadne/plugin-sdk'
+import { imageType } from './message-images'
 import {
   json,
   optionalInt,
@@ -63,25 +64,13 @@ const listDir = workspaceTool(
   },
 )
 
-/** Image files by extension, checked against their first bytes before the model sees them. */
-const IMAGE_EXTENSIONS: Record<string, { mime: string; magic: (bytes: Uint8Array) => boolean }> = {
-  png: { mime: 'image/png', magic: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e },
-  jpg: { mime: 'image/jpeg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 },
-  jpeg: { mime: 'image/jpeg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 },
-  gif: { mime: 'image/gif', magic: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 },
-  webp: {
-    mime: 'image/webp',
-    magic: (b) => b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && b[9] === 0x45,
-  },
-}
-
 /** An image of the workspace, kept in the project's files and handed to the model. */
 async function readImage(
   path: string,
   workspace: Workspace,
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
-  const type = IMAGE_EXTENSIONS[path.split('.').pop()?.toLowerCase() ?? '']
+  const type = imageType(path)
   if (!type) return null
   let data: Uint8Array
   try {
