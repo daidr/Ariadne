@@ -4,8 +4,8 @@ import type { PlanNodeStatus, PlanView } from '@ariadne/core'
 import { computed } from 'vue'
 import PullRequestTag from '../components/PullRequestTag.vue'
 import { t } from '../i18n'
-import { stageTone } from '../stage'
-import { openMain, openThread, state } from '../store'
+import { openThread, state } from '../store'
+import StageLabel from '../components/StageLabel.vue'
 
 // The plan as columns by status: the same nodes as the graph, read from left to right.
 // Statuses come from the threads, so the board is read-only; nodes are changed in the chat.
@@ -34,7 +34,6 @@ const threadsOf = (nodeId: string) =>
 
 function show(threadId: string) {
   void openThread(threadId)
-  openMain({ kind: 'conversation' })
 }
 </script>
 
@@ -77,9 +76,7 @@ function show(threadId: string) {
                 >
                   {{ thread.title }}
                 </DouButton>
-                <DouTag size="sm" :tone="stageTone[thread.stage]">
-                  {{ t(`thread.stage.${thread.stage}`) }}
-                </DouTag>
+                <StageLabel :stage="thread.stage" />
                 <PullRequestTag :thread="thread" />
               </li>
             </ul>
@@ -163,15 +160,15 @@ function show(threadId: string) {
 
 .board-thread {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
 
 .board-thread-title {
-  flex: 1 1 100%;
+  flex: 1 1 0;
   min-width: 0;
   justify-content: flex-start;
+  margin-inline-start: -8px;
 }
 
 .board-empty {

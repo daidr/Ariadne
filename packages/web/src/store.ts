@@ -22,18 +22,32 @@ export type MainView =
   | { kind: 'artifacts' }
   | { kind: 'artifact'; id: string }
 
-interface State {
-  stream: StreamStatus
-  projects: ProjectView[]
-  currentId: string | null
-  detail: ProjectDetail | null
-  /** The thread open in the middle column; `null` shows the coordinator. */
-  threadId: string | null
+/** One conversation as shown on screen: the coordinator's, or the open thread's. */
+export interface ConversationState {
   conversation: ConversationView | null
   messages: MessageView[]
   /** What happened in the conversation besides messages, shown in line with them. */
   notices: NoticeView[]
   todo: TodoView | null
+}
+
+const emptyConversation = (): ConversationState => ({
+  conversation: null,
+  messages: [],
+  notices: [],
+  todo: null,
+})
+
+interface State {
+  stream: StreamStatus
+  projects: ProjectView[]
+  currentId: string | null
+  detail: ProjectDetail | null
+  /** The coordinator's conversation, always on screen. */
+  coordinator: ConversationState
+  /** The thread open beside the coordinator; `null` shows the project panel there. */
+  threadId: string | null
+  thread: ConversationState
   plan: PlanView | null
   artifacts: ArtifactSummary[]
   /** The project's memory: standing preferences every conversation sees. */
@@ -53,11 +67,9 @@ export const state = reactive<State>({
   projects: [],
   currentId: null,
   detail: null,
+  coordinator: emptyConversation(),
   threadId: null,
-  conversation: null,
-  messages: [],
-  notices: [],
-  todo: null,
+  thread: emptyConversation(),
   plan: null,
   artifacts: [],
   memories: [],
@@ -83,8 +95,9 @@ async function refreshCurrent() {
   const threadId = state.threadId
   if (!id) return
   const detail = await api.getProject(id)
-  const [conversation, plan, artifacts, memory] = await Promise.all([
-    api.getConversation(threadId ?? detail.project.coordinatorId),
+  const [coordinator, thread, plan, artifacts, memory] = await Promise.all([
+    api.getConversation(detail.project.coordinatorId),
+    threadId ? api.getConversation(threadId) : null,
     api.getPlan(id),
     api.listArtifacts(id),
     api.listMemories(id),
@@ -92,21 +105,17 @@ async function refreshCurrent() {
   // The user may have switched while this was loading; a late answer is stale.
   if (state.currentId !== id || state.threadId !== threadId) return
   state.detail = detail
-  state.conversation = conversation.conversation
-  state.messages = conversation.messages
-  state.notices = conversation.notices
-  state.todo = conversation.todo
+  state.coordinator = pick(coordinator)
+  state.thread = thread ? pick(thread) : emptyConversation()
   state.plan = plan.plan
   state.artifacts = artifacts.artifacts
   state.memories = memory.memories
   state.revision++
 }
 
-function clearConversation() {
-  state.conversation = null
-  state.messages = []
-  state.notices = []
-  state.todo = null
+function pick(view: ConversationState): ConversationState {
+  const { conversation, messages, notices, todo } = view
+  return { conversation, messages, notices, todo }
 }
 
 export async function openProject(id: string) {
@@ -117,22 +126,20 @@ export async function openProject(id: string) {
   state.artifacts = []
   state.memories = []
   state.main = { kind: 'conversation' }
-  clearConversation()
+  state.coordinator = emptyConversation()
+  state.thread = emptyConversation()
   await refreshCurrent().catch(report)
 }
 
-/** Show a thread's conversation in the middle column, or the coordinator's with `null`. */
+/**
+ * Open a thread's conversation beside the coordinator's, or close it with `null`. The
+ * coordinator stays where it is.
+ */
 export async function openThread(threadId: string | null) {
-  state.main = { kind: 'conversation' }
   if (state.threadId === threadId) return
   state.threadId = threadId
-  clearConversation()
+  state.thread = emptyConversation()
   await refreshCurrent().catch(report)
-}
-
-/** The conversation open in the middle column. */
-export function currentConversationId(): string | null {
-  return state.threadId ?? state.detail?.project.coordinatorId ?? null
 }
 
 export async function createProject(name: string) {
@@ -145,21 +152,18 @@ export async function createProject(name: string) {
   }
 }
 
-export async function sendMessage(content: string) {
+export async function sendMessage(conversationId: string, content: string) {
   const project = state.detail?.project
-  const conversationId = currentConversationId()
-  if (!project || !conversationId) return
+  if (!project) return
   await api.postMessage(project.id, conversationId, content).catch(report)
 }
 
-export async function stopTurn() {
-  const conversationId = currentConversationId()
-  if (conversationId) await api.stopTurn(conversationId).catch(report)
+export async function stopTurn(conversationId: string) {
+  await api.stopTurn(conversationId).catch(report)
 }
 
-export async function retryTurn() {
-  const conversationId = currentConversationId()
-  if (conversationId) await api.retryTurn(conversationId).catch(report)
+export async function retryTurn(conversationId: string) {
+  await api.retryTurn(conversationId).catch(report)
 }
 
 /** Show the plan graph large, or an artifact, in the middle column. */

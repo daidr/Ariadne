@@ -14,10 +14,10 @@ import {
 import { CircleDotIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
-import { stageTone } from '../stage'
 import { editPlan, openThread, setNodeIssue, state } from '../store'
 import { mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
+import StageLabel from '../components/StageLabel.vue'
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
 const emit = defineEmits<{ removed: [] }>()
@@ -209,9 +209,7 @@ const removeQuestion = computed(() =>
         <DouButton size="sm" variant="ghost" @click="openThread(thread.id)">
           {{ thread.title }}
           <template #trailing>
-            <DouTag size="sm" :tone="stageTone[thread.stage]">
-              {{ t(`thread.stage.${thread.stage}`) }}
-            </DouTag>
+            <StageLabel :stage="thread.stage" />
           </template>
         </DouButton>
         <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />

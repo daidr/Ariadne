@@ -4,7 +4,7 @@ import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem } from '@ariadne/core'
-import { answerAttention, state } from '../store'
+import { answerAttention, openThread, state } from '../store'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
@@ -48,7 +48,12 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
             </div>
           </div>
           <div v-else :key="item.thread.id" class="attention">
-            <DouText weight="medium">{{ item.thread.title }}</DouText>
+            <div class="attention-thread">
+              <DouText weight="medium" truncate>{{ item.thread.title }}</DouText>
+              <DouButton size="sm" variant="ghost" @click="openThread(item.thread.id)">
+                {{ t('thread.open') }}
+              </DouButton>
+            </div>
             <DouText variant="secondary" size="sm">
               {{ t(`thread.stage.${item.thread.stage}`) }} · {{ item.thread.lastSummary }}
             </DouText>
@@ -71,6 +76,13 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.attention-thread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .attention-options {

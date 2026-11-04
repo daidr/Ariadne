@@ -28,7 +28,6 @@ async function save(id: string | null, text: string | null) {
 
 <template>
   <section class="memory" :aria-label="t('memory.title')">
-    <DouText variant="tertiary" size="sm">{{ t('memory.hint') }}</DouText>
     <ul v-if="state.memories.length" class="memory-list">
       <li v-for="memory in state.memories" :key="memory.id" class="memory-item">
         <template v-if="editing === memory.id">

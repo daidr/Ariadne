@@ -53,7 +53,7 @@ function togglePreview(id: string) {
       <DouText v-else-if="planUi.previewId === proposal.id" size="sm" variant="secondary">
         {{ t('plan.preview.on') }}
       </DouText>
-      <div class="plan-actions">
+      <template #action>
         <DouButton
           v-if="!unfit(proposal)"
           size="sm"
@@ -73,7 +73,7 @@ function togglePreview(id: string) {
         <DouButton size="sm" tone="primary" @click="answerAttention(proposal.attentionId, 0)">
           {{ t('plan.confirm.apply') }}
         </DouButton>
-      </div>
+      </template>
     </DouAlert>
     <DouAlert v-for="proposal in stale" :key="proposal.id" tone="danger" role="alert">
       {{ t('plan.stale', { reason: proposal.reason }) }}
@@ -105,11 +105,11 @@ function togglePreview(id: string) {
           </DouButton>
         </li>
       </ul>
-      <div class="plan-actions">
+      <template #action>
         <DouButton size="sm" variant="outline" @click="state.plan && acknowledge(state.plan)">
           {{ t('plan.fresh.ack') }}
         </DouButton>
-      </div>
+      </template>
     </DouAlert>
   </div>
 </template>
@@ -124,14 +124,6 @@ function togglePreview(id: string) {
 .plan-ops {
   margin: 4px 0 0;
   padding-left: 18px;
-}
-
-.plan-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 8px;
 }
 
 .plan-fresh > span {

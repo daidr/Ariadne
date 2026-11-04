@@ -177,7 +177,7 @@ const time = (at: number) =>
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--dou-color-border);
+  border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
 .plan-main-tools {
@@ -200,6 +200,7 @@ const time = (at: number) =>
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+  padding: 12px;
 }
 
 .plan-main-side {
