@@ -190,12 +190,13 @@ export type TranscriptNote =
     }
   | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
+  | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,
  * `wait` when one needs the user, `error` when one is blocked, `finish` when all are done.
  */
-export type PlanNodeStatus = 'none' | 'process' | 'wait' | 'error' | 'finish'
+export type PlanNodeStatus = 'none' | 'process' | 'wait' | 'error' | 'paused' | 'finish'
 
 export interface PlanNodeView {
   id: string

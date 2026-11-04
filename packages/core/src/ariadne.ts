@@ -146,9 +146,11 @@ function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
 
 /** A plan node's status from the stages of the threads working on it. */
 function nodeStatus(all: ThreadStage[]): PlanNodeStatus {
-  // A held thread does not move its node either way.
+  // A stopped thread does not move its node either way; a node whose threads are all
+  // stopped shows as paused, not as never started.
   const stages = all.filter((stage) => stage !== 'stopped')
-  if (!stages.length) return 'none'
+  if (!all.length) return 'none'
+  if (!stages.length) return 'paused'
   if (stages.some((stage) => stage === 'blocked')) return 'error'
   if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'wait'
   if (stages.every((stage) => stage === 'done')) return 'finish'
@@ -748,7 +750,29 @@ export class Ariadne {
         })
       }
     }
+    events.unshift(...this.resumedByUser(row.thread_id))
     this.store.append(events)
+  }
+
+  /**
+   * The user speaking to a stopped thread (a message, an answer) lets it go on, the same
+   * as pressing 继续: the thread and the coordinator are told why it had stopped.
+   */
+  private resumedByUser(threadId: string | null): Parameters<EventStore['append']>[0] {
+    if (!threadId) return []
+    const row = this.db
+      .query<{ project_id: string; stopped_reason: string | null }, [string]>(
+        'SELECT project_id, stopped_reason FROM threads WHERE id = ?',
+      )
+      .get(threadId)
+    if (!row?.stopped_reason) return []
+    return [
+      {
+        type: 'thread.resumed',
+        projectId: row.project_id,
+        data: { threadId, by: 'user', reason: row.stopped_reason },
+      },
+    ]
   }
 
   postMessage(
@@ -763,6 +787,7 @@ export class Ariadne {
     }
     const messageId = newId('msg')
     this.store.append([
+      ...(input.author === 'user' ? this.resumedByUser(input.conversationId) : []),
       {
         type: 'message.posted',
         projectId,

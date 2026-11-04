@@ -336,6 +336,10 @@ export async function undoNotice(noticeId: string) {
 }
 
 /** Let a thread the coordinator stopped go on. */
+export async function stopThread(threadId: string, reason: string) {
+  await api.stopThread(threadId, reason).catch(report)
+}
+
 export async function resumeThread(threadId: string) {
   await api.resumeThread(threadId).catch(report)
 }

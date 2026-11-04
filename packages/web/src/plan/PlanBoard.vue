@@ -12,12 +12,13 @@ import { openMain, openThread, state } from '../store'
 const props = defineProps<{ plan: PlanView; compact?: boolean }>()
 const selected = defineModel<string | null>('selected', { default: null })
 
-const COLUMNS: PlanNodeStatus[] = ['none', 'process', 'wait', 'error', 'finish']
+const COLUMNS: PlanNodeStatus[] = ['none', 'process', 'wait', 'error', 'paused', 'finish']
 const tones: Record<PlanNodeStatus, 'neutral' | 'primary' | 'warning' | 'danger' | 'success'> = {
   none: 'neutral',
   process: 'primary',
   wait: 'warning',
   error: 'danger',
+  paused: 'neutral',
   finish: 'success',
 }
 

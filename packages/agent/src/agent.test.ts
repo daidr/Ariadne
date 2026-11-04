@@ -748,4 +748,26 @@ describe('stopping a thread', () => {
       note: { type: 'thread-resumed', by: 'user' },
     })
   })
+  test('a thread the user stopped only the user can resume', async () => {
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') return say('')
+      if (answered(request)) return say('好')
+      const [thread] = app.listThreads(project.id)
+      return [call('r1', 'resume_thread', { threadId: thread!.id })]
+    })
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '重构' })
+    app.stopThread(thread.id, { reason: '我来看看', by: 'user' })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '你看着办',
+    })
+    await startScheduler(model).idle()
+    expect(app.getThread(thread.id).stopped?.by).toBe('user')
+    const result = app
+      .listTranscript(project.coordinatorId)
+      .find((e) => e.kind === 'tool' && e.name === 'resume_thread')
+    expect(result).toMatchObject({ isError: true })
+  })
 })

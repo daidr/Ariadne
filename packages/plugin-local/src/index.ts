@@ -86,6 +86,9 @@ export async function run(
     forThread?: boolean
   },
 ): Promise<ExecResult> {
+  // Stopped before it started (say, while the worktree was being made): an abort listener
+  // added now would never fire, so the command must not start at all.
+  if (options.signal?.aborted) return { exitCode: 130, stdout: '', stderr: 'cancelled' }
   const base = options.forThread ? threadEnv() : process.env
   const proc = Bun.spawn(argv, {
     cwd: options.cwd,

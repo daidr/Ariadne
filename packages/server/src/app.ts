@@ -218,6 +218,12 @@ export function createHandler({
   })
 
   // The user lets a held thread go on.
+  add('POST', '/api/threads/:threadId/stop', async (request, { threadId = '' }) => {
+    const { reason } = await readJson(request)
+    if (typeof reason !== 'string') throw new BadRequest('reason')
+    return json({ thread: app.stopThread(threadId, { reason, by: 'user' }) })
+  })
+
   add('POST', '/api/threads/:threadId/resume', (_request, { threadId = '' }) =>
     json({ thread: app.resumeThread(threadId, 'user') }),
   )

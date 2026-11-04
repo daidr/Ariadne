@@ -227,7 +227,7 @@ async function* readStream(
       }
     }
   } catch (error) {
-    const part = transportErrorPart(error, signal)
+    const part = transportErrorPart(error, signal, true)
     if (part) yield part
     return
   }

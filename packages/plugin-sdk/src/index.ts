@@ -6,6 +6,7 @@ export {
   describeHttpError,
   httpErrorPart,
   incompletePart,
+  MAX_RETRY_AFTER_MS,
   readServerSentEvents,
   retryAfterMs,
   transportErrorPart,

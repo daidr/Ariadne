@@ -161,7 +161,7 @@ async function* readStream(
       if (choice.finish_reason) reason = choice.finish_reason
     }
   } catch (error) {
-    const part = transportErrorPart(error, signal)
+    const part = transportErrorPart(error, signal, true)
     if (part) yield part
     return
   }

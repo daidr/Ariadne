@@ -58,29 +58,63 @@ export function retryAfterMs(response: Response): number | undefined {
   return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
 }
 
+/** The longest wait worth retrying after; a longer `Retry-After` (a spent quota) fails at once. */
+export const MAX_RETRY_AFTER_MS = 60_000
+
 /** The `finish` part for a failed HTTP answer, marked retryable when waiting may help. */
 export async function httpErrorPart(response: Response) {
   const after = retryAfterMs(response)
+  const error = await describeHttpError(response)
+  if (after !== undefined && after > MAX_RETRY_AFTER_MS) {
+    const minutes = Math.ceil(after / 60_000)
+    return {
+      type: 'finish' as const,
+      reason: 'error' as const,
+      error: `${error} (the service asks to wait ${minutes} min before trying again)`,
+    }
+  }
   return {
     type: 'finish' as const,
     reason: 'error' as const,
-    error: await describeHttpError(response),
+    error,
     ...(RETRYABLE_STATUS.has(response.status) ? { retryable: true } : {}),
     ...(after !== undefined ? { retryAfterMs: after } : {}),
   }
 }
 
 /**
- * The `finish` part for a request that failed on the wire (refused, reset, cut off), or
- * `null` when it was aborted on purpose.
+ * Failures of a connection that was working: reset, timed out, closed by the other end.
+ * A wrong address, an unknown host or a bad certificate is a setting to fix, not retried.
  */
-export function transportErrorPart(error: unknown, signal?: AbortSignal) {
+const PASSING_NETWORK_ERRORS = new Set([
+  'ECONNRESET',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ConnectionClosed',
+  'UND_ERR_SOCKET',
+  'TimeoutError',
+])
+
+/**
+ * The `finish` part for a request that failed on the wire, or `null` when it was aborted
+ * on purpose. Only a connection that broke is retryable; `midStream` says the answer had
+ * started, so the connection worked and whatever cut it off is passing.
+ */
+export function transportErrorPart(error: unknown, signal?: AbortSignal, midStream = false) {
   if (signal?.aborted) return null
+  const code = (error as { code?: unknown; name?: unknown } | null)?.code
+  const name = (error as { name?: unknown } | null)?.name
+  const passing =
+    midStream ||
+    (typeof code === 'string' && PASSING_NETWORK_ERRORS.has(code)) ||
+    (typeof name === 'string' && PASSING_NETWORK_ERRORS.has(name))
   return {
     type: 'finish' as const,
     reason: 'error' as const,
     error: error instanceof Error ? error.message : String(error),
-    retryable: true,
+    ...(passing ? { retryable: true } : {}),
   }
 }
 

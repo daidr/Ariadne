@@ -6,7 +6,12 @@ import {
   type TranscriptEntry,
 } from '@ariadne/core'
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
-import type { ModelProvider, ModelRequest, ModelStreamPart } from '@ariadne/plugin-sdk'
+import {
+  MAX_RETRY_AFTER_MS,
+  type ModelProvider,
+  type ModelRequest,
+  type ModelStreamPart,
+} from '@ariadne/plugin-sdk'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
 import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
@@ -259,9 +264,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */
 export const MAX_MODEL_RETRIES = 4
 
-/** Longest wait between retries, whatever the service asks for. */
-const MAX_RETRY_DELAY_MS = 60_000
-
 /**
  * One model response. Only errors the provider marks retryable are tried again, at most
  * `MAX_MODEL_RETRIES` times with a growing wait, and each retry is recorded so the user
@@ -301,7 +303,7 @@ async function requestStep(
     if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
       throw new TurnError({ key: 'error.modelRequest', params: { detail } })
     }
-    const delayMs = Math.min(MAX_RETRY_DELAY_MS, failure.retryAfterMs ?? baseDelayMs * 2 ** attempt)
+    const delayMs = Math.min(MAX_RETRY_AFTER_MS, failure.retryAfterMs ?? baseDelayMs * 2 ** attempt)
     onRetry({ attempt: attempt + 1, delayMs, detail })
     await abortableSleep(delayMs, request.signal)
     if (request.signal.aborted) return null

@@ -33,6 +33,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     }
     case 'thread-resumed':
       return `<thread_resumed thread="${note.threadId}" title="${titleOf(note.threadId)}" by="${note.by === 'user' ? 'user' : 'coordinator'}">\nThe thread had been stopped because: ${note.reason}\nIt goes on from where it was, with that reason in mind.\n</thread_resumed>`
+    case 'thread-stopped-by-user':
+      return `<thread_stopped_by_user thread="${note.threadId}" title="${titleOf(note.threadId)}">\nThe user stopped this thread: ${note.reason}\nIt stays stopped until the user lets it go on; do not resume it or route its work elsewhere unless the user asks.\n</thread_stopped_by_user>`
     case 'pull-request-closed':
       return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
     case 'proposal-stale':

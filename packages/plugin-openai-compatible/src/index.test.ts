@@ -122,7 +122,7 @@ describe('openai-compatible provider', () => {
     ])
   })
 
-  test('a server error and a cut-off stream are retryable; a refused connection too', async () => {
+  test('a server error and a cut-off stream are retryable; a wrong address is not', async () => {
     reply = () => new Response('bad gateway', { status: 502 })
     expect((await collect()).at(-1)).toMatchObject({ reason: 'error', retryable: true })
     reply = () => sse({ choices: [{ delta: { content: '半' } }] })
@@ -134,8 +134,22 @@ describe('openai-compatible provider', () => {
     )) {
       parts.push(part)
     }
-    expect(parts).toEqual([
-      expect.objectContaining({ type: 'finish', reason: 'error', retryable: true }),
-    ])
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({ type: 'finish', reason: 'error' })
+    expect(parts[0]).not.toHaveProperty('retryable')
+  })
+
+  test('a wait longer than a minute fails at once and says how long', async () => {
+    reply = () =>
+      Response.json(
+        { error: { message: 'quota' } },
+        { status: 429, headers: { 'retry-after': '1800' } },
+      )
+    const [part] = await collect()
+    expect(part).toEqual({
+      type: 'finish',
+      reason: 'error',
+      error: 'HTTP 429: quota (the service asks to wait 30 min before trying again)',
+    })
   })
 })

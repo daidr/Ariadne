@@ -262,7 +262,7 @@ const resumeThread: Tool = {
   spec: {
     name: 'resume_thread',
     description:
-      'Let a stopped thread go on. It is told why it had been stopped; send it a message first if it should do something different.',
+      'Let a thread you stopped go on. It is told why it had been stopped; send it a message first if it should do something different. A thread the user stopped only the user can resume.',
     parameters: {
       type: 'object',
       properties: { threadId: { type: 'string' } },
@@ -272,6 +272,14 @@ const resumeThread: Tool = {
   run(args, ctx) {
     const thread = ownThread(ctx, str(args, 'threadId'))
     if (!thread.stopped) return { content: 'It was not stopped.' }
+    // The user's own stop is theirs to lift.
+    if (thread.stopped.by === 'user') {
+      return {
+        content:
+          'The user stopped this thread; only the user can let it go on. Ask them if needed.',
+        isError: true,
+      }
+    }
     ctx.app.resumeThread(thread.id, ctx.conversationId)
     return { content: 'Resumed.' }
   },
