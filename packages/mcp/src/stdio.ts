@@ -44,6 +44,7 @@ export class StdioTransport implements Transport {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
+        windowsHide: true,
         detached: !windows,
       })
     } catch (error) {
@@ -140,6 +141,7 @@ export class StdioTransport implements Transport {
         stdout: 'ignore',
         stderr: 'ignore',
         stdin: 'ignore',
+        windowsHide: true,
       })
       return
     }

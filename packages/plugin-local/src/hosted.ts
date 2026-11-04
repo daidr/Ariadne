@@ -279,6 +279,7 @@ async function gitInput(cwd: string, args: string[], input: string): Promise<str
     stdin: new TextEncoder().encode(input),
     stdout: 'pipe',
     stderr: 'pipe',
+    windowsHide: true,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...serverGitEnv(['file']) },
   })
   const [stdout, stderr, code] = await Promise.all([

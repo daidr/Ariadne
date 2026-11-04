@@ -119,6 +119,9 @@ export async function run(
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: 'ignore',
+    // On Windows a console program gets a console window of its own unless told otherwise;
+    // every spawn in the code passes this (checked by spawn.test.ts in the server).
+    windowsHide: true,
     env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
     // A thread's command gets a process group of its own, so what it leaves running in the
     // background ends with it (on macOS the sandbox does not do this). Windows has no
@@ -133,6 +136,7 @@ export async function run(
         stdout: 'ignore',
         stderr: 'ignore',
         stdin: 'ignore',
+        windowsHide: true,
       })
       return
     }
