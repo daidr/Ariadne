@@ -1,5 +1,5 @@
-import { DomainError, type ConversationView } from '@ariadne/core'
-import type { ResolvedModel } from '@ariadne/agent'
+import { DomainError } from '@ariadne/core'
+import type { ModelChoice, ResolvedModel } from '@ariadne/agent'
 import type { PluginHost } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
 import type { SettingsSchema } from '@ariadne/plugin-sdk'
@@ -22,13 +22,25 @@ export interface ModelProviderConfig {
   settings: Record<string, unknown>
 }
 
+/**
+ * One model the user set up, on one of their providers. `contextTokens` is how much it
+ * reads at most; older history is summarised before a conversation gets near it. `note`
+ * is what it is for, in the user's words: the coordinator reads it when it picks a model
+ * for a thread.
+ */
+export interface ModelConfig {
+  id: string
+  provider: string
+  model: string
+  contextTokens?: number
+  note?: string
+}
+
 export interface ModelsConfig {
   providers: ModelProviderConfig[]
-  /**
-   * The model every conversation uses for now. `contextTokens` is how much it reads at
-   * most; older history is summarised before a conversation gets near it.
-   */
-  default: { provider: string; model: string; contextTokens?: number } | null
+  models: ModelConfig[]
+  /** The model each role uses by default; `thread: null` uses the coordinator's. */
+  roles: { coordinator: string | null; thread: string | null }
 }
 
 export interface UserConfig {
@@ -49,7 +61,7 @@ export interface UserConfig {
 const defaults = (): UserConfig => ({
   locale: 'zh-CN',
   plugins: [],
-  models: { providers: [], default: null },
+  models: { providers: [], models: [], roles: { coordinator: null, thread: null } },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
@@ -64,7 +76,11 @@ export function loadUserConfig(path: string): UserConfig {
   return {
     ...config,
     ...stored,
-    models: { ...config.models, ...stored.models },
+    models: {
+      ...config.models,
+      ...stored.models,
+      roles: { ...config.models.roles, ...stored.models?.roles },
+    },
     concurrency: { ...config.concurrency, ...stored.concurrency },
     sourceSecrets: { ...stored.sourceSecrets },
     sandbox: {
@@ -135,7 +151,8 @@ export class SettingsStore {
           secretsSet: secrets.filter((key) => !!provider.settings[key]),
         }
       }),
-      default: this.config.models.default,
+      models: this.config.models.models,
+      roles: this.config.models.roles,
     }
   }
 
@@ -171,27 +188,44 @@ export class SettingsStore {
         settings,
       }
     })
-    const chosen = body.default ?? null
-    if (chosen !== null) {
-      if (!providers.some((p) => p.id === chosen.provider)) throw new BadRequest('default.provider')
-      if (typeof chosen.model !== 'string' || !chosen.model.trim())
-        throw new BadRequest('default.model')
-      const size = chosen.contextTokens
-      if (size !== undefined && size !== null && !(Number.isInteger(size) && size >= 4096)) {
-        throw new BadRequest('default.contextTokens')
+    if (!Array.isArray(body.models)) throw new BadRequest('models')
+    const ids = new Set<string>()
+    const models = body.models.map((raw, index): ModelConfig => {
+      const entry = (raw ?? {}) as Partial<ModelConfig>
+      const at = `models[${index}]`
+      if (typeof entry.id !== 'string' || !entry.id || ids.has(entry.id)) {
+        throw new BadRequest(`${at}.id`)
       }
+      ids.add(entry.id)
+      if (!providers.some((p) => p.id === entry.provider)) throw new BadRequest(`${at}.provider`)
+      if (typeof entry.model !== 'string' || !entry.model.trim()) {
+        throw new BadRequest(`${at}.model`)
+      }
+      const size = entry.contextTokens
+      if (size !== undefined && size !== null && !(Number.isInteger(size) && size >= 4096)) {
+        throw new BadRequest(`${at}.contextTokens`)
+      }
+      const note = typeof entry.note === 'string' ? entry.note.trim().slice(0, 200) : ''
+      return {
+        id: entry.id,
+        provider: entry.provider as string,
+        model: entry.model.trim(),
+        ...(typeof size === 'number' ? { contextTokens: size } : {}),
+        ...(note ? { note } : {}),
+      }
+    })
+    const roles = (body.roles ?? {}) as Partial<ModelsConfig['roles']>
+    const role = (key: 'coordinator' | 'thread') => {
+      const value = roles[key] ?? null
+      if (value !== null && !ids.has(value)) throw new BadRequest(`roles.${key}`)
+      return value
     }
     this.config = {
       ...this.config,
       models: {
         providers,
-        default: chosen && {
-          provider: chosen.provider,
-          model: chosen.model.trim(),
-          ...(typeof chosen.contextTokens === 'number'
-            ? { contextTokens: chosen.contextTokens }
-            : {}),
-        },
+        models,
+        roles: { coordinator: role('coordinator'), thread: role('thread') },
       },
     }
     this.save()
@@ -290,9 +324,12 @@ export class SettingsStore {
     this.save()
   }
 
-  /** The model a conversation talks to, or `null` when none is set up. */
-  resolveModel(_conversation: ConversationView): ResolvedModel | null {
-    const chosen = this.config.models.default
+  /**
+   * The model a conversation talks to, or `null` when none is set up. A thread uses the
+   * model it was given while that is still set up, else the default for threads.
+   */
+  resolveModel(role: 'coordinator' | 'thread', given: string | null = null): ResolvedModel | null {
+    const chosen = this.modelFor(role, given)
     if (!chosen) return null
     const config = this.config.models.providers.find((p) => p.id === chosen.provider)
     if (!config) return null
@@ -309,9 +346,35 @@ export class SettingsStore {
       provider,
       settings,
       model: chosen.model,
-      label: `${config.name} / ${chosen.model}`,
+      label: this.labelOf(chosen),
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
     }
+  }
+
+  /** The model setting a role (or a thread given `given`) uses, or `null`. */
+  modelFor(role: 'coordinator' | 'thread', given: string | null = null): ModelConfig | null {
+    const { models, roles } = this.config.models
+    const find = (id: string | null) => (id ? (models.find((m) => m.id === id) ?? null) : null)
+    if (role === 'coordinator') return find(roles.coordinator)
+    return find(given) ?? find(roles.thread) ?? find(roles.coordinator)
+  }
+
+  /** The models the coordinator may give a thread, with what the user said each is for. */
+  modelChoices(): ModelChoice[] {
+    const threadDefault = this.modelFor('thread')
+    return this.config.models.models
+      .filter((m) => this.config.models.providers.some((p) => p.id === m.provider))
+      .map((m) => ({
+        id: m.id,
+        label: this.labelOf(m),
+        note: m.note ?? '',
+        threadDefault: m.id === threadDefault?.id,
+      }))
+  }
+
+  private labelOf(model: ModelConfig): string {
+    const provider = this.config.models.providers.find((p) => p.id === model.provider)
+    return `${provider?.name ?? model.provider} / ${model.model}`
   }
 
   private save(): void {

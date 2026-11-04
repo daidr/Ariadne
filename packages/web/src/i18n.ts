@@ -53,3 +53,19 @@ export function setLocale(next: Locale): void {
 export function lt(text: LocalizedText | undefined): string | undefined {
   return text ? (text[locale.value] ?? text['zh-CN']) : undefined
 }
+
+const compact = computed(
+  () => new Intl.NumberFormat(locale.value, { notation: 'compact', maximumFractionDigits: 1 }),
+)
+
+/** A token count as people say it, e.g. `12.3万` or `12.3K`. */
+export function count(value: number): string {
+  return compact.value.format(value)
+}
+
+/** A duration in seconds or milliseconds, short. */
+export function duration(ms: number): string {
+  if (ms < 1000) return t('time.ms', { value: Math.round(ms) })
+  if (ms < 60_000) return t('time.s', { value: (ms / 1000).toFixed(1) })
+  return t('time.min', { m: Math.floor(ms / 60_000), s: Math.round((ms % 60_000) / 1000) })
+}

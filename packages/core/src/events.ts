@@ -62,6 +62,17 @@ export interface TokenUsage {
 }
 
 /**
+ * The parts of a step's model request that the transcript does not hold, by the hash of
+ * their `prompt.recorded` text: the system prompt, the tool definitions (JSON), and the
+ * current state shown beside a summary (`null` without one).
+ */
+export interface StepInput {
+  system: string
+  tools: string
+  state: string | null
+}
+
+/**
  * How a turn ended. `interrupted` means the process stopped mid-turn; `cancelled` means
  * the user stopped it.
  */
@@ -143,7 +154,10 @@ export interface EventMap {
   'project.source.set': { source: ProjectSource | null }
   /** How many of the shared work slots this project may take at once; `null` is no cap. */
   'project.slots.set': { slots: number | null }
-  'thread.created': { threadId: string; title: string; nodeId: string | null }
+  /** `model` is the id of the model setting the coordinator chose for it, if any. */
+  'thread.created': { threadId: string; title: string; nodeId: string | null; model: string | null }
+  /** The thread's model changed; `null` goes back to the default for threads. */
+  'thread.model_set': { threadId: string; model: string | null; by: string }
   /**
    * A thread's workspace was prepared, e.g. a git worktree on its own branch. `base` is the
    * branch that one started from, which its changes are compared and merged against.
@@ -273,7 +287,13 @@ export interface EventMap {
     toolCalls: ToolCallRecord[]
     sawSeq: number
     usage: TokenUsage | null
+    input: StepInput
   }
+  /**
+   * A piece of model input seen for the first time in the project, stored once by its
+   * hash; steps name the pieces they were sent, so the trace can show every request whole.
+   */
+  'prompt.recorded': { hash: string; content: string }
   'tool.finished': {
     conversationId: string
     turnId: string

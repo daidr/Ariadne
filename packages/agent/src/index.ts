@@ -13,12 +13,15 @@ export {
   threadTools,
   toolsFor,
   ToolInputError,
+  type ModelChoice,
   type Tool,
   type ToolContext,
 } from './tools'
 export { shellQuote } from './workspace-tools'
 export { WorkspaceManager } from './workspaces'
 export { describeNote, toChatMessages } from './transcript'
+export { buildTrace, traceInput } from './trace'
+export { DEFAULT_CONTEXT_TOKENS } from './compaction'
 export {
   browserProfiles,
   createSandbox,

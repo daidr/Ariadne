@@ -13,18 +13,20 @@ import {
   useColorMode,
 } from 'dou-ui'
 import { SettingsIcon } from '@dou-ui/icons'
-import { defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import { defineAsyncComponent, onMounted, ref, watch, watchEffect } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
-import { start, state } from './store'
+import { onLiveEvent, start, state } from './store'
+import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
+onLiveEvent(notifyAbout)
 onMounted(start)
 
 const settingsOpen = ref(false)
@@ -53,6 +55,13 @@ const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
 const ArtifactEditor = defineAsyncComponent(() => import('./artifacts/ArtifactEditor.vue'))
 const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
 const ChangesView = defineAsyncComponent(() => import('./changes/ChangesView.vue'))
+const TraceView = defineAsyncComponent(() => import('./trace/TraceView.vue'))
+
+// The tab says how many things wait on the user, across projects.
+watchEffect(() => {
+  const waiting = state.projects.reduce((sum, project) => sum + project.needsMe, 0)
+  document.title = waiting ? `(${waiting}) ${t('app.name')}` : t('app.name')
+})
 </script>
 
 <template>
@@ -106,6 +115,10 @@ const ChangesView = defineAsyncComponent(() => import('./changes/ChangesView.vue
                 <ChangesView
                   v-else-if="state.main.kind === 'changes'"
                   :thread-id="state.main.threadId"
+                />
+                <TraceView
+                  v-else-if="state.main.kind === 'trace'"
+                  :conversation-id="state.main.conversationId"
                 />
                 <ConversationPanel v-else @open-settings="settingsOpen = true" />
               </div>

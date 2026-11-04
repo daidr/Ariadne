@@ -15,9 +15,9 @@ import {
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
-import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
+import { toolsFor, ToolInputError, type ModelChoice, type Tool, type ToolContext } from './tools'
 import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
-import { toChatMessages } from './transcript'
+import { toChatMessages, visibleHistory } from './transcript'
 import type { WorkspaceManager } from './workspaces'
 
 /** The model a conversation talks to, with its provider's settings. */
@@ -45,6 +45,8 @@ export interface TurnOptions {
   /** First wait before a model request is retried; it doubles each time. */
   retryBaseMs?: number
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /** The models the user set up; the coordinator may give one to each thread it opens. */
+  models?: ModelChoice[]
 }
 
 /** Why a turn stopped early, for the user. */
@@ -101,12 +103,14 @@ function systemPrompt(
   locale: Locale,
   hasWorkspace: boolean,
   hasRepo: boolean,
+  models: ModelChoice[],
 ): string {
   if (conversation.role === 'coordinator') {
     return coordinatorPrompt({
       projectName: app.getProject(conversation.projectId).name,
       locale,
       memories: app.listMemories(conversation.projectId),
+      models,
     })
   }
   return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo))
@@ -148,7 +152,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
   const tools =
     options.tools ??
-    toolsFor(conversation.role, { workspace: hasWorkspace, repo: hasRepo, tracker: hasTracker })
+    toolsFor(conversation.role, {
+      workspace: hasWorkspace,
+      repo: hasRepo,
+      tracker: hasTracker,
+      models: options.models ?? [],
+    })
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
   // Input newer than this arrived for this turn.
@@ -178,6 +187,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
+    models: options.models ?? [],
   }
   const titleOf = (threadId: string) => {
     try {
@@ -193,6 +203,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let compactionFailed = false
     let lastInput = 0
     const state = () => currentState(app, conversation)
+    const system = () =>
+      systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo, options.models ?? [])
+    const specs = tools.map((tool) => tool.spec)
+    const toolsJson = JSON.stringify(specs)
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
@@ -201,17 +215,18 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (isThread && workspaces && hasWorkspace) {
         await syncInstructions(app, conversation, turnId, workspaces)
       }
-      const sawSeq = app.lastSeq()
-      const system = {
-        role: 'system' as const,
-        content: systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo),
-      }
-      let transcript = app.listTranscript(conversationId)
-      let messages = [system, ...toChatMessages(transcript, titleOf, { state })]
       // A long conversation gets its older history summarised before it outgrows the
       // model's context. Between steps every call has its result, so any cut is whole.
-      if (!compactionFailed && Math.max(lastInput, estimateTokens(messages)) >= threshold) {
-        const upTo = compactionCut(transcript, threshold / 4)
+      if (!compactionFailed) {
+        const transcript = app.listTranscript(conversationId)
+        const estimate = estimateTokens([
+          { role: 'system', content: system() },
+          ...toChatMessages(transcript, titleOf, { state: state() }),
+        ])
+        const upTo =
+          Math.max(lastInput, estimate) >= threshold
+            ? compactionCut(transcript, threshold / 4)
+            : null
         if (upTo !== null) {
           const request = summaryRequest(transcript, upTo, titleOf, conversation.role)
           const summary = await summarise(model, request, signal)
@@ -222,24 +237,38 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               upTo,
               usage: summary.usage,
             })
-            transcript = app.listTranscript(conversationId)
-            messages = [system, ...toChatMessages(transcript, titleOf, { state })]
           } else {
             compactionFailed = true
             app.recordCompactionFailure(conversationId, turnId, summary.detail.slice(0, 500))
           }
         }
       }
+      // Everything below is read in one go, so the input is exactly the log up to `sawSeq`
+      // plus the pieces recorded with the step: the trace rebuilds it from those.
+      const sawSeq = app.lastSeq()
+      const input = { system: system(), tools: toolsJson, state: state() }
+      const transcript = app.listTranscript(conversationId)
+      const messages = [
+        { role: 'system' as const, content: input.system },
+        ...toChatMessages(transcript, titleOf, { state: input.state }),
+      ]
+      const shownState = visibleHistory(transcript).summary === null ? null : input.state
       const answer = await requestStep(
         model,
-        { model: model.model, messages, tools: tools.map((tool) => tool.spec), signal },
+        { model: model.model, messages, tools: specs, signal },
         (retry) => app.recordModelRetry(conversationId, turnId, retry),
         options.retryBaseMs ?? 1000,
       )
       if (signal.aborted || !answer) break
       const { text, toolCalls, usage } = answer
       lastInput = usage?.input ?? 0
-      app.recordStep(conversationId, turnId, { text, toolCalls, sawSeq, usage })
+      app.recordStep(conversationId, turnId, {
+        text,
+        toolCalls,
+        sawSeq,
+        usage,
+        input: { system: input.system, tools: input.tools, state: shownState },
+      })
 
       if (!toolCalls.length) {
         if (text.trim()) {

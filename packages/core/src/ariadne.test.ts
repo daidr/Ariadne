@@ -6,6 +6,9 @@ import { Ariadne } from './ariadne'
 import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
 
+/** A step's input pieces, for tests that record steps by hand. */
+const STEP_INPUT = { system: 'system', tools: '[]', state: null }
+
 let app: Ariadne
 let clock = 1_000
 
@@ -67,6 +70,7 @@ describe('thread stages', () => {
       toolCalls: [],
       sawSeq: app.lastSeq(),
       usage: null,
+      input: STEP_INPUT,
     })
     app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('review')
@@ -294,7 +298,7 @@ describe('event log', () => {
     const project = app.createProject('P')
     const before = app.store.lastSeq()
     // The same thread id twice violates the threads primary key inside the transaction.
-    const data = { threadId: 'thr_x', title: 't', nodeId: null }
+    const data = { threadId: 'thr_x', title: 't', nodeId: null, model: null }
     expect(() =>
       app.store.append([
         { type: 'thread.created', projectId: project.id, data },
@@ -618,6 +622,7 @@ describe('failing checks', () => {
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage: null,
+        input: STEP_INPUT,
       })
       app.finishTurn(thread.id, turnId, 'completed')
     }
@@ -658,6 +663,7 @@ describe('failing checks', () => {
       toolCalls: [],
       sawSeq: app.lastSeq(),
       usage: null,
+      input: STEP_INPUT,
     })
     app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('blocked')
@@ -892,5 +898,75 @@ describe('plan node ids', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('usage, models and step input', () => {
+  test('a step stores each input piece once per project, by its hash', () => {
+    const project = app.createProject('P')
+    const prompts = () => app.events({ limit: 1000 }).filter((e) => e.type === 'prompt.recorded')
+    const step = (system: string, state: string | null) => {
+      const turnId = app.startTurn(project.coordinatorId, 'm')
+      app.recordStep(project.coordinatorId, turnId, {
+        text: 'x',
+        toolCalls: [],
+        sawSeq: app.lastSeq(),
+        usage: { input: 900, output: 30 },
+        input: { system, tools: '[]', state },
+      })
+      app.finishTurn(project.coordinatorId, turnId, 'completed')
+    }
+    step('提示一', null)
+    step('提示一', null)
+    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]'])
+    step('提示二', '提示二')
+    // The same text twice in one step is stored once.
+    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]', '提示二'])
+    const last = app.events({ limit: 1000 }).findLast((e) => e.type === 'turn.step')
+    if (last?.type !== 'turn.step') throw new Error('expected a step')
+    expect(app.getPrompt(project.id, last.data.input.system)).toBe('提示二')
+    expect(last.data.input.state).toBe(last.data.input.system)
+    // Another project keeps its own copy.
+    const other = app.createProject('Q')
+    expect(app.getPrompt(other.id, last.data.input.system)).toBeNull()
+  })
+
+  test('tokens add up per conversation and project; the context is the latest input', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    const step = (conversationId: string, usage: { input: number; output: number } | null) => {
+      const turnId = app.startTurn(conversationId, 'm')
+      app.recordStep(conversationId, turnId, {
+        text: '',
+        toolCalls: [],
+        sawSeq: app.lastSeq(),
+        usage,
+        input: STEP_INPUT,
+      })
+      app.finishTurn(conversationId, turnId, 'completed')
+    }
+    step(thread.id, { input: 1000, output: 100 })
+    step(thread.id, { input: 1500, output: 50 })
+    // A provider that reports nothing leaves the last known size.
+    step(thread.id, null)
+    step(project.coordinatorId, { input: 200, output: 20 })
+    expect(app.getConversation(thread.id)).toMatchObject({
+      usage: { input: 2500, output: 150 },
+      contextTokens: 1500,
+    })
+    expect(app.getThread(thread.id).usage).toEqual({ input: 2500, output: 150 })
+    expect(app.getProject(project.id).usage).toEqual({ input: 2700, output: 170 })
+  })
+
+  test('a thread keeps the model it was given until it is changed', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't', model: 'small' })
+    expect(thread.model).toBe('small')
+    expect(app.setThreadModel(thread.id, 'big', 'user').model).toBe('big')
+    const count = app.lastSeq()
+    // The same model again records nothing.
+    app.setThreadModel(thread.id, 'big', 'user')
+    expect(app.lastSeq()).toBe(count)
+    expect(app.setThreadModel(thread.id, null, 'user').model).toBeNull()
   })
 })

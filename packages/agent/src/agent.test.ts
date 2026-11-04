@@ -6,6 +6,9 @@ import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
 import { toChatMessages } from './transcript'
 
+/** A step's input pieces, for tests that record steps by hand. */
+const STEP_INPUT = { system: 'system', tools: '[]', state: null }
+
 let app: Ariadne
 let scheduler: Scheduler | null = null
 
@@ -659,6 +662,7 @@ describe('control', () => {
       toolCalls: [{ id: 'c1', name: 'list_threads', arguments: '{}' }],
       sawSeq: app.lastSeq(),
       usage: null,
+      input: STEP_INPUT,
     })
     const model = fakeModel(() => say('继续'))
     await startScheduler(model).idle()

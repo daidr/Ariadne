@@ -14,7 +14,7 @@ export interface Projection {
 
 export type EventListener = (events: AnyStoredEvent[]) => void
 
-interface EventRow {
+export interface EventRow {
   seq: number
   id: string
   type: string
@@ -23,7 +23,7 @@ interface EventRow {
   at: number
 }
 
-function toStored(row: EventRow): AnyStoredEvent {
+export function toStored(row: EventRow): AnyStoredEvent {
   return {
     seq: row.seq,
     id: row.id,

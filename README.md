@@ -18,7 +18,7 @@ bun run check    # 格式、lint、类型检查和测试
 
 本地服务第一次启动时会在 `~/.ariadne/token` 生成访问令牌，并在终端打印带令牌的链接。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可；`bun run build` 之后，本地服务会直接提供构建好的页面。
 
-打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址、API Key 和默认模型名，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
+打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址和 API Key，再添加一个模型，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
 
 要让 thread 读写代码、运行命令，在右侧“项目来源”里选一个本机目录、GitHub 仓库、GitLab 仓库或 SSH 远程目录。
 

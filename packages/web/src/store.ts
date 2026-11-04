@@ -12,7 +12,14 @@ import type {
   TodoView,
 } from '@ariadne/core'
 import { reactive } from 'vue'
-import { api, ApiError, followEvents, type ProjectDetail, type StreamStatus } from './api'
+import {
+  api,
+  ApiError,
+  followEvents,
+  type ModelSettings,
+  type ProjectDetail,
+  type StreamStatus,
+} from './api'
 import { t, tm } from './i18n'
 
 /** What the middle column shows. */
@@ -23,6 +30,8 @@ export type MainView =
   | { kind: 'artifact'; id: string }
   /** What a thread's branch changed, with merging it. */
   | { kind: 'changes'; threadId: string }
+  /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
+  | { kind: 'trace'; conversationId: string }
 
 /** One conversation as shown on screen: the coordinator's, or the open thread's. */
 export interface ConversationState {
@@ -31,6 +40,8 @@ export interface ConversationState {
   /** What happened in the conversation besides messages, shown in line with them. */
   notices: NoticeView[]
   todo: TodoView | null
+  /** The model it uses now, with how much its context holds. */
+  model: { id: string; contextTokens: number } | null
 }
 
 const emptyConversation = (): ConversationState => ({
@@ -38,7 +49,14 @@ const emptyConversation = (): ConversationState => ({
   messages: [],
   notices: [],
   todo: null,
+  model: null,
 })
+
+/** A model the user set up, as the page names it. */
+export interface ModelOption {
+  id: string
+  label: string
+}
 
 interface State {
   stream: StreamStatus
@@ -55,8 +73,12 @@ interface State {
   /** The project's memory: standing preferences every conversation sees. */
   memories: MemoryView[]
   main: MainView
-  /** Whether a default model is set; `null` until known. */
+  /** Whether the coordinator has a model; `null` until known. */
   modelReady: boolean | null
+  /** The models set up, to pick one for a thread. */
+  models: ModelOption[]
+  /** The model threads use unless given another. */
+  threadDefault: string | null
   /** The new-project form is open. */
   creatingProject: boolean
   /** Bumped whenever the open project's events arrive, so open views can reload. */
@@ -77,6 +99,8 @@ export const state = reactive<State>({
   memories: [],
   main: { kind: 'conversation' },
   modelReady: null,
+  models: [],
+  threadDefault: null,
   creatingProject: false,
   revision: 0,
   error: null,
@@ -116,8 +140,8 @@ async function refreshCurrent() {
 }
 
 function pick(view: ConversationState): ConversationState {
-  const { conversation, messages, notices, todo } = view
-  return { conversation, messages, notices, todo }
+  const { conversation, messages, notices, todo, model } = view
+  return { conversation, messages, notices, todo, model }
 }
 
 export async function openProject(id: string) {
@@ -308,7 +332,16 @@ export async function answerAttention(id: string, choice: number) {
 // Coalesce bursts of events into one refresh per frame, remembering every project touched.
 let pending = false
 const touched = new Set<string>()
+const listeners = new Set<(event: AnyStoredEvent) => void>()
+
+/** Hear every event as it arrives, e.g. to notify the user. */
+export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 function onEvent(event: AnyStoredEvent) {
+  for (const listener of listeners) listener(event)
   touched.add(event.projectId)
   if (pending) return
   pending = true
@@ -321,11 +354,28 @@ function onEvent(event: AnyStoredEvent) {
   })
 }
 
+/** Take in the model settings as saved: whether the coordinator has one, and the choices. */
+export function applyModelSettings(settings: ModelSettings) {
+  state.modelReady = !!settings.roles.coordinator
+  state.threadDefault = settings.roles.thread ?? settings.roles.coordinator
+  state.models = settings.models.map((model) => ({
+    id: model.id,
+    label: `${settings.providers.find((p) => p.id === model.provider)?.name ?? model.provider} / ${model.model}`,
+  }))
+}
+
+/** Give a thread another model, or back the default with `null`. */
+export async function setThreadModel(threadId: string, model: string | null) {
+  try {
+    await api.setThreadModel(threadId, model)
+    await refreshCurrent()
+  } catch (error) {
+    report(error)
+  }
+}
+
 async function load(): Promise<number | null> {
-  api.getModelSettings().then(
-    (settings) => (state.modelReady = !!settings.default),
-    () => {},
-  )
+  api.getModelSettings().then(applyModelSettings, () => {})
   try {
     const lastSeq = await refreshProjects()
     const target = state.currentId ?? state.projects[0]?.id

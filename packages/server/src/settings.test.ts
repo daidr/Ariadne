@@ -15,9 +15,10 @@ beforeEach(async () => {
   path = join(mkdtempSync(join(tmpdir(), 'ariadne-settings-')), 'config.json')
 })
 
-const provider = (settings: Record<string, unknown>) => ({
+const provider = (settings: Record<string, unknown>, model: Record<string, unknown> = {}) => ({
   providers: [{ id: 'p1', kind: 'anthropic', name: '主力', settings }],
-  default: { provider: 'p1', model: 'some-model' },
+  models: [{ id: 'm1', provider: 'p1', model: 'some-model', ...model }],
+  roles: { coordinator: 'm1', thread: null },
 })
 
 describe('model settings', () => {
@@ -55,9 +56,9 @@ describe('model settings', () => {
 
   test('resolves the default model with schema defaults for empty fields', () => {
     const store = new SettingsStore(path, host)
-    expect(store.resolveModel({} as never)).toBeNull()
+    expect(store.resolveModel('coordinator')).toBeNull()
     store.updateModels(provider({ baseUrl: '', apiKey: 'k' }))
-    const resolved = store.resolveModel({} as never)
+    const resolved = store.resolveModel('coordinator')
     expect(resolved?.settings).toEqual({
       baseUrl: 'https://api.anthropic.com',
       apiKey: 'k',
@@ -68,18 +69,52 @@ describe('model settings', () => {
 
   test("the default model's context size reaches the turn, and must be sensible", () => {
     const store = new SettingsStore(path, host)
-    const settings = provider({ baseUrl: '', apiKey: 'k' })
-    store.updateModels({ ...settings, default: { ...settings.default, contextTokens: 32_000 } })
-    expect(store.resolveModel({} as never)?.contextTokens).toBe(32_000)
+    store.updateModels(provider({ baseUrl: '', apiKey: 'k' }, { contextTokens: 32_000 }))
+    expect(store.resolveModel('coordinator')?.contextTokens).toBe(32_000)
     expect(() =>
-      store.updateModels({ ...settings, default: { ...settings.default, contextTokens: 10 } }),
+      store.updateModels(provider({ baseUrl: '', apiKey: 'k' }, { contextTokens: 10 })),
+    ).toThrow()
+  })
+
+  test('each role has its model, and a thread may be given another', () => {
+    const store = new SettingsStore(path, host)
+    const settings = provider({ baseUrl: '', apiKey: 'k' })
+    store.updateModels({
+      ...settings,
+      models: [
+        ...settings.models,
+        { id: 'm2', provider: 'p1', model: 'small', note: '便宜，适合调研' },
+        { id: 'm3', provider: 'p1', model: 'large' },
+      ],
+      roles: { coordinator: 'm1', thread: 'm2' },
+    })
+    expect(store.resolveModel('coordinator')?.model).toBe('some-model')
+    expect(store.resolveModel('thread')?.model).toBe('small')
+    expect(store.resolveModel('thread', 'm3')?.model).toBe('large')
+    // A model the thread was given that is no longer set up falls back to the default.
+    expect(store.resolveModel('thread', 'gone')?.model).toBe('small')
+    expect(store.modelChoices()).toEqual([
+      { id: 'm1', label: '主力 / some-model', note: '', threadDefault: false },
+      { id: 'm2', label: '主力 / small', note: '便宜，适合调研', threadDefault: true },
+      { id: 'm3', label: '主力 / large', note: '', threadDefault: false },
+    ])
+    // Without a default for threads they use the coordinator's.
+    store.updateModels(settings)
+    expect(store.resolveModel('thread')?.model).toBe('some-model')
+    // A role must name a model that is set up.
+    expect(() =>
+      store.updateModels({ ...settings, roles: { coordinator: 'nope', thread: null } }),
     ).toThrow()
   })
 
   test('rejects an unknown provider kind', () => {
     const store = new SettingsStore(path, host)
     expect(() =>
-      store.updateModels({ providers: [{ id: 'x', kind: 'nope', settings: {} }], default: null }),
+      store.updateModels({
+        providers: [{ id: 'x', kind: 'nope', settings: {} }],
+        models: [],
+        roles: { coordinator: null, thread: null },
+      }),
     ).toThrow()
   })
 })

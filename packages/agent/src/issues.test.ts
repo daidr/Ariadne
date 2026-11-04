@@ -8,6 +8,9 @@ import { issueReadTools, issueWritePurpose, issueWriteTools } from './issue-tool
 import { ToolInputError, type ToolContext, type ToolResult } from './tool-helpers'
 import { toolsFor } from './tools'
 
+/** A step's input pieces, for tests that record steps by hand. */
+const STEP_INPUT = { system: 'system', tools: '[]', state: null }
+
 let app: Ariadne
 let ctx: ToolContext
 let projectId: string
@@ -393,7 +396,13 @@ describe('changing issues', () => {
     ).toMatchObject({ done: true })
     // The other thread's model reads the note that it was made.
     const turnId = app.startTurn(second, 'm')
-    app.recordStep(second, turnId, { text: '', toolCalls: [], sawSeq: app.lastSeq(), usage: null })
+    app.recordStep(second, turnId, {
+      text: '',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+    })
     app.finishTurn(second, turnId, 'completed')
     // Reopened with its own yes; closing it again later is a new change.
     expect(await step('open')).toMatchObject({ done: true })

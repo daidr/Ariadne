@@ -73,7 +73,12 @@ const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO
 const scheduler = new Scheduler({
   app,
   workspaces,
-  resolveModel: (conversation) => settings.resolveModel(conversation),
+  resolveModel: (conversation) =>
+    settings.resolveModel(
+      conversation.role,
+      conversation.role === 'thread' ? app.getThread(conversation.id).model : null,
+    ),
+  models: () => settings.modelChoices(),
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
