@@ -120,22 +120,23 @@ function select(item: CommandItem) {
   >
     <template #item="{ item }">
       <div v-for="hit in [hits.get(String(item.value))!]" :key="item.value" class="hit">
-        <span class="hit-icon">
-          <template v-if="hit.kind === 'thread'">
-            <StageIcon v-if="stageOf(hit.id)" :stage="stageOf(hit.id)!" />
-          </template>
-          <component :is="kindIcon[hit.artifactKind]" v-else-if="hit.kind === 'artifact'" />
-          <MessagesIcon v-else />
-        </span>
-        <span class="hit-text">
+        <!-- The icon sits on the first line, centred on it; the second line starts under the text. -->
+        <span class="hit-line">
+          <span class="hit-icon">
+            <template v-if="hit.kind === 'thread'">
+              <StageIcon v-if="stageOf(hit.id)" :stage="stageOf(hit.id)!" />
+            </template>
+            <component :is="kindIcon[hit.artifactKind]" v-else-if="hit.kind === 'artifact'" />
+            <MessagesIcon v-else />
+          </span>
           <DouText truncate>
             <DouHighlight :text="item.label" :keywords="result?.terms ?? []" />
           </DouText>
-          <DouText v-if="item.description" variant="tertiary" size="sm" truncate>
-            <template v-if="hit.kind === 'message'">{{ item.description }}</template>
-            <DouHighlight v-else :text="item.description" :keywords="result?.terms ?? []" />
-          </DouText>
         </span>
+        <DouText v-if="item.description" variant="tertiary" size="sm" truncate class="hit-detail">
+          <template v-if="hit.kind === 'message'">{{ item.description }}</template>
+          <DouHighlight v-else :text="item.description" :keywords="result?.terms ?? []" />
+        </DouText>
       </div>
     </template>
     <template #empty>
@@ -148,24 +149,30 @@ function select(item: CommandItem) {
 <style scoped>
 .hit {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   width: 100%;
+}
+
+.hit-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .hit-icon {
   display: inline-flex;
   flex: none;
-  padding-top: 2px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  font-size: 16px;
   color: var(--dou-color-text-tertiary);
 }
 
-.hit-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
+.hit-detail {
+  padding-left: 24px;
 }
 </style>
