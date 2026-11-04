@@ -275,6 +275,8 @@ interface ThreadRow {
   todo_items: string | null
   todo_at: number | null
   message_at: number | null
+  /** When the newest entry of what its agent has seen was written: a step, a tool result. */
+  transcript_at: number | null
 }
 
 interface AttentionRow {
@@ -331,7 +333,9 @@ const usageOf = (row: UsageColumns): UsageTotals => ({
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
   c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, c.turn_started_at,
   td.items AS todo_items, td.updated_at AS todo_at,
-  (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at, (
+  (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
+  (SELECT e.at FROM events e WHERE e.seq = (SELECT tr.seq FROM transcript tr
+    WHERE tr.conversation_id = t.id ORDER BY tr.id DESC LIMIT 1)) AS transcript_at, (
   SELECT json_group_array(json_object('id', ar.id, 'kind', ar.kind, 'title', ar.title))
   FROM (SELECT ar.id, ar.kind, ar.title FROM json_each(t.last_artifacts) j
     JOIN artifacts ar ON ar.id = j.value AND ar.project_id = t.project_id ORDER BY j.key) ar
@@ -397,6 +401,7 @@ function toThread(row: ThreadRow): ThreadView {
     activeAt: Math.max(
       row.updated_at,
       row.message_at ?? 0,
+      row.transcript_at ?? 0,
       row.todo_at ?? 0,
       row.turn_started_at ?? 0,
     ),

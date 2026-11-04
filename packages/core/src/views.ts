@@ -95,7 +95,7 @@ export interface ThreadView {
   progress: { done: number; total: number } | null
   createdAt: number
   updatedAt: number
-  /** When it last did or heard something: a message, a todo update, a turn, a report. */
+  /** When it last did or heard something: a message, a model step or tool result, a todo update, a report. */
   activeAt: number
 }
 

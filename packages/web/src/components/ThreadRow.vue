@@ -51,6 +51,7 @@ const prTone = computed(() =>
           :max="thread.progress.total"
           :width="12"
           :stroke-width="2"
+          color="var(--dou-color-text-tertiary)"
           :label="t('threads.progress')"
         />
         {{ thread.progress.done }}/{{ thread.progress.total }}

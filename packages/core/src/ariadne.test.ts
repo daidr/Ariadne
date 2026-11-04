@@ -67,6 +67,21 @@ describe('thread list facts', () => {
     })
     expect(app.getThread(thread.id).activeAt).toBe(message.createdAt)
     expect(app.getThread(thread.id).updatedAt).toBeLessThan(message.createdAt)
+
+    // A turn that only calls tools still counts, and keeps counting once it ends.
+    const turnId = app.startTurn(thread.id, 'model')
+    app.recordStep(thread.id, turnId, {
+      reasoning: [],
+      text: '',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    const stepAt = clock
+    app.finishTurn(thread.id, turnId, 'failed')
+    expect(app.getThread(thread.id).activeAt).toBe(stepAt)
   })
 })
 
