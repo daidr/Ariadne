@@ -34,12 +34,17 @@ export interface LocalSettings {
 
 /** Commands may run this long unless the caller asks for less. */
 const DEFAULT_TIMEOUT_MS = 120_000
-/** Output beyond this is cut, keeping the end where errors usually are. */
-const MAX_OUTPUT = 64_000
+/**
+ * Output beyond this is cut in the middle, keeping how it began and, larger, the end where
+ * errors usually are. Callers cut further for the model; this only bounds memory.
+ */
+const MAX_OUTPUT = 1_000_000
 
 function clip(text: string): string {
   if (text.length <= MAX_OUTPUT) return text
-  return `[… ${text.length - MAX_OUTPUT} characters cut …]\n${text.slice(-MAX_OUTPUT)}`
+  const head = MAX_OUTPUT / 4
+  const tail = text.length - (MAX_OUTPUT - head)
+  return `${text.slice(0, head)}\n[… ${tail - head} characters cut …]\n${text.slice(tail)}`
 }
 
 /** Credentials the server holds that a thread's commands must never see. */

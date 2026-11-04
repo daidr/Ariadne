@@ -32,6 +32,8 @@ import {
   usageOf,
 } from './compaction'
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
+import { repoTools } from './repo-tools'
+import { workspaceTools } from './workspace-tools'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -302,65 +304,99 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     }
     const specs = tools.map((tool) => tool.spec)
     const toolsJson = JSON.stringify(specs)
+    const reader = transcriptReader(app, conversationId)
+    // What can change the workspace's files, and so its instruction file: its own writing
+    // tools, and the external ones, which may do anything.
+    const changesFiles = new Set([
+      ...[...workspaceTools, ...repoTools].filter((tool) => !tool.readOnly).map((t) => t.spec.name),
+      ...external.map((tool) => tool.spec.name),
+    ])
+    let instructionsStale = true
+    // Steps in a row whose output hit the length limit.
+    let cuts = 0
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
     const recent: string[] = []
     for (;;) {
-      if (isThread && workspaces && hasWorkspace) {
+      if (instructionsStale && isThread && workspaces && hasWorkspace) {
         await syncInstructions(app, conversation, turnId, workspaces)
       }
-      // A long conversation gets its older history summarised before it outgrows the
-      // model's context. Between steps every call has its result, so any cut is whole.
-      if (!compactionFailed) {
-        const readAt = app.lastSeq()
-        const transcript = app.listTranscript(conversationId)
-        const estimate = estimateTokens([
-          { role: 'system', content: system() },
-          ...toChatMessages(transcript, titleOf, chat),
-        ])
-        const upTo =
-          Math.max(lastInput, estimate) >= threshold
-            ? compactionCut(transcript, threshold / 4)
-            : null
-        if (upTo !== null) {
-          const request = summaryRequest(
-            transcript,
-            upTo,
-            titleOf,
-            conversation.role,
-            readText,
-            chat.keepReasoning,
-          )
-          const summary = await summarise(model, withImageData(request, loadImage), signal)
-          if (signal.aborted) break
-          if (summary.ok) {
-            app.compactConversation(conversationId, turnId, {
-              summary: summary.text,
-              upTo,
-              sawSeq: readAt,
-              usage: summary.usage,
-              call: callOf(model, null),
-              timing: summary.timing,
-              reasoning: summary.reasoning,
-              state: state(),
-            })
-          } else {
-            compactionFailed = true
-            app.recordCompactionFailure(conversationId, turnId, summary.detail.slice(0, 500))
+      instructionsStale = false
+      // Everything the request is built from is read in one go, so the input is exactly
+      // the log up to `sawSeq` plus the pieces recorded with the step: the trace rebuilds
+      // it from those.
+      let sawSeq = app.lastSeq()
+      let transcript = reader.read()
+      let systemText = system()
+      let history = toChatMessages(transcript, titleOf, chat)
+      // A long conversation makes room before it outgrows the model's context. Between
+      // steps every call has its result, so any cut is whole.
+      const estimate = estimateTokens([{ role: 'system', content: systemText }, ...history])
+      const size = Math.max(lastInput, estimate)
+      if (size >= threshold) {
+        const upTo = compactionCut(transcript, threshold / 4)
+        let changed = false
+        let enough = false
+        // Old tool results go first: the model has acted on them, and they are most of
+        // what a working thread reads. Either way the request's beginning changes and the
+        // provider's cache starts over, so this happens only when it frees enough.
+        if (upTo !== null && upTo > clearedUpTo(transcript)) {
+          const cleared = toChatMessages(transcript, titleOf, { ...chat, clearUpTo: upTo })
+          const after = estimateTokens([{ role: 'system', content: systemText }, ...cleared])
+          // Not enough means a summary anyway, and it is better written from the results
+          // themselves than from their placeholders.
+          enough =
+            after < estimate * (1 - MIN_CLEARED_SHARE) &&
+            (size * after) / estimate < threshold * CLEARED_ENOUGH
+          if (enough) {
+            app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
+            changed = true
           }
         }
+        if (!enough && !compactionFailed) {
+          const readAt = app.lastSeq()
+          const read = reader.read()
+          const cut = compactionCut(read, threshold / 4)
+          if (cut !== null) {
+            const request = summaryRequest(
+              read,
+              cut,
+              titleOf,
+              conversation.role,
+              readText,
+              chat.keepReasoning,
+            )
+            const summary = await summarise(model, withImageData(request, loadImage), signal)
+            if (signal.aborted) break
+            if (summary.ok) {
+              app.compactConversation(conversationId, turnId, {
+                summary: summary.text,
+                upTo: cut,
+                sawSeq: readAt,
+                usage: summary.usage,
+                call: callOf(model, null),
+                timing: summary.timing,
+                reasoning: summary.reasoning,
+                state: state(),
+              })
+              changed = true
+            } else {
+              compactionFailed = true
+              app.recordCompactionFailure(conversationId, turnId, summary.detail.slice(0, 500))
+            }
+          }
+        }
+        if (changed) {
+          sawSeq = app.lastSeq()
+          transcript = reader.read()
+          systemText = system()
+          history = toChatMessages(transcript, titleOf, chat)
+        }
       }
-      // Everything below is read in one go, so the input is exactly the log up to `sawSeq`
-      // plus the pieces recorded with the step: the trace rebuilds it from those.
-      const sawSeq = app.lastSeq()
-      const input = { system: system(), tools: toolsJson }
-      const transcript = app.listTranscript(conversationId)
+      const input = { system: systemText, tools: toolsJson }
       const messages = withImageData(
-        [
-          { role: 'system' as const, content: input.system },
-          ...toChatMessages(transcript, titleOf, chat),
-        ],
+        [{ role: 'system' as const, content: input.system }, ...history],
         loadImage,
       )
       const answer = await requestStep(
@@ -376,7 +412,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         options.retryBaseMs ?? 1000,
       )
       if (signal.aborted || !answer) break
-      const { text, reasoning, toolCalls, usage, timing } = answer
+      const { text, reasoning, toolCalls, usage, timing, cut } = answer
       lastInput = usage?.input ?? 0
       app.recordStep(conversationId, turnId, {
         text,
@@ -391,9 +427,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           images,
         },
         timing,
+        ...(cut ? { cut: true } : {}),
       })
+      // A cut-off reply is not an answer: the model is told, and goes on in smaller pieces.
+      cuts = cut ? cuts + 1 : 0
+      if (cuts >= MAX_CUTS) throw new TurnError({ key: 'error.truncated', params: { count: cuts } })
 
       if (!toolCalls.length) {
+        if (cut) continue
         if (text.trim()) {
           const content = await withImages(ctx, text.trim())
           app.postMessage(conversation.projectId, {
@@ -408,14 +449,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // The same calls with the same results again: the model is not getting anywhere.
       // It is told once, with the last result of the step before the turn is stopped.
       const results: { content: string; isError: boolean }[] = []
-      for (const [i, call] of toolCalls.entries()) {
-        if (signal.aborted) break
-        const result = await runTool(byName.get(call.name), call, ctx)
+      const record = (index: number, result: Awaited<ReturnType<typeof runTool>>) => {
+        const call = toolCalls[index]!
         results.push({ content: result.content, isError: result.isError ?? false })
         const files = result.files ?? []
         let { content } = result
         let count = 0
-        if (i === toolCalls.length - 1) {
+        if (index === toolCalls.length - 1) {
           const step = fingerprint(toolCalls, results)
           recent.push(step)
           if (recent.length > REPEAT_WINDOW) recent.shift()
@@ -433,6 +473,25 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           throw new TurnError({ key: 'error.repeating', params: { count } })
         }
       }
+      const workspaceBefore = isThread
+        ? JSON.stringify(app.getThread(conversationId).workspace)
+        : ''
+      // Calls that only look run at the same time; the rest one by one, in order. Results
+      // are recorded in the model's order either way.
+      for (const group of callGroups(toolCalls, byName)) {
+        if (signal.aborted) break
+        const settled = await Promise.allSettled(
+          group.map((index) => runTool(byName.get(toolCalls[index]!.name), toolCalls[index]!, ctx)),
+        )
+        for (const [i, outcome] of settled.entries()) {
+          if (outcome.status === 'rejected') throw outcome.reason
+          record(group[i]!, outcome.value)
+        }
+      }
+      // A workspace opened (or opened again) just now has its file to read too.
+      instructionsStale =
+        toolCalls.some((call) => changesFiles.has(call.name)) ||
+        (isThread && JSON.stringify(app.getThread(conversationId).workspace) !== workspaceBefore)
       if (signal.aborted) break
     }
     app.finishTurn(conversationId, turnId, abortOutcome(signal))
@@ -524,6 +583,66 @@ function fingerprint(
   return hash.digest('hex')
 }
 
+/** Steps in a row whose output may hit the length limit before the turn stops. */
+export const MAX_CUTS = 3
+/** Clearing old tool results must free at least this share of the input to be worth it. */
+const MIN_CLEARED_SHARE = 0.15
+/**
+ * Below this share of the threshold after clearing, no summary is needed: the conversation
+ * grows a good while before the cache has to start over again.
+ */
+const CLEARED_ENOUGH = 0.7
+
+/** Up to where a conversation's long tool results were cleared; `-1` when none were. */
+function clearedUpTo(transcript: TranscriptEntry[]): number {
+  let upTo = -1
+  for (const entry of transcript) if (entry.kind === 'cleared') upTo = Math.max(upTo, entry.upTo)
+  return upTo
+}
+
+/**
+ * A step's calls by how they run: a call that only looks goes with the looking calls next
+ * to it, any other call alone. Indexes into `calls`, in order.
+ */
+export function callGroups(
+  calls: ToolCallRecord[],
+  byName: ReadonlyMap<string, Pick<Tool, 'readOnly'>>,
+): number[][] {
+  const groups: number[][] = []
+  let looking: number[] | null = null
+  calls.forEach((call, index) => {
+    if (byName.get(call.name)?.readOnly) {
+      if (!looking) groups.push((looking = []))
+      looking.push(index)
+    } else {
+      looking = null
+      groups.push([index])
+    }
+  })
+  return groups
+}
+
+/**
+ * The conversation's transcript, read whole once and then only what was added since, as
+ * long as no message it holds was edited meanwhile.
+ */
+function transcriptReader(app: Ariadne, conversationId: string) {
+  let entries: TranscriptEntry[] | null = null
+  let readAt = 0
+  return {
+    read(): TranscriptEntry[] {
+      const now = app.lastSeq()
+      if (!entries || app.messagesChangedSince(conversationId, readAt)) {
+        entries = app.listTranscript(conversationId)
+      } else if (now > readAt) {
+        entries = [...entries, ...app.listTranscript(conversationId, { after: readAt })]
+      }
+      readAt = now
+      return entries
+    },
+  }
+}
+
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */
 export const MAX_MODEL_RETRIES = 4
 
@@ -543,6 +662,8 @@ async function requestStep(
   toolCalls: ToolCallRecord[]
   usage: TokenUsage | null
   timing: CallTiming
+  /** The output hit the length limit; a call it was writing then is left out. */
+  cut: boolean
 } | null> {
   for (let attempt = 0; ; attempt++) {
     let text = ''
@@ -550,11 +671,17 @@ async function requestStep(
     const toolCalls: ToolCallRecord[] = []
     let usage: TokenUsage | null = null
     let failure: Extract<ModelStreamPart, { type: 'finish' }> | null = null
+    let cut = false
+    // What came last before the end: the part the limit cut short.
+    let last: ModelStreamPart['type'] | null = null
     const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
     for await (const part of model.provider.stream(model.settings as never, request)) {
       if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
         // Reasoning is handed on whole; it began when its first piece came.
         timing.firstOutputAt ??= (part.type === 'reasoning' && part.startedAt) || Date.now()
+      }
+      if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
+        last = part.type
       }
       if (part.type === 'text') text += part.text
       else if (part.type === 'reasoning') {
@@ -567,12 +694,13 @@ async function requestStep(
         failure = part
         break
       } else if (part.type === 'finish' && part.reason === 'length') {
-        // A cut-off reply is not an answer, and cut-off tool arguments are not a call.
-        throw new TurnError({ key: 'error.truncated' })
+        // Cut-off tool arguments are not a call: the one being written goes.
+        cut = true
+        if (last === 'tool-call') toolCalls.pop()
       }
     }
     if (request.signal.aborted) return null
-    if (!failure) return { text, reasoning, toolCalls, usage, timing }
+    if (!failure) return { text, reasoning, toolCalls, usage, timing, cut }
     const detail = (failure.error ?? '').slice(0, 500)
     if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
       // A service that cannot take images refuses every request that carries one.

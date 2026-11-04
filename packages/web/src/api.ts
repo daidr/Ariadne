@@ -233,8 +233,11 @@ export interface ModelEntry {
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   models: ModelEntry[]
-  /** `coordinator.model: null` uses the threads' model; `effort: null` asks nothing. */
-  roles: { thread: RoleInput; coordinator: RoleInput }
+  /**
+   * `coordinator.model: null` uses the threads' model, `triage.model: null` the
+   * coordinator's; `effort: null` asks nothing.
+   */
+  roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput }
 }
 
 export type Effort = 'low' | 'medium' | 'high'
@@ -292,18 +295,30 @@ export const api = {
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
-  /** The newest messages, the page before `before`, or everything from `from` on. */
-  getConversation: (id: string, cursor: { before?: string; from?: string } = {}) =>
+  /**
+   * The newest messages, the page before `before`, or everything from `from` on. With
+   * `since` (a `lastSeq` given before), only messages and notices changed after it.
+   */
+  getConversation: (id: string, cursor: { before?: string; from?: string; since?: number } = {}) =>
     request<{
       conversation: ConversationView
       messages: MessageView[]
       notices: NoticeView[]
-      /** Earlier messages exist before the first one here. */
+      /** Earlier messages exist before the first one here; not said with `since`. */
       more: boolean
+      /** The newest event this answer holds; changes after it come with `since`. */
+      lastSeq: number
       todo: TodoView
       /** The model it uses now, with how much its context holds. */
       model: { id: string; contextTokens: number } | null
-    }>('GET', `/api/conversations/${id}${queryString(cursor)}`),
+    }>(
+      'GET',
+      `/api/conversations/${id}${queryString({
+        before: cursor.before,
+        from: cursor.from,
+        since: cursor.since === undefined ? undefined : String(cursor.since),
+      })}`,
+    ),
   getTrace: (id: string, before?: number) =>
     request<{ turns: TraceTurn[]; more: boolean }>(
       'GET',

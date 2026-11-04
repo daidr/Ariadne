@@ -74,6 +74,7 @@ const updateTodo: Tool = {
 }
 
 const listMessages: Tool = {
+  readOnly: true,
   spec: {
     name: 'list_messages',
     description:
@@ -414,6 +415,7 @@ const resumeThread: Tool = {
 }
 
 const listThreads: Tool = {
+  readOnly: true,
   spec: {
     name: 'list_threads',
     description: "List the project's threads with what each waits on and its last report.",
@@ -442,6 +444,7 @@ const listThreads: Tool = {
 }
 
 const readThread: Tool = {
+  readOnly: true,
   spec: {
     name: 'read_thread',
     description:

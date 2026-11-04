@@ -92,10 +92,13 @@ const scheduler = new Scheduler({
   app,
   workspaces,
   resolveModel: (conversation) =>
-    settings.resolveModel(
-      conversation.role,
-      conversation.role === 'thread' ? app.getThread(conversation.id).model : null,
-    ),
+    conversation.role === 'thread'
+      ? settings.resolveModel('thread', app.getThread(conversation.id).model)
+      : // What the user wrote in a thread, and nothing else waiting: a quick look will do.
+        settings.resolveCoordinator({
+          triage: app.pendingIsTriage(conversation.id),
+          contextTokens: app.getConversation(conversation.id).contextTokens,
+        }),
   models: () => settings.modelChoices(),
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,

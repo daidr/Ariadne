@@ -1,22 +1,13 @@
 <script setup lang="ts">
 import type { ArtifactKind, ArtifactSummary } from '@ariadne/core'
-import {
-  DouAvatar,
-  DouButton,
-  DouCard,
-  DouDropdown,
-  DouEmpty,
-  DouInput,
-  DouSegmentedControl,
-  DouText,
-} from 'dou-ui'
+import { DouButton, DouDropdown, DouEmpty, DouInput, DouSegmentedControl, DouText } from 'dou-ui'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
-import { locale, t } from '../i18n'
+import { t } from '../i18n'
 import { openMain, state } from '../store'
 import { createItems } from './create'
-import ArtifactThumb from './ArtifactThumb.vue'
-import { ARTIFACT_KINDS, kindIcon } from './kinds'
+import ArtifactCard from './ArtifactCard.vue'
+import { ARTIFACT_KINDS } from './kinds'
 
 /** Every artifact of the project as cards: a picture of what it holds, its name and when. */
 const filter = ref<ArtifactKind | 'all'>('all')
@@ -58,19 +49,6 @@ const shown = computed(() => {
     (a) => (filter.value === 'all' || a.kind === filter.value) && matches(a, words),
   )
 })
-
-/** When it was last changed: the time today, the day this year, the date before. */
-function editedAt(at: number): string {
-  const date = new Date(at)
-  const now = new Date()
-  const options: Intl.DateTimeFormatOptions =
-    date.toDateString() === now.toDateString()
-      ? { hour: '2-digit', minute: '2-digit' }
-      : date.getFullYear() === now.getFullYear()
-        ? { month: 'long', day: 'numeric' }
-        : { dateStyle: 'medium' }
-  return t('artifacts.editedAt', { time: date.toLocaleString(locale.value, options) })
-}
 </script>
 
 <template>
@@ -102,33 +80,12 @@ function editedAt(at: number): string {
       </DouInput>
     </div>
     <div v-if="shown.length" class="overview-grid">
-      <DouCard
+      <ArtifactCard
         v-for="artifact in shown"
         :key="artifact.id"
-        as="button"
-        interactive
-        padding="none"
-        class="overview-card"
+        :artifact="artifact"
         @click="openMain({ kind: 'artifact', id: artifact.id })"
-      >
-        <ArtifactThumb :preview="artifact.preview" />
-        <div class="card-info">
-          <DouAvatar
-            shape="square"
-            :size="36"
-            class="card-icon"
-            :class="`card-icon-${artifact.kind}`"
-          >
-            <component :is="kindIcon[artifact.kind]" />
-          </DouAvatar>
-          <span class="card-text">
-            <DouText weight="medium" truncate>{{ artifact.title }}</DouText>
-            <DouText variant="tertiary" size="sm" truncate>
-              {{ editedAt(artifact.updatedAt) }}
-            </DouText>
-          </span>
-        </div>
-      </DouCard>
+      />
     </div>
     <DouEmpty
       v-else
@@ -179,51 +136,6 @@ function editedAt(at: number): string {
   gap: 16px;
   padding: 12px 16px 16px;
   overflow-y: auto;
-}
-
-.overview-card {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  /* DouCard as a button keeps the browser's button padding, font and centring. */
-  padding: 0;
-  text-align: left;
-  font: inherit;
-}
-
-.card-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  padding: 12px;
-  border-top: 1px solid var(--dou-color-border-subtle);
-}
-
-.card-icon {
-  flex: none;
-  --dou-avatar-bg: var(--dou-color-primary-soft);
-  --dou-avatar-fg: var(--dou-color-primary-text);
-  --dou-avatar-font-size: 18px;
-}
-
-.card-icon-whiteboard {
-  --dou-avatar-bg: var(--dou-color-warning-soft);
-  --dou-avatar-fg: var(--dou-color-warning-text);
-}
-
-.card-icon-dashboard {
-  --dou-avatar-bg: var(--dou-color-success-soft);
-  --dou-avatar-fg: var(--dou-color-success-text);
-}
-
-.card-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
 
 .overview-empty {

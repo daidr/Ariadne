@@ -149,6 +149,7 @@ export function confirmation(locale: Locale, reason: string): PlanConfirmation {
 }
 
 export const readPlan: Tool = {
+  readOnly: true,
   spec: {
     name: 'read_plan',
     description:
