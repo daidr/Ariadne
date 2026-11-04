@@ -398,7 +398,7 @@ async function save() {
         </div>
       </DouTabPanel>
       <DouTabPanel value="input" :label="t('settings.tab.input')">
-        <InputSettings v-if="open && tab === 'input'" ref="input" />
+        <InputSettings v-if="open" ref="input" />
       </DouTabPanel>
       <DouTabPanel value="notifications" :label="t('settings.tab.notifications')">
         <div class="settings">

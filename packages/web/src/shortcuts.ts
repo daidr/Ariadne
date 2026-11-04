@@ -69,23 +69,43 @@ function typingElsewhere(event: KeyboardEvent) {
   return field && !target.closest('[data-message-input]')
 }
 
+/**
+ * Whether a dialog, drawer or the search is open, or focus is in a menu or popover: keys
+ * there belong to it, and switching or focusing what is behind it would pull the user out.
+ */
+function layerOpen() {
+  const modal = [...document.querySelectorAll('[aria-modal="true"]')].some(
+    (el) => el.getClientRects().length > 0,
+  )
+  return modal || !!document.activeElement?.closest('[role="dialog"], [role="menu"]')
+}
+
 /** The app's keys: bound once, for as long as the calling component lives. */
 export function useShortcuts() {
   // `?` is listed first: Shift+/ is the same physical key and would also match `/`.
-  useHotkey(['?', '/'], (_, key) => {
-    if (key === '?') sheetOpen.value = true
-    else activePanel()?.focus()
-  })
+  useHotkey(
+    ['?', '/'],
+    (event, key) => {
+      if (layerOpen()) return
+      event.preventDefault()
+      if (key === '?') sheetOpen.value = true
+      else activePanel()?.focus()
+    },
+    { preventDefault: false },
+  )
 
   useHotkey(
     ['mod+up', 'mod+down'],
-    (_, key) => {
+    (event, key) => {
+      // In any other field the keys move the caret, as usual.
+      if (typingElsewhere(event) || layerOpen()) return
+      event.preventDefault()
       const next = steppedThread(threadOrder(), state.threadId, key === 'mod+up' ? -1 : 1)
       if (!next) return
       lastPanel.value = 'thread'
       void openThread(next)
     },
-    { allowInInput: true },
+    { allowInInput: true, preventDefault: false },
   )
 
   // Heard on the window, after the document: an open menu, popover or dialog takes Escape
