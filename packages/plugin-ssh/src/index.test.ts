@@ -158,20 +158,27 @@ describe('remote directory', () => {
 
     // A background process ends with the command, so the call returns at once.
     const started = Date.now()
-    const bg = await ws.exec('(sleep 30; touch late) & echo started')
+    // A duration no other process uses, so only this test's sleeps are looked for.
+    const nap = `sleep 30.${process.pid}`
+    const bg = await ws.exec(`(${nap}; touch late) & echo started`)
     expect(bg.stdout.trim()).toBe('started')
     expect(Date.now() - started).toBeLessThan(5000)
 
     // A timeout ends the whole group.
-    const slow = await ws.exec('sleep 30 & sleep 30; touch done', { timeoutMs: 500 })
+    const slow = await ws.exec(`${nap} & ${nap}; touch done`, { timeoutMs: 500 })
     expect(slow.exitCode).not.toBe(0)
     const controller = new AbortController()
-    const stopped = ws.exec('sleep 30; touch stopped', { signal: controller.signal })
+    const stopped = ws.exec(`${nap}; touch stopped`, { signal: controller.signal })
     setTimeout(() => controller.abort(), 300)
     expect((await stopped).exitCode).not.toBe(0)
-    await new Promise((done) => setTimeout(done, 300))
-    const left = await run(['pgrep', '-f', 'sleep 30'], { cwd: base })
-    expect(left.stdout.trim()).toBe('')
+    // Killing takes a moment on a busy machine: wait up to 5 seconds for them to go.
+    let left = ''
+    for (let i = 0; i < 50; i++) {
+      left = (await run(['pgrep', '-f', nap], { cwd: base })).stdout.trim()
+      if (!left) break
+      await new Promise((done) => setTimeout(done, 100))
+    }
+    expect(left).toBe('')
     expect(existsSync(join(dir, 'done'))).toBe(false)
     expect(existsSync(join(dir, 'stopped'))).toBe(false)
   }, 20_000)
