@@ -186,7 +186,7 @@ export const en: Record<MessageKey, string> = {
   'sandbox.remote':
     "Thread commands run on {host} as the user SSH logs in as, outside this machine's sandbox; the connection forwards no agent, ports or X11, so commands cannot reach back to this machine.",
   'sandbox.windows.body':
-    "There is no sandbox on Windows yet, so commands threads run can read Ariadne's token and settings and call Ariadne as you. Only give this project to models and repositories you trust.",
+    "There is no sandbox on Windows yet, so thread commands can read Ariadne's token and settings.",
   'sandbox.weaker':
     "macOS's sandbox only restricts files: thread commands cannot read Ariadne's token and settings, but they can see other processes, so isolation is weaker than on Linux.",
   'start.title': 'Getting started',
