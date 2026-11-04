@@ -206,6 +206,19 @@ export interface Concurrency {
   reserved: number
 }
 
+/** A request the user sends often, offered after `/` in the message input. */
+export interface Snippet {
+  id: string
+  name: string
+  text: string
+}
+
+/** Which key sends a message, and the snippets kept for reuse. */
+export interface InputSettings {
+  submitOn: 'enter' | 'mod-enter'
+  snippets: Snippet[]
+}
+
 /** One model on one of the providers; `note` says what it is for, for the coordinator. */
 export interface ModelEntry {
   id: string
@@ -321,6 +334,9 @@ export const api = {
   getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
   saveConcurrency: (input: Concurrency) =>
     request<Concurrency>('PUT', '/api/settings/concurrency', input),
+  getInputSettings: () => request<InputSettings>('GET', '/api/settings/input'),
+  saveInputSettings: (input: InputSettings) =>
+    request<InputSettings>('PUT', '/api/settings/input', input),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   addPlugin: (path: string) =>

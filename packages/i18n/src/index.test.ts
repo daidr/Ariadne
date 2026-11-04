@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { createTranslator, format, locales, negotiateLocale } from './index'
+import { createTranslator, format, locales, negotiateLocale, terminalLocale } from './index'
 
 describe('i18n', () => {
   test('every locale covers every key of the source language', () => {
@@ -17,6 +17,14 @@ describe('i18n', () => {
   test('translates with the chosen locale', () => {
     expect(createTranslator('en')('error.notFound', { what: 'Project' })).toBe('Project not found')
     expect(createTranslator()('attention.title')).toBe('需要我')
+  })
+
+  test("reads a terminal's language", () => {
+    expect(terminalLocale({ LANG: 'zh_CN.UTF-8' })).toBe('zh-CN')
+    expect(terminalLocale({ LC_ALL: 'en_US.UTF-8', LANG: 'zh_CN.UTF-8' })).toBe('en')
+    expect(terminalLocale({ LANG: 'C.UTF-8' }, 'en')).toBe('en')
+    expect(terminalLocale({ LANG: 'fr_FR.UTF-8' })).toBe('zh-CN')
+    expect(terminalLocale({})).toBe('zh-CN')
   })
 
   test('negotiates locales', () => {

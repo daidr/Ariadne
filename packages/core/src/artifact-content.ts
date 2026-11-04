@@ -1,6 +1,6 @@
 import { DomainError } from './errors'
 import type { ArtifactKind } from './events'
-import type { ArtifactPreview } from './views'
+import type { ArtifactPreview, PreviewBox, PreviewTile } from './views'
 
 /**
  * What an artifact's content holds, by kind. A document is Markdown; the other kinds are
@@ -192,6 +192,88 @@ function checkDashboard(value: unknown): void {
 }
 
 const EXCERPT = 160
+/** About what a card's preview shows of a document. */
+const LEAD = 600
+/** How many nodes and edges, or widgets, a preview keeps. */
+const PREVIEW_ITEMS = 60
+const PREVIEW_TEXT = 40
+
+/** Sizes `whiteboardKit()` gives a node that has none of its own. */
+const NODE_SIZE: Record<string, [number, number]> = {
+  shape: [160, 100],
+  sticky: [160, 160],
+  text: [200, 40],
+  image: [240, 180],
+}
+
+const short = (text: string) =>
+  text.length > PREVIEW_TEXT ? `${text.slice(0, PREVIEW_TEXT)}…` : text
+
+/** The opening of a document, cut at a line end so no mark is left half open. */
+function leadOf(content: string): string {
+  if (content.length <= LEAD) return content
+  const cut = content.lastIndexOf('\n', LEAD)
+  const lead = content.slice(0, cut > LEAD / 2 ? cut : LEAD)
+  // An unclosed code fence would swallow the rest of the preview as code.
+  return (lead.match(/^\s*```/gm)?.length ?? 0) % 2 ? `${lead}\n\`\`\`` : lead
+}
+
+function boxesOf(
+  board: WhiteboardContent,
+): Pick<Extract<ArtifactPreview, { kind: 'whiteboard' }>, 'boxes' | 'lines'> {
+  const boxes: PreviewBox[] = []
+  const centres = new Map<string, [number, number]>()
+  for (const node of board.nodes.slice(0, PREVIEW_ITEMS)) {
+    const [w, h] = NODE_SIZE[node.type] ?? [160, 60]
+    const text = typeof node.data?.text === 'string' && node.data.text.trim()
+    const box: PreviewBox = {
+      type: node.type,
+      x: node.x,
+      y: node.y,
+      w: isNumber(node.width) && node.width > 0 ? node.width : w,
+      h: isNumber(node.height) && node.height > 0 ? node.height : h,
+      text: text ? short(text) : null,
+      shape: typeof node.data?.shape === 'string' ? node.data.shape : null,
+    }
+    boxes.push(box)
+    centres.set(node.id, [box.x + box.w / 2, box.y + box.h / 2])
+  }
+  const lines: [number, number, number, number][] = []
+  for (const edge of board.edges) {
+    const from = centres.get(edge.source.node)
+    const to = centres.get(edge.target.node)
+    if (from && to) lines.push([...from, ...to])
+    if (lines.length >= PREVIEW_ITEMS) break
+  }
+  return { boxes, lines }
+}
+
+/** The widgets on the 12-column grid; ones without a place stack below, two to a row. */
+function tilesOf(value: DashboardContent): PreviewTile[] {
+  const widgets = value.dashboard.widgets.slice(0, PREVIEW_ITEMS)
+  const tiles: PreviewTile[] = []
+  let bottom = 0
+  for (const widget of widgets) {
+    const place = widget.place?.lg
+    if (!place) continue
+    tiles.push({ type: widget.type, title: widget.title ?? null, ...place })
+    bottom = Math.max(bottom, place.y + place.h)
+  }
+  let free = 0
+  for (const widget of widgets) {
+    if (widget.place?.lg) continue
+    tiles.push({
+      type: widget.type,
+      title: widget.title ?? null,
+      x: (free % 2) * 6,
+      y: bottom + Math.floor(free / 2) * 3,
+      w: 6,
+      h: 3,
+    })
+    free++
+  }
+  return tiles
+}
 
 /** A short look at stored content, for lists; content is assumed checked. */
 export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview {
@@ -206,6 +288,7 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
           .map((n) => n.data?.text)
           .filter((t): t is string => typeof t === 'string' && !!t.trim())
           .slice(0, 6),
+        ...boxesOf(board),
       }
     }
     if (kind === 'dashboard') {
@@ -218,13 +301,14 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
           .map((w) => w.title)
           .filter((t): t is string => !!t)
           .slice(0, 6),
+        tiles: tilesOf(value),
       }
     }
   } catch {
     // Older or damaged content: show it as empty rather than fail the list.
     return kind === 'whiteboard'
-      ? { kind, items: 0, connectors: 0, texts: [] }
-      : { kind: 'dashboard', widgets: 0, takenAt: null, titles: [] }
+      ? { kind, items: 0, connectors: 0, texts: [], boxes: [], lines: [] }
+      : { kind: 'dashboard', widgets: 0, takenAt: null, titles: [], tiles: [] }
   }
   // Markdown without its marks, on one line.
   const text = content
@@ -235,7 +319,11 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
     .replace(/[#>*_`~|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return { kind: 'document', excerpt: text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text }
+  return {
+    kind: 'document',
+    excerpt: text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text,
+    lead: leadOf(content),
+  }
 }
 
 /** Refuse content the viewer for its kind could not show. */

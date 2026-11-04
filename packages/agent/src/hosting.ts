@@ -100,19 +100,26 @@ class Sync {
     return next
   }
 
-  /** Fetch, then give the checkout the remote's branches as `origin/*`. */
+  /**
+   * Fetch, then give the checkout the remote's branches as `origin/*`; the `origin/*` of
+   * branches deleted on the remote go, as a fetch with `--prune` there would remove them.
+   */
   down(): Promise<void> {
     return this.serial(async () => {
       const clone = this.repo.objects!
       await this.repo.fetch()
-      const refs = await clone.refs([ORIGIN])
-      const tips = [...new Set(Object.values(refs))]
+      const refs: Record<string, string | null> = await clone.refs([ORIGIN])
+      const tips = [...new Set(Object.values(refs) as string[])]
       const present = new Set(await this.checkout.has(tips))
       const missing = Object.keys(refs).filter((ref) => !present.has(refs[ref]!))
+      const theirs = await this.checkout.refs([ORIGIN, 'refs/heads/'])
+      for (const ref of Object.keys(theirs)) {
+        // `origin/HEAD` points at another ref; deleting it would delete that one.
+        if (ref.startsWith(ORIGIN) && ref !== `${ORIGIN}HEAD` && !(ref in refs)) refs[ref] = null
+      }
       let bundle: Uint8Array | null = null
       if (missing.length) {
-        const theirs = Object.values(await this.checkout.refs([ORIGIN, 'refs/heads/']))
-        const shared = await clone.has([...new Set(theirs)])
+        const shared = await clone.has([...new Set(Object.values(theirs))])
         bundle = await clone.bundle(missing, shared)
       }
       await this.checkout.receive(bundle, refs)

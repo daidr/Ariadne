@@ -82,11 +82,15 @@ const tones: Record<State, TagTone> = {
           <DouText variant="secondary" size="sm" class="pr-card-author">{{
             preview.author
           }}</DouText>
-          <DouText size="sm" class="pr-card-diff">
+          <DouText
+            v-if="preview.additions !== null && preview.deletions !== null"
+            size="sm"
+            class="pr-card-diff"
+          >
             <span class="pr-card-added">+{{ preview.additions }}</span>
             <span class="pr-card-deleted">−{{ preview.deletions }}</span>
           </DouText>
-          <DouText variant="secondary" size="sm">
+          <DouText v-if="preview.changedFiles !== null" variant="secondary" size="sm">
             {{ t('link.pr.files', { count: preview.changedFiles }) }}
           </DouText>
         </div>

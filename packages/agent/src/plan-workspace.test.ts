@@ -624,6 +624,22 @@ describe('repository instructions', () => {
     expect(inner).not.toMatch(/repository[\W_\p{Cf}]*instructions\b(?<! instructions)/iu)
     expect(inner.match(/repository instructions/gi)).toHaveLength(variants.length)
   })
+
+  test('a thread on another machine is told git push goes nowhere', () => {
+    const context = {
+      projectName: 'P',
+      title: 't',
+      locale: 'zh-CN' as const,
+      node: null,
+      upstream: [],
+      workspace: { label: 'box:/w', branch: 'ariadne/x', base: 'main' },
+    }
+    expect(threadPrompt({ ...context, remote: true })).toContain(
+      'git push from your workspace goes nowhere',
+    )
+    expect(threadPrompt(context)).not.toContain('goes nowhere')
+    expect(threadPrompt(context)).toContain('(pushing, deploying, sending) needs the user')
+  })
 })
 
 describe('triage', () => {

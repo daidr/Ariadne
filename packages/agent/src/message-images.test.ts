@@ -54,6 +54,7 @@ describe('message images', () => {
     const content = [
       '`![a](code.png)`',
       '```\n![b](block.png)\n```',
+      '\n    ![i](indented.png)\n',
       '![c](https://example.com/c.png)',
       '![d](file:fil_old)',
       '[e](notes.md)',

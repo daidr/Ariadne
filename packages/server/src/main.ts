@@ -1,4 +1,5 @@
 import { Ariadne } from '@ariadne/core'
+import { createTranslator } from '@ariadne/i18n'
 import {
   browserProfiles,
   createSandbox,
@@ -30,6 +31,8 @@ const configPath = join(config.home, 'config.json')
 
 // Thread commands must not see the token or the settings, nor a browser that holds the token.
 const userConfig = loadUserConfig(configPath)
+// What the server prints is in the language the user chose for Ariadne.
+const t = createTranslator(userConfig.locale)
 // The plugin paths as the settings hold them now, once the settings are loaded.
 let pluginPaths = () => userConfig.plugins
 const sandboxSettings = userConfig.sandbox
@@ -48,11 +51,13 @@ const sandbox = createSandbox({
 })
 if (!sandbox.kind) {
   console.warn(
-    sandboxSettings.mode === 'off'
-      ? '工作区沙箱已关闭：讨论串的命令能读到 Ariadne 的令牌和设置'
-      : process.platform === 'win32'
-        ? 'Windows 上暂时没有工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置'
-        : '这台机器上没有可用的工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
+    t(
+      sandboxSettings.mode === 'off'
+        ? 'cli.server.sandboxOff'
+        : process.platform === 'win32'
+          ? 'cli.server.sandboxWindows'
+          : 'cli.server.noSandbox',
+    ),
   )
 }
 
@@ -67,7 +72,9 @@ await host.load(daemon)
 const settings = new SettingsStore(configPath, host)
 pluginPaths = () => settings.current.plugins
 for (const path of settings.current.plugins) {
-  await host.loadFromPath(path).catch((error) => console.error(`插件加载失败：${path}`, error))
+  await host
+    .loadFromPath(path)
+    .catch((error) => console.error(t('cli.server.pluginFailed', { path }), error))
 }
 
 // External tool servers run like thread commands: in the sandbox, without the server's
@@ -120,7 +127,11 @@ const server = Bun.serve({
   }),
 })
 
-console.info(`Ariadne 已启动：http://${server.hostname}:${server.port}/#token=${config.token}`)
+console.info(
+  t('cli.server.started', {
+    url: `http://${server.hostname}:${server.port}/#token=${config.token}`,
+  }),
+)
 
 async function shutdown() {
   server.stop()

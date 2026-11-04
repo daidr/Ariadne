@@ -28,6 +28,7 @@ import {
 import { notifications, setNotifications } from '../notify'
 import { applyModelSettings } from '../store'
 import { lt, t, tm } from '../i18n'
+import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
 import PluginSettings from './PluginSettings.vue'
 import WorktreeSettings from './WorktreeSettings.vue'
@@ -126,10 +127,12 @@ function load(settings: ModelSettings) {
   triageEffort.value = settings.roles.triage.effort ?? ''
 }
 
-const tab = ref<'models' | 'notifications' | 'plugins' | 'mcp' | 'worktrees'>('models')
+export type SettingsTab = 'models' | 'input' | 'notifications' | 'plugins' | 'mcp' | 'worktrees'
+const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
-// The footer saves the tab in view; only the models and the MCP servers wait for a save.
-const saves = computed(() => tab.value === 'models' || tab.value === 'mcp')
+const input = ref<InstanceType<typeof InputSettings> | null>(null)
+// The footer saves the tab in view; the models, the input and the MCP servers wait for it.
+const saves = computed(() => ['models', 'input', 'mcp'].includes(tab.value))
 
 /** Reload the protocols only: a plugin added or removed changes them, not the draft. */
 async function reloadKinds() {
@@ -199,6 +202,15 @@ function clearSecret(provider: DraftProvider, key: string) {
  * tools show up to be marked.
  */
 async function saveTab() {
+  if (tab.value === 'input') {
+    saving.value = true
+    try {
+      if (await input.value?.save()) open.value = false
+    } finally {
+      saving.value = false
+    }
+    return
+  }
   if (tab.value !== 'mcp') return save()
   saving.value = true
   try {
@@ -411,6 +423,9 @@ async function save() {
           </DouForm>
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
+      </DouTabPanel>
+      <DouTabPanel value="input" :label="t('settings.tab.input')">
+        <InputSettings v-if="open" ref="input" />
       </DouTabPanel>
       <DouTabPanel value="notifications" :label="t('settings.tab.notifications')">
         <div class="settings">

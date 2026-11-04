@@ -104,6 +104,15 @@ export class WorkspaceManager {
     return this.provides(projectId, 'repo')
   }
 
+  /**
+   * Whether the project's workspaces are on another machine; a git checkout there pushes
+   * nowhere from threads' commands.
+   */
+  isRemote(projectId: string): boolean {
+    const source = this.app.getProject(projectId).source
+    return !!source && !!this.host.contexts.get(source.kind)?.remote
+  }
+
   /** Whether the project's source has issues to read. */
   hasTracker(projectId: string): boolean {
     return this.provides(projectId, 'tracker')

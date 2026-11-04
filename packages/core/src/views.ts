@@ -454,10 +454,51 @@ export interface ArtifactSummary {
   preview: ArtifactPreview
 }
 
+/**
+ * A short look at an artifact for lists and cards, kept with each version so a list never
+ * reads the whole content: a document's opening Markdown, a whiteboard's boxes and lines, a
+ * dashboard's tiles.
+ */
 export type ArtifactPreview =
-  | { kind: 'document'; excerpt: string }
-  | { kind: 'whiteboard'; items: number; connectors: number; texts: string[] }
-  | { kind: 'dashboard'; widgets: number; takenAt: number | null; titles: string[] }
+  | { kind: 'document'; excerpt: string; lead: string }
+  | {
+      kind: 'whiteboard'
+      items: number
+      connectors: number
+      texts: string[]
+      /** The first nodes as boxes, in board coordinates. */
+      boxes: PreviewBox[]
+      /** The edges between those boxes, centre to centre: `[x1, y1, x2, y2]`. */
+      lines: [number, number, number, number][]
+    }
+  | {
+      kind: 'dashboard'
+      widgets: number
+      takenAt: number | null
+      titles: string[]
+      /** The first widgets on the widest layout's grid, 12 columns wide. */
+      tiles: PreviewTile[]
+    }
+
+export interface PreviewBox {
+  type: string
+  x: number
+  y: number
+  w: number
+  h: number
+  text: string | null
+  /** A shape node's outline, e.g. `rect` or `ellipse`. */
+  shape: string | null
+}
+
+export interface PreviewTile {
+  type: string
+  x: number
+  y: number
+  w: number
+  h: number
+  title: string | null
+}
 
 export interface ArtifactView extends ArtifactSummary {
   content: string
