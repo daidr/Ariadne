@@ -7,7 +7,6 @@ import {
   DouEmpty,
   DouInput,
   DouSegmentedControl,
-  DouTag,
   DouText,
 } from 'dou-ui'
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
@@ -15,10 +14,10 @@ import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
 import { openMain, state } from '../store'
 import { createItems } from './create'
-import { authorName } from './author'
+import ArtifactThumb from './ArtifactThumb.vue'
 import { ARTIFACT_KINDS, kindIcon } from './kinds'
 
-/** Every artifact of the project, by kind, with a glance at what each holds. */
+/** Every artifact of the project as cards: a picture of what it holds, its name and when. */
 const filter = ref<ArtifactKind | 'all'>('all')
 const query = ref('')
 
@@ -59,28 +58,18 @@ const shown = computed(() => {
   )
 })
 
-function glance(artifact: ArtifactSummary): string {
-  const preview = artifact.preview
-  if (preview.kind === 'document') return preview.excerpt || t('artifacts.preview.emptyDocument')
-  if (preview.kind === 'whiteboard') {
-    const sizes = t('artifacts.preview.whiteboard', {
-      items: preview.items,
-      connectors: preview.connectors,
-    })
-    return preview.texts.length ? `${sizes} · ${preview.texts.join(' · ')}` : sizes
-  }
-  const sizes = t('artifacts.preview.dashboard', { widgets: preview.widgets })
-  return preview.titles.length ? `${sizes} · ${preview.titles.join(' · ')}` : sizes
+/** When it was last changed: the time today, the day this year, the date before. */
+function editedAt(at: number): string {
+  const date = new Date(at)
+  const now = new Date()
+  const options: Intl.DateTimeFormatOptions =
+    date.toDateString() === now.toDateString()
+      ? { hour: '2-digit', minute: '2-digit' }
+      : date.getFullYear() === now.getFullYear()
+        ? { month: 'long', day: 'numeric' }
+        : { dateStyle: 'medium' }
+  return t('artifacts.editedAt', { time: date.toLocaleString(locale.value, options) })
 }
-
-function takenAt(artifact: ArtifactSummary): string | null {
-  const preview = artifact.preview
-  if (preview.kind !== 'dashboard' || !preview.takenAt) return null
-  return t('artifact.dashboard.takenAt', { time: time(preview.takenAt) })
-}
-
-const time = (at: number) =>
-  new Date(at).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 </script>
 
 <template>
@@ -117,32 +106,21 @@ const time = (at: number) =>
         :key="artifact.id"
         as="button"
         interactive
-        padding="sm"
+        padding="none"
         class="overview-card"
         @click="openMain({ kind: 'artifact', id: artifact.id })"
       >
-        <div class="card-head">
-          <component :is="kindIcon[artifact.kind]" class="card-icon" />
-          <DouText weight="medium" truncate class="card-title">{{ artifact.title }}</DouText>
-          <DouTag size="sm" tone="neutral">{{ t(`artifact.kind.${artifact.kind}`) }}</DouTag>
-        </div>
-        <DouText variant="secondary" size="sm" class="card-glance">{{ glance(artifact) }}</DouText>
-        <div class="card-foot">
-          <DouText variant="tertiary" size="sm" truncate>
-            {{
-              t('artifact.updated', {
-                who: authorName(artifact.updatedBy),
-                time: time(artifact.updatedAt),
-              })
-            }}
-            · {{ t('artifact.version', { version: artifact.version }) }}
-          </DouText>
-          <DouText v-if="takenAt(artifact)" variant="tertiary" size="sm" truncate>
-            {{ takenAt(artifact) }}
-          </DouText>
-          <DouText v-if="nodeTitle(artifact.nodeId)" variant="tertiary" size="sm" truncate>
-            {{ t('artifacts.node', { node: nodeTitle(artifact.nodeId) ?? '' }) }}
-          </DouText>
+        <ArtifactThumb :preview="artifact.preview" />
+        <div class="card-info">
+          <span class="card-icon" :class="`card-icon-${artifact.kind}`">
+            <component :is="kindIcon[artifact.kind]" />
+          </span>
+          <span class="card-text">
+            <DouText weight="medium" truncate>{{ artifact.title }}</DouText>
+            <DouText variant="tertiary" size="sm" truncate>
+              {{ editedAt(artifact.updatedAt) }}
+            </DouText>
+          </span>
         </div>
       </DouCard>
     </div>
@@ -191,8 +169,8 @@ const time = (at: number) =>
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
   padding: 12px 16px 16px;
   overflow-y: auto;
 }
@@ -200,40 +178,49 @@ const time = (at: number) =>
 .overview-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
+  overflow: hidden;
+  /* DouCard as a button keeps the browser's button padding, font and centring. */
+  padding: 0;
   text-align: left;
   font: inherit;
 }
 
-.card-head {
+.card-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
+  padding: 12px;
+  border-top: 1px solid var(--dou-color-border-subtle);
 }
 
 .card-icon {
+  display: inline-flex;
   flex: none;
-  color: var(--dou-color-text-tertiary);
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--dou-color-primary-soft);
+  color: var(--dou-color-primary-text);
+  font-size: 18px;
 }
 
-.card-title {
-  flex: 1;
-  min-width: 0;
+.card-icon-whiteboard {
+  background: var(--dou-color-warning-soft);
+  color: var(--dou-color-warning-text);
 }
 
-.card-glance {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  min-height: 3.6em;
-  overflow-wrap: anywhere;
+.card-icon-dashboard {
+  background: var(--dou-color-success-soft);
+  color: var(--dou-color-success-text);
 }
 
-.card-foot {
+.card-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;

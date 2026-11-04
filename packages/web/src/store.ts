@@ -522,8 +522,15 @@ export async function revertPlan(revisionId: string, reason: string) {
   }
 }
 
-export async function answerAttention(id: string, answer: BlockAnswer) {
-  await api.answerAttention(id, answer).catch(report)
+/** Whether the answer was taken; a refusal is reported to the user. */
+export async function answerAttention(id: string, answer: BlockAnswer): Promise<boolean> {
+  return api.answerAttention(id, answer).then(
+    () => true,
+    (error: unknown) => {
+      report(error)
+      return false
+    },
+  )
 }
 
 // Coalesce bursts of events into one refresh per frame, remembering every project touched.
