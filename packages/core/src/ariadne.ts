@@ -1298,9 +1298,9 @@ export class Ariadne {
   }
 
   /**
-   * Post a message. An agent's may carry interface blocks: tables, charts and steps are
-   * shown under the text, and at most one choice, confirmation or form asks the user,
-   * as an attention of the conversation's own.
+   * Post a message. An agent's may carry interface blocks: tables, charts, steps and
+   * entries to the project's threads are shown under the text, and at most one choice,
+   * confirmation or form asks the user, as an attention of the conversation's own.
    */
   postMessage(
     projectId: string,
@@ -1342,6 +1342,17 @@ export class Ariadne {
       })
     }
     const shown = parsed.filter((block): block is ShowBlock => !isAskBlock(block))
+    parsed.forEach((block, i) => {
+      if (block.type !== 'thread') return
+      const owner = this.db
+        .query<{ project_id: string }, [string]>('SELECT project_id FROM threads WHERE id = ?')
+        .get(block.threadId)
+      if (owner?.project_id !== projectId) {
+        throw new DomainError('error.blockInvalid', {
+          reason: `blocks[${i}].threadId is not a thread of this project`,
+        })
+      }
+    })
     if (!input.content.trim() && !parsed.length && !attachments.length) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
