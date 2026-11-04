@@ -175,6 +175,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces) return Promise.reject(new DomainError('error.noTracker'))
       return workspaces.tracker(conversation.projectId)
     },
+    branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
   }

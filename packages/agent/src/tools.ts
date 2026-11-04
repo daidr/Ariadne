@@ -149,16 +149,17 @@ const editMessage: Tool = {
 }
 
 /**
- * The branch's newest commit, when the user merged the thread's branch before and its
- * worktree is still there: a report with nothing new since the merge leaves it landed.
+ * The branch's newest commit, when the user merged the thread's branch before: a report
+ * with nothing new since the merge leaves it landed. Read from the branch, so a worktree
+ * removed after the merge is neither needed nor checked out again.
  */
 async function mergedHead(ctx: ToolContext): Promise<string | undefined> {
-  if (ctx.role !== 'thread') return undefined
-  const thread = ctx.app.getThread(ctx.conversationId)
-  if (!thread.merged || !thread.workspace || thread.workspace.removed) return undefined
+  if (ctx.role !== 'thread' || !ctx.branches) return undefined
+  const { merged } = ctx.app.getThread(ctx.conversationId)
+  if (!merged) return undefined
   try {
-    const result = await (await ctx.workspace()).exec('git rev-parse HEAD', { signal: ctx.signal })
-    return result.exitCode === 0 ? result.stdout.trim() : undefined
+    const changes = await (await ctx.branches())?.changes(ctx.conversationId, merged.base)
+    return changes?.head
   } catch {
     return undefined
   }

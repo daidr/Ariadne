@@ -1,5 +1,11 @@
 import { Ariadne } from '@ariadne/core'
-import { PluginHost, WorkspaceManager, WorktreeJanitor } from '@ariadne/agent'
+import {
+  PluginHost,
+  toolsFor,
+  WorkspaceManager,
+  WorktreeJanitor,
+  type ToolContext,
+} from '@ariadne/agent'
 import { localDirectoryProvider, run } from '@ariadne/plugin-local'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
@@ -179,6 +185,29 @@ describe('thread changes', () => {
       await ws.exec('git rev-parse HEAD').then((r) => r.stdout.trim()),
     )
     expect(app.getThread(thread.id).stage).toBe('review')
+  })
+
+  test('a report after its worktree went reads the branch and does not bring it back', async () => {
+    const { project, thread, ws } = await setup()
+    await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(await workspaces.removeWorktree(project.id, thread.id, 'merged')).toBe('removed')
+    const report = toolsFor('thread', { workspace: true, repo: false }).find(
+      (tool) => tool.spec.name === 'report',
+    )!
+    const ctx = {
+      app,
+      projectId: project.id,
+      conversationId: thread.id,
+      role: 'thread',
+      locale: 'zh-CN',
+      signal: new AbortController().signal,
+      workspace: () => workspaces.forThread(project.id, thread.id),
+      repo: () => Promise.reject(new Error('no repo')),
+      branches: () => workspaces.branches(project.id),
+    } satisfies ToolContext
+    await report.run({ kind: 'ready', summary: '好了' }, ctx)
+    expect(app.getThread(thread.id).stage).toBe('done')
+    expect(existsSync(ws.label)).toBe(false)
   })
 
   test('a branch merged by hand counts; one with new commits after the merge does not', async () => {
