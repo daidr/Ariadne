@@ -185,6 +185,8 @@ export interface EventMap {
     content: string | null
     /** Whether an earlier version had been recorded, so the model is told it moved. */
     changed: boolean
+    /** The version differs from the checkout's commit: someone edited it in the workspace. */
+    uncommitted?: boolean
   }
   /** A model request failed in a way worth trying again; `attempt` counts the retries. */
   'conversation.model_retry': {

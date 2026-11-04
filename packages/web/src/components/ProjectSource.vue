@@ -27,6 +27,8 @@ const secretsSet = ref<string[]>([])
 const slots = ref<number | null>(null)
 /** The secrets the stored source has, restored when its kind is chosen again. */
 const storedSecrets = ref<string[]>([])
+/** The source as it was when the form opened, to tell whether it was changed at all. */
+const opened = ref<string | null>(null)
 
 const source = computed(() => state.detail?.project.source ?? null)
 
@@ -70,6 +72,8 @@ async function edit() {
     secretsSet.value = stored.secretsSet
     storedSecrets.value = stored.secretsSet
     if (stored.source) drafts[stored.source.kind] = { ...stored.source.settings }
+    // With no source yet, an untouched form saves none.
+    opened.value = sourceKey()
   } catch (error) {
     problem.value = String(error)
   }
@@ -93,12 +97,23 @@ function clearSecret(key: string) {
   storedSecrets.value = storedSecrets.value.filter((name) => name !== key)
 }
 
+/** The chosen kind and what was typed for it, including secrets typed or cleared. */
+function sourceKey() {
+  return JSON.stringify([kind.value, values()])
+}
+
 async function save(clear = false) {
   saving.value = true
-  problem.value = await setSource(
-    clear || !kind.value ? null : { kind: kind.value, settings: { ...values() } },
-  )
-  if (!problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
+  // Saving the source connects to it again, so it is saved only when it changed: changing
+  // the slot cap alone leaves the source as it is.
+  problem.value =
+    clear || !kind.value
+      ? await setSource(null)
+      : sourceKey() !== opened.value
+        ? await setSource({ kind: kind.value, settings: { ...values() } })
+        : null
+  // Clearing the source is about the source alone; the slot cap waits for a save.
+  if (!clear && !problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
     problem.value = await setProjectSlots(slots.value || null)
   }
   saving.value = false

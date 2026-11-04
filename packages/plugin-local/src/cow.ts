@@ -1,6 +1,7 @@
 import type { ExecResult } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 /**
@@ -9,7 +10,9 @@ import { basename, dirname, join } from 'node:path'
  * no room until either side changes a file. Without clone support nothing is copied and
  * the thread installs its own, which is what a plain worktree does anyway.
  */
-export const SEED_DIRS = new Set(['node_modules', '.venv', 'venv', 'vendor', '.pnpm-store'])
+export const SEED_DIRS = new Set(['node_modules', 'vendor', '.pnpm-store'])
+// Python environments are left out: their scripts and `activate` name the environment by
+// absolute path, so a clone would install into the user's own environment.
 
 /** Clone `from` to `to` sharing storage, or fail; never a full copy. */
 export type Cloner = (from: string, to: string) => Promise<boolean>
@@ -32,8 +35,10 @@ export const platformCloner: Cloner = async (from, to) => {
  * repository's git directory is tried, so nothing appears among the user's files.
  */
 async function canClone(clone: Cloner, gitDir: string, targetDir: string): Promise<boolean> {
-  const probe = join(gitDir, `ariadne-clone-probe-${process.pid}`)
-  const copy = join(targetDir, `.ariadne-clone-probe-${process.pid}`)
+  // Unique per call: threads open their worktrees at the same time.
+  const tag = randomUUID()
+  const probe = join(gitDir, `ariadne-clone-probe-${tag}`)
+  const copy = join(targetDir, `.ariadne-clone-probe-${tag}`)
   try {
     await writeFile(probe, 'probe')
     return await clone(probe, copy)
@@ -78,6 +83,10 @@ export async function seedWorktree(
   for (const dir of dirs) {
     const target = join(worktree, dir)
     if (existsSync(target)) continue
+    // A link (say, to another disk) would be copied as the link, and installing in the
+    // worktree would write through it into the user's own directory.
+    const info = await lstat(join(checkout, dir)).catch(() => null)
+    if (!info?.isDirectory()) continue
     await mkdir(dirname(target), { recursive: true })
     if (await clone(join(checkout, dir), target)) seeded.push(dir)
     else await rm(target, { recursive: true, force: true })

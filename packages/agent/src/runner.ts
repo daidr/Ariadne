@@ -289,8 +289,9 @@ async function syncInstructions(
 ): Promise<void> {
   if (!app.getThread(conversation.id).workspace) return
   let content: string | null = null
+  let workspace: Awaited<ReturnType<WorkspaceManager['forThread']>> | null = null
   try {
-    const workspace = await workspaces.forThread(conversation.projectId, conversation.id)
+    workspace = await workspaces.forThread(conversation.projectId, conversation.id)
     content = await workspace.readFile(INSTRUCTIONS_FILE)
   } catch {
     content = null
@@ -299,7 +300,23 @@ async function syncInstructions(
     content = `${content.slice(0, MAX_INSTRUCTIONS)}\n[cut: the file is longer]`
   }
   const hash = content === null ? 'none' : createHash('sha256').update(content).digest('hex')
-  app.recordInstructions(conversation.id, turnId, { path: INSTRUCTIONS_FILE, hash, content })
+  if (app.getInstructions(conversation.id)?.hash === hash) return
+  if (!app.getInstructions(conversation.id) && content === null) return
+  // Whether the change is the checkout's own or was made in the workspace (by the thread):
+  // the user should know which one the thread follows.
+  let uncommitted = false
+  if (content !== null && workspace?.branch) {
+    const status = await workspace
+      .exec(`git status --porcelain -- ${INSTRUCTIONS_FILE}`, { timeoutMs: 10_000 })
+      .catch(() => null)
+    uncommitted = status?.exitCode === 0 && !!status.stdout.trim()
+  }
+  app.recordInstructions(conversation.id, turnId, {
+    path: INSTRUCTIONS_FILE,
+    hash,
+    content,
+    uncommitted,
+  })
 }
 
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */

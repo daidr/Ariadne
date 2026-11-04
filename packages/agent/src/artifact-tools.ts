@@ -1,7 +1,12 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
 import { boardFromItems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
-import { describeSources, refreshDashboard } from './dashboard-sources'
+import {
+  checkSourceSettings,
+  describeSources,
+  fetchDashboardData,
+  refreshDashboard,
+} from './dashboard-sources'
 import { createTranslator } from '@ariadne/i18n'
 import {
   json,
@@ -277,22 +282,15 @@ async function fetchSource(
         : 'No plugin provides live dashboard data; give the data itself instead.',
     )
   }
-  const settings = input.settings ?? {}
-  if (typeof settings !== 'object' || Array.isArray(settings) || settings === null) {
-    throw new ToolInputError('"source.settings" must be an object')
-  }
+  const checked = checkSourceSettings(source, input.settings)
+  if (!checked.ok) throw new ToolInputError(checked.problem)
   let data: Record<string, unknown>
   try {
-    data = await source.fetch(settings as never, { projectId, signal: ctx.signal })
+    data = await fetchDashboardData(source, checked.settings, { projectId, signal: ctx.signal })
   } catch (error) {
-    throw new ToolInputError(
-      `The source could not fetch: ${error instanceof Error ? error.message : String(error)}`,
-    )
+    throw new ToolInputError(`The source could not fetch: ${(error as Error).message}`)
   }
-  return {
-    source: { kind: source.kind, settings: settings as Record<string, unknown> },
-    data: data ?? {},
-  }
+  return { source: { kind: source.kind, settings: checked.settings }, data }
 }
 
 const listDashboardSources: Tool = {

@@ -779,6 +779,17 @@ describe('stopped threads', () => {
     expect(app.getThread(thread.id).stopped?.by).toBe('user')
   })
 
+  test("taking over without a reason keeps the coordinator's reason", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    app.stopThread(thread.id, { reason: '等评审结果', by: project.coordinatorId })
+    app.stopThread(thread.id, { reason: '  ', by: 'user' })
+    expect(app.getThread(thread.id).stopped).toMatchObject({ by: 'user', reason: '等评审结果' })
+    // A first stop still needs its reason.
+    const other = app.createThread(project.id, { title: '其他' })
+    expect(() => app.stopThread(other.id, { reason: '', by: 'user' })).toThrow()
+  })
+
   test('a node whose threads are all stopped shows as paused, not as not started', () => {
     const project = app.createProject('P')
     app.revisePlan(project.id, {

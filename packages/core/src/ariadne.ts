@@ -516,7 +516,7 @@ export class Ariadne {
   recordInstructions(
     conversationId: string,
     turnId: string,
-    file: { path: string; hash: string; content: string | null },
+    file: { path: string; hash: string; content: string | null; uncommitted?: boolean },
   ): boolean {
     const projectId = this.runningTurn(conversationId, turnId)
     const before = this.getInstructions(conversationId)
@@ -604,11 +604,12 @@ export class Ariadne {
    */
   stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
     const thread = this.getThread(threadId)
-    const reason = input.reason.trim()
-    if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
     // Stopping again changes nothing, except the user taking over the coordinator's stop:
-    // then only the user can lift it.
-    if (thread.stopped && !(input.by === 'user' && thread.stopped.by !== 'user')) return thread
+    // then only the user can lift it. Without a reason of their own, the one given stays.
+    const takeover = !!thread.stopped && input.by === 'user' && thread.stopped.by !== 'user'
+    if (thread.stopped && !takeover) return thread
+    const reason = input.reason.trim() || (takeover ? (thread.stopped?.reason ?? '') : '')
+    if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
     this.store.append([
       {
         type: 'thread.stopped',

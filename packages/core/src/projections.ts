@@ -377,6 +377,15 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'conversation.instructions':
+        // The user sees what the thread follows, and when it moves.
+        add(event.data.conversationId, 'instructions', {
+          path: event.data.path,
+          content: event.data.content,
+          changed: event.data.changed,
+          uncommitted: event.data.uncommitted ?? false,
+        })
+        break
       case 'conversation.model_retry':
         add(event.data.conversationId, 'model-retry', {
           attempt: event.data.attempt,

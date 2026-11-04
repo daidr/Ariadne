@@ -1,6 +1,7 @@
 import { Ariadne, DomainError, type DashboardContent, type WhiteboardContent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { artifactTools } from './artifact-tools'
+import { fetchDashboardData } from './dashboard-sources'
 import { ToolInputError, type ToolContext, type ToolResult } from './tool-helpers'
 
 let app: Ariadne
@@ -258,7 +259,13 @@ describe('live dashboards', () => {
           kind: 'counter',
           title: { 'zh-CN': '计数' },
           description: 'Counts calls; returns { totals: { n } }',
-          settings: { type: 'object', properties: {} },
+          settings: {
+            type: 'object',
+            properties: {
+              step: { type: 'number', title: { 'zh-CN': '步长' } },
+              token: { type: 'string', title: { 'zh-CN': '令牌' }, secret: true },
+            },
+          },
           fetch: async (settings: { step?: number }) => {
             calls += settings.step ?? 1
             return { totals: { n: calls } }
@@ -271,6 +278,16 @@ describe('live dashboards', () => {
       (await run('create_dashboard', { title: 'x', widgets: [], source: { kind: 'nope' } }))
         .isError,
     ).toBe(true)
+    // Settings are checked against the source's schema; a secret cannot be stored in the log.
+    for (const settings of [{ steps: 2 }, { step: '2' }, { token: 'x' }]) {
+      const result = await run('create_dashboard', {
+        title: 'x',
+        widgets: [],
+        source: { kind: 'counter', settings },
+      })
+      expect(result.isError).toBe(true)
+    }
+    expect(calls).toBe(0)
     const { artifactId } = await ok('create_dashboard', {
       title: '计数',
       widgets: [{ id: 'n', type: 'stat', props: { source: 'totals', field: 'n' } }],
@@ -291,5 +308,28 @@ describe('live dashboards', () => {
     await ok('update_dashboard', { artifactId, baseVersion: 3, reason: '定格', source: null })
     expect(read().source).toBeUndefined()
     expect((await run('refresh_dashboard', { artifactId })).isError).toBe(true)
+  })
+
+  test('a source that hangs or returns junk is given up on', async () => {
+    const hang = {
+      kind: 'hang',
+      title: { 'zh-CN': '挂起' },
+      description: '',
+      settings: { type: 'object' as const, properties: {} },
+      fetch: () => new Promise<Record<string, unknown>>(() => {}),
+    }
+    await expect(
+      fetchDashboardData(hang as never, {}, { projectId: 'p', timeoutMs: 20 }),
+    ).rejects.toThrow(/in time/)
+    const junk = {
+      kind: 'junk',
+      title: { 'zh-CN': '垃圾' },
+      description: '',
+      settings: { type: 'object' as const, properties: {} },
+      fetch: async () => [1, 2] as never,
+    }
+    await expect(fetchDashboardData(junk as never, {}, { projectId: 'p' })).rejects.toThrow(
+      /no data sets/,
+    )
   })
 })

@@ -181,9 +181,11 @@ export function createHandler({
   // typo or a missing permission shows up here rather than in a thread's first turn.
   // Secret settings (tokens) go to the user's config, never into the event log.
   // A live dashboard fetches its data again; a new version records what came back.
-  add('POST', '/api/artifacts/:artifactId/refresh', async (_request, { artifactId = '' }) => {
+  add('POST', '/api/artifacts/:artifactId/refresh', async (request, { artifactId = '' }) => {
+    // The fetch ends with the request: a closed page stops waiting on the source.
     const artifact = await refreshDashboard(app, host?.dashboards ?? new Map(), artifactId, {
       author: 'user',
+      signal: request.signal,
       reason: createTranslator(settings?.current.locale ?? 'zh-CN')('artifact.dashboard.refreshed'),
     })
     return json({ artifact })

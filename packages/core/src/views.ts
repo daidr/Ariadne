@@ -100,6 +100,14 @@ export type NoticeView = {
   | { kind: 'compacted'; summary: string }
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
+  | {
+      kind: 'instructions'
+      path: string
+      /** `null` once the file was removed. */
+      content: string | null
+      changed: boolean
+      uncommitted: boolean
+    }
 )
 
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */

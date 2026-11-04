@@ -151,8 +151,16 @@ export interface DashboardSource<Settings = Record<string, unknown>> {
   title: LocalizedText
   /** For the model: what data it gives, and which named data sets come back. */
   description: string
+  /**
+   * The model chooses these and they are stored in the event log with the dashboard, so
+   * they must not hold secrets: fields marked `secret` are refused. Keep credentials in
+   * the plugin's own configuration instead.
+   */
   settings: SettingsSchema
-  /** Fetch now. Returns named data sets: arrays of rows, or one object for a stat. */
+  /**
+   * Fetch now. Returns named data sets: arrays of rows, or one object for a stat. Ariadne
+   * gives up after 30 seconds and aborts `signal`, so stop the work then.
+   */
   fetch(
     settings: Settings,
     context: { projectId: string; signal?: AbortSignal },

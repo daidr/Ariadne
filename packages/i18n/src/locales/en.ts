@@ -203,6 +203,10 @@ export const en: Record<MessageKey, string> = {
   'notice.compacted': 'Older history was summarised for the model',
   'notice.compactionFailed':
     'Summarising older history failed; this turn reads all of it: {detail}',
+  'notice.instructions': 'This thread follows {path} from the repository',
+  'notice.instructionsChanged': '{path} changed; the thread now follows the new version',
+  'notice.instructionsRemoved': '{path} was removed; the thread no longer follows it',
+  'notice.instructionsUncommitted': ' (changed in the workspace, not committed)',
   'notice.modelRetry': 'The model request failed; retry {attempt} in {seconds}s: {detail}',
   'memory.title': 'Memory',
   'memory.hint':

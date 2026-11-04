@@ -50,7 +50,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 - 每次模型回复（`turn.step`）和每个工具结果（`tool.finished`）都是事件。模型的输入每一步都从这些事件重建，所以一轮可以重放，也可以在中断后接着做。
 - 模型回复记下它看到的最新事件（`sawSeq`）。回复期间到达的输入排在这次回复之后，不会被当成已读，会再触发一轮。
 - 服务停止时正在进行的轮次记为 `interrupted`，下次启动时继续；没有结果的工具调用补一条错误结果。
-- 仓库的 `AGENTS.md`：thread 的工作区打开后，每一步开始前读工作区根目录的 `AGENTS.md`，第一次读到或内容变了就记一条 `conversation.instructions`（内容和哈希，超过 1.6 万字截断），模型的系统指令里放最新记下的版本，所以每次请求仍能从日志重建。内容变了（包括 thread 自己改了它）或文件被删时，对话里在变化的位置给模型一条说明。这份文件来自仓库，不是用户说的话：它决定在这个仓库里怎么干活（命令、风格、目录），不能改变用户或协调器的要求、项目记忆和哪些事要用户点头，冲突时以后者为准。还没打开工作区的 thread 不读，读文件不会因此建出 worktree。
+- 仓库的 `AGENTS.md`：thread 的工作区打开后，每一步开始前读工作区根目录的 `AGENTS.md`，第一次读到或内容变了就记一条 `conversation.instructions`（内容和哈希，超过 1.6 万字截断），模型的系统指令里放最新记下的版本，所以每次请求仍能从日志重建。内容变了（包括 thread 自己改了它）或文件被删时，对话里在变化的位置给模型一条说明。用户也在对话里看到一行：遵循了哪份文件、内容可展开，改了或删了各有一行，工作区里未提交的改动会标出来。这份文件来自仓库，不是用户说的话：它决定在这个仓库里怎么干活（命令、风格、目录），不能改变用户或协调器的要求、项目记忆和哪些事要用户点头，冲突时以后者为准。还没打开工作区的 thread 不读，读文件不会因此建出 worktree。
 - 重试窄而可见：只有模型插件标为可重试的错误（限流、服务过载或内部错误、已建立的连接被重置或超时、回复流没收完就断了）才自动重试，最多 4 次，等待从 1 秒起逐次翻倍，服务给了 `Retry-After` 就按它等。地址写错、域名解析不到、证书不对、连接被拒这类设置问题不重试，直接报错；`Retry-After` 超过 1 分钟（比如额度用完）也不重试，错误里写明要等多久。每次重试记一条 `conversation.model_retry`，对话里显示一行淡化的说明（第几次、等多久、原因）；失败那次已经流出来的文字丢弃，不当成回复。
 - 其他模型错误（如 API Key 无效）、重试用完或用户点停止后，这一轮以失败结束，不会为触发这一轮的输入再自动重试，界面给出原因和“重试”；这一轮进行期间新到、模型还没看到的输入仍会排队处理。
 - 回复被截断（超出单次回复的 token 上限）时，这一轮以失败结束并说明原因，不把截断的文字当成完整回复。
@@ -88,7 +88,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 - 文件工具的路径都相对工作区根目录，越出根目录（包括经符号链接）的路径会被拒绝。命令在工作区里用 bash 执行，有超时，输出过长时只保留末尾。
 - 工作区里的命令不需要审批；推送、部署这类影响工作区外、又无法撤销的操作，thread 要先问用户。
 
-新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`.venv`、`venv`、`vendor`、`.pnpm-store`（任意层级）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进 thread 的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，thread 自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制。GitHub 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
+新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`vendor`、`.pnpm-store`（任意层级，符号链接除外）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进 thread 的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，thread 自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制；Python 虚拟环境也不复制，它的脚本和 `activate` 用绝对路径指向原来的环境，克隆出来的会装进用户自己的环境。GitHub 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
 
 本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/` 和 `~/.ariadne/plugins/github/worktrees/` 下。
 
@@ -133,7 +133,7 @@ thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录�
 | 仪表盘 | `{ dashboard, data, takenAt }`：`@dou-ui/dashboard` 的文档，加上格子读的数据 | `DouDashboard`，内置格子：统计数字、文字、表格、图表、透视表 |
 
 - 仪表盘默认是静态快照：数据在写入时复制进来，每个数据源只是交回存下的值，不再请求；界面显示“数据截至”的时间。要更新就写入新的数据，`takenAt` 随之更新。
-- 插件可以用 `registerDashboardSource({ kind, title, description, settings, fetch })` 提供实时数据。仪表盘带上 `source: { kind, settings }` 就成了“实时数据”：agent 用 `create_dashboard` / `update_dashboard` 的 `source` 建立时先取一次，之后 agent 用 `refresh_dashboard`、用户在仪表盘上点“刷新数据”时再取，取回的数据集替换同名的那些，存成一个新版本（`takenAt` 为当时），所以每个版本仍是一份能回放的快照。`list_dashboard_sources` 列出插件提供的来源；`update_dashboard` 给 `source: null` 就变回静态快照。来源所在的插件没加载时刷新会报错，已有的数据不受影响。
+- 插件可以用 `registerDashboardSource({ kind, title, description, settings, fetch })` 提供实时数据。仪表盘带上 `source: { kind, settings }` 就成了“实时数据”：agent 用 `create_dashboard` / `update_dashboard` 的 `source` 建立时先取一次，之后 agent 用 `refresh_dashboard`、用户在仪表盘上点“刷新数据”时再取，取回的数据集替换同名的那些，存成一个新版本（`takenAt` 为当时），所以每个版本仍是一份能回放的快照。`list_dashboard_sources` 列出插件提供的来源；`update_dashboard` 给 `source: null` 就变回静态快照。来源所在的插件没加载时刷新会报错，已有的数据不受影响。模型给的 `settings` 先按来源的 schema 检查（只认声明过的字段、类型要对、必填要有，缺的用默认值），而且会原样记进事件日志，所以标了 `secret` 的字段不能在这里设，凭据放在插件自己的配置里。每次取数最多等 30 秒，取回的必须是一个对象、不超过 2MB，建立和刷新走同一套检查。
 - 保存前 core 检查内容的形状（id 不重复、连线两端存在、格子读的数据源存在、只用注册过的类型），不合格的拒绝，错误原因回给 agent 修正。
 - agent 不直接写坐标：画板工具收条目和连线，没给位置的条目放在它连出的条目右边，否则放在已有内容下方，再往下挪到不重叠；连线选两个条目相对的一边。修改按 id 合并，只改给出的字段，用户画的笔迹、贴的图片和挪过的位置都保留。仪表盘工具同样按 id 合并，新格子按顺序排进 12 列。
 - agent 读画板时，笔迹和图片只列出 id 和位置，不带点阵和图片数据。
