@@ -242,7 +242,7 @@ export interface SearchProvider {
   title: LocalizedText
   /**
    * Search now and return the best hits first, at most `limit`. Ariadne gives up after
-   * 30 seconds and aborts `signal`.
+   * 30 seconds and aborts `signal`. A thrown error's message is not shown to the model.
    */
   search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SearchResult[]>
 }

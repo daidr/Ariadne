@@ -1,4 +1,4 @@
-import { WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -53,6 +53,17 @@ describe('local directory', () => {
     // Opening again reuses the worktree and keeps the work.
     const again = await workspace!.open({ threadId: 'thr_a' })
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
+  })
+
+  test('bytes are read up to a limit', async () => {
+    const dir = join(base, 'plain')
+    await run(['mkdir', '-p', dir], { cwd: base })
+    await writeFile(join(dir, 'a.bin'), new Uint8Array([0, 1, 2, 3]))
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect(await ws.readBytes('a.bin', 4)).toEqual(new Uint8Array([0, 1, 2, 3]))
+    await expect(ws.readBytes('a.bin', 3)).rejects.toThrow(FileTooLargeError)
+    await expect(ws.readBytes('../secret', 4)).rejects.toThrow(WorkspacePathError)
   })
 
   test('a worktree deleted by hand is recreated on its branch', async () => {

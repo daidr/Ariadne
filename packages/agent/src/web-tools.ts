@@ -153,8 +153,12 @@ export function webSearchTool(providers: ReadonlyMap<string, SearchProvider>): T
         results = await provider.search(query, { limit, signal })
       } catch (error) {
         if (ctx.signal.aborted) throw error
+        // The service's own message stays out: it may quote the request, key and all.
+        const timedOut = error instanceof Error && error.name === 'TimeoutError'
         return {
-          content: `The search failed: ${error instanceof Error ? error.message : String(error)}`,
+          content: timedOut
+            ? 'The search service did not answer in time; try again later.'
+            : 'The search service failed. Try again later; if it keeps failing, the user may need to check its plugin settings.',
           isError: true,
         }
       }

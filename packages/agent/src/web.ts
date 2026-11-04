@@ -32,7 +32,6 @@ function ipv4Private(address: string): boolean {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 0 && c === 0) ||
     (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
     a >= 224
   )
 }
@@ -49,7 +48,11 @@ function embeddedIpv4(address: string): string | null {
   return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`
 }
 
-/** Loopback, private, link-local, shared, multicast or unspecified: not the public web. */
+/**
+ * Loopback, private, link-local, shared, multicast or unspecified: not the public web.
+ * 198.18.0.0/15 (benchmarking) is left open: proxies in fake-IP mode hand it out for every
+ * name, so refusing it would refuse the whole web behind them.
+ */
 export function isPrivateAddress(address: string): boolean {
   const kind = isIP(address)
   if (kind === 4) return ipv4Private(address)

@@ -308,6 +308,8 @@ export const en: Record<MessageKey, string> = {
   'error.pluginInWorkspace':
     "Plugins cannot be loaded from Ariadne's plugin data folder: it holds the threads' workspaces and repository clones",
   'error.modelRequest': 'Model request failed: {detail}',
+  'error.modelRequestImages':
+    'Model request failed: {detail}. The request carried images; if this model cannot look at images, turn off "Sees images" in the model settings',
   'error.repeating':
     'The same call came back {count} times with the same result, so this turn was stopped',
   'error.truncated':

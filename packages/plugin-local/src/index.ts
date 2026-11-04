@@ -287,7 +287,16 @@ export class LocalWorkspace implements Workspace {
     try {
       const { size } = await handle.stat()
       if (size > maxBytes) throw new FileTooLargeError(path, size, maxBytes)
-      return new Uint8Array(await handle.readFile())
+      // At most one byte past the limit: a file that grew since `stat` still fails.
+      const buffer = new Uint8Array(maxBytes + 1)
+      let length = 0
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length)
+        if (!bytesRead) break
+        length += bytesRead
+      }
+      if (length > maxBytes) throw new FileTooLargeError(path, length, maxBytes)
+      return buffer.slice(0, length)
     } finally {
       await handle.close()
     }

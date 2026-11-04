@@ -327,6 +327,29 @@ describe('failures', () => {
     expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('好了')
   })
 
+  test('a refused request with images points at the model image setting', async () => {
+    const model = fakeModel(() => [
+      { type: 'finish', reason: 'error', error: 'HTTP 400: image_url is not supported' },
+    ])
+    const project = app.createProject('P')
+    const file = app.saveFile(project.id, {
+      mime: 'image/png',
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'look',
+      attachments: [{ fileId: file.id, name: 'a.png' }],
+    })
+    const s = startScheduler(model)
+    await s.idle()
+    expect(app.getConversation(project.coordinatorId).lastError).toEqual({
+      key: 'error.modelRequestImages',
+      params: { detail: 'HTTP 400: image_url is not supported' },
+    })
+  })
+
   test('a passing model error is retried, visibly, and gives up after four retries', async () => {
     let failures = 2
     const model = fakeModel(() =>

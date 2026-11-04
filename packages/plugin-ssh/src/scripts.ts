@@ -58,7 +58,8 @@ path=$(resolve "$1") || exit 3
 size=$(wc -c < "$path") || exit 1
 size=\${size//[!0-9]/}
 [ "$size" -gt "$2" ] && { printf '%s\\n' "$size" >&2; exit 6; }
-exec base64 < "$path"
+# At most one byte past the limit, so a file that grew meanwhile is still caught.
+head -c "$(($2 + 1))" < "$path" | base64
 `
 
 export const WRITE = `${PRELUDE}

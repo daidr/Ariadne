@@ -521,7 +521,14 @@ async function requestStep(
     if (!failure) return { text, reasoning, toolCalls, usage, timing }
     const detail = (failure.error ?? '').slice(0, 500)
     if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
-      throw new TurnError({ key: 'error.modelRequest', params: { detail } })
+      // A service that cannot take images refuses every request that carries one.
+      const images = request.messages.some(
+        (message) => (message.role === 'user' || message.role === 'tool') && message.images?.length,
+      )
+      throw new TurnError({
+        key: images ? 'error.modelRequestImages' : 'error.modelRequest',
+        params: { detail },
+      })
     }
     const delayMs = Math.min(MAX_RETRY_AFTER_MS, failure.retryAfterMs ?? baseDelayMs * 2 ** attempt)
     onRetry({ attempt: attempt + 1, delayMs, detail })

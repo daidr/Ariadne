@@ -103,7 +103,9 @@ export class RemoteWorkspace implements Workspace {
       throw new FileTooLargeError(path, Number(result.stderr.trim()) || maxBytes + 1, maxBytes)
     }
     if (result.exitCode !== 0) throw failure(path, result)
-    return new Uint8Array(Buffer.from(result.stdout.replace(/\s+/g, ''), 'base64'))
+    const bytes = new Uint8Array(Buffer.from(result.stdout.replace(/\s+/g, ''), 'base64'))
+    if (bytes.length > maxBytes) throw new FileTooLargeError(path, bytes.length, maxBytes)
+    return bytes
   }
 
   async writeFile(path: string, content: string): Promise<void> {

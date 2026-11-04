@@ -1,4 +1,4 @@
-import { WorkspacePathError } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, WorkspacePathError } from '@ariadne/plugin-sdk'
 import { run } from '@ariadne/plugin-local'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -134,6 +134,11 @@ describe('remote directory', () => {
     expect(existsSync(join(base, 'nowhere'))).toBe(false)
     await expect(ws.readFile('missing.txt')).rejects.toThrow('no such file')
     await expect(ws.readFile('sub')).rejects.toThrow('directory')
+
+    await writeFile(join(dir, 'a.bin'), new Uint8Array([0, 255, 2, 3]))
+    expect(await ws.readBytes('a.bin', 4)).toEqual(new Uint8Array([0, 255, 2, 3]))
+    await expect(ws.readBytes('a.bin', 3)).rejects.toThrow(FileTooLargeError)
+    await expect(ws.readBytes('leak', 10)).rejects.toThrow(WorkspacePathError)
   })
 
   test('commands run in the directory and end with their background processes', async () => {

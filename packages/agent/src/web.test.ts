@@ -68,6 +68,9 @@ describe('reading the web', () => {
     expect(isPrivateAddress('100.64.0.1')).toBe(true)
     expect(isPrivateAddress('0.0.0.0')).toBe(true)
     expect(isPrivateAddress('93.184.216.34')).toBe(false)
+    // What proxies in fake-IP mode hand out for every name.
+    expect(isPrivateAddress('198.18.0.7')).toBe(false)
+    expect(isPrivateAddress('198.19.255.1')).toBe(false)
     expect(isPrivateAddress('2606:4700::1111')).toBe(false)
   })
 
@@ -179,6 +182,23 @@ describe('reading the web', () => {
     expect(asked).toEqual([{ query: 'bun sqlite', limit: 3 }])
     expect(result.content).toMatch(/^<search_results_[0-9a-f]{12} query="bun sqlite">/)
     expect(result.content).toContain('1. Bun\n   https://bun.sh\n   A fast runtime')
+  })
+
+  test('a failed search does not hand the service message to the model', async () => {
+    const provider: SearchProvider = {
+      kind: 'demo',
+      title: { 'zh-CN': '演示' },
+      search: () => Promise.reject(new Error('401 for https://api.example/?key=sk-secret')),
+    }
+    const project = app.createProject('P')
+    const search = tool('web_search', {
+      workspace: false,
+      repo: false,
+      search: new Map([['demo', provider]]),
+    })
+    const result = await search.run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(result.isError).toBe(true)
+    expect(result.content).not.toContain('sk-secret')
   })
 })
 
