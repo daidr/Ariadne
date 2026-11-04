@@ -140,6 +140,7 @@ export interface SandboxStatus {
   kind: 'bwrap' | 'unshare' | 'sandbox-exec' | null
   mode: 'auto' | 'off'
   hidden: string[]
+  platform: string
 }
 
 export const api = {

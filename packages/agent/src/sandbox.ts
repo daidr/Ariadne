@@ -13,6 +13,8 @@ export interface SandboxStatus {
   mode: 'auto' | 'off'
   /** The paths hidden from commands. */
   hidden: string[]
+  /** The server's platform: Windows has no sandbox yet, and says so. */
+  platform: NodeJS.Platform
 }
 
 export interface Sandbox extends CommandSandbox {
@@ -349,7 +351,7 @@ export function createSandbox(options: {
   const fixed = options.readOnly ?? (() => [])
   return {
     kind,
-    status: { kind, mode: options.mode, hidden },
+    status: { kind, mode: options.mode, hidden, platform: process.platform },
     wrap(argv, { keep, readOnly = [] }) {
       const locked = [...fixed(), ...readOnly]
       switch (kind) {

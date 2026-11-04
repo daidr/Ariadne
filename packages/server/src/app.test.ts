@@ -276,7 +276,9 @@ describe('files', () => {
 describe('sandbox', () => {
   test('says when thread commands are not isolated', async () => {
     const response = await call('/api/sandbox')
-    expect(await response.json()).toEqual({ sandbox: { kind: null, mode: 'auto', hidden: [] } })
+    expect(await response.json()).toEqual({
+      sandbox: { kind: null, mode: 'auto', hidden: [], platform: process.platform },
+    })
   })
 })
 

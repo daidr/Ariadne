@@ -174,6 +174,8 @@ export const zhCN = {
     '设置里关掉了沙箱（config.json 的 sandbox.mode 为 off），thread 运行的命令能读到 Ariadne 的令牌和设置，并能以你的身份调用 Ariadne。',
   'sandbox.remote':
     'thread 的命令在 {host} 上以 SSH 登录的用户身份运行，本机的沙箱不管它们；连接不转发 agent、端口和 X11，命令连不回这台机器。',
+  'sandbox.windows.body':
+    'Windows 上暂时没有沙箱，thread 运行的命令能读到 Ariadne 的令牌和设置，并能以你的身份调用 Ariadne。只把这个项目交给你信任的模型和仓库。',
   'sandbox.weaker':
     'macOS 的沙箱只限制文件访问：thread 的命令读不到 Ariadne 的令牌和设置，但能看到其他进程，隔离比 Linux 弱。',
   'start.title': '开始使用',
