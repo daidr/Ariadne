@@ -130,10 +130,17 @@ export type ModelStreamPart =
   | ({ type: 'reasoning'; startedAt?: number } & ReasoningBlock)
   /**
    * Tokens of the whole response. `input` counts everything the model read, `cached` the
-   * part of it read from the provider's cache; `reasoning` is the part of `output` spent
-   * thinking. Both only when the provider says.
+   * part of it read from the provider's cache and `cacheWrite` the part written to it;
+   * `reasoning` is the part of `output` spent thinking. Each only when the provider says.
    */
-  | { type: 'usage'; input: number; output: number; cached?: number; reasoning?: number }
+  | {
+      type: 'usage'
+      input: number
+      output: number
+      cached?: number
+      cacheWrite?: number
+      reasoning?: number
+    }
   | {
       type: 'finish'
       reason: 'stop' | 'length' | 'tool-calls' | 'error'

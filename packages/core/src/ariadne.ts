@@ -76,13 +76,14 @@ import type {
   ThreadView,
   TodoView,
   TranscriptEntry,
+  UsageTotals,
 } from './views'
 
 /**
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 27
+export const PROJECTION_VERSION = 28
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -115,6 +116,9 @@ interface ConversationRow {
   last_error: string | null
   input_tokens: number
   output_tokens: number
+  cached_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens: number
   context_tokens: number
 }
 
@@ -143,7 +147,7 @@ function toConversation(row: ConversationRow): ConversationView {
           },
     lastOutcome: row.last_outcome,
     lastError: row.last_error ? (JSON.parse(row.last_error) as LocalizedMessage) : null,
-    usage: { input: row.input_tokens, output: row.output_tokens },
+    usage: usageOf(row),
     contextTokens: row.context_tokens,
   }
 }
@@ -249,6 +253,9 @@ interface ThreadRow {
   last_outcome: TurnOutcome | null
   input_tokens: number | null
   output_tokens: number | null
+  cached_tokens: number | null
+  cache_write_tokens: number | null
+  reasoning_tokens: number | null
 }
 
 interface AttentionRow {
@@ -284,9 +291,26 @@ interface MessageRow {
 const MESSAGE_SELECT = `SELECT m.*, a.id AS ask_id, a.block AS ask_block, a.answer AS ask_answer,
   a.withdrawn AS ask_withdrawn FROM messages m LEFT JOIN attentions a ON a.message_id = m.id`
 
+/** Token columns of `conversations`, summed or not. */
+interface UsageColumns {
+  input_tokens?: number | null
+  output_tokens?: number | null
+  cached_tokens?: number | null
+  cache_write_tokens?: number | null
+  reasoning_tokens?: number | null
+}
+
+const usageOf = (row: UsageColumns): UsageTotals => ({
+  input: row.input_tokens ?? 0,
+  output: row.output_tokens ?? 0,
+  cached: row.cached_tokens ?? 0,
+  cacheWrite: row.cache_write_tokens ?? 0,
+  reasoning: row.reasoning_tokens ?? 0,
+})
+
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
-  c.output_tokens, (
+  c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, (
   SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
@@ -331,7 +355,7 @@ function toThread(row: ThreadRow): ThreadView {
         ? null
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
     model: row.model,
-    usage: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
+    usage: usageOf(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -2437,14 +2461,16 @@ export class Ariadne {
     this.assertThreadIn(projectId, conversationId)
   }
 
-  private projectUsage(projectId: string): { input: number; output: number } {
+  private projectUsage(projectId: string): UsageTotals {
     const row = this.db
-      .query<{ input: number | null; output: number | null }, [string]>(
-        `SELECT sum(input_tokens) AS input, sum(output_tokens) AS output FROM conversations
-         WHERE project_id = ?`,
+      .query<UsageColumns, [string]>(
+        `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
+           sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
+           sum(reasoning_tokens) AS reasoning_tokens
+         FROM conversations WHERE project_id = ?`,
       )
       .get(projectId)
-    return { input: row?.input ?? 0, output: row?.output ?? 0 }
+    return usageOf(row ?? {})
   }
 
   private toProject(row: ProjectRow): ProjectView {

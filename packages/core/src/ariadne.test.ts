@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
+import type { TokenUsage } from './events'
 import { confirmBlock, type ConfirmBlock } from './blocks'
 import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
@@ -1088,7 +1089,7 @@ describe('usage, models and step input', () => {
   test('tokens add up per conversation and project; the context is the latest input', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
-    const step = (conversationId: string, usage: { input: number; output: number } | null) => {
+    const step = (conversationId: string, usage: TokenUsage | null) => {
       const turnId = app.startTurn(conversationId, 'm')
       app.recordStep(conversationId, turnId, {
         reasoning: [],
@@ -1102,7 +1103,7 @@ describe('usage, models and step input', () => {
       app.finishTurn(conversationId, turnId, 'completed')
     }
     step(thread.id, { input: 1000, output: 100 })
-    step(thread.id, { input: 1500, output: 50 })
+    step(thread.id, { input: 1500, output: 50, cached: 1200, cacheWrite: 200, reasoning: 30 })
     // A provider that reports nothing leaves the last known size.
     step(thread.id, null)
     step(project.coordinatorId, { input: 200, output: 20 })
@@ -1110,8 +1111,9 @@ describe('usage, models and step input', () => {
       usage: { input: 2500, output: 150 },
       contextTokens: 1500,
     })
-    expect(app.getThread(thread.id).usage).toEqual({ input: 2500, output: 150 })
-    expect(app.getProject(project.id).usage).toEqual({ input: 2700, output: 170 })
+    const parts = { cached: 1200, cacheWrite: 200, reasoning: 30 }
+    expect(app.getThread(thread.id).usage).toEqual({ input: 2500, output: 150, ...parts })
+    expect(app.getProject(project.id).usage).toEqual({ input: 2700, output: 170, ...parts })
   })
 
   test('a thread keeps the model it was given until it is changed', () => {

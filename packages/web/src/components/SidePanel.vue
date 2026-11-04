@@ -10,7 +10,7 @@ import {
   WorkflowIcon,
 } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
-import { count, t } from '../i18n'
+import { t } from '../i18n'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
@@ -23,7 +23,6 @@ const tab = ref('plan')
 const threadItems = computed(() =>
   (state.detail?.threads ?? []).map((thread) => ({ key: thread.id, label: thread.title })),
 )
-const usage = computed(() => state.detail?.project.usage ?? { input: 0, output: 0 })
 const stageOf = (id: string | number): ThreadStage =>
   state.detail?.threads.find((thread) => thread.id === id)?.stage ?? 'queued'
 </script>
@@ -63,15 +62,6 @@ const stageOf = (id: string | number): ThreadStage =>
       <template #label
         ><SideTab :label="t('panel.threads')"><MessagesIcon /></SideTab
       ></template>
-      <DouText
-        v-if="usage.input || usage.output"
-        variant="tertiary"
-        size="sm"
-        class="usage"
-        :title="t('usage.detail', { input: usage.input, output: usage.output })"
-      >
-        {{ t('usage.project', { value: count(usage.input + usage.output) }) }}
-      </DouText>
       <DouMenu
         v-if="threadItems.length"
         :model-value="state.threadId ?? undefined"
@@ -115,11 +105,6 @@ const stageOf = (id: string | number): ThreadStage =>
   align-self: stretch;
   overflow-y: auto;
   padding-bottom: 8px;
-}
-
-.usage {
-  display: block;
-  padding: 0 8px 4px;
 }
 
 .thread {

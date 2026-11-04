@@ -622,6 +622,9 @@ export const conversationsProjection: Projection = {
       last_error TEXT,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
       context_tokens INTEGER NOT NULL DEFAULT 0,
       instructions TEXT,
       activity TEXT
@@ -669,6 +672,8 @@ export const conversationsProjection: Projection = {
              pending_since = CASE WHEN pending_seq <= ?1 THEN 0 ELSE max(pending_since, ?1 + 1) END,
              pending_seq = CASE WHEN pending_seq <= ?1 THEN 0 ELSE pending_seq END,
              input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3,
+             cached_tokens = cached_tokens + ?7, cache_write_tokens = cache_write_tokens + ?8,
+             reasoning_tokens = reasoning_tokens + ?9,
              context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END,
              activity = coalesce(?6, activity)
            WHERE id = ?4`,
@@ -680,13 +685,26 @@ export const conversationsProjection: Projection = {
             // What the model read last is how full its context is; unknown keeps the last.
             event.data.usage !== null,
             event.data.finish === 'tool-calls' ? activityOf(event.data.text) : null,
+            event.data.usage?.cached ?? 0,
+            event.data.usage?.cacheWrite ?? 0,
+            event.data.usage?.reasoning ?? 0,
           ],
         )
         break
       case 'conversation.compacted':
         db.run(
-          'UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?',
-          [event.data.usage?.input ?? 0, event.data.usage?.output ?? 0, event.data.conversationId],
+          `UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
+             cached_tokens = cached_tokens + ?, cache_write_tokens = cache_write_tokens + ?,
+             reasoning_tokens = reasoning_tokens + ?
+           WHERE id = ?`,
+          [
+            event.data.usage?.input ?? 0,
+            event.data.usage?.output ?? 0,
+            event.data.usage?.cached ?? 0,
+            event.data.usage?.cacheWrite ?? 0,
+            event.data.usage?.reasoning ?? 0,
+            event.data.conversationId,
+          ],
         )
         break
       case 'turn.finished': {

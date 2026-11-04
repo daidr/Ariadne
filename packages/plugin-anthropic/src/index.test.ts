@@ -160,7 +160,14 @@ describe('anthropic provider', () => {
       sse(
         {
           type: 'message_start',
-          message: { usage: { input_tokens: 2, cache_read_input_tokens: 10, output_tokens: 1 } },
+          message: {
+            usage: {
+              input_tokens: 2,
+              cache_creation_input_tokens: 3,
+              cache_read_input_tokens: 10,
+              output_tokens: 1,
+            },
+          },
         },
         { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
         {
@@ -202,7 +209,7 @@ describe('anthropic provider', () => {
       { type: 'reasoning', text: '想想', signature: 's', startedAt: expect.any(Number) },
       { type: 'reasoning', text: 'x', redacted: true, startedAt: expect.any(Number) },
       { type: 'text', text: '好' },
-      { type: 'usage', input: 12, output: 5, cached: 10 },
+      { type: 'usage', input: 15, output: 5, cached: 10, cacheWrite: 3 },
       { type: 'finish', reason: 'stop' },
     ])
   })
