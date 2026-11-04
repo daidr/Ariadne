@@ -63,7 +63,10 @@ const transportOptions = computed(() => [
   { value: 'http', label: t('mcp.transport.http') },
 ])
 const markOptions = computed(() =>
-  (['read', 'ask', 'off'] as const).map((mark) => ({ value: mark, label: t(`mcp.mark.${mark}`) })),
+  (['read', 'ask', 'off'] as const).map((mark) => ({
+    value: mark,
+    label: t(`mcp.mark.${mark}`),
+  })),
 )
 
 const pairsOf = (names: string[]): DraftPair[] =>
@@ -92,7 +95,11 @@ const pairs = (list: DraftPair[]) =>
     .map((pair) => ({ name: pair.name.trim(), value: pair.value }))
 
 function inputOf(server: DraftServer): McpServerInput {
-  const base = { id: server.id.trim(), name: server.name.trim(), tools: server.tools }
+  const base = {
+    id: server.id.trim(),
+    name: server.name.trim(),
+    tools: server.tools,
+  }
   return server.transport === 'stdio'
     ? {
         ...base,
@@ -154,7 +161,10 @@ function add() {
 async function check(id: string) {
   checking.value = new Set([...checking.value, id])
   try {
-    status.value = { ...status.value, [id]: (await api.checkMcpServer(id)).status }
+    status.value = {
+      ...status.value,
+      [id]: (await api.checkMcpServer(id)).status,
+    }
   } catch (cause) {
     error.value = message(cause)
   } finally {
@@ -309,7 +319,11 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
             {{ t('mcp.state.connecting') }}
           </DouShimmer>
           <template v-else-if="stateOf(server) === 'ready'">
-            {{ t('mcp.state.ready', { count: statusOf(server)?.tools?.length ?? 0 }) }}
+            {{
+              t('mcp.state.ready', {
+                count: statusOf(server)?.tools?.length ?? 0,
+              })
+            }}
           </template>
           <template v-else-if="stateOf(server) === 'failed'">
             {{ t('mcp.state.failed', { error: statusOf(server)?.error ?? '' }) }}
@@ -331,7 +345,12 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
       <ul v-if="statusOf(server)?.tools?.length" class="mcp-tools">
         <li v-for="tool in statusOf(server)?.tools ?? []" :key="tool.name" class="mcp-tool">
           <div class="mcp-tool-text">
-            <DouText size="sm" class="mcp-tool-name">{{ tool.title ?? tool.name }}</DouText>
+            <DouText size="sm" truncate :title="tool.title">
+              <span class="mcp-tool-name">{{ tool.name }}</span>
+              <DouText v-if="tool.title" size="sm" variant="tertiary" class="mcp-tool-title">{{
+                tool.title
+              }}</DouText>
+            </DouText>
             <DouText
               v-if="tool.description"
               size="sm"
@@ -456,5 +475,9 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
 
 .mcp-tool-name {
   font-family: var(--dou-font-family-mono);
+}
+
+.mcp-tool-title {
+  margin-left: 8px;
 }
 </style>

@@ -23,6 +23,7 @@ export class StdioTransport implements Transport {
   private proc: ReturnType<typeof Bun.spawn<'pipe', 'pipe', 'pipe'>> | null = null
   private stderr = ''
   private closing = false
+  private onClose: ((reason: string) => void) | null = null
 
   constructor(private readonly options: StdioOptions) {}
 
@@ -51,11 +52,11 @@ export class StdioTransport implements Transport {
       )
     }
     this.proc = proc
+    this.onClose = onClose
     void this.readStderr(proc.stderr)
     void this.readLines(proc.stdout, onMessage)
     void proc.exited.then((code) => {
-      if (this.closing) return
-      onClose(`the process exited with code ${code}`)
+      if (!this.closing) this.end(`the process exited with code ${code}`)
     })
   }
 
@@ -79,6 +80,7 @@ export class StdioTransport implements Transport {
         }
         if (buffer.length > MAX_MESSAGE_BYTES) {
           buffer = ''
+          this.end(`the server sent a message over ${MAX_MESSAGE_BYTES / 1024 / 1024} MB`)
           void this.close()
           return
         }
@@ -86,6 +88,13 @@ export class StdioTransport implements Transport {
     } catch {
       // The process ended; `exited` reports it.
     }
+  }
+
+  /** The connection ended without `close()` being called: said once, before closing. */
+  private end(reason: string) {
+    const onClose = this.onClose
+    this.onClose = null
+    onClose?.(reason)
   }
 
   private async readStderr(stream: ReadableStream<Uint8Array>) {
@@ -116,6 +125,7 @@ export class StdioTransport implements Transport {
     const proc = this.proc
     if (!proc || this.closing) return
     this.closing = true
+    this.onClose = null
     try {
       await proc.stdin.end()
     } catch {

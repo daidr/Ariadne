@@ -38,17 +38,32 @@ export interface McpToolInfo {
   description?: string
   /** JSON Schema of the arguments; always an object schema. */
   inputSchema: Record<string, unknown>
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; title?: string }
+  annotations?: {
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+    title?: string
+  }
 }
 
 export type McpContent =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string }
   | { type: 'audio'; data: string; mimeType: string }
-  | { type: 'resource_link'; uri: string; name?: string; description?: string; mimeType?: string }
+  | {
+      type: 'resource_link'
+      uri: string
+      name?: string
+      description?: string
+      mimeType?: string
+    }
   | {
       type: 'resource'
-      resource: { uri: string; mimeType?: string; text?: string; blob?: string }
+      resource: {
+        uri: string
+        mimeType?: string
+        text?: string
+        blob?: string
+      }
     }
 
 /** What `tools/call` returns. */
@@ -71,6 +86,16 @@ export class McpRemoteError extends Error {
 /** The server could not be reached or broke the protocol; the connection is no use any more. */
 export class McpConnectionError extends Error {}
 
+/**
+ * An HTTP server no longer knows the session (it restarted, or the session expired). The
+ * request was not carried out; a new connection may send it again.
+ */
+export class McpSessionEndedError extends McpConnectionError {
+  constructor() {
+    super('the server ended the session')
+  }
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
@@ -87,7 +112,10 @@ export function parseMessage(text: string): JsonRpcMessage | null {
 }
 
 /** The tools of a `tools/list` page, leaving out entries that are not tools. */
-export function toolsOf(result: unknown): { tools: McpToolInfo[]; nextCursor?: string } {
+export function toolsOf(result: unknown): {
+  tools: McpToolInfo[]
+  nextCursor?: string
+} {
   if (!isObject(result) || !Array.isArray(result.tools)) {
     throw new McpConnectionError('tools/list answered without a list of tools')
   }

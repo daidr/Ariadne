@@ -13,7 +13,7 @@ import {
 } from './protocol'
 import type { Transport } from './transport'
 
-/** Starting up and listing tools may take this long; a server needing more is taken as broken. */
+/** One request while starting up may take this long. */
 export const SETUP_TIMEOUT_MS = 60_000
 /** A tool call may run this long before it is cancelled. */
 export const CALL_TIMEOUT_MS = 300_000
@@ -74,11 +74,15 @@ export class McpClient {
         clientInfo: CLIENT_INFO,
       },
       { signal, timeoutMs: SETUP_TIMEOUT_MS },
-    )) as { protocolVersion?: unknown; serverInfo?: { name?: unknown; version?: unknown } } | null
+    )) as {
+      protocolVersion?: unknown
+      serverInfo?: { name?: unknown; version?: unknown }
+    } | null
     const version = String(result?.protocolVersion ?? '')
     if (!(PROTOCOL_VERSIONS as readonly string[]).includes(version)) {
       await this.close()
-      throw new McpConnectionError(`the server speaks protocol version ${version || '(none)'}`)
+      // The server's own string is not repeated: it would reach the model unchecked.
+      throw new McpConnectionError('the server speaks no protocol version this client knows')
     }
     this.transport.setProtocolVersion?.(version)
     await this.notify('notifications/initialized')
@@ -116,7 +120,10 @@ export class McpClient {
       await this.request(
         'tools/call',
         { name, arguments: args },
-        { signal: options.signal, timeoutMs: options.timeoutMs ?? CALL_TIMEOUT_MS },
+        {
+          signal: options.signal,
+          timeoutMs: options.timeoutMs ?? CALL_TIMEOUT_MS,
+        },
       ),
     )
   }
@@ -145,7 +152,11 @@ export class McpClient {
           ),
         options.timeoutMs,
       )
-      const abort = () => giveUp(new DOMException('aborted', 'AbortError'), 'cancelled by the user')
+      // A signal aborted with a connection error (a deadline) fails with that error.
+      const abort = () =>
+        options.signal?.reason instanceof McpConnectionError
+          ? giveUp(options.signal.reason, 'timeout')
+          : giveUp(new DOMException('aborted', 'AbortError'), 'cancelled by the user')
       const finish = () => {
         clearTimeout(timer)
         options.signal?.removeEventListener('abort', abort)
@@ -154,7 +165,10 @@ export class McpClient {
       const giveUp = (error: Error, reason: string) => {
         if (!this.pending.has(id)) return
         finish()
-        void this.notify('notifications/cancelled', { requestId: id, reason }).catch(() => {})
+        void this.notify('notifications/cancelled', {
+          requestId: id,
+          reason,
+        }).catch(() => {})
         reject(error)
       }
       this.pending.set(id, {
@@ -180,7 +194,11 @@ export class McpClient {
 
   private notify(method: string, params?: Record<string, unknown>): Promise<void> {
     if (this.closedBecause !== null) return Promise.resolve()
-    return this.transport.send({ jsonrpc: '2.0', method, ...(params ? { params } : {}) })
+    return this.transport.send({
+      jsonrpc: '2.0',
+      method,
+      ...(params ? { params } : {}),
+    })
   }
 
   private receive(message: JsonRpcMessage) {
@@ -204,7 +222,10 @@ export class McpClient {
           : {
               jsonrpc: '2.0' as const,
               id: message.id,
-              error: { code: -32601, message: `${message.method} is not supported` },
+              error: {
+                code: -32601,
+                message: `${message.method} is not supported`,
+              },
             }
       void this.transport.send(reply).catch(() => {})
       return

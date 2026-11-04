@@ -2,6 +2,8 @@ import {
   HttpTransport,
   McpClient,
   McpConnectionError,
+  McpSessionEndedError,
+  SETUP_TIMEOUT_MS,
   StdioTransport,
   type McpToolInfo,
   type ServerInfo,
@@ -51,8 +53,15 @@ export interface McpServerStatus {
   tools: McpToolInfo[] | null
 }
 
-/** After a failure, a server is not tried again for this long, so turns do not wait on it. */
-export const RETRY_AFTER_MS = 30_000
+/** A turn waits this long for a server that is not ready yet; it starts without it after. */
+export const TURN_WAIT_MS = 5_000
+/** After a failure a server is not tried again for this long, doubling with each failure in a row. */
+export const RETRY_AFTER_MS = 60_000
+export const MAX_RETRY_AFTER_MS = 15 * 60_000
+
+/** How long a server that failed `count` times in a row is left alone. */
+export const retryAfter = (count: number) =>
+  Math.min(MAX_RETRY_AFTER_MS, RETRY_AFTER_MS * 2 ** Math.max(0, count - 1))
 
 /** What identifies a connection: everything but the tool marks, which change nothing on the wire. */
 const wireKey = (config: McpServerConfig) => {
@@ -94,6 +103,9 @@ export interface McpHubOptions {
   env: () => Record<string, string>
   /** Swaps the fetch of HTTP servers, for tests. */
   fetch?: typeof fetch
+  /** Swaps `TURN_WAIT_MS` and `SETUP_TIMEOUT_MS`, for tests. */
+  turnWaitMs?: number
+  setupTimeoutMs?: number
 }
 
 /**
@@ -102,7 +114,10 @@ export interface McpHubOptions {
  */
 export class McpHub {
   private readonly connections = new Map<string, Connection>()
-  private readonly failures = new Map<string, { at: number; error: string; log: string | null }>()
+  private readonly failures = new Map<
+    string,
+    { at: number; count: number; error: string; log: string | null }
+  >()
   private readonly lastTools = new Map<
     string,
     { key: string; tools: McpToolInfo[]; info: ServerInfo | null }
@@ -169,17 +184,28 @@ export class McpHub {
   }
 
   /**
-   * The server's tools, connecting first if needed; `null` when it cannot be reached (it
-   * failed a moment ago, or fails now). Waiting ends when `signal` aborts.
+   * The server's tools for a turn that is starting, connecting first if needed. It waits
+   * only a few seconds: a server that is slower brings no tools to this turn and goes on
+   * connecting for the next. `null` when it is not ready, failed or is left alone after
+   * failing.
    */
   async tools(config: McpServerConfig, signal?: AbortSignal): Promise<McpToolInfo[] | null> {
-    const connection = this.connections.get(config.id)
-    if (connection?.key === wireKey(config)) {
-      return abortable(connection.ready, signal).catch(() => null)
+    let connection = this.connections.get(config.id)
+    if (connection?.key !== wireKey(config)) {
+      const failure = this.failures.get(config.id)
+      if (failure && Date.now() - failure.at < retryAfter(failure.count)) return null
+      void this.connect(config).catch(() => {})
+      connection = this.connections.get(config.id)
     }
-    const failure = this.failures.get(config.id)
-    if (failure && Date.now() - failure.at < RETRY_AFTER_MS) return null
-    return abortable(this.connect(config), signal).catch(() => null)
+    if (!connection) return null
+    const wait = this.options.turnWaitMs ?? TURN_WAIT_MS
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), wait)
+    })
+    return abortable(Promise.race([connection.ready, late]), signal)
+      .catch(() => null)
+      .finally(() => clearTimeout(timer))
   }
 
   /** The live client of a server, connecting first if needed. */
@@ -219,12 +245,32 @@ export class McpHub {
     const client = new McpClient(transport)
     const secrets = secretsOf(config)
     const fail = (error: unknown) => {
+      // An HTTP session the server forgot is no failure: the next use opens a new one.
+      if (error instanceof McpSessionEndedError) return
       const log = transport instanceof StdioTransport ? transport.stderrTail() : ''
       this.failures.set(config.id, {
         at: Date.now(),
+        count: (this.failures.get(config.id)?.count ?? 0) + 1,
         error: redact(error instanceof Error ? error.message : String(error), secrets),
         log: log ? redact(log, secrets) : null,
       })
+    }
+    // Starting up and every page of tools share one deadline.
+    const setupMs = this.options.setupTimeoutMs ?? SETUP_TIMEOUT_MS
+    const setup = () => {
+      const deadline = new AbortController()
+      const timer = setTimeout(
+        () =>
+          deadline.abort(
+            new McpConnectionError(`not ready within ${Math.round(setupMs / 1000)} seconds`),
+          ),
+        setupMs,
+      )
+      return { signal: deadline.signal, done: () => clearTimeout(timer) }
+    }
+    const list = () => {
+      const { signal, done } = setup()
+      return client.listTools(signal).finally(done)
     }
     const connection: Connection = {
       key,
@@ -234,21 +280,33 @@ export class McpHub {
       ready: Promise.resolve([]),
     }
     connection.ready = (async () => {
-      await client.connect()
-      const tools = await client.listTools()
-      connection.tools = tools
-      this.lastTools.set(config.id, { key, tools, info: client.info })
-      return tools
+      const { signal, done } = setup()
+      try {
+        await client.connect(signal)
+        const tools = await client.listTools(signal)
+        connection.tools = tools
+        this.lastTools.set(config.id, { key, tools, info: client.info })
+        this.failures.delete(config.id)
+        return tools
+      } finally {
+        done()
+      }
     })()
     client.onClose((reason) => {
+      // Whatever the process left running in its group goes too.
+      void client.close().catch(() => {})
       if (this.connections.get(config.id) !== connection) return
       this.connections.delete(config.id)
-      fail(new Error(reason))
+      fail(
+        transport instanceof HttpTransport && transport.sessionEnded
+          ? new McpSessionEndedError()
+          : new Error(reason),
+      )
     })
     // A list that changed is read again on next use.
     client.onToolsChanged(() => {
       if (this.connections.get(config.id) !== connection) return
-      connection.ready = client.listTools().then((tools) => {
+      connection.ready = list().then((tools) => {
         connection.tools = tools
         this.lastTools.set(config.id, { key, tools, info: client.info })
         return tools
@@ -256,7 +314,6 @@ export class McpHub {
       connection.ready.catch(() => {})
     })
     this.connections.set(config.id, connection)
-    this.failures.delete(config.id)
     connection.ready.catch((error: unknown) => {
       if (this.connections.get(config.id) !== connection) return
       this.connections.delete(config.id)

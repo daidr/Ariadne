@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { McpClient } from './client'
 import { HttpTransport } from './http'
-import { McpConnectionError, McpRemoteError, type JsonRpcMessage } from './protocol'
+import {
+  McpConnectionError,
+  McpRemoteError,
+  McpSessionEndedError,
+  type JsonRpcMessage,
+} from './protocol'
 import { StdioTransport } from './stdio'
 import { createServer } from './test-server'
 
@@ -28,9 +33,22 @@ describe('stdio', () => {
   it('starts, lists every page of tools and calls them', async () => {
     const { client } = stdio({ SECRET_THING: 'shh' })
     const info = await client.connect()
-    expect(info).toEqual({ name: 'test-server', version: '1.0.0', protocolVersion: '2025-06-18' })
+    expect(info).toEqual({
+      name: 'test-server',
+      version: '1.0.0',
+      protocolVersion: '2025-06-18',
+    })
     const tools = await client.listTools()
-    expect(tools.map((t) => t.name)).toEqual(['echo', 'env', 'picture', 'fail', 'slow', 'grow'])
+    expect(tools.map((t) => t.name)).toEqual([
+      'echo',
+      'env',
+      'picture',
+      'fail',
+      'slow',
+      'grow',
+      'flood',
+      'refuse',
+    ])
     expect(tools[0]?.annotations?.readOnlyHint).toBe(true)
     expect(await client.callTool('echo', { text: 'hi' })).toEqual({
       content: [{ type: 'text', text: 'hi' }],
@@ -72,7 +90,18 @@ describe('stdio', () => {
 
   it('refuses a protocol version it does not speak', async () => {
     const { client } = stdio({ TEST_MCP_VERSION: '1999-01-01' })
-    await expect(client.connect()).rejects.toThrow('1999-01-01')
+    const failure = client.connect()
+    await expect(failure).rejects.toThrow('no protocol version')
+    await expect(failure).rejects.not.toThrow('1999')
+  })
+
+  it('ends the connection, and says so, when a message is too large', async () => {
+    const { client } = stdio()
+    await client.connect()
+    const closed = new Promise<string>((resolve) => client.onClose(resolve))
+    await expect(client.callTool('flood', {})).rejects.toThrow('over 20 MB')
+    expect(await closed).toContain('over 20 MB')
+    expect(client.closed).toBe(true)
   })
 
   it('reports a process that exits, with what it wrote to stderr', async () => {
@@ -104,7 +133,11 @@ describe('http', () => {
   })
 
   function serve() {
-    const seen: { headers: Headers; body: JsonRpcMessage | null; method: string }[] = []
+    const seen: {
+      headers: Headers
+      body: JsonRpcMessage | null
+      method: string
+    }[] = []
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
@@ -140,7 +173,7 @@ describe('http', () => {
     )
     open.push(client)
     await client.connect()
-    expect((await client.listTools()).length).toBe(6)
+    expect((await client.listTools()).length).toBe(8)
     const result = await client.callTool('picture', {})
     expect(result.content.map((c) => c.type)).toEqual(['text', 'image'])
     await client.close()
@@ -150,6 +183,28 @@ describe('http', () => {
     expect(later.every((s) => s.headers.get('mcp-session-id') === 'session-1')).toBe(true)
     expect(later.every((s) => s.headers.get('mcp-protocol-version') === '2025-06-18')).toBe(true)
     expect(seen.at(-1)?.method).toBe('DELETE')
+  })
+
+  it('tells a session the server forgot from other failures', async () => {
+    const { url } = serve()
+    let forget = false
+    const transport = new HttpTransport({
+      url,
+      headers: { authorization: 'Bearer key' },
+      fetch: (async (input: string | URL | Request, init?: RequestInit) =>
+        forget && init?.method === 'POST'
+          ? new Response('gone', { status: 404 })
+          : fetch(input, init)) as typeof fetch,
+    })
+    const client = new McpClient(transport)
+    open.push(client)
+    await client.connect()
+    forget = true
+    await expect(client.callTool('echo', { text: 'a' })).rejects.toBeInstanceOf(
+      McpSessionEndedError,
+    )
+    expect(transport.sessionEnded).toBe(true)
+    expect(client.closed).toBe(true)
   })
 
   it('reports a refused request without the server text', async () => {

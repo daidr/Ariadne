@@ -3,6 +3,7 @@ export { HttpTransport, type HttpOptions } from './http'
 export {
   McpConnectionError,
   McpRemoteError,
+  McpSessionEndedError,
   PROTOCOL_VERSIONS,
   type McpContent,
   type McpToolInfo,

@@ -1,5 +1,10 @@
 import { readServerSentEvents } from '@ariadne/plugin-sdk'
-import { McpConnectionError, parseMessage, type JsonRpcMessage } from './protocol'
+import {
+  McpConnectionError,
+  McpSessionEndedError,
+  parseMessage,
+  type JsonRpcMessage,
+} from './protocol'
 import { MAX_MESSAGE_BYTES, type Transport } from './transport'
 
 export interface HttpOptions {
@@ -32,8 +37,11 @@ async function readLimited(body: ReadableStream<Uint8Array> | null, max: number)
  */
 export class HttpTransport implements Transport {
   private session: string | null = null
+  /** The server answered that it no longer knows the session. */
+  sessionEnded = false
   private version: string | null = null
   private onMessage: ((message: JsonRpcMessage) => void) | null = null
+  private onClose: ((reason: string) => void) | null = null
   private readonly abort = new AbortController()
   private readonly fetch: typeof fetch
 
@@ -41,8 +49,12 @@ export class HttpTransport implements Transport {
     this.fetch = options.fetch ?? fetch
   }
 
-  async start(onMessage: (message: JsonRpcMessage) => void): Promise<void> {
+  async start(
+    onMessage: (message: JsonRpcMessage) => void,
+    onClose: (reason: string) => void,
+  ): Promise<void> {
     this.onMessage = onMessage
+    this.onClose = onClose
   }
 
   setProtocolVersion(version: string): void {
@@ -83,11 +95,11 @@ export class HttpTransport implements Transport {
     }
     if (!response.ok) {
       await response.body?.cancel()
-      throw new McpConnectionError(
-        response.status === 404 && this.session
-          ? 'the server ended the session'
-          : `the server answered HTTP ${response.status}`,
-      )
+      if (response.status === 404 && this.session) {
+        this.sessionEnded = true
+        throw new McpSessionEndedError()
+      }
+      throw new McpConnectionError(`the server answered HTTP ${response.status}`)
     }
     const type = response.headers.get('content-type') ?? ''
     if (type.includes('text/event-stream')) {
@@ -113,7 +125,11 @@ export class HttpTransport implements Transport {
     if (!body) return
     try {
       for await (const event of readServerSentEvents(body)) {
-        if (event.data.length > MAX_MESSAGE_BYTES) break
+        if (event.data.length > MAX_MESSAGE_BYTES) {
+          // The answer it held is lost, so the connection is no use any more.
+          this.end('the server answered with too much data')
+          return
+        }
         const message = parseMessage(event.data)
         if (message) this.onMessage?.(message)
       }
@@ -122,8 +138,15 @@ export class HttpTransport implements Transport {
     }
   }
 
+  private end(reason: string) {
+    const onClose = this.onClose
+    this.onClose = null
+    onClose?.(reason)
+  }
+
   async close(): Promise<void> {
     if (this.abort.signal.aborted) return
+    this.onClose = null
     this.abort.abort()
     if (!this.session) return
     // Tell the server the session is over; it may not support it, which is fine.
