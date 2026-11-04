@@ -7,6 +7,7 @@ import {
   RepoWatcher,
   Scheduler,
   WorkspaceManager,
+  WorktreeJanitor,
 } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
@@ -78,8 +79,11 @@ const scheduler = new Scheduler({
   reservedSlots: settings.current.concurrency.reserved,
   dashboardSources: host.dashboards,
 })
+// Worktrees of work that landed go once the thread is finished with them.
+const janitor = new WorktreeJanitor(app, workspaces)
 scheduler.start()
 watcher.start()
+janitor.start()
 
 const server = Bun.serve({
   hostname: config.hostname,
@@ -103,6 +107,7 @@ async function shutdown() {
   server.stop()
   // Running turns end as interrupted and resume on the next start.
   await watcher.stop()
+  await janitor.stop()
   await scheduler.stop()
   await workspaces.dispose()
   await host.unloadAll()

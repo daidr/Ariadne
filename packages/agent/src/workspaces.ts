@@ -1,5 +1,6 @@
 import { DomainError, type Ariadne } from '@ariadne/core'
 import type {
+  BranchCapability,
   Capabilities,
   RepoCapability,
   TrackerCapability,
@@ -65,14 +66,20 @@ export class WorkspaceManager {
     const key = this.sourceKey(projectId)
     const cached = this.open.get(threadId)
     if (cached?.key === key) return cached.workspace
+    // A workspace opened before keeps the base it started from.
+    const known = this.app.getThread(threadId).workspace
     const workspace = this.connect(projectId, key).then((capabilities) => {
       if (!capabilities.workspace) throw new DomainError('error.noSource')
-      return capabilities.workspace.open({ threadId })
+      return capabilities.workspace.open({ threadId, ...(known ? { base: known.base } : {}) })
     })
     this.open.set(threadId, { key, workspace })
     try {
       const ready = await workspace
-      this.app.recordWorkspace(threadId, { label: ready.label, branch: ready.branch })
+      this.app.recordWorkspace(threadId, {
+        label: ready.label,
+        branch: ready.branch,
+        base: ready.base,
+      })
       return ready
     } catch (error) {
       this.open.delete(threadId)
@@ -81,6 +88,33 @@ export class WorkspaceManager {
         detail: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+
+  /** The project's threads' branches and worktrees; `null` when they are not git worktrees. */
+  async branches(projectId: string): Promise<BranchCapability | null> {
+    if (!this.available(projectId)) return null
+    const capabilities = await this.connect(projectId, this.sourceKey(projectId))
+    return capabilities.workspace?.branches ?? null
+  }
+
+  /**
+   * Remove the thread's worktree, keeping its branch, and record it. The next use opens it
+   * again. One with changes not committed stays: `false`.
+   */
+  async removeWorktree(
+    projectId: string,
+    threadId: string,
+    reason: 'merged' | 'user',
+  ): Promise<boolean> {
+    const branches = await this.branches(projectId)
+    if (!branches) return false
+    const open = this.open.get(threadId)
+    this.open.delete(threadId)
+    if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
+    const removed = await branches.remove(threadId)
+    const known = this.app.listThreads(projectId).some((thread) => thread.id === threadId)
+    if (removed && known) this.app.recordWorktreeRemoved(threadId, reason)
+    return removed
   }
 
   async dispose(): Promise<void> {

@@ -353,10 +353,21 @@ describe('project source', () => {
 
   test('a thread remembers its workspace', () => {
     const thread = app.createThread(projectId, { title: 'x' })
-    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x' })
-    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x' })
-    expect(app.getThread(thread.id).workspace).toEqual({ label: '/w/x', branch: 'ariadne/x' })
+    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x', base: 'main' })
+    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x', base: 'main' })
+    expect(app.getThread(thread.id).workspace).toEqual({
+      label: '/w/x',
+      branch: 'ariadne/x',
+      base: 'main',
+      removed: false,
+    })
     expect(app.events({ projectId }).filter((e) => e.type === 'workspace.opened')).toHaveLength(1)
+    // A removed worktree comes back as a new record when it is opened again.
+    app.recordWorktreeRemoved(thread.id, 'merged')
+    expect(app.getThread(thread.id).workspace?.removed).toBe(true)
+    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x', base: 'main' })
+    expect(app.getThread(thread.id).workspace?.removed).toBe(false)
+    expect(app.events({ projectId }).filter((e) => e.type === 'workspace.opened')).toHaveLength(2)
   })
 })
 

@@ -6,10 +6,31 @@ import {
   type Workspace,
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
-import { branchFor } from '@ariadne/plugin-local'
+import {
+  branchChanges,
+  branchFor,
+  branchMerged,
+  fileVersions,
+  gitIdentity,
+  mergeBranch,
+  removeWorktree,
+  type GitRun,
+} from '@ariadne/plugin-local'
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
-import { EXEC, LIST, OPEN_WORKTREE, OUTSIDE, PROBE, READ, STARTED, WRITE } from './scripts'
+import {
+  EXEC,
+  EXISTS,
+  GIT,
+  LIST,
+  OPEN_WORKTREE,
+  OUTSIDE,
+  PROBE,
+  READ,
+  STARTED,
+  WORKTREES,
+  WRITE,
+} from './scripts'
 import { SSH_FAILED, SshShell, type RemoteShell } from './transport'
 
 export { LocalShell, SshShell, type RemoteShell } from './transport'
@@ -57,6 +78,7 @@ export class RemoteWorkspace implements Workspace {
     /** The real path of the root on the remote machine. */
     readonly root: string,
     readonly branch: string | null,
+    readonly base: string | null = null,
   ) {}
 
   get label(): string {
@@ -143,14 +165,65 @@ async function probe(shell: RemoteShell, path: string): Promise<Probe> {
  * each other's changes; any other directory is shared by all threads as it is.
  */
 export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCapability {
+  const { repoRoot } = source
+  if (!repoRoot) {
+    return {
+      isolated: false,
+      open: async ({ threadId }) => new RemoteWorkspace(threadId, shell, source.path, null),
+    }
+  }
+  const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
+  const worktrees = posix.join(source.home, WORKTREE_DIR, key)
+  const dirOf = (threadId: string) => posix.join(worktrees, threadId)
+  const git: GitRun = (args, options = {}) =>
+    shell.run(GIT, [options.cwd ?? repoRoot, ...args], {
+      timeoutMs: 120_000,
+      ...(options.whole ? {} : { clip: true }),
+    })
+  const exists = async (path: string) => (await shell.run(EXISTS, [path])).exitCode === 0
+  // The remote user's own identity, as their git there would commit.
+  const identity = gitIdentity((name) => git(['config', '--get', name]))
   return {
-    isolated: source.repoRoot !== null,
-    async open({ threadId, ref }) {
-      const { repoRoot } = source
-      if (!repoRoot) return new RemoteWorkspace(threadId, shell, source.path, null)
+    isolated: true,
+    branches: {
+      async changes(threadId, base) {
+        const dir = dirOf(threadId)
+        return branchChanges(git, {
+          branch: branchFor(threadId),
+          base,
+          baseRef: `refs/heads/${base}`,
+          worktree: (await exists(dir)) ? dir : null,
+        })
+      },
+      file: (request) => fileVersions(git, request),
+      merged: (threadId, base) => branchMerged(git, branchFor(threadId), `refs/heads/${base}`),
+      merge: ({ threadId, ...request }) =>
+        mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
+      remove: (threadId) => removeWorktree(git, dirOf(threadId), exists),
+      async worktrees() {
+        const result = await shell.run(WORKTREES, [worktrees], { timeoutMs: 120_000 })
+        if (result.exitCode !== 0) throw failure(worktrees, result)
+        const fields = result.stdout.split('\0')
+        const list = []
+        for (let i = 0; i + 2 < fields.length; i += 3) {
+          const kib = Number.parseInt(fields[i + 2]!, 10)
+          list.push({
+            threadId: fields[i]!,
+            path: `${shell.host}:${fields[i + 1]!}`,
+            bytes: Number.isFinite(kib) ? kib * 1024 : null,
+          })
+        }
+        return list
+      },
+    },
+    async open({ threadId, ref, base: recorded }) {
       const branch = branchFor(threadId)
-      const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
-      const dir = posix.join(source.home, WORKTREE_DIR, key, threadId)
+      const dir = dirOf(threadId)
+      let base = recorded ?? null
+      if (recorded === undefined) {
+        const head = await git(['symbolic-ref', '--quiet', '--short', 'HEAD'])
+        base = head.exitCode === 0 ? head.stdout.trim() || null : null
+      }
       const result = await shell.run(
         OPEN_WORKTREE,
         [repoRoot, dir, branch, ref || 'HEAD', source.sub],
@@ -158,7 +231,7 @@ export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCa
       )
       if (result.exitCode !== 0) throw failure(dir, result)
       const root = result.stdout.split('\0')[0] || dir
-      return new RemoteWorkspace(threadId, shell, root, branch)
+      return new RemoteWorkspace(threadId, shell, root, branch, base)
     },
   }
 }

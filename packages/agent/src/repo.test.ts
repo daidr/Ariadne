@@ -78,6 +78,7 @@ const workspace: Workspace = {
   id: 'w',
   label: '/work/thread',
   branch: 'ariadne/thread',
+  base: 'main',
   readFile: async () => '',
   writeFile: async () => {},
   list: async () => [],

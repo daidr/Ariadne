@@ -235,3 +235,52 @@ describe('remote directory', () => {
     )
   })
 })
+
+describe('ssh branches', () => {
+  test('changes, squash merge into the checkout, conflicts and removing a worktree', async () => {
+    const dir = await repo()
+    const git = async (...args: string[]) =>
+      (await run(['git', ...args], { cwd: dir })).stdout.trim()
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect(ws.base).toBe('main')
+    await ws.exec('echo a > a.txt && git add . && git commit -qm a && echo wip > wip.txt')
+    const branches = workspace!.branches!
+
+    const changes = (await branches.changes('thr_a', 'main'))!
+    expect(changes.files.map((f) => f.path)).toEqual(['a.txt'])
+    expect(changes.uncommitted).toEqual(['wip.txt'])
+    expect(
+      await branches.file({
+        from: changes.from,
+        head: changes.head,
+        path: 'a.txt',
+        previousPath: null,
+      }),
+    ).toEqual({ before: null, after: 'a\n', skipped: null })
+
+    const outcome = await branches.merge!({
+      threadId: 'thr_a',
+      base: 'main',
+      method: 'squash',
+      message: 'Add a',
+    })
+    expect(outcome.kind).toBe('merged')
+    expect(await git('log', '-1', '--format=%s')).toBe('Add a')
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('a\n')
+
+    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await writeFile(join(dir, 'README.md'), 'user\n')
+    await git('commit', '-qam', 'user')
+    expect(
+      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+    ).toEqual({ kind: 'conflict', files: ['README.md'] })
+
+    expect((await branches.worktrees()).map((w) => w.threadId)).toEqual(['thr_a'])
+    expect(await branches.remove('thr_a')).toBe(false)
+    await ws.exec('rm wip.txt')
+    expect(await branches.remove('thr_a')).toBe(true)
+    expect(await branches.worktrees()).toEqual([])
+    expect(await git('branch', '--list', 'ariadne/thr_a')).toContain('ariadne/thr_a')
+  })
+})

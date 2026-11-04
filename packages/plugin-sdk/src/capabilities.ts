@@ -21,6 +21,11 @@ export interface Workspace {
   /** The branch the workspace works on, when it is a checkout of a repository. */
   branch: string | null
   /**
+   * The branch `branch` started from and is compared and merged against, e.g. `main`;
+   * `null` when there is none (not a repository, or the checkout was on no branch).
+   */
+  base: string | null
+  /**
    * Paths are relative to the workspace root. Implementations refuse paths that leave it,
    * including through symbolic links, with a `WorkspacePathError`.
    */
@@ -39,12 +44,108 @@ export interface WorkspaceRequest {
   threadId: string
   /** Check out this branch or ref, when the source is a repository. */
   ref?: string
+  /**
+   * The base recorded when the workspace was first opened. A workspace opened again (after
+   * a restart, or once its worktree was removed) keeps it rather than taking whatever the
+   * checkout is on now.
+   */
+  base?: string | null
 }
 
 export interface WorkspaceCapability {
   /** Whether two threads can work at the same time without seeing each other's changes. */
   isolated: boolean
   open(request: WorkspaceRequest): Promise<Workspace>
+  /** Threads' branches and worktrees, when workspaces are worktrees of a git repository. */
+  branches?: BranchCapability
+}
+
+export type ChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
+
+/** One file a branch changed against its base. */
+export interface ChangedFile {
+  path: string
+  /** Where a renamed or copied file came from. */
+  previousPath: string | null
+  status: ChangedFileStatus
+  /** Lines added and removed; `null` for a binary file. */
+  added: number | null
+  removed: number | null
+}
+
+/** What a thread's branch changed, from where it left its base to its newest commit. */
+export interface BranchChanges {
+  branch: string
+  base: string
+  /** The commit the branch is compared against: the newest one it shares with the base. */
+  from: string
+  /** The branch's newest commit. */
+  head: string
+  /** Commits on the branch the base does not have, newest first (at most 100). */
+  commits: { sha: string; subject: string }[]
+  files: ChangedFile[]
+  /** Files changed in the worktree and not committed: not part of the changes or a merge. */
+  uncommitted: string[]
+}
+
+/** A file before and after: `null` where it does not exist. */
+export interface FileVersions {
+  before: string | null
+  after: string | null
+  /** Not text, or too large to show: the contents are left out. */
+  skipped: 'binary' | 'large' | null
+}
+
+export type MergeMethod = 'squash' | 'merge'
+
+export type MergeOutcome =
+  /** The base now ends with `sha`, which takes in the branch up to `head`. */
+  | { kind: 'merged'; sha: string; head: string }
+  /** Nothing merged: these files changed on both sides. */
+  | { kind: 'conflict'; files: string[] }
+  /** The base already has everything the branch has. */
+  | { kind: 'empty' }
+
+/** A thread's worktree on disk. */
+export interface WorktreeInfo {
+  threadId: string
+  path: string
+  /** Space it takes, when it could be measured. */
+  bytes: number | null
+}
+
+/**
+ * Threads' branches in the repository their worktrees belong to. Branches stay when a
+ * worktree is removed: they hold the work, and opening the workspace again checks one out.
+ */
+export interface BranchCapability {
+  /** `null` when the thread has no branch yet. */
+  changes(threadId: string, base: string): Promise<BranchChanges | null>
+  /** A changed file at `from` (as `previousPath` when renamed) and at `head`. */
+  file(input: {
+    from: string
+    head: string
+    path: string
+    previousPath: string | null
+  }): Promise<FileVersions>
+  /** Whether the base already has the branch's newest commit, e.g. merged by hand. */
+  merged(threadId: string, base: string): Promise<boolean>
+  /**
+   * Bring the branch into the base without touching the thread's worktree. Left out where
+   * branches reach the base another way, e.g. through pull requests.
+   */
+  merge?(input: {
+    threadId: string
+    base: string
+    method: MergeMethod
+    message: string
+  }): Promise<MergeOutcome>
+  /**
+   * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
+   * stays: `false`.
+   */
+  remove(threadId: string): Promise<boolean>
+  worktrees(): Promise<WorktreeInfo[]>
 }
 
 export interface PullRequestInfo {
@@ -165,5 +266,24 @@ export class WorkspacePathError extends Error {
   constructor(readonly path: string) {
     super(`${path} is outside the workspace`)
     this.name = 'WorkspacePathError'
+  }
+}
+
+/**
+ * Why a merge did not happen, for reasons the user can act on:
+ * - `checkout`: the base is checked out and the files there stand in the way (changes not
+ *   committed to the same files), or the checkout moved on meanwhile.
+ * - `base-moved`: the base got new commits while merging; trying again takes them in.
+ * - `identity`: git has no `user.name` or `user.email` to write the commit with.
+ * - `git-version`: git is too old to merge without a working tree (2.38 or later).
+ * - `no-base`: the base branch is gone.
+ */
+export class MergeRefused extends Error {
+  constructor(
+    readonly reason: 'checkout' | 'base-moved' | 'identity' | 'git-version' | 'no-base',
+    readonly detail: string,
+  ) {
+    super(`merge refused (${reason}): ${detail}`)
+    this.name = 'MergeRefused'
   }
 }

@@ -1,0 +1,192 @@
+import { Ariadne } from '@ariadne/core'
+import { PluginHost, WorkspaceManager, WorktreeJanitor } from '@ariadne/agent'
+import { localDirectoryProvider, run } from '@ariadne/plugin-local'
+import type { ContextProvider } from '@ariadne/plugin-sdk'
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { createHandler } from './app'
+
+const token = 'test-token'
+let base: string
+let app: Ariadne
+let workspaces: WorkspaceManager
+let handle: ReturnType<typeof createHandler>
+
+beforeEach(async () => {
+  base = await mkdtemp(join(tmpdir(), 'ariadne-merge-'))
+  app = new Ariadne({ path: ':memory:' })
+  const host = new PluginHost(join(base, 'plugins'))
+  await host.load({
+    id: 'local',
+    name: { 'zh-CN': '本地目录' },
+    setup: (ctx) =>
+      ctx.registerContextProvider(
+        localDirectoryProvider(join(base, 'data'), undefined, null) as ContextProvider<never>,
+      ),
+  })
+  workspaces = new WorkspaceManager(app, host)
+  handle = createHandler({ app, token, workspaces })
+})
+
+afterEach(async () => {
+  app.close()
+  await rm(base, { recursive: true, force: true })
+})
+
+function call(path: string, init: Omit<RequestInit, 'body'> & { body?: unknown } = {}) {
+  const headers = new Headers(init.headers)
+  headers.set('authorization', `Bearer ${token}`)
+  const body = init.body === undefined ? undefined : JSON.stringify(init.body)
+  if (body) headers.set('content-type', 'application/json')
+  return handle(new Request(`http://127.0.0.1${path}`, { ...init, headers, body }))
+}
+
+const git = async (cwd: string, ...args: string[]) =>
+  (await run(['git', ...args], { cwd })).stdout.trim()
+
+/** A project on a fresh repository, with a thread that committed `a.txt` on its branch. */
+async function setup() {
+  const dir = join(base, 'repo')
+  await run(['mkdir', '-p', dir], { cwd: base })
+  await git(dir, 'init', '-q', '-b', 'main')
+  await git(dir, 'config', 'user.email', 'test@example.com')
+  await git(dir, 'config', 'user.name', 'test')
+  await writeFile(join(dir, 'README.md'), '# repo\n')
+  await git(dir, 'add', '.')
+  await git(dir, 'commit', '-qm', 'init')
+  const project = app.createProject('P')
+  app.setProjectSource(project.id, { kind: 'local-directory', settings: { path: dir } })
+  const thread = app.createThread(project.id, { title: '加一个文件' })
+  app.startThread(thread.id)
+  const ws = await workspaces.forThread(project.id, thread.id)
+  await ws.exec('echo a > a.txt && git add . && git commit -qm a')
+  return { dir, project, thread, ws }
+}
+
+describe('thread changes', () => {
+  test('the user sees the changes and squash-merges them; the coordinator hears of it', async () => {
+    const { dir, project, thread } = await setup()
+    expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })
+
+    const listed = await (await call(`/api/threads/${thread.id}/changes`)).json()
+    expect(listed.mergeable).toBe(true)
+    expect(listed.changes.files.map((f: { path: string }) => f.path)).toEqual(['a.txt'])
+    const query = new URLSearchParams({
+      from: listed.changes.from,
+      head: listed.changes.head,
+      path: 'a.txt',
+    })
+    const file = await (await call(`/api/threads/${thread.id}/changes/file?${query}`)).json()
+    expect(file.file).toEqual({ before: null, after: 'a\n', skipped: null })
+    const bad = await call(`/api/threads/${thread.id}/changes/file?from=HEAD&head=x&path=a`)
+    expect(bad.status).toBe(400)
+
+    const merged = await call(`/api/threads/${thread.id}/merge`, {
+      method: 'POST',
+      body: { message: '' },
+    })
+    const body = await merged.json()
+    expect(body.outcome.kind).toBe('merged')
+    // An empty message takes the thread's title.
+    expect(await git(dir, 'log', '-1', '--format=%s')).toBe('加一个文件')
+    expect(body.thread.merged).toMatchObject({ base: 'main', method: 'squash' })
+
+    const coordinator = app.listTranscript(project.coordinatorId)
+    expect(coordinator.at(-1)).toMatchObject({ kind: 'note', note: { type: 'branch-merged' } })
+    expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
+    // The thread reads it next time it works, without being woken for it.
+    expect(app.getConversation(thread.id).pendingSeq).toBe(0)
+    expect(app.listNotices(thread.id).map((n) => n.kind)).toEqual(['merged'])
+  })
+
+  test('a conflict merges nothing and wakes the thread to resolve it', async () => {
+    const { dir, thread, ws } = await setup()
+    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await writeFile(join(dir, 'README.md'), 'user\n')
+    await git(dir, 'commit', '-qam', 'user')
+    const response = await call(`/api/threads/${thread.id}/merge`, {
+      method: 'POST',
+      body: { method: 'merge', message: 'x' },
+    })
+    expect((await response.json()).outcome).toEqual({ kind: 'conflict', files: ['README.md'] })
+    expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'merge-conflict', base: 'main', files: ['README.md'] },
+    })
+    expect(app.getConversation(thread.id).pendingSeq).toBeGreaterThan(0)
+    expect(app.getThread(thread.id).merged).toBeNull()
+  })
+
+  test('refusals: a bad method, a dirty checkout, a thread at work', async () => {
+    const { dir, thread, ws } = await setup()
+    const merge = (body: unknown) =>
+      call(`/api/threads/${thread.id}/merge`, { method: 'POST', body })
+    expect((await merge({ method: 'rebase' })).status).toBe(400)
+
+    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await writeFile(join(dir, 'README.md'), 'not committed\n')
+    const dirty = await (await merge({})).json()
+    expect(dirty.error.key).toBe('error.merge.checkout')
+  })
+
+  test('once merged and the thread is finished, its worktree goes and comes back on use', async () => {
+    const { project, thread, ws } = await setup()
+    const janitor = new WorktreeJanitor(app, workspaces, { delayMs: 0 })
+    await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    // Still at work: kept.
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    app.reportThread(thread.id, 'ready', '好了')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(false)
+    expect(app.getThread(thread.id).workspace?.removed).toBe(true)
+    expect(app.listNotices(thread.id).map((n) => n.kind)).toEqual(['merged', 'worktree-removed'])
+
+    const again = await workspaces.forThread(project.id, thread.id)
+    expect(existsSync(again.label)).toBe(true)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })
+    await janitor.stop()
+  })
+
+  test('a branch merged by hand counts; one with new commits after the merge does not', async () => {
+    const { dir, thread, ws } = await setup()
+    const janitor = new WorktreeJanitor(app, workspaces, { delayMs: 0 })
+    await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    await ws.exec('echo b > b.txt && git add . && git commit -qm b')
+    app.reportThread(thread.id, 'done', '完成')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    await git(dir, 'merge', '-q', '--no-edit', 'ariadne/' + thread.id.slice(-12))
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(false)
+  })
+
+  test('the settings list worktrees and remove one; one not committed stays', async () => {
+    const { project, thread, ws } = await setup()
+    const listed = await (await call('/api/worktrees')).json()
+    expect(listed.projects).toHaveLength(1)
+    expect(listed.projects[0].worktrees[0]).toMatchObject({
+      threadId: thread.id,
+      thread: { id: thread.id },
+    })
+    await ws.exec('echo wip > wip.txt')
+    const path = `/api/projects/${project.id}/worktrees/${thread.id}`
+    expect((await (await call(path, { method: 'DELETE' })).json()).error.key).toBe(
+      'error.worktreeDirty',
+    )
+    await ws.exec('rm wip.txt')
+    expect((await call(path, { method: 'DELETE' })).status).toBe(204)
+    expect(app.listNotices(thread.id).at(-1)).toMatchObject({
+      kind: 'worktree-removed',
+      reason: 'user',
+    })
+    expect(
+      (await call(`/api/projects/${project.id}/worktrees/a.b`, { method: 'DELETE' })).status,
+    ).toBe(400)
+  })
+})

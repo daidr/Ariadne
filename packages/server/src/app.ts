@@ -1,6 +1,10 @@
 import {
+  listWorktrees,
+  mergeThread,
   refreshDashboard,
   syncThreadPullRequest,
+  threadChanges,
+  threadFile,
   type PluginHost,
   type Scheduler,
   type WorkspaceManager,
@@ -267,6 +271,68 @@ export function createHandler({
         await syncThreadPullRequest(app, await workspaces.repo(thread.projectId), threadId)
       }
       return json({ thread: app.getThread(threadId) })
+    },
+  )
+
+  // What the thread's branch changed against its base, file by file.
+  add('GET', '/api/threads/:threadId/changes', async (_request, { threadId = '' }) => {
+    if (!workspaces) return json({ changes: null, mergeable: false })
+    return json(await threadChanges(app, workspaces, threadId))
+  })
+
+  // One changed file before and after; `from` and `head` come from the changes.
+  add('GET', '/api/threads/:threadId/changes/file', async (_request, { threadId = '' }, url) => {
+    if (!workspaces) throw new DomainError('error.noBranch')
+    const commit = (name: string) => {
+      const value = url.searchParams.get(name) ?? ''
+      if (!/^[0-9a-f]{40,64}$/.test(value)) throw new BadRequest(name)
+      return value
+    }
+    const path = url.searchParams.get('path')
+    if (!path) throw new BadRequest('path')
+    return json({
+      file: await threadFile(app, workspaces, threadId, {
+        from: commit('from'),
+        head: commit('head'),
+        path,
+        previousPath: url.searchParams.get('previousPath') || null,
+      }),
+    })
+  })
+
+  // The user merges the thread's branch into its base.
+  add('POST', '/api/threads/:threadId/merge', async (request, { threadId = '' }) => {
+    if (!workspaces) throw new DomainError('error.merge.unsupported')
+    const body = await readJson(request)
+    const method = body.method ?? 'squash'
+    if (method !== 'squash' && method !== 'merge') throw new BadRequest('method')
+    const message = typeof body.message === 'string' ? body.message : ''
+    return json(await mergeThread(app, workspaces, threadId, { method, message }))
+  })
+
+  // Threads' worktrees across projects, with the space they take.
+  add('GET', '/api/worktrees', async () =>
+    json({ projects: workspaces ? await listWorktrees(app, workspaces) : [] }),
+  )
+
+  // The user removes a thread's worktree, or one left from a thread Ariadne no longer
+  // knows; the branch stays.
+  add(
+    'DELETE',
+    '/api/projects/:projectId/worktrees/:threadId',
+    async (_request, { projectId = '', threadId = '' }) => {
+      app.getProject(projectId)
+      if (!/^[\w-]+$/.test(threadId)) throw new BadRequest('threadId')
+      const known = app.listThreads(projectId).some((item) => item.id === threadId)
+      // A command running in it right now would lose its directory.
+      if (known && app.getConversation(threadId).turn) {
+        throw new DomainError('error.merge.working')
+      }
+      const removed = workspaces
+        ? await workspaces.removeWorktree(projectId, threadId, 'user')
+        : false
+      if (!removed) throw new DomainError('error.worktreeDirty')
+      return new Response(null, { status: 204 })
     },
   )
 

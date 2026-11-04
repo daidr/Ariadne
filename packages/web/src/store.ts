@@ -21,6 +21,8 @@ export type MainView =
   | { kind: 'plan' }
   | { kind: 'artifacts' }
   | { kind: 'artifact'; id: string }
+  /** What a thread's branch changed, with merging it. */
+  | { kind: 'changes'; threadId: string }
 
 /** One conversation as shown on screen: the coordinator's, or the open thread's. */
 export interface ConversationState {

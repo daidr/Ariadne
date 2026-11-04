@@ -5,6 +5,7 @@ import type {
   AnyNewEvent,
   AnyStoredEvent,
   ArtifactKind,
+  BranchMerge,
   AttentionOption,
   Author,
   IssueWrite,
@@ -59,7 +60,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 18
+export const PROJECTION_VERSION = 19
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -183,8 +184,12 @@ interface ThreadRow {
   started: number
   last_report: ReportKind | null
   last_summary: string | null
+  reported_at: number | null
   workspace_label: string | null
   workspace_branch: string | null
+  workspace_base: string | null
+  workspace_removed: number
+  merged: string | null
   pull_request: string | null
   check_failures: number
   stopped_reason: string | null
@@ -228,6 +233,8 @@ const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, (
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
 
 function toThread(row: ThreadRow): ThreadView {
+  const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
+  const pullRequest = row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null
   return {
     id: row.id,
     projectId: row.project_id,
@@ -242,14 +249,21 @@ function toThread(row: ThreadRow): ThreadView {
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
       checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
       stopped: row.stopped_reason !== null,
+      landed: (!!merged && merged.at >= (row.reported_at ?? 0)) || pullRequest?.state === 'merged',
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
     workspace:
       row.workspace_label === null
         ? null
-        : { label: row.workspace_label, branch: row.workspace_branch },
-    pullRequest: row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null,
+        : {
+            label: row.workspace_label,
+            branch: row.workspace_branch,
+            base: row.workspace_base,
+            removed: row.workspace_removed === 1,
+          },
+    merged,
+    pullRequest,
     stopped:
       row.stopped_reason === null
         ? null
@@ -1248,17 +1262,54 @@ export class Ariadne {
   }
 
   /** Record that a thread's workspace is ready, so the user can see where it works. */
-  recordWorkspace(threadId: string, workspace: { label: string; branch: string | null }): void {
+  recordWorkspace(
+    threadId: string,
+    workspace: { label: string; branch: string | null; base: string | null },
+  ): void {
     const thread = this.getThread(threadId)
+    const known = thread.workspace
     if (
-      thread.workspace?.label === workspace.label &&
-      thread.workspace.branch === workspace.branch
+      known &&
+      !known.removed &&
+      known.label === workspace.label &&
+      known.branch === workspace.branch &&
+      known.base === workspace.base
     ) {
       return
     }
     this.store.append([
       { type: 'workspace.opened', projectId: thread.projectId, data: { threadId, ...workspace } },
     ])
+  }
+
+  /** Record that the thread's worktree is gone; its branch stays. */
+  recordWorktreeRemoved(threadId: string, reason: 'merged' | 'user'): void {
+    const thread = this.getThread(threadId)
+    if (!thread.workspace || thread.workspace.removed) return
+    this.store.append([
+      { type: 'workspace.removed', projectId: thread.projectId, data: { threadId, reason } },
+    ])
+  }
+
+  /** The user merged the thread's branch: the coordinator hears of it, the thread later. */
+  recordMerge(threadId: string, merge: BranchMerge): ThreadView {
+    const thread = this.getThread(threadId)
+    this.store.append([
+      { type: 'branch.merged', projectId: thread.projectId, data: { threadId, ...merge } },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /** A merge the user tried stopped at conflicts: the thread is woken to resolve them. */
+  recordMergeConflict(
+    threadId: string,
+    conflict: { branch: string; base: string; files: string[] },
+  ): ThreadView {
+    const thread = this.getThread(threadId)
+    this.store.append([
+      { type: 'branch.conflicted', projectId: thread.projectId, data: { threadId, ...conflict } },
+    ])
+    return this.getThread(threadId)
   }
 
   /**

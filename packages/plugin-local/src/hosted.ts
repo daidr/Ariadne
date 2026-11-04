@@ -2,7 +2,8 @@ import type { CommandSandbox, ExecResult, WorkspaceCapability } from '@ariadne/p
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { branchFor, gitControlPaths, LocalWorkspace, run, serverGitEnv } from './index'
+import { branchChanges, branchMerged, fileVersions, removeWorktree, type GitRun } from './branches'
+import { branchFor, gitControlPaths, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
 
 /** Where `git push` from a workspace goes: nowhere, so every push goes through the tool. */
 const NO_PUSH_URL = 'no-push://use-the-push_branch-tool'
@@ -27,6 +28,9 @@ export function hostedGitEnv(
   }
   return env
 }
+
+/** Where the shared clone keeps the remote's branch `base`. */
+const baseRef = (base: string) => `refs/remotes/origin/${base}`
 
 function addConfig(env: Record<string, string>, key: string, value: string) {
   const index = Number(env.GIT_CONFIG_COUNT)
@@ -116,12 +120,38 @@ export function hostedClone(input: {
     await fetchRemote()
   }
 
+  const worktrees = join(input.dataDir, 'worktrees', ...segments, last)
+  const dirOf = (threadId: string) => join(worktrees, threadId)
+  // Reading the shared clone needs no network and no token.
+  const local: GitRun = (args, options = {}) =>
+    run(['git', ...args], {
+      cwd: options.cwd ?? bare,
+      env: serverGitEnv(['file']),
+      ...(options.whole ? { whole: true } : {}),
+    })
+
   const workspace: WorkspaceCapability = {
     isolated: true,
-    open: ({ threadId }) =>
+    // Branches reach the default branch through pull requests: nothing is merged here.
+    branches: {
+      changes: (threadId, base) =>
+        branchChanges(local, {
+          branch: branchFor(threadId),
+          base,
+          baseRef: baseRef(base),
+          worktree: existsSync(dirOf(threadId)) ? dirOf(threadId) : null,
+        }),
+      file: (request) => fileVersions(local, request),
+      merged: (threadId, base) => branchMerged(local, branchFor(threadId), baseRef(base)),
+      remove: (threadId) =>
+        serial(() => removeWorktree(local, dirOf(threadId), async (dir) => existsSync(dir))),
+      worktrees: () => worktreesIn(worktrees),
+    },
+    open: ({ threadId, base: recorded }) =>
       serial(async () => {
         const branch = branchFor(threadId)
-        const dir = join(input.dataDir, 'worktrees', ...segments, last, threadId)
+        const dir = dirOf(threadId)
+        const base = recorded ?? (await input.defaultBranch())
         if (!existsSync(join(dir, '.git'))) {
           await ensureClone()
           await mkdir(join(dir, '..'), { recursive: true })
@@ -132,22 +162,14 @@ export function hostedClone(input: {
           check(
             hasBranch
               ? await git(bare, 'worktree', 'add', dir, branch)
-              : await git(
-                  bare,
-                  'worktree',
-                  'add',
-                  '--no-track',
-                  '-b',
-                  branch,
-                  dir,
-                  `refs/remotes/origin/${await input.defaultBranch()}`,
-                ),
+              : await git(bare, 'worktree', 'add', '--no-track', '-b', branch, dir, baseRef(base)),
             'git worktree add',
           )
         }
         // A hooks directory that is missing could be made by a thread; make it first.
         await mkdir(join(bare, 'hooks'), { recursive: true })
         return new LocalWorkspace(threadId, dir, branch, {
+          base,
           ...(input.sandbox ? { sandbox: input.sandbox } : {}),
           keep: [dir, bare],
           // The server fetches and pushes in the shared clone; its config and hooks stay as

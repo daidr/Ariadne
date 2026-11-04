@@ -98,7 +98,10 @@ export interface ThreadContext {
   } | null
   /** What the threads of upstream nodes reported when they finished. */
   upstream: { node: string; summary: string }[]
-  workspace: { label: string; branch: string | null } | 'none' | 'not-open'
+  workspace:
+    | { label: string; branch: string | null; base: string | null; removed?: boolean }
+    | 'none'
+    | 'not-open'
   /** Whether the workspace is a checkout of a hosted repository. */
   repo?: boolean
   memories?: { id: string; text: string }[]
@@ -115,10 +118,13 @@ function workspaceSection(workspace: ThreadContext['workspace'], repo: boolean):
     return 'The project has no working directory, so you have no file or command tools. If the work needs one, report "blocked" and say so.'
   }
   const where =
-    workspace === 'not-open'
+    workspace === 'not-open' || workspace.removed
       ? 'It is prepared on first use.'
       : `It is at ${workspace.label}${workspace.branch ? ` on branch ${workspace.branch}` : ''}.`
-  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done". Run the project's checks before you report. ${repo ? `${repoSection()} Anything else irreversible outside the workspace (deploying, sending) needs ask_user first.` : 'Anything irreversible outside the workspace (pushing, deploying, sending) needs ask_user first.'}`
+  const base = workspace !== 'not-open' ? workspace.base : null
+  // Without a hosted repository the user reviews the branch and merges it in Ariadne.
+  const local = `${base ? `The user sees your branch's committed changes against ${base} in Ariadne and merges them there; never merge into ${base} or move it yourself.` : 'The user reviews your branch and merges it; never merge it yourself.'} Anything irreversible outside the workspace (pushing, deploying, sending) needs ask_user first.`
+  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done"; files not committed are not part of what the user reviews. Run the project's checks before you report. ${repo ? `${repoSection()} Anything else irreversible outside the workspace (deploying, sending) needs ask_user first.` : local}`
 }
 
 export function threadPrompt(input: ThreadContext): string {

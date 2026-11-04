@@ -122,6 +122,19 @@ export interface ThreadPullRequest {
   checks: { state: ChecksState; failed: string[] }
 }
 
+export type MergeMethod = 'squash' | 'merge'
+
+/** A thread's branch merged into its base by the user. */
+export interface BranchMerge {
+  branch: string
+  base: string
+  method: MergeMethod
+  /** The commit the base moved to. */
+  sha: string
+  /** The branch's newest commit, which the merge took in. */
+  head: string
+}
+
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
   'project.created': { name: string; coordinatorId: string }
@@ -131,8 +144,29 @@ export interface EventMap {
   /** How many of the shared work slots this project may take at once; `null` is no cap. */
   'project.slots.set': { slots: number | null }
   'thread.created': { threadId: string; title: string; nodeId: string | null }
-  /** A thread's workspace was prepared, e.g. a git worktree on its own branch. */
-  'workspace.opened': { threadId: string; label: string; branch: string | null }
+  /**
+   * A thread's workspace was prepared, e.g. a git worktree on its own branch. `base` is the
+   * branch that one started from, which its changes are compared and merged against.
+   */
+  'workspace.opened': {
+    threadId: string
+    label: string
+    branch: string | null
+    base: string | null
+  }
+  /**
+   * The thread's worktree was removed; its branch stays, and the next use checks it out
+   * again. `merged`: removed on its own once the work was merged (or its pull request
+   * closed) and the thread was finished with it; `user`: the user removed it.
+   */
+  'workspace.removed': { threadId: string; reason: 'merged' | 'user' }
+  /** The user merged the thread's branch into its base; the base now ends with `sha`. */
+  'branch.merged': { threadId: string } & BranchMerge
+  /**
+   * The user tried to merge the thread's branch, and these files changed on both sides.
+   * Nothing was merged; the thread gets to bring the base in and resolve them.
+   */
+  'branch.conflicted': { threadId: string; branch: string; base: string; files: string[] }
   'thread.started': { threadId: string }
   'thread.reported': { threadId: string; report: ReportKind; summary: string }
   /**

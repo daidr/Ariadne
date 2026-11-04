@@ -52,6 +52,7 @@ watch(split, (value) => {
 const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
 const ArtifactEditor = defineAsyncComponent(() => import('./artifacts/ArtifactEditor.vue'))
 const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
+const ChangesView = defineAsyncComponent(() => import('./changes/ChangesView.vue'))
 </script>
 
 <template>
@@ -102,6 +103,10 @@ const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/Artifac
                 <PlanMain v-if="state.main.kind === 'plan'" />
                 <ArtifactEditor v-else-if="state.main.kind === 'artifact'" :id="state.main.id" />
                 <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
+                <ChangesView
+                  v-else-if="state.main.kind === 'changes'"
+                  :thread-id="state.main.threadId"
+                />
                 <ConversationPanel v-else @open-settings="settingsOpen = true" />
               </div>
             </template>

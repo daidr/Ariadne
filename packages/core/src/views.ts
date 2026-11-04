@@ -2,9 +2,11 @@ import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
 import type {
   ArtifactKind,
+  BranchMerge,
   AttentionOption,
   IssueWriteAction,
   LinkedIssue,
+  MergeMethod,
   PlanAuthor,
   PlanNodeKind,
   PlanOp,
@@ -44,8 +46,18 @@ export interface ThreadView {
   stage: ThreadStage
   lastReport: ReportKind | null
   lastSummary: string | null
-  /** The thread's prepared workspace, once it has used one. */
-  workspace: { label: string; branch: string | null } | null
+  /**
+   * The thread's prepared workspace, once it has used one. `removed`: its worktree was
+   * removed since, and the branch is all that is left until it is used again.
+   */
+  workspace: {
+    label: string
+    branch: string | null
+    base: string | null
+    removed: boolean
+  } | null
+  /** The user's last merge of its branch, with the time it was made. */
+  merged: (BranchMerge & { at: number }) | null
   /** The pull request of the thread's branch, once it opened one. */
   pullRequest: ThreadPullRequest | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
@@ -120,6 +132,9 @@ export type NoticeView = {
       text: string
       url: string | null
     }
+  | { kind: 'merged'; base: string; method: MergeMethod; sha: string }
+  | { kind: 'merge-conflict'; base: string; files: string[] }
+  | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
   | {
       kind: 'instructions'
       path: string
@@ -228,6 +243,8 @@ export type TranscriptNote =
       attempt?: number
     }
   | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
+  | ({ type: 'branch-merged'; threadId: string } & BranchMerge)
+  | { type: 'merge-conflict'; threadId: string; branch: string; base: string; files: string[] }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
   | { type: 'instructions-changed'; path: string; removed: boolean }

@@ -18,6 +18,11 @@ export interface StageFacts {
   checksGaveUp?: boolean
   /** Held by the coordinator or the user until resumed. */
   stopped?: boolean
+  /**
+   * Its work landed after it last reported: the user merged its branch, or its pull request
+   * was merged. A review it waited on is then over.
+   */
+  landed?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
@@ -31,7 +36,7 @@ export function threadStage(facts: StageFacts): ThreadStage {
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.
   if (facts.turnPending) return 'queued'
   if (facts.turnFailed || facts.checksGaveUp) return 'blocked'
-  if (facts.lastReport === 'ready') return 'review'
+  if (facts.lastReport === 'ready') return facts.landed ? 'done' : 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
   if (facts.lastReport === 'done') return 'done'
   if (!facts.started) return 'queued'

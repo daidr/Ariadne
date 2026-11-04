@@ -310,7 +310,9 @@ async function syncInstructions(
   turnId: string,
   workspaces: WorkspaceManager,
 ): Promise<void> {
-  if (!app.getThread(conversation.id).workspace) return
+  // Reading the file must not bring back a worktree that is not there.
+  const known = app.getThread(conversation.id).workspace
+  if (!known || known.removed) return
   let content: string | null = null
   let workspace: Awaited<ReturnType<WorkspaceManager['forThread']>> | null = null
   try {

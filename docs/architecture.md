@@ -28,6 +28,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 | `queued`  | 有新输入，在等槽位                              | 否           |
 | `blocked` | 上一轮失败（如模型请求出错），等用户重试        | 是           |
 | `blocked` | PR 的检查连续失败 3 次（见“仓库、PR 与 CI”）    | 是           |
+| `done`    | 最近的 Report 是 `ready`，之后改动已合入        | 否           |
 | `review`  | 最近的 Report 是 `ready`                        | 是           |
 | `blocked` | 最近的 Report 是 `blocked` 或 `failed`          | 是           |
 | `done`    | 最近的 Report 是 `done`                         | 否           |
@@ -36,6 +37,8 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 | `working` | 其他情况：开始过、还没报告，或刚报告 `progress` | 否           |
 
 协调器可以用 `stop_thread` 自己停下一个 thread，必须写明原因（如“方向跑偏了”“和另一个 thread 重复”）；用户也可以在 thread 面板上点“停下”，原因可不填。用户停下的 thread 只有用户能继续，协调器会收到说明，不再指望它；协调器停下的 thread，用户也可以点“改由我停下”接管这次停止。停下时记一条 `thread.stopped`：正在跑的一轮和它的命令立即被中止，调度器的槽位随之空出；之后新到的消息只排队，不会启动它。thread 面板顶部显示谁停的、为什么停，用户点“继续”、在 thread 里发消息或回答它的提问都会继续，三者一样记一条 `thread.resumed`；协调器也可以用 `resume_thread` 让自己停下的 thread 继续。继续后 thread 收到一条说明，带着当初停下的原因接着做；由用户继续时协调器也会收到。
+
+“改动已合入”指用户在报告之后合并了它的分支（见“查看与合并改动”），或者它的 PR 已被合并：用户审阅完、收下了，就不再留在“需要我”里。之后 thread 再报告 `ready`，又回到 `review`。
 
 未回答的问题排在 `done` 前面：thread 报告完成时如果还有问题没答，它仍然停在 `answer`，问题也留在“需要我”里，直到用户回答。
 
@@ -93,7 +96,19 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 
 新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`vendor`、`.pnpm-store`（任意层级，符号链接除外）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进 thread 的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，thread 自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制；Python 虚拟环境也不复制，它的脚本和 `activate` 用绝对路径指向原来的环境，克隆出来的会装进用户自己的环境。GitHub、GitLab 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
 
-本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下。
+本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下（SSH 在远端的 `~/.ariadne-worktrees/`），用完会自动清理，见下文。
+
+### 查看与合并改动
+
+thread 第一次打开工作区时记下它的基线分支（`workspace.opened` 的 `base`）：本地目录和 SSH 是签出当时所在的分支，GitHub、GitLab 是远端的默认分支。签出处在分离的 HEAD 上时没有基线，看不了改动，也合并不了。之后工作区被移除再打开，沿用记下的基线，不看签出现在在哪个分支上。
+
+- 改动按 PR 的方式比较：从分支和基线最近的共同提交，到分支最新的提交，只算已提交的内容（GitHub、GitLab 的基线是共享 clone 里的 `origin/<默认分支>`）。改名按 git 的相似度识别。worktree 里没提交的文件单独列出数量，它们不在改动里，也不会被合并；thread 的系统提示也说明了这一点。
+- 界面上 thread 面板顶部和计划节点里的“改动”打开改动视图：左边是按目录排列的文件（只有一个子目录的目录合成一行），右边是 `@dou-ui/code` 的 `DouCodeDiff`。文件内容按需读取，超过 512 KB 的和二进制文件不显示内容。
+- 本地目录和 SSH 由用户点“合并到 <基线>”：默认压成一个提交（squash），也可以保留每个提交（合并提交）；提交说明默认是 thread 的标题，作者是 git 里配置的 `user.name`、`user.email`（本地读用户自己的配置，SSH 读远端用户的）。合并不碰 thread 的 worktree：先用 `git merge-tree --write-tree`（需要 git 2.38+）算出结果，有冲突就什么都不改；没有冲突时写出提交，基线没有签出在任何地方就用 `update-ref` 从原来的位置移过去（期间基线有了新提交则拒绝，再合并一次即可），基线签出在用户的目录里就在那里 `merge --ff-only`，文件跟着更新，签出里未提交的改动挡住时拒绝，什么都不丢。thread 正在跑一轮时不能合并。
+- 合并记 `branch.merged`：协调器收到说明并被唤醒；thread 下次工作时读到，squash 之后继续改要先把基线合进自己的分支，后面的改动才单独比较。冲突记 `branch.conflicted`，唤醒 thread：在自己的分支上合并基线、解决冲突、跑检查、提交，再报告 `ready`。两者都在 thread 的对话里留一行，用户能看到发生了什么。
+- GitHub、GitLab 的改动通过 PR 合入，界面只看改动，不替托管平台合并。
+
+worktree 在改动合入之后自动移除，分支保留：用户合并了分支（在 Ariadne 里，或者在终端里合并到基线），或者 PR 已合并或关闭，并且 thread 处于 `review` 或 `done`。worktree 里有没提交的文件（被忽略的 `node_modules` 之类不算）就留着。相关事件之后过一会儿检查一次，另外每 10 分钟扫一遍，接住在 Ariadne 之外的合并。移除记 `workspace.removed`，thread 的对话里留一行；thread 再用文件或命令工具时在原分支上重建 worktree，读 `AGENTS.md` 不会因此把它建回来。设置的“工作区”页按项目列出 worktree 和占用的空间（`du`，reflink 克隆的依赖目录按完整大小算），也可以手动移除，同样只移除没有未提交改动的。
 
 上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。GitLab 令牌（需要 `api` 权限）留空时使用 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN` 或 `GL_TOKEN`，但只发给 `GITLAB_HOST` 指的实例（没设置时是 GitLab.com），否则用 `glab config get token --host <实例>`，调用时清空 glab 也会读的 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`OAUTH_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`，只拿 glab 为这个实例保存的令牌：为一个实例签发的令牌不会被发给别的实例。GitLab 实例地址只接受 https（本机的 localhost 除外），API 请求和服务端的 git（GitHub、GitLab 都是）都不跟随重定向，令牌不会被带到别的主机。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
 
@@ -129,7 +144,7 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 - 文件工具在远端读写：路径先在本机规范化，不允许 `..` 和绝对路径，再在远端把最近的已有目录解析成真实路径，确认仍在根目录里；经符号链接出去的、指向不存在位置的链接（写入会顺着它在外面建文件）都会被拒绝。远端的文件工具和命令以同一个用户运行，这层检查防的是失误，不是隔离。
 - 命令用 bash 在工作区里运行，有自己的进程组。脚本另起一个看守进程读连接的输入：超时、thread 被停下或者连接断了，本机就关掉输入，看守进程结束整个进程组，留在组里的后台进程也一起结束；特意脱离进程组的（`setsid`）和本地目录一样挡不住。输出过长时只保留末尾，和本地相同。
 - 本机的工作区沙箱不管远端：命令以 SSH 登录的用户身份运行，能读写那个用户能读写的一切。项目来源下方会注明这一点。SSH 到本机自己（`localhost`）时，命令同样不在沙箱里，能读到 Ariadne 的令牌和设置。
-- SSH 来源只提供 `workspace`，没有 PR 和检查。thread 在远端用 `git push` 推送属于“工作区外、无法撤销”的操作，每次都要先问用户；公开仓库“第一次推送前问一次、对整个项目有效”的规则只适用于有 `repo` 能力、由服务端推送的来源。
+- SSH 来源只提供 `workspace`，没有 PR 和检查；看改动、合并和自动清理 worktree 与本地目录相同，git 都在远端运行。thread 在远端用 `git push` 推送属于“工作区外、无法撤销”的操作，每次都要先问用户；公开仓库“第一次推送前问一次、对整个项目有效”的规则只适用于有 `repo` 能力、由服务端推送的来源。
 
 ### 仓库、PR 与 CI
 
@@ -204,11 +219,11 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 
 上下文源通过能力接入。上层只依赖能力，不依赖具体的 provider。
 
-| 能力        | 典型提供者                   | 负责                                          |
-| ----------- | ---------------------------- | --------------------------------------------- |
-| `workspace` | 本地目录、SSH、remote daemon | 准备一个可写目录，并在其中提供 `fs` 与 `exec` |
-| `repo`      | GitHub、GitLab               | 远端仓库、分支、PR、CI 状态与日志             |
-| `tracker`   | GitHub、GitLab               | Issue 等任务记录                              |
+| 能力        | 典型提供者                   | 负责                                                                                                                                |
+| ----------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace` | 本地目录、SSH、remote daemon | 准备一个可写目录，并在其中提供 `fs` 与 `exec`；是 git worktree 时还提供 `branches`：改动、合并（托管仓库没有）、移除和列出 worktree |
+| `repo`      | GitHub、GitLab               | 远端仓库、分支、PR、CI 状态与日志                                                                                                   |
+| `tracker`   | GitHub、GitLab               | Issue 等任务记录                                                                                                                    |
 
 `workspace`、`repo` 和 `tracker` 见上文“工作区”“仓库、PR 与 CI”和“Issue”。
 

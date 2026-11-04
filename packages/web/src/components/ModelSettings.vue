@@ -19,6 +19,7 @@ import { api, ApiError, type Concurrency, type ModelKind, type ModelSettings } f
 import { state } from '../store'
 import { lt, t, tm } from '../i18n'
 import PluginSettings from './PluginSettings.vue'
+import WorktreeSettings from './WorktreeSettings.vue'
 import SettingsFields from './SettingsFields.vue'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -63,7 +64,7 @@ function load(settings: ModelSettings) {
   contextK.value = tokens ? Math.round(tokens / 1000) : null
 }
 
-const tab = ref<'models' | 'plugins'>('models')
+const tab = ref<'models' | 'plugins' | 'worktrees'>('models')
 
 /** Reload the protocols only: a plugin added or removed changes them, not the draft. */
 async function reloadKinds() {
@@ -249,6 +250,9 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
         <PluginSettings v-if="open" @changed="reloadKinds" />
+      </DouTabPanel>
+      <DouTabPanel value="worktrees" :label="t('settings.tab.worktrees')">
+        <WorktreeSettings v-if="open && tab === 'worktrees'" />
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">

@@ -6,6 +6,8 @@ export { Scheduler, type SchedulerOptions } from './scheduler'
 export { resolvePlanOps } from './plan-tools'
 export { repoTools, summarizeChecks, syncThreadPullRequest } from './repo-tools'
 export { RepoWatcher } from './repo-watcher'
+export { WorktreeJanitor } from './worktree-janitor'
+export { listWorktrees, mergeThread, threadChanges, threadFile } from './branch-merge'
 export {
   coordinatorTools,
   threadTools,
