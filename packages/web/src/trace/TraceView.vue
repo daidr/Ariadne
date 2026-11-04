@@ -11,10 +11,10 @@ import {
   DouText,
 } from 'dou-ui'
 import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { count, duration, locale, t, tm } from '../i18n'
-import { openMain, state } from '../store'
+import { onLiveEvent, openMain, state } from '../store'
 import TraceInput from './TraceInput.vue'
 
 const props = defineProps<{ conversationId: string }>()
@@ -76,10 +76,12 @@ watch(
   },
   { immediate: true },
 )
-// New events of the project: the running turn may have moved on.
-watch(
-  () => state.revision,
-  () => void load(),
+// The running turn of this conversation moved on.
+onUnmounted(
+  onLiveEvent((event) => {
+    const data = event.data as { conversationId?: unknown }
+    if (data.conversationId === props.conversationId) void load()
+  }),
 )
 
 const clock = (at: number) =>
