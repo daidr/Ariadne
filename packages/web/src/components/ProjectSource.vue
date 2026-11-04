@@ -108,7 +108,9 @@ async function save(clear = false) {
   // the slot cap alone leaves the source as it is.
   problem.value =
     clear || !kind.value
-      ? await setSource(null)
+      ? source.value
+        ? await setSource(null)
+        : null
       : sourceKey() !== opened.value
         ? await setSource({ kind: kind.value, settings: { ...values() } })
         : null

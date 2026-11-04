@@ -174,7 +174,7 @@ describe('memory from untrusted input', () => {
     await scheduler!.idle()
     expect(app.listMemories(project.id)).toHaveLength(1)
     const prompt = model.requests.at(-1)!.messages[0]!.content
-    expect(prompt).toContain('<project_memory>')
+    expect(prompt).toMatch(/<project_memory_[0-9a-f]{12}>/)
   })
 })
 
