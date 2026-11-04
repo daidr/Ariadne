@@ -37,6 +37,7 @@ const HIDDEN_ENV = new Set([
   'GITLAB_ACCESS_TOKEN',
   'GL_TOKEN',
   'CI_JOB_TOKEN',
+  'OAUTH_TOKEN',
 ])
 
 /**

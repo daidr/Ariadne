@@ -31,7 +31,22 @@ export interface GitLabProviderOptions {
   env?: Record<string, string | undefined>
   /** What thread commands run in; they see their worktree and the clone behind it. */
   sandbox?: CommandSandbox
+  /** For tests: how `glab` is run. */
+  run?: typeof run
 }
+
+/**
+ * Variables glab reads a token from before its own configuration. Cleared when asking it,
+ * so it answers with the token it keeps for the host and never one from the environment,
+ * which may have been issued by another instance.
+ */
+const GLAB_ENV_TOKENS = [
+  'GITLAB_TOKEN',
+  'GITLAB_ACCESS_TOKEN',
+  'OAUTH_TOKEN',
+  'GL_TOKEN',
+  'CI_JOB_TOKEN',
+]
 
 export const GITLAB_COM = 'https://gitlab.com'
 
@@ -118,6 +133,12 @@ export function parseRepository(
   return { instance: given ?? GITLAB_COM, path: checkPath(text, input) }
 }
 
+/** The directories an instance's clones go under: its host (with port) and path. */
+export function instanceDirs(instance: string): string[] {
+  const url = new URL(instance)
+  return [url.host, ...url.pathname.split('/').filter(Boolean)]
+}
+
 /**
  * The token to use: the configured one; else `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN` or
  * `GL_TOKEN`, but only for the host they are meant for (`GITLAB_HOST`, GitLab.com when
@@ -128,6 +149,7 @@ async function findToken(
   configured: string | undefined,
   instance: string,
   env: Record<string, string | undefined>,
+  runCommand: typeof run,
 ): Promise<string | null> {
   if (configured?.trim()) return configured.trim()
   const host = new URL(instance).host
@@ -146,9 +168,11 @@ async function findToken(
     if (fromEnv) return fromEnv
   }
   try {
-    const result = await run(['glab', 'config', 'get', 'token', '--host', host], {
+    const result = await runCommand(['glab', 'config', 'get', 'token', '--host', host], {
       cwd: '/',
       timeoutMs: 10_000,
+      // glab takes an empty variable as unset.
+      env: Object.fromEntries(GLAB_ENV_TOKENS.map((name) => [name, ''])),
     })
     return result.exitCode === 0 && result.stdout.trim() ? result.stdout.trim() : null
   } catch {
@@ -177,7 +201,7 @@ export function connectRepository(
   // A token found is kept; none found is looked for again, e.g. after `glab auth login`.
   let token: Promise<string | null> | null = null
   const getToken = async () => {
-    token ??= findToken(settings.token, instance, env)
+    token ??= findToken(settings.token, instance, env, options.run ?? run)
     const found = await token
     if (!found) token = null
     return found
@@ -206,6 +230,9 @@ export function connectRepository(
   const clone = hostedClone({
     dataDir: options.dataDir,
     path,
+    // Projects with the same path on two instances are different repositories: each
+    // instance gets its own directories, e.g. `gitlab.com/` or `example.com:8443/gitlab/`.
+    namespace: instanceDirs(instance),
     remoteUrl: `${options.gitBase ?? instance}/${path}.git`,
     // GitLab takes any token as the password of `oauth2`.
     user: 'oauth2',

@@ -85,7 +85,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 - git 仓库：从仓库当前的 HEAD 为 thread 建一个 `git worktree`，分支是 `ariadne/<thread id 的末尾>`，thread 之间互不可见。重启后沿用原来的 worktree；worktree 目录被手动删掉的话，先 `git worktree prune` 再在原分支上重建。上下文源是仓库的子目录时，工作区根目录是 worktree 里对应的子目录。
 - 普通目录：所有 thread 共用这个目录。
 - GitHub 仓库：在插件的数据目录里为仓库建一个共享的 bare clone（`~/.ariadne/plugins/github/repos/<owner>/<name>.git`），远端分支取到 `refs/remotes/origin/*`，取远端时不会动到 thread 的分支；每个 thread 从远端默认分支建自己的 worktree 和分支 `ariadne/…`。
-- GitLab 仓库：和 GitHub 一样（共享 clone、worktree、推送都是同一份代码，`@ariadne/plugin-local` 的 `hostedClone`），目录按项目的完整路径分层（`~/.ariadne/plugins/gitlab/repos/<group>/<sub>/<project>.git`）。支持子组和自建实例：实例地址可以带路径（比如 `https://example.com/gitlab`），留空时用 GitLab.com 或仓库地址里的实例。
+- GitLab 仓库：和 GitHub 一样（共享 clone、worktree、推送都是同一份代码，`@ariadne/plugin-local` 的 `hostedClone`），目录先按实例（主机和端口，再加实例地址里的路径）再按项目的完整路径分层（`~/.ariadne/plugins/gitlab/repos/<主机>/<group>/<sub>/<project>.git`），不同实例上同路径的项目各有各的 clone。支持子组和自建实例：实例地址可以带路径（比如 `https://example.com/gitlab`），留空时用 GitLab.com 或仓库地址里的实例。
 - SSH 远程目录：见下文“SSH 远程工作区”。
 - 文件工具的路径都相对工作区根目录，越出根目录（包括经符号链接）的路径会被拒绝。命令在工作区里用 bash 执行，有超时，输出过长时只保留末尾。
 - 工作区里的命令不需要审批；推送、部署这类影响工作区外、又无法撤销的操作，thread 要先问用户。
@@ -94,9 +94,9 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 
 本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到 thread 的分支。目前不会自动清理：不再需要的 worktree 用 `git worktree remove <目录>` 删除，分支用 `git branch -D ariadne/<…>` 删除；worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下。
 
-上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。GitLab 令牌（需要 `api` 权限）留空时使用 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN` 或 `GL_TOKEN`，但只发给 `GITLAB_HOST` 指的实例（没设置时是 GitLab.com），否则用 `glab config get token --host <实例>`：为一个实例签发的令牌不会被发给别的实例。GitLab 实例地址只接受 https（本机的 localhost 除外），API 请求不跟随重定向，令牌不会被带到别的主机。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
+上下文源的设置按插件给出的 schema 填写。标成 secret 的设置（比如访问令牌）存在 `~/.ariadne/config.json`，不写进事件日志，也不返回给浏览器；GitHub 令牌留空时依次使用 `GH_TOKEN`、`GITHUB_TOKEN` 和 `gh auth token`。GitLab 令牌（需要 `api` 权限）留空时使用 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN` 或 `GL_TOKEN`，但只发给 `GITLAB_HOST` 指的实例（没设置时是 GitLab.com），否则用 `glab config get token --host <实例>`，调用时清空 glab 也会读的 `GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`OAUTH_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`，只拿 glab 为这个实例保存的令牌：为一个实例签发的令牌不会被发给别的实例。GitLab 实例地址只接受 https（本机的 localhost 除外），API 请求和服务端的 git（GitHub、GitLab 都是）都不跟随重定向，令牌不会被带到别的主机。令牌只在服务端自己的 git 命令里通过环境变量交给 git，并绑定到仓库地址，不落盘，也不出现在命令行参数里。服务端的取远端和推送用自己保存的地址、关掉 hook，不读 worktree 里可被改写的 remote；共享 clone 的 `pushurl` 指向一个无效地址，thread 直接 `git push` 会失败。
 
-thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKEN`、`GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`、`ARIADNE_*`、`GIT_CONFIG_*`），令牌不会意外出现在工具结果、事件日志和模型输入里。
+thread 的命令环境里去掉了服务端的凭据（`GH_TOKEN`、`GITHUB_TOKEN`、`GITLAB_TOKEN`、`GITLAB_ACCESS_TOKEN`、`GL_TOKEN`、`CI_JOB_TOKEN`、`OAUTH_TOKEN`、`ARIADNE_*`、`GIT_CONFIG_*`），令牌不会意外出现在工具结果、事件日志和模型输入里。
 
 thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录（`~/.ariadne`，或 `ARIADNE_HOME`：本地令牌、`config.json` 里的 API Key 和访问令牌、数据库）和浏览器的配置目录（页面把令牌存在浏览器里），也就拿不到令牌去调用本机的 Ariadne 接口。
 

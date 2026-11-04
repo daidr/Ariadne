@@ -19,14 +19,20 @@ export function hostedGitEnv(
 ): Record<string, string> {
   const scheme = /^([a-z]+):/.exec(remoteUrl)?.[1] ?? 'https'
   const env = serverGitEnv([scheme])
+  // The header goes with every request: a redirect to another host would take it along.
+  addConfig(env, 'http.followRedirects', 'false')
   if (credentials) {
     const basic = Buffer.from(`${credentials.user}:${credentials.token}`).toString('base64')
-    const index = Number(env.GIT_CONFIG_COUNT)
-    env.GIT_CONFIG_COUNT = String(index + 1)
-    env[`GIT_CONFIG_KEY_${index}`] = `http.${remoteUrl}.extraHeader`
-    env[`GIT_CONFIG_VALUE_${index}`] = `Authorization: Basic ${basic}`
+    addConfig(env, `http.${remoteUrl}.extraHeader`, `Authorization: Basic ${basic}`)
   }
   return env
+}
+
+function addConfig(env: Record<string, string>, key: string, value: string) {
+  const index = Number(env.GIT_CONFIG_COUNT)
+  env.GIT_CONFIG_COUNT = String(index + 1)
+  env[`GIT_CONFIG_KEY_${index}`] = key
+  env[`GIT_CONFIG_VALUE_${index}`] = value
 }
 
 function check(result: ExecResult, what: string): ExecResult {
@@ -38,7 +44,8 @@ function check(result: ExecResult, what: string): ExecResult {
 
 /**
  * A hosted repository checked out for threads. A bare clone under `dataDir/repos/<path>.git`
- * is shared by every thread; each thread gets a worktree under `dataDir/worktrees/<path>/`
+ * (under `namespace` when given) is shared by every thread; each thread gets a worktree under
+ * `dataDir/worktrees/<path>/`
  * on its own branch, started from the remote's default branch, so threads never see each
  * other's changes. The server fetches and pushes by the URL it was given, never by a remote
  * a workspace could rewrite, and the clone's own push URL goes nowhere.
@@ -48,6 +55,11 @@ export function hostedClone(input: {
   dataDir: string
   /** The repository's path on its host, e.g. `owner/name` or `group/sub/project`. */
   path: string
+  /**
+   * Directories above the path, so that the same path on two hosts gets two clones, e.g.
+   * `['gitlab.example.com']`.
+   */
+  namespace?: string[]
   remoteUrl: string
   /** The basic-auth user the host takes with a token, e.g. `x-access-token` or `oauth2`. */
   user: string
@@ -60,7 +72,7 @@ export function hostedClone(input: {
   push(branch: string): Promise<{ sha: string }>
 } {
   const { remoteUrl } = input
-  const segments = input.path.split('/')
+  const segments = [...(input.namespace ?? []), ...input.path.split('/')]
   const last = segments.pop()!
   const bare = join(input.dataDir, 'repos', ...segments, `${last}.git`)
 

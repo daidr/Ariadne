@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
+  instanceDirs,
   connectRepository,
   gitlabProvider,
   parseInstance,
@@ -242,6 +243,43 @@ describe('gitlab settings', () => {
     await configured.api.project()
     expect(requests.at(-1)?.auth).toBe('Bearer mine')
   })
+
+  test('glab is asked for its own token for the host, never one from the environment', async () => {
+    const calls: { argv: string[]; env?: Record<string, string> }[] = []
+    const fakeRun: typeof run = async (argv, opts) => {
+      calls.push({ argv, ...(opts.env ? { env: opts.env } : {}) })
+      return { exitCode: 0, stdout: 'from-glab\n', stderr: '' }
+    }
+    const { api } = connectRepository(settings(), {
+      ...options({ GITLAB_TOKEN: 'for-gitlab-com' }),
+      run: fakeRun,
+    })
+    await api.project()
+    expect(requests.at(-1)?.auth).toBe('Bearer from-glab')
+    expect(calls[0]?.argv).toEqual([
+      'glab',
+      'config',
+      'get',
+      'token',
+      '--host',
+      `localhost:${server.port}`,
+    ])
+    // glab reads these before its own configuration; each is cleared for the call.
+    for (const name of [
+      'GITLAB_TOKEN',
+      'GITLAB_ACCESS_TOKEN',
+      'OAUTH_TOKEN',
+      'GL_TOKEN',
+      'CI_JOB_TOKEN',
+    ]) {
+      expect(calls[0]?.env?.[name]).toBe('')
+    }
+  })
+
+  test('the same path on two instances gets two clones', () => {
+    expect(instanceDirs('https://gitlab.com')).toEqual(['gitlab.com'])
+    expect(instanceDirs('https://example.com:8443/gitlab')).toEqual(['example.com:8443', 'gitlab'])
+  })
 })
 
 describe('gitlab repository', () => {
@@ -252,7 +290,9 @@ describe('gitlab repository', () => {
       workspace.open({ threadId: 'thr_bbbbbbbbbbbb' }),
     ])
     expect(a.branch).toBe('ariadne/aaaaaaaaaaaa')
-    expect(a.label).toContain(join('worktrees', 'acme', 'tools', 'app', 'thr_aaaaaaaaaaaa'))
+    expect(a.label).toContain(
+      join('worktrees', `localhost:${server.port}`, 'acme', 'tools', 'app', 'thr_aaaaaaaaaaaa'),
+    )
     expect(await a.readFile('README.md')).toBe('# app\n')
     await a.writeFile('feature.txt', 'x\n')
     await expect(b.readFile('feature.txt')).rejects.toThrow()
