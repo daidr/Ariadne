@@ -282,8 +282,10 @@ function requestOf(
     // The summary was asked for from the history as it stood when it was read.
     const transcript = app.listTranscript(conversationId, { upTo: event.data.sawSeq })
     const role = app.getConversation(conversationId).role
+    const call = parseCall(app.getPrompt(event.projectId, event.data.call))
+    const keep = call ? writtenBy(app, event.projectId, call) : undefined
     return {
-      messages: summaryRequest(transcript, event.data.upTo, titleOf, role, readText),
+      messages: summaryRequest(transcript, event.data.upTo, titleOf, role, readText, keep),
       tools: [],
     }
   }
@@ -304,9 +306,7 @@ function requestOf(
         readText,
         images: input.images,
         ...(state === undefined ? {} : { state }),
-        ...(call
-          ? { keepReasoning: writtenBy(app, event.projectId, call.provider, call.model) }
-          : {}),
+        ...(call ? { keepReasoning: writtenBy(app, event.projectId, call) } : {}),
       }),
     ],
     tools: JSON.parse(piece(input.tools)) as ToolSpec[],

@@ -4,7 +4,7 @@ import { compactionCut } from './compaction'
 import { MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
-import { toChatMessages } from './transcript'
+import { toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
@@ -1074,5 +1074,26 @@ describe('how long a turn may run', () => {
       2,
     )
     expect(results[4]).toContain('Doing it again will stop')
+  })
+})
+
+describe('whose reasoning goes back', () => {
+  const recorded: Record<string, string> = {
+    a: JSON.stringify({ provider: 'openai-compatible', model: 'm', settings: { baseUrl: 'x' } }),
+    b: JSON.stringify({ provider: 'openai-compatible', model: 'm', settings: { baseUrl: 'y' } }),
+    c: JSON.stringify({ provider: 'openai-compatible', model: 'n', settings: { baseUrl: 'x' } }),
+    d: JSON.stringify({ provider: 'anthropic', model: 'old', settings: {} }),
+  }
+  const fakeApp = { getPrompt: (_: string, hash: string) => recorded[hash] ?? null } as never
+
+  test('the same service and model, or any model of Anthropic', () => {
+    const openai = writtenBy(fakeApp, 'p', {
+      provider: 'openai-compatible',
+      model: 'm',
+      settings: { baseUrl: 'x' },
+    })
+    expect(['a', 'b', 'c', 'd', 'missing'].map(openai)).toEqual([true, false, false, false, false])
+    const anthropic = writtenBy(fakeApp, 'p', { provider: 'anthropic', model: 'new', settings: {} })
+    expect(['a', 'd'].map(anthropic)).toEqual([false, true])
   })
 })

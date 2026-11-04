@@ -98,6 +98,7 @@ export function summaryRequest(
   titleOf: (threadId: string) => string,
   role: 'coordinator' | 'thread',
   readText?: (fileId: string) => string | null,
+  keepReasoning?: (call: string) => boolean,
 ): ModelMessage[] {
   const folded = transcript.filter((entry) => entry.kind === 'summary' || orderKey(entry) <= upTo)
   return [
@@ -106,7 +107,10 @@ export function summaryRequest(
       content: `You summarise the earlier part of a conversation so that the agent having it (the ${role} of an Ariadne project) can carry on from the summary alone. You have no tools; answer with the summary only.`,
     },
     // Images are named in words: the summary is text, and a request full of them is costly.
-    ...toChatMessages(folded, titleOf, readText ? { readText } : {}),
+    ...toChatMessages(folded, titleOf, {
+      ...(readText ? { readText } : {}),
+      ...(keepReasoning ? { keepReasoning } : {}),
+    }),
     {
       role: 'user',
       content: `Summarise the conversation so far, for yourself, to continue from it. Use two sections of short bullet points.

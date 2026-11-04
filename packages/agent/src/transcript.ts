@@ -134,26 +134,39 @@ export const summaryMessages = (
   },
 ]
 
+/** What a call went to, as `callOf` recorded it (the effort aside). */
+export interface CallTarget {
+  provider: string
+  model: string
+  settings: Record<string, unknown>
+}
+
 /**
- * Whether a call (by its recorded hash) went to this provider and model: only then does
- * the reasoning it wrote go back, see `ChatOptions.keepReasoning`.
+ * Whether a call (by its recorded hash) went where `target` goes: only then does the
+ * reasoning it wrote go back, see `ChatOptions.keepReasoning`. The same provider means the
+ * same kind and settings (two services may share a model name). Anthropic signs its
+ * thinking and drops what the model in use cannot read, and wants it back before a tool
+ * call even when the model changed mid-turn, so there any of its models counts.
  */
 export function writtenBy(
   app: Ariadne,
   projectId: string,
-  provider: string,
-  model: string,
+  target: CallTarget,
 ): (call: string) => boolean {
+  const settings = JSON.stringify(target.settings)
   const known = new Map<string, boolean>()
   return (call) => {
     let same = known.get(call)
     if (same === undefined) {
       try {
-        const recorded = JSON.parse(app.getPrompt(projectId, call) ?? 'null') as {
-          provider?: unknown
-          model?: unknown
-        } | null
-        same = recorded?.provider === provider && recorded.model === model
+        const recorded = JSON.parse(
+          app.getPrompt(projectId, call) ?? 'null',
+        ) as Partial<CallTarget> | null
+        same =
+          !!recorded &&
+          recorded.provider === target.provider &&
+          JSON.stringify(recorded.settings ?? {}) === settings &&
+          (target.provider === 'anthropic' || recorded.model === target.model)
       } catch {
         same = false
       }

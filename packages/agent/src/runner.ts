@@ -252,7 +252,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const chat = {
     readText,
     images,
-    keepReasoning: writtenBy(app, conversation.projectId, model.provider.kind, model.model),
+    keepReasoning: writtenBy(app, conversation.projectId, JSON.parse(callOf(model, null))),
   }
   const loadImage = (file: Attachment) => {
     try {
@@ -304,7 +304,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             ? compactionCut(transcript, threshold / 4)
             : null
         if (upTo !== null) {
-          const request = summaryRequest(transcript, upTo, titleOf, conversation.role, readText)
+          const request = summaryRequest(
+            transcript,
+            upTo,
+            titleOf,
+            conversation.role,
+            readText,
+            chat.keepReasoning,
+          )
           const summary = await summarise(model, withImageData(request, loadImage), signal)
           if (signal.aborted) break
           if (summary.ok) {
