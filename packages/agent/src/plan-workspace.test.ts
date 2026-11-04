@@ -393,6 +393,28 @@ describe('the coordinator and the project source', () => {
     )
   })
 
+  test('a source slow to connect does not hold up the turn', async () => {
+    const host = new PluginHost('/tmp/ariadne-test-plugins')
+    await host.load({
+      id: 'slow',
+      name: { 'zh-CN': '慢' },
+      setup: (ctx) =>
+        ctx.registerContextProvider({
+          kind: 'slow',
+          title: { 'zh-CN': '慢' },
+          settings: { type: 'object', properties: {} },
+          provides: ['workspace'],
+          connect: () => new Promise(() => {}),
+        } as ContextProvider<never>),
+    })
+    const workspaces = new WorkspaceManager(app, host)
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'slow', settings: {} })
+    const started = Date.now()
+    expect(await workspaces.viewable(project.id, 20)).toBe(true)
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
   test('without a source it is told so, and has no file tools', async () => {
     const model = fakeModel(() => say(''))
     const project = app.createProject('P')

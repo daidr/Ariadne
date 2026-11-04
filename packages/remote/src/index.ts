@@ -74,7 +74,7 @@ function visible(path: string): string {
       .split('/')
       .some((part) => part.toLowerCase() === '.git')
   ) {
-    throw new WorkspacePathError(path)
+    throw new WorkspacePathError(path, 'is kept out of reach')
   }
   return path
 }

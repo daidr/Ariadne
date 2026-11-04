@@ -341,8 +341,12 @@ export interface TrackerCapability {
 
 /** A path that points outside the workspace. */
 export class WorkspacePathError extends Error {
-  constructor(readonly path: string) {
-    super(`${path} is outside the workspace`)
+  constructor(
+    readonly path: string,
+    /** Why, when it is not outside: e.g. a path kept out of reach inside it. */
+    reason?: string,
+  ) {
+    super(`${path} ${reason ?? 'is outside the workspace'}`)
     this.name = 'WorkspacePathError'
   }
 }

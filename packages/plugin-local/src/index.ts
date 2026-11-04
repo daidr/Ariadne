@@ -285,7 +285,7 @@ export class LocalWorkspace implements Workspace {
     const found = await realpath(existing)
     if (!within(found, root)) throw new WorkspacePathError(path)
     const full = join(found, relative(existing, target))
-    if (this.refused(full, root)) throw new WorkspacePathError(path)
+    if (this.refused(full, root)) throw new WorkspacePathError(path, 'is kept out of reach')
     return full
   }
 

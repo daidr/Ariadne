@@ -13,6 +13,9 @@ import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
 
+/** How long a coordinator's turn waits on its source to know whether it can look at it. */
+const VIEWABLE_WAIT_MS = 2000
+
 /** Secret settings of a source's hosting are kept under this prefix. */
 export const HOSTING_SECRET = 'hosting.'
 
@@ -128,15 +131,25 @@ export class WorkspaceManager {
 
   /**
    * Whether the coordinator can look at the project's source: its provider offers a view.
-   * A source that fails to connect counts as one, so the look says why it failed.
+   * A source that fails to connect, or does not answer within `waitMs`, counts as one: the
+   * turn does not wait on it, and a look says why it failed.
    */
-  async viewable(projectId: string): Promise<boolean> {
+  async viewable(projectId: string, waitMs = VIEWABLE_WAIT_MS): Promise<boolean> {
     if (!this.available(projectId)) return false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<boolean>((done) => {
+      timer = setTimeout(() => done(true), waitMs)
+    })
     try {
-      const capabilities = await this.connect(projectId, this.sourceKey(projectId))
-      return !!capabilities.workspace?.view
+      const connected = this.connect(projectId, this.sourceKey(projectId)).then(
+        (capabilities) => !!capabilities.workspace?.view,
+        () => true,
+      )
+      return await Promise.race([connected, late])
     } catch {
       return true
+    } finally {
+      clearTimeout(timer)
     }
   }
 
