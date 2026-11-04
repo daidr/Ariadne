@@ -560,11 +560,8 @@ export type SearchHit =
       kind: 'message'
       id: string
       conversationId: string
-      /** The thread it was said in; `null` for the coordinator's conversation. */
-      threadId: string | null
-      /** Where it was said: the thread's title, or `null` for the coordinator. */
+      /** Where it was said: the thread's title, or `null` for the coordinator's conversation. */
       where: string | null
-      author: Author
       snippet: string
       at: number
     }

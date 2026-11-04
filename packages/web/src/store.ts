@@ -178,7 +178,7 @@ const cursorFrom = (from: string | null) => (from ? { from } : {})
 
 /**
  * The conversation as just fetched from `from`. If an earlier page or a jump moved the
- * start meanwhile, the messages on screen stay; the next event brings the rest.
+ * start meanwhile, what is on screen before `from` stays and the fetched rest follows it.
  */
 function take(
   current: ConversationState,
@@ -186,7 +186,24 @@ function take(
   from: string | null,
 ): ConversationState {
   const { conversation, todo, model } = page
-  if (current.from !== from) return { ...current, conversation, todo, model }
+  if (current.from !== from) {
+    if (!from) return { ...current, conversation, todo, model }
+    const fetched = new Set(page.notices.map((notice) => notice.id))
+    const startAt = page.messages[0]?.createdAt ?? Infinity
+    return {
+      ...current,
+      conversation,
+      todo,
+      model,
+      messages: [...current.messages.filter((message) => message.id < from), ...page.messages],
+      notices: [
+        ...current.notices.filter(
+          (notice) => !fetched.has(notice.id) && notice.createdAt < startAt,
+        ),
+        ...page.notices,
+      ],
+    }
+  }
   return {
     conversation,
     todo,

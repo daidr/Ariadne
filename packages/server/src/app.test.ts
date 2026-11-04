@@ -70,7 +70,7 @@ describe('pages and search', () => {
     const found = await call(`/api/projects/${project.id}/search?q=${encodeURIComponent('第 3')}`)
     expect(await found.json()).toMatchObject({
       terms: ['第', '3'],
-      messages: [{ id: ids[3], threadId: null, snippet: '分页第 3 条' }],
+      messages: [{ id: ids[3], where: null, snippet: '分页第 3 条' }],
     })
   })
 })

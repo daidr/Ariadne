@@ -83,17 +83,11 @@ describe('project search', () => {
     expect(found.threads.map((t) => t.title)).toEqual(['实现会话分页'])
     expect(found.artifacts.map((a) => a.title)).toEqual(['分页设计'])
     expect(found.messages.map((m) => m.snippet)).toEqual(['长对话要能分页加载'])
-    expect(found.messages[0]).toMatchObject({
-      threadId: null,
-      where: null,
-      author: 'user',
-    })
+    expect(found.messages[0]).toMatchObject({ conversationId: project.coordinatorId, where: null })
 
     // Three characters or more go through the trigram index, ignoring case.
     const pages = app.search(project.id, 'EARLIER')
-    expect(pages.messages).toMatchObject([
-      { conversationId: thread.id, threadId: thread.id, where: '实现会话分页', author: 'thread' },
-    ])
+    expect(pages.messages).toMatchObject([{ conversationId: thread.id, where: '实现会话分页' }])
     expect(app.search(project.id, 'trigram').artifacts).toHaveLength(1)
 
     // Every word must be there.

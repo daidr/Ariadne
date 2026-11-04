@@ -661,16 +661,6 @@ export class Ariadne {
         .map((row) => [row.id, row.title]),
     )
     const messages = rows('message')
-    const authors = new Map(
-      messages.length
-        ? this.db
-            .query<{ id: string; author: Author }, string[]>(
-              `SELECT id, author FROM messages WHERE id IN (${messages.map(() => '?').join(', ')})`,
-            )
-            .all(...messages.map((row) => row.ref_id))
-            .map((row) => [row.id, row.author])
-        : [],
-    )
     const kinds = new Map(
       this.db
         .query<{ id: string; kind: ArtifactKind }, [string]>(
@@ -698,14 +688,11 @@ export class Ariadne {
       })),
       messages: messages.map((row) => {
         const conversationId = row.conversation_id ?? ''
-        const thread = titles.get(conversationId)
         return {
           kind: 'message',
           id: row.ref_id,
           conversationId,
-          threadId: thread === undefined ? null : conversationId,
-          where: thread ?? null,
-          author: authors.get(row.ref_id) ?? 'user',
+          where: titles.get(conversationId) ?? null,
           snippet: snippetOf(row.body, terms),
           at: row.at,
         }
