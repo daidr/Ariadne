@@ -1,6 +1,8 @@
 import {
   buildTrace,
+  connectSource,
   DEFAULT_CONTEXT_TOKENS,
+  HOSTING_SECRET,
   listWorktrees,
   mergeThread,
   refreshDashboard,
@@ -20,6 +22,7 @@ import {
   MAX_FILE_BYTES,
   parsePlanOps,
   type Ariadne,
+  type ProjectSource,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import { eventStream } from './events-stream'
@@ -189,6 +192,7 @@ export function createHandler({
         settings: provider.settings,
         provides: provider.provides,
         remote: !!provider.remote,
+        hosting: !!provider.hosting,
         summary: provider.summary ?? null,
       })),
     }),
@@ -228,10 +232,56 @@ export function createHandler({
       settings?.saveSourceSecrets(projectId, {})
       return json({ project: app.setProjectSource(projectId, null) })
     }
-    const input = (body.source ?? {}) as { kind?: unknown; settings?: unknown }
-    const kind = requireString(input as Record<string, unknown>, 'kind')
+    const input = (body.source ?? {}) as Record<string, unknown>
+    const part = readSourcePart(input, 'source')
+    const hosting =
+      input.hosting === undefined || input.hosting === null
+        ? null
+        : readSourcePart(
+            (typeof input.hosting === 'object' ? input.hosting : {}) as Record<string, unknown>,
+            'hosting',
+          )
+    if (host && hosting) {
+      if (!host.contexts.get(hosting.kind)?.hosting) throw new BadRequest('hosting.kind')
+      if (!host.contexts.get(part.kind)?.remote) throw new BadRequest('hosting')
+    }
+    const split = settings
+      ? settings.splitSourceSettings(projectId, part.kind, part.settings, previous?.kind ?? null)
+      : { settings: part.settings, secrets: {} }
+    const hostingSplit =
+      hosting && settings
+        ? settings.splitSourceSettings(
+            projectId,
+            hosting.kind,
+            hosting.settings,
+            previous?.hosting?.kind ?? null,
+            HOSTING_SECRET,
+          )
+        : hosting
+          ? { settings: hosting.settings, secrets: {} }
+          : null
+    const source: ProjectSource = {
+      kind: part.kind,
+      settings: split.settings,
+      ...(hosting && hostingSplit
+        ? { hosting: { kind: hosting.kind, settings: hostingSplit.settings } }
+        : {}),
+    }
+    const secrets = { ...split.secrets, ...hostingSplit?.secrets }
+    // Connected before it is saved, so a typo or a missing permission shows up here.
+    if (host) await connectSource(host.contexts, source, secrets)
+    settings?.saveSourceSecrets(projectId, secrets)
+    return json({ project: app.setProjectSource(projectId, source) })
+  })
+
+  /** A source's kind and its settings as typed, with the required ones there. */
+  function readSourcePart(
+    input: Record<string, unknown>,
+    what: 'source' | 'hosting',
+  ): { kind: string; settings: Record<string, unknown> } {
+    const kind = requireString(input, 'kind')
     const provider = host?.contexts.get(kind)
-    if (host && !provider) throw new BadRequest('source.kind')
+    if (host && !provider) throw new BadRequest(`${what}.kind`)
     const raw = (
       input.settings && typeof input.settings === 'object' ? input.settings : {}
     ) as Record<string, unknown>
@@ -242,23 +292,15 @@ export function createHandler({
       ]),
     )
     for (const key of provider?.settings.required ?? []) {
-      if (trimmed[key] === undefined || trimmed[key] === '') throw new BadRequest(`settings.${key}`)
-    }
-    const split = settings
-      ? settings.splitSourceSettings(projectId, kind, trimmed, previous?.kind ?? null)
-      : { settings: trimmed, secrets: {} }
-    if (provider) {
-      try {
-        await provider.connect({ ...split.settings, ...split.secrets } as never)
-      } catch (error) {
-        throw new DomainError('error.workspace', {
-          detail: error instanceof Error ? error.message : String(error),
-        })
+      // A secret left empty keeps the stored one; without one, connecting says what is wrong.
+      const field = provider?.settings.properties[key]
+      if (field?.type === 'string' && field.secret) continue
+      if (trimmed[key] === undefined || trimmed[key] === '') {
+        throw new BadRequest(`${what === 'source' ? 'settings' : 'hosting.settings'}.${key}`)
       }
     }
-    settings?.saveSourceSecrets(projectId, split.secrets)
-    return json({ project: app.setProjectSource(projectId, { kind, settings: split.settings }) })
-  })
+    return { kind, settings: trimmed }
+  }
 
   // The user lets a held thread go on.
   add('POST', '/api/threads/:threadId/stop', async (request, { threadId = '' }) => {

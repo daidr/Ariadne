@@ -440,24 +440,26 @@ export class SettingsStore {
   /**
    * Split a source's settings: secrets are kept here, the rest is returned for the event
    * log. An empty secret keeps the stored value, `null` clears it. `kind` changing drops
-   * the old secrets.
+   * the old secrets. A hosting's secrets are kept under `prefix`.
    */
   splitSourceSettings(
     projectId: string,
     kind: string | null,
     settings: Record<string, unknown>,
     previousKind: string | null,
+    prefix = '',
   ): { settings: Record<string, unknown>; secrets: Record<string, string> } {
     const schema = kind ? this.host.contexts.get(kind)?.settings : undefined
-    const before = previousKind === kind ? this.sourceSecrets(projectId) : {}
+    const stored = this.sourceSecrets(projectId)
+    const before = previousKind === kind ? stored : {}
     const plain = { ...settings }
     const secrets: Record<string, string> = {}
     for (const key of secretKeys(schema)) {
       const value = plain[key]
       delete plain[key]
       if (value === null) continue
-      if (typeof value === 'string' && value.trim()) secrets[key] = value.trim()
-      else if (before[key]) secrets[key] = before[key]
+      if (typeof value === 'string' && value.trim()) secrets[`${prefix}${key}`] = value.trim()
+      else if (before[`${prefix}${key}`]) secrets[`${prefix}${key}`] = before[`${prefix}${key}`]!
     }
     return { settings: plain, secrets }
   }

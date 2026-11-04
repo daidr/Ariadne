@@ -27,6 +27,10 @@
         "@ariadne/plugin-sdk": "workspace:*",
         "@ariadne/sandbox": "workspace:*",
       },
+      "devDependencies": {
+        "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/remote": "workspace:*",
+      },
     },
     "packages/core": {
       "name": "@ariadne/core",

@@ -6,7 +6,53 @@ import type {
   TrackerCapability,
   Workspace,
 } from '@ariadne/plugin-sdk'
+import type { ProjectSource } from '@ariadne/core'
+import type { ContextProvider } from '@ariadne/plugin-sdk'
+import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
+
+/** Secret settings of a source's hosting are kept under this prefix. */
+export const HOSTING_SECRET = 'hosting.'
+
+/**
+ * Connect a project's source, and its hosting when it has one. `secrets` are the user's
+ * secret settings of both, the hosting's under `HOSTING_SECRET`.
+ */
+export async function connectSource(
+  contexts: Map<string, ContextProvider<never>>,
+  source: ProjectSource,
+  secrets: Record<string, unknown>,
+): Promise<Partial<Capabilities>> {
+  const own: Record<string, unknown> = {}
+  const hostingSecrets: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(secrets)) {
+    if (key.startsWith(HOSTING_SECRET)) hostingSecrets[key.slice(HOSTING_SECRET.length)] = value
+    else own[key] = value
+  }
+  const provider = contexts.get(source.kind)
+  if (!provider) throw new DomainError('error.notFound', { what: source.kind })
+  const hostingProvider = source.hosting ? contexts.get(source.hosting.kind) : null
+  if (source.hosting && !hostingProvider?.hosting) {
+    throw new DomainError('error.notFound', { what: source.hosting.kind })
+  }
+  if (source.hosting && !provider.remote) {
+    throw new DomainError('error.workspace', { detail: 'only a remote source takes a hosting' })
+  }
+  try {
+    const capabilities = await provider.connect({ ...source.settings, ...own } as never)
+    if (!source.hosting || !hostingProvider) return capabilities
+    const hosting = await hostingProvider.connect({
+      ...source.hosting.settings,
+      ...hostingSecrets,
+    } as never)
+    return await withHosting(capabilities, hosting)
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('error.workspace', {
+      detail: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
 
 /**
  * Opens each thread's workspace from its project's context source, once, and keeps it
@@ -52,7 +98,9 @@ export class WorkspaceManager {
   private provides(projectId: string, capability: keyof Capabilities): boolean {
     const source = this.app.getProject(projectId).source
     if (!source) return false
-    return !!this.host.contexts.get(source.kind)?.provides.includes(capability)
+    // With a hosting, the repository and the issues come from it, the workspaces from the source.
+    const from = source.hosting && capability !== 'workspace' ? source.hosting.kind : source.kind
+    return !!this.host.contexts.get(from)?.provides.includes(capability)
   }
 
   /** The project's repository; throws a `DomainError` the model can read. */
@@ -160,21 +208,8 @@ export class WorkspaceManager {
   private connect(projectId: string, key: string): Promise<Partial<Capabilities>> {
     const known = this.sources.get(projectId)
     if (known?.key === key) return known.capabilities
-    const [source, secrets] = JSON.parse(key) as [
-      { kind: string; settings: Record<string, unknown> },
-      Record<string, unknown>,
-    ]
-    const capabilities = (async () => {
-      const provider = this.host.contexts.get(source.kind)
-      if (!provider) throw new DomainError('error.notFound', { what: source.kind })
-      try {
-        return await provider.connect({ ...source.settings, ...secrets } as never)
-      } catch (error) {
-        throw new DomainError('error.workspace', {
-          detail: error instanceof Error ? error.message : String(error),
-        })
-      }
-    })()
+    const [source, secrets] = JSON.parse(key) as [ProjectSource, Record<string, unknown>]
+    const capabilities = connectSource(this.host.contexts, source, secrets)
     this.sources.set(projectId, { key, capabilities })
     capabilities.catch(() => {
       if (this.sources.get(projectId)?.capabilities === capabilities) this.sources.delete(projectId)

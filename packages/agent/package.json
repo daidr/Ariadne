@@ -12,5 +12,9 @@
     "@ariadne/mcp": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
     "@ariadne/sandbox": "workspace:*"
+  },
+  "devDependencies": {
+    "@ariadne/plugin-local": "workspace:*",
+    "@ariadne/remote": "workspace:*"
   }
 }

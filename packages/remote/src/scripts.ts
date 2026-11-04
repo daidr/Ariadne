@@ -168,7 +168,7 @@ if [ ! -e "$dir/.git" ]; then
   if g rev-parse --verify --quiet "refs/heads/$branch" > /dev/null; then
     g worktree add "$dir" "$branch" >&2 || exit 5
   else
-    g worktree add -b "$branch" "$dir" "$start" >&2 || exit 5
+    g worktree add --no-track -b "$branch" "$dir" "$start" >&2 || exit 5
   fi
   seed
 fi
@@ -209,4 +209,40 @@ for entry in */; do
   size=$(du -sk -- "$name" 2>/dev/null | cut -f1)
   printf '%s\\0%s\\0%s\\0' "$name" "$(pwd -P)/$name" "\${size:-}"
 done
+`
+
+/** git in the repository `$1` with no hooks, reading the rest of the input as its own. */
+const GIT_PRELUDE = `
+set -u
+cd -P -- "$1" 2>/dev/null || { printf '%s is missing on the remote machine\\n' "$1" >&2; exit 4; }
+export GIT_TERMINAL_PROMPT=0
+g() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"; }
+`
+
+/** The commits of the input's lines (one per line) the repository `$1` has, one per line. */
+export const HAS = `${GIT_PRELUDE}
+g cat-file --batch-check='%(objectname) %(objecttype)' | while read -r sha type; do
+  [ "$type" = commit ] && printf '%s\\n' "$sha"
+done
+exit 0
+`
+
+/** A bundle of the revisions on the input (`refs/heads/x`, `^<sha>`), base64 encoded. */
+export const BUNDLE = `${GIT_PRELUDE}
+set -o pipefail
+g bundle create - --stdin | base64
+`
+
+/**
+ * Take in a bundle and set refs. The input is \`update <ref> <sha>\` lines, an empty line,
+ * then the bundle base64 encoded (nothing when there is none).
+ */
+export const RECEIVE = `${GIT_PRELUDE}
+updates=$(mktemp "\${TMPDIR:-/tmp}/ariadne-refs.XXXXXX") || exit 1
+file=$(mktemp "\${TMPDIR:-/tmp}/ariadne-bundle.XXXXXX") || exit 1
+trap 'rm -f -- "$updates" "$file"' EXIT
+while IFS= read -r line && [ -n "$line" ]; do printf '%s\\n' "$line" >> "$updates"; done
+base64 -d > "$file" || exit 1
+if [ -s "$file" ]; then g bundle unbundle "$file" > /dev/null || exit 1; fi
+g update-ref --stdin < "$updates"
 `

@@ -1,6 +1,12 @@
-import type { CommandSandbox, ExecResult, WorkspaceCapability } from '@ariadne/plugin-sdk'
+import type {
+  CommandSandbox,
+  ExecResult,
+  GitObjects,
+  WorkspaceCapability,
+} from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { branchChanges, branchMerged, fileVersions, removeWorktree, type GitRun } from './branches'
 import { branchFor, gitControlPaths, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
@@ -74,6 +80,7 @@ export function hostedClone(input: {
   workspace: WorkspaceCapability
   fetch(): Promise<void>
   push(branch: string): Promise<{ sha: string }>
+  objects: GitObjects
 } {
   const { remoteUrl } = input
   const segments = [...(input.namespace ?? []), ...input.path.split('/')]
@@ -179,8 +186,58 @@ export function hostedClone(input: {
       }),
   }
 
+  // The shared clone's refs and objects, for commits made in a checkout on another machine.
+  const ready = () => (existsSync(join(bare, 'HEAD')) ? Promise.resolve() : serial(ensureClone))
+  const objects: GitObjects = {
+    async refs(prefixes) {
+      await ready()
+      const result = await local([
+        'for-each-ref',
+        '--format=%(objectname) %(refname)',
+        '--',
+        ...prefixes,
+      ])
+      return parseRefs(check(result, 'git for-each-ref').stdout)
+    },
+    async has(shas) {
+      if (!shas.length) return []
+      await ready()
+      const out = await gitInput(
+        bare,
+        ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
+        `${shas.join('\n')}\n`,
+      )
+      return out
+        .split('\n')
+        .map((line) => line.split(' '))
+        .filter(([, type]) => type === 'commit')
+        .map(([sha]) => sha!)
+    },
+    async bundle(tips, exclude) {
+      await ready()
+      return withTemp(async (file) => {
+        const revs = [...tips, ...exclude.map((sha) => `^${sha}`)].join('\n')
+        await gitInput(bare, ['bundle', 'create', file, '--stdin'], `${revs}\n`)
+        return new Uint8Array(await readFile(file))
+      })
+    },
+    receive: (bundle, refs) =>
+      serial(async () => {
+        await ready()
+        if (bundle) {
+          await withTemp(async (file) => {
+            await writeFile(file, bundle)
+            check(await local(['bundle', 'unbundle', file]), 'git bundle unbundle')
+          })
+        }
+        const updates = Object.entries(refs).map(([ref, sha]) => `update ${ref} ${sha}\n`)
+        if (updates.length) await gitInput(bare, ['update-ref', '--stdin'], updates.join(''))
+      }),
+  }
+
   return {
     workspace,
+    objects,
     fetch: () => serial(ensureClone),
     push: (branch) =>
       serial(async () => {
@@ -200,5 +257,42 @@ export function hostedClone(input: {
         await git(bare, 'update-ref', `refs/remotes/origin/${branch}`, sha.stdout.trim())
         return { sha: sha.stdout.trim() }
       }),
+  }
+}
+
+/** `<sha> <ref>` lines, as `for-each-ref` prints them. */
+function parseRefs(text: string): Record<string, string> {
+  const refs: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const [sha, ref] = line.trim().split(' ')
+    if (sha && ref) refs[ref] = sha
+  }
+  return refs
+}
+
+/** The server's git in `cwd`, fed `input`; its output, or an error with the reason. */
+async function gitInput(cwd: string, args: string[], input: string): Promise<string> {
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    stdin: new TextEncoder().encode(input),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...serverGitEnv(['file']) },
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  if (code !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim() || `exit ${code}`}`)
+  return stdout
+}
+
+async function withTemp<T>(work: (file: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'ariadne-bundle-'))
+  try {
+    return await work(join(dir, 'objects.bundle'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
   }
 }

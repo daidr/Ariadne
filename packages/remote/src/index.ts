@@ -1,7 +1,9 @@
 import {
   FileTooLargeError,
   WorkspacePathError,
+  type BranchCapability,
   type ExecResult,
+  type GitObjects,
   type Workspace,
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
@@ -18,7 +20,9 @@ import {
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
 import {
+  BUNDLE,
   EXEC,
+  HAS,
   EXISTS,
   GIT,
   LIST,
@@ -27,6 +31,7 @@ import {
   PROBE,
   READ,
   READ_BYTES,
+  RECEIVE,
   STARTED,
   WORKTREES,
   WRITE,
@@ -186,8 +191,15 @@ export async function probe(shell: RemoteShell, path: string): Promise<Probe> {
  * `~/.ariadne-worktrees/<key>/<thread>` on that machine, on branch `ariadne/<id tail>`
  * created from the checkout's current HEAD (or the ref asked for), so threads never see
  * each other's changes; any other directory is shared by all threads as it is.
+ *
+ * `tracking` workspaces are for a checkout of a hosted repository: branches start from and
+ * are compared against `origin/<base>`, and reach it through pull requests, not a merge.
  */
-export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCapability {
+export function remoteWorkspaces(
+  shell: RemoteShell,
+  source: Probe,
+  tracking = false,
+): WorkspaceCapability {
   const { repoRoot } = source
   if (!repoRoot) {
     return {
@@ -206,22 +218,43 @@ export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCa
   const exists = async (path: string) => (await shell.run(EXISTS, [path])).exitCode === 0
   // The remote user's own identity, as their git there would commit.
   const identity = gitIdentity((name) => git(['config', '--get', name]))
+  const baseRef = (base: string) =>
+    tracking ? `refs/remotes/origin/${base}` : `refs/heads/${base}`
   return {
     isolated: true,
+    ...(tracking
+      ? {}
+      : {
+          checkout: {
+            async originUrl() {
+              const result = await git(['config', '--get', 'remote.origin.url'])
+              return result.exitCode === 0 ? result.stdout.trim() || null : null
+            },
+            objects: remoteObjects(shell, repoRoot),
+            tracking: () => remoteWorkspaces(shell, source, true),
+          },
+        }),
     branches: {
       async changes(threadId, base) {
         const dir = dirOf(threadId)
         return branchChanges(git, {
           branch: branchFor(threadId),
           base,
-          baseRef: `refs/heads/${base}`,
+          baseRef: baseRef(base),
           worktree: (await exists(dir)) ? dir : null,
         })
       },
       file: (request) => fileVersions(git, request),
-      merged: (threadId, base) => branchMerged(git, branchFor(threadId), `refs/heads/${base}`),
-      merge: ({ threadId, ...request }) =>
-        mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
+      merged: (threadId, base) => branchMerged(git, branchFor(threadId), baseRef(base)),
+      ...(tracking
+        ? {}
+        : {
+            merge: ({
+              threadId,
+              ...request
+            }: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
+              mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
+          }),
       remove: (threadId) => removeWorktree(git, dirOf(threadId), exists),
       async worktrees() {
         const result = await shell.run(WORKTREES, [worktrees], { timeoutMs: 120_000 })
@@ -257,6 +290,54 @@ export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCa
       return new RemoteWorkspace(threadId, shell, root, branch, base)
     },
   }
+}
+
+/** Refs and objects of the repository `repo` on the machine `shell` reaches. */
+export function remoteObjects(shell: RemoteShell, repo: string): GitObjects {
+  const call = async (script: string, input: string, what: string) => {
+    const result = await shell.run(script, [repo], { input, timeoutMs: 600_000 })
+    if (result.exitCode !== 0) {
+      throw new Error(`${what} failed: ${failure(shell, repo, result).message}`)
+    }
+    return result.stdout
+  }
+  return {
+    async refs(prefixes) {
+      const result = await shell.run(GIT, [
+        repo,
+        'for-each-ref',
+        '--format=%(objectname) %(refname)',
+        '--',
+        ...prefixes,
+      ])
+      if (result.exitCode !== 0) throw failure(shell, repo, result)
+      return parseRefs(result.stdout)
+    },
+    async has(shas) {
+      if (!shas.length) return []
+      return (await call(HAS, `${shas.join('\n')}\n`, 'git cat-file')).split('\n').filter(Boolean)
+    },
+    async bundle(tips, exclude) {
+      const revs = [...tips, ...exclude.map((sha) => `^${sha}`)].join('\n')
+      const out = await call(BUNDLE, `${revs}\n`, 'git bundle')
+      return new Uint8Array(Buffer.from(out.replace(/\s+/g, ''), 'base64'))
+    },
+    async receive(bundle, refs) {
+      const updates = Object.entries(refs).map(([ref, sha]) => `update ${ref} ${sha}\n`)
+      const data = bundle ? Buffer.from(bundle).toString('base64') : ''
+      await call(RECEIVE, `${updates.join('')}\n${data}`, 'receiving commits')
+    },
+  }
+}
+
+/** `<sha> <ref>` lines, as `for-each-ref` prints them. */
+export function parseRefs(text: string): Record<string, string> {
+  const refs: Record<string, string> = {}
+  for (const line of text.split('\n')) {
+    const [sha, ref] = line.trim().split(' ')
+    if (sha && ref) refs[ref] = sha
+  }
+  return refs
 }
 
 /** The workspaces of the directory `path` on the machine `shell` reaches. */
