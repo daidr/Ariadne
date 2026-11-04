@@ -21,6 +21,7 @@ import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createHandler } from './app'
+import { DataStore } from './data'
 import { loadConfig } from './config'
 import { loadUserConfig, SettingsStore } from './settings'
 
@@ -85,7 +86,15 @@ const mcp = new McpHub({
   env: () => threadEnv(),
 })
 
-const workspaces = new WorkspaceManager(app, host, (projectId) => settings.sourceSecrets(projectId))
+const workspaces = new WorkspaceManager(
+  app,
+  host,
+  (projectId) => settings.sourceSecrets(projectId),
+  {
+    env: (projectId) => settings.turnSettings(projectId).env,
+    setupTimeoutMs: () => settings.current.limits.commandTimeoutMax * 1000,
+  },
+)
 // Pull requests are polled for their checks; ARIADNE_REPO_POLL_MS shortens it for testing.
 const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO_POLL_MS) || 60_000)
 const scheduler = new Scheduler({
@@ -100,6 +109,7 @@ const scheduler = new Scheduler({
           contextTokens: app.getConversation(conversation.id).contextTokens,
         }),
   models: () => settings.modelChoices(),
+  settings: (projectId) => settings.turnSettings(projectId),
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
@@ -127,6 +137,7 @@ const server = Bun.serve({
     host,
     workspaces,
     mcp,
+    data: new DataStore(app, config.home, config.databasePath),
   }),
 })
 

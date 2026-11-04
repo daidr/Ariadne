@@ -147,7 +147,10 @@ async function somethingToMerge(ctx: ToolContext): Promise<boolean> {
   try {
     const branches = ctx.branches ? await ctx.branches() : null
     if (!branches) return true
-    changes = await branches.changes(ctx.conversationId, workspace.base)
+    changes = await branches.changes(
+      { threadId: ctx.conversationId, branch: workspace.branch },
+      workspace.base,
+    )
   } catch {
     return true
   }
@@ -171,7 +174,8 @@ async function mergedHead(ctx: ToolContext): Promise<string | undefined> {
   const { merged } = ctx.app.getThread(ctx.conversationId)
   if (!merged) return undefined
   try {
-    const changes = await (await ctx.branches())?.changes(ctx.conversationId, merged.base)
+    const thread = { threadId: ctx.conversationId, branch: merged.branch }
+    const changes = await (await ctx.branches())?.changes(thread, merged.base)
     return changes?.head
   } catch {
     return undefined
@@ -291,6 +295,11 @@ function createThread(models: ModelChoice[]): Tool {
             description:
               'The plan node this thread works on. It sees the node, and what its upstream nodes produced.',
           },
+          branch: {
+            type: 'string',
+            description:
+              'A short name for its git branch in English, two to four lowercase words joined by hyphens, e.g. "fix-safari-export". The user reads it in git.',
+          },
           ...(choose
             ? {
                 model: {
@@ -318,6 +327,7 @@ function createThread(models: ModelChoice[]): Tool {
         title: str(args, 'title'),
         nodeId,
         model,
+        branch: typeof args.branch === 'string' ? args.branch : null,
       })
       ctx.app.postMessage(ctx.projectId, {
         conversationId: thread.id,
@@ -582,6 +592,27 @@ export const threadTools: Tool[] = [
  * when the source has a tracker (the coordinator reads and links issues, only threads
  * change them). The coordinator reads the source, read-only, when there is one.
  */
+/**
+ * The built-in tools a project can go without, in groups the user turns off together (its
+ * settings keep the group names). The rest are how Ariadne works: plans, threads, reports.
+ */
+export const TOOL_SWITCHES = {
+  fetch: ['fetch_url'],
+  search: ['web_search'],
+  commands: ['run_command'],
+  issueWrites: ['comment_on_issue', 'set_issue_state'],
+} as const satisfies Record<string, readonly string[]>
+
+export type ToolSwitch = keyof typeof TOOL_SWITCHES
+export const TOOL_SWITCH_NAMES = Object.keys(TOOL_SWITCHES) as ToolSwitch[]
+
+/** The tool names a project's switched-off groups take away. */
+export function switchedOff(groups: readonly string[]): Set<string> {
+  return new Set(
+    groups.flatMap((group) => (group in TOOL_SWITCHES ? TOOL_SWITCHES[group as ToolSwitch] : [])),
+  )
+}
+
 export function toolsFor(
   role: 'coordinator' | 'thread',
   source: {

@@ -11,6 +11,7 @@ import type {
   Workspace,
 } from '@ariadne/plugin-sdk'
 import { keepMessageImages } from './message-images'
+import type { CommandRule, Limits } from './limits'
 
 export interface ToolContext {
   app: Ariadne
@@ -37,6 +38,10 @@ export interface ToolContext {
   models?: ModelChoice[]
   /** The plugins' web search services, by kind. */
   searchProviders?: ReadonlyMap<string, SearchProvider>
+  /** The user's limits; the defaults without. */
+  limits?: Limits
+  /** How the project's thread commands run: the user's rules, the shell, the environment. */
+  commands?: { rules: CommandRule[]; shell: readonly string[]; env: Record<string, string> }
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */

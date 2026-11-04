@@ -500,7 +500,7 @@ describe('event log', () => {
     const project = app.createProject('P')
     const before = app.store.lastSeq()
     // The same thread id twice violates the threads primary key inside the transaction.
-    const data = { threadId: 'thr_x', title: 't', nodeId: null, model: null }
+    const data = { threadId: 'thr_x', title: 't', nodeId: null, model: null, branch: null }
     expect(() =>
       app.store.append([
         { type: 'thread.created', projectId: project.id, data },
@@ -1254,14 +1254,13 @@ describe('deleting a project', () => {
     app.requestApproval(project.id, a.id, 'push', card)
     app.requestApproval(project.id, b.id, 'push', card)
     app.setProjectMcp(project.id, [])
-    app.mcpApproval(project.id, b.id, 'mcp:docs.search', card)
+    app.callApproval(project.id, b.id, 'mcp:docs.search', card)
     const [mcpAsk] = app.listOpenAttentions(project.id).filter((ask) => ask.threadId === b.id)
     app.answerAttention(mcpAsk!.id, { type: 'confirm', approved: true })
-    app.useMcpApproval(project.id, {
+    app.useApproval(project.id, {
       threadId: b.id,
       attentionId: mcpAsk!.id,
-      server: 'docs',
-      tool: 'search',
+      what: 'mcp:docs/search',
     })
     app.postMessage(project.id, { conversationId: a.id, author: 'user', content: '开始吧' })
     app.updateTodo(project.id, a.id, [{ label: '调研', status: 'doing' }])

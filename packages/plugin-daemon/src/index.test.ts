@@ -1,6 +1,6 @@
 import { certificate, Lockout, newToken, serveDaemon } from '@ariadne/daemon'
 import { CERT_NAME, pairingCode, parseAddress, parsePairingCode } from '@ariadne/daemon/protocol'
-import { run } from '@ariadne/plugin-local'
+import { branchFor, run } from '@ariadne/plugin-local'
 import { createSandbox, detectSandbox, noSandbox } from '@ariadne/sandbox'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -204,7 +204,10 @@ describe('daemon source', () => {
       'git add -A && git -c user.name=t -c user.email=t@t commit -qm add && git log --oneline | wc -l',
     )
     expect(result.stdout.trim()).toBe('2')
-    const changes = await workspace!.branches!.changes('thr_daemon01', 'main')
+    const changes = await workspace!.branches!.changes(
+      { threadId: 'thr_daemon01', branch: branchFor('thr_daemon01') },
+      'main',
+    )
     expect(changes?.files.map((file) => file.path)).toEqual(['src/new.ts'])
   })
 

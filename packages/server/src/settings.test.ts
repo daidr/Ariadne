@@ -1,10 +1,10 @@
-import { PluginHost } from '@ariadne/agent'
+import { DEFAULT_LIMITS, PluginHost } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, test } from 'vitest'
-import { SettingsStore } from './settings'
+import { DEFAULT_KEYS, SettingsStore } from './settings'
 
 let host: PluginHost
 let path: string
@@ -56,7 +56,7 @@ describe('model settings', () => {
 
   test('the send key and snippets are checked and kept', () => {
     const store = new SettingsStore(path, host)
-    expect(store.current.input).toEqual({ submitOn: 'enter', snippets: [] })
+    expect(store.current.input).toEqual({ submitOn: 'enter', snippets: [], keys: DEFAULT_KEYS })
     expect(() => store.updateInput({ submitOn: 'shift-enter', snippets: [] })).toThrow()
     expect(() =>
       store.updateInput({ submitOn: 'enter', snippets: [{ id: 'a', name: ' ', text: 'x' }] }),
@@ -77,7 +77,108 @@ describe('model settings', () => {
     expect(new SettingsStore(path, host).current.input).toEqual({
       submitOn: 'mod-enter',
       snippets: [{ id: 's1', name: '复查', text: '再看一遍改动\n' }],
+      keys: DEFAULT_KEYS,
     })
+  })
+
+  test('shortcuts can be bound to other single key presses, each to its own', () => {
+    const store = new SettingsStore(path, host)
+    const input = { submitOn: 'enter' as const, snippets: [] }
+    expect(() => store.updateInput({ ...input, keys: { search: 'g i' } })).toThrow()
+    expect(() => store.updateInput({ ...input, keys: { search: 'mod+up' } })).toThrow()
+    store.updateInput({ ...input, keys: { search: 'Mod+P', stop: 'shift+escape' } })
+    expect(new SettingsStore(path, host).current.input.keys).toEqual({
+      ...DEFAULT_KEYS,
+      search: 'mod+p',
+      stop: 'shift+escape',
+    })
+  })
+
+  test('instructions, command rules and limits are checked and kept', () => {
+    const store = new SettingsStore(path, host)
+    expect(store.work().limits).toEqual(DEFAULT_LIMITS)
+    expect(() => store.updateWork({ rules: [{ pattern: 'git push*', action: 'maybe' }] })).toThrow()
+    expect(() => store.updateWork({ limits: { compactShare: 0.95 } })).toThrow()
+    expect(() =>
+      store.updateWork({ limits: { commandTimeout: 900, commandTimeoutMax: 600 } }),
+    ).toThrow()
+    store.updateWork({
+      instructions: ' 回答简短 ',
+      rules: [{ pattern: ' git push * ', action: 'ask' }],
+      limits: { commandTimeout: 300, modelRetries: 2 },
+    })
+    const again = new SettingsStore(path, host)
+    expect(again.work()).toMatchObject({
+      instructions: '回答简短',
+      rules: [{ pattern: 'git push *', action: 'ask' }],
+      limits: { ...DEFAULT_LIMITS, commandTimeout: 300, modelRetries: 2 },
+    })
+    expect(again.turnSettings('prj_x')).toEqual({
+      limits: again.work().limits,
+      instructions: '回答简短',
+      commandRules: [{ pattern: 'git push *', action: 'ask' }],
+      env: {},
+    })
+  })
+
+  test("a project's command environment keeps its values on the server", () => {
+    const store = new SettingsStore(path, host)
+    expect(() => store.updateProjectEnv('prj_a', [{ name: '1BAD', value: 'x' }])).toThrow()
+    expect(() => store.updateProjectEnv('prj_a', [{ name: 'NEW', value: '' }])).toThrow()
+    // Git configuration from the environment would lift the remote push block.
+    for (const name of [
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'git_config_global',
+      'ARIADNE_HOME',
+    ]) {
+      expect(() => store.updateProjectEnv('prj_a', [{ name, value: 'x' }])).toThrow()
+    }
+    store.updateProjectEnv('prj_a', [{ name: 'TOKEN', value: 'secret-env' }])
+    // An empty value keeps what is stored; the names are all the page sees.
+    expect(store.updateProjectEnv('prj_a', [{ name: 'TOKEN', value: '' }])).toEqual(['TOKEN'])
+    expect(store.turnSettings('prj_a').env).toEqual({ TOKEN: 'secret-env' })
+    store.forgetProject('prj_a')
+    expect(new SettingsStore(path, host).turnSettings('prj_a').env).toEqual({})
+  })
+
+  test('a hand-edited environment never hands a command git configuration', () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ projectEnv: { prj_a: { GIT_CONFIG_COUNT: '1', KEEP: 'yes' } } }),
+    )
+    expect(new SettingsStore(path, host).turnSettings('prj_a').env).toEqual({ KEEP: 'yes' })
+  })
+
+  test('request settings reach the resolved model; header values stay on the server', () => {
+    const store = new SettingsStore(path, host)
+    const body = provider({ baseUrl: '', apiKey: 'k' }) as {
+      providers: Record<string, unknown>[]
+      models: Record<string, unknown>[]
+    }
+    body.providers[0] = {
+      ...body.providers[0],
+      headers: [{ name: 'X-Org', value: 'org-secret' }],
+      extraBody: { temperature: 0.3 },
+      timeoutSeconds: 120,
+    }
+    body.models[0] = { ...body.models[0], maxTokens: 4096 }
+    store.updateModels(body)
+    expect(store.resolveModel('thread')?.request).toEqual({
+      headers: { 'X-Org': 'org-secret' },
+      extraBody: { temperature: 0.3 },
+      timeoutSeconds: 120,
+      maxTokens: 4096,
+    })
+    const shown = store.publicModels().providers[0]!
+    expect(shown.headers).toEqual(['X-Org'])
+    expect(JSON.stringify(store.publicModels())).not.toContain('org-secret')
+    // Sent again without a value, the header keeps it.
+    body.providers[0] = { ...body.providers[0], headers: [{ name: 'X-Org', value: '' }] }
+    store.updateModels(body)
+    expect(store.resolveModel('thread')?.request?.headers).toEqual({ 'X-Org': 'org-secret' })
+    body.providers[0] = { ...body.providers[0], extraBody: ['no'] }
+    expect(() => store.updateModels(body)).toThrow()
   })
 
   test('null clears a stored secret', () => {
@@ -96,7 +197,6 @@ describe('model settings', () => {
     expect(resolved?.settings).toEqual({
       baseUrl: 'https://api.anthropic.com',
       apiKey: 'k',
-      maxTokens: 8192,
     })
     expect(resolved?.label).toBe('主力 / some-model')
   })

@@ -13,12 +13,12 @@ const sections = computed(() => {
     {
       title: t('shortcuts.global'),
       rows: [
-        { label: t('shortcuts.search'), keys: ['mod+k'] },
-        { label: t('shortcuts.focus'), keys: ['/'] },
-        { label: t('shortcuts.previousThread'), keys: ['mod+up'] },
-        { label: t('shortcuts.nextThread'), keys: ['mod+down'] },
-        { label: t('shortcuts.stop'), keys: ['escape'] },
-        { label: t('shortcuts.sheet'), keys: ['?'] },
+        { label: t('shortcuts.search'), keys: [state.input.keys.search] },
+        { label: t('shortcuts.focus'), keys: [state.input.keys.focus] },
+        { label: t('shortcuts.previousThread'), keys: [state.input.keys.previousThread] },
+        { label: t('shortcuts.nextThread'), keys: [state.input.keys.nextThread] },
+        { label: t('shortcuts.stop'), keys: [state.input.keys.stop] },
+        { label: t('shortcuts.sheet'), keys: [state.input.keys.sheet] },
       ],
     },
     {

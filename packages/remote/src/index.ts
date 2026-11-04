@@ -3,6 +3,7 @@ import {
   readOnlyView,
   WorkspacePathError,
   type BranchCapability,
+  type ExecOptions,
   type ExecResult,
   type GitObjects,
   type Workspace,
@@ -162,12 +163,15 @@ export class RemoteWorkspace implements Workspace {
       .toSorted((a, b) => a.name.localeCompare(b.name))
   }
 
-  async exec(
-    command: string,
-    options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
-  ): Promise<ExecResult> {
+  async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
     const cwd = options.cwd ?? '.'
-    const args = [this.root, relativePath(cwd), command, ...(this.noPush ? [this.noPush] : [])]
+    // A POSIX machine: the shells there all take the command after `-c`.
+    const [program = 'bash', flag = '-c', ...more] = options.shell ?? []
+    if (flag !== '-c' || more.length) {
+      return { exitCode: 127, stdout: '', stderr: `${program} cannot run commands here` }
+    }
+    const env = Object.entries(options.env ?? {}).map(([name, value]) => `${name}=${value}`)
+    const args = [this.root, relativePath(cwd), command, this.noPush ?? '', program, ...env]
     const result = await this.shell.run(EXEC, args, {
       hold: true,
       clip: true,
@@ -212,7 +216,7 @@ export async function probe(shell: RemoteShell, path: string): Promise<Probe> {
 
 /**
  * Workspaces on a remote machine. A git checkout gives every thread its own worktree in
- * `~/.ariadne-worktrees/<key>/<thread>` on that machine, on branch `ariadne/<id tail>`
+ * `~/.ariadne-worktrees/<key>/<thread>` on that machine, on the branch it was given (`ariadne/<id tail>` without one)
  * created from the checkout's current HEAD (or the ref asked for), so threads never see
  * each other's changes; any other directory is shared by all threads as it is.
  *
@@ -269,25 +273,22 @@ export function remoteWorkspaces(
           },
         }),
     branches: {
-      async changes(threadId, base) {
+      async changes({ threadId, branch }, base) {
         const dir = dirOf(threadId)
         return branchChanges(git, {
-          branch: branchFor(threadId),
+          branch,
           base,
           baseRef: baseRef(base),
           worktree: (await exists(dir)) ? dir : null,
         })
       },
       file: (request) => fileVersions(git, request),
-      merged: (threadId, base) => branchMerged(git, branchFor(threadId), baseRef(base)),
+      merged: ({ branch }, base) => branchMerged(git, branch, baseRef(base)),
       ...(tracking
         ? {}
         : {
-            merge: ({
-              threadId,
-              ...request
-            }: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
-              mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
+            merge: (request: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
+              mergeBranch(git, identity, request),
           }),
       remove: (threadId, options) => removeWorktree(git, dirOf(threadId), exists, options),
       async worktrees() {
@@ -306,8 +307,8 @@ export function remoteWorkspaces(
         return list
       },
     },
-    async open({ threadId, ref, base: recorded }) {
-      const branch = branchFor(threadId)
+    async open({ threadId, ref, base: recorded, branch: named }) {
+      const branch = named ?? branchFor(threadId)
       const dir = dirOf(threadId)
       let base = recorded ?? null
       if (recorded === undefined) {

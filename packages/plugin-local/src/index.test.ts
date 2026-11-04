@@ -237,6 +237,13 @@ describe('local directory', () => {
     expect((await ws.exec('echo hi')).stdout).toBe('hi\n')
     expect(calls).toHaveLength(1)
     expect(calls[0]!.argv).toEqual(['bash', '-c', 'echo hi'])
+    // The project's shell goes inside the sandbox too, and its environment reaches it.
+    const shaped = await ws.exec('printf %s "$GREETING"', {
+      shell: ['sh', '-c'],
+      env: { GREETING: 'hello' },
+    })
+    expect(shaped.stdout).toBe('hello')
+    expect(calls[1]!.argv).toEqual(['sh', '-c', 'printf %s "$GREETING"'])
     const real = await realpath(dir)
     const [worktree] = calls[0]!.keep
     expect(worktree?.startsWith(join(base, 'data', 'worktrees'))).toBe(true)

@@ -4,7 +4,7 @@ import {
   type RepoCapability,
   type SourceView,
 } from '@ariadne/plugin-sdk'
-import { run } from '@ariadne/plugin-local'
+import { branchFor, run } from '@ariadne/plugin-local'
 import { hostedClone } from '@ariadne/plugin-local/hosted'
 import { connectRemote, LocalShell } from '@ariadne/remote'
 import { existsSync } from 'node:fs'
@@ -169,7 +169,10 @@ describe('a remote checkout with a hosted repository', () => {
     await ws.exec('git add -A && git commit -qm feature')
     expect(await git(checkout, 'rev-parse', 'main')).toBe(checkoutMain)
 
-    const changes = await hosted.workspace!.branches!.changes('thr_hosting1', 'main')
+    const changes = await hosted.workspace!.branches!.changes(
+      { threadId: 'thr_hosting1', branch: branchFor('thr_hosting1') },
+      'main',
+    )
     expect(changes?.files.map((file) => file.path)).toEqual(['feature.txt'])
     // Branches reach the base through pull requests.
     expect(hosted.workspace!.branches!.merge).toBeUndefined()

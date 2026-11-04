@@ -571,3 +571,77 @@ describe('links', () => {
     )
   })
 })
+
+describe('project settings, export and backups', () => {
+  test("saves a project's settings and keeps its environment's values on the server", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ariadne-app-settings-'))
+    const settings = new SettingsStore(join(dir, 'config.json'), new PluginHost(dir))
+    handle = createHandler({ app, token, settings })
+    const project = app.createProject('P')
+    const saved = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: {
+        settings: {
+          instructions: '只改 web',
+          tools: ['fetch'],
+          budget: { thread: 200_000, project: null },
+          workspace: { setup: 'bun install', shell: 'zsh', branchPrefix: 'work/' },
+        },
+        env: [{ name: 'API_TOKEN', value: 'env-secret' }],
+      },
+    })
+    expect(saved.status).toBe(200)
+    const read = (await (await call(`/api/projects/${project.id}/settings`)).json()) as {
+      settings: unknown
+      env: string[]
+    }
+    expect(read.env).toEqual(['API_TOKEN'])
+    expect(JSON.stringify(read)).not.toContain('env-secret')
+    expect(app.getProject(project.id).settings).toMatchObject({
+      tools: ['fetch'],
+      workspace: { shell: 'zsh', branchPrefix: 'work/' },
+    })
+    const bad = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: { settings: { workspace: { setup: '', shell: 'bash', branchPrefix: '../x' } } },
+    })
+    expect(bad.status).toBe(400)
+    // A refused part saves nothing, the environment included.
+    const badEnv = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: {
+        settings: { workspace: { setup: '', shell: 'bash', branchPrefix: '../x' } },
+        env: [{ name: 'OTHER', value: 'x' }],
+      },
+    })
+    expect(badEnv.status).toBe(400)
+    expect(settings.projectEnvNames(project.id)).toEqual(['API_TOKEN'])
+    // Settings left out stay as they are.
+    const envOnly = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: { env: [] },
+    })
+    expect(envOnly.status).toBe(200)
+    expect(app.getProject(project.id).settings).toMatchObject({ instructions: '只改 web' })
+  })
+
+  test('exports what the log holds of a project, files included', async () => {
+    const project = app.createProject('导出')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '你好',
+    })
+    app.saveFile(project.id, { mime: 'image/png', data: new Uint8Array([137, 80, 78, 71]) })
+    const response = await call(`/api/projects/${project.id}/export`)
+    expect(response.headers.get('content-disposition')).toContain('attachment')
+    const body = (await response.json()) as {
+      project: { name: string }
+      events: { type: string }[]
+      files: { data: string }[]
+    }
+    expect(body.project.name).toBe('导出')
+    expect(body.events.map((e) => e.type)).toContain('message.posted')
+    expect(body.files[0]?.data).toBe('iVBORw==')
+  })
+})

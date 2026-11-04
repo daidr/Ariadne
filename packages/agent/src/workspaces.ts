@@ -1,4 +1,4 @@
-import { DomainError, type Ariadne } from '@ariadne/core'
+import { DomainError, SHELLS, threadBranch, type Ariadne } from '@ariadne/core'
 import type {
   BranchCapability,
   Capabilities,
@@ -12,6 +12,17 @@ import type { ProjectSource } from '@ariadne/core'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
+import { headAndTail } from './workspace-tools'
+
+/** What the model reads at most of the setup script's output. */
+const MAX_SETUP_OUTPUT = 8000
+
+export interface WorkspaceManagerOptions {
+  /** The environment variables the user gave the project's commands; they may be secret. */
+  env?: (projectId: string) => Record<string, string>
+  /** How long the project's setup script may run. */
+  setupTimeoutMs?: (projectId: string) => number
+}
 
 /** How long a coordinator's turn waits on its source to know whether it can look at it. */
 const VIEWABLE_WAIT_MS = 2000
@@ -86,13 +97,31 @@ export class WorkspaceManager {
   >()
   private readonly open = new Map<string, { key: string; workspace: Promise<Workspace> }>()
   private readonly queues = new Map<string, Promise<void>>()
+  /** What the setup script of a thread's new workspace did, until its model is told. */
+  private readonly setups = new Map<string, string>()
 
   constructor(
     private readonly app: Ariadne,
     private readonly host: PluginHost,
     /** Secret settings of the project's source, kept in the user's config. */
     private readonly secrets: (projectId: string) => Record<string, unknown> = () => ({}),
+    private readonly options: WorkspaceManagerOptions = {},
   ) {}
+
+  /** The environment variables of the project's thread commands. */
+  env(projectId: string): Record<string, string> {
+    return this.options.env?.(projectId) ?? {}
+  }
+
+  /**
+   * What the setup script did in the thread's workspace opened just now, once: the model
+   * reads it with the result of the call that opened the workspace.
+   */
+  takeSetup(threadId: string): string | null {
+    const report = this.setups.get(threadId) ?? null
+    this.setups.delete(threadId)
+    return report
+  }
 
   /** Whether the project's threads can get a workspace at all. */
   available(projectId: string): boolean {
@@ -213,11 +242,22 @@ export class WorkspaceManager {
   private async openFor(projectId: string, threadId: string, key: string): Promise<Workspace> {
     const cached = this.open.get(threadId)
     if (cached?.key === key) return cached.workspace
-    // A workspace opened before keeps the base it started from.
-    const known = this.app.getThread(threadId).workspace
-    const workspace = this.connect(projectId, key).then((capabilities) => {
+    // A workspace opened before keeps the base it started from, and its branch.
+    const thread = this.app.getThread(threadId)
+    const known = thread.workspace
+    const { workspace: setup } = this.app.getProject(projectId).settings
+    const branch = known?.branch ?? threadBranch(setup.branchPrefix, threadId, thread.branchSlug)
+    // A new directory has nothing installed yet: the project's setup script runs first.
+    const fresh = !known || known.removed
+    const workspace = this.connect(projectId, key).then(async (capabilities) => {
       if (!capabilities.workspace) throw new DomainError('error.noSource')
-      return capabilities.workspace.open({ threadId, ...(known ? { base: known.base } : {}) })
+      const opened = await capabilities.workspace.open({
+        threadId,
+        branch,
+        ...(known ? { base: known.base } : {}),
+      })
+      if (fresh && setup.setup) await this.runSetup(projectId, threadId, opened, setup)
+      return opened
     })
     this.open.set(threadId, { key, workspace })
     try {
@@ -235,6 +275,35 @@ export class WorkspaceManager {
         detail: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+
+  private async runSetup(
+    projectId: string,
+    threadId: string,
+    workspace: Workspace,
+    setup: { setup: string; shell: keyof typeof SHELLS },
+  ): Promise<void> {
+    const env = this.env(projectId)
+    const result = await workspace
+      .exec(setup.setup, {
+        shell: SHELLS[setup.shell],
+        timeoutMs: this.options.setupTimeoutMs?.(projectId) ?? 600_000,
+        ...(Object.keys(env).length ? { env } : {}),
+      })
+      .catch((error: unknown) => ({
+        exitCode: -1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      }))
+    const output = headAndTail(
+      [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
+      MAX_SETUP_OUTPUT,
+      'the rest is not kept',
+    )
+    this.setups.set(
+      threadId,
+      `[Ariadne: your workspace is new, so the project's setup script ran in it first, as the user set it: ${result.exitCode === 0 ? 'it succeeded' : `it failed (exit code ${result.exitCode}); what the work needs may be missing`}.]\n${output || '(no output)'}`,
+    )
   }
 
   /** The project's threads' branches and worktrees; `null` when they are not git worktrees. */

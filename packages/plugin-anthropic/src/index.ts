@@ -10,12 +10,12 @@ import {
   type ModelRequest,
   type ModelStreamPart,
   type ReasoningBlock,
+  withExtraBody,
 } from '@ariadne/plugin-sdk'
 
 export interface AnthropicSettings {
   baseUrl: string
   apiKey: string
-  maxTokens: number
 }
 
 const API_VERSION = '2023-06-01'
@@ -180,7 +180,7 @@ function withCachePoints(messages: WireMessage[]) {
 }
 
 /** The body of a Messages request; credentials go in headers. */
-export function requestBody(settings: AnthropicSettings, request: ModelRequest) {
+export function requestBody(_settings: AnthropicSettings, request: ModelRequest) {
   const { system, messages } = toWire(request.messages)
   const cache = request.cache !== false
   if (cache) withCachePoints(messages)
@@ -190,27 +190,33 @@ export function requestBody(settings: AnthropicSettings, request: ModelRequest) 
     input_schema: tool.parameters,
     ...(cache && index === request.tools.length - 1 ? { cache_control: EPHEMERAL } : {}),
   }))
-  return {
-    model: request.model,
-    max_tokens: settings.maxTokens || 8192,
-    // Adaptive thinking, its depth set by effort; a summary of it is shown in the trace.
-    // Models before the 4.6 generation only take a fixed budget and refuse this.
-    ...(request.effort
-      ? {
-          thinking: { type: 'adaptive', display: 'summarized' },
-          output_config: { effort: request.effort },
-        }
-      : {}),
-    ...(system
-      ? {
-          system: cache ? [{ type: 'text', text: system, cache_control: EPHEMERAL }] : system,
-        }
-      : {}),
-    messages,
-    ...(tools.length ? { tools } : {}),
-    stream: true,
-  }
+  return withExtraBody(
+    {
+      model: request.model,
+      max_tokens: request.maxTokens || DEFAULT_MAX_TOKENS,
+      // Adaptive thinking, its depth set by effort; a summary of it is shown in the trace.
+      // Models before the 4.6 generation only take a fixed budget and refuse this.
+      ...(request.effort
+        ? {
+            thinking: { type: 'adaptive', display: 'summarized' },
+            output_config: { effort: request.effort },
+          }
+        : {}),
+      ...(system
+        ? {
+            system: cache ? [{ type: 'text', text: system, cache_control: EPHEMERAL }] : system,
+          }
+        : {}),
+      messages,
+      ...(tools.length ? { tools } : {}),
+      stream: true,
+    },
+    request.extraBody,
+  )
 }
+
+/** What a response may hold when the model's settings do not say: the protocol needs a number. */
+export const DEFAULT_MAX_TOKENS = 8192
 
 export const anthropicProvider: ModelProvider<AnthropicSettings> = {
   kind: 'anthropic',
@@ -224,11 +230,6 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
         default: 'https://api.anthropic.com',
       },
       apiKey: { type: 'string', title: { 'zh-CN': 'API Key', en: 'API key' }, secret: true },
-      maxTokens: {
-        type: 'number',
-        title: { 'zh-CN': '单次回复的最大 token 数', en: 'Max tokens per response' },
-        default: 8192,
-      },
     },
     required: ['baseUrl', 'apiKey'],
   },
@@ -239,6 +240,7 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
       response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
         method: 'POST',
         headers: {
+          ...request.headers,
           'content-type': 'application/json',
           'anthropic-version': API_VERSION,
           'x-api-key': settings.apiKey,

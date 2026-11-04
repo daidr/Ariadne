@@ -16,6 +16,7 @@ import { reactive } from 'vue'
 import {
   api,
   ApiError,
+  DEFAULT_KEYS,
   followEvents,
   type InputSettings,
   type ModelSettings,
@@ -116,6 +117,8 @@ interface State {
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
+  /** The open project's settings dialog is open. */
+  projectSettingsOpen: boolean
   /** Which key sends, and the snippets offered after `/`. */
   input: InputSettings
   error: string | null
@@ -140,7 +143,8 @@ export const state = reactive<State>({
   sourceOpen: false,
   focus: null,
   searchOpen: false,
-  input: { submitOn: 'enter', snippets: [] },
+  projectSettingsOpen: false,
+  input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   error: null,
 })
 
@@ -471,13 +475,21 @@ export async function createArtifact(kind: ArtifactKind) {
   }
 }
 
-/** Cap how many turns of the project run at once; returns why it was refused, or `null`. */
-export async function setProjectSlots(slots: number | null): Promise<string | null> {
+/** Save the open project's settings; returns why they were refused, or `null`. */
+export async function saveProjectSettings(
+  input: Parameters<typeof api.saveProjectSettings>[1],
+  slots: number | null,
+  mcp: string[],
+): Promise<string | null> {
   const project = state.detail?.project
   if (!project) return null
   try {
-    await api.setProjectSlots(project.id, slots)
-    await refreshCurrent()
+    await api.saveProjectSettings(project.id, input)
+    if (slots !== project.slots) await api.setProjectSlots(project.id, slots)
+    if (JSON.stringify(mcp) !== JSON.stringify(project.mcp)) {
+      await api.setProjectMcp(project.id, mcp)
+    }
+    await refreshCurrent(['detail'])
     return null
   } catch (error) {
     if (error instanceof ApiError) return tm(error.localized)
@@ -486,18 +498,18 @@ export async function setProjectSlots(slots: number | null): Promise<string | nu
   }
 }
 
-/** Pick the external tool servers the project uses; returns why it was refused, or `null`. */
-export async function setProjectMcp(servers: string[]): Promise<string | null> {
-  const project = state.detail?.project
-  if (!project) return null
+/** Download everything the project's log holds as a file. */
+export async function exportProject(id: string) {
   try {
-    await api.setProjectMcp(project.id, servers)
-    await refreshCurrent()
-    return null
+    const { blob, name } = await api.exportProject(id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (error) {
-    if (error instanceof ApiError) return tm(error.localized)
     report(error)
-    return null
   }
 }
 

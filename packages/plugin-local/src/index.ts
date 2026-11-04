@@ -5,6 +5,7 @@ import {
   WorkspacePathError,
   type CommandSandbox,
   type ContextProvider,
+  type ExecOptions,
   type ExecResult,
   type Workspace,
   type WorkspaceCapability,
@@ -382,18 +383,17 @@ export class LocalWorkspace implements Workspace {
       .toSorted((a, b) => a.name.localeCompare(b.name))
   }
 
-  async exec(
-    command: string,
-    options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
-  ): Promise<ExecResult> {
+  async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
     const cwd = await this.resolve(options.cwd ?? '.')
+    const shell = options.shell ?? ['bash', '-c']
     return run(
-      this.sandbox.wrap(['bash', '-c', command], { keep: this.keep, readOnly: this.readOnly }),
+      this.sandbox.wrap([...shell, command], { keep: this.keep, readOnly: this.readOnly }),
       {
         cwd,
         forThread: true,
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.env ? { env: options.env } : {}),
       },
     )
   }
@@ -449,11 +449,15 @@ async function currentBranch(repoRoot: string): Promise<string | null> {
   return result.exitCode === 0 ? result.stdout.trim() || null : null
 }
 
-/** Branch names stay short: the random tail of the thread id is unique enough. */
+/**
+ * A thread's branch when it was given no name: the random tail of the thread id is unique
+ * enough.
+ */
 export const branchFor = (threadId: string) => `ariadne/${threadId.slice(-12)}`
 
 /**
- * A git repository gives every thread its own worktree on branch `ariadne/<id tail>`,
+ * A git repository gives every thread its own worktree on a branch of its own (the name
+ * it was given, else `ariadne/<id tail>`),
  * created from the repository's current HEAD, so threads never see each other's changes.
  * When the directory is a subdirectory of the repository, the workspace is that
  * subdirectory of the worktree. Any other directory is shared by all threads as it is.
@@ -498,23 +502,22 @@ export function localWorkspaces(input: {
     isolated: true,
     view,
     branches: {
-      changes: (threadId, base) =>
+      changes: ({ threadId, branch }, base) =>
         branchChanges(gitRun, {
-          branch: branchFor(threadId),
+          branch,
           base,
           baseRef: `refs/heads/${base}`,
           worktree: existsSync(dirOf(threadId)) ? dirOf(threadId) : null,
         }),
       file: (request) => fileVersions(gitRun, request),
-      merged: (threadId, base) => branchMerged(gitRun, branchFor(threadId), `refs/heads/${base}`),
-      merge: ({ threadId, ...request }) =>
-        mergeBranch(gitRun, localIdentity(repoRoot), { branch: branchFor(threadId), ...request }),
+      merged: ({ branch }, base) => branchMerged(gitRun, branch, `refs/heads/${base}`),
+      merge: (request) => mergeBranch(gitRun, localIdentity(repoRoot), request),
       remove: (threadId, options) =>
         removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir), options),
       worktrees: () => worktreesIn(worktrees),
     },
-    async open({ threadId, base: recorded }) {
-      const branch = branchFor(threadId)
+    async open({ threadId, base: recorded, branch: named }) {
+      const branch = named ?? branchFor(threadId)
       const dir = dirOf(threadId)
       const base = recorded === undefined ? await currentBranch(repoRoot) : recorded
       if (!existsSync(join(dir, '.git'))) {

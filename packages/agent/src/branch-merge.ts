@@ -33,7 +33,10 @@ export async function threadChanges(
   }
   try {
     return {
-      changes: await branches.changes(threadId, thread.workspace.base),
+      changes: await branches.changes(
+        { threadId, branch: thread.workspace.branch },
+        thread.workspace.base,
+      ),
       mergeable: !!branches.merge,
     }
   } catch (error) {
@@ -77,7 +80,7 @@ export async function mergeThread(
   const message = input.message.trim() || thread.title
   let outcome: MergeOutcome
   try {
-    outcome = await branches.merge({ threadId, base, method: input.method, message })
+    outcome = await branches.merge({ threadId, branch, base, method: input.method, message })
   } catch (error) {
     throw workError(error)
   }

@@ -24,6 +24,9 @@ export interface RecordedCall {
   model: string
   effort: Effort | null
   settings: Record<string, unknown>
+  /** What the user added to the request in the model's settings. */
+  maxTokens?: number
+  extraBody?: Record<string, unknown>
 }
 
 /**
@@ -255,6 +258,8 @@ export function traceRequest(
         })),
         tools: current.tools,
         ...(call.effort ? { effort: call.effort } : {}),
+        ...(call.maxTokens ? { maxTokens: call.maxTokens } : {}),
+        ...(call.extraBody ? { extraBody: call.extraBody } : {}),
         ...(event.type === 'conversation.compacted' ? { cache: false } : {}),
       }
     : null

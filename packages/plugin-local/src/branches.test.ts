@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { mergeBranch, parseDiff, parseStatus, type GitRun } from './branches'
-import { localDirectoryProvider, run, serverGitEnv } from './index'
+import { branchFor, localDirectoryProvider, run, serverGitEnv } from './index'
 
 let base: string
 
@@ -72,7 +72,9 @@ describe('thread branches', () => {
     expect(thread.base).toBe('main')
     await git(dir, 'switch', '-q', '-c', 'other')
     expect((await capability.open({ threadId: 'thr_b' })).base).toBe('other')
-    expect((await capability.open({ threadId: 'thr_a', base: 'main' })).base).toBe('main')
+    expect(
+      (await capability.open({ threadId: 'thr_a', branch: branchFor('thr_a'), base: 'main' })).base,
+    ).toBe('main')
   })
 
   test('changes compare the committed branch with where it left the base', async () => {
@@ -85,7 +87,10 @@ describe('thread branches', () => {
     await git(dir, 'add', '.')
     await git(dir, 'commit', '-qm', 'base moves')
 
-    const changes = (await branches.changes('thr_a', 'main'))!
+    const changes = (await branches.changes(
+      { threadId: 'thr_a', branch: branchFor('thr_a') },
+      'main',
+    ))!
     expect(changes.branch).toBe('ariadne/thr_a')
     expect(changes.commits.map((c) => c.subject)).toEqual(['work'])
     expect(changes.files).toEqual([
@@ -119,7 +124,10 @@ describe('thread branches', () => {
     await thread.exec(
       'printf "a\\0b" > bin.dat && head -c 600000 /dev/zero | tr "\\0" "x" > big.txt && git add . && git commit -qm files',
     )
-    const changes = (await branches.changes('thr_a', 'main'))!
+    const changes = (await branches.changes(
+      { threadId: 'thr_a', branch: branchFor('thr_a') },
+      'main',
+    ))!
     const file = (path: string) =>
       branches.file({ from: changes.from, head: changes.head, path, previousPath: null })
     expect((await file('bin.dat')).skipped).toBe('binary')
@@ -128,8 +136,12 @@ describe('thread branches', () => {
 
   test('a branch with no commits is null before it exists', async () => {
     const { branches } = await setup()
-    expect(await branches.changes('thr_none', 'main')).toBeNull()
-    expect((await branches.changes('thr_a', 'main'))?.files).toEqual([])
+    expect(
+      await branches.changes({ threadId: 'thr_none', branch: branchFor('thr_none') }, 'main'),
+    ).toBeNull()
+    expect(
+      (await branches.changes({ threadId: 'thr_a', branch: branchFor('thr_a') }, 'main'))?.files,
+    ).toEqual([])
   })
 
   test('squash merge into the checked-out base updates its files', async () => {
@@ -142,6 +154,7 @@ describe('thread branches', () => {
 
     const outcome = await branches.merge!({
       threadId: 'thr_a',
+      branch: branchFor('thr_a'),
       base: 'main',
       method: 'squash',
       message: 'Add a and b',
@@ -158,7 +171,13 @@ describe('thread branches', () => {
 
     // Merging the same work again changes nothing.
     expect(
-      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+      await branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'x',
+      }),
     ).toEqual({ kind: 'empty' })
   })
 
@@ -166,9 +185,17 @@ describe('thread branches', () => {
     const { dir, branches, thread } = await setup()
     await thread.exec('echo a > a.txt && git add . && git commit -qm a')
     const head = await git(thread.label, 'rev-parse', 'HEAD')
-    await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'merge', message: 'Merge' })
+    await branches.merge!({
+      threadId: 'thr_a',
+      branch: branchFor('thr_a'),
+      base: 'main',
+      method: 'merge',
+      message: 'Merge',
+    })
     expect((await git(dir, 'log', '-1', '--format=%P')).split(' ')[1]).toBe(head)
-    expect(await branches.merged('thr_a', 'main')).toBe(true)
+    expect(await branches.merged({ threadId: 'thr_a', branch: branchFor('thr_a') }, 'main')).toBe(
+      true,
+    )
   })
 
   test('a base that is not checked out moves without a working tree', async () => {
@@ -177,6 +204,7 @@ describe('thread branches', () => {
     await git(dir, 'switch', '-q', '-c', 'elsewhere')
     const outcome = await branches.merge!({
       threadId: 'thr_a',
+      branch: branchFor('thr_a'),
       base: 'main',
       method: 'squash',
       message: 'a',
@@ -192,7 +220,13 @@ describe('thread branches', () => {
     await git(dir, 'commit', '-qam', 'user readme')
     const before = await git(dir, 'rev-parse', 'main')
     expect(
-      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+      await branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'x',
+      }),
     ).toEqual({ kind: 'conflict', files: ['README.md'] })
     expect(await git(dir, 'rev-parse', 'main')).toBe(before)
   })
@@ -206,7 +240,13 @@ describe('thread branches', () => {
     await writeFile(join(dir, '中文.md'), 'user\n')
     await git(dir, 'commit', '-qam', 'user zh')
     expect(
-      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+      await branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'x',
+      }),
     ).toEqual({ kind: 'conflict', files: ['中文.md'] })
   })
 
@@ -243,13 +283,25 @@ describe('thread branches', () => {
     await thread.exec('git merge -q main && echo a > a.txt && git add . && git commit -qm a')
     const before = await git(dir, 'rev-parse', 'main')
     await expect(
-      branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'a' }),
+      branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'a',
+      }),
     ).rejects.toMatchObject({ reason: 'filters' })
     expect(await git(dir, 'rev-parse', 'main')).toBe(before)
     // Not checked out, nothing is written to files: it merges.
     await git(dir, 'switch', '-q', '-c', 'elsewhere')
     expect(
-      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'a' }),
+      await branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'a',
+      }),
     ).toMatchObject({ kind: 'merged' })
   })
 
@@ -260,6 +312,7 @@ describe('thread branches', () => {
     const before = await git(dir, 'rev-parse', 'main')
     const merge = branches.merge!({
       threadId: 'thr_a',
+      branch: branchFor('thr_a'),
       base: 'main',
       method: 'squash',
       message: 'x',
@@ -287,7 +340,11 @@ describe('thread branches', () => {
     // Gone already: nothing to do.
     expect(await branches.remove('thr_b')).toBe(true)
     // Opening it again checks the branch out.
-    const again = await capability.open({ threadId: 'thr_b', base: 'main' })
+    const again = await capability.open({
+      threadId: 'thr_b',
+      branch: branchFor('thr_b'),
+      base: 'main',
+    })
     expect(again.branch).toBe('ariadne/thr_b')
   })
 })

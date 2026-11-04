@@ -11,6 +11,7 @@ import {
   syncThreadPullRequest,
   threadChanges,
   threadFile,
+  TOOL_SWITCH_NAMES,
   traceRequest,
   type McpHub,
   type PluginHost,
@@ -24,11 +25,13 @@ import {
   emptyContent,
   MAX_FILE_BYTES,
   parsePlanOps,
+  parseProjectSettings,
   type Ariadne,
   type ProjectSource,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import { eventStream } from './events-stream'
+import type { DataStore } from './data'
 import type { SettingsStore } from './settings'
 import {
   BadRequest,
@@ -54,6 +57,8 @@ export interface HandlerOptions {
   workspaces?: WorkspaceManager
   /** The connections to the user's external tool servers. */
   mcp?: McpHub
+  /** The data directory: its size, and backups of the database. */
+  data?: DataStore
 }
 
 type Params = Record<string, string>
@@ -142,6 +147,7 @@ export function createHandler({
   host,
   workspaces,
   mcp,
+  data: dataStore,
 }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
@@ -176,7 +182,7 @@ export function createHandler({
         try {
           await workspaces?.discardProject(projectId)
           app.deleteProject(projectId)
-          settings?.saveSourceSecrets(projectId, {})
+          settings?.forgetProject(projectId)
         } finally {
           release()
         }
@@ -290,6 +296,71 @@ export function createHandler({
       reason: createTranslator(settings?.current.locale ?? 'zh-CN')('artifact.dashboard.refreshed'),
     })
     return json({ artifact })
+  })
+
+  // The project's own settings, with the names of its command environment variables (their
+  // values never leave the server).
+  add('GET', '/api/projects/:projectId/settings', (_request, { projectId = '' }) =>
+    json({
+      settings: app.getProject(projectId).settings,
+      env: settings?.projectEnvNames(projectId) ?? [],
+      tools: TOOL_SWITCH_NAMES,
+    }),
+  )
+
+  add('PUT', '/api/projects/:projectId/settings', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const current = app.getProject(projectId).settings
+    // Both are checked before either is saved, so a refusal changes nothing; settings left
+    // out stay as they are.
+    const next = body.settings === undefined ? current : body.settings
+    parseProjectSettings(next, TOOL_SWITCH_NAMES)
+    const env =
+      body.env !== undefined
+        ? (settings?.updateProjectEnv(projectId, body.env) ?? [])
+        : (settings?.projectEnvNames(projectId) ?? [])
+    const project = app.setProjectSettings(projectId, next, TOOL_SWITCH_NAMES)
+    return json({ project, settings: project.settings, env, tools: TOOL_SWITCH_NAMES })
+  })
+
+  // Everything the project's log holds, as a file to keep.
+  add('GET', '/api/projects/:projectId/export', (_request, { projectId = '' }) => {
+    const exported = app.exportProject(projectId)
+    const body = JSON.stringify({ ariadne: 1, exportedAt: Date.now(), ...exported })
+    const name = `ariadne-${projectId}.json`
+    return new Response(body, {
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': `attachment; filename="${name}"`,
+      },
+    })
+  })
+
+  add('GET', '/api/settings/data', async () => {
+    if (!dataStore) throw new BadRequest('data')
+    return json(await dataStore.usage())
+  })
+
+  add('POST', '/api/settings/data/backups', () => {
+    if (!dataStore) throw new BadRequest('data')
+    return json({ backup: dataStore.backup() }, 201)
+  })
+
+  add('DELETE', '/api/settings/data/backups/:name', (_request, { name = '' }) => {
+    if (!dataStore) throw new BadRequest('data')
+    dataStore.removeBackup(name)
+    return new Response(null, { status: 204 })
+  })
+
+  // How the work is done everywhere: instructions, command rules, limits.
+  add('GET', '/api/settings/work', () => {
+    if (!settings) throw new BadRequest('settings')
+    return json(settings.work())
+  })
+
+  add('PUT', '/api/settings/work', async (request) => {
+    if (!settings) throw new BadRequest('settings')
+    return json(settings.updateWork(await readJson(request)))
   })
 
   add('PUT', '/api/projects/:projectId/slots', async (request, { projectId = '' }) => {

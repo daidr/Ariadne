@@ -1,6 +1,7 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type { FileType } from './files'
+import type { ProjectSettings } from './project-settings'
 
 /** Who wrote a message. */
 export type Author = 'user' | 'coordinator' | 'thread'
@@ -215,8 +216,19 @@ export interface EventMap {
   'project.slots.set': { slots: number | null }
   /** The external tool servers (MCP) this project's conversations may use, by id. */
   'project.mcp.set': { servers: string[] }
-  /** `model` is the id of the model setting the coordinator chose for it, if any. */
-  'thread.created': { threadId: string; title: string; nodeId: string | null; model: string | null }
+  /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
+  'project.settings.set': { settings: ProjectSettings }
+  /**
+   * `model` is the id of the model setting the coordinator chose for it, if any; `branch`
+   * the readable part of its branch's name it suggested.
+   */
+  'thread.created': {
+    threadId: string
+    title: string
+    nodeId: string | null
+    model: string | null
+    branch: string | null
+  }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
   /**
@@ -474,10 +486,10 @@ export interface EventMap {
    */
   'issue.write_unsure': { attentionId: string; threadId?: string }
   /**
-   * A thread calls an external tool with the user's yes on `attentionId`; the yes is used
-   * now, so the same call again asks again.
+   * A thread makes the call the user's yes on `attentionId` was for; the yes is used now, so
+   * the same call again asks again. `what` names it: `mcp:<server>/<tool>` or `command`.
    */
-  'mcp.called': { threadId: string; attentionId: string; server: string; tool: string }
+  'approval.used': { threadId: string; attentionId: string; what: string }
   /** The thread's pull request as last seen on the repository; written only on a change. */
   'pull_request.synced': { threadId: string } & ThreadPullRequest
   /** Checks of the pull request's newest commit failed; the thread gets to fix them. */

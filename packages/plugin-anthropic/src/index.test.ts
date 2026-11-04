@@ -24,7 +24,7 @@ const sse = (...events: { type: string; [key: string]: unknown }[]) =>
 async function collect(effort?: 'low'): Promise<ModelStreamPart[]> {
   const parts: ModelStreamPart[] = []
   for await (const part of anthropicProvider.stream(
-    { baseUrl: `http://127.0.0.1:${server.port}`, apiKey: 'key', maxTokens: 1024 },
+    { baseUrl: `http://127.0.0.1:${server.port}`, apiKey: 'key' },
     {
       model: 'm',
       messages: [
@@ -32,6 +32,9 @@ async function collect(effort?: 'low'): Promise<ModelStreamPart[]> {
         { role: 'user', content: 'hi' },
       ],
       tools: [],
+      maxTokens: 1024,
+      headers: { 'x-extra': 'yes', 'x-api-key': 'not this' },
+      extraBody: { temperature: 0.2, model: 'not this' },
       ...(effort ? { effort } : {}),
     },
   )) {
@@ -148,8 +151,11 @@ describe('anthropic provider', () => {
     const parts = await collect()
     expect(lastHeaders?.get('x-api-key')).toBe('key')
     expect(lastHeaders?.get('anthropic-version')).toBe('2023-06-01')
+    // The user's header and body fields go along; the provider's own are not replaced.
+    expect(lastHeaders?.get('x-extra')).toBe('yes')
     expect(lastBody).toMatchObject({
       model: 'm',
+      temperature: 0.2,
       max_tokens: 1024,
       system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
       stream: true,
@@ -236,14 +242,11 @@ describe('anthropic provider', () => {
       },
       { role: 'tool' as const, toolCallId: 't1', content: 'ok' },
     ]
-    const off = requestBody(
-      { baseUrl: '', apiKey: '', maxTokens: 100 },
-      { model: 'm', messages, tools: [] },
-    )
+    const off = requestBody({ baseUrl: '', apiKey: '' }, { model: 'm', messages, tools: [] })
     expect(off).not.toHaveProperty('thinking')
     expect(off).not.toHaveProperty('output_config')
     const on = requestBody(
-      { baseUrl: '', apiKey: '', maxTokens: 100 },
+      { baseUrl: '', apiKey: '' },
       { model: 'm', messages, tools: [], effort: 'high' },
     )
     expect(on.messages[1]?.content).toEqual([
@@ -255,7 +258,7 @@ describe('anthropic provider', () => {
   })
 
   test('caches the tools, the system text, the previous request and this one', () => {
-    const settings = { baseUrl: '', apiKey: '', maxTokens: 100 }
+    const settings = { baseUrl: '', apiKey: '' }
     const messages = [
       { role: 'system' as const, content: 'sys' },
       { role: 'user' as const, content: 'hi' },
@@ -309,7 +312,7 @@ describe('anthropic provider', () => {
 
   test('a one-off request is not cached', () => {
     const body = requestBody(
-      { baseUrl: '', apiKey: '', maxTokens: 100 },
+      { baseUrl: '', apiKey: '' },
       {
         model: 'm',
         messages: [

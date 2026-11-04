@@ -1,12 +1,20 @@
 import { DomainError } from '@ariadne/core'
 import {
+  COMMAND_ACTIONS,
   compactAt,
+  DEFAULT_LIMITS,
+  LIMIT_RANGES,
   MCP_TOOL_MARKS,
+  type CommandAction,
+  type CommandRule,
+  type Limits,
   type McpServerConfig,
   type McpToolMark,
   type ModelChoice,
+  type ModelRequestOptions,
   type PluginHost,
   type ResolvedModel,
+  type TurnSettings,
 } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
 import { EFFORTS, type Effort, type SettingsSchema } from '@ariadne/plugin-sdk'
@@ -27,6 +35,12 @@ export interface ModelProviderConfig {
   kind: string
   name: string
   settings: Record<string, unknown>
+  /** Added to every request: headers (which may be secret), body fields, a timeout. */
+  request?: {
+    headers?: Record<string, string>
+    extraBody?: Record<string, unknown>
+    timeoutSeconds?: number
+  }
 }
 
 /**
@@ -43,6 +57,8 @@ export interface ModelConfig {
   note?: string
   /** `false` when the model cannot look at images; it is told about them in words. */
   images?: false
+  /** The most it may write in one response; the provider's default without. */
+  maxTokens?: number
 }
 
 /**
@@ -69,11 +85,52 @@ export interface Snippet {
   text: string
 }
 
-/** How the message input behaves: which key sends, and the requests kept for reuse. */
+/** The app's own keys the user can bind elsewhere, by what they do. */
+export const SHORTCUT_ACTIONS = [
+  'search',
+  'focus',
+  'previousThread',
+  'nextThread',
+  'stop',
+  'sheet',
+] as const
+export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number]
+
+export const DEFAULT_KEYS: Readonly<Record<ShortcutAction, string>> = {
+  search: 'mod+k',
+  focus: '/',
+  previousThread: 'mod+up',
+  nextThread: 'mod+down',
+  stop: 'escape',
+  sheet: '?',
+}
+
+/** A single key press: modifiers and one key, as the hotkey syntax writes it. */
+const HOTKEY =
+  /^((mod|meta|ctrl|alt|shift)\+){0,4}([a-z0-9]|f([1-9]|1[0-2])|escape|enter|tab|space|backspace|delete|up|down|left|right|home|end|pageup|pagedown|[`~!@#$%^&*()\-_=+[\]{}\\|;:'",.<>/?])$/
+
+/** How the message input behaves: which key sends, the requests kept for reuse, the app's keys. */
 export interface InputConfig {
   /** `enter` sends on Enter (Shift+Enter breaks the line); `mod-enter` on ⌘/Ctrl+Enter. */
   submitOn: 'enter' | 'mod-enter'
   snippets: Snippet[]
+  keys: Record<ShortcutAction, string>
+}
+
+function parseKeys(raw: unknown, strict: boolean): Record<ShortcutAction, string> {
+  const given = (raw ?? {}) as Record<string, unknown>
+  const keys = { ...DEFAULT_KEYS }
+  for (const action of SHORTCUT_ACTIONS) {
+    const key = given[action]
+    if (key === undefined) continue
+    if (typeof key === 'string' && HOTKEY.test(key.trim().toLowerCase())) {
+      keys[action] = key.trim().toLowerCase()
+    } else if (strict) throw new BadRequest(`keys.${action}`)
+  }
+  if (strict && new Set(Object.values(keys)).size < SHORTCUT_ACTIONS.length) {
+    throw new BadRequest('keys')
+  }
+  return keys
 }
 
 const SNIPPET_ID = /^[A-Za-z0-9_-]{1,40}$/
@@ -106,6 +163,11 @@ export interface ModelsConfig {
 /** A server's id: short, so tool names stay within what model services take. */
 const MCP_ID = /^[a-z0-9][a-z0-9-]{0,19}$/
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+/**
+ * A project's command variable: no `GIT_CONFIG*` (it would lift the remote push block, which
+ * is git configuration given on the command line) and none of Ariadne's own.
+ */
+const PROJECT_ENV_NAME = /^(?!GIT_CONFIG|ARIADNE_)[A-Za-z_][A-Za-z0-9_]*$/i
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
 
 const noRole = (): RoleConfig => ({ model: null, effort: null })
@@ -134,6 +196,82 @@ export interface UserConfig {
   /** External tool servers; each project picks which of them it uses. */
   mcp: { servers: McpServerConfig[] }
   input: InputConfig
+  /** The user's own instructions for every project. */
+  instructions: string
+  /** What thread commands may run without asking, must ask, or may never run. */
+  commands: { rules: CommandRule[] }
+  limits: Limits
+  /** Environment variables of each project's thread commands, by project id; may be secret. */
+  projectEnv: Record<string, Record<string, string>>
+}
+
+export const MAX_INSTRUCTIONS = 16_000
+const MAX_COMMAND_RULES = 200
+
+function parseRules(raw: unknown, strict: boolean): CommandRule[] {
+  if (!Array.isArray(raw)) {
+    if (strict) throw new BadRequest('rules')
+    return []
+  }
+  if (strict && raw.length > MAX_COMMAND_RULES) throw new BadRequest('rules')
+  return raw.flatMap((item, index) => {
+    const { pattern, action } = (item ?? {}) as Partial<CommandRule>
+    const text = typeof pattern === 'string' ? pattern.trim() : ''
+    if (!text || text.length > 500 || !COMMAND_ACTIONS.includes(action as CommandAction)) {
+      if (strict) throw new BadRequest(`rules[${index}]`)
+      return []
+    }
+    return [{ pattern: text, action: action as CommandAction }]
+  })
+}
+
+function parseLimits(raw: unknown, strict: boolean): Limits {
+  const given = (raw ?? {}) as Partial<Record<keyof Limits, unknown>>
+  const limits = { ...DEFAULT_LIMITS }
+  for (const key of Object.keys(DEFAULT_LIMITS) as (keyof Limits)[]) {
+    const value = given[key]
+    if (value === undefined || value === null) continue
+    const [min, max] = LIMIT_RANGES[key]
+    const whole = key !== 'compactShare'
+    if (
+      typeof value === 'number' &&
+      value >= min &&
+      value <= max &&
+      (!whole || Number.isInteger(value))
+    ) {
+      limits[key] = value
+    } else if (strict) throw new BadRequest(`limits.${key}`)
+  }
+  if (limits.commandTimeout > limits.commandTimeoutMax) {
+    if (strict) throw new BadRequest('limits.commandTimeout')
+    limits.commandTimeout = limits.commandTimeoutMax
+  }
+  return limits
+}
+
+/**
+ * `{ name, value }` pairs as the page sends them, checked against `pattern`: an empty value
+ * keeps the one stored under that name, so the page never needs to know it.
+ */
+function secretPairs(
+  list: unknown,
+  pattern: RegExp,
+  before: Record<string, string> | undefined,
+  at: string,
+): Record<string, string> {
+  if (list === undefined || list === null) return {}
+  if (!Array.isArray(list)) throw new BadRequest(at)
+  const out: Record<string, string> = {}
+  for (const pair of list as { name?: unknown; value?: unknown }[]) {
+    const field = typeof pair?.name === 'string' ? pair.name.trim() : ''
+    if (!pattern.test(field) || field in out) throw new BadRequest(at)
+    const value = typeof pair.value === 'string' ? pair.value : ''
+    const kept = before?.[field]
+    if (value) out[field] = value
+    else if (kept) out[field] = kept
+    else throw new BadRequest(`${at}.${field}`)
+  }
+  return out
 }
 
 const defaults = (): UserConfig => ({
@@ -148,7 +286,11 @@ const defaults = (): UserConfig => ({
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
   mcp: { servers: [] },
-  input: { submitOn: 'enter', snippets: [] },
+  input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
+  instructions: '',
+  commands: { rules: [] },
+  limits: { ...DEFAULT_LIMITS },
+  projectEnv: {},
 })
 
 /** The settings stored at `path`, filled in with the defaults. */
@@ -176,7 +318,12 @@ export function loadUserConfig(path: string): UserConfig {
     input: {
       submitOn: stored.input?.submitOn === 'mod-enter' ? 'mod-enter' : 'enter',
       snippets: storedSnippets(stored.input?.snippets),
+      keys: parseKeys(stored.input?.keys, false),
     },
+    instructions: typeof stored.instructions === 'string' ? stored.instructions : '',
+    commands: { rules: parseRules(stored.commands?.rules, false) },
+    limits: parseLimits(stored.limits, false),
+    projectEnv: { ...stored.projectEnv },
     sandbox: {
       mode: sandbox.mode === 'off' ? 'off' : 'auto',
       hide: Array.isArray(sandbox.hide)
@@ -239,10 +386,15 @@ export class SettingsStore {
         const secrets = secretKeys(this.host.models.get(provider.kind)?.settings)
         const settings = { ...provider.settings }
         for (const key of secrets) delete settings[key]
+        const { request, ...rest } = provider
         return {
-          ...provider,
+          ...rest,
           settings,
           secretsSet: secrets.filter((key) => !!provider.settings[key]),
+          // Header values may be keys: only their names leave the server.
+          headers: Object.keys(request?.headers ?? {}),
+          extraBody: request?.extraBody ?? {},
+          timeoutSeconds: request?.timeoutSeconds ?? null,
         }
       }),
       models: this.config.models.models,
@@ -272,6 +424,35 @@ export class SettingsStore {
           settings[key] = before.settings[key]
         }
       }
+      const extras = provider as Record<string, unknown>
+      const headers = secretPairs(
+        extras.headers,
+        HEADER_NAME,
+        before?.request?.headers,
+        `providers[${index}].headers`,
+      )
+      const extraBody = extras.extraBody ?? {}
+      if (!extraBody || typeof extraBody !== 'object' || Array.isArray(extraBody)) {
+        throw new BadRequest(`providers[${index}].extraBody`)
+      }
+      if (JSON.stringify(extraBody).length > 10_000) {
+        throw new BadRequest(`providers[${index}].extraBody`)
+      }
+      const timeout = extras.timeoutSeconds
+      if (
+        timeout !== undefined &&
+        timeout !== null &&
+        !(Number.isInteger(timeout) && (timeout as number) >= 10 && (timeout as number) <= 3600)
+      ) {
+        throw new BadRequest(`providers[${index}].timeoutSeconds`)
+      }
+      const request = {
+        ...(Object.keys(headers).length ? { headers } : {}),
+        ...(Object.keys(extraBody).length
+          ? { extraBody: extraBody as Record<string, unknown> }
+          : {}),
+        ...(typeof timeout === 'number' ? { timeoutSeconds: timeout } : {}),
+      }
       return {
         id: provider.id,
         kind: provider.kind,
@@ -280,6 +461,7 @@ export class SettingsStore {
             ? provider.name.trim()
             : provider.kind,
         settings,
+        ...(Object.keys(request).length ? { request } : {}),
       }
     })
     if (!Array.isArray(body.models)) throw new BadRequest('models')
@@ -300,6 +482,14 @@ export class SettingsStore {
         throw new BadRequest(`${at}.contextTokens`)
       }
       const note = typeof entry.note === 'string' ? entry.note.trim().slice(0, 200) : ''
+      const most = entry.maxTokens
+      if (
+        most !== undefined &&
+        most !== null &&
+        !(Number.isInteger(most) && most >= 256 && most <= 1_000_000)
+      ) {
+        throw new BadRequest(`${at}.maxTokens`)
+      }
       return {
         id: entry.id,
         provider: entry.provider as string,
@@ -307,6 +497,7 @@ export class SettingsStore {
         ...(typeof size === 'number' ? { contextTokens: size } : {}),
         ...(note ? { note } : {}),
         ...(entry.images === false ? { images: false as const } : {}),
+        ...(typeof most === 'number' ? { maxTokens: most } : {}),
       }
     })
     const roles = (body.roles ?? {}) as Partial<Record<Role, Partial<RoleConfig>>>
@@ -364,22 +555,13 @@ export class SettingsStore {
         // `ask` is what an unmarked tool is anyway.
         if (mark !== 'ask') tools[tool] = mark as McpToolMark
       }
-      const pairs = (key: 'env' | 'headers') => {
-        const list = entry[key] ?? []
-        if (!Array.isArray(list)) throw new BadRequest(`${at}.${key}`)
-        const out: Record<string, string> = {}
-        for (const pair of list as { name?: unknown; value?: unknown }[]) {
-          const field = typeof pair?.name === 'string' ? pair.name.trim() : ''
-          const pattern = key === 'env' ? ENV_NAME : HEADER_NAME
-          if (!pattern.test(field) || field in out) throw new BadRequest(`${at}.${key}`)
-          const value = typeof pair.value === 'string' ? pair.value : ''
-          const kept = before?.[key]?.[field]
-          if (value) out[field] = value
-          else if (kept) out[field] = kept
-          else throw new BadRequest(`${at}.${key}.${field}`)
-        }
-        return out
-      }
+      const pairs = (key: 'env' | 'headers') =>
+        secretPairs(
+          entry[key] ?? [],
+          key === 'env' ? ENV_NAME : HEADER_NAME,
+          before?.[key],
+          `${at}.${key}`,
+        )
       if (entry.transport === 'stdio') {
         const command = typeof entry.command === 'string' ? entry.command.trim() : ''
         if (!command) throw new BadRequest(`${at}.command`)
@@ -502,9 +684,72 @@ export class SettingsStore {
       }
       return { id, name: label, text }
     })
-    this.config = { ...this.config, input: { submitOn: body.submitOn, snippets } }
+    const keys = parseKeys(body.keys ?? DEFAULT_KEYS, true)
+    this.config = { ...this.config, input: { submitOn: body.submitOn, snippets, keys } }
     this.save()
     return this.config.input
+  }
+
+  /** How the work is done everywhere: the user's instructions, command rules and limits. */
+  work() {
+    const { instructions, commands, limits } = this.config
+    return { instructions, rules: commands.rules, limits, defaults: DEFAULT_LIMITS }
+  }
+
+  /** Replace what `work()` returns; each part sent is replaced whole, the others stay. */
+  updateWork(input: unknown) {
+    const body = (input ?? {}) as Record<string, unknown>
+    let { instructions, commands, limits } = this.config
+    if (body.instructions !== undefined) {
+      if (typeof body.instructions !== 'string' || body.instructions.length > MAX_INSTRUCTIONS) {
+        throw new BadRequest('instructions')
+      }
+      instructions = body.instructions.trim()
+    }
+    if (body.rules !== undefined) commands = { rules: parseRules(body.rules, true) }
+    if (body.limits !== undefined) limits = parseLimits(body.limits, true)
+    this.config = { ...this.config, instructions, commands, limits }
+    this.save()
+    return this.work()
+  }
+
+  /** The names of the project's command environment variables; values stay here. */
+  projectEnvNames(projectId: string): string[] {
+    return Object.keys(this.config.projectEnv[projectId] ?? {})
+  }
+
+  /** Replace the project's command environment; an empty value keeps the stored one. */
+  updateProjectEnv(projectId: string, input: unknown): string[] {
+    const env = secretPairs(input, PROJECT_ENV_NAME, this.config.projectEnv[projectId], 'env')
+    const all = { ...this.config.projectEnv }
+    if (Object.keys(env).length) all[projectId] = env
+    else delete all[projectId]
+    this.config = { ...this.config, projectEnv: all }
+    this.save()
+    return this.projectEnvNames(projectId)
+  }
+
+  /** Forget what the settings hold for a project that is gone. */
+  forgetProject(projectId: string): void {
+    const { [projectId]: _env, ...projectEnv } = this.config.projectEnv
+    const { [projectId]: _secrets, ...sourceSecrets } = this.config.sourceSecrets
+    this.config = { ...this.config, projectEnv, sourceSecrets }
+    this.save()
+  }
+
+  /** What a turn of the project's conversations goes by, besides the model. */
+  turnSettings(projectId: string): TurnSettings {
+    return {
+      limits: this.config.limits,
+      instructions: this.config.instructions,
+      commandRules: this.config.commands.rules,
+      // A hand-edited file may hold any name; the refused ones never reach a command.
+      env: Object.fromEntries(
+        Object.entries(this.config.projectEnv[projectId] ?? {}).filter(([name]) =>
+          PROJECT_ENV_NAME.test(name),
+        ),
+      ),
+    }
   }
 
   /** The secret settings of a project's source, merged in when it connects. */
@@ -571,6 +816,10 @@ export class SettingsStore {
     for (const [key, value] of Object.entries(config.settings)) {
       if (value !== '' && value !== null && value !== undefined) settings[key] = value
     }
+    const request: ModelRequestOptions = {
+      ...config.request,
+      ...(chosen.maxTokens ? { maxTokens: chosen.maxTokens } : {}),
+    }
     return {
       provider,
       settings,
@@ -579,6 +828,7 @@ export class SettingsStore {
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
       images: chosen.images !== false,
       ...(effort ? { effort } : {}),
+      ...(Object.keys(request).length ? { request } : {}),
     }
   }
 
@@ -594,7 +844,7 @@ export class SettingsStore {
     const triage = this.resolveModel('triage')
     if (!triage) return coordinator
     // A fifth to spare: the turn adds to what was read last.
-    const room = compactAt(triage.contextTokens) * 0.8
+    const room = compactAt(triage.contextTokens, this.config.limits.compactShare) * 0.8
     return options.contextTokens < room ? triage : coordinator
   }
 

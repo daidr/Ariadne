@@ -1,5 +1,5 @@
 import { FileTooLargeError, WorkspacePathError, type SourceView } from '@ariadne/plugin-sdk'
-import { run } from '@ariadne/plugin-local'
+import { branchFor, run } from '@ariadne/plugin-local'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -138,6 +138,15 @@ describe('remote directory', () => {
       stderr: 'no route\n',
     })
     await expect(ws.exec('pwd', { cwd: '../' })).rejects.toThrow(WorkspacePathError)
+    // The project's shell and environment, with values that need quoting.
+    const shaped = await ws.exec('printf "%s|%s" "$0" "$GREETING"', {
+      shell: ['sh', '-c'],
+      env: { GREETING: "it's a b=c" },
+    })
+    expect(shaped.stdout).toBe("sh|it's a b=c")
+    expect((await ws.exec('true', { shell: ['pwsh', '-NoProfile', '-Command'] })).exitCode).toBe(
+      127,
+    )
 
     // A background process ends with the command, so the call returns at once.
     const started = Date.now()
@@ -290,7 +299,10 @@ describe('ssh branches', () => {
     await ws.exec('echo a > a.txt && git add . && git commit -qm a && echo wip > wip.txt')
     const branches = workspace!.branches!
 
-    const changes = (await branches.changes('thr_a', 'main'))!
+    const changes = (await branches.changes(
+      { threadId: 'thr_a', branch: branchFor('thr_a') },
+      'main',
+    ))!
     expect(changes.files.map((f) => f.path)).toEqual(['a.txt'])
     expect(changes.uncommitted).toEqual(['wip.txt'])
     expect(
@@ -304,6 +316,7 @@ describe('ssh branches', () => {
 
     const outcome = await branches.merge!({
       threadId: 'thr_a',
+      branch: branchFor('thr_a'),
       base: 'main',
       method: 'squash',
       message: 'Add a',
@@ -316,7 +329,13 @@ describe('ssh branches', () => {
     await writeFile(join(dir, 'README.md'), 'user\n')
     await git('commit', '-qam', 'user')
     expect(
-      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+      await branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'x',
+      }),
     ).toEqual({ kind: 'conflict', files: ['README.md'] })
 
     expect((await branches.worktrees()).map((w) => w.threadId)).toEqual(['thr_a'])

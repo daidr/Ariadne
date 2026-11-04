@@ -84,12 +84,14 @@ done
 `
 
 /**
- * Run a thread's command in the directory `$1` with bash. It gets a process group of its
+ * Run a thread's command `$2` in the directory `$1` with the shell `$4` (bash when empty),
+ * which takes it after `-c`; the arguments after it are `NAME=value` pairs added to its
+ * environment. It gets a process group of its
  * own and no input; a watcher reads the script's input, which the caller holds open, and
  * ends the group when it closes: on a timeout, a stop, or a dropped connection. Whatever
  * the command leaves running in the background ends with it.
  *
- * With `$3`, git in the command pushes nowhere: every push address, the remotes' own and
+ * With `$3` not empty, git in the command pushes nowhere: every push address, the remotes' own and
  * one typed out, is rewritten to the path `$3`, which is not a repository, through config
  * in the environment (after any the user's environment sets), so nothing on disk changes.
  * `pushInsteadOf` leaves a remote's explicit `pushurl` alone; those go through `insteadOf`,
@@ -102,8 +104,10 @@ printf '${STARTED}\\n' >&2
 dir=$(resolve "$1") || { printf '${OUTSIDE}\\n' >&2; exit 3; }
 [ -d "$dir" ] || { printf '%s is not a directory\\n' "$1" >&2; exit 2; }
 cd -- "$dir" || exit 1
-if [ -n "\${3:-}" ]; then
-  nowhere=$3 n=\${GIT_CONFIG_COUNT:-0}
+command=$2 nowhere=$3 program=\${4:-bash}
+shift 4
+if [ -n "$nowhere" ]; then
+  n=\${GIT_CONFIG_COUNT:-0}
   case $n in '' | *[!0-9]*) n=0 ;; esac
   rewrite() { export "GIT_CONFIG_KEY_$n=url.$nowhere.$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
   keep() { export "GIT_CONFIG_KEY_$n=url.$1.insteadOf" "GIT_CONFIG_VALUE_$n=$1"; n=$((n + 1)); }
@@ -125,7 +129,7 @@ fi
 # of the command's.
 exec 3>&2 2> /dev/null
 set -m
-bash -c "$2" < /dev/null 2>&3 3>&- &
+env -- "$@" "$program" -c "$command" < /dev/null 2>&3 3>&- &
 child=$!
 { while read -r _; do :; done; kill -KILL -- "-$child"; } 3>&- &
 watcher=$!
