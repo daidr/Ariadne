@@ -183,6 +183,21 @@ export async function createArtifact(kind: ArtifactKind) {
   }
 }
 
+/** Cap how many turns of the project run at once; returns why it was refused, or `null`. */
+export async function setProjectSlots(slots: number | null): Promise<string | null> {
+  const project = state.detail?.project
+  if (!project) return null
+  try {
+    await api.setProjectSlots(project.id, slots)
+    await refreshCurrent()
+    return null
+  } catch (error) {
+    if (error instanceof ApiError) return tm(error.localized)
+    report(error)
+    return null
+  }
+}
+
 /** Save the project's working directory; returns why it was refused, or `null`. */
 export async function setSource(
   source: { kind: string; settings: Record<string, unknown> } | null,

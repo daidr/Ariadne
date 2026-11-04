@@ -27,6 +27,11 @@ export interface ProjectView {
   needsMe: number
   /** Where threads work; `null` until the user picks a directory. */
   source: ProjectSource | null
+  /**
+   * How many turns of this project may run at once, within the shared total; `null`
+   * leaves it to the total. A turn answering the user may still take a reserved slot.
+   */
+  slots: number | null
 }
 
 export interface ThreadView {
@@ -95,6 +100,14 @@ export type NoticeView = {
   | { kind: 'compacted'; summary: string }
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
+  | {
+      kind: 'instructions'
+      path: string
+      /** `null` once the file was removed. */
+      content: string | null
+      changed: boolean
+      uncommitted: boolean
+    }
 )
 
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */
@@ -191,6 +204,7 @@ export type TranscriptNote =
   | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
+  | { type: 'instructions-changed'; path: string; removed: boolean }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,

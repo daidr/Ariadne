@@ -103,6 +103,8 @@ export interface EventMap {
   'project.renamed': { name: string }
   /** The project's context source; `null` removes it. */
   'project.source.set': { source: ProjectSource | null }
+  /** How many of the shared work slots this project may take at once; `null` is no cap. */
+  'project.slots.set': { slots: number | null }
   'thread.created': { threadId: string; title: string; nodeId: string | null }
   /** A thread's workspace was prepared, e.g. a git worktree on its own branch. */
   'workspace.opened': { threadId: string; label: string; branch: string | null }
@@ -171,6 +173,21 @@ export interface EventMap {
   'notice.dismissed': { noticeId: string }
   /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
+  /**
+   * The repository's instruction file (AGENTS.md) as the thread's workspace holds it now:
+   * recorded when it first appears and whenever it changes, `content: null` once removed.
+   * The model reads the newest recorded version, so every request can be rebuilt.
+   */
+  'conversation.instructions': {
+    conversationId: string
+    path: string
+    hash: string
+    content: string | null
+    /** Whether an earlier version had been recorded, so the model is told it moved. */
+    changed: boolean
+    /** The version differs from the checkout's commit: someone edited it in the workspace. */
+    uncommitted?: boolean
+  }
   /** A model request failed in a way worth trying again; `attempt` counts the retries. */
   'conversation.model_retry': {
     conversationId: string

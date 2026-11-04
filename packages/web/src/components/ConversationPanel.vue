@@ -64,8 +64,10 @@ const failure = computed(() =>
 // The user stops a thread with a reason, the same way the coordinator does.
 const stopOpen = ref(false)
 const stopReason = ref('')
-async function stopThreadNow(threadId: string) {
-  await stopThread(threadId, stopReason.value.trim() || t('thread.stopDefaultReason'))
+async function stopThreadNow(threadId: string, takeover: boolean) {
+  // Taking over without a reason keeps the coordinator's, which says why it stopped.
+  const reason = stopReason.value.trim() || (takeover ? '' : t('thread.stopDefaultReason'))
+  await stopThread(threadId, reason)
   stopOpen.value = false
   stopReason.value = ''
 }
@@ -152,20 +154,20 @@ watch(
       </DouTag>
       <PullRequestTag :thread="thread" refreshable />
       <DouPopover
-        v-if="!thread.stopped && thread.stage !== 'done'"
+        v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
         v-model:open="stopOpen"
         trigger="click"
-        :title="t('thread.stopTitle')"
+        :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
         :width="320"
       >
         <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
           <template #leading><PauseIcon /></template>
-          {{ t('thread.stop') }}
+          {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
         </DouButton>
         <template #content>
           <div class="stop-form">
             <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
-            <DouButton size="sm" tone="primary" @click="stopThreadNow(thread.id)">
+            <DouButton size="sm" tone="primary" @click="stopThreadNow(thread.id, !!thread.stopped)">
               {{ t('thread.stopConfirm') }}
             </DouButton>
           </div>
@@ -190,6 +192,27 @@ watch(
           <DouCollapse v-else-if="item.notice.kind === 'compacted'" class="relay">
             <DouCollapseItem :value="item.notice.id" :title="t('notice.compacted')">
               <DouText size="sm" class="relay-content">{{ item.notice.summary }}</DouText>
+            </DouCollapseItem>
+          </DouCollapse>
+          <!-- What the thread follows from the repository, and when it moves. -->
+          <DouText
+            v-else-if="item.notice.kind === 'instructions' && item.notice.content === null"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ t('notice.instructionsRemoved', { path: item.notice.path }) }}
+          </DouText>
+          <DouCollapse v-else-if="item.notice.kind === 'instructions'" class="relay">
+            <DouCollapseItem
+              :value="item.notice.id"
+              :title="
+                t(item.notice.changed ? 'notice.instructionsChanged' : 'notice.instructions', {
+                  path: item.notice.path,
+                }) + (item.notice.uncommitted ? t('notice.instructionsUncommitted') : '')
+              "
+            >
+              <DouText size="sm" class="relay-content">{{ item.notice.content }}</DouText>
             </DouCollapseItem>
           </DouCollapse>
           <DouText

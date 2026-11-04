@@ -1,6 +1,7 @@
 import { Ariadne, DomainError, type DashboardContent, type WhiteboardContent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { artifactTools } from './artifact-tools'
+import { fetchDashboardData } from './dashboard-sources'
 import { ToolInputError, type ToolContext, type ToolResult } from './tool-helpers'
 
 let app: Ariadne
@@ -245,5 +246,90 @@ describe('dashboards', () => {
     })
     expect(widgets.list).toBeUndefined()
     expect(widgets.memo!.place?.lg).toEqual({ x: 0, y: 4, w: 6, h: 2 })
+  })
+})
+
+describe('live dashboards', () => {
+  test('a source fetches the data; refreshing stores a new version; null makes it a snapshot', async () => {
+    let calls = 0
+    ctx.dashboardSources = new Map([
+      [
+        'counter',
+        {
+          kind: 'counter',
+          title: { 'zh-CN': '计数' },
+          description: 'Counts calls; returns { totals: { n } }',
+          settings: {
+            type: 'object',
+            properties: {
+              step: { type: 'number', title: { 'zh-CN': '步长' } },
+              token: { type: 'string', title: { 'zh-CN': '令牌' }, secret: true },
+            },
+          },
+          fetch: async (settings: { step?: number }) => {
+            calls += settings.step ?? 1
+            return { totals: { n: calls } }
+          },
+        },
+      ],
+    ]) as ToolContext['dashboardSources']
+    expect(JSON.parse((await run('list_dashboard_sources', {})).content)[0].kind).toBe('counter')
+    expect(
+      (await run('create_dashboard', { title: 'x', widgets: [], source: { kind: 'nope' } }))
+        .isError,
+    ).toBe(true)
+    // Settings are checked against the source's schema; a secret cannot be stored in the log.
+    for (const settings of [{ steps: 2 }, { step: '2' }, { token: 'x' }]) {
+      const result = await run('create_dashboard', {
+        title: 'x',
+        widgets: [],
+        source: { kind: 'counter', settings },
+      })
+      expect(result.isError).toBe(true)
+    }
+    expect(calls).toBe(0)
+    const { artifactId } = await ok('create_dashboard', {
+      title: '计数',
+      widgets: [{ id: 'n', type: 'stat', props: { source: 'totals', field: 'n' } }],
+      source: { kind: 'counter', settings: { step: 2 } },
+    })
+    const read = () => JSON.parse(app.getArtifact(artifactId as string).content) as DashboardContent
+    expect(read().data).toEqual({ totals: { n: 2 } })
+    expect(read().source).toEqual({ kind: 'counter', settings: { step: 2 } })
+
+    const refreshed = await ok('refresh_dashboard', { artifactId })
+    expect(refreshed.version).toBe(2)
+    expect(read().data).toEqual({ totals: { n: 4 } })
+    expect(app.listArtifactVersions(artifactId as string)[0]?.reason).toBe('刷新了数据')
+
+    // Editing keeps it live; source: null turns it back into a snapshot.
+    await ok('update_dashboard', { artifactId, baseVersion: 2, reason: '改标题', title: '计数器' })
+    expect(read().source?.kind).toBe('counter')
+    await ok('update_dashboard', { artifactId, baseVersion: 3, reason: '定格', source: null })
+    expect(read().source).toBeUndefined()
+    expect((await run('refresh_dashboard', { artifactId })).isError).toBe(true)
+  })
+
+  test('a source that hangs or returns junk is given up on', async () => {
+    const hang = {
+      kind: 'hang',
+      title: { 'zh-CN': '挂起' },
+      description: '',
+      settings: { type: 'object' as const, properties: {} },
+      fetch: () => new Promise<Record<string, unknown>>(() => {}),
+    }
+    await expect(
+      fetchDashboardData(hang as never, {}, { projectId: 'p', timeoutMs: 20 }),
+    ).rejects.toThrow(/in time/)
+    const junk = {
+      kind: 'junk',
+      title: { 'zh-CN': '垃圾' },
+      description: '',
+      settings: { type: 'object' as const, properties: {} },
+      fetch: async () => [1, 2] as never,
+    }
+    await expect(fetchDashboardData(junk as never, {}, { projectId: 'p' })).rejects.toThrow(
+      /no data sets/,
+    )
   })
 })

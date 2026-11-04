@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { constants, existsSync } from 'node:fs'
 import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { platformCloner, seedWorktree, type Cloner } from './cow'
 
 export interface LocalSettings {
   path: string
@@ -303,6 +304,10 @@ export const branchFor = (threadId: string) => `ariadne/${threadId.slice(-12)}`
  * When the directory is a subdirectory of the repository, the workspace is that
  * subdirectory of the worktree. Any other directory is shared by all threads as it is.
  *
+ * A new worktree gets the checkout's ignored dependency directories (`node_modules` and
+ * the like) as copy-on-write clones where the filesystem supports them, so it can build
+ * at once without taking room; elsewhere it is a plain worktree. `clone: null` turns it off.
+ *
  * Worktrees are not removed automatically yet; `git worktree remove <dir>` (and deleting
  * the `ariadne/*` branch) in the repository cleans one up.
  */
@@ -311,8 +316,10 @@ export function localWorkspaces(input: {
   repoRoot: string | null
   dataDir: string
   sandbox?: CommandSandbox
+  clone?: Cloner | null
 }): WorkspaceCapability {
   const { sandbox } = input
+  const clone = input.clone === undefined ? platformCloner : input.clone
   return {
     isolated: input.repoRoot !== null,
     async open({ threadId }) {
@@ -335,6 +342,7 @@ export function localWorkspaces(input: {
         if (result.exitCode !== 0) {
           throw new Error(result.stderr.trim() || `git worktree add exited ${result.exitCode}`)
         }
+        if (clone) await seedWorktree(repoRoot, dir, git, clone)
       }
       // A subdirectory of the repository stays the workspace root inside the worktree.
       const sub = relative(await realpath(repoRoot), await realpath(input.path))
@@ -365,6 +373,7 @@ export function localWorkspaces(input: {
 export function localDirectoryProvider(
   dataDir: string,
   sandbox?: CommandSandbox,
+  clone?: Cloner | null,
 ): ContextProvider<LocalSettings> {
   return {
     kind: 'local-directory',
@@ -390,7 +399,15 @@ export function localDirectoryProvider(
       const info = await stat(path).catch(() => null)
       if (!info?.isDirectory()) throw new Error(`${path} is not a directory`)
       const repoRoot = await gitRoot(path)
-      return { workspace: localWorkspaces({ path, repoRoot, dataDir, sandbox }) }
+      return {
+        workspace: localWorkspaces({
+          path,
+          repoRoot,
+          dataDir,
+          ...(sandbox ? { sandbox } : {}),
+          ...(clone !== undefined ? { clone } : {}),
+        }),
+      }
     },
   }
 }

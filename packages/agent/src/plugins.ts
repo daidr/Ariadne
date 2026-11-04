@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import type {
   ContextProvider,
+  DashboardSource,
   Dispose,
   LocalizedText,
   ModelProvider,
@@ -25,7 +26,7 @@ export interface PluginRecord {
   status: 'loaded' | 'failed'
   error: string | null
   /** The kinds it registered. */
-  provides: { models: string[]; contexts: string[] }
+  provides: { models: string[]; contexts: string[]; dashboards: string[] }
 }
 
 interface Loaded {
@@ -76,6 +77,7 @@ export function resolvePluginPath(input: string): string {
 export class PluginHost {
   readonly models = new Map<string, ModelProvider<never>>()
   readonly contexts = new Map<string, ContextProvider<never>>()
+  readonly dashboards = new Map<string, DashboardSource<never>>()
   private readonly loaded: Loaded[] = []
   /** Paths that failed to load, kept so the settings page can say why. */
   private readonly failed: PluginRecord[] = []
@@ -107,7 +109,7 @@ export class PluginHost {
       throw new Error(`plugin ${plugin.id} is already loaded`)
     }
     const disposers: Dispose[] = []
-    const provides: PluginRecord['provides'] = { models: [], contexts: [] }
+    const provides: PluginRecord['provides'] = { models: [], contexts: [], dashboards: [] }
     const register =
       <T extends { kind: string }>(map: Map<string, T>, list: string[]) =>
       (provider: T): Dispose => {
@@ -125,6 +127,7 @@ export class PluginHost {
       sandbox: this.sandbox,
       registerModelProvider: register(this.models, provides.models),
       registerContextProvider: register(this.contexts, provides.contexts),
+      registerDashboardSource: register(this.dashboards, provides.dashboards),
     }
     try {
       const dispose = await plugin.setup(ctx)
@@ -168,7 +171,7 @@ export class PluginHost {
         path,
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
-        provides: { models: [], contexts: [] },
+        provides: { models: [], contexts: [], dashboards: [] },
       })
       throw error
     }

@@ -122,6 +122,7 @@ export function mergeDashboard(
     dashboard: { version: 1, widgets },
     data,
     ...(takenAt === undefined ? {} : { takenAt }),
+    ...(content.source ? { source: content.source } : {}),
   }
 }
 

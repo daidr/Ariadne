@@ -70,6 +70,7 @@ const scheduler = new Scheduler({
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
+  dashboardSources: host.dashboards,
 })
 scheduler.start()
 watcher.start()

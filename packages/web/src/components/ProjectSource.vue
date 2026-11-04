@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouForm, DouFormItem, DouSelect, DouText } from 'dou-ui'
+import {
+  DouAlert,
+  DouButton,
+  DouForm,
+  DouFormItem,
+  DouInputNumber,
+  DouSelect,
+  DouText,
+} from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PencilIcon } from '@dou-ui/icons'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
-import { setSource, state } from '../store'
+import { setProjectSlots, setSource, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
 
 const editing = ref(false)
@@ -15,8 +23,12 @@ const kind = ref<string | null>(null)
 /** Draft settings per kind, so switching kinds back and forth keeps what was typed. */
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
 const secretsSet = ref<string[]>([])
+/** This project's share of the work slots; empty leaves it to the shared total. */
+const slots = ref<number | null>(null)
 /** The secrets the stored source has, restored when its kind is chosen again. */
 const storedSecrets = ref<string[]>([])
+/** The source as it was when the form opened, to tell whether it was changed at all. */
+const opened = ref<string | null>(null)
 
 const source = computed(() => state.detail?.project.source ?? null)
 
@@ -49,6 +61,7 @@ async function edit() {
   editing.value = true
   const project = state.detail?.project
   if (!project) return
+  slots.value = project.slots
   try {
     const [{ kinds: list }, stored] = await Promise.all([
       api.sourceKinds(),
@@ -59,6 +72,8 @@ async function edit() {
     secretsSet.value = stored.secretsSet
     storedSecrets.value = stored.secretsSet
     if (stored.source) drafts[stored.source.kind] = { ...stored.source.settings }
+    // With no source yet, an untouched form saves none.
+    opened.value = sourceKey()
   } catch (error) {
     problem.value = String(error)
   }
@@ -82,11 +97,27 @@ function clearSecret(key: string) {
   storedSecrets.value = storedSecrets.value.filter((name) => name !== key)
 }
 
+/** The chosen kind and what was typed for it, including secrets typed or cleared. */
+function sourceKey() {
+  return JSON.stringify([kind.value, values()])
+}
+
 async function save(clear = false) {
   saving.value = true
-  problem.value = await setSource(
-    clear || !kind.value ? null : { kind: kind.value, settings: { ...values() } },
-  )
+  // Saving the source connects to it again, so it is saved only when it changed: changing
+  // the slot cap alone leaves the source as it is.
+  problem.value =
+    clear || !kind.value
+      ? source.value
+        ? await setSource(null)
+        : null
+      : sourceKey() !== opened.value
+        ? await setSource({ kind: kind.value, settings: { ...values() } })
+        : null
+  // Clearing the source is about the source alone; the slot cap waits for a save.
+  if (!clear && !problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
+    problem.value = await setProjectSlots(slots.value || null)
+  }
   saving.value = false
   if (!problem.value) editing.value = false
 }
@@ -111,6 +142,15 @@ async function save(clear = false) {
         :secrets-set="secretsSet"
         @clear-secret="clearSecret"
       />
+      <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
+        <DouInputNumber
+          v-model="slots"
+          :min="1"
+          :max="16"
+          :step="1"
+          :placeholder="t('project.slotsShared')"
+        />
+      </DouFormItem>
       <DouText v-if="problem" tone="danger" size="sm" role="alert" class="source-problem">
         {{ problem }}
       </DouText>

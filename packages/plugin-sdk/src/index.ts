@@ -140,6 +140,33 @@ export interface CommandSandbox {
   wrap(argv: string[], options: { keep: string[]; readOnly?: string[] }): string[]
 }
 
+/**
+ * Live data for dashboards. A dashboard names a source and its settings; refreshing it
+ * fetches the data again and stores it as a new version, so every version stays a
+ * snapshot that replays the same. Dashboards without a source keep the data they were
+ * given.
+ */
+export interface DashboardSource<Settings = Record<string, unknown>> {
+  kind: string
+  title: LocalizedText
+  /** For the model: what data it gives, and which named data sets come back. */
+  description: string
+  /**
+   * The model chooses these and they are stored in the event log with the dashboard, so
+   * they must not hold secrets: fields marked `secret` are refused. Keep credentials in
+   * the plugin's own configuration instead.
+   */
+  settings: SettingsSchema
+  /**
+   * Fetch now. Returns named data sets: arrays of rows, or one object for a stat. Ariadne
+   * gives up after 30 seconds and aborts `signal`, so stop the work then.
+   */
+  fetch(
+    settings: Settings,
+    context: { projectId: string; signal?: AbortSignal },
+  ): Promise<Record<string, unknown>>
+}
+
 /** What `setup` receives: every method registers something and returns its disposer. */
 export interface PluginContext {
   /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
@@ -148,6 +175,7 @@ export interface PluginContext {
   sandbox: CommandSandbox
   registerContextProvider(provider: ContextProvider<never>): Dispose
   registerModelProvider(provider: ModelProvider<never>): Dispose
+  registerDashboardSource(source: DashboardSource<never>): Dispose
 }
 
 export interface Plugin {

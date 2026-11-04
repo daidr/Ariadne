@@ -32,6 +32,7 @@ export const projectsProjection: Projection = {
       name TEXT NOT NULL,
       coordinator_id TEXT NOT NULL,
       source TEXT,
+      slots INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -47,6 +48,13 @@ export const projectsProjection: Projection = {
       case 'project.renamed':
         db.run('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?', [
           event.data.name,
+          event.at,
+          event.projectId,
+        ])
+        break
+      case 'project.slots.set':
+        db.run('UPDATE projects SET slots = ?, updated_at = ? WHERE id = ?', [
+          event.data.slots,
           event.at,
           event.projectId,
         ])
@@ -369,6 +377,15 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'conversation.instructions':
+        // The user sees what the thread follows, and when it moves.
+        add(event.data.conversationId, 'instructions', {
+          path: event.data.path,
+          content: event.data.content,
+          changed: event.data.changed,
+          uncommitted: event.data.uncommitted ?? false,
+        })
+        break
       case 'conversation.model_retry':
         add(event.data.conversationId, 'model-retry', {
           attempt: event.data.attempt,
@@ -436,11 +453,22 @@ export const conversationsProjection: Projection = {
       last_outcome TEXT,
       last_error TEXT,
       input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      instructions TEXT
     )`)
   },
   apply(db, event) {
     switch (event.type) {
+      case 'conversation.instructions':
+        db.run('UPDATE conversations SET instructions = ? WHERE id = ?', [
+          JSON.stringify({
+            path: event.data.path,
+            hash: event.data.hash,
+            content: event.data.content,
+          }),
+          event.data.conversationId,
+        ])
+        break
       case 'project.created':
         db.run("INSERT INTO conversations (id, project_id, role) VALUES (?, ?, 'coordinator')", [
           event.data.coordinatorId,
@@ -672,6 +700,24 @@ export const transcriptProjection: Projection = {
           (event.data.attempt ?? 1) <= MAX_CHECK_ATTEMPTS,
         )
         break
+      case 'conversation.instructions': {
+        // The first version needs no note: it is in the instructions from the start. A
+        // change is noted where it happened, so the model knows the rules moved.
+        if (event.data.changed) {
+          const payload = {
+            type: 'instructions-changed',
+            path: event.data.path,
+            removed: event.data.content === null,
+          }
+          addEntry(
+            db,
+            event,
+            { conversationId: event.data.conversationId, kind: 'note', payload },
+            false,
+          )
+        }
+        break
+      }
       case 'thread.stopped': {
         // The coordinator hears of a stop the user made, so it does not count on the thread.
         const coordinator = coordinatorOf(db, event.projectId)

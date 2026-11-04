@@ -255,6 +255,45 @@ describe('local directory', () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  test("a new worktree gets the checkout's dependencies as clones, where clones work", async () => {
+    const dir = await repo()
+    await writeFile(join(dir, '.gitignore'), 'node_modules/\ndist/\n')
+    await run(['git', 'add', '.'], { cwd: dir })
+    await run(['git', 'commit', '-qm', 'ignore'], { cwd: dir })
+    await run(['mkdir', '-p', join(dir, 'node_modules', 'dep'), join(dir, 'dist')], { cwd: base })
+    await writeFile(join(dir, 'node_modules', 'dep', 'index.js'), 'ok')
+    await writeFile(join(dir, 'dist', 'out.js'), 'built')
+    // A linked dependency folder and a Python environment are left out.
+    await run(['mkdir', '-p', join(base, 'elsewhere'), join(dir, 'pkg'), join(dir, '.venv')], {
+      cwd: base,
+    })
+    await symlink(join(base, 'elsewhere'), join(dir, 'pkg', 'node_modules'))
+    await writeFile(join(dir, '.gitignore'), 'node_modules/\nnode_modules\ndist/\n.venv/\n')
+    await run(['git', 'add', '.gitignore'], { cwd: dir })
+    await run(['git', 'commit', '-qm', 'ignore more'], { cwd: dir })
+    const cloned: string[] = []
+    // Stands for a filesystem that clones: copies, and records what it was asked to clone.
+    const clone = async (from: string, to: string) => {
+      cloned.push(from)
+      return (await run(['cp', '-a', from, to], { cwd: base })).exitCode === 0
+    }
+    const provider = localDirectoryProvider(join(base, 'data'), undefined, clone)
+    const { workspace } = await provider.connect({ path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect(await ws.readFile('node_modules/dep/index.js')).toBe('ok')
+    // Only dependencies, not build output.
+    await expect(ws.readFile('dist/out.js')).rejects.toThrow()
+    expect(cloned.some((path) => path.endsWith('node_modules'))).toBe(true)
+    expect(cloned.some((path) => path.includes('pkg') || path.endsWith('.venv'))).toBe(false)
+    // It stays ignored, so the thread's commits do not pick it up.
+    expect((await ws.exec('git status --short')).stdout).toBe('')
+
+    // Where the filesystem cannot clone, the worktree is a plain one.
+    const plain = localDirectoryProvider(join(base, 'data2'), undefined, async () => false)
+    const other = await (await plain.connect({ path: dir })).workspace!.open({ threadId: 'thr_b' })
+    await expect(other.readFile('node_modules/dep/index.js')).rejects.toThrow()
+  })
+
   test('commands time out', async () => {
     const result = await run(['sleep', '5'], { cwd: base, timeoutMs: 50 })
     expect(result.exitCode).not.toBe(0)

@@ -14,7 +14,10 @@ import { statWidget, tableWidget, textWidget } from '@dou-ui/dashboard/widgets'
 import '@dou-ui/dashboard/style.css'
 import '@dou-ui/chart/style.css'
 import '@dou-ui/pivot/style.css'
-import { DouSwitch, DouTag, DouText } from 'dou-ui'
+import { DouButton, DouSwitch, DouTag, DouText } from 'dou-ui'
+import { RotateCwIcon } from '@dou-ui/icons'
+import { api } from '../api'
+import { report } from '../store'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { locale, t } from '../i18n'
 
@@ -22,7 +25,12 @@ import { locale, t } from '../i18n'
  * A dashboard snapshot. The data was copied in when it was taken, so each source just
  * hands back its stored value and nothing is fetched.
  */
-const props = defineProps<{ content: string; readonly: boolean; label?: string }>()
+const props = defineProps<{
+  content: string
+  readonly: boolean
+  label?: string
+  artifactId?: string
+}>()
 const emit = defineEmits<{ draft: [content: string | null] }>()
 
 const widgets = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
@@ -68,6 +76,21 @@ function changed() {
   })
 }
 
+// A live dashboard fetches again on request; the new data comes back as a new version.
+const live = computed(() => !!snapshot.value.source)
+const refreshing = ref(false)
+async function refresh() {
+  if (!props.artifactId) return
+  refreshing.value = true
+  try {
+    await api.refreshDashboard(props.artifactId)
+  } catch (error) {
+    report(error)
+  } finally {
+    refreshing.value = false
+  }
+}
+
 const takenAt = computed(() =>
   snapshot.value.takenAt
     ? new Date(snapshot.value.takenAt).toLocaleString(locale.value, {
@@ -81,10 +104,23 @@ const takenAt = computed(() =>
 <template>
   <div class="dashboard">
     <div class="dashboard-bar">
-      <DouTag size="sm" tone="neutral">{{ t('artifact.dashboard.snapshot') }}</DouTag>
+      <DouTag size="sm" :tone="live ? 'primary' : 'neutral'">
+        {{ t(live ? 'artifact.dashboard.live' : 'artifact.dashboard.snapshot') }}
+      </DouTag>
       <DouText variant="tertiary" size="sm" class="dashboard-taken">
         {{ takenAt ? t('artifact.dashboard.takenAt', { time: takenAt }) : '' }}
       </DouText>
+      <DouButton
+        v-if="live && !readonly"
+        size="sm"
+        variant="ghost"
+        :loading="refreshing"
+        :disabled="editing"
+        @click="refresh"
+      >
+        <template #leading><RotateCwIcon /></template>
+        {{ t('artifact.dashboard.refresh') }}
+      </DouButton>
       <label v-if="!readonly" class="dashboard-edit">
         <DouText size="sm">{{ t('artifact.dashboard.edit') }}</DouText>
         <DouSwitch v-model="editing" size="sm" />
