@@ -789,7 +789,7 @@ describe('files', () => {
     })
     app.reviseArtifact(doc.id, { content: '# Bye', author: 'user', reason: 'r' })
     const [listed] = app.listArtifacts(project.id)
-    expect(listed?.preview).toEqual({ kind: 'document', excerpt: 'Bye' })
+    expect(listed?.preview).toEqual({ kind: 'document', excerpt: 'Bye', lead: '# Bye' })
     expect(listed).not.toHaveProperty('content')
   })
 })

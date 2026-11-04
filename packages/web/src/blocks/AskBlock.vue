@@ -5,6 +5,8 @@ import {
   DouChatConfirm,
   DouChatSuggestions,
   DouCodeBlock,
+  DouDescriptions,
+  DouDescriptionsItem,
   DouForm,
   DouFormItem,
   DouInput,
@@ -23,8 +25,8 @@ import { answerAttention } from '../store'
 
 /**
  * A choice, confirmation or form an agent (or the system) asks the user, the same in the
- * conversation and under "needs me". Once answered it shows the answer in place; once the
- * agent took it back, only what it asked and why it was withdrawn.
+ * conversation and under "needs me". Once answered it shows the answer in place, read-only;
+ * once the agent took it back, only what it asked and why it was withdrawn.
  */
 const props = defineProps<{
   attentionId: string
@@ -38,10 +40,14 @@ const title = computed(() =>
 )
 
 const sending = ref(false)
-async function send(answer: BlockAnswer) {
+// What the user sent, until the stored answer arrives with the next refresh: without it
+// the controls would come back for a moment after the request returns.
+const sent = ref<BlockAnswer | null>(null)
+const answered = computed(() => props.answer ?? sent.value)
+async function send(given: BlockAnswer) {
   sending.value = true
   try {
-    await answerAttention(props.attentionId, answer)
+    if (await answerAttention(props.attentionId, given)) sent.value = given
   } finally {
     sending.value = false
   }
@@ -59,35 +65,43 @@ const suggestions = computed<ChatSuggestion[]>(() =>
     : [],
 )
 const chosen = computed(() =>
-  props.block.type === 'choice' && props.answer?.type === 'choice'
-    ? (props.block.options[props.answer.choice]?.label ?? null)
+  props.block.type === 'choice' && answered.value?.type === 'choice'
+    ? (props.block.options[answered.value.choice]?.label ?? null)
     : null,
 )
 
 const confirmStatus = computed(() => {
-  if (props.answer?.type === 'confirm') return props.answer.approved ? 'approved' : 'denied'
+  if (answered.value?.type === 'confirm') return answered.value.approved ? 'approved' : 'denied'
   return props.withdrawn ? 'withdrawn' : 'waiting'
 })
 function decide(decision: ChatConfirmDecision) {
   if (!sending.value) void send({ type: 'confirm', approved: decision !== 'deny' })
 }
 
-// A form: its values start from the defaults, or show what was submitted.
+// A form: its values start from the defaults; once submitted it lists what was sent.
 const form = computed(() => (props.block.type === 'form' ? props.block : null))
 const values = reactive<Record<string, FormValue>>({})
 watch(
-  () => [props.block, props.answer] as const,
+  () => props.block,
   () => {
     for (const key of Object.keys(values)) delete values[key]
     if (!form.value) return
-    const given = props.answer?.type === 'form' ? props.answer.values : null
     for (const field of form.value.fields) {
-      const value = given ? given[field.key] : field.default
+      const value = field.default
       values[field.key] = Array.isArray(value) ? [...value] : (value ?? null)
     }
   },
   { immediate: true },
 )
+const submitted = computed(() => (answered.value?.type === 'form' ? answered.value.values : null))
+/** A submitted value as the user would say it: option labels, yes or no. */
+function shown(field: FormBlock['fields'][number], value: FormValue | undefined): string {
+  const label = (v: string) => field.options.find((option) => option.value === v)?.label ?? v
+  if (value === null || value === undefined || value === '') return t('block.blank')
+  if (Array.isArray(value)) return value.length ? value.map(label).join('、') : t('block.blank')
+  if (typeof value === 'boolean') return t(value ? 'block.yes' : 'block.no')
+  return field.kind === 'select' ? label(String(value)) : String(value)
+}
 const options = (field: FormBlock['fields'][number]) =>
   field.options.map((option) => ({ label: option.label, value: option.value }))
 const text = (key: string) => (typeof values[key] === 'string' ? (values[key] as string) : '')
@@ -107,7 +121,7 @@ function submit() {
       }}</DouText>
     </template>
     <template v-else-if="block.type === 'choice'">
-      <template v-if="answer">
+      <template v-if="answered">
         <DouText weight="medium" class="ask-title">{{ block.question }}</DouText>
         <DouText variant="secondary" size="sm" class="ask-answer">
           <CheckIcon />{{ t('block.chosen', { label: chosen ?? '' }) }}
@@ -152,12 +166,34 @@ function submit() {
       <DouCodeBlock v-if="block.detail && !withdrawn" :code="block.detail" wrap :max-lines="12" />
     </DouChatConfirm>
 
+    <template v-else-if="form && submitted">
+      <div class="ask-head">
+        <DouText weight="medium" class="ask-title">{{ form.title }}</DouText>
+        <DouText variant="secondary" size="sm" class="ask-answer">
+          <CheckIcon />{{ t('block.submitted') }}
+        </DouText>
+      </div>
+      <DouDescriptions :columns="1" layout="horizontal" label-width="96px" class="ask-values">
+        <DouDescriptionsItem v-for="field in form.fields" :key="field.key" :label="field.label">
+          <DouText
+            :variant="
+              shown(field, submitted[field.key]) === t('block.blank') ? 'tertiary' : undefined
+            "
+            size="sm"
+            class="ask-value"
+          >
+            {{ shown(field, submitted[field.key]) }}
+          </DouText>
+        </DouDescriptionsItem>
+      </DouDescriptions>
+    </template>
+
     <template v-else-if="form">
       <DouText weight="medium" class="ask-title">{{ form.title }}</DouText>
       <DouText v-if="form.description" variant="secondary" size="sm" class="ask-title">
         {{ form.description }}
       </DouText>
-      <DouForm :model="values" :readonly="!!answer" :disabled="sending" size="sm" @submit="submit">
+      <DouForm :model="values" :disabled="sending" size="sm" @submit="submit">
         <DouFormItem
           v-for="field in form.fields"
           :key="field.key"
@@ -201,10 +237,7 @@ function submit() {
           />
         </DouFormItem>
         <div class="ask-actions">
-          <DouText v-if="answer" variant="secondary" size="sm" class="ask-answer">
-            <CheckIcon />{{ t('block.submitted') }}
-          </DouText>
-          <DouButton v-else native-type="submit" size="sm" tone="primary" :loading="sending">
+          <DouButton native-type="submit" size="sm" tone="primary" :loading="sending">
             {{ form.submitText ?? t('block.submit') }}
           </DouButton>
         </div>
@@ -223,6 +256,18 @@ function submit() {
 
 .ask-title {
   white-space: pre-wrap;
+}
+
+.ask-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ask-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .ask-answer {
