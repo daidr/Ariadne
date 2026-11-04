@@ -93,6 +93,7 @@ export const threadsProjection: Projection = {
       last_report TEXT,
       last_summary TEXT,
       reported_at INTEGER,
+      reported_head TEXT,
       workspace_label TEXT,
       workspace_branch TEXT,
       workspace_base TEXT,
@@ -131,8 +132,16 @@ export const threadsProjection: Projection = {
         break
       case 'thread.reported':
         db.run(
-          'UPDATE threads SET last_report = ?, last_summary = ?, reported_at = ?, updated_at = ? WHERE id = ?',
-          [event.data.report, event.data.summary, event.at, event.at, event.data.threadId],
+          `UPDATE threads SET last_report = ?, last_summary = ?, reported_at = ?, reported_head = ?,
+           updated_at = ? WHERE id = ?`,
+          [
+            event.data.report,
+            event.data.summary,
+            event.at,
+            event.data.head ?? null,
+            event.at,
+            event.data.threadId,
+          ],
         )
         break
       case 'workspace.opened':

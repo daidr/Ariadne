@@ -168,7 +168,13 @@ export interface EventMap {
    */
   'branch.conflicted': { threadId: string; branch: string; base: string; files: string[] }
   'thread.started': { threadId: string }
-  'thread.reported': { threadId: string; report: ReportKind; summary: string }
+  'thread.reported': {
+    threadId: string
+    report: ReportKind
+    summary: string
+    /** The branch's newest commit when it reported, once the user merged it before. */
+    head?: string
+  }
   /**
    * The thread is held: its running turn ends and no new one starts until it is resumed.
    * `by` is `user` or the coordinator's id.

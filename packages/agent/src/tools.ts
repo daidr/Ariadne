@@ -148,6 +148,22 @@ const editMessage: Tool = {
   },
 }
 
+/**
+ * The branch's newest commit, when the user merged the thread's branch before and its
+ * worktree is still there: a report with nothing new since the merge leaves it landed.
+ */
+async function mergedHead(ctx: ToolContext): Promise<string | undefined> {
+  if (ctx.role !== 'thread') return undefined
+  const thread = ctx.app.getThread(ctx.conversationId)
+  if (!thread.merged || !thread.workspace || thread.workspace.removed) return undefined
+  try {
+    const result = await (await ctx.workspace()).exec('git rev-parse HEAD', { signal: ctx.signal })
+    return result.exitCode === 0 ? result.stdout.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const report: Tool = {
   spec: {
     name: 'report',
@@ -162,10 +178,10 @@ const report: Tool = {
       required: ['kind', 'summary'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const kind = args.kind as ReportKind
     if (!REPORT_KINDS.includes(kind)) throw new ToolInputError('"kind" is not a report kind')
-    ctx.app.reportThread(ctx.conversationId, kind, str(args, 'summary'))
+    ctx.app.reportThread(ctx.conversationId, kind, str(args, 'summary'), await mergedHead(ctx))
     return { content: 'Reported.' }
   },
 }

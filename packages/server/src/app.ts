@@ -323,15 +323,12 @@ export function createHandler({
     async (_request, { projectId = '', threadId = '' }) => {
       app.getProject(projectId)
       if (!/^[\w-]+$/.test(threadId)) throw new BadRequest('threadId')
-      const known = app.listThreads(projectId).some((item) => item.id === threadId)
-      // A command running in it right now would lose its directory.
-      if (known && app.getConversation(threadId).turn) {
-        throw new DomainError('error.merge.working')
-      }
       const removed = workspaces
         ? await workspaces.removeWorktree(projectId, threadId, 'user')
-        : false
-      if (!removed) throw new DomainError('error.worktreeDirty')
+        : 'dirty'
+      // A command running in it right now would lose its directory.
+      if (removed === 'busy') throw new DomainError('error.merge.working')
+      if (removed === 'dirty') throw new DomainError('error.worktreeDirty')
       return new Response(null, { status: 204 })
     },
   )

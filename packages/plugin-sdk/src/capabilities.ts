@@ -272,15 +272,17 @@ export class WorkspacePathError extends Error {
 /**
  * Why a merge did not happen, for reasons the user can act on:
  * - `checkout`: the base is checked out and the files there stand in the way (changes not
- *   committed to the same files), or the checkout moved on meanwhile.
+ *   committed to the same files).
  * - `base-moved`: the base got new commits while merging; trying again takes them in.
+ * - `filters`: the base is checked out and the repository has `.gitattributes` filters
+ *   (Git LFS, for one), which would not run when the checkout is updated.
  * - `identity`: git has no `user.name` or `user.email` to write the commit with.
  * - `git-version`: git is too old to merge without a working tree (2.38 or later).
  * - `no-base`: the base branch is gone.
  */
 export class MergeRefused extends Error {
   constructor(
-    readonly reason: 'checkout' | 'base-moved' | 'identity' | 'git-version' | 'no-base',
+    readonly reason: 'checkout' | 'base-moved' | 'filters' | 'identity' | 'git-version' | 'no-base',
     readonly detail: string,
   ) {
     super(`merge refused (${reason}): ${detail}`)

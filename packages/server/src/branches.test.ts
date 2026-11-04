@@ -152,6 +152,35 @@ describe('thread changes', () => {
     await janitor.stop()
   })
 
+  test('opening it while it is being removed waits and checks it out again', async () => {
+    const { project, thread } = await setup()
+    const removing = workspaces.removeWorktree(project.id, thread.id, 'user')
+    const reopened = workspaces.forThread(project.id, thread.id)
+    expect(await removing).toBe('removed')
+    const ws = await reopened
+    expect(existsSync(ws.label)).toBe(true)
+    expect(await workspaces.forThread(project.id, thread.id)).toBe(ws)
+    expect(app.getThread(thread.id).workspace?.removed).toBe(false)
+  })
+
+  test('a report after the merge with nothing new stays landed', async () => {
+    const { thread, ws } = await setup()
+    const merged = await (
+      await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    ).json()
+    const head = merged.outcome.head as string
+    app.reportThread(thread.id, 'ready', '好了', head)
+    expect(app.getThread(thread.id).stage).toBe('done')
+    await ws.exec('echo b > b.txt && git add . && git commit -qm b')
+    app.reportThread(
+      thread.id,
+      'ready',
+      '又改了',
+      await ws.exec('git rev-parse HEAD').then((r) => r.stdout.trim()),
+    )
+    expect(app.getThread(thread.id).stage).toBe('review')
+  })
+
   test('a branch merged by hand counts; one with new commits after the merge does not', async () => {
     const { dir, thread, ws } = await setup()
     const janitor = new WorktreeJanitor(app, workspaces, { delayMs: 0 })

@@ -363,6 +363,8 @@ export const en: Record<MessageKey, string> = {
   'error.merge.failed': 'Merge failed: {detail}',
   'error.merge.checkout':
     'Changes in the checkout of the base branch are in the way; commit or stash them and try again: {detail}',
+  'error.merge.filters':
+    'The repository uses .gitattributes filters (such as Git LFS); merge it in your checkout by hand',
   'error.merge.base-moved': 'The base branch just got new commits; merge again',
   'error.merge.identity': 'git has no user.name or user.email; set them and merge again',
   'error.merge.git-version': 'Merging needs git 2.38 or later: {detail}',

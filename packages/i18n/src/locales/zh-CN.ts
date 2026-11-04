@@ -334,6 +334,7 @@ export const zhCN = {
   'error.merge.unsupported': '这个项目的改动通过 PR 合入，不在这里合并',
   'error.merge.failed': '合并失败：{detail}',
   'error.merge.checkout': '基线分支的签出里有改动挡住了合并，提交或暂存后再试：{detail}',
+  'error.merge.filters': '仓库用了 .gitattributes 过滤器（比如 Git LFS），请在你的签出里手动合并',
   'error.merge.base-moved': '基线分支刚有新提交，再合并一次即可',
   'error.merge.identity': 'git 还没有设置 user.name 和 user.email，设置后再合并',
   'error.merge.git-version': '合并需要 git 2.38 或更新的版本：{detail}',

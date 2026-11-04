@@ -185,6 +185,7 @@ interface ThreadRow {
   last_report: ReportKind | null
   last_summary: string | null
   reported_at: number | null
+  reported_head: string | null
   workspace_label: string | null
   workspace_branch: string | null
   workspace_base: string | null
@@ -249,7 +250,10 @@ function toThread(row: ThreadRow): ThreadView {
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
       checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
       stopped: row.stopped_reason !== null,
-      landed: (!!merged && merged.at >= (row.reported_at ?? 0)) || pullRequest?.state === 'merged',
+      // Merged after it reported, or it reported the very commit that was merged.
+      landed:
+        (!!merged && (merged.at >= (row.reported_at ?? 0) || merged.head === row.reported_head)) ||
+        pullRequest?.state === 'merged',
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -861,10 +865,15 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
-  reportThread(threadId: string, report: ReportKind, summary: string): ThreadView {
+  /** `head` is the branch's newest commit, to tell whether merged work is all it reports. */
+  reportThread(threadId: string, report: ReportKind, summary: string, head?: string): ThreadView {
     const thread = this.getThread(threadId)
     this.store.append([
-      { type: 'thread.reported', projectId: thread.projectId, data: { threadId, report, summary } },
+      {
+        type: 'thread.reported',
+        projectId: thread.projectId,
+        data: { threadId, report, summary, ...(head ? { head } : {}) },
+      },
     ])
     return this.getThread(threadId)
   }

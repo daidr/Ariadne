@@ -104,7 +104,7 @@ thread 第一次打开工作区时记下它的基线分支（`workspace.opened` 
 
 - 改动按 PR 的方式比较：从分支和基线最近的共同提交，到分支最新的提交，只算已提交的内容（GitHub、GitLab 的基线是共享 clone 里的 `origin/<默认分支>`）。改名按 git 的相似度识别。worktree 里没提交的文件单独列出数量，它们不在改动里，也不会被合并；thread 的系统提示也说明了这一点。
 - 界面上 thread 面板顶部和计划节点里的“改动”打开改动视图：左边是按目录排列的文件（只有一个子目录的目录合成一行），右边是 `@dou-ui/code` 的 `DouCodeDiff`。文件内容按需读取，超过 512 KB 的和二进制文件不显示内容。
-- 本地目录和 SSH 由用户点“合并到 <基线>”：默认压成一个提交（squash），也可以保留每个提交（合并提交）；提交说明默认是 thread 的标题，作者是 git 里配置的 `user.name`、`user.email`（本地读用户自己的配置，SSH 读远端用户的）。合并不碰 thread 的 worktree：先用 `git merge-tree --write-tree`（需要 git 2.38+）算出结果，有冲突就什么都不改；没有冲突时写出提交，基线没有签出在任何地方就用 `update-ref` 从原来的位置移过去（期间基线有了新提交则拒绝，再合并一次即可），基线签出在用户的目录里就在那里 `merge --ff-only`，文件跟着更新，签出里未提交的改动挡住时拒绝，什么都不丢。thread 正在跑一轮时不能合并。
+- 本地目录和 SSH 由用户点“合并到 <基线>”：默认压成一个提交（squash），也可以保留每个提交（合并提交）；提交说明默认是 thread 的标题，作者是 git 里配置的 `user.name`、`user.email`（本地读用户自己的配置，SSH 读远端用户的）。合并不碰 thread 的 worktree：先用 `git merge-tree --write-tree`（需要 git 2.38+）算出结果，有冲突就什么都不改；没有冲突时写出提交，基线没有签出在任何地方就用 `update-ref` 从原来的位置移过去（期间基线有了新提交则拒绝，再合并一次即可），基线签出在用户的目录里就在那里 `merge --ff-only`，文件跟着更新，签出里未提交的改动挡住时拒绝，什么都不丢。更新签出时不读用户的全局 git 配置（免得执行 thread 写进去的 filter），所以仓库的 `.gitattributes` 里有 `filter=`（比如 Git LFS）时拒绝在签出里合并，请用户自己合；全局的 `core.autocrlf` 也不生效。thread 正在跑一轮时不能合并。
 - 合并记 `branch.merged`：协调器收到说明并被唤醒；thread 下次工作时读到，squash 之后继续改要先把基线合进自己的分支，后面的改动才单独比较。冲突记 `branch.conflicted`，唤醒 thread：在自己的分支上合并基线、解决冲突、跑检查、提交，再报告 `ready`。两者都在 thread 的对话里留一行，用户能看到发生了什么。
 - GitHub、GitLab 的改动通过 PR 合入，界面只看改动，不替托管平台合并。
 

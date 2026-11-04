@@ -18,6 +18,7 @@ export class WorkspaceManager {
     { key: string; capabilities: Promise<Partial<Capabilities>> }
   >()
   private readonly open = new Map<string, { key: string; workspace: Promise<Workspace> }>()
+  private readonly queues = new Map<string, Promise<void>>()
 
   constructor(
     private readonly app: Ariadne,
@@ -64,6 +65,11 @@ export class WorkspaceManager {
   /** The thread's workspace; throws a `DomainError` the model can read. */
   async forThread(projectId: string, threadId: string): Promise<Workspace> {
     const key = this.sourceKey(projectId)
+    // Not while its worktree is being removed: it would be used, then deleted under it.
+    return this.serial(threadId, () => this.openFor(projectId, threadId, key))
+  }
+
+  private async openFor(projectId: string, threadId: string, key: string): Promise<Workspace> {
     const cached = this.open.get(threadId)
     if (cached?.key === key) return cached.workspace
     // A workspace opened before keeps the base it started from.
@@ -99,22 +105,42 @@ export class WorkspaceManager {
 
   /**
    * Remove the thread's worktree, keeping its branch, and record it. The next use opens it
-   * again. One with changes not committed stays: `false`.
+   * again. One with changes not committed stays (`dirty`), and so does one whose thread has
+   * a turn running (`busy`): it may be using it.
    */
   async removeWorktree(
     projectId: string,
     threadId: string,
     reason: 'merged' | 'user',
-  ): Promise<boolean> {
-    const branches = await this.branches(projectId)
-    if (!branches) return false
-    const open = this.open.get(threadId)
-    this.open.delete(threadId)
-    if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
-    const removed = await branches.remove(threadId)
+  ): Promise<'removed' | 'dirty' | 'busy'> {
     const known = this.app.listThreads(projectId).some((thread) => thread.id === threadId)
-    if (removed && known) this.app.recordWorktreeRemoved(threadId, reason)
-    return removed
+    return this.serial(threadId, async () => {
+      const branches = await this.branches(projectId)
+      if (!branches) return 'dirty'
+      if (known && this.app.getConversation(threadId).turn) return 'busy'
+      const open = this.open.get(threadId)
+      this.open.delete(threadId)
+      if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
+      const removed = await branches.remove(threadId)
+      if (!removed) return 'dirty'
+      if (known) this.app.recordWorktreeRemoved(threadId, reason)
+      return 'removed'
+    })
+  }
+
+  /** Run `task` after the thread's earlier opening or removal has finished. */
+  private serial<T>(threadId: string, task: () => Promise<T>): Promise<T> {
+    const before = this.queues.get(threadId) ?? Promise.resolve()
+    const result = before.then(task, task)
+    const done = result.then(
+      () => {},
+      () => {},
+    )
+    this.queues.set(threadId, done)
+    void done.then(() => {
+      if (this.queues.get(threadId) === done) this.queues.delete(threadId)
+    })
+    return result
   }
 
   async dispose(): Promise<void> {

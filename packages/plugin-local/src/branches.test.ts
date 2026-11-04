@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { parseDiff, parseStatus } from './branches'
-import { localDirectoryProvider, run } from './index'
+import { mergeBranch, parseDiff, parseStatus, type GitRun } from './branches'
+import { localDirectoryProvider, run, serverGitEnv } from './index'
 
 let base: string
 
@@ -30,6 +30,8 @@ async function repo(): Promise<string> {
   await git('commit', '-q', '-m', 'init')
   return dir
 }
+
+const identity = async () => ({ name: 'test', email: 'test@example.com' })
 
 const git = async (cwd: string, ...args: string[]) =>
   (await run(['git', ...args], { cwd })).stdout.trim()
@@ -193,6 +195,62 @@ describe('thread branches', () => {
       await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
     ).toEqual({ kind: 'conflict', files: ['README.md'] })
     expect(await git(dir, 'rev-parse', 'main')).toBe(before)
+  })
+
+  test('conflicting file names come as they are, not quoted', async () => {
+    const { dir, branches, thread } = await setup()
+    await writeFile(join(dir, '中文.md'), 'base\n')
+    await git(dir, 'add', '.')
+    await git(dir, 'commit', '-qm', 'zh')
+    await thread.exec('git merge -q main && echo thread > 中文.md && git commit -qam zh')
+    await writeFile(join(dir, '中文.md'), 'user\n')
+    await git(dir, 'commit', '-qam', 'user zh')
+    expect(
+      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'x' }),
+    ).toEqual({ kind: 'conflict', files: ['中文.md'] })
+  })
+
+  test('a commit made in the checkout meanwhile is reported as the base moving', async () => {
+    const { dir, thread } = await setup()
+    await thread.exec('echo a > a.txt && git add . && git commit -qm a')
+    const plain: GitRun = (args, options = {}) =>
+      run(['git', ...args], { cwd: options.cwd ?? dir, env: serverGitEnv(['file']) })
+    // The user commits just after the merge commit is written.
+    const racing: GitRun = async (args, options) => {
+      const result = await plain(args, options)
+      if (args.includes('commit-tree')) {
+        await writeFile(join(dir, 'user.txt'), 'user\n')
+        await git(dir, 'add', '.')
+        await git(dir, 'commit', '-qm', 'user')
+      }
+      return result
+    }
+    const merge = mergeBranch(racing, identity, {
+      branch: 'ariadne/thr_a',
+      base: 'main',
+      method: 'squash',
+      message: 'a',
+    })
+    await expect(merge).rejects.toMatchObject({ reason: 'base-moved' })
+    expect(await git(dir, 'log', '-1', '--format=%s')).toBe('user')
+  })
+
+  test('a checked-out base is not updated when the repository uses filters', async () => {
+    const { dir, branches, thread } = await setup()
+    await writeFile(join(dir, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n')
+    await git(dir, 'add', '.')
+    await git(dir, 'commit', '-qm', 'attributes')
+    await thread.exec('git merge -q main && echo a > a.txt && git add . && git commit -qm a')
+    const before = await git(dir, 'rev-parse', 'main')
+    await expect(
+      branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'a' }),
+    ).rejects.toMatchObject({ reason: 'filters' })
+    expect(await git(dir, 'rev-parse', 'main')).toBe(before)
+    // Not checked out, nothing is written to files: it merges.
+    await git(dir, 'switch', '-q', '-c', 'elsewhere')
+    expect(
+      await branches.merge!({ threadId: 'thr_a', base: 'main', method: 'squash', message: 'a' }),
+    ).toMatchObject({ kind: 'merged' })
   })
 
   test('changes in the checkout that stand in the way stop the merge', async () => {

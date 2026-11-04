@@ -27,8 +27,11 @@ function fail(result: ExecResult, what: string): never {
   throw new Error(`${what} failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
 }
 
-async function sha(git: GitRun, ref: string): Promise<string | null> {
-  const result = await git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+async function sha(git: GitRun, ref: string, cwd?: string): Promise<string | null> {
+  const result = await git(
+    ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`],
+    cwd ? { cwd } : undefined,
+  )
   return result.exitCode === 0 ? result.stdout.trim() : null
 }
 
@@ -211,15 +214,11 @@ export async function mergeBranch(
   const author = await identity()
   if (!author) throw new MergeRefused('identity', 'user.name or user.email is not set')
 
-  const merged = await git([
-    'merge-tree',
-    '--write-tree',
-    '--name-only',
-    '--no-messages',
-    baseSha,
-    head,
-  ])
-  const lines = merged.stdout.split('\n').filter(Boolean)
+  const merged = await git(
+    ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', baseSha, head],
+    { whole: true },
+  )
+  const lines = merged.stdout.split('\0').filter(Boolean)
   if (merged.exitCode === 1) return { kind: 'conflict', files: [...new Set(lines.slice(1))] }
   if (merged.exitCode !== 0) {
     if (/usage|unknown option/i.test(merged.stderr)) {
@@ -249,6 +248,15 @@ export async function mergeBranch(
 
   const checkout = await checkoutOf(git, baseRef)
   if (checkout) {
+    // A commit made in the checkout meanwhile: the merge started from an older base.
+    if ((await sha(git, 'HEAD', checkout)) !== baseSha) {
+      throw new MergeRefused('base-moved', `${input.base} moved in ${checkout}`)
+    }
+    // The checkout's files are written without the user's global config, so filters set
+    // there (Git LFS, for one) would not run on them.
+    if (await usesFilters(git, tree)) {
+      throw new MergeRefused('filters', 'the repository uses .gitattributes filters')
+    }
     const moved = await git(['merge', '--ff-only', '-q', result], { cwd: checkout })
     if (moved.exitCode !== 0) throw new MergeRefused('checkout', moved.stderr.trim())
   } else {
@@ -257,6 +265,21 @@ export async function mergeBranch(
     if (moved.exitCode !== 0) throw new MergeRefused('base-moved', moved.stderr.trim())
   }
   return { kind: 'merged', sha: result, head }
+}
+
+/** Whether any `.gitattributes` in `tree` sets a filter. */
+async function usesFilters(git: GitRun, tree: string): Promise<boolean> {
+  const found = await git([
+    'grep',
+    '-q',
+    '-E',
+    '[[:space:]]filter=',
+    tree,
+    '--',
+    '.gitattributes',
+    '**/.gitattributes',
+  ])
+  return found.exitCode === 0
 }
 
 /** The worktree that has `ref` checked out, if any. */
