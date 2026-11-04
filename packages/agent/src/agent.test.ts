@@ -311,6 +311,7 @@ describe('history compaction', () => {
         seq: 1,
         kind: 'step',
         reasoning: [],
+        call: '{}',
         text: '',
         sawSeq: 1,
         toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
@@ -324,7 +325,7 @@ describe('history compaction', () => {
         content: 'r'.repeat(400),
         isError: false,
       },
-      { seq: 5, kind: 'step', reasoning: [], text: 'ok', sawSeq: 4, toolCalls: [] },
+      { seq: 5, kind: 'step', reasoning: [], call: '{}', text: 'ok', sawSeq: 4, toolCalls: [] },
       { seq: 6, kind: 'message', message: { content: 'new', attachments: [] } as never },
     ]
     // Keeping very little: the cut falls after the step's result, never between.
@@ -335,7 +336,14 @@ describe('history compaction', () => {
     // A second compaction folds the first summary in and cuts later.
     const again = [
       ...entries,
-      { seq: 7, kind: 'summary', summary: 's', upTo: 1.5, reasoning: [] as never[] } as const,
+      {
+        seq: 7,
+        kind: 'summary',
+        summary: 's',
+        upTo: 1.5,
+        reasoning: [] as never[],
+        call: '{}',
+      } as const,
     ]
     expect(compactionCut(again, 1)).toBe(4.5)
     // Keeping the newest two entries: the cut may not fall between the call and its result.
@@ -847,6 +855,7 @@ describe('transcript to model messages', () => {
           seq: 1,
           kind: 'step',
           reasoning: [],
+          call: '{}',
           text: '',
           sawSeq: 0,
           toolCalls: [
@@ -878,7 +887,15 @@ describe('transcript to model messages', () => {
           message: { content: '开始', kind: 'chat', attachments: [] } as never,
         },
         { seq: 2, kind: 'note', note: report },
-        { seq: 3, kind: 'step', reasoning: [], text: '我去安排', toolCalls: [], sawSeq: 1 },
+        {
+          seq: 3,
+          kind: 'step',
+          reasoning: [],
+          call: '{}',
+          text: '我去安排',
+          toolCalls: [],
+          sawSeq: 1,
+        },
       ],
       () => 't',
     )

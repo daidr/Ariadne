@@ -299,6 +299,46 @@ describe('the trace', () => {
     })
   })
 
+  test('reasoning goes back only to the model that wrote it', async () => {
+    const thinker = fakeModel(() => [{ type: 'reasoning', text: '我先想想' }, ...say('好')])
+    const other = fakeModel(() => say('嗯'))
+    other.model = 'fake-2'
+    let current: ResolvedModel = thinker
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => current,
+      locale: () => 'zh-CN',
+      retryBaseMs: 1,
+    })
+    scheduler.start()
+    const project = app.createProject('P')
+    const say1 = (content: string) =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content,
+      })
+    say1('一')
+    await scheduler.idle()
+    say1('二')
+    await scheduler.idle()
+    // The same model reads its reasoning back.
+    expect(thinker.requests[1]!.messages.find((m) => m.role === 'assistant')).toMatchObject({
+      reasoning: [{ text: '我先想想' }],
+    })
+    current = other
+    say1('三')
+    await scheduler.idle()
+    const sent = other.requests[0]!
+    const assistants = sent.messages.filter((m) => m.role === 'assistant')
+    expect(assistants).toHaveLength(2)
+    for (const message of assistants) expect(message).not.toHaveProperty('reasoning')
+    // The trace rebuilds the request the other model was sent, without the reasoning too.
+    const step = calls(project.coordinatorId).at(-1)!
+    const { signal: _, ...request } = sent
+    expect(traceRequest(app, project.coordinatorId, step.seq).request).toEqual(request)
+  })
+
   test("refuses a seq that is not one of the conversation's calls", async () => {
     const project = app.createProject('P')
     const other = app.createProject('Q')

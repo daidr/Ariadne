@@ -31,7 +31,13 @@ import {
   summaryRequest,
   usageOf,
 } from './compaction'
-import { attachedText, toChatMessages, visibleHistory, withImageData } from './transcript'
+import {
+  attachedText,
+  toChatMessages,
+  visibleHistory,
+  withImageData,
+  writtenBy,
+} from './transcript'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -243,7 +249,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
   const readText = attachedText(app)
   const images = model.images !== false
-  const chat = { readText, images }
+  const chat = {
+    readText,
+    images,
+    keepReasoning: writtenBy(app, conversation.projectId, model.provider.kind, model.model),
+  }
   const loadImage = (file: Attachment) => {
     try {
       return {

@@ -94,16 +94,19 @@ export function inModelOrder(entries: TranscriptEntry[]): TranscriptEntry[] {
 export function visibleHistory(entries: TranscriptEntry[]): {
   summary: string | null
   reasoning: ReasoningRecord[]
+  /** The summarising call, see `ChatOptions.keepReasoning`. */
+  call: string | null
   entries: TranscriptEntry[]
 } {
   let latest: Extract<TranscriptEntry, { kind: 'summary' }> | null = null
   for (const entry of entries) if (entry.kind === 'summary') latest = entry
   const rest = entries.filter((entry) => entry.kind !== 'summary')
-  if (!latest) return { summary: null, reasoning: [], entries: rest }
+  if (!latest) return { summary: null, reasoning: [], call: null, entries: rest }
   const upTo = latest.upTo
   return {
     summary: latest.summary,
     reasoning: latest.reasoning,
+    call: latest.call,
     entries: rest.filter((entry) => orderKey(entry) > upTo),
   }
 }
@@ -132,6 +135,35 @@ export const summaryMessages = (
 ]
 
 /**
+ * Whether a call (by its recorded hash) went to this provider and model: only then does
+ * the reasoning it wrote go back, see `ChatOptions.keepReasoning`.
+ */
+export function writtenBy(
+  app: Ariadne,
+  projectId: string,
+  provider: string,
+  model: string,
+): (call: string) => boolean {
+  const known = new Map<string, boolean>()
+  return (call) => {
+    let same = known.get(call)
+    if (same === undefined) {
+      try {
+        const recorded = JSON.parse(app.getPrompt(projectId, call) ?? 'null') as {
+          provider?: unknown
+          model?: unknown
+        } | null
+        same = recorded?.provider === provider && recorded.model === model
+      } catch {
+        same = false
+      }
+      known.set(call, same)
+    }
+    return same
+  }
+}
+
+/**
  * Turn a transcript into model messages. Both protocols need every tool call answered
  * right after the step that made it, so input that arrived while tools ran is held back
  * until the step's results are in, and a call without a result gets one.
@@ -143,6 +175,11 @@ export interface ChatOptions {
   images?: boolean
   /** A text attachment's content, from the project's files. */
   readText?: (fileId: string) => string | null
+  /**
+   * Whether reasoning written by a call (its hash) goes back. Reasoning belongs to the
+   * model that wrote it: another service would read it as its own, or refuse it.
+   */
+  keepReasoning?: (call: string) => boolean
 }
 
 export function toChatMessages(
@@ -152,8 +189,10 @@ export function toChatMessages(
 ): ModelMessage[] {
   const visible = visibleHistory(transcript)
   const { entries } = visible
+  const keep = (call: string | null) =>
+    !options.keepReasoning || (call !== null && options.keepReasoning(call))
   const out: ModelMessage[] = visible.summary
-    ? summaryMessages(visible.summary, options.state, visible.reasoning)
+    ? summaryMessages(visible.summary, options.state, keep(visible.call) ? visible.reasoning : [])
     : []
   let open: { ids: string[]; names: Map<string, string> } | null = null
   let held: ModelMessage[] = []
@@ -186,7 +225,7 @@ export function toChatMessages(
           role: 'assistant',
           content: entry.text,
           ...(entry.toolCalls.length ? { toolCalls: entry.toolCalls } : {}),
-          ...(entry.reasoning.length ? { reasoning: entry.reasoning } : {}),
+          ...(entry.reasoning.length && keep(entry.call) ? { reasoning: entry.reasoning } : {}),
         })
         if (entry.toolCalls.length) {
           open = {

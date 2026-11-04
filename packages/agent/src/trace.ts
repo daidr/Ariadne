@@ -10,7 +10,13 @@ import {
 } from '@ariadne/core'
 import type { Effort, ModelRequest, ToolSpec } from '@ariadne/plugin-sdk'
 import { summaryRequest } from './compaction'
-import { attachedText, toChatMessages, withImageData, type ModelMessage } from './transcript'
+import {
+  attachedText,
+  toChatMessages,
+  withImageData,
+  writtenBy,
+  type ModelMessage,
+} from './transcript'
 
 /** What a request went with, as `callOf` recorded it. */
 export interface RecordedCall {
@@ -290,6 +296,7 @@ function requestOf(
   }
   const transcript = app.listTranscript(conversationId, { upTo: sawSeq })
   const state = input.state === null ? undefined : piece(input.state)
+  const call = parseCall(app.getPrompt(event.projectId, input.call))
   return {
     messages: [
       { role: 'system', content: piece(input.system) },
@@ -297,6 +304,9 @@ function requestOf(
         readText,
         images: input.images,
         ...(state === undefined ? {} : { state }),
+        ...(call
+          ? { keepReasoning: writtenBy(app, event.projectId, call.provider, call.model) }
+          : {}),
       }),
     ],
     tools: JSON.parse(piece(input.tools)) as ToolSpec[],
