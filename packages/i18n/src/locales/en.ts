@@ -18,6 +18,7 @@ export const en: Record<MessageKey, string> = {
   'plan.confirm.question': 'The coordinator wants to change the plan: {reason}',
   'plan.confirm.apply': 'Apply the change',
   'plan.confirm.keep': 'Keep as is',
+  'plan.confirm.more': '…and {count} more; preview on the plan to see them all',
   'plan.kind.task': 'Task',
   'plan.kind.milestone': 'Milestone',
   'plan.kind.decision': 'Decision',

@@ -17,6 +17,7 @@ export const zhCN = {
   'plan.confirm.question': '协调器想修改计划：{reason}',
   'plan.confirm.apply': '同意修改',
   'plan.confirm.keep': '保持原样',
+  'plan.confirm.more': '…还有 {count} 项，在计划图上预览可以看到全部',
   'plan.kind.task': '任务',
   'plan.kind.milestone': '里程碑',
   'plan.kind.decision': '决策',

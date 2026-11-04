@@ -488,6 +488,20 @@ describe('standing approvals', () => {
     expect(app.requestApproval(project.id, b.id, 'push', card)).toBe('asked')
   })
 
+  test("an agent's own confirmation is never a standing approval", () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'A' })
+    const message = app.postMessage(project.id, {
+      conversationId: a.id,
+      author: 'thread',
+      content: '',
+      blocks: [{ type: 'confirm', title: '推送到公开仓库？', approveText: '允许推送' }],
+    })
+    app.answerAttention(message.ask!.attentionId, { type: 'confirm', approved: true })
+    expect(app.approvalFor(project.id, a.id, 'push')).toBeNull()
+    expect(app.requestApproval(project.id, a.id, 'push', card)).toBe('asked')
+  })
+
   test('an approval must be a confirmation, answered as one', () => {
     const project = app.createProject('P')
     const a = app.createThread(project.id, { title: 'A' })

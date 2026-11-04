@@ -189,6 +189,25 @@ describe('parseBlock', () => {
     ).toBe('block.fields uses the key "a" twice')
   })
 
+  test('keys named like built-in properties read only what the row holds', () => {
+    const columns = [
+      { key: 'name', title: '名称' },
+      { key: 'toString', title: '其他' },
+    ]
+    expect(parseBlock({ type: 'table', columns, rows: [{ name: 'a' }] })).toMatchObject({
+      rows: [{ name: 'a', toString: null }],
+    })
+    const form = parseBlock({
+      type: 'form',
+      title: 't',
+      fields: [{ key: 'constructor', label: 'C', kind: 'text' }],
+    }) as FormBlock
+    expect(parseAnswer(form, { type: 'form', values: {} })).toEqual({
+      type: 'form',
+      values: { constructor: null },
+    })
+  })
+
   test('a checked block checks again the same, as stored blocks are', () => {
     const blocks = [
       {

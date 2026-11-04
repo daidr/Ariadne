@@ -161,6 +161,10 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
 
+/** A value the object itself holds, never one from its prototype (`toString` as a key). */
+const own = (value: Record<string, unknown>, name: string): unknown =>
+  Object.hasOwn(value, name) ? value[name] : undefined
+
 const KEY = /^[A-Za-z_][\w-]{0,39}$/
 
 function text(value: unknown, at: string, max: number = BLOCK_LIMITS.text): string {
@@ -343,7 +347,7 @@ function parseTable(value: Record<string, unknown>, at: string): TableBlock {
     only(raw, keys, where)
     return Object.fromEntries(
       keys.map((name) => {
-        const cell = raw[name] ?? null
+        const cell = own(raw, name) ?? null
         if (cell !== null && typeof cell !== 'string' && typeof cell !== 'boolean') {
           if (!isNumber(cell)) invalid(`${where}.${name} must be text, a number or a boolean`)
         }
@@ -380,7 +384,7 @@ function parseChart(value: Record<string, unknown>, at: string): ChartBlock {
     const where = `${at}.rows[${i}]`
     if (!isObject(raw)) invalid(`${where} must be an object`)
     only(raw, [x, ...y], where)
-    const xValue = raw[x]
+    const xValue = own(raw, x)
     if (typeof xValue !== 'string' && !isNumber(xValue))
       invalid(`${where}.${x} must be text or a number`)
     if (typeof xValue === 'string' && xValue.length > BLOCK_LIMITS.label) {
@@ -388,7 +392,7 @@ function parseChart(value: Record<string, unknown>, at: string): ChartBlock {
     }
     const row: Record<string, string | number | null> = { [x]: xValue }
     for (const name of y) {
-      const v = raw[name] ?? null
+      const v = own(raw, name) ?? null
       if (v !== null && !isNumber(v)) invalid(`${where}.${name} must be a number or null`)
       row[name] = v
     }
@@ -525,7 +529,7 @@ export function parseAnswer(block: AskBlock, value: unknown): BlockAnswer {
         values: Object.fromEntries(
           block.fields.map((field) => [
             field.key,
-            fieldValue(field, given[field.key], `values.${field.key}`, true),
+            fieldValue(field, own(given, field.key), `values.${field.key}`, true),
           ]),
         ),
       }

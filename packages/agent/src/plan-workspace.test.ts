@@ -1,8 +1,8 @@
-import { Ariadne } from '@ariadne/core'
+import { Ariadne, parseBlock } from '@ariadne/core'
 import type { ContextProvider, ModelRequest, Workspace } from '@ariadne/plugin-sdk'
 import { WorkspacePathError } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { resolvePlanOps } from './plan-tools'
+import { confirmation, resolvePlanOps } from './plan-tools'
 import { threadPrompt } from './prompts'
 import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
@@ -343,5 +343,18 @@ describe('triage', () => {
     ])
     // The coordinator said nothing to the user.
     expect(app.listMessages(project.coordinatorId)).toEqual([])
+  })
+})
+
+describe('plan confirmation card', () => {
+  test('a long reason or a large batch still makes a valid card, counting what it leaves out', () => {
+    const changes = Array.from({ length: 2000 }, (_, i) => ({
+      key: 'plan.op.remove' as const,
+      params: { title: `节点 ${i}` },
+    }))
+    const card = confirmation('zh-CN', '理'.repeat(3000)).card(changes)
+    expect(parseBlock(card)).toEqual(card)
+    expect(card.title.length).toBe(2000)
+    expect(card.detail).toMatch(/…还有 \d+ 项，在计划图上预览可以看到全部$/)
   })
 })
