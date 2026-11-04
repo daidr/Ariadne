@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ArtifactKind, ArtifactSummary } from '@ariadne/core'
 import {
+  DouAvatar,
   DouButton,
   DouCard,
   DouDropdown,
@@ -112,9 +113,14 @@ function editedAt(at: number): string {
       >
         <ArtifactThumb :preview="artifact.preview" />
         <div class="card-info">
-          <span class="card-icon" :class="`card-icon-${artifact.kind}`">
+          <DouAvatar
+            shape="square"
+            :size="36"
+            class="card-icon"
+            :class="`card-icon-${artifact.kind}`"
+          >
             <component :is="kindIcon[artifact.kind]" />
-          </span>
+          </DouAvatar>
           <span class="card-text">
             <DouText weight="medium" truncate>{{ artifact.title }}</DouText>
             <DouText variant="tertiary" size="sm" truncate>
@@ -196,26 +202,20 @@ function editedAt(at: number): string {
 }
 
 .card-icon {
-  display: inline-flex;
   flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--dou-color-primary-soft);
-  color: var(--dou-color-primary-text);
-  font-size: 18px;
+  --dou-avatar-bg: var(--dou-color-primary-soft);
+  --dou-avatar-fg: var(--dou-color-primary-text);
+  --dou-avatar-font-size: 18px;
 }
 
 .card-icon-whiteboard {
-  background: var(--dou-color-warning-soft);
-  color: var(--dou-color-warning-text);
+  --dou-avatar-bg: var(--dou-color-warning-soft);
+  --dou-avatar-fg: var(--dou-color-warning-text);
 }
 
 .card-icon-dashboard {
-  background: var(--dou-color-success-soft);
-  color: var(--dou-color-success-text);
+  --dou-avatar-bg: var(--dou-color-success-soft);
+  --dou-avatar-fg: var(--dou-color-success-text);
 }
 
 .card-text {
