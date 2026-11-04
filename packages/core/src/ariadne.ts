@@ -217,9 +217,9 @@ function nodeStatus(all: ThreadStage[]): PlanNodeStatus {
   if (!all.length) return 'none'
   if (!stages.length) return 'paused'
   if (stages.some((stage) => stage === 'blocked')) return 'error'
-  if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'wait'
-  if (stages.every((stage) => stage === 'done')) return 'finish'
-  return 'process'
+  if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'waiting'
+  if (stages.every((stage) => stage === 'done')) return 'done'
+  return 'running'
 }
 
 /**

@@ -19,7 +19,7 @@ import {
   DouLink,
   DouPopover,
   DouShimmer,
-  DouSpinner,
+  DouStatusDot,
   DouTag,
   DouText,
   type ChatAttachment,
@@ -62,6 +62,8 @@ import {
 import StageLabel from './StageLabel.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
+import MessageLink from '../markdown/MessageLink.vue'
+import { sanitizeUrl } from '../markdown/links'
 
 /** `thread` shows the open thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ thread?: boolean }>()
@@ -137,7 +139,7 @@ function pickModel(value: string | number | undefined) {
 function openTrace() {
   if (conversationId.value) openMain({ kind: 'trace', conversationId: conversationId.value })
 }
-const todo = computed(() => todoPlan(view.value.todo, working.value))
+const todo = computed(() => todoPlan(view.value.todo))
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
   () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
@@ -229,6 +231,9 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
 function sender(message: MessageView) {
   return message.author === 'user' ? 'user' : 'assistant'
 }
+
+/** Agents write Markdown; the user's own words are shown as typed. */
+const markdown = { linkTarget: '_blank', sanitizeUrl } as const
 
 async function submit(value: string) {
   const id = conversationId.value
@@ -478,8 +483,12 @@ watch(
             v-else
             :sender="sender(message)"
             :parts="partsOf(message)"
+            :markdown="sender(message) === 'assistant' && markdown"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
           >
+            <template #markdown-link="{ href, external, children }">
+              <MessageLink :href="href" :external="external" :children="children" />
+            </template>
             <template #part="{ part }">
               <DouChatAttachments
                 v-if="part.type === 'attachments'"
@@ -522,7 +531,14 @@ watch(
         </template>
       </template>
       <!-- What it is doing, what comes next, what it waits on: in place of progress messages. -->
-      <DouChatPlan v-if="todo.length" :items="todo" :title="t('todo.title')" class="todo" />
+      <DouChatPlan
+        v-if="todo.length"
+        :items="todo"
+        :title="t('todo.title')"
+        :collapsible="false"
+        :live="working"
+        class="todo"
+      />
     </DouChatList>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="props.thread" :title="thread?.title" :description="t('thread.empty')" />
@@ -546,7 +562,7 @@ watch(
     </DouAlert>
     <div v-else-if="working" class="conversation-status" role="status">
       <DouText variant="secondary" size="sm" class="conversation-activity">
-        <DouSpinner size="sm" />
+        <DouStatusDot tone="primary" ripple />
         <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
       </DouText>
       <DouButton variant="ghost" size="sm" @click="stop">

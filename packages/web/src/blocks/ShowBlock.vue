@@ -17,9 +17,9 @@ import ThreadCard from './ThreadCard.vue'
 const props = defineProps<{ block: ShowBlock }>()
 
 const stepStatus: Record<BlockStepStatus, StepStatus> = {
-  done: 'finish',
-  current: 'process',
-  pending: 'wait',
+  done: 'done',
+  current: 'running',
+  pending: 'pending',
   failed: 'error',
 }
 const steps = computed<StepItem[]>(() =>

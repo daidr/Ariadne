@@ -396,7 +396,7 @@ describe('plan revisions', () => {
     app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a')] })
     const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })
     app.startThread(thread.id)
-    expect(app.getPlan(projectId).nodes[0]?.status).toBe('process')
+    expect(app.getPlan(projectId).nodes[0]?.status).toBe('running')
     app.reportThread(thread.id, {
       kind: 'blocked',
       summary: '调用 GitHub 接口返回 403',
@@ -405,7 +405,7 @@ describe('plan revisions', () => {
     expect(app.getPlan(projectId).nodes[0]?.status).toBe('error')
     expect(app.getPlan(projectId).nodes[0]?.threads[0]?.lastHeadline).toBe('缺少仓库权限')
     app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' })
-    expect(app.getPlan(projectId).nodes[0]?.status).toBe('finish')
+    expect(app.getPlan(projectId).nodes[0]?.status).toBe('done')
     expect(() => app.createThread(projectId, { title: 'x', nodeId: 'nope' })).toThrow(DomainError)
   })
 

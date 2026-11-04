@@ -21,7 +21,7 @@ const items = computed<StepItem[]>(() =>
   (['model', 'project', 'source', 'talk'] as const).map((step, index) => ({
     title: t(`start.${step}`),
     description: t(`start.${step}Hint`),
-    ...(done.value[index] ? { status: 'finish' as const } : {}),
+    ...(done.value[index] ? { status: 'done' as const } : {}),
   })),
 )
 </script>

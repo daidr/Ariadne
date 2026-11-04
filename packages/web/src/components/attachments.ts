@@ -91,7 +91,7 @@ export function useAttachments(projectId: () => string | null) {
         name: file.name || 'file',
         size: file.size,
         type: file.type,
-        status: 'uploading',
+        status: 'running',
         ...(file.type.startsWith('image/') ? { url: URL.createObjectURL(file) } : {}),
       }
       files.value.push(draft)

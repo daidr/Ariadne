@@ -22,25 +22,25 @@ const props = defineProps<{ data: PlanNodeData }>()
 
 const icons: Record<PlanNodeData['status'], Component> = {
   none: CircleDashedIcon,
-  process: CircleHalfIcon,
-  wait: UserCircleIcon,
+  running: CircleHalfIcon,
+  waiting: UserCircleIcon,
   error: AlertCircleIcon,
   paused: PauseCircleIcon,
-  finish: CheckCircleIcon,
+  done: CheckCircleIcon,
 }
 const tone = {
   none: 'neutral',
-  process: 'primary',
-  wait: 'warning',
+  running: 'primary',
+  waiting: 'warning',
   error: 'danger',
   paused: 'neutral',
-  finish: 'success',
+  done: 'success',
 } as const
 
 /** A node shows two threads; the rest are counted and listed in the side panel. */
 const SHOWN = 2
 const shown = computed(() => props.data.threads.slice(0, SHOWN))
-const waiting = computed(() => props.data.status === 'wait')
+const waiting = computed(() => props.data.status === 'waiting')
 const status = computed(() =>
   waiting.value ? t('plan.waiting') : t(`plan.status.${props.data.status}`),
 )
