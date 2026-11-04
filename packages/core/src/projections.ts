@@ -12,6 +12,8 @@ export const projectionTables = [
   'attention_waiters',
   'messages',
   'todos',
+  'memories',
+  'notices',
   'conversations',
   'transcript',
   'plan_nodes',
@@ -77,6 +79,7 @@ export const threadsProjection: Projection = {
       workspace_label TEXT,
       workspace_branch TEXT,
       pull_request TEXT,
+      check_failures INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -117,13 +120,31 @@ export const threadsProjection: Projection = {
         break
       case 'pull_request.synced': {
         const { threadId, ...pullRequest } = event.data
-        db.run('UPDATE threads SET pull_request = ?, updated_at = ? WHERE id = ?', [
-          JSON.stringify(pullRequest),
-          event.at,
-          threadId,
-        ])
+        // Passing checks end a run of failures.
+        db.run(
+          `UPDATE threads SET pull_request = ?1, updated_at = ?2,
+             check_failures = CASE WHEN ?3 THEN 0 ELSE check_failures END
+           WHERE id = ?4`,
+          [JSON.stringify(pullRequest), event.at, pullRequest.checks.state === 'success', threadId],
+        )
         break
       }
+      case 'pull_request.closed':
+        // Merged or closed, its checks are no longer the thread's to fix.
+        db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.threadId])
+        break
+      case 'checks.failed':
+        db.run('UPDATE threads SET check_failures = ? WHERE id = ?', [
+          event.data.attempt ?? 1,
+          event.data.threadId,
+        ])
+        break
+      case 'message.posted':
+        // The user stepping in gives the thread fresh tries.
+        if (event.data.author === 'user') {
+          db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.conversationId])
+        }
+        break
     }
   },
 }
@@ -199,6 +220,7 @@ export const messagesProjection: Projection = {
       created_at INTEGER NOT NULL,
       edited_at INTEGER,
       edit_reason TEXT,
+      original_content TEXT,
       read_at INTEGER,
       edited_since_read INTEGER NOT NULL DEFAULT 0
     )`)
@@ -223,6 +245,7 @@ export const messagesProjection: Projection = {
       case 'message.edited':
         db.run(
           `UPDATE messages SET content = ?, edited_at = ?, edit_reason = ?,
+             original_content = coalesce(original_content, content),
              edited_since_read = CASE WHEN read_at IS NULL THEN 0 ELSE 1 END
            WHERE id = ?`,
           [event.data.content, event.at, event.data.reason, event.data.messageId],
@@ -257,6 +280,115 @@ export const todosProjection: Projection = {
        ON CONFLICT (conversation_id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at`,
       [event.data.conversationId, event.projectId, JSON.stringify(event.data.items), event.at],
     )
+  },
+}
+
+/** The project's memory: its standing preferences and facts. */
+/**
+ * Notices shown in line with a conversation's messages. Applied before the memories
+ * projection, so a change still sees what the entry said before it.
+ */
+export const noticesProjection: Projection = {
+  name: 'notices',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS notices (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      undone INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`)
+    db.run(
+      'CREATE INDEX IF NOT EXISTS notices_conversation ON notices (conversation_id, created_at)',
+    )
+  },
+  apply(db, event) {
+    const add = (conversationId: string, kind: string, payload: unknown) =>
+      db.run(
+        'INSERT INTO notices (id, project_id, conversation_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          `ntc_${event.seq}`,
+          event.projectId,
+          conversationId,
+          kind,
+          JSON.stringify(payload),
+          event.at,
+        ],
+      )
+    switch (event.type) {
+      case 'memory.saved':
+      case 'memory.removed': {
+        const { memoryId, author, undoes } = event.data
+        if (undoes) db.run('UPDATE notices SET undone = 1 WHERE id = ?', [undoes])
+        // The user's own changes are in front of them already; an agent's are shown where
+        // it made them.
+        if (author === 'user') break
+        const before =
+          db
+            .query<{ text: string }, [string]>('SELECT text FROM memories WHERE id = ?')
+            .get(memoryId)?.text ?? null
+        if (event.type === 'memory.saved') {
+          add(author, 'memory', {
+            action: 'saved',
+            memoryId,
+            text: event.data.text,
+            previous: before,
+          })
+        } else {
+          add(author, 'memory', {
+            action: 'removed',
+            memoryId,
+            text: before ?? '',
+            previous: before,
+          })
+        }
+        break
+      }
+      case 'conversation.compacted':
+        add(event.data.conversationId, 'compacted', { summary: event.data.summary })
+        break
+      case 'conversation.compaction_failed':
+        add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
+        break
+      case 'notice.dismissed':
+        db.run('UPDATE notices SET undone = 1 WHERE id = ?', [event.data.noticeId])
+        break
+    }
+  },
+}
+
+export const memoriesProjection: Projection = {
+  name: 'memories',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      author TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`)
+    db.run('CREATE INDEX IF NOT EXISTS memories_project ON memories (project_id, created_at)')
+  },
+  apply(db, event) {
+    if (event.type === 'memory.saved') {
+      db.run(
+        `INSERT INTO memories (id, project_id, text, author, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, author = excluded.author, updated_at = excluded.updated_at`,
+        [
+          event.data.memoryId,
+          event.projectId,
+          event.data.text,
+          event.data.author,
+          event.at,
+          event.at,
+        ],
+      )
+    } else if (event.type === 'memory.removed') {
+      db.run('DELETE FROM memories WHERE id = ?', [event.data.memoryId])
+    }
   },
 }
 
@@ -318,6 +450,12 @@ export const conversationsProjection: Projection = {
             event.data.usage?.output ?? 0,
             event.data.conversationId,
           ],
+        )
+        break
+      case 'conversation.compacted':
+        db.run(
+          'UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?',
+          [event.data.usage?.input ?? 0, event.data.usage?.output ?? 0, event.data.conversationId],
         )
         break
       case 'turn.finished': {
@@ -439,7 +577,10 @@ function upstreamDone(
   }
 }
 
-export type TranscriptKind = 'message' | 'note' | 'step' | 'tool'
+/** Failed check runs in a row a thread fixes on its own before it must stop and report. */
+export const MAX_CHECK_ATTEMPTS = 3
+
+export type TranscriptKind = 'message' | 'note' | 'step' | 'tool' | 'summary'
 
 /**
  * What each conversation's agent has seen, in order: the model's input is rebuilt from
@@ -495,6 +636,7 @@ export const transcriptProjection: Projection = {
         break
       }
       case 'checks.failed':
+        // Past the limit the thread is no longer woken: it has been told to stop and report.
         addEntry(
           db,
           event,
@@ -503,7 +645,7 @@ export const transcriptProjection: Projection = {
             kind: 'note',
             payload: { type: 'checks-failed', ...event.data },
           },
-          true,
+          (event.data.attempt ?? 1) <= MAX_CHECK_ATTEMPTS,
         )
         break
       case 'pull_request.closed': {
@@ -621,6 +763,18 @@ export const transcriptProjection: Projection = {
         }
         break
       }
+      case 'conversation.compacted':
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.conversationId,
+            kind: 'summary',
+            payload: { summary: event.data.summary, upTo: event.data.upTo },
+          },
+          false,
+        )
+        break
       case 'turn.step':
         addEntry(
           db,
@@ -989,6 +1143,8 @@ export const defaultProjections: Projection[] = [
   attentionsProjection,
   messagesProjection,
   todosProjection,
+  noticesProjection,
+  memoriesProjection,
   conversationsProjection,
   planProjection,
   artifactsProjection,

@@ -338,17 +338,20 @@ export function createSandbox(options: {
   kind: SandboxKind | null
   mode: 'auto' | 'off'
   hide: string[]
-  /** Paths commands may read but never change, such as the code the server runs. */
-  readOnly?: string[]
+  /**
+   * Paths commands may read but never change, such as the code the server runs; asked
+   * for each command, so a plugin path added in the settings is locked from then on.
+   */
+  readOnly?: () => string[]
 }): Sandbox {
   const kind = options.mode === 'off' ? null : options.kind
   const hidden = [...new Set(options.hide.map(realPath))]
-  const fixed = options.readOnly ?? []
+  const fixed = options.readOnly ?? (() => [])
   return {
     kind,
     status: { kind, mode: options.mode, hidden },
     wrap(argv, { keep, readOnly = [] }) {
-      const locked = [...fixed, ...readOnly]
+      const locked = [...fixed(), ...readOnly]
       switch (kind) {
         case 'bwrap':
           return bwrapArgs(mountPlan(hidden, keep, locked), argv)

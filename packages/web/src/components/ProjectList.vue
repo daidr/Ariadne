@@ -6,7 +6,6 @@ import { t } from '../i18n'
 import { createProject, openProject, state } from '../store'
 
 const name = ref('')
-const creating = ref(false)
 
 const items = computed(() =>
   state.projects.map((project) => ({ key: project.id, label: project.name, icon: FolderIcon })),
@@ -16,7 +15,7 @@ async function submit() {
   if (!name.value.trim()) return
   await createProject(name.value)
   name.value = ''
-  creating.value = false
+  state.creatingProject = false
 }
 </script>
 
@@ -28,12 +27,12 @@ async function submit() {
         variant="ghost"
         size="sm"
         :aria-label="t('nav.newProject')"
-        @click="creating = !creating"
+        @click="state.creatingProject = !state.creatingProject"
       >
         <PlusIcon />
       </DouButton>
     </div>
-    <form v-if="creating" class="projects-new" @submit.prevent="submit">
+    <form v-if="state.creatingProject" class="projects-new" @submit.prevent="submit">
       <DouInput v-model="name" size="sm" :placeholder="t('project.create.name')" autofocus />
       <DouButton size="sm" tone="primary" native-type="submit">
         {{ t('project.create.submit') }}

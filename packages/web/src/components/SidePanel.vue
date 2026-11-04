@@ -8,6 +8,7 @@ import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import { openThread, state } from '../store'
+import MemoryList from './MemoryList.vue'
 import ProjectSource from './ProjectSource.vue'
 import TodoList from './TodoList.vue'
 
@@ -51,6 +52,9 @@ const stageOf = (id: string | number): ThreadStage =>
       </DouTabPanel>
       <DouTabPanel value="artifacts" :label="t('panel.artifacts')">
         <ArtifactList />
+      </DouTabPanel>
+      <DouTabPanel value="memory" :label="t('memory.title')">
+        <MemoryList />
       </DouTabPanel>
     </DouTabs>
   </div>

@@ -171,6 +171,35 @@ export const en: Record<MessageKey, string> = {
   'sandbox.off.title': 'The workspace sandbox is off',
   'sandbox.off.body':
     "The sandbox is turned off in the settings (sandbox.mode is off in config.json), so commands threads run can read Ariadne's token and settings and call Ariadne as you.",
+  'sandbox.weaker':
+    "macOS's sandbox only restricts files: thread commands cannot read Ariadne's token and settings, but they can see other processes, so isolation is weaker than on Linux.",
+  'start.title': 'Getting started',
+  'start.model': 'Set up a model',
+  'start.modelHint': 'Add a model service in settings and pick the default model',
+  'start.project': 'Create a project',
+  'start.projectHint': 'A project serves one goal, with its own coordinator, plan and artifacts',
+  'start.source': 'Choose a working directory (optional)',
+  'start.sourceHint':
+    'Set a local folder or repository on the right so threads can edit files and run commands',
+  'start.talk': 'Tell the coordinator what you want',
+  'start.talkHint': 'Type below; the coordinator plans the work and opens threads',
+  'notice.memoryAdded': 'Saved to project memory: {text}',
+  'notice.memoryChanged': 'Changed a project memory entry: {previous} → {text}',
+  'notice.memoryRemoved': 'Removed from project memory: {text}',
+  'notice.undo': 'Undo',
+  'notice.undone': 'Undone',
+  'notice.compacted': 'Older history was summarised for the model',
+  'notice.compactionFailed':
+    'Summarising older history failed; this turn reads all of it: {detail}',
+  'memory.title': 'Memory',
+  'memory.hint':
+    'Standing preferences and conventions of the project. The coordinator and every thread follow them on every step. You and the coordinator can both change them.',
+  'memory.empty':
+    'Nothing remembered yet. Tell the coordinator "from now on…" and it will note it here.',
+  'memory.add': 'Add one',
+  'memory.edit': 'Edit',
+  'memory.remove': 'Remove',
+  'memory.save': 'Save',
   'thread.workspace': 'Workspace',
   'thread.branch': 'Branch {branch}',
   'todo.title': 'Todo',
@@ -185,6 +214,9 @@ export const en: Record<MessageKey, string> = {
   'thread.stage.working': 'Working',
   'thread.stage.idle': 'Idle',
   'thread.stage.done': 'Done',
+  'message.editedTitle': 'This message was edited',
+  'message.editReason': 'Why: ',
+  'message.original': 'Original',
   'message.edited': 'Edited',
   'message.fromCoordinator': 'Received a message from the coordinator',
   'conversation.working': 'Working',
@@ -209,6 +241,9 @@ export const en: Record<MessageKey, string> = {
   'settings.noProviders': 'No model provider yet',
   'settings.default': 'Default model',
   'settings.defaultProvider': 'Provider',
+  'settings.contextTokens': 'Context (thousand tokens)',
+  'settings.contextTokensHelp':
+    'How much the model reads at most; at six tenths of it, older history is summarised. Empty means 128',
   'settings.defaultModel': 'Model name',
   'settings.defaultModelHelp': 'The model id the service accepts',
   'settings.save': 'Save',
@@ -257,6 +292,8 @@ export const en: Record<MessageKey, string> = {
   'error.fileType':
     'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',
   'error.fileTooLarge': 'The file is too large; the limit is {max} MB',
+  'error.memoryFull':
+    'The project memory is full ({max} entries); remove some you no longer need first',
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',
   'error.noSource': 'The project has no working directory yet',
   'error.noRepo':

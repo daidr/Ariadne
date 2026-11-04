@@ -8,8 +8,8 @@ import {
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { constants, existsSync } from 'node:fs'
+import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface LocalSettings {
@@ -93,20 +93,68 @@ export async function run(
     stderr: 'pipe',
     stdin: 'ignore',
     env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
+    // A thread's command gets a process group of its own, so what it leaves running in the
+    // background ends with it (on macOS the sandbox does not do this).
+    detached: !!options.forThread,
   })
-  const kill = () => proc.kill()
+  const killGroup = () => {
+    try {
+      process.kill(-proc.pid, 'SIGKILL')
+    } catch {
+      // Already gone.
+    }
+  }
+  const kill = () => (options.forThread ? killGroup() : proc.kill())
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
-    return { exitCode, stdout: clip(stdout), stderr: clip(stderr) }
+    const stdout = collect(proc.stdout)
+    const stderr = collect(proc.stderr)
+    const exitCode = await proc.exited
+    // Background processes would keep the output open, and keep running, otherwise.
+    if (options.forThread) killGroup()
+    // One that left the group (setsid) may still hold the output: give it a moment, then
+    // stop waiting, so the call returns.
+    const [out, err] = await Promise.all([stdout.settle(), stderr.settle()])
+    return { exitCode, stdout: clip(out), stderr: clip(err) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', kill)
+  }
+}
+
+const OUTPUT_GRACE_MS = 1000
+
+/**
+ * Read a process's output as it comes. `settle` gives what was read once the output ends,
+ * or after a short grace, whichever is first, and stops reading.
+ */
+function collect(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  const ended = (async () => {
+    try {
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        text += decoder.decode(chunk.value, { stream: true })
+      }
+    } catch {
+      // Cancelled after the grace.
+    }
+  })()
+  return {
+    async settle(): Promise<string> {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const late = new Promise<void>((done) => {
+        timer = setTimeout(done, OUTPUT_GRACE_MS)
+      })
+      await Promise.race([ended, late])
+      clearTimeout(timer)
+      await reader.cancel().catch(() => {})
+      return text
+    },
   }
 }
 
@@ -157,14 +205,48 @@ export class LocalWorkspace implements Workspace {
     return join(real, relative(existing, target))
   }
 
+  /**
+   * Open a workspace file, and make sure what was opened is the file inside the root. A
+   * command left running could swap a directory on the way for a link between resolving
+   * the path and opening it; the open file must then be the one the path resolves to now,
+   * still inside the root, or it is refused. Nothing is truncated before that check. A
+   * refused write may leave an empty file or directory where the swapped path led: removing
+   * it by path again would follow the same swap and could delete a file outside.
+   */
+  private async open(path: string, flags: number): Promise<FileHandle> {
+    const target = await this.resolve(path)
+    const handle = await open(target, flags | constants.O_NOFOLLOW).catch(() => {
+      throw new WorkspacePathError(path)
+    })
+    try {
+      const [opened, now] = await Promise.all([handle.stat(), stat(await this.resolve(path))])
+      if (opened.dev !== now.dev || opened.ino !== now.ino) throw new WorkspacePathError(path)
+      return handle
+    } catch (error) {
+      await handle.close()
+      throw error instanceof WorkspacePathError ? error : new WorkspacePathError(path)
+    }
+  }
+
   async readFile(path: string): Promise<string> {
-    return readFile(await this.resolve(path), 'utf8')
+    const handle = await this.open(path, constants.O_RDONLY)
+    try {
+      return await handle.readFile('utf8')
+    } finally {
+      await handle.close()
+    }
   }
 
   async writeFile(path: string, content: string): Promise<void> {
     const target = await this.resolve(path)
     await mkdir(dirname(target), { recursive: true })
-    await writeFile(target, content)
+    const handle = await this.open(path, constants.O_WRONLY | constants.O_CREAT)
+    try {
+      await handle.truncate(0)
+      await handle.writeFile(content)
+    } finally {
+      await handle.close()
+    }
   }
 
   async list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]> {

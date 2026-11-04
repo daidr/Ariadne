@@ -22,8 +22,11 @@ const config = loadConfig()
 const app = new Ariadne({ path: config.databasePath })
 
 const configPath = join(config.home, 'config.json')
+
 // Thread commands must not see the token or the settings, nor a browser that holds the token.
 const userConfig = loadUserConfig(configPath)
+// The plugin paths as the settings hold them now, once the settings are loaded.
+let pluginPaths = () => userConfig.plugins
 const sandboxSettings = userConfig.sandbox
 const sandbox = createSandbox({
   kind: sandboxSettings.mode === 'off' ? null : await detectSandbox(),
@@ -31,9 +34,9 @@ const sandbox = createSandbox({
   hide: [config.home, ...browserProfiles(), ...sandboxSettings.hide],
   // What the server runs later, outside the sandbox: its own code, the plugins it loads,
   // and the user's git config.
-  readOnly: [
+  readOnly: () => [
     resolve(import.meta.dir, '../../..'),
-    ...userConfig.plugins,
+    ...pluginPaths(),
     join(homedir(), '.gitconfig'),
     join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'git'),
   ],
@@ -52,6 +55,7 @@ await host.load(anthropic)
 await host.load(local)
 await host.load(github)
 const settings = new SettingsStore(configPath, host)
+pluginPaths = () => settings.current.plugins
 for (const path of settings.current.plugins) {
   await host.loadFromPath(path).catch((error) => console.error(`插件加载失败：${path}`, error))
 }

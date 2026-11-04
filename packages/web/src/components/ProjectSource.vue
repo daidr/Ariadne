@@ -29,6 +29,8 @@ onMounted(() => {
   )
 })
 const unsandboxed = computed(() => !!source.value && sandbox.value?.kind === null)
+// macOS's sandbox keeps files out of reach but not the server's processes.
+const weaker = computed(() => !!source.value && sandbox.value?.kind === 'sandbox-exec')
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
 const kindOptions = computed(() =>
   kinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),
@@ -151,6 +153,7 @@ async function save(clear = false) {
     >
       {{ t(sandbox.mode === 'off' ? 'sandbox.off.body' : 'sandbox.missing.body') }}
     </DouAlert>
+    <DouText v-else-if="weaker" variant="tertiary" size="sm">{{ t('sandbox.weaker') }}</DouText>
   </section>
 </template>
 

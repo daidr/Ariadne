@@ -13,6 +13,8 @@ export interface StageFacts {
   turnPending: boolean
   /** The last turn failed (e.g. the model request errored) and waits for a retry. */
   turnFailed: boolean
+  /** Its pull request's checks failed too many times in a row for it to try again alone. */
+  checksGaveUp?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
@@ -23,7 +25,7 @@ export function threadStage(facts: StageFacts): ThreadStage {
   if (facts.turnRunning) return 'working'
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.
   if (facts.turnPending) return 'queued'
-  if (facts.turnFailed) return 'blocked'
+  if (facts.turnFailed || facts.checksGaveUp) return 'blocked'
   if (facts.lastReport === 'ready') return 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
   if (facts.lastReport === 'done') return 'done'

@@ -108,6 +108,34 @@ export function createHandler({
     return json({ file: app.saveFile(projectId, { mime, data }) }, 201)
   })
 
+  // The project's memory: standing preferences every conversation sees.
+  add('GET', '/api/projects/:projectId/memory', (_request, { projectId = '' }) =>
+    json({ memories: app.listMemories(projectId) }),
+  )
+  add('POST', '/api/projects/:projectId/memory', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const memory = app.saveMemory(projectId, { text: requireString(body, 'text'), author: 'user' })
+    return json({ memory }, 201)
+  })
+  add('PUT', '/api/projects/:projectId/memory/:memoryId', async (request, params) => {
+    const body = await readJson(request)
+    const memory = app.saveMemory(params.projectId ?? '', {
+      memoryId: params.memoryId ?? '',
+      text: requireString(body, 'text'),
+      author: 'user',
+    })
+    return json({ memory })
+  })
+  // The user takes back an agent's change to the memory.
+  add('POST', '/api/projects/:projectId/notices/:noticeId/undo', (_request, params) => {
+    app.undoMemoryNotice(params.projectId ?? '', params.noticeId ?? '')
+    return new Response(null, { status: 204 })
+  })
+  add('DELETE', '/api/projects/:projectId/memory/:memoryId', (_request, params) => {
+    app.removeMemory(params.projectId ?? '', params.memoryId ?? '', 'user')
+    return new Response(null, { status: 204 })
+  })
+
   // How thread commands are isolated, so the page can say when they are not.
   add('GET', '/api/sandbox', () =>
     json({ sandbox: host?.sandbox.status ?? { kind: null, mode: 'auto', hidden: [] } }),
@@ -289,6 +317,7 @@ export function createHandler({
     json({
       conversation: app.getConversation(conversationId),
       messages: app.listMessages(conversationId),
+      notices: app.listNotices(conversationId),
       todo: app.getTodo(conversationId),
     }),
   )

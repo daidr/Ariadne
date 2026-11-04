@@ -12,6 +12,8 @@ import type {
   ProjectView,
   ThreadView,
   TodoView,
+  MemoryView,
+  NoticeView,
   StoredFile,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
@@ -109,7 +111,7 @@ export interface PluginRecord {
 
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
-  default: { provider: string; model: string } | null
+  default: { provider: string; model: string; contextTokens?: number } | null
 }
 
 export interface ModelSettings extends ModelSettingsInput {
@@ -129,6 +131,18 @@ export interface SandboxStatus {
 }
 
 export const api = {
+  listMemories: (projectId: string) =>
+    request<{ memories: MemoryView[] }>('GET', `/api/projects/${projectId}/memory`),
+  addMemory: (projectId: string, text: string) =>
+    request<{ memory: MemoryView }>('POST', `/api/projects/${projectId}/memory`, { text }),
+  saveMemory: (projectId: string, memoryId: string, text: string) =>
+    request<{ memory: MemoryView }>('PUT', `/api/projects/${projectId}/memory/${memoryId}`, {
+      text,
+    }),
+  undoNotice: (projectId: string, noticeId: string) =>
+    request<void>('POST', `/api/projects/${projectId}/notices/${noticeId}/undo`),
+  removeMemory: (projectId: string, memoryId: string) =>
+    request<void>('DELETE', `/api/projects/${projectId}/memory/${memoryId}`),
   uploadFile: (projectId: string, file: Blob) =>
     request<{ file: StoredFile }>('POST', `/api/projects/${projectId}/files`, file),
   getSandbox: () => request<{ sandbox: SandboxStatus }>('GET', '/api/sandbox'),
@@ -137,10 +151,12 @@ export const api = {
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
   getConversation: (id: string) =>
-    request<{ conversation: ConversationView; messages: MessageView[]; todo: TodoView }>(
-      'GET',
-      `/api/conversations/${id}`,
-    ),
+    request<{
+      conversation: ConversationView
+      messages: MessageView[]
+      notices: NoticeView[]
+      todo: TodoView
+    }>('GET', `/api/conversations/${id}`),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
