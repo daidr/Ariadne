@@ -59,7 +59,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 16
+export const PROJECTION_VERSION = 17
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50

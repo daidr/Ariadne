@@ -630,11 +630,14 @@ function upstreamDone(
     .get(data.threadId)
   if (!source?.node_id) return
   const node = db
-    .query<{ title: string }, [string]>('SELECT title FROM plan_nodes WHERE id = ?')
-    .get(source.node_id)
+    .query<{ title: string }, [string, string]>(
+      'SELECT title FROM plan_nodes WHERE project_id = ? AND id = ?',
+    )
+    .get(event.projectId, source.node_id)
   const downstream = db
     .query<{ id: string }, [string, string]>(
-      `SELECT t.id FROM threads t JOIN plan_edges e ON e.to_id = t.node_id
+      `SELECT t.id FROM threads t
+       JOIN plan_edges e ON e.project_id = t.project_id AND e.to_id = t.node_id
        WHERE e.from_id = ? AND t.project_id = ? AND coalesce(t.last_report, '') != 'done'`,
     )
     .all(source.node_id, event.projectId)
@@ -965,7 +968,9 @@ function storePlanGraph(
   at: number,
 ) {
   for (const id of before.order) {
-    if (!next.nodes.has(id)) db.run('DELETE FROM plan_nodes WHERE id = ?', [id])
+    if (!next.nodes.has(id)) {
+      db.run('DELETE FROM plan_nodes WHERE project_id = ? AND id = ?', [projectId, id])
+    }
   }
   next.order.forEach((id, position) => {
     const node = next.nodes.get(id) as PlanNodeFields
@@ -997,7 +1002,7 @@ function storePlanGraph(
         `UPDATE plan_nodes SET title = ?, description = ?, acceptance = ?, position = ?,
            changed_in = CASE WHEN ? THEN ? ELSE changed_in END,
            updated_at = CASE WHEN ? THEN ? ELSE updated_at END
-         WHERE id = ?`,
+         WHERE project_id = ? AND id = ?`,
         [
           node.title,
           node.description,
@@ -1007,6 +1012,7 @@ function storePlanGraph(
           revisionId,
           changed ? 1 : 0,
           at,
+          projectId,
           id,
         ],
       )
@@ -1031,8 +1037,9 @@ function storePlanGraph(
 export const planProjection: Projection = {
   name: 'plan',
   setup(db) {
+    // Node ids are the plan's own names ("login", "a"): unique within a project only.
     db.run(`CREATE TABLE IF NOT EXISTS plan_nodes (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       kind TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -1041,7 +1048,8 @@ export const planProjection: Projection = {
       position INTEGER NOT NULL,
       changed_in TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, id)
     )`)
     db.run('CREATE INDEX IF NOT EXISTS plan_nodes_project ON plan_nodes (project_id, position)')
     db.run(`CREATE TABLE IF NOT EXISTS plan_edges (
