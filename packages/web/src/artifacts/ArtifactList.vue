@@ -1,31 +1,14 @@
 <script setup lang="ts">
-import { DouButton, DouDropdown, DouEmpty, DouMenu, DouText } from 'dou-ui'
+import { DouButton, DouDropdown, DouEmpty } from 'dou-ui'
 import { LayoutGridIcon, PlusIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
-import { locale, t } from '../i18n'
+import { t } from '../i18n'
 import { createItems } from './create'
 import { openMain, state } from '../store'
-import { authorName } from './author'
-import { kindIcon } from './kinds'
+import ArtifactCard from './ArtifactCard.vue'
 
-const items = computed(() =>
-  state.artifacts.map((artifact) => ({
-    key: artifact.id,
-    label: artifact.title,
-    icon: kindIcon[artifact.kind],
-  })),
-)
+/** The project's artifacts in the side panel, as the same cards the overview shows. */
 const current = computed(() => (state.main.kind === 'artifact' ? state.main.id : undefined))
-const versionOf = (id: string | number) => state.artifacts.find((a) => a.id === id)?.version ?? 1
-const meta = (id: string | number) => {
-  const artifact = state.artifacts.find((a) => a.id === id)
-  if (!artifact) return ''
-  const time = new Date(artifact.updatedAt).toLocaleString(locale.value, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
-  return t('artifact.updated', { who: authorName(artifact.updatedBy), time })
-}
 </script>
 
 <template>
@@ -38,21 +21,15 @@ const meta = (id: string | number) => {
     <template #leading><LayoutGridIcon /></template>
     {{ t('artifacts.overview') }}
   </DouButton>
-  <DouMenu
-    v-if="items.length"
-    :model-value="current"
-    :items="items"
-    @select="(key) => openMain({ kind: 'artifact', id: String(key) })"
-  >
-    <template #label="{ item }">
-      <span class="artifact-item" :title="meta(item.key)">
-        <DouText truncate>{{ item.label }}</DouText>
-        <DouText variant="tertiary" size="sm" class="artifact-version">
-          {{ t('artifact.version', { version: versionOf(item.key) }) }}
-        </DouText>
-      </span>
-    </template>
-  </DouMenu>
+  <div v-if="state.artifacts.length" class="artifact-cards">
+    <ArtifactCard
+      v-for="artifact in state.artifacts"
+      :key="artifact.id"
+      :artifact="artifact"
+      :current="artifact.id === current"
+      @click="openMain({ kind: 'artifact', id: artifact.id })"
+    />
+  </div>
   <DouEmpty v-else size="sm" :description="t('artifacts.empty')">
     <DouDropdown :items="createItems">
       <DouButton size="sm" variant="outline">
@@ -65,19 +42,13 @@ const meta = (id: string | number) => {
 
 <style scoped>
 .artifact-all {
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
-.artifact-item {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.artifact-version {
-  flex: none;
+/* One column in a narrow panel, more as it widens. */
+.artifact-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
 }
 </style>
