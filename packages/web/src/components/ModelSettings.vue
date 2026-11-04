@@ -15,6 +15,7 @@ import {
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError, type ModelKind, type ModelSettings } from '../api'
+import { state } from '../store'
 import { lt, t, tm } from '../i18n'
 import PluginSettings from './PluginSettings.vue'
 import SettingsFields from './SettingsFields.vue'
@@ -45,6 +46,7 @@ const providerOptions = computed(() =>
 )
 
 function load(settings: ModelSettings) {
+  state.modelReady = !!settings.default
   kinds.value = settings.kinds
   providers.value = settings.providers.map((provider) => ({
     ...provider,

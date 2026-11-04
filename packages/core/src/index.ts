@@ -1,5 +1,7 @@
 export {
   Ariadne,
+  MAX_MEMORIES,
+  MAX_MEMORY,
   unknownResult,
   type AriadneOptions,
   type PlanChange,
@@ -33,7 +35,7 @@ export { DomainError } from './errors'
 export { FILE_TYPES, MAX_FILE_BYTES, fileUrl, type FileType, type StoredFile } from './files'
 export type * from './events'
 export { newId } from './ids'
-export { defaultProjections, dropProjectionTables } from './projections'
+export { defaultProjections, dropProjectionTables, MAX_CHECK_ATTEMPTS } from './projections'
 export { needsUser, threadStage, type StageFacts, type ThreadStage } from './stage'
 export { EventStore, type EventListener, type Projection } from './store'
 export type * from './views'

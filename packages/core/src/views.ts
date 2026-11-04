@@ -64,8 +64,20 @@ export interface MessageView {
   createdAt: number
   editedAt: number | null
   editReason: string | null
+  /** What the message said when it was posted, once it has been edited. */
+  originalContent: string | null
   /** Edited after the user read it: highlight once, until the next read. */
   editedSinceRead: boolean
+}
+
+/** One entry of the project's memory. `author` is `user`, or the coordinator's id. */
+export interface MemoryView {
+  id: string
+  projectId: string
+  text: string
+  author: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface TodoView {
@@ -118,6 +130,13 @@ export type TranscriptEntry =
       content: string
       isError: boolean
     }
+  | {
+      seq: number
+      kind: 'summary'
+      /** What the history up to `upTo` said, in short. */
+      summary: string
+      upTo: number
+    }
 
 /** Facts written into a transcript by the system rather than by a person. */
 export type TranscriptNote =
@@ -134,7 +153,14 @@ export type TranscriptNote =
   | { type: 'artifact-edited'; artifactId: string; title: string; version: number }
   | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
   | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
-  | { type: 'checks-failed'; threadId: string; number: number; headSha: string; failed: string[] }
+  | {
+      type: 'checks-failed'
+      threadId: string
+      number: number
+      headSha: string
+      failed: string[]
+      attempt?: number
+    }
   | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
 
 /**

@@ -294,6 +294,51 @@ const readThread: Tool = {
   },
 }
 
+const remember: Tool = {
+  spec: {
+    name: 'remember',
+    description:
+      'Save a standing preference or fact of the project to its memory, which every conversation of the project (you and all threads) sees on every step: e.g. "Write commit messages in Chinese", "Do not touch packages/legacy". Pass memoryId to change an entry instead of adding one. Only lasting things the user said or confirmed; not progress or one-off instructions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description: 'One short sentence, in the words the user would use.',
+        },
+        memoryId: { type: 'string', description: 'The entry to change; leave out to add one.' },
+      },
+      required: ['text'],
+    },
+  },
+  run(args, ctx) {
+    const memoryId = typeof args.memoryId === 'string' && args.memoryId ? args.memoryId : undefined
+    const saved = ctx.app.saveMemory(ctx.projectId, {
+      text: str(args, 'text'),
+      author: ctx.conversationId,
+      ...(memoryId ? { memoryId } : {}),
+    })
+    return { content: `Saved as ${saved.id}.` }
+  },
+}
+
+const forget: Tool = {
+  spec: {
+    name: 'forget',
+    description:
+      'Remove an entry from the project memory, e.g. when the user takes a preference back. Entry ids are listed with the memory in your instructions.',
+    parameters: {
+      type: 'object',
+      properties: { memoryId: { type: 'string' } },
+      required: ['memoryId'],
+    },
+  },
+  run(args, ctx) {
+    ctx.app.removeMemory(ctx.projectId, str(args, 'memoryId'), ctx.conversationId)
+    return { content: 'Removed.' }
+  },
+}
+
 export const coordinatorTools: Tool[] = [
   updateTodo,
   askUser,
@@ -303,6 +348,8 @@ export const coordinatorTools: Tool[] = [
   readThread,
   listMessages,
   editMessage,
+  remember,
+  forget,
   ...planTools,
   ...artifactTools,
 ]

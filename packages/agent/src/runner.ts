@@ -8,6 +8,13 @@ import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { ModelProvider } from '@ariadne/plugin-sdk'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
+import {
+  COMPACT_AT_TOKENS,
+  compactionCut,
+  estimateTokens,
+  summarise,
+  summaryRequest,
+} from './compaction'
 import { toChatMessages } from './transcript'
 import type { WorkspaceManager } from './workspaces'
 
@@ -30,6 +37,8 @@ export interface TurnOptions {
   tools?: Tool[]
   /** Opens threads' workspaces; without it threads get no file or command tools. */
   workspaces?: WorkspaceManager
+  /** Input size, in tokens, at which older history is summarised. */
+  compactAt?: number
 }
 
 /** Why a turn stopped early, for the user. */
@@ -67,6 +76,7 @@ function threadContext(
     upstream,
     workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
     repo: hasRepo,
+    memories: app.listMemories(project.id),
   }
 }
 
@@ -78,7 +88,11 @@ function systemPrompt(
   hasRepo: boolean,
 ): string {
   if (conversation.role === 'coordinator') {
-    return coordinatorPrompt({ projectName: app.getProject(conversation.projectId).name, locale })
+    return coordinatorPrompt({
+      projectName: app.getProject(conversation.projectId).name,
+      locale,
+      memories: app.listMemories(conversation.projectId),
+    })
   }
   return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo))
 }
@@ -148,15 +162,35 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
 
   try {
+    const compactAt = options.compactAt ?? COMPACT_AT_TOKENS
+    let lastInput = 0
     for (let step = 0; step < options.maxSteps; step++) {
       const sawSeq = app.lastSeq()
-      const messages = [
-        {
-          role: 'system' as const,
-          content: systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo),
-        },
-        ...toChatMessages(app.listTranscript(conversationId), titleOf),
-      ]
+      const system = {
+        role: 'system' as const,
+        content: systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo),
+      }
+      let transcript = app.listTranscript(conversationId)
+      let messages = [system, ...toChatMessages(transcript, titleOf)]
+      // A long conversation gets its older history summarised before it outgrows the
+      // model's context. Between steps every call has its result, so any cut is whole.
+      if (Math.max(lastInput, estimateTokens(messages)) >= compactAt) {
+        const upTo = compactionCut(transcript, compactAt / 4)
+        if (upTo !== null) {
+          const request = summaryRequest(transcript, upTo, titleOf, conversation.role)
+          const summary = await summarise(model, request, signal)
+          if (signal.aborted) break
+          if (summary) {
+            app.compactConversation(conversationId, turnId, {
+              summary: summary.text,
+              upTo,
+              usage: summary.usage,
+            })
+            transcript = app.listTranscript(conversationId)
+            messages = [system, ...toChatMessages(transcript, titleOf)]
+          }
+        }
+      }
       let text = ''
       const toolCalls: ToolCallRecord[] = []
       let usage: { input: number; output: number } | null = null
@@ -178,6 +212,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         }
       }
       if (signal.aborted) break
+      lastInput = usage?.input ?? 0
       app.recordStep(conversationId, turnId, { text, toolCalls, sawSeq, usage })
 
       if (!toolCalls.length) {

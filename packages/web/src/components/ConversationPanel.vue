@@ -8,6 +8,7 @@ import {
   DouCollapse,
   DouCollapseItem,
   DouEmpty,
+  DouPopover,
   DouTag,
   DouText,
 } from 'dou-ui'
@@ -17,6 +18,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
 import { stageTone } from '../stage'
+import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import {
   currentConversationId,
@@ -37,6 +39,10 @@ const thread = computed(() =>
     : null,
 )
 const working = computed(() => !!state.conversation?.turn)
+// Set up enough to talk: a model, a project, and its working directory.
+const started = computed(
+  () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
+)
 // New input is waiting for a free slot.
 const queued = computed(() => !working.value && (state.conversation?.pendingSeq ?? 0) > 0)
 const failure = computed(() =>
@@ -119,9 +125,21 @@ watch(
           :class="{ 'conversation-edited': highlighted.has(message.id) }"
         >
           <template v-if="message.editedAt" #actions>
-            <DouText variant="tertiary" size="sm" :title="message.editReason ?? undefined">
-              {{ t('message.edited') }}
-            </DouText>
+            <!-- Why it changed and what it said before, for whoever wants to check. -->
+            <DouPopover trigger="click" :title="t('message.editedTitle')" :width="360">
+              <DouButton variant="ghost" size="sm">{{ t('message.edited') }}</DouButton>
+              <template #content>
+                <div class="edit-details">
+                  <DouText v-if="message.editReason" size="sm">
+                    {{ t('message.editReason') }}{{ message.editReason }}
+                  </DouText>
+                  <template v-if="message.originalContent !== null">
+                    <DouText variant="tertiary" size="sm">{{ t('message.original') }}</DouText>
+                    <DouText size="sm" class="edit-original">{{ message.originalContent }}</DouText>
+                  </template>
+                </div>
+              </template>
+            </DouPopover>
           </template>
         </DouChatMessage>
       </template>
@@ -129,6 +147,7 @@ watch(
     </DouChatList>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="thread" :title="thread.title" :description="t('thread.empty')" />
+      <GettingStarted v-else-if="!started" @open-settings="emit('openSettings')" />
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
@@ -178,6 +197,19 @@ watch(
 </template>
 
 <style scoped>
+.edit-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.edit-original {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .conversation {
   display: flex;
   flex-direction: column;

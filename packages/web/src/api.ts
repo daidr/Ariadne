@@ -12,6 +12,7 @@ import type {
   ProjectView,
   ThreadView,
   TodoView,
+  MemoryView,
   StoredFile,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
@@ -129,6 +130,16 @@ export interface SandboxStatus {
 }
 
 export const api = {
+  listMemories: (projectId: string) =>
+    request<{ memories: MemoryView[] }>('GET', `/api/projects/${projectId}/memory`),
+  addMemory: (projectId: string, text: string) =>
+    request<{ memory: MemoryView }>('POST', `/api/projects/${projectId}/memory`, { text }),
+  saveMemory: (projectId: string, memoryId: string, text: string) =>
+    request<{ memory: MemoryView }>('PUT', `/api/projects/${projectId}/memory/${memoryId}`, {
+      text,
+    }),
+  removeMemory: (projectId: string, memoryId: string) =>
+    request<void>('DELETE', `/api/projects/${projectId}/memory/${memoryId}`),
   uploadFile: (projectId: string, file: Blob) =>
     request<{ file: StoredFile }>('POST', `/api/projects/${projectId}/files`, file),
   getSandbox: () => request<{ sandbox: SandboxStatus }>('GET', '/api/sandbox'),

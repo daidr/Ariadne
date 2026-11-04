@@ -1,5 +1,6 @@
-import { Ariadne, type ConversationView } from '@ariadne/core'
+import { Ariadne, type ConversationView, type TranscriptEntry } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { compactionCut } from './compaction'
 import type { ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
@@ -18,7 +19,10 @@ afterEach(async () => {
   app.close()
 })
 
-function startScheduler(model: ResolvedModel | null, options: { slots?: number } = {}) {
+function startScheduler(
+  model: ResolvedModel | null,
+  options: { slots?: number; compactAt?: number } = {},
+) {
   scheduler = new Scheduler({
     app,
     resolveModel: () => model,
@@ -108,6 +112,114 @@ describe('a coordinator turn', () => {
     expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('调研做完了。')
     const report = model.requests.find((r) => lastUser(r).includes('<thread_report'))
     expect(lastUser(report!)).toContain('title="调研" kind="done"')
+  })
+})
+
+describe('project memory', () => {
+  test('what the coordinator remembers, every thread sees from its next step on', async () => {
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') return say('好的')
+      if (answered(request)) return say('记下了。')
+      return [
+        call('c1', 'remember', { text: '提交信息一律用中文' }),
+        call('c2', 'create_thread', { title: '写文档', brief: '补 README' }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '以后提交信息都用中文，然后补一下 README',
+    })
+    await startScheduler(model).idle()
+
+    const [memory] = app.listMemories(project.id)
+    expect(memory).toMatchObject({ text: '提交信息一律用中文', author: project.coordinatorId })
+    const threadRequest = model.requests.find((r) => r.messages[0]?.content.includes('写文档'))
+    expect(threadRequest?.messages[0]?.content).toContain(`[${memory!.id}] 提交信息一律用中文`)
+    // The coordinator sees it too, with the id it needs to change or forget it.
+    const later = model.requests.findLast((r) => r.messages[0]?.content.includes('coordinator'))
+    expect(later?.messages[0]?.content).toContain(`[${memory!.id}]`)
+  })
+})
+
+describe('history compaction', () => {
+  test('a long conversation reads a summary in place of its older history', async () => {
+    const model = fakeModel((request) => {
+      if (request.messages[0]?.content.startsWith('You summarise')) {
+        return say('- 用户在整理三份需求：甲、乙、丙')
+      }
+      if (!answered(request) && lastUser(request).includes('第 2 份')) {
+        return [call('c1', 'update_todo', { items: [{ label: '整理', status: 'doing' }] })]
+      }
+      return say('收到')
+    })
+    const project = app.createProject('P')
+    const running = startScheduler(model, { compactAt: 600 })
+    for (const n of [1, 2, 3, 4]) {
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: `第 ${n} 份需求：${'很长的描述。'.repeat(80)}`,
+      })
+      await running.idle()
+    }
+
+    const summaries = app.listTranscript(project.coordinatorId).filter((e) => e.kind === 'summary')
+    expect(summaries.length).toBeGreaterThan(0)
+    const last = model.requests.findLast((r) => r.messages[0]?.content.includes('coordinator'))!
+    expect(last.messages[1]?.content).toContain('<conversation_summary>')
+    expect(last.messages[1]?.content).toContain('甲、乙、丙')
+    expect(JSON.stringify(last.messages)).not.toContain('第 1 份需求')
+    expect(lastUser(last)).toContain('第 4 份需求')
+    // A step is never kept without its results, nor a result without its step.
+    for (const [index, message] of last.messages.entries()) {
+      if (message.role === 'tool') expect(last.messages[index - 1]?.role).toMatch(/assistant|tool/)
+    }
+    // The summarising call reads the history it folds, and its tokens count too.
+    const request = model.requests.find((r) => r.messages[0]?.content.startsWith('You summarise'))
+    expect(JSON.stringify(request?.messages)).toContain('第 1 份需求')
+    expect(request?.tools).toEqual([])
+    expect(app.listMessages(project.coordinatorId).filter((m) => m.author === 'user')).toHaveLength(
+      4,
+    )
+    expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
+  })
+
+  test('the cut keeps a step with its results and always keeps the newest input', () => {
+    const entries: TranscriptEntry[] = [
+      { seq: 1, kind: 'message', message: { content: 'a'.repeat(400) } as never },
+      {
+        seq: 1,
+        kind: 'step',
+        text: '',
+        sawSeq: 1,
+        toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
+      },
+      { seq: 3, kind: 'message', message: { content: 'held' } as never },
+      {
+        seq: 4,
+        kind: 'tool',
+        toolCallId: 'x',
+        name: 't',
+        content: 'r'.repeat(400),
+        isError: false,
+      },
+      { seq: 5, kind: 'step', text: 'ok', sawSeq: 4, toolCalls: [] },
+      { seq: 6, kind: 'message', message: { content: 'new' } as never },
+    ]
+    // Keeping very little: the cut falls after the step's result, never between.
+    const upTo = compactionCut(entries, 1)
+    expect(upTo).toBe(4.5)
+    // Keeping more than there is: nothing to fold.
+    expect(compactionCut(entries, 10_000)).toBeNull()
+    // A second compaction folds the first summary in and cuts later.
+    const again = [...entries, { seq: 7, kind: 'summary', summary: 's', upTo: 1.5 } as const]
+    expect(compactionCut(again, 1)).toBe(4.5)
+    // Keeping the newest two entries: the cut may not fall between the call and its result.
+    expect(compactionCut(entries, 170)).toBeNull()
+    expect(compactionCut([entries[1]!, entries[2]!, entries[4]!], 1)).toBeNull()
   })
 })
 

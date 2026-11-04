@@ -3,6 +3,7 @@ import type {
   ArtifactKind,
   ArtifactSummary,
   ConversationView,
+  MemoryView,
   MessageView,
   PlanOp,
   PlanView,
@@ -32,7 +33,13 @@ interface State {
   todo: TodoView | null
   plan: PlanView | null
   artifacts: ArtifactSummary[]
+  /** The project's memory: standing preferences every conversation sees. */
+  memories: MemoryView[]
   main: MainView
+  /** Whether a default model is set; `null` until known. */
+  modelReady: boolean | null
+  /** The new-project form is open. */
+  creatingProject: boolean
   /** Bumped whenever the open project's events arrive, so open views can reload. */
   revision: number
   error: string | null
@@ -49,7 +56,10 @@ export const state = reactive<State>({
   todo: null,
   plan: null,
   artifacts: [],
+  memories: [],
   main: { kind: 'conversation' },
+  modelReady: null,
+  creatingProject: false,
   revision: 0,
   error: null,
 })
@@ -69,10 +79,11 @@ async function refreshCurrent() {
   const threadId = state.threadId
   if (!id) return
   const detail = await api.getProject(id)
-  const [conversation, plan, artifacts] = await Promise.all([
+  const [conversation, plan, artifacts, memory] = await Promise.all([
     api.getConversation(threadId ?? detail.project.coordinatorId),
     api.getPlan(id),
     api.listArtifacts(id),
+    api.listMemories(id),
   ])
   // The user may have switched while this was loading; a late answer is stale.
   if (state.currentId !== id || state.threadId !== threadId) return
@@ -82,6 +93,7 @@ async function refreshCurrent() {
   state.todo = conversation.todo
   state.plan = plan.plan
   state.artifacts = artifacts.artifacts
+  state.memories = memory.memories
   state.revision++
 }
 
@@ -97,6 +109,7 @@ export async function openProject(id: string) {
   state.detail = null
   state.plan = null
   state.artifacts = []
+  state.memories = []
   state.main = { kind: 'conversation' }
   clearConversation()
   await refreshCurrent().catch(report)
@@ -261,6 +274,10 @@ function onEvent(event: AnyStoredEvent) {
 }
 
 async function load(): Promise<number | null> {
+  api.getModelSettings().then(
+    (settings) => (state.modelReady = !!settings.default),
+    () => {},
+  )
   try {
     const lastSeq = await refreshProjects()
     const target = state.currentId ?? state.projects[0]?.id
@@ -287,4 +304,20 @@ export async function start() {
       void load()
     },
   )
+}
+
+/** Add a memory entry, change one (`id`), or remove it (`text` null); `null` when it worked. */
+export async function saveMemory(id: string | null, text: string | null): Promise<string | null> {
+  const projectId = state.currentId
+  if (!projectId) return null
+  try {
+    if (text === null) {
+      if (id) await api.removeMemory(projectId, id)
+    } else if (id) await api.saveMemory(projectId, id, text)
+    else await api.addMemory(projectId, text)
+    state.memories = (await api.listMemories(projectId)).memories
+    return null
+  } catch (error) {
+    return error instanceof ApiError ? tm(error.localized) : String(error)
+  }
 }

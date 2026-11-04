@@ -22,7 +22,12 @@ import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
 import { readFile, saveFile, setupFiles, storeInlineImages, type StoredFile } from './files'
 import { newId } from './ids'
 import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
-import { defaultProjections, dropProjectionTables, loadPlanGraph } from './projections'
+import {
+  defaultProjections,
+  dropProjectionTables,
+  loadPlanGraph,
+  MAX_CHECK_ATTEMPTS,
+} from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, type EventListener } from './store'
 import type {
@@ -30,6 +35,7 @@ import type {
   ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
+  MemoryView,
   AttentionView,
   ConversationRole,
   ConversationView,
@@ -50,7 +56,11 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 11
+export const PROJECTION_VERSION = 12
+
+/** Memory is read into every model request, so it stays short. */
+export const MAX_MEMORIES = 50
+export const MAX_MEMORY = 500
 
 interface ConversationRow {
   id: string
@@ -168,6 +178,7 @@ interface ThreadRow {
   workspace_label: string | null
   workspace_branch: string | null
   pull_request: string | null
+  check_failures: number
   created_at: number
   updated_at: number
   open_attentions: number
@@ -195,6 +206,7 @@ interface MessageRow {
   created_at: number
   edited_at: number | null
   edit_reason: string | null
+  original_content: string | null
   edited_since_read: number
 }
 
@@ -215,6 +227,7 @@ function toThread(row: ThreadRow): ThreadView {
       turnRunning: row.turn_id !== null,
       turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
+      checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -250,6 +263,7 @@ function toMessage(row: MessageRow): MessageView {
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
+    originalContent: row.original_content,
     editedSinceRead: row.edited_since_read === 1,
   }
 }
@@ -435,9 +449,28 @@ export class Ariadne {
         case 'tool':
           entries.push({ seq: row.seq, kind: 'tool', ...payload })
           break
+        case 'summary':
+          entries.push({ seq: row.seq, kind: 'summary', ...payload })
+          break
       }
     }
     return entries
+  }
+
+  /**
+   * Replace a conversation's history up to `upTo` with a summary, during one of its turns.
+   * The log keeps everything; only what the model reads gets shorter.
+   */
+  compactConversation(
+    conversationId: string,
+    turnId: string,
+    compaction: { summary: string; upTo: number; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    const summary = compaction.summary.trim()
+    if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
+    const data = { conversationId, summary, upTo: compaction.upTo, usage: compaction.usage }
+    this.store.append([{ type: 'conversation.compacted', projectId, data }])
   }
 
   // ---- commands ----
@@ -712,6 +745,66 @@ export class Ariadne {
     this.store.append([{ type: 'message.read', projectId, data: { conversationId, upTo } }])
   }
 
+  // ---- memory ----
+
+  listMemories(projectId: string): MemoryView[] {
+    this.getProject(projectId)
+    return this.db
+      .query<
+        {
+          id: string
+          project_id: string
+          text: string
+          author: string
+          created_at: number
+          updated_at: number
+        },
+        [string]
+      >('SELECT * FROM memories WHERE project_id = ? ORDER BY created_at, id')
+      .all(projectId)
+      .map((row) => ({
+        id: row.id,
+        projectId: row.project_id,
+        text: row.text,
+        author: row.author,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }))
+  }
+
+  /** Save a new memory, or change the one `memoryId` names. */
+  saveMemory(
+    projectId: string,
+    input: { memoryId?: string; text: string; author: string },
+  ): MemoryView {
+    const text = input.text.trim()
+    if (!text) throw new DomainError('error.invalidBody', { reason: 'text' })
+    if (text.length > MAX_MEMORY) {
+      throw new DomainError('error.invalidBody', { reason: `text longer than ${MAX_MEMORY}` })
+    }
+    const existing = this.listMemories(projectId)
+    if (input.memoryId && !existing.some((m) => m.id === input.memoryId)) {
+      throw new DomainError('error.notFound', { what: input.memoryId })
+    }
+    if (!input.memoryId && existing.length >= MAX_MEMORIES) {
+      throw new DomainError('error.memoryFull', { max: MAX_MEMORIES })
+    }
+    const memoryId = input.memoryId ?? newId('mem')
+    const same = existing.find((m) => m.id === memoryId)
+    if (same?.text === text) return same
+    this.store.append([
+      { type: 'memory.saved', projectId, data: { memoryId, text, author: input.author } },
+    ])
+    return this.listMemories(projectId).find((m) => m.id === memoryId)!
+  }
+
+  removeMemory(projectId: string, memoryId: string, author: string): void {
+    if (!this.listMemories(projectId).some((m) => m.id === memoryId)) {
+      throw new DomainError('error.notFound', { what: memoryId })
+    }
+    this.store.append([{ type: 'memory.removed', projectId, data: { memoryId, author } }])
+  }
+
   updateTodo(projectId: string, conversationId: string, items: TodoItem[]): TodoView {
     this.assertConversationIn(projectId, conversationId)
     this.store.append([{ type: 'todo.updated', projectId, data: { conversationId, items } }])
@@ -754,6 +847,11 @@ export class Ariadne {
     const failedBefore =
       before?.headSha === pullRequest.headSha && before.checks.state === 'failure'
     if (pullRequest.checks.state === 'failure' && !failedBefore) {
+      const row = this.db
+        .query<{ check_failures: number }, [string]>(
+          'SELECT check_failures FROM threads WHERE id = ?',
+        )
+        .get(threadId)
       events.push({
         type: 'checks.failed',
         projectId,
@@ -762,6 +860,7 @@ export class Ariadne {
           number: pullRequest.number,
           headSha: pullRequest.headSha,
           failed: pullRequest.checks.failed,
+          attempt: (row?.check_failures ?? 0) + 1,
         },
       })
     }

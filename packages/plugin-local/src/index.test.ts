@@ -1,10 +1,10 @@
 import { WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { branchFor, localDirectoryProvider, run } from './index'
+import { branchFor, localDirectoryProvider, run, type LocalWorkspace } from './index'
 
 let base: string
 
@@ -168,6 +168,43 @@ describe('local directory', () => {
     const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
     await workspace!.open({ threadId: 'thr_a' })
     expect(existsSync(marker)).toBe(false)
+  })
+
+  test('what a command leaves running in the background ends with it', async () => {
+    const dir = join(base, 'plain')
+    await run(['mkdir', '-p', dir], { cwd: base })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const started = Date.now()
+    const result = await ws.exec('(sleep 3; touch late) & echo started')
+    expect(result.stdout).toBe('started\n')
+    expect(Date.now() - started).toBeLessThan(2000)
+    await Bun.sleep(3500)
+    expect(existsSync(join(dir, 'late'))).toBe(false)
+  })
+
+  test('a file swapped for a link after the path was checked is refused', async () => {
+    const dir = join(base, 'plain')
+    await run(['mkdir', '-p', join(dir, 'sub')], { cwd: base })
+    await writeFile(join(dir, 'sub', 'a.txt'), 'inside\n')
+    await writeFile(join(base, 'secret'), 'outside\n')
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    const ws = (await workspace!.open({ threadId: 'thr_a' })) as LocalWorkspace
+    // Swap the directory for a link to outside right after the path is resolved.
+    const resolveFirst = ws.resolve.bind(ws)
+    let calls = 0
+    ws.resolve = async (path: string) => {
+      const resolved = await resolveFirst(path)
+      if (++calls === 1) {
+        await rm(join(dir, 'sub'), { recursive: true })
+        await symlink(base, join(dir, 'sub'))
+        await rename(join(base, 'secret'), join(base, 'a.txt'))
+      }
+      return resolved.replace(/sub\/a\.txt$/, 'sub/a.txt')
+    }
+    await expect(ws.readFile('sub/a.txt')).rejects.toThrow(WorkspacePathError)
+    await expect(ws.writeFile('sub/a.txt', 'x')).rejects.toThrow(WorkspacePathError)
+    expect(await readFile(join(base, 'a.txt'), 'utf8')).toBe('outside\n')
   })
 
   test('commands time out', async () => {
