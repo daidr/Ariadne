@@ -33,10 +33,15 @@ const openTurns = ref<string[]>([])
 // Steps whose full input is shown.
 const inputs = ref(new Set<number>())
 
+// Loads overlap as events arrive; only the latest one's answer is used.
+let latest = 0
+
 /** The newest turns again, keeping older ones already paged in. */
 async function load() {
+  const ticket = ++latest
   try {
     const page = await api.getTrace(props.conversationId)
+    if (ticket !== latest) return
     const oldest = page.turns[0]?.seq ?? Number.POSITIVE_INFINITY
     const older = turns.value.filter((turn) => turn.seq < oldest)
     if (!turns.value.length) {
@@ -48,9 +53,11 @@ async function load() {
     turns.value = [...older, ...page.turns]
     problem.value = null
   } catch (error) {
-    problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
+    if (ticket === latest) {
+      problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
+    }
   } finally {
-    loading.value = false
+    if (ticket === latest) loading.value = false
   }
 }
 
