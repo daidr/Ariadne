@@ -48,8 +48,14 @@ describe('thread stages', () => {
     const thread = app.createThread(project.id, { title: '调研' })
     expect(thread.stage).toBe('queued')
     expect(app.startThread(thread.id).stage).toBe('working')
-    expect(app.reportThread(thread.id, 'waiting', '本轮结束').stage).toBe('idle')
-    expect(app.reportThread(thread.id, 'ready', '可以审阅').stage).toBe('review')
+    expect(
+      app.reportThread(thread.id, { kind: 'waiting', summary: '本轮结束', headline: '本轮结束' })
+        .stage,
+    ).toBe('idle')
+    expect(
+      app.reportThread(thread.id, { kind: 'ready', summary: '可以审阅', headline: '可以审阅' })
+        .stage,
+    ).toBe('review')
 
     const attention = app.openAttention(project.id, {
       threadId: thread.id,
@@ -82,7 +88,9 @@ describe('thread stages', () => {
     })
     app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('review')
-    expect(app.reportThread(thread.id, 'done', '完成').stage).toBe('done')
+    expect(
+      app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' }).stage,
+    ).toBe('done')
     expect(app.getProject(project.id).needsMe).toBe(0)
   })
 
@@ -92,7 +100,10 @@ describe('thread stages', () => {
     const project = timed.createProject('P')
     const thread = timed.createThread(project.id, { title: '改代码' })
     timed.startThread(thread.id)
-    expect(timed.reportThread(thread.id, 'ready', '可以审阅').stage).toBe('review')
+    expect(
+      timed.reportThread(thread.id, { kind: 'ready', summary: '可以审阅', headline: '可以审阅' })
+        .stage,
+    ).toBe('review')
     const merge = {
       branch: 'ariadne/x',
       base: 'main',
@@ -103,7 +114,9 @@ describe('thread stages', () => {
     expect(timed.recordMerge(thread.id, merge).stage).toBe('done')
     expect(timed.getProject(project.id).needsMe).toBe(0)
     // New work asks for review again.
-    expect(timed.reportThread(thread.id, 'ready', '又改了').stage).toBe('review')
+    expect(
+      timed.reportThread(thread.id, { kind: 'ready', summary: '又改了', headline: '又改了' }).stage,
+    ).toBe('review')
     timed.close()
   })
 
@@ -111,7 +124,7 @@ describe('thread stages', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
     app.startThread(thread.id)
-    app.reportThread(thread.id, 'blocked', '缺少权限')
+    app.reportThread(thread.id, { kind: 'blocked', summary: '缺少权限', headline: '缺少权限' })
     app.openAttention(project.id, { block: confirmBlock({ title: '要开始吗？' }) })
     expect(app.getProject(project.id).needsMe).toBe(2)
   })
@@ -131,7 +144,9 @@ describe('thread stages', () => {
     expect(app.getProject(project.id).needsMe).toBe(2)
 
     // Reporting done does not hide an unanswered question.
-    expect(app.reportThread(thread.id, 'done', '完成').stage).toBe('answer')
+    expect(
+      app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' }).stage,
+    ).toBe('answer')
     expect(app.getProject(project.id).needsMe).toBe(app.listNeedsMe(project.id).length)
   })
 
@@ -1292,5 +1307,71 @@ describe('deleting a project', () => {
     app.finishTurn(thread.id, turnId, 'cancelled')
     expect(refusal()).toBeNull()
     expect(refusal()).toBe('error.notFound')
+  })
+})
+
+describe('thread reports', () => {
+  test('keep a headline for the user and show pointed-to artifacts by their current title', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '梳理架构' })
+    const doc = app.createArtifact(project.id, {
+      kind: 'document',
+      title: '架构说明',
+      author: thread.id,
+      content: '# 架构',
+    })
+    const notes = app.createArtifact(project.id, {
+      kind: 'document',
+      title: '笔记',
+      author: thread.id,
+      content: '笔记',
+    })
+    const reported = app.reportThread(thread.id, {
+      kind: 'ready',
+      summary: '  很长的报告，写给协调器  ',
+      headline: '  架构文档写好了，请审阅  ',
+      artifacts: [notes.id, doc.id, notes.id],
+    })
+    expect(reported.lastSummary).toBe('很长的报告，写给协调器')
+    expect(reported.lastHeadline).toBe('架构文档写好了，请审阅')
+    expect(reported.lastArtifacts).toEqual([
+      { id: notes.id, kind: 'document', title: '笔记' },
+      { id: doc.id, kind: 'document', title: '架构说明' },
+    ])
+
+    app.reviseArtifact(doc.id, {
+      title: '架构说明 v2',
+      content: '# 架构',
+      author: 'user',
+      reason: '改名',
+    })
+    expect(app.getThread(thread.id).lastArtifacts.map((a) => a.title)).toEqual([
+      '笔记',
+      '架构说明 v2',
+    ])
+  })
+
+  test('refuse an empty headline and artifacts of another project', () => {
+    const project = app.createProject('P')
+    const other = app.createProject('Q')
+    const thread = app.createThread(project.id, { title: 'T' })
+    const foreign = app.createArtifact(other.id, {
+      kind: 'document',
+      title: '别处',
+      author: 'user',
+      content: 'x',
+    })
+    expect(() =>
+      app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '  ' }),
+    ).toThrow(DomainError)
+    expect(() =>
+      app.reportThread(thread.id, {
+        kind: 'ready',
+        summary: '好了',
+        headline: '请审阅',
+        artifacts: [foreign.id],
+      }),
+    ).toThrow(DomainError)
+    expect(app.getThread(thread.id).lastReport).toBeNull()
   })
 })

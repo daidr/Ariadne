@@ -73,6 +73,8 @@ import type {
   PlanRevisionView,
   PlanView,
   ProjectView,
+  ThreadArtifact,
+  ThreadReport,
   ThreadView,
   TodoView,
   TranscriptEntry,
@@ -83,7 +85,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 28
+export const PROJECTION_VERSION = 29
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -232,6 +234,9 @@ interface ThreadRow {
   started: number
   last_report: ReportKind | null
   last_summary: string | null
+  last_headline: string | null
+  /** The pointed-to artifacts that still exist, in order, as JSON. */
+  report_artifacts: string
   reported_at: number | null
   reported_head: string | null
   workspace_label: string | null
@@ -311,6 +316,10 @@ const usageOf = (row: UsageColumns): UsageTotals => ({
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
   c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, (
+  SELECT json_group_array(json_object('id', ar.id, 'kind', ar.kind, 'title', ar.title))
+  FROM (SELECT ar.id, ar.kind, ar.title FROM json_each(t.last_artifacts) j
+    JOIN artifacts ar ON ar.id = j.value AND ar.project_id = t.project_id ORDER BY j.key) ar
+) AS report_artifacts, (
   SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
@@ -339,6 +348,8 @@ function toThread(row: ThreadRow): ThreadView {
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
+    lastHeadline: row.last_headline,
+    lastArtifacts: JSON.parse(row.report_artifacts) as ThreadArtifact[],
     workspace:
       row.workspace_label === null
         ? null
@@ -1123,13 +1134,30 @@ export class Ariadne {
   }
 
   /** `head` is the branch's newest commit, to tell whether merged work is all it reports. */
-  reportThread(threadId: string, report: ReportKind, summary: string, head?: string): ThreadView {
+  reportThread(threadId: string, report: ThreadReport, head?: string): ThreadView {
     const thread = this.getThread(threadId)
+    const summary = report.summary.trim()
+    const headline = report.headline.trim()
+    if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
+    if (!headline) throw new DomainError('error.invalidBody', { reason: 'headline' })
+    const artifacts = [...new Set(report.artifacts ?? [])]
+    for (const id of artifacts) {
+      if (this.getArtifact(id).projectId !== thread.projectId) {
+        throw new DomainError('error.notFound', { what: id })
+      }
+    }
     this.store.append([
       {
         type: 'thread.reported',
         projectId: thread.projectId,
-        data: { threadId, report, summary, ...(head ? { head } : {}) },
+        data: {
+          threadId,
+          report: report.kind,
+          summary,
+          headline,
+          artifacts,
+          ...(head ? { head } : {}),
+        },
       },
     ])
     return this.getThread(threadId)
@@ -1813,6 +1841,7 @@ export class Ariadne {
           id: thread.id,
           title: thread.title,
           stage: thread.stage,
+          lastHeadline: thread.lastHeadline,
           pullRequest: thread.pullRequest && {
             number: thread.pullRequest.number,
             ...(thread.pullRequest.reference ? { reference: thread.pullRequest.reference } : {}),

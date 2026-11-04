@@ -9,6 +9,7 @@ import type {
 } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
 import { layoutGraph } from 'dou-ui'
+import { showsHeadline } from '../stage'
 
 /** Room between dependency levels, between nodes on one level, and between unrelated parts. */
 const RANK_GAP = 56
@@ -96,13 +97,16 @@ function textWidth(text: string): number {
 
 /**
  * About how tall a node is drawn: the kind line, the title wrapped to the node's width,
- * and up to two threads plus a "more" line. Only used to keep nodes apart, so a little
- * over is fine.
+ * and up to two threads, each with the line it waits on the user for, plus a "more" line.
+ * Only used to keep nodes apart, so a little over is fine.
  */
 export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>): number {
   const lines = Math.max(1, Math.ceil(textWidth(node.title) / (NODE_WIDTH - 24)))
   const threads = Math.min(node.threads.length, 2) + (node.threads.length > 2 ? 1 : 0)
-  return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0)
+  const headlines = node.threads
+    .slice(0, 2)
+    .filter((thread) => thread.lastHeadline && showsHeadline(thread.stage)).length
+  return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0) + headlines * 18
 }
 
 /** Groups of nodes linked to each other through dependencies, in planned order. */

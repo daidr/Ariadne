@@ -16,6 +16,7 @@ import { t } from '../i18n'
 import { checksTone } from '../stage'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
+import ThreadHeadline from '../components/ThreadHeadline.vue'
 
 const props = defineProps<{ data: PlanNodeData }>()
 
@@ -110,6 +111,12 @@ const mark = computed(() => {
           </DouTag>
           <StageIcon :stage="thread.stage" />
         </span>
+        <ThreadHeadline
+          class="plan-node-headline"
+          :stage="thread.stage"
+          :headline="thread.lastHeadline"
+          :lines="1"
+        />
       </li>
       <li v-if="data.threads.length > SHOWN">
         <DouText size="sm" variant="tertiary">
@@ -165,9 +172,16 @@ const mark = computed(() => {
 .plan-node-head,
 .plan-node-thread {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 0 8px;
+}
+
+/* A node is laid out at a fixed spacing, so its headline keeps to one line. */
+.plan-node-headline {
+  flex-basis: 100%;
+  min-width: 0;
 }
 
 .plan-node-tags {

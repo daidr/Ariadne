@@ -233,7 +233,12 @@ export interface EventMap {
   'thread.reported': {
     threadId: string
     report: ReportKind
+    /** For the coordinator: what changed and what it depends on. */
     summary: string
+    /** For the user: one short line on what to do or look at, shown wherever the thread is. */
+    headline: string
+    /** Artifacts the user should look at, by id; shown by their titles. */
+    artifacts: string[]
     /** The branch's newest commit when it reported, once the user merged it before. */
     head?: string
   }

@@ -65,7 +65,12 @@ export interface ThreadView {
   nodeId: string | null
   stage: ThreadStage
   lastReport: ReportKind | null
+  /** Its last report as the coordinator read it; long and not meant for the user. */
   lastSummary: string | null
+  /** What its last report asks of the user, in one short line: the text the UI shows. */
+  lastHeadline: string | null
+  /** Artifacts its last report pointed to, by their current titles; deleted ones drop out. */
+  lastArtifacts: ThreadArtifact[]
   /**
    * The thread's prepared workspace, once it has used one. `removed`: its worktree was
    * removed since, and the branch is all that is left until it is used again.
@@ -88,6 +93,20 @@ export interface ThreadView {
   usage: UsageTotals
   createdAt: number
   updatedAt: number
+}
+
+/** What a thread reports: `summary` for the coordinator, `headline` for the user. */
+export interface ThreadReport {
+  kind: ReportKind
+  summary: string
+  headline: string
+  artifacts?: string[]
+}
+
+export interface ThreadArtifact {
+  id: string
+  kind: ArtifactKind
+  title: string
 }
 
 export interface AttentionView {
@@ -282,7 +301,14 @@ export type TranscriptEntry =
 
 /** Facts written into a transcript by the system rather than by a person. */
 export type TranscriptNote =
-  | { type: 'report'; threadId: string; report: ReportKind; summary: string }
+  | {
+      type: 'report'
+      threadId: string
+      report: ReportKind
+      summary: string
+      headline: string
+      artifacts: string[]
+    }
   | {
       type: 'answer'
       attentionId: string
@@ -342,6 +368,7 @@ export interface PlanNodeView {
     id: string
     title: string
     stage: ThreadStage
+    lastHeadline: string | null
     pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> | null
   }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */

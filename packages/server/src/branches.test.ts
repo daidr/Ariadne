@@ -148,7 +148,7 @@ describe('thread changes', () => {
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
 
-    app.reportThread(thread.id, 'ready', '好了')
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(false)
     expect(app.getThread(thread.id).workspace?.removed).toBe(true)
@@ -177,13 +177,12 @@ describe('thread changes', () => {
       await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
     ).json()
     const head = merged.outcome.head as string
-    app.reportThread(thread.id, 'ready', '好了', head)
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' }, head)
     expect(app.getThread(thread.id).stage).toBe('done')
     await ws.exec('echo b > b.txt && git add . && git commit -qm b')
     app.reportThread(
       thread.id,
-      'ready',
-      '又改了',
+      { kind: 'ready', summary: '又改了', headline: '又改了' },
       await ws.exec('git rev-parse HEAD').then((r) => r.stdout.trim()),
     )
     expect(app.getThread(thread.id).stage).toBe('review')
@@ -207,7 +206,7 @@ describe('thread changes', () => {
       repo: () => Promise.reject(new Error('no repo')),
       branches: () => workspaces.branches(project.id),
     } satisfies ToolContext
-    await report.run({ kind: 'ready', summary: '好了' }, ctx)
+    await report.run({ kind: 'ready', summary: '好了', headline: '好了' }, ctx)
     expect(app.getThread(thread.id).stage).toBe('done')
     expect(existsSync(ws.label)).toBe(false)
   })
@@ -217,7 +216,7 @@ describe('thread changes', () => {
     const janitor = new WorktreeJanitor(app, workspaces, { delayMs: 0 })
     await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
     await ws.exec('echo b > b.txt && git add . && git commit -qm b')
-    app.reportThread(thread.id, 'done', '完成')
+    app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' })
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
 

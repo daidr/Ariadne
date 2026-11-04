@@ -3,13 +3,19 @@ import { DouBadge, DouButton, DouEmpty, DouPopover, DouText } from 'dou-ui'
 import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import type { NeedsMeItem } from '@ariadne/core'
+import type { NeedsMeItem, ThreadView } from '@ariadne/core'
 import { openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
+import ReportArtifacts from './ReportArtifacts.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
+
+/** What its last report asks of the user; its stage when it said nothing. */
+function headline(thread: ThreadView): string {
+  return thread.lastHeadline ?? t(`thread.stage.${thread.stage}`)
+}
 
 /** Every thread waiting on a card, so the user sees whom one answer reaches. */
 function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
@@ -52,9 +58,10 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
                 {{ t('thread.open') }}
               </DouButton>
             </div>
-            <DouText variant="secondary" size="sm">
-              {{ t(`thread.stage.${item.thread.stage}`) }} · {{ item.thread.lastSummary }}
+            <DouText variant="secondary" size="sm" :truncate="2" :title="headline(item.thread)">
+              {{ headline(item.thread) }}
             </DouText>
+            <ReportArtifacts :artifacts="item.thread.lastArtifacts" />
           </div>
         </template>
       </div>

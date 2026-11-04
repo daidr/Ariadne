@@ -249,9 +249,14 @@ describe('plan revisions', () => {
     const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })
     app.startThread(thread.id)
     expect(app.getPlan(projectId).nodes[0]?.status).toBe('process')
-    app.reportThread(thread.id, 'blocked', '缺权限')
+    app.reportThread(thread.id, {
+      kind: 'blocked',
+      summary: '调用 GitHub 接口返回 403',
+      headline: '缺少仓库权限',
+    })
     expect(app.getPlan(projectId).nodes[0]?.status).toBe('error')
-    app.reportThread(thread.id, 'done', '完成')
+    expect(app.getPlan(projectId).nodes[0]?.threads[0]?.lastHeadline).toBe('缺少仓库权限')
+    app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' })
     expect(app.getPlan(projectId).nodes[0]?.status).toBe('finish')
     expect(() => app.createThread(projectId, { title: 'x', nodeId: 'nope' })).toThrow(DomainError)
   })
@@ -264,7 +269,11 @@ describe('plan revisions', () => {
     })
     const upstream = app.createThread(projectId, { title: '设计', nodeId: 'a' })
     const downstream = app.createThread(projectId, { title: '实现', nodeId: 'b' })
-    app.reportThread(upstream.id, 'done', '接口定为 REST')
+    app.reportThread(upstream.id, {
+      kind: 'done',
+      summary: '接口定为 REST',
+      headline: '接口定为 REST',
+    })
     const transcript = app.listTranscript(downstream.id)
     expect(transcript.at(-1)).toMatchObject({
       kind: 'note',
