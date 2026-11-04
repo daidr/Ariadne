@@ -10,13 +10,16 @@ import {
   DouInput,
   DouInputNumber,
   DouSelect,
+  DouSwitch,
   DouTabPanel,
   DouTabs,
+  DouText,
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError, type Concurrency, type ModelKind, type ModelSettings } from '../api'
-import { state } from '../store'
+import { notifications, setNotifications } from '../notify'
+import { applyModelSettings } from '../store'
 import { lt, t, tm } from '../i18n'
 import PluginSettings from './PluginSettings.vue'
 import WorktreeSettings from './WorktreeSettings.vue'
@@ -32,12 +35,21 @@ interface DraftProvider {
   secretsSet: string[]
 }
 
+interface DraftModel {
+  id: string
+  provider: string
+  model: string
+  /** In thousands of tokens; empty uses the default. */
+  contextK: number | null
+  note: string
+}
+
 const kinds = ref<ModelKind[]>([])
 const providers = ref<DraftProvider[]>([])
-const defaultProvider = ref<string | null>(null)
-const defaultModel = ref('')
-// In thousands of tokens; empty uses the default.
-const contextK = ref<number | null>(null)
+const models = ref<DraftModel[]>([])
+const coordinatorModel = ref<string | null>(null)
+// `''` stands for "the coordinator's", which the select cannot hold as `null`.
+const threadModel = ref<string>('')
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -50,21 +62,38 @@ const kindOptions = computed(() =>
 const providerOptions = computed(() =>
   providers.value.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
 )
+const modelOptions = computed(() =>
+  models.value
+    .filter((model) => model.model.trim())
+    .map((model) => ({
+      value: model.id,
+      label: `${providers.value.find((p) => p.id === model.provider)?.name ?? ''} / ${model.model.trim()}`,
+    })),
+)
+const threadOptions = computed(() => [
+  { value: '', label: t('settings.sameAsCoordinator') },
+  ...modelOptions.value,
+])
 
 function load(settings: ModelSettings) {
-  state.modelReady = !!settings.default
+  applyModelSettings(settings)
   kinds.value = settings.kinds
   providers.value = settings.providers.map((provider) => ({
     ...provider,
     settings: { ...provider.settings },
   }))
-  defaultProvider.value = settings.default?.provider ?? null
-  defaultModel.value = settings.default?.model ?? ''
-  const tokens = settings.default?.contextTokens
-  contextK.value = tokens ? Math.round(tokens / 1000) : null
+  models.value = settings.models.map((model) => ({
+    id: model.id,
+    provider: model.provider,
+    model: model.model,
+    contextK: model.contextTokens ? Math.round(model.contextTokens / 1000) : null,
+    note: model.note ?? '',
+  }))
+  coordinatorModel.value = settings.roles.coordinator
+  threadModel.value = settings.roles.thread ?? ''
 }
 
-const tab = ref<'models' | 'plugins' | 'worktrees'>('models')
+const tab = ref<'models' | 'notifications' | 'plugins' | 'worktrees'>('models')
 
 /** Reload the protocols only: a plugin added or removed changes them, not the draft. */
 async function reloadKinds() {
@@ -79,18 +108,20 @@ watch(open, async (isOpen) => {
   if (!isOpen) return
   error.value = null
   try {
-    const [models, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
-    load(models)
+    const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
+    load(saved)
     concurrency.value = slots
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
   }
 })
 
+const newId = (prefix: string) => `${prefix}_${Date.now().toString(36)}`
+
 function addProvider() {
   const kind = kinds.value[0]
   if (!kind) return
-  const id = `p_${Date.now().toString(36)}`
+  const id = newId('p')
   providers.value.push({
     id,
     kind: kind.kind,
@@ -98,16 +129,26 @@ function addProvider() {
     settings: {},
     secretsSet: [],
   })
-  defaultProvider.value ??= id
+  if (!models.value.length) addModel(id)
 }
 
 function removeProvider(id: string) {
   providers.value = providers.value.filter((provider) => provider.id !== id)
-  if (defaultProvider.value === id) {
-    // The model name belonged to the removed provider; do not carry it over.
-    defaultProvider.value = providers.value[0]?.id ?? null
-    defaultModel.value = ''
-  }
+  // Its models go with it.
+  for (const model of models.value.filter((m) => m.provider === id)) removeModel(model.id)
+}
+
+function addModel(provider = providers.value[0]?.id) {
+  if (!provider) return
+  const id = newId('m')
+  models.value.push({ id, provider, model: '', contextK: null, note: '' })
+  coordinatorModel.value ??= id
+}
+
+function removeModel(id: string) {
+  models.value = models.value.filter((model) => model.id !== id)
+  if (coordinatorModel.value === id) coordinatorModel.value = models.value[0]?.id ?? null
+  if (threadModel.value === id) threadModel.value = ''
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -120,6 +161,9 @@ async function save() {
   saving.value = true
   error.value = null
   try {
+    // A model without a name is left out, and so is a role that pointed at it.
+    const kept = models.value.filter((model) => model.model.trim())
+    const keep = (id: string | null) => (id && kept.some((m) => m.id === id) ? id : null)
     load(
       await api.saveModelSettings({
         providers: providers.value.map(({ id, kind, name, settings }) => ({
@@ -128,14 +172,17 @@ async function save() {
           name,
           settings,
         })),
-        default:
-          defaultProvider.value && defaultModel.value.trim()
-            ? {
-                provider: defaultProvider.value,
-                model: defaultModel.value.trim(),
-                ...(contextK.value ? { contextTokens: contextK.value * 1000 } : {}),
-              }
-            : null,
+        models: kept.map((model) => ({
+          id: model.id,
+          provider: model.provider,
+          model: model.model.trim(),
+          ...(model.contextK ? { contextTokens: model.contextK * 1000 } : {}),
+          ...(model.note.trim() ? { note: model.note.trim() } : {}),
+        })),
+        roles: {
+          coordinator: keep(coordinatorModel.value) ?? kept[0]?.id ?? null,
+          thread: keep(threadModel.value || null),
+        },
       }),
     )
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
@@ -198,36 +245,66 @@ async function save() {
             </DouForm>
           </DouCard>
 
-          <DouForm v-if="providers.length || concurrency" layout="vertical" size="sm">
-            <template v-if="providers.length">
-              <div class="settings-row">
-                <DouFormItem :label="t('settings.defaultProvider')" class="settings-grow">
-                  <DouSelect v-model="defaultProvider" :options="providerOptions" />
-                </DouFormItem>
-                <DouFormItem
-                  :label="t('settings.defaultModel')"
-                  :help="t('settings.defaultModelHelp')"
-                  class="settings-grow"
-                >
-                  <DouInput v-model="defaultModel" />
-                </DouFormItem>
-              </div>
-              <div class="settings-row">
-                <DouFormItem
-                  :label="t('settings.contextTokens')"
-                  :help="t('settings.contextTokensHelp')"
-                  class="settings-grow"
-                >
-                  <DouInputNumber
-                    v-model="contextK"
-                    :min="8"
-                    :max="10000"
-                    :step="8"
-                    placeholder="128"
-                  />
-                </DouFormItem>
-              </div>
-            </template>
+          <template v-if="providers.length">
+            <div class="settings-head">
+              <span>{{ t('settings.models') }}</span>
+              <DouButton size="sm" variant="outline" @click="addModel()">
+                <template #leading><PlusIcon /></template>
+                {{ t('settings.addModel') }}
+              </DouButton>
+            </div>
+            <DouCard v-for="model in models" :key="model.id" padding="sm">
+              <DouForm layout="vertical" size="sm">
+                <div class="settings-row">
+                  <DouFormItem :label="t('settings.provider')" class="settings-grow">
+                    <DouSelect v-model="model.provider" :options="providerOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.modelName')" class="settings-grow">
+                    <DouInput v-model="model.model" />
+                  </DouFormItem>
+                  <DouButton
+                    size="sm"
+                    variant="ghost"
+                    tone="danger"
+                    class="settings-remove"
+                    :aria-label="t('settings.remove')"
+                    :title="t('settings.remove')"
+                    @click="removeModel(model.id)"
+                  >
+                    <TrashIcon />
+                  </DouButton>
+                </div>
+                <div class="settings-row">
+                  <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
+                    <DouInputNumber
+                      v-model="model.contextK"
+                      :min="8"
+                      :max="10000"
+                      :step="8"
+                      placeholder="128"
+                    />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.modelNote')" class="settings-grow">
+                    <DouInput
+                      v-model="model.note"
+                      :maxlength="200"
+                      :placeholder="t('settings.modelNotePlaceholder')"
+                    />
+                  </DouFormItem>
+                </div>
+              </DouForm>
+            </DouCard>
+          </template>
+
+          <DouForm v-if="modelOptions.length || concurrency" layout="vertical" size="sm">
+            <div v-if="modelOptions.length" class="settings-row">
+              <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
+                <DouSelect v-model="coordinatorModel" :options="modelOptions" />
+              </DouFormItem>
+              <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
+                <DouSelect v-model="threadModel" :options="threadOptions" />
+              </DouFormItem>
+            </div>
             <div v-if="concurrency" class="settings-row">
               <DouFormItem
                 :label="t('settings.slots')"
@@ -246,6 +323,37 @@ async function save() {
             </div>
           </DouForm>
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
+        </div>
+      </DouTabPanel>
+      <DouTabPanel value="notifications" :label="t('settings.tab.notifications')">
+        <div class="settings">
+          <div class="settings-switch">
+            <div class="settings-switch-text">
+              <span>{{ t('settings.notify') }}</span>
+            </div>
+            <DouSwitch
+              :model-value="notifications.enabled"
+              :disabled="
+                notifications.permission === 'unsupported' || notifications.permission === 'denied'
+              "
+              @update:model-value="(on: boolean) => setNotifications(on)"
+            />
+          </div>
+          <DouText
+            v-if="
+              notifications.permission === 'denied' || notifications.permission === 'unsupported'
+            "
+            tone="warning"
+            size="sm"
+          >
+            {{
+              t(
+                notifications.permission === 'denied'
+                  ? 'settings.notifyDenied'
+                  : 'settings.notifyUnsupported',
+              )
+            }}
+          </DouText>
         </div>
       </DouTabPanel>
       <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
@@ -287,6 +395,24 @@ async function save() {
 .settings-grow {
   flex: 1;
   min-width: 0;
+}
+
+.settings-narrow {
+  flex: none;
+  width: 140px;
+}
+
+.settings-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .settings-remove {

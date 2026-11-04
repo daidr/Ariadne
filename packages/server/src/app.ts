@@ -1,16 +1,20 @@
 import {
+  buildTrace,
+  DEFAULT_CONTEXT_TOKENS,
   listWorktrees,
   mergeThread,
   refreshDashboard,
   syncThreadPullRequest,
   threadChanges,
   threadFile,
+  traceInput,
   type PluginHost,
   type Scheduler,
   type WorkspaceManager,
 } from '@ariadne/agent'
 import {
   DomainError,
+  type ConversationView,
   emptyContent,
   MAX_FILE_BYTES,
   parsePlanOps,
@@ -467,14 +471,60 @@ export function createHandler({
     return json({ artifact, versions: app.listArtifactVersions(artifactId) })
   })
 
-  add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }) =>
-    json({
-      conversation: app.getConversation(conversationId),
+  /** The model a conversation uses now, as the page shows it; `null` when none is set up. */
+  function modelOf(conversation: ConversationView) {
+    const given = conversation.role === 'thread' ? app.getThread(conversation.id).model : null
+    const chosen = settings?.modelFor(conversation.role, given) ?? null
+    if (!chosen) return null
+    return {
+      id: chosen.id,
+      contextTokens: chosen.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
+    }
+  }
+
+  add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }) => {
+    const conversation = app.getConversation(conversationId)
+    return json({
+      conversation,
       messages: app.listMessages(conversationId),
       notices: app.listNotices(conversationId),
       todo: app.getTodo(conversationId),
-    }),
+      model: modelOf(conversation),
+    })
+  })
+
+  // What the conversation's agent did, turn by turn, rebuilt from the log for debugging.
+  add(
+    'GET',
+    '/api/conversations/:conversationId/trace',
+    (_request, { conversationId = '' }, url) => {
+      const given = url.searchParams.get('before')
+      const before = given === null ? undefined : Number(given)
+      if (before !== undefined && !Number.isInteger(before)) throw new BadRequest('before')
+      return json(buildTrace(app, conversationId, before === undefined ? {} : { before }))
+    },
   )
+
+  // The whole request of one model call: a step, or the summary of older history.
+  add(
+    'GET',
+    '/api/conversations/:conversationId/trace/input/:seq',
+    (_request, { conversationId = '', seq = '' }) => {
+      const at = Number(seq)
+      if (!Number.isInteger(at) || at < 1) throw new BadRequest('seq')
+      return json({ input: traceInput(app, conversationId, at) })
+    },
+  )
+
+  // The user gives a thread another model, or back the default with `null`.
+  add('PUT', '/api/threads/:threadId/model', async (request, { threadId = '' }) => {
+    const { model } = await readJson(request)
+    if (model !== null && typeof model !== 'string') throw new BadRequest('model')
+    if (model !== null && !settings?.modelChoices().some((choice) => choice.id === model)) {
+      throw new BadRequest('model')
+    }
+    return json({ thread: app.setThreadModel(threadId, model, 'user') })
+  })
 
   add('POST', '/api/conversations/:conversationId/stop', (_request, { conversationId = '' }) => {
     app.getConversation(conversationId)

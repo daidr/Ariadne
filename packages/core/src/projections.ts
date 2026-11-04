@@ -30,6 +30,7 @@ export const projectionTables = [
   'issue_writes',
   'artifacts',
   'artifact_versions',
+  'prompts',
 ] as const
 
 export const projectsProjection: Projection = {
@@ -104,6 +105,7 @@ export const threadsProjection: Projection = {
       stopped_reason TEXT,
       stopped_by TEXT,
       stopped_at INTEGER,
+      model TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -113,16 +115,24 @@ export const threadsProjection: Projection = {
     switch (event.type) {
       case 'thread.created':
         db.run(
-          'INSERT INTO threads (id, project_id, title, node_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO threads (id, project_id, title, node_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             event.data.threadId,
             event.projectId,
             event.data.title,
             event.data.nodeId,
+            event.data.model,
             event.at,
             event.at,
           ],
         )
+        break
+      case 'thread.model_set':
+        db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
+          event.data.model,
+          event.at,
+          event.data.threadId,
+        ])
         break
       case 'thread.started':
         db.run('UPDATE threads SET started = 1, updated_at = ? WHERE id = ?', [
@@ -534,6 +544,7 @@ export const conversationsProjection: Projection = {
       last_error TEXT,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
+      context_tokens INTEGER NOT NULL DEFAULT 0,
       instructions TEXT
     )`)
   },
@@ -574,13 +585,16 @@ export const conversationsProjection: Projection = {
           `UPDATE conversations SET
              pending_since = CASE WHEN pending_seq <= ?1 THEN 0 ELSE max(pending_since, ?1 + 1) END,
              pending_seq = CASE WHEN pending_seq <= ?1 THEN 0 ELSE pending_seq END,
-             input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3
+             input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3,
+             context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END
            WHERE id = ?4`,
           [
             event.data.sawSeq,
             event.data.usage?.input ?? 0,
             event.data.usage?.output ?? 0,
             event.data.conversationId,
+            // What the model read last is how full its context is; unknown keeps the last.
+            event.data.usage !== null,
           ],
         )
         break
@@ -1485,7 +1499,29 @@ export const artifactsProjection: Projection = {
   },
 }
 
+/** Model input stored once by its hash, see `prompt.recorded`. */
+export const promptsProjection: Projection = {
+  name: 'prompts',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS prompts (
+      project_id TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      content TEXT NOT NULL,
+      PRIMARY KEY (project_id, hash)
+    )`)
+  },
+  apply(db, event) {
+    if (event.type !== 'prompt.recorded') return
+    db.run('INSERT OR IGNORE INTO prompts (project_id, hash, content) VALUES (?, ?, ?)', [
+      event.projectId,
+      event.data.hash,
+      event.data.content,
+    ])
+  },
+}
+
 export const defaultProjections: Projection[] = [
+  promptsProjection,
   projectsProjection,
   threadsProjection,
   attentionsProjection,

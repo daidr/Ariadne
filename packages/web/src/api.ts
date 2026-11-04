@@ -12,6 +12,8 @@ import type {
   ProjectView,
   ThreadView,
   TodoView,
+  TraceInput,
+  TraceTurn,
   MemoryView,
   NoticeView,
   StoredFile,
@@ -138,9 +140,20 @@ export interface Concurrency {
   reserved: number
 }
 
+/** One model on one of the providers; `note` says what it is for, for the coordinator. */
+export interface ModelEntry {
+  id: string
+  provider: string
+  model: string
+  contextTokens?: number
+  note?: string
+}
+
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
-  default: { provider: string; model: string; contextTokens?: number } | null
+  models: ModelEntry[]
+  /** `thread: null` uses the coordinator's. */
+  roles: { coordinator: string | null; thread: string | null }
 }
 
 export interface ModelSettings extends ModelSettingsInput {
@@ -190,7 +203,18 @@ export const api = {
       messages: MessageView[]
       notices: NoticeView[]
       todo: TodoView
+      /** The model it uses now, with how much its context holds. */
+      model: { id: string; contextTokens: number } | null
     }>('GET', `/api/conversations/${id}`),
+  getTrace: (id: string, before?: number) =>
+    request<{ turns: TraceTurn[]; more: boolean }>(
+      'GET',
+      `/api/conversations/${id}/trace${before === undefined ? '' : `?before=${before}`}`,
+    ),
+  getTraceInput: (id: string, seq: number) =>
+    request<{ input: TraceInput }>('GET', `/api/conversations/${id}/trace/input/${seq}`),
+  setThreadModel: (threadId: string, model: string | null) =>
+    request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
   getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),

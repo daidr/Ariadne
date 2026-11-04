@@ -112,13 +112,11 @@ export const summaryMessages = (summary: string, state?: string): ChatMessage[] 
 export function toChatMessages(
   transcript: TranscriptEntry[],
   titleOf: (threadId: string) => string,
-  options: { state?: () => string } = {},
+  options: { state?: string } = {},
 ): ChatMessage[] {
   const visible = visibleHistory(transcript)
   const { entries } = visible
-  const out: ChatMessage[] = visible.summary
-    ? summaryMessages(visible.summary, options.state?.())
-    : []
+  const out: ChatMessage[] = visible.summary ? summaryMessages(visible.summary, options.state) : []
   let open: { ids: string[]; names: Map<string, string> } | null = null
   let held: ChatMessage[] = []
   const results = new Map<string, Extract<TranscriptEntry, { kind: 'tool' }>>()

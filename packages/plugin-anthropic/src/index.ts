@@ -86,7 +86,14 @@ export function toWire(messages: ChatMessage[]): { system: string; messages: Wir
 interface StreamEvent {
   type: string
   index?: number
-  message?: { usage?: { input_tokens?: number; output_tokens?: number } }
+  message?: {
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+  }
   content_block?: { type: string; id?: string; name?: string }
   delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string | null }
   usage?: { output_tokens?: number }
@@ -176,10 +183,16 @@ async function* readStream(
         continue
       }
       switch (event.type) {
-        case 'message_start':
-          input = event.message?.usage?.input_tokens ?? 0
-          output = event.message?.usage?.output_tokens ?? 0
+        case 'message_start': {
+          // Cached input is counted apart; all of it is what the model read.
+          const usage = event.message?.usage
+          input =
+            (usage?.input_tokens ?? 0) +
+            (usage?.cache_creation_input_tokens ?? 0) +
+            (usage?.cache_read_input_tokens ?? 0)
+          output = usage?.output_tokens ?? 0
           break
+        }
         case 'content_block_start':
           if (event.content_block?.type === 'tool_use' && event.index !== undefined) {
             blocks.set(event.index, {

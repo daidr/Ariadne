@@ -36,6 +36,8 @@ export interface ProjectView {
    * leaves it to the total. A turn answering the user may still take a reserved slot.
    */
   slots: number | null
+  /** Tokens every conversation of the project has used, summaries included. */
+  usage: { input: number; output: number }
 }
 
 export interface ThreadView {
@@ -62,6 +64,10 @@ export interface ThreadView {
   pullRequest: ThreadPullRequest | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
   stopped: { reason: string; by: string; at: number } | null
+  /** The model setting it was given; `null` uses the default for threads. */
+  model: string | null
+  /** Tokens its turns have used. */
+  usage: { input: number; output: number }
   createdAt: number
   updatedAt: number
 }
@@ -189,6 +195,8 @@ export interface ConversationView {
   lastOutcome: TurnOutcome | null
   lastError: LocalizedMessage | null
   usage: { input: number; output: number }
+  /** How many tokens the model read in its latest step: how full its context is. */
+  contextTokens: number
 }
 
 /** One entry of what a conversation's agent has seen, oldest first. */
@@ -356,4 +364,71 @@ export interface ArtifactVersionView {
   author: string
   reason: string
   createdAt: number
+}
+
+/**
+ * One turn of a conversation as the trace shows it, rebuilt from the event log: every
+ * model step with its output, calls and their results, retries, summaries and timing.
+ */
+export interface TraceTurn {
+  turnId: string
+  /** The `turn.started` event; earlier turns are paged by it. */
+  seq: number
+  model: string
+  startedAt: number
+  /** `null` while it runs. */
+  finishedAt: number | null
+  outcome: TurnOutcome | null
+  error: LocalizedMessage | null
+  usage: { input: number; output: number }
+  items: TraceItem[]
+}
+
+export interface TraceToolCall extends ToolCallRecord {
+  /** `null` while it runs. */
+  result: { content: string; isError: boolean; durationMs: number } | null
+}
+
+export type TraceItem =
+  | {
+      kind: 'step'
+      /** The `turn.step` event, which its full input is fetched by. */
+      seq: number
+      at: number
+      /** From the event before it to the response, less any wait before a retry. */
+      durationMs: number
+      text: string
+      toolCalls: TraceToolCall[]
+      usage: { input: number; output: number } | null
+    }
+  | { kind: 'retry'; at: number; attempt: number; delayMs: number; detail: string }
+  | {
+      kind: 'compacted'
+      /** The `conversation.compacted` event, which the summary's input is fetched by. */
+      seq: number
+      at: number
+      durationMs: number
+      summary: string
+      usage: { input: number; output: number } | null
+    }
+  | { kind: 'compaction-failed'; at: number; detail: string }
+  | { kind: 'instructions'; at: number; path: string; changed: boolean; removed: boolean }
+
+/** The whole request one model call was sent, rebuilt from the event log. */
+export interface TraceInput {
+  /** `system`, `user`, `assistant` and `tool` messages, as the provider got them. */
+  messages: (
+    | { role: 'system' | 'user'; content: string }
+    | { role: 'assistant'; content: string; toolCalls?: ToolCallRecord[] }
+    | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
+  )[]
+  /** The tool definitions it was offered. */
+  tools: { name: string; description: string; parameters: Record<string, unknown> }[]
+  /**
+   * Messages from here on are new since the conversation's previous call; the system
+   * prompt (the first message) is compared apart.
+   */
+  newFrom: number
+  /** The system prompt differs from the previous call's. */
+  systemChanged: boolean
 }

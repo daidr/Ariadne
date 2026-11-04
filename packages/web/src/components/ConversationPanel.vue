@@ -3,11 +3,15 @@ import {
   DouAlert,
   DouButton,
   DouChatInput,
+  DouChatContextMeter,
   DouChatPlan,
   DouChatList,
   DouChatMessage,
   DouCollapse,
   DouCollapseItem,
+  DouDropdown,
+  DouDropdownItem,
+  DouDropdownRadioGroup,
   DouEmpty,
   DouInput,
   DouLink,
@@ -17,8 +21,12 @@ import {
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
 import {
+  ChevronDownIcon,
+  CpuIcon,
   FileDiffIcon,
   GitBranchIcon,
+  ListTreeIcon,
+  MoreHorizontalIcon,
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
@@ -27,7 +35,7 @@ import {
 } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
-import { t, tm } from '../i18n'
+import { count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
@@ -38,6 +46,7 @@ import {
   sendMessage,
   state,
   resumeThread,
+  setThreadModel,
   stopThread,
   stopTurn,
   undoNotice,
@@ -60,6 +69,25 @@ const thread = computed(() =>
     : null,
 )
 const working = computed(() => !!view.value.conversation?.turn)
+// The model it uses now; a thread's picker also offers going back to the default.
+const modelLabel = computed(() => {
+  const id = view.value.model?.id
+  return state.models.find((model) => model.id === id)?.label ?? null
+})
+const defaultLabel = computed(
+  () => state.models.find((model) => model.id === state.threadDefault)?.label ?? '',
+)
+// A model since removed from the settings falls back to the default, so that is shown.
+const pickedModel = computed(() => {
+  const id = thread.value?.model
+  return id && state.models.some((model) => model.id === id) ? id : ''
+})
+function pickModel(value: string | number | undefined) {
+  if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
+}
+function openTrace() {
+  if (conversationId.value) openMain({ kind: 'trace', conversationId: conversationId.value })
+}
 const todo = computed(() => todoPlan(view.value.todo, working.value))
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
@@ -203,30 +231,56 @@ watch(
           <template #leading><FileDiffIcon /></template>
           {{ t('changes.open') }}
         </DouButton>
-        <DouPopover
-          v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
-          v-model:open="stopOpen"
-          trigger="click"
-          :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
-          :width="320"
-        >
-          <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
-            <template #leading><PauseIcon /></template>
-            {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
-          </DouButton>
-          <template #content>
-            <div class="stop-form">
-              <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
-              <DouButton
-                size="sm"
-                tone="primary"
-                @click="stopThreadNow(thread.id, !!thread.stopped)"
-              >
-                {{ t('thread.stopConfirm') }}
-              </DouButton>
-            </div>
-          </template>
-        </DouPopover>
+        <div class="conversation-tools">
+          <DouText
+            v-if="thread.usage.input || thread.usage.output"
+            variant="tertiary"
+            size="sm"
+            :title="t('usage.detail', { input: thread.usage.input, output: thread.usage.output })"
+          >
+            {{ t('usage.short', { value: count(thread.usage.input + thread.usage.output) }) }}
+          </DouText>
+          <DouPopover
+            v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
+            v-model:open="stopOpen"
+            trigger="click"
+            :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
+            :width="320"
+          >
+            <DouButton variant="ghost" size="sm">
+              <template #leading><PauseIcon /></template>
+              {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
+            </DouButton>
+            <template #content>
+              <div class="stop-form">
+                <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
+                <DouButton
+                  size="sm"
+                  tone="primary"
+                  @click="stopThreadNow(thread.id, !!thread.stopped)"
+                >
+                  {{ t('thread.stopConfirm') }}
+                </DouButton>
+              </div>
+            </template>
+          </DouPopover>
+          <DouDropdown placement="bottom-end">
+            <DouButton
+              variant="ghost"
+              size="sm"
+              :aria-label="t('thread.more')"
+              :title="t('thread.more')"
+            >
+              <MoreHorizontalIcon />
+            </DouButton>
+            <template #menu>
+              <DouDropdownItem value="trace" @click="openTrace">
+                <template #prefix><ListTreeIcon /></template>
+                {{ t('trace.open') }}
+              </DouDropdownItem>
+            </template>
+          </DouDropdown>
+        </div>
       </div>
     </div>
 
@@ -454,7 +508,38 @@ watch(
         :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         @submit="submit"
-      />
+      >
+        <template #actions>
+          <!-- Which model answers here, and how full its context is. -->
+          <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
+            <DouButton variant="ghost" size="sm" :title="t('thread.model')">
+              <template #leading><CpuIcon /></template>
+              <span class="conversation-model">{{ modelLabel ?? t('thread.noModel') }}</span>
+              <template #trailing><ChevronDownIcon /></template>
+            </DouButton>
+            <template #menu>
+              <DouDropdownRadioGroup :model-value="pickedModel" @update:model-value="pickModel">
+                <DouDropdownItem value="">
+                  {{ t('thread.modelDefault', { label: defaultLabel }) }}
+                </DouDropdownItem>
+                <DouDropdownItem v-for="model in state.models" :key="model.id" :value="model.id">
+                  {{ model.label }}
+                </DouDropdownItem>
+              </DouDropdownRadioGroup>
+            </template>
+          </DouDropdown>
+          <DouText v-else-if="modelLabel" variant="tertiary" size="sm" class="conversation-model">
+            {{ modelLabel }}
+          </DouText>
+          <DouChatContextMeter
+            v-if="view.model && view.conversation?.contextTokens"
+            :used="view.conversation.contextTokens"
+            :total="view.model.contextTokens"
+            :warn-at="0.5"
+            :danger-at="0.6"
+          />
+        </template>
+      </DouChatInput>
     </div>
   </div>
 </template>
@@ -542,8 +627,18 @@ watch(
   padding: 12px 16px 16px;
 }
 
-.conversation-stop-thread {
+.conversation-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+.conversation-model {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stop-form {

@@ -3,10 +3,24 @@ import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
 import { issueReadTools, issueWriteTools } from './issue-tools'
 import { repoTools } from './repo-tools'
-import { json, optionalInt, str, ToolInputError, type Tool, type ToolContext } from './tool-helpers'
+import {
+  json,
+  optionalInt,
+  str,
+  ToolInputError,
+  type ModelChoice,
+  type Tool,
+  type ToolContext,
+} from './tool-helpers'
 import { workspaceTools } from './workspace-tools'
 
-export { ToolInputError, type Tool, type ToolContext, type ToolResult } from './tool-helpers'
+export {
+  ToolInputError,
+  type ModelChoice,
+  type Tool,
+  type ToolContext,
+  type ToolResult,
+} from './tool-helpers'
 
 const TODO_STATUSES = ['doing', 'next', 'waiting', 'done'] as const
 const REPORT_KINDS = ['progress', 'waiting', 'ready', 'blocked', 'failed', 'done'] as const
@@ -187,36 +201,63 @@ const report: Tool = {
   },
 }
 
-const createThread: Tool = {
-  spec: {
-    name: 'create_thread',
-    description:
-      'Open a thread for one piece of work and hand it a brief. The thread starts as soon as a slot is free. Brief it like a capable peer: the goal, what is known, the scope, and when it is done.',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Three to six words, the goal first.' },
-        brief: { type: 'string' },
-        nodeId: {
-          type: 'string',
-          description:
-            'The plan node this thread works on. It sees the node, and what its upstream nodes produced.',
+const CREATE_THREAD_DESCRIPTION =
+  'Open a thread for one piece of work and hand it a brief. The thread starts as soon as a slot is free. Brief it like a capable peer: the goal, what is known, the scope, and when it is done.'
+
+/** `models` are offered as a choice when there is more than one. */
+function createThread(models: ModelChoice[]): Tool {
+  const choose = models.length > 1
+  return {
+    spec: {
+      name: 'create_thread',
+      description: CREATE_THREAD_DESCRIPTION,
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Three to six words, the goal first.' },
+          brief: { type: 'string' },
+          nodeId: {
+            type: 'string',
+            description:
+              'The plan node this thread works on. It sees the node, and what its upstream nodes produced.',
+          },
+          ...(choose
+            ? {
+                model: {
+                  type: 'string',
+                  enum: models.map((m) => m.id),
+                  description:
+                    'The model for this work, from the list in your instructions. Leave it out for the default for threads.',
+                },
+              }
+            : {}),
         },
+        required: ['title', 'brief'],
       },
-      required: ['title', 'brief'],
     },
-  },
-  run(args, ctx) {
-    const nodeId = typeof args.nodeId === 'string' && args.nodeId ? args.nodeId : null
-    const thread = ctx.app.createThread(ctx.projectId, { title: str(args, 'title'), nodeId })
-    ctx.app.postMessage(ctx.projectId, {
-      conversationId: thread.id,
-      author: 'coordinator',
-      kind: 'relay',
-      content: str(args, 'brief'),
-    })
-    return json({ threadId: thread.id, stage: thread.stage })
-  },
+    run(args, ctx) {
+      const nodeId = typeof args.nodeId === 'string' && args.nodeId ? args.nodeId : null
+      let model: string | null = null
+      if (typeof args.model === 'string' && args.model) {
+        if (!(ctx.models ?? []).some((m) => m.id === args.model)) {
+          throw new ToolInputError(`"model" must be one of the listed models`)
+        }
+        model = args.model
+      }
+      const thread = ctx.app.createThread(ctx.projectId, {
+        title: str(args, 'title'),
+        nodeId,
+        model,
+      })
+      ctx.app.postMessage(ctx.projectId, {
+        conversationId: thread.id,
+        author: 'coordinator',
+        kind: 'relay',
+        content: str(args, 'brief'),
+      })
+      return json({ threadId: thread.id, stage: thread.stage })
+    },
+  }
 }
 
 const messageThread: Tool = {
@@ -430,10 +471,11 @@ const forget: Tool = {
   },
 }
 
-export const coordinatorTools: Tool[] = [
+/** The coordinator's tools; `models` are those it may give a thread. */
+export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   updateTodo,
   askUser,
-  createThread,
+  createThread(models),
   messageThread,
   stopThread,
   resumeThread,
@@ -465,10 +507,10 @@ export const threadTools: Tool[] = [
  */
 export function toolsFor(
   role: 'coordinator' | 'thread',
-  source: { workspace: boolean; repo: boolean; tracker?: boolean },
+  source: { workspace: boolean; repo: boolean; tracker?: boolean; models?: ModelChoice[] },
 ): Tool[] {
   if (role === 'coordinator') {
-    return [...coordinatorTools, ...(source.tracker ? issueReadTools : [])]
+    return [...coordinatorTools(source.models), ...(source.tracker ? issueReadTools : [])]
   }
   return [
     ...threadTools,

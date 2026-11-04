@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
@@ -15,6 +16,7 @@ import type {
   PlanOp,
   ProjectSource,
   ReportKind,
+  StepInput,
   ThreadPullRequest,
   TodoItem,
   TokenUsage,
@@ -32,7 +34,7 @@ import {
   MAX_CHECK_ATTEMPTS,
 } from './projections'
 import { needsUser, threadStage, type ThreadStage } from './stage'
-import { EventStore, type EventListener } from './store'
+import { EventStore, toStored as storedEvent, type EventListener, type EventRow } from './store'
 import type {
   ArtifactPreview,
   ArtifactSummary,
@@ -60,7 +62,19 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 19
+export const PROJECTION_VERSION = 20
+
+/** The events a conversation's trace is rebuilt from; each names its conversation. */
+const TURN_EVENT_TYPES = [
+  'turn.started',
+  'turn.step',
+  'tool.finished',
+  'turn.finished',
+  'conversation.model_retry',
+  'conversation.compacted',
+  'conversation.compaction_failed',
+  'conversation.instructions',
+] as const
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -78,6 +92,7 @@ interface ConversationRow {
   last_error: string | null
   input_tokens: number
   output_tokens: number
+  context_tokens: number
 }
 
 /**
@@ -101,6 +116,7 @@ function toConversation(row: ConversationRow): ConversationView {
     lastOutcome: row.last_outcome,
     lastError: row.last_error ? (JSON.parse(row.last_error) as LocalizedMessage) : null,
     usage: { input: row.input_tokens, output: row.output_tokens },
+    contextTokens: row.context_tokens,
   }
 }
 
@@ -196,12 +212,15 @@ interface ThreadRow {
   stopped_reason: string | null
   stopped_by: string | null
   stopped_at: number | null
+  model: string | null
   created_at: number
   updated_at: number
   open_attentions: number
   turn_id: string | null
   pending_seq: number | null
   last_outcome: TurnOutcome | null
+  input_tokens: number | null
+  output_tokens: number | null
 }
 
 interface AttentionRow {
@@ -228,7 +247,8 @@ interface MessageRow {
 }
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
-const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, (
+const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
+  c.output_tokens, (
   SELECT count(*) FROM attentions a WHERE a.answered = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
@@ -272,6 +292,8 @@ function toThread(row: ThreadRow): ThreadView {
       row.stopped_reason === null
         ? null
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
+    model: row.model,
+    usage: { input: row.input_tokens ?? 0, output: row.output_tokens ?? 0 },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -477,20 +499,32 @@ export class Ariadne {
       .map(toConversation)
   }
 
-  /** Everything this conversation's agent has seen, oldest first. */
-  listTranscript(conversationId: string): TranscriptEntry[] {
+  /**
+   * Everything this conversation's agent has seen, oldest first. With `upTo`, only what
+   * was there once event `upTo` was written, messages as they read then: the input a step
+   * that had seen up to it was built from.
+   */
+  listTranscript(conversationId: string, options: { upTo?: number } = {}): TranscriptEntry[] {
+    const upTo = options.upTo ?? Number.MAX_SAFE_INTEGER
     const rows = this.db
-      .query<{ seq: number; kind: string; ref: string | null; payload: string | null }, [string]>(
-        'SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? ORDER BY id',
+      .query<
+        { seq: number; kind: string; ref: string | null; payload: string | null },
+        [string, number]
+      >(
+        'SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? AND seq <= ? ORDER BY id',
       )
-      .all(conversationId)
+      .all(conversationId, upTo)
     const entries: TranscriptEntry[] = []
     for (const row of rows) {
       const payload = row.payload ? JSON.parse(row.payload) : null
       switch (row.kind) {
         case 'message': {
           const message = row.ref ? this.findMessage(row.ref) : null
-          if (message) entries.push({ seq: row.seq, kind: 'message', message })
+          if (message) {
+            const content =
+              options.upTo === undefined ? message.content : this.contentAt(message, upTo)
+            entries.push({ seq: row.seq, kind: 'message', message: { ...message, content } })
+          }
           break
         }
         case 'note':
@@ -517,12 +551,18 @@ export class Ariadne {
   compactConversation(
     conversationId: string,
     turnId: string,
-    compaction: { summary: string; upTo: number; usage: TokenUsage | null },
+    compaction: { summary: string; upTo: number; sawSeq: number; usage: TokenUsage | null },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
     const summary = compaction.summary.trim()
     if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
-    const data = { conversationId, summary, upTo: compaction.upTo, usage: compaction.usage }
+    const data = {
+      conversationId,
+      summary,
+      upTo: compaction.upTo,
+      sawSeq: compaction.sawSeq,
+      usage: compaction.usage,
+    }
     this.store.append([{ type: 'conversation.compacted', projectId, data }])
   }
 
@@ -611,7 +651,10 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
-  createThread(projectId: string, input: { title: string; nodeId?: string | null }): ThreadView {
+  createThread(
+    projectId: string,
+    input: { title: string; nodeId?: string | null; model?: string | null },
+  ): ThreadView {
     this.getProject(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
@@ -623,8 +666,18 @@ export class Ariadne {
       {
         type: 'thread.created',
         projectId,
-        data: { threadId, title, nodeId: input.nodeId ?? null },
+        data: { threadId, title, nodeId: input.nodeId ?? null, model: input.model ?? null },
       },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /** Give a thread another model setting from its next step on; `null` is the default. */
+  setThreadModel(threadId: string, model: string | null, by: string): ThreadView {
+    const thread = this.getThread(threadId)
+    if (thread.model === model) return thread
+    this.store.append([
+      { type: 'thread.model_set', projectId: thread.projectId, data: { threadId, model, by } },
     ])
     return this.getThread(threadId)
   }
@@ -1777,13 +1830,108 @@ export class Ariadne {
     return turnId
   }
 
+  /**
+   * Record one model response, with the input it answered that the transcript does not
+   * hold (system prompt, tool definitions, current state). Each piece is stored once per
+   * project by its hash, so the trace can rebuild every request whole.
+   */
   recordStep(
     conversationId: string,
     turnId: string,
-    step: { text: string; toolCalls: ToolCallRecord[]; sawSeq: number; usage: TokenUsage | null },
+    step: {
+      text: string
+      toolCalls: ToolCallRecord[]
+      sawSeq: number
+      usage: TokenUsage | null
+      input: { system: string; tools: string; state: string | null }
+    },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
-    this.store.append([{ type: 'turn.step', projectId, data: { conversationId, turnId, ...step } }])
+    const pieces: AnyNewEvent[] = []
+    const seen = new Set<string>()
+    const keep = (content: string) => {
+      const hash = createHash('sha256').update(content).digest('hex')
+      if (!seen.has(hash) && this.getPrompt(projectId, hash) === null) {
+        pieces.push({ type: 'prompt.recorded', projectId, data: { hash, content } })
+      }
+      seen.add(hash)
+      return hash
+    }
+    const input: StepInput = {
+      system: keep(step.input.system),
+      tools: keep(step.input.tools),
+      state: step.input.state === null ? null : keep(step.input.state),
+    }
+    const { text, toolCalls, sawSeq, usage } = step
+    this.store.append([
+      ...pieces,
+      {
+        type: 'turn.step',
+        projectId,
+        data: { conversationId, turnId, text, toolCalls, sawSeq, usage, input },
+      },
+    ])
+  }
+
+  /** A piece of model input by its hash, see `recordStep`; `null` when not stored. */
+  getPrompt(projectId: string, hash: string): string | null {
+    return (
+      this.db
+        .query<{ content: string }, [string, string]>(
+          'SELECT content FROM prompts WHERE project_id = ? AND hash = ?',
+        )
+        .get(projectId, hash)?.content ?? null
+    )
+  }
+
+  /** The last model step of a conversation before `seq`, in whatever turn it was. */
+  lastStepBefore(conversationId: string, seq: number): AnyStoredEvent | null {
+    const conversation = this.getConversation(conversationId)
+    const row = this.db
+      .query<EventRow, [string, string, number]>(
+        `SELECT * FROM events WHERE project_id = ? AND type = 'turn.step'
+           AND json_extract(data, '$.conversationId') = ? AND seq < ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(conversation.projectId, conversationId, seq)
+    return row ? storedEvent(row) : null
+  }
+
+  /**
+   * Every event of a conversation's turns, oldest first: what the trace is rebuilt from.
+   * `before` (a `turn.started` seq) and `turns` page backwards through them.
+   */
+  listTurnEvents(
+    conversationId: string,
+    options: { before?: number; turns?: number } = {},
+  ): { events: AnyStoredEvent[]; more: boolean } {
+    const conversation = this.getConversation(conversationId)
+    const turns = options.turns ?? 10
+    const starts = this.db
+      .query<{ seq: number }, [string, string, number, number]>(
+        `SELECT seq FROM events WHERE project_id = ? AND type = 'turn.started'
+           AND json_extract(data, '$.conversationId') = ? AND seq < ?
+         ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(
+        conversation.projectId,
+        conversationId,
+        options.before ?? Number.MAX_SAFE_INTEGER,
+        turns + 1,
+      )
+    const more = starts.length > turns
+    const first = starts.slice(0, turns).at(-1)?.seq
+    if (first === undefined) return { events: [], more: false }
+    const until = options.before ?? Number.MAX_SAFE_INTEGER
+    const rows = this.db
+      .query<EventRow, [string, number, number, string]>(
+        `SELECT * FROM events WHERE project_id = ? AND seq >= ? AND seq < ?
+           AND type IN (${TURN_EVENT_TYPES.map((type) => `'${type}'`).join(', ')})
+           AND json_extract(data, '$.conversationId') = ?
+         ORDER BY seq`,
+      )
+      .all(conversation.projectId, first, until, conversationId)
+    return { events: rows.map(storedEvent), more }
   }
 
   recordToolResult(
@@ -1886,6 +2034,20 @@ export class Ariadne {
     return conversation.projectId
   }
 
+  /** What a message said once event `seq` was written: its last edit by then, if any. */
+  private contentAt(message: MessageView, seq: number): string {
+    if (message.editedAt === null) return message.content
+    const edit = this.db
+      .query<{ content: string }, [string, string, number]>(
+        `SELECT json_extract(data, '$.content') AS content FROM events
+         WHERE project_id = (SELECT project_id FROM messages WHERE id = ?1)
+           AND type = 'message.edited' AND json_extract(data, '$.messageId') = ?2 AND seq <= ?3
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(message.id, message.id, seq)
+    return edit?.content ?? message.originalContent ?? message.content
+  }
+
   private findMessage(messageId: string): MessageView | null {
     const row = this.db
       .query<MessageRow, [string]>('SELECT * FROM messages WHERE id = ?')
@@ -1922,6 +2084,16 @@ export class Ariadne {
     this.assertThreadIn(projectId, conversationId)
   }
 
+  private projectUsage(projectId: string): { input: number; output: number } {
+    const row = this.db
+      .query<{ input: number | null; output: number | null }, [string]>(
+        `SELECT sum(input_tokens) AS input, sum(output_tokens) AS output FROM conversations
+         WHERE project_id = ?`,
+      )
+      .get(projectId)
+    return { input: row?.input ?? 0, output: row?.output ?? 0 }
+  }
+
   private toProject(row: ProjectRow): ProjectView {
     return {
       id: row.id,
@@ -1932,6 +2104,7 @@ export class Ariadne {
       needsMe: this.listNeedsMe(row.id).length,
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
       slots: row.slots,
+      usage: this.projectUsage(row.id),
     }
   }
 }

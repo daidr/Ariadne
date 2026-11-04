@@ -28,6 +28,19 @@ export interface ToolContext {
   userSpoke?: () => boolean
   /** The plugins' live data sources for dashboards, by kind. */
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /** The models the user set up, which the coordinator may give a thread. */
+  models?: ModelChoice[]
+}
+
+/** A model the user set up, as the coordinator picks among them for a thread. */
+export interface ModelChoice {
+  id: string
+  /** e.g. `provider / model`. */
+  label: string
+  /** What the user said it is for. */
+  note: string
+  /** Threads use it unless given another. */
+  threadDefault: boolean
 }
 
 export interface ToolResult {

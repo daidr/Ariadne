@@ -2,6 +2,7 @@ import type { DashboardSource } from '@ariadne/plugin-sdk'
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import { runTurn, type ResolvedModel } from './runner'
+import type { ModelChoice } from './tools'
 import type { WorkspaceManager } from './workspaces'
 
 export interface SchedulerOptions {
@@ -20,6 +21,8 @@ export interface SchedulerOptions {
   /** The plugins' live data sources for dashboards. */
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   workspaces?: WorkspaceManager
+  /** The models the user set up, which the coordinator may give a thread. */
+  models?: () => ModelChoice[]
 }
 
 interface Running {
@@ -174,6 +177,7 @@ export class Scheduler {
           ? { retryBaseMs: this.options.retryBaseMs }
           : {}),
         ...(this.options.workspaces ? { workspaces: this.options.workspaces } : {}),
+        ...(this.options.models ? { models: this.options.models() } : {}),
         ...(this.options.dashboardSources
           ? { dashboardSources: this.options.dashboardSources }
           : {}),
