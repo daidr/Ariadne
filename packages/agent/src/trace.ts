@@ -183,6 +183,7 @@ function addUsage(sum: TokenUsage, usage: TokenUsage) {
   sum.input += usage.input
   sum.output += usage.output
   if (usage.cached) sum.cached = (sum.cached ?? 0) + usage.cached
+  if (usage.cacheWrite) sum.cacheWrite = (sum.cacheWrite ?? 0) + usage.cacheWrite
   if (usage.reasoning) sum.reasoning = (sum.reasoning ?? 0) + usage.reasoning
 }
 

@@ -82,6 +82,8 @@ export interface TokenUsage {
   input: number
   output: number
   cached?: number
+  /** The part of `input` written to the provider's cache. */
+  cacheWrite?: number
   reasoning?: number
 }
 
