@@ -2713,7 +2713,6 @@ export class Ariadne {
     ])
   }
 
-  /** Whether the newest unseen input of a conversation is a message the user wrote. */
   /**
    * Whether all the coordinator has waiting is what the user wrote inside threads (and
    * progress reports, which need nothing): the turn only decides where those belong.
@@ -2735,6 +2734,7 @@ export class Ariadne {
     return triage
   }
 
+  /** Whether the newest unseen input of a conversation is a message the user wrote. */
   pendingIsUserMessage(conversationId: string): boolean {
     const row = this.db
       .query<{ author: string }, [string]>(

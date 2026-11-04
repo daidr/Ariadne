@@ -344,10 +344,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         if (upTo !== null && upTo > clearedUpTo(transcript)) {
           const cleared = toChatMessages(transcript, titleOf, { ...chat, clearUpTo: upTo })
           const after = estimateTokens([{ role: 'system', content: systemText }, ...cleared])
-          if (after < estimate * (1 - MIN_CLEARED_SHARE)) {
+          // Not enough means a summary anyway, and it is better written from the results
+          // themselves than from their placeholders.
+          enough =
+            after < estimate * (1 - MIN_CLEARED_SHARE) &&
+            (size * after) / estimate < threshold * CLEARED_ENOUGH
+          if (enough) {
             app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
             changed = true
-            enough = (size * after) / estimate < threshold * CLEARED_ENOUGH
           }
         }
         if (!enough && !compactionFailed) {

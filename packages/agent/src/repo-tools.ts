@@ -275,6 +275,7 @@ const readCheckLog: Tool = {
 function guarded(tool: Tool): Tool {
   return {
     spec: tool.spec,
+    ...(tool.readOnly ? { readOnly: true } : {}),
     async run(args, ctx) {
       try {
         return await tool.run(args, ctx)

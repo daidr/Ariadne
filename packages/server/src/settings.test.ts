@@ -150,6 +150,11 @@ describe('model settings', () => {
     })
     expect(store.resolveModel('triage')).toMatchObject({ model: 'small', effort: 'low' })
     expect(store.resolveModel('coordinator')).toMatchObject({ model: 'large' })
+    // Only a quick look takes the triage model, and only while the coordinator's context
+    // fits well within it (128k by default: summarised at 76.8k, spared to 61.4k).
+    expect(store.resolveCoordinator({ triage: false, contextTokens: 0 })?.model).toBe('large')
+    expect(store.resolveCoordinator({ triage: true, contextTokens: 1000 })?.model).toBe('small')
+    expect(store.resolveCoordinator({ triage: true, contextTokens: 70_000 })?.model).toBe('large')
     store.updateModels({
       ...settings,
       models: [

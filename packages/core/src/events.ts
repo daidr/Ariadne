@@ -331,13 +331,13 @@ export interface EventMap {
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
-  /** Summarising a conversation's history failed; the turn went on with all of it. */
   /**
    * Older tool results of a conversation were cleared to make room: the model reads a
    * short placeholder instead of each long result it had read up to `upTo` (a position in
    * the model's order). The log keeps them whole. Decided on the transcript as of `sawSeq`.
    */
   'conversation.results_cleared': { conversationId: string; upTo: number; sawSeq: number }
+  /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
   /**
    * The repository's instruction file (AGENTS.md) as the thread's workspace holds it now:

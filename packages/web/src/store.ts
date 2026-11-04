@@ -184,11 +184,14 @@ async function loadParts(parts: ReadonlySet<Part>) {
     parts.has('artifacts') ? api.listArtifacts(id) : null,
     parts.has('memories') ? api.listMemories(id) : null,
   ])
-  // The user may have switched while this was loading; a late answer is stale.
-  if (state.currentId !== id || state.threadId !== threadId) return
+  // The user may have opened another project while this was loading: a late answer is
+  // stale. Another thread only makes the thread's own part stale; opening it loads that.
+  if (state.currentId !== id) return
   state.detail = detail
   if (coordinator) state.coordinator = coordinator(state.coordinator)
-  if (conversations) state.thread = thread ? thread(state.thread) : emptyConversation()
+  if (conversations && state.threadId === threadId) {
+    state.thread = thread ? thread(state.thread) : emptyConversation()
+  }
   if (plan) state.plan = plan.plan
   if (artifacts) state.artifacts = artifacts.artifacts
   if (memory) state.memories = memory.memories

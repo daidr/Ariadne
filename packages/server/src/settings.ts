@@ -1,5 +1,6 @@
 import { DomainError } from '@ariadne/core'
 import {
+  compactAt,
   MCP_TOOL_MARKS,
   type McpServerConfig,
   type McpToolMark,
@@ -579,6 +580,22 @@ export class SettingsStore {
       images: chosen.images !== false,
       ...(effort ? { effort } : {}),
     }
+  }
+
+  /**
+   * The coordinator's model for a turn: the triage model when all it has waiting is what
+   * the user wrote in threads (`triage`), unless the coordinator's context (`contextTokens`,
+   * what it read last) is too large for it. A smaller model would make room in that history
+   * by its own limit, and its summary would replace what the coordinator reads from then on.
+   */
+  resolveCoordinator(options: { triage: boolean; contextTokens: number }): ResolvedModel | null {
+    const coordinator = this.resolveModel('coordinator')
+    if (!options.triage) return coordinator
+    const triage = this.resolveModel('triage')
+    if (!triage) return coordinator
+    // A fifth to spare: the turn adds to what was read last.
+    const room = compactAt(triage.contextTokens) * 0.8
+    return options.contextTokens < room ? triage : coordinator
   }
 
   /** How hard a role thinks; triage left wholly unset is the coordinator as it is. */
