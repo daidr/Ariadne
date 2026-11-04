@@ -30,7 +30,7 @@ export {
   type Sandbox,
   type SandboxKind,
   type SandboxStatus,
-} from './sandbox'
+} from '@ariadne/sandbox'
 export {
   MCP_TOOL_MARKS,
   McpHub,

@@ -11,7 +11,7 @@ import type {
   PluginContext,
   SearchProvider,
 } from '@ariadne/plugin-sdk'
-import { noSandbox, type Sandbox } from './sandbox'
+import { noSandbox, type Sandbox } from '@ariadne/sandbox'
 
 /** Where a plugin came from: shipped with Ariadne, or a path on this machine. */
 export type PluginSource = 'builtin' | 'path'

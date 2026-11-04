@@ -25,6 +25,7 @@
         "@ariadne/i18n": "workspace:*",
         "@ariadne/mcp": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
+        "@ariadne/sandbox": "workspace:*",
       },
     },
     "packages/core": {
@@ -32,6 +33,18 @@
       "version": "0.0.0",
       "dependencies": {
         "@ariadne/i18n": "workspace:*",
+      },
+    },
+    "packages/daemon": {
+      "name": "@ariadne/daemon",
+      "version": "0.0.0",
+      "bin": {
+        "ariadne-daemon": "./src/main.ts",
+      },
+      "dependencies": {
+        "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+        "@ariadne/sandbox": "workspace:*",
       },
     },
     "packages/i18n": {
@@ -50,6 +63,19 @@
       "version": "0.0.0",
       "dependencies": {
         "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
+    "packages/plugin-daemon": {
+      "name": "@ariadne/plugin-daemon",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/daemon": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+        "@ariadne/remote": "workspace:*",
+      },
+      "devDependencies": {
+        "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/sandbox": "workspace:*",
       },
     },
     "packages/plugin-github": {
@@ -90,7 +116,22 @@
       "name": "@ariadne/plugin-ssh",
       "version": "0.0.0",
       "dependencies": {
+        "@ariadne/plugin-sdk": "workspace:*",
+        "@ariadne/remote": "workspace:*",
+      },
+    },
+    "packages/remote": {
+      "name": "@ariadne/remote",
+      "version": "0.0.0",
+      "dependencies": {
         "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
+    "packages/sandbox": {
+      "name": "@ariadne/sandbox",
+      "version": "0.0.0",
+      "dependencies": {
         "@ariadne/plugin-sdk": "workspace:*",
       },
     },
@@ -102,6 +143,7 @@
         "@ariadne/core": "workspace:*",
         "@ariadne/i18n": "workspace:*",
         "@ariadne/plugin-anthropic": "workspace:*",
+        "@ariadne/plugin-daemon": "workspace:*",
         "@ariadne/plugin-github": "workspace:*",
         "@ariadne/plugin-gitlab": "workspace:*",
         "@ariadne/plugin-local": "workspace:*",
@@ -134,11 +176,15 @@
 
     "@ariadne/core": ["@ariadne/core@workspace:packages/core"],
 
+    "@ariadne/daemon": ["@ariadne/daemon@workspace:packages/daemon"],
+
     "@ariadne/i18n": ["@ariadne/i18n@workspace:packages/i18n"],
 
     "@ariadne/mcp": ["@ariadne/mcp@workspace:packages/mcp"],
 
     "@ariadne/plugin-anthropic": ["@ariadne/plugin-anthropic@workspace:packages/plugin-anthropic"],
+
+    "@ariadne/plugin-daemon": ["@ariadne/plugin-daemon@workspace:packages/plugin-daemon"],
 
     "@ariadne/plugin-github": ["@ariadne/plugin-github@workspace:packages/plugin-github"],
 
@@ -151,6 +197,10 @@
     "@ariadne/plugin-sdk": ["@ariadne/plugin-sdk@workspace:packages/plugin-sdk"],
 
     "@ariadne/plugin-ssh": ["@ariadne/plugin-ssh@workspace:packages/plugin-ssh"],
+
+    "@ariadne/remote": ["@ariadne/remote@workspace:packages/remote"],
+
+    "@ariadne/sandbox": ["@ariadne/sandbox@workspace:packages/sandbox"],
 
     "@ariadne/server": ["@ariadne/server@workspace:packages/server"],
 
