@@ -9,11 +9,18 @@ import {
   DouText,
   useDialog,
 } from 'dou-ui'
-import { FolderIcon, ListTreeIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
+import {
+  DownloadIcon,
+  FolderIcon,
+  ListTreeIcon,
+  PlusIcon,
+  SettingsIcon,
+  TrashIcon,
+} from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { createProject, deleteProject, openMain, openProject, state } from '../store'
+import { createProject, deleteProject, exportProject, openMain, openProject, state } from '../store'
 
 const name = ref('')
 const dialog = useDialog()
@@ -21,7 +28,9 @@ const dialog = useDialog()
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
 const target = ref<string>()
 const actions = [
+  { key: 'settings', label: t('projectSettings.open'), icon: SettingsIcon },
   { key: 'trace', label: t('trace.coordinator'), icon: ListTreeIcon },
+  { key: 'export', label: t('project.export'), icon: DownloadIcon },
   { key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const },
 ]
 
@@ -33,8 +42,16 @@ async function openTrace(id: string) {
   openMain({ kind: 'trace', conversationId: project.coordinatorId })
 }
 
+/** The project's own settings, in its project. */
+async function openSettings(id: string) {
+  if (state.currentId !== id) await openProject(id)
+  state.projectSettingsOpen = true
+}
+
 function act(key: unknown, id: string) {
-  if (key === 'trace') void openTrace(id)
+  if (key === 'settings') void openSettings(id)
+  else if (key === 'trace') void openTrace(id)
+  else if (key === 'export') void exportProject(id)
   else if (key === 'delete') void confirmDelete(id)
 }
 

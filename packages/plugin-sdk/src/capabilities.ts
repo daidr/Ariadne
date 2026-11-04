@@ -37,11 +37,21 @@ export interface Workspace {
   readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   writeFile(path: string, content: string): Promise<void>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
-  exec(
-    command: string,
-    options?: { cwd?: string; timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<ExecResult>
+  exec(command: string, options?: ExecOptions): Promise<ExecResult>
   dispose(): Promise<void>
+}
+
+export interface ExecOptions {
+  cwd?: string
+  timeoutMs?: number
+  signal?: AbortSignal
+  /**
+   * The program and its arguments the command line is handed to, e.g. `['zsh', '-c']`;
+   * `['bash', '-c']` when left out.
+   */
+  shell?: readonly string[]
+  /** Added to the command's environment. */
+  env?: Record<string, string>
 }
 
 /**
@@ -80,6 +90,11 @@ export interface WorkspaceRequest {
   threadId: string
   /** Check out this branch or ref, when the source is a repository. */
   ref?: string
+  /**
+   * The name of the thread's own branch, made when it does not exist yet; providers pick
+   * one from the thread id when left out.
+   */
+  branch?: string
   /**
    * The base recorded when the workspace was first opened. A workspace opened again (after
    * a restart, or once its worktree was removed) keeps it rather than taking whatever the
@@ -190,13 +205,19 @@ export interface WorktreeInfo {
   bytes: number | null
 }
 
+/** A thread and the branch its workspace was opened on, as recorded then. */
+export interface ThreadBranch {
+  threadId: string
+  branch: string
+}
+
 /**
  * Threads' branches in the repository their worktrees belong to. Branches stay when a
  * worktree is removed: they hold the work, and opening the workspace again checks one out.
  */
 export interface BranchCapability {
   /** `null` when the thread has no branch yet. */
-  changes(threadId: string, base: string): Promise<BranchChanges | null>
+  changes(thread: ThreadBranch, base: string): Promise<BranchChanges | null>
   /** A changed file at `from` (as `previousPath` when renamed) and at `head`. */
   file(input: {
     from: string
@@ -205,13 +226,14 @@ export interface BranchCapability {
     previousPath: string | null
   }): Promise<FileVersions>
   /** Whether the base already has the branch's newest commit, e.g. merged by hand. */
-  merged(threadId: string, base: string): Promise<boolean>
+  merged(thread: ThreadBranch, base: string): Promise<boolean>
   /**
    * Bring the branch into the base without touching the thread's worktree. Left out where
    * branches reach the base another way, e.g. through pull requests.
    */
   merge?(input: {
     threadId: string
+    branch: string
     base: string
     method: MergeMethod
     message: string

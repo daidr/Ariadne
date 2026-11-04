@@ -103,15 +103,17 @@ export class WorktreeJanitor {
   private async landed(thread: ThreadView): Promise<boolean> {
     if (thread.pullRequest) return thread.pullRequest.state !== 'open'
     const base = thread.workspace?.base
-    if (!base) return false
+    const branch = thread.workspace?.branch
+    if (!base || !branch) return false
     const branches = await this.workspaces.branches(thread.projectId)
     if (!branches) return false
+    const own = { threadId: thread.id, branch }
     // A squashed branch never becomes part of the base: it landed if nothing came after.
     if (thread.merged) {
-      const changes = await branches.changes(thread.id, thread.merged.base)
+      const changes = await branches.changes(own, thread.merged.base)
       if (changes?.head === thread.merged.head) return true
     }
-    return branches.merged(thread.id, base)
+    return branches.merged(own, base)
   }
 }
 

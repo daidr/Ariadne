@@ -8,9 +8,17 @@ import {
   DouSegmentedControl,
   DouTextarea,
 } from 'dou-ui'
-import { PlusIcon, TrashIcon } from '@dou-ui/icons'
+import { PlusIcon, RotateCcwIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
-import { api, ApiError, type InputSettings } from '../api'
+import {
+  api,
+  ApiError,
+  DEFAULT_KEYS,
+  SHORTCUT_ACTIONS,
+  type InputSettings,
+  type ShortcutAction,
+} from '../api'
+import KeyRecorder from './KeyRecorder.vue'
 import { t, tm } from '../i18n'
 import { state } from '../store'
 
@@ -22,6 +30,14 @@ interface DraftSnippet {
 
 const submitOn = ref<InputSettings['submitOn']>(state.input.submitOn)
 const snippets = ref<DraftSnippet[]>([])
+const keys = ref<Record<ShortcutAction, string>>({ ...DEFAULT_KEYS })
+
+/** Bind `key` to `action`; an action that had it takes this one's old key, so none is lost. */
+function bind(action: ShortcutAction, key: string) {
+  const other = SHORTCUT_ACTIONS.find((a) => a !== action && keys.value[a] === key)
+  if (other) keys.value[other] = keys.value[action]
+  keys.value[action] = key
+}
 const error = ref<string | null>(null)
 
 const submitOptions = computed(() => [
@@ -32,6 +48,7 @@ const submitOptions = computed(() => [
 function load(input: InputSettings) {
   submitOn.value = input.submitOn
   snippets.value = input.snippets.map((snippet) => ({ ...snippet }))
+  keys.value = { ...DEFAULT_KEYS, ...input.keys }
 }
 
 onMounted(async () => {
@@ -57,6 +74,7 @@ async function save(): Promise<boolean> {
       snippets: snippets.value
         .filter((snippet) => snippet.name.trim() && snippet.text.trim())
         .map((snippet) => ({ ...snippet, name: snippet.name.trim() })),
+      keys: keys.value,
     })
     state.input = saved
     load(saved)
@@ -115,6 +133,27 @@ defineExpose({ save })
         <TrashIcon />
       </DouButton>
     </div>
+    <span class="input-heading">{{ t('shortcuts.title') }}</span>
+    <div v-for="action in SHORTCUT_ACTIONS" :key="action" class="input-row">
+      <span>{{ t(`shortcuts.${action}`) }}</span>
+      <span class="input-key">
+        <DouButton
+          v-if="keys[action] !== DEFAULT_KEYS[action]"
+          size="sm"
+          variant="ghost"
+          :aria-label="t('shortcuts.reset')"
+          :title="t('shortcuts.reset')"
+          @click="bind(action, DEFAULT_KEYS[action])"
+        >
+          <RotateCcwIcon />
+        </DouButton>
+        <KeyRecorder
+          :model-value="keys[action]"
+          :label="t(`shortcuts.${action}`)"
+          @update:model-value="(key) => bind(action, key)"
+        />
+      </span>
+    </div>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
   </div>
 </template>
@@ -137,6 +176,12 @@ defineExpose({ save })
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.input-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .snippet {

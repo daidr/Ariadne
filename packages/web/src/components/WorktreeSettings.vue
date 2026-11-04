@@ -3,7 +3,8 @@ import { DouAlert, DouButton, DouEmpty, DouPopconfirm, DouSpinner, DouText } fro
 import { TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type ProjectWorktrees } from '../api'
-import { locale, t, tm } from '../i18n'
+import { formatBytes } from '../bytes'
+import { t, tm } from '../i18n'
 import StageLabel from './StageLabel.vue'
 
 // Threads' worktrees on disk, project by project, to see what they take and remove some.
@@ -26,14 +27,7 @@ async function load() {
 }
 onMounted(load)
 
-const size = (bytes: number) =>
-  new Intl.NumberFormat(locale.value, {
-    notation: 'compact',
-    style: 'unit',
-    unit: bytes >= 1024 ** 3 ? 'gigabyte' : bytes >= 1024 ** 2 ? 'megabyte' : 'kilobyte',
-    unitDisplay: 'short',
-    maximumFractionDigits: 1,
-  }).format(bytes / (bytes >= 1024 ** 3 ? 1024 ** 3 : bytes >= 1024 ** 2 ? 1024 ** 2 : 1024))
+const size = formatBytes
 
 const total = computed(() =>
   (projects.value ?? [])

@@ -1,5 +1,5 @@
 import type { CallTiming, ReasoningRecord, TokenUsage, TranscriptEntry } from '@ariadne/core'
-import type { ChatMessage, ModelStreamPart } from '@ariadne/plugin-sdk'
+import type { ChatMessage, ModelRequest, ModelStreamPart } from '@ariadne/plugin-sdk'
 import type { ResolvedModel } from './runner'
 import {
   inModelOrder,
@@ -13,10 +13,12 @@ import {
 export const DEFAULT_CONTEXT_TOKENS = 128_000
 
 /**
- * Older history is summarised when the input reaches this share of the model's context,
- * so the summary request (the folded part plus the ask) still fits in it.
+ * Older history is summarised when the input reaches `share` of the model's context (the
+ * user's limit, 0.6 unless set), so the summary request (the folded part plus the ask)
+ * still fits in it.
  */
-export const compactAt = (contextTokens = DEFAULT_CONTEXT_TOKENS) => Math.floor(contextTokens * 0.6)
+export const compactAt = (contextTokens = DEFAULT_CONTEXT_TOKENS, share = 0.6) =>
+  Math.floor(contextTokens * share)
 
 /** What an image costs the model, about: a large screenshot reads as some 1600 tokens. */
 export const IMAGE_TOKENS = 1600
@@ -148,6 +150,7 @@ export async function summarise(
       tools: [],
       // Nothing after it starts with this prompt, so there is nothing to cache.
       cache: false,
+      ...requestExtras(model),
       signal,
     })) {
       if (part.type === 'text' && part.text) timing.firstOutputAt ??= Date.now()
@@ -170,4 +173,14 @@ export async function summarise(
   return text.trim()
     ? { ok: true, text: text.trim(), reasoning, usage, timing }
     : { ok: false, detail: 'empty summary' }
+}
+
+/** What the user added to the model's requests, as the request carries it. */
+export function requestExtras(model: ResolvedModel): Partial<ModelRequest> {
+  const { headers, extraBody, maxTokens } = model.request ?? {}
+  return {
+    ...(headers && Object.keys(headers).length ? { headers } : {}),
+    ...(extraBody && Object.keys(extraBody).length ? { extraBody } : {}),
+    ...(maxTokens ? { maxTokens } : {}),
+  }
 }

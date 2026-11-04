@@ -159,7 +159,7 @@ function serverTool(
         }
         const t = createTranslator(ctx.locale)
         const purpose = mcpCallPurpose(server.id, info.name, args)
-        const approval = ctx.app.mcpApproval(ctx.projectId, ctx.conversationId, purpose, () =>
+        const approval = ctx.app.callApproval(ctx.projectId, ctx.conversationId, purpose, () =>
           confirmBlock({
             // The tool's real name: a title is the server's own words and could say anything.
             title: t('mcp.ask.question', {
@@ -186,11 +186,10 @@ function serverTool(
                     : 'The user is already being asked about this call. Their answer arrives as a new turn; do not make it until then.',
               }
         }
-        ctx.app.useMcpApproval(ctx.projectId, {
+        ctx.app.useApproval(ctx.projectId, {
           threadId: ctx.conversationId,
           attentionId: approval.attentionId,
-          server: server.id,
-          tool: info.name,
+          what: `mcp:${server.id}/${info.name}`,
         })
       }
       const send = async () => {

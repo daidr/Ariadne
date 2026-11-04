@@ -161,24 +161,24 @@ export function hostedClone(input: {
     view,
     // Branches reach the default branch through pull requests: nothing is merged here.
     branches: {
-      changes: (threadId, base) =>
+      changes: ({ threadId, branch }, base) =>
         branchChanges(local, {
-          branch: branchFor(threadId),
+          branch,
           base,
           baseRef: baseRef(base),
           worktree: existsSync(dirOf(threadId)) ? dirOf(threadId) : null,
         }),
       file: (request) => fileVersions(local, request),
-      merged: (threadId, base) => branchMerged(local, branchFor(threadId), baseRef(base)),
+      merged: ({ branch }, base) => branchMerged(local, branch, baseRef(base)),
       remove: (threadId, options) =>
         serial(() =>
           removeWorktree(local, dirOf(threadId), async (dir) => existsSync(dir), options),
         ),
       worktrees: () => worktreesIn(worktrees),
     },
-    open: ({ threadId, base: recorded }) =>
+    open: ({ threadId, base: recorded, branch: named }) =>
       serial(async () => {
-        const branch = branchFor(threadId)
+        const branch = named ?? branchFor(threadId)
         const dir = dirOf(threadId)
         const base = recorded ?? (await input.defaultBranch())
         if (!existsSync(join(dir, '.git'))) {

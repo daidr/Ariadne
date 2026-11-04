@@ -50,6 +50,21 @@ export {
 export type * from './blocks'
 export { DomainError } from './errors'
 export {
+  branchSlug,
+  DEFAULT_BRANCH_PREFIX,
+  defaultProjectSettings,
+  MAX_PROJECT_INSTRUCTIONS,
+  MAX_SETUP_SCRIPT,
+  parseProjectSettings,
+  POSIX_SHELLS,
+  SHELL_NAMES,
+  SHELLS,
+  threadBranch,
+  validBranchPrefix,
+  type ProjectSettings,
+  type ShellName,
+} from './project-settings'
+export {
   IMAGE_TYPES,
   isImageType,
   MAX_FILE_BYTES,

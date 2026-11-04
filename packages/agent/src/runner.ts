@@ -1,6 +1,7 @@
 import {
   askTitle,
   DomainError,
+  SHELLS,
   type Ariadne,
   type Attachment,
   type CallTiming,
@@ -22,18 +23,27 @@ import {
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
-import { toolsFor, ToolInputError, type ModelChoice, type Tool, type ToolContext } from './tools'
+import {
+  switchedOff,
+  toolsFor,
+  ToolInputError,
+  type ModelChoice,
+  type Tool,
+  type ToolContext,
+} from './tools'
 import {
   compactAt,
   compactionCut,
   estimateTokens,
+  requestExtras,
   summarise,
   summaryRequest,
   usageOf,
 } from './compaction'
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import { repoTools } from './repo-tools'
-import { workspaceTools } from './workspace-tools'
+import { runCommandSpec, workspaceTools } from './workspace-tools'
+import { DEFAULT_LIMITS, defaultTurnSettings, type Limits, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -52,6 +62,20 @@ export interface ResolvedModel {
   images?: boolean
   /** How hard it thinks in this role; without it the request asks nothing. */
   effort?: Effort
+  /** What the user added to its requests in the settings. */
+  request?: ModelRequestOptions
+}
+
+/** Request settings the user gave a provider (headers, body, timeout) or a model (output). */
+export interface ModelRequestOptions {
+  /** Added to every request's headers; may hold secrets. */
+  headers?: Record<string, string>
+  /** Fields added to every request's body, e.g. `temperature`. */
+  extraBody?: Record<string, unknown>
+  /** The most the model may write in one response. */
+  maxTokens?: number
+  /** A request with no output for this long is given up and tried again. */
+  timeoutSeconds?: number
 }
 
 /**
@@ -65,7 +89,15 @@ export function callOf(model: ResolvedModel, effort: Effort | null): string {
     const field = fields[key]
     if (field && !(field.type === 'string' && field.secret)) settings[key] = value
   }
-  return JSON.stringify({ provider: model.provider.kind, model: model.model, effort, settings })
+  const { maxTokens, extraBody } = model.request ?? {}
+  return JSON.stringify({
+    provider: model.provider.kind,
+    model: model.model,
+    effort,
+    settings,
+    ...(maxTokens ? { maxTokens } : {}),
+    ...(extraBody && Object.keys(extraBody).length ? { extraBody } : {}),
+  })
 }
 
 export interface TurnOptions {
@@ -88,6 +120,8 @@ export interface TurnOptions {
   models?: ModelChoice[]
   /** The user's external tool servers; the project's enabled ones bring their tools. */
   mcp?: McpHub
+  /** The user's limits, instructions, command rules and the project's environment. */
+  settings?: TurnSettings
 }
 
 /** Why a turn stopped early, for the user. */
@@ -104,6 +138,7 @@ function threadContext(
   hasWorkspace: boolean,
   hasRepo: boolean,
   remote: boolean,
+  userInstructions: string,
 ): ThreadContext {
   const project = app.getProject(conversation.projectId)
   const thread = app.getThread(conversation.id)
@@ -133,11 +168,14 @@ function threadContext(
     repo: hasRepo,
     remote,
     memories: app.listMemories(project.id),
-    instructions: (() => {
-      const recorded = app.getInstructions(conversation.id)
-      return recorded?.content ? { path: recorded.path, content: recorded.content } : null
-    })(),
+    instructions: recordedInstructions(app, conversation.id),
+    userInstructions: { global: userInstructions, project: project.settings.instructions },
   }
+}
+
+function recordedInstructions(app: Ariadne, conversationId: string) {
+  const recorded = app.getInstructions(conversationId)
+  return recorded?.content ? { path: recorded.path, content: recorded.content } : null
 }
 
 function systemPrompt(
@@ -149,17 +187,23 @@ function systemPrompt(
   remote: boolean,
   models: ModelChoice[],
   source: { line: string; readable: boolean } | null,
+  userInstructions: string,
 ): string {
   if (conversation.role === 'coordinator') {
+    const project = app.getProject(conversation.projectId)
     return coordinatorPrompt({
-      projectName: app.getProject(conversation.projectId).name,
+      projectName: project.name,
       locale,
       memories: app.listMemories(conversation.projectId),
       models,
       source,
+      userInstructions: { global: userInstructions, project: project.settings.instructions },
+      instructions: recordedInstructions(app, conversation.id),
     })
   }
-  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo, remote))
+  return threadPrompt(
+    threadContext(app, conversation, locale, hasWorkspace, hasRepo, remote, userInstructions),
+  )
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolContext) {
@@ -192,6 +236,9 @@ async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolCo
 export async function runTurn(options: TurnOptions): Promise<void> {
   const { app, conversation, model, signal } = options
   const { workspaces } = options
+  const settings = options.settings ?? defaultTurnSettings()
+  const { limits } = settings
+  const project = app.getProject(conversation.projectId)
   const isThread = conversation.role === 'thread'
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
@@ -203,7 +250,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const turnId = app.startTurn(conversationId, model.label)
   // The coordinator looks at the source only when its provider offers a view.
   const hasSource = !isThread && !!(await workspaces?.viewable(conversation.projectId))
-  const builtIn =
+  // The project's switches turn built-in tools off; the user's limits and shell show in
+  // run_command's description.
+  const off = switchedOff(project.settings.tools)
+  const shellName = project.settings.workspace.shell
+  const builtIn = (
     options.tools ??
     toolsFor(conversation.role, {
       workspace: isThread ? hasWorkspace : hasSource,
@@ -212,6 +263,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       models: options.models ?? [],
       ...(options.searchProviders ? { search: options.searchProviders } : {}),
     })
+  )
+    .filter((tool) => !off.has(tool.spec.name))
+    .map((tool) =>
+      tool.spec.name === 'run_command'
+        ? { ...tool, spec: runCommandSpec(limits, shellName) }
+        : tool,
+    )
   // The project's external tools, as their servers list them now; one that cannot be
   // reached brings none, and the turn goes on without it.
   const external =
@@ -255,6 +313,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
+    limits,
+    commands: {
+      rules: settings.commandRules,
+      shell: SHELLS[shellName],
+      env: settings.env,
+    },
   }
   const readText = attachedText(app)
   const images = model.images !== false
@@ -282,7 +346,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
 
   try {
-    const threshold = options.compactAt ?? compactAt(model.contextTokens)
+    const threshold = options.compactAt ?? compactAt(model.contextTokens, limits.compactShare)
     // One try per turn: a failed summary would fail the same way on every step.
     let compactionFailed = false
     let lastInput = 0
@@ -300,6 +364,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         remote,
         options.models ?? [],
         line ? { line, readable: hasSource } : null,
+        settings.instructions,
       )
     }
     const specs = tools.map((tool) => tool.spec)
@@ -318,11 +383,19 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
     const recent: string[] = []
+    // The coordinator reads the source's instruction file once a turn: its source changes
+    // under it only by the user's hand or a merge.
+    if (!isThread && hasSource && workspaces) {
+      await syncSourceInstructions(app, conversation, turnId, workspaces)
+    }
     for (;;) {
       if (instructionsStale && isThread && workspaces && hasWorkspace) {
         await syncInstructions(app, conversation, turnId, workspaces)
       }
       instructionsStale = false
+      // Over the budget the turn stops before it spends more; the user raises it or not.
+      const over = overBudget(app, conversation.projectId, conversationId)
+      if (over) throw new TurnError(over)
       // Everything the request is built from is read in one go, so the input is exactly
       // the log up to `sawSeq` plus the pieces recorded with the step: the trace rebuilds
       // it from those.
@@ -406,10 +479,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           messages,
           tools: specs,
           ...(model.effort ? { effort: model.effort } : {}),
+          ...requestExtras(model),
           signal,
         },
         (retry) => app.recordModelRetry(conversationId, turnId, retry),
         options.retryBaseMs ?? 1000,
+        limits,
+        model.request?.timeoutSeconds,
       )
       if (signal.aborted || !answer) break
       const { text, reasoning, toolCalls, usage, timing, cut } = answer
@@ -454,13 +530,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         results.push({ content: result.content, isError: result.isError ?? false })
         const files = result.files ?? []
         let { content } = result
+        // The call that opened a new workspace hears what its setup script did.
+        const setup = isThread ? workspaces?.takeSetup(conversationId) : null
+        if (setup) content = `${content}\n\n${setup}`
         let count = 0
         if (index === toolCalls.length - 1) {
           const step = fingerprint(toolCalls, results)
           recent.push(step)
           if (recent.length > REPEAT_WINDOW) recent.shift()
           count = recent.filter((seen) => seen === step).length
-          if (count === MAX_REPEATS - 1) content = `${content}\n\n${REPEAT_HINT}`
+          if (count === limits.loopRepeats - 1) content = `${content}\n\n${REPEAT_HINT}`
         }
         app.recordToolResult(conversationId, turnId, {
           toolCallId: call.id,
@@ -469,7 +548,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           isError: result.isError ?? false,
           ...(files.length ? { files } : {}),
         })
-        if (count >= MAX_REPEATS) {
+        if (count >= limits.loopRepeats) {
           throw new TurnError({ key: 'error.repeating', params: { count } })
         }
       }
@@ -561,11 +640,71 @@ async function syncInstructions(
 
 /**
  * How often the same step (the same tool calls, returning the same results) may come
- * back within the last `REPEAT_WINDOW` steps before the turn is stopped. Steps need not
- * follow each other, so a loop between two or three calls is caught too.
+ * back within the last `REPEAT_WINDOW` steps before the turn is stopped, unless the user
+ * set another limit. Steps need not follow each other, so a loop between two or three
+ * calls is caught too.
  */
-export const MAX_REPEATS = 4
+export const MAX_REPEATS = DEFAULT_LIMITS.loopRepeats
 export const REPEAT_WINDOW = 12
+
+/**
+ * Read the source's instruction file for the coordinator, through its read-only view, and
+ * record it when it changed. A source that cannot be read leaves what was recorded.
+ */
+async function syncSourceInstructions(
+  app: Ariadne,
+  conversation: ConversationView,
+  turnId: string,
+  workspaces: WorkspaceManager,
+): Promise<void> {
+  let content: string | null = null
+  try {
+    const view = await workspaces.view(conversation.projectId)
+    // Not there is a fact to record; a source that cannot be read now is not.
+    const top = await view.list('.')
+    if (top.some((entry) => entry.name === INSTRUCTIONS_FILE && entry.kind === 'file')) {
+      content = new TextDecoder().decode(await view.readBytes(INSTRUCTIONS_FILE, 1024 * 1024))
+    }
+  } catch {
+    return
+  }
+  if (content !== null && content.length > MAX_INSTRUCTIONS) {
+    content = `${content.slice(0, MAX_INSTRUCTIONS)}\n[cut: the file is longer]`
+  }
+  const hash = content === null ? 'none' : createHash('sha256').update(content).digest('hex')
+  app.recordInstructions(conversation.id, turnId, { path: INSTRUCTIONS_FILE, hash, content })
+}
+
+const spent = (usage: { input: number; output: number }) => usage.input + usage.output
+/** Tokens in thousands, as the settings take them. */
+const k = (tokens: number) => Math.round(tokens / 1000).toLocaleString('en')
+
+/**
+ * Why the conversation may not spend more: its thread, or its whole project, used the
+ * tokens the user allowed it. `null` while within them.
+ */
+export function overBudget(
+  app: Ariadne,
+  projectId: string,
+  conversationId: string,
+): LocalizedMessage | null {
+  const project = app.getProject(projectId)
+  const { budget } = project.settings
+  if (budget.project !== null) {
+    const used = spent(project.usage)
+    if (used >= budget.project) {
+      return { key: 'error.budgetProject', params: { used: k(used), limit: k(budget.project) } }
+    }
+  }
+  const conversation = app.getConversation(conversationId)
+  if (budget.thread !== null && conversation.role === 'thread') {
+    const used = spent(conversation.usage)
+    if (used >= budget.thread) {
+      return { key: 'error.budgetThread', params: { used: k(used), limit: k(budget.thread) } }
+    }
+  }
+  return null
+}
 
 const REPEAT_HINT =
   '[Ariadne: this exact call has returned this exact result several times in this turn. Doing it again will stop the turn. Try something else, or answer with what you have. If you are waiting for something (checks, a reply), end the turn: you will be woken.]'
@@ -644,18 +783,21 @@ function transcriptReader(app: Ariadne, conversationId: string) {
 }
 
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */
-export const MAX_MODEL_RETRIES = 4
+export const MAX_MODEL_RETRIES = DEFAULT_LIMITS.modelRetries
 
 /**
  * One model response. Only errors the provider marks retryable are tried again, at most
- * `MAX_MODEL_RETRIES` times with a growing wait, and each retry is recorded so the user
- * sees it; what a failed attempt streamed is dropped. `null` when aborted.
+ * `limits.modelRetries` times with a growing wait, and each retry is recorded so the user
+ * sees it; what a failed attempt streamed is dropped. A request with no output for
+ * `timeoutSeconds` is given up and counts as such an error. `null` when aborted.
  */
 async function requestStep(
   model: ResolvedModel,
   request: ModelRequest & { signal: AbortSignal },
   onRetry: (retry: { attempt: number; delayMs: number; detail: string }) => void,
   baseDelayMs: number,
+  limits: Limits,
+  timeoutSeconds?: number,
 ): Promise<{
   text: string
   reasoning: ReasoningRecord[]
@@ -675,34 +817,64 @@ async function requestStep(
     // What came last before the end: the part the limit cut short.
     let last: ModelStreamPart['type'] | null = null
     const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
-    for await (const part of model.provider.stream(model.settings as never, request)) {
-      if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
-        // Reasoning is handed on whole; it began when its first piece came.
-        timing.firstOutputAt ??= (part.type === 'reasoning' && part.startedAt) || Date.now()
+    // Each attempt has its own signal, so a silent request can be given up alone.
+    const attemptController = new AbortController()
+    const forward = () => attemptController.abort(request.signal.reason)
+    request.signal.addEventListener('abort', forward, { once: true })
+    let silent = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const wait = () => {
+      if (!timeoutSeconds) return
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        silent = true
+        attemptController.abort('timeout')
+      }, timeoutSeconds * 1000)
+    }
+    wait()
+    const attemptRequest = { ...request, signal: attemptController.signal }
+    try {
+      for await (const part of model.provider.stream(model.settings as never, attemptRequest)) {
+        wait()
+        if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
+          // Reasoning is handed on whole; it began when its first piece came.
+          timing.firstOutputAt ??= (part.type === 'reasoning' && part.startedAt) || Date.now()
+        }
+        if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
+          last = part.type
+        }
+        if (part.type === 'text') text += part.text
+        else if (part.type === 'reasoning') {
+          const { type: _, startedAt: __, ...block } = part
+          reasoning.push(block)
+        } else if (part.type === 'tool-call')
+          toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })
+        else if (part.type === 'usage') usage = usageOf(part)
+        else if (part.type === 'finish' && part.reason === 'error') {
+          failure = part
+          break
+        } else if (part.type === 'finish' && part.reason === 'length') {
+          // Cut-off tool arguments are not a call: the one being written goes.
+          cut = true
+          if (last === 'tool-call') toolCalls.pop()
+        }
       }
-      if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
-        last = part.type
-      }
-      if (part.type === 'text') text += part.text
-      else if (part.type === 'reasoning') {
-        const { type: _, startedAt: __, ...block } = part
-        reasoning.push(block)
-      } else if (part.type === 'tool-call')
-        toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })
-      else if (part.type === 'usage') usage = usageOf(part)
-      else if (part.type === 'finish' && part.reason === 'error') {
-        failure = part
-        break
-      } else if (part.type === 'finish' && part.reason === 'length') {
-        // Cut-off tool arguments are not a call: the one being written goes.
-        cut = true
-        if (last === 'tool-call') toolCalls.pop()
-      }
+    } finally {
+      clearTimeout(timer)
+      request.signal.removeEventListener('abort', forward)
     }
     if (request.signal.aborted) return null
+    if (silent) {
+      failure = {
+        type: 'finish',
+        reason: 'error',
+        retryable: true,
+        error: `no response for ${timeoutSeconds} seconds`,
+      }
+    }
     if (!failure) return { text, reasoning, toolCalls, usage, timing, cut }
     const detail = (failure.error ?? '').slice(0, 500)
-    if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
+    if (!failure.retryable || attempt >= limits.modelRetries) {
       // A service that cannot take images refuses every request that carries one.
       const images = request.messages.some(
         (message) => (message.role === 'user' || message.role === 'tool') && message.images?.length,

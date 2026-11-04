@@ -23,6 +23,7 @@ import ProjectSearch from './components/ProjectSearch.vue'
 import ProjectSource from './components/ProjectSource.vue'
 import ProjectUsage from './components/ProjectUsage.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
+import ProjectSettings from './components/ProjectSettings.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, start, state } from './store'
@@ -161,6 +162,7 @@ watchEffect(() => {
     </DouLayout>
     <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
     <ShortcutSheet />
+    <ProjectSettings />
   </DouConfigProvider>
 </template>
 

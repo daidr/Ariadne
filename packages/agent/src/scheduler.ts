@@ -1,7 +1,9 @@
 import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
-import { runTurn, type ResolvedModel } from './runner'
+import { overBudget, runTurn, type ResolvedModel } from './runner'
+import { DomainError } from '@ariadne/core'
+import type { TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import type { ModelChoice } from './tools'
 import type { WorkspaceManager } from './workspaces'
@@ -27,6 +29,8 @@ export interface SchedulerOptions {
   workspaces?: WorkspaceManager
   /** The models the user set up, which the coordinator may give a thread. */
   models?: () => ModelChoice[]
+  /** The user's limits, instructions and command rules, and the project's environment. */
+  settings?: (projectId: string) => TurnSettings
 }
 
 interface Running {
@@ -177,6 +181,12 @@ export class Scheduler {
     const { app } = this.options
     const controller = new AbortController()
     const done = (async () => {
+      // A conversation over its token budget does not start: it would only stop again.
+      const over = overBudget(app, conversation.projectId, conversation.id)
+      if (over) {
+        app.failBeforeTurn(conversation.id, new DomainError(over.key, over.params))
+        return
+      }
       let model: ResolvedModel | null
       try {
         model = this.options.resolveModel(conversation)
@@ -205,6 +215,9 @@ export class Scheduler {
           : {}),
         ...(this.options.searchProviders ? { searchProviders: this.options.searchProviders } : {}),
         ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
+        ...(this.options.settings
+          ? { settings: this.options.settings(conversation.projectId) }
+          : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

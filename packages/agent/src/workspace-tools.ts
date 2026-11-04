@@ -1,5 +1,8 @@
-import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
+import { confirmBlock, DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
+import { createTranslator } from '@ariadne/i18n'
 import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
+import { createHash } from 'node:crypto'
+import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
 import {
   optionalInt,
@@ -257,8 +260,8 @@ const search = workspaceTool(
   { readOnly: true },
 )
 
-/** What run_command hands the model of a command's output, stdout and stderr together. */
-export const MAX_COMMAND_CHARS = 30_000
+/** What run_command hands the model of a command's output by default, stdout and stderr together. */
+export const MAX_COMMAND_CHARS = DEFAULT_LIMITS.commandOutput
 /** Where a cut output is kept whole, inside the workspace; the directory ignores itself. */
 export const OUTPUT_DIR = '.ariadne/output'
 
@@ -278,26 +281,27 @@ export function headAndTail(text: string, budget: number, where: string): string
 }
 
 /** How much of each stream fits: a short one is kept whole and the other gets the rest. */
-function budgets(stdout: number, stderr: number): [number, number] {
-  if (stdout + stderr <= MAX_COMMAND_CHARS) return [stdout, stderr]
-  const half = MAX_COMMAND_CHARS / 2
-  if (stderr <= half) return [MAX_COMMAND_CHARS - stderr, stderr]
-  if (stdout <= half) return [stdout, MAX_COMMAND_CHARS - stdout]
+function budgets(stdout: number, stderr: number, max: number): [number, number] {
+  if (stdout + stderr <= max) return [stdout, stderr]
+  const half = max / 2
+  if (stderr <= half) return [max - stderr, stderr]
+  if (stdout <= half) return [stdout, max - stdout]
   return [half, half]
 }
 
 /**
  * A command's result as the model reads it: the exit code, then each stream as plain text.
- * Output too long to read whole is cut in the middle, and kept whole in the workspace
+ * Output longer than `max` characters is cut in the middle, and kept whole in the workspace
  * where read_file and search can look into it.
  */
 export async function commandResult(
   result: { exitCode: number; stdout: string; stderr: string },
   workspace: Pick<Workspace, 'writeFile'>,
   name: string,
+  max: number = MAX_COMMAND_CHARS,
 ): Promise<string> {
   const { stdout, stderr } = result
-  const [outBudget, errBudget] = budgets(stdout.length, stderr.length)
+  const [outBudget, errBudget] = budgets(stdout.length, stderr.length, max)
   let where = 'the whole output could not be kept'
   if (outBudget < stdout.length || errBudget < stderr.length) {
     const path = `${OUTPUT_DIR}/${name}.log`
@@ -321,37 +325,126 @@ export async function commandResult(
 
 let outputs = 0
 /** A name for a kept output that sorts by time and does not repeat within a process. */
-const outputName = () =>
+export const outputName = () =>
   `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '')}-${(++outputs).toString(36)}`
 
-const runCommand = workspaceTool(
-  {
+/** run_command as the model reads it, with the user's limits and shell. */
+export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
+  return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (bash), e.g. tests, a build, or git. It needs no approval inside the workspace; anything that reaches outside it and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${MAX_COMMAND_CHARS / 1000}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names.`,
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string' },
         cwd: { type: 'string', description: 'Relative to the workspace root.' },
-        timeoutSeconds: { type: 'integer', description: 'Default 120, at most 600.' },
+        timeoutSeconds: {
+          type: 'integer',
+          description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}.`,
+        },
       },
       required: ['command'],
     },
-  },
-  async (args, workspace, ctx) => {
-    const seconds = Math.min(600, Math.max(1, optionalInt(args, 'timeoutSeconds') ?? 120))
-    const cwd = optionalStr(args, 'cwd')
-    const result = await workspace.exec(str(args, 'command'), {
-      timeoutMs: seconds * 1000,
-      signal: ctx.signal,
-      ...(cwd ? { cwd } : {}),
-    })
+  }
+}
+
+/** Names the command a yes is for: where it runs and what it is, hashed. */
+export function commandPurpose(command: string, cwd: string) {
+  return `command:${createHash('sha256')
+    .update(JSON.stringify([cwd, command]))
+    .digest('hex')}`
+}
+
+/** The longest command the user is asked about; they could not check a longer one. */
+const MAX_ASKED_COMMAND = 10_000
+
+/**
+ * Whether the user's rules let `command` run now: `null` when it may, else the result for
+ * the model. A command they must agree to is put to them once; their yes is for that one
+ * run of it in that directory.
+ */
+function commandGate(command: string, cwd: string, ctx: ToolContext): ToolResult | null {
+  const rules = ctx.commands?.rules ?? []
+  const verdict = commandVerdict(command, rules)
+  if (verdict.action === 'allow') return null
+  if (verdict.action === 'deny') {
     return {
-      content: await commandResult(result, workspace, outputName()),
-      isError: result.exitCode !== 0,
+      content: `The user's command rules do not allow this command (it matches "${verdict.pattern}"). Do not run it another way; do without it, or tell the user what you would need.`,
+      isError: true,
+    }
+  }
+  if (command.length > MAX_ASKED_COMMAND) {
+    return {
+      content: `This command needs the user's yes, and at over ${MAX_ASKED_COMMAND} characters it is too long for them to check. Run less at once.`,
+      isError: true,
+    }
+  }
+  const t = createTranslator(ctx.locale)
+  const approval = ctx.app.callApproval(
+    ctx.projectId,
+    ctx.conversationId,
+    commandPurpose(command, cwd),
+    () =>
+      confirmBlock({
+        title: t('command.ask.question'),
+        detail: cwd && cwd !== '.' ? `cd ${cwd}\n${command}` : command,
+        description: t('command.ask.rule', { pattern: verdict.pattern ?? '' }),
+        approveText: t('command.ask.yes'),
+        denyText: t('command.ask.no'),
+      }),
+  )
+  if (approval.state === 'approved') {
+    ctx.app.useApproval(ctx.projectId, {
+      threadId: ctx.conversationId,
+      attentionId: approval.attentionId,
+      what: 'command',
+    })
+    return null
+  }
+  if (approval.state === 'declined') {
+    return {
+      content:
+        'The user declined this command. Do not run it, nor something to the same effect; go on without it, or tell the user what you would need.',
+      isError: true,
+    }
+  }
+  return {
+    content:
+      approval.state === 'asked'
+        ? "The user's rules ask for their yes on this command, and they were asked. Their answer arrives as a new turn; run it again, the same way, only if they agree."
+        : 'The user is already being asked about this command. Their answer arrives as a new turn; do not run it until then.',
+  }
+}
+
+const runCommand: Tool = {
+  spec: runCommandSpec(),
+  async run(args, ctx) {
+    const limits = ctx.limits ?? DEFAULT_LIMITS
+    const asked = optionalInt(args, 'timeoutSeconds') ?? limits.commandTimeout
+    const seconds = Math.min(limits.commandTimeoutMax, Math.max(1, asked))
+    const cwd = optionalStr(args, 'cwd')
+    const command = str(args, 'command')
+    const gate = commandGate(command, cwd || '.', ctx)
+    if (gate) return gate
+    const workspace = await ctx.workspace()
+    try {
+      const result = await workspace.exec(command, {
+        timeoutMs: seconds * 1000,
+        signal: ctx.signal,
+        ...(cwd ? { cwd } : {}),
+        ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
+        ...(ctx.commands && Object.keys(ctx.commands.env).length ? { env: ctx.commands.env } : {}),
+      })
+      return {
+        content: await commandResult(result, workspace, outputName(), limits.commandOutput),
+        isError: result.exitCode !== 0,
+      }
+    } catch (error) {
+      if (error instanceof ToolInputError || error instanceof DomainError) throw error
+      return { content: error instanceof Error ? error.message : String(error), isError: true }
     }
   },
-)
+}
 
 export const workspaceTools: Tool[] = [listDir, readFile, writeFile, editFile, search, runCommand]
 

@@ -97,27 +97,48 @@ function layerOpen() {
   return modal || !!document.activeElement?.closest('[role="dialog"], [role="menu"]')
 }
 
-/** The app's keys: bound once, for as long as the calling component lives. */
+const keys = () => state.input.keys
+
+/**
+ * Whether a key types into a field when pressed there: no modifier but Shift, and a key
+ * that writes or edits text. Such a key bound to an action is only heard outside fields.
+ */
+export function typesText(hotkey: string): boolean {
+  const parts = hotkey.split('+')
+  const key = parts.at(-1) ?? ''
+  if (parts.slice(0, -1).some((mod) => mod !== 'shift')) return false
+  return key.length === 1 || ['space', 'enter', 'tab', 'backspace', 'delete'].includes(key)
+}
+
+function inField(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  if (!target || !('tagName' in target)) return false
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+
+/** The app's keys, as the user bound them: bound once, for as long as the calling component lives. */
 export function useShortcuts() {
-  // `?` is listed first: Shift+/ is the same physical key and would also match `/`.
+  // The sheet is listed first: `?` is Shift+/ on most keyboards and would also match `/`.
   useHotkey(
-    ['?', '/'],
+    () => [keys().sheet, keys().focus],
     (event, key) => {
       if (layerOpen()) return
       event.preventDefault()
-      if (key === '?') sheetOpen.value = true
+      if (key === keys().sheet) sheetOpen.value = true
       else activePanel()?.focus()
     },
     { preventDefault: false },
   )
 
   useHotkey(
-    ['mod+up', 'mod+down'],
+    () => [keys().previousThread, keys().nextThread],
     (event, key) => {
-      // In any other field the keys move the caret, as usual.
+      // In any other field the keys do what they do there, as usual.
       if (typingElsewhere(event) || layerOpen()) return
+      if (inField(event) && typesText(key)) return
       event.preventDefault()
-      const next = steppedThread(threadOrder(), state.threadId, key === 'mod+up' ? -1 : 1)
+      const step = key === keys().previousThread ? -1 : 1
+      const next = steppedThread(threadOrder(), state.threadId, step)
       if (!next) return
       lastPanel.value = 'thread'
       void openThread(next)
@@ -126,13 +147,65 @@ export function useShortcuts() {
   )
 
   // Heard on the window, after the document: an open menu, popover or dialog takes Escape
-  // there and stops it, so Escape only stops a turn when nothing else wanted it.
+  // there and stops it, so the key only stops a turn when nothing else wanted it.
   useHotkey(
-    'escape',
-    (event) => {
-      if (typingElsewhere(event)) return
+    () => keys().stop,
+    (event, key) => {
+      if (typingElsewhere(event) || (inField(event) && typesText(key))) return
       if (activePanel()?.stop()) event.preventDefault()
     },
     { target: () => window, allowInInput: true, preventDefault: false },
   )
+}
+
+const NAMED_KEYS: Record<string, string> = {
+  ' ': 'space',
+  arrowup: 'up',
+  arrowdown: 'down',
+  arrowleft: 'left',
+  arrowright: 'right',
+  escape: 'escape',
+  enter: 'enter',
+  tab: 'tab',
+  backspace: 'backspace',
+  delete: 'delete',
+  home: 'home',
+  end: 'end',
+  pageup: 'pageup',
+  pagedown: 'pagedown',
+}
+
+/** The keys the settings take, as the server checks them. */
+const BINDABLE =
+  /^((mod|meta|ctrl|alt|shift)\+){0,4}([a-z0-9]|f([1-9]|1[0-2])|escape|enter|tab|space|backspace|delete|up|down|left|right|home|end|pageup|pagedown|[`~!@#$%^&*()\-_=[\]{}\\|;:'",.<>/?])$/
+
+/**
+ * A key press as a hotkey the app can bind, e.g. `mod+shift+k`; `null` for a modifier on its
+ * own or a key the settings do not take. Letters and digits are read from the physical key,
+ * so Alt or a layout does not change them; a symbol typed with Shift (`?`) is the symbol alone,
+ * as `useHotkey` matches it.
+ */
+export function hotkeyOf(event: KeyboardEvent, apple: boolean): string | null {
+  const raw = event.key
+  if (!raw || ['Meta', 'Control', 'Alt', 'Shift', 'CapsLock', 'Dead'].includes(raw)) return null
+  const lower = raw.toLowerCase()
+  let key: string
+  let symbol = false
+  if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3).toLowerCase()
+  else if (/^Digit\d$/.test(event.code)) key = event.code.slice(5)
+  else if (NAMED_KEYS[lower]) key = NAMED_KEYS[lower]
+  else if (/^f([1-9]|1[0-2])$/.test(lower)) key = lower
+  else if (raw.length === 1 && raw !== '+') {
+    key = raw
+    symbol = true
+  } else return null
+  const mods = [
+    apple ? event.metaKey && 'mod' : event.ctrlKey && 'mod',
+    apple ? false : event.metaKey && 'meta',
+    apple ? event.ctrlKey && 'ctrl' : false,
+    event.altKey && 'alt',
+    event.shiftKey && !symbol && 'shift',
+  ].filter((mod): mod is string => !!mod)
+  const hotkey = [...mods, key].join('+')
+  return BINDABLE.test(hotkey) ? hotkey : null
 }

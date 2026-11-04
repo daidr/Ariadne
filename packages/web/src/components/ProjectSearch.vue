@@ -17,7 +17,7 @@ import { locale, t } from '../i18n'
 import { openMain, openMessage, openThread, report, state } from '../store'
 import StageIcon from './StageIcon.vue'
 
-/** Find what was said and made in the open project: ⌘K or Ctrl+K anywhere. */
+/** Find what was said and made in the open project: ⌘K or Ctrl+K anywhere, unless rebound. */
 
 const query = ref('')
 const result = ref<SearchResult | null>(null)
@@ -116,6 +116,7 @@ function select(item: CommandItem) {
     :placeholder="t('search.placeholder')"
     :max-height="440"
     :width="600"
+    :hotkey="state.input.keys.search"
     @select="select"
   >
     <template #item="{ item }">

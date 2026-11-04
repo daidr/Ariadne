@@ -170,7 +170,31 @@ export interface ModelRequest {
    * the cache costs more than reading the prompt once.
    */
   cache?: boolean
+  /** The most the model may write in this response; the provider's default without. */
+  maxTokens?: number
+  /** Headers the user added to every request, sent after the provider's own. */
+  headers?: Record<string, string>
+  /**
+   * Fields the user added to every request's body (e.g. `temperature`). They go in on top
+   * of the provider's, except the messages, tools, model and streaming, which stay its own.
+   */
+  extraBody?: Record<string, unknown>
   signal?: AbortSignal
+}
+
+/** Body fields a request's `extraBody` cannot replace. */
+export const FIXED_BODY_FIELDS = ['model', 'messages', 'tools', 'stream', 'system']
+
+/** `body` with the user's extra fields on top, except those the provider must set itself. */
+export function withExtraBody<T extends Record<string, unknown>>(
+  body: T,
+  extra: Record<string, unknown> | undefined,
+): T {
+  if (!extra) return body
+  const added = Object.fromEntries(
+    Object.entries(extra).filter(([key]) => !FIXED_BODY_FIELDS.includes(key)),
+  )
+  return { ...body, ...added }
 }
 
 /** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */

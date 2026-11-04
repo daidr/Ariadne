@@ -14,8 +14,9 @@ import {
   DouTabPanel,
   DouTabs,
   DouText,
+  DouTextarea,
 } from 'dou-ui'
-import { PlusIcon, TrashIcon } from '@dou-ui/icons'
+import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import {
   api,
@@ -32,7 +33,10 @@ import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
 import PluginSettings from './PluginSettings.vue'
 import WorktreeSettings from './WorktreeSettings.vue'
+import WorkSettings from './WorkSettings.vue'
+import DataSettings from './DataSettings.vue'
 import SettingsFields from './SettingsFields.vue'
+import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -42,6 +46,12 @@ interface DraftProvider {
   name: string
   settings: Record<string, unknown>
   secretsSet: string[]
+  headers: DraftPair[]
+  /** The extra body fields as JSON text, checked on save. */
+  extraBody: string
+  timeoutSeconds: number | null
+  /** The request options are shown; they start shown when any is set. */
+  advanced: boolean
 }
 
 interface DraftModel {
@@ -53,6 +63,7 @@ interface DraftModel {
   /** Whether it looks at images; off for text-only models. */
   images: boolean
   note: string
+  maxTokens: number | null
 }
 
 const kinds = ref<ModelKind[]>([])
@@ -107,10 +118,20 @@ const effortOptions = computed(() => [
 function load(settings: ModelSettings) {
   applyModelSettings(settings)
   kinds.value = settings.kinds
-  providers.value = settings.providers.map((provider) => ({
-    ...provider,
-    settings: { ...provider.settings },
-  }))
+  providers.value = settings.providers.map((provider) => {
+    const extra = Object.keys(provider.extraBody).length
+    return {
+      id: provider.id,
+      kind: provider.kind,
+      name: provider.name,
+      secretsSet: provider.secretsSet,
+      settings: { ...provider.settings },
+      headers: storedPairs(provider.headers),
+      extraBody: extra ? JSON.stringify(provider.extraBody, null, 2) : '',
+      timeoutSeconds: provider.timeoutSeconds,
+      advanced: !!(extra || provider.headers.length || provider.timeoutSeconds),
+    }
+  })
   models.value = settings.models.map((model) => ({
     id: model.id,
     provider: model.provider,
@@ -118,6 +139,7 @@ function load(settings: ModelSettings) {
     contextK: model.contextTokens ? Math.round(model.contextTokens / 1000) : null,
     images: model.images !== false,
     note: model.note ?? '',
+    maxTokens: model.maxTokens ?? null,
   }))
   threadModel.value = settings.roles.thread.model
   threadEffort.value = settings.roles.thread.effort ?? ''
@@ -127,12 +149,26 @@ function load(settings: ModelSettings) {
   triageEffort.value = settings.roles.triage.effort ?? ''
 }
 
-export type SettingsTab = 'models' | 'input' | 'notifications' | 'plugins' | 'mcp' | 'worktrees'
+export type SettingsTab =
+  | 'models'
+  | 'instructions'
+  | 'commands'
+  | 'limits'
+  | 'input'
+  | 'notifications'
+  | 'plugins'
+  | 'mcp'
+  | 'worktrees'
+  | 'data'
+type WorkPart = 'instructions' | 'commands' | 'limits'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
-// The footer saves the tab in view; the models, the input and the MCP servers wait for it.
-const saves = computed(() => ['models', 'input', 'mcp'].includes(tab.value))
+const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
+const WORK_PARTS: WorkPart[] = ['instructions', 'commands', 'limits']
+const isWork = (value: string): value is WorkPart => WORK_PARTS.includes(value as WorkPart)
+// The footer saves the tab in view; the others act at once.
+const saves = computed(() => ['models', 'input', 'mcp', ...WORK_PARTS].includes(tab.value))
 
 /** Reload the protocols only: a plugin added or removed changes them, not the draft. */
 async function reloadKinds() {
@@ -167,6 +203,10 @@ function addProvider() {
     name: lt(kind.title) ?? kind.kind,
     settings: {},
     secretsSet: [],
+    headers: [],
+    extraBody: '',
+    timeoutSeconds: null,
+    advanced: false,
   })
   if (!models.value.length) addModel(id)
 }
@@ -180,7 +220,15 @@ function removeProvider(id: string) {
 function addModel(provider = providers.value[0]?.id) {
   if (!provider) return
   const id = newId('m')
-  models.value.push({ id, provider, model: '', contextK: null, images: true, note: '' })
+  models.value.push({
+    id,
+    provider,
+    model: '',
+    contextK: null,
+    images: true,
+    note: '',
+    maxTokens: null,
+  })
   threadModel.value ??= id
 }
 
@@ -202,6 +250,16 @@ function clearSecret(provider: DraftProvider, key: string) {
  * tools show up to be marked.
  */
 async function saveTab() {
+  const part = tab.value
+  if (isWork(part)) {
+    saving.value = true
+    try {
+      if (await work.value[part]?.save()) open.value = false
+    } finally {
+      saving.value = false
+    }
+    return
+  }
   if (tab.value === 'input') {
     saving.value = true
     try {
@@ -227,13 +285,30 @@ async function save() {
     // A model without a name is left out, and so is a role that pointed at it.
     const kept = models.value.filter((model) => model.model.trim())
     const keep = (id: string | null) => (id && kept.some((m) => m.id === id) ? id : null)
+    const bodies = providers.value.map((provider) => {
+      const text = provider.extraBody.trim()
+      if (!text) return {}
+      let body: unknown
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = null
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        throw new Error(t('settings.extraBodyInvalid', { name: provider.name || provider.id }))
+      }
+      return body as Record<string, unknown>
+    })
     load(
       await api.saveModelSettings({
-        providers: providers.value.map(({ id, kind, name, settings }) => ({
-          id,
-          kind,
-          name,
-          settings,
+        providers: providers.value.map((provider, at) => ({
+          id: provider.id,
+          kind: provider.kind,
+          name: provider.name,
+          settings: provider.settings,
+          headers: pairsInput(provider.headers),
+          extraBody: bodies[at]!,
+          timeoutSeconds: provider.timeoutSeconds || null,
         })),
         models: kept.map((model) => ({
           id: model.id,
@@ -242,6 +317,7 @@ async function save() {
           ...(model.contextK ? { contextTokens: model.contextK * 1000 } : {}),
           ...(model.images ? {} : { images: false as const }),
           ...(model.note.trim() ? { note: model.note.trim() } : {}),
+          ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
         })),
         roles: {
           thread: {
@@ -262,7 +338,12 @@ async function save() {
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
     open.value = false
   } catch (cause) {
-    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+    error.value =
+      cause instanceof ApiError
+        ? tm(cause.localized)
+        : cause instanceof Error
+          ? cause.message
+          : String(cause)
   } finally {
     saving.value = false
   }
@@ -270,8 +351,8 @@ async function save() {
 </script>
 
 <template>
-  <DouDialog v-model:open="open" :title="t('settings.title')" :width="560">
-    <DouTabs v-model="tab">
+  <DouDialog v-model:open="open" :title="t('settings.title')" :width="760">
+    <DouTabs v-model="tab" placement="start" :height="560" class="settings-tabs">
       <DouTabPanel value="models" :label="t('settings.tab.models')">
         <div class="settings">
           <div class="settings-head">
@@ -316,6 +397,41 @@ async function save() {
                 :secrets-set="provider.secretsSet"
                 @clear-secret="(key) => clearSecret(provider, key)"
               />
+              <DouButton
+                size="sm"
+                variant="ghost"
+                class="settings-more"
+                :aria-expanded="provider.advanced"
+                @click="provider.advanced = !provider.advanced"
+              >
+                <template #leading>
+                  <ChevronDownIcon v-if="provider.advanced" />
+                  <ChevronRightIcon v-else />
+                </template>
+                {{ t('settings.request') }}
+              </DouButton>
+              <template v-if="provider.advanced">
+                <DouFormItem :label="t('settings.headers')">
+                  <SecretPairs v-model="provider.headers" :add-label="t('mcp.addHeader')" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.extraBody')">
+                  <DouTextarea
+                    v-model="provider.extraBody"
+                    :autosize="{ minRows: 2, maxRows: 10 }"
+                    placeholder='{ "temperature": 0.2 }'
+                    class="settings-code"
+                  />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.timeoutSeconds')" class="settings-narrow">
+                  <DouInputNumber
+                    v-model="provider.timeoutSeconds"
+                    :min="10"
+                    :max="3600"
+                    :step="10"
+                    :placeholder="t('settings.timeoutNone')"
+                  />
+                </DouFormItem>
+              </template>
             </DouForm>
           </DouCard>
 
@@ -358,9 +474,20 @@ async function save() {
                       placeholder="128"
                     />
                   </DouFormItem>
+                  <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
+                    <DouInputNumber
+                      v-model="model.maxTokens"
+                      :min="256"
+                      :max="1000000"
+                      :step="1024"
+                      :placeholder="t('settings.maxTokensDefault')"
+                    />
+                  </DouFormItem>
                   <DouFormItem :label="t('settings.modelImages')">
                     <DouSwitch v-model="model.images" />
                   </DouFormItem>
+                </div>
+                <div class="settings-row">
                   <DouFormItem :label="t('settings.modelNote')" class="settings-grow">
                     <DouInput
                       v-model="model.note"
@@ -424,6 +551,18 @@ async function save() {
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
       </DouTabPanel>
+      <DouTabPanel
+        v-for="part in WORK_PARTS"
+        :key="part"
+        :value="part"
+        :label="t(`settings.tab.${part}`)"
+      >
+        <WorkSettings
+          v-if="open"
+          :ref="(el) => (work[part] = el as InstanceType<typeof WorkSettings> | null)"
+          :part="part"
+        />
+      </DouTabPanel>
       <DouTabPanel value="input" :label="t('settings.tab.input')">
         <InputSettings v-if="open" ref="input" />
       </DouTabPanel>
@@ -466,6 +605,9 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="worktrees" :label="t('settings.tab.worktrees')">
         <WorktreeSettings v-if="open && tab === 'worktrees'" />
+      </DouTabPanel>
+      <DouTabPanel value="data" :label="t('settings.tab.data')">
+        <DataSettings v-if="open && tab === 'data'" />
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
@@ -522,6 +664,15 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.settings-more {
+  align-self: flex-start;
+}
+
+.settings-code :deep(textarea),
+.settings-code :deep(input) {
+  font-family: var(--dou-font-family-mono);
 }
 
 .settings-remove {

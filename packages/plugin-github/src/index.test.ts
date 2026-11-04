@@ -1,4 +1,4 @@
-import { run } from '@ariadne/plugin-local'
+import { branchFor, run } from '@ariadne/plugin-local'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -235,9 +235,17 @@ describe('github repository', () => {
     )
     const branches = workspace.branches!
     expect(branches.merge).toBeUndefined()
-    const changes = await branches.changes('thr_ffffffffffff', 'main')
+    const changes = await branches.changes(
+      { threadId: 'thr_ffffffffffff', branch: branchFor('thr_ffffffffffff') },
+      'main',
+    )
     expect(changes?.files.map((f) => [f.path, f.status])).toEqual([['x.txt', 'added']])
-    expect(await branches.merged('thr_ffffffffffff', 'main')).toBe(false)
+    expect(
+      await branches.merged(
+        { threadId: 'thr_ffffffffffff', branch: branchFor('thr_ffffffffffff') },
+        'main',
+      ),
+    ).toBe(false)
     expect((await branches.worktrees()).map((w) => w.threadId)).toEqual(['thr_ffffffffffff'])
     expect(await branches.remove('thr_ffffffffffff')).toBe(true)
     expect(await branches.worktrees()).toEqual([])

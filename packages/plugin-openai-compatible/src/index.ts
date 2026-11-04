@@ -9,6 +9,7 @@ import {
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
+  withExtraBody,
 } from '@ariadne/plugin-sdk'
 
 export interface OpenAICompatibleSettings {
@@ -137,6 +138,10 @@ function finishReason(reason: string | null): 'stop' | 'length' | 'tool-calls' {
 
 /** The body of a chat completion request; the key goes in a header. */
 export function requestBody(_settings: OpenAICompatibleSettings, request: ModelRequest) {
+  return withExtraBody(baseBody(request), request.extraBody)
+}
+
+function baseBody(request: ModelRequest) {
   return {
     model: request.model,
     messages: toWire(request.messages),
@@ -153,6 +158,7 @@ export function requestBody(_settings: OpenAICompatibleSettings, request: ModelR
         }
       : {}),
     ...(request.effort ? { reasoning_effort: request.effort } : {}),
+    ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
     stream: true,
     stream_options: { include_usage: true },
   }
@@ -181,6 +187,7 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
       response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
+          ...request.headers,
           'content-type': 'application/json',
           ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
         },

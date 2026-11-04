@@ -21,6 +21,7 @@ import type {
   TraceTurn,
   MemoryView,
   NoticeView,
+  ProjectSettings,
   StoredFile,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
@@ -183,6 +184,10 @@ export interface ModelProviderInput {
   kind: string
   name: string
   settings: Record<string, unknown>
+  /** Sent with every request; an empty value keeps the stored one. */
+  headers?: { name: string; value: string }[]
+  extraBody?: Record<string, unknown>
+  timeoutSeconds?: number | null
 }
 
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */
@@ -215,10 +220,80 @@ export interface Snippet {
   text: string
 }
 
-/** Which key sends a message, and the snippets kept for reuse. */
+/** The app's keys the user can bind elsewhere. */
+export const SHORTCUT_ACTIONS = [
+  'search',
+  'focus',
+  'previousThread',
+  'nextThread',
+  'stop',
+  'sheet',
+] as const
+export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number]
+
+export const DEFAULT_KEYS: Readonly<Record<ShortcutAction, string>> = {
+  search: 'mod+k',
+  focus: '/',
+  previousThread: 'mod+up',
+  nextThread: 'mod+down',
+  stop: 'escape',
+  sheet: '?',
+}
+
+/** Which key sends a message, the snippets kept for reuse, and the app's keys. */
 export interface InputSettings {
   submitOn: 'enter' | 'mod-enter'
   snippets: Snippet[]
+  keys: Record<ShortcutAction, string>
+}
+
+export type CommandAction = 'allow' | 'ask' | 'deny'
+
+export interface CommandRule {
+  pattern: string
+  action: CommandAction
+}
+
+/** Numbers that bound the work; seconds, characters, a share of the context, counts. */
+export interface Limits {
+  commandTimeout: number
+  commandTimeoutMax: number
+  commandOutput: number
+  compactShare: number
+  modelRetries: number
+  loopRepeats: number
+}
+
+/** How the work is done everywhere: the user's instructions, command rules, limits. */
+export interface WorkSettings {
+  instructions: string
+  rules: CommandRule[]
+  limits: Limits
+  defaults: Limits
+}
+
+export type ToolGroup = 'fetch' | 'search' | 'commands' | 'issueWrites'
+
+export interface ProjectSettingsView {
+  settings: ProjectSettings
+  /** Names of the project's command environment variables; values stay on the server. */
+  env: string[]
+  /** The built-in tool groups a project can switch off. */
+  tools: ToolGroup[]
+}
+
+export interface BackupInfo {
+  name: string
+  size: number
+  createdAt: number
+}
+
+export interface DataUsage {
+  home: string
+  database: number
+  plugins: number | null
+  backups: BackupInfo[]
+  backupsDir: string
 }
 
 /** One model on one of the providers; `note` says what it is for, for the coordinator. */
@@ -230,6 +305,8 @@ export interface ModelEntry {
   note?: string
   /** `false` when the model cannot look at images. */
   images?: false
+  /** The most it may write in one response. */
+  maxTokens?: number
 }
 
 export interface ModelSettingsInput {
@@ -249,9 +326,15 @@ export interface RoleInput {
   effort: Effort | null
 }
 
-export interface ModelSettings extends ModelSettingsInput {
+export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
   kinds: ModelKind[]
-  providers: (ModelProviderInput & { secretsSet: string[] })[]
+  providers: (Omit<ModelProviderInput, 'headers'> & {
+    secretsSet: string[]
+    /** Names of the headers stored; their values stay on the server. */
+    headers: string[]
+    extraBody: Record<string, unknown>
+    timeoutSeconds: number | null
+  })[]
 }
 
 export interface ArtifactDetail {
@@ -385,6 +468,33 @@ export const api = {
     ),
   setProjectMcp: (projectId: string, servers: string[]) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/mcp`, { servers }),
+  getWorkSettings: () => request<WorkSettings>('GET', '/api/settings/work'),
+  saveWorkSettings: (input: Partial<Omit<WorkSettings, 'defaults'>>) =>
+    request<WorkSettings>('PUT', '/api/settings/work', input),
+  getDataUsage: () => request<DataUsage>('GET', '/api/settings/data'),
+  backupData: () => request<{ backup: BackupInfo }>('POST', '/api/settings/data/backups'),
+  removeBackup: (name: string) =>
+    request<void>('DELETE', `/api/settings/data/backups/${encodeURIComponent(name)}`),
+  getProjectSettings: (projectId: string) =>
+    request<ProjectSettingsView>('GET', `/api/projects/${projectId}/settings`),
+  saveProjectSettings: (
+    projectId: string,
+    input: { settings: ProjectSettings; env?: { name: string; value: string }[] },
+  ) =>
+    request<ProjectSettingsView & { project: ProjectView }>(
+      'PUT',
+      `/api/projects/${projectId}/settings`,
+      input,
+    ),
+  /** The project's log as a file; the token goes in a header, so not as a plain link. */
+  exportProject: async (projectId: string) => {
+    const response = await fetch(`/api/projects/${projectId}/export`, {
+      headers: { authorization: `Bearer ${token() ?? ''}` },
+    })
+    if (!response.ok) throw new ApiError(response.status, (await response.json()).error)
+    const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
+    return { blob: await response.blob(), name: name ?? `ariadne-${projectId}.json` }
+  },
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
   getChanges: (threadId: string) =>

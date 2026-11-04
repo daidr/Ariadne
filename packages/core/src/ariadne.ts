@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
+import { branchSlug, parseProjectSettings, storedProjectSettings } from './project-settings'
 import {
   parseAnswer,
   parseBlock,
@@ -102,7 +103,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 36
+export const PROJECTION_VERSION = 37
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -182,6 +183,7 @@ interface ProjectRow {
   source: string | null
   slots: number | null
   mcp: string
+  settings: string | null
   created_at: number
   updated_at: number
 }
@@ -310,6 +312,7 @@ interface ThreadRow {
   stopped_by: string | null
   stopped_at: number | null
   model: string | null
+  branch_slug: string | null
   created_at: number
   updated_at: number
   open_attentions: number
@@ -445,6 +448,7 @@ function toThread(row: ThreadRow): ThreadView {
         ? null
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
     model: row.model,
+    branchSlug: row.branch_slug,
     usage: usageOf(row),
     progress: progressOf(row.todo_items),
     createdAt: row.created_at,
@@ -579,6 +583,44 @@ export class Ariadne {
 
   close(): void {
     this.store.close()
+  }
+
+  /**
+   * Copy the whole database to `path`, consistent as of now, while it stays in use. The
+   * copy is a database of its own: to restore it, stop Ariadne and put it in place.
+   */
+  backupTo(path: string): void {
+    this.db.run('VACUUM INTO ?', [path])
+  }
+
+  /**
+   * Everything the log holds of a project, oldest first, with the files it refers to: a
+   * record to keep, readable as JSON. Settings kept outside the log (secrets) are not in it.
+   */
+  exportProject(projectId: string): {
+    project: { id: string; name: string }
+    events: AnyStoredEvent[]
+    files: { id: string; mime: string; data: string }[]
+  } {
+    const project = this.getProject(projectId)
+    const events: AnyStoredEvent[] = []
+    for (let after = 0; ;) {
+      const page = this.store.read({ afterSeq: after, projectId, limit: 1000 })
+      events.push(...page)
+      if (page.length < 1000) break
+      after = page.at(-1)!.seq
+    }
+    const files = this.db
+      .query<{ id: string; mime: string; data: Uint8Array }, [string]>(
+        'SELECT id, mime, data FROM files WHERE project_id = ? ORDER BY id',
+      )
+      .all(projectId)
+      .map((file) => ({
+        id: file.id,
+        mime: file.mime,
+        data: Buffer.from(file.data).toString('base64'),
+      }))
+    return { project: { id: project.id, name: project.name }, events, files }
   }
 
   // ---- queries ----
@@ -1083,9 +1125,21 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
+  /**
+   * Replace the project's own settings. `tools` names the built-in tools that can be
+   * turned off; the input may turn off only those.
+   */
+  setProjectSettings(projectId: string, input: unknown, tools: readonly string[]): ProjectView {
+    const project = this.getProject(projectId)
+    const settings = parseProjectSettings(input, tools)
+    if (JSON.stringify(settings) === JSON.stringify(project.settings)) return project
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings } }])
+    return this.getProject(projectId)
+  }
+
   createThread(
     projectId: string,
-    input: { title: string; nodeId?: string | null; model?: string | null },
+    input: { title: string; nodeId?: string | null; model?: string | null; branch?: string | null },
   ): ThreadView {
     this.getProject(projectId)
     const title = input.title.trim()
@@ -1098,7 +1152,13 @@ export class Ariadne {
       {
         type: 'thread.created',
         projectId,
-        data: { threadId, title, nodeId: input.nodeId ?? null, model: input.model ?? null },
+        data: {
+          threadId,
+          title,
+          nodeId: input.nodeId ?? null,
+          model: input.model ?? null,
+          branch: branchSlug(input.branch),
+        },
       },
     ])
     return this.getThread(threadId)
@@ -1320,12 +1380,12 @@ export class Ariadne {
   }
 
   /**
-   * The user's yes for one call of an external tool by one thread: `purpose` names the
-   * tool and the exact arguments. A yes is used for one call (`useMcpApproval`), and the
+   * The user's yes for one call by one thread (an external tool, a command): `purpose` names
+   * the call and its exact arguments. A yes is used for one call (`useApproval`), and the
    * same call later asks again. A no holds until the user writes in the thread again, so
    * the thread does not ask the same thing twice on its own.
    */
-  mcpApproval(
+  callApproval(
     projectId: string,
     threadId: string,
     purpose: string,
@@ -1338,7 +1398,7 @@ export class Ariadne {
         [string, string, string]
       >(
         `SELECT a.id, a.closed, a.approved,
-           (SELECT 1 FROM mcp_calls c WHERE c.attention_id = a.id) AS used
+           (SELECT 1 FROM used_approvals c WHERE c.attention_id = a.id) AS used
          FROM attentions a
          WHERE a.project_id = ? AND a.purpose = ? AND a.conversation_id = ?
          ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
@@ -1371,16 +1431,18 @@ export class Ariadne {
   }
 
   /** Spend the yes on `attentionId` on the call about to be made. */
-  useMcpApproval(
+  useApproval(
     projectId: string,
-    input: { threadId: string; attentionId: string; server: string; tool: string },
+    input: { threadId: string; attentionId: string; what: string },
   ): void {
     this.assertThreadIn(projectId, input.threadId)
     const used = this.db
-      .query<{ one: number }, [string]>('SELECT 1 AS one FROM mcp_calls WHERE attention_id = ?')
+      .query<{ one: number }, [string]>(
+        'SELECT 1 AS one FROM used_approvals WHERE attention_id = ?',
+      )
       .get(input.attentionId)
     if (used) throw new DomainError('error.invalidBody', { reason: 'approval used' })
-    this.store.append([{ type: 'mcp.called', projectId, data: input }])
+    this.store.append([{ type: 'approval.used', projectId, data: input }])
   }
 
   stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
@@ -3034,6 +3096,7 @@ export class Ariadne {
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],
+      settings: storedProjectSettings(row.settings),
       usage: this.projectUsage(row.id),
     }
   }

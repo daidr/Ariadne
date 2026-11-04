@@ -1,5 +1,6 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
+import type { ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
@@ -41,6 +42,7 @@ export interface ProjectView {
   slots: number | null
   /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
   mcp: string[]
+  settings: ProjectSettings
   /** Tokens every conversation of the project has used, summaries included. */
   usage: UsageTotals
 }
@@ -89,6 +91,8 @@ export interface ThreadView {
   stopped: { reason: string; by: string; at: number } | null
   /** The model setting it was given; `null` uses the default for threads. */
   model: string | null
+  /** The readable part of its branch name the coordinator gave it, e.g. `fix-export`. */
+  branchSlug: string | null
   /** Tokens its turns have used. */
   usage: UsageTotals
   /** How many of its todos are done, out of how many; `null` while it has none. */
