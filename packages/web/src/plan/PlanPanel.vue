@@ -33,9 +33,12 @@ const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.valu
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: 100%;
 }
 
+/* The graph takes whatever height the panel has left. */
 .plan-panel-graph {
-  height: max(240px, 55dvh);
+  flex: 1;
+  min-height: 240px;
 }
 </style>

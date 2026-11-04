@@ -82,6 +82,8 @@ interface State {
   threadDefault: string | null
   /** The new-project form is open. */
   creatingProject: boolean
+  /** The project source popover in the header is open; the first-run steps open it too. */
+  sourceOpen: boolean
   /** Bumped whenever the open project's events arrive, so open views can reload. */
   revision: number
   error: string | null
@@ -103,6 +105,7 @@ export const state = reactive<State>({
   models: [],
   threadDefault: null,
   creatingProject: false,
+  sourceOpen: false,
   revision: 0,
   error: null,
 })

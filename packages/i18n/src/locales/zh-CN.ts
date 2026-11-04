@@ -176,6 +176,7 @@ export const zhCN = {
   'start.projectHint': '一个目标对应一个项目',
   'start.source': '选择工作目录（可选）',
   'start.sourceHint': '本地目录、仓库或 SSH 远程目录，thread 才能改代码',
+  'start.chooseSource': '选择目录',
   'start.talk': '告诉协调器你想做什么',
   'start.talkHint': '协调器会拆解计划、安排 thread',
   'notice.memoryAdded': '记下了一条项目记忆：{text}',

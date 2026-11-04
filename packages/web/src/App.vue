@@ -4,6 +4,7 @@ import {
   DouButton,
   DouColorModeButton,
   DouConfigProvider,
+  DouDivider,
   DouLayout,
   DouLayoutAside,
   DouLayoutHeader,
@@ -18,6 +19,7 @@ import AttentionBar from './components/AttentionBar.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
+import ProjectSource from './components/ProjectSource.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, start, state } from './store'
@@ -71,7 +73,12 @@ watchEffect(() => {
         <div class="header">
           <DouText weight="medium">{{ t('app.name') }}</DouText>
           <div class="header-actions">
-            <AttentionBar />
+            <!-- What belongs to the open project, set apart from the app's own buttons. -->
+            <template v-if="state.detail">
+              <AttentionBar />
+              <ProjectSource />
+              <DouDivider direction="vertical" />
+            </template>
             <DouButton
               variant="ghost"
               size="sm"
