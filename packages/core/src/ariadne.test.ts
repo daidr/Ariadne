@@ -9,7 +9,7 @@ import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
+const STEP_INPUT = { system: 'system', tools: '[]', call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne
@@ -1116,7 +1116,7 @@ describe('usage, models and step input', () => {
   test('a step stores each input piece once per project, by its hash', () => {
     const project = app.createProject('P')
     const prompts = () => app.events({ limit: 1000 }).filter((e) => e.type === 'prompt.recorded')
-    const step = (system: string, state: string | null) => {
+    const step = (system: string, tools: string) => {
       const turnId = app.startTurn(project.coordinatorId, 'm')
       app.recordStep(project.coordinatorId, turnId, {
         text: 'x',
@@ -1124,13 +1124,13 @@ describe('usage, models and step input', () => {
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage: { input: 900, output: 30 },
-        input: { system, tools: '[]', state, call: '{}', images: true },
+        input: { system, tools, call: '{}', images: true },
         timing: TIMING,
       })
       app.finishTurn(project.coordinatorId, turnId, 'completed')
     }
-    step('提示一', null)
-    step('提示一', null)
+    step('提示一', '[]')
+    step('提示一', '[]')
     expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]', '{}'])
     step('提示二', '提示二')
     // The same text twice in one step is stored once.
@@ -1138,7 +1138,7 @@ describe('usage, models and step input', () => {
     const last = app.events({ limit: 1000 }).findLast((e) => e.type === 'turn.step')
     if (last?.type !== 'turn.step') throw new Error('expected a step')
     expect(app.getPrompt(project.id, last.data.input.system)).toBe('提示二')
-    expect(last.data.input.state).toBe(last.data.input.system)
+    expect(last.data.input.tools).toBe(last.data.input.system)
     // Another project keeps its own copy.
     const other = app.createProject('Q')
     expect(app.getPrompt(other.id, last.data.input.system)).toBeNull()

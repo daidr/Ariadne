@@ -99,7 +99,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 31
+export const PROJECTION_VERSION = 32
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -807,6 +807,8 @@ export class Ariadne {
       call: string
       timing: CallTiming
       reasoning: ReasoningRecord[]
+      /** The todo list and open questions now, kept beside the notes. */
+      state: string
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
@@ -825,6 +827,7 @@ export class Ariadne {
       reasoning: compaction.reasoning
         .filter((block) => !block.redacted && block.text)
         .map((block) => ({ text: block.text })),
+      state: compaction.state,
     }
     this.store.append([...pieces, { type: 'conversation.compacted', projectId, data }])
   }
@@ -2454,7 +2457,7 @@ export class Ariadne {
       toolCalls: ToolCallRecord[]
       sawSeq: number
       usage: TokenUsage | null
-      input: { system: string; tools: string; state: string | null; call: string; images: boolean }
+      input: { system: string; tools: string; call: string; images: boolean }
       timing: CallTiming
     },
   ): void {
@@ -2463,7 +2466,6 @@ export class Ariadne {
     const input: StepInput = {
       system: keep(step.input.system),
       tools: keep(step.input.tools),
-      state: step.input.state === null ? null : keep(step.input.state),
       call: keep(step.input.call),
       images: step.input.images,
     }

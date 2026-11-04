@@ -89,14 +89,13 @@ export interface TokenUsage {
 
 /**
  * The parts of a step's model request that the transcript does not hold, by the hash of
- * their `prompt.recorded` text: the system prompt, the tool definitions (JSON), the
- * current state shown beside a summary (`null` without one), and `call`: JSON of the
- * provider kind, model, effort and settings (secrets left out) the request went with.
+ * their `prompt.recorded` text: the system prompt, the tool definitions (JSON), and
+ * `call`: JSON of the provider kind, model, effort and settings (secrets left out) the
+ * request went with.
  */
 export interface StepInput {
   system: string
   tools: string
-  state: string | null
   call: string
   /** Whether images went to the model as images; without, they were described in words. */
   images: boolean
@@ -323,6 +322,12 @@ export interface EventMap {
      * services that think by default (DeepSeek) refuse an assistant message without it.
      */
     reasoning: ReasoningRecord[]
+    /**
+     * The todo list and open questions as they stood when the summary was written; they
+     * go with the notes. Fixed here, so the request keeps its beginning (and the
+     * provider's cache) until the next summary: later changes are calls in the history.
+     */
+    state: string
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
