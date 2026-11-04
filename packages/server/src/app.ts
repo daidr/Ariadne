@@ -700,6 +700,18 @@ export function createHandler({
     return json(concurrency)
   })
 
+  add('GET', '/api/settings/input', () => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.current.input)
+  })
+
+  add('PUT', '/api/settings/input', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.updateInput(await readJson(request)))
+  })
+
   // Links in messages that a plugin knows, such as pull requests: what each names, and the
   // card shown when the user points at one.
   const links = new LinkResolver(host?.links ?? new Map())
