@@ -31,9 +31,14 @@ export function format(template: string, params?: MessageParams): string {
 
 export type Translate = (key: MessageKey, params?: MessageParams) => string
 
+/**
+ * A message key the event log may hold from an older version but this one no longer has
+ * comes back as the key itself, so old data never breaks rendering.
+ */
 export function createTranslator(locale: Locale = defaultLocale): Translate {
-  const messages = locales[locale]
-  return (key, params) => format(messages[key] ?? zhCN[key], params)
+  const messages: Record<string, string> = locales[locale]
+  const source: Record<string, string> = zhCN
+  return (key, params) => format(messages[key] ?? source[key] ?? key, params)
 }
 
 /** Pick the best supported locale from a list such as `navigator.languages` or `Accept-Language`. */

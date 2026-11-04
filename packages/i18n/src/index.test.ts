@@ -19,6 +19,11 @@ describe('i18n', () => {
     expect(createTranslator()('attention.title')).toBe('需要我')
   })
 
+  test('shows a key it no longer knows as the key itself', () => {
+    const t = createTranslator('en') as (key: string, params?: Record<string, string>) => string
+    expect(t('error.goneSinceLastVersion', { limit: '50' })).toBe('error.goneSinceLastVersion')
+  })
+
   test('negotiates locales', () => {
     expect(negotiateLocale(['zh-TW', 'en'])).toBe('zh-CN')
     expect(negotiateLocale(['en-US'])).toBe('en')
