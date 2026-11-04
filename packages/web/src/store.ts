@@ -19,6 +19,7 @@ import {
   followEvents,
   type ModelSettings,
   type ProjectDetail,
+  type SourceInput,
   type StreamStatus,
 } from './api'
 import { t, tm } from './i18n'
@@ -259,9 +260,7 @@ export async function setProjectMcp(servers: string[]): Promise<string | null> {
 }
 
 /** Save the project's working directory; returns why it was refused, or `null`. */
-export async function setSource(
-  source: { kind: string; settings: Record<string, unknown> } | null,
-): Promise<string | null> {
+export async function setSource(source: SourceInput | null): Promise<string | null> {
   const project = state.detail?.project
   if (!project) return null
   try {

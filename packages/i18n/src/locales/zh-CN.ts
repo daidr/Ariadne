@@ -157,6 +157,8 @@ export const zhCN = {
   'plan.removeSelectedThreads':
     '删除选中的 {count} 个节点？上面共有 {threads} 个 thread 会和计划图脱钩。可以在修改记录里撤销。',
   'plugins.removeAffects': '这些模型提供方正在用它：{names}。移除后它们会无法使用。',
+  'project.source.hosting': '代码托管',
+  'project.source.hostingNone': '不用',
   'project.source.none': '未设置',
   'project.source.save': '保存',
   'project.source.clear': '移除',
@@ -175,7 +177,7 @@ export const zhCN = {
   'start.project': '新建项目',
   'start.projectHint': '一个目标对应一个项目',
   'start.source': '选择工作目录（可选）',
-  'start.sourceHint': '本地目录、仓库或 SSH 远程目录，thread 才能改代码',
+  'start.sourceHint': '本地目录、仓库或远程目录，thread 才能改代码',
   'start.chooseSource': '选择目录',
   'start.talk': '告诉协调器你想做什么',
   'start.talkHint': '协调器会拆解计划、安排 thread',

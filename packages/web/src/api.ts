@@ -146,11 +146,20 @@ export interface ModelKind {
   settings: SettingsSchema
 }
 
+/** A source as the form sends it: secrets typed in, `null` to clear one. */
+export interface SourceInput {
+  kind: string
+  settings: Record<string, unknown>
+  hosting?: { kind: string; settings: Record<string, unknown> } | null
+}
+
 /** A kind of context source a plugin offers. */
 export interface SourceKind extends ModelKind {
   provides: string[]
   /** Threads' commands run on another machine, outside this one's sandbox. */
   remote: boolean
+  /** Can bring its repository and issues to a remote source. */
+  hosting: boolean
   /** One-line name of a source, `{setting}` replaced by its value. */
   summary: string | null
 }
@@ -304,10 +313,8 @@ export const api = {
       'GET',
       `/api/projects/${projectId}/source`,
     ),
-  setSource: (
-    projectId: string,
-    source: { kind: string; settings: Record<string, unknown> } | null,
-  ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  setSource: (projectId: string, source: SourceInput | null) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
   getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
