@@ -2,7 +2,7 @@ import type { PlanNodeView, PlanRevisionView, PlanView } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
 import { editOf, mergeIntoForm, reasonOf } from './edit'
-import { freshChanges, toFlowDocument } from './layout'
+import { freshChanges, layoutPlan, NODE_WIDTH, nodeHeight, toFlowDocument } from './layout'
 
 const node = (id: string, dependsOn: string[] = [], extra: Partial<PlanNodeView> = {}) =>
   ({
@@ -196,5 +196,86 @@ describe('mergeIntoForm', () => {
     // Saving from here sends only the user's field, expecting the newer value to be kept
     // out of it until they choose.
     expect(next.description).toBe('')
+  })
+})
+
+const overlaps = (nodes: PlanNodeView[], at: Map<string, { x: number; y: number }>) =>
+  nodes.some((a, i) =>
+    nodes.slice(i + 1).some((b) => {
+      const p = at.get(a.id)!
+      const q = at.get(b.id)!
+      return (
+        Math.abs(p.x - q.x) < NODE_WIDTH &&
+        (p.y < q.y ? q.y - p.y < nodeHeight(a) : p.y - q.y < nodeHeight(b))
+      )
+    }),
+  )
+
+describe('layoutPlan', () => {
+  test('a node sits below what it depends on', () => {
+    const nodes = [node('a'), node('b', ['a']), node('c', ['b']), node('d', ['a'])]
+    const at = layoutPlan(nodes)
+    expect(at.get('b')!.y).toBeGreaterThan(at.get('a')!.y)
+    expect(at.get('c')!.y).toBeGreaterThan(at.get('b')!.y)
+    expect(at.get('d')!.y).toBeGreaterThan(at.get('a')!.y)
+    expect(overlaps(nodes, at)).toBe(false)
+  })
+
+  test('a source waits on the level just above what needs it', () => {
+    // `late` feeds only `c`, three levels down: it sits right above `c`, not in the top row.
+    const nodes = [node('a'), node('b', ['a']), node('late'), node('c', ['b', 'late'])]
+    const at = layoutPlan(nodes)
+    expect(at.get('late')!.y).toBe(at.get('b')!.y)
+  })
+
+  test('unrelated parts and lone nodes are kept apart', () => {
+    const nodes = [
+      node('a'),
+      node('b', ['a']),
+      node('x'),
+      node('y', ['x']),
+      node('lone1'),
+      node('lone2'),
+    ]
+    const at = layoutPlan(nodes)
+    expect(overlaps(nodes, at)).toBe(false)
+    const right = (ids: string[]) => Math.max(...ids.map((id) => at.get(id)!.x)) + NODE_WIDTH
+    const left = (ids: string[]) => Math.min(...ids.map((id) => at.get(id)!.x))
+    const bottom = (ids: string[]) =>
+      Math.max(...ids.map((id) => at.get(id)!.y + nodeHeight(nodes.find((n) => n.id === id)!)))
+    const top = (ids: string[]) => Math.min(...ids.map((id) => at.get(id)!.y))
+    const apart = (p: string[], q: string[]) =>
+      right(p) <= left(q) || right(q) <= left(p) || bottom(p) <= top(q) || bottom(q) <= top(p)
+    expect(apart(['a', 'b'], ['x', 'y'])).toBe(true)
+    expect(apart(['a', 'b'], ['lone1', 'lone2'])).toBe(true)
+    expect(apart(['x', 'y'], ['lone1', 'lone2'])).toBe(true)
+  })
+
+  test('a wide plan wraps instead of running off to one side', () => {
+    const nodes = Array.from({ length: 12 }, (_, i) => [
+      node(`s${i}`),
+      node(`t${i}`, [`s${i}`]),
+    ]).flat()
+    const at = layoutPlan(nodes)
+    const xs = [...at.values()].map((p) => p.x)
+    const ys = [...at.values()].map((p) => p.y)
+    const width = Math.max(...xs) - Math.min(...xs) + NODE_WIDTH
+    const height = Math.max(...ys) - Math.min(...ys)
+    expect(width).toBeLessThan(height * 3)
+    expect(overlaps(nodes, at)).toBe(false)
+  })
+
+  test('a previewed change is laid out with its own edges', () => {
+    const doc = toFlowDocument(plan([node('a'), node('b')]), {
+      preview: {
+        nodes: [
+          { ...node('a'), mark: null },
+          { ...node('b', ['a']), mark: 'changed' },
+        ],
+        edges: [{ from: 'a', to: 'b', mark: 'added' }],
+      },
+    })
+    const y = (id: string) => doc.nodes.find((n) => n.id === id)!.y
+    expect(y('b')).toBeGreaterThan(y('a'))
   })
 })
