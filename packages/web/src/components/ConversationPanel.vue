@@ -62,6 +62,7 @@ import {
 import StageLabel from './StageLabel.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
+import AgentText from '../markdown/AgentText.vue'
 import MessageLink from '../markdown/MessageLink.vue'
 import { sanitizeUrl } from '../markdown/links'
 
@@ -476,7 +477,7 @@ watch(
           <!-- What the coordinator told a thread: there for whoever wants it, out of the way otherwise. -->
           <DouCollapse v-if="message.kind === 'relay'" class="relay">
             <DouCollapseItem :value="message.id" :title="t('message.fromCoordinator')">
-              <DouText size="sm" class="relay-content">{{ message.content }}</DouText>
+              <AgentText :content="message.content" class="relay-content" />
             </DouCollapseItem>
           </DouCollapse>
           <DouChatMessage
@@ -519,7 +520,12 @@ watch(
                     </DouText>
                     <template v-if="message.originalContent !== null">
                       <DouText variant="tertiary" size="sm">{{ t('message.original') }}</DouText>
-                      <DouText size="sm" class="edit-original">{{
+                      <AgentText
+                        v-if="message.author !== 'user'"
+                        :content="message.originalContent"
+                        class="edit-original edit-original-markdown"
+                      />
+                      <DouText v-else size="sm" class="edit-original">{{
                         message.originalContent
                       }}</DouText>
                     </template>
@@ -683,6 +689,11 @@ watch(
   overflow-wrap: anywhere;
 }
 
+.edit-original-markdown {
+  font-size: var(--dou-font-size-sm);
+  white-space: normal;
+}
+
 .conversation {
   display: flex;
   flex-direction: column;
@@ -790,6 +801,6 @@ watch(
 }
 
 .relay-content {
-  white-space: pre-wrap;
+  font-size: var(--dou-font-size-sm);
 }
 </style>

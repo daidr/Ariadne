@@ -14,6 +14,7 @@ describe('message links', () => {
     expect(sanitizeUrl('thread:thr_1', 'link')).toBe('thread:thr_1')
     expect(sanitizeUrl('https://example.com/a', 'link')).toBe('https://example.com/a')
     expect(sanitizeUrl('mailto:a@b.c', 'link')).toBe('mailto:a@b.c')
+    expect(sanitizeUrl('http://example.com', 'link')).toBeUndefined()
     expect(sanitizeUrl('src/App.vue:12', 'link')).toBeUndefined()
     expect(sanitizeUrl('/api/files/x', 'link')).toBeUndefined()
     expect(sanitizeUrl('javascript:alert(1)', 'link')).toBeUndefined()
