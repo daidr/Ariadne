@@ -31,7 +31,13 @@ import {
   summaryRequest,
   usageOf,
 } from './compaction'
-import { attachedText, toChatMessages, visibleHistory, withImageData } from './transcript'
+import {
+  attachedText,
+  toChatMessages,
+  visibleHistory,
+  withImageData,
+  writtenBy,
+} from './transcript'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -243,7 +249,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
   const readText = attachedText(app)
   const images = model.images !== false
-  const chat = { readText, images }
+  const chat = {
+    readText,
+    images,
+    keepReasoning: writtenBy(app, conversation.projectId, JSON.parse(callOf(model, null))),
+  }
   const loadImage = (file: Attachment) => {
     try {
       return {
@@ -294,7 +304,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             ? compactionCut(transcript, threshold / 4)
             : null
         if (upTo !== null) {
-          const request = summaryRequest(transcript, upTo, titleOf, conversation.role, readText)
+          const request = summaryRequest(
+            transcript,
+            upTo,
+            titleOf,
+            conversation.role,
+            readText,
+            chat.keepReasoning,
+          )
           const summary = await summarise(model, withImageData(request, loadImage), signal)
           if (signal.aborted) break
           if (summary.ok) {
@@ -305,6 +322,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               usage: summary.usage,
               call: callOf(model, null),
               timing: summary.timing,
+              reasoning: summary.reasoning,
             })
           } else {
             compactionFailed = true

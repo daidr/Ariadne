@@ -152,6 +152,16 @@ describe('daemon shell', () => {
     await shell.dispose()
   })
 
+  test('an idle connection closes, and the next call opens one again', async () => {
+    const shell = new DaemonShell(target, 100)
+    expect((await shell.run('echo one', [])).stdout).toBe('one\n')
+    expect(shell.connected).toBe(true)
+    await Bun.sleep(300)
+    expect(shell.connected).toBe(false)
+    expect((await shell.run('echo two', [])).stdout).toBe('two\n')
+    await shell.dispose()
+  })
+
   test('a new pairing code takes hold at once', async () => {
     const shell = new DaemonShell(target)
     expect((await shell.run('echo one', [])).stdout).toBe('one\n')

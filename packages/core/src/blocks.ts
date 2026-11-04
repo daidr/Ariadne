@@ -8,7 +8,7 @@ import { DomainError } from './errors'
  *
  * Choices, confirmations and forms ask the user something (ask blocks): each is an
  * attention, listed under "needs me" until answered, and the answer wakes whoever asked.
- * Tables, charts and steps only show something.
+ * Tables, charts, steps and threads only show something.
  */
 
 export interface ChoiceOption {
@@ -118,12 +118,18 @@ export interface StepsBlock {
   items: { title: string; description: string | null; status: StepStatus }[]
 }
 
+/** An entry to one of the project's threads, drawn with its stage as it is now. */
+export interface ThreadBlock {
+  type: 'thread'
+  threadId: string
+}
+
 export type AskBlock = ChoiceBlock | ConfirmBlock | FormBlock
-export type ShowBlock = TableBlock | ChartBlock | StepsBlock
+export type ShowBlock = TableBlock | ChartBlock | StepsBlock | ThreadBlock
 export type UiBlock = AskBlock | ShowBlock
 
 export const ASK_BLOCK_TYPES = ['choice', 'confirm', 'form'] as const
-export const SHOW_BLOCK_TYPES = ['table', 'chart', 'steps'] as const
+export const SHOW_BLOCK_TYPES = ['table', 'chart', 'steps', 'thread'] as const
 export const BLOCK_TYPES = [...ASK_BLOCK_TYPES, ...SHOW_BLOCK_TYPES] as const
 
 /** How the user answered an ask block; its `type` is the block's. */
@@ -426,6 +432,12 @@ function parseSteps(value: Record<string, unknown>, at: string): StepsBlock {
   return { type: 'steps', title: optionalText(value.title, `${at}.title`), items }
 }
 
+/** Only the id's shape is checked here; `postMessage` checks it names a thread of the project. */
+function parseThread(value: Record<string, unknown>, at: string): ThreadBlock {
+  only(value, ['type', 'threadId'], at)
+  return { type: 'thread', threadId: text(value.threadId, `${at}.threadId`, BLOCK_LIMITS.label) }
+}
+
 /**
  * Check a block as an agent wrote it and fill in what it left out. Throws `blockInvalid`
  * with a reason the model can act on.
@@ -446,6 +458,8 @@ export function parseBlock(value: unknown, at = 'block'): UiBlock {
       return parseChart(value, at)
     case 'steps':
       return parseSteps(value, at)
+    case 'thread':
+      return parseThread(value, at)
   }
 }
 

@@ -1,5 +1,6 @@
 import { browserProfiles, createSandbox, detectSandbox } from '@ariadne/sandbox'
-import { dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { certificate, daemonHome, hasToken, newToken, serveDaemon } from './daemon'
 import { DEFAULT_PORT, isLoopback, pairingCode, parseAddress } from './protocol'
@@ -49,7 +50,8 @@ if (!listen) {
 const sandbox = createSandbox({
   kind: values['no-sandbox'] ? null : await detectSandbox(),
   mode: values['no-sandbox'] ? 'off' : 'auto',
-  hide: [home, ...browserProfiles(), ...values.hide],
+  // Ariadne's own home too, should it also run on this machine.
+  hide: [home, join(homedir(), '.ariadne'), ...browserProfiles(), ...values.hide],
 })
 // The daemon's own code: a thread that changed it would run as the daemon next time.
 const code = process.execPath.endsWith('/bun')

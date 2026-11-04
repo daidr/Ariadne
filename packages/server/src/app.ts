@@ -119,6 +119,30 @@ export function createHandler({
     }),
   )
 
+  // Delete a project with everything Ariadne keeps for it. Its turns end first, then its
+  // threads' worktrees go (branches stay), then its data. The source's own directory or
+  // repository is never touched.
+  const deleting = new Map<string, Promise<void>>()
+  add('DELETE', '/api/projects/:projectId', async (_request, { projectId = '' }) => {
+    app.getProject(projectId)
+    let deletion = deleting.get(projectId)
+    if (!deletion) {
+      deletion = (async () => {
+        const release = (await scheduler?.holdProject(projectId)) ?? (() => {})
+        try {
+          await workspaces?.discardProject(projectId)
+          app.deleteProject(projectId)
+          settings?.saveSourceSecrets(projectId, {})
+        } finally {
+          release()
+        }
+      })().finally(() => deleting.delete(projectId))
+      deleting.set(projectId, deletion)
+    }
+    await deletion
+    return new Response(null, { status: 204 })
+  })
+
   // Files people add: whiteboard images, or (with `?for=message`) a message's images and
   // text files. The body is the file itself.
   add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }, url) => {

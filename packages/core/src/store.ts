@@ -10,6 +10,8 @@ export interface Projection {
   name: string
   setup(db: Database): void
   apply(db: Database, event: AnyStoredEvent): void
+  /** Drop every row this projection holds for the project, which is being deleted. */
+  forget(db: Database, projectId: string): void
 }
 
 export type EventListener = (events: AnyStoredEvent[]) => void
@@ -39,6 +41,8 @@ export interface EventStoreOptions {
   path: string
   projections: Projection[]
   now?: () => number
+  /** Checks each event inside the append's transaction; throwing refuses the whole append. */
+  check?: (db: Database, event: AnyNewEvent) => void
 }
 
 /** The append-only event log, the single source of truth. */
@@ -47,6 +51,7 @@ export class EventStore {
   private readonly projections: Projection[]
   private readonly listeners = new Set<EventListener>()
   private readonly now: () => number
+  private readonly check: ((db: Database, event: AnyNewEvent) => void) | undefined
 
   constructor(options: EventStoreOptions) {
     this.db = new Database(options.path, { create: true, strict: true })
@@ -63,6 +68,7 @@ export class EventStore {
     this.db.run('CREATE INDEX IF NOT EXISTS events_project ON events (project_id, seq)')
     this.projections = options.projections
     this.now = options.now ?? Date.now
+    this.check = options.check
     for (const projection of this.projections) projection.setup(this.db)
   }
 
@@ -73,6 +79,7 @@ export class EventStore {
     )
     const stored = this.db.transaction(() =>
       events.map((event) => {
+        this.check?.(this.db, event)
         const row = insert.get(
           newId('evt'),
           event.type,
@@ -86,16 +93,42 @@ export class EventStore {
         return storedEvent
       }),
     )()
-    // The transaction decides the result. A failing listener is logged and must not keep
-    // the others from seeing these events.
+    this.notify(stored)
+    return stored
+  }
+
+  /**
+   * Remove a project: every event of it and every projection row are dropped, and `also`
+   * removes what is kept beside the log, all in one transaction. Only `tombstone` stays,
+   * so clients following the log hear the project is gone, whenever they come back.
+   */
+  purge(projectId: string, tombstone: AnyNewEvent, also: (db: Database) => void): AnyStoredEvent {
+    const stored = this.db.transaction(() => {
+      for (const projection of this.projections) projection.forget(this.db, projectId)
+      this.db.run('DELETE FROM events WHERE project_id = ?', [projectId])
+      also(this.db)
+      const row = this.db
+        .query<EventRow, [string, string, string, string, number]>(
+          'INSERT INTO events (id, type, project_id, data, at) VALUES (?, ?, ?, ?, ?) RETURNING *',
+        )
+        .get(newId('evt'), tombstone.type, projectId, JSON.stringify(tombstone.data), this.now())
+      if (!row) throw new Error('event insert returned no row')
+      return toStored(row)
+    })()
+    this.notify([stored])
+    return stored
+  }
+
+  // The transaction decides the result. A failing listener is logged and must not keep
+  // the others from seeing these events.
+  private notify(events: AnyStoredEvent[]) {
     for (const listener of this.listeners) {
       try {
-        listener(stored)
+        listener(events)
       } catch (error) {
         console.error('event listener failed', error)
       }
     }
-    return stored
   }
 
   /** Events after `afterSeq`, optionally of one project, oldest first. */

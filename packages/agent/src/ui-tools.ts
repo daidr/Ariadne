@@ -6,6 +6,7 @@ import {
   FORM_FIELD_KINDS,
   STEP_STATUSES,
   type MessageView,
+  type ThreadView,
 } from '@ariadne/core'
 import { json, str, ToolInputError, type Tool } from './tool-helpers'
 
@@ -168,12 +169,22 @@ const blockSchemas = [
     },
     required: ['type', 'items'],
   },
+  {
+    type: 'object',
+    description:
+      "An entry to one of the project's threads. The user sees its title and where it stands now, live, and opens it from there.",
+    properties: {
+      type: { const: 'thread' },
+      threadId: label,
+    },
+    required: ['type', 'threadId'],
+  },
 ]
 
 export const postUi: Tool = {
   spec: {
     name: 'post_ui',
-    description: `Post a message with interface blocks into your conversation, for what plain text shows badly. Blocks: choice, confirm and form ask the user something; table, chart and steps show something. A message asks at most one thing, shown after the other blocks. An ask appears in the message and in the user's "needs me" list; the answer reaches you later as a <user_answer>. Ask only when the answer changes the user's goal or the step cannot be undone, recommend an option, and keep working meanwhile unless it is irreversible. Put a short lead-in in "text" and do not repeat in your reply what the blocks already show. At most ${BLOCK_LIMITS.blocks} blocks.`,
+    description: `Post a message with interface blocks into your conversation, for what plain text shows badly. Blocks: choice, confirm and form ask the user something; table, chart and steps show something; thread is an entry to a thread. A message asks at most one thing, shown after the other blocks. An ask appears in the message and in the user's "needs me" list; the answer reaches you later as a <user_answer>. Ask only when the answer changes the user's goal or the step cannot be undone, recommend an option, and keep working meanwhile unless it is irreversible. Put a short lead-in in "text" and do not repeat in your reply what the blocks already show. At most ${BLOCK_LIMITS.blocks} blocks.`,
     parameters: {
       type: 'object',
       properties: {
@@ -229,11 +240,21 @@ export const withdrawAsk: Tool = {
   },
 }
 
-/** A message's blocks in a line each, for tools that list messages. */
-export function blockLines(message: MessageView): string[] {
+/**
+ * A message's blocks in a line each, for tools that list messages. `thread` looks up a
+ * thread block's thread, so the line names it and where it stands now.
+ */
+export function blockLines(
+  message: MessageView,
+  thread: (id: string) => Pick<ThreadView, 'title' | 'stage'>,
+): string[] {
   const shown = message.blocks.map((block) => {
     if (block.type === 'table')
       return `table${block.title ? ` "${block.title}"` : ''}: ${block.rows.length} rows`
+    if (block.type === 'thread') {
+      const { title, stage } = thread(block.threadId)
+      return `thread ${block.threadId} "${title}" [${stage}]`
+    }
     if (block.type === 'chart')
       return `${block.kind} chart${block.title ? ` "${block.title}"` : ''}: ${block.rows.length} points`
     return `steps${block.title ? ` "${block.title}"` : ''}: ${block.items.map((item) => `${item.title} [${item.status}]`).join(', ')}`

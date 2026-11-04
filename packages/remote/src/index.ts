@@ -255,7 +255,7 @@ export function remoteWorkspaces(
             }: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
               mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
           }),
-      remove: (threadId) => removeWorktree(git, dirOf(threadId), exists),
+      remove: (threadId, options) => removeWorktree(git, dirOf(threadId), exists, options),
       async worktrees() {
         const result = await shell.run(WORKTREES, [worktrees], { timeoutMs: 120_000 })
         if (result.exitCode !== 0) throw failure(shell, worktrees, result)

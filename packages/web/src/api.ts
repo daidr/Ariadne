@@ -257,6 +257,7 @@ export const api = {
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
+  deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
   getConversation: (id: string) =>
     request<{

@@ -254,8 +254,8 @@ describe('ssh branches', () => {
 
     expect((await branches.worktrees()).map((w) => w.threadId)).toEqual(['thr_a'])
     expect(await branches.remove('thr_a')).toBe(false)
-    await ws.exec('rm wip.txt')
-    expect(await branches.remove('thr_a')).toBe(true)
+    // Dropping what was not committed, as when the project is deleted.
+    expect(await branches.remove('thr_a', { discard: true })).toBe(true)
     expect(await branches.worktrees()).toEqual([])
     expect(await git('branch', '--list', 'ariadne/thr_a')).toContain('ariadne/thr_a')
   })

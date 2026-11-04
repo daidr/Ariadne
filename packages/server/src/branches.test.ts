@@ -1,11 +1,13 @@
 import { Ariadne } from '@ariadne/core'
 import {
   PluginHost,
+  Scheduler,
   toolsFor,
   WorkspaceManager,
   WorktreeJanitor,
   type ToolContext,
 } from '@ariadne/agent'
+import { fakeModel } from '../../agent/src/test-model'
 import { localDirectoryProvider, run } from '@ariadne/plugin-local'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
@@ -246,5 +248,52 @@ describe('thread changes', () => {
     expect(
       (await call(`/api/projects/${project.id}/worktrees/a.b`, { method: 'DELETE' })).status,
     ).toBe(400)
+  })
+})
+
+describe('deleting a project', () => {
+  test('ends its turns, removes its worktrees with their changes, and keeps the repository', async () => {
+    const { dir, project, thread, ws } = await setup()
+    const other = await setup()
+    await ws.exec('echo wip > wip.txt')
+    expect(existsSync(join(ws.label, 'wip.txt'))).toBe(true)
+
+    // The thread is mid-turn: its model answers only once the turn is stopped.
+    let started!: () => void
+    const running = new Promise<void>((resolve) => (started = resolve))
+    const model = fakeModel(async (request) => {
+      started()
+      await new Promise((resolve) => request.signal?.addEventListener('abort', resolve))
+      return []
+    })
+    const scheduler = new Scheduler({ app, resolveModel: () => model, locale: () => 'zh-CN' })
+    handle = createHandler({ app, token, workspaces, scheduler })
+    scheduler.start()
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '继续' })
+    await running
+
+    expect((await call(`/api/projects/${project.id}`, { method: 'DELETE' })).status).toBe(204)
+    await scheduler.stop()
+    expect(app.listProjects().map((p) => p.id)).toEqual([other.project.id])
+    expect(existsSync(ws.label)).toBe(false)
+    // The repository, its checkout and the thread's branch stay.
+    expect(existsSync(join(dir, 'README.md'))).toBe(true)
+    expect(await git(dir, 'worktree', 'list')).not.toContain(thread.id)
+    expect(await git(dir, 'branch', '--list', 'ariadne/*')).toContain(thread.id.slice(-12))
+    // The other project's worktree is untouched.
+    expect(existsSync(other.ws.label)).toBe(true)
+    expect((await call(`/api/projects/${project.id}`)).status).toBe(404)
+  })
+
+  test('a worktree that cannot be removed keeps the project', async () => {
+    const { project, thread } = await setup()
+    app.setProjectSource(project.id, {
+      kind: 'local-directory',
+      settings: { path: join(base, 'gone') },
+    })
+    const response = await call(`/api/projects/${project.id}`, { method: 'DELETE' })
+    expect(response.status).toBe(400)
+    expect(app.getThread(thread.id).workspace?.removed).toBe(false)
+    expect(app.listProjects()).toHaveLength(1)
   })
 })

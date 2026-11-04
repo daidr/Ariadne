@@ -103,9 +103,22 @@ export class DaemonShell implements RemoteShell {
   /** The connection `link` resolved to, to tell whether a closed one is still the one in use. */
   private current: Link | null = null
   private nextId = 1
+  private idle: ReturnType<typeof setTimeout> | null = null
 
-  constructor(private readonly target: DaemonTarget) {
+  constructor(
+    private readonly target: DaemonTarget,
+    /**
+     * The connection closes once no call has used it for this long, like a shared SSH
+     * connection: a source replaced or only checked does not keep one open.
+     */
+    private readonly idleMs = 120_000,
+  ) {
     this.host = target.host
+  }
+
+  /** Whether a connection is open now. */
+  get connected(): boolean {
+    return this.current !== null
   }
 
   private get base(): string {
@@ -203,6 +216,8 @@ export class DaemonShell implements RemoteShell {
       const reason = error instanceof Error ? error.message : String(error)
       return { exitCode: CONNECTION_FAILED, stdout: '', stderr: `daemon: ${reason}` }
     }
+    if (this.idle) clearTimeout(this.idle)
+    this.idle = null
     const id = this.nextId++
     const send = (message: ClientMessage) => {
       if (link.ws.readyState === WebSocket.OPEN) link.ws.send(JSON.stringify(message))
@@ -243,10 +258,19 @@ export class DaemonShell implements RemoteShell {
       clearTimeout(timer)
       options.signal?.removeEventListener('abort', end)
       if (options.hold) send({ op: 'end', id })
+      if (!link.runs.size && link === this.current) {
+        if (this.idle) clearTimeout(this.idle)
+        this.idle = setTimeout(() => {
+          if (link === this.current && !link.runs.size) void this.dispose()
+        }, this.idleMs)
+        this.idle.unref?.()
+      }
     }
   }
 
   async dispose(): Promise<void> {
+    if (this.idle) clearTimeout(this.idle)
+    this.idle = null
     const link = this.link
     this.link = null
     this.current = null
