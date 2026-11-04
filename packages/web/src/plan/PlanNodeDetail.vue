@@ -214,11 +214,13 @@ const removeQuestion = computed(() => {
     </DouForm>
     <template v-else>
       <header class="node-detail-head">
-        <DouText size="sm" variant="tertiary">{{ t(`plan.kind.${node.kind}`) }}</DouText>
         <div class="node-detail-title">
           <PlanStatusIcon :status="node.status" />
           <DouText as="h2" size="lg" weight="medium" class="node-detail-title-text">
             {{ node.title }}
+          </DouText>
+          <DouText size="sm" variant="tertiary" class="node-detail-kind">
+            {{ t(`plan.kind.${node.kind}`) }}
           </DouText>
         </div>
         <DouText v-if="node.description" size="sm" class="node-detail-text">
@@ -331,8 +333,15 @@ const removeQuestion = computed(() => {
 }
 
 .node-detail-title-text {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.node-detail-kind {
+  flex: none;
+  margin-top: 2px;
 }
 
 .node-detail-text {
@@ -369,20 +378,14 @@ const removeQuestion = computed(() => {
 }
 
 /* A thread: its stage, title and what it asks of the user open it; the tools sit at the end.
-   The row reaches past the column by its own padding, so its icon lines up with the heading. */
+   The row reaches past the column by the button's padding, so its icon lines up with the
+   heading. */
 .node-thread {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: 0 4px;
-  margin-inline: -6px;
-  padding: 4px 6px;
-  border-radius: var(--dou-radius-control);
-  transition: background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);
-}
-
-.node-thread:hover {
-  background-color: color-mix(in oklab, var(--dou-color-neutral) 6%, transparent);
+  margin-inline-start: -6px;
 }
 
 .node-thread-open {
@@ -392,19 +395,24 @@ const removeQuestion = computed(() => {
   gap: 8px;
   min-width: 0;
   margin: 0;
-  padding: 0;
+  padding: 4px 6px;
   border: 0;
+  border-radius: var(--dou-radius-control);
   background: none;
+  transition: background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);
   color: inherit;
   font: inherit;
   text-align: start;
   cursor: pointer;
 }
 
+.node-thread-open:hover {
+  background-color: color-mix(in oklab, var(--dou-color-neutral) 6%, transparent);
+}
+
 .node-thread-open:focus-visible {
   outline: 2px solid var(--dou-color-focus);
   outline-offset: 2px;
-  border-radius: var(--dou-radius-control);
 }
 
 /* On the title's first line. */
@@ -430,7 +438,7 @@ const removeQuestion = computed(() => {
 /* Under the title, past the stage icon. */
 .node-thread-extra {
   flex-basis: 100%;
-  padding-inline-start: 24px;
+  padding-inline-start: 30px;
 }
 
 .node-issue {

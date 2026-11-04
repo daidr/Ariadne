@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { DouButton, DouEmpty, DouTag, DouText, DouTimeline, DouTimelineItem } from 'dou-ui'
+import {
+  DouButton,
+  DouDivider,
+  DouEmpty,
+  DouTag,
+  DouText,
+  DouTimeline,
+  DouTimelineItem,
+} from 'dou-ui'
 import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon } from '@dou-ui/icons'
 import type { PlanOp } from '@ariadne/core'
 import { computed, ref } from 'vue'
@@ -97,7 +105,8 @@ const time = (at: number) =>
           :editable="canEdit && editing"
           @removed="selected = null"
         />
-        <PlanSection :title="t('plan.history')" :class="{ 'plan-main-history': node }">
+        <DouDivider v-if="node" class="plan-main-divider" />
+        <PlanSection :title="t('plan.history')">
           <DouTimeline v-if="state.plan?.revisions.length">
             <DouTimelineItem
               v-for="revision in state.plan.revisions"
@@ -168,17 +177,16 @@ const time = (at: number) =>
 .plan-main-side {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   width: 280px;
   padding: 12px 16px;
   overflow-y: auto;
   border-left: 1px solid var(--dou-color-border-subtle);
 }
 
-/* Apart from the node above it, which is about one step, not the whole plan. */
-.plan-main-history {
-  padding-top: 16px;
-  border-top: 1px solid var(--dou-color-border-subtle);
+/* The side panel's gap already spaces it. */
+.plan-main-divider {
+  --dou-divider-spacing: 0;
 }
 
 .plan-main-revision {
