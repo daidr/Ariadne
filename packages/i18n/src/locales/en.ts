@@ -202,7 +202,6 @@ export const en: Record<MessageKey, string> = {
   'notice.memoryRemoved': 'Removed from project memory: {text}',
   'notice.undo': 'Undo',
   'notice.undone': 'Undone',
-  'notice.compacted': 'Older history was summarised for the model',
   'notice.compactionFailed':
     'Summarising older history failed; this turn reads all of it: {detail}',
   'notice.instructions': 'This thread follows {path} from the repository',
@@ -252,7 +251,7 @@ export const en: Record<MessageKey, string> = {
   'block.submitted': 'Submitted',
   'block.withdrawn': 'Withdrawn: {reason}',
   'message.fromCoordinator': 'From the coordinator',
-  'conversation.working': 'Working',
+  'conversation.working': 'Ariadne is working…',
   'conversation.queued': 'Queued, starts when a slot frees up',
   'conversation.stop': 'Stop',
   'conversation.retry': 'Retry',

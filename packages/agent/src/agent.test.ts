@@ -91,6 +91,41 @@ describe('a coordinator turn', () => {
     ])
   })
 
+  test('the line beside tool calls is its status, not a message', async () => {
+    const seen: (string | null | undefined)[] = []
+    let project: ReturnType<Ariadne['createProject']>
+    const model = fakeModel((request) => {
+      seen.push(app.getConversation(project.coordinatorId).turn?.activity)
+      const steps = request.messages.filter((m) => m.role === 'tool').length
+      if (steps === 0) {
+        return [
+          { type: 'text', text: '  先看看有哪些 thread\n再决定怎么分' },
+          call('c1', 'list_threads', {}),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      // A step without a line keeps the last one.
+      if (steps === 1) {
+        return [call('c2', 'read_plan', {}), { type: 'finish', reason: 'tool-calls' }]
+      }
+      return say('没有在跑的 thread。')
+    })
+    project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+
+    expect(seen).toEqual([null, '先看看有哪些 thread', '先看看有哪些 thread'])
+    expect(app.getConversation(project.coordinatorId).turn).toBeNull()
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。',
+    ])
+  })
+
   test('a thread report wakes the coordinator; a progress report does not', async () => {
     const model = fakeModel((request, role) => {
       if (role === 'thread') {
@@ -217,7 +252,8 @@ describe('history compaction', () => {
     expect(last.messages[2]?.content).toContain('<your_notes>')
     expect(last.messages[2]?.content).toContain('甲、乙、丙')
     expect(last.messages[2]?.content).toContain('- [doing] 整理')
-    expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).toContain('compacted')
+    // The summary is the model's own: it is in the trace, not in the chat.
+    expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).not.toContain('compacted')
     expect(JSON.stringify(last.messages)).not.toContain('第 1 份需求')
     expect(lastUser(last)).toContain('第 4 份需求')
     // A step is never kept without its results, nor a result without its step.
