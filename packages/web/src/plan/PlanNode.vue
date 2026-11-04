@@ -1,14 +1,32 @@
 <script setup lang="ts">
-import { DouTag, DouText } from 'dou-ui'
-import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
-import { computed } from 'vue'
+import { DouBadge, DouTag, DouText, DouTooltip } from 'dou-ui'
+import {
+  AlertCircleIcon,
+  CheckCircleIcon,
+  CircleDashedIcon,
+  CircleHalfIcon,
+  GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestIcon,
+  PauseCircleIcon,
+  UserCircleIcon,
+} from '@dou-ui/icons'
+import { computed, type Component } from 'vue'
 import { t } from '../i18n'
 import { checksTone } from '../stage'
 import type { PlanNodeData } from './layout'
-import StageLabel from '../components/StageLabel.vue'
+import StageIcon from '../components/StageIcon.vue'
 
 const props = defineProps<{ data: PlanNodeData }>()
 
+const icons: Record<PlanNodeData['status'], Component> = {
+  none: CircleDashedIcon,
+  process: CircleHalfIcon,
+  wait: UserCircleIcon,
+  error: AlertCircleIcon,
+  paused: PauseCircleIcon,
+  finish: CheckCircleIcon,
+}
 const tone = {
   none: 'neutral',
   process: 'primary',
@@ -22,6 +40,10 @@ const tone = {
 const SHOWN = 2
 const shown = computed(() => props.data.threads.slice(0, SHOWN))
 const waiting = computed(() => props.data.status === 'wait')
+const status = computed(() =>
+  waiting.value ? t('plan.waiting') : t(`plan.status.${props.data.status}`),
+)
+/** What a change does or did to the node, as a dot named on hover. */
 const mark = computed(() => {
   if (props.data.mark) {
     const tones = { added: 'success', removed: 'danger', changed: 'primary' } as const
@@ -38,7 +60,6 @@ const mark = computed(() => {
     class="plan-node"
     :class="{
       'plan-node-wait': waiting,
-      'plan-node-fresh': data.fresh,
       'plan-node-proposed': data.proposed,
       [`plan-node-${data.mark}`]: !!data.mark,
     }"
@@ -46,13 +67,22 @@ const mark = computed(() => {
     <div class="plan-node-head">
       <DouText size="sm" variant="tertiary">{{ t(`plan.kind.${data.kind}`) }}</DouText>
       <span class="plan-node-tags">
-        <DouTag v-if="mark" size="sm" variant="outline" :tone="mark.tone">{{ mark.label }}</DouTag>
-        <DouTag v-if="waiting" size="sm" variant="solid" tone="warning">
-          {{ t('plan.waiting') }}
-        </DouTag>
-        <DouTag v-else size="sm" :tone="tone[data.status]">
-          {{ t(`plan.status.${data.status}`) }}
-        </DouTag>
+        <DouTooltip v-if="mark" :content="mark.label">
+          <span class="plan-node-mark" role="img" :aria-label="mark.label">
+            <DouBadge dot :tone="mark.tone" />
+          </span>
+        </DouTooltip>
+        <DouTooltip :content="status">
+          <DouText
+            :tone="tone[data.status]"
+            :variant="tone[data.status] === 'neutral' ? 'tertiary' : 'default'"
+            class="plan-node-status"
+            role="img"
+            :aria-label="status"
+          >
+            <component :is="icons[data.status]" aria-hidden="true" />
+          </DouText>
+        </DouTooltip>
       </span>
     </div>
     <DouText class="plan-node-title" weight="medium">{{ data.title }}</DouText>
@@ -78,7 +108,7 @@ const mark = computed(() => {
           >
             {{ t(`pr.checks.${thread.pullRequest.checks.state}`) }}
           </DouTag>
-          <StageLabel :stage="thread.stage" />
+          <StageIcon :stage="thread.stage" />
         </span>
       </li>
       <li v-if="data.threads.length > SHOWN">
@@ -103,12 +133,6 @@ const mark = computed(() => {
 /* A node waiting on the user stands out at a glance, before any text is read. */
 .plan-node-wait {
   background: var(--dou-color-warning-soft);
-}
-
-/* Changed by the coordinator since the user last looked. */
-.plan-node-fresh {
-  outline: 2px solid var(--dou-color-primary);
-  outline-offset: 2px;
 }
 
 /* Touched by a change that waits on the user's yes. */
@@ -151,6 +175,19 @@ const mark = computed(() => {
   align-items: center;
   flex-shrink: 0;
   gap: 4px;
+}
+
+.plan-node-mark,
+.plan-node-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.plan-node-status {
+  font-size: 16px;
 }
 
 .plan-node-title {
