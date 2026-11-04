@@ -808,21 +808,21 @@ describe('stopping a thread', () => {
   })
 })
 
-describe('how long a turn may run', () => {
-  const ask = () => {
-    const project = app.createProject('P')
-    app.postMessage(project.id, {
-      conversationId: project.coordinatorId,
-      author: 'user',
-      content: '查一下',
-    })
-    return project
-  }
-  const toolResults = (conversationId: string) =>
-    app
-      .listTranscript(conversationId)
-      .flatMap((entry) => (entry.kind === 'tool' ? [entry.content] : []))
+const askCoordinator = () => {
+  const project = app.createProject('P')
+  app.postMessage(project.id, {
+    conversationId: project.coordinatorId,
+    author: 'user',
+    content: '查一下',
+  })
+  return project
+}
+const toolResultsOf = (conversationId: string) =>
+  app
+    .listTranscript(conversationId)
+    .flatMap((entry) => (entry.kind === 'tool' ? [entry.content] : []))
 
+describe('how long a turn may run', () => {
   test('has no step limit: a long turn ends when the model answers', async () => {
     let step = 0
     const model = fakeModel(() => {
@@ -833,7 +833,7 @@ describe('how long a turn may run', () => {
         { type: 'finish', reason: 'tool-calls' },
       ]
     })
-    const project = ask()
+    const project = askCoordinator()
     await startScheduler(model).idle()
     expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
     expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('查完了')
@@ -850,14 +850,14 @@ describe('how long a turn may run', () => {
         { type: 'finish', reason: 'tool-calls' },
       ]
     })
-    const project = ask()
+    const project = askCoordinator()
     await startScheduler(model).idle()
     const conversation = app.getConversation(project.coordinatorId)
     expect(conversation.lastOutcome).toBe('failed')
     expect(conversation.lastError).toEqual({ key: 'error.repeating', params: { count: 4 } })
     // 甲 for the fourth time is the seventh step.
     expect(step).toBe(7)
-    const results = toolResults(project.coordinatorId)
+    const results = toolResultsOf(project.coordinatorId)
     expect(results.filter((content) => content.includes('Doing it again will stop'))).toHaveLength(
       2,
     )
