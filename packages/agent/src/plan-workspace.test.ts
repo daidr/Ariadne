@@ -296,11 +296,14 @@ describe('images in messages', () => {
     const project = app.createProject('P')
     app.setProjectSource(project.id, { kind: 'memory', settings: {} })
     const thread = app.createThread(project.id, { title: '截图' })
-    const model = fakeModel((_request, role) =>
-      role === 'coordinator'
-        ? say('看 ![用量](shots/usage.png)')
-        : say('截图见 [用量](shots/usage.png)，![用量](shots/usage.png)'),
-    )
+    // The thread looks at its workspace first; a message alone would not open one.
+    const model = fakeModel((request, role) => {
+      if (role === 'coordinator') return say('看 ![用量](shots/usage.png)')
+      if (!request.messages.some((m) => m.role === 'tool')) {
+        return [call('l1', 'list_dir', {}), { type: 'finish', reason: 'tool-calls' }]
+      }
+      return say('截图见 [用量](shots/usage.png)，![用量](shots/usage.png)')
+    })
     app.postMessage(project.id, {
       conversationId: thread.id,
       kind: 'relay',
@@ -325,6 +328,26 @@ describe('images in messages', () => {
       .listMessages(project.coordinatorId)
       .findLast((m) => m.author === 'coordinator')
     expect(coordinator?.content).toBe('看 ![用量](shots/usage.png)')
+  })
+
+  test('a message alone does not open a workspace for its images', async () => {
+    const host = await workspaceHost({ 'a.png': new Uint8Array([0x89, 0x50, 0x4e, 0x47]) })
+    const workspaces = new WorkspaceManager(app, host)
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'memory', settings: {} })
+    const thread = app.createThread(project.id, { title: '只说话' })
+    const model = fakeModel((_request, role) => say(role === 'thread' ? '![a](a.png)' : ''))
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '说一句',
+    })
+    await startScheduler(model, workspaces).idle()
+    expect(app.listMessages(thread.id).find((m) => m.author === 'thread')?.content).toBe(
+      '![a](a.png)',
+    )
+    expect(app.getThread(thread.id).workspace).toBeNull()
   })
 })
 

@@ -15,8 +15,6 @@ defineProps<{ src: string; alt: string; title?: string | undefined }>()
   max-width: 100%;
   max-height: 320px;
   margin-block: 4px;
-  border-radius: var(--dou-radius-md, 6px);
-  cursor: zoom-in;
 }
 .message-image :deep(img) {
   max-width: 100%;

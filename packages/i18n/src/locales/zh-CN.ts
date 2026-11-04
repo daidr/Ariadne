@@ -245,7 +245,7 @@ export const zhCN = {
   'conversation.openSettings': '去设置',
   'conversation.cancelled': '已停止',
   'composer.attach': '添加图片或文件',
-  'link.pr.open': '打开',
+  'link.pr.open': '待合并',
   'link.pr.draft': '草稿',
   'link.pr.merged': '已合并',
   'link.pr.closed': '已关闭',

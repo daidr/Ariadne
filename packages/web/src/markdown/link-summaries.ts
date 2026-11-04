@@ -8,6 +8,7 @@ import { api } from '../api'
  */
 const summaries = reactive(new Map<string, LinkSummary | null>())
 let waiting = new Set<string>()
+const BATCH = 200
 let flush: Promise<void> | null = null
 
 export function linkSummary(url: string): LinkSummary | null | undefined {
@@ -21,12 +22,16 @@ export function askLinkSummary(url: string): void {
     const urls = [...waiting]
     waiting = new Set()
     flush = null
-    try {
-      const { links } = await api.summarizeLinks(urls)
-      for (const each of urls) summaries.set(each, links[each] ?? null)
-    } catch {
-      // Shown as plain links; asked again on the next page load.
-      for (const each of urls) summaries.set(each, null)
+    // The server answers at most this many at once.
+    for (let at = 0; at < urls.length; at += BATCH) {
+      const batch = urls.slice(at, at + BATCH)
+      try {
+        const { links } = await api.summarizeLinks(batch)
+        for (const each of batch) summaries.set(each, links[each] ?? null)
+      } catch {
+        // Shown as plain links; asked again on the next page load.
+        for (const each of batch) summaries.set(each, null)
+      }
     }
   })
 }
