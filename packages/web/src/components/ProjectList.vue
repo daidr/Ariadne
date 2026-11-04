@@ -63,11 +63,11 @@ async function submit() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
 }
 
 .projects-head {
   display: flex;
+  padding-inline-start: 8px;
   align-items: center;
   justify-content: space-between;
 }

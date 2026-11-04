@@ -8,11 +8,12 @@ import {
   DouLayoutAside,
   DouLayoutHeader,
   DouLayoutMain,
+  DouSplitter,
   DouText,
   useColorMode,
 } from 'dou-ui'
 import { SettingsIcon } from '@dou-ui/icons'
-import { defineAsyncComponent, onMounted, ref } from 'vue'
+import { defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings from './components/ModelSettings.vue'
@@ -27,6 +28,25 @@ useColorMode({ storageKey: COLOR_MODE_KEY })
 onMounted(start)
 
 const settingsOpen = ref(false)
+
+// How much of the room the left pane takes; the right one holds the project or a thread.
+const SPLIT_KEY = 'ariadne.split'
+const split = ref(readSplit())
+function readSplit() {
+  try {
+    const value = Number(localStorage.getItem(SPLIT_KEY))
+    return value >= 30 && value <= 80 ? value : 62
+  } catch {
+    return 62
+  }
+}
+watch(split, (value) => {
+  try {
+    localStorage.setItem(SPLIT_KEY, String(Math.round(value)))
+  } catch {
+    // Not remembered; the default comes back next time.
+  }
+})
 
 // The flow and document editors are large; load them when first opened.
 const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
@@ -75,14 +95,24 @@ const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/Artifac
           <ProjectList />
         </DouLayoutAside>
         <DouLayoutMain class="main">
-          <PlanMain v-if="state.main.kind === 'plan'" />
-          <ArtifactEditor v-else-if="state.main.kind === 'artifact'" :id="state.main.id" />
-          <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
-          <ConversationPanel v-else @open-settings="settingsOpen = true" />
+          <!-- A thread opens on the right, so the coordinator stays in view beside it. -->
+          <DouSplitter v-model="split" :min="30" :max="80" class="split">
+            <template #start>
+              <div class="pane">
+                <PlanMain v-if="state.main.kind === 'plan'" />
+                <ArtifactEditor v-else-if="state.main.kind === 'artifact'" :id="state.main.id" />
+                <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
+                <ConversationPanel v-else @open-settings="settingsOpen = true" />
+              </div>
+            </template>
+            <template #end>
+              <div class="pane">
+                <ConversationPanel v-if="state.threadId" :key="state.threadId" thread />
+                <SidePanel v-else />
+              </div>
+            </template>
+          </DouSplitter>
         </DouLayoutMain>
-        <DouLayoutAside :width="420">
-          <SidePanel />
-        </DouLayoutAside>
       </DouLayout>
     </DouLayout>
     <ModelSettings v-model:open="settingsOpen" />
@@ -127,6 +157,18 @@ body,
   --dou-layout-main-padding: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+.split {
+  flex: 1;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
 }
 </style>

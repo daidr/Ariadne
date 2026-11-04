@@ -87,8 +87,8 @@ const provides = (plugin: PluginRecord) => [
             <DouTag size="sm">
               {{ plugin.source === 'builtin' ? t('plugins.builtin') : t('plugins.path') }}
             </DouTag>
-            <DouTag size="sm" :tone="plugin.status === 'loaded' ? 'success' : 'danger'">
-              {{ plugin.status === 'loaded' ? t('plugins.loaded') : t('plugins.failed') }}
+            <DouTag v-if="plugin.status !== 'loaded'" size="sm" tone="danger">
+              {{ t('plugins.failed') }}
             </DouTag>
           </div>
           <DouText v-if="plugin.path" size="sm" variant="tertiary" class="plugins-text">
@@ -97,7 +97,7 @@ const provides = (plugin: PluginRecord) => [
           <DouText v-if="plugin.error" size="sm" class="plugins-error plugins-text">
             {{ plugin.error }}
           </DouText>
-          <DouText v-else size="sm" variant="secondary">
+          <DouText v-else-if="plugin.source !== 'builtin'" size="sm" variant="secondary">
             {{
               provides(plugin).length
                 ? t('plugins.provides', { kinds: provides(plugin).join('、') })

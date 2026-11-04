@@ -3,6 +3,7 @@ import {
   DouAlert,
   DouButton,
   DouChatInput,
+  DouChatPlan,
   DouChatList,
   DouChatMessage,
   DouCollapse,
@@ -16,12 +17,12 @@ import {
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
 import {
-  ChevronLeftIcon,
   GitBranchIcon,
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
   SquareStopIcon,
+  CloseIcon,
 } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
@@ -29,8 +30,8 @@ import { t, tm } from '../i18n'
 import { stageTone } from '../stage'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
+import { todoPlan } from './todo'
 import {
-  currentConversationId,
   openThread,
   retryTurn,
   sendMessage,
@@ -41,25 +42,32 @@ import {
   undoNotice,
 } from '../store'
 
+/** `thread` shows the open thread's conversation; otherwise the coordinator's. */
+const props = defineProps<{ thread?: boolean }>()
 const emit = defineEmits<{ openSettings: [] }>()
 
 const draft = ref('')
 
+const view = computed(() => (props.thread ? state.thread : state.coordinator))
+const conversationId = computed(() =>
+  props.thread ? state.threadId : (state.detail?.project.coordinatorId ?? null),
+)
 const thread = computed(() =>
-  state.threadId
+  props.thread && state.threadId
     ? (state.detail?.threads.find((item) => item.id === state.threadId) ?? null)
     : null,
 )
-const working = computed(() => !!state.conversation?.turn)
+const todo = computed(() => todoPlan(view.value.todo))
+const working = computed(() => !!view.value.conversation?.turn)
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
   () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
 )
 // New input is waiting for a free slot.
-const queued = computed(() => !working.value && (state.conversation?.pendingSeq ?? 0) > 0)
+const queued = computed(() => !working.value && (view.value.conversation?.pendingSeq ?? 0) > 0)
 const failure = computed(() =>
-  state.conversation?.lastOutcome === 'failed' && !working.value
-    ? state.conversation.lastError
+  view.value.conversation?.lastOutcome === 'failed' && !working.value
+    ? view.value.conversation.lastError
     : null,
 )
 // The user stops a thread with a reason, the same way the coordinator does.
@@ -72,13 +80,15 @@ async function stopThreadNow(threadId: string, takeover: boolean) {
   stopOpen.value = false
   stopReason.value = ''
 }
-const cancelled = computed(() => state.conversation?.lastOutcome === 'cancelled' && !working.value)
+const cancelled = computed(
+  () => view.value.conversation?.lastOutcome === 'cancelled' && !working.value,
+)
 
 // Messages edited after the user read them stay highlighted for this visit, even though
 // opening the conversation marks them read on the server.
 const highlighted = ref(new Set<string>())
 watch(
-  () => state.messages,
+  () => view.value.messages,
   (messages) => {
     for (const message of messages) {
       if (message.editedSinceRead) highlighted.value.add(message.id)
@@ -87,20 +97,20 @@ watch(
   { immediate: true },
 )
 watch(
-  () => [state.currentId, state.threadId],
+  () => [state.currentId, conversationId.value],
   () => (highlighted.value = new Set()),
 )
 
 // Messages and notices in the order they happened.
 const timeline = computed(() =>
   [
-    ...state.messages.map((message) => ({
+    ...view.value.messages.map((message) => ({
       id: message.id,
       at: message.createdAt,
       message,
       notice: null,
     })),
-    ...state.notices.map((notice) => ({
+    ...view.value.notices.map((notice) => ({
       id: notice.id,
       at: notice.createdAt,
       message: null,
@@ -132,15 +142,25 @@ function sender(message: MessageView) {
 }
 
 async function submit(value: string) {
+  const id = conversationId.value
+  if (!id) return
   draft.value = ''
-  await sendMessage(value)
+  await sendMessage(id, value)
+}
+
+function stop() {
+  if (conversationId.value) void stopTurn(conversationId.value)
+}
+
+function retry() {
+  if (conversationId.value) void retryTurn(conversationId.value)
 }
 
 // Everything on screen counts as read; this also clears the "edited since read" highlight.
 watch(
-  () => state.messages.at(-1)?.id,
+  () => view.value.messages.at(-1)?.id,
   (last) => {
-    const conversation = currentConversationId()
+    const conversation = conversationId.value
     if (last && conversation) void api.markRead(conversation, last)
   },
 )
@@ -149,46 +169,59 @@ watch(
 <template>
   <div class="conversation">
     <div v-if="thread" class="conversation-header">
-      <DouButton variant="ghost" size="sm" :title="t('thread.back')" @click="openThread(null)">
-        <template #leading><ChevronLeftIcon /></template>
-        {{ t('thread.back') }}
-      </DouButton>
-      <DouText weight="medium" truncate>{{ thread.title }}</DouText>
-      <DouTag size="sm" :tone="stageTone[thread.stage]">
-        {{ t(`thread.stage.${thread.stage}`) }}
-      </DouTag>
-      <DouTag
-        v-if="thread.workspace?.branch"
-        size="sm"
-        :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
-      >
-        <template #leading><GitBranchIcon /></template>
-        {{ thread.workspace.branch }}
-      </DouTag>
-      <PullRequestTag :thread="thread" refreshable />
-      <DouPopover
-        v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
-        v-model:open="stopOpen"
-        trigger="click"
-        :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
-        :width="320"
-      >
-        <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
-          <template #leading><PauseIcon /></template>
-          {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
+      <div class="conversation-title">
+        <DouText weight="medium" truncate>{{ thread.title }}</DouText>
+        <DouButton
+          variant="ghost"
+          size="sm"
+          :aria-label="t('thread.close')"
+          :title="t('thread.close')"
+          @click="openThread(null)"
+        >
+          <CloseIcon />
         </DouButton>
-        <template #content>
-          <div class="stop-form">
-            <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
-            <DouButton size="sm" tone="primary" @click="stopThreadNow(thread.id, !!thread.stopped)">
-              {{ t('thread.stopConfirm') }}
-            </DouButton>
-          </div>
-        </template>
-      </DouPopover>
+      </div>
+      <div class="conversation-meta">
+        <DouTag size="sm" :tone="stageTone[thread.stage]">
+          {{ t(`thread.stage.${thread.stage}`) }}
+        </DouTag>
+        <DouTag
+          v-if="thread.workspace?.branch"
+          size="sm"
+          :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
+        >
+          <template #leading><GitBranchIcon /></template>
+          {{ thread.workspace.branch }}
+        </DouTag>
+        <PullRequestTag :thread="thread" refreshable />
+        <DouPopover
+          v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
+          v-model:open="stopOpen"
+          trigger="click"
+          :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
+          :width="320"
+        >
+          <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
+            <template #leading><PauseIcon /></template>
+            {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
+          </DouButton>
+          <template #content>
+            <div class="stop-form">
+              <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
+              <DouButton
+                size="sm"
+                tone="primary"
+                @click="stopThreadNow(thread.id, !!thread.stopped)"
+              >
+                {{ t('thread.stopConfirm') }}
+              </DouButton>
+            </div>
+          </template>
+        </DouPopover>
+      </div>
     </div>
 
-    <DouChatList v-if="timeline.length || working" class="conversation-list">
+    <DouChatList v-if="timeline.length || todo.length || working" class="conversation-list">
       <template v-for="item in timeline" :key="item.id">
         <div v-if="item.notice" class="notice">
           <template v-if="item.notice.kind === 'memory'">
@@ -307,6 +340,8 @@ watch(
           </DouChatMessage>
         </template>
       </template>
+      <!-- What it is doing, what comes next, what it waits on: in place of progress messages. -->
+      <DouChatPlan v-if="todo.length" :items="todo" :title="t('todo.title')" class="todo" />
       <DouChatMessage v-if="working" sender="assistant" loading />
     </DouChatList>
     <div v-else class="conversation-empty">
@@ -331,9 +366,9 @@ watch(
     </DouAlert>
     <div v-else-if="working" class="conversation-status" role="status">
       <DouText variant="secondary" size="sm" truncate>
-        {{ t('conversation.working') }} · {{ state.conversation?.turn?.model }}
+        {{ t('conversation.working') }} · {{ view.conversation?.turn?.model }}
       </DouText>
-      <DouButton variant="ghost" size="sm" @click="stopTurn">
+      <DouButton variant="ghost" size="sm" @click="stop">
         <template #leading><SquareStopIcon /></template>
         {{ t('conversation.stop') }}
       </DouButton>
@@ -347,7 +382,7 @@ watch(
         <DouButton v-if="failure.key === 'error.noModel'" size="sm" @click="emit('openSettings')">
           {{ t('conversation.openSettings') }}
         </DouButton>
-        <DouButton size="sm" variant="outline" @click="retryTurn">
+        <DouButton size="sm" variant="outline" @click="retry">
           <template #leading><RotateCwIcon /></template>
           {{ t('conversation.retry') }}
         </DouButton>
@@ -356,7 +391,7 @@ watch(
     <DouAlert v-else-if="cancelled" tone="neutral" class="conversation-alert">
       {{ t('conversation.cancelled') }}
       <template #action>
-        <DouButton size="sm" variant="outline" @click="retryTurn">
+        <DouButton size="sm" variant="outline" @click="retry">
           <template #leading><RotateCwIcon /></template>
           {{ t('conversation.retry') }}
         </DouButton>
@@ -408,16 +443,31 @@ watch(
 
 .conversation-header {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--dou-color-border-subtle);
+}
+
+.conversation-title,
+.conversation-meta {
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--dou-color-border);
+  min-width: 0;
+}
+
+.conversation-title {
+  justify-content: space-between;
+}
+
+.conversation-meta {
+  flex-wrap: wrap;
 }
 
 .conversation-list {
   flex: 1;
   min-height: 0;
-  padding: 16px;
 }
 
 .conversation-empty {

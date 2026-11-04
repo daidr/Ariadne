@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { DouButton, DouEmpty } from 'dou-ui'
-import { MaximizeIcon } from '@dou-ui/icons'
+import { DouEmpty } from 'dou-ui'
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { t } from '../i18n'
-import { openMain, state } from '../store'
+import { state } from '../store'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
 
@@ -16,12 +15,6 @@ const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.valu
 <template>
   <div class="plan-panel">
     <template v-if="state.plan?.nodes.length">
-      <div class="plan-panel-head">
-        <DouButton size="sm" variant="ghost" @click="openMain({ kind: 'plan' })">
-          <template #leading><MaximizeIcon /></template>
-          {{ t('plan.expand') }}
-        </DouButton>
-      </div>
       <PlanChangeBar />
       <div class="plan-panel-graph">
         <PlanGraph v-model:selected="selected" :plan="state.plan" compact />
@@ -42,15 +35,7 @@ const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.valu
   gap: 8px;
 }
 
-.plan-panel-head {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .plan-panel-graph {
-  height: 300px;
-  border: 1px solid var(--dou-color-border-subtle);
-  border-radius: var(--dou-radius-container);
-  overflow: hidden;
+  height: max(240px, 55dvh);
 }
 </style>

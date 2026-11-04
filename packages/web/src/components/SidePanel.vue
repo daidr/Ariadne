@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import type { ThreadStage } from '@ariadne/core'
-import { DouEmpty, DouMenu, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui'
+import { DouButton, DouEmpty, DouMenu, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui'
+import { MaximizeIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
-import { openThread, state } from '../store'
+import { openMain, openThread, state } from '../store'
 import MemoryList from './MemoryList.vue'
 import ProjectSource from './ProjectSource.vue'
-import TodoList from './TodoList.vue'
 
 const tab = ref('plan')
 const threadItems = computed(() =>
@@ -23,8 +23,19 @@ const stageOf = (id: string | number): ThreadStage =>
 <template>
   <div class="side">
     <ProjectSource />
-    <TodoList :todo="state.todo" />
     <DouTabs v-model="tab" class="side-tabs">
+      <template #extra>
+        <DouButton
+          v-if="tab === 'plan' && state.plan?.nodes.length"
+          size="sm"
+          variant="ghost"
+          :aria-label="t('plan.expand')"
+          :title="t('plan.expand')"
+          @click="openMain({ kind: 'plan' })"
+        >
+          <MaximizeIcon />
+        </DouButton>
+      </template>
       <DouTabPanel value="plan" :label="t('panel.plan')">
         <PlanPanel />
       </DouTabPanel>

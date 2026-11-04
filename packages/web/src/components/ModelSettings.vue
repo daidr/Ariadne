@@ -160,7 +160,7 @@ async function save() {
             </DouButton>
           </div>
           <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
-          <DouCard v-for="provider in providers" :key="provider.id" padding="md">
+          <DouCard v-for="provider in providers" :key="provider.id" padding="sm">
             <DouForm layout="vertical" size="sm">
               <div class="settings-row">
                 <DouFormItem :label="t('settings.kind')" class="settings-grow">
@@ -175,6 +175,17 @@ async function save() {
                 <DouFormItem :label="t('settings.name')" class="settings-grow">
                   <DouInput v-model="provider.name" />
                 </DouFormItem>
+                <DouButton
+                  size="sm"
+                  variant="ghost"
+                  tone="danger"
+                  class="settings-remove"
+                  :aria-label="t('settings.remove')"
+                  :title="t('settings.remove')"
+                  @click="removeProvider(provider.id)"
+                >
+                  <TrashIcon />
+                </DouButton>
               </div>
               <SettingsFields
                 v-if="kindOf(provider.kind)"
@@ -183,51 +194,40 @@ async function save() {
                 :secrets-set="provider.secretsSet"
                 @clear-secret="(key) => clearSecret(provider, key)"
               />
-              <div class="settings-remove">
-                <DouButton
-                  size="sm"
-                  variant="ghost"
-                  tone="danger"
-                  @click="removeProvider(provider.id)"
-                >
-                  <template #leading><TrashIcon /></template>
-                  {{ t('settings.remove') }}
-                </DouButton>
-              </div>
             </DouForm>
           </DouCard>
 
-          <DouForm v-if="providers.length" layout="vertical" size="sm">
-            <div class="settings-row">
-              <DouFormItem :label="t('settings.defaultProvider')" class="settings-grow">
-                <DouSelect v-model="defaultProvider" :options="providerOptions" />
-              </DouFormItem>
-              <DouFormItem
-                :label="t('settings.defaultModel')"
-                :help="t('settings.defaultModelHelp')"
-                class="settings-grow"
-              >
-                <DouInput v-model="defaultModel" />
-              </DouFormItem>
-            </div>
-            <div class="settings-row">
-              <DouFormItem
-                :label="t('settings.contextTokens')"
-                :help="t('settings.contextTokensHelp')"
-                class="settings-grow"
-              >
-                <DouInputNumber
-                  v-model="contextK"
-                  :min="8"
-                  :max="10000"
-                  :step="8"
-                  placeholder="128"
-                />
-              </DouFormItem>
-            </div>
-          </DouForm>
-          <DouForm v-if="concurrency" layout="vertical" size="sm">
-            <div class="settings-row">
+          <DouForm v-if="providers.length || concurrency" layout="vertical" size="sm">
+            <template v-if="providers.length">
+              <div class="settings-row">
+                <DouFormItem :label="t('settings.defaultProvider')" class="settings-grow">
+                  <DouSelect v-model="defaultProvider" :options="providerOptions" />
+                </DouFormItem>
+                <DouFormItem
+                  :label="t('settings.defaultModel')"
+                  :help="t('settings.defaultModelHelp')"
+                  class="settings-grow"
+                >
+                  <DouInput v-model="defaultModel" />
+                </DouFormItem>
+              </div>
+              <div class="settings-row">
+                <DouFormItem
+                  :label="t('settings.contextTokens')"
+                  :help="t('settings.contextTokensHelp')"
+                  class="settings-grow"
+                >
+                  <DouInputNumber
+                    v-model="contextK"
+                    :min="8"
+                    :max="10000"
+                    :step="8"
+                    placeholder="128"
+                  />
+                </DouFormItem>
+              </div>
+            </template>
+            <div v-if="concurrency" class="settings-row">
               <DouFormItem
                 :label="t('settings.slots')"
                 :help="t('settings.slotsHelp')"
@@ -252,7 +252,9 @@ async function save() {
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
-      <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
+      <DouButton variant="ghost" @click="close">
+        {{ t(tab === 'models' ? 'settings.cancel' : 'settings.close') }}
+      </DouButton>
       <DouButton v-if="tab === 'models'" tone="primary" :loading="saving" @click="save">
         {{ t('settings.save') }}
       </DouButton>
@@ -284,7 +286,7 @@ async function save() {
 }
 
 .settings-remove {
-  display: flex;
-  justify-content: flex-end;
+  flex: none;
+  align-self: flex-start;
 }
 </style>

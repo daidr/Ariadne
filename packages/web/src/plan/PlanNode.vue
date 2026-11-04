@@ -103,7 +103,7 @@ const mark = computed(() => {
 
 /* A node waiting on the user stands out at a glance, before any text is read. */
 .plan-node-wait {
-  background: color-mix(in srgb, var(--dou-color-warning) 12%, transparent);
+  background: var(--dou-color-warning-soft);
   box-shadow: inset 3px 0 0 var(--dou-color-warning);
 }
 
