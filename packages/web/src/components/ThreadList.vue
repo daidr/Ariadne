@@ -64,6 +64,7 @@ function select(key: string | number) {
         variant="ghost"
         class="group-toggle"
         :aria-expanded="isOpen(group)"
+        :aria-controls="`thread-group-${group}`"
         @click="toggle(group)"
       >
         {{ t(`threads.group.${group}`) }} · {{ list.length }}
@@ -74,7 +75,9 @@ function select(key: string | number) {
       </DouButton>
       <DouMenu
         v-if="isOpen(group)"
+        :id="`thread-group-${group}`"
         class="thread-menu"
+        :aria-label="t(`threads.group.${group}`)"
         :model-value="state.threadId ?? undefined"
         :items="itemsOf(group, list)"
         @select="select"
