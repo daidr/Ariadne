@@ -38,6 +38,7 @@ watch(current, (markdown) => emit('draft', markdown === baseline.value ? null : 
       :readonly="readonly"
       :extensions="extensions"
       :aria-label="label"
+      class="document-text"
     />
   </div>
 </template>
@@ -51,13 +52,11 @@ watch(current, (markdown) => emit('draft', markdown === baseline.value ? null : 
 }
 
 /*
- * A readable column: about 40 characters of Chinese a line, centred, with room between
- * paragraphs. Editing adds the handle gutter on the left; the same space on the right keeps
- * the text where it was.
+ * A readable column: about 40 characters of Chinese a line, centred. Editing adds the
+ * handle gutter on the left; the same space on the right keeps the text where it was.
  */
-.document :deep(.dou-editor) {
+.document-text {
   --dou-editor-line-height: 1.8;
-  --dou-editor-block-gap: 6px;
   max-width: calc(40em + 2 * var(--dou-editor-gutter));
   margin-inline: auto;
   padding-inline-end: var(--dou-editor-gutter);
