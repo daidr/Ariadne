@@ -18,14 +18,16 @@ import { openMain, openThread, state } from '../store'
 import MemoryList from './MemoryList.vue'
 import SideTab from './SideTab.vue'
 import StageLabel from './StageLabel.vue'
+import ThreadHeadline from './ThreadHeadline.vue'
 
 const tab = ref('plan')
 const threadItems = computed(() =>
   (state.detail?.threads ?? []).map((thread) => ({ key: thread.id, label: thread.title })),
 )
 const usage = computed(() => state.detail?.project.usage ?? { input: 0, output: 0 })
-const stageOf = (id: string | number): ThreadStage =>
-  state.detail?.threads.find((thread) => thread.id === id)?.stage ?? 'queued'
+const threadOf = (id: string | number) =>
+  state.detail?.threads.find((thread) => thread.id === id) ?? null
+const stageOf = (id: string | number): ThreadStage => threadOf(id)?.stage ?? 'queued'
 </script>
 
 <template>
@@ -74,14 +76,21 @@ const stageOf = (id: string | number): ThreadStage =>
       </DouText>
       <DouMenu
         v-if="threadItems.length"
+        class="thread-menu"
         :model-value="state.threadId ?? undefined"
         :items="threadItems"
         @select="(key) => openThread(String(key))"
       >
         <template #label="{ item }">
           <span class="thread">
-            <DouText truncate>{{ item.label }}</DouText>
-            <StageLabel :stage="stageOf(item.key)" />
+            <span class="thread-head">
+              <DouText truncate>{{ item.label }}</DouText>
+              <StageLabel :stage="stageOf(item.key)" />
+            </span>
+            <ThreadHeadline
+              :stage="stageOf(item.key)"
+              :headline="threadOf(item.key)?.lastHeadline ?? null"
+            />
           </span>
         </template>
       </DouMenu>
@@ -122,9 +131,24 @@ const stageOf = (id: string | number): ThreadStage =>
   padding: 0 8px 4px;
 }
 
+/* An item grows to two lines when a thread says what it waits on the user for. */
+.thread-menu {
+  --dou-menu-item-height: auto;
+}
+
 .thread {
   display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 0;
+  line-height: normal;
+  white-space: normal;
+}
+
+.thread-head {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;

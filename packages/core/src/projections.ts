@@ -106,6 +106,9 @@ export const threadsProjection: Projection = {
       started INTEGER NOT NULL DEFAULT 0,
       last_report TEXT,
       last_summary TEXT,
+      last_headline TEXT,
+      -- Ids of the artifacts it pointed the user to (JSON), shown by their current titles.
+      last_artifacts TEXT NOT NULL DEFAULT '[]',
       reported_at INTEGER,
       reported_head TEXT,
       workspace_label TEXT,
@@ -158,11 +161,13 @@ export const threadsProjection: Projection = {
         break
       case 'thread.reported':
         db.run(
-          `UPDATE threads SET last_report = ?, last_summary = ?, reported_at = ?, reported_head = ?,
-           updated_at = ? WHERE id = ?`,
+          `UPDATE threads SET last_report = ?, last_summary = ?, last_headline = ?, last_artifacts = ?,
+           reported_at = ?, reported_head = ?, updated_at = ? WHERE id = ?`,
           [
             event.data.report,
             event.data.summary,
+            event.data.headline,
+            JSON.stringify(event.data.artifacts),
             event.at,
             event.data.head ?? null,
             event.at,

@@ -144,6 +144,44 @@ async function mergedHead(ctx: ToolContext): Promise<string | undefined> {
   }
 }
 
+/** Longer than this and a headline stops being a line the user takes in at a glance. */
+export const MAX_HEADLINE = 60
+
+// Things that mean nothing to the user: internal ids, file paths and line numbers.
+const HEADLINE_NOISE = [
+  /\b[a-z]{2,8}_[0-9a-f]{8}-?[0-9a-f]{4}/i,
+  /[\w-]+\.[a-z][a-z0-9]{0,5}:\d+/i,
+  /(?:^|[\s(（`])\.{0,2}\/?(?:[\w.-]+\/)+[\w-]+\.[a-z][a-z0-9]{0,5}\b/i,
+]
+
+/** The user-facing line of a report, or why it does not work as one. */
+export function checkHeadline(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ToolInputError('"headline" must be a non-empty string')
+  }
+  const headline = value.trim()
+  if (/\n/.test(headline)) throw new ToolInputError('"headline" must be a single line')
+  if ([...headline].length > MAX_HEADLINE) {
+    throw new ToolInputError(
+      `"headline" is ${[...headline].length} characters; keep it under 40 and put the rest in "summary"`,
+    )
+  }
+  if (HEADLINE_NOISE.some((pattern) => pattern.test(headline))) {
+    throw new ToolInputError(
+      '"headline" must not contain ids, file paths or line numbers; name artifacts by their title and list their ids in "artifacts"',
+    )
+  }
+  return headline
+}
+
+function artifactIds(value: unknown): string[] {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.some((id) => typeof id !== 'string')) {
+    throw new ToolInputError('"artifacts" must be an array of artifact ids')
+  }
+  return value as string[]
+}
+
 const report: Tool = {
   spec: {
     name: 'report',
@@ -153,15 +191,37 @@ const report: Tool = {
       type: 'object',
       properties: {
         kind: { type: 'string', enum: REPORT_KINDS },
-        summary: { type: 'string', description: 'What changed and what it depends on.' },
+        summary: {
+          type: 'string',
+          description:
+            'For the coordinator: what changed and what it depends on. The user does not see it.',
+        },
+        headline: {
+          type: 'string',
+          description:
+            'For the user, shown in their "needs me" list and wherever this thread is listed: one plain line, under 40 characters, on what they need to do or look at (e.g. "架构文档写好了，请审阅"). No ids, file paths, line numbers or commit hashes.',
+        },
+        artifacts: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Ids of the artifacts the user should open, if any; they are shown by title next to the headline.',
+        },
       },
-      required: ['kind', 'summary'],
+      required: ['kind', 'summary', 'headline'],
     },
   },
   async run(args, ctx) {
     const kind = args.kind as ReportKind
     if (!REPORT_KINDS.includes(kind)) throw new ToolInputError('"kind" is not a report kind')
-    ctx.app.reportThread(ctx.conversationId, kind, str(args, 'summary'), await mergedHead(ctx))
+    const summary = str(args, 'summary')
+    const headline = checkHeadline(args.headline)
+    const artifacts = artifactIds(args.artifacts)
+    ctx.app.reportThread(
+      ctx.conversationId,
+      { kind, summary, headline, artifacts },
+      await mergedHead(ctx),
+    )
     return { content: 'Reported.' }
   },
 }

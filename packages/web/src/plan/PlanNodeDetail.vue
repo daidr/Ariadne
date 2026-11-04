@@ -18,8 +18,17 @@ import { editPlan, openMain, openThread, setNodeIssue, state } from '../store'
 import { mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 import StageLabel from '../components/StageLabel.vue'
+import ThreadHeadline from '../components/ThreadHeadline.vue'
+import ReportArtifacts from '../components/ReportArtifacts.vue'
+import { showsHeadline } from '../stage'
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
+
+/** The artifacts a thread waiting on the user pointed to in its last report. */
+const reportArtifacts = (threadId: string) => {
+  const thread = state.detail?.threads.find((item) => item.id === threadId)
+  return thread && showsHeadline(thread.stage) ? thread.lastArtifacts : []
+}
 
 /** Whether the thread has a branch whose changes can be shown. */
 const hasBranch = (threadId: string) => {
@@ -229,6 +238,12 @@ const removeQuestion = computed(() =>
         >
           <FileDiffIcon />
         </DouButton>
+        <ThreadHeadline
+          class="node-detail-headline"
+          :stage="thread.stage"
+          :headline="thread.lastHeadline"
+        />
+        <ReportArtifacts class="node-detail-headline" :artifacts="reportArtifacts(thread.id)" />
       </li>
     </ul>
     <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>
@@ -343,5 +358,9 @@ const removeQuestion = computed(() =>
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+}
+
+.node-detail-headline {
+  flex-basis: 100%;
 }
 </style>

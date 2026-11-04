@@ -17,7 +17,7 @@ const thread = computed(
   <DouChatArtifact
     v-if="thread"
     :title="thread.title"
-    :description="thread.lastSummary ?? undefined"
+    :description="thread.lastHeadline ?? undefined"
     :active="state.threadId === thread.id"
     @open="openThread(thread.id)"
   >

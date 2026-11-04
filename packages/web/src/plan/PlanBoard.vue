@@ -6,6 +6,7 @@ import PullRequestTag from '../components/PullRequestTag.vue'
 import { t } from '../i18n'
 import { openThread, state } from '../store'
 import StageLabel from '../components/StageLabel.vue'
+import ThreadHeadline from '../components/ThreadHeadline.vue'
 
 // The plan as columns by status: the same nodes as the graph, read from left to right.
 // Statuses come from the threads, so the board is read-only; nodes are changed in the chat.
@@ -78,6 +79,11 @@ function show(threadId: string) {
                 </DouButton>
                 <StageLabel :stage="thread.stage" />
                 <PullRequestTag :thread="thread" />
+                <ThreadHeadline
+                  class="board-thread-headline"
+                  :stage="thread.stage"
+                  :headline="thread.lastHeadline"
+                />
               </li>
             </ul>
             <DouText v-else variant="tertiary" size="sm">{{ t('plan.board.noThreads') }}</DouText>
@@ -160,8 +166,14 @@ function show(threadId: string) {
 
 .board-thread {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 0 4px;
+}
+
+.board-thread-headline {
+  flex-basis: 100%;
+  margin-bottom: 4px;
 }
 
 .board-thread-title {

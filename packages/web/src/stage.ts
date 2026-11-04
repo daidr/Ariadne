@@ -28,3 +28,11 @@ export function checksTone(state: 'none' | 'pending' | 'success' | 'failure' | u
       return 'neutral'
   }
 }
+
+/**
+ * Stages in which a thread's last report says what the user should do: review its work,
+ * or unblock it. A question it asks speaks for itself.
+ */
+export function showsHeadline(stage: ThreadStage): boolean {
+  return stage === 'review' || stage === 'blocked'
+}
