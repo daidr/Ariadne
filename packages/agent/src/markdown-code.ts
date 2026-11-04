@@ -105,3 +105,45 @@ function splitSpans(text: string): string[] {
   parts.push(rest + text.slice(at))
   return parts
 }
+
+/** Inline marks taken off a line of text, leaving what the reader sees. */
+function plainLine(line: string): string {
+  return (
+    line
+      // Block markers: headings, quotes, list items and to-dos, table pipes.
+      .replace(/^\s*(?:>\s?)+/, '')
+      .replace(/^\s*#{1,6}\s+/, '')
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+      .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-*:?\s*$/, '')
+      .replace(/\s*\|\s*/g, '')
+      // Images go; links and autolinks keep their text.
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/<(https?:[^>]+)>/g, '$1')
+      .replace(/<[^>]+>/g, '')
+      // Emphasis and strikethrough.
+      .replace(/(\*\*|__|~~)/g, '')
+      .replace(/(^|[^\\])\*/g, '$1')
+      .replace(/\\([\\`*_{}[\]()#+\-.!|~>])/g, '$1')
+  )
+}
+
+/**
+ * A document's text as the editor shows it, block after block with nothing between, as
+ * commented text is matched: no Markdown marks, no code blocks; inline code keeps its text.
+ */
+export function plainText(markdown: string): string {
+  const parts = splitCode(markdown)
+  let out = ''
+  for (const [index, part] of parts.entries()) {
+    if (index % 2 === 0) {
+      out += part
+        .split('\n')
+        .map((line) => plainLine(line))
+        .join('')
+    } else if (!part.includes('\n')) {
+      out += part.replace(/^`+\s?|\s?`+$/g, '')
+    }
+  }
+  return out
+}

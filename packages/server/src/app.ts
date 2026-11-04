@@ -19,6 +19,7 @@ import {
 } from '@ariadne/agent'
 import {
   DomainError,
+  type ArtifactCommentAction,
   type ConversationView,
   emptyContent,
   MAX_FILE_BYTES,
@@ -80,6 +81,47 @@ type Route = {
   method: string
   pattern: URLPattern
   handle: (request: Request, params: Params, url: URL) => Response | Promise<Response>
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((v) => typeof v === 'string')
+  )
+}
+
+/** A comment action as the page sends it, checked field by field. */
+function commentAction(body: Record<string, unknown>): ArtifactCommentAction {
+  const text = (key: string) => {
+    const value = body[key]
+    if (typeof value !== 'string' || !value) throw new BadRequest(key)
+    return value
+  }
+  const threadId = text('threadId')
+  switch (body.type) {
+    case 'create':
+      return {
+        type: 'create',
+        threadId,
+        commentId: text('commentId'),
+        quote: text('quote'),
+        body: text('body'),
+      }
+    case 'reply':
+      return { type: 'reply', threadId, commentId: text('commentId'), body: text('body') }
+    case 'edit':
+      return { type: 'edit', threadId, commentId: text('commentId'), body: text('body') }
+    case 'delete':
+      return { type: 'delete', threadId, commentId: text('commentId') }
+    case 'resolve':
+    case 'reopen':
+    case 'remove':
+      return { type: body.type, threadId }
+    default:
+      throw new BadRequest('type')
+  }
 }
 
 function bearer(request: Request, url: URL): string | null {
@@ -532,7 +574,7 @@ export function createHandler({
       author: 'user',
       content: emptyContent(kind),
     })
-    return json({ artifact, versions: app.listArtifactVersions(artifact.id) })
+    return json({ artifact, versions: app.listArtifactVersions(artifact.id), comments: [] })
   })
 
   add('GET', '/api/artifacts/:artifactId', (_request, { artifactId = '' }, url) => {
@@ -542,7 +584,14 @@ export function createHandler({
     return json({
       artifact: app.getArtifact(artifactId, version),
       versions: app.listArtifactVersions(artifactId),
+      comments: app.listArtifactComments(artifactId),
     })
+  })
+
+  // The user comments on a document's text; see ArtifactCommentAction.
+  add('POST', '/api/artifacts/:artifactId/comments', async (request, { artifactId = '' }) => {
+    const body = await readJson(request)
+    return json({ comments: app.commentOnArtifact(artifactId, 'user', commentAction(body)) })
   })
 
   // The user saves an edit. `baseVersion` is the version they started from.
@@ -557,8 +606,13 @@ export function createHandler({
       reason: typeof body.reason === 'string' ? body.reason : '',
       baseVersion: body.baseVersion as number,
       ...(typeof body.title === 'string' ? { title: body.title } : {}),
+      ...(isStringRecord(body.quotes) ? { quotes: body.quotes } : {}),
     })
-    return json({ artifact, versions: app.listArtifactVersions(artifactId) })
+    return json({
+      artifact,
+      versions: app.listArtifactVersions(artifactId),
+      comments: app.listArtifactComments(artifactId),
+    })
   })
 
   /** The model a conversation uses now, as the page shows it; `null` when none is set up. */

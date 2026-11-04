@@ -53,7 +53,11 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     case 'upstream-done':
       return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
     case 'artifact-edited':
-      return `<artifact_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}">The user saved their own edit; read_artifact before you change it again.</artifact_edited_by_user>`
+      return note.diff
+        ? `<artifact_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}">\nThe user saved their own edit; take it as what they want. Changed lines (- removed, + added):\n${note.diff}\nread_artifact before you change it again.\n</artifact_edited_by_user>`
+        : `<artifact_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}">The user saved their own edit; take it as what they want, and read_artifact before you change it again.</artifact_edited_by_user>`
+    case 'artifact-comment':
+      return `<artifact_comment artifact="${note.artifactId}" title="${note.title}" comment_thread="${note.threadId}" kind="${note.action === 'create' ? 'new' : 'reply'}">\nOn the text: ${note.quote}\nThe user wrote: ${note.body}\nAnswer with comment_artifact in that comment thread: a reply, a question back, or what you changed (change the document first if they ask for it; once you change the commented text, resolve the comment, since it no longer finds its text). resolve_artifact_comment once it is settled. Do not answer it in a chat message.\n</artifact_comment>`
     case 'checks-failed': {
       const attempt = note.attempt ?? 1
       const head = `<checks_failed pull_request="${note.number}" commit="${note.headSha.slice(0, 12)}" attempt="${attempt}">\nChecks of your pull request failed: ${note.failed.join(', ') || '(unnamed)'}.`

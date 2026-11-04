@@ -1298,6 +1298,13 @@ describe('deleting a project', () => {
       content: '# Hello',
     })
     app.reviseArtifact(doc.id, { content: '# Bye', author: 'user', reason: 'r' })
+    app.commentOnArtifact(doc.id, 'user', {
+      type: 'create',
+      threadId: `cth_${project.id}`,
+      commentId: 'm1',
+      quote: 'Bye',
+      body: '?',
+    })
     const file = app.saveFile(project.id, { mime: 'image/png', data: png })
     const turnId = app.startTurn(a.id, 'model')
     app.recordStep(a.id, turnId, {

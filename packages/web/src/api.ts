@@ -1,5 +1,7 @@
 import type {
   AnyStoredEvent,
+  ArtifactCommentAction,
+  ArtifactCommentThreadView,
   ArtifactKind,
   ArtifactSummary,
   ArtifactVersionView,
@@ -255,6 +257,7 @@ export interface ModelSettings extends ModelSettingsInput {
 export interface ArtifactDetail {
   artifact: ArtifactView
   versions: ArtifactVersionView[]
+  comments: ArtifactCommentThreadView[]
 }
 
 export interface SandboxStatus {
@@ -454,8 +457,20 @@ export const api = {
     request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),
   saveArtifact: (
     id: string,
-    input: { content: string; baseVersion: number; reason: string; title?: string },
+    input: {
+      content: string
+      baseVersion: number
+      reason: string
+      title?: string
+      quotes?: Record<string, string>
+    },
   ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
+  commentArtifact: (id: string, action: ArtifactCommentAction) =>
+    request<{ comments: ArtifactCommentThreadView[] }>(
+      'POST',
+      `/api/artifacts/${id}/comments`,
+      action,
+    ),
   summarizeLinks: (urls: string[]) =>
     request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }),
   previewLink: (url: string) =>

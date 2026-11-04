@@ -505,6 +505,137 @@ describe('artifact notes', () => {
   })
 })
 
+const coordinatorOf = () => app.getProject(projectId).coordinatorId
+const doc = (author: string, content = '# 方案\n\n开业当天全场八折。\n') =>
+  app.createArtifact(projectId, { kind: 'document', title: '方案', content, author })
+
+describe('user edits and comments on artifacts', () => {
+  test("an edit of the user's own document goes to the coordinator, with the changed lines", () => {
+    const own = doc('user')
+    app.reviseArtifact(own.id, {
+      content: '# 方案\n\n开业当天全场九折。\n',
+      author: 'user',
+      reason: '',
+    })
+    const coordinator = coordinatorOf()
+    expect(app.listTranscript(coordinator).at(-1)).toMatchObject({
+      kind: 'note',
+      note: {
+        type: 'artifact-edited',
+        artifactId: own.id,
+        version: 2,
+        diff: '…\n \n-开业当天全场八折。\n+开业当天全场九折。\n ',
+      },
+    })
+    // Not woken: it reads the edit with whatever it does next.
+    expect(app.getConversation(coordinator).pendingSeq).toBe(0)
+    expect(app.listNotices(coordinator)).toMatchObject([
+      { kind: 'artifact-edited', artifactId: own.id, title: '方案', version: 2 },
+    ])
+  })
+
+  test("a stopped thread's document is the coordinator's to hear about", () => {
+    const thread = app.createThread(projectId, { title: '写' })
+    const written = doc(thread.id)
+    app.stopThread(thread.id, { reason: '先停', by: 'user' })
+    app.reviseArtifact(written.id, { content: 'b', author: 'user', reason: '' })
+    expect(app.listNotices(thread.id)).toEqual([])
+    expect(app.listNotices(coordinatorOf()).map((n) => n.kind)).toEqual(['artifact-edited'])
+  })
+
+  test("the user's comment wakes the writer, whose reply shows where it wrote it", () => {
+    const thread = app.createThread(projectId, { title: '写' })
+    const written = doc(thread.id)
+    app.commentOnArtifact(written.id, 'user', {
+      type: 'create',
+      threadId: 'c1',
+      commentId: 'm1',
+      quote: '全场八折',
+      body: '能和会员价叠加吗？',
+    })
+    expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'artifact-comment', threadId: 'c1', action: 'create', quote: '全场八折' },
+    })
+    expect(app.getConversation(thread.id).pendingSeq).toBeGreaterThan(0)
+    expect(app.getArtifact(written.id)).toMatchObject({ openComments: 1 })
+
+    app.commentOnArtifact(written.id, thread.id, {
+      type: 'reply',
+      threadId: 'c1',
+      commentId: 'm2',
+      body: '不叠加',
+    })
+    app.commentOnArtifact(written.id, thread.id, { type: 'resolve', threadId: 'c1' })
+    const [comments] = app.listArtifactComments(written.id)
+    expect(comments).toMatchObject({
+      quote: '全场八折',
+      comments: [
+        { id: 'm1', author: 'user', body: '能和会员价叠加吗？' },
+        { id: 'm2', author: thread.id, body: '不叠加' },
+      ],
+      resolved: { by: thread.id },
+    })
+    expect(app.getArtifact(written.id).openComments).toBe(0)
+    expect(app.listNotices(thread.id).map((n) => n.kind)).toEqual([
+      'artifact-comment',
+      'artifact-comment',
+    ])
+    // Its own reply does not come back to it.
+    expect(
+      app
+        .listTranscript(thread.id)
+        .filter((e) => e.kind === 'note' && e.note.type === 'artifact-comment'),
+    ).toHaveLength(1)
+  })
+
+  test('only an author changes a comment, and the first goes only with its thread', () => {
+    const own = doc('user')
+    const thread = app.createThread(projectId, { title: '写' })
+    app.commentOnArtifact(own.id, 'user', {
+      type: 'create',
+      threadId: 'c1',
+      commentId: 'm1',
+      quote: '八折',
+      body: '?',
+    })
+    expect(() =>
+      app.commentOnArtifact(own.id, thread.id, {
+        type: 'edit',
+        threadId: 'c1',
+        commentId: 'm1',
+        body: '改',
+      }),
+    ).toThrow(DomainError)
+    expect(() =>
+      app.commentOnArtifact(own.id, 'user', { type: 'delete', threadId: 'c1', commentId: 'm1' }),
+    ).toThrow(DomainError)
+    expect(() =>
+      app.commentOnArtifact(own.id, thread.id, { type: 'remove', threadId: 'c1' }),
+    ).toThrow(DomainError)
+    app.commentOnArtifact(own.id, 'user', { type: 'remove', threadId: 'c1' })
+    expect(app.listArtifactComments(own.id)).toEqual([])
+  })
+
+  test('a save carries the commented text along as it now reads', () => {
+    const own = doc('user')
+    app.commentOnArtifact(own.id, 'user', {
+      type: 'create',
+      threadId: 'c1',
+      commentId: 'm1',
+      quote: '全场八折',
+      body: '?',
+    })
+    app.reviseArtifact(own.id, {
+      content: '# 方案\n\n开业当天全场八五折。\n',
+      author: 'user',
+      reason: '',
+      quotes: { c1: '全场八五折', unknown: 'x' },
+    })
+    expect(app.listArtifactComments(own.id)[0]?.quote).toBe('全场八五折')
+  })
+})
+
 describe('project source', () => {
   test('is stored and cleared', () => {
     const source = { kind: 'local-directory', settings: { path: '/tmp/x' } }

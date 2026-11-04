@@ -64,6 +64,7 @@ import {
 } from '../store'
 import ReviewActions from './ReviewActions.vue'
 import StageLabel from './StageLabel.vue'
+import ArtifactNotice from './ArtifactNotice.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
 import AgentText from '../markdown/AgentText.vue'
@@ -599,6 +600,12 @@ watch(
               )
             }}
           </DouText>
+          <ArtifactNotice
+            v-else-if="
+              item.notice.kind === 'artifact-edited' || item.notice.kind === 'artifact-comment'
+            "
+            :notice="item.notice"
+          />
           <DouText v-else tone="warning" size="sm" class="notice-text">
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>

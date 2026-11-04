@@ -158,6 +158,20 @@ export interface ProjectSource {
 /** Markdown documents, whiteboards and dashboard snapshots; see artifact-content.ts. */
 export type ArtifactKind = 'document' | 'whiteboard' | 'dashboard'
 
+/**
+ * A change to an artifact's comments. A thread of comments is about a stretch of the
+ * document's text, kept as that text (`quote`) rather than as a place, so it is found again
+ * after anyone rewrites the Markdown around it. Times are the event's.
+ */
+export type ArtifactCommentAction =
+  | { type: 'create'; threadId: string; commentId: string; quote: string; body: string }
+  | { type: 'reply'; threadId: string; commentId: string; body: string }
+  | { type: 'edit'; threadId: string; commentId: string; body: string }
+  | { type: 'delete'; threadId: string; commentId: string }
+  | { type: 'resolve'; threadId: string }
+  | { type: 'reopen'; threadId: string }
+  | { type: 'remove'; threadId: string }
+
 /** How the checks of a commit stand, all together. */
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
 
@@ -493,6 +507,23 @@ export interface EventMap {
     content: string
     author: string
     reason: string
+    /**
+     * For the user's edit: the conversation told about it, the one that wrote the
+     * artifact last, or the coordinator.
+     */
+    notify?: string | null
+    /** For the user's edit of a document: the changed lines, cut to a bounded length. */
+    diff?: string | null
+    /** The commented text as it reads after the user's edit, by comment thread. */
+    quotes?: Record<string, string>
+  }
+  'artifact.commented': {
+    artifactId: string
+    /** `user`, the coordinator or a thread. */
+    by: string
+    action: ArtifactCommentAction
+    /** For the user's new comment or reply: the conversation woken to answer it. */
+    notify: string | null
   }
 }
 

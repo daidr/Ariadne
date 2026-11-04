@@ -196,6 +196,20 @@ export type NoticeView = {
       url: string | null
     }
   | { kind: 'merged'; base: string; method: MergeMethod; sha: string }
+  /** The user's edit of an artifact, where the conversation told about it is followed. */
+  | { kind: 'artifact-edited'; artifactId: string; title: string; version: number }
+  /**
+   * A comment on an artifact: the user's, where the conversation woken for it is followed,
+   * or the agent's own.
+   */
+  | {
+      kind: 'artifact-comment'
+      artifactId: string
+      title: string
+      by: string
+      action: 'create' | 'reply'
+      body: string
+    }
   | { kind: 'merge-conflict'; base: string; files: string[] }
   | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
   | {
@@ -332,7 +346,23 @@ export type TranscriptNote =
     }
   | { type: 'user-in-thread'; threadId: string; content: string }
   | { type: 'upstream-done'; threadId: string; nodeTitle: string; summary: string }
-  | { type: 'artifact-edited'; artifactId: string; title: string; version: number }
+  | {
+      type: 'artifact-edited'
+      artifactId: string
+      title: string
+      version: number
+      /** The changed lines of a document; `null` for other kinds or a change too large. */
+      diff?: string | null
+    }
+  | {
+      type: 'artifact-comment'
+      artifactId: string
+      title: string
+      threadId: string
+      action: 'create' | 'reply'
+      quote: string
+      body: string
+    }
   | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
   | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
   | {
@@ -453,6 +483,30 @@ export interface ArtifactSummary {
   updatedAt: number
   /** What the overview shows of it without loading the whole content. */
   preview: ArtifactPreview
+  /** Comment threads not resolved yet. */
+  openComments: number
+  /** When its comments last changed; 0 without any. */
+  commentedAt: number
+}
+
+/** One comment of a thread on an artifact's text. `author` as for a version. */
+export interface ArtifactCommentView {
+  id: string
+  author: string
+  body: string
+  createdAt: number
+  editedAt: number | null
+}
+
+/** A thread of comments about a stretch of a document's text, oldest comment first. */
+export interface ArtifactCommentThreadView {
+  id: string
+  artifactId: string
+  /** The text it is about, as it read when last saved. */
+  quote: string
+  comments: ArtifactCommentView[]
+  resolved: { by: string; at: number } | null
+  createdAt: number
 }
 
 /**

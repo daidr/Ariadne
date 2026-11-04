@@ -33,6 +33,7 @@ export const projectionTables = [
   'mcp_calls',
   'artifacts',
   'artifact_versions',
+  'artifact_comments',
   'prompts',
   'search_docs',
   'search_text',
@@ -578,6 +579,36 @@ export const noticesProjection: Projection = {
           detail: event.data.detail,
         })
         break
+      case 'artifact.revised':
+        // Where the agent that heard about the user's edit is followed.
+        if (event.data.notify) {
+          add(event.data.notify, 'artifact-edited', {
+            artifactId: event.data.artifactId,
+            title: event.data.title,
+            version: event.data.version,
+          })
+        }
+        break
+      case 'artifact.commented': {
+        const { by, notify, action, artifactId } = event.data
+        if (action.type !== 'create' && action.type !== 'reply') break
+        // The user's comment where the agent woken for it is followed; an agent's own
+        // where it wrote it.
+        const conversationId = by === 'user' ? notify : by
+        if (!conversationId) break
+        const title =
+          db
+            .query<{ title: string }, [string]>('SELECT title FROM artifacts WHERE id = ?')
+            .get(artifactId)?.title ?? ''
+        add(conversationId, 'artifact-comment', {
+          artifactId,
+          title,
+          by,
+          action: action.type,
+          body: action.body,
+        })
+        break
+      }
       case 'notice.dismissed':
         db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [
           event.seq,
@@ -1064,29 +1095,49 @@ export const transcriptProjection: Projection = {
         )
         break
       case 'artifact.revised': {
-        // The agent that last wrote the document learns the user changed it, next turn.
-        // The artifacts projection has already applied this edit, which leaves the last
-        // agent in place.
-        const row = db
-          .query<{ last_agent: string | null; title: string }, [string]>(
-            'SELECT last_agent, title FROM artifacts WHERE id = ?',
-          )
-          .get(event.data.artifactId)
-        if (!row?.last_agent || event.data.author !== 'user') break
+        // The user changed it: the agent told learns what changed, next turn.
+        const { notify, artifactId, title, version, diff } = event.data
+        if (!notify) break
         addEntry(
           db,
           event,
           {
-            conversationId: row.last_agent,
+            conversationId: notify,
             kind: 'note',
-            payload: {
-              type: 'artifact-edited',
-              artifactId: event.data.artifactId,
-              title: row.title,
-              version: event.data.version,
-            },
+            payload: { type: 'artifact-edited', artifactId, title, version, diff: diff ?? null },
           },
           false,
+        )
+        break
+      }
+      case 'artifact.commented': {
+        // The user asks something on the text: the agent told is woken to answer.
+        const { notify, artifactId, action } = event.data
+        if (!notify || (action.type !== 'create' && action.type !== 'reply')) break
+        const thread = db
+          .query<{ quote: string; title: string }, [string]>(
+            `SELECT c.quote, a.title FROM artifact_comments c JOIN artifacts a ON a.id = c.artifact_id
+             WHERE c.id = ?`,
+          )
+          .get(action.threadId)
+        if (!thread) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: notify,
+            kind: 'note',
+            payload: {
+              type: 'artifact-comment',
+              artifactId,
+              title: thread.title,
+              threadId: action.threadId,
+              action: action.type,
+              quote: thread.quote,
+              body: action.body,
+            },
+          },
+          true,
         )
         break
       }
@@ -1643,6 +1694,8 @@ export const artifactsProjection: Projection = {
       updated_by TEXT NOT NULL,
       -- The agent that wrote it last; it hears about the user's edits.
       last_agent TEXT,
+      open_comments INTEGER NOT NULL DEFAULT 0,
+      commented_at INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -1657,10 +1710,27 @@ export const artifactsProjection: Projection = {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (artifact_id, version)
     )`)
+    // A thread of comments; its comments (JSON) oldest first, see ArtifactCommentView.
+    db.run(`CREATE TABLE IF NOT EXISTS artifact_comments (
+      id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL,
+      quote TEXT NOT NULL,
+      comments TEXT NOT NULL,
+      resolved_by TEXT,
+      resolved_at INTEGER,
+      created_at INTEGER NOT NULL
+    )`)
+    db.run(
+      'CREATE INDEX IF NOT EXISTS artifact_comments_artifact ON artifact_comments (artifact_id, created_at)',
+    )
   },
   forget(db, projectId) {
     db.run(
       'DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?)',
+      [projectId],
+    )
+    db.run(
+      'DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?)',
       [projectId],
     )
     db.run('DELETE FROM artifacts WHERE project_id = ?', [projectId])
@@ -1717,10 +1787,101 @@ export const artifactsProjection: Projection = {
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [artifactId, version, title, content, author, reason, event.at],
         )
+        for (const [threadId, quote] of Object.entries(event.data.quotes ?? {})) {
+          db.run('UPDATE artifact_comments SET quote = ? WHERE id = ? AND artifact_id = ?', [
+            quote,
+            threadId,
+            artifactId,
+          ])
+        }
         break
       }
+      case 'artifact.commented':
+        applyComment(db, event.data.artifactId, event.data.by, event.data.action, event.at)
+        break
     }
   },
+}
+
+type CommentItem = {
+  id: string
+  author: string
+  body: string
+  createdAt: number
+  editedAt: number | null
+}
+
+function applyComment(
+  db: Database,
+  artifactId: string,
+  by: string,
+  action: Extract<AnyStoredEvent, { type: 'artifact.commented' }>['data']['action'],
+  at: number,
+) {
+  const row = db
+    .query<{ comments: string }, [string, string]>(
+      'SELECT comments FROM artifact_comments WHERE id = ? AND artifact_id = ?',
+    )
+    .get(action.threadId, artifactId)
+  const comments: CommentItem[] = row ? JSON.parse(row.comments) : []
+  const save = (next: CommentItem[]) =>
+    db.run('UPDATE artifact_comments SET comments = ? WHERE id = ?', [
+      JSON.stringify(next),
+      action.threadId,
+    ])
+  switch (action.type) {
+    case 'create':
+      db.run(
+        'INSERT INTO artifact_comments (id, artifact_id, quote, comments, created_at) VALUES (?, ?, ?, ?, ?)',
+        [
+          action.threadId,
+          artifactId,
+          action.quote,
+          JSON.stringify([
+            { id: action.commentId, author: by, body: action.body, createdAt: at, editedAt: null },
+          ]),
+          at,
+        ],
+      )
+      break
+    case 'reply':
+      save([
+        ...comments,
+        { id: action.commentId, author: by, body: action.body, createdAt: at, editedAt: null },
+      ])
+      break
+    case 'edit':
+      save(
+        comments.map((c) =>
+          c.id === action.commentId ? { ...c, body: action.body, editedAt: at } : c,
+        ),
+      )
+      break
+    case 'delete':
+      save(comments.filter((c) => c.id !== action.commentId))
+      break
+    case 'resolve':
+      db.run('UPDATE artifact_comments SET resolved_by = ?, resolved_at = ? WHERE id = ?', [
+        by,
+        at,
+        action.threadId,
+      ])
+      break
+    case 'reopen':
+      db.run('UPDATE artifact_comments SET resolved_by = NULL, resolved_at = NULL WHERE id = ?', [
+        action.threadId,
+      ])
+      break
+    case 'remove':
+      db.run('DELETE FROM artifact_comments WHERE id = ?', [action.threadId])
+      break
+  }
+  db.run(
+    `UPDATE artifacts SET commented_at = ?1, open_comments = (
+       SELECT COUNT(*) FROM artifact_comments WHERE artifact_id = ?2 AND resolved_by IS NULL
+     ) WHERE id = ?2`,
+    [at, artifactId],
+  )
 }
 
 /** Model input stored once by its hash, see `prompt.recorded`. */

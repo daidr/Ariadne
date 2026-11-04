@@ -1,4 +1,5 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import { plainText } from './markdown-code'
 import { boardFromItems, boardProblems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
 import {
@@ -98,7 +99,7 @@ const updateDocument: Tool = {
   spec: {
     name: 'update_document',
     description:
-      "Save a new version of a document with its full Markdown content. baseVersion is the version you read: if anyone saved since, the call fails and you read it again, so the user's edits are never lost.",
+      "Save a new version of a document with its full Markdown content. baseVersion is the version you read: if anyone saved since, the call fails and you read it again, so the user's edits are never lost. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text.",
     parameters: {
       type: 'object',
       properties: {
@@ -515,7 +516,109 @@ const readArtifact: Tool = {
     if (artifact.kind === 'dashboard') {
       return json({ ...head, content: JSON.parse(artifact.content) as DashboardContent })
     }
-    return json({ ...head, content: artifact.content })
+    // Comments are on the newest text; an older version is read without them.
+    if (version !== null && version !== ctx.app.getArtifact(artifact.id).version) {
+      return json({ ...head, content: artifact.content })
+    }
+    return json({ ...head, content: artifact.content, ...commentsOf(ctx, artifact.id) })
+  },
+}
+
+/** Who wrote a comment, as the model reads it: the user, you, the coordinator or a thread. */
+function commenter(ctx: ToolContext, author: string): string {
+  if (author === 'user') return 'user'
+  if (author === ctx.conversationId) return 'you'
+  if (author === ctx.app.getProject(ctx.projectId).coordinatorId) return 'coordinator'
+  try {
+    return `thread "${ctx.app.getThread(author).title}"`
+  } catch {
+    return 'thread'
+  }
+}
+
+/** The open comment threads on a document, and how many were resolved. */
+function commentsOf(ctx: ToolContext, artifactId: string) {
+  const threads = ctx.app.listArtifactComments(artifactId)
+  const open = threads.filter((thread) => !thread.resolved)
+  if (!threads.length) return {}
+  return {
+    comments: open.map((thread) => ({
+      commentThread: thread.id,
+      quote: thread.quote,
+      comments: thread.comments.map((c) => ({ by: commenter(ctx, c.author), body: c.body })),
+    })),
+    resolvedComments: threads.length - open.length,
+  }
+}
+
+const commentArtifact: Tool = {
+  spec: {
+    name: 'comment_artifact',
+    description:
+      "Comment on a document's text, as the user does in the document: reply in a comment thread (commentThread), or start one on a short passage of its text (quote, as the reader sees it, without Markdown marks). Keep comments short. Answer the user's comments here, not in a chat message.",
+    parameters: {
+      type: 'object',
+      properties: {
+        artifactId: { type: 'string' },
+        commentThread: { type: 'string', description: 'The comment thread to reply in.' },
+        quote: { type: 'string', description: 'The text a new comment thread is about.' },
+        body: { type: 'string', description: 'Plain text.' },
+      },
+      required: ['artifactId', 'body'],
+    },
+  },
+  run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    const artifact = ownArtifact(ctx, artifactId, 'document')
+    const threadId = optionalStr(args, 'commentThread')
+    const body = str(args, 'body')
+    const commentId = `cmt_${crypto.randomUUID()}`
+    if (threadId) {
+      ctx.app.commentOnArtifact(artifactId, ctx.conversationId, {
+        type: 'reply',
+        threadId,
+        commentId,
+        body,
+      })
+      return json({ commentThread: threadId })
+    }
+    const quote = optionalStr(args, 'quote')?.trim()
+    if (!quote) throw new ToolInputError('Give commentThread to reply, or quote to start one.')
+    // Matched as the page marks it: the text the reader sees, without Markdown marks.
+    if (!plainText(artifact.content).includes(plainText(quote))) {
+      throw new ToolInputError(
+        'The quote is not in the document. Copy the text as the reader sees it, without Markdown marks; if it still fails, reply in an existing comment thread or write in chat instead.',
+      )
+    }
+    const created = `cth_${crypto.randomUUID()}`
+    ctx.app.commentOnArtifact(artifactId, ctx.conversationId, {
+      type: 'create',
+      threadId: created,
+      commentId,
+      quote: plainText(quote),
+      body,
+    })
+    return json({ commentThread: created })
+  },
+}
+
+const resolveArtifactComment: Tool = {
+  spec: {
+    name: 'resolve_artifact_comment',
+    description:
+      "Mark a document's comment thread resolved once it is settled, for example after you made the change it asked for. The user can reopen it.",
+    parameters: {
+      type: 'object',
+      properties: { artifactId: { type: 'string' }, commentThread: { type: 'string' } },
+      required: ['artifactId', 'commentThread'],
+    },
+  },
+  run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    ownArtifact(ctx, artifactId, 'document')
+    const threadId = str(args, 'commentThread')
+    ctx.app.commentOnArtifact(artifactId, ctx.conversationId, { type: 'resolve', threadId })
+    return json({ commentThread: threadId, resolved: true })
   },
 }
 
@@ -535,6 +638,7 @@ const listArtifacts: Tool = {
         version: a.version,
         nodeId: a.nodeId,
         updatedBy: a.updatedBy,
+        ...(a.openComments ? { openComments: a.openComments } : {}),
       })),
     )
   },
@@ -551,4 +655,6 @@ export const artifactTools: Tool[] = [
   listDashboardSources,
   readArtifact,
   listArtifacts,
+  commentArtifact,
+  resolveArtifactComment,
 ]
