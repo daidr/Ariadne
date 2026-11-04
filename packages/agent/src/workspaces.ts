@@ -132,7 +132,8 @@ export class WorkspaceManager {
    * Remove the worktrees of every thread of a project about to be deleted, changes not
    * committed and all; their branches stay in the repository. The project's turns must
    * have ended. Throws when the source cannot be reached or a worktree cannot be removed,
-   * so nothing is deleted while worktrees would be left behind.
+   * so nothing is deleted while worktrees would be left behind. Worktrees no source can
+   * reach any more (it was cleared, changed, or its plugin removed) are left where they are.
    */
   async discardProject(projectId: string): Promise<void> {
     let branches: Promise<BranchCapability | null> | null = null

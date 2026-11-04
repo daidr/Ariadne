@@ -26,6 +26,8 @@ const actions = computed(() =>
     : [],
 )
 
+// DouMenu does not say which item a right click was on, so it is read from the item's
+// element until dou-ui hands the item to the context menu.
 function pick(event: MouseEvent) {
   const item = (event.target as Element | null)?.closest('[data-dou-menu-item]')
   target.value = item?.querySelector<HTMLElement>('[data-project]')?.dataset.project ?? null
