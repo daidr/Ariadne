@@ -295,6 +295,8 @@ export type TranscriptEntry =
       toolCalls: ToolCallRecord[]
       /** The newest event the model had seen when it wrote this step. */
       sawSeq: number
+      /** Its output hit the length limit: the model is told so after it. */
+      cut?: true
     }
   | {
       seq: number
@@ -317,6 +319,12 @@ export type TranscriptEntry =
       call: string
       /** The todo list and open questions when it was written, shown with the notes. */
       state: string
+    }
+  | {
+      seq: number
+      kind: 'cleared'
+      /** Long tool results up to here (in the model's order) read as a placeholder. */
+      upTo: number
     }
 
 /** Facts written into a transcript by the system rather than by a person. */
@@ -370,6 +378,7 @@ export type TranscriptNote =
   | { type: 'merge-conflict'; threadId: string; branch: string; base: string; files: string[] }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
+  | { type: 'thread-reviewed'; threadId: string }
   | { type: 'instructions-changed'; path: string; removed: boolean }
   | {
       /**
@@ -598,7 +607,7 @@ export interface TraceRequest {
   firstOutputAt: number | null
   finishedAt: number
   usage: TokenUsage | null
-  finish: 'stop' | 'tool-calls'
+  finish: 'stop' | 'tool-calls' | 'length'
   /** The answer, or the summary. */
   text: string
   reasoning: { text: string; redacted: boolean }[]
@@ -609,6 +618,8 @@ export type TraceItem =
   | TraceRequest
   | { kind: 'retry'; at: number; attempt: number; delayMs: number; detail: string }
   | { kind: 'compaction-failed'; at: number; detail: string }
+  /** Long tool results read before were replaced by a placeholder to make room. */
+  | { kind: 'results-cleared'; at: number }
   | { kind: 'instructions'; at: number; path: string; changed: boolean; removed: boolean }
 
 /** A message of a model request, as the provider was handed it. */

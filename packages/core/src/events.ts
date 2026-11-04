@@ -263,6 +263,11 @@ export interface EventMap {
   /** Work goes on; `reason` is why it had been stopped, for the thread to read. */
   'thread.resumed': { threadId: string; by: string; reason: string }
   /**
+   * The user is done with what the thread's last report put up for review, without merging
+   * it here: they looked it over, merged it elsewhere, or let it go.
+   */
+  'thread.reviewed': { threadId: string }
+  /**
    * Something waits on the user: an ask block (choice, confirmation or form). An agent's
    * comes with the message it posted it in (`messageId`); the system's own (approvals,
    * plan proposals) are only listed under "needs me".
@@ -345,6 +350,12 @@ export interface EventMap {
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
+  /**
+   * Older tool results of a conversation were cleared to make room: the model reads a
+   * short placeholder instead of each long result it had read up to `upTo` (a position in
+   * the model's order). The log keeps them whole. Decided on the transcript as of `sawSeq`.
+   */
+  'conversation.results_cleared': { conversationId: string; upTo: number; sawSeq: number }
   /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
   /**
@@ -381,8 +392,11 @@ export interface EventMap {
     text: string
     reasoning: ReasoningRecord[]
     toolCalls: ToolCallRecord[]
-    /** Why the model stopped: it answered, or it called tools. */
-    finish: 'stop' | 'tool-calls'
+    /**
+     * Why the model stopped: it answered, it called tools, or its output hit the length
+     * limit (`length`): the text is what came, the calls only those that came whole.
+     */
+    finish: 'stop' | 'tool-calls' | 'length'
     sawSeq: number
     usage: TokenUsage | null
     input: StepInput

@@ -56,6 +56,11 @@ export class EventStore {
   constructor(options: EventStoreOptions) {
     this.db = new Database(options.path, { create: true, strict: true })
     this.db.run('PRAGMA journal_mode = WAL')
+    // With WAL, NORMAL keeps the database consistent through a crash and only a power cut
+    // may lose the newest commits, without a disk flush on every event.
+    this.db.run('PRAGMA synchronous = NORMAL')
+    // Another connection (a rebuild, a second process) may hold the write lock for a moment.
+    this.db.run('PRAGMA busy_timeout = 5000')
     this.db.run('PRAGMA foreign_keys = ON')
     this.db.run(`CREATE TABLE IF NOT EXISTS events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -60,6 +60,7 @@ function asIssueData(name: string, value: unknown): ToolResult {
 }
 
 const listIssues: Tool = {
+  readOnly: true,
   spec: {
     name: 'list_issues',
     description:
@@ -105,6 +106,7 @@ const listIssues: Tool = {
 }
 
 const readIssue: Tool = {
+  readOnly: true,
   spec: {
     name: 'read_issue',
     description:

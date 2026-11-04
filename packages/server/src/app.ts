@@ -386,6 +386,10 @@ export function createHandler({
     json({ thread: app.resumeThread(threadId, 'user') }),
   )
 
+  add('POST', '/api/threads/:threadId/reviewed', (_request, { threadId = '' }) =>
+    json({ thread: app.reviewThread(threadId) }),
+  )
+
   // Read the thread's pull request and checks again now, instead of waiting for the poll.
   add(
     'POST',
@@ -622,21 +626,26 @@ export function createHandler({
     }
   }
 
-  // The newest messages, or the page before `before`, or everything from `from` on.
+  // The newest messages, or the page before `before`, or everything from `from` on; with
+  // `since` (an event seq, as `lastSeq` gave it), only what changed after that event.
   add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }, url) => {
     const conversation = app.getConversation(conversationId)
     const before = url.searchParams.get('before')
     const from = url.searchParams.get('from')
     const limit = url.searchParams.get('limit')
+    const since = url.searchParams.get('since')
     if (limit !== null && !/^[1-9]\d{0,2}$/.test(limit)) throw new BadRequest('limit')
+    if (since !== null && !/^\d{1,15}$/.test(since)) throw new BadRequest('since')
     const page = app.pageMessages(conversationId, {
       ...(before === null ? {} : { before }),
       ...(from === null ? {} : { from }),
       ...(limit === null ? {} : { limit: Number(limit) }),
+      ...(since === null ? {} : { since: Number(since) }),
     })
     return json({
       conversation,
       ...page,
+      lastSeq: app.lastSeq(),
       todo: app.getTodo(conversationId),
       model: modelOf(conversation),
     })

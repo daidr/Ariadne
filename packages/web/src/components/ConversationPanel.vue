@@ -62,6 +62,7 @@ import {
   stopTurn,
   undoNotice,
 } from '../store'
+import ReviewActions from './ReviewActions.vue'
 import StageLabel from './StageLabel.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
 import AskBlock from '../blocks/AskBlock.vue'
@@ -403,6 +404,7 @@ watch(
       </div>
       <div class="conversation-meta">
         <StageLabel :stage="thread.stage" />
+        <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
         <DouTag
           v-if="thread.workspace?.branch"
           size="sm"

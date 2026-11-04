@@ -36,8 +36,11 @@ export interface RemoteShell {
 
 /** Commands may run this long unless the caller asks for less. */
 export const DEFAULT_TIMEOUT_MS = 120_000
-/** Output beyond this is cut, keeping the end where errors usually are. */
-const MAX_OUTPUT = 64_000
+/**
+ * Output beyond this is cut in the middle, keeping how it began and, larger, the end where
+ * errors usually are. Callers cut further for the model; this only bounds memory.
+ */
+const MAX_OUTPUT = 1_000_000
 /**
  * The exit code of a call that never reached the machine or lost it on the way: what
  * `ssh` gives, and what the daemon connection gives too.
@@ -46,7 +49,9 @@ export const CONNECTION_FAILED = 255
 
 export function clip(text: string): string {
   if (text.length <= MAX_OUTPUT) return text
-  return `[… ${text.length - MAX_OUTPUT} characters cut …]\n${text.slice(-MAX_OUTPUT)}`
+  const head = MAX_OUTPUT / 4
+  const tail = text.length - (MAX_OUTPUT - head)
+  return `${text.slice(0, head)}\n[… ${tail - head} characters cut …]\n${text.slice(tail)}`
 }
 
 /** Run `argv` with the script's input, collecting its output; ends it on timeout or abort. */

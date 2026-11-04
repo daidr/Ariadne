@@ -55,6 +55,7 @@ function open() {
   <DouLink
     v-if="thread || artifact || image"
     class="message-link"
+    underline="none"
     role="link"
     tabindex="0"
     @click="open"
@@ -81,7 +82,12 @@ function open() {
 </template>
 
 <style scoped>
+/* A chip, like a pull request: what it names stands apart from the words around it. */
 .message-link {
+  padding-inline: 4px;
+  border-radius: 4px;
+  background: var(--dou-color-bg-muted);
+  text-decoration: none;
   cursor: pointer;
 }
 </style>

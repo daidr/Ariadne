@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouBadge, DouButton, DouEmpty, DouPopover, DouText } from 'dou-ui'
+import { DouBadge, DouButton, DouEmpty, DouLink, DouPopover, DouText } from 'dou-ui'
 import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
@@ -8,6 +8,7 @@ import { threadLine } from '../stage'
 import { openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
+import ReviewActions from './ReviewActions.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
@@ -54,8 +55,17 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
           </div>
           <div v-else :key="item.thread.id" class="attention">
             <div class="attention-thread">
-              <DouText weight="medium" truncate>{{ item.thread.title }}</DouText>
-              <DouButton size="sm" variant="ghost" @click="openThread(item.thread.id)">
+              <!-- The title opens the thread, so a review can be looked at before it ends. -->
+              <DouLink
+                class="attention-title"
+                underline="hover"
+                :title="item.thread.title"
+                @click="openThread(item.thread.id)"
+              >
+                {{ item.thread.title }}
+              </DouLink>
+              <ReviewActions v-if="item.thread.stage === 'review'" :thread-id="item.thread.id" />
+              <DouButton v-else size="sm" variant="ghost" @click="openThread(item.thread.id)">
                 {{ t('thread.open') }}
               </DouButton>
             </div>
@@ -89,5 +99,12 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.attention-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

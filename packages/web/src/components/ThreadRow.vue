@@ -5,6 +5,7 @@ import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone, threadLine } from '../stage'
+import ReviewActions from './ReviewActions.vue'
 import StageIcon from './StageIcon.vue'
 
 /** One thread in the thread list: its status, title, pull request, todos and last word. */
@@ -60,9 +61,12 @@ const prTone = computed(() =>
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>
     </span>
-    <DouText v-if="line" size="sm" variant="secondary" truncate class="row-line" :title="line">
-      {{ line }}
-    </DouText>
+    <span v-if="line || thread.stage === 'review'" class="row-foot">
+      <DouText size="sm" variant="secondary" truncate class="row-line" :title="line ?? undefined">
+        {{ line }}
+      </DouText>
+      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+    </span>
   </span>
 </template>
 
@@ -104,7 +108,16 @@ const prTone = computed(() =>
 }
 
 /* The activity line starts under the title, past the status icon. */
-.row-line {
+.row-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   padding-inline-start: 24px;
+}
+
+.row-line {
+  flex: 1;
+  min-width: 0;
 }
 </style>

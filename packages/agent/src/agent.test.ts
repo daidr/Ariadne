@@ -1,10 +1,10 @@
 import { Ariadne, type ConversationView, type TranscriptEntry } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { compactionCut } from './compaction'
-import { MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
+import { MAX_CUTS, MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
-import { toChatMessages, writtenBy } from './transcript'
+import { CUT_HINT, toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
@@ -692,7 +692,54 @@ describe('answers and guards', () => {
     expect(app.listMessages(project.coordinatorId).some((m) => m.kind === 'relay')).toBe(false)
   })
 
-  test('a cut-off reply fails the turn instead of passing as an answer', async () => {
+  test('a cut-off reply is not an answer: the model is told and goes on', async () => {
+    const model = fakeModel((request) =>
+      request.messages.length === 2
+        ? [
+            { type: 'text', text: '说到一半' },
+            { type: 'finish', reason: 'length' },
+          ]
+        : say('说完了'),
+    )
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'x',
+    })
+    await startScheduler(model).idle()
+    expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual(['x', '说完了'])
+    expect(model.requests[1]!.messages.slice(-2)).toEqual([
+      { role: 'assistant', content: '说到一半' },
+      { role: 'user', content: CUT_HINT },
+    ])
+  })
+
+  test('a tool call cut off mid-way is dropped; the whole ones run', async () => {
+    const model = fakeModel((request) =>
+      request.messages.length === 2
+        ? [
+            call('a', 'update_todo', { items: [{ label: '写文件', status: 'doing' }] }),
+            { type: 'tool-call', id: 'b', name: 'update_todo', arguments: '{"items": [{"la' },
+            { type: 'finish', reason: 'length' },
+          ]
+        : say('好'),
+    )
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'x',
+    })
+    await startScheduler(model).idle()
+    const second = model.requests[1]!.messages
+    expect(second.filter((m) => m.role === 'tool').map((m) => m.toolCallId)).toEqual(['a'])
+    expect(second.at(-1)).toEqual({ role: 'user', content: CUT_HINT })
+    expect(app.getTodo(project.coordinatorId).items).toEqual([{ label: '写文件', status: 'doing' }])
+  })
+
+  test('replies cut off again and again stop the turn', async () => {
     const model = fakeModel(() => [
       { type: 'text', text: '说到一半' },
       { type: 'finish', reason: 'length' },
@@ -704,7 +751,11 @@ describe('answers and guards', () => {
       content: 'x',
     })
     await startScheduler(model).idle()
-    expect(app.getConversation(project.coordinatorId).lastError).toEqual({ key: 'error.truncated' })
+    expect(model.requests).toHaveLength(MAX_CUTS)
+    expect(app.getConversation(project.coordinatorId).lastError).toEqual({
+      key: 'error.truncated',
+      params: { count: MAX_CUTS },
+    })
     expect(app.listMessages(project.coordinatorId).map((m) => m.author)).toEqual(['user'])
   })
 })

@@ -4,7 +4,8 @@ import { t, tm } from '../i18n'
 /** One line of the trace table: a turn, a request in it, a tool call of that request, … */
 export interface TraceRow {
   key: string
-  kind: 'turn' | 'request' | 'tool' | 'retry' | 'instructions' | 'compaction-failed'
+  kind:
+    'turn' | 'request' | 'tool' | 'retry' | 'instructions' | 'compaction-failed' | 'results-cleared'
   event: string
   content: string
   tone: 'danger' | 'warning' | null
@@ -107,6 +108,14 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
             event: t('trace.kind.compactionFailed'),
             content: oneLine(item.detail),
             tone: 'warning',
+          })
+          break
+        case 'results-cleared':
+          children.push({
+            ...base(turn, key, item.at, item.at),
+            kind: 'results-cleared',
+            event: t('trace.kind.resultsCleared'),
+            content: t('trace.resultsCleared'),
           })
           break
         case 'instructions':
