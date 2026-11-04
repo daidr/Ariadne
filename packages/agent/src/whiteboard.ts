@@ -1,10 +1,12 @@
 import type { WhiteboardContent, WhiteboardEdge, WhiteboardNode } from '@ariadne/core'
 import { ToolInputError } from './tool-helpers'
+import { fitText, layoutBoard, rankGap, type Direction } from './whiteboard-layout'
 
 /**
  * The model writes a whiteboard as items and connectors, and leaves the pixels to us:
- * items without x and y are placed next to what they connect from, and each connector
- * picks the sides of its two items that face each other.
+ * a new board is laid out in ranks along its connectors, with boxes sized to their text
+ * and room between ranks for the labels; an item added later goes next to what it
+ * connects from. Each connector joins the sides of its two items that face each other.
  */
 
 const SHAPES = ['rect', 'ellipse', 'diamond'] as const
@@ -22,7 +24,6 @@ const SIZE: Record<ItemKind, { width: number; height: number }> = {
   sticky: { width: 160, height: 160 },
   text: { width: 200, height: 40 },
 }
-const GAP_X = 80
 const GAP_Y = 40
 
 interface Box {
@@ -37,6 +38,9 @@ export interface BoardChanges {
   connectors: Record<string, unknown>[]
   removeItems: string[]
   removeConnectors: string[]
+  /** Lay every item the model can change out again, instead of only placing new ones. */
+  relayout?: boolean
+  direction?: Direction
 }
 
 const num = (value: unknown): number | undefined =>
@@ -89,13 +93,14 @@ const overlaps = (a: Box, b: Box) =>
   a.y < b.y + b.height + GAP_Y / 2 &&
   b.y < a.y + a.height + GAP_Y / 2
 
-/** Move a box down until it is clear of every other. */
-function clear(box: Box, others: Box[]): Box {
+/** Move a box across the flow (down, or right in a top-to-bottom board) until it is clear of every other. */
+function clear(box: Box, others: Box[], direction: Direction): Box {
   const next = { ...box }
   for (let i = 0; i < 1000; i++) {
     const hit = others.find((other) => overlaps(next, other))
     if (!hit) break
-    next.y = hit.y + hit.height + GAP_Y
+    if (direction === 'down') next.x = hit.x + hit.width + GAP_Y
+    else next.y = hit.y + hit.height + GAP_Y
   }
   return next
 }
@@ -138,12 +143,17 @@ function applyItem(item: Record<string, unknown>, existing?: WhiteboardNode): Wh
     y: num(item.y) ?? existing?.y ?? Number.NaN,
     data,
   }
-  const width = num(item.width) ?? (given && given !== before ? SIZE[kind].width : existing?.width)
-  const height =
-    num(item.height) ?? (given && given !== before ? SIZE[kind].height : existing?.height)
-  node.width = width ?? SIZE[kind].width
+  const reshaped = !existing || (given !== undefined && given !== before)
+  // A new or reshaped item is sized to its text; otherwise it keeps its width and only
+  // grows taller when its text no longer fits. Text is never cut off.
+  const width = num(item.width) ?? (reshaped ? undefined : existing?.width)
+  const fit = fitText(kind, typeof data.text === 'string' ? data.text : '', SIZE[kind], width)
+  node.width = fit.width
   if (kind === 'text') delete node.height
-  else node.height = height ?? SIZE[kind].height
+  else {
+    const height = num(item.height) ?? (reshaped ? undefined : existing?.height)
+    node.height = Math.max(height ?? 0, fit.height!)
+  }
   return node
 }
 
@@ -163,7 +173,7 @@ const isPlaced = (n: WhiteboardNode) => Number.isFinite(n.x) && Number.isFinite(
  * Give every node without a place one: right of a placed node it is connected from, or
  * below everything else; then down until it overlaps nothing.
  */
-function place(nodes: WhiteboardNode[], edges: WhiteboardEdge[]): void {
+function place(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: Direction): void {
   const placed = nodes.filter(isPlaced)
   const boxes = placed.map(boxOf)
   const bottom = boxes.length ? Math.max(...boxes.map((b) => b.y + b.height)) + GAP_Y * 2 : 0
@@ -189,10 +199,18 @@ function place(nodes: WhiteboardNode[], edges: WhiteboardEdge[]): void {
       .map((e) => byId.get(e.source.node)!)
       .find(isPlaced)
     const size = boxOf({ ...node, x: 0, y: 0 })
-    const start = from
-      ? { x: from.x + boxOf(from).width + GAP_X, y: from.y }
-      : { x: left, y: bottom }
-    const box = clear({ ...size, ...start }, boxes)
+    const gap = rankGap(
+      edges
+        .filter((e) => e.target.node === node.id && e.source.node === from?.id)
+        .map((e) => e.label),
+      direction,
+    )
+    const start = !from
+      ? { x: left, y: bottom }
+      : direction === 'down'
+        ? { x: from.x, y: from.y + boxOf(from).height + gap }
+        : { x: from.x + boxOf(from).width + gap, y: from.y }
+    const box = clear({ ...size, ...start }, boxes, direction)
     node.x = Math.round(box.x)
     node.y = Math.round(box.y)
     boxes.push(boxOf(node))
@@ -219,6 +237,8 @@ function applyConnector(
     const value = oneOf(connector, key, allowed)
     if (value !== undefined) data[key] = value
   }
+  // Curves bend around the items in their way; a straight line can't (see layoutBoard).
+  if (!existing && data.route === undefined) data.route = 'curve'
   const edge: WhiteboardEdge = {
     ...existing,
     id: existing?.id ?? text(connector, 'id') ?? `${from}-${to}`,
@@ -239,6 +259,13 @@ function uniqueId(id: string, taken: Set<string>): string {
   for (let i = 2; taken.has(next); i++) next = `${id}-${i}`
   taken.add(next)
   return next
+}
+
+/** The way most connectors run: left to right when they mostly leave items on the right. */
+function directionOf(edges: WhiteboardEdge[]): Direction {
+  const down = edges.filter((e) => e.source.port === 'bottom').length
+  const right = edges.filter((e) => e.source.port === 'right').length
+  return right > down ? 'right' : 'down'
 }
 
 /** Apply the model's changes to a board; with an empty board, this draws a new one. */
@@ -286,29 +313,105 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
     touched.add(edge)
   }
 
-  place(nodes, edges)
+  const direction = changes.direction ?? directionOf(board.edges)
+  if (changes.relayout) {
+    relayout(nodes, edges, direction)
+    return { version: 1, nodes, edges }
+  }
+  place(nodes, edges, direction)
   for (const edge of edges) {
     if (!touched.has(edge) && !moved.has(edge.source.node) && !moved.has(edge.target.node)) continue
     const side = ports(boxOf(byId.get(edge.source.node)!), boxOf(byId.get(edge.target.node)!))
     edge.source = { node: edge.source.node, port: side.source }
     edge.target = { node: edge.target.node, port: side.target }
+    // The way around the items between was worked out for the old places.
+    delete edge.points
   }
   return { version: 1, nodes, edges }
 }
 
+/**
+ * Lay out every item the model can change, in ranks along the connectors, where the
+ * items stood before (or at the top left of a new board); below the user's drawings and
+ * images if it would cover them. Connectors between neighbouring ranks join facing sides,
+ * longer ones run through the gaps of the ranks between.
+ */
+function relayout(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: Direction): void {
+  const movable = nodes.filter((n) => !isFixed(kindOf(n)))
+  const fixed = nodes.filter((n) => isFixed(kindOf(n))).map(boxOf)
+  const ids = new Set(movable.map((n) => n.id))
+  const inside = edges.filter((e) => ids.has(e.source.node) && ids.has(e.target.node))
+  const layout = layoutBoard(
+    movable.map((n) => ({ id: n.id, ...boxOf({ ...n, x: 0, y: 0 }) })),
+    inside.map((e) => ({ from: e.source.node, to: e.target.node, label: e.label })),
+    direction,
+  )
+  const before = movable.filter(isPlaced)
+  const origin = {
+    x: before.length ? Math.min(...before.map((n) => n.x)) : 0,
+    y: before.length ? Math.min(...before.map((n) => n.y)) : 0,
+  }
+  const area = { ...origin, width: layout.width, height: layout.height }
+  if (fixed.some((box) => overlaps(area, box))) {
+    origin.y = Math.max(...fixed.map((b) => b.y + b.height)) + GAP_Y * 2
+  }
+  for (const node of movable) {
+    const at = layout.nodes.get(node.id)!
+    node.x = origin.x + at.x
+    node.y = origin.y + at.y
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  // Several connectors between the same two items run side by side.
+  const seen = new Map<string, number>()
+  for (const edge of edges) {
+    const key = `${edge.source.node}>${edge.target.node}`
+    const laid = ids.has(edge.source.node) && ids.has(edge.target.node) && !layout.dropped.has(key)
+    delete edge.points
+    if (!laid) {
+      const side = ports(boxOf(byId.get(edge.source.node)!), boxOf(byId.get(edge.target.node)!))
+      edge.source = { node: edge.source.node, port: side.source }
+      edge.target = { node: edge.target.node, port: side.target }
+      continue
+    }
+    edge.source = { node: edge.source.node, port: direction === 'down' ? 'bottom' : 'right' }
+    edge.target = { node: edge.target.node, port: direction === 'down' ? 'top-in' : 'left-in' }
+    const through = layout.points.get(key)
+    if (!through) continue
+    const n = seen.get(key) ?? 0
+    seen.set(key, n + 1)
+    const off = n * 24
+    edge.points = through.map((p) =>
+      direction === 'down'
+        ? { x: origin.x + p.x + off, y: origin.y + p.y }
+        : { x: origin.x + p.x, y: origin.y + p.y + off },
+    )
+  }
+}
+
+/** A new board, laid out whole; places the model gives are not used. */
 export function boardFromItems(
   items: Record<string, unknown>[],
   connectors: Record<string, unknown>[],
+  direction: Direction = 'down',
 ): WhiteboardContent {
   const seen = new Set<string>()
-  for (const item of items) {
+  const unplaced = items.map((item) => {
     const id = text(item, 'id')
     if (id && seen.has(id)) throw new ToolInputError(`item id "${id}" is used twice`)
     if (id) seen.add(id)
-  }
+    const { x: _x, y: _y, ...rest } = item
+    return rest
+  })
   return mergeBoard(
     { version: 1, nodes: [], edges: [] },
-    { items, connectors, removeItems: [], removeConnectors: [] },
+    {
+      items: unplaced,
+      connectors,
+      removeItems: [],
+      removeConnectors: [],
+      relayout: true,
+      direction,
+    },
   )
 }
 

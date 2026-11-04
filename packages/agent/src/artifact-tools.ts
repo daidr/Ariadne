@@ -129,19 +129,38 @@ const updateDocument: Tool = {
 
 // ---- whiteboards ----
 
-const ITEM_SCHEMA = {
+const NEW_ITEM_SCHEMA = {
   type: 'object',
   properties: {
     id: { type: 'string', description: 'Your own short id, used by connectors and later edits.' },
     kind: { type: 'string', enum: ['rect', 'ellipse', 'diamond', 'sticky', 'text'] },
-    text: { type: 'string' },
+    text: {
+      type: 'string',
+      description:
+        'A short title, a line break, then a few words at most. The box grows to fit it.',
+    },
     tone: { type: 'string', enum: ['neutral', 'primary', 'success', 'warning', 'danger'] },
-    x: { type: 'number' },
+  },
+  required: ['id'],
+} as const
+
+const ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    ...NEW_ITEM_SCHEMA.properties,
+    x: { type: 'number', description: 'Only to move an item that is on the board already.' },
     y: { type: 'number' },
     width: { type: 'number' },
     height: { type: 'number' },
   },
   required: ['id'],
+} as const
+
+const DIRECTION = {
+  type: 'string',
+  enum: ['down', 'right'],
+  description:
+    'Which way connectors run: top to bottom or left to right. A new board runs top to bottom unless you say (a long left-to-right board gets too wide to read); a board keeps its way when you leave this out.',
 } as const
 
 const CONNECTOR_SCHEMA = {
@@ -150,7 +169,7 @@ const CONNECTOR_SCHEMA = {
     id: { type: 'string' },
     from: { type: 'string', description: 'Item id.' },
     to: { type: 'string', description: 'Item id.' },
-    label: { type: 'string' },
+    label: { type: 'string', description: 'A few words; the gap between items grows to hold it.' },
     route: { type: 'string', enum: ['straight', 'elbow', 'curve'] },
     dash: { type: 'string', enum: ['solid', 'dashed', 'dotted', 'dash-dot'] },
     arrow: { type: 'string', enum: ['none', 'end', 'both'] },
@@ -158,24 +177,38 @@ const CONNECTOR_SCHEMA = {
   required: ['from', 'to'],
 } as const
 
+function directionOf(args: Record<string, unknown>): 'right' | 'down' | undefined {
+  const value = args.direction
+  if (value === undefined || value === null) return undefined
+  if (value !== 'right' && value !== 'down') {
+    throw new ToolInputError('"direction" must be "right" or "down"')
+  }
+  return value
+}
+
 const createWhiteboard: Tool = {
   spec: {
     name: 'create_whiteboard',
     description:
-      'Create a whiteboard in the project: shapes, sticky notes and text joined by arrows, for a sketch of an architecture, a flow, a mind map or options side by side. The user can move things, draw and add their own. Leave out x and y and items are laid out for you along the connectors, left to right; give them to place items yourself (canvas pixels, a shape is about 160 by 90).',
+      'Create a whiteboard in the project: shapes, sticky notes and text joined by arrows, for a sketch of an architecture, a flow, a mind map or options side by side. The user can move things, draw and add their own. Items are laid out for you in ranks along the connectors, sized to their text, with room for connector labels; items not connected to anything are set in rows. Keep a board to about 15 items and give connectors only where the arrow says something.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string' },
-        items: { type: 'array', items: ITEM_SCHEMA },
+        items: { type: 'array', items: NEW_ITEM_SCHEMA },
         connectors: { type: 'array', items: CONNECTOR_SCHEMA },
+        direction: DIRECTION,
         nodeId: NODE_ID,
       },
       required: ['title', 'items'],
     },
   },
   run(args, ctx) {
-    const board = boardFromItems(arrayOf(args, 'items'), arrayOf(args, 'connectors'))
+    const board = boardFromItems(
+      arrayOf(args, 'items'),
+      arrayOf(args, 'connectors'),
+      directionOf(args),
+    )
     const artifact = ctx.app.createArtifact(ctx.projectId, {
       kind: 'whiteboard',
       title: str(args, 'title'),
@@ -191,7 +224,7 @@ const updateWhiteboard: Tool = {
   spec: {
     name: 'update_whiteboard',
     description:
-      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed for you. Everything else on the board stays, including the user's drawings and images. baseVersion is the version you read; if anyone saved since, read it again.",
+      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed next to what it connects from. Everything else on the board stays, including the user's drawings and images. With relayout, every item but the user's drawings and images is laid out again, as on a new board; use it after adding several items, not to undo where the user moved things. baseVersion is the version you read; if anyone saved since, read it again.",
     parameters: {
       type: 'object',
       properties: {
@@ -203,6 +236,8 @@ const updateWhiteboard: Tool = {
         connectors: { type: 'array', items: CONNECTOR_SCHEMA },
         removeItems: { type: 'array', items: { type: 'string' } },
         removeConnectors: { type: 'array', items: { type: 'string' } },
+        relayout: { type: 'boolean' },
+        direction: DIRECTION,
       },
       required: ['artifactId', 'baseVersion', 'reason'],
     },
@@ -216,6 +251,8 @@ const updateWhiteboard: Tool = {
       connectors: arrayOf(args, 'connectors'),
       removeItems: stringsOf(args, 'removeItems'),
       removeConnectors: stringsOf(args, 'removeConnectors'),
+      relayout: args.relayout === true,
+      direction: directionOf(args),
     })
     const title = optionalStr(args, 'title')
     const artifact = ctx.app.reviseArtifact(artifactId, {
