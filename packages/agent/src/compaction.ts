@@ -146,6 +146,8 @@ export async function summarise(
       model: model.model,
       messages,
       tools: [],
+      // Nothing after it starts with this prompt, so there is nothing to cache.
+      cache: false,
       signal,
     })) {
       if (part.type === 'text' && part.text) timing.firstOutputAt ??= Date.now()

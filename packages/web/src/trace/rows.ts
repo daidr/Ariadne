@@ -10,6 +10,7 @@ export interface TraceRow {
   tone: 'danger' | 'warning' | null
   input: number | null
   cached: number | null
+  cacheWrite: number | null
   output: number | null
   reasoning: number | null
   /** When it started and ended, in ms; `end: null` while it runs. */
@@ -31,6 +32,7 @@ function base(turn: TraceTurn, key: string, start: number, end: number | null) {
     tone: null,
     input: null,
     cached: null,
+    cacheWrite: null,
     output: null,
     reasoning: null,
     start,
@@ -80,6 +82,7 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
             content: requestContent(item),
             input: item.usage?.input ?? null,
             cached: item.usage?.cached ?? null,
+            cacheWrite: item.usage?.cacheWrite ?? null,
             output: item.usage?.output ?? null,
             reasoning: item.usage?.reasoning ?? null,
             request: item,
@@ -132,6 +135,7 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
       tone: turn.outcome === 'failed' ? 'danger' : null,
       input: turn.usage.input,
       cached: turn.usage.cached ?? null,
+      cacheWrite: turn.usage.cacheWrite ?? null,
       output: turn.usage.output,
       reasoning: turn.usage.reasoning ?? null,
       ...(children.length ? { children } : {}),

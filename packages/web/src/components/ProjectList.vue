@@ -9,11 +9,11 @@ import {
   DouText,
   useDialog,
 } from 'dou-ui'
-import { FolderIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
+import { FolderIcon, ListTreeIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { createProject, deleteProject, openProject, state } from '../store'
+import { createProject, deleteProject, openMain, openProject, state } from '../store'
 
 const name = ref('')
 const dialog = useDialog()
@@ -21,8 +21,22 @@ const dialog = useDialog()
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
 const target = ref<string>()
 const actions = [
+  { key: 'trace', label: t('trace.coordinator'), icon: ListTreeIcon },
   { key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const },
 ]
+
+/** The coordinator's trace, in its project. */
+async function openTrace(id: string) {
+  const project = state.projects.find((p) => p.id === id)
+  if (!project) return
+  if (state.currentId !== id) await openProject(id)
+  openMain({ kind: 'trace', conversationId: project.coordinatorId })
+}
+
+function act(key: unknown, id: string) {
+  if (key === 'trace') void openTrace(id)
+  else if (key === 'delete') void confirmDelete(id)
+}
 
 async function confirmDelete(id: string) {
   const project = state.projects.find((p) => p.id === id)
@@ -78,7 +92,7 @@ async function submit() {
       v-model:target="target"
       :items="actions"
       :before-open="() => !!target"
-      @select="() => target && confirmDelete(target)"
+      @select="(key) => target && act(key, target)"
     >
       <div>
         <DouMenu

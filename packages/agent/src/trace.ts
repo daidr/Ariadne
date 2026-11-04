@@ -252,6 +252,7 @@ export function traceRequest(
         })),
         tools: current.tools,
         ...(call.effort ? { effort: call.effort } : {}),
+        ...(event.type === 'conversation.compacted' ? { cache: false } : {}),
       }
     : null
   return { detail, request }

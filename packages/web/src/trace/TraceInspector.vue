@@ -120,10 +120,10 @@ const title = computed(() =>
     </div>
     <DouAlert v-if="problem" tone="danger" class="inspector-problem">{{ problem }}</DouAlert>
 
-    <DouTabs v-model="tab" size="sm" class="inspector-tabs">
+    <DouTabs v-model="tab" size="sm" height="100%" class="inspector-tabs">
       <DouTabPanel value="overview" :label="t('trace.tab.overview')">
         <div class="inspector-pad">
-          <DouDescriptions :columns="1" layout="horizontal" label-width="96px">
+          <DouDescriptions :columns="1" layout="horizontal" label-width="120px">
             <template v-if="row.kind === 'turn'">
               <DouDescriptionsItem :label="t('trace.field.model')">
                 {{ row.turn.model }}
@@ -209,6 +209,9 @@ const title = computed(() =>
               <DouDescriptionsItem :label="t('trace.field.cached')">
                 {{ tokens(row.cached) }}
               </DouDescriptionsItem>
+              <DouDescriptionsItem :label="t('trace.field.cacheWrite')">
+                {{ tokens(row.cacheWrite) }}
+              </DouDescriptionsItem>
               <DouDescriptionsItem :label="t('trace.field.output')">
                 {{ tokens(row.output) }}
               </DouDescriptionsItem>
@@ -222,7 +225,7 @@ const title = computed(() =>
 
       <template v-if="row.kind === 'request'">
         <DouTabPanel value="body" :label="t('trace.tab.body')">
-          <div class="inspector-pad">
+          <div class="inspector-pad inspector-fill">
             <DouSpinner v-if="!detail && !problem" size="sm" />
             <template v-else-if="detail">
               <DouText v-if="detail.body === null" variant="tertiary" size="sm">
@@ -316,7 +319,6 @@ const title = computed(() =>
 .inspector-tabs {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
 }
 
 .inspector-pad {
@@ -326,8 +328,15 @@ const title = computed(() =>
   padding: 12px 16px 16px;
 }
 
+/* The request body's editor takes the height the panel has and scrolls inside. */
+.inspector-fill {
+  box-sizing: border-box;
+  height: 100%;
+}
+
 .inspector-editor {
-  height: calc(100vh - 208px);
+  flex: 1;
+  min-height: 0;
 }
 
 .inspector-mono {

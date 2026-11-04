@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import type { TraceTurn } from '@ariadne/core'
-import { DouAlert, DouButton, DouSpinner, DouTable, DouText, type TableColumn } from 'dou-ui'
+import {
+  DouAlert,
+  DouButton,
+  DouSpinner,
+  DouSplitter,
+  DouTable,
+  DouText,
+  type TableColumn,
+} from 'dou-ui'
 import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
@@ -88,17 +96,44 @@ const expanded = computed({
   },
 })
 
+// How much of the width the table keeps beside the details, remembered in this browser.
+// With nothing picked the table takes it all and the divider stays put.
+const SPLIT_KEY = 'ariadne.traceSplit'
+const split = ref(readSplit())
+function readSplit() {
+  try {
+    const value = Number(localStorage.getItem(SPLIT_KEY))
+    return value >= 30 && value <= 80 ? value : 62
+  } catch {
+    return 62
+  }
+}
+const shownSplit = computed({
+  get: () => (selected.value ? split.value : 100),
+  set: (value) => {
+    if (!selected.value) return
+    split.value = value
+    try {
+      localStorage.setItem(SPLIT_KEY, String(Math.round(value)))
+    } catch {
+      // Not remembered; the default comes back next time.
+    }
+  },
+})
+
 const columns = computed<TableColumn<TraceRow>[]>(() => [
-  { key: 'event', title: t('trace.col.event'), width: 150 },
+  // Kept in view when a narrow table scrolls sideways; the columns then keep their widths.
+  { key: 'event', title: t('trace.col.event'), width: 150, fixed: 'start' },
   { key: 'content', title: t('trace.col.content'), ellipsis: true, minWidth: 200 },
   { key: 'input', title: t('trace.col.input'), width: 84, align: 'end' },
   { key: 'cached', title: t('trace.col.cached'), width: 84, align: 'end' },
+  { key: 'cacheWrite', title: t('trace.col.cacheWrite'), width: 84, align: 'end' },
   { key: 'output', title: t('trace.col.output'), width: 72, align: 'end' },
   { key: 'reasoning', title: t('trace.col.reasoning'), width: 72, align: 'end' },
   {
     key: 'duration',
     title: t('trace.col.duration'),
-    width: 84,
+    width: 96,
     align: 'end',
     value: (row) => (row.end === null ? null : row.end - row.start),
   },
@@ -147,52 +182,66 @@ function bar(row: TraceRow) {
     </div>
     <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>
     <div v-if="loading" class="trace-empty"><DouSpinner /></div>
-    <div v-else class="trace-body">
-      <div class="trace-table">
-        <DouTable
-          v-model:current="current"
-          v-model:expanded="expanded"
-          :data="rows"
-          :columns="columns"
-          row-key="key"
-          children-key="children"
-          size="sm"
-          :indent="14"
-          highlight-current
-          hoverable
-          max-height="100%"
-          :empty-text="t('trace.empty')"
-          :row-class="(row: TraceRow) => (row.tone ? `trace-row--${row.tone}` : undefined)"
-        >
-          <template #cell-event="{ row }">
-            <span :class="['trace-event', `trace-event--${row.kind}`]">{{ row.event }}</span>
-          </template>
-          <template #cell-content="{ row }">
-            <span :class="['trace-content', `trace-content--${row.kind}`]">{{ row.content }}</span>
-          </template>
-          <template #cell-input="{ value }">{{ tokens(value) }}</template>
-          <template #cell-cached="{ value }">{{ tokens(value) }}</template>
-          <template #cell-output="{ value }">{{ tokens(value) }}</template>
-          <template #cell-reasoning="{ value }">{{ tokens(value) }}</template>
-          <template #cell-duration="{ value }">
-            {{ typeof value === 'number' ? duration(value) : '' }}
-          </template>
-          <template #cell-timeline="{ row }">
-            <div class="trace-track">
-              <span :class="['trace-bar', `trace-bar--${row.kind}`]" :style="bar(row)" />
-            </div>
-          </template>
-        </DouTable>
-      </div>
-      <TraceInspector
-        v-if="selected"
-        :key="selected.key"
-        :row="selected"
-        :conversation-id="conversationId"
-        class="trace-inspector"
-        @close="current = null"
-      />
-    </div>
+    <DouSplitter
+      v-else
+      v-model="shownSplit"
+      :min="30"
+      :max="selected ? 80 : 100"
+      :disabled="!selected"
+      class="trace-body"
+    >
+      <template #start>
+        <div class="trace-table">
+          <DouTable
+            v-model:current="current"
+            v-model:expanded="expanded"
+            :data="rows"
+            :columns="columns"
+            row-key="key"
+            children-key="children"
+            size="sm"
+            :indent="14"
+            highlight-current
+            hoverable
+            max-height="100%"
+            :empty-text="t('trace.empty')"
+            :row-class="(row: TraceRow) => (row.tone ? `trace-row--${row.tone}` : undefined)"
+          >
+            <template #cell-event="{ row }">
+              <span :class="['trace-event', `trace-event--${row.kind}`]">{{ row.event }}</span>
+            </template>
+            <template #cell-content="{ row }">
+              <span :class="['trace-content', `trace-content--${row.kind}`]">{{
+                row.content
+              }}</span>
+            </template>
+            <template #cell-input="{ value }">{{ tokens(value) }}</template>
+            <template #cell-cached="{ value }">{{ tokens(value) }}</template>
+            <template #cell-cacheWrite="{ value }">{{ tokens(value) }}</template>
+            <template #cell-output="{ value }">{{ tokens(value) }}</template>
+            <template #cell-reasoning="{ value }">{{ tokens(value) }}</template>
+            <template #cell-duration="{ value }">
+              {{ typeof value === 'number' ? duration(value) : '' }}
+            </template>
+            <template #cell-timeline="{ row }">
+              <div class="trace-track">
+                <span :class="['trace-bar', `trace-bar--${row.kind}`]" :style="bar(row)" />
+              </div>
+            </template>
+          </DouTable>
+        </div>
+      </template>
+      <template #end>
+        <TraceInspector
+          v-if="selected"
+          :key="selected.key"
+          :row="selected"
+          :conversation-id="conversationId"
+          class="trace-inspector"
+          @close="current = null"
+        />
+      </template>
+    </DouSplitter>
   </div>
 </template>
 
@@ -228,21 +277,14 @@ function bar(row: TraceRow) {
 }
 
 .trace-body {
-  display: flex;
   flex: 1;
   min-height: 0;
 }
 
-.trace-table {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
+.trace-table,
 .trace-inspector {
-  width: 520px;
-  flex: none;
-  border-left: 1px solid var(--dou-color-border);
+  height: 100%;
+  min-height: 0;
 }
 
 .trace-event--turn {

@@ -25,7 +25,10 @@ type ImageBlock = {
   source: { type: 'base64'; media_type: string; data: string }
 }
 
-type Block =
+/** A cache point: the service keeps the prompt up to the block it is on for a few minutes. */
+const EPHEMERAL = { type: 'ephemeral' } as const
+
+type Block = (
   | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'redacted_thinking'; data: string }
   | { type: 'text'; text: string }
@@ -37,6 +40,7 @@ type Block =
       content: string | ({ type: 'text'; text: string } | ImageBlock)[]
       is_error?: boolean
     }
+) & { cache_control?: typeof EPHEMERAL }
 
 const imageBlock = (image: ImagePart): ImageBlock => ({
   type: 'image',
@@ -148,9 +152,44 @@ interface StreamEvent {
   error?: { type?: string; message?: string }
 }
 
+/** Put a cache point on the last block of `message` that takes one (thinking takes none). */
+function markLast(message: WireMessage | undefined) {
+  if (!message) return
+  for (let index = message.content.length - 1; index >= 0; index--) {
+    const block = message.content[index]!
+    if (block.type === 'thinking' || block.type === 'redacted_thinking') continue
+    message.content[index] = { ...block, cache_control: EPHEMERAL }
+    return
+  }
+}
+
+/**
+ * Cache points, at most four, each where a part that changes less often ends: the tools,
+ * the system text (memory and the plan move it now and then), the end of the request
+ * before this one, and the end of this one. A turn only ever appends to the conversation,
+ * so the next request reads all of this one from the cache and pays in full only for what
+ * came since. After a summary the conversation starts anew and is cached again from there.
+ * The point on the previous request's end is a sure read, however much a step appended.
+ */
+function withCachePoints(messages: WireMessage[]) {
+  markLast(messages.at(-1))
+  const before = messages.findLastIndex(
+    (message, index) => message.role === 'user' && index < messages.length - 1,
+  )
+  if (before >= 0) markLast(messages[before])
+}
+
 /** The body of a Messages request; credentials go in headers. */
 export function requestBody(settings: AnthropicSettings, request: ModelRequest) {
   const { system, messages } = toWire(request.messages)
+  const cache = request.cache !== false
+  if (cache) withCachePoints(messages)
+  const tools = request.tools.map((tool, index) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+    ...(cache && index === request.tools.length - 1 ? { cache_control: EPHEMERAL } : {}),
+  }))
   return {
     model: request.model,
     max_tokens: settings.maxTokens || 8192,
@@ -162,17 +201,13 @@ export function requestBody(settings: AnthropicSettings, request: ModelRequest) 
           output_config: { effort: request.effort },
         }
       : {}),
-    ...(system ? { system } : {}),
-    messages,
-    ...(request.tools.length
+    ...(system
       ? {
-          tools: request.tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.parameters,
-          })),
+          system: cache ? [{ type: 'text', text: system, cache_control: EPHEMERAL }] : system,
         }
       : {}),
+    messages,
+    ...(tools.length ? { tools } : {}),
     stream: true,
   }
 }
