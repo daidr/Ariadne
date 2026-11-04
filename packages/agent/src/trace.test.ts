@@ -144,6 +144,60 @@ describe('the trace', () => {
     expect(older).toMatchObject({ more: false, turns: [{ seq: turns[0]!.seq }] })
   })
 
+  test('right after a summary, the system prompt is compared with the step before', async () => {
+    const model = fakeModel((request) =>
+      request.messages[0]?.content.startsWith('You summarise') ? say('- 前情') : say('收到'),
+    )
+    const project = app.createProject('P')
+    const running = start(model, { compactAt: 600 })
+    for (const n of [1, 2]) {
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: `第 ${n} 份：${'很长的描述。'.repeat(80)}`,
+      })
+      await running.idle()
+    }
+    const made = calls(project.coordinatorId)
+    const compacted = made.findIndex((e) => e.type === 'conversation.compacted')
+    expect(compacted).toBeGreaterThan(0)
+    const afterSummary = made[compacted + 1]!
+    expect(afterSummary.type).toBe('turn.step')
+    expect(traceInput(app, project.coordinatorId, afterSummary.seq).systemChanged).toBe(false)
+  })
+
+  test('a turn that made no step does not make everything after it new', async () => {
+    const model = fakeModel((request) => {
+      if (lastUser(request) === '坏') throw new Error('boom')
+      return say('收到')
+    })
+    const project = app.createProject('P')
+    const running = start(model)
+    for (const content of ['一', '坏', '二']) {
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content,
+      })
+      await running.idle()
+    }
+    const { turns } = buildTrace(app, project.coordinatorId)
+    expect(turns.map((turn) => [turn.outcome, turn.items.some((i) => i.kind === 'step')])).toEqual([
+      ['completed', true],
+      ['failed', false],
+      ['completed', true],
+    ])
+    const last = calls(project.coordinatorId).at(-1)!
+    const input = traceInput(app, project.coordinatorId, last.seq)
+    // Since the first step read: its answer, the failed turn's message and this one's.
+    expect(input.messages.slice(input.newFrom).map((m) => m.content)).toEqual([
+      '收到',
+      expect.stringContaining('坏'),
+      expect.stringContaining('二'),
+    ])
+    expect(input.systemChanged).toBe(false)
+  })
+
   test("refuses a seq that is not one of the conversation's calls", async () => {
     const project = app.createProject('P')
     const other = app.createProject('Q')

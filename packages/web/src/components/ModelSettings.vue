@@ -301,11 +301,7 @@ async function save() {
               <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
                 <DouSelect v-model="coordinatorModel" :options="modelOptions" />
               </DouFormItem>
-              <DouFormItem
-                :label="t('settings.threadModel')"
-                :help="t('settings.threadModelHelp')"
-                class="settings-grow"
-              >
+              <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
                 <DouSelect v-model="threadModel" :options="threadOptions" />
               </DouFormItem>
             </div>
@@ -334,7 +330,6 @@ async function save() {
           <div class="settings-switch">
             <div class="settings-switch-text">
               <span>{{ t('settings.notify') }}</span>
-              <DouText variant="secondary" size="sm">{{ t('settings.notifyHelp') }}</DouText>
             </div>
             <DouSwitch
               :model-value="notifications.enabled"

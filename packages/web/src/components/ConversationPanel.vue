@@ -77,7 +77,11 @@ const modelLabel = computed(() => {
 const defaultLabel = computed(
   () => state.models.find((model) => model.id === state.threadDefault)?.label ?? '',
 )
-const pickedModel = computed(() => thread.value?.model ?? '')
+// A model since removed from the settings falls back to the default, so that is shown.
+const pickedModel = computed(() => {
+  const id = thread.value?.model
+  return id && state.models.some((model) => model.id === id) ? id : ''
+})
 function pickModel(value: string | number | undefined) {
   if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
 }

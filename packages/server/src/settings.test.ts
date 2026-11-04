@@ -37,6 +37,14 @@ describe('model settings', () => {
     )
   })
 
+  test('fields this version does not know are not written back', () => {
+    writeFileSync(path, JSON.stringify({ models: { ...provider({}), default: 'm1' } }))
+    const store = new SettingsStore(path, host)
+    store.updateConcurrency({ slots: 2, reserved: 1 })
+    const saved = JSON.parse(readFileSync(path, 'utf8')).models
+    expect(Object.keys(saved).toSorted()).toEqual(['models', 'providers', 'roles'])
+  })
+
   test('work slots are checked and kept', () => {
     const store = new SettingsStore(path, host)
     expect(store.current.concurrency).toEqual({ slots: 3, reserved: 1 })

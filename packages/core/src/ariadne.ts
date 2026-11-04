@@ -551,12 +551,18 @@ export class Ariadne {
   compactConversation(
     conversationId: string,
     turnId: string,
-    compaction: { summary: string; upTo: number; usage: TokenUsage | null },
+    compaction: { summary: string; upTo: number; sawSeq: number; usage: TokenUsage | null },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
     const summary = compaction.summary.trim()
     if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
-    const data = { conversationId, summary, upTo: compaction.upTo, usage: compaction.usage }
+    const data = {
+      conversationId,
+      summary,
+      upTo: compaction.upTo,
+      sawSeq: compaction.sawSeq,
+      usage: compaction.usage,
+    }
     this.store.append([{ type: 'conversation.compacted', projectId, data }])
   }
 
@@ -1876,6 +1882,19 @@ export class Ariadne {
         )
         .get(projectId, hash)?.content ?? null
     )
+  }
+
+  /** The last model step of a conversation before `seq`, in whatever turn it was. */
+  lastStepBefore(conversationId: string, seq: number): AnyStoredEvent | null {
+    const conversation = this.getConversation(conversationId)
+    const row = this.db
+      .query<EventRow, [string, string, number]>(
+        `SELECT * FROM events WHERE project_id = ? AND type = 'turn.step'
+           AND json_extract(data, '$.conversationId') = ? AND seq < ?
+         ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(conversation.projectId, conversationId, seq)
+    return row ? storedEvent(row) : null
   }
 
   /**

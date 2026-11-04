@@ -241,11 +241,13 @@ export interface EventMap {
   /**
    * A conversation's older history was summarised: the model sees `summary` in place of
    * every transcript entry it had read up to `upTo` (a position in the model's order).
+   * The summary was asked for from the transcript as of `sawSeq`.
    */
   'conversation.compacted': {
     conversationId: string
     summary: string
     upTo: number
+    sawSeq: number
     usage: TokenUsage | null
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */

@@ -401,13 +401,9 @@ export const en: Record<MessageKey, string> = {
   'settings.modelNote': 'Good for',
   'settings.coordinatorModel': 'Coordinator uses',
   'settings.threadModel': 'Threads use by default',
-  'settings.threadModelHelp':
-    'The coordinator may pick another when it opens a thread, and you can change it in the thread',
   'settings.sameAsCoordinator': 'Same as the coordinator',
   'settings.tab.notifications': 'Notifications',
   'settings.notify': 'Browser notifications',
-  'settings.notifyHelp':
-    'While the page is in the background, tell me when something waits on me or a thread finishes',
   'settings.notifyDenied': 'The browser blocked notifications; allow them in its site settings',
   'settings.notifyUnsupported': 'This browser does not support notifications',
   'notify.answer': 'Waiting for your answer',

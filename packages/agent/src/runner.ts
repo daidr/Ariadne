@@ -218,6 +218,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // A long conversation gets its older history summarised before it outgrows the
       // model's context. Between steps every call has its result, so any cut is whole.
       if (!compactionFailed) {
+        const readAt = app.lastSeq()
         const transcript = app.listTranscript(conversationId)
         const estimate = estimateTokens([
           { role: 'system', content: system() },
@@ -235,6 +236,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             app.compactConversation(conversationId, turnId, {
               summary: summary.text,
               upTo,
+              sawSeq: readAt,
               usage: summary.usage,
             })
           } else {

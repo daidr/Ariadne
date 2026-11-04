@@ -137,8 +137,9 @@ export function traceInput(app: Ariadne, conversationId: string, seq: number): T
     throw new DomainError('error.notFound', { what: String(seq) })
   }
   const current = requestOf(app, conversationId, event)
-  // What the call before it was sent, to mark what is new in this one.
-  const previous = previousCall(app, conversationId, seq)
+  // What the step before it was sent, to mark what is new in this one. Steps only: a
+  // summary request reads differently and would mark everything changed.
+  const previous = app.lastStepBefore(conversationId, seq)
   const before = previous ? requestOf(app, conversationId, previous).messages : []
   // The system prompt moves on its own (the plan, memory, the workspace opening); the
   // conversation after it is compared apart, so one change does not mark everything new.
@@ -176,8 +177,8 @@ function requestOf(
     }
   }
   if (event.type === 'conversation.compacted') {
-    // The summary was asked for from the history before it, as it stood then.
-    const transcript = app.listTranscript(conversationId, { upTo: event.seq - 1 })
+    // The summary was asked for from the history as it stood when it was read.
+    const transcript = app.listTranscript(conversationId, { upTo: event.data.sawSeq })
     const role = app.getConversation(conversationId).role
     return { messages: summaryRequest(transcript, event.data.upTo, titleOf, role), tools: [] }
   }
@@ -197,18 +198,4 @@ function requestOf(
     ],
     tools: JSON.parse(piece(input.tools)) as ToolSpec[],
   }
-}
-
-/** The conversation's model call (a step or a summary) right before `seq`, if any. */
-function previousCall(app: Ariadne, conversationId: string, seq: number): AnyStoredEvent | null {
-  const { events } = app.listTurnEvents(conversationId, { before: seq, turns: 1 })
-  // A step's earlier calls are in its own turn; the turn before holds the rest.
-  for (const source of [
-    events,
-    app.listTurnEvents(conversationId, { before: events[0]?.seq ?? seq, turns: 1 }).events,
-  ]) {
-    const found = source.filter((e) => e.seq < seq && belongsTo(e, conversationId)).at(-1)
-    if (found) return found
-  }
-  return null
 }

@@ -76,10 +76,14 @@ export function loadUserConfig(path: string): UserConfig {
   return {
     ...config,
     ...stored,
+    // Only the fields this version knows: anything else is not written back.
     models: {
-      ...config.models,
-      ...stored.models,
-      roles: { ...config.models.roles, ...stored.models?.roles },
+      providers: stored.models?.providers ?? config.models.providers,
+      models: stored.models?.models ?? config.models.models,
+      roles: {
+        coordinator: stored.models?.roles?.coordinator ?? null,
+        thread: stored.models?.roles?.thread ?? null,
+      },
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
     sourceSecrets: { ...stored.sourceSecrets },
