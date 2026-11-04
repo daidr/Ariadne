@@ -2,6 +2,7 @@ import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import { runTurn, type ResolvedModel } from './runner'
+import type { McpHub } from './mcp'
 import type { ModelChoice } from './tools'
 import type { WorkspaceManager } from './workspaces'
 
@@ -21,6 +22,8 @@ export interface SchedulerOptions {
   /** The plugins' live data sources for dashboards. */
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   searchProviders?: ReadonlyMap<string, SearchProvider>
+  /** The user's external tool servers. */
+  mcp?: McpHub
   workspaces?: WorkspaceManager
   /** The models the user set up, which the coordinator may give a thread. */
   models?: () => ModelChoice[]
@@ -183,6 +186,7 @@ export class Scheduler {
           ? { dashboardSources: this.options.dashboardSources }
           : {}),
         ...(this.options.searchProviders ? { searchProviders: this.options.searchProviders } : {}),
+        ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

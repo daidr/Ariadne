@@ -1,8 +1,12 @@
 import { Ariadne, type AnyStoredEvent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { PluginHost, WorkspaceManager } from '@ariadne/agent'
+import { McpHub, noSandbox, PluginHost, WorkspaceManager } from '@ariadne/agent'
 import type { ContextProvider, TrackerCapability } from '@ariadne/plugin-sdk'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createHandler } from './app'
+import { SettingsStore } from './settings'
 
 const token = 'test-token'
 let app: Ariadne
@@ -429,5 +433,54 @@ describe('issues on plan nodes', () => {
     })
     expect(await errorOf(none)).toBe('error.noTracker')
     expect(app.getPlan(projectId).nodes[0]?.issues).toEqual([])
+  })
+})
+
+describe('MCP servers', () => {
+  test('are set up in the settings and picked per project, secrets kept on the server', async () => {
+    const settings = new SettingsStore(
+      join(mkdtempSync(join(tmpdir(), 'ariadne-mcp-')), 'config.json'),
+      new PluginHost('/tmp/ariadne-test-plugins'),
+    )
+    const mcp = new McpHub({
+      servers: () => settings.current.mcp.servers,
+      sandbox: noSandbox,
+      env: () => ({}),
+    })
+    handle = createHandler({ app, token, settings, mcp })
+    const saved = await call('/api/settings/mcp', {
+      method: 'PUT',
+      body: {
+        servers: [
+          {
+            id: 'gone',
+            name: '不在',
+            transport: 'stdio',
+            command: '/definitely/not/here',
+            env: [{ name: 'TOKEN', value: 'secret-1' }],
+            tools: {},
+          },
+        ],
+      },
+    })
+    expect(saved.status).toBe(200)
+    const text = await saved.text()
+    expect(text).not.toContain('secret-1')
+    expect(JSON.parse(text).status).toMatchObject([{ id: 'gone', state: 'idle' }])
+    const checked = await call('/api/settings/mcp/gone/check', { method: 'POST' })
+    expect(((await checked.json()) as { status: { state: string } }).status.state).toBe('failed')
+
+    const project = app.createProject('P')
+    const refused = await call(`/api/projects/${project.id}/mcp`, {
+      method: 'PUT',
+      body: { servers: ['nope'] },
+    })
+    expect(refused.status).toBe(400)
+    const picked = await call(`/api/projects/${project.id}/mcp`, {
+      method: 'PUT',
+      body: { servers: ['gone'] },
+    })
+    expect(((await picked.json()) as { project: { mcp: string[] } }).project.mcp).toEqual(['gone'])
+    await mcp.dispose()
   })
 })
