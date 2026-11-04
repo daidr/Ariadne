@@ -807,3 +807,80 @@ describe('stopping a thread', () => {
     expect(result).toMatchObject({ isError: true })
   })
 })
+
+const askCoordinator = () => {
+  const project = app.createProject('P')
+  app.postMessage(project.id, {
+    conversationId: project.coordinatorId,
+    author: 'user',
+    content: '查一下',
+  })
+  return project
+}
+const toolResultsOf = (conversationId: string) =>
+  app
+    .listTranscript(conversationId)
+    .flatMap((entry) => (entry.kind === 'tool' ? [entry.content] : []))
+
+describe('how long a turn may run', () => {
+  test('has no step limit: a long turn ends when the model answers', async () => {
+    let step = 0
+    const model = fakeModel(() => {
+      step++
+      if (step > 60) return say('查完了')
+      return [
+        call(`c${step}`, 'update_todo', { items: [{ label: `第 ${step} 步`, status: 'doing' }] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = askCoordinator()
+    await startScheduler(model).idle()
+    expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('查完了')
+  })
+
+  test('counts repeats among the latest steps only, so an occasional re-read is fine', async () => {
+    let step = 0
+    const model = fakeModel(() => {
+      step++
+      if (step > 40) return say('做完了')
+      // The same call every tenth step, something new in between.
+      const label = step % 10 ? `第 ${step} 步` : '再看一眼'
+      return [
+        call(`c${step}`, 'update_todo', { items: [{ label, status: 'doing' }] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = askCoordinator()
+    await startScheduler(model).idle()
+    expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
+    expect(
+      toolResultsOf(project.coordinatorId).some((content) => content.includes('Doing it again')),
+    ).toBe(false)
+  })
+
+  test('stops a turn that repeats the same call with the same result, after warning once', async () => {
+    let step = 0
+    const model = fakeModel(() => {
+      step++
+      // Two calls taking turns are a loop too.
+      const label = step % 2 ? '甲' : '乙'
+      return [
+        call(`c${step}`, 'update_todo', { items: [{ label, status: 'doing' }] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = askCoordinator()
+    await startScheduler(model).idle()
+    const conversation = app.getConversation(project.coordinatorId)
+    expect(conversation.lastOutcome).toBe('failed')
+    expect(conversation.lastError).toEqual({ key: 'error.repeating', params: { count: 4 } })
+    // 甲 for the fourth time is the seventh step.
+    expect(step).toBe(7)
+    const results = toolResultsOf(project.coordinatorId)
+    expect(results.filter((content) => content.includes('Doing it again will stop'))).toHaveLength(
+      2,
+    )
+    expect(results[4]).toContain('Doing it again will stop')
+  })
+})

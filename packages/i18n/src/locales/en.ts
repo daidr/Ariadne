@@ -309,7 +309,8 @@ export const en: Record<MessageKey, string> = {
   'error.pluginInWorkspace':
     "Plugins cannot be loaded from Ariadne's plugin data folder: it holds the threads' workspaces and repository clones",
   'error.modelRequest': 'Model request failed: {detail}',
-  'error.stepLimit': 'This turn went over {limit} steps and was stopped',
+  'error.repeating':
+    'The same call came back {count} times with the same result, so this turn was stopped',
   'error.truncated':
     'The reply went over the per-response token limit and was cut off; raise the limit in model settings and retry',
   'error.interrupted': 'The server stopped mid-turn; work resumed from there',
