@@ -125,12 +125,29 @@ describe('model settings', () => {
     const store = new SettingsStore(path, host)
     expect(() => store.updateProjectEnv('prj_a', [{ name: '1BAD', value: 'x' }])).toThrow()
     expect(() => store.updateProjectEnv('prj_a', [{ name: 'NEW', value: '' }])).toThrow()
+    // Git configuration from the environment would lift the remote push block.
+    for (const name of [
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'git_config_global',
+      'ARIADNE_HOME',
+    ]) {
+      expect(() => store.updateProjectEnv('prj_a', [{ name, value: 'x' }])).toThrow()
+    }
     store.updateProjectEnv('prj_a', [{ name: 'TOKEN', value: 'secret-env' }])
     // An empty value keeps what is stored; the names are all the page sees.
     expect(store.updateProjectEnv('prj_a', [{ name: 'TOKEN', value: '' }])).toEqual(['TOKEN'])
     expect(store.turnSettings('prj_a').env).toEqual({ TOKEN: 'secret-env' })
     store.forgetProject('prj_a')
     expect(new SettingsStore(path, host).turnSettings('prj_a').env).toEqual({})
+  })
+
+  test('a hand-edited environment never hands a command git configuration', () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ projectEnv: { prj_a: { GIT_CONFIG_COUNT: '1', KEEP: 'yes' } } }),
+    )
+    expect(new SettingsStore(path, host).turnSettings('prj_a').env).toEqual({ KEEP: 'yes' })
   })
 
   test('request settings reach the resolved model; header values stay on the server', () => {

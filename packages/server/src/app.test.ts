@@ -606,6 +606,23 @@ describe('project settings, export and backups', () => {
       body: { settings: { workspace: { setup: '', shell: 'bash', branchPrefix: '../x' } } },
     })
     expect(bad.status).toBe(400)
+    // A refused part saves nothing, the environment included.
+    const badEnv = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: {
+        settings: { workspace: { setup: '', shell: 'bash', branchPrefix: '../x' } },
+        env: [{ name: 'OTHER', value: 'x' }],
+      },
+    })
+    expect(badEnv.status).toBe(400)
+    expect(settings.projectEnvNames(project.id)).toEqual(['API_TOKEN'])
+    // Settings left out stay as they are.
+    const envOnly = await call(`/api/projects/${project.id}/settings`, {
+      method: 'PUT',
+      body: { env: [] },
+    })
+    expect(envOnly.status).toBe(200)
+    expect(app.getProject(project.id).settings).toMatchObject({ instructions: '只改 web' })
   })
 
   test('exports what the log holds of a project, files included', async () => {

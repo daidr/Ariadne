@@ -25,6 +25,7 @@ import {
   emptyContent,
   MAX_FILE_BYTES,
   parsePlanOps,
+  parseProjectSettings,
   type Ariadne,
   type ProjectSource,
 } from '@ariadne/core'
@@ -309,13 +310,16 @@ export function createHandler({
 
   add('PUT', '/api/projects/:projectId/settings', async (request, { projectId = '' }) => {
     const body = await readJson(request)
-    app.getProject(projectId)
-    // The environment first: it is checked on its own, and a refusal changes nothing.
+    const current = app.getProject(projectId).settings
+    // Both are checked before either is saved, so a refusal changes nothing; settings left
+    // out stay as they are.
+    const next = body.settings === undefined ? current : body.settings
+    parseProjectSettings(next, TOOL_SWITCH_NAMES)
     const env =
       body.env !== undefined
         ? (settings?.updateProjectEnv(projectId, body.env) ?? [])
         : (settings?.projectEnvNames(projectId) ?? [])
-    const project = app.setProjectSettings(projectId, body.settings, TOOL_SWITCH_NAMES)
+    const project = app.setProjectSettings(projectId, next, TOOL_SWITCH_NAMES)
     return json({ project, settings: project.settings, env, tools: TOOL_SWITCH_NAMES })
   })
 

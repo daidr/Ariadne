@@ -163,6 +163,11 @@ export interface ModelsConfig {
 /** A server's id: short, so tool names stay within what model services take. */
 const MCP_ID = /^[a-z0-9][a-z0-9-]{0,19}$/
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+/**
+ * A project's command variable: no `GIT_CONFIG*` (it would lift the remote push block, which
+ * is git configuration given on the command line) and none of Ariadne's own.
+ */
+const PROJECT_ENV_NAME = /^(?!GIT_CONFIG|ARIADNE_)[A-Za-z_][A-Za-z0-9_]*$/i
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
 
 const noRole = (): RoleConfig => ({ model: null, effort: null })
@@ -715,7 +720,7 @@ export class SettingsStore {
 
   /** Replace the project's command environment; an empty value keeps the stored one. */
   updateProjectEnv(projectId: string, input: unknown): string[] {
-    const env = secretPairs(input, ENV_NAME, this.config.projectEnv[projectId], 'env')
+    const env = secretPairs(input, PROJECT_ENV_NAME, this.config.projectEnv[projectId], 'env')
     const all = { ...this.config.projectEnv }
     if (Object.keys(env).length) all[projectId] = env
     else delete all[projectId]
@@ -738,7 +743,12 @@ export class SettingsStore {
       limits: this.config.limits,
       instructions: this.config.instructions,
       commandRules: this.config.commands.rules,
-      env: { ...this.config.projectEnv[projectId] },
+      // A hand-edited file may hold any name; the refused ones never reach a command.
+      env: Object.fromEntries(
+        Object.entries(this.config.projectEnv[projectId] ?? {}).filter(([name]) =>
+          PROJECT_ENV_NAME.test(name),
+        ),
+      ),
     }
   }
 
