@@ -1,26 +1,13 @@
 <script setup lang="ts">
 import { DouAlert, DouButton, DouText } from 'dou-ui'
-import { EyeIcon, EyeOffIcon, RotateCcwIcon } from '@dou-ui/icons'
+import { EyeIcon, EyeOffIcon } from '@dou-ui/icons'
 import { computed, watch } from 'vue'
 import { t, tm } from '../i18n'
-import { answerAttention, dismissProposal, revertPlan, state } from '../store'
-import { freshChanges } from './layout'
-import { acknowledge, loadSeen, planUi, seenRevision } from './ui'
-
-watch(
-  () => state.plan,
-  (plan) => plan && loadSeen(plan),
-  { immediate: true },
-)
+import { answerAttention, dismissProposal, state } from '../store'
+import { planUi } from './ui'
 
 const open = computed(() => state.plan?.proposals.filter((p) => p.status === 'open') ?? [])
 const stale = computed(() => state.plan?.proposals.filter((p) => p.status === 'stale') ?? [])
-// What the coordinator changed since the user last said "got it"; marked on the graph.
-const fresh = computed(() =>
-  state.plan
-    ? freshChanges(state.plan, seenRevision(state.plan))
-    : { revisions: [], nodes: new Set<string>(), truncated: false },
-)
 // The server draws each open proposal on the plan; `null` means it no longer fits.
 const unfit = (proposal: { preview: unknown }) => proposal.preview === null
 
@@ -37,7 +24,7 @@ function togglePreview(id: string) {
 </script>
 
 <template>
-  <div v-if="fresh.revisions.length || open.length || stale.length" class="plan-change">
+  <div v-if="open.length || stale.length" class="plan-change">
     <DouAlert
       v-for="proposal in open"
       :key="proposal.id"
@@ -91,34 +78,6 @@ function togglePreview(id: string) {
         </DouButton>
       </template>
     </DouAlert>
-    <DouAlert
-      v-if="fresh.revisions.length && state.plan"
-      tone="primary"
-      :title="t('plan.fresh.title', { count: fresh.revisions.length })"
-    >
-      <DouText v-if="fresh.truncated" size="sm" variant="secondary">
-        {{ t('plan.fresh.truncated') }}
-      </DouText>
-      <ul class="plan-ops">
-        <li v-for="revision in fresh.revisions" :key="revision.id" class="plan-fresh">
-          <span>{{ revision.reason }}</span>
-          <DouButton
-            size="sm"
-            variant="ghost"
-            :aria-label="t('plan.revert')"
-            :title="t('plan.revert')"
-            @click="revertPlan(revision.id)"
-          >
-            <RotateCcwIcon />
-          </DouButton>
-        </li>
-      </ul>
-      <template #action>
-        <DouButton size="sm" variant="outline" @click="state.plan && acknowledge(state.plan)">
-          {{ t('plan.fresh.ack') }}
-        </DouButton>
-      </template>
-    </DouAlert>
   </div>
 </template>
 
@@ -132,9 +91,5 @@ function togglePreview(id: string) {
 .plan-ops {
   margin: 4px 0 0;
   padding-left: 18px;
-}
-
-.plan-fresh > span {
-  margin-inline-end: 4px;
 }
 </style>

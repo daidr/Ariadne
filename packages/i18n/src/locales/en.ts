@@ -29,8 +29,16 @@ export const en: Record<MessageKey, string> = {
   'plan.status.paused': 'Stopped',
   'plan.status.finish': 'Done',
   'plan.revert': 'Revert',
-  'plan.revertReason': 'The user reverted this change',
   'plan.reverted': 'Reverted',
+  'plan.restore': 'Restore',
+  'plan.undo.ask': 'Undo this change?',
+  'plan.undo.blocked': 'Cannot undo',
+  'plan.undo.ok': 'Got it',
+  'plan.undo.reason': 'Undo: {reason}',
+  'plan.undo.threads': 'Threads that will stop: {titles}',
+  'plan.restore.ask': 'Restore this change?',
+  'plan.restore.blocked': 'Cannot restore',
+  'plan.restore.reason': 'Restore: {reason}',
   'plan.history': 'History',
   'plan.expand': 'Open large',
   'plan.title': 'Plan',
@@ -40,8 +48,7 @@ export const en: Record<MessageKey, string> = {
   'plan.op.add': 'Add "{title}"',
   'plan.op.addMilestone': 'Add milestone "{title}"',
   'plan.op.remove': 'Remove "{title}"',
-  'plan.op.removeWithThreads':
-    'Remove "{title}"; its {count} threads will no longer be on the plan',
+  'plan.op.removeWithThreads': 'Remove "{title}"; its {count} threads will stop',
   'plan.op.acceptance': 'Change the acceptance of "{title}" to: {value}',
   'plan.op.rename': 'Rename "{title}" to "{value}"',
   'plan.op.update': 'Edit the description of "{title}"',
@@ -138,7 +145,7 @@ export const en: Record<MessageKey, string> = {
   'plan.remove': 'Remove node',
   'plan.removeConfirm': 'Remove "{title}"?',
   'plan.removeConfirmThreads':
-    'Remove "{title}"? Its {count} threads will be detached from the plan. You can undo this from the history.',
+    'Remove "{title}"? Its {count} threads will stop. You can undo this from the history.',
   'plan.mark.added': 'Added',
   'plan.mark.removed': 'Removed',
   'plan.mark.changed': 'Changed',
@@ -149,9 +156,6 @@ export const en: Record<MessageKey, string> = {
   'plan.preview.show': 'Preview on graph',
   'plan.preview.hide': 'Hide preview',
   'plan.preview.on': 'Green is added, red removed, blue changed',
-  'plan.fresh.title':
-    'The coordinator changed the plan {count} times; the nodes it touched are marked',
-  'plan.fresh.ack': 'Got it',
   'plan.preview.stale':
     'The plan changed since; this proposal no longer fits it and cannot be previewed.',
   'plan.reason.more': '{first}, and {count} changes in all',
@@ -160,12 +164,10 @@ export const en: Record<MessageKey, string> = {
   'plan.conflict.empty': '(empty)',
   'plan.conflict.mine': 'Keep mine and save again',
   'plan.conflict.theirs': 'Use the current one',
-  'plan.fresh.truncated':
-    'The plan changed many times while you were away; only the nodes the coordinator touched in the last 50 changes are marked',
   'plan.removeSelected': 'Remove the {count} selected nodes?',
   'plan.removeAsk': 'Confirm before removing nodes',
   'plan.removeSelectedThreads':
-    'Remove the {count} selected nodes? Their {threads} threads will be detached from the plan. You can undo this from the history.',
+    'Remove the {count} selected nodes? Their {threads} threads will stop. You can undo this from the history.',
   'plugins.removeAffects':
     'These model providers use it: {names}. They stop working once it is removed.',
   'project.source.hosting': 'Hosting',
@@ -328,6 +330,10 @@ export const en: Record<MessageKey, string> = {
   'error.planConflict':
     '"{title}" was changed while you were editing it; your change was not saved',
   'error.planReverted': 'This change has already been reverted',
+  'error.planUndoGone': '"{title}" was removed since',
+  'error.planUndoGoneUnnamed': 'A node it changed was removed since',
+  'error.planUndoChanged': '"{title}" was changed again since',
+  'error.planUndoLink': 'The dependency between "{from}" and "{to}" was changed again since',
   'error.artifactConflict': 'This artifact is now at version {version}; reload before saving',
   'error.fileType':
     'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',

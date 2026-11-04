@@ -15,7 +15,7 @@ import { CircleDotIcon, FileDiffIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { editPlan, openMain, openThread, setNodeIssue, state } from '../store'
-import { mergeIntoForm, reasonOf } from './edit'
+import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 import StageLabel from '../components/StageLabel.vue'
 import ThreadHeadline from '../components/ThreadHeadline.vue'
@@ -150,11 +150,12 @@ async function unlinkIssue(number: number) {
   issueProblem.value = await setNodeIssue(props.node.id, number, false)
 }
 
-const removeQuestion = computed(() =>
-  props.node.threads.length
-    ? t('plan.removeConfirmThreads', { title: props.node.title, count: props.node.threads.length })
-    : t('plan.removeConfirm', { title: props.node.title }),
-)
+const removeQuestion = computed(() => {
+  const count = liveThreads(props.node)
+  return count
+    ? t('plan.removeConfirmThreads', { title: props.node.title, count })
+    : t('plan.removeConfirm', { title: props.node.title })
+})
 </script>
 
 <template>

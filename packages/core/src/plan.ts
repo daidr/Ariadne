@@ -130,6 +130,66 @@ export function applyOps(graph: PlanGraph, ops: PlanOp[]): { graph: PlanGraph; i
 }
 
 /**
+ * Why undoing a revision no longer applies, in words the user reads: the first undo op
+ * that fails, and the node or dependency later changes moved. `titles` names nodes the
+ * plan no longer has (taken from the revision itself).
+ */
+export function whyUndoFails(
+  graph: PlanGraph,
+  undo: PlanOp[],
+  titles: Map<string, string>,
+): LocalizedMessage | null {
+  let at = graph
+  for (const op of undo) {
+    try {
+      at = applyOps(at, [op]).graph
+      continue
+    } catch {
+      // This op is the one; say what moved under it.
+    }
+    const title = (id: string) => at.nodes.get(id)?.title ?? titles.get(id) ?? ''
+    const gone = (id: string): LocalizedMessage => {
+      const name = title(id)
+      return name
+        ? { key: 'error.planUndoGone', params: { title: name } }
+        : { key: 'error.planUndoGoneUnnamed' }
+    }
+    switch (op.op) {
+      case 'add':
+        return { key: 'error.planUndoChanged', params: { title: title(op.id) || op.title } }
+      case 'remove':
+      case 'update':
+        if (!at.nodes.has(op.id)) return gone(op.id)
+        return { key: 'error.planUndoChanged', params: { title: title(op.id) } }
+      case 'link':
+      case 'unlink':
+        if (!at.nodes.has(op.from)) return gone(op.from)
+        if (!at.nodes.has(op.to)) return gone(op.to)
+        return { key: 'error.planUndoLink', params: { from: title(op.from), to: title(op.to) } }
+    }
+  }
+  return null
+}
+
+/**
+ * What undoing does beyond its own ops: dependencies that later changes added to nodes the
+ * undo removes go with those nodes.
+ */
+export function droppedWith(before: PlanGraph, after: PlanGraph, undo: PlanOp[]) {
+  const unlinked = new Set(
+    undo.flatMap((op) => (op.op === 'unlink' ? [edgeKey(op.from, op.to)] : [])),
+  )
+  return edgesOf(before).filter(
+    ({ from, to }) => !after.edges.has(edgeKey(from, to)) && !unlinked.has(edgeKey(from, to)),
+  )
+}
+
+/** Nodes in `before` that `after` no longer has. */
+export function removedNodes(before: PlanGraph, after: PlanGraph): string[] {
+  return before.order.filter((id) => !after.nodes.has(id))
+}
+
+/**
  * Changes the user must agree to before they take effect: removing a node, changing how a
  * node is accepted, or touching a milestone. Everything else applies at once and can be
  * reverted.

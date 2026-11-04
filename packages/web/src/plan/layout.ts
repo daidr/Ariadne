@@ -68,8 +68,10 @@ export function touchedBy(ops: readonly PlanOp[]): Set<string> {
 
 /**
  * The coordinator's changes the user has not seen yet: those newer than `seen`, the
- * revision that was newest when they last said "got it". The plan lists only its latest
- * revisions; when `seen` is not among them, `truncated` says that older ones are missing.
+ * newest revision when the user last caught up. `nodes` maps each node they touch to the
+ * newest such revision, so a node the user looked at since stops standing out. The plan
+ * lists only its latest revisions; when `seen` is not among them, `truncated` says that
+ * older ones are missing.
  */
 export function freshChanges(plan: PlanView | null, seen: string | null) {
   const revisions: PlanRevisionView[] = []
@@ -83,8 +85,10 @@ export function freshChanges(plan: PlanView | null, seen: string | null) {
       revisions.push(revision)
     }
   }
-  const nodes = new Set<string>()
-  for (const revision of revisions) for (const id of touchedBy(revision.ops)) nodes.add(id)
+  const nodes = new Map<string, string>()
+  for (const revision of revisions) {
+    for (const id of touchedBy(revision.ops)) if (!nodes.has(id)) nodes.set(id, revision.id)
+  }
   return { revisions, nodes, truncated: !!seen && !found && revisions.length > 0 }
 }
 

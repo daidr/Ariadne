@@ -405,6 +405,15 @@ export interface PlanProposalView {
   createdAt: number
 }
 
+/** What undoing a revision would do; see `Ariadne.previewPlanUndo`. */
+export interface PlanUndoPreview {
+  changes: LocalizedMessage[]
+  /** Threads on nodes the undo removes; they stop. */
+  threads: { id: string; title: string }[]
+  /** Why it can no longer be undone, or null. */
+  blocked: LocalizedMessage | null
+}
+
 export interface PlanView {
   projectId: string
   nodes: PlanNodeView[]

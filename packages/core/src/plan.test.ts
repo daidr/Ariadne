@@ -244,6 +244,104 @@ describe('plan revisions', () => {
     expect(app.getPlan(projectId).nodes[0]?.title).toBe('用户的名字')
   })
 
+  test('undoing shows what goes with it, stops threads on removed nodes and wakes the coordinator', () => {
+    const project = app.getProject(projectId)
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '调研')] })
+    const split = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '拆出实现',
+      ops: [add('b', '实现')],
+    })
+    if (split.status !== 'applied') throw new Error('expected applied')
+    // A later change links to the node the undo removes.
+    app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '加依赖',
+      ops: [{ op: 'link', from: 'a', to: 'b' }],
+    })
+    const working = app.createThread(projectId, { title: '写实现', nodeId: 'b' })
+    const finished = app.createThread(projectId, { title: '早做完的', nodeId: 'b' })
+    app.reportThread(finished.id, { kind: 'done', summary: '完成', headline: '完成' })
+
+    expect(app.previewPlanUndo(projectId, split.revisionId)).toEqual({
+      changes: [
+        { key: 'plan.op.removeWithThreads', params: { title: '实现', count: 1 } },
+        { key: 'plan.op.unlink', params: { from: '调研', to: '实现' } },
+      ],
+      threads: [{ id: working.id, title: '写实现' }],
+      blocked: null,
+    })
+
+    app.revertPlanRevision(projectId, split.revisionId, 'user', '撤销：拆出实现')
+    expect(app.getPlan(projectId).nodes.map((n) => n.id)).toEqual(['a'])
+    expect(app.getThread(working.id).stopped).toMatchObject({
+      by: 'user',
+      reason: '撤销：拆出实现',
+    })
+    expect(app.getThread(finished.id).stopped).toBeNull()
+    expect(app.listTranscript(project.coordinatorId).slice(-2)).toMatchObject([
+      { kind: 'note', note: { type: 'plan-changed-by-user', revertOf: split.revisionId } },
+      { kind: 'note', note: { type: 'thread-stopped-by-user', threadId: working.id } },
+    ])
+    expect(app.getConversation(project.coordinatorId).pendingSeq).toBeGreaterThan(0)
+
+    // Restoring undoes the undo: the change stands again and can be undone again.
+    const undoId = app.getPlan(projectId).revisions[0]?.id ?? ''
+    expect(app.previewPlanUndo(projectId, undoId).changes).toEqual([
+      { key: 'plan.op.add', params: { title: '实现' } },
+      { key: 'plan.op.link', params: { from: '调研', to: '实现' } },
+    ])
+    app.revertPlanRevision(projectId, undoId, 'user', '恢复：拆出实现')
+    const plan = app.getPlan(projectId)
+    expect(plan.nodes.map((n) => [n.id, n.dependsOn])).toEqual([
+      ['a', []],
+      ['b', ['a']],
+    ])
+    expect(plan.revisions.find((r) => r.id === split.revisionId)?.revertedBy).toBeNull()
+    expect(plan.revisions.find((r) => r.id === undoId)?.revertedBy).toBe(plan.revisions[0]?.id)
+    expect(app.previewPlanUndo(projectId, split.revisionId).blocked).toBeNull()
+    // The stopped thread waits for the user to let it go on.
+    expect(app.getThread(working.id).stopped).not.toBeNull()
+  })
+
+  test('an undo later changes are in the way of says why in words', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '旧')] })
+    const rename = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '改名',
+      ops: [{ op: 'update', id: 'a', title: '新' }],
+    })
+    if (rename.status !== 'applied') throw new Error('expected applied')
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '用户改',
+      ops: [{ op: 'update', id: 'a', title: '用户的名字' }],
+    })
+    expect(app.previewPlanUndo(projectId, rename.revisionId).blocked).toEqual({
+      key: 'error.planUndoChanged',
+      params: { title: '用户的名字' },
+    })
+    app.revisePlan(projectId, { author: 'user', reason: '删掉', ops: [{ op: 'remove', id: 'a' }] })
+    expect(app.previewPlanUndo(projectId, rename.revisionId).blocked).toEqual({
+      key: 'error.planUndoGone',
+      params: { title: '新' },
+    })
+    expect(() => app.revertPlanRevision(projectId, rename.revisionId, 'user', '')).toThrow(
+      expect.objectContaining({ code: 'error.planUndoGone' }),
+    )
+  })
+
+  test('the user removing a node stops the threads on it', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a')] })
+    const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '删除「a」',
+      ops: [{ op: 'remove', id: 'a' }],
+    })
+    expect(app.getThread(thread.id).stopped).toMatchObject({ by: 'user', reason: '删除「a」' })
+  })
+
   test('node status follows its threads', () => {
     app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a')] })
     const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })

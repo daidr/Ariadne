@@ -46,7 +46,16 @@ import {
   type StoredFile,
 } from './files'
 import { newId } from './ids'
-import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
+import {
+  applyOps,
+  describePlanOps,
+  droppedWith,
+  needsConfirmation,
+  previewPlanOps,
+  removedNodes,
+  whyUndoFails,
+  type PlanGraph,
+} from './plan'
 import {
   defaultProjections,
   dropProjectionTables,
@@ -71,6 +80,7 @@ import type {
   PlanNodeView,
   PlanProposalView,
   PlanRevisionView,
+  PlanUndoPreview,
   PlanView,
   ProjectView,
   ThreadArtifact,
@@ -85,7 +95,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 29
+export const PROJECTION_VERSION = 30
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -1310,7 +1320,8 @@ export class Ariadne {
     if (proposal && answer.type === 'confirm' && answer.approved) {
       const ops = JSON.parse(proposal.ops) as PlanOp[]
       try {
-        applyOps(loadPlanGraph(this.db, row.project_id), ops)
+        const before = loadPlanGraph(this.db, row.project_id)
+        const after = applyOps(before, ops).graph
         events.push({
           type: 'plan.revised',
           projectId: row.project_id,
@@ -1323,6 +1334,9 @@ export class Ariadne {
             proposalId: proposal.id,
           },
         })
+        events.push(
+          ...this.stopsForRemoved(row.project_id, before, after, proposal.reason, 'coordinator'),
+        )
       } catch (error) {
         if (!(error instanceof DomainError)) throw error
         // The plan moved on since it was proposed. Say so: the user sees it did not take
@@ -1928,12 +1942,86 @@ export class Ariadne {
 
   /** What a change would do, one line per op, as the user would read it. */
   describePlanChange(projectId: string, ops: PlanOp[]): LocalizedMessage[] {
-    const threads = this.listThreads(projectId)
+    const threads = this.liveThreads(projectId)
     return describePlanOps(
       loadPlanGraph(this.db, projectId),
       ops,
       (nodeId) => threads.filter((thread) => thread.nodeId === nodeId).length,
     )
+  }
+
+  /** Threads still at work or waiting: those a removed node stops. */
+  private liveThreads(projectId: string): ThreadView[] {
+    return this.listThreads(projectId).filter(
+      (thread) => thread.stage !== 'done' && !thread.stopped,
+    )
+  }
+
+  /**
+   * A node that leaves the plan stops the threads still working on it, so nothing goes on
+   * for work the plan no longer has. They are not resumed when the node comes back.
+   */
+  private stopsForRemoved(
+    projectId: string,
+    before: PlanGraph,
+    after: PlanGraph,
+    reason: string,
+    by: string,
+  ): AnyNewEvent[] {
+    const removed = new Set(removedNodes(before, after))
+    if (!removed.size) return []
+    return this.liveThreads(projectId)
+      .filter((thread) => thread.nodeId && removed.has(thread.nodeId))
+      .map((thread) => ({
+        type: 'thread.stopped' as const,
+        projectId,
+        data: { threadId: thread.id, reason, by },
+      }))
+  }
+
+  /**
+   * What undoing a revision would do, for the user to judge before they undo it: the
+   * changes, dependencies later changes added that go with removed nodes, and the threads
+   * it stops. `blocked` says why it can no longer be undone.
+   */
+  previewPlanUndo(projectId: string, revisionId: string): PlanUndoPreview {
+    const { graph, undo, titles } = this.undoOf(projectId, revisionId)
+    const blocked = whyUndoFails(graph, undo, titles)
+    if (blocked) return { changes: [], threads: [], blocked }
+    const after = applyOps(graph, undo).graph
+    const title = (id: string) => graph.nodes.get(id)?.title ?? id
+    const changes = [
+      ...this.describePlanChange(projectId, undo),
+      ...droppedWith(graph, after, undo).map(({ from, to }): LocalizedMessage => ({
+        key: 'plan.op.unlink',
+        params: { from: title(from), to: title(to) },
+      })),
+    ]
+    const removed = new Set(removedNodes(graph, after))
+    const threads = this.liveThreads(projectId)
+      .filter((thread) => thread.nodeId && removed.has(thread.nodeId))
+      .map((thread) => ({ id: thread.id, title: thread.title }))
+    return { changes, threads, blocked: null }
+  }
+
+  private undoOf(projectId: string, revisionId: string) {
+    const row = this.db
+      .query<
+        { ops: string; inverse: string; reverted_by: string | null; reason: string },
+        [string, string]
+      >(
+        'SELECT ops, inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
+      )
+      .get(revisionId, projectId)
+    if (!row) throw new DomainError('error.notFound', { what: revisionId })
+    if (row.reverted_by) throw new DomainError('error.planReverted')
+    const undo = JSON.parse(row.inverse) as PlanOp[]
+    // Names for nodes the plan may no longer have, from what the revision itself held.
+    const titles = new Map<string, string>()
+    for (const op of [...undo, ...(JSON.parse(row.ops) as PlanOp[])]) {
+      if ((op.op === 'add' || op.op === 'update') && op.title) titles.set(op.id, op.title)
+    }
+    return { graph: loadPlanGraph(this.db, projectId), undo, titles, reason: row.reason }
   }
 
   /**
@@ -1948,19 +2036,14 @@ export class Ariadne {
     reason: string,
     confirmation?: PlanConfirmation,
   ): PlanChange {
-    const row = this.db
-      .query<{ inverse: string; reverted_by: string | null; reason: string }, [string, string]>(
-        'SELECT inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
-      )
-      .get(revisionId, projectId)
-    if (!row) throw new DomainError('error.notFound', { what: revisionId })
-    if (row.reverted_by) throw new DomainError('error.planReverted')
-    const ops = JSON.parse(row.inverse) as PlanOp[]
+    const { graph, undo, titles, reason: original } = this.undoOf(projectId, revisionId)
+    const blocked = whyUndoFails(graph, undo, titles)
+    if (blocked) throw new DomainError(blocked.key, blocked.params)
     return this.changePlan(
       projectId,
       author,
-      reason.trim() || row.reason,
-      ops,
+      reason.trim() || original,
+      undo,
       revisionId,
       confirmation,
     )
@@ -1975,7 +2058,7 @@ export class Ariadne {
     confirmation: PlanConfirmation | undefined,
   ): PlanChange {
     const graph = loadPlanGraph(this.db, projectId)
-    applyOps(graph, ops)
+    const after = applyOps(graph, ops).graph
     if (author === 'coordinator' && needsConfirmation(graph, ops)) {
       if (!confirmation) throw new DomainError('error.invalidBody', { reason: 'confirmation' })
       const proposalId = newId('prp')
@@ -1999,6 +2082,7 @@ export class Ariadne {
         projectId,
         data: { revisionId, author, reason, ops, revertOf, proposalId: null },
       },
+      ...this.stopsForRemoved(projectId, graph, after, reason, author),
     ])
     return { status: 'applied', revisionId }
   }

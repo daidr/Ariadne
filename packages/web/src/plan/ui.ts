@@ -1,6 +1,6 @@
 import type { PlanView } from '@ariadne/core'
 import { reactive } from 'vue'
-import type { Positions } from './layout'
+import { freshChanges, type Positions } from './layout'
 
 /**
  * What the plan views share in this browser: the change being previewed on the graph, the
@@ -9,13 +9,16 @@ import type { Positions } from './layout'
 export const planUi = reactive({
   /** The open proposal shown on the graph instead of the plan as it is. */
   previewId: null as string | null,
-  /** Per project: the newest revision when the user last said "got it". */
+  /** Per project: the newest revision when the user last caught up. */
   seen: {} as Record<string, string | null>,
+  /** Per project: nodes looked at since, with the newest revision touching each then. */
+  seenNodes: {} as Record<string, Record<string, string>>,
   /** Bumped when saved offsets change outside a drag, so graphs lay out again. */
   layoutVersion: 0,
 })
 
 const SEEN_KEY = (projectId: string) => `ariadne.planSeen.${projectId}`
+const SEEN_NODES_KEY = (projectId: string) => `ariadne.planSeenNodes.${projectId}`
 const LAYOUT_KEY = (projectId: string) => `ariadne.planOffsets.${projectId}`
 
 function read(key: string): string | null {
@@ -42,6 +45,11 @@ function write(key: string, value: string | null): void {
  */
 export function loadSeen(plan: PlanView): void {
   if (plan.projectId in planUi.seen) return
+  try {
+    planUi.seenNodes[plan.projectId] = JSON.parse(read(SEEN_NODES_KEY(plan.projectId)) ?? '{}')
+  } catch {
+    planUi.seenNodes[plan.projectId] = {}
+  }
   const saved = read(SEEN_KEY(plan.projectId))
   const newest = plan.revisions[0]?.id ?? null
   planUi.seen[plan.projectId] = saved ?? newest
@@ -56,10 +64,36 @@ export function seenRevision(plan: PlanView): string | null {
     : (plan.revisions[0]?.id ?? null)
 }
 
-export function acknowledge(plan: PlanView): void {
-  const newest = plan.revisions[0]?.id ?? null
-  planUi.seen[plan.projectId] = newest
-  write(SEEN_KEY(plan.projectId), newest ?? '')
+/**
+ * Nodes the coordinator changed that the user has not looked at since. Looking at a node
+ * (selecting it) is what clears its mark; there is nothing else to dismiss.
+ */
+export function unseenNodes(plan: PlanView): Set<string> {
+  const looked = planUi.seenNodes[plan.projectId] ?? {}
+  const nodes = new Set<string>()
+  for (const [id, revision] of freshChanges(plan, seenRevision(plan)).nodes) {
+    if (looked[id] !== revision) nodes.add(id)
+  }
+  return nodes
+}
+
+/** The user looked at a node: its mark goes until the coordinator changes it again. */
+export function markNodeSeen(plan: PlanView, nodeId: string): void {
+  const fresh = freshChanges(plan, seenRevision(plan)).nodes
+  const revision = fresh.get(nodeId)
+  if (!revision) return
+  const looked = { ...planUi.seenNodes[plan.projectId], [nodeId]: revision }
+  // Once every changed node was looked at, the user has caught up with the plan.
+  if ([...fresh].every(([id, rev]) => looked[id] === rev)) {
+    const newest = plan.revisions[0]?.id ?? null
+    planUi.seen[plan.projectId] = newest
+    write(SEEN_KEY(plan.projectId), newest ?? '')
+    planUi.seenNodes[plan.projectId] = {}
+    write(SEEN_NODES_KEY(plan.projectId), null)
+    return
+  }
+  planUi.seenNodes[plan.projectId] = looked
+  write(SEEN_NODES_KEY(plan.projectId), JSON.stringify(looked))
 }
 
 /**
