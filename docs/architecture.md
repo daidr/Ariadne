@@ -118,13 +118,13 @@ thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录�
 
 SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出和执行命令，填主机（`user@host` 或 `~/.ssh/config` 里的 Host）、可选的端口和远端的绝对路径。
 
-- 连接用系统自带的 `ssh` 和用户自己的配置、密钥、ssh-agent，不保存任何密钥，也不支持密码登录：`BatchMode=yes`，从不提问。主机指纹不认识时连接直接失败并给出原因，用户先在终端里 ssh 一次确认指纹；Ariadne 不会替用户接受新指纹。
-- 连接不转发任何东西（`ForwardAgent=no`、`ForwardX11=no`、`ClearAllForwardings=yes`），也不运行 `LocalCommand`：远端的命令连不回这台机器，用不了本机的 agent 去登录别处。本地的 `ssh` 进程拿到的环境同样去掉了服务端的凭据，`SendEnv` 带不过去。
-- 同一台主机的调用共用一条连接（`ControlMaster`，套接字在 `~/.ariadne/plugins/ssh/cm/`，空闲两分钟后断开），每次调用只有几十毫秒的开销；数据目录的路径太长、放不下 Unix 套接字时就每次新连。
+- 连接用系统自带的 `ssh` 和用户自己的配置、密钥、ssh-agent，不保存任何密钥，也不支持密码登录：`BatchMode=yes`，从不提问。主机指纹不认识时连接直接失败并给出原因，用户先在终端里 ssh 一次确认指纹；Ariadne 不会替用户接受新指纹。不过用户自己的 ssh 配置里放宽的指纹策略（`StrictHostKeyChecking no` 或 `accept-new`）同样生效。
+- 连接不转发任何东西（`ForwardAgent=no`、`ForwardX11=no`、`ClearAllForwardings=yes`、`Tunnel=no`、`GSSAPIDelegateCredentials=no`），也不运行 `LocalCommand`：远端的命令连不回这台机器，用不了本机的 agent 去登录别处。本地的 `ssh` 进程拿到的环境同样去掉了服务端的凭据，`SendEnv` 带不过去。
+- 同一台主机的调用共用一条连接（`ControlMaster`，套接字在 `~/.ariadne/plugins/ssh/cm/`，空闲两分钟后断开），每次调用只有几十毫秒的开销；数据目录的路径太长、放不下 Unix 套接字时就每次新连，并显式关掉复用（`ControlMaster=no`、`ControlPath=none`），不会挂到用户在终端里开的、可能带着转发的主连接上。
 - 远端是 git 仓库时，和本地目录一样为每个 thread 建一个 worktree，放在远端用户的 `~/.ariadne-worktrees/<仓库路径的哈希>/<thread id>`，分支是 `ariadne/…`，从签出当前的 HEAD 建出；子目录、手动删掉后重建、依赖目录的写时复制（远端支持 reflink 时）都和本地目录相同。服务端在远端运行的 git 关掉 hook 和 fsmonitor。不是 git 仓库的目录由所有 thread 共用。
-- 远端只需要 bash、git 和常见的 POSIX 工具（`realpath`、`cat`、`cp`）。每次调用都是 `exec bash -c '<脚本>' <参数…>`，参数逐个加引号，登录 shell 是 zsh、fish 也一样。
+- 远端只需要 bash、git 和常见的 POSIX 工具（`realpath`、`cat`、`cp`）。登录 shell 的引号规则各不相同（fish 的单引号里仍有反斜杠转义，csh 不接受单引号里换行），所以交给登录 shell 的命令行固定是 `exec bash --norc --noprofile -s`，没有任何要引的东西；脚本和参数从输入送给 bash，参数只按 bash 的规则加引号。bash 从管道或套接字读输入时一次读一个字节、读完一整行才执行，所以调用脚本的那一行之后的输入原样留给脚本：要写入的文件内容，或者看守进程读的输入。这个 bash 不读启动文件，登录 shell 自己读过的那些设好的环境（比如 `PATH`）照样带过来。sh、bash、zsh、fish、tcsh 作登录 shell 都有对照测试。
 - 文件工具在远端读写：路径先在本机规范化，不允许 `..` 和绝对路径，再在远端把最近的已有目录解析成真实路径，确认仍在根目录里；经符号链接出去的、指向不存在位置的链接（写入会顺着它在外面建文件）都会被拒绝。远端的文件工具和命令以同一个用户运行，这层检查防的是失误，不是隔离。
-- 命令用 bash 在工作区里运行，有自己的进程组。脚本另起一个看守进程读连接的输入：超时、thread 被停下或者连接断了，本机就关掉输入，看守进程结束整个进程组，留下的后台进程也一起结束。输出过长时只保留末尾，和本地相同。
+- 命令用 bash 在工作区里运行，有自己的进程组。脚本另起一个看守进程读连接的输入：超时、thread 被停下或者连接断了，本机就关掉输入，看守进程结束整个进程组，留在组里的后台进程也一起结束；特意脱离进程组的（`setsid`）和本地目录一样挡不住。输出过长时只保留末尾，和本地相同。
 - 本机的工作区沙箱不管远端：命令以 SSH 登录的用户身份运行，能读写那个用户能读写的一切。项目来源下方会注明这一点。SSH 到本机自己（`localhost`）时，命令同样不在沙箱里，能读到 Ariadne 的令牌和设置。
 - SSH 来源只提供 `workspace`，没有 PR 和检查。thread 在远端用 `git push` 推送属于“工作区外、无法撤销”的操作，每次都要先问用户；公开仓库“第一次推送前问一次、对整个项目有效”的规则只适用于有 `repo` 能力、由服务端推送的来源。
 

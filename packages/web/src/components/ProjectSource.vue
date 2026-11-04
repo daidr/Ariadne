@@ -19,6 +19,8 @@ const editing = ref(false)
 const saving = ref(false)
 const problem = ref<string | null>(null)
 const kinds = ref<SourceKind[]>([])
+/** Whether `kinds` came back: until then a remote source cannot be told from a local one. */
+const kindsKnown = ref(false)
 const kind = ref<string | null>(null)
 /** Draft settings per kind, so switching kinds back and forth keeps what was typed. */
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
@@ -40,7 +42,10 @@ onMounted(() => {
     () => {},
   )
   api.sourceKinds().then(
-    (result) => (kinds.value = result.kinds),
+    (result) => {
+      kinds.value = result.kinds
+      kindsKnown.value = true
+    },
     () => {},
   )
 })
@@ -48,11 +53,11 @@ onMounted(() => {
 const storedKind = computed(() => kinds.value.find((k) => k.kind === source.value?.kind) ?? null)
 // A remote source runs commands on another machine; this one's sandbox is beside the point.
 const remote = computed(() => !!storedKind.value?.remote)
-const unsandboxed = computed(() => !!source.value && !remote.value && sandbox.value?.kind === null)
+// Notes about this machine's sandbox wait for the kinds, so a remote source never shows one.
+const local = computed(() => !!source.value && kindsKnown.value && !remote.value)
+const unsandboxed = computed(() => local.value && sandbox.value?.kind === null)
 // macOS's sandbox keeps files out of reach but not the server's processes.
-const weaker = computed(
-  () => !!source.value && !remote.value && sandbox.value?.kind === 'sandbox-exec',
-)
+const weaker = computed(() => local.value && sandbox.value?.kind === 'sandbox-exec')
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
 const kindOptions = computed(() =>
   kinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),

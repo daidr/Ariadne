@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { LocalShell, relativePath, sshProvider, SshShell, WORKTREE_DIR } from './index'
-import { remoteCommand, sshOptions } from './transport'
+import { sshOptions } from './transport'
 
 let base: string
 let home: string
@@ -66,10 +66,23 @@ describe('ssh connection', () => {
     expect(options).toContain('ControlPath=/tmp/cm/%C')
   })
 
-  test('quotes the script and every argument for the login shell', async () => {
-    const line = remoteCommand('printf "%s|" "$@"', ["it's", '$HOME', 'a b'])
-    const result = await run(['sh', '-c', line], { cwd: base })
-    expect(result.stdout).toBe("it's|$HOME|a b|")
+  test('without a shared connection, joins none the user opened', () => {
+    const options = sshOptions(null).join(' ')
+    expect(options).toContain('ControlMaster=no')
+    expect(options).toContain('ControlPath=none')
+    expect(options).toContain('GSSAPIDelegateCredentials=no')
+    expect(options).toContain('Tunnel=no')
+  })
+
+  // Login shells quote differently; the command line they read has nothing to quote, so
+  // every one of them hands the script the same arguments and the same input.
+  const shells = ['sh', 'bash', 'zsh', 'fish', 'tcsh'].filter((shell) => Bun.which(shell))
+  test.each(shells)('arguments and input arrive unchanged through %s', async (shell) => {
+    const args = ["it's", '\\.ts', "x\\'", '$HOME `id` $(id)', 'two\nlines', 'ends\n', '', '中文']
+    const script = 'for a in "$@"; do printf "[%s]" "$a"; done; printf "|"; cat'
+    const result = await new LocalShell(shell).run(script, args, { input: "after\\'\n" })
+    expect(result.stderr).toBe('')
+    expect(result.stdout).toBe(`${args.map((a) => `[${a}]`).join('')}|after\\'\n`)
   })
 
   test('refuses a host that ssh would read as an option', async () => {
@@ -133,8 +146,14 @@ describe('remote directory', () => {
     expect(here.exitCode).toBe(7)
     expect(here.stdout.trim()).toMatch(/\/plain\/sub$/)
     expect(here.stderr.trim()).toBe('err')
-    // Exit code 3 of the command itself is just its exit code.
+    // Exit code 3 of the command itself is just its exit code, and 255 is not a failed
+    // connection when the command ran (it may run ssh itself).
     expect((await ws.exec('exit 3')).exitCode).toBe(3)
+    expect(await ws.exec('echo no route >&2; exit 255')).toEqual({
+      exitCode: 255,
+      stdout: '',
+      stderr: 'no route\n',
+    })
     await expect(ws.exec('pwd', { cwd: '../' })).rejects.toThrow(WorkspacePathError)
 
     // A background process ends with the command, so the call returns at once.

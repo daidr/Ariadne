@@ -48,7 +48,7 @@ function clip(text: string): string {
 /** Run `argv` with the script's input, collecting its output; ends it on timeout or abort. */
 async function spawnScript(
   argv: string[],
-  options: ShellRun & { env?: Record<string, string> },
+  options: ShellRun & { payload: string; env?: Record<string, string> },
 ): Promise<ExecResult> {
   if (options.signal?.aborted) return { exitCode: 130, stdout: '', stderr: 'cancelled' }
   const proc = Bun.spawn(argv, {
@@ -57,6 +57,7 @@ async function spawnScript(
     stderr: 'pipe',
     env: { ...threadEnv(), ...options.env },
   })
+  proc.stdin.write(options.payload)
   if (options.input !== undefined) proc.stdin.write(options.input)
   if (!options.hold) await proc.stdin.end()
   let ended = false
@@ -87,11 +88,24 @@ async function spawnScript(
 }
 
 /**
- * The remote command line: login shells differ (bash, zsh, fish), so it only runs bash
- * with the script and its arguments, each quoted.
+ * The remote command line, read by the user's login shell. Login shells quote differently
+ * (fish keeps backslash escapes inside single quotes, csh refuses newlines in them), so
+ * the line has nothing to quote: bash reads the script and its arguments from the input
+ * instead, see `payload`. That bash reads no startup files: the login shell already read
+ * its own, and the environment they set up (say, `PATH`) carries over.
  */
-export function remoteCommand(script: string, args: string[]): string {
-  return ['exec', 'bash', '-c', shellQuote(script), 'ariadne', ...args.map(shellQuote)].join(' ')
+export const REMOTE_COMMAND = 'exec bash --norc --noprofile -s'
+
+/**
+ * What `bash -s` reads first: the script as a function, then one line that calls it with
+ * the arguments (quoted for bash, which is the only shell that reads them) and exits. bash
+ * reads its input from a pipe or socket one byte at a time and parses a whole line before
+ * running it, so whatever follows that line stays unread for the script: a file's content
+ * to write, or the input the command's watcher holds.
+ */
+export function payload(script: string, args: string[]): string {
+  const call = ['ariadne_main', ...args.map(shellQuote)].join(' ')
+  return `ariadne_main() {\n${script}\n}\n${call}; exit $?\n`
 }
 
 export interface SshTarget {
@@ -112,14 +126,20 @@ export function sshOptions(controlPath: string | null): string[] {
     'ForwardAgent=no',
     'ForwardX11=no',
     'ClearAllForwardings=yes',
+    'GSSAPIDelegateCredentials=no',
+    'Tunnel=no',
     'PermitLocalCommand=no',
     'ConnectTimeout=15',
     'ServerAliveInterval=15',
     'ServerAliveCountMax=4',
   ]
   // One connection carries every call; it stays open for two minutes after the last.
+  // Without one of its own, it must not join a connection the user opened in a terminal
+  // either: that one keeps whatever it forwards.
   if (controlPath) {
     options.push(`ControlMaster=auto`, `ControlPath=${controlPath}`, 'ControlPersist=120')
+  } else {
+    options.push('ControlMaster=no', 'ControlPath=none')
   }
   return [...options.flatMap((option) => ['-o', option]), '-T', '-e', 'none']
 }
@@ -153,7 +173,10 @@ export class SshShell implements RemoteShell {
   }
 
   run(script: string, args: string[], options: ShellRun = {}): Promise<ExecResult> {
-    return spawnScript([...this.argv, remoteCommand(script, args)], options)
+    return spawnScript([...this.argv, REMOTE_COMMAND], {
+      ...options,
+      payload: payload(script, args),
+    })
   }
 
   async dispose(): Promise<void> {
@@ -161,12 +184,20 @@ export class SshShell implements RemoteShell {
   }
 }
 
-/** This machine, through the same scripts: for tests, and to compare behaviour. */
+/**
+ * This machine, through the same scripts and the same command line, handed to `shell` the
+ * way sshd hands it to the login shell: for tests, and to compare login shells.
+ */
 export class LocalShell implements RemoteShell {
   readonly host = 'localhost'
 
+  constructor(private readonly shell = 'sh') {}
+
   run(script: string, args: string[], options: ShellRun = {}): Promise<ExecResult> {
-    return spawnScript(['bash', '-c', script, 'ariadne', ...args], options)
+    return spawnScript([this.shell, '-c', REMOTE_COMMAND], {
+      ...options,
+      payload: payload(script, args),
+    })
   }
 
   async dispose(): Promise<void> {}

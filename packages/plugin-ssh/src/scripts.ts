@@ -10,6 +10,12 @@
 /** What EXEC says when its directory is outside the workspace, so it is told from the command's own exit code 3. */
 export const OUTSIDE = 'ariadne: outside the workspace'
 
+/**
+ * The first line EXEC writes to its error output, taken off again here: an exit code 255
+ * without it means the connection failed, not the command (which may run ssh itself).
+ */
+export const STARTED = 'ariadne: started'
+
 /** Sets `real_root`, and defines `resolve PATH`, which prints the real path inside it. */
 const PRELUDE = `
 set -u
@@ -71,6 +77,7 @@ done
  * the command leaves running in the background ends with it.
  */
 export const EXEC = `${PRELUDE}
+printf '${STARTED}\\n' >&2
 dir=$(resolve "$1") || { printf '${OUTSIDE}\\n' >&2; exit 3; }
 [ -d "$dir" ] || { printf '%s is not a directory\\n' "$1" >&2; exit 2; }
 cd -- "$dir" || exit 1

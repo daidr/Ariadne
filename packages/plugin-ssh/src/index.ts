@@ -9,7 +9,7 @@ import {
 import { branchFor } from '@ariadne/plugin-local'
 import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
-import { EXEC, LIST, OUTSIDE, OPEN_WORKTREE, PROBE, READ, WRITE } from './scripts'
+import { EXEC, LIST, OPEN_WORKTREE, OUTSIDE, PROBE, READ, STARTED, WRITE } from './scripts'
 import { SSH_FAILED, SshShell, type RemoteShell } from './transport'
 
 export { LocalShell, SshShell, type RemoteShell } from './transport'
@@ -101,14 +101,17 @@ export class RemoteWorkspace implements Workspace {
       ...(options.signal ? { signal: options.signal } : {}),
     })
     // The command's own failures are its exit code; a path outside is the caller's.
-    if (result.exitCode === 3 && result.stderr.trim() === OUTSIDE) throw new WorkspacePathError(cwd)
-    if (
-      result.exitCode === SSH_FAILED &&
-      /^ssh: |^Connection |Permission denied \(/m.test(result.stderr)
-    ) {
-      return { ...result, stderr: `${result.stderr}\n[the SSH connection failed]` }
+    // Whatever came before the marker is the login shell's own (a greeting in its startup
+    // files); output cut for length lost the marker but certainly ran.
+    const marker = result.stderr.indexOf(`${STARTED}\n`)
+    const started = marker >= 0 || result.stderr.startsWith('[… ')
+    const stderr = marker >= 0 ? result.stderr.slice(marker + STARTED.length + 1) : result.stderr
+    if (result.exitCode === 3 && stderr.trim() === OUTSIDE) throw new WorkspacePathError(cwd)
+    // The script never ran: ssh itself failed to connect, or lost the connection first.
+    if (result.exitCode === SSH_FAILED && !started) {
+      return { ...result, stderr: `${stderr}\n[the SSH connection failed]` }
     }
-    return result
+    return { ...result, stderr }
   }
 
   async dispose(): Promise<void> {
