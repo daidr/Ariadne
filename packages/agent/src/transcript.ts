@@ -96,17 +96,20 @@ export function visibleHistory(entries: TranscriptEntry[]): {
   reasoning: ReasoningRecord[]
   /** The summarising call, see `ChatOptions.keepReasoning`. */
   call: string | null
+  /** The state written down with the summary. */
+  state: string | null
   entries: TranscriptEntry[]
 } {
   let latest: Extract<TranscriptEntry, { kind: 'summary' }> | null = null
   for (const entry of entries) if (entry.kind === 'summary') latest = entry
   const rest = entries.filter((entry) => entry.kind !== 'summary')
-  if (!latest) return { summary: null, reasoning: [], call: null, entries: rest }
+  if (!latest) return { summary: null, reasoning: [], call: null, state: null, entries: rest }
   const upTo = latest.upTo
   return {
     summary: latest.summary,
     reasoning: latest.reasoning,
     call: latest.call,
+    state: latest.state,
     entries: rest.filter((entry) => orderKey(entry) > upTo),
   }
 }
@@ -114,8 +117,9 @@ export function visibleHistory(entries: TranscriptEntry[]): {
 /**
  * The summary goes back to the model as its own notes (an assistant message), neither as
  * something the user said nor beside its instructions: it was written from history that
- * holds tool output too. `state` is what stored state says now (the todo list, open
- * questions), which the notes may have blurred.
+ * holds tool output too. `state` is the todo list and open questions as stored when the
+ * notes were written, which the notes may have blurred; it stays as it was until the next
+ * summary, so the request keeps its beginning and the provider's cache holds.
  */
 export const summaryMessages = (
   summary: string,
@@ -182,8 +186,6 @@ export function writtenBy(
  * until the step's results are in, and a call without a result gets one.
  */
 export interface ChatOptions {
-  /** The current state shown beside a summary. */
-  state?: string
   /** Whether the model looks at images; without, they are named in words. */
   images?: boolean
   /** A text attachment's content, from the project's files. */
@@ -205,7 +207,11 @@ export function toChatMessages(
   const keep = (call: string | null) =>
     !options.keepReasoning || (call !== null && options.keepReasoning(call))
   const out: ModelMessage[] = visible.summary
-    ? summaryMessages(visible.summary, options.state, keep(visible.call) ? visible.reasoning : [])
+    ? summaryMessages(
+        visible.summary,
+        visible.state ?? undefined,
+        keep(visible.call) ? visible.reasoning : [],
+      )
     : []
   let open: { ids: string[]; names: Map<string, string> } | null = null
   let held: ModelMessage[] = []

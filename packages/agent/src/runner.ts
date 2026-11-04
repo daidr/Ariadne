@@ -31,13 +31,7 @@ import {
   summaryRequest,
   usageOf,
 } from './compaction'
-import {
-  attachedText,
-  toChatMessages,
-  visibleHistory,
-  withImageData,
-  writtenBy,
-} from './transcript'
+import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -318,7 +312,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         const transcript = app.listTranscript(conversationId)
         const estimate = estimateTokens([
           { role: 'system', content: system() },
-          ...toChatMessages(transcript, titleOf, { ...chat, state: state() }),
+          ...toChatMessages(transcript, titleOf, chat),
         ])
         const upTo =
           Math.max(lastInput, estimate) >= threshold
@@ -344,6 +338,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               call: callOf(model, null),
               timing: summary.timing,
               reasoning: summary.reasoning,
+              state: state(),
             })
           } else {
             compactionFailed = true
@@ -354,16 +349,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // Everything below is read in one go, so the input is exactly the log up to `sawSeq`
       // plus the pieces recorded with the step: the trace rebuilds it from those.
       const sawSeq = app.lastSeq()
-      const input = { system: system(), tools: toolsJson, state: state() }
+      const input = { system: system(), tools: toolsJson }
       const transcript = app.listTranscript(conversationId)
       const messages = withImageData(
         [
           { role: 'system' as const, content: input.system },
-          ...toChatMessages(transcript, titleOf, { ...chat, state: input.state }),
+          ...toChatMessages(transcript, titleOf, chat),
         ],
         loadImage,
       )
-      const shownState = visibleHistory(transcript).summary === null ? null : input.state
       const answer = await requestStep(
         model,
         {
@@ -388,7 +382,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         input: {
           system: input.system,
           tools: input.tools,
-          state: shownState,
           call: callOf(model, model.effort ?? null),
           images,
         },
@@ -625,8 +618,9 @@ function userSpokeSince(transcript: TranscriptEntry[], since: number): boolean {
 }
 
 /**
- * What stored state says now, beside the notes of a summarised conversation: the notes
- * may blur the todo list, and `update_todo` replaces it whole.
+ * What stored state says when history is summarised, kept with the notes: they may blur
+ * the todo list, and `update_todo` replaces it whole. It is not brought up to date later:
+ * the calls after the notes say what changed, and the request keeps its beginning.
  */
 function currentState(app: Ariadne, conversation: ConversationView): string {
   const todo = app.getTodo(conversation.id).items
@@ -641,7 +635,7 @@ function currentState(app: Ariadne, conversation: ConversationView): string {
   const askingText = asking.length
     ? asking.map((a) => `- [${a.id}] ${askTitle(a.block)}`).join('\n')
     : '(none)'
-  return `<current_state>\nYour todo list as stored now (update_todo replaces it whole, so keep what still applies):\n${todoText}\nYour questions still waiting for the user's answer (do not ask them again; withdraw one with withdraw_ask once the user answered it in words or it no longer matters):\n${askingText}\n</current_state>`
+  return `<state_at_summary>\nYour todo list when these notes were written (update_todo replaces it whole, so keep what still applies; your update_todo calls after the notes are newer):\n${todoText}\nYour questions that were still waiting for the user's answer then (answers and withdrawals since come later in the conversation; do not ask them again; withdraw one with withdraw_ask once the user answered it in words or it no longer matters):\n${askingText}\n</state_at_summary>`
 }
 
 /** The scheduler aborts with `interrupted` on shutdown and `cancelled` when the user stops. */

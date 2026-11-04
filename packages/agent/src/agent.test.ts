@@ -8,7 +8,7 @@ import { toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
+const STEP_INPUT = { system: 'system', tools: '[]', call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
 const thought = (text: string) =>
   ({ type: 'reasoning', text, signature: 'sig', startedAt: 1 }) as const
@@ -393,6 +393,7 @@ describe('history compaction', () => {
         upTo: 1.5,
         reasoning: [] as never[],
         call: '{}',
+        state: '',
       } as const,
     ]
     expect(compactionCut(again, 1)).toBe(4.5)

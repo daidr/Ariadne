@@ -164,6 +164,12 @@ export interface ModelRequest {
   messages: ChatMessage[]
   tools: ToolSpec[]
   effort?: Effort
+  /**
+   * `false` for a one-off request whose prompt no later request starts with, such as a
+   * summary: a provider that caches what it is told to keeps none of it, since writing to
+   * the cache costs more than reading the prompt once.
+   */
+  cache?: boolean
   signal?: AbortSignal
 }
 

@@ -1179,6 +1179,7 @@ export const transcriptProjection: Projection = {
               upTo: event.data.upTo,
               reasoning: event.data.reasoning,
               call: event.data.call,
+              state: event.data.state,
             },
           },
           false,

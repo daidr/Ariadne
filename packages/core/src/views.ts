@@ -301,6 +301,8 @@ export type TranscriptEntry =
       reasoning: ReasoningRecord[]
       /** Hash of the summarising call, as for a step. */
       call: string
+      /** The todo list and open questions when it was written, shown with the notes. */
+      state: string
     }
 
 /** Facts written into a transcript by the system rather than by a person. */

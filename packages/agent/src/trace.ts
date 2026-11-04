@@ -252,6 +252,7 @@ export function traceRequest(
         })),
         tools: current.tools,
         ...(call.effort ? { effort: call.effort } : {}),
+        ...(event.type === 'conversation.compacted' ? { cache: false } : {}),
       }
     : null
   return { detail, request }
@@ -298,7 +299,6 @@ function requestOf(
     return content
   }
   const transcript = app.listTranscript(conversationId, { upTo: sawSeq })
-  const state = input.state === null ? undefined : piece(input.state)
   const call = parseCall(app.getPrompt(event.projectId, input.call))
   return {
     messages: [
@@ -306,7 +306,6 @@ function requestOf(
       ...toChatMessages(transcript, titleOf, {
         readText,
         images: input.images,
-        ...(state === undefined ? {} : { state }),
         ...(call ? { keepReasoning: writtenBy(app, event.projectId, call) } : {}),
       }),
     ],

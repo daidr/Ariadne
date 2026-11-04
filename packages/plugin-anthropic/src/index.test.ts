@@ -40,6 +40,8 @@ async function collect(effort?: 'low'): Promise<ModelStreamPart[]> {
   return parts
 }
 
+const tool = (name: string) => ({ name, description: name, parameters: { type: 'object' } })
+
 describe('anthropic provider', () => {
   test('sends images after the text, and a tool result with its images', () => {
     const image = { mime: 'image/png', data: 'AAAA' }
@@ -146,7 +148,12 @@ describe('anthropic provider', () => {
     const parts = await collect()
     expect(lastHeaders?.get('x-api-key')).toBe('key')
     expect(lastHeaders?.get('anthropic-version')).toBe('2023-06-01')
-    expect(lastBody).toMatchObject({ model: 'm', max_tokens: 1024, system: 'sys', stream: true })
+    expect(lastBody).toMatchObject({
+      model: 'm',
+      max_tokens: 1024,
+      system: [{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }],
+      stream: true,
+    })
     expect(parts).toEqual([
       { type: 'text', text: '好的' },
       { type: 'tool-call', id: 'tu1', name: 'f', arguments: '{"a":1}' },
@@ -245,6 +252,78 @@ describe('anthropic provider', () => {
       { type: 'tool_use', id: 't1', name: 'f', input: {} },
     ])
     expect(off.messages).toEqual(on.messages)
+  })
+
+  test('caches the tools, the system text, the previous request and this one', () => {
+    const settings = { baseUrl: '', apiKey: '', maxTokens: 100 }
+    const messages = [
+      { role: 'system' as const, content: 'sys' },
+      { role: 'user' as const, content: 'hi' },
+      {
+        role: 'assistant' as const,
+        content: '',
+        toolCalls: [{ id: 't1', name: 'f', arguments: '{}' }],
+      },
+      { role: 'tool' as const, toolCallId: 't1', content: 'one' },
+      {
+        role: 'assistant' as const,
+        content: 'next',
+        reasoning: [{ text: '想', signature: 's' }],
+        toolCalls: [{ id: 't2', name: 'f', arguments: '{}' }],
+      },
+      { role: 'tool' as const, toolCallId: 't2', content: 'two' },
+      { role: 'user' as const, content: 'also this' },
+    ]
+    const point = { type: 'ephemeral' }
+    const body = requestBody(settings, {
+      model: 'm',
+      messages,
+      tools: [tool('a'), tool('b')],
+    })
+    expect(body.tools?.map((spec) => 'cache_control' in spec)).toEqual([false, true])
+    expect(body.system).toEqual([{ type: 'text', text: 'sys', cache_control: point }])
+    // Where the request before this one ended, and where this one ends.
+    expect(body.messages[2]?.content).toEqual([
+      { type: 'tool_result', tool_use_id: 't1', content: 'one', cache_control: point },
+    ])
+    expect(body.messages[4]?.content).toEqual([
+      { type: 'tool_result', tool_use_id: 't2', content: 'two' },
+      { type: 'text', text: 'also this', cache_control: point },
+    ])
+    const points = JSON.stringify(body).match(/cache_control/g) ?? []
+    expect(points).toHaveLength(4)
+
+    // A request that ends on a step: the point goes on its call, never on its thinking.
+    const ending = requestBody(settings, {
+      model: 'm',
+      messages: messages.slice(0, 5),
+      tools: [],
+    })
+    expect(ending.messages.at(-1)?.content.at(-1)).toMatchObject({
+      type: 'tool_use',
+      cache_control: point,
+    })
+    expect(ending.messages.at(-1)?.content[0]).not.toHaveProperty('cache_control')
+    expect(ending).not.toHaveProperty('tools')
+  })
+
+  test('a one-off request is not cached', () => {
+    const body = requestBody(
+      { baseUrl: '', apiKey: '', maxTokens: 100 },
+      {
+        model: 'm',
+        messages: [
+          { role: 'system', content: 'sys' },
+          { role: 'user', content: 'a' },
+          { role: 'assistant', content: 'b' },
+          { role: 'user', content: 'summarise' },
+        ],
+        tools: [{ name: 'f', description: 'f', parameters: {} }],
+        cache: false,
+      },
+    )
+    expect(body.system).toBe('sys')
+    expect(JSON.stringify(body)).not.toContain('cache_control')
   })
 
   test('reports a stream error event', async () => {
