@@ -58,6 +58,8 @@ export interface AttentionView {
   id: string
   projectId: string
   threadId: string | null
+  /** Threads that asked the same since and wait on this card too, in the order they joined. */
+  joinedBy: string[]
   question: string
   options: AttentionOption[]
   recommended: number | null
@@ -150,7 +152,13 @@ export interface TodoView {
  * shown anywhere are the length of this list.
  */
 export type NeedsMeItem =
-  | { kind: 'attention'; attention: AttentionView; thread: ThreadView | null }
+  | {
+      kind: 'attention'
+      attention: AttentionView
+      thread: ThreadView | null
+      /** Other threads waiting on the same card, which hear the same answer. */
+      joined: ThreadView[]
+    }
   | { kind: 'thread'; thread: ThreadView }
 
 export type ConversationRole = 'coordinator' | 'thread'
@@ -223,6 +231,19 @@ export type TranscriptNote =
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
   | { type: 'instructions-changed'; path: string; removed: boolean }
+  | {
+      /**
+       * A change to an issue that this thread waited on with others was made by
+       * `threadId`, or that attempt may not have gone through.
+       */
+      type: 'issue-write-shared'
+      threadId: string
+      tracker: string
+      number: number
+      action: IssueWriteAction
+      outcome: 'made' | 'unsure'
+      url: string | null
+    }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,

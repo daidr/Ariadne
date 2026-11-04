@@ -195,8 +195,9 @@ export function issueWritePurpose(
  * Changing an issue reaches other people and cannot be taken back, so each change waits on
  * the user's yes to exactly that change: the card shows the issue and the whole text. Once
  * they agree, calling again with the same arguments makes it, once; the same change later
- * asks again. The change is recorded before it is made, so one cut off by a crash is
- * checked rather than made a second time.
+ * asks again. Threads that waited on one card share its yes: one makes the change and the
+ * others are told it was made. The change is recorded before it is made, so one cut off by
+ * a crash is checked rather than made a second time.
  */
 async function writeIssue(
   ctx: ToolContext,
@@ -239,6 +240,23 @@ async function writeIssue(
           : 'The user is already being asked about this change. Their answer arrives as a new turn; do not make it until then.',
     }
   }
+  if (approval.state === 'made') {
+    // Another thread waited on the same card and made the change with the shared yes.
+    return json({
+      done: true,
+      url: approval.url,
+      madeBy: approval.by,
+      note: 'Another thread that waited on the same yes already made exactly this change. Do not make it again.',
+    })
+  }
+  if (approval.state === 'writing') {
+    return {
+      content:
+        approval.by === ctx.conversationId
+          ? 'An earlier call is making exactly this change right now. Do not make it again; its result shows how it went.'
+          : 'Another thread is making exactly this change right now, with the same yes. Do not make it yourself; you will be told how it went.',
+    }
+  }
   if (approval.state === 'declined') {
     return {
       content:
@@ -249,7 +267,7 @@ async function writeIssue(
   if (approval.state === 'unsure') {
     // Ariadne stopped between starting the change and hearing back: it may have gone
     // through. The yes is spent; calling again asks the user again.
-    ctx.app.markIssueWriteUnsure(ctx.projectId, approval.attentionId)
+    ctx.app.markIssueWriteUnsure(ctx.projectId, approval.attentionId, ctx.conversationId)
     return {
       content:
         'An earlier attempt at exactly this change was cut off, and it may have gone through. Check the issue with read_issue first. Only if the change is not there, call this tool again; that asks the user again.',
@@ -274,7 +292,7 @@ async function writeIssue(
   } catch (error) {
     // A request that failed may still have reached the tracker (a timeout, say): the yes is
     // spent, and the thread checks before asking again.
-    ctx.app.markIssueWriteUnsure(ctx.projectId, attentionId)
+    ctx.app.markIssueWriteUnsure(ctx.projectId, attentionId, ctx.conversationId)
     throw new ToolInputError(
       `The tracker refused: ${error instanceof Error ? error.message : String(error)}. Check the issue with read_issue; if the change is not there, calling this tool again asks the user again.`,
       { cause: error },
