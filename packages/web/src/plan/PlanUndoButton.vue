@@ -18,6 +18,8 @@ const restore = computed(() => !!props.revision.revertedBy)
 /** The revision to undo: this one, or the undo that took it back. */
 const target = computed(() => props.revision.revertedBy ?? props.revision.id)
 
+const label = computed(() => t(restore.value ? 'plan.restore' : 'plan.revert'))
+
 const open = ref(false)
 const preview = ref<PlanUndoPreview | null>(null)
 const failed = ref<string | null>(null)
@@ -60,12 +62,11 @@ async function confirm() {
 <template>
   <!-- A popover, not a popconfirm: when it cannot be undone there is only one button. -->
   <DouPopover v-model:open="open" :title="title" :width="320">
-    <DouButton size="sm" variant="ghost">
-      <template #leading>
-        <RotateCwIcon v-if="restore" />
-        <RotateCcwIcon v-else />
-      </template>
-      {{ t(restore ? 'plan.restore' : 'plan.revert') }}
+    <!-- Icon only: a labelled button stands out from the small text around it. The
+         popover's title names the action. -->
+    <DouButton size="sm" variant="ghost" :aria-label="label">
+      <RotateCwIcon v-if="restore" />
+      <RotateCcwIcon v-else />
     </DouButton>
     <template #content="{ close }">
       <DouText v-if="blocked" size="sm">{{ blocked }}</DouText>
@@ -86,7 +87,7 @@ async function confirm() {
         <template v-else>
           <DouButton size="sm" variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
           <DouButton size="sm" tone="primary" :loading="busy" @click="confirm">
-            {{ t(restore ? 'plan.restore' : 'plan.revert') }}
+            {{ label }}
           </DouButton>
         </template>
       </div>
