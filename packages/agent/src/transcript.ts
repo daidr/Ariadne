@@ -33,6 +33,10 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     }
     case 'thread-resumed':
       return `<thread_resumed thread="${note.threadId}" title="${titleOf(note.threadId)}" by="${note.by === 'user' ? 'user' : 'coordinator'}">\nThe thread had been stopped because: ${note.reason}\nIt goes on from where it was, with that reason in mind.\n</thread_resumed>`
+    case 'instructions-changed':
+      return note.removed
+        ? `<instructions_changed path="${note.path}">${note.path} was removed from your workspace; its conventions no longer apply.</instructions_changed>`
+        : `<instructions_changed path="${note.path}">${note.path} in your workspace changed; your instructions now hold its new version.</instructions_changed>`
     case 'thread-stopped-by-user':
       return `<thread_stopped_by_user thread="${note.threadId}" title="${titleOf(note.threadId)}">\nThe user stopped this thread: ${note.reason}\nIt stays stopped until the user lets it go on; do not resume it or route its work elsewhere unless the user asks.\n</thread_stopped_by_user>`
     case 'pull-request-closed':

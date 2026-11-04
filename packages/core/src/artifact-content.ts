@@ -58,6 +58,12 @@ export interface DashboardContent {
   data: Record<string, unknown>
   /** When the data was taken (ms), shown with the dashboard. */
   takenAt?: number
+  /**
+   * Where a live dashboard's data comes from: a plugin's dashboard source and its
+   * settings. Refreshing fetches again into a new version. Without it the data stays
+   * what it was given.
+   */
+  source?: { kind: string; settings: Record<string, unknown> }
 }
 
 /**
@@ -143,6 +149,15 @@ function checkDashboard(value: unknown): void {
   }
   if (!isObject(data)) invalid('data must be an object of named data sources')
   if (value.takenAt !== undefined && !isNumber(value.takenAt)) invalid('takenAt is not a number')
+  if (value.source !== undefined) {
+    const { source } = value
+    if (!isObject(source) || typeof source.kind !== 'string' || !source.kind) {
+      invalid('source must be { kind, settings }')
+    }
+    if (source.settings !== undefined && !isObject(source.settings)) {
+      invalid('source.settings is not an object')
+    }
+  }
   const ids = new Set<string>()
   dashboard.widgets.forEach((widget: unknown, i) => {
     if (!isObject(widget) || typeof widget.id !== 'string' || !widget.id) {

@@ -56,7 +56,11 @@ async function add() {
 
 const nameOf = (plugin: PluginRecord) =>
   lt(plugin.name ?? undefined) ?? plugin.id ?? plugin.path ?? ''
-const provides = (plugin: PluginRecord) => [...plugin.provides.models, ...plugin.provides.contexts]
+const provides = (plugin: PluginRecord) => [
+  ...plugin.provides.models,
+  ...plugin.provides.contexts,
+  ...(plugin.provides.dashboards ?? []),
+]
 </script>
 
 <template>

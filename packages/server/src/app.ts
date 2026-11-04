@@ -1,4 +1,5 @@
 import {
+  refreshDashboard,
   syncThreadPullRequest,
   type PluginHost,
   type Scheduler,
@@ -11,6 +12,7 @@ import {
   parsePlanOps,
   type Ariadne,
 } from '@ariadne/core'
+import { createTranslator } from '@ariadne/i18n'
 import { eventStream } from './events-stream'
 import type { SettingsStore } from './settings'
 import {
@@ -178,6 +180,21 @@ export function createHandler({
   // Where the project's threads work. The source is connected before it is saved, so a
   // typo or a missing permission shows up here rather than in a thread's first turn.
   // Secret settings (tokens) go to the user's config, never into the event log.
+  // A live dashboard fetches its data again; a new version records what came back.
+  add('POST', '/api/artifacts/:artifactId/refresh', async (_request, { artifactId = '' }) => {
+    const artifact = await refreshDashboard(app, host?.dashboards ?? new Map(), artifactId, {
+      author: 'user',
+      reason: createTranslator(settings?.current.locale ?? 'zh-CN')('artifact.dashboard.refreshed'),
+    })
+    return json({ artifact })
+  })
+
+  add('PUT', '/api/projects/:projectId/slots', async (request, { projectId = '' }) => {
+    const { slots } = await readJson(request)
+    if (slots !== null && typeof slots !== 'number') throw new BadRequest('slots')
+    return json({ project: app.setProjectSlots(projectId, slots) })
+  })
+
   add('PUT', '/api/projects/:projectId/source', async (request, { projectId = '' }) => {
     const body = await readJson(request)
     const previous = app.getProject(projectId).source

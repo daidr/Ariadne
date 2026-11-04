@@ -152,15 +152,15 @@ watch(
       </DouTag>
       <PullRequestTag :thread="thread" refreshable />
       <DouPopover
-        v-if="!thread.stopped && thread.stage !== 'done'"
+        v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
         v-model:open="stopOpen"
         trigger="click"
-        :title="t('thread.stopTitle')"
+        :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
         :width="320"
       >
         <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
           <template #leading><PauseIcon /></template>
-          {{ t('thread.stop') }}
+          {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
         </DouButton>
         <template #content>
           <div class="stop-form">

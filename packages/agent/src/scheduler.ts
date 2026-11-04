@@ -1,3 +1,4 @@
+import type { DashboardSource } from '@ariadne/plugin-sdk'
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import { runTurn, type ResolvedModel } from './runner'
@@ -17,11 +18,14 @@ export interface SchedulerOptions {
   compactAt?: number
   /** First wait before a failed model request is retried. */
   retryBaseMs?: number
+  /** The plugins' live data sources for dashboards. */
+  dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   workspaces?: WorkspaceManager
 }
 
 interface Running {
   controller: AbortController
+  projectId: string
   reserved: boolean
   done: Promise<void>
 }
@@ -114,13 +118,31 @@ export class Scheduler {
   private fill(): void {
     const { app } = this.options
     const { slots, reservedSlots } = this
+    const caps = new Map<string, number | null>()
+    const capOf = (projectId: string) => {
+      if (!caps.has(projectId)) {
+        let cap: number | null = null
+        try {
+          cap = app.getProject(projectId).slots
+        } catch {
+          // A project removed meanwhile: no cap to keep.
+        }
+        caps.set(projectId, cap)
+      }
+      return caps.get(projectId) ?? null
+    }
     for (const conversation of app.listPendingConversations()) {
       if (this.stopped) return
       if (this.running.has(conversation.id)) continue
       const used = [...this.running.values()]
       const general = used.filter((r) => !r.reserved).length
       const reserved = used.length - general
-      if (general < slots) this.launch(conversation, false)
+      const cap = capOf(conversation.projectId)
+      // A project's cap counts its general slots only: the user's own message is never held.
+      const projectFull =
+        cap !== null &&
+        used.filter((r) => !r.reserved && r.projectId === conversation.projectId).length >= cap
+      if (general < slots && !projectFull) this.launch(conversation, false)
       else if (reserved < reservedSlots && app.pendingIsUserMessage(conversation.id)) {
         this.launch(conversation, true)
       }
@@ -154,6 +176,9 @@ export class Scheduler {
           ? { retryBaseMs: this.options.retryBaseMs }
           : {}),
         ...(this.options.workspaces ? { workspaces: this.options.workspaces } : {}),
+        ...(this.options.dashboardSources
+          ? { dashboardSources: this.options.dashboardSources }
+          : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))
@@ -161,6 +186,11 @@ export class Scheduler {
         this.running.delete(conversation.id)
         this.schedule()
       })
-    this.running.set(conversation.id, { controller, reserved, done })
+    this.running.set(conversation.id, {
+      controller,
+      projectId: conversation.projectId,
+      reserved,
+      done,
+    })
   }
 }

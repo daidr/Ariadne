@@ -229,6 +229,7 @@ const time = (at: number) =>
         v-if="artifact"
         :content="artifact.content"
         :project-id="artifact.projectId"
+        :artifact-id="artifact.id"
         :readonly="viewingOld"
         :label="artifact.title"
         @draft="(content: string | null) => (draft = content)"

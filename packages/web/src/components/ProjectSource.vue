@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouForm, DouFormItem, DouSelect, DouText } from 'dou-ui'
+import {
+  DouAlert,
+  DouButton,
+  DouForm,
+  DouFormItem,
+  DouInputNumber,
+  DouSelect,
+  DouText,
+} from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PencilIcon } from '@dou-ui/icons'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
-import { setSource, state } from '../store'
+import { setProjectSlots, setSource, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
 
 const editing = ref(false)
@@ -15,6 +23,8 @@ const kind = ref<string | null>(null)
 /** Draft settings per kind, so switching kinds back and forth keeps what was typed. */
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
 const secretsSet = ref<string[]>([])
+/** This project's share of the work slots; empty leaves it to the shared total. */
+const slots = ref<number | null>(null)
 /** The secrets the stored source has, restored when its kind is chosen again. */
 const storedSecrets = ref<string[]>([])
 
@@ -49,6 +59,7 @@ async function edit() {
   editing.value = true
   const project = state.detail?.project
   if (!project) return
+  slots.value = project.slots
   try {
     const [{ kinds: list }, stored] = await Promise.all([
       api.sourceKinds(),
@@ -87,6 +98,9 @@ async function save(clear = false) {
   problem.value = await setSource(
     clear || !kind.value ? null : { kind: kind.value, settings: { ...values() } },
   )
+  if (!problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
+    problem.value = await setProjectSlots(slots.value || null)
+  }
   saving.value = false
   if (!problem.value) editing.value = false
 }
@@ -111,6 +125,15 @@ async function save(clear = false) {
         :secrets-set="secretsSet"
         @clear-secret="clearSecret"
       />
+      <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
+        <DouInputNumber
+          v-model="slots"
+          :min="1"
+          :max="16"
+          :step="1"
+          :placeholder="t('project.slotsShared')"
+        />
+      </DouFormItem>
       <DouText v-if="problem" tone="danger" size="sm" role="alert" class="source-problem">
         {{ problem }}
       </DouText>

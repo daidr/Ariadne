@@ -8,10 +8,12 @@ import {
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import {
   MAX_RETRY_AFTER_MS,
+  type DashboardSource,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
 } from '@ariadne/plugin-sdk'
+import { createHash } from 'node:crypto'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
 import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
@@ -43,6 +45,7 @@ export interface TurnOptions {
   compactAt?: number
   /** First wait before a model request is retried; it doubles each time. */
   retryBaseMs?: number
+  dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
 }
 
 /** Why a turn stopped early, for the user. */
@@ -81,6 +84,10 @@ function threadContext(
     workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
     repo: hasRepo,
     memories: app.listMemories(project.id),
+    instructions: (() => {
+      const recorded = app.getInstructions(conversation.id)
+      return recorded?.content ? { path: recorded.path, content: recorded.content } : null
+    })(),
   }
 }
 
@@ -159,6 +166,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       return workspaces.repo(conversation.projectId)
     },
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
+    ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
   }
   const titleOf = (threadId: string) => {
     try {
@@ -175,6 +183,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let lastInput = 0
     const state = () => currentState(app, conversation)
     for (let step = 0; step < options.maxSteps; step++) {
+      if (isThread && workspaces && hasWorkspace) {
+        await syncInstructions(app, conversation, turnId, workspaces)
+      }
       const sawSeq = app.lastSeq()
       const system = {
         role: 'system' as const,
@@ -259,6 +270,36 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           : { key: 'error.modelRequest' as const, params: { detail: String(error) } }
     app.finishTurn(conversationId, turnId, 'failed', localized)
   }
+}
+
+/** The repository's instruction file, read from the workspace root. */
+export const INSTRUCTIONS_FILE = 'AGENTS.md'
+/** Longer instruction files are cut, so they cannot crowd out the conversation. */
+const MAX_INSTRUCTIONS = 16_000
+
+/**
+ * Record AGENTS.md when it appears or changes in an open workspace. A workspace not
+ * opened yet is left alone: reading the file must not create a checkout.
+ */
+async function syncInstructions(
+  app: Ariadne,
+  conversation: ConversationView,
+  turnId: string,
+  workspaces: WorkspaceManager,
+): Promise<void> {
+  if (!app.getThread(conversation.id).workspace) return
+  let content: string | null = null
+  try {
+    const workspace = await workspaces.forThread(conversation.projectId, conversation.id)
+    content = await workspace.readFile(INSTRUCTIONS_FILE)
+  } catch {
+    content = null
+  }
+  if (content !== null && content.length > MAX_INSTRUCTIONS) {
+    content = `${content.slice(0, MAX_INSTRUCTIONS)}\n[cut: the file is longer]`
+  }
+  const hash = content === null ? 'none' : createHash('sha256').update(content).digest('hex')
+  app.recordInstructions(conversation.id, turnId, { path: INSTRUCTIONS_FILE, hash, content })
 }
 
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */

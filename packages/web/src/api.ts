@@ -106,7 +106,7 @@ export interface PluginRecord {
   path: string | null
   status: 'loaded' | 'failed'
   error: string | null
-  provides: { models: string[]; contexts: string[] }
+  provides: { models: string[]; contexts: string[]; dashboards: string[] }
 }
 
 /** How many turns run at once, plus those kept for answering the user. */
@@ -199,6 +199,10 @@ export const api = {
     projectId: string,
     source: { kind: string; settings: Record<string, unknown> } | null,
   ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  refreshDashboard: (artifactId: string) =>
+    request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
+  setProjectSlots: (projectId: string, slots: number | null) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
   refreshPullRequest: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/pull-request/refresh`),
   dismissProposal: (projectId: string, proposalId: string) =>

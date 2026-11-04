@@ -738,7 +738,7 @@ describe('stopped threads', () => {
     expect(app.listPendingConversations().map((c) => c.id)).not.toContain(thread.id)
     expect(app.getThread(thread.id).stage).toBe('stopped')
     // Stopping again changes nothing; the user's own words resume it.
-    app.stopThread(thread.id, { reason: '别的', by: 'user' })
+    app.stopThread(thread.id, { reason: '别的', by: project.coordinatorId })
     expect(app.getThread(thread.id).stopped?.reason).toBe('等确认')
     app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '继续吧' })
     expect(app.getThread(thread.id).stopped).toBeNull()
@@ -766,6 +766,17 @@ describe('stopped threads', () => {
     app.answerAttention(attention.id, { choice: 0 })
     expect(app.getThread(thread.id).stopped).toBeNull()
     expect(notes(thread.id).filter((n) => n === 'thread-resumed')).toHaveLength(2)
+  })
+
+  test("the user takes over the coordinator's stop, and only the user can lift it", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    app.stopThread(thread.id, { reason: '先等等', by: project.coordinatorId })
+    app.stopThread(thread.id, { reason: '我来决定', by: 'user' })
+    expect(app.getThread(thread.id).stopped).toMatchObject({ by: 'user', reason: '我来决定' })
+    // A later stop by the coordinator does not take it back.
+    app.stopThread(thread.id, { reason: '再停', by: project.coordinatorId })
+    expect(app.getThread(thread.id).stopped?.by).toBe('user')
   })
 
   test('a node whose threads are all stopped shows as paused, not as not started', () => {

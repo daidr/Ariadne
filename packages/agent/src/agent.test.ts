@@ -583,6 +583,42 @@ describe('control', () => {
     expect(app.listPendingConversations()).toEqual([])
   })
 
+  test("a project's own cap holds its threads within the shared slots", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const model = fakeModel(async () => {
+      await gate
+      return say('')
+    })
+    const capped = app.createProject('A')
+    const other = app.createProject('B')
+    app.setProjectSlots(capped.id, 1)
+    for (const [project, title] of [
+      [capped, 'a1'],
+      [capped, 'a2'],
+      [other, 'b1'],
+    ] as const) {
+      const thread = app.createThread(project.id, { title })
+      app.postMessage(project.id, {
+        conversationId: thread.id,
+        author: 'coordinator',
+        kind: 'relay',
+        content: 'go',
+      })
+    }
+    const s = startScheduler(model, { slots: 3 })
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    const running = () => app.listRunningConversations().map((c) => c.projectId)
+    expect(running().filter((id) => id === capped.id)).toHaveLength(1)
+    expect(running()).toContain(other.id)
+    // Lifting the cap lets the waiting thread start.
+    app.setProjectSlots(capped.id, null)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(running().filter((id) => id === capped.id)).toHaveLength(2)
+    release()
+    await s.idle()
+  })
+
   test('raising the slot limit starts waiting turns at once', async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => (release = resolve))

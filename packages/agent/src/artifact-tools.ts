@@ -1,6 +1,8 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
 import { boardFromItems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
+import { describeSources, refreshDashboard } from './dashboard-sources'
+import { createTranslator } from '@ariadne/i18n'
 import {
   json,
   optionalInt,
@@ -247,32 +249,122 @@ const DATA_SCHEMA = {
     'Named data sources the widgets read with props.source: usually an array of row objects, or one object for stat widgets.',
 } as const
 
+const SOURCE_SCHEMA = {
+  type: 'object',
+  description:
+    'Make the dashboard live: a plugin source (list_dashboard_sources) fetches its data now and on every refresh, and the data sets it returns replace those of the same name. Leave it out for a snapshot of the data you give.',
+  properties: { kind: { type: 'string' }, settings: { type: 'object' } },
+  required: ['kind'],
+} as const
+
+/** The source the model named, checked, and the data it gives now. */
+async function fetchSource(
+  value: unknown,
+  ctx: ToolContext,
+  projectId: string,
+): Promise<{
+  source: { kind: string; settings: Record<string, unknown> }
+  data: Record<string, unknown>
+}> {
+  const input = (value ?? {}) as { kind?: unknown; settings?: unknown }
+  const sources = ctx.dashboardSources ?? new Map()
+  const source = typeof input.kind === 'string' ? sources.get(input.kind) : undefined
+  if (!source) {
+    const kinds = [...sources.keys()]
+    throw new ToolInputError(
+      kinds.length
+        ? `"source.kind" must be one of: ${kinds.join(', ')}`
+        : 'No plugin provides live dashboard data; give the data itself instead.',
+    )
+  }
+  const settings = input.settings ?? {}
+  if (typeof settings !== 'object' || Array.isArray(settings) || settings === null) {
+    throw new ToolInputError('"source.settings" must be an object')
+  }
+  let data: Record<string, unknown>
+  try {
+    data = await source.fetch(settings as never, { projectId, signal: ctx.signal })
+  } catch (error) {
+    throw new ToolInputError(
+      `The source could not fetch: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  return {
+    source: { kind: source.kind, settings: settings as Record<string, unknown> },
+    data: data ?? {},
+  }
+}
+
+const listDashboardSources: Tool = {
+  spec: {
+    name: 'list_dashboard_sources',
+    description:
+      'List the live data sources plugins offer for dashboards: what each gives, its settings, and the data sets it returns for widgets to read.',
+    parameters: { type: 'object', properties: {} },
+  },
+  run(_args, ctx) {
+    return json(describeSources(ctx.dashboardSources ?? new Map()))
+  },
+}
+
+const refreshDashboardTool: Tool = {
+  spec: {
+    name: 'refresh_dashboard',
+    description:
+      "Fetch a live dashboard's data again from its source, stored as a new version. A snapshot dashboard has nothing to fetch: update_dashboard with new data instead.",
+    parameters: {
+      type: 'object',
+      properties: { artifactId: { type: 'string' } },
+      required: ['artifactId'],
+    },
+  },
+  async run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    ownArtifact(ctx, artifactId, 'dashboard')
+    const artifact = await refreshDashboard(
+      ctx.app,
+      ctx.dashboardSources ?? new Map(),
+      artifactId,
+      {
+        author: ctx.conversationId,
+        reason: createTranslator(ctx.locale)('artifact.dashboard.refreshed'),
+        signal: ctx.signal,
+      },
+    )
+    return json({ artifactId, version: artifact.version })
+  },
+}
+
 const createDashboard: Tool = {
   spec: {
     name: 'create_dashboard',
     description:
-      'Create a dashboard in the project: numbers, tables, charts and pivot tables over data you gathered. It is a snapshot: the data you give is stored with it and never fetched again, and it shows when it was taken. To bring it up to date, update_dashboard with new data. Widgets are placed in order on a 12-column grid unless you give w and h.',
+      'Create a dashboard in the project: numbers, tables, charts and pivot tables over data you gathered. By default it is a snapshot: the data you give is stored with it and never fetched again, and it shows when it was taken; to bring it up to date, update_dashboard with new data. With source, a plugin fetches the data instead and the dashboard can be refreshed (refresh_dashboard, or the refresh button the user sees). Widgets are placed in order on a 12-column grid unless you give w and h.',
     parameters: {
       type: 'object',
       properties: {
         title: { type: 'string' },
         widgets: { type: 'array', items: WIDGET_SCHEMA },
         data: DATA_SCHEMA,
+        source: SOURCE_SCHEMA,
         nodeId: NODE_ID,
       },
       required: ['title', 'widgets'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const data = args.data ?? {}
     if (typeof data !== 'object' || Array.isArray(data) || data === null) {
       throw new ToolInputError('"data" must be an object of named data sources')
     }
+    const live =
+      args.source === undefined ? null : await fetchSource(args.source, ctx, ctx.projectId)
     const content = dashboardFromWidgets(
       arrayOf(args, 'widgets'),
-      data as Record<string, unknown>,
+      { ...(data as Record<string, unknown>), ...live?.data },
       Date.now(),
     )
+    if (live) content.source = live.source
     const artifact = ctx.app.createArtifact(ctx.projectId, {
       kind: 'dashboard',
       title: str(args, 'title'),
@@ -300,11 +392,15 @@ const updateDashboard: Tool = {
         removeWidgets: { type: 'array', items: { type: 'string' } },
         data: DATA_SCHEMA,
         removeData: { type: 'array', items: { type: 'string' } },
+        source: {
+          ...SOURCE_SCHEMA,
+          description: `${SOURCE_SCHEMA.description} null turns a live dashboard back into a snapshot of its current data.`,
+        },
       },
       required: ['artifactId', 'baseVersion', 'reason'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const artifactId = str(args, 'artifactId')
     const current = ownArtifact(ctx, artifactId, 'dashboard')
     const baseVersion = baseVersionOf(args)
@@ -312,16 +408,23 @@ const updateDashboard: Tool = {
     if (data !== undefined && (typeof data !== 'object' || Array.isArray(data) || data === null)) {
       throw new ToolInputError('"data" must be an object of named data sources')
     }
+    const live =
+      args.source === undefined || args.source === null
+        ? null
+        : await fetchSource(args.source, ctx, current.projectId)
+    const fetched = live || data ? { ...(data as Record<string, unknown>), ...live?.data } : null
     const content = mergeDashboard(
       JSON.parse(current.content) as DashboardContent,
       {
         widgets: arrayOf(args, 'widgets'),
         removeWidgets: stringsOf(args, 'removeWidgets'),
-        ...(data ? { data: data as Record<string, unknown> } : {}),
+        ...(fetched ? { data: fetched } : {}),
         removeData: stringsOf(args, 'removeData'),
       },
       Date.now(),
     )
+    if (live) content.source = live.source
+    else if (args.source === null) delete content.source
     const title = optionalStr(args, 'title')
     const artifact = ctx.app.reviseArtifact(artifactId, {
       content: JSON.stringify(content),
@@ -397,6 +500,8 @@ export const artifactTools: Tool[] = [
   updateWhiteboard,
   createDashboard,
   updateDashboard,
+  refreshDashboardTool,
+  listDashboardSources,
   readArtifact,
   listArtifacts,
 ]

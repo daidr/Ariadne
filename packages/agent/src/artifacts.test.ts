@@ -247,3 +247,49 @@ describe('dashboards', () => {
     expect(widgets.memo!.place?.lg).toEqual({ x: 0, y: 4, w: 6, h: 2 })
   })
 })
+
+describe('live dashboards', () => {
+  test('a source fetches the data; refreshing stores a new version; null makes it a snapshot', async () => {
+    let calls = 0
+    ctx.dashboardSources = new Map([
+      [
+        'counter',
+        {
+          kind: 'counter',
+          title: { 'zh-CN': '计数' },
+          description: 'Counts calls; returns { totals: { n } }',
+          settings: { type: 'object', properties: {} },
+          fetch: async (settings: { step?: number }) => {
+            calls += settings.step ?? 1
+            return { totals: { n: calls } }
+          },
+        },
+      ],
+    ]) as ToolContext['dashboardSources']
+    expect(JSON.parse((await run('list_dashboard_sources', {})).content)[0].kind).toBe('counter')
+    expect(
+      (await run('create_dashboard', { title: 'x', widgets: [], source: { kind: 'nope' } }))
+        .isError,
+    ).toBe(true)
+    const { artifactId } = await ok('create_dashboard', {
+      title: '计数',
+      widgets: [{ id: 'n', type: 'stat', props: { source: 'totals', field: 'n' } }],
+      source: { kind: 'counter', settings: { step: 2 } },
+    })
+    const read = () => JSON.parse(app.getArtifact(artifactId as string).content) as DashboardContent
+    expect(read().data).toEqual({ totals: { n: 2 } })
+    expect(read().source).toEqual({ kind: 'counter', settings: { step: 2 } })
+
+    const refreshed = await ok('refresh_dashboard', { artifactId })
+    expect(refreshed.version).toBe(2)
+    expect(read().data).toEqual({ totals: { n: 4 } })
+    expect(app.listArtifactVersions(artifactId as string)[0]?.reason).toBe('刷新了数据')
+
+    // Editing keeps it live; source: null turns it back into a snapshot.
+    await ok('update_dashboard', { artifactId, baseVersion: 2, reason: '改标题', title: '计数器' })
+    expect(read().source?.kind).toBe('counter')
+    await ok('update_dashboard', { artifactId, baseVersion: 3, reason: '定格', source: null })
+    expect(read().source).toBeUndefined()
+    expect((await run('refresh_dashboard', { artifactId })).isError).toBe(true)
+  })
+})

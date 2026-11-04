@@ -1,6 +1,7 @@
 export { PluginHost } from './plugins'
 export { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 export { runTurn, type ResolvedModel, type TurnOptions } from './runner'
+export { refreshDashboard } from './dashboard-sources'
 export { Scheduler, type SchedulerOptions } from './scheduler'
 export { resolvePlanOps } from './plan-tools'
 export { repoTools, summarizeChecks, syncThreadPullRequest } from './repo-tools'

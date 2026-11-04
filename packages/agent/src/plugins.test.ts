@@ -43,7 +43,7 @@ describe('plugins from a path', () => {
         source: 'path',
         path: root,
         status: 'loaded',
-        provides: { models: ['demo-protocol'], contexts: [] },
+        provides: { models: ['demo-protocol'], contexts: [], dashboards: [] },
       }),
     ])
     await host.unloadPath(root)

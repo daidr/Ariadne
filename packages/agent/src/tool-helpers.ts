@@ -1,6 +1,6 @@
 import type { Ariadne } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
-import type { RepoCapability, ToolSpec, Workspace } from '@ariadne/plugin-sdk'
+import type { DashboardSource, RepoCapability, ToolSpec, Workspace } from '@ariadne/plugin-sdk'
 
 export interface ToolContext {
   app: Ariadne
@@ -15,6 +15,8 @@ export interface ToolContext {
   repo(): Promise<RepoCapability>
   /** Whether input of this turn came from the user's own words (a message, an answer). */
   userSpoke?: () => boolean
+  /** The plugins' live data sources for dashboards, by kind. */
+  dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
 }
 
 export interface ToolResult {

@@ -57,7 +57,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 14
+export const PROJECTION_VERSION = 15
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -106,6 +106,7 @@ interface ProjectRow {
   name: string
   coordinator_id: string
   source: string | null
+  slots: number | null
   created_at: number
   updated_at: number
 }
@@ -496,6 +497,40 @@ export class Ariadne {
     ])
   }
 
+  /** The newest instruction file recorded for a conversation, or `null`. */
+  getInstructions(
+    conversationId: string,
+  ): { path: string; hash: string; content: string | null } | null {
+    const row = this.db
+      .query<{ instructions: string | null }, [string]>(
+        'SELECT instructions FROM conversations WHERE id = ?',
+      )
+      .get(conversationId)
+    return row?.instructions ? JSON.parse(row.instructions) : null
+  }
+
+  /**
+   * Record the instruction file as the workspace holds it, when it differs from what was
+   * recorded last. Returns whether anything was recorded.
+   */
+  recordInstructions(
+    conversationId: string,
+    turnId: string,
+    file: { path: string; hash: string; content: string | null },
+  ): boolean {
+    const projectId = this.runningTurn(conversationId, turnId)
+    const before = this.getInstructions(conversationId)
+    if (before ? before.hash === file.hash : file.content === null) return false
+    this.store.append([
+      {
+        type: 'conversation.instructions',
+        projectId,
+        data: { conversationId, ...file, changed: before !== null },
+      },
+    ])
+    return true
+  }
+
   /** The model request is tried again after `delayMs`; the user sees each retry. */
   recordModelRetry(
     conversationId: string,
@@ -525,6 +560,17 @@ export class Ariadne {
     const trimmed = name.trim()
     if (!trimmed) throw new DomainError('error.invalidBody', { reason: 'name' })
     this.store.append([{ type: 'project.renamed', projectId, data: { name: trimmed } }])
+    return this.getProject(projectId)
+  }
+
+  /** Cap how many turns of the project run at once (1–16), or lift the cap with `null`. */
+  setProjectSlots(projectId: string, slots: number | null): ProjectView {
+    const project = this.getProject(projectId)
+    if (slots !== null && !(Number.isInteger(slots) && slots >= 1 && slots <= 16)) {
+      throw new DomainError('error.invalidBody', { reason: 'slots' })
+    }
+    if (project.slots === slots) return project
+    this.store.append([{ type: 'project.slots.set', projectId, data: { slots } }])
     return this.getProject(projectId)
   }
 
@@ -560,7 +606,9 @@ export class Ariadne {
     const thread = this.getThread(threadId)
     const reason = input.reason.trim()
     if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
-    if (thread.stopped) return thread
+    // Stopping again changes nothing, except the user taking over the coordinator's stop:
+    // then only the user can lift it.
+    if (thread.stopped && !(input.by === 'user' && thread.stopped.by !== 'user')) return thread
     this.store.append([
       {
         type: 'thread.stopped',
@@ -1588,6 +1636,7 @@ export class Ariadne {
       updatedAt: row.updated_at,
       needsMe: this.listNeedsMe(row.id).length,
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
+      slots: row.slots,
     }
   }
 }
