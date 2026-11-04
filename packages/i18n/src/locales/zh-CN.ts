@@ -297,7 +297,7 @@ export const zhCN = {
   'error.pluginInWorkspace':
     '不能从 Ariadne 的插件数据目录加载插件：那里是 thread 的工作区和仓库的克隆',
   'error.modelRequest': '模型请求失败：{detail}',
-  'error.stepLimit': '这一轮的步骤超过了 {limit} 步，已停止',
+  'error.repeating': '同样的调用重复了 {count} 次，结果都没变，已停下',
   'error.truncated':
     '模型的回复超出了单次回复的 token 上限，被截断了；可以在模型设置里调高上限后重试',
   'error.interrupted': '服务在这一轮中途停止，已从断点继续',

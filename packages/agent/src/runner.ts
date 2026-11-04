@@ -37,7 +37,6 @@ export interface TurnOptions {
   model: ResolvedModel
   locale: Locale
   signal: AbortSignal
-  maxSteps: number
   tools?: Tool[]
   /** Opens threads' workspaces; without it threads get no file or command tools. */
   workspaces?: WorkspaceManager
@@ -193,7 +192,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let compactionFailed = false
     let lastInput = 0
     const state = () => currentState(app, conversation)
-    for (let step = 0; step < options.maxSteps; step++) {
+    // A turn has no step limit: it ends when the model answers, the user stops it, or it
+    // goes in circles (see `MAX_REPEATS`).
+    const repeats = new Map<string, number>()
+    for (;;) {
       if (isThread && workspaces && hasWorkspace) {
         await syncInstructions(app, conversation, turnId, workspaces)
       }
@@ -248,26 +250,34 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         app.finishTurn(conversationId, turnId, 'completed')
         return
       }
-      for (const call of toolCalls) {
+      // The same calls with the same results again: the model is not getting anywhere.
+      // It is told once, with the last result of the step before the turn is stopped.
+      const results: { content: string; isError: boolean }[] = []
+      for (const [i, call] of toolCalls.entries()) {
         if (signal.aborted) break
         const result = await runTool(byName.get(call.name), call, ctx)
+        results.push({ content: result.content, isError: result.isError ?? false })
+        let { content } = result
+        let count = 0
+        if (i === toolCalls.length - 1) {
+          const step = fingerprint(toolCalls, results)
+          count = (repeats.get(step) ?? 0) + 1
+          repeats.set(step, count)
+          if (count === MAX_REPEATS - 1) content = `${content}\n\n${REPEAT_HINT}`
+        }
         app.recordToolResult(conversationId, turnId, {
           toolCallId: call.id,
           name: call.name,
-          content: result.content,
+          content,
           isError: result.isError ?? false,
         })
+        if (count >= MAX_REPEATS) {
+          throw new TurnError({ key: 'error.repeating', params: { count } })
+        }
       }
       if (signal.aborted) break
     }
-    if (signal.aborted) {
-      app.finishTurn(conversationId, turnId, abortOutcome(signal))
-      return
-    }
-    app.finishTurn(conversationId, turnId, 'failed', {
-      key: 'error.stepLimit',
-      params: { limit: options.maxSteps },
-    })
+    app.finishTurn(conversationId, turnId, abortOutcome(signal))
   } catch (error) {
     if (signal.aborted) {
       app.finishTurn(conversationId, turnId, abortOutcome(signal))
@@ -328,6 +338,29 @@ async function syncInstructions(
     content,
     uncommitted,
   })
+}
+
+/**
+ * How often the same step (the same tool calls, returning the same results) may come
+ * back in one turn before the turn is stopped. Steps need not follow each other, so a
+ * loop between two calls is caught too.
+ */
+export const MAX_REPEATS = 4
+
+const REPEAT_HINT =
+  '[Ariadne: this exact call has returned this exact result several times in this turn. Doing it again will stop the turn. Try something else, or answer with what you have.]'
+
+function fingerprint(
+  calls: ToolCallRecord[],
+  results: { content: string; isError: boolean }[],
+): string {
+  const hash = createHash('sha256')
+  calls.forEach((call, i) => {
+    hash.update(
+      JSON.stringify([call.name, call.arguments, results[i]?.content, results[i]?.isError]),
+    )
+  })
+  return hash.digest('hex')
 }
 
 /** How often a passing model error (rate limit, overload, broken connection) is retried. */
