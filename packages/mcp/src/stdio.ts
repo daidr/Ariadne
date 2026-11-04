@@ -5,6 +5,8 @@ import { MAX_MESSAGE_BYTES, type Transport } from './transport'
 const STDERR_KEPT = 4000
 /** A server that does not exit this long after its input closed is killed. */
 const EXIT_GRACE_MS = 2000
+/** How long a failed write waits to learn whether the server exited. */
+const WRITE_EXIT_WAIT_MS = 1000
 
 const windows = process.platform === 'win32'
 
@@ -66,21 +68,34 @@ export class StdioTransport implements Transport {
     onMessage: (message: JsonRpcMessage) => void,
   ) {
     const decoder = new TextDecoder()
-    let buffer = ''
+    // The line so far, in pieces: only the newest piece is searched for its end, so a long
+    // line costs its length once, not once per chunk.
+    let pieces: string[] = []
+    let size = 0
+    const take = (line: string) => {
+      const text = line.trim()
+      // Lines that are not JSON-RPC (a stray log line) are skipped.
+      const message = text ? parseMessage(text) : null
+      if (message) onMessage(message)
+    }
     try {
       for await (const chunk of stream) {
-        buffer += decoder.decode(chunk, { stream: true })
-        let newline = buffer.indexOf('\n')
+        let text = decoder.decode(chunk, { stream: true })
+        let newline = text.indexOf('\n')
         while (newline !== -1) {
-          const line = buffer.slice(0, newline).trim()
-          buffer = buffer.slice(newline + 1)
-          // Lines that are not JSON-RPC (a stray log line) are skipped.
-          const message = line ? parseMessage(line) : null
-          if (message) onMessage(message)
-          newline = buffer.indexOf('\n')
+          pieces.push(text.slice(0, newline))
+          take(pieces.join(''))
+          pieces = []
+          size = 0
+          text = text.slice(newline + 1)
+          newline = text.indexOf('\n')
         }
-        if (buffer.length > MAX_MESSAGE_BYTES) {
-          buffer = ''
+        if (text) {
+          pieces.push(text)
+          size += text.length
+        }
+        if (size > MAX_MESSAGE_BYTES) {
+          pieces = []
           this.end(`the server sent a message over ${MAX_MESSAGE_BYTES / 1024 / 1024} MB`)
           void this.close()
           return
@@ -116,8 +131,13 @@ export class StdioTransport implements Transport {
       proc.stdin.write(`${JSON.stringify(message)}\n`)
       await proc.stdin.flush()
     } catch (error) {
+      // A server that exits at once (a missing token, a bad argument) closes its input
+      // before the first message gets there: why it exited is the reason, not the pipe.
+      const code = await Promise.race([proc.exited, Bun.sleep(WRITE_EXIT_WAIT_MS).then(() => null)])
       throw new McpConnectionError(
-        `could not write to the server: ${error instanceof Error ? error.message : String(error)}`,
+        code !== null
+          ? `the process exited with code ${code}`
+          : `could not write to the server: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
   }

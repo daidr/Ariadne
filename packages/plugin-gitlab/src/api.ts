@@ -4,6 +4,7 @@ import type {
   IssueDetail,
   IssueSummary,
   PullRequestInfo,
+  PullRequestPreview,
 } from '@ariadne/plugin-sdk'
 
 /** A failed GitLab request, with GitLab's own message. */
@@ -256,6 +257,42 @@ export class GitLabApi {
           b.created_at.localeCompare(a.created_at),
       )
     return ranked[0] ? toMergeRequest(ranked[0]) : null
+  }
+
+  /** A merge request with what the card over a link to it shows. */
+  async mergeRequestPreview(iid: number): Promise<PullRequestPreview> {
+    const raw = await this.request<
+      RawMergeRequest & {
+        author: { username: string } | null
+        /** A number as text, or `1000+` past that many files. */
+        changes_count: string | null
+        merged_at: string | null
+        closed_at: string | null
+      }
+    >('GET', `${this.projectPath}/merge_requests/${iid}`)
+    const info = toMergeRequest(raw)
+    const files = /^\d+$/.test(raw.changes_count ?? '') ? Number(raw.changes_count) : null
+    return {
+      kind: 'pull-request',
+      repository: this.options.path,
+      number: raw.iid,
+      reference: `!${raw.iid}`,
+      url: raw.web_url,
+      title: raw.title,
+      state: info.state,
+      draft: info.draft,
+      author: raw.author?.username ?? null,
+      // GitLab does not count lines for a merge request.
+      additions: null,
+      deletions: null,
+      changedFiles: files,
+      at:
+        (info.state === 'merged'
+          ? raw.merged_at
+          : info.state === 'closed'
+            ? raw.closed_at
+            : null) ?? raw.created_at,
+    }
   }
 
   async mergeRequest(iid: number): Promise<PullRequestInfo> {

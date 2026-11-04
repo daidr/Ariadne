@@ -205,6 +205,37 @@ describe('a remote checkout with a hosted repository', () => {
     )
   })
 
+  test("a branch deleted on the hosted repository leaves the checkout's origin too", async () => {
+    const { seed, checkout, repo, workspace } = await setup()
+    await git(seed, 'push', '-q', 'origin', 'main:refs/heads/topic')
+    const hosted = await withHosting({ workspace }, { repo })
+    await hosted.repo!.fetch()
+    expect(await git(checkout, 'for-each-ref', '--format=%(refname)', 'refs/remotes/')).toBe(
+      'refs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/topic',
+    )
+    await git(seed, 'push', '-q', 'origin', ':refs/heads/topic')
+    await hosted.repo!.fetch()
+    // origin/HEAD is a pointer to origin/main, and stays.
+    expect(await git(checkout, 'for-each-ref', '--format=%(refname)', 'refs/remotes/')).toBe(
+      'refs/remotes/origin/HEAD\nrefs/remotes/origin/main',
+    )
+    expect(await git(checkout, 'rev-parse', 'refs/remotes/origin/HEAD')).toBe(
+      await git(seed, 'rev-parse', 'HEAD'),
+    )
+  })
+
+  test("a thread's git push goes through Ariadne only", async () => {
+    const { upstream, checkout, repo, workspace } = await setup()
+    const hosted = await withHosting({ workspace }, { repo })
+    // The checkout's own credentials would reach the hosted repository.
+    await git(checkout, 'remote', 'set-url', '--push', 'origin', upstream)
+    const ws = await hosted.workspace!.open({ threadId: 'thr_hosting2' })
+    const pushed = await ws.exec(`git push -q origin HEAD:refs/heads/${ws.branch}`)
+    expect(pushed.exitCode).not.toBe(0)
+    expect(pushed.stderr).toContain('use-the-push_branch-tool')
+    expect(await git(upstream, 'for-each-ref', '--format=%(refname)')).toBe('refs/heads/main')
+  })
+
   test('a checkout of another repository is refused', async () => {
     const { repo, workspace } = await setup('https://example.com/team/other.git')
     await expect(withHosting({ workspace }, { repo })).rejects.toThrow('not https://example.com')

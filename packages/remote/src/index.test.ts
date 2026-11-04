@@ -31,6 +31,9 @@ class TestShell extends LocalShell {
   }
 }
 
+/** git in `cwd`. */
+const gitIn = (cwd: string, ...args: string[]) => run(['git', ...args], { cwd })
+
 const provider = () => ({
   connect: async ({ path }: { host: string; path: string }) => ({
     workspace: await connectRemote(new TestShell(), path),
@@ -187,6 +190,52 @@ describe('remote directory', () => {
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
     // The user's own checkout is untouched.
     expect(existsSync(join(dir, 'src'))).toBe(false)
+  })
+
+  test("git push from a thread's worktree goes nowhere, and nothing on disk changes", async () => {
+    const dir = await repo()
+    const upstream = join(base, 'upstream.git')
+    await gitIn(base, 'init', '-q', '--bare', upstream)
+    const other = join(base, 'other.git')
+    await gitIn(base, 'init', '-q', '--bare', other)
+    await gitIn(dir, 'remote', 'add', 'origin', upstream)
+    // A remote with its own push address, which push rewrites leave alone.
+    await gitIn(dir, 'remote', 'add', 'mirror', join(base, 'unused.git'))
+    await gitIn(dir, 'config', 'remote.mirror.pushurl', other)
+    const config = await readFile(join(dir, '.git', 'config'), 'utf8')
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_push' })
+
+    for (const target of ['origin', 'mirror', upstream, `file://${other}`]) {
+      const pushed = await ws.exec(`git push -q ${target} HEAD:refs/heads/pushed`)
+      expect(pushed.exitCode).not.toBe(0)
+      expect(pushed.stderr).toContain('git-push-is-blocked/the-user-pushes')
+    }
+    expect((await gitIn(upstream, 'for-each-ref')).stdout).toBe('')
+    expect((await gitIn(other, 'for-each-ref')).stdout).toBe('')
+    // Fetching still works, and the user's checkout keeps its config.
+    expect((await ws.exec('git fetch -q origin')).exitCode).toBe(0)
+    expect(await readFile(join(dir, '.git', 'config'), 'utf8')).toBe(config)
+    // The user's own push from their checkout is not affected.
+    expect((await gitIn(dir, 'push', '-q', 'origin', 'main')).exitCode).toBe(0)
+  })
+
+  test('fetching still works when a push address is also a fetch address, or a prefix of one', async () => {
+    const dir = await repo()
+    const upstream = join(base, 'up.git')
+    await gitIn(base, 'init', '-q', '--bare', upstream)
+    await gitIn(dir, 'push', '-q', upstream, 'main')
+    // The same address for both, and a push address that a fetch address starts with.
+    await gitIn(dir, 'remote', 'add', 'origin', upstream)
+    await gitIn(dir, 'config', 'remote.origin.pushurl', upstream)
+    await gitIn(dir, 'remote', 'add', 'other', `${upstream}/`)
+    await gitIn(dir, 'remote', 'add', 'prefix', join(base, 'unused.git'))
+    await gitIn(dir, 'config', 'remote.prefix.pushurl', upstream.slice(0, -4))
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_fetch' })
+    expect((await ws.exec('git fetch -q origin && git fetch -q other')).exitCode).toBe(0)
+    const pushed = await ws.exec('git push -q prefix HEAD:refs/heads/x')
+    expect(pushed.stderr).toContain('git-push-is-blocked')
   })
 
   test("the source's view is the checkout as it is on that machine, with no worktree", async () => {

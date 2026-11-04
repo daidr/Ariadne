@@ -52,6 +52,14 @@ export {
   type ShellRun,
 } from './shell'
 
+/**
+ * Where `git push` from a thread's worktree goes: a path that is no repository, named so
+ * the error says why. With a hosted repository Ariadne pushes (`push_branch`); without
+ * one, pushing is the user's.
+ */
+export const PUSH_THROUGH_ARIADNE = '/git-push-is-blocked/use-the-push_branch-tool/'
+export const PUSH_BY_USER = '/git-push-is-blocked/the-user-pushes/'
+
 /** Where threads' worktrees go on the remote machine, under the user's home. */
 export const WORKTREE_DIR = '.ariadne-worktrees'
 
@@ -105,6 +113,8 @@ export class RemoteWorkspace implements Workspace {
     readonly root: string,
     readonly branch: string | null,
     readonly base: string | null = null,
+    /** Where git pushes from the commands go instead, so they go nowhere (see `EXEC`). */
+    private readonly noPush: string | null = null,
   ) {}
 
   get label(): string {
@@ -157,7 +167,8 @@ export class RemoteWorkspace implements Workspace {
     options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<ExecResult> {
     const cwd = options.cwd ?? '.'
-    const result = await this.shell.run(EXEC, [this.root, relativePath(cwd), command], {
+    const args = [this.root, relativePath(cwd), command, ...(this.noPush ? [this.noPush] : [])]
+    const result = await this.shell.run(EXEC, args, {
       hold: true,
       clip: true,
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
@@ -310,7 +321,14 @@ export function remoteWorkspaces(
       )
       if (result.exitCode !== 0) throw failure(shell, dir, result)
       const root = result.stdout.split('\0')[0] || dir
-      return new RemoteWorkspace(threadId, shell, root, branch, base)
+      return new RemoteWorkspace(
+        threadId,
+        shell,
+        root,
+        branch,
+        base,
+        tracking ? PUSH_THROUGH_ARIADNE : PUSH_BY_USER,
+      )
     },
   }
 }
@@ -346,7 +364,9 @@ export function remoteObjects(shell: RemoteShell, repo: string): GitObjects {
       return new Uint8Array(Buffer.from(out.replace(/\s+/g, ''), 'base64'))
     },
     async receive(bundle, refs) {
-      const updates = Object.entries(refs).map(([ref, sha]) => `update ${ref} ${sha}\n`)
+      const updates = Object.entries(refs).map(([ref, sha]) =>
+        sha ? `update ${ref} ${sha}\n` : `delete ${ref}\n`,
+      )
       const data = bundle ? Buffer.from(bundle).toString('base64') : ''
       await call(RECEIVE, `${updates.join('')}\n${data}`, 'receiving commits')
     },

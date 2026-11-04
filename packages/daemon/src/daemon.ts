@@ -67,6 +67,14 @@ export interface Certificate {
   fingerprint: string
 }
 
+/** There is no `openssl` to make the certificate with. */
+export class MissingOpensslError extends Error {
+  constructor() {
+    super('openssl is needed to make the certificate')
+    this.name = 'MissingOpensslError'
+  }
+}
+
 /**
  * The daemon's certificate, made with `openssl` the first time: a self-signed P-256 one
  * for `ariadne-daemon`. Ariadne trusts it by its fingerprint, never through a CA, so the
@@ -76,7 +84,7 @@ export async function certificate(home: string): Promise<Certificate> {
   const certPath = join(home, 'cert.pem')
   const keyPath = join(home, 'key.pem')
   if (!existsSync(certPath) || !existsSync(keyPath)) {
-    if (!Bun.which('openssl')) throw new Error('需要 openssl 来生成证书')
+    if (!Bun.which('openssl')) throw new MissingOpensslError()
     const proc = Bun.spawn(
       [
         'openssl',
@@ -101,7 +109,7 @@ export async function certificate(home: string): Promise<Certificate> {
       { stdout: 'ignore', stderr: 'pipe', stdin: 'ignore', windowsHide: true },
     )
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
-    if (code !== 0) throw new Error(`openssl 生成证书失败：${stderr.trim()}`)
+    if (code !== 0) throw new Error(`openssl failed: ${stderr.trim() || `exit ${code}`}`)
     chmodSync(`${keyPath}.new`, 0o600)
     renameSync(`${keyPath}.new`, keyPath)
     renameSync(`${certPath}.new`, certPath)

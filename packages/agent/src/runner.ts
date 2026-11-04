@@ -101,6 +101,7 @@ function threadContext(
   locale: Locale,
   hasWorkspace: boolean,
   hasRepo: boolean,
+  remote: boolean,
 ): ThreadContext {
   const project = app.getProject(conversation.projectId)
   const thread = app.getThread(conversation.id)
@@ -128,6 +129,7 @@ function threadContext(
     upstream,
     workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
     repo: hasRepo,
+    remote,
     memories: app.listMemories(project.id),
     instructions: (() => {
       const recorded = app.getInstructions(conversation.id)
@@ -142,6 +144,7 @@ function systemPrompt(
   locale: Locale,
   hasWorkspace: boolean,
   hasRepo: boolean,
+  remote: boolean,
   models: ModelChoice[],
   source: { line: string; readable: boolean } | null,
 ): string {
@@ -154,7 +157,7 @@ function systemPrompt(
       source,
     })
   }
-  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo))
+  return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo, remote))
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, ctx: ToolContext) {
@@ -190,6 +193,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const isThread = conversation.role === 'thread'
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
+  const remote = hasWorkspace && !!workspaces?.isRemote(conversation.projectId)
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
   const conversationId = conversation.id
   // Input newer than this arrived for this turn.
@@ -291,6 +295,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         options.locale,
         hasWorkspace,
         hasRepo,
+        remote,
         options.models ?? [],
         line ? { line, readable: hasSource } : null,
       )
