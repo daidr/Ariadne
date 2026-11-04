@@ -7,7 +7,7 @@ import {
   syncThreadPullRequest,
   threadChanges,
   threadFile,
-  traceInput,
+  traceRequest,
   type PluginHost,
   type Scheduler,
   type WorkspaceManager,
@@ -505,14 +505,25 @@ export function createHandler({
     },
   )
 
-  // The whole request of one model call: a step, or the summary of older history.
+  // The whole of one model request: a step, or the summary of older history, with the
+  // body its provider built (no credentials: those go in headers).
   add(
     'GET',
-    '/api/conversations/:conversationId/trace/input/:seq',
+    '/api/conversations/:conversationId/trace/requests/:seq',
     (_request, { conversationId = '', seq = '' }) => {
       const at = Number(seq)
       if (!Number.isInteger(at) || at < 1) throw new BadRequest('seq')
-      return json({ input: traceInput(app, conversationId, at) })
+      const { detail, request } = traceRequest(app, conversationId, at)
+      const provider = detail.call ? host?.models.get(detail.call.provider) : undefined
+      let body: unknown = null
+      if (provider?.requestBody && request && detail.call) {
+        try {
+          body = provider.requestBody(detail.call.settings as never, request)
+        } catch {
+          body = null
+        }
+      }
+      return json({ request: { ...detail, body } })
     },
   )
 

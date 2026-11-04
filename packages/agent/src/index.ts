@@ -20,7 +20,7 @@ export {
 export { shellQuote } from './workspace-tools'
 export { WorkspaceManager } from './workspaces'
 export { describeNote, toChatMessages } from './transcript'
-export { buildTrace, traceInput } from './trace'
+export { buildTrace, traceRequest, type RecordedCall } from './trace'
 export { DEFAULT_CONTEXT_TOKENS } from './compaction'
 export {
   browserProfiles,

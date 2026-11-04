@@ -142,6 +142,7 @@ export function toChatMessages(
           role: 'assistant',
           content: entry.text,
           ...(entry.toolCalls.length ? { toolCalls: entry.toolCalls } : {}),
+          ...(entry.reasoning.length ? { reasoning: entry.reasoning } : {}),
         })
         if (entry.toolCalls.length) {
           open = {

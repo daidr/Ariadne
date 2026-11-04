@@ -1,6 +1,6 @@
 import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
-import { openAICompatibleProvider } from './index'
+import { openAICompatibleProvider, requestBody } from './index'
 
 let lastBody: Record<string, unknown> | null = null
 let lastAuth: string | null = null
@@ -95,6 +95,62 @@ describe('openai-compatible provider', () => {
       { type: 'tool-call', id: 'x1', name: 'f', arguments: '{"q":2}' },
       { type: 'finish', reason: 'tool-calls' },
     ])
+  })
+
+  test('asks for an effort, and passes on reasoning and detailed usage', async () => {
+    reply = () =>
+      sse(
+        { choices: [{ delta: { reasoning_content: '先想' } }] },
+        { choices: [{ delta: { reasoning_content: '一下' } }] },
+        { choices: [{ delta: { content: '好' }, finish_reason: 'stop' }] },
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 8,
+            prompt_tokens_details: { cached_tokens: 16 },
+            completion_tokens_details: { reasoning_tokens: 6 },
+          },
+        },
+        '[DONE]',
+      )
+    const parts: ModelStreamPart[] = []
+    for await (const part of openAICompatibleProvider.stream(
+      { baseUrl: `http://127.0.0.1:${server.port}/v1`, apiKey: '' },
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [], effort: 'medium' },
+    )) {
+      parts.push(part)
+    }
+    expect(lastBody).toMatchObject({ reasoning_effort: 'medium' })
+    expect(parts).toEqual([
+      { type: 'reasoning', text: '先想一下', startedAt: expect.any(Number) },
+      { type: 'text', text: '好' },
+      { type: 'usage', input: 20, output: 8, cached: 16, reasoning: 6 },
+      { type: 'finish', reason: 'stop' },
+    ])
+  })
+
+  test('sends reasoning back with the tool calls it led to', () => {
+    const body = requestBody(
+      { baseUrl: '', apiKey: '' },
+      {
+        model: 'm',
+        tools: [],
+        messages: [
+          { role: 'user', content: 'hi' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 't1', name: 'f', arguments: '{}' }],
+            reasoning: [{ text: '先想' }, { text: '密', redacted: true }, { text: '一下' }],
+          },
+          { role: 'tool', toolCallId: 't1', content: 'ok' },
+          { role: 'assistant', content: '好' },
+        ],
+      },
+    )
+    expect(body.messages[1]).toMatchObject({ role: 'assistant', reasoning_content: '先想一下' })
+    expect(body.messages[3]).not.toHaveProperty('reasoning_content')
   })
 
   test('reports length when the token limit cuts off tool arguments', async () => {

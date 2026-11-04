@@ -1,5 +1,5 @@
-import type { TranscriptEntry } from '@ariadne/core'
-import type { ChatMessage } from '@ariadne/plugin-sdk'
+import type { CallTiming, TokenUsage, TranscriptEntry } from '@ariadne/core'
+import type { ChatMessage, ModelStreamPart } from '@ariadne/plugin-sdk'
 import type { ResolvedModel } from './runner'
 import { inModelOrder, orderKey, toChatMessages, visibleHistory } from './transcript'
 
@@ -11,6 +11,16 @@ export const DEFAULT_CONTEXT_TOKENS = 128_000
  * so the summary request (the folded part plus the ask) still fits in it.
  */
 export const compactAt = (contextTokens = DEFAULT_CONTEXT_TOKENS) => Math.floor(contextTokens * 0.6)
+
+/** A provider's usage part as recorded, leaving out what it did not say. */
+export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): TokenUsage {
+  return {
+    input: part.input,
+    output: part.output,
+    ...(part.cached ? { cached: part.cached } : {}),
+    ...(part.reasoning ? { reasoning: part.reasoning } : {}),
+  }
+}
 
 /** A rough count that errs high: Chinese text runs near a token per character. */
 export const estimateTokens = (messages: ChatMessage[]) =>
@@ -84,11 +94,12 @@ export async function summarise(
   messages: ChatMessage[],
   signal: AbortSignal,
 ): Promise<
-  | { ok: true; text: string; usage: { input: number; output: number } | null }
+  | { ok: true; text: string; usage: TokenUsage | null; timing: CallTiming }
   | { ok: false; detail: string }
 > {
   let text = ''
-  let usage: { input: number; output: number } | null = null
+  let usage: TokenUsage | null = null
+  const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
   try {
     for await (const part of model.provider.stream(model.settings as never, {
       model: model.model,
@@ -96,8 +107,9 @@ export async function summarise(
       tools: [],
       signal,
     })) {
+      if (part.type === 'text' && part.text) timing.firstOutputAt ??= Date.now()
       if (part.type === 'text') text += part.text
-      else if (part.type === 'usage') usage = { input: part.input, output: part.output }
+      else if (part.type === 'usage') usage = usageOf(part)
       else if (part.type === 'finish' && part.reason === 'error') {
         return { ok: false, detail: part.error ?? 'error' }
       } else if (part.type === 'finish' && part.reason === 'length') {
@@ -108,6 +120,6 @@ export async function summarise(
     return { ok: false, detail: String(error) }
   }
   return text.trim()
-    ? { ok: true, text: text.trim(), usage }
+    ? { ok: true, text: text.trim(), usage, timing }
     : { ok: false, detail: 'empty summary' }
 }

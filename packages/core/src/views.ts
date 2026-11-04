@@ -13,9 +13,11 @@ import type {
   ProjectSource,
   Author,
   MessageKind,
+  ReasoningRecord,
   ReportKind,
   ThreadPullRequest,
   TodoItem,
+  TokenUsage,
   ToolCallRecord,
   TurnOutcome,
 } from './events'
@@ -220,6 +222,8 @@ export type TranscriptEntry =
       seq: number
       kind: 'step'
       text: string
+      /** What the model thought first; providers that want it back get it in later steps. */
+      reasoning: ReasoningRecord[]
       toolCalls: ToolCallRecord[]
       /** The newest event the model had seen when it wrote this step. */
       sawSeq: number
@@ -381,67 +385,83 @@ export interface ArtifactVersionView {
 
 /**
  * One turn of a conversation as the trace shows it, rebuilt from the event log: every
- * model step with its output, calls and their results, retries, summaries and timing.
+ * model request with its output, the tool calls and their results, retries and timing.
  */
 export interface TraceTurn {
   turnId: string
   /** The `turn.started` event; earlier turns are paged by it. */
   seq: number
+  /** The model the turn started with, as the user named it. */
   model: string
   startedAt: number
   /** `null` while it runs. */
   finishedAt: number | null
   outcome: TurnOutcome | null
   error: LocalizedMessage | null
-  usage: { input: number; output: number }
+  usage: TokenUsage
   items: TraceItem[]
 }
 
 export interface TraceToolCall extends ToolCallRecord {
-  /** `null` while it runs. */
-  result: { content: string; isError: boolean; durationMs: number } | null
+  startedAt: number
+  /** `null` while it runs, or when the turn ended before it did. */
+  result: { content: string; isError: boolean; finishedAt: number } | null
+}
+
+/** One request to a model: a step of the turn, or the summary of older history. */
+export interface TraceRequest {
+  kind: 'request'
+  /** Its `turn.step` or `conversation.compacted` event, which its details are fetched by. */
+  seq: number
+  /** Counted over the whole conversation, from 1. */
+  number: number
+  purpose: 'step' | 'summary'
+  provider: string | null
+  model: string | null
+  effort: 'low' | 'medium' | 'high' | null
+  startedAt: number
+  firstOutputAt: number | null
+  finishedAt: number
+  usage: TokenUsage | null
+  finish: 'stop' | 'tool-calls'
+  /** The answer, or the summary. */
+  text: string
+  reasoning: { text: string; redacted: boolean }[]
+  toolCalls: TraceToolCall[]
 }
 
 export type TraceItem =
-  | {
-      kind: 'step'
-      /** The `turn.step` event, which its full input is fetched by. */
-      seq: number
-      at: number
-      /** From the event before it to the response, less any wait before a retry. */
-      durationMs: number
-      text: string
-      toolCalls: TraceToolCall[]
-      usage: { input: number; output: number } | null
-    }
+  | TraceRequest
   | { kind: 'retry'; at: number; attempt: number; delayMs: number; detail: string }
-  | {
-      kind: 'compacted'
-      /** The `conversation.compacted` event, which the summary's input is fetched by. */
-      seq: number
-      at: number
-      durationMs: number
-      summary: string
-      usage: { input: number; output: number } | null
-    }
   | { kind: 'compaction-failed'; at: number; detail: string }
   | { kind: 'instructions'; at: number; path: string; changed: boolean; removed: boolean }
 
-/** The whole request one model call was sent, rebuilt from the event log. */
-export interface TraceInput {
-  /** `system`, `user`, `assistant` and `tool` messages, as the provider got them. */
-  messages: (
-    | { role: 'system' | 'user'; content: string }
-    | { role: 'assistant'; content: string; toolCalls?: ToolCallRecord[] }
-    | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
-  )[]
+/** A message of a model request, as the provider was handed it. */
+export type TraceMessage =
+  | { role: 'system' | 'user'; content: string }
+  | {
+      role: 'assistant'
+      content: string
+      toolCalls?: ToolCallRecord[]
+      reasoning?: ReasoningRecord[]
+    }
+  | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
+
+/** The whole of one model request, rebuilt from the event log. */
+export interface TraceRequestDetail {
+  messages: TraceMessage[]
   /** The tool definitions it was offered. */
   tools: { name: string; description: string; parameters: Record<string, unknown> }[]
+  effort: 'low' | 'medium' | 'high' | null
+  /** What it went with besides the messages: provider kind, model and settings without secrets. */
+  call: { provider: string; model: string; settings: Record<string, unknown> } | null
+  /** The body the provider sent, when its plugin can say; credentials are not in it. */
+  body: unknown
   /**
-   * Messages from here on are new since the conversation's previous call; the system
+   * Messages from here on are new since the conversation's previous step; the system
    * prompt (the first message) is compared apart.
    */
   newFrom: number
-  /** The system prompt differs from the previous call's. */
+  /** The system prompt differs from the previous step's. */
   systemChanged: boolean
 }

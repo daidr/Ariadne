@@ -1,21 +1,13 @@
 <script setup lang="ts">
 import type { TraceTurn } from '@ariadne/core'
-import {
-  DouAlert,
-  DouButton,
-  DouChatToolCall,
-  DouCollapse,
-  DouCollapseItem,
-  DouEmpty,
-  DouSpinner,
-  DouText,
-} from 'dou-ui'
+import { DouAlert, DouButton, DouSpinner, DouTable, DouText, type TableColumn } from 'dou-ui'
 import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
-import { count, duration, locale, t, tm } from '../i18n'
+import { duration, locale, t, tm } from '../i18n'
 import { onLiveEvent, openMain, state } from '../store'
-import TraceInput from './TraceInput.vue'
+import TraceInspector from './TraceInspector.vue'
+import { findRow, parentKeys, traceRows, type TraceRow } from './rows'
 
 const props = defineProps<{ conversationId: string }>()
 
@@ -28,10 +20,9 @@ const turns = ref<TraceTurn[]>([])
 const more = ref(false)
 const loading = ref(true)
 const problem = ref<string | null>(null)
-// Open turns and steps, by key, so a reload keeps what the user expanded.
-const openTurns = ref<string[]>([])
-// Steps whose full input is shown.
-const inputs = ref(new Set<number>())
+const current = ref<string | number | null>(null)
+// Rows the user folded; everything else stays open, also as new rows come in.
+const folded = ref(new Set<string>())
 
 // Loads overlap as events arrive; only the latest one's answer is used.
 let latest = 0
@@ -44,12 +35,7 @@ async function load() {
     if (ticket !== latest) return
     const oldest = page.turns[0]?.seq ?? Number.POSITIVE_INFINITY
     const older = turns.value.filter((turn) => turn.seq < oldest)
-    if (!turns.value.length) {
-      more.value = page.more
-      // The newest turn is what the user came to look at.
-      const last = page.turns.at(-1)
-      if (last) openTurns.value = [last.turnId]
-    }
+    if (!turns.value.length) more.value = page.more
     turns.value = [...older, ...page.turns]
     problem.value = null
   } catch (error) {
@@ -77,7 +63,8 @@ watch(
   () => props.conversationId,
   () => {
     turns.value = []
-    inputs.value = new Set()
+    current.value = null
+    folded.value = new Set()
     loading.value = true
     void load()
   },
@@ -91,47 +78,47 @@ onUnmounted(
   }),
 )
 
-const clock = (at: number) =>
-  new Date(at).toLocaleTimeString(locale.value, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  })
-const day = (at: number) =>
-  new Date(at).toLocaleDateString(locale.value, { month: '2-digit', day: '2-digit' })
+const rows = computed(() => traceRows(turns.value))
+const selected = computed(() => findRow(rows.value, current.value))
+const expanded = computed({
+  get: () => parentKeys(rows.value).filter((key) => !folded.value.has(key)),
+  set: (keys) => {
+    const open = new Set(keys.map(String))
+    folded.value = new Set(parentKeys(rows.value).filter((key) => !open.has(key)))
+  },
+})
 
-function turnTitle(turn: TraceTurn) {
-  const parts = [`${day(turn.startedAt)} ${clock(turn.startedAt)}`]
-  if (turn.model) parts.push(turn.model)
-  parts.push(turn.outcome ? t(`trace.outcome.${turn.outcome}`) : t('trace.running'))
-  if (turn.finishedAt) parts.push(duration(turn.finishedAt - turn.startedAt))
-  if (turn.usage.input || turn.usage.output) parts.push(usageText(turn.usage))
-  return parts.join(' · ')
-}
+const columns = computed<TableColumn<TraceRow>[]>(() => [
+  { key: 'event', title: t('trace.col.event'), width: 150 },
+  { key: 'content', title: t('trace.col.content'), ellipsis: true, minWidth: 200 },
+  { key: 'input', title: t('trace.col.input'), width: 84, align: 'end' },
+  { key: 'cached', title: t('trace.col.cached'), width: 84, align: 'end' },
+  { key: 'output', title: t('trace.col.output'), width: 72, align: 'end' },
+  { key: 'reasoning', title: t('trace.col.reasoning'), width: 72, align: 'end' },
+  {
+    key: 'duration',
+    title: t('trace.col.duration'),
+    width: 84,
+    align: 'end',
+    value: (row) => (row.end === null ? null : row.end - row.start),
+  },
+  { key: 'timeline', title: t('trace.col.timeline'), width: 160 },
+])
 
-const usageText = (usage: { input: number; output: number }) =>
-  t('trace.usage', { input: count(usage.input), output: count(usage.output) })
+const tokens = (value: unknown) =>
+  typeof value === 'number' ? value.toLocaleString(locale.value) : ''
 
-/** A tool's arguments as an object when they parse, else the text the model wrote. */
-function argsOf(text: string): unknown {
-  try {
-    return JSON.parse(text || '{}')
-  } catch {
-    return text
-  }
-}
+// Now, for what still runs; it moves on with each load.
+const now = computed(() => (turns.value, Date.now()))
 
-function toggleInput(seq: number) {
-  const next = new Set(inputs.value)
-  if (next.has(seq)) next.delete(seq)
-  else next.add(seq)
-  inputs.value = next
-}
-
-/** Steps are numbered within their turn. */
-function stepNumber(turn: TraceTurn, index: number) {
-  return turn.items.slice(0, index + 1).filter((item) => item.kind === 'step').length
+/** Where the row sits in its turn, as a share of the turn's time. */
+function bar(row: TraceRow) {
+  const from = row.turn.startedAt
+  const to = Math.max(row.turn.finishedAt ?? now.value, from + 1)
+  const span = to - from
+  const left = Math.min(1, Math.max(0, (row.start - from) / span))
+  const end = Math.min(1, Math.max(left, ((row.end ?? now.value) - from) / span))
+  return { left: `${left * 100}%`, width: `max(2px, ${(end - left) * 100}%)` }
 }
 </script>
 
@@ -145,6 +132,9 @@ function stepNumber(turn: TraceTurn, index: number) {
       <DouText weight="medium" truncate class="trace-title">
         {{ t('trace.title', { name }) }}
       </DouText>
+      <DouButton v-if="more" variant="ghost" size="sm" @click="loadEarlier">
+        {{ t('trace.earlier') }}
+      </DouButton>
       <DouButton
         variant="ghost"
         size="sm"
@@ -155,129 +145,53 @@ function stepNumber(turn: TraceTurn, index: number) {
         <RotateCwIcon />
       </DouButton>
     </div>
-
-    <div class="trace-body">
-      <DouAlert v-if="problem" tone="danger">{{ problem }}</DouAlert>
-      <div v-if="loading" class="trace-empty"><DouSpinner /></div>
-      <div v-else-if="!turns.length" class="trace-empty">
-        <DouEmpty size="sm" :description="t('trace.empty')" />
-      </div>
-      <template v-else>
-        <DouButton v-if="more" variant="ghost" size="sm" class="trace-more" @click="loadEarlier">
-          {{ t('trace.earlier') }}
-        </DouButton>
-        <DouCollapse v-model="openTurns">
-          <DouCollapseItem
-            v-for="turn in turns"
-            :key="turn.turnId"
-            :value="turn.turnId"
-            :title="turnTitle(turn)"
-          >
-            <div class="trace-items">
-              <template v-for="(item, index) in turn.items" :key="index">
-                <div v-if="item.kind === 'step'" class="trace-step">
-                  <div class="trace-step-head">
-                    <DouText size="sm" weight="medium">
-                      {{ t('trace.step', { n: stepNumber(turn, index) }) }}
-                    </DouText>
-                    <DouText variant="tertiary" size="sm">
-                      {{ clock(item.at) }} · {{ duration(item.durationMs) }}
-                      <template v-if="item.usage"> · {{ usageText(item.usage) }}</template>
-                    </DouText>
-                    <DouButton
-                      size="sm"
-                      variant="ghost"
-                      class="trace-input-toggle"
-                      @click="toggleInput(item.seq)"
-                    >
-                      {{ t(inputs.has(item.seq) ? 'trace.hideInput' : 'trace.showInput') }}
-                    </DouButton>
-                  </div>
-                  <TraceInput
-                    v-if="inputs.has(item.seq)"
-                    :conversation-id="conversationId"
-                    :seq="item.seq"
-                  />
-                  <DouText v-if="item.text" size="sm" class="trace-text">{{ item.text }}</DouText>
-                  <DouChatToolCall
-                    v-for="call in item.toolCalls"
-                    :key="call.id"
-                    :name="call.name"
-                    :title="
-                      call.result ? `${call.name} · ${duration(call.result.durationMs)}` : call.name
-                    "
-                    :status="!call.result ? 'running' : call.result.isError ? 'error' : 'success'"
-                    :input="argsOf(call.arguments)"
-                    :output="call.result?.content"
-                  />
-                </div>
-                <div v-else-if="item.kind === 'compacted'" class="trace-step">
-                  <div class="trace-step-head">
-                    <DouText size="sm" weight="medium">{{ t('trace.compacted') }}</DouText>
-                    <DouText variant="tertiary" size="sm">
-                      {{ clock(item.at) }} · {{ duration(item.durationMs) }}
-                      <template v-if="item.usage"> · {{ usageText(item.usage) }}</template>
-                    </DouText>
-                    <DouButton
-                      size="sm"
-                      variant="ghost"
-                      class="trace-input-toggle"
-                      @click="toggleInput(item.seq)"
-                    >
-                      {{ t(inputs.has(item.seq) ? 'trace.hideInput' : 'trace.showInput') }}
-                    </DouButton>
-                  </div>
-                  <TraceInput
-                    v-if="inputs.has(item.seq)"
-                    :conversation-id="conversationId"
-                    :seq="item.seq"
-                  />
-                  <DouText size="sm" class="trace-text">{{ item.summary }}</DouText>
-                </div>
-                <DouText
-                  v-else-if="item.kind === 'retry'"
-                  tone="warning"
-                  size="sm"
-                  class="trace-line"
-                >
-                  {{ clock(item.at) }} ·
-                  {{
-                    t('notice.modelRetry', {
-                      attempt: item.attempt,
-                      seconds: Math.max(1, Math.round(item.delayMs / 1000)),
-                      detail: item.detail,
-                    })
-                  }}
-                </DouText>
-                <DouText
-                  v-else-if="item.kind === 'compaction-failed'"
-                  tone="warning"
-                  size="sm"
-                  class="trace-line"
-                >
-                  {{ clock(item.at) }} · {{ t('notice.compactionFailed', { detail: item.detail }) }}
-                </DouText>
-                <DouText v-else variant="tertiary" size="sm" class="trace-line">
-                  {{ clock(item.at) }} ·
-                  {{
-                    t(
-                      item.removed
-                        ? 'notice.instructionsRemoved'
-                        : item.changed
-                          ? 'notice.instructionsChanged'
-                          : 'notice.instructions',
-                      { path: item.path },
-                    )
-                  }}
-                </DouText>
-              </template>
-              <DouText v-if="turn.error" tone="danger" size="sm" class="trace-line">
-                {{ tm(turn.error) }}
-              </DouText>
+    <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>
+    <div v-if="loading" class="trace-empty"><DouSpinner /></div>
+    <div v-else class="trace-body">
+      <div class="trace-table">
+        <DouTable
+          v-model:current="current"
+          v-model:expanded="expanded"
+          :data="rows"
+          :columns="columns"
+          row-key="key"
+          children-key="children"
+          size="sm"
+          :indent="14"
+          highlight-current
+          hoverable
+          max-height="100%"
+          :empty-text="t('trace.empty')"
+          :row-class="(row: TraceRow) => (row.tone ? `trace-row--${row.tone}` : undefined)"
+        >
+          <template #cell-event="{ row }">
+            <span :class="['trace-event', `trace-event--${row.kind}`]">{{ row.event }}</span>
+          </template>
+          <template #cell-content="{ row }">
+            <span :class="['trace-content', `trace-content--${row.kind}`]">{{ row.content }}</span>
+          </template>
+          <template #cell-input="{ value }">{{ tokens(value) }}</template>
+          <template #cell-cached="{ value }">{{ tokens(value) }}</template>
+          <template #cell-output="{ value }">{{ tokens(value) }}</template>
+          <template #cell-reasoning="{ value }">{{ tokens(value) }}</template>
+          <template #cell-duration="{ value }">
+            {{ typeof value === 'number' ? duration(value) : '' }}
+          </template>
+          <template #cell-timeline="{ row }">
+            <div class="trace-track">
+              <span :class="['trace-bar', `trace-bar--${row.kind}`]" :style="bar(row)" />
             </div>
-          </DouCollapseItem>
-        </DouCollapse>
-      </template>
+          </template>
+        </DouTable>
+      </div>
+      <TraceInspector
+        v-if="selected"
+        :key="selected.key"
+        :row="selected"
+        :conversation-id="conversationId"
+        class="trace-inspector"
+        @close="current = null"
+      />
     </div>
   </div>
 </template>
@@ -303,11 +217,8 @@ function stepNumber(turn: TraceTurn, index: number) {
   min-width: 0;
 }
 
-.trace-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px 16px 16px;
+.trace-problem {
+  margin: 8px 16px 0;
 }
 
 .trace-empty {
@@ -316,35 +227,77 @@ function stepNumber(turn: TraceTurn, index: number) {
   padding: 48px 0;
 }
 
-.trace-more {
-  margin-bottom: 4px;
-}
-
-.trace-items {
+.trace-body {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex: 1;
+  min-height: 0;
 }
 
-.trace-step {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.trace-table {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
-.trace-step-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.trace-inspector {
+  width: 520px;
+  flex: none;
+  border-left: 1px solid var(--dou-color-border);
 }
 
-.trace-input-toggle {
-  margin-left: auto;
+.trace-event--turn {
+  font-weight: var(--dou-font-weight-medium);
 }
 
-.trace-text,
-.trace-line {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.trace-event--tool,
+.trace-event--retry,
+.trace-event--instructions,
+.trace-event--compaction-failed {
+  color: var(--dou-color-text-secondary);
+}
+
+.trace-content--tool {
+  font-family: var(--dou-font-family-mono);
+  font-size: var(--dou-font-size-sm);
+}
+
+:deep(.trace-row--danger) .trace-content {
+  color: var(--dou-color-danger-text);
+}
+
+:deep(.trace-row--warning) .trace-content {
+  color: var(--dou-color-warning-text);
+}
+
+.trace-track {
+  position: relative;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--dou-color-bg-muted);
+}
+
+.trace-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: var(--dou-color-primary);
+}
+
+.trace-bar--turn {
+  background: var(--dou-color-border-strong);
+}
+
+.trace-bar--tool {
+  background: var(--dou-color-success);
+}
+
+.trace-bar--retry,
+.trace-bar--compaction-failed {
+  background: var(--dou-color-warning);
+}
+
+.trace-bar--instructions {
+  background: var(--dou-color-text-tertiary);
 }
 </style>

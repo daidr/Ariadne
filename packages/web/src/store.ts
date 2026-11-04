@@ -357,8 +357,8 @@ function onEvent(event: AnyStoredEvent) {
 
 /** Take in the model settings as saved: whether the coordinator has one, and the choices. */
 export function applyModelSettings(settings: ModelSettings) {
-  state.modelReady = !!settings.roles.coordinator
-  state.threadDefault = settings.roles.thread ?? settings.roles.coordinator
+  state.modelReady = !!settings.roles.thread.model
+  state.threadDefault = settings.roles.thread.model
   state.models = settings.models.map((model) => ({
     id: model.id,
     label: `${settings.providers.find((p) => p.id === model.provider)?.name ?? model.provider} / ${model.model}`,

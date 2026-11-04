@@ -2,13 +2,23 @@ import {
   DomainError,
   type AnyStoredEvent,
   type Ariadne,
-  type TraceInput,
-  type TraceItem,
+  type TokenUsage,
+  type TraceRequest,
+  type TraceRequestDetail,
+  type TraceToolCall,
   type TraceTurn,
 } from '@ariadne/core'
-import type { ChatMessage, ToolSpec } from '@ariadne/plugin-sdk'
+import type { ChatMessage, Effort, ModelRequest, ToolSpec } from '@ariadne/plugin-sdk'
 import { summaryRequest } from './compaction'
 import { toChatMessages } from './transcript'
+
+/** What a request went with, as `callOf` recorded it. */
+export interface RecordedCall {
+  provider: string
+  model: string
+  effort: Effort | null
+  settings: Record<string, unknown>
+}
 
 /**
  * A conversation's turns, newest last, rebuilt from the event log. `before` pages back:
@@ -20,12 +30,18 @@ export function buildTrace(
   options: { before?: number; turns?: number } = {},
 ): { turns: TraceTurn[]; more: boolean } {
   const { events, more } = app.listTurnEvents(conversationId, options)
+  const first = events[0]
+  let number = first ? app.countRequests(conversationId, first.seq) : 0
+  const calls = new Map<string, RecordedCall | null>()
+  const callOf = (projectId: string, hash: string) => {
+    if (!calls.has(hash)) calls.set(hash, parseCall(app.getPrompt(projectId, hash)))
+    return calls.get(hash) ?? null
+  }
   const turns: TraceTurn[] = []
   let turn: TraceTurn | null = null
-  // When the previous event of the turn happened, to time what came after it.
-  let last = 0
-  let retryWait = 0
-  const calls = new Map<string, Extract<TraceItem, { kind: 'step' }>['toolCalls'][number]>()
+  // Tools run one after another once their step is answered.
+  let toolsFrom = 0
+  const running = new Map<string, TraceToolCall>()
   for (const event of events) {
     if (event.type === 'turn.started') {
       turn = {
@@ -40,40 +56,46 @@ export function buildTrace(
         items: [],
       }
       turns.push(turn)
-      last = event.at
-      retryWait = 0
-      calls.clear()
+      running.clear()
       continue
     }
     if (!turn) continue
-    const took = Math.max(0, event.at - last - retryWait)
-    retryWait = 0
     switch (event.type) {
       case 'turn.step': {
-        const { usage } = event.data
-        if (usage) addUsage(turn, usage)
-        const toolCalls = event.data.toolCalls.map((call) => ({ ...call, result: null }))
-        for (const call of toolCalls) calls.set(call.id, call)
+        const { usage, timing, input } = event.data
+        if (usage) addUsage(turn.usage, usage)
+        const call = callOf(event.projectId, input.call)
+        toolsFrom = event.at
+        const toolCalls = event.data.toolCalls.map((tool) => {
+          const entry: TraceToolCall = { ...tool, startedAt: event.at, result: null }
+          running.set(tool.id, entry)
+          return entry
+        })
         turn.items.push({
-          kind: 'step',
-          seq: event.seq,
-          at: event.at,
-          durationMs: took,
+          ...requestBase(event.seq, ++number, call, timing, event.at, usage),
+          purpose: 'step',
+          finish: event.data.finish,
           text: event.data.text,
+          reasoning: event.data.reasoning.map((block) => ({
+            text: block.redacted ? '' : block.text,
+            redacted: !!block.redacted,
+          })),
           toolCalls,
-          usage,
         })
         break
       }
       case 'tool.finished': {
-        const call = calls.get(event.data.toolCallId)
-        if (call) {
-          call.result = {
+        const tool = running.get(event.data.toolCallId)
+        if (tool) {
+          tool.startedAt = toolsFrom
+          tool.result = {
             content: event.data.content,
             isError: event.data.isError,
-            durationMs: took,
+            finishedAt: event.at,
           }
+          running.delete(event.data.toolCallId)
         }
+        toolsFrom = event.at
         break
       }
       case 'conversation.model_retry':
@@ -84,19 +106,27 @@ export function buildTrace(
           delayMs: event.data.delayMs,
           detail: event.data.detail,
         })
-        retryWait = event.data.delayMs
         break
-      case 'conversation.compacted':
-        if (event.data.usage) addUsage(turn, event.data.usage)
+      case 'conversation.compacted': {
+        const { usage, timing, call } = event.data
+        if (usage) addUsage(turn.usage, usage)
         turn.items.push({
-          kind: 'compacted',
-          seq: event.seq,
-          at: event.at,
-          durationMs: took,
-          summary: event.data.summary,
-          usage: event.data.usage,
+          ...requestBase(
+            event.seq,
+            ++number,
+            callOf(event.projectId, call),
+            timing,
+            event.at,
+            usage,
+          ),
+          purpose: 'summary',
+          finish: 'stop',
+          text: event.data.summary,
+          reasoning: [],
+          toolCalls: [],
         })
         break
+      }
       case 'conversation.compaction_failed':
         turn.items.push({ kind: 'compaction-failed', at: event.at, detail: event.data.detail })
         break
@@ -116,22 +146,59 @@ export function buildTrace(
         turn = null
         break
     }
-    last = event.at
   }
   return { turns, more }
 }
 
-function addUsage(turn: TraceTurn, usage: { input: number; output: number }) {
-  turn.usage.input += usage.input
-  turn.usage.output += usage.output
+function requestBase(
+  seq: number,
+  number: number,
+  call: RecordedCall | null,
+  timing: { startedAt: number; firstOutputAt: number | null },
+  finishedAt: number,
+  usage: TokenUsage | null,
+): Omit<TraceRequest, 'purpose' | 'finish' | 'text' | 'reasoning' | 'toolCalls'> {
+  return {
+    kind: 'request',
+    seq,
+    number,
+    provider: call?.provider ?? null,
+    model: call?.model ?? null,
+    effort: call?.effort ?? null,
+    startedAt: timing.startedAt,
+    firstOutputAt: timing.firstOutputAt,
+    finishedAt,
+    usage,
+  }
+}
+
+function addUsage(sum: TokenUsage, usage: TokenUsage) {
+  sum.input += usage.input
+  sum.output += usage.output
+  if (usage.cached) sum.cached = (sum.cached ?? 0) + usage.cached
+  if (usage.reasoning) sum.reasoning = (sum.reasoning ?? 0) + usage.reasoning
+}
+
+function parseCall(content: string | null): RecordedCall | null {
+  if (content === null) return null
+  try {
+    return JSON.parse(content) as RecordedCall
+  } catch {
+    return null
+  }
 }
 
 /**
- * The whole request of one model call of a conversation: a step (`turn.step`) or the
- * summary of its history (`conversation.compacted`). Rebuilt from the transcript as it
- * stood then and the pieces the step recorded, so it is what the provider was sent.
+ * The whole of one model request of a conversation: a step (`turn.step`) or the summary
+ * of its history (`conversation.compacted`). Rebuilt from the transcript as it stood then
+ * and the pieces recorded with it, so it is what the provider was handed. `request` is
+ * that, ready for the provider's `requestBody`; the detail leaves the body to the caller.
  */
-export function traceInput(app: Ariadne, conversationId: string, seq: number): TraceInput {
+export function traceRequest(
+  app: Ariadne,
+  conversationId: string,
+  seq: number,
+): { detail: Omit<TraceRequestDetail, 'body'>; request: ModelRequest | null } {
   const event = app.events({ afterSeq: seq - 1, limit: 1 })[0]
   if (!event || event.seq !== seq || !belongsTo(event, conversationId)) {
     throw new DomainError('error.notFound', { what: String(seq) })
@@ -152,7 +219,30 @@ export function traceInput(app: Ariadne, conversationId: string, seq: number): T
   ) {
     newFrom++
   }
-  return { messages: current.messages, tools: current.tools, newFrom, systemChanged }
+  const hash =
+    event.type === 'turn.step'
+      ? event.data.input.call
+      : event.type === 'conversation.compacted'
+        ? event.data.call
+        : null
+  const call = hash === null ? null : parseCall(app.getPrompt(event.projectId, hash))
+  const detail = {
+    messages: current.messages,
+    tools: current.tools,
+    effort: call?.effort ?? null,
+    call: call ? { provider: call.provider, model: call.model, settings: call.settings } : null,
+    newFrom,
+    systemChanged,
+  }
+  const request: ModelRequest | null = call
+    ? {
+        model: call.model,
+        messages: current.messages,
+        tools: current.tools,
+        ...(call.effort ? { effort: call.effort } : {}),
+      }
+    : null
+  return { detail, request }
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)

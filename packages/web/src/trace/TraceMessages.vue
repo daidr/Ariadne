@@ -1,36 +1,24 @@
 <script setup lang="ts">
-import type { TraceInput } from '@ariadne/core'
-import { DouAlert, DouCollapse, DouCollapseItem, DouSpinner, DouText } from 'dou-ui'
-import { computed, onMounted, ref } from 'vue'
-import { api, ApiError } from '../api'
-import { t, tm } from '../i18n'
+import type { TraceMessage, TraceRequestDetail } from '@ariadne/core'
+import { DouCollapse, DouCollapseItem, DouText } from 'dou-ui'
+import { computed, ref } from 'vue'
+import { t } from '../i18n'
 
-/** The whole request of one model call, fetched when the user opens it. */
-const props = defineProps<{ conversationId: string; seq: number }>()
+/** The messages of one request, those new since the step before marked and open. */
+const props = defineProps<{ detail: TraceRequestDetail }>()
 
-const input = ref<TraceInput | null>(null)
-const problem = ref<string | null>(null)
-// New messages start open: they are what this call added.
-const open = ref<string[]>([])
+const input = computed(() => props.detail)
+const open = ref<string[]>(
+  props.detail.messages
+    .map((_, index) => `m${index}`)
+    .filter((_, index) => index >= Math.max(props.detail.newFrom, 1)),
+)
 
-onMounted(async () => {
-  try {
-    input.value = (await api.getTraceInput(props.conversationId, props.seq)).input
-    open.value = input.value.messages
-      .map((_, index) => `m${index}`)
-      .filter((_, index) => index >= Math.max(input.value?.newFrom ?? 0, 1))
-  } catch (error) {
-    problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
-  }
-})
-
-type Message = TraceInput['messages'][number]
+type Message = TraceMessage
 
 function titleOf(message: Message, index: number) {
   const role = t(`trace.role.${message.role}`)
-  const isNew =
-    !!input.value &&
-    (index === 0 ? input.value.systemChanged : index >= Math.max(input.value.newFrom, 1))
+  const isNew = index === 0 ? input.value.systemChanged : index >= Math.max(input.value.newFrom, 1)
   const calls =
     message.role === 'assistant' && message.toolCalls?.length
       ? ` · ${message.toolCalls.map((call) => call.name).join('、')}`
@@ -41,19 +29,22 @@ function titleOf(message: Message, index: number) {
 }
 
 function bodyOf(message: Message) {
-  if (message.role !== 'assistant' || !message.toolCalls?.length) return message.content
-  const calls = message.toolCalls.map((call) => `${call.name}(${call.arguments})`).join('\n')
-  return message.content ? `${message.content}\n\n${calls}` : calls
+  if (message.role !== 'assistant') return message.content
+  const thought = (message.reasoning ?? [])
+    .map((block) => (block.redacted ? t('trace.redacted') : block.text))
+    .join('\n\n')
+  const calls = (message.toolCalls ?? [])
+    .map((call) => `${call.name}(${call.arguments})`)
+    .join('\n')
+  return [thought, message.content, calls].filter(Boolean).join('\n\n')
 }
 
-const tools = computed(() => JSON.stringify(input.value?.tools ?? [], null, 2))
+const tools = computed(() => JSON.stringify(input.value.tools, null, 2))
 </script>
 
 <template>
   <div class="trace-input">
-    <DouAlert v-if="problem" tone="danger">{{ problem }}</DouAlert>
-    <DouSpinner v-else-if="!input" size="sm" />
-    <template v-else>
+    <template v-if="input">
       <DouText variant="tertiary" size="sm">
         {{
           t('trace.inputSummary', {
@@ -89,8 +80,6 @@ const tools = computed(() => JSON.stringify(input.value?.tools ?? [], null, 2))
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-left: 12px;
-  border-left: 2px solid var(--dou-color-border-subtle);
 }
 
 .trace-input-text {

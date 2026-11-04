@@ -7,7 +7,8 @@ import { Scheduler } from './scheduler'
 import { toChatMessages } from './transcript'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null }
+const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}' }
+const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -267,6 +268,7 @@ describe('history compaction', () => {
       {
         seq: 1,
         kind: 'step',
+        reasoning: [],
         text: '',
         sawSeq: 1,
         toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
@@ -280,7 +282,7 @@ describe('history compaction', () => {
         content: 'r'.repeat(400),
         isError: false,
       },
-      { seq: 5, kind: 'step', text: 'ok', sawSeq: 4, toolCalls: [] },
+      { seq: 5, kind: 'step', reasoning: [], text: 'ok', sawSeq: 4, toolCalls: [] },
       { seq: 6, kind: 'message', message: { content: 'new' } as never },
     ]
     // Keeping very little: the cut falls after the step's result, never between.
@@ -739,10 +741,12 @@ describe('control', () => {
     const turnId = app.startTurn(project.coordinatorId, 'fake')
     app.recordStep(project.coordinatorId, turnId, {
       text: '',
+      reasoning: [],
       toolCalls: [{ id: 'c1', name: 'list_threads', arguments: '{}' }],
       sawSeq: app.lastSeq(),
       usage: null,
       input: STEP_INPUT,
+      timing: TIMING,
     })
     const model = fakeModel(() => say('继续'))
     await startScheduler(model).idle()
@@ -760,6 +764,7 @@ describe('transcript to model messages', () => {
         {
           seq: 1,
           kind: 'step',
+          reasoning: [],
           text: '',
           sawSeq: 0,
           toolCalls: [
@@ -787,7 +792,7 @@ describe('transcript to model messages', () => {
       [
         { seq: 1, kind: 'message', message: { content: '开始', kind: 'chat' } as never },
         { seq: 2, kind: 'note', note: report },
-        { seq: 3, kind: 'step', text: '我去安排', toolCalls: [], sawSeq: 1 },
+        { seq: 3, kind: 'step', reasoning: [], text: '我去安排', toolCalls: [], sawSeq: 1 },
       ],
       () => 't',
     )

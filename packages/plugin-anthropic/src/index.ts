@@ -6,7 +6,9 @@ import {
   transportErrorPart,
   type ChatMessage,
   type ModelProvider,
+  type ModelRequest,
   type ModelStreamPart,
+  type ReasoningBlock,
 } from '@ariadne/plugin-sdk'
 
 export interface AnthropicSettings {
@@ -18,6 +20,8 @@ export interface AnthropicSettings {
 const API_VERSION = '2023-06-01'
 
 type Block =
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'redacted_thinking'; data: string }
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
@@ -36,9 +40,20 @@ function parseInput(text: string): unknown {
   }
 }
 
+/** Thinking blocks as the protocol takes them back; ones it did not sign are left out. */
+function thinkingBlocks(reasoning: ReasoningBlock[] | undefined): Block[] {
+  return (reasoning ?? []).flatMap((block): Block[] => {
+    if (block.redacted) return [{ type: 'redacted_thinking', data: block.text }]
+    if (!block.signature) return []
+    return [{ type: 'thinking', thinking: block.text, signature: block.signature }]
+  })
+}
+
 /**
  * The protocol keeps system text apart, wants tool results inside a user message, and
- * expects roles to alternate, so neighbouring messages of one role are merged.
+ * expects roles to alternate, so neighbouring messages of one role are merged. Signed
+ * thinking always goes back as it came: newer models think without being asked and want it
+ * back in a turn's tool calls, and the API drops what the model in use cannot read.
  */
 export function toWire(messages: ChatMessage[]): { system: string; messages: WireMessage[] } {
   const system: string[] = []
@@ -59,6 +74,7 @@ export function toWire(messages: ChatMessage[]): { system: string; messages: Wir
         break
       case 'assistant':
         push('assistant', [
+          ...thinkingBlocks(message.reasoning),
           ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
           ...(message.toolCalls ?? []).map((call) => ({
             type: 'tool_use' as const,
@@ -94,10 +110,46 @@ interface StreamEvent {
       cache_read_input_tokens?: number
     }
   }
-  content_block?: { type: string; id?: string; name?: string }
-  delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string | null }
+  content_block?: { type: string; id?: string; name?: string; data?: string }
+  delta?: {
+    type?: string
+    text?: string
+    thinking?: string
+    signature?: string
+    partial_json?: string
+    stop_reason?: string | null
+  }
   usage?: { output_tokens?: number }
   error?: { type?: string; message?: string }
+}
+
+/** The body of a Messages request; credentials go in headers. */
+export function requestBody(settings: AnthropicSettings, request: ModelRequest) {
+  const { system, messages } = toWire(request.messages)
+  return {
+    model: request.model,
+    max_tokens: settings.maxTokens || 8192,
+    // Adaptive thinking, its depth set by effort; a summary of it is shown in the trace.
+    // Models before the 4.6 generation only take a fixed budget and refuse this.
+    ...(request.effort
+      ? {
+          thinking: { type: 'adaptive', display: 'summarized' },
+          output_config: { effort: request.effort },
+        }
+      : {}),
+    ...(system ? { system } : {}),
+    messages,
+    ...(request.tools.length
+      ? {
+          tools: request.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.parameters,
+          })),
+        }
+      : {}),
+    stream: true,
+  }
 }
 
 export const anthropicProvider: ModelProvider<AnthropicSettings> = {
@@ -120,8 +172,8 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
     },
     required: ['baseUrl', 'apiKey'],
   },
+  requestBody,
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
-    const { system, messages } = toWire(request.messages)
     let response: Response
     try {
       response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
@@ -131,22 +183,7 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
           'anthropic-version': API_VERSION,
           'x-api-key': settings.apiKey,
         },
-        body: JSON.stringify({
-          model: request.model,
-          max_tokens: settings.maxTokens || 8192,
-          ...(system ? { system } : {}),
-          messages,
-          ...(request.tools.length
-            ? {
-                tools: request.tools.map((tool) => ({
-                  name: tool.name,
-                  description: tool.description,
-                  input_schema: tool.parameters,
-                })),
-              }
-            : {}),
-          stream: true,
-        }),
+        body: JSON.stringify(requestBody(settings, request)),
         ...(request.signal ? { signal: request.signal } : {}),
       })
     } catch (error) {
@@ -170,7 +207,9 @@ async function* readStream(
   signal: AbortSignal | undefined,
 ): AsyncGenerator<ModelStreamPart> {
   const blocks = new Map<number, { id: string; name: string; json: string }>()
+  const thoughts = new Map<number, ReasoningBlock & { startedAt: number }>()
   let input = 0
+  let cached = 0
   let output = 0
   let stop: string | null = null
   let done = false
@@ -190,11 +229,21 @@ async function* readStream(
             (usage?.input_tokens ?? 0) +
             (usage?.cache_creation_input_tokens ?? 0) +
             (usage?.cache_read_input_tokens ?? 0)
+          cached = usage?.cache_read_input_tokens ?? 0
           output = usage?.output_tokens ?? 0
           break
         }
         case 'content_block_start':
-          if (event.content_block?.type === 'tool_use' && event.index !== undefined) {
+          if (event.index === undefined) break
+          if (event.content_block?.type === 'thinking') {
+            thoughts.set(event.index, { text: '', signature: '', startedAt: Date.now() })
+          } else if (event.content_block?.type === 'redacted_thinking') {
+            thoughts.set(event.index, {
+              text: event.content_block.data ?? '',
+              redacted: true,
+              startedAt: Date.now(),
+            })
+          } else if (event.content_block?.type === 'tool_use') {
             blocks.set(event.index, {
               id: event.content_block.id ?? `toolu_${event.index}`,
               name: event.content_block.name ?? '',
@@ -205,12 +254,29 @@ async function* readStream(
         case 'content_block_delta':
           if (event.delta?.type === 'text_delta' && event.delta.text) {
             yield { type: 'text', text: event.delta.text }
+          } else if (event.delta?.type === 'thinking_delta' && event.index !== undefined) {
+            const thought = thoughts.get(event.index)
+            if (thought) thought.text += event.delta.thinking ?? ''
+          } else if (event.delta?.type === 'signature_delta' && event.index !== undefined) {
+            const thought = thoughts.get(event.index)
+            if (thought)
+              thought.signature = (thought.signature ?? '') + (event.delta.signature ?? '')
           } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
             const block = blocks.get(event.index)
             if (block) block.json += event.delta.partial_json ?? ''
           }
           break
         case 'content_block_stop': {
+          const thought = event.index === undefined ? undefined : thoughts.get(event.index)
+          if (thought) {
+            yield {
+              type: 'reasoning',
+              text: thought.text,
+              startedAt: thought.startedAt,
+              ...(thought.signature ? { signature: thought.signature } : {}),
+              ...(thought.redacted ? { redacted: true } : {}),
+            }
+          }
           const block = event.index === undefined ? undefined : blocks.get(event.index)
           if (block) {
             yield {
@@ -248,7 +314,7 @@ async function* readStream(
     if (!signal?.aborted) yield incompletePart()
     return
   }
-  yield { type: 'usage', input, output }
+  yield { type: 'usage', input, output, ...(cached ? { cached } : {}) }
   yield {
     type: 'finish',
     reason: stop === 'tool_use' ? 'tool-calls' : stop === 'max_tokens' ? 'length' : 'stop',
