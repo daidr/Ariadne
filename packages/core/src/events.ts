@@ -113,6 +113,8 @@ export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
 /** A thread's pull request on the project's repository. */
 export interface ThreadPullRequest {
   number: number
+  /** How the host refers to it in text, e.g. `!12`; `#<number>` when left out. */
+  reference?: string
   url: string
   title: string
   state: 'open' | 'closed' | 'merged'

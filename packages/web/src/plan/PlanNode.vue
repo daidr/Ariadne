@@ -65,7 +65,7 @@ const mark = computed(() => {
             <GitMergeIcon v-if="thread.pullRequest.state === 'merged'" />
             <GitPullRequestClosedIcon v-else-if="thread.pullRequest.state === 'closed'" />
             <GitPullRequestIcon v-else />
-            #{{ thread.pullRequest.number }}
+            {{ thread.pullRequest.reference ?? `#${thread.pullRequest.number}` }}
           </span>
           <DouTag
             v-if="

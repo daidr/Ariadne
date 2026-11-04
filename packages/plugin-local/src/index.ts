@@ -33,11 +33,15 @@ const HIDDEN_ENV = new Set([
   'GITHUB_TOKEN',
   'GH_ENTERPRISE_TOKEN',
   'GITHUB_ENTERPRISE_TOKEN',
+  'GITLAB_TOKEN',
+  'GITLAB_ACCESS_TOKEN',
+  'GL_TOKEN',
+  'CI_JOB_TOKEN',
 ])
 
 /**
  * The environment for commands a thread runs: the server's own, without its credentials
- * (Ariadne's local token, GitHub tokens, git config passed through the environment).
+ * (Ariadne's local token, GitHub and GitLab tokens, git config passed through the environment).
  * This keeps them out of tool results, and so out of the event log and the model's input.
  * It is not a sandbox: a command can still read files the user can read.
  */

@@ -173,7 +173,7 @@ export const en: Record<MessageKey, string> = {
   'plugins.removeAffects':
     'These model providers use it: {names}. They stop working once it is removed.',
   'project.source.none':
-    'No project source yet (a local directory or a GitHub repository); threads cannot read or write files or run commands',
+    'No project source yet (a local directory, a GitHub or GitLab repository, or an SSH directory); threads cannot read or write files or run commands',
   'project.source.save': 'Save',
   'project.source.clear': 'Remove',
   'project.source.edit': 'Set the project source',
