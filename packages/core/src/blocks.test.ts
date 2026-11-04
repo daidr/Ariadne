@@ -58,7 +58,7 @@ describe('parseBlock', () => {
 
   test('tells the model what is wrong, field by field', () => {
     expect(reason(() => parseBlock({ type: 'html', html: '<b>' }))).toBe(
-      'block.type must be one of choice, confirm, form, table, chart, steps',
+      'block.type must be one of choice, confirm, form, table, chart, steps, thread',
     )
     expect(
       reason(() =>
