@@ -10,9 +10,9 @@ import {
 } from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PencilIcon, ServerIcon } from '@dou-ui/icons'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { api, type SandboxStatus, type SourceKind } from '../api'
+import { api, type McpServerView, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
-import { setProjectSlots, setSource, state } from '../store'
+import { setProjectMcp, setProjectSlots, setSource, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
 
 const editing = ref(false)
@@ -27,6 +27,18 @@ const drafts = reactive<Record<string, Record<string, unknown>>>({})
 const secretsSet = ref<string[]>([])
 /** This project's share of the work slots; empty leaves it to the shared total. */
 const slots = ref<number | null>(null)
+/** The external tool servers this project uses, by id. */
+const mcp = ref<string[]>([])
+/** The servers set up in the settings, to pick from and to name. */
+const mcpServers = ref<McpServerView[]>([])
+const mcpOptions = computed(() =>
+  mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
+)
+const mcpNames = computed(() =>
+  (state.detail?.project.mcp ?? [])
+    .map((id) => mcpServers.value.find((server) => server.id === id)?.name)
+    .filter((name): name is string => !!name),
+)
 /** The secrets the stored source has, restored when its kind is chosen again. */
 const storedSecrets = ref<string[]>([])
 /** The source as it was when the form opened, to tell whether it was changed at all. */
@@ -48,7 +60,15 @@ onMounted(() => {
     },
     () => {},
   )
+  loadMcp()
 })
+
+function loadMcp() {
+  return api.getMcpSettings().then(
+    (result) => (mcpServers.value = result.servers),
+    () => {},
+  )
+}
 /** The provider of the stored source, once the kinds are known. */
 const storedKind = computed(() => kinds.value.find((k) => k.kind === source.value?.kind) ?? null)
 // A remote source runs commands on another machine; this one's sandbox is beside the point.
@@ -95,6 +115,8 @@ async function edit() {
   const project = state.detail?.project
   if (!project) return
   slots.value = project.slots
+  mcp.value = [...project.mcp]
+  void loadMcp()
   try {
     const [{ kinds: list }, stored] = await Promise.all([
       api.sourceKinds(),
@@ -151,6 +173,10 @@ async function save(clear = false) {
   if (!clear && !problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
     problem.value = await setProjectSlots(slots.value || null)
   }
+  const usedBefore = state.detail?.project.mcp ?? []
+  if (!clear && !problem.value && JSON.stringify(mcp.value) !== JSON.stringify(usedBefore)) {
+    problem.value = await setProjectMcp(mcp.value)
+  }
   saving.value = false
   if (!problem.value) editing.value = false
 }
@@ -182,6 +208,15 @@ async function save(clear = false) {
           :max="16"
           :step="1"
           :placeholder="t('project.slotsShared')"
+        />
+      </DouFormItem>
+      <DouFormItem v-if="mcpOptions.length" :label="t('project.mcp')">
+        <DouSelect
+          v-model="mcp"
+          multiple
+          clearable
+          :options="mcpOptions"
+          :placeholder="t('project.mcpNone')"
         />
       </DouFormItem>
       <DouText v-if="problem" tone="danger" size="sm" role="alert" class="source-problem">
@@ -219,6 +254,9 @@ async function save(clear = false) {
         <PencilIcon />
       </DouButton>
     </div>
+    <DouText v-if="!editing && mcpNames.length" variant="tertiary" size="sm" truncate>
+      {{ t('project.mcpUsed', { names: mcpNames.join('、') }) }}
+    </DouText>
     <DouAlert
       v-if="unsandboxed && sandbox"
       tone="warning"

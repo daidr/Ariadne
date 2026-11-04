@@ -3,6 +3,7 @@ import {
   browserProfiles,
   createSandbox,
   detectSandbox,
+  McpHub,
   PluginHost,
   RepoWatcher,
   Scheduler,
@@ -12,7 +13,7 @@ import {
 import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
 import gitlab from '@ariadne/plugin-gitlab'
-import local from '@ariadne/plugin-local'
+import local, { threadEnv } from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
 import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
@@ -67,6 +68,14 @@ for (const path of settings.current.plugins) {
   await host.loadFromPath(path).catch((error) => console.error(`插件加载失败：${path}`, error))
 }
 
+// External tool servers run like thread commands: in the sandbox, without the server's
+// credentials, with only what the user gave them on top.
+const mcp = new McpHub({
+  servers: () => settings.current.mcp.servers,
+  sandbox,
+  env: () => threadEnv(),
+})
+
 const workspaces = new WorkspaceManager(app, host, (projectId) => settings.sourceSecrets(projectId))
 // Pull requests are polled for their checks; ARIADNE_REPO_POLL_MS shortens it for testing.
 const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO_POLL_MS) || 60_000)
@@ -84,6 +93,7 @@ const scheduler = new Scheduler({
   reservedSlots: settings.current.concurrency.reserved,
   dashboardSources: host.dashboards,
   searchProviders: host.searches,
+  mcp,
 })
 // Worktrees of work that landed go once the thread is finished with them.
 const janitor = new WorktreeJanitor(app, workspaces)
@@ -104,6 +114,7 @@ const server = Bun.serve({
     settings,
     host,
     workspaces,
+    mcp,
   }),
 })
 
@@ -115,6 +126,7 @@ async function shutdown() {
   await watcher.stop()
   await janitor.stop()
   await scheduler.stop()
+  await mcp.dispose()
   await workspaces.dispose()
   await host.unloadAll()
   app.close()

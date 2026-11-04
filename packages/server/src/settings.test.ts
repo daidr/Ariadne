@@ -241,3 +241,65 @@ test('plugins inside the plugin data folder, where worktrees live, are refused',
   const inside = join(path, '..', 'plugins', 'local', 'worktrees', 'x')
   await expect(store.addPlugin(inside)).rejects.toMatchObject({ code: 'error.pluginInWorkspace' })
 })
+
+const stdio = (env: { name: string; value: string }[] = []) => ({
+  id: 'files',
+  name: '文件',
+  transport: 'stdio',
+  command: 'some-server',
+  args: ['--root', '/tmp'],
+  env,
+  tools: { read: 'read', write: 'ask', drop: 'off' },
+})
+
+describe('MCP servers', () => {
+  test('keep environment values and headers away from the browser, and keep one left empty', () => {
+    const store = new SettingsStore(path, host)
+    store.updateMcp({ servers: [stdio([{ name: 'TOKEN', value: 'secret-env' }])] })
+    const shown = store.publicMcp()
+    expect(JSON.stringify(shown)).not.toContain('secret-env')
+    // `ask` is what an unmarked tool is anyway, so it is not stored.
+    expect(shown[0]).toMatchObject({ env: ['TOKEN'], tools: { read: 'read', drop: 'off' } })
+    store.updateMcp({ servers: [stdio([{ name: 'TOKEN', value: '' }])] })
+    expect(store.current.mcp.servers[0]?.env).toEqual({ TOKEN: 'secret-env' })
+    // A new name without a value has nothing to keep.
+    expect(() => store.updateMcp({ servers: [stdio([{ name: 'OTHER', value: '' }])] })).toThrow()
+
+    store.updateMcp({
+      servers: [
+        {
+          id: 'web',
+          name: '',
+          transport: 'http',
+          url: 'https://mcp.example.test/mcp',
+          headers: [{ name: 'Authorization', value: 'Bearer secret-header' }],
+          tools: {},
+        },
+      ],
+    })
+    expect(JSON.stringify(store.publicMcp())).not.toContain('secret-header')
+    expect(store.publicMcp()[0]).toMatchObject({ name: 'web', headers: ['Authorization'] })
+    expect(JSON.parse(readFileSync(path, 'utf8')).mcp.servers[0].headers).toEqual({
+      Authorization: 'Bearer secret-header',
+    })
+  })
+
+  test('refuse ids, addresses and directories that do not fit', () => {
+    const store = new SettingsStore(path, host)
+    const bad = [
+      { ...stdio(), id: 'Has Space' },
+      { ...stdio(), id: 'x'.repeat(30) },
+      { ...stdio(), command: ' ' },
+      { ...stdio(), args: [1] },
+      { ...stdio(), tools: { read: 'maybe' } },
+      // Ariadne's home holds its settings and log.
+      { ...stdio(), cwd: join(path, '..') },
+      { id: 'web', transport: 'http', url: 'file:///etc/passwd', tools: {} },
+      { id: 'web', transport: 'http', url: 'https://user:pw@example.test', tools: {} },
+      { id: 'web', transport: 'carrier-pigeon', tools: {} },
+    ]
+    for (const server of bad) expect(() => store.updateMcp({ servers: [server] })).toThrow()
+    expect(() => store.updateMcp({ servers: [stdio(), stdio()] })).toThrow()
+    expect(store.current.mcp.servers).toEqual([])
+  })
+})

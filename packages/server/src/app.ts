@@ -8,6 +8,7 @@ import {
   threadChanges,
   threadFile,
   traceRequest,
+  type McpHub,
   type PluginHost,
   type Scheduler,
   type WorkspaceManager,
@@ -45,6 +46,8 @@ export interface HandlerOptions {
   host?: PluginHost
   /** The projects' workspaces and repositories, to refresh a pull request on request. */
   workspaces?: WorkspaceManager
+  /** The connections to the user's external tool servers. */
+  mcp?: McpHub
 }
 
 type Params = Record<string, string>
@@ -91,6 +94,7 @@ export function createHandler({
   settings,
   host,
   workspaces,
+  mcp,
 }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
@@ -560,6 +564,37 @@ export function createHandler({
       return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
     settings.updateModels(await readJson(request))
     return json(settings.publicModels())
+  })
+
+  // External tool servers: what is set up, secrets left out, and how each stands.
+  const mcpSettings = () => ({
+    servers: settings?.publicMcp() ?? [],
+    status: mcp?.status() ?? [],
+  })
+  add('GET', '/api/settings/mcp', () => json(mcpSettings()))
+
+  add('PUT', '/api/settings/mcp', async (request) => {
+    if (!settings) throw new BadRequest('settings')
+    settings.updateMcp(await readJson(request))
+    await mcp?.reconfigure()
+    return json(mcpSettings())
+  })
+
+  // Connect to a server again now and list its tools.
+  add('POST', '/api/settings/mcp/:serverId/check', async (_request, { serverId = '' }) => {
+    const status = await mcp?.check(serverId)
+    if (!status) throw new DomainError('error.notFound', { what: serverId })
+    return json({ status })
+  })
+
+  add('PUT', '/api/projects/:projectId/mcp', async (request, { projectId = '' }) => {
+    const { servers } = await readJson(request)
+    if (!Array.isArray(servers)) throw new BadRequest('servers')
+    const known = new Set((settings?.current.mcp.servers ?? []).map((s) => s.id))
+    if (servers.some((id) => typeof id !== 'string' || !known.has(id))) {
+      throw new BadRequest('servers')
+    }
+    return json({ project: app.setProjectMcp(projectId, servers as string[]) })
   })
 
   add('GET', '/api/settings/concurrency', () => {
