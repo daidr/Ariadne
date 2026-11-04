@@ -92,7 +92,9 @@ const listMessages: Tool = {
           id: m.id,
           author: m.author,
           content: m.content,
-          ...(m.blocks.length || m.ask ? { blocks: blockLines(m) } : {}),
+          ...(m.blocks.length || m.ask
+            ? { blocks: blockLines(m, (id) => ctx.app.getThread(id)) }
+            : {}),
           edited: !!m.editedAt,
         })),
     )
@@ -368,7 +370,9 @@ const readThread: Tool = {
           author: m.author,
           kind: m.kind,
           content: m.content,
-          ...(m.blocks.length || m.ask ? { blocks: blockLines(m) } : {}),
+          ...(m.blocks.length || m.ask
+            ? { blocks: blockLines(m, (id) => ctx.app.getThread(id)) }
+            : {}),
           edited: !!m.editedAt,
         })),
     })

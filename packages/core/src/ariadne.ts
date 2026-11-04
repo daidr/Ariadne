@@ -1218,9 +1218,9 @@ export class Ariadne {
   }
 
   /**
-   * Post a message. An agent's may carry interface blocks: tables, charts and steps are
-   * shown under the text, and at most one choice, confirmation or form asks the user,
-   * as an attention of the conversation's own.
+   * Post a message. An agent's may carry interface blocks: tables, charts, steps and
+   * entries to the project's threads are shown under the text, and at most one choice,
+   * confirmation or form asks the user, as an attention of the conversation's own.
    */
   postMessage(
     projectId: string,

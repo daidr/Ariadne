@@ -6,6 +6,7 @@ import {
   FORM_FIELD_KINDS,
   STEP_STATUSES,
   type MessageView,
+  type ThreadView,
 } from '@ariadne/core'
 import { json, str, ToolInputError, type Tool } from './tool-helpers'
 
@@ -239,12 +240,21 @@ export const withdrawAsk: Tool = {
   },
 }
 
-/** A message's blocks in a line each, for tools that list messages. */
-export function blockLines(message: MessageView): string[] {
+/**
+ * A message's blocks in a line each, for tools that list messages. `thread` looks up a
+ * thread block's thread, so the line names it and where it stands now.
+ */
+export function blockLines(
+  message: MessageView,
+  thread: (id: string) => Pick<ThreadView, 'title' | 'stage'>,
+): string[] {
   const shown = message.blocks.map((block) => {
     if (block.type === 'table')
       return `table${block.title ? ` "${block.title}"` : ''}: ${block.rows.length} rows`
-    if (block.type === 'thread') return `thread ${block.threadId}`
+    if (block.type === 'thread') {
+      const { title, stage } = thread(block.threadId)
+      return `thread ${block.threadId} "${title}" [${stage}]`
+    }
     if (block.type === 'chart')
       return `${block.kind} chart${block.title ? ` "${block.title}"` : ''}: ${block.rows.length} points`
     return `steps${block.title ? ` "${block.title}"` : ''}: ${block.items.map((item) => `${item.title} [${item.status}]`).join(', ')}`

@@ -2,7 +2,7 @@
 import { DouChatArtifact } from 'dou-ui'
 import { MessagesIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
-import StageLabel from '../components/StageLabel.vue'
+import StageIcon from '../components/StageIcon.vue'
 import { openThread, state } from '../store'
 
 /** An entry to a thread an agent put in a message; follows the thread as it moves on. */
@@ -19,10 +19,9 @@ const thread = computed(
     :title="thread.title"
     :description="thread.lastSummary ?? undefined"
     :active="state.threadId === thread.id"
-    class="thread-card"
     @open="openThread(thread.id)"
   >
     <template #icon><MessagesIcon /></template>
-    <template #actions><StageLabel :stage="thread.stage" /></template>
+    <template #actions><StageIcon :stage="thread.stage" /></template>
   </DouChatArtifact>
 </template>
