@@ -108,6 +108,13 @@ export interface EventMap {
   'workspace.opened': { threadId: string; label: string; branch: string | null }
   'thread.started': { threadId: string }
   'thread.reported': { threadId: string; report: ReportKind; summary: string }
+  /**
+   * The thread is held: its running turn ends and no new one starts until it is resumed.
+   * `by` is `user` or the coordinator's id.
+   */
+  'thread.stopped': { threadId: string; reason: string; by: string }
+  /** Work goes on; `reason` is why it had been stopped, for the thread to read. */
+  'thread.resumed': { threadId: string; by: string; reason: string }
   'attention.opened': {
     attentionId: string
     /** `null` when the coordinator asks. */
@@ -164,6 +171,13 @@ export interface EventMap {
   'notice.dismissed': { noticeId: string }
   /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
+  /** A model request failed in a way worth trying again; `attempt` counts the retries. */
+  'conversation.model_retry': {
+    conversationId: string
+    attempt: number
+    delayMs: number
+    detail: string
+  }
   /** The agent of a conversation began working. */
   'turn.started': { conversationId: string; turnId: string; model: string }
   /**

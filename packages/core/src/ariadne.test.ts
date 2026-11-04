@@ -722,3 +722,28 @@ describe('project memory', () => {
     )
   })
 })
+
+describe('stopped threads', () => {
+  test('a stopped thread is not scheduled; writing to it lets it go on', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    expect(() => app.stopThread(thread.id, { reason: '  ', by: 'user' })).toThrow(DomainError)
+    app.stopThread(thread.id, { reason: '等确认', by: project.coordinatorId })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '补一句',
+    })
+    expect(app.listPendingConversations().map((c) => c.id)).not.toContain(thread.id)
+    expect(app.getThread(thread.id).stage).toBe('stopped')
+    // Stopping again changes nothing; the user's own words resume it.
+    app.stopThread(thread.id, { reason: '别的', by: 'user' })
+    expect(app.getThread(thread.id).stopped?.reason).toBe('等确认')
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '继续吧' })
+    expect(app.getThread(thread.id).stopped).toBeNull()
+    expect(app.listPendingConversations().map((c) => c.id)).toContain(thread.id)
+    app.rebuildProjections()
+    expect(app.getThread(thread.id).stopped).toBeNull()
+  })
+})

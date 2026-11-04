@@ -15,6 +15,8 @@ export interface SchedulerOptions {
   maxSteps?: number
   /** Input size, in tokens, at which a conversation's older history is summarised. */
   compactAt?: number
+  /** First wait before a failed model request is retried. */
+  retryBaseMs?: number
   workspaces?: WorkspaceManager
 }
 
@@ -33,8 +35,20 @@ export class Scheduler {
   private unsubscribe: (() => void) | null = null
   private scheduled = false
   private stopped = false
+  private slots: number
+  private reservedSlots: number
 
-  constructor(private readonly options: SchedulerOptions) {}
+  constructor(private readonly options: SchedulerOptions) {
+    this.slots = options.slots ?? 3
+    this.reservedSlots = options.reservedSlots ?? 1
+  }
+
+  /** Change the slot limits. Running turns finish; new ones start within the new limits. */
+  setSlots(slots: number, reservedSlots: number): void {
+    this.slots = slots
+    this.reservedSlots = reservedSlots
+    this.schedule()
+  }
 
   /** Close turns the last process left running, then follow the log. */
   start(): void {
@@ -46,7 +60,13 @@ export class Scheduler {
         })
       }
     }
-    this.unsubscribe = app.subscribe(() => this.schedule())
+    this.unsubscribe = app.subscribe((events) => {
+      // A held thread's turn ends now, with whatever command it runs; that frees its slot.
+      for (const event of events) {
+        if (event.type === 'thread.stopped') this.cancel(event.data.threadId)
+      }
+      this.schedule()
+    })
     this.schedule()
   }
 
@@ -93,8 +113,7 @@ export class Scheduler {
 
   private fill(): void {
     const { app } = this.options
-    const slots = this.options.slots ?? 3
-    const reservedSlots = this.options.reservedSlots ?? 1
+    const { slots, reservedSlots } = this
     for (const conversation of app.listPendingConversations()) {
       if (this.stopped) return
       if (this.running.has(conversation.id)) continue
@@ -131,6 +150,9 @@ export class Scheduler {
         signal: controller.signal,
         maxSteps: this.options.maxSteps ?? 40,
         ...(this.options.compactAt ? { compactAt: this.options.compactAt } : {}),
+        ...(this.options.retryBaseMs !== undefined
+          ? { retryBaseMs: this.options.retryBaseMs }
+          : {}),
         ...(this.options.workspaces ? { workspaces: this.options.workspaces } : {}),
       })
     })()

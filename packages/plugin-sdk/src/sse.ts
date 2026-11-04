@@ -44,3 +44,50 @@ export async function describeHttpError(response: Response): Promise<string> {
   }
   return `HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ''}`
 }
+
+/** Statuses that mean "try again later": timeout, rate limit, the service failing or overloaded. */
+const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504, 529])
+
+/** How long a `Retry-After` header asks to wait, in milliseconds. */
+export function retryAfterMs(response: Response): number | undefined {
+  const header = response.headers.get('retry-after')
+  if (!header) return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const at = Date.parse(header)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
+}
+
+/** The `finish` part for a failed HTTP answer, marked retryable when waiting may help. */
+export async function httpErrorPart(response: Response) {
+  const after = retryAfterMs(response)
+  return {
+    type: 'finish' as const,
+    reason: 'error' as const,
+    error: await describeHttpError(response),
+    ...(RETRYABLE_STATUS.has(response.status) ? { retryable: true } : {}),
+    ...(after !== undefined ? { retryAfterMs: after } : {}),
+  }
+}
+
+/**
+ * The `finish` part for a request that failed on the wire (refused, reset, cut off), or
+ * `null` when it was aborted on purpose.
+ */
+export function transportErrorPart(error: unknown, signal?: AbortSignal) {
+  if (signal?.aborted) return null
+  return {
+    type: 'finish' as const,
+    reason: 'error' as const,
+    error: error instanceof Error ? error.message : String(error),
+    retryable: true,
+  }
+}
+
+/** The `finish` part for a stream that ended before the service said it was done. */
+export const incompletePart = () => ({
+  type: 'finish' as const,
+  reason: 'error' as const,
+  error: 'the response stream ended before it was complete',
+  retryable: true,
+})

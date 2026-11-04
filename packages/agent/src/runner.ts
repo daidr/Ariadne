@@ -6,7 +6,7 @@ import {
   type TranscriptEntry,
 } from '@ariadne/core'
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
-import type { ModelProvider } from '@ariadne/plugin-sdk'
+import type { ModelProvider, ModelRequest, ModelStreamPart } from '@ariadne/plugin-sdk'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
 import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
@@ -36,6 +36,8 @@ export interface TurnOptions {
   workspaces?: WorkspaceManager
   /** Input size, in tokens, at which older history is summarised. */
   compactAt?: number
+  /** First wait before a model request is retried; it doubles each time. */
+  retryBaseMs?: number
 }
 
 /** Why a turn stopped early, for the user. */
@@ -197,27 +199,14 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           }
         }
       }
-      let text = ''
-      const toolCalls: ToolCallRecord[] = []
-      let usage: { input: number; output: number } | null = null
-      for await (const part of model.provider.stream(model.settings as never, {
-        model: model.model,
-        messages,
-        tools: tools.map((tool) => tool.spec),
-        signal,
-      })) {
-        if (part.type === 'text') text += part.text
-        else if (part.type === 'tool-call')
-          toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })
-        else if (part.type === 'usage') usage = { input: part.input, output: part.output }
-        else if (part.type === 'finish' && part.reason === 'error') {
-          throw new TurnError({ key: 'error.modelRequest', params: { detail: part.error ?? '' } })
-        } else if (part.type === 'finish' && part.reason === 'length') {
-          // A cut-off reply is not an answer, and cut-off tool arguments are not a call.
-          throw new TurnError({ key: 'error.truncated' })
-        }
-      }
-      if (signal.aborted) break
+      const answer = await requestStep(
+        model,
+        { model: model.model, messages, tools: tools.map((tool) => tool.spec), signal },
+        (retry) => app.recordModelRetry(conversationId, turnId, retry),
+        options.retryBaseMs ?? 1000,
+      )
+      if (signal.aborted || !answer) break
+      const { text, toolCalls, usage } = answer
       lastInput = usage?.input ?? 0
       app.recordStep(conversationId, turnId, { text, toolCalls, sawSeq, usage })
 
@@ -265,6 +254,71 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           : { key: 'error.modelRequest' as const, params: { detail: String(error) } }
     app.finishTurn(conversationId, turnId, 'failed', localized)
   }
+}
+
+/** How often a passing model error (rate limit, overload, broken connection) is retried. */
+export const MAX_MODEL_RETRIES = 4
+
+/** Longest wait between retries, whatever the service asks for. */
+const MAX_RETRY_DELAY_MS = 60_000
+
+/**
+ * One model response. Only errors the provider marks retryable are tried again, at most
+ * `MAX_MODEL_RETRIES` times with a growing wait, and each retry is recorded so the user
+ * sees it; what a failed attempt streamed is dropped. `null` when aborted.
+ */
+async function requestStep(
+  model: ResolvedModel,
+  request: ModelRequest & { signal: AbortSignal },
+  onRetry: (retry: { attempt: number; delayMs: number; detail: string }) => void,
+  baseDelayMs: number,
+): Promise<{
+  text: string
+  toolCalls: ToolCallRecord[]
+  usage: { input: number; output: number } | null
+} | null> {
+  for (let attempt = 0; ; attempt++) {
+    let text = ''
+    const toolCalls: ToolCallRecord[] = []
+    let usage: { input: number; output: number } | null = null
+    let failure: Extract<ModelStreamPart, { type: 'finish' }> | null = null
+    for await (const part of model.provider.stream(model.settings as never, request)) {
+      if (part.type === 'text') text += part.text
+      else if (part.type === 'tool-call')
+        toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })
+      else if (part.type === 'usage') usage = { input: part.input, output: part.output }
+      else if (part.type === 'finish' && part.reason === 'error') {
+        failure = part
+        break
+      } else if (part.type === 'finish' && part.reason === 'length') {
+        // A cut-off reply is not an answer, and cut-off tool arguments are not a call.
+        throw new TurnError({ key: 'error.truncated' })
+      }
+    }
+    if (request.signal.aborted) return null
+    if (!failure) return { text, toolCalls, usage }
+    const detail = (failure.error ?? '').slice(0, 500)
+    if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
+      throw new TurnError({ key: 'error.modelRequest', params: { detail } })
+    }
+    const delayMs = Math.min(MAX_RETRY_DELAY_MS, failure.retryAfterMs ?? baseDelayMs * 2 ** attempt)
+    onRetry({ attempt: attempt + 1, delayMs, detail })
+    await abortableSleep(delayMs, request.signal)
+    if (request.signal.aborted) return null
+  }
+}
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(done, ms)
+    function done() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    signal.addEventListener('abort', done, { once: true })
+  })
 }
 
 /** The newest event a step of this conversation had seen. */

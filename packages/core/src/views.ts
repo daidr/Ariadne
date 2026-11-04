@@ -41,6 +41,8 @@ export interface ThreadView {
   workspace: { label: string; branch: string | null } | null
   /** The pull request of the thread's branch, once it opened one. */
   pullRequest: ThreadPullRequest | null
+  /** Why and by whom it is held, while it is; see `thread.stopped`. */
+  stopped: { reason: string; by: string; at: number } | null
   createdAt: number
   updatedAt: number
 }
@@ -92,6 +94,7 @@ export type NoticeView = {
     }
   | { kind: 'compacted'; summary: string }
   | { kind: 'compaction-failed'; detail: string }
+  | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
 )
 
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */
@@ -186,6 +189,7 @@ export type TranscriptNote =
       attempt?: number
     }
   | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
+  | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,

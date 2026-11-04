@@ -36,6 +36,15 @@ describe('model settings', () => {
     )
   })
 
+  test('work slots are checked and kept', () => {
+    const store = new SettingsStore(path, host)
+    expect(store.current.concurrency).toEqual({ slots: 3, reserved: 1 })
+    expect(() => store.updateConcurrency({ slots: 0, reserved: 1 })).toThrow()
+    expect(() => store.updateConcurrency({ slots: 2, reserved: 1.5 })).toThrow()
+    store.updateConcurrency({ slots: 5, reserved: 0 })
+    expect(new SettingsStore(path, host).current.concurrency).toEqual({ slots: 5, reserved: 0 })
+  })
+
   test('null clears a stored secret', () => {
     const store = new SettingsStore(path, host)
     store.updateModels(provider({ baseUrl: '', apiKey: 'secret-1' }))

@@ -13,7 +13,13 @@ import {
   DouText,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
-import { ChevronLeftIcon, GitBranchIcon, RotateCwIcon, SquareStopIcon } from '@dou-ui/icons'
+import {
+  ChevronLeftIcon,
+  GitBranchIcon,
+  PlayIcon,
+  RotateCwIcon,
+  SquareStopIcon,
+} from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
@@ -26,6 +32,7 @@ import {
   retryTurn,
   sendMessage,
   state,
+  resumeThread,
   stopTurn,
   undoNotice,
 } from '../store'
@@ -154,6 +161,20 @@ watch(
               <DouText size="sm" class="relay-content">{{ item.notice.summary }}</DouText>
             </DouCollapseItem>
           </DouCollapse>
+          <DouText
+            v-else-if="item.notice.kind === 'model-retry'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t('notice.modelRetry', {
+                attempt: item.notice.attempt,
+                seconds: Math.max(1, Math.round(item.notice.delayMs / 1000)),
+                detail: item.notice.detail,
+              })
+            }}
+          </DouText>
           <DouText v-else tone="warning" size="sm" class="notice-text">
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>
@@ -213,6 +234,19 @@ watch(
     <div v-else-if="queued" class="conversation-status" role="status">
       <DouText variant="secondary" size="sm">{{ t('conversation.queued') }}</DouText>
     </div>
+    <DouAlert v-else-if="thread?.stopped" tone="warning" class="conversation-alert">
+      {{
+        t(thread.stopped.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator', {
+          reason: thread.stopped.reason,
+        })
+      }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="resumeThread(thread.id)">
+          <template #leading><PlayIcon /></template>
+          {{ t('thread.resume') }}
+        </DouButton>
+      </template>
+    </DouAlert>
     <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
       {{ tm(failure) }}
       <template #action>

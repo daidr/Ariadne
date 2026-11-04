@@ -228,6 +228,55 @@ const messageThread: Tool = {
   },
 }
 
+/** A thread of this project, or not found: never another project's. */
+function ownThread(ctx: ToolContext, threadId: string) {
+  const thread = ctx.app.getThread(threadId)
+  if (thread.projectId !== ctx.projectId)
+    throw new DomainError('error.notFound', { what: threadId })
+  return thread
+}
+
+const stopThread: Tool = {
+  spec: {
+    name: 'stop_thread',
+    description:
+      'Hold a thread: its running turn and command end now, and it does no more until resumed. Use it when a thread works beyond its brief, repeats the same failing attempt, or its work is no longer wanted. The user sees the reason on the thread and can resume it; messages sent to it meanwhile wait.',
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        reason: { type: 'string', description: 'One sentence the user reads on the thread.' },
+      },
+      required: ['threadId', 'reason'],
+    },
+  },
+  run(args, ctx) {
+    const thread = ownThread(ctx, str(args, 'threadId'))
+    if (thread.stopped) return { content: 'It was already stopped.' }
+    ctx.app.stopThread(thread.id, { reason: str(args, 'reason'), by: ctx.conversationId })
+    return { content: 'Stopped.' }
+  },
+}
+
+const resumeThread: Tool = {
+  spec: {
+    name: 'resume_thread',
+    description:
+      'Let a stopped thread go on. It is told why it had been stopped; send it a message first if it should do something different.',
+    parameters: {
+      type: 'object',
+      properties: { threadId: { type: 'string' } },
+      required: ['threadId'],
+    },
+  },
+  run(args, ctx) {
+    const thread = ownThread(ctx, str(args, 'threadId'))
+    if (!thread.stopped) return { content: 'It was not stopped.' }
+    ctx.app.resumeThread(thread.id, ctx.conversationId)
+    return { content: 'Resumed.' }
+  },
+}
+
 const listThreads: Tool = {
   spec: {
     name: 'list_threads',
@@ -243,6 +292,7 @@ const listThreads: Tool = {
         stage: t.stage,
         lastReport: t.lastReport,
         lastSummary: t.lastSummary,
+        stoppedBecause: t.stopped?.reason ?? null,
         branch: t.workspace?.branch ?? null,
         pullRequest: t.pullRequest && {
           number: t.pullRequest.number,
@@ -359,6 +409,8 @@ export const coordinatorTools: Tool[] = [
   askUser,
   createThread,
   messageThread,
+  stopThread,
+  resumeThread,
   listThreads,
   readThread,
   listMessages,

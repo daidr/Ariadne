@@ -121,4 +121,21 @@ describe('openai-compatible provider', () => {
       { type: 'finish', reason: 'error', error: 'HTTP 401: invalid key' },
     ])
   })
+
+  test('a server error and a cut-off stream are retryable; a refused connection too', async () => {
+    reply = () => new Response('bad gateway', { status: 502 })
+    expect((await collect()).at(-1)).toMatchObject({ reason: 'error', retryable: true })
+    reply = () => sse({ choices: [{ delta: { content: '半' } }] })
+    expect((await collect()).at(-1)).toMatchObject({ reason: 'error', retryable: true })
+    const parts: ModelStreamPart[] = []
+    for await (const part of openAICompatibleProvider.stream(
+      { baseUrl: 'http://127.0.0.1:1/v1', apiKey: '' },
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [] },
+    )) {
+      parts.push(part)
+    }
+    expect(parts).toEqual([
+      expect.objectContaining({ type: 'finish', reason: 'error', retryable: true }),
+    ])
+  })
 })

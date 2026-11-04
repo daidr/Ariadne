@@ -122,6 +122,35 @@ describe('anthropic provider', () => {
 
   test('reports a stream error event', async () => {
     reply = () => sse({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })
-    expect(await collect()).toEqual([{ type: 'finish', reason: 'error', error: 'Overloaded' }])
+    expect(await collect()).toEqual([
+      { type: 'finish', reason: 'error', error: 'Overloaded', retryable: true },
+    ])
+  })
+
+  test('a stream that stops before message_stop is incomplete and retryable', async () => {
+    reply = () =>
+      sse(
+        { type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '半' } },
+      )
+    const parts = await collect()
+    expect(parts.at(-1)).toMatchObject({ type: 'finish', reason: 'error', retryable: true })
+  })
+
+  test('a rate limit is retryable after the wait the service asks for', async () => {
+    reply = () =>
+      Response.json(
+        { error: { message: 'slow down' } },
+        { status: 429, headers: { 'retry-after': '3' } },
+      )
+    expect(await collect()).toEqual([
+      {
+        type: 'finish',
+        reason: 'error',
+        error: 'HTTP 429: slow down',
+        retryable: true,
+        retryAfterMs: 3000,
+      },
+    ])
   })
 })

@@ -217,6 +217,11 @@ export function createHandler({
     return json({ project: app.setProjectSource(projectId, { kind, settings: split.settings }) })
   })
 
+  // The user lets a held thread go on.
+  add('POST', '/api/threads/:threadId/resume', (_request, { threadId = '' }) =>
+    json({ thread: app.resumeThread(threadId, 'user') }),
+  )
+
   // Read the thread's pull request and checks again now, instead of waiting for the poll.
   add(
     'POST',
@@ -343,6 +348,20 @@ export function createHandler({
       return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
     settings.updateModels(await readJson(request))
     return json(settings.publicModels())
+  })
+
+  add('GET', '/api/settings/concurrency', () => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.current.concurrency)
+  })
+
+  add('PUT', '/api/settings/concurrency', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    const concurrency = settings.updateConcurrency(await readJson(request))
+    scheduler?.setSlots(concurrency.slots, concurrency.reserved)
+    return json(concurrency)
   })
 
   // The user writes to the coordinator or straight into a thread.

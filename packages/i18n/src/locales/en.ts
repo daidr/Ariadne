@@ -191,6 +191,7 @@ export const en: Record<MessageKey, string> = {
   'notice.compacted': 'Older history was summarised for the model',
   'notice.compactionFailed':
     'Summarising older history failed; this turn reads all of it: {detail}',
+  'notice.modelRetry': 'The model request failed; retry {attempt} in {seconds}s: {detail}',
   'memory.title': 'Memory',
   'memory.hint':
     'Standing preferences and conventions of the project. The coordinator and every thread follow them on every step. You and the coordinator can both change them.',
@@ -207,6 +208,10 @@ export const en: Record<MessageKey, string> = {
   'todo.next': 'Next',
   'todo.waiting': 'Waiting',
   'todo.done': 'Done',
+  'thread.stage.stopped': 'Stopped',
+  'thread.stoppedByCoordinator': 'The coordinator stopped this thread: {reason}',
+  'thread.stoppedByUser': 'This thread is stopped: {reason}',
+  'thread.resume': 'Resume',
   'thread.stage.answer': 'Awaiting your answer',
   'thread.stage.review': 'Awaiting your review',
   'thread.stage.blocked': 'Blocked',
@@ -246,6 +251,11 @@ export const en: Record<MessageKey, string> = {
     'How much the model reads at most; at six tenths of it, older history is summarised. Empty means 128',
   'settings.defaultModel': 'Model name',
   'settings.defaultModelHelp': 'The model id the service accepts',
+  'settings.slots': 'Turns at once',
+  'settings.slotsHelp': 'How many coordinator and thread turns run at the same time',
+  'settings.reservedSlots': 'Kept for you',
+  'settings.reservedSlotsHelp':
+    'Extra turns that may start to answer your messages when all are busy',
   'settings.save': 'Save',
   'settings.cancel': 'Cancel',
   'settings.saved': 'Saved',

@@ -6,6 +6,7 @@ export const stageTone: Record<
   'warning' | 'primary' | 'danger' | 'neutral' | 'success'
 > = {
   answer: 'warning',
+  stopped: 'neutral',
   review: 'primary',
   blocked: 'danger',
   queued: 'neutral',

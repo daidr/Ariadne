@@ -1,7 +1,8 @@
 import type { ReportKind } from './events'
 
 /** What a thread waits on. The first matching rule wins; see docs/architecture.md. */
-export type ThreadStage = 'answer' | 'working' | 'blocked' | 'review' | 'done' | 'queued' | 'idle'
+export type ThreadStage =
+  'answer' | 'stopped' | 'working' | 'blocked' | 'review' | 'done' | 'queued' | 'idle'
 
 export interface StageFacts {
   openAttentions: number
@@ -15,12 +16,16 @@ export interface StageFacts {
   turnFailed: boolean
   /** Its pull request's checks failed too many times in a row for it to try again alone. */
   checksGaveUp?: boolean
+  /** Held by the coordinator or the user until resumed. */
+  stopped?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
   // An unanswered question outranks everything, even `done`: the thread is not finished
   // for the user while it still asks them something.
   if (facts.openAttentions > 0) return 'answer'
+  // Held: nothing runs until it is resumed, even if its last turn is still winding down.
+  if (facts.stopped) return 'stopped'
   // Whatever it reported before, a thread with a running turn is at work again.
   if (facts.turnRunning) return 'working'
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.

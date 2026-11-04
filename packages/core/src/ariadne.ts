@@ -57,7 +57,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 13
+export const PROJECTION_VERSION = 14
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -145,7 +145,9 @@ function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
 }
 
 /** A plan node's status from the stages of the threads working on it. */
-function nodeStatus(stages: ThreadStage[]): PlanNodeStatus {
+function nodeStatus(all: ThreadStage[]): PlanNodeStatus {
+  // A held thread does not move its node either way.
+  const stages = all.filter((stage) => stage !== 'stopped')
   if (!stages.length) return 'none'
   if (stages.some((stage) => stage === 'blocked')) return 'error'
   if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'wait'
@@ -180,6 +182,9 @@ interface ThreadRow {
   workspace_branch: string | null
   pull_request: string | null
   check_failures: number
+  stopped_reason: string | null
+  stopped_by: string | null
+  stopped_at: number | null
   created_at: number
   updated_at: number
   open_attentions: number
@@ -229,6 +234,7 @@ function toThread(row: ThreadRow): ThreadView {
       turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
       checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
+      stopped: row.stopped_reason !== null,
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -237,6 +243,10 @@ function toThread(row: ThreadRow): ThreadView {
         ? null
         : { label: row.workspace_label, branch: row.workspace_branch },
     pullRequest: row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null,
+    stopped:
+      row.stopped_reason === null
+        ? null
+        : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -411,7 +421,9 @@ export class Ariadne {
   listPendingConversations(): ConversationView[] {
     return this.db
       .query<ConversationRow, []>(
-        'SELECT * FROM conversations WHERE pending_seq > 0 AND turn_id IS NULL ORDER BY pending_since',
+        `SELECT * FROM conversations WHERE pending_seq > 0 AND turn_id IS NULL
+           AND id NOT IN (SELECT id FROM threads WHERE stopped_reason IS NOT NULL)
+         ORDER BY pending_since`,
       )
       .all()
       .map(toConversation)
@@ -482,6 +494,18 @@ export class Ariadne {
     ])
   }
 
+  /** The model request is tried again after `delayMs`; the user sees each retry. */
+  recordModelRetry(
+    conversationId: string,
+    turnId: string,
+    retry: { attempt: number; delayMs: number; detail: string },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'conversation.model_retry', projectId, data: { conversationId, ...retry } },
+    ])
+  }
+
   // ---- commands ----
 
   createProject(name: string): ProjectView {
@@ -523,6 +547,38 @@ export class Ariadne {
   startThread(threadId: string): ThreadView {
     const thread = this.getThread(threadId)
     this.store.append([{ type: 'thread.started', projectId: thread.projectId, data: { threadId } }])
+    return this.getThread(threadId)
+  }
+
+  /**
+   * Hold a thread: its running turn is ended by the scheduler, and no new one starts until
+   * it is resumed. Input that arrives meanwhile waits for then.
+   */
+  stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
+    const thread = this.getThread(threadId)
+    const reason = input.reason.trim()
+    if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
+    if (thread.stopped) return thread
+    this.store.append([
+      {
+        type: 'thread.stopped',
+        projectId: thread.projectId,
+        data: { threadId, reason, by: input.by },
+      },
+    ])
+    return this.getThread(threadId)
+  }
+
+  resumeThread(threadId: string, by: string): ThreadView {
+    const thread = this.getThread(threadId)
+    if (!thread.stopped) return thread
+    this.store.append([
+      {
+        type: 'thread.resumed',
+        projectId: thread.projectId,
+        data: { threadId, by, reason: thread.stopped.reason },
+      },
+    ])
     return this.getThread(threadId)
   }
 

@@ -334,3 +334,8 @@ export async function undoNotice(noticeId: string) {
   if (!projectId) return
   await api.undoNotice(projectId, noticeId).catch(report)
 }
+
+/** Let a thread the coordinator stopped go on. */
+export async function resumeThread(threadId: string) {
+  await api.resumeThread(threadId).catch(report)
+}

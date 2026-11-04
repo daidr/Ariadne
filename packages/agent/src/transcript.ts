@@ -31,6 +31,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       }
       return `${head} Others may still be running: repo_status lists them all. Read the failed logs with read_check_log, fix the cause in your workspace, commit and push_branch again; if the default branch moved on, sync_branch and merge it first. If the failure is not caused by your change, report it as blocked with what you found.\n</checks_failed>`
     }
+    case 'thread-resumed':
+      return `<thread_resumed thread="${note.threadId}" title="${titleOf(note.threadId)}" by="${note.by === 'user' ? 'user' : 'coordinator'}">\nThe thread had been stopped because: ${note.reason}\nIt goes on from where it was, with that reason in mind.\n</thread_resumed>`
     case 'pull-request-closed':
       return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
     case 'proposal-stale':
