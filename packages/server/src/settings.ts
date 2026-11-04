@@ -46,20 +46,26 @@ export interface ModelConfig {
 
 /**
  * The model a role uses and how hard it thinks there. `effort: null` asks nothing of the
- * model: some reject the parameter. `model: null` on the coordinator uses the threads' model.
+ * model: some reject the parameter. `model: null` on the coordinator uses the threads'
+ * model, and on triage the coordinator's.
  */
 export interface RoleConfig {
   model: string | null
   effort: Effort | null
 }
 
-export type Role = 'coordinator' | 'thread'
+/**
+ * `triage` is the coordinator's quick look at what the user wrote inside a thread, when
+ * nothing else waits for it: it only decides whether the request belongs elsewhere.
+ */
+export type Role = 'coordinator' | 'thread' | 'triage'
+const ROLES: Role[] = ['thread', 'coordinator', 'triage']
 
 export interface ModelsConfig {
   providers: ModelProviderConfig[]
   models: ModelConfig[]
   /** Threads do the work, so their model comes first; the coordinator may use another. */
-  roles: { thread: RoleConfig; coordinator: RoleConfig }
+  roles: Record<Role, RoleConfig>
 }
 
 /** A server's id: short, so tool names stay within what model services take. */
@@ -97,7 +103,11 @@ export interface UserConfig {
 const defaults = (): UserConfig => ({
   locale: 'zh-CN',
   plugins: [],
-  models: { providers: [], models: [], roles: { thread: noRole(), coordinator: noRole() } },
+  models: {
+    providers: [],
+    models: [],
+    roles: { thread: noRole(), coordinator: noRole(), triage: noRole() },
+  },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
@@ -120,6 +130,7 @@ export function loadUserConfig(path: string): UserConfig {
       roles: {
         thread: storedRole(stored.models?.roles?.thread),
         coordinator: storedRole(stored.models?.roles?.coordinator),
+        triage: storedRole(stored.models?.roles?.triage),
       },
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
@@ -270,7 +281,7 @@ export class SettingsStore {
       models: {
         providers,
         models,
-        roles: { thread: role('thread'), coordinator: role('coordinator') },
+        roles: Object.fromEntries(ROLES.map((key) => [key, role(key)])) as Record<Role, RoleConfig>,
       },
     }
     this.save()
@@ -479,6 +490,7 @@ export class SettingsStore {
   resolveModel(role: Role, given: string | null = null): ResolvedModel | null {
     const chosen = this.modelFor(role, given)
     if (!chosen) return null
+    const effort = this.effortFor(role)
     const config = this.config.models.providers.find((p) => p.id === chosen.provider)
     if (!config) return null
     const provider = this.host.models.get(config.kind)
@@ -497,16 +509,26 @@ export class SettingsStore {
       label: this.labelOf(chosen),
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
       images: chosen.images !== false,
-      ...(this.config.models.roles[role].effort
-        ? { effort: this.config.models.roles[role].effort }
-        : {}),
+      ...(effort ? { effort } : {}),
     }
+  }
+
+  /** How hard a role thinks; triage left wholly unset is the coordinator as it is. */
+  private effortFor(role: Role): Effort | null {
+    const { roles } = this.config.models
+    if (role === 'triage' && !roles.triage.model && !roles.triage.effort) {
+      return roles.coordinator.effort
+    }
+    return roles[role].effort
   }
 
   /** The model setting a role (or a thread given `given`) uses, or `null`. */
   modelFor(role: Role, given: string | null = null): ModelConfig | null {
     const { models, roles } = this.config.models
     const find = (id: string | null) => (id ? (models.find((m) => m.id === id) ?? null) : null)
+    if (role === 'triage') {
+      return find(roles.triage.model) ?? find(roles.coordinator.model) ?? find(roles.thread.model)
+    }
     if (role === 'coordinator') return find(roles.coordinator.model) ?? find(roles.thread.model)
     return find(given) ?? find(roles.thread.model)
   }

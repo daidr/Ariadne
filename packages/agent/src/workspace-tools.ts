@@ -2,7 +2,6 @@ import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
 import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
 import { imageType } from './message-images'
 import {
-  json,
   optionalInt,
   optionalStr,
   str,
@@ -24,10 +23,12 @@ export function shellQuote(value: string): string {
 function workspaceTool<W = Workspace>(
   spec: Tool['spec'],
   run: (args: Record<string, unknown>, workspace: W, ctx: ToolContext) => Promise<ToolResult>,
-  open: (ctx: ToolContext) => Promise<W> = (ctx) => ctx.workspace() as Promise<W>,
+  options: { open?: (ctx: ToolContext) => Promise<W>; readOnly?: boolean } = {},
 ): Tool {
+  const open = options.open ?? ((ctx: ToolContext) => ctx.workspace() as Promise<W>)
   return {
     spec,
+    ...(options.readOnly ? { readOnly: true } : {}),
     async run(args, ctx) {
       const workspace = await open(ctx)
       try {
@@ -63,6 +64,7 @@ const listDir = workspaceTool(
     },
   },
   listEntries,
+  { readOnly: true },
 )
 
 /** An image of the workspace, kept in the project's files and handed to the model. */
@@ -174,6 +176,7 @@ const readFile = workspaceTool(
       ctx,
       'Look at the part you need with run_command instead (e.g. grep -n, sed -n or head).',
     ),
+  { readOnly: true },
 )
 
 const writeFile = workspaceTool(
@@ -251,13 +254,80 @@ const search = workspaceTool(
       return { content: result.stderr, isError: true }
     return { content: result.stdout || 'No matches.' }
   },
+  { readOnly: true },
 )
+
+/** What run_command hands the model of a command's output, stdout and stderr together. */
+export const MAX_COMMAND_CHARS = 30_000
+/** Where a cut output is kept whole, inside the workspace; the directory ignores itself. */
+export const OUTPUT_DIR = '.ariadne/output'
+
+/**
+ * `text` cut to about `budget` characters: its beginning (what ran) and, larger, its end
+ * (where errors and summaries are), at line boundaries when one is near.
+ */
+export function headAndTail(text: string, budget: number, where: string): string {
+  if (text.length <= budget) return text
+  let head = Math.floor(budget * 0.4)
+  let tail = text.length - (budget - head)
+  const headLine = text.lastIndexOf('\n', head)
+  if (headLine > 0 && headLine > head - 400) head = headLine + 1
+  const tailLine = text.indexOf('\n', tail)
+  if (tailLine !== -1 && tailLine < tail + 400) tail = tailLine + 1
+  return `${text.slice(0, head)}[… ${tail - head} characters cut; ${where} …]\n${text.slice(tail)}`
+}
+
+/** How much of each stream fits: a short one is kept whole and the other gets the rest. */
+function budgets(stdout: number, stderr: number): [number, number] {
+  if (stdout + stderr <= MAX_COMMAND_CHARS) return [stdout, stderr]
+  const half = MAX_COMMAND_CHARS / 2
+  if (stderr <= half) return [MAX_COMMAND_CHARS - stderr, stderr]
+  if (stdout <= half) return [stdout, MAX_COMMAND_CHARS - stdout]
+  return [half, half]
+}
+
+/**
+ * A command's result as the model reads it: the exit code, then each stream as plain text.
+ * Output too long to read whole is cut in the middle, and kept whole in the workspace
+ * where read_file and search can look into it.
+ */
+export async function commandResult(
+  result: { exitCode: number; stdout: string; stderr: string },
+  workspace: Pick<Workspace, 'writeFile'>,
+  name: string,
+): Promise<string> {
+  const { stdout, stderr } = result
+  const [outBudget, errBudget] = budgets(stdout.length, stderr.length)
+  let where = 'the whole output could not be kept'
+  if (outBudget < stdout.length || errBudget < stderr.length) {
+    const path = `${OUTPUT_DIR}/${name}.log`
+    try {
+      await workspace.writeFile('.ariadne/.gitignore', '*\n')
+      await workspace.writeFile(
+        path,
+        `exit code ${result.exitCode}\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`,
+      )
+      where = `the whole output is in ${path}`
+    } catch {
+      // The cut output still says what it can.
+    }
+  }
+  const parts = [`exit code ${result.exitCode}`]
+  if (stdout) parts.push(`--- stdout ---\n${headAndTail(stdout, outBudget, where)}`)
+  if (stderr) parts.push(`--- stderr ---\n${headAndTail(stderr, errBudget, where)}`)
+  if (!stdout && !stderr) parts.push('(no output)')
+  return parts.join('\n')
+}
+
+let outputs = 0
+/** A name for a kept output that sorts by time and does not repeat within a process. */
+const outputName = () =>
+  `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '')}-${(++outputs).toString(36)}`
 
 const runCommand = workspaceTool(
   {
     name: 'run_command',
-    description:
-      'Run a shell command in your workspace (bash), e.g. tests, a build, or git. It needs no approval inside the workspace; anything that reaches outside it and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block).',
+    description: `Run a shell command in your workspace (bash), e.g. tests, a build, or git. It needs no approval inside the workspace; anything that reaches outside it and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${MAX_COMMAND_CHARS / 1000}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names.`,
     parameters: {
       type: 'object',
       properties: {
@@ -277,7 +347,7 @@ const runCommand = workspaceTool(
       ...(cwd ? { cwd } : {}),
     })
     return {
-      ...json({ exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }),
+      content: await commandResult(result, workspace, outputName()),
       isError: result.exitCode !== 0,
     }
   },
@@ -312,7 +382,7 @@ export const sourceTools: Tool[] = [
       },
     },
     async (args, view) => fromRef(view, await listEntries(args, view)),
-    openSource,
+    { open: openSource, readOnly: true },
   ),
   workspaceTool(
     {
@@ -330,6 +400,6 @@ export const sourceTools: Tool[] = [
           'Read another file, or leave a closer look at this one to a thread.',
         ),
       ),
-    openSource,
+    { open: openSource, readOnly: true },
   ),
 ]

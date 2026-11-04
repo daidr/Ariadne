@@ -53,6 +53,11 @@ export interface ConversationState {
   from: string | null
   /** An earlier page is on its way. */
   loadingEarlier: boolean
+  /**
+   * The newest event what is shown holds; later refreshes fetch only what changed after it.
+   * `null` until the first page is in.
+   */
+  seq: number | null
 }
 
 const emptyConversation = (): ConversationState => ({
@@ -64,6 +69,7 @@ const emptyConversation = (): ConversationState => ({
   more: false,
   from: null,
   loadingEarlier: false,
+  seq: null,
 })
 
 /** A message to bring into view and mark for a moment, e.g. one the search found. */
@@ -109,8 +115,6 @@ interface State {
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
-  /** Bumped whenever the open project's events arrive, so open views can reload. */
-  revision: number
   error: string | null
 }
 
@@ -133,7 +137,6 @@ export const state = reactive<State>({
   sourceOpen: false,
   focus: null,
   searchOpen: false,
-  revision: 0,
   error: null,
 })
 
@@ -147,29 +150,61 @@ async function refreshProjects() {
   return lastSeq
 }
 
-async function refreshCurrent() {
+/** The parts of the open project the page loads, each refreshed when an event touches it. */
+type Part = 'detail' | 'conversations' | 'plan' | 'artifacts' | 'memories'
+const ALL_PARTS: readonly Part[] = ['detail', 'conversations', 'plan', 'artifacts', 'memories']
+
+/**
+ * Load the open project's `parts`. Conversations already shown fetch only what changed
+ * since they were last loaded. Refreshes run one after another, so a slow answer never
+ * lands on top of a newer one.
+ */
+let refreshing: Promise<void> = Promise.resolve()
+function refreshCurrent(parts: Iterable<Part> = ALL_PARTS): Promise<void> {
+  const wanted = new Set(parts)
+  const run = refreshing.then(() => loadParts(wanted))
+  refreshing = run.catch(() => {})
+  return run
+}
+
+async function loadParts(parts: ReadonlySet<Part>) {
   const id = state.currentId
   const threadId = state.threadId
   if (!id) return
-  const detail = await api.getProject(id)
-  const coordinatorFrom = state.coordinator.from
-  const threadFrom = state.thread.from
+  const detail = parts.has('detail') || !state.detail ? await api.getProject(id) : state.detail
+  const conversations = parts.has('conversations')
   const [coordinator, thread, plan, artifacts, memory] = await Promise.all([
-    api.getConversation(detail.project.coordinatorId, cursorFrom(coordinatorFrom)),
-    threadId ? api.getConversation(threadId, cursorFrom(threadFrom)) : null,
-    api.getPlan(id),
-    api.listArtifacts(id),
-    api.listMemories(id),
+    conversations ? fetchConversation(detail.project.coordinatorId, state.coordinator) : null,
+    conversations && threadId ? fetchConversation(threadId, state.thread) : null,
+    parts.has('plan') ? api.getPlan(id) : null,
+    parts.has('artifacts') ? api.listArtifacts(id) : null,
+    parts.has('memories') ? api.listMemories(id) : null,
   ])
   // The user may have switched while this was loading; a late answer is stale.
   if (state.currentId !== id || state.threadId !== threadId) return
   state.detail = detail
-  state.coordinator = take(state.coordinator, coordinator, coordinatorFrom)
-  state.thread = thread ? take(state.thread, thread, threadFrom) : emptyConversation()
-  state.plan = plan.plan
-  state.artifacts = artifacts.artifacts
-  state.memories = memory.memories
-  state.revision++
+  if (coordinator) state.coordinator = coordinator(state.coordinator)
+  if (conversations) state.thread = thread ? thread(state.thread) : emptyConversation()
+  if (plan) state.plan = plan.plan
+  if (artifacts) state.artifacts = artifacts.artifacts
+  if (memory) state.memories = memory.memories
+}
+
+/**
+ * Fetch a conversation: whole from where it starts on screen the first time, then only
+ * what changed. Gives what to make of the state on screen once the answer is in.
+ */
+async function fetchConversation(
+  conversationId: string,
+  current: ConversationState,
+): Promise<(now: ConversationState) => ConversationState> {
+  const { from, seq } = current
+  if (seq === null || current.conversation?.id !== conversationId) {
+    const page = await api.getConversation(conversationId, cursorFrom(from))
+    return (now) => take(now, page, from)
+  }
+  const page = await api.getConversation(conversationId, { since: seq, ...cursorFrom(from) })
+  return (now) => merge(now, page)
 }
 
 type ConversationPage = Awaited<ReturnType<typeof api.getConversation>>
@@ -214,6 +249,37 @@ function take(
     // Hold on to where it starts, so the next refresh brings the same messages and more.
     from: page.messages[0]?.id ?? from,
     loadingEarlier: current.loadingEarlier,
+    seq: page.lastSeq,
+  }
+}
+
+/** The conversation on screen with what changed in it: new messages added, changed ones replaced. */
+export function merge(current: ConversationState, page: ConversationPage): ConversationState {
+  const messages = [...current.messages]
+  for (const message of page.messages) {
+    const at = messages.findIndex((shown) => shown.id === message.id)
+    if (at !== -1) messages[at] = message
+    else if (!current.from || message.id >= current.from) messages.push(message)
+  }
+  messages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  // A notice before the first message loaded comes with the earlier page instead.
+  const firstAt = current.more ? (messages[0]?.createdAt ?? Infinity) : -Infinity
+  const notices = [...current.notices]
+  for (const notice of page.notices) {
+    const at = notices.findIndex((shown) => shown.id === notice.id)
+    if (at !== -1) notices[at] = notice
+    else if (notice.createdAt >= firstAt) notices.push(notice)
+  }
+  notices.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return {
+    ...current,
+    conversation: page.conversation,
+    todo: page.todo,
+    model: page.model,
+    messages,
+    notices,
+    from: current.from ?? messages[0]?.id ?? null,
+    seq: Math.max(current.seq ?? 0, page.lastSeq),
   }
 }
 
@@ -277,6 +343,7 @@ export async function openMessage(conversationId: string, messageId: string) {
         notices: page.notices,
         more: page.more,
         from: page.messages[0]?.id ?? null,
+        seq: page.lastSeq,
       }
     } catch (error) {
       report(error)
@@ -307,7 +374,7 @@ export async function openThread(threadId: string | null) {
   if (state.threadId === threadId) return
   state.threadId = threadId
   state.thread = emptyConversation()
-  await refreshCurrent().catch(report)
+  await refreshCurrent(['conversations']).catch(report)
 }
 
 export async function createProject(name: string) {
@@ -526,15 +593,58 @@ export async function answerAttention(id: string, answer: BlockAnswer) {
   await api.answerAttention(id, answer).catch(report)
 }
 
-// Coalesce bursts of events into one refresh per frame, remembering every project touched.
+// Coalesce bursts of events into one refresh per frame, remembering every project touched
+// and which parts of the open one.
 let pending = false
 const touched = new Set<string>()
+const parts = new Set<Part>()
 const listeners = new Set<(event: AnyStoredEvent) => void>()
 
 /** Hear every event as it arrives, e.g. to notify the user. */
 export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/**
+ * What an event changes of the open project's parts, by the group its type starts with.
+ * A group not listed refreshes every part: a new event is never missed, only fetched more
+ * than it needs.
+ */
+export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
+  switch (type.split('.')[0]) {
+    case 'prompt':
+      return []
+    case 'memory':
+      return ['memories', 'conversations']
+    case 'artifact':
+      return ['artifacts', 'conversations']
+    // What a turn does while it runs; its threads' stages on the plan stay as they are.
+    case 'tool':
+    case 'todo':
+    case 'conversation':
+    case 'notice':
+    case 'project':
+      return ['detail', 'conversations']
+    case 'turn':
+      return type === 'turn.step'
+        ? ['detail', 'conversations']
+        : ['detail', 'conversations', 'plan']
+    // Anything that may move a thread's stage, which the plan's nodes show.
+    case 'plan':
+    case 'thread':
+    case 'message':
+    case 'attention':
+    case 'workspace':
+    case 'branch':
+    case 'pull_request':
+    case 'checks':
+    case 'issue':
+    case 'mcp':
+      return ['detail', 'conversations', 'plan']
+    default:
+      return ALL_PARTS
+  }
 }
 
 function onEvent(event: AnyStoredEvent) {
@@ -544,15 +654,20 @@ function onEvent(event: AnyStoredEvent) {
     forgetProject(event.projectId)
     return
   }
+  // A piece of model input stored once changes nothing on screen.
+  if (event.type === 'prompt.recorded') return
   touched.add(event.projectId)
+  if (event.projectId === state.currentId) for (const part of partsOf(event.type)) parts.add(part)
   if (pending) return
   pending = true
   requestAnimationFrame(() => {
     pending = false
     const current = state.currentId !== null && touched.has(state.currentId)
+    const changed = [...parts]
     touched.clear()
+    parts.clear()
     void refreshProjects().catch(report)
-    if (current) void refreshCurrent().catch(report)
+    if (current && changed.length) void refreshCurrent(changed).catch(report)
   })
 }
 

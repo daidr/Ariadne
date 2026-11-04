@@ -61,8 +61,12 @@ const models = ref<DraftModel[]>([])
 const threadModel = ref<string | null>(null)
 const threadEffort = ref<Effort | ''>('')
 const coordinatorEffort = ref<Effort | ''>('')
-// `''` stands for "the coordinator's", which the select cannot hold as `null`.
+// `''` stands for "the threads'", which the select cannot hold as `null`.
 const coordinatorModel = ref<string>('')
+// What the user writes inside a thread gets a quick look from the coordinator; `''` is the
+// coordinator's own model.
+const triageModel = ref<string>('')
+const triageEffort = ref<Effort | ''>('')
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -85,6 +89,10 @@ const modelOptions = computed(() =>
 )
 const coordinatorOptions = computed(() => [
   { value: '', label: t('settings.sameAsThreads') },
+  ...modelOptions.value,
+])
+const triageOptions = computed(() => [
+  { value: '', label: t('settings.sameAsCoordinator') },
   ...modelOptions.value,
 ])
 const effortOptions = computed(() => [
@@ -114,6 +122,8 @@ function load(settings: ModelSettings) {
   threadEffort.value = settings.roles.thread.effort ?? ''
   coordinatorModel.value = settings.roles.coordinator.model ?? ''
   coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
+  triageModel.value = settings.roles.triage.model ?? ''
+  triageEffort.value = settings.roles.triage.effort ?? ''
 }
 
 const tab = ref<'models' | 'notifications' | 'plugins' | 'mcp' | 'worktrees'>('models')
@@ -175,6 +185,7 @@ function removeModel(id: string) {
   models.value = models.value.filter((model) => model.id !== id)
   if (threadModel.value === id) threadModel.value = models.value[0]?.id ?? null
   if (coordinatorModel.value === id) coordinatorModel.value = ''
+  if (triageModel.value === id) triageModel.value = ''
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -228,6 +239,10 @@ async function save() {
           coordinator: {
             model: keep(coordinatorModel.value || null),
             effort: coordinatorEffort.value || null,
+          },
+          triage: {
+            model: keep(triageModel.value || null),
+            effort: triageEffort.value || null,
           },
         },
       }),
@@ -362,6 +377,18 @@ async function save() {
                 </DouFormItem>
                 <DouFormItem :label="t('settings.effort')" class="settings-effort">
                   <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                </DouFormItem>
+              </div>
+              <div class="settings-row">
+                <DouFormItem
+                  :label="t('settings.triageModel')"
+                  :help="t('settings.triageModelHelp')"
+                  class="settings-grow"
+                >
+                  <DouSelect v-model="triageModel" :options="triageOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                  <DouSelect v-model="triageEffort" :options="effortOptions" />
                 </DouFormItem>
               </div>
             </template>

@@ -294,6 +294,7 @@ async function fetchSource(
 }
 
 const listDashboardSources: Tool = {
+  readOnly: true,
   spec: {
     name: 'list_dashboard_sources',
     description:
@@ -438,6 +439,7 @@ const updateDashboard: Tool = {
 // ---- any kind ----
 
 const readArtifact: Tool = {
+  readOnly: true,
   spec: {
     name: 'read_artifact',
     description:
@@ -472,6 +474,7 @@ const readArtifact: Tool = {
 }
 
 const listArtifacts: Tool = {
+  readOnly: true,
   spec: {
     name: 'list_artifacts',
     description: "List the project's documents, whiteboards and dashboards, newest first.",

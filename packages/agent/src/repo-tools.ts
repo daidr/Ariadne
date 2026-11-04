@@ -78,6 +78,7 @@ async function branchOf(ctx: ToolContext): Promise<string> {
 }
 
 const repoStatus: Tool = {
+  readOnly: true,
   spec: {
     name: 'repo_status',
     description:
@@ -254,6 +255,7 @@ const openPullRequest: Tool = {
 }
 
 const readCheckLog: Tool = {
+  readOnly: true,
   spec: {
     name: 'read_check_log',
     description: "The end of a check's log, by the id repo_status lists, to see why it failed.",

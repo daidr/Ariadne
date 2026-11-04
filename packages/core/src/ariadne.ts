@@ -99,7 +99,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 32
+export const PROJECTION_VERSION = 33
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -112,6 +112,7 @@ const TURN_EVENT_TYPES = [
   'turn.finished',
   'conversation.model_retry',
   'conversation.compacted',
+  'conversation.results_cleared',
   'conversation.compaction_failed',
   'conversation.instructions',
 ] as const
@@ -428,6 +429,25 @@ function toAttention(row: AttentionRow, joinedBy: string[] = []): AttentionView 
   }
 }
 
+interface NoticeRow {
+  id: string
+  conversation_id: string
+  kind: string
+  payload: string
+  undone: number
+  created_at: number
+}
+
+function toNotice(row: NoticeRow): NoticeView {
+  const base = { id: row.id, conversationId: row.conversation_id, createdAt: row.created_at }
+  const payload = JSON.parse(row.payload)
+  return (
+    row.kind === 'memory'
+      ? { ...base, kind: 'memory', ...payload, undone: row.undone === 1 }
+      : { ...base, kind: row.kind, ...payload }
+  ) as NoticeView
+}
+
 function toMessage(row: MessageRow): MessageView {
   return {
     id: row.id,
@@ -602,9 +622,10 @@ export class Ariadne {
    */
   pageMessages(
     conversationId: string,
-    cursor: { before?: string; from?: string; limit?: number } = {},
+    cursor: { before?: string; from?: string; limit?: number; since?: number } = {},
   ): MessagePage {
     const limit = Math.max(1, Math.min(cursor.limit ?? MESSAGE_PAGE, 500))
+    if (cursor.since !== undefined) return this.changedMessages(conversationId, cursor)
     let messages: MessageView[]
     if (cursor.from !== undefined) {
       messages = this.db
@@ -641,6 +662,32 @@ export class Ariadne {
       ...(end === undefined ? {} : { to: end }),
     })
     return { messages, notices, more }
+  }
+
+  /**
+   * What changed in a conversation after event `since`: messages posted or changed (an
+   * edit, an answer to the question they ask), from `from` on, and notices. Pages already
+   * shown are brought up to date with it instead of being fetched again.
+   */
+  private changedMessages(
+    conversationId: string,
+    cursor: { from?: string; since?: number },
+  ): MessagePage {
+    const since = cursor.since ?? 0
+    const messages = this.db
+      .query<MessageRow, [string, string, number, number]>(
+        `${MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.id >= ?
+           AND (m.changed_seq > ? OR coalesce(a.changed_seq, 0) > ?) ORDER BY m.id`,
+      )
+      .all(conversationId, cursor.from ?? '', since, since)
+      .map(toMessage)
+    const notices = this.db
+      .query<NoticeRow, [string, number]>(
+        'SELECT * FROM notices WHERE conversation_id = ? AND changed_seq > ? ORDER BY created_at, id',
+      )
+      .all(conversationId, since)
+      .map(toNotice)
+    return { messages, notices, more: false }
   }
 
   /**
@@ -744,18 +791,22 @@ export class Ariadne {
   /**
    * Everything this conversation's agent has seen, oldest first. With `upTo`, only what
    * was there once event `upTo` was written, messages as they read then: the input a step
-   * that had seen up to it was built from.
+   * that had seen up to it was built from. With `after`, only what came after event
+   * `after`, to add to what was read before (see `messagesChangedSince`).
    */
-  listTranscript(conversationId: string, options: { upTo?: number } = {}): TranscriptEntry[] {
+  listTranscript(
+    conversationId: string,
+    options: { upTo?: number; after?: number } = {},
+  ): TranscriptEntry[] {
     const upTo = options.upTo ?? Number.MAX_SAFE_INTEGER
     const rows = this.db
       .query<
         { seq: number; kind: string; ref: string | null; payload: string | null },
-        [string, number]
+        [string, number, number]
       >(
-        'SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? AND seq <= ? ORDER BY id',
+        'SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? AND seq > ? AND seq <= ? ORDER BY id',
       )
-      .all(conversationId, upTo)
+      .all(conversationId, options.after ?? -1, upTo)
     const entries: TranscriptEntry[] = []
     for (const row of rows) {
       const payload = row.payload ? JSON.parse(row.payload) : null
@@ -786,9 +837,44 @@ export class Ariadne {
         case 'summary':
           entries.push({ seq: row.seq, kind: 'summary', ...payload })
           break
+        case 'cleared':
+          entries.push({ seq: row.seq, kind: 'cleared', ...payload })
+          break
       }
     }
     return entries
+  }
+
+  /**
+   * Whether a message of the conversation was changed (edited) after event `seq`: what
+   * `listTranscript` gave before then no longer holds, and must be read again.
+   */
+  messagesChangedSince(conversationId: string, seq: number): boolean {
+    return !!this.db
+      .query<{ one: number }, [string, number]>(
+        `SELECT 1 AS one FROM messages WHERE conversation_id = ? AND changed_seq > ?
+           AND edited_at IS NOT NULL LIMIT 1`,
+      )
+      .get(conversationId, seq)
+  }
+
+  /**
+   * Clear the long tool results a conversation's model read up to `upTo`, during one of
+   * its turns, to make room. The log keeps them; the model reads a placeholder.
+   */
+  clearToolResults(
+    conversationId: string,
+    turnId: string,
+    clearing: { upTo: number; sawSeq: number },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      {
+        type: 'conversation.results_cleared',
+        projectId,
+        data: { conversationId, upTo: clearing.upTo, sawSeq: clearing.sawSeq },
+      },
+    ])
   }
 
   /**
@@ -1763,30 +1849,12 @@ export class Ariadne {
    */
   listNotices(conversationId: string, range: { from?: number; to?: number } = {}): NoticeView[] {
     return this.db
-      .query<
-        {
-          id: string
-          conversation_id: string
-          kind: string
-          payload: string
-          undone: number
-          created_at: number
-        },
-        [string, number, number]
-      >(
+      .query<NoticeRow, [string, number, number]>(
         `SELECT * FROM notices WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
          ORDER BY created_at, id`,
       )
       .all(conversationId, range.from ?? -1, range.to ?? Number.MAX_SAFE_INTEGER)
-      .map((row) => {
-        const base = { id: row.id, conversationId: row.conversation_id, createdAt: row.created_at }
-        const payload = JSON.parse(row.payload)
-        return (
-          row.kind === 'memory'
-            ? { ...base, kind: 'memory', ...payload, undone: row.undone === 1 }
-            : { ...base, kind: row.kind, ...payload }
-        ) as NoticeView
-      })
+      .map(toNotice)
   }
 
   /**
@@ -2459,6 +2527,8 @@ export class Ariadne {
       usage: TokenUsage | null
       input: { system: string; tools: string; call: string; images: boolean }
       timing: CallTiming
+      /** The output hit the length limit; `toolCalls` are only those that came whole. */
+      cut?: boolean
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
@@ -2470,7 +2540,11 @@ export class Ariadne {
       images: step.input.images,
     }
     const { text, reasoning, toolCalls, sawSeq, usage, timing } = step
-    const finish = toolCalls.length ? ('tool-calls' as const) : ('stop' as const)
+    const finish = step.cut
+      ? ('length' as const)
+      : toolCalls.length
+        ? ('tool-calls' as const)
+        : ('stop' as const)
     this.store.append([
       ...pieces,
       {
@@ -2640,6 +2714,27 @@ export class Ariadne {
   }
 
   /** Whether the newest unseen input of a conversation is a message the user wrote. */
+  /**
+   * Whether all the coordinator has waiting is what the user wrote inside threads (and
+   * progress reports, which need nothing): the turn only decides where those belong.
+   */
+  pendingIsTriage(conversationId: string): boolean {
+    const rows = this.db
+      .query<{ kind: string; payload: string | null }, [string]>(
+        `SELECT t.kind, t.payload FROM conversations c
+           JOIN transcript t ON t.conversation_id = c.id AND t.seq >= c.pending_since
+         WHERE c.id = ? AND c.pending_seq > 0 AND c.role = 'coordinator'`,
+      )
+      .all(conversationId)
+    let triage = false
+    for (const row of rows) {
+      const note = row.kind === 'note' && row.payload ? JSON.parse(row.payload) : null
+      if (note?.type === 'user-in-thread') triage = true
+      else if (!(note?.type === 'report' && note.report === 'progress')) return false
+    }
+    return triage
+  }
+
   pendingIsUserMessage(conversationId: string): boolean {
     const row = this.db
       .query<{ author: string }, [string]>(

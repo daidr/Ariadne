@@ -335,7 +335,7 @@ export const en: Record<MessageKey, string> = {
   'error.repeating':
     'The same call came back {count} times with the same result, so this turn was stopped',
   'error.truncated':
-    'The reply went over the per-response token limit and was cut off; raise the limit in model settings and retry',
+    'The reply went over the per-response token limit {count} times in a row, so this turn stopped; raise the limit in model settings and retry',
   'error.interrupted': 'The server stopped mid-turn; work resumed from there',
   'error.planInvalid': 'Invalid plan change: {reason}',
   'error.planConflict':
@@ -441,6 +441,10 @@ export const en: Record<MessageKey, string> = {
   'settings.threadModel': 'Threads use by default',
   'settings.coordinatorModel': 'Coordinator uses',
   'settings.sameAsThreads': 'Same as threads',
+  'settings.triageModel': 'Triage uses',
+  'settings.triageModelHelp':
+    'What you write in a thread gets a quick look from the coordinator, to see whether it belongs elsewhere',
+  'settings.sameAsCoordinator': 'Same as the coordinator',
   'settings.effort': 'Thinking',
   'settings.effort.default': 'Default',
   'settings.effort.low': 'Low',
@@ -501,6 +505,8 @@ export const en: Record<MessageKey, string> = {
   'trace.kind.retry': 'Retry',
   'trace.kind.instructions': 'Instructions',
   'trace.kind.compactionFailed': 'Summary failed',
+  'trace.kind.resultsCleared': 'Cleared',
+  'trace.resultsCleared': 'Older long tool results were replaced by a placeholder to make room',
   'trace.tab.overview': 'Summary',
   'trace.tab.body': 'Body',
   'trace.tab.messages': 'Messages',
@@ -528,6 +534,7 @@ export const en: Record<MessageKey, string> = {
   'trace.field.wait': 'Wait',
   'trace.finish.stop': 'Answered',
   'trace.finish.tool-calls': 'Called tools',
+  'trace.finish.length': 'Hit the length limit',
   'trace.noBody': 'The plugin gave no body; this is the request it was handed',
   'trace.redacted': '(encrypted thinking)',
   'trace.noResult': 'No result yet',

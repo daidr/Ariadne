@@ -107,6 +107,35 @@ describe('model settings', () => {
     })
     // A model the thread was given that is no longer set up falls back to the default.
     expect(store.resolveModel('thread', 'gone')?.model).toBe('large')
+    // Triage left unset is the coordinator as it is; given a model, it uses that.
+    expect(store.resolveModel('triage')).toMatchObject({ model: 'small', effort: 'low' })
+    store.updateModels({
+      ...settings,
+      models: [
+        ...settings.models,
+        { id: 'm2', provider: 'p1', model: 'small' },
+        { id: 'm3', provider: 'p1', model: 'large' },
+      ],
+      roles: {
+        thread: { model: 'm3', effort: 'high' },
+        coordinator: { model: 'm3', effort: null },
+        triage: { model: 'm2', effort: 'low' },
+      },
+    })
+    expect(store.resolveModel('triage')).toMatchObject({ model: 'small', effort: 'low' })
+    expect(store.resolveModel('coordinator')).toMatchObject({ model: 'large' })
+    store.updateModels({
+      ...settings,
+      models: [
+        ...settings.models,
+        { id: 'm2', provider: 'p1', model: 'small', note: '便宜，适合调研' },
+        { id: 'm3', provider: 'p1', model: 'large' },
+      ],
+      roles: {
+        thread: { model: 'm3', effort: 'high' },
+        coordinator: { model: 'm2', effort: 'low' },
+      },
+    })
     expect(store.modelChoices()).toEqual([
       { id: 'm1', label: '主力 / some-model', note: '', threadDefault: false },
       { id: 'm2', label: '主力 / small', note: '便宜，适合调研', threadDefault: false },
