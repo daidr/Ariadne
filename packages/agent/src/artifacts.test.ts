@@ -47,10 +47,16 @@ async function ok(name: string, args: Record<string, unknown>) {
 
 const board = (id: string) => JSON.parse(app.getArtifact(id).content) as WhiteboardContent
 
+const box = (id: string, text: string) => ({ id, text })
+type Rect = { x: number; y: number; width: number; height: number }
+const hit = (a: Rect, b: Rect) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+
 describe('whiteboards', () => {
   test('items without places are laid out along their connectors, facing sides joined', async () => {
     const { artifactId } = await ok('create_whiteboard', {
       title: '架构',
+      direction: 'right',
       items: [
         { id: 'web', text: '浏览器' },
         { id: 'server', text: '本地服务', tone: 'primary' },
@@ -81,19 +87,126 @@ describe('whiteboards', () => {
       target: { node: 'server', port: 'left-in' },
       label: 'HTTP',
     })
-    expect(edges[1]!.data).toEqual({ dash: 'dashed' })
+    expect(edges[1]!.data).toEqual({ dash: 'dashed', route: 'curve' })
+  })
+
+  test('a box grows taller once its text wraps', async () => {
+    const { artifactId } = await ok('create_whiteboard', {
+      title: '长文',
+      items: [{ id: 'a', text: '一段很长的说明文字，'.repeat(8) }],
+    })
+    const [node] = board(String(artifactId)).nodes
+    expect(node!.width).toBe(280)
+    expect(node!.height).toBeGreaterThan(120)
+  })
+
+  test('a big board keeps items, labels and long connectors clear of each other', async () => {
+    for (const direction of ['right', 'down'] as const) {
+      const { artifactId } = await ok('create_whiteboard', {
+        title: '架构',
+        direction,
+        items: [
+          box('reader', '阅读站 / 浏览器（仓库外）\n服务端代理 /api/auth，转发登录和会话'),
+          box('dashboard', 'dashboard\nVue 3 管理 SPA'),
+          box('basic', 'basic\n组件 + auth store / client'),
+          box('shared', 'shared\n设置 schema · 实时协议 · 常量'),
+          box('api', '@story-verse/api\nEden treaty + core DTS'),
+          box('dql', 'dql-schema\n过滤字段与运算符'),
+          box('kit', 'dql-kit（邻仓 checkout）\ntsconfig paths / vite alias'),
+          box('core', 'core 入口\nindex.ts → app.ts'),
+          box('plugins', '全局插件\n错误 · LogId · IP · Origin · 安全头 · auth macro'),
+          box('modules', 'modules 路由层\n28 个模块，/api 下 .use()'),
+          box('service', 'service / job\n业务规则、定时任务'),
+          box('infra', 'shared 基础设施\ndb · queue+leader · realtime · rate-limit'),
+          { id: 'pg', kind: 'ellipse', text: 'Postgres\nDrizzle snake_case' },
+          { id: 'redis', kind: 'ellipse', text: 'Redis\nsession/缓存/队列/事件' },
+          box('external', '外部服务\nS3 · SMTP · Bark · LLM · Turnstile · …'),
+          box('consola', 'consola\n内置 fork'),
+        ],
+        connectors: [
+          { from: 'reader', to: 'api', label: 'REST / BFF 代理' },
+          { from: 'dashboard', to: 'basic', label: '组件 / auth store' },
+          { from: 'dashboard', to: 'api', label: 'getClient()' },
+          { from: 'basic', to: 'api', label: 'AuthUser' },
+          { from: 'shared', to: 'dashboard', label: '设置项与 topic' },
+          { from: 'shared', to: 'core', label: '设置/协议类型' },
+          { from: 'api', to: 'core', label: 'VerseBackend' },
+          { from: 'dql', to: 'basic', label: '过滤 UI' },
+          { from: 'dql', to: 'modules', label: 'AST → SQL' },
+          { from: 'kit', to: 'dql', label: '源码解析' },
+          { from: 'kit', to: 'api', label: 'normalFields' },
+          { from: 'core', to: 'plugins', label: '先 .use()' },
+          { from: 'core', to: 'modules', label: "group('/api')" },
+          { from: 'core', to: 'consola', label: 'logger' },
+          { from: 'modules', to: 'service', label: '调用' },
+          { from: 'service', to: 'external', label: '存 · 发信 · 审核' },
+          { from: 'service', to: 'infra', label: 'db / enqueue / redis' },
+          { from: 'infra', to: 'pg', label: '读写' },
+          { from: 'infra', to: 'redis', label: '读写 + Pub/Sub' },
+        ],
+      })
+      const { nodes, edges } = board(String(artifactId))
+      const at = new Map(nodes.map((n) => [n.id, n]))
+      const rect = (n: (typeof nodes)[number]) => ({
+        x: n.x,
+        y: n.y,
+        width: n.width!,
+        height: n.height!,
+      })
+      // Items don't overlap.
+      for (const a of nodes) {
+        for (const b of nodes)
+          if (a !== b) expect(hit(rect(a), rect(b)), `${a.id} ${b.id}`).toBe(false)
+      }
+      // Each label sits where the curve has its middle, clear of every item and other label.
+      const anchor = (id: string, port: string) => {
+        const n = rect(at.get(id)!)
+        if (port.startsWith('right')) return { x: n.x + n.width, y: n.y + n.height / 2 }
+        if (port.startsWith('left')) return { x: n.x, y: n.y + n.height / 2 }
+        if (port.startsWith('bottom')) return { x: n.x + n.width / 2, y: n.y + n.height }
+        return { x: n.x + n.width / 2, y: n.y }
+      }
+      const labels = edges.map((e) => {
+        const a = anchor(e.source.node, e.source.port)
+        const b = anchor(e.target.node, e.target.port)
+        const points = (e.points as { x: number; y: number }[] | undefined) ?? []
+        // As dou-ui puts it: between the middle two points, or halfway along.
+        const m = (points.length - 1) / 2
+        const mid = points.length
+          ? {
+              x: (points[Math.floor(m)]!.x + points[Math.ceil(m)]!.x) / 2,
+              y: (points[Math.floor(m)]!.y + points[Math.ceil(m)]!.y) / 2,
+            }
+          : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+        const width = Math.min(200, [...e.label!].length * 13 + 14)
+        return { id: e.id, x: mid.x - width / 2, y: mid.y - 10, width, height: 20 }
+      })
+      for (const label of labels) {
+        for (const n of nodes) expect(hit(label, rect(n)), `${label.id} on ${n.id}`).toBe(false)
+        for (const other of labels) {
+          if (other !== label) expect(hit(label, other), `${label.id} on ${other.id}`).toBe(false)
+        }
+      }
+      // Boxes grow to their text: wider for a long line, taller once it wraps.
+      expect(at.get('reader')!.width).toBeGreaterThan(160)
+      // Connectors spanning ranks run through the gaps between.
+      expect(edges.some((e) => Array.isArray(e.points) && e.points.length > 0)).toBe(true)
+    }
   })
 
   test("an update changes only what it names and keeps the user's drawings", async () => {
     const { artifactId } = await ok('create_whiteboard', {
       title: '草图',
       items: [
-        { id: 'a', text: 'A', x: 0, y: 0 },
-        { id: 'b', text: 'B', x: 400, y: 0 },
+        { id: 'a', text: 'A' },
+        { id: 'b', text: 'B' },
       ],
       connectors: [{ from: 'a', to: 'b' }],
     })
     const id = String(artifactId)
+    const laid = Object.fromEntries(board(id).nodes.map((n) => [n.id, n]))
+    expect(laid.a).toMatchObject({ x: 0, y: 0 })
+    expect(laid.b!.y).toBeGreaterThan(laid.a!.height!)
     // The user draws on it and moves B.
     const drawn = board(id)
     drawn.nodes.push({
@@ -147,8 +260,9 @@ describe('whiteboards', () => {
     expect(at.ink1).toEqual(drawn.nodes.find((n) => n.id === 'ink1'))
     expect(at.a).toMatchObject({ x: 0, y: 0, data: { text: '开始' } })
     expect(at.b).toMatchObject({ x: 0, y: 400 })
-    // The new item sits right of what it is connected from.
-    expect(at.c!.x).toBeGreaterThan(at.b!.x)
+    // The new item sits below what it is connected from, as the board runs top to bottom.
+    expect(at.c).toMatchObject({ x: at.b!.x })
+    expect(at.c!.y).toBeGreaterThan(at.b!.y + at.b!.height!)
     expect(after.edges).toHaveLength(2)
 
     await ok('update_whiteboard', {
