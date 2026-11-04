@@ -9,6 +9,7 @@ import {
   DouCollapseItem,
   DouEmpty,
   DouInput,
+  DouLink,
   DouPopover,
   DouTag,
   DouText,
@@ -107,6 +108,18 @@ const timeline = computed(() =>
     })),
   ].toSorted((a, b) => a.at - b.at),
 )
+
+function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
+  const issue = `${notice.tracker}#${notice.number}`
+  if (notice.action === 'comment') return t('notice.issueComment', { issue })
+  if (notice.action === 'reopen') return t('notice.issueReopen', { issue })
+  return t('notice.issueClose', {
+    issue,
+    reason: t(
+      notice.text === 'not_planned' ? 'tracker.reason.not_planned' : 'tracker.reason.completed',
+    ),
+  })
+}
 
 function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
   if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
@@ -215,6 +228,18 @@ watch(
               <DouText size="sm" class="relay-content">{{ item.notice.content }}</DouText>
             </DouCollapseItem>
           </DouCollapse>
+          <!-- A change made to an issue in the user's name, with a link to see it there. -->
+          <DouText
+            v-else-if="item.notice.kind === 'issue-written'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ issueNotice(item.notice) }}
+            <DouLink v-if="item.notice.url" :href="item.notice.url" external>
+              {{ t('notice.issueOpen') }}
+            </DouLink>
+          </DouText>
           <DouText
             v-else-if="item.notice.kind === 'model-retry'"
             variant="tertiary"

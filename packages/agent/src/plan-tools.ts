@@ -135,6 +135,8 @@ export const readPlan: Tool = {
         dependsOn: node.dependsOn,
         status: node.status,
         threads: node.threads,
+        // Numbers only: titles are written by whoever filed the issue; read_issue shows them.
+        issues: node.issues.map((issue) => issue.number),
       })),
       waitingOnUser: plan.proposals
         .filter((p) => p.status === 'open')

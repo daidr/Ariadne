@@ -15,6 +15,7 @@ const node = (id: string, dependsOn: string[] = [], extra: Partial<PlanNodeView>
     status: 'none',
     threads: [],
     changedIn: null,
+    issues: [],
     ...extra,
   }) satisfies PlanNodeView
 

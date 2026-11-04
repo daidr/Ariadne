@@ -3,6 +3,8 @@ import type { PlanPreview } from './plan'
 import type {
   ArtifactKind,
   AttentionOption,
+  IssueWriteAction,
+  LinkedIssue,
   PlanAuthor,
   PlanNodeKind,
   PlanOp,
@@ -100,6 +102,14 @@ export type NoticeView = {
   | { kind: 'compacted'; summary: string }
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
+  | {
+      kind: 'issue-written'
+      tracker: string
+      number: number
+      action: IssueWriteAction
+      text: string
+      url: string | null
+    }
   | {
       kind: 'instructions'
       path: string
@@ -229,6 +239,8 @@ export interface PlanNodeView {
   }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */
   changedIn: string | null
+  /** Issues of the project's tracker that this node's work is about. */
+  issues: LinkedIssue[]
 }
 
 export interface PlanRevisionView {

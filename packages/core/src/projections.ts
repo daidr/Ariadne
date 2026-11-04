@@ -20,6 +20,8 @@ export const projectionTables = [
   'plan_edges',
   'plan_revisions',
   'plan_proposals',
+  'plan_node_issues',
+  'issue_writes',
   'artifacts',
   'artifact_versions',
 ] as const
@@ -377,6 +379,12 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'issue.written': {
+        // A change made outside Ariadne, in the user's name: shown where the thread made it.
+        const { threadId, tracker, number, action, text, url } = event.data
+        add(threadId, 'issue-written', { tracker, number, action, text, url })
+        break
+      }
       case 'conversation.instructions':
         // The user sees what the thread follows, and when it moves.
         add(event.data.conversationId, 'instructions', {
@@ -1037,6 +1045,21 @@ export const planProjection: Projection = {
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS plan_revisions_project ON plan_revisions (project_id, seq)')
+    db.run(`CREATE TABLE IF NOT EXISTS plan_node_issues (
+      project_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      tracker TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      PRIMARY KEY (project_id, node_id, tracker, number)
+    )`)
+    db.run(`CREATE TABLE IF NOT EXISTS issue_writes (
+      purpose TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      url TEXT
+    )`)
     db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -1062,6 +1085,14 @@ export const planProjection: Projection = {
           break
         }
         storePlanGraph(db, event.projectId, before, result.graph, event.data.revisionId, event.at)
+        // A removed node takes its issue links with it; adding it back starts without them.
+        for (const id of before.nodes.keys()) {
+          if (result.graph.nodes.has(id)) continue
+          db.run('DELETE FROM plan_node_issues WHERE project_id = ? AND node_id = ?', [
+            event.projectId,
+            id,
+          ])
+        }
         db.run(
           `INSERT INTO plan_revisions (id, project_id, author, reason, ops, inverse, revert_of, proposal_id, seq, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1091,6 +1122,29 @@ export const planProjection: Projection = {
         }
         break
       }
+      case 'plan.issue_linked': {
+        const { nodeId, issue } = event.data
+        db.run(
+          `INSERT INTO plan_node_issues (project_id, node_id, tracker, number, title, url, seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO UPDATE SET title = excluded.title, url = excluded.url`,
+          [event.projectId, nodeId, issue.tracker, issue.number, issue.title, issue.url, event.seq],
+        )
+        break
+      }
+      case 'plan.issue_unlinked':
+        db.run(
+          'DELETE FROM plan_node_issues WHERE project_id = ? AND node_id = ? AND tracker = ? AND number = ?',
+          [event.projectId, event.data.nodeId, event.data.tracker, event.data.number],
+        )
+        break
+      case 'issue.written':
+        db.run('INSERT OR IGNORE INTO issue_writes (purpose, project_id, url) VALUES (?, ?, ?)', [
+          event.data.purpose,
+          event.projectId,
+          event.data.url,
+        ])
+        break
       case 'plan.proposal.dismissed':
         db.run("UPDATE plan_proposals SET status = 'expired' WHERE id = ? AND status = 'stale'", [
           event.data.proposalId,

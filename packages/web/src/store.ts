@@ -263,6 +263,27 @@ export async function editPlan(
   }
 }
 
+/** Link an issue to a plan node, or unlink it; returns why it was refused, or `null`. */
+export async function setNodeIssue(
+  nodeId: string,
+  number: number,
+  linked: boolean,
+): Promise<string | null> {
+  const project = state.detail?.project
+  if (!project) return null
+  try {
+    const { plan } = linked
+      ? await api.linkIssue(project.id, nodeId, number)
+      : await api.unlinkIssue(project.id, nodeId, number)
+    if (state.detail?.project.id === plan.projectId) state.plan = plan
+    return null
+  } catch (error) {
+    if (error instanceof ApiError) return tm(error.localized)
+    report(error)
+    return null
+  }
+}
+
 export async function revertPlan(revisionId: string) {
   const project = state.detail?.project
   if (!project) return

@@ -2,6 +2,7 @@
 export interface Capabilities {
   workspace: WorkspaceCapability
   repo: RepoCapability
+  tracker: TrackerCapability
 }
 
 export type CapabilityName = keyof Capabilities
@@ -99,6 +100,59 @@ export interface RepoCapability {
   checks(sha: string): Promise<CheckInfo[]>
   /** The end of a check's log, for a thread to see why it failed. */
   checkLog(checkId: string): Promise<string>
+}
+
+/** An issue as a list shows it. Titles and bodies are written by anyone who can file one. */
+export interface IssueSummary {
+  number: number
+  url: string
+  title: string
+  state: 'open' | 'closed'
+  author: string | null
+  labels: string[]
+  comments: number
+  updatedAt: string
+}
+
+export interface IssueComment {
+  id: string
+  author: string | null
+  body: string
+  createdAt: string
+  url: string
+}
+
+export interface IssueDetail extends IssueSummary {
+  body: string
+  createdAt: string
+  /** The newest comments, oldest first; `comments` says how many there are in all. */
+  recent: IssueComment[]
+}
+
+/**
+ * Where the project's issues live: reading them is context for the work. Changing one
+ * reaches other people, so Ariadne asks the user before each change and calls these only
+ * with their yes.
+ */
+export interface TrackerCapability {
+  /** Names the tracker in links and records, e.g. `owner/name`. */
+  name: string
+  webUrl: string
+  /** Newest updated first. Pull requests are not issues and are left out. */
+  list(query: {
+    state?: 'open' | 'closed' | 'all'
+    labels?: string[]
+    /** Words to look for in titles and bodies. */
+    search?: string
+    limit?: number
+  }): Promise<IssueSummary[]>
+  issue(number: number): Promise<IssueDetail>
+  comment(number: number, body: string): Promise<IssueComment>
+  setState(
+    number: number,
+    state: 'open' | 'closed',
+    reason?: 'completed' | 'not_planned',
+  ): Promise<IssueSummary>
 }
 
 /** A path that points outside the workspace. */

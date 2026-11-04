@@ -1,5 +1,10 @@
 import { DomainError, type Ariadne } from '@ariadne/core'
-import type { Capabilities, RepoCapability, Workspace } from '@ariadne/plugin-sdk'
+import type {
+  Capabilities,
+  RepoCapability,
+  TrackerCapability,
+  Workspace,
+} from '@ariadne/plugin-sdk'
 import type { PluginHost } from './plugins'
 
 /**
@@ -28,6 +33,18 @@ export class WorkspaceManager {
   /** Whether the project's source is a hosted repository, with pull requests and checks. */
   hasRepo(projectId: string): boolean {
     return this.provides(projectId, 'repo')
+  }
+
+  /** Whether the project's source has issues to read. */
+  hasTracker(projectId: string): boolean {
+    return this.provides(projectId, 'tracker')
+  }
+
+  /** The project's issue tracker; throws a `DomainError` the model can read. */
+  async tracker(projectId: string): Promise<TrackerCapability> {
+    const capabilities = await this.connect(projectId, this.sourceKey(projectId))
+    if (!capabilities.tracker) throw new DomainError('error.noTracker')
+    return capabilities.tracker
   }
 
   private provides(projectId: string, capability: keyof Capabilities): boolean {

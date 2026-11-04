@@ -14,6 +14,17 @@ export type ReportKind = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed'
 
 export type TodoStatus = 'doing' | 'next' | 'waiting' | 'done'
 
+/** An issue of the project's tracker, as a plan node links it. */
+export interface LinkedIssue {
+  /** Where the issue lives, e.g. `owner/name`. */
+  tracker: string
+  number: number
+  title: string
+  url: string
+}
+
+export type IssueWriteAction = 'comment' | 'close' | 'reopen'
+
 export interface TodoItem {
   label: string
   status: TodoStatus
@@ -254,6 +265,26 @@ export interface EventMap {
   'plan.proposal.stale': { proposalId: string; reason: string }
   /** The user has seen that an agreed proposal did not take effect. */
   'plan.proposal.dismissed': { proposalId: string }
+  /**
+   * An issue of the project's tracker belongs to a plan node: the node's threads read it as
+   * part of their work. The title is as it was when linked, for showing without a fetch.
+   */
+  'plan.issue_linked': { nodeId: string; issue: LinkedIssue; by: string }
+  'plan.issue_unlinked': { nodeId: string; tracker: string; number: number; by: string }
+  /**
+   * A thread changed an issue (a comment, closing or reopening it) after the user agreed to
+   * exactly that change. `purpose` names the approval it used, so it is done only once.
+   */
+  'issue.written': {
+    threadId: string
+    purpose: string
+    tracker: string
+    number: number
+    action: IssueWriteAction
+    /** What was written, as the user agreed to it. */
+    text: string
+    url: string | null
+  }
   /** The thread's pull request as last seen on the repository; written only on a change. */
   'pull_request.synced': { threadId: string } & ThreadPullRequest
   /** Checks of the pull request's newest commit failed; the thread gets to fix them. */

@@ -7,6 +7,8 @@ import type {
   ArtifactKind,
   AttentionOption,
   Author,
+  EventMap,
+  LinkedIssue,
   MessageKind,
   PlanAuthor,
   PlanOp,
@@ -57,7 +59,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 15
+export const PROJECTION_VERSION = 16
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -602,6 +604,77 @@ export class Ariadne {
    * Hold a thread: its running turn is ended by the scheduler, and no new one starts until
    * it is resumed. Input that arrives meanwhile waits for then.
    */
+  /**
+   * Link an issue to a plan node, or refresh its title when it is linked already. Small
+   * and undoable like other plan edits: it applies at once, and unlinking takes it back.
+   */
+  linkIssue(projectId: string, nodeId: string, issue: LinkedIssue, by: string): PlanView {
+    this.assertNode(projectId, nodeId)
+    if (!Number.isInteger(issue.number) || issue.number < 1) {
+      throw new DomainError('error.invalidBody', { reason: 'number' })
+    }
+    this.store.append([
+      {
+        type: 'plan.issue_linked',
+        projectId,
+        data: {
+          nodeId,
+          issue: {
+            tracker: issue.tracker,
+            number: issue.number,
+            title: issue.title.slice(0, 300),
+            url: issue.url,
+          },
+          by,
+        },
+      },
+    ])
+    return this.getPlan(projectId)
+  }
+
+  unlinkIssue(
+    projectId: string,
+    nodeId: string,
+    issue: { tracker: string; number: number },
+    by: string,
+  ): PlanView {
+    this.assertNode(projectId, nodeId)
+    const linked = this.getPlan(projectId)
+      .nodes.find((n) => n.id === nodeId)
+      ?.issues.some((i) => i.tracker === issue.tracker && i.number === issue.number)
+    if (!linked) return this.getPlan(projectId)
+    this.store.append([
+      {
+        type: 'plan.issue_unlinked',
+        projectId,
+        data: { nodeId, tracker: issue.tracker, number: issue.number, by },
+      },
+    ])
+    return this.getPlan(projectId)
+  }
+
+  private assertNode(projectId: string, nodeId: string) {
+    this.getProject(projectId)
+    if (!loadPlanGraph(this.db, projectId).nodes.has(nodeId)) {
+      throw new DomainError('error.planInvalid', { reason: `no node ${nodeId}` })
+    }
+  }
+
+  /** Whether the change an approval was for has been made, and where it can be seen. */
+  issueWriteDone(purpose: string): { url: string | null } | null {
+    return (
+      this.db
+        .query<{ url: string | null }, [string]>('SELECT url FROM issue_writes WHERE purpose = ?')
+        .get(purpose) ?? null
+    )
+  }
+
+  /** A thread made the change to an issue the user agreed to; it is not made again. */
+  recordIssueWrite(projectId: string, data: EventMap['issue.written']): void {
+    this.assertThreadIn(projectId, data.threadId)
+    this.store.append([{ type: 'issue.written', projectId, data }])
+  }
+
   stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
     const thread = this.getThread(threadId)
     // Stopping again changes nothing, except the user taking over the coordinator's stop:
@@ -1122,6 +1195,18 @@ export class Ariadne {
       const [from = '', to = ''] = key.split('>')
       dependsOn.set(to, [...(dependsOn.get(to) ?? []), from])
     }
+    const issues = new Map<string, LinkedIssue[]>()
+    for (const row of this.db
+      .query<
+        { node_id: string; tracker: string; number: number; title: string; url: string },
+        [string]
+      >(
+        'SELECT node_id, tracker, number, title, url FROM plan_node_issues WHERE project_id = ? ORDER BY seq',
+      )
+      .all(projectId)) {
+      const { node_id, ...issue } = row
+      issues.set(node_id, [...(issues.get(node_id) ?? []), issue])
+    }
     const nodes = graph.order.map((id): PlanNodeView => {
       const node = graph.nodes.get(id) as NonNullable<ReturnType<typeof graph.nodes.get>>
       const onNode = threads.filter((thread) => thread.nodeId === id)
@@ -1142,6 +1227,7 @@ export class Ariadne {
           },
         })),
         changedIn: changedIn.get(id) ?? null,
+        issues: issues.get(id) ?? [],
       }
     })
     const revisions = this.db
