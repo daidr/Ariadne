@@ -27,6 +27,20 @@ export const MAX_IMAGES = 20
 /** A text attachment is read up to this many characters. */
 export const MAX_ATTACHED_CHARS = 100_000
 
+/**
+ * Tool results this short stay when older results are cleared: they say what was done
+ * ("Written.", an id), and clearing them would save next to nothing.
+ */
+export const CLEARABLE_CHARS = 500
+
+/** What the model reads in place of a cleared tool result. */
+export const clearedResult = (length: number) =>
+  `[Ariadne: this result (${length} characters) was cleared to make room in your context. Run the call again if you need it.]`
+
+/** Told after a step whose output hit the length limit, once its results are in. */
+export const CUT_HINT =
+  '<output_cut_off>Your reply above hit the output length limit and was cut off; anything unfinished in it, such as a tool call whose arguments were not complete, was dropped, and the user has not seen it. Go on from where it stopped, in smaller pieces: keep replies shorter and write a large file in parts (write_file for the first part, then edit_file to add the rest).</output_cut_off>'
+
 /** How a note reads to the model. Titles are looked up so the model sees names, not ids. */
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
   switch (note.type) {
@@ -98,18 +112,27 @@ export function visibleHistory(entries: TranscriptEntry[]): {
   call: string | null
   /** The state written down with the summary. */
   state: string | null
+  /** Long tool results up to here (in the model's order) were cleared; `-1` when none. */
+  clearedUpTo: number
   entries: TranscriptEntry[]
 } {
   let latest: Extract<TranscriptEntry, { kind: 'summary' }> | null = null
-  for (const entry of entries) if (entry.kind === 'summary') latest = entry
-  const rest = entries.filter((entry) => entry.kind !== 'summary')
-  if (!latest) return { summary: null, reasoning: [], call: null, state: null, entries: rest }
+  let clearedUpTo = -1
+  for (const entry of entries) {
+    if (entry.kind === 'summary') latest = entry
+    else if (entry.kind === 'cleared') clearedUpTo = Math.max(clearedUpTo, entry.upTo)
+  }
+  const rest = entries.filter((entry) => entry.kind !== 'summary' && entry.kind !== 'cleared')
+  if (!latest) {
+    return { summary: null, reasoning: [], call: null, state: null, clearedUpTo, entries: rest }
+  }
   const upTo = latest.upTo
   return {
     summary: latest.summary,
     reasoning: latest.reasoning,
     call: latest.call,
     state: latest.state,
+    clearedUpTo,
     entries: rest.filter((entry) => orderKey(entry) > upTo),
   }
 }
@@ -195,7 +218,13 @@ export interface ChatOptions {
    * model that wrote it: another service would read it as its own, or refuse it.
    */
   keepReasoning?: (call: string) => boolean
+  /** Read the long tool results up to here as cleared, as if a clearing said so. */
+  clearUpTo?: number
 }
+
+/** Whether a result is long enough to be cleared, see `CLEARABLE_CHARS`. */
+export const clearable = (entry: Extract<TranscriptEntry, { kind: 'tool' }>) =>
+  entry.content.length > CLEARABLE_CHARS || !!entry.files?.length
 
 export function toChatMessages(
   transcript: TranscriptEntry[],
@@ -213,7 +242,8 @@ export function toChatMessages(
         keep(visible.call) ? visible.reasoning : [],
       )
     : []
-  let open: { ids: string[]; names: Map<string, string> } | null = null
+  const clearedUpTo = Math.max(visible.clearedUpTo, options.clearUpTo ?? -1)
+  let open: { ids: string[]; cut: boolean } | null = null
   let held: ModelMessage[] = []
   const results = new Map<string, Extract<TranscriptEntry, { kind: 'tool' }>>()
   for (const entry of entries) if (entry.kind === 'tool') results.set(entry.toolCallId, entry)
@@ -222,6 +252,15 @@ export function toChatMessages(
     if (!open) return
     for (const id of open.ids) {
       const result = results.get(id)
+      if (result && orderKey(result) <= clearedUpTo && clearable(result)) {
+        out.push({
+          role: 'tool',
+          toolCallId: id,
+          content: clearedResult(result.content.length),
+          ...(result.isError ? { isError: true } : {}),
+        })
+        continue
+      }
       const images = viewable(result?.files ?? [], options)
       out.push({
         role: 'tool',
@@ -231,6 +270,7 @@ export function toChatMessages(
         ...(images.shown.length ? { images: images.shown } : {}),
       })
     }
+    if (open.cut) out.push({ role: 'user', content: CUT_HINT })
     open = null
     out.push(...held)
     held = []
@@ -247,14 +287,14 @@ export function toChatMessages(
           ...(entry.reasoning.length && keep(entry.call) ? { reasoning: entry.reasoning } : {}),
         })
         if (entry.toolCalls.length) {
-          open = {
-            ids: entry.toolCalls.map((call) => call.id),
-            names: new Map(entry.toolCalls.map((call) => [call.id, call.name])),
-          }
+          open = { ids: entry.toolCalls.map((call) => call.id), cut: !!entry.cut }
+        } else if (entry.cut) {
+          out.push({ role: 'user', content: CUT_HINT })
         }
         break
       case 'tool':
       case 'summary':
+      case 'cleared':
         // A result is emitted with its step, in call order; summaries are handled above.
         break
       case 'message': {

@@ -134,6 +134,9 @@ export function buildTrace(
         })
         break
       }
+      case 'conversation.results_cleared':
+        turn.items.push({ kind: 'results-cleared', at: event.at })
+        break
       case 'conversation.compaction_failed':
         turn.items.push({ kind: 'compaction-failed', at: event.at, detail: event.data.detail })
         break

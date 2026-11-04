@@ -331,6 +331,12 @@ export interface EventMap {
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
+  /**
+   * Older tool results of a conversation were cleared to make room: the model reads a
+   * short placeholder instead of each long result it had read up to `upTo` (a position in
+   * the model's order). The log keeps them whole. Decided on the transcript as of `sawSeq`.
+   */
+  'conversation.results_cleared': { conversationId: string; upTo: number; sawSeq: number }
   /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
   /**
@@ -367,8 +373,11 @@ export interface EventMap {
     text: string
     reasoning: ReasoningRecord[]
     toolCalls: ToolCallRecord[]
-    /** Why the model stopped: it answered, or it called tools. */
-    finish: 'stop' | 'tool-calls'
+    /**
+     * Why the model stopped: it answered, it called tools, or its output hit the length
+     * limit (`length`): the text is what came, the calls only those that came whole.
+     */
+    finish: 'stop' | 'tool-calls' | 'length'
     sawSeq: number
     usage: TokenUsage | null
     input: StepInput

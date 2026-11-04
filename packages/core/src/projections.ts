@@ -264,7 +264,9 @@ export const attentionsProjection: Projection = {
       withdrawn TEXT,
       approved INTEGER,
       purpose TEXT,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      -- The event that last changed what the row shows, for pages that fetch only changes.
+      changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
     db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, closed)')
     db.run('CREATE INDEX IF NOT EXISTS attentions_message ON attentions (message_id)')
@@ -294,7 +296,7 @@ export const attentionsProjection: Projection = {
       case 'attention.opened':
         db.run(
           `INSERT INTO attentions (id, project_id, thread_id, conversation_id, message_id, block,
-             purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             purpose, created_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.attentionId,
             event.projectId,
@@ -304,6 +306,7 @@ export const attentionsProjection: Projection = {
             JSON.stringify(event.data.block),
             event.data.purpose ?? null,
             event.at,
+            event.seq,
           ],
         )
         break
@@ -315,15 +318,20 @@ export const attentionsProjection: Projection = {
         break
       case 'attention.answered':
         // `approved` is kept apart for confirmations, which standing approvals look up.
-        db.run('UPDATE attentions SET closed = 1, answer = ?, approved = ? WHERE id = ?', [
-          JSON.stringify(event.data.answer),
-          approvedOf(event.data.answer),
-          event.data.attentionId,
-        ])
+        db.run(
+          'UPDATE attentions SET closed = 1, answer = ?, approved = ?, changed_seq = ? WHERE id = ?',
+          [
+            JSON.stringify(event.data.answer),
+            approvedOf(event.data.answer),
+            event.seq,
+            event.data.attentionId,
+          ],
+        )
         break
       case 'attention.withdrawn':
-        db.run('UPDATE attentions SET closed = 1, withdrawn = ? WHERE id = ?', [
+        db.run('UPDATE attentions SET closed = 1, withdrawn = ?, changed_seq = ? WHERE id = ?', [
           event.data.reason,
+          event.seq,
           event.data.attentionId,
         ])
         break
@@ -354,7 +362,9 @@ export const messagesProjection: Projection = {
       read_at INTEGER,
       edited_since_read INTEGER NOT NULL DEFAULT 0,
       blocks TEXT,
-      attachments TEXT
+      attachments TEXT,
+      -- The event that last changed the row, for pages that fetch only changes.
+      changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
     db.run('CREATE INDEX IF NOT EXISTS messages_conversation ON messages (conversation_id, id)')
   },
@@ -366,7 +376,7 @@ export const messagesProjection: Projection = {
       case 'message.posted':
         db.run(
           `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
-             attachments, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             attachments, created_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -377,6 +387,7 @@ export const messagesProjection: Projection = {
             event.data.blocks?.length ? JSON.stringify(event.data.blocks) : null,
             event.data.attachments?.length ? JSON.stringify(event.data.attachments) : null,
             event.at,
+            event.seq,
           ],
         )
         break
@@ -384,17 +395,19 @@ export const messagesProjection: Projection = {
         db.run(
           `UPDATE messages SET content = ?, edited_at = ?, edit_reason = ?,
              original_content = coalesce(original_content, content),
-             edited_since_read = CASE WHEN read_at IS NULL THEN 0 ELSE 1 END
+             edited_since_read = CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, changed_seq = ?
            WHERE id = ?`,
-          [event.data.content, event.at, event.data.reason, event.data.messageId],
+          [event.data.content, event.at, event.data.reason, event.seq, event.data.messageId],
         )
         break
       case 'message.read':
         // Ids are time ordered, so `id <= upTo` is every message the user has seen.
         db.run(
-          `UPDATE messages SET read_at = coalesce(read_at, ?), edited_since_read = 0
+          // Only rows whose look changes (an edit no longer marked new) count as changed.
+          `UPDATE messages SET read_at = coalesce(read_at, ?), edited_since_read = 0,
+             changed_seq = CASE WHEN edited_since_read = 1 THEN ? ELSE changed_seq END
            WHERE conversation_id = ? AND id <= ? AND author != 'user'`,
-          [event.at, event.data.conversationId, event.data.upTo],
+          [event.at, event.seq, event.data.conversationId, event.data.upTo],
         )
         break
     }
@@ -439,7 +452,9 @@ export const noticesProjection: Projection = {
       kind TEXT NOT NULL,
       payload TEXT NOT NULL,
       undone INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      -- The event that last changed the row, for pages that fetch only changes.
+      changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
     db.run(
       'CREATE INDEX IF NOT EXISTS notices_conversation ON notices (conversation_id, created_at)',
@@ -451,7 +466,8 @@ export const noticesProjection: Projection = {
   apply(db, event) {
     const add = (conversationId: string, kind: string, payload: unknown) =>
       db.run(
-        'INSERT INTO notices (id, project_id, conversation_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        `INSERT INTO notices (id, project_id, conversation_id, kind, payload, created_at,
+           changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           `ntc_${event.seq}`,
           event.projectId,
@@ -459,13 +475,15 @@ export const noticesProjection: Projection = {
           kind,
           JSON.stringify(payload),
           event.at,
+          event.seq,
         ],
       )
     switch (event.type) {
       case 'memory.saved':
       case 'memory.removed': {
         const { memoryId, author, undoes } = event.data
-        if (undoes) db.run('UPDATE notices SET undone = 1 WHERE id = ?', [undoes])
+        if (undoes)
+          db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [event.seq, undoes])
         // The user's own changes are in front of them already; an agent's are shown where
         // it made them.
         if (author === 'user') break
@@ -553,7 +571,10 @@ export const noticesProjection: Projection = {
         })
         break
       case 'notice.dismissed':
-        db.run('UPDATE notices SET undone = 1 WHERE id = ?', [event.data.noticeId])
+        db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [
+          event.seq,
+          event.data.noticeId,
+        ])
         break
     }
   },
@@ -692,7 +713,7 @@ export const conversationsProjection: Projection = {
             event.data.conversationId,
             // What the model read last is how full its context is; unknown keeps the last.
             event.data.usage !== null,
-            event.data.finish === 'tool-calls' ? activityOf(event.data.text) : null,
+            event.data.finish !== 'stop' ? activityOf(event.data.text) : null,
             event.data.usage?.cached ?? 0,
             event.data.usage?.cacheWrite ?? 0,
             event.data.usage?.reasoning ?? 0,
@@ -855,7 +876,7 @@ function upstreamDone(
 /** Failed check runs in a row a thread fixes on its own before it must stop and report. */
 export const MAX_CHECK_ATTEMPTS = 3
 
-export type TranscriptKind = 'message' | 'note' | 'step' | 'tool' | 'summary'
+export type TranscriptKind = 'message' | 'note' | 'step' | 'tool' | 'summary' | 'cleared'
 
 /**
  * What each conversation's agent has seen, in order: the model's input is rebuilt from
@@ -1185,6 +1206,18 @@ export const transcriptProjection: Projection = {
           false,
         )
         break
+      case 'conversation.results_cleared':
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.conversationId,
+            kind: 'cleared',
+            payload: { upTo: event.data.upTo },
+          },
+          false,
+        )
+        break
       case 'turn.step':
         addEntry(
           db,
@@ -1198,6 +1231,7 @@ export const transcriptProjection: Projection = {
               call: event.data.input.call,
               toolCalls: event.data.toolCalls,
               sawSeq: event.data.sawSeq,
+              ...(event.data.finish === 'length' ? { cut: true } : {}),
             },
           },
           false,

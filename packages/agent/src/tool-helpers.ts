@@ -59,6 +59,11 @@ export interface ToolResult {
 
 export interface Tool {
   spec: ToolSpec
+  /**
+   * Only looks: it changes nothing the model or the user could see. Calls of such tools
+   * made in one step run at the same time; the others run one by one, in the model's order.
+   */
+  readOnly?: boolean
   run(args: Record<string, unknown>, ctx: ToolContext): ToolResult | Promise<ToolResult>
 }
 

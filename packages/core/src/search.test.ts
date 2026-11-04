@@ -64,6 +64,80 @@ describe('message pages', () => {
   })
 })
 
+describe('changes since an event', () => {
+  test('bring only what was posted or changed after it, edits and undone notices too', () => {
+    const project = app.createProject('P')
+    const coordinator = project.coordinatorId
+    const a = say(project.id, coordinator, 'a', 'coordinator').id
+    const b = say(project.id, coordinator, 'b').id
+    const notice = app.saveMemory(project.id, { text: '记一下', author: coordinator })
+    const seen = app.lastSeq()
+    expect(app.pageMessages(coordinator, { since: seen })).toEqual({
+      messages: [],
+      notices: [],
+      more: false,
+    })
+
+    app.editMessage(a, { author: 'coordinator', conversationId: coordinator }, 'a2', '改错字')
+    const c = say(project.id, coordinator, 'c').id
+    const changed = app.pageMessages(coordinator, { since: seen })
+    expect(changed.messages.map((m) => [m.id, m.content])).toEqual([
+      [a, 'a2'],
+      [c, 'c'],
+    ])
+    // Only from the first message shown on.
+    expect(
+      app.pageMessages(coordinator, { since: seen, from: b }).messages.map((m) => m.id),
+    ).toEqual([c])
+
+    const before = app.lastSeq()
+    const id = app.pageMessages(coordinator).notices[0]!.id
+    app.undoMemoryNotice(project.id, id)
+    expect(
+      app.pageMessages(coordinator, { since: before }).notices.find((n) => n.id === id),
+    ).toMatchObject({ undone: true })
+    expect(notice).toBeTruthy()
+  })
+})
+
+describe('transcript read in parts', () => {
+  test('adds what came after an event; an edit says to read it again', () => {
+    const project = app.createProject('P')
+    const coordinator = project.coordinatorId
+    const thread = app.createThread(project.id, { title: 't' })
+    say(project.id, coordinator, '第一句')
+    const first = app.listTranscript(coordinator)
+    const seen = app.lastSeq()
+    say(project.id, coordinator, '第二句')
+    const added = app.listTranscript(coordinator, { after: seen })
+    expect(added.map((e) => e.kind === 'message' && e.message.content)).toEqual(['第二句'])
+    expect([...first, ...added]).toEqual(app.listTranscript(coordinator))
+
+    expect(app.messagesChangedSince(coordinator, seen)).toBe(false)
+    // No path edits what an agent was told today; the check keeps a later one honest.
+    const told = say(project.id, thread.id, '去做')
+    const later = app.lastSeq()
+    app.editMessage(told.id, { author: 'user', conversationId: thread.id }, '去做吧', '语气')
+    expect(app.messagesChangedSince(thread.id, later)).toBe(true)
+    expect(app.messagesChangedSince(coordinator, later)).toBe(false)
+  })
+})
+
+describe('triage', () => {
+  test('is all the coordinator has waiting when the user only wrote inside threads', () => {
+    const project = app.createProject('P')
+    const coordinator = project.coordinatorId
+    const thread = app.createThread(project.id, { title: 't' })
+    expect(app.pendingIsTriage(coordinator)).toBe(false)
+    say(project.id, thread.id, '顺便把这个也改了')
+    expect(app.pendingIsTriage(coordinator)).toBe(true)
+    // The thread itself is not triage.
+    expect(app.pendingIsTriage(thread.id)).toBe(false)
+    say(project.id, coordinator, '进展怎么样')
+    expect(app.pendingIsTriage(coordinator)).toBe(false)
+  })
+})
+
 describe('project search', () => {
   test('finds messages, threads and artifacts, in Chinese too', () => {
     const project = app.createProject('P')
