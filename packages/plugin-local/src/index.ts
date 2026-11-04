@@ -1,6 +1,7 @@
 import {
   definePlugin,
   FileTooLargeError,
+  readOnlyView,
   WorkspacePathError,
   type CommandSandbox,
   type ContextProvider,
@@ -10,7 +11,7 @@ import {
   type WorktreeInfo,
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
-import { constants, existsSync } from 'node:fs'
+import { constants, existsSync, realpathSync } from 'node:fs'
 import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
@@ -200,6 +201,31 @@ function collect(stream: ReadableStream<Uint8Array>) {
   }
 }
 
+/** Whether `path` is `dir` or inside it, on this platform's paths. */
+function within(path: string, dir: string): boolean {
+  const rel = relative(dir, path)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function real(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+/**
+ * Whether the real path `path` is hidden: inside a hidden path, and not inside a kept path
+ * that is itself in there (a worktree under Ariadne's home). A kept path that holds a
+ * hidden one does not show it, as with the sandbox's mounts.
+ */
+export function hiddenPath(path: string, hidden: readonly string[], keep: string[]): boolean {
+  return hidden.some(
+    (dir) => within(path, dir) && !keep.some((kept) => within(kept, dir) && within(path, kept)),
+  )
+}
+
 /** Commands run as they are, for workspaces made without a host. */
 const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
 
@@ -212,7 +238,11 @@ export class LocalWorkspace implements Workspace {
   readonly base: string | null
   private readonly sandbox: CommandSandbox
   private readonly keep: string[]
+  /** `keep` through symbolic links, to compare with real paths. */
+  private readonly kept: string[]
   private readonly readOnly: string[]
+  private readonly hidden: readonly string[]
+  private readonly git: boolean
 
   constructor(
     readonly id: string,
@@ -223,12 +253,19 @@ export class LocalWorkspace implements Workspace {
       keep?: string[]
       readOnly?: string[]
       base?: string | null
+      /** Real paths not to read, list or write; the sandbox's own by default. */
+      hidden?: readonly string[]
+      /** `false` refuses paths through a `.git` directory, for a view of the source. */
+      git?: boolean
     } = {},
   ) {
     this.base = options.base ?? null
     this.sandbox = options.sandbox ?? unsandboxed
     this.keep = options.keep ?? [root]
+    this.kept = this.keep.map(real)
     this.readOnly = options.readOnly ?? []
+    this.hidden = options.hidden ?? this.sandbox.hidden ?? []
+    this.git = options.git ?? true
   }
 
   get label(): string {
@@ -242,16 +279,23 @@ export class LocalWorkspace implements Workspace {
   async resolve(path: string): Promise<string> {
     const root = await realpath(this.root)
     const target = resolve(root, path || '.')
-    const inside = (candidate: string) => {
-      const rel = relative(root, candidate)
-      return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-    }
-    if (!inside(target)) throw new WorkspacePathError(path)
+    if (!within(target, root)) throw new WorkspacePathError(path)
     let existing = target
     while (!existsSync(existing) && existing !== root) existing = dirname(existing)
-    const real = await realpath(existing)
-    if (!inside(real)) throw new WorkspacePathError(path)
-    return join(real, relative(existing, target))
+    const found = await realpath(existing)
+    if (!within(found, root)) throw new WorkspacePathError(path)
+    const full = join(found, relative(existing, target))
+    if (this.refused(full, root)) throw new WorkspacePathError(path)
+    return full
+  }
+
+  /** A hidden path, or one through git's own directory when that is not shown. */
+  private refused(full: string, root: string): boolean {
+    if (hiddenPath(full, this.hidden, this.kept)) return true
+    if (this.git) return false
+    return relative(root, full)
+      .split(/[\\/]/)
+      .some((part) => part.toLowerCase() === '.git')
   }
 
   /**
@@ -319,9 +363,13 @@ export class LocalWorkspace implements Workspace {
   }
 
   async list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]> {
-    const entries = await readdir(await this.resolve(path), { withFileTypes: true })
+    const dir = await this.resolve(path)
+    const entries = await readdir(dir, { withFileTypes: true })
     return entries
-      .filter((entry) => entry.name !== '.git')
+      .filter(
+        (entry) =>
+          entry.name !== '.git' && !hiddenPath(join(dir, entry.name), this.hidden, this.kept),
+      )
       .map((entry) => ({
         name: entry.name,
         kind: entry.isDirectory() ? ('directory' as const) : ('file' as const),
@@ -421,8 +469,10 @@ export function localWorkspaces(input: {
 }): WorkspaceCapability {
   const { sandbox, repoRoot } = input
   const clone = input.clone === undefined ? platformCloner : input.clone
-  // The coordinator reads the directory as the user has it, changes not committed and all.
-  const view = async () => new LocalWorkspace('source', input.path, null)
+  // The coordinator reads the directory as the user has it, changes not committed and all,
+  // without git's own directory and what the sandbox hides.
+  const view = async () =>
+    readOnlyView(new LocalWorkspace('source', input.path, null, { sandbox, git: false }))
   if (!repoRoot) {
     return {
       isolated: false,

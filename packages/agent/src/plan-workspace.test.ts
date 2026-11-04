@@ -319,15 +319,11 @@ describe('the coordinator and the project source', () => {
     expect(app.listThreads(project.id)).toEqual([])
   })
 
-  test('a source it cannot read is still named, and the tools say why', async () => {
+  test('a source without a view is still named, with no tools to read it', async () => {
     const workspaces = new WorkspaceManager(app, await sourceHost({}, false))
     const project = app.createProject('P')
     app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/srv/app' } })
-    const model = fakeModel((request, role) => {
-      if (role !== 'coordinator') return say('')
-      if (request.messages.some((m) => m.role === 'tool')) return say('')
-      return [call('c1', 'list_dir', {}), { type: 'finish', reason: 'tool-calls' }]
-    })
+    const model = fakeModel(() => say(''))
     app.postMessage(project.id, {
       conversationId: project.coordinatorId,
       author: 'user',
@@ -335,11 +331,66 @@ describe('the coordinator and the project source', () => {
     })
     await startScheduler(model, workspaces).idle()
     expect(system(model.requests[0]!)).toContain('本地目录 /srv/app')
-    const [result] = app
+    expect(system(model.requests[0]!)).toContain('You cannot read it from here')
+    expect(toolNames(model.requests[0]!)).not.toContain('list_dir')
+  })
+
+  test('reading is bounded: big files are refused, long lines cut, and the ref is named', async () => {
+    const files: Record<string, string> = {
+      'min.js': 'x'.repeat(3_000_000),
+      'wide.json': `${'y'.repeat(5000)}\nnext`,
+      'many.txt': Array.from({ length: 400 }, () => 'z'.repeat(1900)).join('\n'),
+    }
+    const host = new PluginHost('/tmp/ariadne-test-plugins')
+    await host.load({
+      id: 'tree',
+      name: { 'zh-CN': '仓库' },
+      setup: (ctx) =>
+        ctx.registerContextProvider({
+          kind: 'tree',
+          title: { 'zh-CN': '仓库' },
+          settings: { type: 'object', properties: {} },
+          provides: ['workspace'],
+          async connect() {
+            return {
+              workspace: {
+                isolated: true,
+                open: async () => memoryWorkspace(files),
+                view: async () => ({ ...memoryWorkspace(files), ref: 'origin/main' }),
+              },
+            }
+          },
+        } as ContextProvider<never>),
+    })
+    const workspaces = new WorkspaceManager(app, host)
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'tree', settings: { repo: 'team/app' } })
+    const model = fakeModel((request, role) => {
+      if (role !== 'coordinator' || request.messages.some((m) => m.role === 'tool')) return say('')
+      return [
+        call('c1', 'read_file', { path: 'min.js' }),
+        call('c2', 'read_file', { path: 'wide.json' }),
+        call('c3', 'read_file', { path: 'many.txt' }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看',
+    })
+    await startScheduler(model, workspaces).idle()
+    const [big, wide, many] = app
       .listTranscript(project.coordinatorId)
       .flatMap((e) => (e.kind === 'tool' ? [e] : []))
-    expect(result?.isError).toBe(true)
-    expect(result?.content).toContain('a thread can read it')
+    expect(big?.isError).toBe(true)
+    expect(big?.content).toContain('more than the 1024 KB read_file reads')
+    expect(wide?.content).toContain('[… 3000 characters of this line cut]')
+    expect(wide?.content).toContain('    2\tnext\n[from origin/main]')
+    expect(many!.content.length).toBeLessThan(70_000)
+    expect(many?.content).toMatch(
+      /\[lines 1-\d+ of 400; read on with offset \d+\]\n\[from origin\/main\]$/,
+    )
   })
 
   test('without a source it is told so, and has no file tools', async () => {

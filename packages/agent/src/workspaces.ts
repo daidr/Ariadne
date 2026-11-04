@@ -126,6 +126,20 @@ export class WorkspaceManager {
     ].join(' · ')
   }
 
+  /**
+   * Whether the coordinator can look at the project's source: its provider offers a view.
+   * A source that fails to connect counts as one, so the look says why it failed.
+   */
+  async viewable(projectId: string): Promise<boolean> {
+    if (!this.available(projectId)) return false
+    try {
+      const capabilities = await this.connect(projectId, this.sourceKey(projectId))
+      return !!capabilities.workspace?.view
+    } catch {
+      return true
+    }
+  }
+
   /** The project's source as it is, read-only; throws a `DomainError` the model can read. */
   async view(projectId: string): Promise<SourceView> {
     const capabilities = await this.connect(projectId, this.sourceKey(projectId))

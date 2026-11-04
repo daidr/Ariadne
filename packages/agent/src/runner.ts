@@ -194,10 +194,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const { app, conversation, model, signal } = options
   const { workspaces } = options
   const isThread = conversation.role === 'thread'
-  const hasSource = !!workspaces?.available(conversation.projectId)
-  const hasWorkspace = isThread && hasSource
+  const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
+  const conversationId = conversation.id
+  // Input newer than this arrived for this turn.
+  const handledBefore = lastHandled(app.listTranscript(conversationId))
+  const turnId = app.startTurn(conversationId, model.label)
+  // The coordinator looks at the source only when its provider offers a view.
+  const hasSource = !isThread && !!(await workspaces?.viewable(conversation.projectId))
   const builtIn =
     options.tools ??
     toolsFor(conversation.role, {
@@ -207,10 +212,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       models: options.models ?? [],
       ...(options.searchProviders ? { search: options.searchProviders } : {}),
     })
-  const conversationId = conversation.id
-  // Input newer than this arrived for this turn.
-  const handledBefore = lastHandled(app.listTranscript(conversationId))
-  const turnId = app.startTurn(conversationId, model.label)
   // The project's external tools, as their servers list them now; one that cannot be
   // reached brings none, and the turn goes on without it.
   const external =

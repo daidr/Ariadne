@@ -1,4 +1,9 @@
-import { FileTooLargeError, WorkspacePathError, type RepoCapability } from '@ariadne/plugin-sdk'
+import {
+  FileTooLargeError,
+  WorkspacePathError,
+  type RepoCapability,
+  type SourceView,
+} from '@ariadne/plugin-sdk'
 import { run } from '@ariadne/plugin-local'
 import { hostedClone } from '@ariadne/plugin-local/hosted'
 import { connectRemote, LocalShell } from '@ariadne/remote'
@@ -34,6 +39,10 @@ const git = async (cwd: string, ...args: string[]) => {
   if (result.exitCode !== 0) throw new Error(result.stderr)
   return result.stdout.trim()
 }
+
+/** A view's file as text. */
+const textOf = async (view: SourceView, path: string) =>
+  new TextDecoder().decode(await view.readBytes(path, 1 << 20))
 
 const WEB = 'https://example.com/team/app'
 
@@ -110,7 +119,8 @@ describe("a hosted repository's view", () => {
       defaultBranch: async () => 'main',
     })
     const view = await clone.workspace.view!()
-    expect([view.label, view.ref]).toEqual(['team/app', 'origin/main'])
+    expect(view.ref).toBe('origin/main')
+    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes', 'ref'])
     expect(await view.list('.')).toEqual([
       { name: 'docs', kind: 'directory' },
       { name: 'logo.png', kind: 'file' },
@@ -118,15 +128,15 @@ describe("a hosted repository's view", () => {
       { name: 'README.md', kind: 'file' },
     ])
     expect(await view.list('docs/')).toEqual([{ name: 'a.md', kind: 'file' }])
-    expect(await view.readFile('./docs/a.md')).toBe('A\n')
-    expect(await view.readFile('docs\\a.md')).toBe('A\n')
+    expect(await textOf(view, './docs/a.md')).toBe('A\n')
+    expect(await textOf(view, 'docs\\a.md')).toBe('A\n')
     expect(await view.readBytes('logo.png', 4)).toEqual(new Uint8Array([0x89, 0x50, 0, 255]))
     await expect(view.readBytes('logo.png', 3)).rejects.toThrow(FileTooLargeError)
-    await expect(view.readFile('docs')).rejects.toThrow('not a file')
+    await expect(view.readBytes('docs', 10)).rejects.toThrow('not a file')
     await expect(view.list('README.md')).rejects.toThrow('not a directory')
-    await expect(view.readFile('missing.md')).rejects.toThrow('does not exist')
+    await expect(view.readBytes('missing.md', 10)).rejects.toThrow('does not exist')
     for (const path of ['../x', 'docs/../../x', '/etc/passwd', 'C:\\x']) {
-      await expect(view.readFile(path)).rejects.toThrow(WorkspacePathError)
+      await expect(view.readBytes(path, 10)).rejects.toThrow(WorkspacePathError)
     }
     // No worktree was made for looking.
     expect(existsSync(join(base, 'data2', 'worktrees'))).toBe(false)

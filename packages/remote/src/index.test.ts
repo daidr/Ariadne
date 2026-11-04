@@ -1,4 +1,4 @@
-import { FileTooLargeError, WorkspacePathError } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, WorkspacePathError, type SourceView } from '@ariadne/plugin-sdk'
 import { run } from '@ariadne/plugin-local'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { connectRemote, LocalShell, relativePath, WORKTREE_DIR } from './index'
 
 let base: string
+
+/** A view's file as text. */
+const textOf = async (view: SourceView, path: string) =>
+  new TextDecoder().decode(await view.readBytes(path, 1 << 20))
 let home: string
 
 beforeEach(async () => {
@@ -190,10 +194,12 @@ describe('remote directory', () => {
     await writeFile(join(dir, 'draft.md'), 'not committed\n')
     const { workspace } = await provider().connect({ host: 'box', path: dir })
     const view = await workspace!.view!()
-    expect(view.label).toBe(`localhost:${dir}`)
+    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
     expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'pkg', 'README.md'])
-    expect(await view.readFile('pkg/index.ts')).toBe('export {}\n')
-    await expect(view.readFile('../x')).rejects.toThrow(WorkspacePathError)
+    expect(await textOf(view, 'pkg/index.ts')).toBe('export {}\n')
+    await expect(view.readBytes('../x', 10)).rejects.toThrow(WorkspacePathError)
+    await expect(view.readBytes('.git/config', 1000)).rejects.toThrow(WorkspacePathError)
+    await expect(view.list('.git')).rejects.toThrow(WorkspacePathError)
     expect(existsSync(join(home, WORKTREE_DIR))).toBe(false)
   })
 

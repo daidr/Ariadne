@@ -88,7 +88,7 @@ Project source: none yet, so there are no files to look at and threads get no wo
   }
   const block = fenced('project_source', asData(source.line))
   const look = source.readable
-    ? `Look at it with list_dir and read_file: read-only, as it is now (for a hosted repository, its default branch). Before you say what the project is, or plan work on it, look: the top level, the README, the manifests, enough to answer a quick question or brief a thread well. Never tell the user the project is empty or ask where its code is without looking first. An analysis that takes more than a handful of files, and every change, is a thread's work: open one.`
+    ? `Look at it with list_dir and read_file, read-only. A directory is read as it is now, changes not yet committed included; a thread's copy starts from the last commit and has none of them, so do not brief a thread on files only you can see. A hosted repository is read at its default branch as last fetched, and the results say so. Before you say what the project is, or plan work on it, look: the top level, the README, the manifests, enough to answer a quick question or brief a thread well. Never tell the user the project is empty or ask where its code is without looking first. An analysis that takes more than a handful of files, and every change, is a thread's work: open one.`
     : 'You cannot read it from here; open a thread to look at it.'
   return `
 Project source: the user's code and files for this project, named inside <${block.tag}> as the user set it (the kind of source, then where it is). Threads work in it, each in a copy of its own (a separate branch when it is a git repository). ${look}

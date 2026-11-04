@@ -47,19 +47,32 @@ export interface Workspace {
 /**
  * The source as it is, to look at without changing it: what the coordinator reads to
  * know the project before it briefs threads. Paths are relative to its root and kept
- * inside it, as a workspace's are.
+ * inside it, as a workspace's are; git's own directory is not shown.
  */
 export interface SourceView {
-  /** Shown to the user, e.g. a path or `host:path`. */
-  label: string
   /**
    * What is shown when it is not the directory as it is now, e.g. `origin/main` for the
    * default branch of a hosted repository as last fetched.
    */
   ref?: string
-  readFile(path: string): Promise<string>
+  /** Larger than `maxBytes` is refused with a `FileTooLargeError`, without reading it all. */
   readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
+}
+
+/**
+ * Only the reading half of `files`, so a view handed out cannot write or run anything
+ * whatever object stands behind it.
+ */
+export function readOnlyView(
+  files: Pick<SourceView, 'readBytes' | 'list'>,
+  ref?: string,
+): SourceView {
+  return {
+    ...(ref ? { ref } : {}),
+    readBytes: async (path, maxBytes) => files.readBytes(path, maxBytes),
+    list: async (path) => files.list(path),
+  }
 }
 
 export interface WorkspaceRequest {

@@ -1,3 +1,4 @@
+import { readOnlyView } from '@ariadne/plugin-sdk'
 import type {
   CommandSandbox,
   ExecResult,
@@ -149,11 +150,8 @@ export function hostedClone(input: {
       await serial(ensureClone)
       fetchedAt = Date.now()
     }
-    return new GitTreeView(
-      local,
-      (args) => gitBytes(bare, args),
-      baseRef(base),
-      [...(input.namespace ?? []), input.path].join('/'),
+    return readOnlyView(
+      new GitTreeView(local, (args) => gitBytes(bare, args), baseRef(base), `origin/${base}`),
       `origin/${base}`,
     )
   }

@@ -23,7 +23,6 @@ export class GitTreeView implements SourceView {
     private readonly bytes: (args: string[]) => Promise<Uint8Array>,
     /** The commit, e.g. `refs/remotes/origin/main`. */
     private readonly rev: string,
-    readonly label: string,
     readonly ref: string,
   ) {}
 
@@ -39,13 +38,6 @@ export class GitTreeView implements SourceView {
 
   private async blob(path: string): Promise<void> {
     if ((await this.type(path)) !== 'blob') throw new Error(`${path} is not a file`)
-  }
-
-  async readFile(path: string): Promise<string> {
-    await this.blob(path)
-    const result = await this.git(['cat-file', 'blob', this.spec(path)], { whole: true })
-    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `cannot read ${path}`)
-    return result.stdout
   }
 
   async readBytes(path: string, maxBytes: number): Promise<Uint8Array> {
