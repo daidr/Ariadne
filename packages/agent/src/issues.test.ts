@@ -379,6 +379,31 @@ describe('changing issues', () => {
     )
   })
 
+  test('once a thread has seen the shared change made, the same change again asks again', async () => {
+    const first = ctx.conversationId
+    const second = app.createThread(projectId, { title: '修注册' }).id
+    const as = (conversationId: string) => (ctx = { ...ctx, conversationId })
+    await run('set_issue_state', { number: 3, state: 'closed' })
+    as(second)
+    await run('set_issue_state', { number: 3, state: 'closed' })
+    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    as(first)
+    expect(
+      JSON.parse((await run('set_issue_state', { number: 3, state: 'closed' })).content),
+    ).toMatchObject({ done: true })
+    // The other thread's model reads the note that it was made.
+    const turnId = app.startTurn(second, 'm')
+    app.recordStep(second, turnId, { text: '', toolCalls: [], sawSeq: app.lastSeq(), usage: null })
+    app.finishTurn(second, turnId, 'completed')
+    // Reopened with its own yes; closing it again later is a new change.
+    expect(await step('open')).toMatchObject({ done: true })
+    as(second)
+    expect((await run('set_issue_state', { number: 3, state: 'closed' })).content).toContain(
+      'asked',
+    )
+    expect(written).toEqual(['state 3: closed completed', 'state 3: open'])
+  })
+
   test('a change under way is not taken for one cut off, by its own thread or another', async () => {
     const tracker = await ctx.tracker!()
     let release!: () => void

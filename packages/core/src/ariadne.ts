@@ -683,7 +683,9 @@ export class Ariadne {
    * no holds for the threads that waited on that card.
    *
    * Threads that waited on one card share its yes, and one of them makes the change: the
-   * others hear `made` (with who made it and where) instead of being asked again, and while
+   * others hear `made` (with who made it and where) instead of being asked again, until
+   * their model has seen the note that it was made (after that, the same change is new work
+   * and asks again); while
    * it is under way they hear `writing` and are told how it went. `unsure` means a change
    * with this yes was started but not known to have gone through (Ariadne stopped in
    * between); a change still under way in this process is never taken for one cut off.
@@ -709,10 +711,12 @@ export class Ariadne {
           status: string | null
           writer: string | null
           url: string | null
+          written_seq: number | null
         },
         [string, string]
       >(
-        `SELECT a.id, a.answered, a.choice, a.thread_id, w.status, w.thread_id AS writer, w.url
+        `SELECT a.id, a.answered, a.choice, a.thread_id, w.status, w.thread_id AS writer, w.url,
+           w.written_seq
          FROM attentions a
          LEFT JOIN issue_writes w ON w.attention_id = a.id
          WHERE a.project_id = ? AND a.purpose = ?
@@ -743,13 +747,33 @@ export class Ariadne {
         if (by !== threadId) join()
         return { state: 'writing', by }
       }
-      if (newest.status === 'written' && onCard && newest.writer && newest.writer !== threadId) {
+      // Only while the thread has not yet seen that it was made: once the note reached its
+      // model, the same change again is new work and asks again.
+      if (
+        newest.status === 'written' &&
+        onCard &&
+        newest.writer &&
+        newest.writer !== threadId &&
+        this.lastSeenSeq(threadId) < (newest.written_seq ?? 0)
+      ) {
         return { state: 'made', by: newest.writer, url: newest.url }
       }
     }
     if (newest.choice !== null && newest.choice !== 0 && onCard) return { state: 'declined' }
     this.openAttention(projectId, { threadId, ...card(), purpose })
     return { state: 'asked' }
+  }
+
+  /** The newest event the conversation's model had seen when it last took a step. */
+  private lastSeenSeq(conversationId: string): number {
+    return (
+      this.db
+        .query<{ saw: number | null }, [string]>(
+          `SELECT json_extract(payload, '$.sawSeq') AS saw FROM transcript
+           WHERE conversation_id = ? AND kind = 'step' ORDER BY id DESC LIMIT 1`,
+        )
+        .get(conversationId)?.saw ?? 0
+    )
   }
 
   /** Whether the thread asked on this card or joined it, and so hears its answer. */

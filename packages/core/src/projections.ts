@@ -1152,7 +1152,8 @@ export const planProjection: Projection = {
       number INTEGER NOT NULL,
       action TEXT NOT NULL,
       status TEXT NOT NULL,
-      url TEXT
+      url TEXT,
+      written_seq INTEGER
     )`)
     db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
       id TEXT PRIMARY KEY,
@@ -1247,9 +1248,14 @@ export const planProjection: Projection = {
         const written = event.type === 'issue.written'
         db.run(
           `INSERT INTO issue_writes
-             (attention_id, project_id, purpose, thread_id, tracker, number, action, status, url)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT DO ${written ? "UPDATE SET status = 'written', url = excluded.url" : 'NOTHING'}`,
+             (attention_id, project_id, purpose, thread_id, tracker, number, action, status, url,
+              written_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO ${
+             written
+               ? "UPDATE SET status = 'written', url = excluded.url, written_seq = excluded.written_seq"
+               : 'NOTHING'
+           }`,
           [
             attentionId,
             event.projectId,
@@ -1260,6 +1266,7 @@ export const planProjection: Projection = {
             action,
             written ? 'written' : 'writing',
             written ? event.data.url : null,
+            written ? event.seq : null,
           ],
         )
         break
