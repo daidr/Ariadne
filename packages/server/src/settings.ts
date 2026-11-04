@@ -55,6 +55,40 @@ export interface RoleConfig {
 
 export type Role = 'coordinator' | 'thread'
 
+/** A request the user sends often, offered after `/` in the message input. */
+export interface Snippet {
+  id: string
+  name: string
+  text: string
+}
+
+/** How the message input behaves: which key sends, and the requests kept for reuse. */
+export interface InputConfig {
+  /** `enter` sends on Enter (Shift+Enter breaks the line); `mod-enter` on ⌘/Ctrl+Enter. */
+  submitOn: 'enter' | 'mod-enter'
+  snippets: Snippet[]
+}
+
+const SNIPPET_ID = /^[A-Za-z0-9_-]{1,40}$/
+const MAX_SNIPPETS = 200
+const MAX_SNIPPET_NAME = 40
+const MAX_SNIPPET_TEXT = 20_000
+
+/** Stored snippets that still make sense; a hand-edited file may hold anything. */
+function storedSnippets(raw: unknown): Snippet[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  return raw.flatMap((item) => {
+    const { id, name, text } = (item ?? {}) as Partial<Snippet>
+    if (typeof id !== 'string' || !SNIPPET_ID.test(id) || seen.has(id)) return []
+    if (typeof name !== 'string' || typeof text !== 'string' || !name.trim() || !text.trim()) {
+      return []
+    }
+    seen.add(id)
+    return [{ id, name, text }]
+  })
+}
+
 export interface ModelsConfig {
   providers: ModelProviderConfig[]
   models: ModelConfig[]
@@ -92,6 +126,7 @@ export interface UserConfig {
   sandbox: { mode: 'auto' | 'off'; hide: string[] }
   /** External tool servers; each project picks which of them it uses. */
   mcp: { servers: McpServerConfig[] }
+  input: InputConfig
 }
 
 const defaults = (): UserConfig => ({
@@ -102,6 +137,7 @@ const defaults = (): UserConfig => ({
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
   mcp: { servers: [] },
+  input: { submitOn: 'enter', snippets: [] },
 })
 
 /** The settings stored at `path`, filled in with the defaults. */
@@ -125,6 +161,10 @@ export function loadUserConfig(path: string): UserConfig {
     concurrency: { ...config.concurrency, ...stored.concurrency },
     sourceSecrets: { ...stored.sourceSecrets },
     mcp: { servers: Array.isArray(stored.mcp?.servers) ? stored.mcp.servers : [] },
+    input: {
+      submitOn: stored.input?.submitOn === 'mod-enter' ? 'mod-enter' : 'enter',
+      snippets: storedSnippets(stored.input?.snippets),
+    },
     sandbox: {
       mode: sandbox.mode === 'off' ? 'off' : 'auto',
       hide: Array.isArray(sandbox.hide)
@@ -425,6 +465,34 @@ export class SettingsStore {
     this.config = { ...this.config, concurrency: { slots: slots!, reserved: reserved! } }
     this.save()
     return this.config.concurrency
+  }
+
+  /** Change which key sends and the snippets offered after `/`; the whole list at once. */
+  updateInput(input: unknown): InputConfig {
+    const body = (input ?? {}) as Partial<InputConfig>
+    if (body.submitOn !== 'enter' && body.submitOn !== 'mod-enter') {
+      throw new BadRequest('submitOn')
+    }
+    if (!Array.isArray(body.snippets) || body.snippets.length > MAX_SNIPPETS) {
+      throw new BadRequest('snippets')
+    }
+    const ids = new Set<string>()
+    const snippets = body.snippets.map((item, index) => {
+      const { id, name, text } = (item ?? {}) as Partial<Snippet>
+      if (typeof id !== 'string' || !SNIPPET_ID.test(id) || ids.has(id)) {
+        throw new BadRequest(`snippets[${index}].id`)
+      }
+      ids.add(id)
+      const label = typeof name === 'string' ? name.trim() : ''
+      if (!label || label.length > MAX_SNIPPET_NAME) throw new BadRequest(`snippets[${index}].name`)
+      if (typeof text !== 'string' || !text.trim() || text.length > MAX_SNIPPET_TEXT) {
+        throw new BadRequest(`snippets[${index}].text`)
+      }
+      return { id, name: label, text }
+    })
+    this.config = { ...this.config, input: { submitOn: body.submitOn, snippets } }
+    this.save()
+    return this.config.input
   }
 
   /** The secret settings of a project's source, merged in when it connects. */

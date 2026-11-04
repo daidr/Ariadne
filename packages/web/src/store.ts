@@ -17,6 +17,7 @@ import {
   api,
   ApiError,
   followEvents,
+  type InputSettings,
   type ModelSettings,
   type ProjectDetail,
   type SourceInput,
@@ -109,6 +110,8 @@ interface State {
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
+  /** Which key sends, and the snippets offered after `/`. */
+  input: InputSettings
   /** Bumped whenever the open project's events arrive, so open views can reload. */
   revision: number
   error: string | null
@@ -133,6 +136,7 @@ export const state = reactive<State>({
   sourceOpen: false,
   focus: null,
   searchOpen: false,
+  input: { submitOn: 'enter', snippets: [] },
   revision: 0,
   error: null,
 })
@@ -585,6 +589,10 @@ export async function setThreadModel(threadId: string, model: string | null) {
 
 async function load(): Promise<number | null> {
   api.getModelSettings().then(applyModelSettings, () => {})
+  api.getInputSettings().then(
+    (input) => (state.input = input),
+    () => {},
+  )
   try {
     const lastSeq = await refreshProjects()
     const target = state.currentId ?? state.projects[0]?.id

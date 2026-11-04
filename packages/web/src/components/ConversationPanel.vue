@@ -24,6 +24,7 @@ import {
   DouTag,
   DouText,
   type ChatAttachment,
+  type ChatInputOption,
   type ChatMessageProps,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
@@ -41,7 +42,7 @@ import {
   SquareStopIcon,
   CloseIcon,
 } from '@dou-ui/icons'
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
@@ -68,10 +69,12 @@ import AgentText from '../markdown/AgentText.vue'
 import MessageImage from '../markdown/MessageImage.vue'
 import MessageLink from '../markdown/MessageLink.vue'
 import { isBare, sanitizeUrl } from '../markdown/links'
+import { lastPanel, registerPanel } from '../shortcuts'
+import { stepHistory, type Recall } from './input-history'
 
 /** `thread` shows the open thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ thread?: boolean }>()
-const emit = defineEmits<{ openSettings: [] }>()
+const emit = defineEmits<{ openSettings: [tab?: 'input'] }>()
 
 const draft = ref('')
 const attachments = useAttachments(() => state.detail?.project.id ?? null)
@@ -254,6 +257,75 @@ function stop() {
   if (conversationId.value) void stopTurn(conversationId.value)
 }
 
+// The keyboard reaches this conversation: `/` puts the caret in its input, Escape stops it.
+const input = useTemplateRef<{ focus: () => void; textarea: HTMLTextAreaElement | null }>('input')
+const kind = props.thread ? 'thread' : 'coordinator'
+let unregister: (() => void) | undefined
+onMounted(() => {
+  unregister = registerPanel(kind, {
+    focus: () => input.value?.focus(),
+    stop: () => {
+      if (!working.value) return false
+      stop()
+      return true
+    },
+  })
+})
+onBeforeUnmount(() => unregister?.())
+
+// ↑ in an empty input brings back what the user sent here before, newest first.
+const sent = computed(() =>
+  view.value.messages
+    .filter((message) => message.author === 'user' && message.content.trim())
+    .map((message) => message.content)
+    .toReversed(),
+)
+let recall: Recall | null = null
+watch(conversationId, () => (recall = null))
+function onInputKeydown(event: KeyboardEvent) {
+  // The `/` menu moves through its entries with the arrows and has already taken them.
+  if (event.defaultPrevented || event.isComposing) return
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+  const next = stepHistory(sent.value, recall, draft.value, event.key === 'ArrowUp' ? 1 : -1)
+  if (!next) return
+  event.preventDefault()
+  recall = next.recall
+  draft.value = next.draft
+  void caretToEnd()
+}
+
+async function caretToEnd() {
+  await nextTick()
+  const el = input.value?.textarea
+  el?.setSelectionRange(el.value.length, el.value.length)
+}
+
+// `/` at the start offers the user's snippets; picking one puts its text in the input.
+const MANAGE = ':manage'
+const commands = computed<ChatInputOption[]>(() => [
+  ...state.input.snippets.map((snippet) => ({
+    value: snippet.id,
+    label: snippet.name,
+    description: snippet.text.split('\n', 1)[0],
+  })),
+  { value: MANAGE, label: t('snippets.manage') },
+])
+function useSnippet(option: ChatInputOption) {
+  if (option.value === MANAGE) {
+    emit('openSettings', 'input')
+    return
+  }
+  const snippet = state.input.snippets.find((item) => item.id === option.value)
+  if (!snippet) return
+  draft.value = snippet.text + draft.value
+  // After the input has put its caret where the `/` was.
+  setTimeout(() => {
+    const el = input.value?.textarea
+    el?.setSelectionRange(snippet.text.length, snippet.text.length)
+  })
+}
+
 function retry() {
   if (conversationId.value) void retryTurn(conversationId.value)
 }
@@ -309,7 +381,12 @@ watch(
 </script>
 
 <template>
-  <div class="conversation">
+  <div
+    class="conversation"
+    :data-panel="kind"
+    @focusin="lastPanel = kind"
+    @pointerdown="lastPanel = kind"
+  >
     <div v-if="thread" class="conversation-header">
       <div class="conversation-title">
         <DouText weight="medium" truncate>{{ thread.title }}</DouText>
@@ -674,9 +751,13 @@ watch(
       v-model:index="preview.index"
       :images="preview.images"
     />
-    <div class="conversation-input">
+    <div class="conversation-input" data-message-input @keydown="onInputKeydown">
       <DouChatInput
+        ref="input"
         v-model="draft"
+        :submit-on="state.input.submitOn"
+        :commands="commands"
+        @command="useSnippet"
         :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         :can-submit="canSubmit"

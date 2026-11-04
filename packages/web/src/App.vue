@@ -17,23 +17,31 @@ import { SettingsIcon } from '@dou-ui/icons'
 import { defineAsyncComponent, onMounted, ref, watch, watchEffect } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
-import ModelSettings from './components/ModelSettings.vue'
+import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import ProjectSearch from './components/ProjectSearch.vue'
 import ProjectSource from './components/ProjectSource.vue'
 import ProjectUsage from './components/ProjectUsage.vue'
+import ShortcutSheet from './components/ShortcutSheet.vue'
 import SidePanel from './components/SidePanel.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, start, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
+import { useShortcuts } from './shortcuts'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
 onLiveEvent(notifyAbout)
 onMounted(start)
+useShortcuts()
 
 const settingsOpen = ref(false)
+const settingsTab = ref<SettingsTab>('models')
+function openSettings(tab: SettingsTab = 'models') {
+  settingsTab.value = tab
+  settingsOpen.value = true
+}
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -88,7 +96,7 @@ watchEffect(() => {
               size="sm"
               :aria-label="t('settings.open')"
               :title="t('settings.open')"
-              @click="settingsOpen = true"
+              @click="openSettings()"
             >
               <SettingsIcon />
             </DouButton>
@@ -133,12 +141,17 @@ watchEffect(() => {
                   v-else-if="state.main.kind === 'changes'"
                   :thread-id="state.main.threadId"
                 />
-                <ConversationPanel v-else @open-settings="settingsOpen = true" />
+                <ConversationPanel v-else @open-settings="openSettings" />
               </div>
             </template>
             <template #end>
               <div class="pane">
-                <ConversationPanel v-if="state.threadId" :key="state.threadId" thread />
+                <ConversationPanel
+                  v-if="state.threadId"
+                  :key="state.threadId"
+                  thread
+                  @open-settings="openSettings"
+                />
                 <SidePanel v-else />
               </div>
             </template>
@@ -146,7 +159,8 @@ watchEffect(() => {
         </DouLayoutMain>
       </DouLayout>
     </DouLayout>
-    <ModelSettings v-model:open="settingsOpen" />
+    <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
+    <ShortcutSheet />
   </DouConfigProvider>
 </template>
 
