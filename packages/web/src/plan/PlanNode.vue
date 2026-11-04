@@ -1,49 +1,20 @@
 <script setup lang="ts">
 import { DouBadge, DouTag, DouText, DouTooltip } from 'dou-ui'
-import {
-  AlertCircleIcon,
-  CheckCircleIcon,
-  CircleDashedIcon,
-  CircleHalfIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestIcon,
-  PauseCircleIcon,
-  UserCircleIcon,
-} from '@dou-ui/icons'
-import { computed, type Component } from 'vue'
+import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
+import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone } from '../stage'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
+import PlanStatusIcon from './PlanStatusIcon.vue'
 import ThreadHeadline from '../components/ThreadHeadline.vue'
 
 const props = defineProps<{ data: PlanNodeData }>()
-
-const icons: Record<PlanNodeData['status'], Component> = {
-  none: CircleDashedIcon,
-  running: CircleHalfIcon,
-  waiting: UserCircleIcon,
-  error: AlertCircleIcon,
-  paused: PauseCircleIcon,
-  done: CheckCircleIcon,
-}
-const tone = {
-  none: 'neutral',
-  running: 'primary',
-  waiting: 'warning',
-  error: 'danger',
-  paused: 'neutral',
-  done: 'success',
-} as const
 
 /** A node shows two threads; the rest are counted and listed in the side panel. */
 const SHOWN = 2
 const shown = computed(() => props.data.threads.slice(0, SHOWN))
 const waiting = computed(() => props.data.status === 'waiting')
-const status = computed(() =>
-  waiting.value ? t('plan.waiting') : t(`plan.status.${props.data.status}`),
-)
 /** What a change does or did to the node, as a dot named on hover. */
 const mark = computed(() => {
   if (props.data.mark) {
@@ -73,17 +44,7 @@ const mark = computed(() => {
             <DouBadge dot :tone="mark.tone" />
           </span>
         </DouTooltip>
-        <DouTooltip :content="status">
-          <DouText
-            :tone="tone[data.status]"
-            :variant="tone[data.status] === 'neutral' ? 'tertiary' : 'default'"
-            class="plan-node-status"
-            role="img"
-            :aria-label="status"
-          >
-            <component :is="icons[data.status]" aria-hidden="true" />
-          </DouText>
-        </DouTooltip>
+        <PlanStatusIcon :status="data.status" />
       </span>
     </div>
     <DouText class="plan-node-title" weight="medium">{{ data.title }}</DouText>
@@ -191,17 +152,12 @@ const mark = computed(() => {
   gap: 4px;
 }
 
-.plan-node-mark,
-.plan-node-status {
+.plan-node-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
-}
-
-.plan-node-status {
-  font-size: 16px;
 }
 
 .plan-node-title {
