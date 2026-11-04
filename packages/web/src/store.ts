@@ -243,6 +243,21 @@ export async function setProjectSlots(slots: number | null): Promise<string | nu
   }
 }
 
+/** Pick the external tool servers the project uses; returns why it was refused, or `null`. */
+export async function setProjectMcp(servers: string[]): Promise<string | null> {
+  const project = state.detail?.project
+  if (!project) return null
+  try {
+    await api.setProjectMcp(project.id, servers)
+    await refreshCurrent()
+    return null
+  } catch (error) {
+    if (error instanceof ApiError) return tm(error.localized)
+    report(error)
+    return null
+  }
+}
+
 /** Save the project's working directory; returns why it was refused, or `null`. */
 export async function setSource(
   source: { kind: string; settings: Record<string, unknown> } | null,

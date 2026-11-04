@@ -1,6 +1,12 @@
 import { DomainError } from '@ariadne/core'
-import type { ModelChoice, ResolvedModel } from '@ariadne/agent'
-import type { PluginHost } from '@ariadne/agent'
+import {
+  MCP_TOOL_MARKS,
+  type McpServerConfig,
+  type McpToolMark,
+  type ModelChoice,
+  type PluginHost,
+  type ResolvedModel,
+} from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
 import { EFFORTS, type Effort, type SettingsSchema } from '@ariadne/plugin-sdk'
 import {
@@ -56,6 +62,11 @@ export interface ModelsConfig {
   roles: { thread: RoleConfig; coordinator: RoleConfig }
 }
 
+/** A server's id: short, so tool names stay within what model services take. */
+const MCP_ID = /^[a-z0-9][a-z0-9-]{0,19}$/
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
+
 const noRole = (): RoleConfig => ({ model: null, effort: null })
 
 function storedRole(raw: unknown): RoleConfig {
@@ -79,6 +90,8 @@ export interface UserConfig {
    * adds paths they must not see to Ariadne's home and the browsers' profiles.
    */
   sandbox: { mode: 'auto' | 'off'; hide: string[] }
+  /** External tool servers; each project picks which of them it uses. */
+  mcp: { servers: McpServerConfig[] }
 }
 
 const defaults = (): UserConfig => ({
@@ -88,6 +101,7 @@ const defaults = (): UserConfig => ({
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
+  mcp: { servers: [] },
 })
 
 /** The settings stored at `path`, filled in with the defaults. */
@@ -110,6 +124,7 @@ export function loadUserConfig(path: string): UserConfig {
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
     sourceSecrets: { ...stored.sourceSecrets },
+    mcp: { servers: Array.isArray(stored.mcp?.servers) ? stored.mcp.servers : [] },
     sandbox: {
       mode: sandbox.mode === 'off' ? 'off' : 'auto',
       hide: Array.isArray(sandbox.hide)
@@ -258,6 +273,107 @@ export class SettingsStore {
         roles: { thread: role('thread'), coordinator: role('coordinator') },
       },
     }
+    this.save()
+  }
+
+  /**
+   * The external tool servers as the browser may see them: the names of environment
+   * variables and headers, never their values.
+   */
+  publicMcp() {
+    return this.config.mcp.servers.map(({ env, headers, ...server }) => ({
+      ...server,
+      env: Object.keys(env ?? {}),
+      headers: Object.keys(headers ?? {}),
+    }))
+  }
+
+  /**
+   * Replace the external tool servers. Environment variables and headers come as
+   * `{ name, value }`: an empty value keeps the one stored under that name, so the page
+   * never needs to know it.
+   */
+  updateMcp(input: unknown): void {
+    const body = (input ?? {}) as { servers?: unknown }
+    if (!Array.isArray(body.servers)) throw new BadRequest('servers')
+    const ids = new Set<string>()
+    const servers = body.servers.map((raw, index): McpServerConfig => {
+      const entry = (raw ?? {}) as Record<string, unknown>
+      const at = `servers[${index}]`
+      const id = entry.id
+      if (typeof id !== 'string' || !MCP_ID.test(id) || ids.has(id))
+        throw new BadRequest(`${at}.id`)
+      ids.add(id)
+      const before = this.config.mcp.servers.find((s) => s.id === id)
+      const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id
+      const tools: Record<string, McpToolMark> = {}
+      for (const [tool, mark] of Object.entries((entry.tools ?? {}) as Record<string, unknown>)) {
+        if (!MCP_TOOL_MARKS.includes(mark as McpToolMark)) throw new BadRequest(`${at}.tools`)
+        // `ask` is what an unmarked tool is anyway.
+        if (mark !== 'ask') tools[tool] = mark as McpToolMark
+      }
+      const pairs = (key: 'env' | 'headers') => {
+        const list = entry[key] ?? []
+        if (!Array.isArray(list)) throw new BadRequest(`${at}.${key}`)
+        const out: Record<string, string> = {}
+        for (const pair of list as { name?: unknown; value?: unknown }[]) {
+          const field = typeof pair?.name === 'string' ? pair.name.trim() : ''
+          const pattern = key === 'env' ? ENV_NAME : HEADER_NAME
+          if (!pattern.test(field) || field in out) throw new BadRequest(`${at}.${key}`)
+          const value = typeof pair.value === 'string' ? pair.value : ''
+          const kept = before?.[key]?.[field]
+          if (value) out[field] = value
+          else if (kept) out[field] = kept
+          else throw new BadRequest(`${at}.${key}.${field}`)
+        }
+        return out
+      }
+      if (entry.transport === 'stdio') {
+        const command = typeof entry.command === 'string' ? entry.command.trim() : ''
+        if (!command) throw new BadRequest(`${at}.command`)
+        const args = entry.args ?? []
+        if (!Array.isArray(args) || args.some((a) => typeof a !== 'string')) {
+          throw new BadRequest(`${at}.args`)
+        }
+        const cwd = typeof entry.cwd === 'string' ? entry.cwd.trim() : ''
+        // A server never starts inside Ariadne's home: its settings and log live there.
+        if (cwd && insideDir(cwd, dirname(this.path))) throw new BadRequest(`${at}.cwd`)
+        const env = pairs('env')
+        return {
+          id,
+          name,
+          transport: 'stdio',
+          command,
+          args: args as string[],
+          ...(cwd ? { cwd } : {}),
+          ...(Object.keys(env).length ? { env } : {}),
+          tools,
+        }
+      }
+      if (entry.transport === 'http') {
+        const url = typeof entry.url === 'string' ? entry.url.trim() : ''
+        let parsed: URL | null = null
+        try {
+          parsed = new URL(url)
+        } catch {
+          parsed = null
+        }
+        if (!parsed || !['http:', 'https:'].includes(parsed.protocol) || parsed.username) {
+          throw new BadRequest(`${at}.url`)
+        }
+        const headers = pairs('headers')
+        return {
+          id,
+          name,
+          transport: 'http',
+          url,
+          ...(Object.keys(headers).length ? { headers } : {}),
+          tools,
+        }
+      }
+      throw new BadRequest(`${at}.transport`)
+    })
+    this.config = { ...this.config, mcp: { servers } }
     this.save()
   }
 

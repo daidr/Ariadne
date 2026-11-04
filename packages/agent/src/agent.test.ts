@@ -5,6 +5,7 @@ import { MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
 import { toChatMessages } from './transcript'
+import { blockLines } from './ui-tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
 const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
@@ -528,6 +529,20 @@ describe('answers and guards', () => {
     const request = model.requests.find((r) => lastUser(r).includes('<user_answer'))
     expect(lastUser(request!)).toContain('choice: B')
     expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('好，按 B 来。')
+  })
+
+  test("a thread block reads back with the thread's title and stage as they are now", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    const message = app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'coordinator',
+      content: '开了一个：',
+      blocks: [{ type: 'thread', threadId: thread.id }],
+    })
+    expect(blockLines(message, (id) => app.getThread(id))).toEqual([
+      `thread ${thread.id} "调研" [queued]`,
+    ])
   })
 
   test('post_ui refuses blocks outside the built-in set and says why', async () => {

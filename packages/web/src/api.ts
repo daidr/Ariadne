@@ -30,6 +30,44 @@ import type {
   WorktreeInfo,
 } from '@ariadne/plugin-sdk'
 
+/** How a tool of an external server may be used; unmarked tools are `ask`. */
+export type McpToolMark = 'read' | 'ask' | 'off'
+
+/** An external tool server as the settings hold it, without its secret values. */
+export interface McpServerView {
+  id: string
+  name: string
+  transport: 'stdio' | 'http'
+  command?: string
+  args?: string[]
+  cwd?: string
+  url?: string
+  /** Names of its environment variables and headers; their values stay on the server. */
+  env: string[]
+  headers: string[]
+  tools: Record<string, McpToolMark>
+}
+
+/** What the page sends: an empty value keeps the one stored under that name. */
+export type McpServerInput = Omit<McpServerView, 'env' | 'headers'> & {
+  env: { name: string; value: string }[]
+  headers: { name: string; value: string }[]
+}
+
+export interface McpServerStatus {
+  id: string
+  state: 'idle' | 'connecting' | 'ready' | 'failed'
+  error: string | null
+  log: string | null
+  info: { name: string; version: string; protocolVersion: string } | null
+  tools: { name: string; title?: string; description?: string }[] | null
+}
+
+export interface McpSettings {
+  servers: McpServerView[]
+  status: McpServerStatus[]
+}
+
 const TOKEN_KEY = 'ariadne.token'
 
 /**
@@ -272,6 +310,16 @@ export const api = {
   ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
+  getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
+  saveMcpSettings: (servers: McpServerInput[]) =>
+    request<McpSettings>('PUT', '/api/settings/mcp', { servers }),
+  checkMcpServer: (id: string) =>
+    request<{ status: McpServerStatus }>(
+      'POST',
+      `/api/settings/mcp/${encodeURIComponent(id)}/check`,
+    ),
+  setProjectMcp: (projectId: string, servers: string[]) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/mcp`, { servers }),
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
   getChanges: (threadId: string) =>

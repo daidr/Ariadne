@@ -188,6 +188,8 @@ export interface EventMap {
   'project.source.set': { source: ProjectSource | null }
   /** How many of the shared work slots this project may take at once; `null` is no cap. */
   'project.slots.set': { slots: number | null }
+  /** The external tool servers (MCP) this project's conversations may use, by id. */
+  'project.mcp.set': { servers: string[] }
   /** `model` is the id of the model setting the coordinator chose for it, if any. */
   'thread.created': { threadId: string; title: string; nodeId: string | null; model: string | null }
   /** The thread's model changed; `null` goes back to the default for threads. */
@@ -421,6 +423,11 @@ export interface EventMap {
    * check (absent in logs written before it was recorded).
    */
   'issue.write_unsure': { attentionId: string; threadId?: string }
+  /**
+   * A thread calls an external tool with the user's yes on `attentionId`; the yes is used
+   * now, so the same call again asks again.
+   */
+  'mcp.called': { threadId: string; attentionId: string; server: string; tool: string }
   /** The thread's pull request as last seen on the repository; written only on a change. */
   'pull_request.synced': { threadId: string } & ThreadPullRequest
   /** Checks of the pull request's newest commit failed; the thread gets to fix them. */

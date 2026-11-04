@@ -238,6 +238,23 @@ describe('messages', () => {
     expect(app.listMessages(project.coordinatorId)).toHaveLength(1)
   })
 
+  test("a thread block names one of the project's own threads", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    const other = app.createThread(app.createProject('Q').id, { title: '别的' })
+    const post = (threadId: string) => () =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'coordinator',
+        content: '开了一个 thread：',
+        blocks: [{ type: 'thread', threadId }],
+      })
+    expect(post(thread.id)().blocks).toEqual([{ type: 'thread', threadId: thread.id }])
+    expect(problem(post(other.id))).toBe('error.blockInvalid')
+    expect(problem(post('thr_missing'))).toBe('error.blockInvalid')
+    expect(app.listMessages(project.coordinatorId)).toHaveLength(1)
+  })
+
   test('only the author may edit, and edits after reading are highlighted once', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })

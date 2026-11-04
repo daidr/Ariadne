@@ -9,6 +9,7 @@
   "dependencies": {
     "@ariadne/core": "workspace:*",
     "@ariadne/i18n": "workspace:*",
+    "@ariadne/mcp": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*"
   }
 }

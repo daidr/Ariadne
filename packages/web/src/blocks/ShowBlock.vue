@@ -11,8 +11,9 @@ import {
 } from '@dou-ui/chart'
 import '@dou-ui/chart/style.css'
 import { computed } from 'vue'
+import ThreadCard from './ThreadCard.vue'
 
-/** A table, chart or steps an agent put in a message; checked on the server. */
+/** A table, chart, steps or thread entry an agent put in a message; checked on the server. */
 const props = defineProps<{ block: ShowBlock }>()
 
 const stepStatus: Record<BlockStepStatus, StepStatus> = {
@@ -36,7 +37,8 @@ const nameOf = (key: string) =>
 </script>
 
 <template>
-  <div class="show-block">
+  <ThreadCard v-if="block.type === 'thread'" :thread-id="block.threadId" />
+  <div v-else class="show-block">
     <DouText v-if="block.title" weight="medium" size="sm">{{ block.title }}</DouText>
     <DouTable
       v-if="block.type === 'table'"

@@ -148,6 +148,7 @@ interface ProjectRow {
   coordinator_id: string
   source: string | null
   slots: number | null
+  mcp: string
   created_at: number
   updated_at: number
 }
@@ -714,6 +715,21 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
+  /**
+   * Which external tool servers the project's conversations may use. Ids are the user's
+   * settings'; the caller checks they exist.
+   */
+  setProjectMcp(projectId: string, servers: string[]): ProjectView {
+    const project = this.getProject(projectId)
+    if (!Array.isArray(servers) || servers.some((id) => typeof id !== 'string' || !id)) {
+      throw new DomainError('error.invalidBody', { reason: 'servers' })
+    }
+    const unique = [...new Set(servers)]
+    if (JSON.stringify(unique) === JSON.stringify(project.mcp)) return project
+    this.store.append([{ type: 'project.mcp.set', projectId, data: { servers: unique } }])
+    return this.getProject(projectId)
+  }
+
   createThread(
     projectId: string,
     input: { title: string; nodeId?: string | null; model?: string | null },
@@ -948,6 +964,70 @@ export class Ariadne {
   markIssueWriteUnsure(projectId: string, attentionId: string, threadId: string): void {
     this.issueWritesUnderWay.delete(attentionId)
     this.store.append([{ type: 'issue.write_unsure', projectId, data: { attentionId, threadId } }])
+  }
+
+  /**
+   * The user's yes for one call of an external tool by one thread: `purpose` names the
+   * tool and the exact arguments. A yes is used for one call (`useMcpApproval`), and the
+   * same call later asks again. A no holds until the user writes in the thread again, so
+   * the thread does not ask the same thing twice on its own.
+   */
+  mcpApproval(
+    projectId: string,
+    threadId: string,
+    purpose: string,
+    card: () => ConfirmBlock,
+  ): { state: 'approved'; attentionId: string } | { state: 'asked' | 'pending' | 'declined' } {
+    this.assertThreadIn(projectId, threadId)
+    const newest = this.db
+      .query<
+        { id: string; closed: number; approved: number | null; used: number | null },
+        [string, string, string]
+      >(
+        `SELECT a.id, a.closed, a.approved,
+           (SELECT 1 FROM mcp_calls c WHERE c.attention_id = a.id) AS used
+         FROM attentions a
+         WHERE a.project_id = ? AND a.purpose = ? AND a.conversation_id = ?
+         ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
+      )
+      .get(projectId, purpose, threadId)
+    const ask = () => {
+      this.openAttention(projectId, { threadId, block: card(), purpose })
+      return { state: 'asked' as const }
+    }
+    if (!newest) return ask()
+    if (!newest.closed) return { state: 'pending' }
+    if (newest.approved === 1 && !newest.used) return { state: 'approved', attentionId: newest.id }
+    if (newest.approved === 0 && !this.userWroteSince(threadId, newest.id)) {
+      return { state: 'declined' }
+    }
+    return ask()
+  }
+
+  /** Whether the user wrote in the conversation after it heard this attention's answer. */
+  private userWroteSince(conversationId: string, attentionId: string): boolean {
+    return !!this.db
+      .query<{ one: number }, [string, string, string]>(
+        `SELECT 1 AS one FROM transcript t JOIN messages m ON m.id = t.ref
+         WHERE t.conversation_id = ? AND t.kind = 'message' AND m.author = 'user'
+           AND t.seq > (SELECT a.seq FROM transcript a WHERE a.conversation_id = ?
+             AND a.kind = 'note' AND json_extract(a.payload, '$.attentionId') = ?)
+         LIMIT 1`,
+      )
+      .get(conversationId, conversationId, attentionId)
+  }
+
+  /** Spend the yes on `attentionId` on the call about to be made. */
+  useMcpApproval(
+    projectId: string,
+    input: { threadId: string; attentionId: string; server: string; tool: string },
+  ): void {
+    this.assertThreadIn(projectId, input.threadId)
+    const used = this.db
+      .query<{ one: number }, [string]>('SELECT 1 AS one FROM mcp_calls WHERE attention_id = ?')
+      .get(input.attentionId)
+    if (used) throw new DomainError('error.invalidBody', { reason: 'approval used' })
+    this.store.append([{ type: 'mcp.called', projectId, data: input }])
   }
 
   stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
@@ -1223,9 +1303,9 @@ export class Ariadne {
   }
 
   /**
-   * Post a message. An agent's may carry interface blocks: tables, charts and steps are
-   * shown under the text, and at most one choice, confirmation or form asks the user,
-   * as an attention of the conversation's own.
+   * Post a message. An agent's may carry interface blocks: tables, charts, steps and
+   * entries to the project's threads are shown under the text, and at most one choice,
+   * confirmation or form asks the user, as an attention of the conversation's own.
    */
   postMessage(
     projectId: string,
@@ -1267,6 +1347,17 @@ export class Ariadne {
       })
     }
     const shown = parsed.filter((block): block is ShowBlock => !isAskBlock(block))
+    parsed.forEach((block, i) => {
+      if (block.type !== 'thread') return
+      const owner = this.db
+        .query<{ project_id: string }, [string]>('SELECT project_id FROM threads WHERE id = ?')
+        .get(block.threadId)
+      if (owner?.project_id !== projectId) {
+        throw new DomainError('error.blockInvalid', {
+          reason: `blocks[${i}].threadId is not a thread of this project`,
+        })
+      }
+    })
     if (!input.content.trim() && !parsed.length && !attachments.length) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
@@ -2329,6 +2420,7 @@ export class Ariadne {
       needsMe: this.listNeedsMe(row.id).length,
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
       slots: row.slots,
+      mcp: JSON.parse(row.mcp) as string[],
       usage: this.projectUsage(row.id),
     }
   }

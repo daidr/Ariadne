@@ -39,6 +39,8 @@ export interface ProjectView {
    * leaves it to the total. A turn answering the user may still take a reserved slot.
    */
   slots: number | null
+  /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
+  mcp: string[]
   /** Tokens every conversation of the project has used, summaries included. */
   usage: { input: number; output: number }
 }

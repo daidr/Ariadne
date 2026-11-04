@@ -29,6 +29,7 @@ export const projectionTables = [
   'plan_proposals',
   'plan_node_issues',
   'issue_writes',
+  'mcp_calls',
   'artifacts',
   'artifact_versions',
   'prompts',
@@ -43,6 +44,7 @@ export const projectsProjection: Projection = {
       coordinator_id TEXT NOT NULL,
       source TEXT,
       slots INTEGER,
+      mcp TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -65,6 +67,13 @@ export const projectsProjection: Projection = {
       case 'project.slots.set':
         db.run('UPDATE projects SET slots = ?, updated_at = ? WHERE id = ?', [
           event.data.slots,
+          event.at,
+          event.projectId,
+        ])
+        break
+      case 'project.mcp.set':
+        db.run('UPDATE projects SET mcp = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(event.data.servers),
           event.at,
           event.projectId,
         ])
@@ -251,6 +260,11 @@ export const attentionsProjection: Projection = {
       thread_id TEXT NOT NULL,
       PRIMARY KEY (attention_id, thread_id)
     )`)
+    // The yeses to external tool calls that were used, each for one call.
+    db.run(`CREATE TABLE IF NOT EXISTS mcp_calls (
+      attention_id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL
+    )`)
   },
   apply(db, event) {
     switch (event.type) {
@@ -288,6 +302,12 @@ export const attentionsProjection: Projection = {
         db.run('UPDATE attentions SET closed = 1, withdrawn = ? WHERE id = ?', [
           event.data.reason,
           event.data.attentionId,
+        ])
+        break
+      case 'mcp.called':
+        db.run('INSERT OR IGNORE INTO mcp_calls (attention_id, thread_id) VALUES (?, ?)', [
+          event.data.attentionId,
+          event.data.threadId,
         ])
         break
     }

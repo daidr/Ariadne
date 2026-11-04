@@ -32,6 +32,8 @@ import {
   usageOf,
 } from './compaction'
 import { attachedText, toChatMessages, visibleHistory, withImageData } from './transcript'
+import type { McpHub } from './mcp'
+import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 
 /** The model a conversation talks to, with its provider's settings. */
@@ -81,6 +83,8 @@ export interface TurnOptions {
   searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The models the user set up; the coordinator may give one to each thread it opens. */
   models?: ModelChoice[]
+  /** The user's external tool servers; the project's enabled ones bring their tools. */
+  mcp?: McpHub
 }
 
 /** Why a turn stopped early, for the user. */
@@ -184,7 +188,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
-  const tools =
+  const builtIn =
     options.tools ??
     toolsFor(conversation.role, {
       workspace: hasWorkspace,
@@ -193,11 +197,23 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       models: options.models ?? [],
       ...(options.searchProviders ? { search: options.searchProviders } : {}),
     })
-  const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
   // Input newer than this arrived for this turn.
   const handledBefore = lastHandled(app.listTranscript(conversationId))
   const turnId = app.startTurn(conversationId, model.label)
+  // The project's external tools, as their servers list them now; one that cannot be
+  // reached brings none, and the turn goes on without it.
+  const external =
+    options.mcp && !options.tools
+      ? await mcpTools(
+          options.mcp,
+          app.getProject(conversation.projectId).mcp,
+          conversation.role,
+          signal,
+        )
+      : []
+  const tools = [...builtIn, ...external]
+  const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const ctx: ToolContext = {
     app,
     projectId: conversation.projectId,
