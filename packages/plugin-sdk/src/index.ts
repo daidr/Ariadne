@@ -50,6 +50,16 @@ export interface ContextProvider<Settings = Record<string, unknown>> {
   title: LocalizedText
   settings: SettingsSchema
   provides: CapabilityName[]
+  /**
+   * The source's workspaces are on another machine: threads' commands run there, as the
+   * user the source logs in as, and the host's sandbox does not apply to them.
+   */
+  remote?: boolean
+  /**
+   * How the source is named in one line, with `{setting}` replaced by its value, e.g.
+   * `{host}:{path}`. Without it the first text setting is shown.
+   */
+  summary?: string
   /** Build the capabilities of one configured source. */
   connect(settings: Settings): Promise<Partial<Capabilities>>
 }

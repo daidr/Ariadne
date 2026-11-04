@@ -12,6 +12,7 @@ import anthropic from '@ariadne/plugin-anthropic'
 import github from '@ariadne/plugin-github'
 import local from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
+import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createHandler } from './app'
@@ -54,6 +55,7 @@ await host.load(openAICompatible)
 await host.load(anthropic)
 await host.load(local)
 await host.load(github)
+await host.load(ssh)
 const settings = new SettingsStore(configPath, host)
 pluginPaths = () => settings.current.plugins
 for (const path of settings.current.plugins) {
