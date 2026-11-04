@@ -198,9 +198,8 @@ describe('whiteboards', () => {
     const { artifactId } = await ok('create_whiteboard', {
       title: '草图',
       items: [
-        // Places given for a new board are not used: it is laid out whole.
-        { id: 'a', text: 'A', x: 900, y: 900 },
-        { id: 'b', text: 'B', x: 400, y: 0 },
+        { id: 'a', text: 'A' },
+        { id: 'b', text: 'B' },
       ],
       connectors: [{ from: 'a', to: 'b' }],
     })

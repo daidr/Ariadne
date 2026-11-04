@@ -156,13 +156,17 @@ export function layoutBoard(
   boxes: LayoutBox[],
   edges: { from: string; to: string; label?: string }[],
   direction: Direction,
+  /** How much wider than needed items side by side stand, so more labels clear each other. */
+  loose = 1,
 ): BoardLayout {
   const byId = new Map(boxes.map((box) => [box.id, box]))
   const known = edges.filter((e) => byId.has(e.from) && byId.has(e.to) && e.from !== e.to)
   const vertical = direction === 'down'
   const widest = Math.max(0, ...known.map((e) => labelWidth(e.label)))
   const narrowest = Math.min(...boxes.map((box) => box.width))
-  const laneGap = vertical ? Math.max(LANE_GAP, 2 * (widest + 8) - narrowest) : LANE_GAP
+  const laneGap = Math.round(
+    (vertical ? Math.max(LANE_GAP, 2 * (widest + 8) - narrowest) : LANE_GAP) * loose,
+  )
   const options = {
     direction: vertical ? ('vertical' as const) : ('horizontal' as const),
     rankGap: rankGap(
@@ -170,8 +174,9 @@ export function layoutBoard(
       direction,
     ),
     laneGap,
-    // Long connectors passing the same gap side by side keep their labels apart.
-    edgeGap: known.some((e) => e.label) ? LABEL_HEIGHT + 8 : 16,
+    // Long connectors passing the same gap side by side keep their labels apart: labels
+    // stand side by side in a top-to-bottom board, one above the other otherwise.
+    edgeGap: !known.some((e) => e.label) ? 16 : vertical ? widest + 8 : LABEL_HEIGHT + 8,
     equalWidth: false,
     straightChains: true,
     grid: 8,

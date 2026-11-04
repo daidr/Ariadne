@@ -1,6 +1,6 @@
 import type { WhiteboardContent, WhiteboardEdge, WhiteboardNode } from '@ariadne/core'
 import { ToolInputError } from './tool-helpers'
-import { fitText, layoutBoard, rankGap, type Direction } from './whiteboard-layout'
+import { fitText, labelWidth, layoutBoard, rankGap, type Direction } from './whiteboard-layout'
 
 /**
  * The model writes a whiteboard as items and connectors, and leaves the pixels to us:
@@ -170,8 +170,9 @@ function ports(from: Box, to: Box): { source: string; target: string } {
 const isPlaced = (n: WhiteboardNode) => Number.isFinite(n.x) && Number.isFinite(n.y)
 
 /**
- * Give every node without a place one: right of a placed node it is connected from, or
- * below everything else; then down until it overlaps nothing.
+ * Give every node without a place one: next to a placed node it is connected from (to
+ * its right, or below it on a top-to-bottom board), a label's room away; otherwise below
+ * everything else. Then across the flow until it overlaps nothing.
  */
 function place(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: Direction): void {
   const placed = nodes.filter(isPlaced)
@@ -279,8 +280,26 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
     const existing = id ? byId.get(id) : undefined
     const node = applyItem(item, existing)
     if (existing) {
-      if (num(item.x) !== undefined || num(item.y) !== undefined || node.width !== existing.width) {
+      const grew = (node.height ?? 0) - (existing.height ?? 0)
+      if (
+        num(item.x) !== undefined ||
+        num(item.y) !== undefined ||
+        node.width !== existing.width ||
+        grew
+      ) {
         moved.add(node.id)
+      }
+      if (grew > 0 && num(item.y) === undefined) {
+        // Longer text made the box taller: what stood below it moves down as much.
+        const was = boxOf(existing)
+        for (const other of nodes) {
+          if (other === existing || isFixed(kindOf(other))) continue
+          const b = boxOf(other)
+          if (b.y >= was.y + was.height && b.x < was.x + was.width && was.x < b.x + b.width) {
+            other.y += grew
+            moved.add(other.id)
+          }
+        }
       }
       nodes[nodes.indexOf(existing)] = node
     } else {
@@ -315,7 +334,16 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
 
   const direction = changes.direction ?? directionOf(board.edges)
   if (changes.relayout) {
-    relayout(nodes, edges, direction)
+    // A dense board can leave labels on each other; try it looser and keep the cleanest.
+    let best = { loose: 1, count: Infinity }
+    for (const loose of LOOSENESS) {
+      const trial = structuredClone({ version: 1 as const, nodes, edges })
+      relayout(trial.nodes, trial.edges, direction, loose)
+      const count = boardProblems(trial).length
+      if (count < best.count) best = { loose, count }
+      if (!count) break
+    }
+    relayout(nodes, edges, direction, best.loose)
     return { version: 1, nodes, edges }
   }
   place(nodes, edges, direction)
@@ -336,7 +364,14 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
  * images if it would cover them. Connectors between neighbouring ranks join facing sides,
  * longer ones run through the gaps of the ranks between.
  */
-function relayout(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: Direction): void {
+const LOOSENESS = [1, 1.5, 2, 3]
+
+function relayout(
+  nodes: WhiteboardNode[],
+  edges: WhiteboardEdge[],
+  direction: Direction,
+  loose = 1,
+): void {
   const movable = nodes.filter((n) => !isFixed(kindOf(n)))
   const fixed = nodes.filter((n) => isFixed(kindOf(n))).map(boxOf)
   const ids = new Set(movable.map((n) => n.id))
@@ -345,6 +380,7 @@ function relayout(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: D
     movable.map((n) => ({ id: n.id, ...boxOf({ ...n, x: 0, y: 0 }) })),
     inside.map((e) => ({ from: e.source.node, to: e.target.node, label: e.label })),
     direction,
+    loose,
   )
   const before = movable.filter(isPlaced)
   const origin = {
@@ -388,31 +424,133 @@ function relayout(nodes: WhiteboardNode[], edges: WhiteboardEdge[], direction: D
   }
 }
 
-/** A new board, laid out whole; places the model gives are not used. */
+/**
+ * A new board. Without places it is laid out whole, in ranks along the connectors. With
+ * places for some items, those are kept as a sketch of the picture (a comparison, a ring):
+ * the rest go next to what they connect from, then the picture is stretched until no two
+ * items overlap and every labelled connector has room for its label.
+ */
 export function boardFromItems(
   items: Record<string, unknown>[],
   connectors: Record<string, unknown>[],
   direction: Direction = 'down',
 ): WhiteboardContent {
   const seen = new Set<string>()
-  const unplaced = items.map((item) => {
+  let placed = false
+  const sized = items.map((item) => {
     const id = text(item, 'id')
     if (id && seen.has(id)) throw new ToolInputError(`item id "${id}" is used twice`)
     if (id) seen.add(id)
-    const { x: _x, y: _y, ...rest } = item
+    if (num(item.x) !== undefined && num(item.y) !== undefined) placed = true
+    // Boxes are sized to their text.
+    const { width: _w, height: _h, ...rest } = item
     return rest
   })
-  return mergeBoard(
+  const board = mergeBoard(
     { version: 1, nodes: [], edges: [] },
     {
-      items: unplaced,
+      items: placed ? sized : sized.map(({ x: _x, y: _y, ...rest }) => rest),
       connectors,
       removeItems: [],
       removeConnectors: [],
-      relayout: true,
+      relayout: !placed,
       direction,
     },
   )
+  if (placed) spread(board)
+  return board
+}
+
+/** The scale along one axis that puts two centres `need` apart, or none if they are level. */
+const scale = (d: number, need: number) => (Math.abs(d) < 1 ? Infinity : need / Math.abs(d))
+
+/**
+ * Stretch a sketched board, along x and y apart, as little as keeps every two items
+ * apart and leaves each labelled connector its label's room; then join facing sides.
+ */
+function spread(board: WhiteboardContent): void {
+  const { nodes, edges } = board
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const centre = new Map(
+    nodes.map((n) => {
+      const b = boxOf(n)
+      return [n.id, { x: b.x + b.width / 2, y: b.y + b.height / 2 }]
+    }),
+  )
+  let sx = 1
+  let sy = 1
+  for (let round = 0; round < 50; round++) {
+    let changed = false
+    const want = (x: number, y: number) => {
+      // Stretch along the axis that needs less of it.
+      if (x <= y && x > sx) {
+        sx = x
+        changed = true
+      } else if (y < x && y > sy) {
+        sy = y
+        changed = true
+      }
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = boxOf(nodes[i]!)
+        const b = boxOf(nodes[j]!)
+        const ca = centre.get(nodes[i]!.id)!
+        const cb = centre.get(nodes[j]!.id)!
+        const dx = (cb.x - ca.x) * sx
+        const dy = (cb.y - ca.y) * sy
+        const nx = (a.width + b.width) / 2 + GAP_Y
+        const ny = (a.height + b.height) / 2 + GAP_Y
+        if (Math.abs(dx) >= nx || Math.abs(dy) >= ny) continue
+        want(scale(cb.x - ca.x, nx), scale(cb.y - ca.y, ny))
+      }
+    }
+    for (const edge of edges) {
+      if (!edge.label) continue
+      if (edge.source.node === edge.target.node) continue
+      const a = boxOf(byId.get(edge.source.node)!)
+      const b = boxOf(byId.get(edge.target.node)!)
+      const ca = centre.get(edge.source.node)!
+      const cb = centre.get(edge.target.node)!
+      const dx = (cb.x - ca.x) * sx
+      const dy = (cb.y - ca.y) * sy
+      // The label sits between the sides that face each other.
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        const need = (a.width + b.width) / 2 + rankGap([edge.label], 'right')
+        if (Math.abs(dx) < need) want(scale(cb.x - ca.x, need), Infinity)
+      } else {
+        const need = (a.height + b.height) / 2 + rankGap([edge.label], 'down')
+        if (Math.abs(dy) < need) want(Infinity, scale(cb.y - ca.y, need))
+      }
+    }
+    if (!changed) break
+  }
+  const boxes: Box[] = []
+  for (const node of nodes) {
+    const c = centre.get(node.id)!
+    const b = boxOf(node)
+    // Items sharing a centre can't be stretched apart; the later one moves down.
+    const at = clear(
+      { ...b, x: Math.round(c.x * sx - b.width / 2), y: Math.round(c.y * sy - b.height / 2) },
+      boxes,
+      'right',
+    )
+    node.x = at.x
+    node.y = at.y
+    boxes.push(at)
+  }
+  const left = Math.min(...nodes.map((n) => n.x))
+  const top = Math.min(...nodes.map((n) => n.y))
+  for (const node of nodes) {
+    node.x -= left
+    node.y -= top
+  }
+  for (const edge of edges) {
+    const side = ports(boxOf(byId.get(edge.source.node)!), boxOf(byId.get(edge.target.node)!))
+    edge.source = { node: edge.source.node, port: side.source }
+    edge.target = { node: edge.target.node, port: side.target }
+    delete edge.points
+  }
 }
 
 /** The board as the model reads it: items and connectors, without ink points or image data. */
@@ -444,4 +582,109 @@ export function boardSummary(board: WhiteboardContent) {
       ...edge.data,
     })),
   }
+}
+
+/** Where a port sits on a box: the middle of its side. */
+function anchorOf(box: Box, port: string) {
+  const side = port.replace(/-in$/, '')
+  if (side === 'left') return { x: box.x, y: box.y + box.height / 2 }
+  if (side === 'right') return { x: box.x + box.width, y: box.y + box.height / 2 }
+  if (side === 'top') return { x: box.x + box.width / 2, y: box.y }
+  return { x: box.x + box.width / 2, y: box.y + box.height }
+}
+
+const hits = (a: Box, b: Box) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+
+/** Whether the segment from p to q passes through the box (Liang-Barsky clipping). */
+function crosses(p: { x: number; y: number }, q: { x: number; y: number }, box: Box): boolean {
+  let t0 = 0
+  let t1 = 1
+  const dx = q.x - p.x
+  const dy = q.y - p.y
+  for (const [d, lo, hi] of [
+    [dx, box.x - p.x, box.x + box.width - p.x],
+    [dy, box.y - p.y, box.y + box.height - p.y],
+  ] as const) {
+    if (Math.abs(d) < 1e-9) {
+      if (lo > 0 || hi < 0) return false
+      continue
+    }
+    const a = lo / d
+    const b = hi / d
+    t0 = Math.max(t0, Math.min(a, b))
+    t1 = Math.min(t1, Math.max(a, b))
+    if (t0 > t1) return false
+  }
+  return true
+}
+
+const MAX_PROBLEMS = 20
+
+/**
+ * What is wrong with how a board looks, for the model to read after it writes one and
+ * whenever it reads one the user may have changed: items on top of each other, labels on
+ * items or on each other, connectors through items, text cut off. Connectors are taken
+ * as straight runs through their points, labels where dou-ui puts them, so this is close,
+ * not exact. Freehand drawings may sit on anything and are left out.
+ */
+export function boardProblems(board: WhiteboardContent): string[] {
+  const nodes = board.nodes.filter((n) => kindOf(n) !== 'drawing')
+  const box = new Map(nodes.map((n) => [n.id, boxOf(n)]))
+  const out: string[] = []
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (hits(box.get(nodes[i]!.id)!, box.get(nodes[j]!.id)!)) {
+        out.push(`items "${nodes[i]!.id}" and "${nodes[j]!.id}" overlap`)
+      }
+    }
+  }
+  for (const node of nodes) {
+    const kind = kindOf(node)
+    if (isFixed(kind) || kind === 'text') continue
+    const label = typeof node.data?.text === 'string' ? node.data.text : ''
+    const b = box.get(node.id)!
+    const fit = fitText(kind, label, { width: 0, height: 0 }, b.width)
+    if (fit.height! > b.height + 2) out.push(`the text of "${node.id}" is cut off; shorten it`)
+  }
+  const labels: { id: string; box: Box }[] = []
+  for (const edge of board.edges) {
+    const from = box.get(edge.source.node)
+    const to = box.get(edge.target.node)
+    if (!from || !to || edge.source.node === edge.target.node) continue
+    const points = Array.isArray(edge.points) ? (edge.points as { x: number; y: number }[]) : []
+    const run = [anchorOf(from, edge.source.port), ...points, anchorOf(to, edge.target.port)]
+    for (const node of nodes) {
+      if (node.id === edge.source.node || node.id === edge.target.node) continue
+      const b = box.get(node.id)!
+      // A few px in, so a line grazing a corner doesn't count.
+      const inner = { x: b.x + 4, y: b.y + 4, width: b.width - 8, height: b.height - 8 }
+      if (run.slice(1).some((q, k) => crosses(run[k]!, q, inner))) {
+        out.push(`connector "${edge.id}" runs through item "${node.id}"`)
+      }
+    }
+    if (!edge.label) continue
+    // As dou-ui puts it: halfway between the ends, or between the middle two points.
+    const mid = points.length ? points : [run[0]!, run.at(-1)!]
+    const m = (mid.length - 1) / 2
+    const at = {
+      x: (mid[Math.floor(m)]!.x + mid[Math.ceil(m)]!.x) / 2,
+      y: (mid[Math.floor(m)]!.y + mid[Math.ceil(m)]!.y) / 2,
+    }
+    const width = labelWidth(edge.label)
+    const label = { x: at.x - width / 2, y: at.y - 10, width, height: 20 }
+    for (const node of nodes) {
+      if (hits(label, box.get(node.id)!)) {
+        out.push(`the label of connector "${edge.id}" lies on item "${node.id}"`)
+      }
+    }
+    for (const other of labels) {
+      if (hits(label, other.box)) {
+        out.push(`the labels of connectors "${other.id}" and "${edge.id}" overlap`)
+      }
+    }
+    labels.push({ id: edge.id, box: label })
+  }
+  if (out.length <= MAX_PROBLEMS) return out
+  return [...out.slice(0, MAX_PROBLEMS), `and ${out.length - MAX_PROBLEMS} more`]
 }
