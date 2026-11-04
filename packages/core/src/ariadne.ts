@@ -99,7 +99,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 34
+export const PROJECTION_VERSION = 35
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -256,6 +256,7 @@ interface ThreadRow {
   /** The pointed-to artifacts that still exist, in order, as JSON. */
   report_artifacts: string
   reported_at: number | null
+  reviewed_at: number | null
   reported_head: string | null
   workspace_label: string | null
   workspace_branch: string | null
@@ -381,6 +382,7 @@ function toThread(row: ThreadRow): ThreadView {
       landed:
         (!!merged && (merged.at >= (row.reported_at ?? 0) || merged.head === row.reported_head)) ||
         pullRequest?.state === 'merged',
+      reviewed: row.reviewed_at !== null && row.reviewed_at >= (row.reported_at ?? 0),
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -1367,6 +1369,16 @@ export class Ariadne {
         projectId: thread.projectId,
         data: { threadId, by, reason: thread.stopped.reason },
       },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /** The user is through with what the thread put up for review; it counts as done. */
+  reviewThread(threadId: string): ThreadView {
+    const thread = this.getThread(threadId)
+    if (thread.stage !== 'review') throw new DomainError('error.threadNotInReview')
+    this.store.append([
+      { type: 'thread.reviewed', projectId: thread.projectId, data: { threadId } },
     ])
     return this.getThread(threadId)
   }

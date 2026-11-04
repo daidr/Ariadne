@@ -70,6 +70,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
         : `<instructions_changed path="${note.path}">${note.path} in your workspace changed; your instructions now hold its new version.</instructions_changed>`
     case 'thread-stopped-by-user':
       return `<thread_stopped_by_user thread="${note.threadId}" title="${titleOf(note.threadId)}">\nThe user stopped this thread: ${note.reason}\nIt stays stopped until the user lets it go on; do not resume it or route its work elsewhere unless the user asks.\n</thread_stopped_by_user>`
+    case 'thread-reviewed':
+      return `<thread_reviewed thread="${note.threadId}" title="${titleOf(note.threadId)}">\nThe user is through with what this thread put up for review and did not merge it in Ariadne; it counts as done. Do not ask them to review it again.\n</thread_reviewed>`
     case 'pull-request-closed':
       return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
     case 'branch-merged':

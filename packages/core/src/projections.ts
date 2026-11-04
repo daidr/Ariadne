@@ -124,6 +124,7 @@ export const threadsProjection: Projection = {
       stopped_reason TEXT,
       stopped_by TEXT,
       stopped_at INTEGER,
+      reviewed_at INTEGER,
       model TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -233,6 +234,13 @@ export const threadsProjection: Projection = {
           'UPDATE threads SET stopped_reason = ?, stopped_by = ?, stopped_at = ?, updated_at = ? WHERE id = ?',
           [event.data.reason, event.data.by, event.at, event.at, event.data.threadId],
         )
+        break
+      case 'thread.reviewed':
+        db.run('UPDATE threads SET reviewed_at = ?, updated_at = ? WHERE id = ?', [
+          event.at,
+          event.at,
+          event.data.threadId,
+        ])
         break
       case 'thread.resumed':
         db.run(
@@ -999,6 +1007,15 @@ export const transcriptProjection: Projection = {
             threadId: event.data.threadId,
             reason: event.data.reason,
           }
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
+        }
+        break
+      }
+      case 'thread.reviewed': {
+        // The coordinator hears that the user is through with it, so it does not wait on it.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator) {
+          const payload = { type: 'thread-reviewed', threadId: event.data.threadId }
           addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
         }
         break

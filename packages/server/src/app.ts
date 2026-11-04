@@ -344,6 +344,10 @@ export function createHandler({
     json({ thread: app.resumeThread(threadId, 'user') }),
   )
 
+  add('POST', '/api/threads/:threadId/reviewed', (_request, { threadId = '' }) =>
+    json({ thread: app.reviewThread(threadId) }),
+  )
+
   // Read the thread's pull request and checks again now, instead of waiting for the poll.
   add(
     'POST',

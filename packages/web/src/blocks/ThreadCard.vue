@@ -2,6 +2,7 @@
 import { DouChatArtifact } from 'dou-ui'
 import { MessagesIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
+import ReviewActions from '../components/ReviewActions.vue'
 import StageIcon from '../components/StageIcon.vue'
 import { threadLine } from '../stage'
 import { openThread, state } from '../store'
@@ -26,6 +27,9 @@ const headline = computed(() =>
     @open="openThread(thread.id)"
   >
     <template #icon><MessagesIcon /></template>
-    <template #actions><StageIcon :stage="thread.stage" /></template>
+    <template #actions>
+      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+      <StageIcon :stage="thread.stage" />
+    </template>
   </DouChatArtifact>
 </template>

@@ -249,6 +249,11 @@ export interface EventMap {
   /** Work goes on; `reason` is why it had been stopped, for the thread to read. */
   'thread.resumed': { threadId: string; by: string; reason: string }
   /**
+   * The user is done with what the thread's last report put up for review, without merging
+   * it here: they looked it over, merged it elsewhere, or let it go.
+   */
+  'thread.reviewed': { threadId: string }
+  /**
    * Something waits on the user: an ask block (choice, confirmation or form). An agent's
    * comes with the message it posted it in (`messageId`); the system's own (approvals,
    * plan proposals) are only listed under "needs me".

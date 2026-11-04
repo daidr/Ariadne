@@ -31,6 +31,23 @@ export function registerPanel(kind: PanelKind, handle: PanelHandle): () => void 
   }
 }
 
+/**
+ * Open a thread with the caret in its input, for the user to say what to change. Its panel
+ * may only mount once the thread is open, so this waits a few frames for it.
+ */
+export async function writeToThread(threadId: string) {
+  await openThread(threadId)
+  for (let frame = 0; frame < 30; frame++) {
+    await new Promise(requestAnimationFrame)
+    const panel = panels.get('thread')
+    if (panel && state.threadId === threadId) {
+      lastPanel.value = 'thread'
+      panel.focus()
+      return
+    }
+  }
+}
+
 /** The conversation focus is in, else the one last used, else whichever is on screen. */
 function activePanel(): PanelHandle | null {
   const focused = document.activeElement?.closest<HTMLElement>('[data-panel]')?.dataset.panel

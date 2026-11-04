@@ -770,3 +770,8 @@ export async function stopThread(threadId: string, reason: string) {
 export async function resumeThread(threadId: string) {
   await api.resumeThread(threadId).catch(report)
 }
+
+/** The user is through with what the thread put up for review. */
+export async function reviewThread(threadId: string) {
+  await api.reviewThread(threadId).catch(report)
+}
