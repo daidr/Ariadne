@@ -4,12 +4,14 @@ import { compactionCut } from './compaction'
 import { MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
-import { toChatMessages } from './transcript'
+import { toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
 const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
+const thought = (text: string) =>
+  ({ type: 'reasoning', text, signature: 'sig', startedAt: 1 }) as const
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -232,6 +234,45 @@ describe('history compaction', () => {
     expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('completed')
   })
 
+  test('what the model thought while summarising goes back with its notes, unsigned', async () => {
+    // A model that thinks before every answer, as DeepSeek does by default: once tools are
+    // in play it wants reasoning back on every earlier assistant message, notes included.
+    const model = fakeModel((request) => {
+      if (request.messages[0]?.content.startsWith('You summarise')) {
+        return [thought('想想怎么概括'), ...say('- 用户在整理需求')]
+      }
+      if (!answered(request) && lastUser(request).includes('第 2 份')) {
+        return [
+          thought('先记待办'),
+          call('c1', 'update_todo', { items: [{ label: '整理', status: 'doing' }] }),
+        ]
+      }
+      return [thought('看完了'), ...say('收到')]
+    })
+    const project = app.createProject('P')
+    const running = startScheduler(model, { compactAt: 600 })
+    for (const n of [1, 2, 3, 4]) {
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: `第 ${n} 份需求：${'很长的描述。'.repeat(80)}`,
+      })
+      await running.idle()
+    }
+
+    const [summary] = app.listTranscript(project.coordinatorId).filter((e) => e.kind === 'summary')
+    expect(summary).toMatchObject({ reasoning: [{ text: '想想怎么概括' }] })
+    const last = model.requests.findLast((r) => r.messages[0]?.content.includes('coordinator'))!
+    expect(last.messages[2]).toMatchObject({
+      role: 'assistant',
+      reasoning: [{ text: '想想怎么概括' }],
+    })
+    expect(last.messages[2]).not.toHaveProperty('reasoning.0.signature')
+    for (const message of last.messages) {
+      if (message.role === 'assistant') expect(message.reasoning?.length).toBeGreaterThan(0)
+    }
+  })
+
   test('a failed summary is tried once per turn and shown to the user', async () => {
     let summaries = 0
     const model = fakeModel((request) => {
@@ -270,6 +311,7 @@ describe('history compaction', () => {
         seq: 1,
         kind: 'step',
         reasoning: [],
+        call: '{}',
         text: '',
         sawSeq: 1,
         toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
@@ -283,7 +325,7 @@ describe('history compaction', () => {
         content: 'r'.repeat(400),
         isError: false,
       },
-      { seq: 5, kind: 'step', reasoning: [], text: 'ok', sawSeq: 4, toolCalls: [] },
+      { seq: 5, kind: 'step', reasoning: [], call: '{}', text: 'ok', sawSeq: 4, toolCalls: [] },
       { seq: 6, kind: 'message', message: { content: 'new', attachments: [] } as never },
     ]
     // Keeping very little: the cut falls after the step's result, never between.
@@ -292,7 +334,17 @@ describe('history compaction', () => {
     // Keeping more than there is: nothing to fold.
     expect(compactionCut(entries, 10_000)).toBeNull()
     // A second compaction folds the first summary in and cuts later.
-    const again = [...entries, { seq: 7, kind: 'summary', summary: 's', upTo: 1.5 } as const]
+    const again = [
+      ...entries,
+      {
+        seq: 7,
+        kind: 'summary',
+        summary: 's',
+        upTo: 1.5,
+        reasoning: [] as never[],
+        call: '{}',
+      } as const,
+    ]
     expect(compactionCut(again, 1)).toBe(4.5)
     // Keeping the newest two entries: the cut may not fall between the call and its result.
     expect(compactionCut(entries, 170)).toBeNull()
@@ -803,6 +855,7 @@ describe('transcript to model messages', () => {
           seq: 1,
           kind: 'step',
           reasoning: [],
+          call: '{}',
           text: '',
           sawSeq: 0,
           toolCalls: [
@@ -834,7 +887,15 @@ describe('transcript to model messages', () => {
           message: { content: '开始', kind: 'chat', attachments: [] } as never,
         },
         { seq: 2, kind: 'note', note: report },
-        { seq: 3, kind: 'step', reasoning: [], text: '我去安排', toolCalls: [], sawSeq: 1 },
+        {
+          seq: 3,
+          kind: 'step',
+          reasoning: [],
+          call: '{}',
+          text: '我去安排',
+          toolCalls: [],
+          sawSeq: 1,
+        },
       ],
       () => 't',
     )
@@ -1013,5 +1074,26 @@ describe('how long a turn may run', () => {
       2,
     )
     expect(results[4]).toContain('Doing it again will stop')
+  })
+})
+
+describe('whose reasoning goes back', () => {
+  const recorded: Record<string, string> = {
+    a: JSON.stringify({ provider: 'openai-compatible', model: 'm', settings: { baseUrl: 'x' } }),
+    b: JSON.stringify({ provider: 'openai-compatible', model: 'm', settings: { baseUrl: 'y' } }),
+    c: JSON.stringify({ provider: 'openai-compatible', model: 'n', settings: { baseUrl: 'x' } }),
+    d: JSON.stringify({ provider: 'anthropic', model: 'old', settings: {} }),
+  }
+  const fakeApp = { getPrompt: (_: string, hash: string) => recorded[hash] ?? null } as never
+
+  test('the same service and model, or any model of Anthropic', () => {
+    const openai = writtenBy(fakeApp, 'p', {
+      provider: 'openai-compatible',
+      model: 'm',
+      settings: { baseUrl: 'x' },
+    })
+    expect(['a', 'b', 'c', 'd', 'missing'].map(openai)).toEqual([true, false, false, false, false])
+    const anthropic = writtenBy(fakeApp, 'p', { provider: 'anthropic', model: 'new', settings: {} })
+    expect(['a', 'd'].map(anthropic)).toEqual([false, true])
   })
 })

@@ -82,7 +82,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 24
+export const PROJECTION_VERSION = 25
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -607,6 +607,7 @@ export class Ariadne {
       /** JSON of the provider, model, effort and settings, see `StepInput.call`. */
       call: string
       timing: CallTiming
+      reasoning: ReasoningRecord[]
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
@@ -621,6 +622,10 @@ export class Ariadne {
       usage: compaction.usage,
       call: keep(compaction.call),
       timing: compaction.timing,
+      // A signature belongs to the summarising call and would not hold beside the notes.
+      reasoning: compaction.reasoning
+        .filter((block) => !block.redacted && block.text)
+        .map((block) => ({ text: block.text })),
     }
     this.store.append([...pieces, { type: 'conversation.compacted', projectId, data }])
   }

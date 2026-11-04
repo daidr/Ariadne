@@ -46,6 +46,9 @@ function calls(conversationId: string) {
     )
 }
 
+const isSummary = (r: { messages: { content: string }[] }) =>
+  r.messages[0]?.content.startsWith('You summarise') ?? false
+
 describe('the trace', () => {
   test('rebuilds every request exactly as the model was sent it', async () => {
     const model = fakeModel((request) => {
@@ -297,6 +300,61 @@ describe('the trace', () => {
     expect(traceInput(app, project.coordinatorId, step.seq).call?.settings).toEqual({
       baseUrl: 'http://models.test',
     })
+  })
+
+  test('reasoning goes back only to the model that wrote it', async () => {
+    const thinker = fakeModel(() => [{ type: 'reasoning', text: '我先想想' }, ...say('好')])
+    const other = fakeModel((request) =>
+      request.messages[0]?.content.startsWith('You summarise') ? say('- 概要') : say('嗯'),
+    )
+    other.model = 'fake-2'
+    let current: ResolvedModel = thinker
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => current,
+      locale: () => 'zh-CN',
+      retryBaseMs: 1,
+      compactAt: 600,
+    })
+    scheduler.start()
+    const project = app.createProject('P')
+    const write = (content: string) =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content,
+      })
+    write('一')
+    await scheduler.idle()
+    write('二')
+    await scheduler.idle()
+    // The same model reads its reasoning back.
+    expect(thinker.requests[1]!.messages.find((m) => m.role === 'assistant')).toMatchObject({
+      reasoning: [{ text: '我先想想' }],
+    })
+    current = other
+    write('三')
+    await scheduler.idle()
+    const sent = other.requests.find((r) => !isSummary(r))!
+    const assistants = sent.messages.filter((m) => m.role === 'assistant')
+    expect(assistants.length).toBeGreaterThan(0)
+    for (const message of assistants) expect(message).not.toHaveProperty('reasoning')
+    // The trace rebuilds the request the other model was sent, without the reasoning too.
+    const step = calls(project.coordinatorId).at(-1)!
+    const { signal: _, ...request } = sent
+    expect(traceRequest(app, project.coordinatorId, step.seq).request).toEqual(request)
+
+    // Neither does the other model's summary of that history read it.
+    for (const n of [4, 5, 6]) {
+      write(`第 ${n} 份：${'很长的描述。'.repeat(80)}`)
+      await scheduler.idle()
+    }
+    const summarising = other.requests.find(isSummary)!
+    expect(summarising).toBeDefined()
+    expect(JSON.stringify(summarising.messages)).not.toContain('我先想想')
+    const compacted = calls(project.coordinatorId).find((e) => e.type === 'conversation.compacted')!
+    const { signal: __, ...summaryRequest } = summarising
+    expect(traceRequest(app, project.coordinatorId, compacted.seq).request).toEqual(summaryRequest)
   })
 
   test("refuses a seq that is not one of the conversation's calls", async () => {
