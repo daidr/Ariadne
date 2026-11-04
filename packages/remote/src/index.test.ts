@@ -185,6 +185,18 @@ describe('remote directory', () => {
     expect(existsSync(join(dir, 'src'))).toBe(false)
   })
 
+  test("the source's view is the checkout as it is on that machine, with no worktree", async () => {
+    const dir = await repo()
+    await writeFile(join(dir, 'draft.md'), 'not committed\n')
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const view = await workspace!.view!()
+    expect(view.label).toBe(`localhost:${dir}`)
+    expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'pkg', 'README.md'])
+    expect(await view.readFile('pkg/index.ts')).toBe('export {}\n')
+    await expect(view.readFile('../x')).rejects.toThrow(WorkspacePathError)
+    expect(existsSync(join(home, WORKTREE_DIR))).toBe(false)
+  })
+
   test('a worktree deleted by hand is recreated on its branch', async () => {
     const dir = await repo()
     const { workspace } = await provider().connect({ host: 'box', path: dir })

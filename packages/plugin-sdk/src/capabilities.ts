@@ -44,6 +44,24 @@ export interface Workspace {
   dispose(): Promise<void>
 }
 
+/**
+ * The source as it is, to look at without changing it: what the coordinator reads to
+ * know the project before it briefs threads. Paths are relative to its root and kept
+ * inside it, as a workspace's are.
+ */
+export interface SourceView {
+  /** Shown to the user, e.g. a path or `host:path`. */
+  label: string
+  /**
+   * What is shown when it is not the directory as it is now, e.g. `origin/main` for the
+   * default branch of a hosted repository as last fetched.
+   */
+  ref?: string
+  readFile(path: string): Promise<string>
+  readBytes(path: string, maxBytes: number): Promise<Uint8Array>
+  list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
+}
+
 export interface WorkspaceRequest {
   /** The thread the workspace is for; providers use it to name worktrees. */
   threadId: string
@@ -61,6 +79,8 @@ export interface WorkspaceCapability {
   /** Whether two threads can work at the same time without seeing each other's changes. */
   isolated: boolean
   open(request: WorkspaceRequest): Promise<Workspace>
+  /** The source itself, read-only; without it the coordinator cannot look at the files. */
+  view?(): Promise<SourceView>
   /** Threads' branches and worktrees, when workspaces are worktrees of a git repository. */
   branches?: BranchCapability
   /**

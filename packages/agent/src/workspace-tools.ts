@@ -1,5 +1,5 @@
 import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
-import { FileTooLargeError, type Workspace } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
 import { imageType } from './message-images'
 import {
   json,
@@ -21,18 +21,15 @@ export function shellQuote(value: string): string {
  * Workspace failures (a missing file, a path outside the workspace) go back to the model
  * as error results it can act on, never fail the turn.
  */
-function workspaceTool(
+function workspaceTool<W = Workspace>(
   spec: Tool['spec'],
-  run: (
-    args: Record<string, unknown>,
-    workspace: Workspace,
-    ctx: ToolContext,
-  ) => Promise<ToolResult>,
+  run: (args: Record<string, unknown>, workspace: W, ctx: ToolContext) => Promise<ToolResult>,
+  open: (ctx: ToolContext) => Promise<W> = (ctx) => ctx.workspace() as Promise<W>,
 ): Tool {
   return {
     spec,
     async run(args, ctx) {
-      const workspace = await ctx.workspace()
+      const workspace = await open(ctx)
       try {
         return await run(args, workspace, ctx)
       } catch (error) {
@@ -45,6 +42,17 @@ function workspaceTool(
 
 const DEFAULT_LINES = 400
 
+/** Files to read: a thread's workspace, or the coordinator's view of the source. */
+type Readable = Pick<Workspace, 'readFile' | 'readBytes' | 'list'>
+
+const listEntries = async (args: Record<string, unknown>, files: Readable) => {
+  const entries = await files.list(optionalStr(args, 'path') || '.')
+  return {
+    content:
+      entries.map((e) => (e.kind === 'directory' ? `${e.name}/` : e.name)).join('\n') || '(empty)',
+  }
+}
+
 const listDir = workspaceTool(
   {
     name: 'list_dir',
@@ -54,20 +62,13 @@ const listDir = workspaceTool(
       properties: { path: { type: 'string', description: 'Default ".".' } },
     },
   },
-  async (args, workspace) => {
-    const entries = await workspace.list(optionalStr(args, 'path') || '.')
-    return {
-      content:
-        entries.map((e) => (e.kind === 'directory' ? `${e.name}/` : e.name)).join('\n') ||
-        '(empty)',
-    }
-  },
+  listEntries,
 )
 
 /** An image of the workspace, kept in the project's files and handed to the model. */
 async function readImage(
   path: string,
-  workspace: Workspace,
+  workspace: Readable,
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
   const type = imageType(path)
@@ -92,37 +93,45 @@ async function readImage(
   }
 }
 
+async function readText(
+  args: Record<string, unknown>,
+  files: Readable,
+  ctx: ToolContext,
+): Promise<ToolResult> {
+  const path = str(args, 'path')
+  const image = await readImage(path, files, ctx)
+  if (image) return image
+  const text = await files.readFile(path)
+  if (text.includes('\u0000')) {
+    return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
+  }
+  const lines = text.split('\n')
+  const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
+  const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
+  const shown = lines.slice(offset - 1, offset - 1 + limit)
+  const body = shown.map((line, i) => `${String(offset + i).padStart(5)}\t${line}`).join('\n')
+  const end = offset - 1 + shown.length
+  const more = end < lines.length ? `\n[lines ${offset}-${end} of ${lines.length}]` : ''
+  return { content: body + more }
+}
+
+const readParameters = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    offset: { type: 'integer' },
+    limit: { type: 'integer' },
+  },
+  required: ['path'],
+}
+
 const readFile = workspaceTool(
   {
     name: 'read_file',
     description: `Read a file of your workspace: text with line numbers, ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise; a PNG, JPEG, GIF or WebP image as a picture you see.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string' },
-        offset: { type: 'integer' },
-        limit: { type: 'integer' },
-      },
-      required: ['path'],
-    },
+    parameters: readParameters,
   },
-  async (args, workspace, ctx) => {
-    const path = str(args, 'path')
-    const image = await readImage(path, workspace, ctx)
-    if (image) return image
-    const text = await workspace.readFile(path)
-    if (text.includes('\u0000')) {
-      return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
-    }
-    const lines = text.split('\n')
-    const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
-    const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
-    const shown = lines.slice(offset - 1, offset - 1 + limit)
-    const body = shown.map((line, i) => `${String(offset + i).padStart(5)}\t${line}`).join('\n')
-    const end = offset - 1 + shown.length
-    const more = end < lines.length ? `\n[lines ${offset}-${end} of ${lines.length}]` : ''
-    return { content: body + more }
-  },
+  readText,
 )
 
 const writeFile = workspaceTool(
@@ -233,3 +242,37 @@ const runCommand = workspaceTool(
 )
 
 export const workspaceTools: Tool[] = [listDir, readFile, writeFile, editFile, search, runCommand]
+
+const openSource = (ctx: ToolContext): Promise<SourceView> => {
+  if (!ctx.source) return Promise.reject(new DomainError('error.noSource'))
+  return ctx.source()
+}
+
+/**
+ * The coordinator's look at the project's source, as it is now and read-only: enough to
+ * know what the project is and brief threads well. Changing it is a thread's work.
+ */
+export const sourceTools: Tool[] = [
+  workspaceTool(
+    {
+      name: 'list_dir',
+      description:
+        'List a directory of the project\'s source (read-only). Paths are relative to its root; "." is the root.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'Default ".".' } },
+      },
+    },
+    listEntries,
+    openSource,
+  ),
+  workspaceTool(
+    {
+      name: 'read_file',
+      description: `Read a file of the project's source (read-only): text with line numbers, ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise; a PNG, JPEG, GIF or WebP image as a picture you see.`,
+      parameters: readParameters,
+    },
+    readText,
+    openSource,
+  ),
+]

@@ -55,6 +55,29 @@ describe('local directory', () => {
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
   })
 
+  test("the source's view is the user's directory as it is, read-only", async () => {
+    const dir = await repo()
+    await writeFile(join(dir, 'draft.md'), 'not committed\n')
+    const provider = localDirectoryProvider(join(base, 'data'))
+    const { workspace } = await provider.connect({ path: dir })
+    const view = await workspace!.view!()
+    expect(view.label).toBe(dir)
+    expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'README.md'])
+    expect(await view.readFile('draft.md')).toBe('not committed\n')
+    expect(new TextDecoder().decode(await view.readBytes('README.md', 100))).toBe('# repo\n')
+    await expect(view.readFile('../outside')).rejects.toBeInstanceOf(WorkspacePathError)
+    // Looking makes no worktree and no branch.
+    expect(existsSync(join(base, 'data', 'worktrees'))).toBe(false)
+    const branches = await run(['git', 'branch', '--list'], { cwd: dir })
+    expect(branches.stdout.trim()).toBe('* main')
+
+    const plain = join(base, 'plain')
+    await run(['mkdir', '-p', plain], { cwd: base })
+    await writeFile(join(plain, 'notes.txt'), 'hi\n')
+    const shared = (await provider.connect({ path: plain })).workspace!
+    expect(await (await shared.view!()).readFile('notes.txt')).toBe('hi\n')
+  })
+
   test('bytes are read up to a limit', async () => {
     const dir = join(base, 'plain')
     await run(['mkdir', '-p', dir], { cwd: base })

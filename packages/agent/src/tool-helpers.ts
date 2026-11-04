@@ -5,6 +5,7 @@ import type {
   DashboardSource,
   RepoCapability,
   SearchProvider,
+  SourceView,
   ToolSpec,
   TrackerCapability,
   Workspace,
@@ -22,6 +23,8 @@ export interface ToolContext {
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */
   repo(): Promise<RepoCapability>
+  /** The project's source as it is, read-only: what the coordinator looks at. */
+  source?: () => Promise<SourceView>
   /** The project's threads' branches, read without their worktrees. */
   branches?: () => Promise<BranchCapability | null>
   /** The project's issue tracker, when its source has one. */

@@ -201,10 +201,13 @@ export function remoteWorkspaces(
   tracking = false,
 ): WorkspaceCapability {
   const { repoRoot } = source
+  // The coordinator reads the directory as it is on that machine.
+  const view = async () => new RemoteWorkspace('source', shell, source.path, null)
   if (!repoRoot) {
     return {
       isolated: false,
       open: async ({ threadId }) => new RemoteWorkspace(threadId, shell, source.path, null),
+      view,
     }
   }
   const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
@@ -222,6 +225,7 @@ export function remoteWorkspaces(
     tracking ? `refs/remotes/origin/${base}` : `refs/heads/${base}`
   return {
     isolated: true,
+    view,
     ...(tracking
       ? {}
       : {

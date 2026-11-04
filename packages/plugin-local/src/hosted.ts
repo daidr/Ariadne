@@ -10,6 +10,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { branchChanges, branchMerged, fileVersions, removeWorktree, type GitRun } from './branches'
 import { branchFor, gitControlPaths, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
+import { GitTreeView } from './tree'
+
+/** The coordinator's view fetches again once what it shows is older than this. */
+const VIEW_FRESH_MS = 60_000
 
 /** Where `git push` from a workspace goes: nowhere, so every push goes through the tool. */
 const NO_PUSH_URL = 'no-push://use-the-push_branch-tool'
@@ -137,8 +141,26 @@ export function hostedClone(input: {
       ...(options.whole ? { whole: true } : {}),
     })
 
+  // What the coordinator reads: the default branch as last fetched, at most a minute old.
+  let fetchedAt = 0
+  const view = async () => {
+    const base = await input.defaultBranch()
+    if (Date.now() - fetchedAt > VIEW_FRESH_MS) {
+      await serial(ensureClone)
+      fetchedAt = Date.now()
+    }
+    return new GitTreeView(
+      local,
+      (args) => gitBytes(bare, args),
+      baseRef(base),
+      [...(input.namespace ?? []), input.path].join('/'),
+      `origin/${base}`,
+    )
+  }
+
   const workspace: WorkspaceCapability = {
     isolated: true,
+    view,
     // Branches reach the default branch through pull requests: nothing is merged here.
     branches: {
       changes: (threadId, base) =>
@@ -284,6 +306,25 @@ async function gitInput(cwd: string, args: string[], input: string): Promise<str
   })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  if (code !== 0) throw new Error(`git ${args[0]} failed: ${stderr.trim() || `exit ${code}`}`)
+  return stdout
+}
+
+/** The server's git in the shared clone, its output as bytes. */
+async function gitBytes(cwd: string, args: string[]): Promise<Uint8Array> {
+  const proc = Bun.spawn(['git', ...args], {
+    cwd,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    windowsHide: true,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...serverGitEnv(['file']) },
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).bytes(),
     new Response(proc.stderr).text(),
     proc.exited,
   ])

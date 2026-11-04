@@ -1,7 +1,8 @@
-import type { RepoCapability } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, WorkspacePathError, type RepoCapability } from '@ariadne/plugin-sdk'
 import { run } from '@ariadne/plugin-local'
 import { hostedClone } from '@ariadne/plugin-local/hosted'
 import { connectRemote, LocalShell } from '@ariadne/remote'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -90,6 +91,47 @@ async function setup(origin = `git@example.com:team/app.git`) {
   const workspace = await connectRemote(new TestShell(), checkout)
   return { upstream, seed, checkout, repo, workspace }
 }
+
+describe("a hosted repository's view", () => {
+  test('the coordinator reads the default branch as fetched, without a checkout', async () => {
+    const { seed, upstream } = await setup()
+    await mkdir(join(seed, 'docs'), { recursive: true })
+    await writeFile(join(seed, 'docs', 'a.md'), 'A\n')
+    await writeFile(join(seed, 'logo.png'), new Uint8Array([0x89, 0x50, 0, 255]))
+    await git(seed, 'add', '.')
+    await git(seed, 'commit', '-q', '-m', 'docs')
+    await git(seed, 'push', '-q', 'origin', 'main')
+    const clone = hostedClone({
+      dataDir: join(base, 'data2'),
+      path: 'team/app',
+      remoteUrl: `file://${upstream}`,
+      user: 'x',
+      token: async () => null,
+      defaultBranch: async () => 'main',
+    })
+    const view = await clone.workspace.view!()
+    expect([view.label, view.ref]).toEqual(['team/app', 'origin/main'])
+    expect(await view.list('.')).toEqual([
+      { name: 'docs', kind: 'directory' },
+      { name: 'logo.png', kind: 'file' },
+      { name: 'NEW.md', kind: 'file' },
+      { name: 'README.md', kind: 'file' },
+    ])
+    expect(await view.list('docs/')).toEqual([{ name: 'a.md', kind: 'file' }])
+    expect(await view.readFile('./docs/a.md')).toBe('A\n')
+    expect(await view.readFile('docs\\a.md')).toBe('A\n')
+    expect(await view.readBytes('logo.png', 4)).toEqual(new Uint8Array([0x89, 0x50, 0, 255]))
+    await expect(view.readBytes('logo.png', 3)).rejects.toThrow(FileTooLargeError)
+    await expect(view.readFile('docs')).rejects.toThrow('not a file')
+    await expect(view.list('README.md')).rejects.toThrow('not a directory')
+    await expect(view.readFile('missing.md')).rejects.toThrow('does not exist')
+    for (const path of ['../x', 'docs/../../x', '/etc/passwd', 'C:\\x']) {
+      await expect(view.readFile(path)).rejects.toThrow(WorkspacePathError)
+    }
+    // No worktree was made for looking.
+    expect(existsSync(join(base, 'data2', 'worktrees'))).toBe(false)
+  })
+})
 
 describe('repository urls', () => {
   test('the same repository however it is written', () => {

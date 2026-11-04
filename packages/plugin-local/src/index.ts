@@ -421,10 +421,13 @@ export function localWorkspaces(input: {
 }): WorkspaceCapability {
   const { sandbox, repoRoot } = input
   const clone = input.clone === undefined ? platformCloner : input.clone
+  // The coordinator reads the directory as the user has it, changes not committed and all.
+  const view = async () => new LocalWorkspace('source', input.path, null)
   if (!repoRoot) {
     return {
       isolated: false,
       open: async ({ threadId }) => new LocalWorkspace(threadId, input.path, null, { sandbox }),
+      view,
     }
   }
   const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
@@ -438,6 +441,7 @@ export function localWorkspaces(input: {
     })
   return {
     isolated: true,
+    view,
     branches: {
       changes: (threadId, base) =>
         branchChanges(gitRun, {
