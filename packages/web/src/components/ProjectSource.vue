@@ -56,6 +56,13 @@ const remote = computed(() => !!storedKind.value?.remote)
 // Notes about this machine's sandbox wait for the kinds, so a remote source never shows one.
 const local = computed(() => !!source.value && kindsKnown.value && !remote.value)
 const unsandboxed = computed(() => local.value && sandbox.value?.kind === null)
+const sandboxNote = computed(() =>
+  sandbox.value?.mode === 'off'
+    ? 'sandbox.off.body'
+    : sandbox.value?.platform === 'win32'
+      ? 'sandbox.windows.body'
+      : 'sandbox.missing.body',
+)
 // macOS's sandbox keeps files out of reach but not the server's processes.
 const weaker = computed(() => local.value && sandbox.value?.kind === 'sandbox-exec')
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
@@ -218,7 +225,7 @@ async function save(clear = false) {
       role="alert"
       :title="t(sandbox.mode === 'off' ? 'sandbox.off.title' : 'sandbox.missing.title')"
     >
-      {{ t(sandbox.mode === 'off' ? 'sandbox.off.body' : 'sandbox.missing.body') }}
+      {{ t(sandboxNote) }}
     </DouAlert>
     <DouText v-else-if="weaker" variant="tertiary" size="sm">{{ t('sandbox.weaker') }}</DouText>
     <DouText v-else-if="source && remote" variant="tertiary" size="sm">

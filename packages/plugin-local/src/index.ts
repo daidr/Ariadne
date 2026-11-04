@@ -80,6 +80,8 @@ export function serverGitEnv(protocols: string[] = ['https']): Record<string, st
 /** The parts of a git directory that make git run something: kept read-only for threads. */
 export const gitControlPaths = (gitDir: string) => [join(gitDir, 'config'), join(gitDir, 'hooks')]
 
+const windows = process.platform === 'win32'
+
 /** Run a program without a shell. */
 export async function run(
   argv: string[],
@@ -103,10 +105,21 @@ export async function run(
     stdin: 'ignore',
     env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
     // A thread's command gets a process group of its own, so what it leaves running in the
-    // background ends with it (on macOS the sandbox does not do this).
-    detached: !!options.forThread,
+    // background ends with it (on macOS the sandbox does not do this). Windows has no
+    // process groups, and a detached command there would open a console window of its own.
+    detached: !!options.forThread && !windows,
   })
   const killGroup = () => {
+    if (windows) {
+      // The command and what it started, while it still runs; once it has exited, the
+      // processes it left behind are no longer found from it.
+      Bun.spawn(['taskkill', '/T', '/F', '/PID', String(proc.pid)], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+        stdin: 'ignore',
+      })
+      return
+    }
     try {
       process.kill(-proc.pid, 'SIGKILL')
     } catch {
@@ -121,7 +134,7 @@ export async function run(
     const stderr = collect(proc.stderr)
     const exitCode = await proc.exited
     // Background processes would keep the output open, and keep running, otherwise.
-    if (options.forThread) killGroup()
+    if (options.forThread && !windows) killGroup()
     // One that left the group (setsid) may still hold the output: give it a moment, then
     // stop waiting, so the call returns.
     const [out, err] = await Promise.all([stdout.settle(), stderr.settle()])

@@ -141,7 +141,14 @@ export function createHandler({
 
   // How thread commands are isolated, so the page can say when they are not.
   add('GET', '/api/sandbox', () =>
-    json({ sandbox: host?.sandbox.status ?? { kind: null, mode: 'auto', hidden: [] } }),
+    json({
+      sandbox: host?.sandbox.status ?? {
+        kind: null,
+        mode: 'auto',
+        hidden: [],
+        platform: process.platform,
+      },
+    }),
   )
 
   // Plugins: the built-in ones and those loaded from a path, with why a path failed.

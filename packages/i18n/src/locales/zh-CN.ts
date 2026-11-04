@@ -169,6 +169,7 @@ export const zhCN = {
   'sandbox.off.title': '工作区沙箱已关闭',
   'sandbox.off.body': 'config.json 里关闭了沙箱，thread 运行的命令能读到 Ariadne 的令牌和设置。',
   'sandbox.remote': 'thread 的命令在 {host} 上运行，不受本机沙箱限制',
+  'sandbox.windows.body': 'Windows 上暂时没有沙箱，thread 运行的命令能读到 Ariadne 的令牌和设置。',
   'sandbox.weaker': 'macOS 的沙箱只隔离文件，比 Linux 弱',
   'start.title': '开始使用',
   'start.model': '设置模型',
