@@ -1,7 +1,13 @@
-import type { RepoCapability } from '@ariadne/plugin-sdk'
+import {
+  FileTooLargeError,
+  WorkspacePathError,
+  type RepoCapability,
+  type SourceView,
+} from '@ariadne/plugin-sdk'
 import { run } from '@ariadne/plugin-local'
 import { hostedClone } from '@ariadne/plugin-local/hosted'
 import { connectRemote, LocalShell } from '@ariadne/remote'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,6 +39,10 @@ const git = async (cwd: string, ...args: string[]) => {
   if (result.exitCode !== 0) throw new Error(result.stderr)
   return result.stdout.trim()
 }
+
+/** A view's file as text. */
+const textOf = async (view: SourceView, path: string) =>
+  new TextDecoder().decode(await view.readBytes(path, 1 << 20))
 
 const WEB = 'https://example.com/team/app'
 
@@ -90,6 +100,48 @@ async function setup(origin = `git@example.com:team/app.git`) {
   const workspace = await connectRemote(new TestShell(), checkout)
   return { upstream, seed, checkout, repo, workspace }
 }
+
+describe("a hosted repository's view", () => {
+  test('the coordinator reads the default branch as fetched, without a checkout', async () => {
+    const { seed, upstream } = await setup()
+    await mkdir(join(seed, 'docs'), { recursive: true })
+    await writeFile(join(seed, 'docs', 'a.md'), 'A\n')
+    await writeFile(join(seed, 'logo.png'), new Uint8Array([0x89, 0x50, 0, 255]))
+    await git(seed, 'add', '.')
+    await git(seed, 'commit', '-q', '-m', 'docs')
+    await git(seed, 'push', '-q', 'origin', 'main')
+    const clone = hostedClone({
+      dataDir: join(base, 'data2'),
+      path: 'team/app',
+      remoteUrl: `file://${upstream}`,
+      user: 'x',
+      token: async () => null,
+      defaultBranch: async () => 'main',
+    })
+    const view = await clone.workspace.view!()
+    expect(view.ref).toBe('origin/main')
+    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes', 'ref'])
+    expect(await view.list('.')).toEqual([
+      { name: 'docs', kind: 'directory' },
+      { name: 'logo.png', kind: 'file' },
+      { name: 'NEW.md', kind: 'file' },
+      { name: 'README.md', kind: 'file' },
+    ])
+    expect(await view.list('docs/')).toEqual([{ name: 'a.md', kind: 'file' }])
+    expect(await textOf(view, './docs/a.md')).toBe('A\n')
+    expect(await textOf(view, 'docs\\a.md')).toBe('A\n')
+    expect(await view.readBytes('logo.png', 4)).toEqual(new Uint8Array([0x89, 0x50, 0, 255]))
+    await expect(view.readBytes('logo.png', 3)).rejects.toThrow(FileTooLargeError)
+    await expect(view.readBytes('docs', 10)).rejects.toThrow('not a file')
+    await expect(view.list('README.md')).rejects.toThrow('not a directory')
+    await expect(view.readBytes('missing.md', 10)).rejects.toThrow('does not exist')
+    for (const path of ['../x', 'docs/../../x', '/etc/passwd', 'C:\\x']) {
+      await expect(view.readBytes(path, 10)).rejects.toThrow(WorkspacePathError)
+    }
+    // No worktree was made for looking.
+    expect(existsSync(join(base, 'data2', 'worktrees'))).toBe(false)
+  })
+})
 
 describe('repository urls', () => {
   test('the same repository however it is written', () => {

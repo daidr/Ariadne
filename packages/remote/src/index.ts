@@ -1,5 +1,6 @@
 import {
   FileTooLargeError,
+  readOnlyView,
   WorkspacePathError,
   type BranchCapability,
   type ExecResult,
@@ -64,6 +65,18 @@ export function relativePath(path: string): string {
     throw new WorkspacePathError(path)
   }
   return normal === '.' ? '' : normal.replace(/\/+$/, '')
+}
+
+/** A path of the source's view: inside it, and not through git's own directory. */
+function visible(path: string): string {
+  if (
+    relativePath(path)
+      .split('/')
+      .some((part) => part.toLowerCase() === '.git')
+  ) {
+    throw new WorkspacePathError(path, 'is kept out of reach')
+  }
+  return path
 }
 
 /** What a failed script means: a path outside, or the reason it gave. */
@@ -201,10 +214,19 @@ export function remoteWorkspaces(
   tracking = false,
 ): WorkspaceCapability {
   const { repoRoot } = source
+  // The coordinator reads the directory as it is on that machine, without git's own.
+  const view = async () => {
+    const files = new RemoteWorkspace('source', shell, source.path, null)
+    return readOnlyView({
+      readBytes: async (path, maxBytes) => files.readBytes(visible(path), maxBytes),
+      list: async (path) => (await files.list(visible(path))).filter((e) => e.name !== '.git'),
+    })
+  }
   if (!repoRoot) {
     return {
       isolated: false,
       open: async ({ threadId }) => new RemoteWorkspace(threadId, shell, source.path, null),
+      view,
     }
   }
   const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
@@ -222,6 +244,7 @@ export function remoteWorkspaces(
     tracking ? `refs/remotes/origin/${base}` : `refs/heads/${base}`
   return {
     isolated: true,
+    view,
     ...(tracking
       ? {}
       : {

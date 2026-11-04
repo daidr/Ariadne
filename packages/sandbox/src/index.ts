@@ -357,6 +357,7 @@ export function createSandbox(options: {
   return {
     kind,
     status: { kind, mode: options.mode, hidden, platform: process.platform },
+    hidden,
     wrap(argv, { keep, readOnly = [] }) {
       const locked = [...fixed(), ...readOnly]
       switch (kind) {

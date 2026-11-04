@@ -3,13 +3,18 @@ import type {
   BranchCapability,
   Capabilities,
   RepoCapability,
+  SourceView,
   TrackerCapability,
   Workspace,
 } from '@ariadne/plugin-sdk'
+import type { Locale } from '@ariadne/i18n'
 import type { ProjectSource } from '@ariadne/core'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
+
+/** How long a coordinator's turn waits on its source to know whether it can look at it. */
+const VIEWABLE_WAIT_MS = 2000
 
 /** Secret settings of a source's hosting are kept under this prefix. */
 export const HOSTING_SECRET = 'hosting.'
@@ -55,6 +60,22 @@ export async function connectSource(
 }
 
 /**
+ * A source's settings in one line, as the project header shows them: the provider's
+ * `summary` with `{setting}` filled in, or else its first text setting (the path, the
+ * repository). Secret settings are never stored with the source, so none can show.
+ */
+export function sourceSummary(
+  template: string | undefined,
+  settings: Record<string, unknown>,
+): string | null {
+  if (template) {
+    return template.replace(/\{(\w+)\}/g, (_, key: string) => String(settings[key] ?? '')).trim()
+  }
+  const value = Object.values(settings).find((v) => typeof v === 'string' && v)
+  return typeof value === 'string' ? value : null
+}
+
+/**
  * Opens each thread's workspace from its project's context source, once, and keeps it
  * for later turns. A source that changes gets connected again.
  */
@@ -86,6 +107,69 @@ export class WorkspaceManager {
   /** Whether the project's source has issues to read. */
   hasTracker(projectId: string): boolean {
     return this.provides(projectId, 'tracker')
+  }
+
+  /**
+   * The project's source in one line, as the user sees it in the project header: the kind
+   * of source and its summary (e.g. `本地目录 D:\work\app`), the hosting first when it
+   * has one. `null` without a source.
+   */
+  describe(projectId: string, locale: Locale): string | null {
+    const source = this.app.getProject(projectId).source
+    if (!source) return null
+    const line = (kind: string, settings: Record<string, unknown>) => {
+      const provider = this.host.contexts.get(kind)
+      const title = provider ? (provider.title[locale] ?? provider.title['zh-CN']) : kind
+      const summary = sourceSummary(provider?.summary, settings)
+      return summary ? `${title} ${summary}` : title
+    }
+    return [
+      ...(source.hosting ? [line(source.hosting.kind, source.hosting.settings)] : []),
+      line(source.kind, source.settings),
+    ].join(' · ')
+  }
+
+  /**
+   * Whether the coordinator can look at the project's source: its provider offers a view.
+   * A source that fails to connect, or does not answer within `waitMs`, counts as one: the
+   * turn does not wait on it, and a look says why it failed.
+   */
+  async viewable(projectId: string, waitMs = VIEWABLE_WAIT_MS): Promise<boolean> {
+    if (!this.available(projectId)) return false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<boolean>((done) => {
+      timer = setTimeout(() => done(true), waitMs)
+    })
+    try {
+      const connected = this.connect(projectId, this.sourceKey(projectId)).then(
+        (capabilities) => !!capabilities.workspace?.view,
+        () => true,
+      )
+      return await Promise.race([connected, late])
+    } catch {
+      return true
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** The project's source as it is, read-only; throws a `DomainError` the model can read. */
+  async view(projectId: string): Promise<SourceView> {
+    const capabilities = await this.connect(projectId, this.sourceKey(projectId))
+    const view = capabilities.workspace?.view
+    if (!view) {
+      throw new DomainError('error.workspace', {
+        detail: 'this source cannot be read from here; a thread can read it in its workspace',
+      })
+    }
+    try {
+      return await view.call(capabilities.workspace)
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError('error.workspace', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   /** The project's issue tracker; throws a `DomainError` the model can read. */

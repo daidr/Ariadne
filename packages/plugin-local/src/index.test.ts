@@ -1,13 +1,22 @@
-import { FileTooLargeError, WorkspacePathError, type CommandSandbox } from '@ariadne/plugin-sdk'
+import {
+  FileTooLargeError,
+  WorkspacePathError,
+  type CommandSandbox,
+  type SourceView,
+} from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { branchFor, localDirectoryProvider, run, type LocalWorkspace } from './index'
+import { branchFor, LocalWorkspace, localDirectoryProvider, run } from './index'
 import { hostedGitEnv } from './hosted'
 
 let base: string
+
+/** A view's file as text. */
+const textOf = async (view: SourceView, path: string) =>
+  new TextDecoder().decode(await view.readBytes(path, 1 << 20))
 
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'ariadne-local-'))
@@ -53,6 +62,71 @@ describe('local directory', () => {
     // Opening again reuses the worktree and keeps the work.
     const again = await workspace!.open({ threadId: 'thr_a' })
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
+  })
+
+  test("the source's view is the user's directory as it is, read-only", async () => {
+    const dir = await repo()
+    await writeFile(join(dir, 'draft.md'), 'not committed\n')
+    const provider = localDirectoryProvider(join(base, 'data'))
+    const { workspace } = await provider.connect({ path: dir })
+    const view = await workspace!.view!()
+    // Only reading: nothing behind it to write or run with.
+    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
+    expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'README.md'])
+    expect(await textOf(view, 'draft.md')).toBe('not committed\n')
+    await expect(view.readBytes('../outside', 10)).rejects.toBeInstanceOf(WorkspacePathError)
+    // git's own directory, which may hold credentials in a remote's URL, is not shown.
+    for (const path of ['.git/config', './.git/config', 'sub/../.git/HEAD', '.GIT/config']) {
+      await expect(view.readBytes(path, 1000)).rejects.toBeInstanceOf(WorkspacePathError)
+    }
+    // Looking makes no worktree and no branch.
+    expect(existsSync(join(base, 'data', 'worktrees'))).toBe(false)
+    const branches = await run(['git', 'branch', '--list'], { cwd: dir })
+    expect(branches.stdout.trim()).toBe('* main')
+
+    const plain = join(base, 'plain')
+    await run(['mkdir', '-p', plain], { cwd: base })
+    await writeFile(join(plain, 'notes.txt'), 'hi\n')
+    const shared = (await provider.connect({ path: plain })).workspace!
+    expect(await textOf(await shared.view!(), 'notes.txt')).toBe('hi\n')
+  })
+
+  test('what the sandbox hides is not read, listed or written, with or without a sandbox', async () => {
+    // A source that holds Ariadne's home, as when the source is the user's home directory.
+    const home = join(base, 'home')
+    const secrets = join(home, '.ariadne')
+    await run(['mkdir', '-p', join(secrets, 'worktrees', 'thr_a'), join(home, 'src')], {
+      cwd: base,
+    })
+    await writeFile(join(secrets, 'config.json'), '{"apiKey":"sk-secret"}')
+    await writeFile(join(home, 'src', 'a.ts'), 'export {}\n')
+    await symlink(join(secrets, 'config.json'), join(home, 'src', 'link.json'))
+    const sandbox: CommandSandbox = {
+      kind: null,
+      wrap: (argv) => argv,
+      hidden: [await realpath(secrets)],
+    }
+    const provider = localDirectoryProvider(join(base, 'data'), sandbox)
+    const { workspace } = await provider.connect({ path: home })
+    for (const files of [await workspace!.view!(), await workspace!.open({ threadId: 'thr_x' })]) {
+      expect((await files.list('.')).map((e) => e.name)).toEqual(['src'])
+      for (const path of ['.ariadne/config.json', 'src/link.json', '.ariadne']) {
+        await expect(files.readBytes(path, 1000)).rejects.toBeInstanceOf(WorkspacePathError)
+      }
+      await expect(files.list('.ariadne')).rejects.toBeInstanceOf(WorkspacePathError)
+    }
+    const thread = await workspace!.open({ threadId: 'thr_x' })
+    await expect(thread.writeFile('.ariadne/config.json', '{}')).rejects.toBeInstanceOf(
+      WorkspacePathError,
+    )
+    expect(await readFile(join(secrets, 'config.json'), 'utf8')).toBe('{"apiKey":"sk-secret"}')
+
+    // A workspace kept inside a hidden directory (a worktree under Ariadne's home) still works.
+    const inside = new LocalWorkspace('thr_a', join(secrets, 'worktrees', 'thr_a'), null, {
+      sandbox,
+    })
+    await inside.writeFile('ok.txt', 'ok')
+    expect(await inside.readFile('ok.txt')).toBe('ok')
   })
 
   test('bytes are read up to a limit', async () => {

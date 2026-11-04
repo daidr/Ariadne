@@ -17,7 +17,7 @@ import {
 } from './tool-helpers'
 import { fetchUrlTool, webSearchTool } from './web-tools'
 import type { WebAccess } from './web'
-import { workspaceTools } from './workspace-tools'
+import { sourceTools, workspaceTools } from './workspace-tools'
 
 export {
   ToolInputError,
@@ -541,11 +541,12 @@ export const threadTools: Tool[] = [
  * A thread's tools: the workspace tools only when its project has a directory to work in,
  * the repository tools only when that directory is a hosted repository, the issue tools
  * when the source has a tracker (the coordinator reads and links issues, only threads
- * change them).
+ * change them). The coordinator reads the source, read-only, when there is one.
  */
 export function toolsFor(
   role: 'coordinator' | 'thread',
   source: {
+    /** A thread: whether it gets a workspace. The coordinator: whether it can read the source. */
     workspace: boolean
     repo: boolean
     tracker?: boolean
@@ -561,7 +562,12 @@ export function toolsFor(
     ...(source.search?.size ? [webSearchTool(source.search)] : []),
   ]
   if (role === 'coordinator') {
-    return [...coordinatorTools(source.models), ...web, ...(source.tracker ? issueReadTools : [])]
+    return [
+      ...coordinatorTools(source.models),
+      ...web,
+      ...(source.workspace ? sourceTools : []),
+      ...(source.tracker ? issueReadTools : []),
+    ]
   }
   return [
     ...threadTools,

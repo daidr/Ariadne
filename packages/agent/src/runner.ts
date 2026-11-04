@@ -149,6 +149,7 @@ function systemPrompt(
   hasWorkspace: boolean,
   hasRepo: boolean,
   models: ModelChoice[],
+  source: { line: string; readable: boolean } | null,
 ): string {
   if (conversation.role === 'coordinator') {
     return coordinatorPrompt({
@@ -156,6 +157,7 @@ function systemPrompt(
       locale,
       memories: app.listMemories(conversation.projectId),
       models,
+      source,
     })
   }
   return threadPrompt(threadContext(app, conversation, locale, hasWorkspace, hasRepo))
@@ -195,19 +197,21 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
+  const conversationId = conversation.id
+  // Input newer than this arrived for this turn.
+  const handledBefore = lastHandled(app.listTranscript(conversationId))
+  const turnId = app.startTurn(conversationId, model.label)
+  // The coordinator looks at the source only when its provider offers a view.
+  const hasSource = !isThread && !!(await workspaces?.viewable(conversation.projectId))
   const builtIn =
     options.tools ??
     toolsFor(conversation.role, {
-      workspace: hasWorkspace,
+      workspace: isThread ? hasWorkspace : hasSource,
       repo: hasRepo,
       tracker: hasTracker,
       models: options.models ?? [],
       ...(options.searchProviders ? { search: options.searchProviders } : {}),
     })
-  const conversationId = conversation.id
-  // Input newer than this arrived for this turn.
-  const handledBefore = lastHandled(app.listTranscript(conversationId))
-  const turnId = app.startTurn(conversationId, model.label)
   // The project's external tools, as their servers list them now; one that cannot be
   // reached brings none, and the turn goes on without it.
   const external =
@@ -233,6 +237,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         return Promise.reject(new DomainError('error.noSource'))
       }
       return workspaces.forThread(conversation.projectId, conversationId)
+    },
+    source: () => {
+      if (!workspaces) return Promise.reject(new DomainError('error.noSource'))
+      return workspaces.view(conversation.projectId)
     },
     repo: () => {
       if (!workspaces || !isThread) return Promise.reject(new DomainError('error.noRepo'))
@@ -279,8 +287,20 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let compactionFailed = false
     let lastInput = 0
     const state = () => currentState(app, conversation)
-    const system = () =>
-      systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo, options.models ?? [])
+    const system = () => {
+      const line = isThread
+        ? null
+        : (workspaces?.describe(conversation.projectId, options.locale) ?? null)
+      return systemPrompt(
+        app,
+        conversation,
+        options.locale,
+        hasWorkspace,
+        hasRepo,
+        options.models ?? [],
+        line ? { line, readable: hasSource } : null,
+      )
+    }
     const specs = tools.map((tool) => tool.spec)
     const toolsJson = JSON.stringify(specs)
     // A turn has no step limit: it ends when the model answers, the user stops it, or it

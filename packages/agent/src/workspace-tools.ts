@@ -1,5 +1,5 @@
 import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
-import { FileTooLargeError, type Workspace } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
 import { imageType } from './message-images'
 import {
   json,
@@ -21,18 +21,15 @@ export function shellQuote(value: string): string {
  * Workspace failures (a missing file, a path outside the workspace) go back to the model
  * as error results it can act on, never fail the turn.
  */
-function workspaceTool(
+function workspaceTool<W = Workspace>(
   spec: Tool['spec'],
-  run: (
-    args: Record<string, unknown>,
-    workspace: Workspace,
-    ctx: ToolContext,
-  ) => Promise<ToolResult>,
+  run: (args: Record<string, unknown>, workspace: W, ctx: ToolContext) => Promise<ToolResult>,
+  open: (ctx: ToolContext) => Promise<W> = (ctx) => ctx.workspace() as Promise<W>,
 ): Tool {
   return {
     spec,
     async run(args, ctx) {
-      const workspace = await ctx.workspace()
+      const workspace = await open(ctx)
       try {
         return await run(args, workspace, ctx)
       } catch (error) {
@@ -45,6 +42,17 @@ function workspaceTool(
 
 const DEFAULT_LINES = 400
 
+/** Files to read: a thread's workspace, or the coordinator's view of the source. */
+type Readable = Pick<Workspace, 'readBytes' | 'list'>
+
+const listEntries = async (args: Record<string, unknown>, files: Readable) => {
+  const entries = await files.list(optionalStr(args, 'path') || '.')
+  return {
+    content:
+      entries.map((e) => (e.kind === 'directory' ? `${e.name}/` : e.name)).join('\n') || '(empty)',
+  }
+}
+
 const listDir = workspaceTool(
   {
     name: 'list_dir',
@@ -54,20 +62,13 @@ const listDir = workspaceTool(
       properties: { path: { type: 'string', description: 'Default ".".' } },
     },
   },
-  async (args, workspace) => {
-    const entries = await workspace.list(optionalStr(args, 'path') || '.')
-    return {
-      content:
-        entries.map((e) => (e.kind === 'directory' ? `${e.name}/` : e.name)).join('\n') ||
-        '(empty)',
-    }
-  },
+  listEntries,
 )
 
 /** An image of the workspace, kept in the project's files and handed to the model. */
 async function readImage(
   path: string,
-  workspace: Workspace,
+  workspace: Readable,
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
   const type = imageType(path)
@@ -92,37 +93,87 @@ async function readImage(
   }
 }
 
+/** read_file decodes at most this much of a text file. */
+export const MAX_READ_BYTES = 1024 * 1024
+/** A longer line is cut, e.g. minified code or JSON on one line. */
+const MAX_LINE_CHARS = 2000
+/** A result stops at a line boundary past this, and says where to go on. */
+const MAX_RESULT_CHARS = 60_000
+
+/**
+ * A text file with line numbers, `limit` lines from `offset`, with long lines cut and the
+ * whole result kept short. `tooLarge` says what to do with a file above `MAX_READ_BYTES`.
+ */
+async function readText(
+  args: Record<string, unknown>,
+  files: Readable,
+  ctx: ToolContext,
+  tooLarge: string,
+): Promise<ToolResult> {
+  const path = str(args, 'path')
+  const image = await readImage(path, files, ctx)
+  if (image) return image
+  let data: Uint8Array
+  try {
+    data = await files.readBytes(path, MAX_READ_BYTES)
+  } catch (error) {
+    if (error instanceof FileTooLargeError) {
+      return {
+        content: `${path} is ${Math.round(error.size / 1024)} KB, more than the ${MAX_READ_BYTES / 1024} KB read_file reads. ${tooLarge}`,
+        isError: true,
+      }
+    }
+    throw error
+  }
+  if (data.includes(0)) {
+    return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
+  }
+  const lines = new TextDecoder().decode(data).split('\n')
+  const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
+  const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
+  const shown: string[] = []
+  let size = 0
+  for (const [i, line] of lines.slice(offset - 1, offset - 1 + limit).entries()) {
+    if (shown.length && size >= MAX_RESULT_CHARS) break
+    const cut =
+      line.length > MAX_LINE_CHARS
+        ? `${line.slice(0, MAX_LINE_CHARS)} [… ${line.length - MAX_LINE_CHARS} characters of this line cut]`
+        : line
+    const numbered = `${String(offset + i).padStart(5)}\t${cut}`
+    shown.push(numbered)
+    size += numbered.length + 1
+  }
+  const end = offset - 1 + shown.length
+  const more =
+    end < lines.length
+      ? `\n[lines ${offset}-${end} of ${lines.length}; read on with offset ${end + 1}]`
+      : ''
+  return { content: shown.join('\n') + more }
+}
+
+const readParameters = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    offset: { type: 'integer' },
+    limit: { type: 'integer' },
+  },
+  required: ['path'],
+}
+
 const readFile = workspaceTool(
   {
     name: 'read_file',
     description: `Read a file of your workspace: text with line numbers, ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise; a PNG, JPEG, GIF or WebP image as a picture you see.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string' },
-        offset: { type: 'integer' },
-        limit: { type: 'integer' },
-      },
-      required: ['path'],
-    },
+    parameters: readParameters,
   },
-  async (args, workspace, ctx) => {
-    const path = str(args, 'path')
-    const image = await readImage(path, workspace, ctx)
-    if (image) return image
-    const text = await workspace.readFile(path)
-    if (text.includes('\u0000')) {
-      return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
-    }
-    const lines = text.split('\n')
-    const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
-    const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
-    const shown = lines.slice(offset - 1, offset - 1 + limit)
-    const body = shown.map((line, i) => `${String(offset + i).padStart(5)}\t${line}`).join('\n')
-    const end = offset - 1 + shown.length
-    const more = end < lines.length ? `\n[lines ${offset}-${end} of ${lines.length}]` : ''
-    return { content: body + more }
-  },
+  (args, workspace, ctx) =>
+    readText(
+      args,
+      workspace,
+      ctx,
+      'Look at the part you need with run_command instead (e.g. grep -n, sed -n or head).',
+    ),
 )
 
 const writeFile = workspaceTool(
@@ -233,3 +284,52 @@ const runCommand = workspaceTool(
 )
 
 export const workspaceTools: Tool[] = [listDir, readFile, writeFile, editFile, search, runCommand]
+
+const openSource = (ctx: ToolContext): Promise<SourceView> => {
+  if (!ctx.source) return Promise.reject(new DomainError('error.noSource'))
+  return ctx.source()
+}
+
+/** Says what a view shows when it is not the directory as it is now. */
+const fromRef = (view: SourceView, result: ToolResult): ToolResult =>
+  view.ref && !result.isError
+    ? { ...result, content: `${result.content}\n[from ${view.ref}]` }
+    : result
+
+/**
+ * The coordinator's look at the project's source, as it is now and read-only: enough to
+ * know what the project is and brief threads well. Changing it is a thread's work.
+ */
+export const sourceTools: Tool[] = [
+  workspaceTool(
+    {
+      name: 'list_dir',
+      description:
+        'List a directory of the project\'s source (read-only). Paths are relative to its root; "." is the root.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'Default ".".' } },
+      },
+    },
+    async (args, view) => fromRef(view, await listEntries(args, view)),
+    openSource,
+  ),
+  workspaceTool(
+    {
+      name: 'read_file',
+      description: `Read a file of the project's source (read-only): text with line numbers, ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise; a PNG, JPEG, GIF or WebP image as a picture you see.`,
+      parameters: readParameters,
+    },
+    async (args, view, ctx) =>
+      fromRef(
+        view,
+        await readText(
+          args,
+          view,
+          ctx,
+          'Read another file, or leave a closer look at this one to a thread.',
+        ),
+      ),
+    openSource,
+  ),
+]

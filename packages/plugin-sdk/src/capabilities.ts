@@ -44,6 +44,37 @@ export interface Workspace {
   dispose(): Promise<void>
 }
 
+/**
+ * The source as it is, to look at without changing it: what the coordinator reads to
+ * know the project before it briefs threads. Paths are relative to its root and kept
+ * inside it, as a workspace's are; git's own directory is not shown.
+ */
+export interface SourceView {
+  /**
+   * What is shown when it is not the directory as it is now, e.g. `origin/main` for the
+   * default branch of a hosted repository as last fetched.
+   */
+  ref?: string
+  /** Larger than `maxBytes` is refused with a `FileTooLargeError`, without reading it all. */
+  readBytes(path: string, maxBytes: number): Promise<Uint8Array>
+  list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
+}
+
+/**
+ * Only the reading half of `files`, so a view handed out cannot write or run anything
+ * whatever object stands behind it.
+ */
+export function readOnlyView(
+  files: Pick<SourceView, 'readBytes' | 'list'>,
+  ref?: string,
+): SourceView {
+  return {
+    ...(ref ? { ref } : {}),
+    readBytes: async (path, maxBytes) => files.readBytes(path, maxBytes),
+    list: async (path) => files.list(path),
+  }
+}
+
 export interface WorkspaceRequest {
   /** The thread the workspace is for; providers use it to name worktrees. */
   threadId: string
@@ -61,6 +92,8 @@ export interface WorkspaceCapability {
   /** Whether two threads can work at the same time without seeing each other's changes. */
   isolated: boolean
   open(request: WorkspaceRequest): Promise<Workspace>
+  /** The source itself, read-only; without it the coordinator cannot look at the files. */
+  view?(): Promise<SourceView>
   /** Threads' branches and worktrees, when workspaces are worktrees of a git repository. */
   branches?: BranchCapability
   /**
@@ -308,8 +341,12 @@ export interface TrackerCapability {
 
 /** A path that points outside the workspace. */
 export class WorkspacePathError extends Error {
-  constructor(readonly path: string) {
-    super(`${path} is outside the workspace`)
+  constructor(
+    readonly path: string,
+    /** Why, when it is not outside: e.g. a path kept out of reach inside it. */
+    reason?: string,
+  ) {
+    super(`${path} ${reason ?? 'is outside the workspace'}`)
     this.name = 'WorkspacePathError'
   }
 }

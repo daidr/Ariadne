@@ -1,7 +1,7 @@
 import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
-export { FileTooLargeError, MergeRefused, WorkspacePathError } from './capabilities'
+export { FileTooLargeError, MergeRefused, readOnlyView, WorkspacePathError } from './capabilities'
 export {
   describeHttpError,
   httpErrorPart,
@@ -208,6 +208,12 @@ export interface CommandSandbox {
    * `hooks`.
    */
   wrap(argv: string[], options: { keep: string[]; readOnly?: string[] }): string[]
+  /**
+   * The real paths threads must not see (Ariadne's home, the browsers' profiles, what the
+   * user added). Commands get them covered where the sandbox works; file tools refuse
+   * them everywhere, also where no sandbox runs.
+   */
+  readonly hidden?: readonly string[]
 }
 
 /**
