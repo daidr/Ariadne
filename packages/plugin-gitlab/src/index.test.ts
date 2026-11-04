@@ -477,7 +477,8 @@ describe('merge request links', () => {
 
   test('shows the card with the token the instance was given', async () => {
     const instances = new GitLabInstances({})
-    instances.add(instance, 'given')
+    instances.add(instance, 'acme/other', 'other-project')
+    instances.add(instance, 'acme/tools/app', 'given')
     const links = gitlabLinks(instances, { env: {} })
     expect(
       await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/8`), {}),
@@ -496,6 +497,7 @@ describe('merge request links', () => {
       changedFiles: 12,
       at: '2026-11-04T12:00:00Z',
     })
+    // The linked project's own token first.
     expect(requests.at(-1)).toMatchObject({
       path: `${P}/merge_requests/8`,
       auth: 'Bearer given',
@@ -503,8 +505,15 @@ describe('merge request links', () => {
     expect(
       await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/9`), {}),
     ).toMatchObject({ draft: true, author: null, changedFiles: null, at: '2026-11-03T00:00:00Z' })
+    // Not there for any token: each is tried once, the other project's too.
+    const before = requests.length
     expect(
       await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/10`), {}),
     ).toBeNull()
+    expect(requests.slice(before).map((request) => request.auth)).toEqual([
+      'Bearer given',
+      'Bearer other-project',
+      null,
+    ])
   })
 })

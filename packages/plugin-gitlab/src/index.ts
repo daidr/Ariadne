@@ -305,34 +305,47 @@ export function parseMergeRequestUrl(
  * and those of the projects connected since the start, with the token each was given.
  */
 export class GitLabInstances {
-  private readonly tokens = new Map<string, string | undefined>()
+  /** Instance to the tokens its connected projects were given, by project path. */
+  private readonly instances = new Map<string, Map<string, string>>()
 
   constructor(env: Record<string, string | undefined> = process.env) {
-    this.tokens.set(GITLAB_COM, undefined)
+    this.instances.set(GITLAB_COM, new Map())
     const host = env.GITLAB_HOST?.trim()
     if (host) {
       try {
-        this.tokens.set(parseInstance(host.includes('://') ? host : `https://${host}`), undefined)
+        this.instances.set(
+          parseInstance(host.includes('://') ? host : `https://${host}`),
+          new Map(),
+        )
       } catch {
         // Not an address an instance can be at; its links stay plain.
       }
     }
   }
 
-  add(instance: string, token: string | undefined) {
-    // A token the user gave for the instance is used for its links too.
-    if (token?.trim() || !this.tokens.has(instance)) this.tokens.set(instance, token?.trim())
+  /** A project connected on `instance`, with the token the user gave it, if any. */
+  add(instance: string, path: string, token: string | undefined) {
+    let tokens = this.instances.get(instance)
+    if (!tokens) {
+      tokens = new Map()
+      this.instances.set(instance, tokens)
+    }
+    if (token?.trim()) tokens.set(path, token.trim())
   }
 
-  /** The instance the link is on, the one with the longest path when they nest. */
-  find(
-    url: URL,
-  ): { instance: string; token: string | undefined; path: string; iid: number } | null {
+  /**
+   * The instance the link is on, the one with the longest path when they nest, and the
+   * tokens given for its projects: the linked project's own first, then the others (a
+   * group or personal token reads more than its project).
+   */
+  find(url: URL): { instance: string; tokens: string[]; path: string; iid: number } | null {
     let found: ReturnType<GitLabInstances['find']> = null
-    for (const [instance, token] of this.tokens) {
+    for (const [instance, given] of this.instances) {
       const mr = parseMergeRequestUrl(url, instance)
       if (mr && (!found || instance.length > found.instance.length)) {
-        found = { instance, token, ...mr }
+        const own = given.get(mr.path)
+        const others = [...given.values()].filter((token) => token !== own)
+        found = { instance, tokens: [...(own ? [own] : []), ...new Set(others)], ...mr }
       }
     }
     return found
@@ -349,18 +362,18 @@ export function gitlabLinks(
   options: Pick<GitLabProviderOptions, 'fetch' | 'env' | 'run'> = {},
 ): LinkProvider {
   const env = options.env ?? process.env
-  // A token found is kept per instance; none found is looked for again next time.
-  const tokens = new Map<string, Promise<string | null>>()
-  const tokenFor = async (instance: string, configured: string | undefined) => {
-    const key = `${instance}\0${configured ?? ''}`
-    let token = tokens.get(key)
+  // The token from the environment or glab is kept per instance; none found is looked for
+  // again next time.
+  const found = new Map<string, Promise<string | null>>()
+  const fallback = async (instance: string) => {
+    let token = found.get(instance)
     if (!token) {
-      token = findToken(configured, instance, env, options.run ?? run)
-      tokens.set(key, token)
+      token = findToken(undefined, instance, env, options.run ?? run)
+      found.set(instance, token)
     }
-    const found = await token
-    if (!found) tokens.delete(key)
-    return found
+    const value = await token
+    if (!value) found.delete(instance)
+    return value
   }
   return {
     kind: 'gitlab',
@@ -372,20 +385,27 @@ export function gitlabLinks(
     async preview(url, { signal }) {
       const mr = instances.find(url)
       if (!mr) return null
-      const api = new GitLabApi({
-        base: `${mr.instance}/api/v4`,
-        path: mr.path,
-        webUrl: `${mr.instance}/${mr.path}`,
-        token: () => tokenFor(mr.instance, mr.token),
-        fetch: ((input, init) =>
-          (options.fetch ?? fetch)(input, { ...init, signal: signal ?? null })) as typeof fetch,
-      })
-      try {
-        return await api.mergeRequestPreview(mr.iid)
-      } catch (error) {
-        if (error instanceof GitLabError && error.status === 404) return null
-        throw error
+      const read = (token: () => Promise<string | null>) =>
+        new GitLabApi({
+          base: `${mr.instance}/api/v4`,
+          path: mr.path,
+          webUrl: `${mr.instance}/${mr.path}`,
+          token,
+          fetch: ((input, init) =>
+            (options.fetch ?? fetch)(input, { ...init, signal: signal ?? null })) as typeof fetch,
+        }).mergeRequestPreview(mr.iid)
+      // Each project may have its own token: the linked project's first, then the others
+      // given on the instance, then the environment's. A private one reads as not there to
+      // a token without access.
+      const tokens = [...mr.tokens.map((token) => async () => token), () => fallback(mr.instance)]
+      for (const token of tokens) {
+        try {
+          return await read(token)
+        } catch (error) {
+          if (!(error instanceof GitLabError && [401, 403, 404].includes(error.status))) throw error
+        }
       }
+      return null
     },
   }
 }
@@ -433,7 +453,7 @@ export function gitlabProvider(
     hosting: true,
     async connect(settings): Promise<Partial<Capabilities>> {
       const connected = connectRepository(settings, options)
-      options.instances?.add(connected.instance, settings.token)
+      options.instances?.add(connected.instance, connected.path, settings.token)
       // Fails early on a typo, a wrong instance or a token without access.
       await connected.api.project()
       return { workspace: connected.workspace, repo: connected.repo, tracker: connected.tracker }

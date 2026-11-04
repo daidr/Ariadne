@@ -220,6 +220,24 @@ describe('remote directory', () => {
     expect((await gitIn(dir, 'push', '-q', 'origin', 'main')).exitCode).toBe(0)
   })
 
+  test('fetching still works when a push address is also a fetch address, or a prefix of one', async () => {
+    const dir = await repo()
+    const upstream = join(base, 'up.git')
+    await gitIn(base, 'init', '-q', '--bare', upstream)
+    await gitIn(dir, 'push', '-q', upstream, 'main')
+    // The same address for both, and a push address that a fetch address starts with.
+    await gitIn(dir, 'remote', 'add', 'origin', upstream)
+    await gitIn(dir, 'config', 'remote.origin.pushurl', upstream)
+    await gitIn(dir, 'remote', 'add', 'other', `${upstream}/`)
+    await gitIn(dir, 'remote', 'add', 'prefix', join(base, 'unused.git'))
+    await gitIn(dir, 'config', 'remote.prefix.pushurl', upstream.slice(0, -4))
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_fetch' })
+    expect((await ws.exec('git fetch -q origin && git fetch -q other')).exitCode).toBe(0)
+    const pushed = await ws.exec('git push -q prefix HEAD:refs/heads/x')
+    expect(pushed.stderr).toContain('git-push-is-blocked')
+  })
+
   test("the source's view is the checkout as it is on that machine, with no worktree", async () => {
     const dir = await repo()
     await writeFile(join(dir, 'draft.md'), 'not committed\n')

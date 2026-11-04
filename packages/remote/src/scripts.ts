@@ -92,7 +92,10 @@ done
  * With `$3`, git in the command pushes nowhere: every push address, the remotes' own and
  * one typed out, is rewritten to the path `$3`, which is not a repository, through config
  * in the environment (after any the user's environment sets), so nothing on disk changes.
- * `pushInsteadOf` leaves a remote's explicit `pushurl` alone; those go through `insteadOf`.
+ * `pushInsteadOf` leaves a remote's explicit `pushurl` alone; those go through `insteadOf`,
+ * which fetches use too, by prefix: a remote address that starts with such a `pushurl` gets
+ * a rewrite to itself, which is longer and so wins for fetching. A `pushurl` that is also a
+ * remote's address cannot be told apart from it and is left as it is.
  */
 export const EXEC = `${PRELUDE}
 printf '${STARTED}\\n' >&2
@@ -103,9 +106,18 @@ if [ -n "\${3:-}" ]; then
   nowhere=$3 n=\${GIT_CONFIG_COUNT:-0}
   case $n in '' | *[!0-9]*) n=0 ;; esac
   rewrite() { export "GIT_CONFIG_KEY_$n=url.$nowhere.$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+  keep() { export "GIT_CONFIG_KEY_$n=url.$1.insteadOf" "GIT_CONFIG_VALUE_$n=$1"; n=$((n + 1)); }
   rewrite pushInsteadOf ''
-  while IFS= read -r url; do
-    [ -n "$url" ] && rewrite insteadOf "$url"
+  addresses=$(git config --get-regexp '^remote\\..*\\.url$' 2> /dev/null | cut -d ' ' -f 2-)
+  while IFS= read -r push; do
+    [ -n "$push" ] || continue
+    fetched=
+    while IFS= read -r url; do [ "$url" = "$push" ] && fetched=1; done <<< "$addresses"
+    [ -n "$fetched" ] && continue
+    rewrite insteadOf "$push"
+    while IFS= read -r url; do
+      case $url in "$push"?*) keep "$url" ;; esac
+    done <<< "$addresses"
   done < <(git config --get-regexp '^remote\\..*\\.pushurl$' 2> /dev/null | cut -d ' ' -f 2-)
   export GIT_CONFIG_COUNT=$n
 fi
