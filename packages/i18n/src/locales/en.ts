@@ -168,6 +168,8 @@ export const en: Record<MessageKey, string> = {
     'Remove the {count} selected nodes? Their {threads} threads will be detached from the plan. You can undo this from the history.',
   'plugins.removeAffects':
     'These model providers use it: {names}. They stop working once it is removed.',
+  'project.source.hosting': 'Hosting',
+  'project.source.hostingNone': 'None',
   'project.source.none': 'Not set',
   'project.source.save': 'Save',
   'project.source.clear': 'Remove',
@@ -191,7 +193,7 @@ export const en: Record<MessageKey, string> = {
   'start.projectHint': 'A project serves one goal, with its own coordinator, plan and artifacts',
   'start.source': 'Choose a working directory (optional)',
   'start.sourceHint':
-    'Set a local folder, repository or SSH remote directory on the right so threads can edit files and run commands',
+    'Set a local folder, repository or remote directory on the right so threads can edit files and run commands',
   'start.chooseSource': 'Choose a directory',
   'start.talk': 'Tell the coordinator what you want',
   'start.talkHint': 'Type below; the coordinator plans the work and opens threads',

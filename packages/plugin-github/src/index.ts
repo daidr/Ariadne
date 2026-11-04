@@ -122,6 +122,7 @@ export function connectRepository(
     isPublic: async () => !(await getRepository()).private,
     fetch: clone.fetch,
     push: clone.push,
+    objects: clone.objects,
     pullRequestFor: (branch) => api.pullRequestFor(branch),
     pullRequest: (number) => api.pullRequest(number),
     openPullRequest: async (input) =>
@@ -178,6 +179,7 @@ export function githubProvider(options: GitHubProviderOptions): ContextProvider<
       required: ['repository'],
     },
     provides: ['workspace', 'repo', 'tracker'],
+    hosting: true,
     async connect(settings): Promise<Partial<Capabilities>> {
       const connected = connectRepository(settings, options)
       // Fails early on a typo or a token without access.

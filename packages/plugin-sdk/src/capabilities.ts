@@ -63,6 +63,41 @@ export interface WorkspaceCapability {
   open(request: WorkspaceRequest): Promise<Workspace>
   /** Threads' branches and worktrees, when workspaces are worktrees of a git repository. */
   branches?: BranchCapability
+  /**
+   * The checkout the workspaces are worktrees of, when a hosted repository can come with
+   * them: its pull requests and checks, with the commits moved through Ariadne.
+   */
+  checkout?: HostedCheckout
+}
+
+/**
+ * A git repository's refs and objects, to move commits between two clones of the same
+ * repository without either reaching the other.
+ */
+export interface GitObjects {
+  /** The refs under these prefixes (e.g. `refs/remotes/origin/`), name to commit. */
+  refs(prefixes: string[]): Promise<Record<string, string>>
+  /** Those of `shas` the repository has. */
+  has(shas: string[]): Promise<string[]>
+  /**
+   * A git bundle of the commits the refs `tips` reach and the commits `exclude` do not;
+   * `exclude` are commits the receiving side has.
+   */
+  bundle(tips: string[], exclude: string[]): Promise<Uint8Array>
+  /** Take in a bundle's objects, when there is one, then set the refs to these commits. */
+  receive(bundle: Uint8Array | null, refs: Record<string, string>): Promise<void>
+}
+
+/** A checkout on some machine that a hosted repository's clone works with. */
+export interface HostedCheckout {
+  /** Where its `origin` points, to check it is the hosted repository. */
+  originUrl(): Promise<string | null>
+  objects: GitObjects
+  /**
+   * The same workspaces, with new branches started from and compared against
+   * `origin/<base>`, and no merge: the branches reach the base through pull requests.
+   */
+  tracking(): WorkspaceCapability
 }
 
 export type ChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
@@ -211,6 +246,11 @@ export interface RepoCapability {
   checks(sha: string): Promise<CheckInfo[]>
   /** The end of a check's log, for a thread to see why it failed. */
   checkLog(checkId: string): Promise<string>
+  /**
+   * The clone `fetch` and `push` work in, when commits can come into it from a checkout
+   * elsewhere (see `HostedCheckout`).
+   */
+  objects?: GitObjects
 }
 
 /** An issue as a list shows it. Titles and bodies are written by anyone who can file one. */

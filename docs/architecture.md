@@ -91,7 +91,7 @@ thread 的阶段按“它在等谁”划分，从上到下第一条匹配的生�
 
 ### 工作区
 
-项目有一个上下文源：本地目录、GitHub 仓库、GitLab 仓库或 SSH 远程目录。thread 第一次用文件或命令工具时才准备工作区：
+项目有一个上下文源：本地目录、GitHub 仓库、GitLab 仓库、SSH 远程目录或远程 daemon。thread 第一次用文件或命令工具时才准备工作区：
 
 - git 仓库：从仓库当前的 HEAD 为 thread 建一个 `git worktree`，分支是 `ariadne/<thread id 的末尾>`，thread 之间互不可见。重启后沿用原来的 worktree；worktree 目录被手动删掉的话，先 `git worktree prune` 再在原分支上重建。上下文源是仓库的子目录时，工作区根目录是 worktree 里对应的子目录。
 - 普通目录：所有 thread 共用这个目录。
@@ -151,7 +151,31 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 - 文件工具在远端读写：路径先在本机规范化，不允许 `..` 和绝对路径，再在远端把最近的已有目录解析成真实路径，确认仍在根目录里；经符号链接出去的、指向不存在位置的链接（写入会顺着它在外面建文件）都会被拒绝。远端的文件工具和命令以同一个用户运行，这层检查防的是失误，不是隔离。
 - 命令用 bash 在工作区里运行，有自己的进程组。脚本另起一个看守进程读连接的输入：超时、thread 被停下或者连接断了，本机就关掉输入，看守进程结束整个进程组，留在组里的后台进程也一起结束；特意脱离进程组的（`setsid`）和本地目录一样挡不住。输出过长时只保留末尾，和本地相同。
 - 本机的工作区沙箱不管远端：命令以 SSH 登录的用户身份运行，能读写那个用户能读写的一切。项目来源下方会注明这一点。SSH 到本机自己（`localhost`）时，命令同样不在沙箱里，能读到 Ariadne 的令牌和设置。
-- SSH 来源只提供 `workspace`，没有 PR 和检查；看改动、合并和自动清理 worktree 与本地目录相同，git 都在远端运行。thread 在远端用 `git push` 推送属于“工作区外、无法撤销”的操作，每次都要先问用户；公开仓库“第一次推送前问一次、对整个项目有效”的规则只适用于有 `repo` 能力、由服务端推送的来源。
+- SSH 来源只提供 `workspace`，没有 PR 和检查（搭配代码托管时有，见下文）；看改动、合并和自动清理 worktree 与本地目录相同，git 都在远端运行。thread 在远端用 `git push` 推送属于“工作区外、无法撤销”的操作，每次都要先问用户；公开仓库“第一次推送前问一次、对整个项目有效”的规则只适用于有 `repo` 能力、由服务端推送的来源。
+
+SSH 来源的远端代码（工作区、脚本、对 `RemoteShell` 的约定）在 `@ariadne/remote` 包里，SSH 和下面的 daemon 都只提供传输：把一段 bash 脚本和参数交给远端的 `bash --norc --noprofile -s`，送输入、收输出和退出码、能中途结束。
+
+### 远程 daemon
+
+daemon 来源（内置插件 `plugin-daemon`）给连不了 SSH 的机器用：容器、只开一个端口的云主机。远端运行 `ariadne-daemon`（`@ariadne/daemon`，`bun run build:daemon` 打出 Linux 和 macOS 的单文件程序），项目来源里填它的地址、配对码和远端目录。工作区、worktree、改动和合并与 SSH 来源完全相同。
+
+- 方向只有一个：Ariadne 去连 daemon，daemon 不主动连任何地方，Ariadne 自己照旧只听 127.0.0.1。daemon 默认只听远端的 `127.0.0.1:7429`；`--listen` 换成别的地址时启动日志会提醒其他机器也能连上来。
+- 连接总是 TLS。daemon 第一次启动时用 `openssl` 生成一张自签的 P-256 证书（名字是 `ariadne-daemon`），Ariadne 不走 CA：每次连接先取 daemon 的证书，核对它的 SHA-256 指纹和配对码里的一致，再把这张证书当成唯一可信的根去建真正的连接，令牌只在这条连接上发出。指纹对不上就断开，并说明是另一台机器在应答，或者 daemon 换了证书。
+- 配对码是 256 位随机令牌加证书指纹，第一次启动或 `ariadne-daemon pair` 时打印一次。daemon 只存令牌的 SHA-256（`~/.ariadne-daemon/token.sha256`），每次认证都重新读，`pair` 换掉的旧令牌立即失效（已经连着的连接不受影响）。令牌放在 `Authorization` 头里，不进 URL；同一个地址十分钟内错十次，之后的十分钟一律拒绝。
+- Ariadne 这边，配对码是来源的私密设置，和 GitHub 令牌一样存在 `~/.ariadne/config.json`，不进事件日志、追踪和错误信息，浏览器只知道它设过没有。
+- 一条 WebSocket 同时跑多个调用（`/v1/shell`），先用 `/v1/hello` 核对令牌和协议版本，版本不同直接拒绝并提示两边用同一个版本。连接断了，进行中的调用以退出码 255 结束，下一次调用重新连接。daemon 端连接断开时关掉每个调用的输入（命令的看守进程据此结束进程组），两秒后再强制结束。
+- daemon 在远端也用工作区沙箱（和本机同一个 `@ariadne/sandbox`）运行每个调用，遮住 `~/.ariadne-daemon`（证书私钥和令牌哈希）和浏览器的配置目录，`--hide` 可以再加；daemon 自己的代码只读。没有可用的沙箱时启动日志会说明，`--no-sandbox` 可以关掉。
+- 拿到令牌就等于拿到 daemon 所在用户的 shell，和 SSH 私钥一样。所以默认只听回环、远端不存明文、连接必须过 TLS，建议用一个单独的系统用户运行 daemon。
+- 暂不支持 Windows，也不做断线后接回原来的命令。
+
+### 远程目录搭配托管仓库
+
+SSH 和 daemon 来源可以再选一个代码托管（GitHub 或 GitLab，`ContextProvider.hosting`）：thread 在远端写代码，PR、检查和 issue 走托管仓库，推送在本机做，托管的令牌从不去远端。
+
+- 远端目录必须是这个托管仓库的签出：连接时比对它 `origin` 的主机和路径（`https`、`ssh://`、`git@host:path` 写法都认），不是就拒绝，免得把别的仓库的提交推上去。
+- 提交在两边的 git 之间用 git bundle 搬（`GitObjects`）：本机在自己的共享 clone 里 fetch，再把远端没有的提交打包，经同一条连接送过去，更新远端的 `origin/*`；推送时反过来，把 thread 的分支从远端打包带回本机的 clone，再由本机推送。打包只含对方没有的提交，两边共有的提交作为前提。远端用户自己的分支不动。
+- 新 thread 的分支从刚同步过的 `origin/<默认分支>` 建出，改动对比的也是它；合并走 PR，所以没有“合并到基线”。推送后远端的 `origin/<分支>` 跟着更新。
+- 其余同托管仓库：推送和开 PR 用 `push_branch`、`open_pull_request`，公开仓库第一次推送前问一次。thread 自己在远端用 `git push`（用远端的凭据）仍然属于要先问用户的操作。
 
 ### 仓库、PR 与 CI
 
@@ -294,12 +318,15 @@ packages/
   core         领域模型、事件存储与投影，不依赖 HTTP
   plugin-sdk   插件作者使用的类型与 definePlugin
   mcp          MCP 客户端：stdio 与 HTTP 两种连接
+  sandbox      工作区沙箱：bwrap、unshare、sandbox-exec
+  remote       远端工作区：脚本、worktree，SSH 和 daemon 共用
+  daemon       远端运行的 ariadne-daemon
   agent        agent loop、调度、协调器与 thread 的工具、插件宿主
-  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录、GitHub 仓库、GitLab 仓库与 SSH 远程目录上下文源
+  plugin-*     内置插件：OpenAI 兼容与 Anthropic 两种模型协议，本地目录、GitHub 仓库、GitLab 仓库、SSH 远程目录与远程 daemon 上下文源
   server       本地 HTTP 服务、鉴权、事件流与用户设置
   web          Vue + dou-ui 的浏览器界面
 ```
 
-- 依赖方向：`i18n` ← `core` ← `agent` ← `server`，`plugin-sdk` ← `plugin-*`、`mcp`、`agent`，`mcp` ← `agent`；`web` 只依赖 `i18n`，以及 `core` 和 `plugin-sdk` 导出的类型。
+- 依赖方向：`i18n` ← `core` ← `agent` ← `server`，`plugin-sdk` ← `plugin-*`、`mcp`、`agent`，`mcp` ← `agent`，`sandbox` ← `agent`、`daemon`，`remote` ← `plugin-ssh`、`plugin-daemon`；`web` 只依赖 `i18n`，以及 `core` 和 `plugin-sdk` 导出的类型。
 - 存储：`bun:sqlite` 单文件，一张事件表加若干投影表；投影与事件在同一个事务里写入。
 - 服务默认只监听 `127.0.0.1`，请求需要携带本地 token。

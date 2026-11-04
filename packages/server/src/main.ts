@@ -11,6 +11,7 @@ import {
   WorktreeJanitor,
 } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
+import daemon from '@ariadne/plugin-daemon'
 import github from '@ariadne/plugin-github'
 import gitlab from '@ariadne/plugin-gitlab'
 import local, { threadEnv } from '@ariadne/plugin-local'
@@ -62,6 +63,7 @@ await host.load(local)
 await host.load(github)
 await host.load(gitlab)
 await host.load(ssh)
+await host.load(daemon)
 const settings = new SettingsStore(configPath, host)
 pluginPaths = () => settings.current.plugins
 for (const path of settings.current.plugins) {

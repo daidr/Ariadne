@@ -250,6 +250,7 @@ export function connectRepository(
     isPublic: async () => (await getProject()).visibility !== 'private',
     fetch: clone.fetch,
     push: clone.push,
+    objects: clone.objects,
     pullRequestFor: async (branch) => api.mergeRequestFor(branch, (await getProject()).id),
     pullRequest: (iid) => api.mergeRequest(iid),
     openPullRequest: async (input) =>
@@ -316,6 +317,7 @@ export function gitlabProvider(options: GitLabProviderOptions): ContextProvider<
       required: ['repository'],
     },
     provides: ['workspace', 'repo', 'tracker'],
+    hosting: true,
     async connect(settings): Promise<Partial<Capabilities>> {
       const connected = connectRepository(settings, options)
       // Fails early on a typo, a wrong instance or a token without access.

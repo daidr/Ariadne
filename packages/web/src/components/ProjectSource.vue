@@ -26,6 +26,13 @@ const kind = ref<string | null>(null)
 /** Draft settings per kind, so switching kinds back and forth keeps what was typed. */
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
 const secretsSet = ref<string[]>([])
+/** The hosted repository a remote source pushes to, and its form, like the source's. */
+const hostingKind = ref<string | null>(null)
+const hostingDrafts = reactive<Record<string, Record<string, unknown>>>({})
+const hostingSecretsSet = ref<string[]>([])
+const storedHostingSecrets = ref<string[]>([])
+/** How the server keeps a hosting's secrets apart from the source's. */
+const HOSTING = 'hosting.'
 /** This project's share of the work slots; empty leaves it to the shared total. */
 const slots = ref<number | null>(null)
 /** The external tool servers this project uses, by id. */
@@ -100,23 +107,42 @@ const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ??
 const kindOptions = computed(() =>
   kinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),
 )
+const hostingKinds = computed(() => kinds.value.filter((k) => k.hosting))
+// Only a source on another machine takes a hosting; a repository source is one already.
+const takesHosting = computed(() => !!current.value?.remote && hostingKinds.value.length > 0)
+const hostingCurrent = computed(
+  () => hostingKinds.value.find((k) => k.kind === hostingKind.value) ?? null,
+)
+const hostingOptions = computed(() => [
+  { value: '', label: t('project.source.hostingNone') },
+  ...hostingKinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),
+])
 
 /**
- * One line for the source: the provider's summary filled in (e.g. `host:path`), or else
- * its first plain setting, e.g. the path or the repository.
+ * One line for a source: the provider's summary filled in (e.g. `host:path`), or else its
+ * first plain setting, e.g. the path or the repository.
  */
-const summary = computed(() => {
-  const settings = source.value?.settings ?? {}
-  const template = storedKind.value?.summary
+function summaryOf(of: SourceKind | null, settings: Record<string, unknown>): string | null {
+  const template = of?.summary
   if (template) {
     return template.replace(/\{(\w+)\}/g, (_, key: string) => String(settings[key] ?? ''))
   }
   const value = Object.values(settings).find((v) => typeof v === 'string' && v)
   return typeof value === 'string' ? value : null
+}
+const summary = computed(() => {
+  const own = summaryOf(storedKind.value, source.value?.settings ?? {})
+  const hosting = source.value?.hosting
+  if (!hosting) return own
+  const hostingOf = kinds.value.find((k) => k.kind === hosting.kind) ?? null
+  return [summaryOf(hostingOf, hosting.settings), own].filter(Boolean).join(' · ')
 })
-const isRepo = computed(() => !!storedKind.value?.provides.includes('repo'))
+const isRepo = computed(
+  () => !!storedKind.value?.provides.includes('repo') || !!source.value?.hosting,
+)
 const remoteHost = computed(() => {
-  const host = source.value?.settings.host
+  const settings = source.value?.settings ?? {}
+  const host = settings.host ?? settings.address
   return typeof host === 'string' ? host : (summary.value ?? '')
 })
 
@@ -135,9 +161,19 @@ async function edit() {
     ])
     kinds.value = list
     kind.value = stored.source?.kind ?? list[0]?.kind ?? null
-    secretsSet.value = stored.secretsSet
-    storedSecrets.value = stored.secretsSet
+    const own = stored.secretsSet.filter((key) => !key.startsWith(HOSTING))
+    const hosting = stored.secretsSet
+      .filter((key) => key.startsWith(HOSTING))
+      .map((key) => key.slice(HOSTING.length))
+    secretsSet.value = own
+    storedSecrets.value = own
+    hostingSecretsSet.value = hosting
+    storedHostingSecrets.value = hosting
     if (stored.source) drafts[stored.source.kind] = { ...stored.source.settings }
+    hostingKind.value = stored.source?.hosting?.kind ?? null
+    if (stored.source?.hosting) {
+      hostingDrafts[stored.source.hosting.kind] = { ...stored.source.hosting.settings }
+    }
     // With no source yet, an untouched form saves none.
     opened.value = sourceKey()
   } catch (error) {
@@ -149,6 +185,31 @@ function values(): Record<string, unknown> {
   const key = kind.value ?? ''
   drafts[key] ??= {}
   return drafts[key]
+}
+
+function hostingValues(): Record<string, unknown> {
+  const key = hostingKind.value ?? ''
+  hostingDrafts[key] ??= {}
+  return hostingDrafts[key]
+}
+
+function chooseHosting(next: string) {
+  hostingKind.value = next || null
+  hostingSecretsSet.value =
+    next && next === source.value?.hosting?.kind ? storedHostingSecrets.value : []
+}
+
+function clearHostingSecret(key: string) {
+  hostingValues()[key] = null
+  hostingSecretsSet.value = hostingSecretsSet.value.filter((name) => name !== key)
+  storedHostingSecrets.value = storedHostingSecrets.value.filter((name) => name !== key)
+}
+
+/** The hosting the form would save: none unless the source takes one. */
+function hostingInput() {
+  return takesHosting.value && hostingKind.value
+    ? { kind: hostingKind.value, settings: { ...hostingValues() } }
+    : null
 }
 
 function chooseKind(next: string) {
@@ -165,7 +226,7 @@ function clearSecret(key: string) {
 
 /** The chosen kind and what was typed for it, including secrets typed or cleared. */
 function sourceKey() {
-  return JSON.stringify([kind.value, values()])
+  return JSON.stringify([kind.value, values(), hostingInput()])
 }
 
 async function save(clear = false) {
@@ -178,7 +239,11 @@ async function save(clear = false) {
         ? await setSource(null)
         : null
       : sourceKey() !== opened.value
-        ? await setSource({ kind: kind.value, settings: { ...values() } })
+        ? await setSource({
+            kind: kind.value,
+            settings: { ...values() },
+            hosting: hostingInput(),
+          })
         : null
   // Clearing the source is about the source alone; the slot cap waits for a save.
   if (!clear && !problem.value && slots.value !== (state.detail?.project.slots ?? null)) {
@@ -231,6 +296,23 @@ async function save(clear = false) {
             :secrets-set="secretsSet"
             @clear-secret="clearSecret"
           />
+          <template v-if="takesHosting">
+            <DouFormItem :label="t('project.source.hosting')">
+              <DouSelect
+                :model-value="hostingKind ?? ''"
+                :options="hostingOptions"
+                @update:model-value="(value) => chooseHosting(String(value))"
+              />
+            </DouFormItem>
+            <SettingsFields
+              v-if="hostingCurrent"
+              :key="`hosting-${hostingCurrent.kind}`"
+              :schema="hostingCurrent.settings"
+              :values="hostingValues()"
+              :secrets-set="hostingSecretsSet"
+              @clear-secret="clearHostingSecret"
+            />
+          </template>
           <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
             <DouInputNumber
               v-model="slots"

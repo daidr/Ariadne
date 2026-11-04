@@ -147,6 +147,11 @@ export type PlanAuthor = 'user' | 'coordinator'
 export interface ProjectSource {
   kind: string
   settings: Record<string, unknown>
+  /**
+   * A hosted repository the source's workspaces push to and open pull requests on, for a
+   * source on another machine.
+   */
+  hosting?: { kind: string; settings: Record<string, unknown> }
 }
 
 /** Markdown documents, whiteboards and dashboard snapshots; see artifact-content.ts. */

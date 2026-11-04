@@ -1,0 +1,18 @@
+{
+  "name": "@ariadne/plugin-daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ariadne/daemon": "workspace:*",
+    "@ariadne/plugin-sdk": "workspace:*",
+    "@ariadne/remote": "workspace:*"
+  },
+  "devDependencies": {
+    "@ariadne/plugin-local": "workspace:*",
+    "@ariadne/sandbox": "workspace:*"
+  }
+}

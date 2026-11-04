@@ -60,6 +60,12 @@ export interface ContextProvider<Settings = Record<string, unknown>> {
    * `{host}:{path}`. Without it the first text setting is shown.
    */
   summary?: string
+  /**
+   * Its repository and issues can come with a remote source's workspaces: threads work on
+   * the other machine, and their branches are pushed from here, with this source's
+   * credentials, which never reach that machine.
+   */
+  hosting?: boolean
   /** Build the capabilities of one configured source. */
   connect(settings: Settings): Promise<Partial<Capabilities>>
 }

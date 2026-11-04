@@ -11,7 +11,7 @@ import {
   unshareArgs,
   type Mount,
   type SandboxKind,
-} from './sandbox'
+} from './index'
 
 let base: string
 let home: string
