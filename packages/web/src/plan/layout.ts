@@ -8,10 +8,17 @@ import type {
   PlanView,
 } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
+import { layoutGraph } from 'dou-ui'
 
-/** Space between dependency levels (top to bottom) and between nodes on one level. */
-const LEVEL = 170
-const SPREAD = 284
+/** Room between dependency levels, between nodes on one level, and between unrelated parts. */
+const RANK_GAP = 56
+const LANE_GAP = 32
+const PART_GAP = 96
+/**
+ * Plan nodes are drawn this wide (PlanNode.vue: 248px of text plus 12px padding each side);
+ * their height is estimated from what they show.
+ */
+export const NODE_WIDTH = 272
 
 /** How a node or edge stands in a change shown on the graph. */
 export type PlanMark = 'added' | 'removed' | 'changed' | null
@@ -80,38 +87,151 @@ export function freshChanges(plan: PlanView | null, seen: string | null) {
   return { revisions, nodes, truncated: !!seen && !found && revisions.length > 0 }
 }
 
+/** How wide a title runs at the node's text size: CJK and other wide characters count double. */
+function textWidth(text: string): number {
+  let width = 0
+  for (const char of text) width += (char.codePointAt(0) ?? 0) > 0x2e80 ? 14 : 7.5
+  return width
+}
+
 /**
- * Lay the graph out top to bottom by dependency depth (a node sits below everything it
- * depends on), keeping the planned order inside each level. Top to bottom suits the tall,
- * narrow panels the plan is shown in.
+ * About how tall a node is drawn: the kind line, the title wrapped to the node's width,
+ * and up to two threads plus a "more" line. Only used to keep nodes apart, so a little
+ * over is fine.
  */
-export function layoutPlan(nodes: PlanNodeView[]): Map<string, { x: number; y: number }> {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const depth = new Map<string, number>()
-  const depthOf = (id: string, seen: Set<string>): number => {
-    const known = depth.get(id)
-    if (known !== undefined) return known
-    if (seen.has(id)) return 0
-    seen.add(id)
-    const deps = byId.get(id)?.dependsOn ?? []
-    const value = deps.length ? Math.max(...deps.map((dep) => depthOf(dep, seen) + 1)) : 0
-    depth.set(id, value)
-    return value
+export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>): number {
+  const lines = Math.max(1, Math.ceil(textWidth(node.title) / (NODE_WIDTH - 24)))
+  const threads = Math.min(node.threads.length, 2) + (node.threads.length > 2 ? 1 : 0)
+  return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0)
+}
+
+/** Groups of nodes linked to each other through dependencies, in planned order. */
+function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): string[][] {
+  const root = new Map(nodes.map((node) => [node.id, node.id]))
+  const find = (id: string): string => {
+    let at = id
+    while (root.get(at) !== at) at = root.get(at)!
+    root.set(id, at)
+    return at
   }
-  const used = new Map<number, number>()
-  const positions = new Map<string, { x: number; y: number }>()
+  for (const { from, to } of edges) {
+    if (!root.has(from) || !root.has(to)) continue
+    root.set(find(from), find(to))
+  }
+  const groups = new Map<string, string[]>()
   for (const node of nodes) {
-    const level = depthOf(node.id, new Set())
-    const index = used.get(level) ?? 0
-    used.set(level, index + 1)
-    positions.set(node.id, { x: index * SPREAD, y: level * LEVEL })
+    const key = find(node.id)
+    groups.set(key, [...(groups.get(key) ?? []), node.id])
+  }
+  return [...groups.values()]
+}
+
+interface Block {
+  width: number
+  height: number
+  /** Node positions inside the block, from its top left corner. */
+  nodes: Map<string, { x: number; y: number }>
+}
+
+/**
+ * Lay the graph out top to bottom in dependency levels (a node sits below everything it
+ * depends on), ordered to cross as few edges as possible. Parts of the plan that don't
+ * depend on each other are laid out apart and placed side by side, wrapping into rows so
+ * the whole stays about as wide as it is tall; lone nodes come last, in a grid.
+ */
+export function layoutPlan(
+  nodes: PlanNodeView[],
+  edges: { from: string; to: string }[] = nodes.flatMap((node) =>
+    node.dependsOn.map((from) => ({ from, to: node.id })),
+  ),
+): Map<string, { x: number; y: number }> {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const blocks: Block[] = []
+  const lone: string[] = []
+  for (const ids of parts(nodes, edges)) {
+    if (ids.length === 1) {
+      lone.push(ids[0]!)
+      continue
+    }
+    const inside = new Set(ids)
+    const layout = layoutGraph(
+      ids.map((id) => ({
+        id,
+        width: NODE_WIDTH,
+        height: nodeHeight(byId.get(id)!),
+        // Ports sit in the middle of the top and bottom edges.
+        anchor: NODE_WIDTH / 2,
+      })),
+      edges.filter((edge) => inside.has(edge.from) && inside.has(edge.to)),
+      { direction: 'vertical', rankGap: RANK_GAP, laneGap: LANE_GAP, equalWidth: false, grid: 8 },
+    )
+    const placed = new Map([...layout.nodes].map(([id, node]) => [id, { x: node.x, y: node.y }]))
+    blocks.push({ width: layout.width, height: layout.height, nodes: placed })
+  }
+
+  const area =
+    blocks.reduce((sum, block) => sum + block.width * block.height, 0) +
+    lone.reduce(
+      (sum, id) => sum + (NODE_WIDTH + LANE_GAP) * (nodeHeight(byId.get(id)!) + RANK_GAP),
+      0,
+    )
+  const rowWidth = Math.max(NODE_WIDTH, ...blocks.map((block) => block.width), Math.sqrt(area))
+
+  if (lone.length) {
+    const columns = Math.max(1, Math.floor((rowWidth + LANE_GAP) / (NODE_WIDTH + LANE_GAP)))
+    const placed = new Map<string, { x: number; y: number }>()
+    let y = 0
+    for (let i = 0; i < lone.length; i += columns) {
+      const row = lone.slice(i, i + columns)
+      row.forEach((id, k) => placed.set(id, { x: k * (NODE_WIDTH + LANE_GAP), y }))
+      y += Math.max(...row.map((id) => nodeHeight(byId.get(id)!))) + LANE_GAP
+    }
+    const width = Math.min(lone.length, columns) * (NODE_WIDTH + LANE_GAP) - LANE_GAP
+    blocks.push({ width, height: y - LANE_GAP, nodes: placed })
+  }
+
+  // Rows of blocks, each as wide as the widest block or the square root of the whole.
+  const positions = new Map<string, { x: number; y: number }>()
+  let x = 0
+  let y = 0
+  let rowHeight = 0
+  for (const block of blocks) {
+    if (x > 0 && x + block.width > rowWidth) {
+      x = 0
+      y += rowHeight + PART_GAP
+      rowHeight = 0
+    }
+    for (const [id, at] of block.nodes) {
+      positions.set(id, { x: Math.round(x + at.x), y: Math.round(y + at.y) })
+    }
+    x += block.width + PART_GAP
+    rowHeight = Math.max(rowHeight, block.height)
   }
   return positions
 }
 
+function place(auto: { x: number; y: number } | undefined, offset?: { x: number; y: number }) {
+  const at = auto ?? { x: 0, y: 0 }
+  return offset ? { x: at.x + offset.x, y: at.y + offset.y } : at
+}
+
+/**
+ * Where nodes were moved to, as offsets from where the layout of `plan` puts them. A node
+ * the layout doesn't have yet keeps its place as its offset, from the origin.
+ */
+export function offsetsOf(plan: PlanView, moved: Positions): Positions {
+  const auto = layoutPlan(plan.nodes)
+  const offsets: Positions = {}
+  for (const [id, at] of Object.entries(moved)) {
+    const from = auto.get(id) ?? { x: 0, y: 0 }
+    offsets[id] = { x: at.x - from.x, y: at.y - from.y }
+  }
+  return offsets
+}
+
 export interface GraphOptions {
-  /** Where the user moved nodes; others are laid out by dependency. */
-  positions?: Positions
+  /** How far the user moved nodes from where the layout puts them. */
+  offsets?: Positions
   /** A change to show on the graph instead of the plan as it is, as the server drew it. */
   preview?: PlanPreview | null
   fresh?: Set<string>
@@ -131,10 +251,10 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         changedIn: null,
       }))
     : (plan?.nodes ?? []).map((node) => ({ ...node, mark: null }))
-  const auto = layoutPlan(nodes)
   const edges: { from: string; to: string; mark: PlanMark }[] =
     preview?.edges ??
     nodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
+  const auto = layoutPlan(nodes, edges)
   return {
     version: 1,
     nodes: nodes.map((node) => {
@@ -152,7 +272,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
       return {
         id: node.id,
         type: 'plan',
-        ...(options.positions?.[node.id] ?? auto.get(node.id) ?? { x: 0, y: 0 }),
+        ...place(auto.get(node.id), options.offsets?.[node.id]),
         data,
       }
     }),

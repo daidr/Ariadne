@@ -19,9 +19,9 @@ import { computed, markRaw, ref, watch } from 'vue'
 import { t, tm } from '../i18n'
 import { editPlan } from '../store'
 import { editOf, reasonOf } from './edit'
-import { freshChanges, toFlowDocument, touchedBy, type PlanMark } from './layout'
+import { freshChanges, offsetsOf, toFlowDocument, touchedBy, type PlanMark } from './layout'
 import PlanNode from './PlanNode.vue'
-import { loadSeen, planUi, savedPositions, savePositions, seenRevision } from './ui'
+import { loadSeen, planUi, savedOffsets, saveOffsets, seenRevision } from './ui'
 
 const props = defineProps<{ plan: PlanView | null; compact?: boolean; editable?: boolean }>()
 const selected = defineModel<string | null>('selected', { default: null })
@@ -96,9 +96,9 @@ const proposed = computed(() => {
 
 const source = computed<FlowDocument>(() => {
   void planUi.layoutVersion
-  const positions = props.plan ? savedPositions(props.plan.projectId) : {}
+  const offsets = props.plan ? savedOffsets(props.plan.projectId) : {}
   return toFlowDocument(props.plan, {
-    positions,
+    offsets,
     preview: preview.value,
     fresh: fresh.value,
     proposed: proposed.value,
@@ -122,10 +122,24 @@ async function onTransaction(tr: FlowTransaction) {
   if (!editing.value || !props.plan) return
   const plan = props.plan
   const { ops, moved } = editOf(tr.steps, tr.before, t('plan.newNode'))
-  if (Object.keys(moved).length) savePositions(plan.projectId, moved)
-  if (!ops.length) return
+  const keep = Object.keys(moved).length > 0
+  if (!ops.length) {
+    // Only moved: the layout stays as it is, so offsets are taken from it.
+    if (keep) saveOffsets(plan.projectId, offsetsOf(plan, moved))
+    return
+  }
   const titleOf = (id: string) => plan.nodes.find((node) => node.id === id)?.title ?? id
-  if ((await editPlan(reasonOf(ops, titleOf, t), ops)) !== 'ok') doc.value = source.value
+  if ((await editPlan(reasonOf(ops, titleOf, t), ops)) !== 'ok') {
+    doc.value = source.value
+    return
+  }
+  // The change can lay the plan out anew, and a new node only has a place in the new
+  // layout: offsets are taken from that, and the graph is drawn again with them.
+  const after = props.plan
+  if (keep && after?.projectId === plan.projectId) {
+    saveOffsets(plan.projectId, offsetsOf(after, moved))
+    planUi.layoutVersion += 1
+  }
 }
 
 const removeQuestion = computed(() => {
