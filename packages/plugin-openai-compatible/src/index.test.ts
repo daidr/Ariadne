@@ -1,6 +1,6 @@
 import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
-import { openAICompatibleProvider } from './index'
+import { openAICompatibleProvider, requestBody } from './index'
 
 let lastBody: Record<string, unknown> | null = null
 let lastAuth: string | null = null
@@ -123,11 +123,34 @@ describe('openai-compatible provider', () => {
     }
     expect(lastBody).toMatchObject({ reasoning_effort: 'medium' })
     expect(parts).toEqual([
-      { type: 'reasoning', text: '先想一下' },
+      { type: 'reasoning', text: '先想一下', startedAt: expect.any(Number) },
       { type: 'text', text: '好' },
       { type: 'usage', input: 20, output: 8, cached: 16, reasoning: 6 },
       { type: 'finish', reason: 'stop' },
     ])
+  })
+
+  test('sends reasoning back with the tool calls it led to', () => {
+    const body = requestBody(
+      { baseUrl: '', apiKey: '' },
+      {
+        model: 'm',
+        tools: [],
+        messages: [
+          { role: 'user', content: 'hi' },
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 't1', name: 'f', arguments: '{}' }],
+            reasoning: [{ text: '先想' }, { text: '密', redacted: true }, { text: '一下' }],
+          },
+          { role: 'tool', toolCallId: 't1', content: 'ok' },
+          { role: 'assistant', content: '好' },
+        ],
+      },
+    )
+    expect(body.messages[1]).toMatchObject({ role: 'assistant', reasoning_content: '先想一下' })
+    expect(body.messages[3]).not.toHaveProperty('reasoning_content')
   })
 
   test('reports length when the token limit cuts off tool arguments', async () => {

@@ -17,10 +17,17 @@ export interface OpenAICompatibleSettings {
 
 function toWire(message: ChatMessage): Record<string, unknown> {
   switch (message.role) {
-    case 'assistant':
+    case 'assistant': {
+      // Reasoning goes back as it came: services that think by default (DeepSeek) refuse a
+      // turn's tool calls without it. Only services that sent it have any to send back.
+      const reasoning = (message.reasoning ?? [])
+        .filter((block) => !block.redacted)
+        .map((block) => block.text)
+        .join('')
       return {
         role: 'assistant',
         content: message.content || null,
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
         ...(message.toolCalls?.length
           ? {
               tool_calls: message.toolCalls.map((call) => ({
@@ -31,6 +38,7 @@ function toWire(message: ChatMessage): Record<string, unknown> {
             }
           : {}),
       }
+    }
     case 'tool':
       return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
     default:
@@ -146,6 +154,7 @@ async function* readStream(
   const calls = new Map<number, { id: string; name: string; arguments: string }>()
   let reason: string | null = null
   let reasoning = ''
+  let reasoningFrom = 0
   let done = false
   try {
     for await (const { data } of readServerSentEvents(body)) {
@@ -177,10 +186,12 @@ async function* readStream(
       const choice = chunk.choices?.[0]
       if (!choice) continue
       const delta = choice.delta
-      reasoning += delta?.reasoning_content ?? delta?.reasoning ?? ''
+      const thought = delta?.reasoning_content ?? delta?.reasoning ?? ''
+      if (thought && !reasoning) reasoningFrom = Date.now()
+      reasoning += thought
       // Reasoning ends where the answer starts.
       if (reasoning && (delta?.content || delta?.tool_calls?.length)) {
-        yield { type: 'reasoning', text: reasoning }
+        yield { type: 'reasoning', text: reasoning, startedAt: reasoningFrom }
         reasoning = ''
       }
       if (delta?.content) yield { type: 'text', text: delta.content }
@@ -203,7 +214,7 @@ async function* readStream(
     if (!signal?.aborted) yield incompletePart()
     return
   }
-  if (reasoning) yield { type: 'reasoning', text: reasoning }
+  if (reasoning) yield { type: 'reasoning', text: reasoning, startedAt: reasoningFrom }
   for (const [index, call] of [...calls].toSorted(([a], [b]) => a - b)) {
     yield { type: 'tool-call', id: call.id || `call_${index}`, ...withoutId(call) }
   }

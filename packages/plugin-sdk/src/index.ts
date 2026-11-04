@@ -102,8 +102,11 @@ export interface ToolSpec {
 export type ModelStreamPart =
   | { type: 'text'; text: string }
   | ({ type: 'tool-call' } & ToolCall)
-  /** One whole block of reasoning; it comes before the answer it led to. */
-  | ({ type: 'reasoning' } & ReasoningBlock)
+  /**
+   * One whole block of reasoning; it comes before the answer it led to. `startedAt` is
+   * when its first piece came, as it is only handed on once whole.
+   */
+  | ({ type: 'reasoning'; startedAt?: number } & ReasoningBlock)
   /**
    * Tokens of the whole response. `input` counts everything the model read, `cached` the
    * part of it read from the provider's cache; `reasoning` is the part of `output` spent

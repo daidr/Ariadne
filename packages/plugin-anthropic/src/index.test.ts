@@ -159,19 +159,21 @@ describe('anthropic provider', () => {
       )
     const parts = await collect('low')
     expect(lastBody).toMatchObject({
-      max_tokens: 1024 + 2048,
-      thinking: { type: 'enabled', budget_tokens: 2048 },
+      max_tokens: 1024,
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'low' },
     })
+    expect(lastBody).not.toHaveProperty('thinking.budget_tokens')
     expect(parts).toEqual([
-      { type: 'reasoning', text: '想想', signature: 's' },
-      { type: 'reasoning', text: 'x', redacted: true },
+      { type: 'reasoning', text: '想想', signature: 's', startedAt: expect.any(Number) },
+      { type: 'reasoning', text: 'x', redacted: true, startedAt: expect.any(Number) },
       { type: 'text', text: '好' },
       { type: 'usage', input: 12, output: 5, cached: 10 },
       { type: 'finish', reason: 'stop' },
     ])
   })
 
-  test('sends thinking back only while thinking, and only what it signed', () => {
+  test('sends signed thinking back with or without effort, and nothing unsigned', () => {
     const messages = [
       { role: 'user' as const, content: 'hi' },
       {
@@ -191,7 +193,7 @@ describe('anthropic provider', () => {
       { model: 'm', messages, tools: [] },
     )
     expect(off).not.toHaveProperty('thinking')
-    expect(JSON.stringify(off.messages)).not.toContain('thinking')
+    expect(off).not.toHaveProperty('output_config')
     const on = requestBody(
       { baseUrl: '', apiKey: '', maxTokens: 100 },
       { model: 'm', messages, tools: [], effort: 'high' },
@@ -201,6 +203,7 @@ describe('anthropic provider', () => {
       { type: 'redacted_thinking', data: 'x' },
       { type: 'tool_use', id: 't1', name: 'f', input: {} },
     ])
+    expect(off.messages).toEqual(on.messages)
   })
 
   test('reports a stream error event', async () => {

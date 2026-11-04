@@ -471,11 +471,12 @@ async function requestStep(
     const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
     for await (const part of model.provider.stream(model.settings as never, request)) {
       if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
-        timing.firstOutputAt ??= Date.now()
+        // Reasoning is handed on whole; it began when its first piece came.
+        timing.firstOutputAt ??= (part.type === 'reasoning' && part.startedAt) || Date.now()
       }
       if (part.type === 'text') text += part.text
       else if (part.type === 'reasoning') {
-        const { type: _, ...block } = part
+        const { type: _, startedAt: __, ...block } = part
         reasoning.push(block)
       } else if (part.type === 'tool-call')
         toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })

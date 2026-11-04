@@ -262,6 +262,43 @@ describe('the trace', () => {
     expect(detail.call).toEqual({ provider: 'fake', model: 'fake-1', settings: {} })
   })
 
+  test('a secret setting is left out of what is recorded and of the trace', async () => {
+    const model = fakeModel(() => say('好'))
+    model.provider = {
+      ...model.provider,
+      settings: {
+        type: 'object',
+        properties: {
+          baseUrl: { type: 'string', title: { 'zh-CN': '地址' } },
+          apiKey: { type: 'string', title: { 'zh-CN': '密钥' }, secret: true },
+        },
+      },
+    }
+    model.settings = { baseUrl: 'http://models.test', apiKey: 'sk-very-secret' }
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '开始',
+    })
+    await start(model).idle()
+
+    const [step] = calls(project.coordinatorId)
+    if (step?.type !== 'turn.step') throw new Error('expected a step')
+    const recorded = [step.data.input.system, step.data.input.tools, step.data.input.call]
+      .map((hash) => app.getPrompt(project.id, hash))
+      .join('\n')
+    expect(recorded).toContain('http://models.test')
+    const trace = JSON.stringify(buildTrace(app, project.coordinatorId))
+    const detail = JSON.stringify(traceRequest(app, project.coordinatorId, step.seq))
+    for (const text of [JSON.stringify(app.events({ limit: 10_000 })), recorded, trace, detail]) {
+      expect(text).not.toContain('sk-very-secret')
+    }
+    expect(traceInput(app, project.coordinatorId, step.seq).call?.settings).toEqual({
+      baseUrl: 'http://models.test',
+    })
+  })
+
   test("refuses a seq that is not one of the conversation's calls", async () => {
     const project = app.createProject('P')
     const other = app.createProject('Q')

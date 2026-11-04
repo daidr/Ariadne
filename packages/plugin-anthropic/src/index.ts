@@ -52,13 +52,11 @@ function thinkingBlocks(reasoning: ReasoningBlock[] | undefined): Block[] {
 
 /**
  * The protocol keeps system text apart, wants tool results inside a user message, and
- * expects roles to alternate, so neighbouring messages of one role are merged. Thinking
- * goes back only while thinking is on: the protocol wants it back in a turn's tool calls.
+ * expects roles to alternate, so neighbouring messages of one role are merged. Signed
+ * thinking always goes back as it came: newer models think without being asked and want it
+ * back in a turn's tool calls, and the API drops what the model in use cannot read.
  */
-export function toWire(
-  messages: ChatMessage[],
-  thinking = false,
-): { system: string; messages: WireMessage[] } {
+export function toWire(messages: ChatMessage[]): { system: string; messages: WireMessage[] } {
   const system: string[] = []
   const wire: WireMessage[] = []
   const push = (role: WireMessage['role'], blocks: Block[]) => {
@@ -77,7 +75,7 @@ export function toWire(
         break
       case 'assistant':
         push('assistant', [
-          ...(thinking ? thinkingBlocks(message.reasoning) : []),
+          ...thinkingBlocks(message.reasoning),
           ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
           ...(message.toolCalls ?? []).map((call) => ({
             type: 'tool_use' as const,
@@ -126,17 +124,20 @@ interface StreamEvent {
   error?: { type?: string; message?: string }
 }
 
-/** Tokens the model may think with, by effort; the reply's own budget comes on top. */
-const THINKING_BUDGET: Record<Effort, number> = { low: 2048, medium: 8192, high: 24_576 }
-
 /** The body of a Messages request; credentials go in headers. */
 export function requestBody(settings: AnthropicSettings, request: ModelRequest) {
-  const { system, messages } = toWire(request.messages, !!request.effort)
-  const budget = request.effort ? THINKING_BUDGET[request.effort] : 0
+  const { system, messages } = toWire(request.messages)
   return {
     model: request.model,
-    max_tokens: (settings.maxTokens || 8192) + budget,
-    ...(budget ? { thinking: { type: 'enabled', budget_tokens: budget } } : {}),
+    max_tokens: settings.maxTokens || 8192,
+    // Adaptive thinking, its depth set by effort; a summary of it is shown in the trace.
+    // Models before the 4.6 generation only take a fixed budget and refuse this.
+    ...(request.effort
+      ? {
+          thinking: { type: 'adaptive', display: 'summarized' },
+          output_config: { effort: request.effort },
+        }
+      : {}),
     ...(system ? { system } : {}),
     messages,
     ...(request.tools.length
@@ -207,7 +208,7 @@ async function* readStream(
   signal: AbortSignal | undefined,
 ): AsyncGenerator<ModelStreamPart> {
   const blocks = new Map<number, { id: string; name: string; json: string }>()
-  const thoughts = new Map<number, ReasoningBlock>()
+  const thoughts = new Map<number, ReasoningBlock & { startedAt: number }>()
   let input = 0
   let cached = 0
   let output = 0
@@ -236,9 +237,13 @@ async function* readStream(
         case 'content_block_start':
           if (event.index === undefined) break
           if (event.content_block?.type === 'thinking') {
-            thoughts.set(event.index, { text: '', signature: '' })
+            thoughts.set(event.index, { text: '', signature: '', startedAt: Date.now() })
           } else if (event.content_block?.type === 'redacted_thinking') {
-            thoughts.set(event.index, { text: event.content_block.data ?? '', redacted: true })
+            thoughts.set(event.index, {
+              text: event.content_block.data ?? '',
+              redacted: true,
+              startedAt: Date.now(),
+            })
           } else if (event.content_block?.type === 'tool_use') {
             blocks.set(event.index, {
               id: event.content_block.id ?? `toolu_${event.index}`,
@@ -268,6 +273,7 @@ async function* readStream(
             yield {
               type: 'reasoning',
               text: thought.text,
+              startedAt: thought.startedAt,
               ...(thought.signature ? { signature: thought.signature } : {}),
               ...(thought.redacted ? { redacted: true } : {}),
             }
