@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlanRevisionView, PlanUndoPreview } from '@ariadne/core'
-import { DouButton, DouPopconfirm, DouText } from 'dou-ui'
+import { DouButton, DouPopover, DouText } from 'dou-ui'
 import { RotateCcwIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
@@ -44,25 +44,30 @@ const title = computed(() => {
   return t(restore.value ? 'plan.restore.ask' : 'plan.undo.ask')
 })
 
+const busy = ref(false)
 async function confirm() {
   if (blocked.value || !preview.value) return
   const reason = t(restore.value ? 'plan.restore.reason' : 'plan.undo.reason', {
     reason: props.revision.reason,
   })
+  busy.value = true
   await revertPlan(target.value, reason)
+  busy.value = false
+  open.value = false
 }
 </script>
 
 <template>
-  <DouPopconfirm
-    v-model:open="open"
-    :title="title"
-    :tone="blocked ? 'neutral' : 'warning'"
-    :confirm-text="blocked ? t('plan.undo.ok') : t(restore ? 'plan.restore' : 'plan.revert')"
-    :width="320"
-    @confirm="confirm"
-  >
-    <template #description>
+  <!-- A popover, not a popconfirm: when it cannot be undone there is only one button. -->
+  <DouPopover v-model:open="open" :title="title" :width="320">
+    <DouButton size="sm" variant="ghost">
+      <template #leading>
+        <RotateCwIcon v-if="restore" />
+        <RotateCcwIcon v-else />
+      </template>
+      {{ t(restore ? 'plan.restore' : 'plan.revert') }}
+    </DouButton>
+    <template #content="{ close }">
       <DouText v-if="blocked" size="sm">{{ blocked }}</DouText>
       <template v-else-if="preview">
         <ul class="undo-lines">
@@ -76,20 +81,29 @@ async function confirm() {
           }}
         </DouText>
       </template>
+      <div v-if="blocked || preview" class="undo-actions">
+        <DouButton v-if="blocked" size="sm" @click="close">{{ t('plan.undo.ok') }}</DouButton>
+        <template v-else>
+          <DouButton size="sm" variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
+          <DouButton size="sm" tone="primary" :loading="busy" @click="confirm">
+            {{ t(restore ? 'plan.restore' : 'plan.revert') }}
+          </DouButton>
+        </template>
+      </div>
     </template>
-    <DouButton size="sm" variant="ghost">
-      <template #leading>
-        <RotateCwIcon v-if="restore" />
-        <RotateCcwIcon v-else />
-      </template>
-      {{ t(restore ? 'plan.restore' : 'plan.revert') }}
-    </DouButton>
-  </DouPopconfirm>
+  </DouPopover>
 </template>
 
 <style scoped>
 .undo-lines {
   margin: 0 0 4px;
   padding-left: 18px;
+}
+
+.undo-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 </style>
