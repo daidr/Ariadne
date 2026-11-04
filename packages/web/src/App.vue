@@ -19,6 +19,7 @@ import AttentionBar from './components/AttentionBar.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
+import ProjectSearch from './components/ProjectSearch.vue'
 import ProjectSource from './components/ProjectSource.vue'
 import ProjectUsage from './components/ProjectUsage.vue'
 import SidePanel from './components/SidePanel.vue'
@@ -76,6 +77,7 @@ watchEffect(() => {
           <div class="header-actions">
             <!-- What belongs to the open project, set apart from the app's own buttons. -->
             <template v-if="state.detail">
+              <ProjectSearch />
               <AttentionBar />
               <ProjectSource />
               <ProjectUsage />

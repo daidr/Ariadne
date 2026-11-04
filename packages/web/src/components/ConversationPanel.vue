@@ -19,6 +19,7 @@ import {
   DouLink,
   DouPopover,
   DouShimmer,
+  DouSpinner,
   DouStatusDot,
   DouTag,
   DouText,
@@ -40,7 +41,7 @@ import {
   SquareStopIcon,
   CloseIcon,
 } from '@dou-ui/icons'
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
@@ -48,6 +49,7 @@ import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
 import {
+  loadEarlier,
   openMain,
   openThread,
   retryTurn,
@@ -256,6 +258,46 @@ function retry() {
   if (conversationId.value) void retryTurn(conversationId.value)
 }
 
+// Scrolled to the top: the page before. A first page too short to scroll fetches the
+// next one by itself, since there is no top to reach.
+const list = useTemplateRef<{ viewport: HTMLElement | null }>('list')
+function earlier() {
+  if (conversationId.value && view.value.more) void loadEarlier(conversationId.value)
+}
+watch(
+  () => [view.value.messages.length, view.value.more],
+  async () => {
+    if (!view.value.more || view.value.loadingEarlier) return
+    await nextTick()
+    const el = list.value?.viewport
+    if (el && el.scrollHeight <= el.clientHeight) earlier()
+  },
+)
+
+// A message the search found: scroll to it and mark it for a moment. A message from the
+// coordinator to a thread is folded, so it opens.
+const focused = ref<string | null>(null)
+const openRelays = ref<string[]>([])
+let unmark: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => state.focus,
+  async (focus) => {
+    if (!focus || focus.conversationId !== conversationId.value) return
+    state.focus = null
+    const message = view.value.messages.find((item) => item.id === focus.messageId)
+    if (message?.kind === 'relay' && !openRelays.value.includes(message.id)) {
+      openRelays.value = [...openRelays.value, message.id]
+    }
+    await nextTick()
+    const el = list.value?.viewport?.querySelector(`[data-message-id="${focus.messageId}"]`)
+    el?.scrollIntoView({ block: 'center' })
+    focused.value = focus.messageId
+    clearTimeout(unmark)
+    unmark = setTimeout(() => (focused.value = null), 2000)
+  },
+  { immediate: true },
+)
+
 // Everything on screen counts as read; this also clears the "edited since read" highlight.
 watch(
   () => view.value.messages.at(-1)?.id,
@@ -354,7 +396,15 @@ watch(
       </div>
     </div>
 
-    <DouChatList v-if="timeline.length || todo.length || working" class="conversation-list">
+    <DouChatList
+      v-if="timeline.length || todo.length || working"
+      ref="list"
+      class="conversation-list"
+      @top-reached="earlier"
+    >
+      <div v-if="view.loadingEarlier" class="earlier" role="status">
+        <DouSpinner size="sm" />
+      </div>
       <template v-for="item in timeline" :key="item.id">
         <div v-if="item.notice" class="notice">
           <template v-if="item.notice.kind === 'memory'">
@@ -476,7 +526,12 @@ watch(
         </div>
         <template v-for="message in item.message ? [item.message] : []" v-else :key="message.id">
           <!-- What the coordinator told a thread: there for whoever wants it, out of the way otherwise. -->
-          <DouCollapse v-if="message.kind === 'relay'" class="relay">
+          <DouCollapse
+            v-if="message.kind === 'relay'"
+            v-model="openRelays"
+            :data-message-id="message.id"
+            :class="['relay', { 'conversation-focused': focused === message.id }]"
+          >
             <DouCollapseItem :value="message.id" :title="t('message.fromCoordinator')">
               <AgentText :content="message.content" class="relay-content" />
             </DouCollapseItem>
@@ -486,7 +541,11 @@ watch(
             :sender="sender(message)"
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
-            :class="{ 'conversation-edited': highlighted.has(message.id) }"
+            :data-message-id="message.id"
+            :class="{
+              'conversation-edited': highlighted.has(message.id),
+              'conversation-focused': focused === message.id,
+            }"
           >
             <template #markdown-link="{ node, href, external, children }">
               <MessageLink
@@ -793,6 +852,20 @@ watch(
   flex-direction: column;
   gap: 8px;
   align-items: flex-end;
+}
+
+.earlier {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+/* A message the search led to, marked until the eye has found it: its text, not the row. */
+.relay.conversation-focused,
+.conversation-focused :deep(.dou-chat-message__content) {
+  outline: 1px solid var(--dou-color-primary);
+  outline-offset: 4px;
+  border-radius: var(--dou-radius-container);
 }
 
 .conversation-edited {

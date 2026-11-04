@@ -516,7 +516,7 @@ export function localDirectoryProvider(
           type: 'string',
           title: { 'zh-CN': '目录', en: 'Directory' },
           description: {
-            'zh-CN': 'git 仓库会为每个 thread 建一个独立的 worktree',
+            'zh-CN': 'git 仓库会为每个讨论串建一个独立的 worktree',
             en: 'A git repository gets a separate worktree per thread',
           },
         },

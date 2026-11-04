@@ -145,6 +145,11 @@ export function createHandler({
     return new Response(null, { status: 204 })
   })
 
+  // Find what was said and made in the project.
+  add('GET', '/api/projects/:projectId/search', (_request, { projectId = '' }, url) =>
+    json(app.search(projectId, (url.searchParams.get('q') ?? '').slice(0, 200))),
+  )
+
   // Files people add: whiteboard images, or (with `?for=message`) a message's images and
   // text files. The body is the file itself.
   add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }, url) => {
@@ -563,12 +568,21 @@ export function createHandler({
     }
   }
 
-  add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }) => {
+  // The newest messages, or the page before `before`, or everything from `from` on.
+  add('GET', '/api/conversations/:conversationId', (_request, { conversationId = '' }, url) => {
     const conversation = app.getConversation(conversationId)
+    const before = url.searchParams.get('before')
+    const from = url.searchParams.get('from')
+    const limit = url.searchParams.get('limit')
+    if (limit !== null && !/^[1-9]\d{0,2}$/.test(limit)) throw new BadRequest('limit')
+    const page = app.pageMessages(conversationId, {
+      ...(before === null ? {} : { before }),
+      ...(from === null ? {} : { from }),
+      ...(limit === null ? {} : { limit: Number(limit) }),
+    })
     return json({
       conversation,
-      messages: app.listMessages(conversationId),
-      notices: app.listNotices(conversationId),
+      ...page,
       todo: app.getTodo(conversationId),
       model: modelOf(conversation),
     })

@@ -43,6 +43,38 @@ describe('auth', () => {
   })
 })
 
+describe('pages and search', () => {
+  test('pages a conversation and finds what was said', async () => {
+    const project = app.createProject('P')
+    const ids = Array.from(
+      { length: 5 },
+      (_, i) =>
+        app.postMessage(project.id, {
+          conversationId: project.coordinatorId,
+          author: 'user',
+          content: `分页第 ${i} 条`,
+        }).id,
+    )
+    type Page = { messages: { id: string }[]; more: boolean }
+    const page = async (query: string) =>
+      (await (await call(`/api/conversations/${project.coordinatorId}${query}`)).json()) as Page
+
+    const newest = await page('?limit=2')
+    expect([newest.messages.map((m) => m.id), newest.more]).toEqual([ids.slice(3), true])
+    const earlier = await page(`?before=${ids[3]}&limit=2`)
+    expect(earlier.messages.map((m) => m.id)).toEqual(ids.slice(1, 3))
+    const from = await page(`?from=${ids[1]}`)
+    expect(from.messages.map((m) => m.id)).toEqual(ids.slice(1))
+    expect((await call(`/api/conversations/${project.coordinatorId}?limit=0`)).status).toBe(400)
+
+    const found = await call(`/api/projects/${project.id}/search?q=${encodeURIComponent('第 3')}`)
+    expect(await found.json()).toMatchObject({
+      terms: ['第', '3'],
+      messages: [{ id: ids[3], threadId: null, snippet: '分页第 3 条' }],
+    })
+  })
+})
+
 describe('projects and messages', () => {
   test('creates a project and talks to its coordinator', async () => {
     const created = await call('/api/projects', { method: 'POST', body: { name: 'Ariadne' } })

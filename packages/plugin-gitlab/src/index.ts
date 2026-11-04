@@ -290,7 +290,7 @@ export function gitlabProvider(options: GitLabProviderOptions): ContextProvider<
           type: 'string',
           title: { 'zh-CN': '仓库', en: 'Repository' },
           description: {
-            'zh-CN': 'group/project（可含子组）或项目地址；每个 thread 在自己的分支上工作',
+            'zh-CN': 'group/project（可含子组）或项目地址；每个讨论串在自己的分支上工作',
             en: 'group/project (subgroups too) or its URL; each thread works on its own branch',
           },
         },

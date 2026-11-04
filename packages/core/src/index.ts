@@ -2,6 +2,7 @@ export {
   Ariadne,
   MAX_MEMORIES,
   MAX_MEMORY,
+  MESSAGE_PAGE,
   unknownResult,
   type AriadneOptions,
   type PlanChange,
@@ -63,6 +64,7 @@ export {
 export type * from './events'
 export { newId } from './ids'
 export { defaultProjections, dropProjectionTables, MAX_CHECK_ATTEMPTS } from './projections'
+export { SEARCH_LIMITS, searchTerms } from './search'
 export { needsUser, threadStage, type StageFacts, type ThreadStage } from './stage'
 export { EventStore, type EventListener, type Projection } from './store'
 export type * from './views'

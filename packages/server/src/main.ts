@@ -49,10 +49,10 @@ const sandbox = createSandbox({
 if (!sandbox.kind) {
   console.warn(
     sandboxSettings.mode === 'off'
-      ? '工作区沙箱已关闭：thread 的命令能读到 Ariadne 的令牌和设置'
+      ? '工作区沙箱已关闭：讨论串的命令能读到 Ariadne 的令牌和设置'
       : process.platform === 'win32'
-        ? 'Windows 上暂时没有工作区沙箱：thread 的命令能读到 Ariadne 的令牌和设置'
-        : '这台机器上没有可用的工作区沙箱：thread 的命令能读到 Ariadne 的令牌和设置',
+        ? 'Windows 上暂时没有工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置'
+        : '这台机器上没有可用的工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
   )
 }
 

@@ -71,8 +71,8 @@ if (!isLoopback(listen.host)) console.info('监听的不是本机回环地址，
 if (!sandbox.kind) {
   console.warn(
     values['no-sandbox']
-      ? '沙箱已关闭：thread 的命令能读到 daemon 的证书私钥'
-      : '这台机器上没有可用的沙箱：thread 的命令能读到 daemon 的证书私钥',
+      ? '沙箱已关闭：讨论串的命令能读到 daemon 的证书私钥'
+      : '这台机器上没有可用的沙箱：讨论串的命令能读到 daemon 的证书私钥',
   )
 }
 if (!hasToken(home)) printCode(newToken(home))

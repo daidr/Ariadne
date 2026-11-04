@@ -9,6 +9,7 @@ import type {
   PlanOp,
 } from './events'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
+import { searchProjection } from './search'
 import type { Projection } from './store'
 
 /** Every projection table, so a rebuild can drop them. */
@@ -33,6 +34,8 @@ export const projectionTables = [
   'artifacts',
   'artifact_versions',
   'prompts',
+  'search_docs',
+  'search_text',
 ] as const
 
 export const projectsProjection: Projection = {
@@ -1704,6 +1707,8 @@ export const defaultProjections: Projection[] = [
   conversationsProjection,
   planProjection,
   artifactsProjection,
+  // After artifacts: a revision reads the artifact's kind from there.
+  searchProjection,
   // Last: it reads plan edges and attention rows written above for the same event.
   transcriptProjection,
 ]

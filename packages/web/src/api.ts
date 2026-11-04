@@ -12,6 +12,7 @@ import type {
   PlanUndoPreview,
   PlanView,
   ProjectView,
+  SearchResult,
   ThreadView,
   TodoView,
   TraceRequestDetail,
@@ -108,6 +109,14 @@ export class ApiError extends Error {
   ) {
     super(localized.key)
   }
+}
+
+/** A query string of the values given, or nothing when none is. */
+function queryString(values: Record<string, string | undefined>): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(values)) if (value !== undefined) params.set(key, value)
+  const text = params.toString()
+  return text ? `?${text}` : ''
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -268,15 +277,18 @@ export const api = {
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
   getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
-  getConversation: (id: string) =>
+  /** The newest messages, the page before `before`, or everything from `from` on. */
+  getConversation: (id: string, cursor: { before?: string; from?: string } = {}) =>
     request<{
       conversation: ConversationView
       messages: MessageView[]
       notices: NoticeView[]
+      /** Earlier messages exist before the first one here. */
+      more: boolean
       todo: TodoView
       /** The model it uses now, with how much its context holds. */
       model: { id: string; contextTokens: number } | null
-    }>('GET', `/api/conversations/${id}`),
+    }>('GET', `/api/conversations/${id}${queryString(cursor)}`),
   getTrace: (id: string, before?: number) =>
     request<{ turns: TraceTurn[]; more: boolean }>(
       'GET',
@@ -396,6 +408,8 @@ export const api = {
       `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
       { reason },
     ),
+  search: (projectId: string, q: string) =>
+    request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
   listArtifacts: (projectId: string) =>
     request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
   getArtifact: (id: string, version?: number) =>

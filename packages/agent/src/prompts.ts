@@ -3,8 +3,15 @@ import type { Locale } from '@ariadne/i18n'
 
 const languages: Record<Locale, string> = { 'zh-CN': 'Simplified Chinese', en: 'English' }
 
+/** What the user's language calls Ariadne's own things, where a literal word would mislead. */
+const terms: Record<Locale, string> = {
+  'zh-CN':
+    '\nIn Chinese, a thread is 讨论串 (never 线程 or "thread"); the coordinator is 协调器 and an artifact is 产物.',
+  en: '',
+}
+
 const shared = (locale: Locale) => `
-Write everything the user reads in ${languages[locale]}, unless the user writes to you in another language.
+Write everything the user reads in ${languages[locale]}, unless the user writes to you in another language.${terms[locale]}
 
 How you talk to the user:
 - Send a message only to reply to the user, to summarise finished work, or to raise a blocker. Never send progress chatter.

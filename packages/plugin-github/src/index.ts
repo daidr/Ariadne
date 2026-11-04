@@ -163,7 +163,7 @@ export function githubProvider(options: GitHubProviderOptions): ContextProvider<
           type: 'string',
           title: { 'zh-CN': '仓库', en: 'Repository' },
           description: {
-            'zh-CN': 'owner/name 或仓库地址；每个 thread 在自己的分支上工作',
+            'zh-CN': 'owner/name 或仓库地址；每个讨论串在自己的分支上工作',
             en: 'owner/name or the URL; each thread works on its own branch',
           },
         },
