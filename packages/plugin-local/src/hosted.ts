@@ -143,8 +143,10 @@ export function hostedClone(input: {
         }),
       file: (request) => fileVersions(local, request),
       merged: (threadId, base) => branchMerged(local, branchFor(threadId), baseRef(base)),
-      remove: (threadId) =>
-        serial(() => removeWorktree(local, dirOf(threadId), async (dir) => existsSync(dir))),
+      remove: (threadId, options) =>
+        serial(() =>
+          removeWorktree(local, dirOf(threadId), async (dir) => existsSync(dir), options),
+        ),
       worktrees: () => worktreesIn(worktrees),
     },
     open: ({ threadId, base: recorded }) =>

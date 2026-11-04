@@ -147,9 +147,9 @@ export interface BranchCapability {
   }): Promise<MergeOutcome>
   /**
    * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
-   * stays: `false`.
+   * stays (`false`), unless `discard` says to drop them, as when its project is deleted.
    */
-  remove(threadId: string): Promise<boolean>
+  remove(threadId: string, options?: { discard?: boolean }): Promise<boolean>
   worktrees(): Promise<WorktreeInfo[]>
 }
 

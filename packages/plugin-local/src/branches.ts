@@ -297,18 +297,21 @@ async function checkoutOf(git: GitRun, ref: string): Promise<string | null> {
 /**
  * Remove a worktree with `git worktree remove`, keeping its branch. One with changes not
  * committed (untracked files included; ignored ones such as `node_modules` go) stays and
- * gives `false`. A directory already gone is just forgotten.
+ * gives `false`, unless `discard` drops them too. A directory already gone is just forgotten.
  */
 export async function removeWorktree(
   git: GitRun,
   dir: string,
   exists: (dir: string) => Promise<boolean>,
+  options: { discard?: boolean } = {},
 ): Promise<boolean> {
   if (!(await exists(dir))) {
     await git(['worktree', 'prune'])
     return true
   }
-  const result = await git(['worktree', 'remove', dir])
+  // Twice: a locked worktree goes as well.
+  const force = options.discard ? ['--force', '--force'] : []
+  const result = await git(['worktree', 'remove', ...force, dir])
   if (result.exitCode === 0) return true
   if (/modified or untracked|use --force/i.test(result.stderr)) return false
   fail(result, 'git worktree remove')

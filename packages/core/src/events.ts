@@ -184,6 +184,11 @@ export interface BranchMerge {
 export interface EventMap {
   'project.created': { name: string; coordinatorId: string }
   'project.renamed': { name: string }
+  /**
+   * The project was deleted with everything it held; this is all the log keeps of it.
+   * Nothing else of the project is written after it.
+   */
+  'project.deleted': Record<string, never>
   /** The project's context source; `null` removes it. */
   'project.source.set': { source: ProjectSource | null }
   /** How many of the shared work slots this project may take at once; `null` is no cap. */

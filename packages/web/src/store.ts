@@ -182,6 +182,37 @@ export async function createProject(name: string) {
   }
 }
 
+/** Delete a project; the dialog asking first stays open on a failure, which is reported. */
+export async function deleteProject(id: string) {
+  try {
+    await api.deleteProject(id)
+  } catch (error) {
+    report(error)
+    throw error
+  }
+  forgetProject(id)
+}
+
+/** Let go of a project that is gone; if it was open, the next one opens. */
+function forgetProject(id: string) {
+  state.projects = state.projects.filter((project) => project.id !== id)
+  if (state.currentId !== id) return
+  const next = state.projects[0]?.id
+  if (next) {
+    void openProject(next)
+    return
+  }
+  state.currentId = null
+  state.threadId = null
+  state.detail = null
+  state.plan = null
+  state.artifacts = []
+  state.memories = []
+  state.main = { kind: 'conversation' }
+  state.coordinator = emptyConversation()
+  state.thread = emptyConversation()
+}
+
 /** Whether it was sent; a failure is reported, and the draft is kept for another try. */
 export async function sendMessage(
   conversationId: string,
@@ -372,6 +403,11 @@ export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => vo
 
 function onEvent(event: AnyStoredEvent) {
   for (const listener of listeners) listener(event)
+  if (event.type === 'project.deleted') {
+    touched.delete(event.projectId)
+    forgetProject(event.projectId)
+    return
+  }
   touched.add(event.projectId)
   if (pending) return
   pending = true
