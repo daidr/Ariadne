@@ -18,6 +18,8 @@ import {
   DouInput,
   DouLink,
   DouPopover,
+  DouShimmer,
+  DouSpinner,
   DouTag,
   DouText,
   type ChatAttachment,
@@ -112,6 +114,10 @@ const thread = computed(() =>
     : null,
 )
 const working = computed(() => !!view.value.conversation?.turn)
+// What the model said it is doing beside its latest tool calls, shown above the input.
+const activity = computed(
+  () => view.value.conversation?.turn?.activity ?? t('conversation.working'),
+)
 // The model it uses now; a thread's picker also offers going back to the default.
 const modelLabel = computed(() => {
   const id = view.value.model?.id
@@ -355,11 +361,6 @@ watch(
               {{ t('notice.undo') }}
             </DouButton>
           </template>
-          <DouCollapse v-else-if="item.notice.kind === 'compacted'" class="relay">
-            <DouCollapseItem :value="item.notice.id" :title="t('notice.compacted')">
-              <DouText size="sm" class="relay-content">{{ item.notice.summary }}</DouText>
-            </DouCollapseItem>
-          </DouCollapse>
           <!-- What the thread follows from the repository, and when it moves. -->
           <DouText
             v-else-if="item.notice.kind === 'instructions' && item.notice.content === null"
@@ -522,7 +523,6 @@ watch(
       </template>
       <!-- What it is doing, what comes next, what it waits on: in place of progress messages. -->
       <DouChatPlan v-if="todo.length" :items="todo" :title="t('todo.title')" class="todo" />
-      <DouChatMessage v-if="working" sender="assistant" loading />
     </DouChatList>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="props.thread" :title="thread?.title" :description="t('thread.empty')" />
@@ -545,8 +545,9 @@ watch(
       </template>
     </DouAlert>
     <div v-else-if="working" class="conversation-status" role="status">
-      <DouText variant="secondary" size="sm" truncate>
-        {{ t('conversation.working') }} · {{ view.conversation?.turn?.model }}
+      <DouText variant="secondary" size="sm" class="conversation-activity">
+        <DouSpinner size="sm" />
+        <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
       </DouText>
       <DouButton variant="ghost" size="sm" @click="stop">
         <template #leading><SquareStopIcon /></template>
@@ -720,6 +721,19 @@ watch(
   margin: 0 16px;
 }
 
+.conversation-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conversation-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .conversation-input {
   padding: 12px 16px 16px;
 }
@@ -751,8 +765,11 @@ watch(
   border-radius: var(--dou-radius-container);
 }
 
-/* Faded: the user can read it, but it does not compete with the conversation. */
+/* Faded and small: the user can read it, but it does not compete with the conversation. */
 .relay {
+  --dou-collapse-border: transparent;
+  --dou-collapse-header-padding-y: 6px;
+  font-size: var(--dou-font-size-sm);
   opacity: 0.7;
 }
 

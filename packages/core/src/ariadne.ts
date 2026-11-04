@@ -82,7 +82,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 26
+export const PROJECTION_VERSION = 27
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -109,6 +109,7 @@ interface ConversationRow {
   pending_seq: number
   turn_id: string | null
   turn_started_at: number | null
+  activity: string | null
   model: string | null
   last_outcome: TurnOutcome | null
   last_error: string | null
@@ -134,7 +135,12 @@ function toConversation(row: ConversationRow): ConversationView {
     turn:
       row.turn_id === null
         ? null
-        : { id: row.turn_id, startedAt: row.turn_started_at ?? 0, model: row.model },
+        : {
+            id: row.turn_id,
+            startedAt: row.turn_started_at ?? 0,
+            model: row.model,
+            activity: row.activity,
+          },
     lastOutcome: row.last_outcome,
     lastError: row.last_error ? (JSON.parse(row.last_error) as LocalizedMessage) : null,
     usage: { input: row.input_tokens, output: row.output_tokens },

@@ -482,9 +482,6 @@ export const noticesProjection: Projection = {
         }
         break
       }
-      case 'conversation.compacted':
-        add(event.data.conversationId, 'compacted', { summary: event.data.summary })
-        break
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
@@ -590,6 +587,20 @@ export const memoriesProjection: Projection = {
   },
 }
 
+/** Longer status lines are cut: it sits on one line above the input. */
+const MAX_ACTIVITY = 60
+
+/**
+ * The line a model wrote beside its tool calls says what it is doing; it is never posted,
+ * so it becomes the conversation's status while the turn runs. Only its first line counts.
+ */
+export function activityOf(text: string): string | null {
+  const line = text.trim().split('\n', 1)[0]!.trim()
+  if (!line) return null
+  const chars = [...line]
+  return chars.length > MAX_ACTIVITY ? `${chars.slice(0, MAX_ACTIVITY).join('')}…` : line
+}
+
 /**
  * One agent per conversation: the project's coordinator or a thread. Tracks whether new
  * input waits for a turn (`pending_seq`), the running turn, and how the last one ended.
@@ -612,7 +623,8 @@ export const conversationsProjection: Projection = {
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       context_tokens INTEGER NOT NULL DEFAULT 0,
-      instructions TEXT
+      instructions TEXT,
+      activity TEXT
     )`)
   },
   forget(db, projectId) {
@@ -644,7 +656,8 @@ export const conversationsProjection: Projection = {
         break
       case 'turn.started':
         db.run(
-          `UPDATE conversations SET turn_id = ?, turn_started_at = ?, turn_started_seq = ?, model = ?
+          `UPDATE conversations SET turn_id = ?, turn_started_at = ?, turn_started_seq = ?, model = ?,
+             activity = NULL
            WHERE id = ?`,
           [event.data.turnId, event.at, event.seq, event.data.model, event.data.conversationId],
         )
@@ -656,7 +669,8 @@ export const conversationsProjection: Projection = {
              pending_since = CASE WHEN pending_seq <= ?1 THEN 0 ELSE max(pending_since, ?1 + 1) END,
              pending_seq = CASE WHEN pending_seq <= ?1 THEN 0 ELSE pending_seq END,
              input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3,
-             context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END
+             context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END,
+             activity = coalesce(?6, activity)
            WHERE id = ?4`,
           [
             event.data.sawSeq,
@@ -665,6 +679,7 @@ export const conversationsProjection: Projection = {
             event.data.conversationId,
             // What the model read last is how full its context is; unknown keeps the last.
             event.data.usage !== null,
+            event.data.finish === 'tool-calls' ? activityOf(event.data.text) : null,
           ],
         )
         break
@@ -677,7 +692,7 @@ export const conversationsProjection: Projection = {
       case 'turn.finished': {
         const { outcome, error, conversationId } = event.data
         const result = [outcome, error ? JSON.stringify(error) : null, conversationId]
-        const end = `turn_id = NULL, turn_started_at = NULL, last_outcome = ?, last_error = ?`
+        const end = `turn_id = NULL, turn_started_at = NULL, activity = NULL, last_outcome = ?, last_error = ?`
         if (outcome === 'interrupted') {
           // Resumes when the server starts again.
           db.run(

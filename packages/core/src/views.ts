@@ -141,7 +141,6 @@ export type NoticeView = {
       previous: string | null
       undone: boolean
     }
-  | { kind: 'compacted'; summary: string }
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
   | {
@@ -213,7 +212,8 @@ export interface ConversationView {
   role: ConversationRole
   /** Newest input that no model response has seen yet; 0 when none. */
   pendingSeq: number
-  turn: { id: string; startedAt: number; model: string | null } | null
+  /** `activity`: what the model said it is doing beside its latest tool calls this turn. */
+  turn: { id: string; startedAt: number; model: string | null; activity: string | null } | null
   lastOutcome: TurnOutcome | null
   lastError: LocalizedMessage | null
   usage: { input: number; output: number }
