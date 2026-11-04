@@ -69,17 +69,29 @@ describe('projects and messages', () => {
     )
   })
 
-  test('answers an attention', async () => {
+  test('answers an attention with values its form allows', async () => {
     const project = app.createProject('P')
     const attention = app.openAttention(project.id, {
-      question: '开始吗？',
-      options: [{ label: '开始', consequence: '协调器开 thread' }],
+      block: {
+        type: 'form',
+        title: '发布设置',
+        fields: [
+          { key: 'version', label: '版本号', kind: 'text', required: true },
+          { key: 'notify', label: '通知订阅者', kind: 'switch' },
+        ],
+      } as never,
     })
-    const answered = await call(`/api/attentions/${attention.id}/answer`, {
-      method: 'POST',
-      body: { choice: 0 },
-    })
-    expect(answered.status).toBe(204)
+    const answer = (values: Record<string, unknown>) =>
+      call(`/api/attentions/${attention.id}/answer`, {
+        method: 'POST',
+        body: { answer: { type: 'form', values } },
+      })
+    const missing = await answer({ notify: true })
+    expect(missing.status).toBe(400)
+    expect(((await missing.json()) as { error: { key: string } }).error.key).toBe(
+      'error.blockInvalid',
+    )
+    expect((await answer({ version: '1.2.0', notify: true })).status).toBe(204)
     expect(app.listOpenAttentions(project.id)).toEqual([])
   })
 })

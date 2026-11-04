@@ -1,4 +1,10 @@
-import { newId, type PlanConfirmation, type PlanNodeKind, type PlanOp } from '@ariadne/core'
+import {
+  confirmBlock,
+  newId,
+  type PlanConfirmation,
+  type PlanNodeKind,
+  type PlanOp,
+} from '@ariadne/core'
 import { createTranslator, type Locale } from '@ariadne/i18n'
 import { json, optionalStr, str, ToolInputError, type Tool } from './tool-helpers'
 
@@ -106,13 +112,13 @@ export function resolvePlanOps(raw: unknown): { ops: PlanOp[]; refs: Record<stri
 export function confirmation(locale: Locale, reason: string): PlanConfirmation {
   const t = createTranslator(locale)
   return {
-    question: (changes) =>
-      [
-        t('plan.confirm.question', { reason }),
-        ...changes.map((change) => `• ${t(change.key, change.params)}`),
-      ].join('\n'),
-    apply: { label: t('plan.confirm.apply'), consequence: t('plan.confirm.applyConsequence') },
-    keep: { label: t('plan.confirm.keep'), consequence: t('plan.confirm.keepConsequence') },
+    card: (changes) =>
+      confirmBlock({
+        title: t('plan.confirm.question', { reason }),
+        detail: changes.map((change) => `• ${t(change.key, change.params)}`).join('\n'),
+        approveText: t('plan.confirm.apply'),
+        denyText: t('plan.confirm.keep'),
+      }),
   }
 }
 

@@ -170,7 +170,7 @@ const runCommand = workspaceTool(
   {
     name: 'run_command',
     description:
-      'Run a shell command in your workspace (bash), e.g. tests, a build, or git. It needs no approval inside the workspace; anything that reaches outside it and cannot be undone (pushing, deploying, deleting outside the workspace) must go to the user with ask_user first.',
+      'Run a shell command in your workspace (bash), e.g. tests, a build, or git. It needs no approval inside the workspace; anything that reaches outside it and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block).',
     parameters: {
       type: 'object',
       properties: {

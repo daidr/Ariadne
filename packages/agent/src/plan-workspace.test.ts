@@ -168,13 +168,15 @@ describe('plan tools', () => {
 
     expect(app.getPlan(project.id).nodes).toHaveLength(1)
     const [item] = app.listNeedsMe(project.id)
-    expect(item?.kind === 'attention' && item.attention.question).toBe(
-      '协调器想修改计划：这个任务不需要了\n• 删除「旧任务」',
-    )
-    expect(item?.kind === 'attention' && item.attention.options.map((o) => o.label)).toEqual([
-      '同意修改',
-      '保持原样',
-    ])
+    expect(item?.kind === 'attention' && item.attention.block).toEqual({
+      type: 'confirm',
+      title: '协调器想修改计划：这个任务不需要了',
+      description: null,
+      detail: '• 删除「旧任务」',
+      tone: 'neutral',
+      approveText: '同意修改',
+      denyText: '保持原样',
+    })
   })
 })
 

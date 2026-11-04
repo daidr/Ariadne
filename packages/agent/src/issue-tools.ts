@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { DomainError, type IssueWriteAction } from '@ariadne/core'
+import { confirmBlock, DomainError, type IssueWriteAction } from '@ariadne/core'
 import type { IssueDetail, TrackerCapability } from '@ariadne/plugin-sdk'
 import { createTranslator } from '@ariadne/i18n'
 import { fenced } from './prompts'
@@ -221,17 +221,20 @@ async function writeIssue(
   const purpose = issueWritePurpose(tracker.name, input.number, input.action, input.text)
   const t = createTranslator(ctx.locale)
   const issue = await ask(tracker.issue(input.number))
-  const approval = ctx.app.issueApproval(ctx.projectId, ctx.conversationId, purpose, () => ({
-    question: t(`tracker.${input.action}.question`, {
-      issue: `${tracker.name}#${input.number}`,
-      title: issue.title,
-      text: input.shown ?? input.text,
+  const approval = ctx.app.issueApproval(ctx.projectId, ctx.conversationId, purpose, () =>
+    confirmBlock({
+      title: t(`tracker.${input.action}.question`, {
+        issue: `${tracker.name}#${input.number}`,
+        title: issue.title,
+        text: input.shown ?? input.text,
+      }),
+      // A comment is shown as it will be posted.
+      detail: input.action === 'comment' ? input.text : null,
+      description: t('tracker.yesConsequence'),
+      approveText: t(`tracker.${input.action}.yes`),
+      denyText: t('tracker.no'),
     }),
-    options: [
-      { label: t(`tracker.${input.action}.yes`), consequence: t('tracker.yesConsequence') },
-      { label: t('tracker.no'), consequence: t('tracker.noConsequence') },
-    ],
-  }))
+  )
   if (approval.state === 'asked' || approval.state === 'pending') {
     return {
       content:

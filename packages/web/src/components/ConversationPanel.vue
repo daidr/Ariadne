@@ -18,6 +18,7 @@ import {
   DouPopover,
   DouTag,
   DouText,
+  type ChatMessageProps,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
 import {
@@ -52,6 +53,8 @@ import {
   undoNotice,
 } from '../store'
 import StageLabel from './StageLabel.vue'
+import AskBlock from '../blocks/AskBlock.vue'
+import ShowBlock from '../blocks/ShowBlock.vue'
 
 /** `thread` shows the open thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ thread?: boolean }>()
@@ -165,6 +168,15 @@ function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
   if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
   if (notice.previous === null) return t('notice.memoryAdded', { text: notice.text })
   return t('notice.memoryChanged', { previous: notice.previous, text: notice.text })
+}
+
+/** The text, then tables, charts and steps, then what it asks. */
+function partsOf(message: MessageView): ChatMessageProps['parts'] {
+  return [
+    ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+    ...message.blocks.map((_, index) => ({ type: 'block', index })),
+    ...(message.ask ? [{ type: 'ask' }] : []),
+  ]
 }
 
 function sender(message: MessageView) {
@@ -419,9 +431,21 @@ watch(
           <DouChatMessage
             v-else
             :sender="sender(message)"
-            :content="message.content"
+            :parts="partsOf(message)"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
           >
+            <template #part="{ part }">
+              <AskBlock
+                v-if="part.type === 'ask' && message.ask"
+                :attention-id="message.ask.attentionId"
+                :block="message.ask.block"
+                :answer="message.ask.answer"
+              />
+              <ShowBlock
+                v-else-if="part.type === 'block'"
+                :block="message.blocks[part.index as number]!"
+              />
+            </template>
             <template v-if="message.editedAt" #actions>
               <!-- Why it changed and what it said before, for whoever wants to check. -->
               <DouPopover trigger="click" :title="t('message.editedTitle')" :width="360">

@@ -402,20 +402,100 @@ describe('failures', () => {
 })
 
 describe('answers and guards', () => {
+  test('post_ui shows blocks in the conversation, and the answer to its ask wakes the asker', async () => {
+    let asked = false
+    const model = fakeModel((request, role) => {
+      if (role !== 'coordinator') return say('')
+      if (lastUser(request).includes('<user_answer')) return say('好，按 B 来。')
+      if (answered(request)) return say('')
+      if (asked) return say('')
+      asked = true
+      return [
+        call('c1', 'post_ui', {
+          text: '两个方案：',
+          blocks: [
+            {
+              type: 'chart',
+              kind: 'bar',
+              x: 'plan',
+              y: ['days'],
+              labels: { days: '工期' },
+              rows: [
+                { plan: 'A', days: 3 },
+                { plan: 'B', days: 5 },
+              ],
+            },
+            {
+              type: 'choice',
+              question: '用哪个方案？',
+              options: [
+                { label: 'A', consequence: '快' },
+                { label: 'B', consequence: '稳' },
+              ],
+              recommended: 1,
+            },
+          ],
+        }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = askCoordinator()
+    await startScheduler(model).idle()
+    const [, posted] = app.listMessages(project.coordinatorId)
+    expect(posted).toMatchObject({
+      author: 'coordinator',
+      content: '两个方案：',
+      blocks: [{ type: 'chart', kind: 'bar' }],
+      ask: { block: { type: 'choice', question: '用哪个方案？' }, answer: null },
+    })
+    // The tool hands back where the answer will come from.
+    expect(JSON.parse(toolResultsOf(project.coordinatorId)[0]!)).toMatchObject({
+      attentionId: posted!.ask!.attentionId,
+    })
+    expect(app.listNeedsMe(project.id)).toHaveLength(1)
+
+    app.answerAttention(posted!.ask!.attentionId, { type: 'choice', choice: 1 })
+    await scheduler!.idle()
+    const request = model.requests.find((r) => lastUser(r).includes('<user_answer'))
+    expect(lastUser(request!)).toContain('choice: B')
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('好，按 B 来。')
+  })
+
+  test('post_ui refuses blocks outside the built-in set and says why', async () => {
+    let step = 0
+    const model = fakeModel((_request, role) => {
+      if (role !== 'coordinator') return say('')
+      step++
+      if (step > 1) return say('')
+      return [
+        call('c1', 'post_ui', { blocks: [{ type: 'html', html: '<script>alert(1)</script>' }] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    const project = askCoordinator()
+    await startScheduler(model).idle()
+    expect(toolResultsOf(project.coordinatorId)[0]).toContain('error.blockInvalid')
+    expect(app.listMessages(project.coordinatorId).map((m) => m.author)).toEqual(['user'])
+  })
+
   test('an answer wakes the thread that asked, even after it reported done', async () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: '调研' })
     app.startThread(thread.id)
     const attention = app.openAttention(project.id, {
       threadId: thread.id,
-      question: '用哪个方案？',
-      options: [
-        { label: 'A', consequence: '快' },
-        { label: 'B', consequence: '稳' },
-      ],
+      block: {
+        type: 'choice',
+        question: '用哪个方案？',
+        options: [
+          { label: 'A', consequence: '快' },
+          { label: 'B', consequence: '稳' },
+        ],
+        recommended: null,
+      },
     })
     app.reportThread(thread.id, 'done', '做完了，只差一个决定')
-    app.answerAttention(attention.id, { choice: 1 })
+    app.answerAttention(attention.id, { type: 'choice', choice: 1 })
     // Before a slot picks it up, it shows as queued, not as done.
     expect(app.getThread(thread.id).stage).toBe('queued')
 
