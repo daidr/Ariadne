@@ -74,7 +74,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 21
+export const PROJECTION_VERSION = 22
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [

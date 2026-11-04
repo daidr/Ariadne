@@ -5,7 +5,6 @@ import {
   readServerSentEvents,
   transportErrorPart,
   type ChatMessage,
-  type Effort,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
