@@ -74,6 +74,27 @@ describe('thread stages', () => {
     expect(app.getProject(project.id).needsMe).toBe(0)
   })
 
+  test('a merge after the thread asked for review ends the review', () => {
+    let tick = 1000
+    const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })
+    const project = timed.createProject('P')
+    const thread = timed.createThread(project.id, { title: '改代码' })
+    timed.startThread(thread.id)
+    expect(timed.reportThread(thread.id, 'ready', '可以审阅').stage).toBe('review')
+    const merge = {
+      branch: 'ariadne/x',
+      base: 'main',
+      method: 'squash' as const,
+      sha: 'a',
+      head: 'b',
+    }
+    expect(timed.recordMerge(thread.id, merge).stage).toBe('done')
+    expect(timed.getProject(project.id).needsMe).toBe(0)
+    // New work asks for review again.
+    expect(timed.reportThread(thread.id, 'ready', '又改了').stage).toBe('review')
+    timed.close()
+  })
+
   test('counts coordinator questions and waiting threads in "needs me"', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })

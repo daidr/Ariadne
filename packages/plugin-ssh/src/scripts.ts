@@ -169,3 +169,31 @@ if [ -n "$sub" ]; then
 fi
 printf '%s\\0' "$(cd -P -- "$root" && pwd -P)"
 `
+
+/**
+ * git in the directory `$1` (the repository, or a worktree of it), with the rest as its
+ * arguments. Like the server's other git on the remote machine, it runs no hooks and no
+ * fsmonitor.
+ */
+export const GIT = `
+set -u
+cd -P -- "$1" 2>/dev/null || { printf '%s is missing on the remote machine\\n' "$1" >&2; exit 4; }
+shift
+export GIT_TERMINAL_PROMPT=0
+exec git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
+`
+
+/** Exits 0 when the path `$1` exists. */
+export const EXISTS = `[ -e "$1" ] || [ -L "$1" ]`
+
+/** The directories in `$1`, each as its name, its real path and its size in KiB, NUL-separated. */
+export const WORKTREES = `
+set -u
+cd -P -- "$1" 2>/dev/null || exit 0
+for entry in */; do
+  [ -d "$entry" ] && [ ! -L "\${entry%/}" ] || continue
+  name=\${entry%/}
+  size=$(du -sk -- "$name" 2>/dev/null | cut -f1)
+  printf '%s\\0%s\\0%s\\0' "$name" "$(pwd -P)/$name" "\${size:-}"
+done
+`

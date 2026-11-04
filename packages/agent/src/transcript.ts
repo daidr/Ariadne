@@ -41,6 +41,10 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<thread_stopped_by_user thread="${note.threadId}" title="${titleOf(note.threadId)}">\nThe user stopped this thread: ${note.reason}\nIt stays stopped until the user lets it go on; do not resume it or route its work elsewhere unless the user asks.\n</thread_stopped_by_user>`
     case 'pull-request-closed':
       return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
+    case 'branch-merged':
+      return `<branch_merged thread="${note.threadId}" title="${titleOf(note.threadId)}" branch="${note.branch}" base="${note.base}" method="${note.method}" commit="${note.sha.slice(0, 12)}">\nThe user merged ${note.branch} into ${note.base}${note.method === 'squash' ? ' as one squashed commit' : ''}, up to ${note.head.slice(0, 12)}. ${note.method === 'squash' ? `Before working on the branch again, merge ${note.base} into it, so later changes are compared and merged on their own.` : ''}\n</branch_merged>`
+    case 'merge-conflict':
+      return `<merge_conflict branch="${note.branch}" base="${note.base}">\nThe user tried to merge your branch into ${note.base}, and these files changed on both sides: ${note.files.join(', ')}. Nothing was merged. In your workspace, run git merge ${note.base}, resolve the conflicts keeping both sides' intent, run the project's checks, commit, and report "ready" again. Do not merge into ${note.base} yourself.\n</merge_conflict>`
     case 'proposal-stale':
       return `<plan_proposal_not_applied proposal="${note.proposalId}">\nThe user agreed to "${note.reason}", but the plan had changed and it no longer applied (${note.staleBecause}). Nothing changed. Read the plan and propose again if it is still needed.\n</plan_proposal_not_applied>`
     case 'issue-write-shared': {

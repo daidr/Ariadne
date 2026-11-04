@@ -110,6 +110,7 @@
         "@ariadne/i18n": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
         "@dou-ui/chart": "0.1.0-alpha.2",
+        "@dou-ui/code": "0.1.0-alpha.2",
         "@dou-ui/dashboard": "0.1.0-alpha.2",
         "@dou-ui/editor": "0.1.0-alpha.2",
         "@dou-ui/flow": "0.1.0-alpha.2",
@@ -154,6 +155,8 @@
     "@babel/types": ["@babel/types@7.29.11", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.11", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-WCsemW40Cpc6gouC1SrY6PBaZ+oLRlEVY9XBvZBI7il/HyUrb2nJ505wE1MHEFyDZNnrWDEuy4jL50WVHfTTSQ=="],
 
     "@dou-ui/chart": ["@dou-ui/chart@0.1.0-alpha.2", "", { "peerDependencies": { "dou-ui": "0.1.0-alpha.2", "vue": "^3.5.0" } }, "sha512-Ruo6FJAMuxGThBBF3SHt+IGFokAPwhNqbkDrgFEufosvSUDHyC6XFHFpmEjTTT49jkVJUMbyiEjaPrMjcU4RJg=="],
+
+    "@dou-ui/code": ["@dou-ui/code@0.1.0-alpha.2", "", { "dependencies": { "@dou-ui/icons": "0.1.0-alpha.2" }, "peerDependencies": { "dou-ui": "0.1.0-alpha.2", "shiki": "^1.0.0 || ^2.0.0 || ^3.0.0", "vue": "^3.5.0", "yjs": "^13.6.0" }, "optionalPeers": ["shiki", "yjs"] }, "sha512-8kG64VkhXbz56XiJfM4WwHoca343hQkKePuXsoWq2XcjXMRUCOhQJ/8lAAv3xVOPQ16vK5XDRxmvBE9XIHXwtg=="],
 
     "@dou-ui/dashboard": ["@dou-ui/dashboard@0.1.0-alpha.2", "", { "dependencies": { "@dou-ui/icons": "0.1.0-alpha.2", "@dou-ui/sheet": "0.1.0-alpha.2" }, "peerDependencies": { "@dou-ui/chart": "0.1.0-alpha.2", "@dou-ui/pivot": "0.1.0-alpha.2", "dou-ui": "0.1.0-alpha.2", "vue": "^3.5.0", "yjs": "^13.6.0" }, "optionalPeers": ["@dou-ui/chart", "@dou-ui/pivot", "yjs"] }, "sha512-OOuv3lvDQ54sJJvX6Xj1eiBywfnttX9EHjzBgIE2FgsED9+yQ+7LsjBGGaFDlhg262m06wYLAcbO/qg8DscWEQ=="],
 

@@ -1,5 +1,6 @@
 import { DomainError, type Ariadne } from '@ariadne/core'
 import type {
+  BranchCapability,
   Capabilities,
   RepoCapability,
   TrackerCapability,
@@ -17,6 +18,7 @@ export class WorkspaceManager {
     { key: string; capabilities: Promise<Partial<Capabilities>> }
   >()
   private readonly open = new Map<string, { key: string; workspace: Promise<Workspace> }>()
+  private readonly queues = new Map<string, Promise<void>>()
 
   constructor(
     private readonly app: Ariadne,
@@ -63,16 +65,27 @@ export class WorkspaceManager {
   /** The thread's workspace; throws a `DomainError` the model can read. */
   async forThread(projectId: string, threadId: string): Promise<Workspace> {
     const key = this.sourceKey(projectId)
+    // Not while its worktree is being removed: it would be used, then deleted under it.
+    return this.serial(threadId, () => this.openFor(projectId, threadId, key))
+  }
+
+  private async openFor(projectId: string, threadId: string, key: string): Promise<Workspace> {
     const cached = this.open.get(threadId)
     if (cached?.key === key) return cached.workspace
+    // A workspace opened before keeps the base it started from.
+    const known = this.app.getThread(threadId).workspace
     const workspace = this.connect(projectId, key).then((capabilities) => {
       if (!capabilities.workspace) throw new DomainError('error.noSource')
-      return capabilities.workspace.open({ threadId })
+      return capabilities.workspace.open({ threadId, ...(known ? { base: known.base } : {}) })
     })
     this.open.set(threadId, { key, workspace })
     try {
       const ready = await workspace
-      this.app.recordWorkspace(threadId, { label: ready.label, branch: ready.branch })
+      this.app.recordWorkspace(threadId, {
+        label: ready.label,
+        branch: ready.branch,
+        base: ready.base,
+      })
       return ready
     } catch (error) {
       this.open.delete(threadId)
@@ -81,6 +94,53 @@ export class WorkspaceManager {
         detail: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+
+  /** The project's threads' branches and worktrees; `null` when they are not git worktrees. */
+  async branches(projectId: string): Promise<BranchCapability | null> {
+    if (!this.available(projectId)) return null
+    const capabilities = await this.connect(projectId, this.sourceKey(projectId))
+    return capabilities.workspace?.branches ?? null
+  }
+
+  /**
+   * Remove the thread's worktree, keeping its branch, and record it. The next use opens it
+   * again. One with changes not committed stays (`dirty`), and so does one whose thread has
+   * a turn running (`busy`): it may be using it.
+   */
+  async removeWorktree(
+    projectId: string,
+    threadId: string,
+    reason: 'merged' | 'user',
+  ): Promise<'removed' | 'dirty' | 'busy'> {
+    const known = this.app.listThreads(projectId).some((thread) => thread.id === threadId)
+    return this.serial(threadId, async () => {
+      const branches = await this.branches(projectId)
+      if (!branches) return 'dirty'
+      if (known && this.app.getConversation(threadId).turn) return 'busy'
+      const open = this.open.get(threadId)
+      this.open.delete(threadId)
+      if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
+      const removed = await branches.remove(threadId)
+      if (!removed) return 'dirty'
+      if (known) this.app.recordWorktreeRemoved(threadId, reason)
+      return 'removed'
+    })
+  }
+
+  /** Run `task` after the thread's earlier opening or removal has finished. */
+  private serial<T>(threadId: string, task: () => Promise<T>): Promise<T> {
+    const before = this.queues.get(threadId) ?? Promise.resolve()
+    const result = before.then(task, task)
+    const done = result.then(
+      () => {},
+      () => {},
+    )
+    this.queues.set(threadId, done)
+    void done.then(() => {
+      if (this.queues.get(threadId) === done) this.queues.delete(threadId)
+    })
+    return result
   }
 
   async dispose(): Promise<void> {

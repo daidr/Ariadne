@@ -1,6 +1,7 @@
 import type { Ariadne } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import type {
+  BranchCapability,
   DashboardSource,
   RepoCapability,
   ToolSpec,
@@ -19,6 +20,8 @@ export interface ToolContext {
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */
   repo(): Promise<RepoCapability>
+  /** The project's threads' branches, read without their worktrees. */
+  branches?: () => Promise<BranchCapability | null>
   /** The project's issue tracker, when its source has one. */
   tracker?: () => Promise<TrackerCapability>
   /** Whether input of this turn came from the user's own words (a message, an answer). */

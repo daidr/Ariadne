@@ -199,6 +199,23 @@ describe('github repository', () => {
     expect((await repo.pullRequestFor(a.branch!))?.number).toBe(7)
   })
 
+  test('changes compare against the default branch; nothing merges here', async () => {
+    const { workspace } = connectRepository({ repository: 'acme/app' }, options())
+    const ws = await workspace.open({ threadId: 'thr_ffffffffffff' })
+    expect(ws.base).toBe('main')
+    await ws.exec(
+      'echo x > x.txt && git add . && git -c user.email=t@e -c user.name=t commit -qm x',
+    )
+    const branches = workspace.branches!
+    expect(branches.merge).toBeUndefined()
+    const changes = await branches.changes('thr_ffffffffffff', 'main')
+    expect(changes?.files.map((f) => [f.path, f.status])).toEqual([['x.txt', 'added']])
+    expect(await branches.merged('thr_ffffffffffff', 'main')).toBe(false)
+    expect((await branches.worktrees()).map((w) => w.threadId)).toEqual(['thr_ffffffffffff'])
+    expect(await branches.remove('thr_ffffffffffff')).toBe(true)
+    expect(await branches.worktrees()).toEqual([])
+  })
+
   test('reads checks and the log of a failed job', async () => {
     const { repo } = connectRepository({ repository: 'acme/app' }, options())
     const checks = await repo.checks('abc')

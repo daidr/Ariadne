@@ -17,7 +17,15 @@ import type {
   StoredFile,
 } from '@ariadne/core'
 import type { LocalizedMessage } from '@ariadne/i18n'
-import type { LocalizedText, SettingsSchema } from '@ariadne/plugin-sdk'
+import type {
+  BranchChanges,
+  FileVersions,
+  LocalizedText,
+  MergeMethod,
+  MergeOutcome,
+  SettingsSchema,
+  WorktreeInfo,
+} from '@ariadne/plugin-sdk'
 
 const TOKEN_KEY = 'ariadne.token'
 
@@ -72,6 +80,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = await response.json()
   if (!response.ok) throw new ApiError(response.status, data.error)
   return data as T
+}
+
+/** One project's threads' worktrees, as the settings list them. */
+export interface ProjectWorktrees {
+  id: string
+  name: string
+  worktrees: (WorktreeInfo & { thread: ThreadView | null })[]
+  /** Why they could not be listed, e.g. the remote machine was unreachable. */
+  error: LocalizedMessage | null
 }
 
 export interface ProjectDetail {
@@ -210,6 +227,32 @@ export const api = {
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
+  getChanges: (threadId: string) =>
+    request<{ changes: BranchChanges | null; mergeable: boolean }>(
+      'GET',
+      `/api/threads/${threadId}/changes`,
+    ),
+  getChangedFile: (
+    threadId: string,
+    input: { from: string; head: string; path: string; previousPath: string | null },
+  ) => {
+    const query = new URLSearchParams({
+      from: input.from,
+      head: input.head,
+      path: input.path,
+      ...(input.previousPath ? { previousPath: input.previousPath } : {}),
+    })
+    return request<{ file: FileVersions }>('GET', `/api/threads/${threadId}/changes/file?${query}`)
+  },
+  mergeThread: (threadId: string, input: { method: MergeMethod; message: string }) =>
+    request<{ outcome: MergeOutcome; thread: ThreadView }>(
+      'POST',
+      `/api/threads/${threadId}/merge`,
+      input,
+    ),
+  listWorktrees: () => request<{ projects: ProjectWorktrees[] }>('GET', '/api/worktrees'),
+  removeWorktree: (projectId: string, threadId: string) =>
+    request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),
   refreshPullRequest: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/pull-request/refresh`),
   dismissProposal: (projectId: string, proposalId: string) =>

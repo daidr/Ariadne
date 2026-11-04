@@ -6,12 +6,25 @@ import {
   type ExecResult,
   type Workspace,
   type WorkspaceCapability,
+  type WorktreeInfo,
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { constants, existsSync } from 'node:fs'
 import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  branchChanges,
+  branchMerged,
+  fileVersions,
+  gitIdentity,
+  mergeBranch,
+  removeWorktree,
+  type GitRun,
+  type Identity,
+} from './branches'
 import { platformCloner, seedWorktree, type Cloner } from './cow'
+
+export * from './branches'
 
 export interface LocalSettings {
   path: string
@@ -92,6 +105,8 @@ export async function run(
     env?: Record<string, string>
     /** Leave out the server's credentials, for commands a thread asked for. */
     forThread?: boolean
+    /** Keep the whole output, e.g. a file's contents; otherwise long output keeps its end. */
+    whole?: boolean
   },
 ): Promise<ExecResult> {
   // Stopped before it started (say, while the worktree was being made): an abort listener
@@ -138,7 +153,7 @@ export async function run(
     // One that left the group (setsid) may still hold the output: give it a moment, then
     // stop waiting, so the call returns.
     const [out, err] = await Promise.all([stdout.settle(), stderr.settle()])
-    return { exitCode, stdout: clip(out), stderr: clip(err) }
+    return { exitCode, stdout: options.whole ? out : clip(out), stderr: clip(err) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', kill)
@@ -189,6 +204,7 @@ const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
  * behind it when the root is part of one.
  */
 export class LocalWorkspace implements Workspace {
+  readonly base: string | null
   private readonly sandbox: CommandSandbox
   private readonly keep: string[]
   private readonly readOnly: string[]
@@ -197,8 +213,14 @@ export class LocalWorkspace implements Workspace {
     readonly id: string,
     readonly root: string,
     readonly branch: string | null,
-    options: { sandbox?: CommandSandbox; keep?: string[]; readOnly?: string[] } = {},
+    options: {
+      sandbox?: CommandSandbox
+      keep?: string[]
+      readOnly?: string[]
+      base?: string | null
+    } = {},
   ) {
+    this.base = options.base ?? null
     this.sandbox = options.sandbox ?? unsandboxed
     this.keep = options.keep ?? [root]
     this.readOnly = options.readOnly ?? []
@@ -303,6 +325,36 @@ export class LocalWorkspace implements Workspace {
   }
 }
 
+/** Space a directory takes, in bytes, as `du` counts it; `null` where it cannot. */
+export async function diskUsage(dir: string): Promise<number | null> {
+  try {
+    const result = await run(['du', '-sk', dir], { cwd: dirname(dir) })
+    const kib = Number.parseInt(result.stdout, 10)
+    return result.exitCode === 0 && Number.isFinite(kib) ? kib * 1024 : null
+  } catch {
+    return null
+  }
+}
+
+/** The worktrees under `dir`, one directory per thread, with the space each takes. */
+export async function worktreesIn(dir: string): Promise<WorktreeInfo[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  return Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const path = join(dir, entry.name)
+        return { threadId: entry.name, path, bytes: await diskUsage(path) }
+      }),
+  )
+}
+
+/** The author for commits the server writes: the user's own git identity. */
+export function localIdentity(cwd: string): Identity {
+  // Read with the user's own configuration, not the server's hardened one.
+  return gitIdentity((key) => run(['git', 'config', '--get', key], { cwd }))
+}
+
 async function gitRoot(path: string): Promise<string | null> {
   const result = await git(path, 'rev-parse', '--show-toplevel')
   return result.exitCode === 0 ? result.stdout.trim() : null
@@ -311,6 +363,12 @@ async function gitRoot(path: string): Promise<string | null> {
 // The user's repository needs no network; `file` only for local submodules and the like.
 async function git(cwd: string, ...args: string[]): Promise<ExecResult> {
   return run(['git', ...args], { cwd, env: serverGitEnv(['file']) })
+}
+
+/** The checkout's branch, or `null` when it is on no branch. */
+async function currentBranch(repoRoot: string): Promise<string | null> {
+  const result = await git(repoRoot, 'symbolic-ref', '--quiet', '--short', 'HEAD')
+  return result.exitCode === 0 ? result.stdout.trim() || null : null
 }
 
 /** Branch names stay short: the random tail of the thread id is unique enough. */
@@ -326,8 +384,8 @@ export const branchFor = (threadId: string) => `ariadne/${threadId.slice(-12)}`
  * the like) as copy-on-write clones where the filesystem supports them, so it can build
  * at once without taking room; elsewhere it is a plain worktree. `clone: null` turns it off.
  *
- * Worktrees are not removed automatically yet; `git worktree remove <dir>` (and deleting
- * the `ariadne/*` branch) in the repository cleans one up.
+ * The base is the branch the checkout was on when the thread's worktree was made; the
+ * thread's changes are compared against it, and merged into it.
  */
 export function localWorkspaces(input: {
   path: string
@@ -336,16 +394,44 @@ export function localWorkspaces(input: {
   sandbox?: CommandSandbox
   clone?: Cloner | null
 }): WorkspaceCapability {
-  const { sandbox } = input
+  const { sandbox, repoRoot } = input
   const clone = input.clone === undefined ? platformCloner : input.clone
+  if (!repoRoot) {
+    return {
+      isolated: false,
+      open: async ({ threadId }) => new LocalWorkspace(threadId, input.path, null, { sandbox }),
+    }
+  }
+  const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
+  const worktrees = join(input.dataDir, 'worktrees', key)
+  const dirOf = (threadId: string) => join(worktrees, threadId)
+  const gitRun: GitRun = (args, options = {}) =>
+    run(['git', ...args], {
+      cwd: options.cwd ?? repoRoot,
+      env: serverGitEnv(['file']),
+      ...(options.whole ? { whole: true } : {}),
+    })
   return {
-    isolated: input.repoRoot !== null,
-    async open({ threadId }) {
-      const { repoRoot } = input
-      if (!repoRoot) return new LocalWorkspace(threadId, input.path, null, { sandbox })
+    isolated: true,
+    branches: {
+      changes: (threadId, base) =>
+        branchChanges(gitRun, {
+          branch: branchFor(threadId),
+          base,
+          baseRef: `refs/heads/${base}`,
+          worktree: existsSync(dirOf(threadId)) ? dirOf(threadId) : null,
+        }),
+      file: (request) => fileVersions(gitRun, request),
+      merged: (threadId, base) => branchMerged(gitRun, branchFor(threadId), `refs/heads/${base}`),
+      merge: ({ threadId, ...request }) =>
+        mergeBranch(gitRun, localIdentity(repoRoot), { branch: branchFor(threadId), ...request }),
+      remove: (threadId) => removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir)),
+      worktrees: () => worktreesIn(worktrees),
+    },
+    async open({ threadId, base: recorded }) {
       const branch = branchFor(threadId)
-      const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
-      const dir = join(input.dataDir, 'worktrees', key, threadId)
+      const dir = dirOf(threadId)
+      const base = recorded === undefined ? await currentBranch(repoRoot) : recorded
       if (!existsSync(join(dir, '.git'))) {
         await mkdir(dirname(dir), { recursive: true })
         // A worktree whose directory was deleted by hand is still registered; forget it
@@ -382,6 +468,7 @@ export function localWorkspaces(input: {
         sandbox,
         keep: [dir, ...(common ? [common] : [])],
         readOnly: common ? gitControlPaths(common) : [],
+        base,
       })
     },
   }

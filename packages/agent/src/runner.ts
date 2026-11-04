@@ -175,6 +175,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces) return Promise.reject(new DomainError('error.noTracker'))
       return workspaces.tracker(conversation.projectId)
     },
+    branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
   }
@@ -310,7 +311,9 @@ async function syncInstructions(
   turnId: string,
   workspaces: WorkspaceManager,
 ): Promise<void> {
-  if (!app.getThread(conversation.id).workspace) return
+  // Reading the file must not bring back a worktree that is not there.
+  const known = app.getThread(conversation.id).workspace
+  if (!known || known.removed) return
   let content: string | null = null
   let workspace: Awaited<ReturnType<WorkspaceManager['forThread']>> | null = null
   try {

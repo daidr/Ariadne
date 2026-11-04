@@ -34,6 +34,7 @@ function memoryWorkspace(files: Record<string, string>): Workspace {
     id: 'w',
     label: '/work/thread',
     branch: 'ariadne/thread',
+    base: 'main',
     async readFile(path) {
       const content = files[checkPath(path)]
       if (content === undefined) throw new Error(`ENOENT: ${path}`)
@@ -225,6 +226,8 @@ describe('workspace tools', () => {
     expect(app.getThread(thread.id).workspace).toEqual({
       label: '/work/thread',
       branch: 'ariadne/thread',
+      base: 'main',
+      removed: false,
     })
     const threadRequest = model.requests.find((r) => system(r).includes('You are a thread'))
     expect(toolNames(threadRequest!)).toContain('run_command')

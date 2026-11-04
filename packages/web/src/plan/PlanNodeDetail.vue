@@ -11,15 +11,21 @@ import {
   DouText,
   DouTextarea,
 } from 'dou-ui'
-import { CircleDotIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from '@dou-ui/icons'
+import { CircleDotIcon, FileDiffIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
-import { editPlan, openThread, setNodeIssue, state } from '../store'
+import { editPlan, openMain, openThread, setNodeIssue, state } from '../store'
 import { mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 import StageLabel from '../components/StageLabel.vue'
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
+
+/** Whether the thread has a branch whose changes can be shown. */
+const hasBranch = (threadId: string) => {
+  const workspace = state.detail?.threads.find((thread) => thread.id === threadId)?.workspace
+  return !!workspace?.branch && !!workspace.base
+}
 const emit = defineEmits<{ removed: [] }>()
 
 type Fields = { title: string; description: string; acceptance: string }
@@ -213,6 +219,16 @@ const removeQuestion = computed(() =>
           </template>
         </DouButton>
         <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
+        <DouButton
+          v-if="hasBranch(thread.id)"
+          size="sm"
+          variant="ghost"
+          :aria-label="t('changes.open')"
+          :title="t('changes.open')"
+          @click="openMain({ kind: 'changes', threadId: thread.id })"
+        >
+          <FileDiffIcon />
+        </DouButton>
       </li>
     </ul>
     <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>

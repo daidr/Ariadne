@@ -17,6 +17,7 @@ import {
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
 import {
+  FileDiffIcon,
   GitBranchIcon,
   PauseIcon,
   PlayIcon,
@@ -31,6 +32,7 @@ import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
 import {
+  openMain,
   openThread,
   retryTurn,
   sendMessage,
@@ -192,6 +194,15 @@ watch(
           {{ thread.workspace.branch }}
         </DouTag>
         <PullRequestTag :thread="thread" refreshable />
+        <DouButton
+          v-if="thread.workspace?.branch && thread.workspace.base"
+          variant="ghost"
+          size="sm"
+          @click="openMain({ kind: 'changes', threadId: thread.id })"
+        >
+          <template #leading><FileDiffIcon /></template>
+          {{ t('changes.open') }}
+        </DouButton>
         <DouPopover
           v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
           v-model:open="stopOpen"
@@ -297,6 +308,47 @@ watch(
                 seconds: Math.max(1, Math.round(item.notice.delayMs / 1000)),
                 detail: item.notice.detail,
               })
+            }}
+          </DouText>
+          <!-- What happened to its branch and worktree. -->
+          <DouText
+            v-else-if="item.notice.kind === 'merged'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.method === 'squash' ? 'notice.mergedSquash' : 'notice.mergedMerge', {
+                base: item.notice.base,
+                sha: item.notice.sha.slice(0, 7),
+              })
+            }}
+          </DouText>
+          <DouText
+            v-else-if="item.notice.kind === 'merge-conflict'"
+            tone="warning"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t('notice.mergeConflict', {
+                base: item.notice.base,
+                files: item.notice.files.join('、'),
+              })
+            }}
+          </DouText>
+          <DouText
+            v-else-if="item.notice.kind === 'worktree-removed'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(
+                item.notice.reason === 'merged'
+                  ? 'notice.worktreeRemovedMerged'
+                  : 'notice.worktreeRemovedUser',
+              )
             }}
           </DouText>
           <DouText v-else tone="warning" size="sm" class="notice-text">

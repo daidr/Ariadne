@@ -1,7 +1,7 @@
 import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
-export { WorkspacePathError } from './capabilities'
+export { MergeRefused, WorkspacePathError } from './capabilities'
 export {
   describeHttpError,
   httpErrorPart,

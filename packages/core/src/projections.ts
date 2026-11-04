@@ -92,8 +92,13 @@ export const threadsProjection: Projection = {
       started INTEGER NOT NULL DEFAULT 0,
       last_report TEXT,
       last_summary TEXT,
+      reported_at INTEGER,
+      reported_head TEXT,
       workspace_label TEXT,
       workspace_branch TEXT,
+      workspace_base TEXT,
+      workspace_removed INTEGER NOT NULL DEFAULT 0,
+      merged TEXT,
       pull_request TEXT,
       check_failures INTEGER NOT NULL DEFAULT 0,
       stopped_reason TEXT,
@@ -127,16 +132,40 @@ export const threadsProjection: Projection = {
         break
       case 'thread.reported':
         db.run(
-          'UPDATE threads SET last_report = ?, last_summary = ?, updated_at = ? WHERE id = ?',
-          [event.data.report, event.data.summary, event.at, event.data.threadId],
+          `UPDATE threads SET last_report = ?, last_summary = ?, reported_at = ?, reported_head = ?,
+           updated_at = ? WHERE id = ?`,
+          [
+            event.data.report,
+            event.data.summary,
+            event.at,
+            event.data.head ?? null,
+            event.at,
+            event.data.threadId,
+          ],
         )
         break
       case 'workspace.opened':
         db.run(
-          'UPDATE threads SET workspace_label = ?, workspace_branch = ?, updated_at = ? WHERE id = ?',
-          [event.data.label, event.data.branch, event.at, event.data.threadId],
+          `UPDATE threads SET workspace_label = ?, workspace_branch = ?, workspace_base = ?,
+             workspace_removed = 0, updated_at = ? WHERE id = ?`,
+          [event.data.label, event.data.branch, event.data.base, event.at, event.data.threadId],
         )
         break
+      case 'workspace.removed':
+        db.run('UPDATE threads SET workspace_removed = 1, updated_at = ? WHERE id = ?', [
+          event.at,
+          event.data.threadId,
+        ])
+        break
+      case 'branch.merged': {
+        const { threadId, ...merge } = event.data
+        db.run('UPDATE threads SET merged = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify({ ...merge, at: event.at }),
+          event.at,
+          threadId,
+        ])
+        break
+      }
       case 'pull_request.synced': {
         const { threadId, ...pullRequest } = event.data
         // Passing checks end a run of failures.
@@ -419,6 +448,23 @@ export const noticesProjection: Projection = {
           changed: event.data.changed,
           uncommitted: event.data.uncommitted ?? false,
         })
+        break
+      // What happened to the thread's branch and worktree, where the user follows the thread.
+      case 'branch.merged':
+        add(event.data.threadId, 'merged', {
+          base: event.data.base,
+          method: event.data.method,
+          sha: event.data.sha,
+        })
+        break
+      case 'branch.conflicted':
+        add(event.data.threadId, 'merge-conflict', {
+          base: event.data.base,
+          files: event.data.files,
+        })
+        break
+      case 'workspace.removed':
+        add(event.data.threadId, 'worktree-removed', { reason: event.data.reason })
         break
       case 'conversation.model_retry':
         add(event.data.conversationId, 'model-retry', {
@@ -802,6 +848,29 @@ export const transcriptProjection: Projection = {
         }
         break
       }
+      case 'branch.merged': {
+        // The thread learns it next time it works; the coordinator moves the plan on now.
+        const payload = { type: 'branch-merged', ...event.data }
+        addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, false)
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator) {
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, true)
+        }
+        break
+      }
+      case 'branch.conflicted':
+        // Handed back to the thread: it brings the base in and resolves the conflicts.
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.threadId,
+            kind: 'note',
+            payload: { type: 'merge-conflict', ...event.data },
+          },
+          true,
+        )
+        break
       case 'artifact.revised': {
         // The agent that last wrote the document learns the user changed it, next turn.
         // The artifacts projection has already applied this edit, which leaves the last
