@@ -39,6 +39,8 @@ export interface ProjectView {
    * leaves it to the total. A turn answering the user may still take a reserved slot.
    */
   slots: number | null
+  /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
+  mcp: string[]
   /** Tokens every conversation of the project has used, summaries included. */
   usage: { input: number; output: number }
 }
@@ -238,6 +240,8 @@ export type TranscriptEntry =
       text: string
       /** What the model thought first; providers that want it back get it in later steps. */
       reasoning: ReasoningRecord[]
+      /** Hash of the call that wrote it (`StepInput.call`): whose the reasoning is. */
+      call: string
       toolCalls: ToolCallRecord[]
       /** The newest event the model had seen when it wrote this step. */
       sawSeq: number
@@ -257,6 +261,10 @@ export type TranscriptEntry =
       /** What the history up to `upTo` said, in short. */
       summary: string
       upTo: number
+      /** What the model thought while summarising; goes back with the notes. */
+      reasoning: ReasoningRecord[]
+      /** Hash of the summarising call, as for a step. */
+      call: string
     }
 
 /** Facts written into a transcript by the system rather than by a person. */

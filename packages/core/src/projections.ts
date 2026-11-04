@@ -29,6 +29,7 @@ export const projectionTables = [
   'plan_proposals',
   'plan_node_issues',
   'issue_writes',
+  'mcp_calls',
   'artifacts',
   'artifact_versions',
   'prompts',
@@ -43,6 +44,7 @@ export const projectsProjection: Projection = {
       coordinator_id TEXT NOT NULL,
       source TEXT,
       slots INTEGER,
+      mcp TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -68,6 +70,13 @@ export const projectsProjection: Projection = {
       case 'project.slots.set':
         db.run('UPDATE projects SET slots = ?, updated_at = ? WHERE id = ?', [
           event.data.slots,
+          event.at,
+          event.projectId,
+        ])
+        break
+      case 'project.mcp.set':
+        db.run('UPDATE projects SET mcp = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(event.data.servers),
           event.at,
           event.projectId,
         ])
@@ -257,12 +266,19 @@ export const attentionsProjection: Projection = {
       thread_id TEXT NOT NULL,
       PRIMARY KEY (attention_id, thread_id)
     )`)
+    // The yeses to external tool calls that were used, each for one call.
+    db.run(`CREATE TABLE IF NOT EXISTS mcp_calls (
+      attention_id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL
+    )`)
   },
   forget(db, projectId) {
-    db.run(
-      'DELETE FROM attention_waiters WHERE attention_id IN (SELECT id FROM attentions WHERE project_id = ?)',
-      [projectId],
-    )
+    for (const table of ['attention_waiters', 'mcp_calls']) {
+      db.run(
+        `DELETE FROM ${table} WHERE attention_id IN (SELECT id FROM attentions WHERE project_id = ?)`,
+        [projectId],
+      )
+    }
     db.run('DELETE FROM attentions WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
@@ -301,6 +317,12 @@ export const attentionsProjection: Projection = {
         db.run('UPDATE attentions SET closed = 1, withdrawn = ? WHERE id = ?', [
           event.data.reason,
           event.data.attentionId,
+        ])
+        break
+      case 'mcp.called':
+        db.run('INSERT OR IGNORE INTO mcp_calls (attention_id, thread_id) VALUES (?, ?)', [
+          event.data.attentionId,
+          event.data.threadId,
         ])
         break
     }
@@ -1110,7 +1132,12 @@ export const transcriptProjection: Projection = {
           {
             conversationId: event.data.conversationId,
             kind: 'summary',
-            payload: { summary: event.data.summary, upTo: event.data.upTo },
+            payload: {
+              summary: event.data.summary,
+              upTo: event.data.upTo,
+              reasoning: event.data.reasoning,
+              call: event.data.call,
+            },
           },
           false,
         )
@@ -1125,6 +1152,7 @@ export const transcriptProjection: Projection = {
             payload: {
               text: event.data.text,
               reasoning: event.data.reasoning,
+              call: event.data.input.call,
               toolCalls: event.data.toolCalls,
               sawSeq: event.data.sawSeq,
             },

@@ -31,3 +31,11 @@ export {
   type SandboxKind,
   type SandboxStatus,
 } from './sandbox'
+export {
+  MCP_TOOL_MARKS,
+  McpHub,
+  type McpServerConfig,
+  type McpServerStatus,
+  type McpToolMark,
+} from './mcp'
+export { mcpTools } from './mcp-tools'

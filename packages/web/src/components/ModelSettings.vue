@@ -28,6 +28,7 @@ import {
 import { notifications, setNotifications } from '../notify'
 import { applyModelSettings } from '../store'
 import { lt, t, tm } from '../i18n'
+import McpSettings from './McpSettings.vue'
 import PluginSettings from './PluginSettings.vue'
 import WorktreeSettings from './WorktreeSettings.vue'
 import SettingsFields from './SettingsFields.vue'
@@ -115,7 +116,10 @@ function load(settings: ModelSettings) {
   coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
 }
 
-const tab = ref<'models' | 'notifications' | 'plugins' | 'worktrees'>('models')
+const tab = ref<'models' | 'notifications' | 'plugins' | 'mcp' | 'worktrees'>('models')
+const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
+// The footer saves the tab in view; only the models and the MCP servers wait for a save.
+const saves = computed(() => tab.value === 'models' || tab.value === 'mcp')
 
 /** Reload the protocols only: a plugin added or removed changes them, not the draft. */
 async function reloadKinds() {
@@ -177,6 +181,20 @@ function removeModel(id: string) {
 function clearSecret(provider: DraftProvider, key: string) {
   provider.settings[key] = null
   provider.secretsSet = provider.secretsSet.filter((name) => name !== key)
+}
+
+/**
+ * Save the tab in view. Saved MCP servers then connect, so the dialog stays open: their
+ * tools show up to be marked.
+ */
+async function saveTab() {
+  if (tab.value !== 'mcp') return save()
+  saving.value = true
+  try {
+    await mcp.value?.save()
+  } finally {
+    saving.value = false
+  }
 }
 
 async function save() {
@@ -401,15 +419,18 @@ async function save() {
       <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
         <PluginSettings v-if="open" @changed="reloadKinds" />
       </DouTabPanel>
+      <DouTabPanel value="mcp" :label="t('settings.tab.mcp')">
+        <McpSettings v-if="open" ref="mcp" />
+      </DouTabPanel>
       <DouTabPanel value="worktrees" :label="t('settings.tab.worktrees')">
         <WorktreeSettings v-if="open && tab === 'worktrees'" />
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
       <DouButton variant="ghost" @click="close">
-        {{ t(tab === 'models' ? 'settings.cancel' : 'settings.close') }}
+        {{ t(saves ? 'settings.cancel' : 'settings.close') }}
       </DouButton>
-      <DouButton v-if="tab === 'models'" tone="primary" :loading="saving" @click="save">
+      <DouButton v-if="saves" tone="primary" :loading="saving" @click="saveTab">
         {{ t('settings.save') }}
       </DouButton>
     </template>

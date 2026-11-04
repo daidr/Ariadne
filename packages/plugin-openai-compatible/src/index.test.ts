@@ -188,7 +188,20 @@ describe('openai-compatible provider', () => {
       },
     )
     expect(body.messages[1]).toMatchObject({ role: 'assistant', reasoning_content: '先想一下' })
-    expect(body.messages[3]).not.toHaveProperty('reasoning_content')
+    // Once the model thinks, no assistant message goes without reasoning.
+    expect(body.messages[3]).toMatchObject({ role: 'assistant', reasoning_content: '' })
+    const plain = requestBody(
+      { baseUrl: '', apiKey: '' },
+      {
+        model: 'm',
+        tools: [],
+        messages: [
+          { role: 'user', content: 'hi' },
+          { role: 'assistant', content: '好' },
+        ],
+      },
+    )
+    expect(plain.messages[1]).not.toHaveProperty('reasoning_content')
   })
 
   test('reports length when the token limit cuts off tool arguments', async () => {

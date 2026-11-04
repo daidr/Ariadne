@@ -27,6 +27,15 @@ function userContent(text: string, images: ImagePart[] = []) {
   return [...(text ? [{ type: 'text', text }] : []), ...images.map(imageUrl)]
 }
 
+/** A message's reasoning as one text, without what the service hid. */
+const reasoningOf = (message: ChatMessage) =>
+  message.role === 'assistant'
+    ? (message.reasoning ?? [])
+        .filter((block) => !block.redacted)
+        .map((block) => block.text)
+        .join('')
+    : ''
+
 /**
  * The wire messages. Tool messages take only text here, so the images of a step's tool
  * results follow its last result in one user message, saying which call they came from.
@@ -45,20 +54,20 @@ export function toWire(messages: ChatMessage[]): Record<string, unknown>[] {
     })
     pending = []
   }
+  // Reasoning goes back as it came: services that think by default (DeepSeek) refuse every
+  // earlier assistant message without it once tools are in play. Only services that sent
+  // some have any; then a message with none (written before the model thought, or by
+  // another model) gets an empty one, so none is missing.
+  const thinks = messages.some((message) => reasoningOf(message))
   for (const message of messages) {
     if (message.role !== 'tool') flush()
     switch (message.role) {
       case 'assistant': {
-        // Reasoning goes back as it came: services that think by default (DeepSeek) refuse a
-        // turn's tool calls without it. Only services that sent it have any to send back.
-        const reasoning = (message.reasoning ?? [])
-          .filter((block) => !block.redacted)
-          .map((block) => block.text)
-          .join('')
+        const reasoning = reasoningOf(message)
         wire.push({
           role: 'assistant',
           content: message.content || null,
-          ...(reasoning ? { reasoning_content: reasoning } : {}),
+          ...(thinks ? { reasoning_content: reasoning } : {}),
           ...(message.toolCalls?.length
             ? {
                 tool_calls: message.toolCalls.map((call) => ({

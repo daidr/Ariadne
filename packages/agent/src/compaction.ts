@@ -1,4 +1,4 @@
-import type { CallTiming, TokenUsage, TranscriptEntry } from '@ariadne/core'
+import type { CallTiming, ReasoningRecord, TokenUsage, TranscriptEntry } from '@ariadne/core'
 import type { ChatMessage, ModelStreamPart } from '@ariadne/plugin-sdk'
 import type { ResolvedModel } from './runner'
 import {
@@ -98,6 +98,7 @@ export function summaryRequest(
   titleOf: (threadId: string) => string,
   role: 'coordinator' | 'thread',
   readText?: (fileId: string) => string | null,
+  keepReasoning?: (call: string) => boolean,
 ): ModelMessage[] {
   const folded = transcript.filter((entry) => entry.kind === 'summary' || orderKey(entry) <= upTo)
   return [
@@ -106,7 +107,10 @@ export function summaryRequest(
       content: `You summarise the earlier part of a conversation so that the agent having it (the ${role} of an Ariadne project) can carry on from the summary alone. You have no tools; answer with the summary only.`,
     },
     // Images are named in words: the summary is text, and a request full of them is costly.
-    ...toChatMessages(folded, titleOf, readText ? { readText } : {}),
+    ...toChatMessages(folded, titleOf, {
+      ...(readText ? { readText } : {}),
+      ...(keepReasoning ? { keepReasoning } : {}),
+    }),
     {
       role: 'user',
       content: `Summarise the conversation so far, for yourself, to continue from it. Use two sections of short bullet points.
@@ -123,10 +127,17 @@ export async function summarise(
   messages: ChatMessage[],
   signal: AbortSignal,
 ): Promise<
-  | { ok: true; text: string; usage: TokenUsage | null; timing: CallTiming }
+  | {
+      ok: true
+      text: string
+      reasoning: ReasoningRecord[]
+      usage: TokenUsage | null
+      timing: CallTiming
+    }
   | { ok: false; detail: string }
 > {
   let text = ''
+  const reasoning: ReasoningRecord[] = []
   let usage: TokenUsage | null = null
   const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
   try {
@@ -137,6 +148,11 @@ export async function summarise(
       signal,
     })) {
       if (part.type === 'text' && part.text) timing.firstOutputAt ??= Date.now()
+      if (part.type === 'reasoning') {
+        timing.firstOutputAt ??= part.startedAt || Date.now()
+        const { type: _, startedAt: __, ...block } = part
+        reasoning.push(block)
+      }
       if (part.type === 'text') text += part.text
       else if (part.type === 'usage') usage = usageOf(part)
       else if (part.type === 'finish' && part.reason === 'error') {
@@ -149,6 +165,6 @@ export async function summarise(
     return { ok: false, detail: String(error) }
   }
   return text.trim()
-    ? { ok: true, text: text.trim(), usage, timing }
+    ? { ok: true, text: text.trim(), reasoning, usage, timing }
     : { ok: false, detail: 'empty summary' }
 }

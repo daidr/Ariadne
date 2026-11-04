@@ -238,6 +238,23 @@ describe('messages', () => {
     expect(app.listMessages(project.coordinatorId)).toHaveLength(1)
   })
 
+  test("a thread block names one of the project's own threads", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    const other = app.createThread(app.createProject('Q').id, { title: '别的' })
+    const post = (threadId: string) => () =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'coordinator',
+        content: '开了一个 thread：',
+        blocks: [{ type: 'thread', threadId }],
+      })
+    expect(post(thread.id)().blocks).toEqual([{ type: 'thread', threadId: thread.id }])
+    expect(problem(post(other.id))).toBe('error.blockInvalid')
+    expect(problem(post('thr_missing'))).toBe('error.blockInvalid')
+    expect(app.listMessages(project.coordinatorId)).toHaveLength(1)
+  })
+
   test('only the author may edit, and edits after reading are highlighted once', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
@@ -1148,13 +1165,43 @@ describe('deleting a project', () => {
     const b = app.createThread(project.id, { title: `${name} B` })
     app.requestApproval(project.id, a.id, 'push', card)
     app.requestApproval(project.id, b.id, 'push', card)
+    app.setProjectMcp(project.id, [])
+    app.mcpApproval(project.id, b.id, 'mcp:docs.search', card)
+    const [mcpAsk] = app.listOpenAttentions(project.id).filter((ask) => ask.threadId === b.id)
+    app.answerAttention(mcpAsk!.id, { type: 'confirm', approved: true })
+    app.useMcpApproval(project.id, {
+      threadId: b.id,
+      attentionId: mcpAsk!.id,
+      server: 'docs',
+      tool: 'search',
+    })
     app.postMessage(project.id, { conversationId: a.id, author: 'user', content: '开始吧' })
     app.updateTodo(project.id, a.id, [{ label: '调研', status: 'doing' }])
-    app.saveMemory(project.id, { text: `${name} 用中文`, author: 'user' })
+    app.saveMemory(project.id, { text: `${name} 用中文`, author: project.coordinatorId })
     app.revisePlan(project.id, {
       author: 'user',
       reason: '起步',
-      ops: [{ op: 'add', id: 'n', kind: 'task', title: 'N', description: '', acceptance: '' }],
+      ops: [
+        { op: 'add', id: 'n', kind: 'task', title: 'N', description: '', acceptance: '' },
+        { op: 'add', id: 'm', kind: 'task', title: 'M', description: '', acceptance: '' },
+        { op: 'link', from: 'n', to: 'm' },
+      ],
+    })
+    app.linkIssue(project.id, 'n', { tracker: 'acme/app', number: 3, title: 't', url: 'u' }, 'user')
+    app.revisePlan(project.id, {
+      author: 'coordinator',
+      reason: '合并',
+      ops: [{ op: 'remove', id: 'm' }],
+      confirmation: { card: () => card() },
+    })
+    app.startIssueWrite(project.id, {
+      threadId: a.id,
+      attentionId: app.listOpenAttentions(project.id)[0]!.id,
+      purpose: 'issue',
+      tracker: 'acme/app',
+      number: 3,
+      action: 'comment',
+      text: '修好了',
     })
     const doc = app.createArtifact(project.id, {
       kind: 'document',
@@ -1182,6 +1229,10 @@ describe('deleting a project', () => {
     const gone = busyProject('甲')
     const kept = busyProject('乙')
     const before = rows()
+    // Every table holds something of each project, so none is left out of the check.
+    for (const [table, list] of Object.entries(before)) {
+      expect(list.length, `${table} is empty`).toBeGreaterThan(0)
+    }
     app.deleteProject(gone.project.id)
     const after = rows()
 
