@@ -88,12 +88,27 @@ done
  * own and no input; a watcher reads the script's input, which the caller holds open, and
  * ends the group when it closes: on a timeout, a stop, or a dropped connection. Whatever
  * the command leaves running in the background ends with it.
+ *
+ * With `$3`, git in the command pushes nowhere: every push address, the remotes' own and
+ * one typed out, is rewritten to the path `$3`, which is not a repository, through config
+ * in the environment (after any the user's environment sets), so nothing on disk changes.
+ * `pushInsteadOf` leaves a remote's explicit `pushurl` alone; those go through `insteadOf`.
  */
 export const EXEC = `${PRELUDE}
 printf '${STARTED}\\n' >&2
 dir=$(resolve "$1") || { printf '${OUTSIDE}\\n' >&2; exit 3; }
 [ -d "$dir" ] || { printf '%s is not a directory\\n' "$1" >&2; exit 2; }
 cd -- "$dir" || exit 1
+if [ -n "\${3:-}" ]; then
+  nowhere=$3 n=\${GIT_CONFIG_COUNT:-0}
+  case $n in '' | *[!0-9]*) n=0 ;; esac
+  rewrite() { export "GIT_CONFIG_KEY_$n=url.$nowhere.$1" "GIT_CONFIG_VALUE_$n=$2"; n=$((n + 1)); }
+  rewrite pushInsteadOf ''
+  while IFS= read -r url; do
+    [ -n "$url" ] && rewrite insteadOf "$url"
+  done < <(git config --get-regexp '^remote\\..*\\.pushurl$' 2> /dev/null | cut -d ' ' -f 2-)
+  export GIT_CONFIG_COUNT=$n
+fi
 # With job control on, bash reports finished jobs on its own error output: keep that out
 # of the command's.
 exec 3>&2 2> /dev/null
@@ -234,8 +249,8 @@ g bundle create - --stdin | base64
 `
 
 /**
- * Take in a bundle and set refs. The input is \`update <ref> <sha>\` lines, an empty line,
- * then the bundle base64 encoded (nothing when there is none).
+ * Take in a bundle and set refs. The input is \`update <ref> <sha>\` and \`delete <ref>\`
+ * lines, an empty line, then the bundle base64 encoded (nothing when there is none).
  */
 export const RECEIVE = `${GIT_PRELUDE}
 updates=$(mktemp "\${TMPDIR:-/tmp}/ariadne-refs.XXXXXX") || exit 1

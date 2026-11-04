@@ -15,6 +15,7 @@
     "build": "for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do bun build src/main.ts --compile --target=bun-$target --outfile dist/ariadne-daemon-$target || exit 1; done"
   },
   "dependencies": {
+    "@ariadne/i18n": "workspace:*",
     "@ariadne/plugin-local": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
     "@ariadne/sandbox": "workspace:*"

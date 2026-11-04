@@ -252,7 +252,9 @@ export function hostedClone(input: {
             check(await local(['bundle', 'unbundle', file]), 'git bundle unbundle')
           })
         }
-        const updates = Object.entries(refs).map(([ref, sha]) => `update ${ref} ${sha}\n`)
+        const updates = Object.entries(refs).map(([ref, sha]) =>
+          sha ? `update ${ref} ${sha}\n` : `delete ${ref}\n`,
+        )
         if (updates.length) await gitInput(bare, ['update-ref', '--stdin'], updates.join(''))
       }),
   }

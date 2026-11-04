@@ -294,9 +294,11 @@ export interface PullRequestPreview {
   state: 'open' | 'closed' | 'merged'
   draft: boolean
   author: string | null
-  additions: number
-  deletions: number
-  changedFiles: number
+  /** Lines added and removed; `null` when the host does not say (GitLab). */
+  additions: number | null
+  deletions: number | null
+  /** `null` when the host does not say exactly (GitLab past 1000 files). */
+  changedFiles: number | null
   /** When it was merged, closed or opened, whichever is its state now; ISO time. */
   at: string
 }

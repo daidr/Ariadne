@@ -1,5 +1,6 @@
 import { MAX_FILE_BYTES } from '@ariadne/core'
 import type { Workspace } from '@ariadne/plugin-sdk'
+import { splitCode } from './markdown-code'
 
 /** Image files by extension, checked against their first bytes before anyone sees them. */
 export const IMAGE_EXTENSIONS: Record<
@@ -23,8 +24,6 @@ export function imageType(path: string) {
 /** Images a message may carry; more stay as their text. */
 const MAX_IMAGES = 20
 
-/** Code, where a link is only text: fenced blocks and inline spans. */
-const CODE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/
 /** `[text](address)` or `![alt](address)`, the address optionally in `<…>`, maybe a title. */
 const LINK = /(!?\[[^\]\n]*\]\(\s*)(<[^>\n]+>|[^\s()<>]+)((?:\s+"[^"\n]*")?\s*\))/g
 
@@ -54,7 +53,8 @@ export async function keepMessageImages(
   workspace: () => Promise<Workspace>,
   save: (file: { mime: string; data: Uint8Array }) => { id: string },
 ): Promise<string> {
-  const parts = content.split(CODE)
+  // Code, where a link is only text, stays as it is.
+  const parts = splitCode(content)
   const paths = new Set<string>()
   for (const [index, part] of parts.entries()) {
     if (index % 2) continue

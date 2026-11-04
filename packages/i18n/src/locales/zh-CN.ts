@@ -549,6 +549,27 @@ export const zhCN = {
   'project.mcp': 'MCP 服务',
   'project.mcpNone': '不用',
   'project.mcpUsed': 'MCP：{names}',
+  'cli.daemon.usage':
+    '用法：\n  ariadne-daemon [--listen 地址:端口] [--hide 路径]... [--no-sandbox]\n  ariadne-daemon pair      换一个新的配对码，旧的立即失效\n\n默认只监听 127.0.0.1:{port}。',
+  'cli.daemon.windows': 'daemon 暂不支持 Windows',
+  'cli.daemon.noOpenssl': '需要 openssl 来生成证书',
+  'cli.daemon.certificateFailed': '生成证书失败：{reason}',
+  'cli.daemon.pairingCode': '配对码（只显示这一次）：\n\n  {code}\n',
+  'cli.daemon.badListen': '监听地址不对：{address}',
+  'cli.daemon.listenFailed': '无法在 {address} 上监听：{reason}',
+  'cli.daemon.started': 'ariadne-daemon 已启动：{address}',
+  'cli.daemon.notLoopback': '监听的不是本机回环地址，其他机器也能连上来',
+  'cli.daemon.sandboxOff': '沙箱已关闭：讨论串的命令能读到 daemon 的证书私钥',
+  'cli.daemon.noSandbox': '这台机器上没有可用的沙箱：讨论串的命令能读到 daemon 的证书私钥',
+  'cli.daemon.paired': '已配对。要换配对码，运行 ariadne-daemon pair',
+  'cli.server.sandboxOff': '工作区沙箱已关闭：讨论串的命令能读到 Ariadne 的令牌和设置',
+  'cli.server.sandboxWindows':
+    'Windows 上暂时没有工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
+  'cli.server.noSandbox': '这台机器上没有可用的工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
+  'cli.server.pluginFailed': '插件加载失败：{path}',
+  'cli.server.started': 'Ariadne 已启动：{url}',
+  'cli.start.building': '正在构建页面…',
+  'cli.start.buildFailed': '页面构建失败',
 } as const
 
 export type MessageKey = keyof typeof zhCN

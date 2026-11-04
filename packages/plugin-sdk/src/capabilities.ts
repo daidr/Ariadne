@@ -117,8 +117,11 @@ export interface GitObjects {
    * `exclude` are commits the receiving side has.
    */
   bundle(tips: string[], exclude: string[]): Promise<Uint8Array>
-  /** Take in a bundle's objects, when there is one, then set the refs to these commits. */
-  receive(bundle: Uint8Array | null, refs: Record<string, string>): Promise<void>
+  /**
+   * Take in a bundle's objects, when there is one, then set the refs to these commits; a
+   * ref given `null` is deleted.
+   */
+  receive(bundle: Uint8Array | null, refs: Record<string, string | null>): Promise<void>
 }
 
 /** A checkout on some machine that a hosted repository's clone works with. */

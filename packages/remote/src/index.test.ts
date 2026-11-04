@@ -31,6 +31,9 @@ class TestShell extends LocalShell {
   }
 }
 
+/** git in `cwd`. */
+const gitIn = (cwd: string, ...args: string[]) => run(['git', ...args], { cwd })
+
 const provider = () => ({
   connect: async ({ path }: { host: string; path: string }) => ({
     workspace: await connectRemote(new TestShell(), path),
@@ -187,6 +190,34 @@ describe('remote directory', () => {
     expect(await again.readFile('src/new.ts')).toBe('export {}\n')
     // The user's own checkout is untouched.
     expect(existsSync(join(dir, 'src'))).toBe(false)
+  })
+
+  test("git push from a thread's worktree goes nowhere, and nothing on disk changes", async () => {
+    const dir = await repo()
+    const upstream = join(base, 'upstream.git')
+    await gitIn(base, 'init', '-q', '--bare', upstream)
+    const other = join(base, 'other.git')
+    await gitIn(base, 'init', '-q', '--bare', other)
+    await gitIn(dir, 'remote', 'add', 'origin', upstream)
+    // A remote with its own push address, which push rewrites leave alone.
+    await gitIn(dir, 'remote', 'add', 'mirror', join(base, 'unused.git'))
+    await gitIn(dir, 'config', 'remote.mirror.pushurl', other)
+    const config = await readFile(join(dir, '.git', 'config'), 'utf8')
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_push' })
+
+    for (const target of ['origin', 'mirror', upstream, `file://${other}`]) {
+      const pushed = await ws.exec(`git push -q ${target} HEAD:refs/heads/pushed`)
+      expect(pushed.exitCode).not.toBe(0)
+      expect(pushed.stderr).toContain('git-push-is-blocked/the-user-pushes')
+    }
+    expect((await gitIn(upstream, 'for-each-ref')).stdout).toBe('')
+    expect((await gitIn(other, 'for-each-ref')).stdout).toBe('')
+    // Fetching still works, and the user's checkout keeps its config.
+    expect((await ws.exec('git fetch -q origin')).exitCode).toBe(0)
+    expect(await readFile(join(dir, '.git', 'config'), 'utf8')).toBe(config)
+    // The user's own push from their checkout is not affected.
+    expect((await gitIn(dir, 'push', '-q', 'origin', 'main')).exitCode).toBe(0)
   })
 
   test("the source's view is the checkout as it is on that machine, with no worktree", async () => {

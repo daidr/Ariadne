@@ -5,11 +5,12 @@ import {
   type Capabilities,
   type CommandSandbox,
   type ContextProvider,
+  type LinkProvider,
   type RepoCapability,
   type TrackerCapability,
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
-import { GitLabApi, type RawProject } from './api'
+import { GitLabApi, GitLabError, type RawProject } from './api'
 
 export { GitLabApi, GitLabError, plainLog, toCheck } from './api'
 
@@ -279,7 +280,119 @@ export function connectRepository(
   return { workspace: clone.workspace, repo, tracker, api, instance, path }
 }
 
-export function gitlabProvider(options: GitLabProviderOptions): ContextProvider<GitLabSettings> {
+/** Merge request pages: `<instance>/<group>/<project>/-/merge_requests/<iid>[/…]`. */
+export function parseMergeRequestUrl(
+  url: URL,
+  instance: string,
+): { path: string; iid: number } | null {
+  const home = new URL(instance)
+  if (url.protocol !== home.protocol || url.host !== home.host) return null
+  const prefix = home.pathname.replace(/\/+$/, '')
+  if (prefix && !url.pathname.startsWith(`${prefix}/`)) return null
+  const match = /^\/(.+?)\/-\/merge_requests\/(\d{1,9})(?:\/[\w/.-]*)?$/.exec(
+    url.pathname.slice(prefix.length),
+  )
+  if (!match?.[1] || !match[2]) return null
+  try {
+    return { path: checkPath(match[1], url.href), iid: Number(match[2]) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The instances merge request links are recognised on: GitLab.com, the `GITLAB_HOST` one,
+ * and those of the projects connected since the start, with the token each was given.
+ */
+export class GitLabInstances {
+  private readonly tokens = new Map<string, string | undefined>()
+
+  constructor(env: Record<string, string | undefined> = process.env) {
+    this.tokens.set(GITLAB_COM, undefined)
+    const host = env.GITLAB_HOST?.trim()
+    if (host) {
+      try {
+        this.tokens.set(parseInstance(host.includes('://') ? host : `https://${host}`), undefined)
+      } catch {
+        // Not an address an instance can be at; its links stay plain.
+      }
+    }
+  }
+
+  add(instance: string, token: string | undefined) {
+    // A token the user gave for the instance is used for its links too.
+    if (token?.trim() || !this.tokens.has(instance)) this.tokens.set(instance, token?.trim())
+  }
+
+  /** The instance the link is on, the one with the longest path when they nest. */
+  find(
+    url: URL,
+  ): { instance: string; token: string | undefined; path: string; iid: number } | null {
+    let found: ReturnType<GitLabInstances['find']> = null
+    for (const [instance, token] of this.tokens) {
+      const mr = parseMergeRequestUrl(url, instance)
+      if (mr && (!found || instance.length > found.instance.length)) {
+        found = { instance, token, ...mr }
+      }
+    }
+    return found
+  }
+}
+
+/**
+ * Merge request links in messages: `group/project!12` with a card of its state, title,
+ * author and files. Read with the same token the instance's projects use, so private ones
+ * show too.
+ */
+export function gitlabLinks(
+  instances: GitLabInstances,
+  options: Pick<GitLabProviderOptions, 'fetch' | 'env' | 'run'> = {},
+): LinkProvider {
+  const env = options.env ?? process.env
+  // A token found is kept per instance; none found is looked for again next time.
+  const tokens = new Map<string, Promise<string | null>>()
+  const tokenFor = async (instance: string, configured: string | undefined) => {
+    const key = `${instance}\0${configured ?? ''}`
+    let token = tokens.get(key)
+    if (!token) {
+      token = findToken(configured, instance, env, options.run ?? run)
+      tokens.set(key, token)
+    }
+    const found = await token
+    if (!found) tokens.delete(key)
+    return found
+  }
+  return {
+    kind: 'gitlab',
+    title: { 'zh-CN': 'GitLab 合并请求', en: 'GitLab merge requests' },
+    match(url) {
+      const mr = instances.find(url)
+      return mr ? { kind: 'pull-request', label: `${mr.path}!${mr.iid}` } : null
+    },
+    async preview(url, { signal }) {
+      const mr = instances.find(url)
+      if (!mr) return null
+      const api = new GitLabApi({
+        base: `${mr.instance}/api/v4`,
+        path: mr.path,
+        webUrl: `${mr.instance}/${mr.path}`,
+        token: () => tokenFor(mr.instance, mr.token),
+        fetch: ((input, init) =>
+          (options.fetch ?? fetch)(input, { ...init, signal: signal ?? null })) as typeof fetch,
+      })
+      try {
+        return await api.mergeRequestPreview(mr.iid)
+      } catch (error) {
+        if (error instanceof GitLabError && error.status === 404) return null
+        throw error
+      }
+    },
+  }
+}
+
+export function gitlabProvider(
+  options: GitLabProviderOptions & { instances?: GitLabInstances },
+): ContextProvider<GitLabSettings> {
   return {
     kind: 'gitlab',
     title: { 'zh-CN': 'GitLab 仓库', en: 'GitLab repository' },
@@ -320,6 +433,7 @@ export function gitlabProvider(options: GitLabProviderOptions): ContextProvider<
     hosting: true,
     async connect(settings): Promise<Partial<Capabilities>> {
       const connected = connectRepository(settings, options)
+      options.instances?.add(connected.instance, settings.token)
       // Fails early on a typo, a wrong instance or a token without access.
       await connected.api.project()
       return { workspace: connected.workspace, repo: connected.repo, tracker: connected.tracker }
@@ -331,8 +445,15 @@ export default definePlugin({
   id: 'gitlab',
   name: { 'zh-CN': 'GitLab', en: 'GitLab' },
   setup(ctx) {
-    return ctx.registerContextProvider(
-      gitlabProvider({ dataDir: ctx.dataDir, sandbox: ctx.sandbox }) as ContextProvider<never>,
+    const instances = new GitLabInstances()
+    // Both are undone with the plugin.
+    ctx.registerLinkProvider(gitlabLinks(instances))
+    ctx.registerContextProvider(
+      gitlabProvider({
+        dataDir: ctx.dataDir,
+        sandbox: ctx.sandbox,
+        instances,
+      }) as ContextProvider<never>,
     )
   },
 })

@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
   instanceDirs,
   connectRepository,
+  GitLabInstances,
+  gitlabLinks,
   gitlabProvider,
+  parseMergeRequestUrl,
   parseInstance,
   parseRepository,
   plainLog,
@@ -113,6 +116,28 @@ beforeEach(async () => {
           mergeRequests.push(mr)
           return Response.json(mr, { status: 201 })
         }
+        case `GET ${P}/merge_requests/8`:
+          return Response.json(
+            rawMergeRequest(8, {
+              state: 'merged',
+              author: { username: 'daidr' },
+              changes_count: '12',
+              merged_at: '2026-11-04T12:00:00Z',
+              closed_at: null,
+            }),
+          )
+        case `GET ${P}/merge_requests/9`:
+          return Response.json(
+            rawMergeRequest(9, {
+              draft: true,
+              author: null,
+              changes_count: '1000+',
+              merged_at: null,
+              closed_at: null,
+            }),
+          )
+        case `GET ${P}/merge_requests/10`:
+          return Response.json({ message: '404 Not found' }, { status: 404 })
         case `GET ${P}/merge_requests/7`:
           return Response.json(rawMergeRequest(7, { state: 'merged' }))
         case `GET ${P}/repository/commits/abc/statuses`:
@@ -404,5 +429,82 @@ describe('gitlab issues', () => {
     expect(requests.at(-1)?.body).toEqual({ state_event: 'close' })
     await tracker.setState(3, 'open')
     expect(requests.at(-1)?.body).toEqual({ state_event: 'reopen' })
+  })
+})
+
+const at = (url: string, home = 'https://gitlab.com') => parseMergeRequestUrl(new URL(url), home)
+
+describe('merge request links', () => {
+  test('reads merge request pages of the instance, and nothing else', () => {
+    expect(at('https://gitlab.com/acme/tools/app/-/merge_requests/12')).toEqual({
+      path: 'acme/tools/app',
+      iid: 12,
+    })
+    expect(at('https://gitlab.com/acme/app/-/merge_requests/12/diffs#note_1')).toMatchObject({
+      iid: 12,
+    })
+    expect(at('https://gitlab.com/acme/app/-/merge_requests')).toBeNull()
+    expect(at('https://gitlab.com/acme/app/-/issues/12')).toBeNull()
+    expect(at('https://gitlab.com/app/-/merge_requests/12')).toBeNull()
+    expect(at('http://gitlab.com/acme/app/-/merge_requests/12')).toBeNull()
+    expect(at('https://gitlab.com.evil.example/acme/app/-/merge_requests/12')).toBeNull()
+    const nested = 'https://example.com/gitlab'
+    expect(at('https://example.com/gitlab/acme/app/-/merge_requests/3', nested)).toEqual({
+      path: 'acme/app',
+      iid: 3,
+    })
+    expect(at('https://example.com/acme/app/-/merge_requests/3', nested)).toBeNull()
+  })
+
+  test('knows GitLab.com, the GITLAB_HOST instance and connected ones', async () => {
+    const instances = new GitLabInstances({ GITLAB_HOST: 'gitlab.corp.example' })
+    const links = gitlabLinks(instances, { env: {} })
+    const match = (url: string) => links.match(new URL(url))
+    expect(match('https://gitlab.com/acme/app/-/merge_requests/1')).toEqual({
+      kind: 'pull-request',
+      label: 'acme/app!1',
+    })
+    expect(match('https://gitlab.corp.example/acme/app/-/merge_requests/2')).toMatchObject({
+      label: 'acme/app!2',
+    })
+    expect(match(`${instance}/acme/tools/app/-/merge_requests/8`)).toBeNull()
+    // Connecting a project on the instance makes its links known.
+    await gitlabProvider({ ...options(), instances }).connect({ ...settings(), token: 'given' })
+    expect(match(`${instance}/acme/tools/app/-/merge_requests/8`)).toMatchObject({
+      label: 'acme/tools/app!8',
+    })
+  })
+
+  test('shows the card with the token the instance was given', async () => {
+    const instances = new GitLabInstances({})
+    instances.add(instance, 'given')
+    const links = gitlabLinks(instances, { env: {} })
+    expect(
+      await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/8`), {}),
+    ).toEqual({
+      kind: 'pull-request',
+      repository: 'acme/tools/app',
+      number: 8,
+      reference: '!8',
+      url: 'https://gitlab.example.com/acme/tools/app/-/merge_requests/8',
+      title: 'Add feature',
+      state: 'merged',
+      draft: false,
+      author: 'daidr',
+      additions: null,
+      deletions: null,
+      changedFiles: 12,
+      at: '2026-11-04T12:00:00Z',
+    })
+    expect(requests.at(-1)).toMatchObject({
+      path: `${P}/merge_requests/8`,
+      auth: 'Bearer given',
+    })
+    expect(
+      await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/9`), {}),
+    ).toMatchObject({ draft: true, author: null, changedFiles: null, at: '2026-11-03T00:00:00Z' })
+    expect(
+      await links.preview(new URL(`${instance}/acme/tools/app/-/merge_requests/10`), {}),
+    ).toBeNull()
   })
 })

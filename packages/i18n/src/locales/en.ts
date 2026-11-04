@@ -575,4 +575,29 @@ export const en: Record<MessageKey, string> = {
   'project.mcp': 'MCP servers',
   'project.mcpNone': 'None',
   'project.mcpUsed': 'MCP: {names}',
+  'cli.daemon.usage':
+    'Usage:\n  ariadne-daemon [--listen host:port] [--hide path]... [--no-sandbox]\n  ariadne-daemon pair      make a new pairing code; the old one stops working at once\n\nListens only on 127.0.0.1:{port} by default.',
+  'cli.daemon.windows': 'The daemon does not run on Windows yet',
+  'cli.daemon.noOpenssl': 'openssl is needed to make the certificate',
+  'cli.daemon.certificateFailed': 'Could not make the certificate: {reason}',
+  'cli.daemon.pairingCode': 'Pairing code (shown only this once):\n\n  {code}\n',
+  'cli.daemon.badListen': 'Not an address to listen on: {address}',
+  'cli.daemon.listenFailed': 'Could not listen on {address}: {reason}',
+  'cli.daemon.started': 'ariadne-daemon is running: {address}',
+  'cli.daemon.notLoopback': 'Not a loopback address: other machines can connect too',
+  'cli.daemon.sandboxOff':
+    "The sandbox is off: threads' commands can read the daemon's private key",
+  'cli.daemon.noSandbox':
+    "No sandbox is available on this machine: threads' commands can read the daemon's private key",
+  'cli.daemon.paired': 'Paired. For a new pairing code, run ariadne-daemon pair',
+  'cli.server.sandboxOff':
+    "The workspace sandbox is off: threads' commands can read Ariadne's token and settings",
+  'cli.server.sandboxWindows':
+    "There is no workspace sandbox on Windows yet: threads' commands can read Ariadne's token and settings",
+  'cli.server.noSandbox':
+    "No workspace sandbox is available on this machine: threads' commands can read Ariadne's token and settings",
+  'cli.server.pluginFailed': 'Could not load the plugin: {path}',
+  'cli.server.started': 'Ariadne is running: {url}',
+  'cli.start.building': 'Building the pages…',
+  'cli.start.buildFailed': 'Building the pages failed',
 }

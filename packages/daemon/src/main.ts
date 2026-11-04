@@ -1,15 +1,20 @@
+import { createTranslator, terminalLocale } from '@ariadne/i18n'
 import { browserProfiles, createSandbox, detectSandbox } from '@ariadne/sandbox'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { certificate, daemonHome, hasToken, newToken, serveDaemon } from './daemon'
+import {
+  certificate,
+  daemonHome,
+  hasToken,
+  MissingOpensslError,
+  newToken,
+  serveDaemon,
+} from './daemon'
 import { DEFAULT_PORT, isLoopback, pairingCode, parseAddress } from './protocol'
 
-const usage = `用法：
-  ariadne-daemon [--listen 地址:端口] [--hide 路径]... [--no-sandbox]
-  ariadne-daemon pair      换一个新的配对码，旧的立即失效
-
-默认只监听 127.0.0.1:${DEFAULT_PORT}。`
+// In the terminal's language.
+const t = createTranslator(terminalLocale(process.env))
 
 const { values, positionals } = parseArgs({
   args: Bun.argv.slice(2),
@@ -23,18 +28,27 @@ const { values, positionals } = parseArgs({
 })
 
 if (values.help || positionals.length > 1 || (positionals[0] && positionals[0] !== 'pair')) {
-  console.info(usage)
+  console.info(t('cli.daemon.usage', { port: DEFAULT_PORT }))
   process.exit(values.help ? 0 : 2)
 }
 if (process.platform === 'win32') {
-  console.error('daemon 暂不支持 Windows')
+  console.error(t('cli.daemon.windows'))
   process.exit(1)
 }
 
 const home = daemonHome()
-const cert = await certificate(home)
+const cert = await certificate(home).catch((error: unknown) => {
+  console.error(
+    error instanceof MissingOpensslError
+      ? t('cli.daemon.noOpenssl')
+      : t('cli.daemon.certificateFailed', {
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+  )
+  process.exit(1)
+})
 const printCode = (token: string) =>
-  console.info(`配对码（只显示这一次）：\n\n  ${pairingCode(token, cert.fingerprint)}\n`)
+  console.info(t('cli.daemon.pairingCode', { code: pairingCode(token, cert.fingerprint) }))
 
 if (positionals[0] === 'pair') {
   printCode(newToken(home))
@@ -43,7 +57,7 @@ if (positionals[0] === 'pair') {
 
 const listen = parseAddress(values.listen)
 if (!listen) {
-  console.error(`监听地址不对：${values.listen}`)
+  console.error(t('cli.daemon.badListen', { address: values.listen }))
   process.exit(2)
 }
 
@@ -57,23 +71,30 @@ const sandbox = createSandbox({
 const code = process.execPath.endsWith('/bun')
   ? resolve(import.meta.dir, '../../..')
   : dirname(process.execPath)
-const server = serveDaemon({
-  home,
-  hostname: listen.host,
-  port: listen.port,
-  certificate: cert,
-  sandbox,
-  readOnly: [code],
-})
-
-console.info(`ariadne-daemon 已启动：${listen.host}:${server.port}`)
-if (!isLoopback(listen.host)) console.info('监听的不是本机回环地址，其他机器也能连上来')
-if (!sandbox.kind) {
-  console.warn(
-    values['no-sandbox']
-      ? '沙箱已关闭：讨论串的命令能读到 daemon 的证书私钥'
-      : '这台机器上没有可用的沙箱：讨论串的命令能读到 daemon 的证书私钥',
+let server: ReturnType<typeof serveDaemon>
+try {
+  server = serveDaemon({
+    home,
+    hostname: listen.host,
+    port: listen.port,
+    certificate: cert,
+    sandbox,
+    readOnly: [code],
+  })
+} catch (error) {
+  console.error(
+    t('cli.daemon.listenFailed', {
+      address: values.listen,
+      reason: error instanceof Error ? error.message : String(error),
+    }),
   )
+  process.exit(1)
+}
+
+console.info(t('cli.daemon.started', { address: `${listen.host}:${server.port}` }))
+if (!isLoopback(listen.host)) console.info(t('cli.daemon.notLoopback'))
+if (!sandbox.kind) {
+  console.warn(t(values['no-sandbox'] ? 'cli.daemon.sandboxOff' : 'cli.daemon.noSandbox'))
 }
 if (!hasToken(home)) printCode(newToken(home))
-else console.info('已配对。要换配对码，运行 ariadne-daemon pair')
+else console.info(t('cli.daemon.paired'))
