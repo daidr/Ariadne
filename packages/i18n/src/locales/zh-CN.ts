@@ -130,7 +130,6 @@ export const zhCN = {
   'plan.edit.done': '完成编辑',
   'plan.edit.add': '加节点',
   'plan.edit.relayout': '重新排列',
-  'plan.edit.hint': '从节点底部拖线表示依赖，选中后按 Delete 删除',
   'plan.newNode': '新节点',
   'plan.reason.add': '在计划图上新增「{title}」',
   'plan.reason.remove': '在计划图上删除「{title}」',

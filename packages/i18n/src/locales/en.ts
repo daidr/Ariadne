@@ -135,8 +135,6 @@ export const en: Record<MessageKey, string> = {
   'plan.edit.done': 'Done editing',
   'plan.edit.add': 'Add node',
   'plan.edit.relayout': 'Rearrange',
-  'plan.edit.hint':
-    "Drag from a node's bottom to add a dependency; select and press Delete to remove",
   'plan.newNode': 'New node',
   'plan.reason.add': 'Added "{title}" on the plan graph',
   'plan.reason.remove': 'Removed "{title}" on the plan graph',

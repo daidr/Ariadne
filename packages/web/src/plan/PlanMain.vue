@@ -95,9 +95,6 @@ const time = (at: number) =>
         <DouEmpty v-else :description="t('plan.empty')" />
       </div>
       <aside class="plan-main-side">
-        <DouText v-if="canEdit && editing" size="sm" variant="secondary">
-          {{ t('plan.edit.hint') }}
-        </DouText>
         <PlanChangeBar />
         <PlanNodeDetail
           v-if="node"
