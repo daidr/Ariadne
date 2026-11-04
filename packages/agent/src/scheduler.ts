@@ -13,7 +13,6 @@ export interface SchedulerOptions {
   slots?: number
   /** Extra slots only a turn answering the user may take, so the user never waits in line. */
   reservedSlots?: number
-  maxSteps?: number
   /** Input size, in tokens, at which a conversation's older history is summarised. */
   compactAt?: number
   /** First wait before a failed model request is retried. */
@@ -170,7 +169,6 @@ export class Scheduler {
         model,
         locale: this.options.locale(),
         signal: controller.signal,
-        maxSteps: this.options.maxSteps ?? 40,
         ...(this.options.compactAt ? { compactAt: this.options.compactAt } : {}),
         ...(this.options.retryBaseMs !== undefined
           ? { retryBaseMs: this.options.retryBaseMs }

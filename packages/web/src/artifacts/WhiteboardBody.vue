@@ -4,7 +4,6 @@ import { DouFlowControls, DouFlowEditor, type FlowDocument } from '@dou-ui/flow'
 import '@dou-ui/flow/style.css'
 import { nextTick, ref, shallowRef, watch } from 'vue'
 import { api } from '../api'
-import { report } from '../store'
 import { whiteboardExtensions } from './whiteboard-extensions'
 
 /** A whiteboard: the flow editor with the whiteboard kit, stored as its FlowDocument. */
@@ -17,15 +16,10 @@ const props = defineProps<{
 const emit = defineEmits<{ draft: [content: string | null] }>()
 
 // Pasted and dropped images are uploaded as files; the board keeps their address.
-// A failed upload leaves the image out; say why, since the editor only tells screen readers.
-const extensions = whiteboardExtensions(async (file) => {
-  try {
-    return (await api.uploadFile(props.projectId, file)).file.url
-  } catch (error) {
-    report(error)
-    throw error
-  }
-})
+// A failed upload is announced by the editor itself.
+const extensions = whiteboardExtensions(
+  async (file) => (await api.uploadFile(props.projectId, file)).file.url,
+)
 const board = shallowRef<FlowDocument>({ version: 1, nodes: [], edges: [] })
 const generation = ref(0)
 /** The board as loaded, so undoing back to it clears the draft. */
