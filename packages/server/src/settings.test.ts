@@ -54,6 +54,32 @@ describe('model settings', () => {
     expect(new SettingsStore(path, host).current.concurrency).toEqual({ slots: 5, reserved: 0 })
   })
 
+  test('the send key and snippets are checked and kept', () => {
+    const store = new SettingsStore(path, host)
+    expect(store.current.input).toEqual({ submitOn: 'enter', snippets: [] })
+    expect(() => store.updateInput({ submitOn: 'shift-enter', snippets: [] })).toThrow()
+    expect(() =>
+      store.updateInput({ submitOn: 'enter', snippets: [{ id: 'a', name: ' ', text: 'x' }] }),
+    ).toThrow()
+    expect(() =>
+      store.updateInput({
+        submitOn: 'enter',
+        snippets: [
+          { id: 'a', name: 'A', text: 'x' },
+          { id: 'a', name: 'B', text: 'y' },
+        ],
+      }),
+    ).toThrow()
+    store.updateInput({
+      submitOn: 'mod-enter',
+      snippets: [{ id: 's1', name: ' 复查 ', text: '再看一遍改动\n' }],
+    })
+    expect(new SettingsStore(path, host).current.input).toEqual({
+      submitOn: 'mod-enter',
+      snippets: [{ id: 's1', name: '复查', text: '再看一遍改动\n' }],
+    })
+  })
+
   test('null clears a stored secret', () => {
     const store = new SettingsStore(path, host)
     store.updateModels(provider({ baseUrl: '', apiKey: 'secret-1' }))
