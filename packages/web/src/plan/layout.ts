@@ -210,9 +210,28 @@ export function layoutPlan(
   return positions
 }
 
+function place(auto: { x: number; y: number } | undefined, offset?: { x: number; y: number }) {
+  const at = auto ?? { x: 0, y: 0 }
+  return offset ? { x: at.x + offset.x, y: at.y + offset.y } : at
+}
+
+/**
+ * Where nodes were moved to, as offsets from where the layout of `plan` puts them. A node
+ * the layout doesn't have yet keeps its place as its offset, from the origin.
+ */
+export function offsetsOf(plan: PlanView, moved: Positions): Positions {
+  const auto = layoutPlan(plan.nodes)
+  const offsets: Positions = {}
+  for (const [id, at] of Object.entries(moved)) {
+    const from = auto.get(id) ?? { x: 0, y: 0 }
+    offsets[id] = { x: at.x - from.x, y: at.y - from.y }
+  }
+  return offsets
+}
+
 export interface GraphOptions {
-  /** Where the user moved nodes; others are laid out by dependency. */
-  positions?: Positions
+  /** How far the user moved nodes from where the layout puts them. */
+  offsets?: Positions
   /** A change to show on the graph instead of the plan as it is, as the server drew it. */
   preview?: PlanPreview | null
   fresh?: Set<string>
@@ -253,7 +272,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
       return {
         id: node.id,
         type: 'plan',
-        ...(options.positions?.[node.id] ?? auto.get(node.id) ?? { x: 0, y: 0 }),
+        ...place(auto.get(node.id), options.offsets?.[node.id]),
         data,
       }
     }),

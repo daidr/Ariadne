@@ -2,7 +2,14 @@ import type { PlanNodeView, PlanRevisionView, PlanView } from '@ariadne/core'
 import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
 import { editOf, mergeIntoForm, reasonOf } from './edit'
-import { freshChanges, layoutPlan, NODE_WIDTH, nodeHeight, toFlowDocument } from './layout'
+import {
+  freshChanges,
+  layoutPlan,
+  NODE_WIDTH,
+  nodeHeight,
+  offsetsOf,
+  toFlowDocument,
+} from './layout'
 
 const node = (id: string, dependsOn: string[] = [], extra: Partial<PlanNodeView> = {}) =>
   ({
@@ -161,15 +168,47 @@ describe('freshChanges', () => {
     expect(lost.revisions.map((r) => r.id)).toEqual(['r5', 'r2', 'r1'])
   })
 
-  test('saved positions win over the layout', () => {
+  test('a moved node keeps its offset from the layout', () => {
+    const auto = toFlowDocument(plan([node('a'), node('b', ['a'])]))
+    const b = auto.nodes.find((n) => n.id === 'b')!
     const doc = toFlowDocument(plan([node('a'), node('b', ['a'])]), {
-      positions: { b: { x: 9, y: 9 } },
+      offsets: { b: { x: 9, y: 9 } },
       fresh: new Set(['b']),
     })
     expect(doc.nodes.map((n) => [n.x, n.y, n.data?.fresh])).toEqual([
       [0, 0, false],
-      [9, 9, true],
+      [b.x + 9, b.y + 9, true],
     ])
+  })
+
+  test('a moved node goes along when its part of the plan is moved by another', () => {
+    // Two parts side by side; `y` is moved a little. Then the first part grows, which
+    // pushes the second part over: `y` must stay beside `x`, as the user put it.
+    const before = plan([node('a'), node('b', ['a']), node('x'), node('y', ['x'])])
+    const start = toFlowDocument(before)
+    const moved = { y: { x: nodeIn(start, 'y').x + 40, y: nodeIn(start, 'y').y + 16 } }
+    const offsets = offsetsOf(before, moved)
+    const grown = plan([
+      node('a'),
+      node('b', ['a']),
+      node('c', ['a']),
+      node('d', ['a']),
+      node('e', ['b', 'c', 'd']),
+      node('x'),
+      node('y', ['x']),
+    ])
+    const after = toFlowDocument(grown, { offsets })
+    const plain = toFlowDocument(grown)
+    expect(where(plain, 'x')).not.toEqual(where(start, 'x'))
+    expect(nodeIn(after, 'y').x - nodeIn(after, 'x').x).toBe(moved.y.x - nodeIn(start, 'x').x)
+    expect(nodeIn(after, 'y').y - nodeIn(after, 'x').y).toBe(moved.y.y - nodeIn(start, 'x').y)
+  })
+
+  test('a node added on the graph stays where it was dropped', () => {
+    const grown = plan([node('a'), node('b', ['a']), node('n')])
+    const offsets = offsetsOf(grown, { n: { x: 500, y: 40 } })
+    const doc = toFlowDocument(grown, { offsets })
+    expect(doc.nodes.find((n) => n.id === 'n')).toMatchObject({ x: 500, y: 40 })
   })
 })
 
@@ -198,6 +237,9 @@ describe('mergeIntoForm', () => {
     expect(next.description).toBe('')
   })
 })
+
+const nodeIn = (doc: FlowDocument, id: string) => doc.nodes.find((n) => n.id === id)!
+const where = (doc: FlowDocument, id: string) => ({ x: nodeIn(doc, id).x, y: nodeIn(doc, id).y })
 
 const overlaps = (nodes: PlanNodeView[], at: Map<string, { x: number; y: number }>) =>
   nodes.some((a, i) =>
