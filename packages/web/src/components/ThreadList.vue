@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
+import type { ThreadView } from '@ariadne/core'
+import { DouButton, DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
+import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
 import { groupOf, sortThreads, threadGroups, type ThreadGroup } from '../stage'
@@ -27,30 +29,22 @@ const groups = computed(() =>
     .filter((entry) => entry.threads.length),
 )
 
-const GROUP = 'group:'
 const MORE = 'more:'
-const items = computed<MenuOption[]>(() =>
-  groups.value.map(({ group, threads: list }) => {
-    const shown = showingAll.value.has(group) ? list : list.slice(0, LIMIT)
-    return {
-      key: `${GROUP}${group}`,
-      label: `${t(`threads.group.${group}`)} · ${list.length}`,
-      children: [
-        ...shown.map((thread) => ({ key: thread.id, label: thread.title })),
-        ...(shown.length < list.length
-          ? [{ key: `${MORE}${group}`, label: t('threads.more') }]
-          : []),
-      ],
-    }
-  }),
-)
+/** One menu per group: its threads, and "show more" while some are left out. */
+function itemsOf(group: ThreadGroup, list: ThreadView[]): MenuOption[] {
+  const shown = showingAll.value.has(group) ? list : list.slice(0, LIMIT)
+  return [
+    ...shown.map((thread) => ({ key: thread.id, label: thread.title })),
+    ...(shown.length < list.length ? [{ key: `${MORE}${group}`, label: t('threads.more') }] : []),
+  ]
+}
 
-const expanded = computed({
-  get: () => openGroups.value.map((group) => `${GROUP}${group}`),
-  set: (keys) => {
-    openGroups.value = keys.map((key) => String(key).slice(GROUP.length) as ThreadGroup)
-  },
-})
+const isOpen = (group: ThreadGroup) => openGroups.value.includes(group)
+function toggle(group: ThreadGroup) {
+  openGroups.value = isOpen(group)
+    ? openGroups.value.filter((item) => item !== group)
+    : [...openGroups.value, group]
+}
 
 function select(key: string | number) {
   const id = String(key)
@@ -63,41 +57,68 @@ function select(key: string | number) {
 </script>
 
 <template>
-  <DouMenu
-    v-if="items.length"
-    v-model:expanded="expanded"
-    class="thread-list"
-    :model-value="state.threadId ?? undefined"
-    :items="items"
-    @select="select"
-  >
-    <template #label="{ item }">
-      <DouText v-if="String(item.key).startsWith(GROUP)" size="sm" variant="tertiary" class="group">
-        {{ item.label }}
-      </DouText>
-      <DouText
-        v-else-if="String(item.key).startsWith(MORE)"
+  <div v-if="groups.length" class="thread-list">
+    <section v-for="{ group, threads: list } in groups" :key="group" class="thread-group">
+      <DouButton
         size="sm"
-        variant="tertiary"
-        class="more"
+        variant="ghost"
+        class="group-toggle"
+        :aria-expanded="isOpen(group)"
+        @click="toggle(group)"
       >
-        {{ item.label }}
-      </DouText>
-      <ThreadRow v-else-if="byId.get(String(item.key))" :thread="byId.get(String(item.key))!" />
-    </template>
-  </DouMenu>
+        {{ t(`threads.group.${group}`) }} · {{ list.length }}
+        <template #trailing>
+          <ChevronDownIcon v-if="isOpen(group)" />
+          <ChevronRightIcon v-else />
+        </template>
+      </DouButton>
+      <DouMenu
+        v-if="isOpen(group)"
+        class="thread-menu"
+        :model-value="state.threadId ?? undefined"
+        :items="itemsOf(group, list)"
+        @select="select"
+      >
+        <template #label="{ item }">
+          <DouText
+            v-if="String(item.key).startsWith(MORE)"
+            size="sm"
+            variant="tertiary"
+            class="more"
+          >
+            {{ item.label }}
+          </DouText>
+          <ThreadRow v-else-if="byId.get(String(item.key))" :thread="byId.get(String(item.key))!" />
+        </template>
+      </DouMenu>
+    </section>
+  </div>
   <DouEmpty v-else size="sm" />
 </template>
 
 <style scoped>
-/* Group headers sit flush with the threads under them; rows grow for the activity line. */
 .thread-list {
-  --dou-menu-indent: 0px;
-  --dou-menu-item-height: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.group {
-  padding: 6px 0;
+.thread-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+/* The group's name is a small button the size of its text, quieter than the threads. */
+.group-toggle {
+  --dou-button-fg: var(--dou-color-text-tertiary);
+}
+
+/* Rows grow for the activity line. */
+.thread-menu {
+  align-self: stretch;
+  --dou-menu-item-height: auto;
 }
 
 .more {
