@@ -12,7 +12,7 @@ import type {
   ProjectView,
   ThreadView,
   TodoView,
-  TraceInput,
+  TraceRequestDetail,
   TraceTurn,
   MemoryView,
   NoticeView,
@@ -152,8 +152,15 @@ export interface ModelEntry {
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   models: ModelEntry[]
-  /** `thread: null` uses the coordinator's. */
-  roles: { coordinator: string | null; thread: string | null }
+  /** `coordinator.model: null` uses the threads' model; `effort: null` asks nothing. */
+  roles: { thread: RoleInput; coordinator: RoleInput }
+}
+
+export type Effort = 'low' | 'medium' | 'high'
+
+export interface RoleInput {
+  model: string | null
+  effort: Effort | null
 }
 
 export interface ModelSettings extends ModelSettingsInput {
@@ -211,8 +218,11 @@ export const api = {
       'GET',
       `/api/conversations/${id}/trace${before === undefined ? '' : `?before=${before}`}`,
     ),
-  getTraceInput: (id: string, seq: number) =>
-    request<{ input: TraceInput }>('GET', `/api/conversations/${id}/trace/input/${seq}`),
+  getTraceRequest: (id: string, seq: number) =>
+    request<{ request: TraceRequestDetail }>(
+      'GET',
+      `/api/conversations/${id}/trace/requests/${seq}`,
+    ),
   setThreadModel: (threadId: string, model: string | null) =>
     request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),

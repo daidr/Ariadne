@@ -18,7 +18,7 @@ beforeEach(async () => {
 const provider = (settings: Record<string, unknown>, model: Record<string, unknown> = {}) => ({
   providers: [{ id: 'p1', kind: 'anthropic', name: '主力', settings }],
   models: [{ id: 'm1', provider: 'p1', model: 'some-model', ...model }],
-  roles: { coordinator: 'm1', thread: null },
+  roles: { thread: { model: 'm1', effort: null }, coordinator: { model: null, effort: null } },
 })
 
 describe('model settings', () => {
@@ -94,25 +94,35 @@ describe('model settings', () => {
         { id: 'm2', provider: 'p1', model: 'small', note: '便宜，适合调研' },
         { id: 'm3', provider: 'p1', model: 'large' },
       ],
-      roles: { coordinator: 'm1', thread: 'm2' },
+      roles: {
+        thread: { model: 'm3', effort: 'high' },
+        coordinator: { model: 'm2', effort: 'low' },
+      },
     })
-    expect(store.resolveModel('coordinator')?.model).toBe('some-model')
-    expect(store.resolveModel('thread')?.model).toBe('small')
-    expect(store.resolveModel('thread', 'm3')?.model).toBe('large')
+    expect(store.resolveModel('coordinator')).toMatchObject({ model: 'small', effort: 'low' })
+    expect(store.resolveModel('thread')).toMatchObject({ model: 'large', effort: 'high' })
+    expect(store.resolveModel('thread', 'm1')).toMatchObject({
+      model: 'some-model',
+      effort: 'high',
+    })
     // A model the thread was given that is no longer set up falls back to the default.
-    expect(store.resolveModel('thread', 'gone')?.model).toBe('small')
+    expect(store.resolveModel('thread', 'gone')?.model).toBe('large')
     expect(store.modelChoices()).toEqual([
       { id: 'm1', label: '主力 / some-model', note: '', threadDefault: false },
-      { id: 'm2', label: '主力 / small', note: '便宜，适合调研', threadDefault: true },
-      { id: 'm3', label: '主力 / large', note: '', threadDefault: false },
+      { id: 'm2', label: '主力 / small', note: '便宜，适合调研', threadDefault: false },
+      { id: 'm3', label: '主力 / large', note: '', threadDefault: true },
     ])
-    // Without a default for threads they use the coordinator's.
-    store.updateModels(settings)
-    expect(store.resolveModel('thread')?.model).toBe('some-model')
-    // A role must name a model that is set up.
-    expect(() =>
-      store.updateModels({ ...settings, roles: { coordinator: 'nope', thread: null } }),
-    ).toThrow()
+    // Without a model of its own the coordinator uses the threads', thinking as it is told.
+    store.updateModels({
+      ...settings,
+      roles: { thread: { model: 'm1', effort: null }, coordinator: { model: null, effort: 'low' } },
+    })
+    expect(store.resolveModel('coordinator')).toMatchObject({ model: 'some-model', effort: 'low' })
+    expect(store.resolveModel('thread')?.effort).toBeUndefined()
+    // A role must name a model that is set up, and a known effort.
+    const role = (thread: unknown) => ({ ...settings, roles: { ...settings.roles, thread } })
+    expect(() => store.updateModels(role({ model: 'nope', effort: null }))).toThrow()
+    expect(() => store.updateModels(role({ model: 'm1', effort: 'max' }))).toThrow()
   })
 
   test('rejects an unknown provider kind', () => {

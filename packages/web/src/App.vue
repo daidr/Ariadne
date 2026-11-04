@@ -100,7 +100,13 @@ watchEffect(() => {
       >
         {{ state.error }}
       </DouAlert>
-      <DouLayout class="body">
+      <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
+      <TraceView
+        v-if="state.main.kind === 'trace'"
+        :conversation-id="state.main.conversationId"
+        class="body"
+      />
+      <DouLayout v-else class="body">
         <DouLayoutAside :width="220">
           <ProjectList />
         </DouLayoutAside>
@@ -115,10 +121,6 @@ watchEffect(() => {
                 <ChangesView
                   v-else-if="state.main.kind === 'changes'"
                   :thread-id="state.main.threadId"
-                />
-                <TraceView
-                  v-else-if="state.main.kind === 'trace'"
-                  :conversation-id="state.main.conversationId"
                 />
                 <ConversationPanel v-else @open-settings="settingsOpen = true" />
               </div>

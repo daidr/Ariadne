@@ -4,7 +4,10 @@ import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import type { ModelChoice } from './tools'
-import { buildTrace, traceInput } from './trace'
+import { buildTrace, traceRequest } from './trace'
+
+const traceInput = (app: Ariadne, conversationId: string, seq: number) =>
+  traceRequest(app, conversationId, seq).detail
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -122,15 +125,33 @@ describe('the trace', () => {
     })
     expect(turn!.finishedAt).toBeGreaterThanOrEqual(turn!.startedAt)
     const [step, answer] = turn!.items
-    expect(step).toMatchObject({ kind: 'step', usage: { input: 100, output: 20 } })
-    if (step?.kind !== 'step') throw new Error('expected a step')
+    expect(step).toMatchObject({
+      kind: 'request',
+      number: 1,
+      purpose: 'step',
+      provider: 'fake',
+      model: 'fake-1',
+      finish: 'tool-calls',
+      usage: { input: 100, output: 20 },
+    })
+    if (step?.kind !== 'request') throw new Error('expected a request')
+    expect(step.firstOutputAt).toBeGreaterThanOrEqual(step.startedAt)
+    expect(step.finishedAt).toBeGreaterThanOrEqual(step.startedAt)
     expect(step.toolCalls[0]).toMatchObject({
       name: 'update_todo',
       result: { content: 'Todo list updated.', isError: false },
     })
-    expect(answer).toMatchObject({ kind: 'step', text: '好了', toolCalls: [] })
+    expect(answer).toMatchObject({
+      kind: 'request',
+      number: 2,
+      finish: 'stop',
+      text: '好了',
+      toolCalls: [],
+    })
+    // Numbers go on over turns.
+    expect(turns[1]!.items.map((item) => item.kind === 'request' && item.number)).toEqual([3, 4])
     // The second call adds the first one's step and result to what that one read.
-    if (answer?.kind !== 'step') throw new Error('expected a step')
+    if (answer?.kind !== 'request') throw new Error('expected a request')
     const input = traceInput(app, project.coordinatorId, answer.seq)
     expect(input.newFrom).toBe(input.messages.length - 2)
     expect(input.systemChanged).toBe(false)
@@ -142,6 +163,7 @@ describe('the trace', () => {
     expect(newest.turns.map((t) => t.seq)).toEqual([turns[1]!.seq])
     const older = buildTrace(app, project.coordinatorId, { before: turns[1]!.seq, turns: 1 })
     expect(older).toMatchObject({ more: false, turns: [{ seq: turns[0]!.seq }] })
+    expect(newest.turns[0]!.items[0]).toMatchObject({ number: 3 })
   })
 
   test('right after a summary, the system prompt is compared with the step before', async () => {
@@ -182,7 +204,9 @@ describe('the trace', () => {
       await running.idle()
     }
     const { turns } = buildTrace(app, project.coordinatorId)
-    expect(turns.map((turn) => [turn.outcome, turn.items.some((i) => i.kind === 'step')])).toEqual([
+    expect(
+      turns.map((turn) => [turn.outcome, turn.items.some((i) => i.kind === 'request')]),
+    ).toEqual([
       ['completed', true],
       ['failed', false],
       ['completed', true],
@@ -196,6 +220,46 @@ describe('the trace', () => {
       expect.stringContaining('二'),
     ])
     expect(input.systemChanged).toBe(false)
+  })
+
+  test('thinking is kept with its step, sent back, and the request rebuilt with its effort', async () => {
+    const model = fakeModel((request) =>
+      answered(request)
+        ? [{ type: 'reasoning', text: '收尾', signature: 's2' }, ...say('好了')]
+        : [
+            { type: 'reasoning', text: '先列待办', signature: 's1' },
+            call('c1', 'update_todo', { items: [{ label: '看看', status: 'doing' }] }),
+            { type: 'usage', input: 100, output: 20, cached: 80, reasoning: 12 },
+            { type: 'finish', reason: 'tool-calls' },
+          ],
+    )
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '开始',
+    })
+    await start({ ...model, effort: 'low' }).idle()
+
+    const second = model.requests[1]!
+    expect(second.effort).toBe('low')
+    expect(second.messages.at(-2)).toMatchObject({
+      role: 'assistant',
+      reasoning: [{ text: '先列待办', signature: 's1' }],
+    })
+    const [turn] = buildTrace(app, project.coordinatorId).turns
+    expect(turn!.usage).toEqual({ input: 110, output: 25, cached: 80, reasoning: 12 })
+    const [first, answer] = turn!.items
+    expect(first).toMatchObject({
+      effort: 'low',
+      reasoning: [{ text: '先列待办', redacted: false }],
+      usage: { cached: 80, reasoning: 12 },
+    })
+    if (answer?.kind !== 'request') throw new Error('expected a request')
+    const { request, detail } = traceRequest(app, project.coordinatorId, answer.seq)
+    const { signal: _, ...sent } = second
+    expect(request).toEqual(sent)
+    expect(detail.call).toEqual({ provider: 'fake', model: 'fake-1', settings: {} })
   })
 
   test("refuses a seq that is not one of the conversation's calls", async () => {

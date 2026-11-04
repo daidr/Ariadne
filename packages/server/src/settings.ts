@@ -2,7 +2,7 @@ import { DomainError } from '@ariadne/core'
 import type { ModelChoice, ResolvedModel } from '@ariadne/agent'
 import type { PluginHost } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
-import type { SettingsSchema } from '@ariadne/plugin-sdk'
+import { EFFORTS, type Effort, type SettingsSchema } from '@ariadne/plugin-sdk'
 import {
   chmodSync,
   existsSync,
@@ -36,11 +36,32 @@ export interface ModelConfig {
   note?: string
 }
 
+/**
+ * The model a role uses and how hard it thinks there. `effort: null` asks nothing of the
+ * model: some reject the parameter. `model: null` on the coordinator uses the threads' model.
+ */
+export interface RoleConfig {
+  model: string | null
+  effort: Effort | null
+}
+
+export type Role = 'coordinator' | 'thread'
+
 export interface ModelsConfig {
   providers: ModelProviderConfig[]
   models: ModelConfig[]
-  /** The model each role uses by default; `thread: null` uses the coordinator's. */
-  roles: { coordinator: string | null; thread: string | null }
+  /** Threads do the work, so their model comes first; the coordinator may use another. */
+  roles: { thread: RoleConfig; coordinator: RoleConfig }
+}
+
+const noRole = (): RoleConfig => ({ model: null, effort: null })
+
+function storedRole(raw: unknown): RoleConfig {
+  const role = (raw ?? {}) as Partial<RoleConfig>
+  return {
+    model: typeof role.model === 'string' ? role.model : null,
+    effort: EFFORTS.includes(role.effort as Effort) ? (role.effort as Effort) : null,
+  }
 }
 
 export interface UserConfig {
@@ -61,7 +82,7 @@ export interface UserConfig {
 const defaults = (): UserConfig => ({
   locale: 'zh-CN',
   plugins: [],
-  models: { providers: [], models: [], roles: { coordinator: null, thread: null } },
+  models: { providers: [], models: [], roles: { thread: noRole(), coordinator: noRole() } },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
   sandbox: { mode: 'auto', hide: [] },
@@ -81,8 +102,8 @@ export function loadUserConfig(path: string): UserConfig {
       providers: stored.models?.providers ?? config.models.providers,
       models: stored.models?.models ?? config.models.models,
       roles: {
-        coordinator: stored.models?.roles?.coordinator ?? null,
-        thread: stored.models?.roles?.thread ?? null,
+        thread: storedRole(stored.models?.roles?.thread),
+        coordinator: storedRole(stored.models?.roles?.coordinator),
       },
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
@@ -218,18 +239,20 @@ export class SettingsStore {
         ...(note ? { note } : {}),
       }
     })
-    const roles = (body.roles ?? {}) as Partial<ModelsConfig['roles']>
-    const role = (key: 'coordinator' | 'thread') => {
-      const value = roles[key] ?? null
-      if (value !== null && !ids.has(value)) throw new BadRequest(`roles.${key}`)
-      return value
+    const roles = (body.roles ?? {}) as Partial<Record<Role, Partial<RoleConfig>>>
+    const role = (key: Role): RoleConfig => {
+      const model = roles[key]?.model ?? null
+      if (model !== null && !ids.has(model)) throw new BadRequest(`roles.${key}.model`)
+      const effort = roles[key]?.effort ?? null
+      if (effort !== null && !EFFORTS.includes(effort)) throw new BadRequest(`roles.${key}.effort`)
+      return { model, effort }
     }
     this.config = {
       ...this.config,
       models: {
         providers,
         models,
-        roles: { coordinator: role('coordinator'), thread: role('thread') },
+        roles: { thread: role('thread'), coordinator: role('coordinator') },
       },
     }
     this.save()
@@ -332,7 +355,7 @@ export class SettingsStore {
    * The model a conversation talks to, or `null` when none is set up. A thread uses the
    * model it was given while that is still set up, else the default for threads.
    */
-  resolveModel(role: 'coordinator' | 'thread', given: string | null = null): ResolvedModel | null {
+  resolveModel(role: Role, given: string | null = null): ResolvedModel | null {
     const chosen = this.modelFor(role, given)
     if (!chosen) return null
     const config = this.config.models.providers.find((p) => p.id === chosen.provider)
@@ -352,15 +375,18 @@ export class SettingsStore {
       model: chosen.model,
       label: this.labelOf(chosen),
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
+      ...(this.config.models.roles[role].effort
+        ? { effort: this.config.models.roles[role].effort }
+        : {}),
     }
   }
 
   /** The model setting a role (or a thread given `given`) uses, or `null`. */
-  modelFor(role: 'coordinator' | 'thread', given: string | null = null): ModelConfig | null {
+  modelFor(role: Role, given: string | null = null): ModelConfig | null {
     const { models, roles } = this.config.models
     const find = (id: string | null) => (id ? (models.find((m) => m.id === id) ?? null) : null)
-    if (role === 'coordinator') return find(roles.coordinator)
-    return find(given) ?? find(roles.thread) ?? find(roles.coordinator)
+    if (role === 'coordinator') return find(roles.coordinator.model) ?? find(roles.thread.model)
+    return find(given) ?? find(roles.thread.model)
   }
 
   /** The models the coordinator may give a thread, with what the user said each is for. */

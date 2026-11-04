@@ -1049,6 +1049,7 @@ export const transcriptProjection: Projection = {
             kind: 'step',
             payload: {
               text: event.data.text,
+              reasoning: event.data.reasoning,
               toolCalls: event.data.toolCalls,
               sawSeq: event.data.sawSeq,
             },

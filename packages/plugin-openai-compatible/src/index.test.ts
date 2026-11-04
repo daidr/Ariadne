@@ -97,6 +97,39 @@ describe('openai-compatible provider', () => {
     ])
   })
 
+  test('asks for an effort, and passes on reasoning and detailed usage', async () => {
+    reply = () =>
+      sse(
+        { choices: [{ delta: { reasoning_content: '先想' } }] },
+        { choices: [{ delta: { reasoning_content: '一下' } }] },
+        { choices: [{ delta: { content: '好' }, finish_reason: 'stop' }] },
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 8,
+            prompt_tokens_details: { cached_tokens: 16 },
+            completion_tokens_details: { reasoning_tokens: 6 },
+          },
+        },
+        '[DONE]',
+      )
+    const parts: ModelStreamPart[] = []
+    for await (const part of openAICompatibleProvider.stream(
+      { baseUrl: `http://127.0.0.1:${server.port}/v1`, apiKey: '' },
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [], effort: 'medium' },
+    )) {
+      parts.push(part)
+    }
+    expect(lastBody).toMatchObject({ reasoning_effort: 'medium' })
+    expect(parts).toEqual([
+      { type: 'reasoning', text: '先想一下' },
+      { type: 'text', text: '好' },
+      { type: 'usage', input: 20, output: 8, cached: 16, reasoning: 6 },
+      { type: 'finish', reason: 'stop' },
+    ])
+  })
+
   test('reports length when the token limit cuts off tool arguments', async () => {
     reply = () =>
       sse(

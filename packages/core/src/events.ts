@@ -56,20 +56,44 @@ export interface ToolCallRecord {
   arguments: string
 }
 
+/**
+ * A block of a model's reasoning as its provider returned it; `signature` (or the opaque
+ * `text` of a `redacted` block) is what the provider checks when it is sent back.
+ */
+export interface ReasoningRecord {
+  text: string
+  signature?: string
+  redacted?: boolean
+}
+
+/**
+ * Tokens of one model call. `input` is everything read, `cached` the part of it read from
+ * the provider's cache, `reasoning` the part of `output` spent thinking (when known).
+ */
 export interface TokenUsage {
   input: number
   output: number
+  cached?: number
+  reasoning?: number
 }
 
 /**
  * The parts of a step's model request that the transcript does not hold, by the hash of
- * their `prompt.recorded` text: the system prompt, the tool definitions (JSON), and the
- * current state shown beside a summary (`null` without one).
+ * their `prompt.recorded` text: the system prompt, the tool definitions (JSON), the
+ * current state shown beside a summary (`null` without one), and `call`: JSON of the
+ * provider kind, model, effort and settings (secrets left out) the request went with.
  */
 export interface StepInput {
   system: string
   tools: string
   state: string | null
+  call: string
+}
+
+/** When a model call was sent and when its first output came, in ms since the epoch. */
+export interface CallTiming {
+  startedAt: number
+  firstOutputAt: number | null
 }
 
 /**
@@ -249,6 +273,9 @@ export interface EventMap {
     upTo: number
     sawSeq: number
     usage: TokenUsage | null
+    /** Hash of the call's `prompt.recorded` JSON, as in `StepInput.call`. */
+    call: string
+    timing: CallTiming
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
@@ -286,10 +313,14 @@ export interface EventMap {
     conversationId: string
     turnId: string
     text: string
+    reasoning: ReasoningRecord[]
     toolCalls: ToolCallRecord[]
+    /** Why the model stopped: it answered, or it called tools. */
+    finish: 'stop' | 'tool-calls'
     sawSeq: number
     usage: TokenUsage | null
     input: StepInput
+    timing: CallTiming
   }
   /**
    * A piece of model input seen for the first time in the project, stored once by its

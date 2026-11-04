@@ -17,6 +17,8 @@ import type {
   ProjectSource,
   ReportKind,
   StepInput,
+  CallTiming,
+  ReasoningRecord,
   ThreadPullRequest,
   TodoItem,
   TokenUsage,
@@ -62,7 +64,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 20
+export const PROJECTION_VERSION = 21
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -551,19 +553,30 @@ export class Ariadne {
   compactConversation(
     conversationId: string,
     turnId: string,
-    compaction: { summary: string; upTo: number; sawSeq: number; usage: TokenUsage | null },
+    compaction: {
+      summary: string
+      upTo: number
+      sawSeq: number
+      usage: TokenUsage | null
+      /** JSON of the provider, model, effort and settings, see `StepInput.call`. */
+      call: string
+      timing: CallTiming
+    },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
     const summary = compaction.summary.trim()
     if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
+    const { pieces, keep } = this.promptKeeper(projectId)
     const data = {
       conversationId,
       summary,
       upTo: compaction.upTo,
       sawSeq: compaction.sawSeq,
       usage: compaction.usage,
+      call: keep(compaction.call),
+      timing: compaction.timing,
     }
-    this.store.append([{ type: 'conversation.compacted', projectId, data }])
+    this.store.append([...pieces, { type: 'conversation.compacted', projectId, data }])
   }
 
   /** Summarising failed: the user sees it in the conversation, the turn goes on. */
@@ -1840,13 +1853,47 @@ export class Ariadne {
     turnId: string,
     step: {
       text: string
+      reasoning: ReasoningRecord[]
       toolCalls: ToolCallRecord[]
       sawSeq: number
       usage: TokenUsage | null
-      input: { system: string; tools: string; state: string | null }
+      input: { system: string; tools: string; state: string | null; call: string }
+      timing: CallTiming
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
+    const { pieces, keep } = this.promptKeeper(projectId)
+    const input: StepInput = {
+      system: keep(step.input.system),
+      tools: keep(step.input.tools),
+      state: step.input.state === null ? null : keep(step.input.state),
+      call: keep(step.input.call),
+    }
+    const { text, reasoning, toolCalls, sawSeq, usage, timing } = step
+    const finish = toolCalls.length ? ('tool-calls' as const) : ('stop' as const)
+    this.store.append([
+      ...pieces,
+      {
+        type: 'turn.step',
+        projectId,
+        data: {
+          conversationId,
+          turnId,
+          text,
+          reasoning,
+          toolCalls,
+          finish,
+          sawSeq,
+          usage,
+          input,
+          timing,
+        },
+      },
+    ])
+  }
+
+  /** Stores each piece of model input once per project; `keep` gives its hash. */
+  private promptKeeper(projectId: string) {
     const pieces: AnyNewEvent[] = []
     const seen = new Set<string>()
     const keep = (content: string) => {
@@ -1857,20 +1904,7 @@ export class Ariadne {
       seen.add(hash)
       return hash
     }
-    const input: StepInput = {
-      system: keep(step.input.system),
-      tools: keep(step.input.tools),
-      state: step.input.state === null ? null : keep(step.input.state),
-    }
-    const { text, toolCalls, sawSeq, usage } = step
-    this.store.append([
-      ...pieces,
-      {
-        type: 'turn.step',
-        projectId,
-        data: { conversationId, turnId, text, toolCalls, sawSeq, usage, input },
-      },
-    ])
+    return { pieces, keep }
   }
 
   /** A piece of model input by its hash, see `recordStep`; `null` when not stored. */
@@ -1881,6 +1915,20 @@ export class Ariadne {
           'SELECT content FROM prompts WHERE project_id = ? AND hash = ?',
         )
         .get(projectId, hash)?.content ?? null
+    )
+  }
+
+  /** How many model requests (steps and summaries) a conversation made before `seq`. */
+  countRequests(conversationId: string, seq: number): number {
+    const conversation = this.getConversation(conversationId)
+    return (
+      this.db
+        .query<{ n: number }, [string, string, number]>(
+          `SELECT count(*) AS n FROM events WHERE project_id = ?
+             AND type IN ('turn.step', 'conversation.compacted')
+             AND json_extract(data, '$.conversationId') = ? AND seq < ?`,
+        )
+        .get(conversation.projectId, conversationId, seq)?.n ?? 0
     )
   }
 

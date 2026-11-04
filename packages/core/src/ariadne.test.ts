@@ -7,7 +7,8 @@ import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null }
+const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}' }
+const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne
 let clock = 1_000
@@ -66,11 +67,13 @@ describe('thread stages', () => {
     const turnId = app.startTurn(thread.id, 'model')
     expect(app.getThread(thread.id).stage).toBe('working')
     app.recordStep(thread.id, turnId, {
+      reasoning: [],
       text: '',
       toolCalls: [],
       sawSeq: app.lastSeq(),
       usage: null,
       input: STEP_INPUT,
+      timing: TIMING,
     })
     app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('review')
@@ -618,11 +621,13 @@ describe('failing checks', () => {
       // Stand in for the thread's turn having seen everything so far.
       const turnId = app.startTurn(thread.id, 'm')
       app.recordStep(thread.id, turnId, {
+        reasoning: [],
         text: '',
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage: null,
         input: STEP_INPUT,
+        timing: TIMING,
       })
       app.finishTurn(thread.id, turnId, 'completed')
     }
@@ -659,11 +664,13 @@ describe('failing checks', () => {
     // The thread's turn saw all of it and ended.
     const turnId = app.startTurn(thread.id, 'm')
     app.recordStep(thread.id, turnId, {
+      reasoning: [],
       text: '',
       toolCalls: [],
       sawSeq: app.lastSeq(),
       usage: null,
       input: STEP_INPUT,
+      timing: TIMING,
     })
     app.finishTurn(thread.id, turnId, 'completed')
     expect(app.getThread(thread.id).stage).toBe('blocked')
@@ -909,19 +916,21 @@ describe('usage, models and step input', () => {
       const turnId = app.startTurn(project.coordinatorId, 'm')
       app.recordStep(project.coordinatorId, turnId, {
         text: 'x',
+        reasoning: [],
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage: { input: 900, output: 30 },
-        input: { system, tools: '[]', state },
+        input: { system, tools: '[]', state, call: '{}' },
+        timing: TIMING,
       })
       app.finishTurn(project.coordinatorId, turnId, 'completed')
     }
     step('提示一', null)
     step('提示一', null)
-    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]'])
+    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]', '{}'])
     step('提示二', '提示二')
     // The same text twice in one step is stored once.
-    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]', '提示二'])
+    expect(prompts().map((e) => e.data.content)).toEqual(['提示一', '[]', '{}', '提示二'])
     const last = app.events({ limit: 1000 }).findLast((e) => e.type === 'turn.step')
     if (last?.type !== 'turn.step') throw new Error('expected a step')
     expect(app.getPrompt(project.id, last.data.input.system)).toBe('提示二')
@@ -937,11 +946,13 @@ describe('usage, models and step input', () => {
     const step = (conversationId: string, usage: { input: number; output: number } | null) => {
       const turnId = app.startTurn(conversationId, 'm')
       app.recordStep(conversationId, turnId, {
+        reasoning: [],
         text: '',
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage,
         input: STEP_INPUT,
+        timing: TIMING,
       })
       app.finishTurn(conversationId, turnId, 'completed')
     }

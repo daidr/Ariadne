@@ -72,13 +72,24 @@ export interface ToolCall {
 }
 
 /**
+ * What a model thought before answering, as its provider returned it. `signature` (or the
+ * opaque `text` of a `redacted` block) lets the provider check the block when it is sent
+ * back; a provider that does not need it back may drop it.
+ */
+export interface ReasoningBlock {
+  text: string
+  signature?: string
+  redacted?: boolean
+}
+
+/**
  * One message of a model request. Both protocols require a tool result to follow the
  * assistant message that made the call, so assistant turns carry their calls and the whole
  * request can be rebuilt from the event log.
  */
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; reasoning?: ReasoningBlock[] }
   | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
 
 export interface ToolSpec {
@@ -91,7 +102,14 @@ export interface ToolSpec {
 export type ModelStreamPart =
   | { type: 'text'; text: string }
   | ({ type: 'tool-call' } & ToolCall)
-  | { type: 'usage'; input: number; output: number }
+  /** One whole block of reasoning; it comes before the answer it led to. */
+  | ({ type: 'reasoning' } & ReasoningBlock)
+  /**
+   * Tokens of the whole response. `input` counts everything the model read, `cached` the
+   * part of it read from the provider's cache; `reasoning` is the part of `output` spent
+   * thinking. Both only when the provider says.
+   */
+  | { type: 'usage'; input: number; output: number; cached?: number; reasoning?: number }
   | {
       type: 'finish'
       reason: 'stop' | 'length' | 'tool-calls' | 'error'
@@ -104,11 +122,17 @@ export type ModelStreamPart =
       retryAfterMs?: number
     }
 
+/** How hard a model thinks before it answers. Without it the request asks nothing of it. */
+export type Effort = 'low' | 'medium' | 'high'
+
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high']
+
 /** What the agent loop asks of a model provider for one response. */
 export interface ModelRequest {
   model: string
   messages: ChatMessage[]
   tools: ToolSpec[]
+  effort?: Effort
   signal?: AbortSignal
 }
 
@@ -123,6 +147,11 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
    * `retryable` when trying again may help; the agent loop retries only those.
    */
   stream(settings: Settings, request: ModelRequest): AsyncIterable<ModelStreamPart>
+  /**
+   * The body `stream` sends for `request`, without credentials (they go in headers). The
+   * trace shows it as the request the service got.
+   */
+  requestBody?(settings: Settings, request: ModelRequest): unknown
 }
 
 /** Undo a registration. */

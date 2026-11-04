@@ -17,7 +17,14 @@ import {
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
-import { api, ApiError, type Concurrency, type ModelKind, type ModelSettings } from '../api'
+import {
+  api,
+  ApiError,
+  type Concurrency,
+  type Effort,
+  type ModelKind,
+  type ModelSettings,
+} from '../api'
 import { notifications, setNotifications } from '../notify'
 import { applyModelSettings } from '../store'
 import { lt, t, tm } from '../i18n'
@@ -47,9 +54,12 @@ interface DraftModel {
 const kinds = ref<ModelKind[]>([])
 const providers = ref<DraftProvider[]>([])
 const models = ref<DraftModel[]>([])
-const coordinatorModel = ref<string | null>(null)
+// Threads come first: they do the work. The coordinator may use another model, and think less.
+const threadModel = ref<string | null>(null)
+const threadEffort = ref<Effort | ''>('')
+const coordinatorEffort = ref<Effort | ''>('')
 // `''` stands for "the coordinator's", which the select cannot hold as `null`.
-const threadModel = ref<string>('')
+const coordinatorModel = ref<string>('')
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -70,9 +80,16 @@ const modelOptions = computed(() =>
       label: `${providers.value.find((p) => p.id === model.provider)?.name ?? ''} / ${model.model.trim()}`,
     })),
 )
-const threadOptions = computed(() => [
-  { value: '', label: t('settings.sameAsCoordinator') },
+const coordinatorOptions = computed(() => [
+  { value: '', label: t('settings.sameAsThreads') },
   ...modelOptions.value,
+])
+const effortOptions = computed(() => [
+  { value: '', label: t('settings.effort.default') },
+  ...(['low', 'medium', 'high'] as const).map((effort) => ({
+    value: effort,
+    label: t(`settings.effort.${effort}`),
+  })),
 ])
 
 function load(settings: ModelSettings) {
@@ -89,8 +106,10 @@ function load(settings: ModelSettings) {
     contextK: model.contextTokens ? Math.round(model.contextTokens / 1000) : null,
     note: model.note ?? '',
   }))
-  coordinatorModel.value = settings.roles.coordinator
-  threadModel.value = settings.roles.thread ?? ''
+  threadModel.value = settings.roles.thread.model
+  threadEffort.value = settings.roles.thread.effort ?? ''
+  coordinatorModel.value = settings.roles.coordinator.model ?? ''
+  coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
 }
 
 const tab = ref<'models' | 'notifications' | 'plugins' | 'worktrees'>('models')
@@ -142,13 +161,13 @@ function addModel(provider = providers.value[0]?.id) {
   if (!provider) return
   const id = newId('m')
   models.value.push({ id, provider, model: '', contextK: null, note: '' })
-  coordinatorModel.value ??= id
+  threadModel.value ??= id
 }
 
 function removeModel(id: string) {
   models.value = models.value.filter((model) => model.id !== id)
-  if (coordinatorModel.value === id) coordinatorModel.value = models.value[0]?.id ?? null
-  if (threadModel.value === id) threadModel.value = ''
+  if (threadModel.value === id) threadModel.value = models.value[0]?.id ?? null
+  if (coordinatorModel.value === id) coordinatorModel.value = ''
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -180,8 +199,14 @@ async function save() {
           ...(model.note.trim() ? { note: model.note.trim() } : {}),
         })),
         roles: {
-          coordinator: keep(coordinatorModel.value) ?? kept[0]?.id ?? null,
-          thread: keep(threadModel.value || null),
+          thread: {
+            model: keep(threadModel.value) ?? kept[0]?.id ?? null,
+            effort: threadEffort.value || null,
+          },
+          coordinator: {
+            model: keep(coordinatorModel.value || null),
+            effort: coordinatorEffort.value || null,
+          },
         },
       }),
     )
@@ -297,14 +322,24 @@ async function save() {
           </template>
 
           <DouForm v-if="modelOptions.length || concurrency" layout="vertical" size="sm">
-            <div v-if="modelOptions.length" class="settings-row">
-              <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
-                <DouSelect v-model="coordinatorModel" :options="modelOptions" />
-              </DouFormItem>
-              <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
-                <DouSelect v-model="threadModel" :options="threadOptions" />
-              </DouFormItem>
-            </div>
+            <template v-if="modelOptions.length">
+              <div class="settings-row">
+                <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
+                  <DouSelect v-model="threadModel" :options="modelOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                  <DouSelect v-model="threadEffort" :options="effortOptions" />
+                </DouFormItem>
+              </div>
+              <div class="settings-row">
+                <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
+                  <DouSelect v-model="coordinatorModel" :options="coordinatorOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                  <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                </DouFormItem>
+              </div>
+            </template>
             <div v-if="concurrency" class="settings-row">
               <DouFormItem
                 :label="t('settings.slots')"
@@ -395,6 +430,10 @@ async function save() {
 .settings-grow {
   flex: 1;
   min-width: 0;
+}
+
+.settings-effort {
+  width: 120px;
 }
 
 .settings-narrow {

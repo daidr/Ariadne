@@ -1,7 +1,10 @@
 import {
   DomainError,
   type Ariadne,
+  type CallTiming,
   type ConversationView,
+  type ReasoningRecord,
+  type TokenUsage,
   type ToolCallRecord,
   type TranscriptEntry,
 } from '@ariadne/core'
@@ -9,6 +12,7 @@ import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import {
   MAX_RETRY_AFTER_MS,
   type DashboardSource,
+  type Effort,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
@@ -16,7 +20,14 @@ import {
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type ModelChoice, type Tool, type ToolContext } from './tools'
-import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
+import {
+  compactAt,
+  compactionCut,
+  estimateTokens,
+  summarise,
+  summaryRequest,
+  usageOf,
+} from './compaction'
 import { toChatMessages, visibleHistory } from './transcript'
 import type { WorkspaceManager } from './workspaces'
 
@@ -29,6 +40,22 @@ export interface ResolvedModel {
   label: string
   /** How many tokens the model reads at most, when its settings say. */
   contextTokens?: number
+  /** How hard it thinks in this role; without it the request asks nothing. */
+  effort?: Effort
+}
+
+/**
+ * What a request went with besides its messages, as recorded with it: the provider kind,
+ * model, effort and settings, secrets left out. The trace rebuilds the body from it.
+ */
+export function callOf(model: ResolvedModel, effort: Effort | null): string {
+  const settings: Record<string, unknown> = {}
+  const fields = model.provider.settings.properties
+  for (const [key, value] of Object.entries((model.settings ?? {}) as Record<string, unknown>)) {
+    const field = fields[key]
+    if (field && !(field.type === 'string' && field.secret)) settings[key] = value
+  }
+  return JSON.stringify({ provider: model.provider.kind, model: model.model, effort, settings })
 }
 
 export interface TurnOptions {
@@ -238,6 +265,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               upTo,
               sawSeq: readAt,
               usage: summary.usage,
+              call: callOf(model, null),
+              timing: summary.timing,
             })
           } else {
             compactionFailed = true
@@ -257,19 +286,32 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       const shownState = visibleHistory(transcript).summary === null ? null : input.state
       const answer = await requestStep(
         model,
-        { model: model.model, messages, tools: specs, signal },
+        {
+          model: model.model,
+          messages,
+          tools: specs,
+          ...(model.effort ? { effort: model.effort } : {}),
+          signal,
+        },
         (retry) => app.recordModelRetry(conversationId, turnId, retry),
         options.retryBaseMs ?? 1000,
       )
       if (signal.aborted || !answer) break
-      const { text, toolCalls, usage } = answer
+      const { text, reasoning, toolCalls, usage, timing } = answer
       lastInput = usage?.input ?? 0
       app.recordStep(conversationId, turnId, {
         text,
+        reasoning,
         toolCalls,
         sawSeq,
         usage,
-        input: { system: input.system, tools: input.tools, state: shownState },
+        input: {
+          system: input.system,
+          tools: input.tools,
+          state: shownState,
+          call: callOf(model, model.effort ?? null),
+        },
+        timing,
       })
 
       if (!toolCalls.length) {
@@ -415,19 +457,29 @@ async function requestStep(
   baseDelayMs: number,
 ): Promise<{
   text: string
+  reasoning: ReasoningRecord[]
   toolCalls: ToolCallRecord[]
-  usage: { input: number; output: number } | null
+  usage: TokenUsage | null
+  timing: CallTiming
 } | null> {
   for (let attempt = 0; ; attempt++) {
     let text = ''
+    const reasoning: ReasoningRecord[] = []
     const toolCalls: ToolCallRecord[] = []
-    let usage: { input: number; output: number } | null = null
+    let usage: TokenUsage | null = null
     let failure: Extract<ModelStreamPart, { type: 'finish' }> | null = null
+    const timing: CallTiming = { startedAt: Date.now(), firstOutputAt: null }
     for await (const part of model.provider.stream(model.settings as never, request)) {
+      if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
+        timing.firstOutputAt ??= Date.now()
+      }
       if (part.type === 'text') text += part.text
-      else if (part.type === 'tool-call')
+      else if (part.type === 'reasoning') {
+        const { type: _, ...block } = part
+        reasoning.push(block)
+      } else if (part.type === 'tool-call')
         toolCalls.push({ id: part.id, name: part.name, arguments: part.arguments })
-      else if (part.type === 'usage') usage = { input: part.input, output: part.output }
+      else if (part.type === 'usage') usage = usageOf(part)
       else if (part.type === 'finish' && part.reason === 'error') {
         failure = part
         break
@@ -437,7 +489,7 @@ async function requestStep(
       }
     }
     if (request.signal.aborted) return null
-    if (!failure) return { text, toolCalls, usage }
+    if (!failure) return { text, reasoning, toolCalls, usage, timing }
     const detail = (failure.error ?? '').slice(0, 500)
     if (!failure.retryable || attempt >= MAX_MODEL_RETRIES) {
       throw new TurnError({ key: 'error.modelRequest', params: { detail } })
