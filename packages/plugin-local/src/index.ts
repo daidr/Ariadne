@@ -1,5 +1,6 @@
 import {
   definePlugin,
+  FileTooLargeError,
   WorkspacePathError,
   type CommandSandbox,
   type ContextProvider,
@@ -276,6 +277,26 @@ export class LocalWorkspace implements Workspace {
     const handle = await this.open(path, constants.O_RDONLY)
     try {
       return await handle.readFile('utf8')
+    } finally {
+      await handle.close()
+    }
+  }
+
+  async readBytes(path: string, maxBytes: number): Promise<Uint8Array> {
+    const handle = await this.open(path, constants.O_RDONLY)
+    try {
+      const { size } = await handle.stat()
+      if (size > maxBytes) throw new FileTooLargeError(path, size, maxBytes)
+      // At most one byte past the limit: a file that grew since `stat` still fails.
+      const buffer = new Uint8Array(maxBytes + 1)
+      let length = 0
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length)
+        if (!bytesRead) break
+        length += bytesRead
+      }
+      if (length > maxBytes) throw new FileTooLargeError(path, length, maxBytes)
+      return buffer.slice(0, length)
     } finally {
       await handle.close()
     }

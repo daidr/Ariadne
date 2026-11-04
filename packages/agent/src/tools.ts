@@ -1,9 +1,10 @@
 import { DomainError, type ReportKind, type TodoItem } from '@ariadne/core'
+import type { SearchProvider } from '@ariadne/plugin-sdk'
 import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
 import { issueReadTools, issueWriteTools } from './issue-tools'
 import { repoTools } from './repo-tools'
-import { blockLines, postUi } from './ui-tools'
+import { blockLines, postUi, withdrawAsk } from './ui-tools'
 import {
   json,
   optionalInt,
@@ -13,6 +14,8 @@ import {
   type Tool,
   type ToolContext,
 } from './tool-helpers'
+import { fetchUrlTool, webSearchTool } from './web-tools'
+import type { WebAccess } from './web'
 import { workspaceTools } from './workspace-tools'
 
 export {
@@ -436,6 +439,7 @@ const forget: Tool = {
 export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   updateTodo,
   postUi,
+  withdrawAsk,
   createThread(models),
   messageThread,
   stopThread,
@@ -453,6 +457,7 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
 export const threadTools: Tool[] = [
   updateTodo,
   postUi,
+  withdrawAsk,
   report,
   listMessages,
   editMessage,
@@ -468,13 +473,27 @@ export const threadTools: Tool[] = [
  */
 export function toolsFor(
   role: 'coordinator' | 'thread',
-  source: { workspace: boolean; repo: boolean; tracker?: boolean; models?: ModelChoice[] },
+  source: {
+    workspace: boolean
+    repo: boolean
+    tracker?: boolean
+    models?: ModelChoice[]
+    /** The plugins' search services; without any there is no web_search. */
+    search?: ReadonlyMap<string, SearchProvider>
+    /** Swaps the resolver and fetch of fetch_url, for tests. */
+    web?: WebAccess
+  },
 ): Tool[] {
+  const web = [
+    fetchUrlTool(source.web),
+    ...(source.search?.size ? [webSearchTool(source.search)] : []),
+  ]
   if (role === 'coordinator') {
-    return [...coordinatorTools(source.models), ...(source.tracker ? issueReadTools : [])]
+    return [...coordinatorTools(source.models), ...web, ...(source.tracker ? issueReadTools : [])]
   }
   return [
     ...threadTools,
+    ...web,
     ...(source.workspace ? workspaceTools : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),

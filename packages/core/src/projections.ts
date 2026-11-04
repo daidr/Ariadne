@@ -236,13 +236,14 @@ export const attentionsProjection: Projection = {
       conversation_id TEXT,
       message_id TEXT,
       block TEXT NOT NULL,
-      answered INTEGER NOT NULL DEFAULT 0,
+      closed INTEGER NOT NULL DEFAULT 0,
       answer TEXT,
+      withdrawn TEXT,
       approved INTEGER,
       purpose TEXT,
       created_at INTEGER NOT NULL
     )`)
-    db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, answered)')
+    db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, closed)')
     db.run('CREATE INDEX IF NOT EXISTS attentions_message ON attentions (message_id)')
     // The threads that hear an attention's answer: the one that asked and any that joined.
     db.run(`CREATE TABLE IF NOT EXISTS attention_waiters (
@@ -277,9 +278,15 @@ export const attentionsProjection: Projection = {
         break
       case 'attention.answered':
         // `approved` is kept apart for confirmations, which standing approvals look up.
-        db.run('UPDATE attentions SET answered = 1, answer = ?, approved = ? WHERE id = ?', [
+        db.run('UPDATE attentions SET closed = 1, answer = ?, approved = ? WHERE id = ?', [
           JSON.stringify(event.data.answer),
           approvedOf(event.data.answer),
+          event.data.attentionId,
+        ])
+        break
+      case 'attention.withdrawn':
+        db.run('UPDATE attentions SET closed = 1, withdrawn = ? WHERE id = ?', [
+          event.data.reason,
           event.data.attentionId,
         ])
         break
@@ -303,7 +310,8 @@ export const messagesProjection: Projection = {
       original_content TEXT,
       read_at INTEGER,
       edited_since_read INTEGER NOT NULL DEFAULT 0,
-      blocks TEXT
+      blocks TEXT,
+      attachments TEXT
     )`)
     db.run('CREATE INDEX IF NOT EXISTS messages_conversation ON messages (conversation_id, id)')
   },
@@ -312,7 +320,7 @@ export const messagesProjection: Projection = {
       case 'message.posted':
         db.run(
           `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
-             created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             attachments, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -321,6 +329,7 @@ export const messagesProjection: Projection = {
             event.data.kind,
             event.data.content,
             event.data.blocks?.length ? JSON.stringify(event.data.blocks) : null,
+            event.data.attachments?.length ? JSON.stringify(event.data.attachments) : null,
             event.at,
           ],
         )
@@ -777,7 +786,31 @@ export const transcriptProjection: Projection = {
     switch (event.type) {
       case 'message.posted': {
         const { conversationId, author, kind, messageId, content } = event.data
-        if (author === 'user' || kind === 'relay') {
+        if (author === 'user') {
+          // The conversation's own questions still waiting: the user may be answering one
+          // in words, and the agent may then withdraw it.
+          const openAsks = db
+            .query<{ id: string; block: string }, [string]>(
+              `SELECT id, block FROM attentions
+               WHERE conversation_id = ? AND closed = 0 AND message_id IS NOT NULL ORDER BY id`,
+            )
+            .all(conversationId)
+            .map((row) => ({
+              attentionId: row.id,
+              title: askTitle(JSON.parse(row.block) as AskBlock),
+            }))
+          addEntry(
+            db,
+            event,
+            {
+              conversationId,
+              kind: 'message',
+              ref: messageId,
+              ...(openAsks.length ? { payload: { openAsks } } : {}),
+            },
+            true,
+          )
+        } else if (kind === 'relay') {
           addEntry(db, event, { conversationId, kind: 'message', ref: messageId }, true)
         }
         // What the user tells a thread also gets a quick look from the coordinator, which
@@ -1078,6 +1111,7 @@ export const transcriptProjection: Projection = {
               name: event.data.name,
               content: event.data.content,
               isError: event.data.isError,
+              ...(event.data.files?.length ? { files: event.data.files } : {}),
             },
           },
           false,

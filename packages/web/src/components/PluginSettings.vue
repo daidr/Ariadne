@@ -59,7 +59,8 @@ const nameOf = (plugin: PluginRecord) =>
 const provides = (plugin: PluginRecord) => [
   ...plugin.provides.models,
   ...plugin.provides.contexts,
-  ...(plugin.provides.dashboards ?? []),
+  ...plugin.provides.dashboards,
+  ...plugin.provides.searches,
 ]
 </script>
 

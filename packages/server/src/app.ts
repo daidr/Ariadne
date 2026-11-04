@@ -112,11 +112,13 @@ export function createHandler({
     }),
   )
 
-  // Files people add, such as whiteboard images. The body is the file itself.
-  add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }) => {
+  // Files people add: whiteboard images, or (with `?for=message`) a message's images and
+  // text files. The body is the file itself.
+  add('POST', '/api/projects/:projectId/files', async (request, { projectId = '' }, url) => {
     const data = await readLimited(request, MAX_FILE_BYTES)
     const mime = request.headers.get('content-type') ?? ''
-    return json({ file: app.saveFile(projectId, { mime, data }) }, 201)
+    const text = url.searchParams.get('for') === 'message'
+    return json({ file: app.saveFile(projectId, { mime, data }, { text }) }, 201)
   })
 
   // The project's memory: standing preferences every conversation sees.
@@ -577,10 +579,13 @@ export function createHandler({
   // The user writes to the coordinator or straight into a thread.
   add('POST', '/api/projects/:projectId/messages', async (request, { projectId = '' }) => {
     const body = await readJson(request)
+    const attachments = body.attachments ?? []
+    if (!Array.isArray(attachments)) throw new BadRequest('attachments')
     const message = app.postMessage(projectId, {
       conversationId: requireString(body, 'conversationId'),
       author: 'user',
-      content: requireString(body, 'content'),
+      content: typeof body.content === 'string' ? body.content : '',
+      attachments,
     })
     return json({ message }, 201)
   })
@@ -631,7 +636,7 @@ export function createHandler({
       const file = app.getFile(id)
       return new Response(new Blob([file.data as Uint8Array<ArrayBuffer>]), {
         headers: {
-          'content-type': file.mime,
+          'content-type': file.mime === 'text/plain' ? 'text/plain; charset=utf-8' : file.mime,
           'cache-control': 'private, max-age=31536000, immutable',
           'cross-origin-resource-policy': 'same-origin',
           'x-content-type-options': 'nosniff',

@@ -48,6 +48,8 @@ interface DraftModel {
   model: string
   /** In thousands of tokens; empty uses the default. */
   contextK: number | null
+  /** Whether it looks at images; off for text-only models. */
+  images: boolean
   note: string
 }
 
@@ -104,6 +106,7 @@ function load(settings: ModelSettings) {
     provider: model.provider,
     model: model.model,
     contextK: model.contextTokens ? Math.round(model.contextTokens / 1000) : null,
+    images: model.images !== false,
     note: model.note ?? '',
   }))
   threadModel.value = settings.roles.thread.model
@@ -160,7 +163,7 @@ function removeProvider(id: string) {
 function addModel(provider = providers.value[0]?.id) {
   if (!provider) return
   const id = newId('m')
-  models.value.push({ id, provider, model: '', contextK: null, note: '' })
+  models.value.push({ id, provider, model: '', contextK: null, images: true, note: '' })
   threadModel.value ??= id
 }
 
@@ -196,6 +199,7 @@ async function save() {
           provider: model.provider,
           model: model.model.trim(),
           ...(model.contextK ? { contextTokens: model.contextK * 1000 } : {}),
+          ...(model.images ? {} : { images: false as const }),
           ...(model.note.trim() ? { note: model.note.trim() } : {}),
         })),
         roles: {
@@ -308,6 +312,9 @@ async function save() {
                       :step="8"
                       placeholder="128"
                     />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.modelImages')">
+                    <DouSwitch v-model="model.images" />
                   </DouFormItem>
                   <DouFormItem :label="t('settings.modelNote')" class="settings-grow">
                     <DouInput

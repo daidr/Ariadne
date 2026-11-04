@@ -5,6 +5,7 @@ import {
   readServerSentEvents,
   transportErrorPart,
   type ChatMessage,
+  type ImagePart,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
@@ -15,35 +16,80 @@ export interface OpenAICompatibleSettings {
   apiKey: string
 }
 
-function toWire(message: ChatMessage): Record<string, unknown> {
-  switch (message.role) {
-    case 'assistant': {
-      // Reasoning goes back as it came: services that think by default (DeepSeek) refuse a
-      // turn's tool calls without it. Only services that sent it have any to send back.
-      const reasoning = (message.reasoning ?? [])
-        .filter((block) => !block.redacted)
-        .map((block) => block.text)
-        .join('')
-      return {
-        role: 'assistant',
-        content: message.content || null,
-        ...(reasoning ? { reasoning_content: reasoning } : {}),
-        ...(message.toolCalls?.length
-          ? {
-              tool_calls: message.toolCalls.map((call) => ({
-                id: call.id,
-                type: 'function',
-                function: { name: call.name, arguments: call.arguments },
-              })),
-            }
-          : {}),
-      }
-    }
-    case 'tool':
-      return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
-    default:
-      return { role: message.role, content: message.content }
+const imageUrl = (image: ImagePart) => ({
+  type: 'image_url',
+  image_url: { url: `data:${image.mime};base64,${image.data}` },
+})
+
+/** Text, then images; a message without images keeps plain string content. */
+function userContent(text: string, images: ImagePart[] = []) {
+  if (!images.length) return text
+  return [...(text ? [{ type: 'text', text }] : []), ...images.map(imageUrl)]
+}
+
+/**
+ * The wire messages. Tool messages take only text here, so the images of a step's tool
+ * results follow its last result in one user message, saying which call they came from.
+ */
+export function toWire(messages: ChatMessage[]): Record<string, unknown>[] {
+  const wire: Record<string, unknown>[] = []
+  let pending: { text: string; images: ImagePart[] }[] = []
+  const flush = () => {
+    if (!pending.length) return
+    wire.push({
+      role: 'user',
+      content: pending.flatMap((entry) => [
+        { type: 'text', text: entry.text },
+        ...entry.images.map(imageUrl),
+      ]),
+    })
+    pending = []
   }
+  for (const message of messages) {
+    if (message.role !== 'tool') flush()
+    switch (message.role) {
+      case 'assistant': {
+        // Reasoning goes back as it came: services that think by default (DeepSeek) refuse a
+        // turn's tool calls without it. Only services that sent it have any to send back.
+        const reasoning = (message.reasoning ?? [])
+          .filter((block) => !block.redacted)
+          .map((block) => block.text)
+          .join('')
+        wire.push({
+          role: 'assistant',
+          content: message.content || null,
+          ...(reasoning ? { reasoning_content: reasoning } : {}),
+          ...(message.toolCalls?.length
+            ? {
+                tool_calls: message.toolCalls.map((call) => ({
+                  id: call.id,
+                  type: 'function',
+                  function: { name: call.name, arguments: call.arguments },
+                })),
+              }
+            : {}),
+        })
+        break
+      }
+      case 'tool':
+        wire.push({ role: 'tool', tool_call_id: message.toolCallId, content: message.content })
+        if (message.images?.length) {
+          pending.push({
+            text: `Images from the result of tool call ${message.toolCallId}:`,
+            images: message.images,
+          })
+        }
+        break
+      case 'user':
+        wire.push({ role: 'user', content: userContent(message.content, message.images) })
+        break
+      case 'system':
+        wire.push({ role: 'system', content: message.content })
+        break
+    }
+  }
+  flush()
+  return wire
 }
 
 interface ChunkToolCall {
@@ -78,14 +124,11 @@ function finishReason(reason: string | null): 'stop' | 'length' | 'tool-calls' {
   return 'stop'
 }
 
-/**
- * The body of a chat completion request; the key goes in a header. Reasoning is not sent
- * back: services that return it differ on whether they take it again.
- */
+/** The body of a chat completion request; the key goes in a header. */
 export function requestBody(_settings: OpenAICompatibleSettings, request: ModelRequest) {
   return {
     model: request.model,
-    messages: request.messages.map(toWire),
+    messages: toWire(request.messages),
     ...(request.tools.length
       ? {
           tools: request.tools.map((tool) => ({

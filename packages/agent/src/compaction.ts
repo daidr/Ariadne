@@ -1,7 +1,13 @@
 import type { CallTiming, TokenUsage, TranscriptEntry } from '@ariadne/core'
 import type { ChatMessage, ModelStreamPart } from '@ariadne/plugin-sdk'
 import type { ResolvedModel } from './runner'
-import { inModelOrder, orderKey, toChatMessages, visibleHistory } from './transcript'
+import {
+  inModelOrder,
+  orderKey,
+  toChatMessages,
+  visibleHistory,
+  type ModelMessage,
+} from './transcript'
 
 /** The context size assumed for a model whose settings do not give one. */
 export const DEFAULT_CONTEXT_TOKENS = 128_000
@@ -11,6 +17,9 @@ export const DEFAULT_CONTEXT_TOKENS = 128_000
  * so the summary request (the folded part plus the ask) still fits in it.
  */
 export const compactAt = (contextTokens = DEFAULT_CONTEXT_TOKENS) => Math.floor(contextTokens * 0.6)
+
+/** What an image costs the model, about: a large screenshot reads as some 1600 tokens. */
+export const IMAGE_TOKENS = 1600
 
 /** A provider's usage part as recorded, leaving out what it did not say. */
 export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): TokenUsage {
@@ -22,11 +31,29 @@ export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): Toke
   }
 }
 
-/** A rough count that errs high: Chinese text runs near a token per character. */
-export const estimateTokens = (messages: ChatMessage[]) =>
-  Math.ceil(JSON.stringify(messages).length / 2.5)
+const imagesIn = (messages: ModelMessage[]) =>
+  messages.reduce(
+    (sum, message) =>
+      sum +
+      (message.role === 'user' || message.role === 'tool' ? (message.images?.length ?? 0) : 0),
+    0,
+  )
 
-const sizeOf = (entry: TranscriptEntry) => JSON.stringify(entry).length / 2.5
+/**
+ * A rough count that errs high: Chinese text runs near a token per character. Images are
+ * named by their files here, so they count by `IMAGE_TOKENS` rather than their bytes.
+ */
+export const estimateTokens = (messages: ModelMessage[]) =>
+  Math.ceil(JSON.stringify(messages).length / 2.5) + imagesIn(messages) * IMAGE_TOKENS
+
+const sizeOf = (entry: TranscriptEntry) =>
+  JSON.stringify(entry).length / 2.5 +
+  (entry.kind === 'message'
+    ? entry.message.attachments.filter((file) => file.mime.startsWith('image/')).length
+    : entry.kind === 'tool'
+      ? (entry.files?.length ?? 0)
+      : 0) *
+    IMAGE_TOKENS
 
 /**
  * Where to cut a conversation's history so that about `keepTokens` of the newest stays in
@@ -70,14 +97,16 @@ export function summaryRequest(
   upTo: number,
   titleOf: (threadId: string) => string,
   role: 'coordinator' | 'thread',
-): ChatMessage[] {
+  readText?: (fileId: string) => string | null,
+): ModelMessage[] {
   const folded = transcript.filter((entry) => entry.kind === 'summary' || orderKey(entry) <= upTo)
   return [
     {
       role: 'system',
       content: `You summarise the earlier part of a conversation so that the agent having it (the ${role} of an Ariadne project) can carry on from the summary alone. You have no tools; answer with the summary only.`,
     },
-    ...toChatMessages(folded, titleOf),
+    // Images are named in words: the summary is text, and a request full of them is costly.
+    ...toChatMessages(folded, titleOf, readText ? { readText } : {}),
     {
       role: 'user',
       content: `Summarise the conversation so far, for yourself, to continue from it. Use two sections of short bullet points.

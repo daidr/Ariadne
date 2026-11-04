@@ -3,6 +3,7 @@ import type { TraceRequestDetail } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
+  DouChatAttachments,
   DouCodeBlock,
   DouDescriptions,
   DouDescriptionsItem,
@@ -10,12 +11,14 @@ import {
   DouTabPanel,
   DouTabs,
   DouText,
+  type ChatAttachment,
 } from 'dou-ui'
 import { DouCodeEditor, json as jsonLanguage } from '@dou-ui/code'
 import '@dou-ui/code/style.css'
 import { CloseIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError } from '../api'
+import { shownAttachments } from '../components/attachments'
 import { duration, locale, t, tm } from '../i18n'
 import type { TraceRow } from './rows'
 import TraceMessages from './TraceMessages.vue'
@@ -24,6 +27,10 @@ const props = defineProps<{ row: TraceRow; conversationId: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 const tab = ref('overview')
+
+function openFile(file: ChatAttachment) {
+  if (file.url) window.open(file.url, '_blank', 'noopener')
+}
 const detail = ref<TraceRequestDetail | null>(null)
 const problem = ref<string | null>(null)
 
@@ -263,6 +270,12 @@ const title = computed(() =>
               wrap
             />
             <DouText v-else variant="tertiary" size="sm">{{ t('trace.noResult') }}</DouText>
+            <DouChatAttachments
+              v-if="row.tool.result?.files.length"
+              :model-value="shownAttachments(row.tool.result.files)"
+              :removable="false"
+              @open="openFile"
+            />
           </div>
         </DouTabPanel>
         <DouTabPanel value="schema" :label="t('trace.tab.schema')">

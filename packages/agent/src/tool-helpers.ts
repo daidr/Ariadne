@@ -1,9 +1,10 @@
-import type { Ariadne } from '@ariadne/core'
+import type { Ariadne, Attachment } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import type {
   BranchCapability,
   DashboardSource,
   RepoCapability,
+  SearchProvider,
   ToolSpec,
   TrackerCapability,
   Workspace,
@@ -30,6 +31,8 @@ export interface ToolContext {
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   /** The models the user set up, which the coordinator may give a thread. */
   models?: ModelChoice[]
+  /** The plugins' web search services, by kind. */
+  searchProviders?: ReadonlyMap<string, SearchProvider>
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */
@@ -46,6 +49,8 @@ export interface ModelChoice {
 export interface ToolResult {
   content: string
   isError?: boolean
+  /** Images for the model to look at, already kept in the project's files. */
+  files?: Attachment[]
 }
 
 export interface Tool {

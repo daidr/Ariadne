@@ -80,6 +80,7 @@ const workspace: Workspace = {
   branch: 'ariadne/thread',
   base: 'main',
   readFile: async () => '',
+  readBytes: async () => new Uint8Array(),
   writeFile: async () => {},
   list: async () => [],
   exec: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
