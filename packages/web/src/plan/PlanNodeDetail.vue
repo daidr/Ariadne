@@ -362,5 +362,7 @@ const removeQuestion = computed(() =>
 
 .node-detail-headline {
   flex-basis: 100%;
+  /* In line with the thread's title, which sits inside a small text button. */
+  padding-inline-start: var(--dou-control-padding-x-sm);
 }
 </style>

@@ -19,6 +19,10 @@ describe('report headline', () => {
       '挂在 nod_01a1a64aa887773d 上',
       '修好了 router.go:97',
       '改了 packages/web/src/App.vue',
+      '修改了packages/web/src/App.vue',
+      '“packages/web/src/App.vue”已改',
+      '改了src/App.vue',
+      '提交 4ef0347 已推送',
       '第一行\n第二行',
       '很长'.repeat(31),
     ]

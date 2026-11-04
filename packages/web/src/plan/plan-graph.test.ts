@@ -321,3 +321,24 @@ describe('layoutPlan', () => {
     expect(y('b')).toBeGreaterThan(y('a'))
   })
 })
+
+const thread = (
+  stage: PlanNodeView['threads'][number]['stage'],
+  lastHeadline: string | null,
+): PlanNodeView['threads'][number] => ({
+  id: `t-${stage}`,
+  title: 'T',
+  stage,
+  lastHeadline,
+  pullRequest: null,
+})
+
+describe('nodeHeight', () => {
+  test('makes room for the line a thread waiting on the user shows', () => {
+    const plain = nodeHeight(node('a', [], { threads: [thread('working', '请审阅')] }))
+    const waiting = nodeHeight(node('a', [], { threads: [thread('review', '请审阅')] }))
+    const silent = nodeHeight(node('a', [], { threads: [thread('blocked', null)] }))
+    expect(waiting).toBeGreaterThan(plain)
+    expect(silent).toBe(plain)
+  })
+})

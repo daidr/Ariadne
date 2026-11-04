@@ -12,10 +12,9 @@ import ReportArtifacts from './ReportArtifacts.vue'
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
 
-/** Its stage, and what its last report asks of the user. */
+/** What its last report asks of the user; its stage when it said nothing. */
 function headline(thread: ThreadView): string {
-  const stage = t(`thread.stage.${thread.stage}`)
-  return thread.lastHeadline ? `${stage} · ${thread.lastHeadline}` : stage
+  return thread.lastHeadline ?? t(`thread.stage.${thread.stage}`)
 }
 
 /** Every thread waiting on a card, so the user sees whom one answer reaches. */

@@ -147,12 +147,17 @@ async function mergedHead(ctx: ToolContext): Promise<string | undefined> {
 /** Longer than this and a headline stops being a line the user takes in at a glance. */
 export const MAX_HEADLINE = 60
 
-// Things that mean nothing to the user: internal ids, file paths and line numbers.
+// Things that mean nothing to the user: internal ids, file paths, line numbers and commit
+// hashes. Chinese puts no space before a path, so a path may follow any non-path character.
 const HEADLINE_NOISE = [
   /\b[a-z]{2,8}_[0-9a-f]{8}-?[0-9a-f]{4}/i,
   /[\w-]+\.[a-z][a-z0-9]{0,5}:\d+/i,
-  /(?:^|[\s(（`])\.{0,2}\/?(?:[\w.-]+\/)+[\w-]+\.[a-z][a-z0-9]{0,5}\b/i,
+  /(?<![\w./-])\.{0,2}\/?(?:[\w.-]+\/)+[\w-]+\.[a-z][a-z0-9]{0,5}\b/i,
+  /(?<![\w-])(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])/i,
 ]
+
+/** What the tool asks for; the limit leaves room for a headline that runs a little over. */
+const HEADLINE_AIM = 40
 
 /** The user-facing line of a report, or why it does not work as one. */
 export function checkHeadline(value: unknown): string {
@@ -163,7 +168,7 @@ export function checkHeadline(value: unknown): string {
   if (/\n/.test(headline)) throw new ToolInputError('"headline" must be a single line')
   if ([...headline].length > MAX_HEADLINE) {
     throw new ToolInputError(
-      `"headline" is ${[...headline].length} characters; keep it under 40 and put the rest in "summary"`,
+      `"headline" is ${[...headline].length} characters, over the limit of ${MAX_HEADLINE}; aim for under ${HEADLINE_AIM} and put the rest in "summary"`,
     )
   }
   if (HEADLINE_NOISE.some((pattern) => pattern.test(headline))) {
@@ -198,8 +203,7 @@ const report: Tool = {
         },
         headline: {
           type: 'string',
-          description:
-            'For the user, shown in their "needs me" list and wherever this thread is listed: one plain line, under 40 characters, on what they need to do or look at (e.g. "架构文档写好了，请审阅"). No ids, file paths, line numbers or commit hashes.',
+          description: `For the user, shown in their "needs me" list and wherever this thread is listed: one plain line, under ${HEADLINE_AIM} characters, on what they need to do or look at (e.g. "架构文档写好了，请审阅"). No ids, file paths, line numbers or commit hashes.`,
         },
         artifacts: {
           type: 'array',

@@ -31,7 +31,7 @@ export const MAX_ATTACHED_CHARS = 100_000
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
   switch (note.type) {
     case 'report':
-      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}">\nfor the user: ${note.headline}\n${note.summary}\n</thread_report>`
+      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}">\nfor the user: ${note.headline}\n${note.artifacts.length ? `artifacts: ${note.artifacts.join(', ')}\n` : ''}${note.summary}\n</thread_report>`
     case 'answer':
       return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
