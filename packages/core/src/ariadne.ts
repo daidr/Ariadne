@@ -16,6 +16,7 @@ import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   AnyNewEvent,
   AnyStoredEvent,
+  ArtifactCommentAction,
   ArtifactKind,
   Attachment,
   BranchMerge,
@@ -65,7 +66,9 @@ import {
 import { searchRows, searchTerms, SEARCH_LIMITS, snippetOf } from './search'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, toStored as storedEvent, type EventListener, type EventRow } from './store'
+import { lineDiff } from './text-diff'
 import type {
+  ArtifactCommentThreadView,
   ArtifactPreview,
   ArtifactSummary,
   ArtifactVersionView,
@@ -99,7 +102,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 33
+export const PROJECTION_VERSION = 34
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -192,13 +195,19 @@ interface ArtifactRow {
   preview: string
   created_by: string
   updated_by: string
+  open_comments: number
+  commented_at: number
   created_at: number
   updated_at: number
 }
 
 /** Every column but the content, which lists do not need. */
 const ARTIFACT_COLUMNS =
-  'id, project_id, kind, title, node_id, version, preview, created_by, updated_by, created_at, updated_at'
+  'id, project_id, kind, title, node_id, version, preview, created_by, updated_by, open_comments, commented_at, created_at, updated_at'
+
+/** A comment's text is kept to this many characters, a quote to this many. */
+export const MAX_COMMENT = 4000
+export const MAX_COMMENT_QUOTE = 1000
 
 function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
   return {
@@ -211,9 +220,41 @@ function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
     version: row.version,
     createdBy: row.created_by,
     updatedBy: row.updated_by,
+    openComments: row.open_comments,
+    commentedAt: row.commented_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+interface CommentThreadRow {
+  id: string
+  artifact_id: string
+  quote: string
+  comments: string
+  resolved_by: string | null
+  resolved_at: number | null
+  created_at: number
+}
+
+function toCommentThread(row: CommentThreadRow): ArtifactCommentThreadView {
+  return {
+    id: row.id,
+    artifactId: row.artifact_id,
+    quote: row.quote,
+    comments: JSON.parse(row.comments),
+    resolved: row.resolved_by ? { by: row.resolved_by, at: row.resolved_at ?? 0 } : null,
+    createdAt: row.created_at,
+  }
+}
+
+const invalid = (reason: string) => new DomainError('error.invalidBody', { reason })
+
+/** A comment's text, trimmed; refused when empty or too long. */
+function commentText(body: string): string {
+  const trimmed = body.trim()
+  if (!trimmed || trimmed.length > MAX_COMMENT) throw invalid('body')
+  return trimmed
 }
 
 /** A plan node's status from the stages of the threads working on it. */
@@ -2392,6 +2433,8 @@ export class Ariadne {
       author: string
       reason: string
       baseVersion?: number
+      /** The user's edit: the commented text as it now reads, by comment thread. */
+      quotes?: Record<string, string>
     },
   ): ArtifactView {
     const current = this.getArtifact(artifactId)
@@ -2404,7 +2447,18 @@ export class Ariadne {
       checkArtifactContent(current.kind, stored)
       return stored
     })()
+    // Only quotes that moved, of threads this artifact has.
+    const threads = new Map(this.listArtifactComments(artifactId).map((t) => [t.id, t]))
+    const quotes: Record<string, string> = {}
+    for (const [threadId, quote] of Object.entries(input.quotes ?? {})) {
+      const text = quote.slice(0, MAX_COMMENT_QUOTE)
+      const thread = threads.get(threadId)
+      if (thread && text && text !== thread.quote) quotes[threadId] = text
+    }
+    const moved = Object.keys(quotes).length > 0
+    // A quote moves only with the text it is in.
     if (title === current.title && content === current.content) return current
+    const byUser = input.author === 'user'
     this.store.append([
       {
         type: 'artifact.revised',
@@ -2416,10 +2470,117 @@ export class Ariadne {
           content,
           author: input.author,
           reason: input.reason,
+          ...(byUser
+            ? {
+                notify: this.artifactListener(artifactId),
+                diff: current.kind === 'document' ? lineDiff(current.content, content) : null,
+              }
+            : {}),
+          ...(moved ? { quotes } : {}),
         },
       },
     ])
     return this.getArtifact(artifactId)
+  }
+
+  /**
+   * Who hears about the user's edits and comments on an artifact: the agent that wrote it
+   * last, unless that is a thread the user or the coordinator stopped (or there is none);
+   * then the coordinator.
+   */
+  private artifactListener(artifactId: string): string | null {
+    const row = this.db
+      .query<{ project_id: string; last_agent: string | null }, [string]>(
+        'SELECT project_id, last_agent FROM artifacts WHERE id = ?',
+      )
+      .get(artifactId)
+    if (!row) return null
+    const coordinator = this.getProject(row.project_id).coordinatorId
+    if (!row.last_agent || row.last_agent === coordinator) return coordinator
+    const thread = this.db
+      .query<{ stopped_at: number | null }, [string]>('SELECT stopped_at FROM threads WHERE id = ?')
+      .get(row.last_agent)
+    return thread && thread.stopped_at === null ? row.last_agent : coordinator
+  }
+
+  listArtifactComments(artifactId: string): ArtifactCommentThreadView[] {
+    return this.db
+      .query<CommentThreadRow, [string]>(
+        'SELECT * FROM artifact_comments WHERE artifact_id = ? ORDER BY created_at, id',
+      )
+      .all(artifactId)
+      .map(toCommentThread)
+  }
+
+  /**
+   * Change an artifact's comments. Anyone can start a thread, reply, resolve or reopen
+   * one; only a comment's author edits or deletes it, and only the user removes a whole
+   * thread. The first comment goes only with its thread. The user's new comments and
+   * replies wake the agent that hears about the artifact, to answer them.
+   */
+  commentOnArtifact(
+    artifactId: string,
+    by: string,
+    action: ArtifactCommentAction,
+  ): ArtifactCommentThreadView[] {
+    const artifact = this.getArtifact(artifactId)
+    if (artifact.kind !== 'document') throw new DomainError('error.invalidBody', { reason: 'kind' })
+    const thread = this.listArtifactComments(artifactId).find((t) => t.id === action.threadId)
+    let checked: ArtifactCommentAction
+    if (action.type === 'create') {
+      // Ids are the page's; one taken anywhere is refused, not overwritten.
+      const taken = this.db
+        .query<{ id: string }, [string]>('SELECT id FROM artifact_comments WHERE id = ?')
+        .get(action.threadId)
+      if (taken) throw invalid('threadId')
+      const quote = action.quote.trim()
+      if (!quote || quote.length > MAX_COMMENT_QUOTE) throw invalid('quote')
+      checked = { ...action, quote, body: commentText(action.body) }
+    } else {
+      if (!thread) throw new DomainError('error.notFound', { what: action.threadId })
+      const comment =
+        'commentId' in action ? thread.comments.find((c) => c.id === action.commentId) : null
+      switch (action.type) {
+        case 'reply':
+          if (thread.comments.some((c) => c.id === action.commentId)) throw invalid('commentId')
+          checked = { ...action, body: commentText(action.body) }
+          break
+        case 'edit':
+          if (!comment) throw new DomainError('error.notFound', { what: action.commentId })
+          if (comment.author !== by) throw invalid('author')
+          checked = { ...action, body: commentText(action.body) }
+          break
+        case 'delete':
+          if (!comment) throw new DomainError('error.notFound', { what: action.commentId })
+          if (comment.author !== by || thread.comments[0]?.id === comment.id) {
+            throw invalid('author')
+          }
+          checked = action
+          break
+        case 'remove':
+          if (by !== 'user') throw invalid('author')
+          checked = action
+          break
+        default:
+          if ((action.type === 'resolve') === !!thread.resolved)
+            return this.listArtifactComments(artifactId)
+          checked = action
+      }
+    }
+    const asks = by === 'user' && (checked.type === 'create' || checked.type === 'reply')
+    this.store.append([
+      {
+        type: 'artifact.commented',
+        projectId: artifact.projectId,
+        data: {
+          artifactId,
+          by,
+          action: checked,
+          notify: asks ? this.artifactListener(artifactId) : null,
+        },
+      },
+    ])
+    return this.listArtifactComments(artifactId)
   }
 
   // ---- turns ----

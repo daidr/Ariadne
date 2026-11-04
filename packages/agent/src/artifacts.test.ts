@@ -333,3 +333,48 @@ describe('live dashboards', () => {
     )
   })
 })
+
+describe('document comments', () => {
+  test('read_artifact lists open comments; the agent replies, starts and resolves them', async () => {
+    const { artifactId } = await ok('create_document', {
+      title: '方案',
+      content: '# 方案\n\n开业当天**全场八折**，送帆布袋。\n',
+    })
+    const id = artifactId as string
+    app.commentOnArtifact(id, 'user', {
+      type: 'create',
+      threadId: 'c1',
+      commentId: 'm1',
+      quote: '全场八折',
+      body: '能叠加吗？',
+    })
+    expect(await ok('read_artifact', { artifactId: id })).toMatchObject({
+      comments: [
+        { commentThread: 'c1', quote: '全场八折', comments: [{ by: 'user', body: '能叠加吗？' }] },
+      ],
+      resolvedComments: 0,
+    })
+
+    await ok('comment_artifact', { artifactId: id, commentThread: 'c1', body: '不叠加' })
+    await ok('resolve_artifact_comment', { artifactId: id, commentThread: 'c1' })
+    // A quote has to be the document's own text.
+    expect(
+      (await run('comment_artifact', { artifactId: id, quote: '全场九折', body: '?' })).isError,
+    ).toBe(true)
+    const started = await ok('comment_artifact', {
+      artifactId: id,
+      quote: '送帆布袋',
+      body: '几个？',
+    })
+
+    const read = await ok('read_artifact', { artifactId: id })
+    expect(read).toMatchObject({
+      comments: [{ commentThread: started.commentThread, comments: [{ by: 'you' }] }],
+      resolvedComments: 1,
+    })
+    expect(app.listArtifactComments(id)[0]?.comments.map((c) => c.author)).toEqual([
+      'user',
+      ctx.conversationId,
+    ])
+  })
+})

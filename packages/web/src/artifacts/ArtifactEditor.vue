@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import type { ArtifactVersionView, ArtifactView } from '@ariadne/core'
-import { DouAlert, DouButton, DouInput, DouSelect, DouText } from 'dou-ui'
+import type {
+  ArtifactCommentAction,
+  ArtifactCommentThreadView,
+  ArtifactVersionView,
+  ArtifactView,
+} from '@ariadne/core'
+import { DouAlert, DouButton, DouInput, DouSelect, DouText, type CommentAction } from 'dou-ui'
 import { CheckIcon, ChevronLeftIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
 import { openMain, report, state } from '../store'
 import { authorName } from './author'
+import CommentList from './CommentList.vue'
 import { kindIcon } from './kinds'
 
 const props = defineProps<{ id: string }>()
@@ -20,6 +26,12 @@ const bodies = {
 
 const artifact = ref<ArtifactView | null>(null)
 const versions = ref<ArtifactVersionView[]>([])
+const comments = ref<ArtifactCommentThreadView[]>([])
+/** The comment thread open in the text. */
+const activeComment = ref<string | null>(null)
+const body = ref<{ quotes?: () => Record<string, string>; anchored?: () => Set<string> } | null>(
+  null,
+)
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
 /** Content edited and not saved yet; `null` when nothing changed. */
@@ -49,6 +61,7 @@ async function load(version?: number) {
   try {
     const detail = await api.getArtifact(props.id, version)
     versions.value = detail.versions
+    comments.value = detail.comments
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
     conflict.value = null
@@ -72,6 +85,76 @@ watch(
     if (version && version !== latest.value && !dirty.value && !viewingOld.value) void load()
   },
 )
+// Someone commented (an agent answering): take the comments in, leaving edits open.
+watch(
+  () => state.artifacts.find((a) => a.id === props.id)?.commentedAt,
+  async (at, before) => {
+    if (!at || at === before) return
+    try {
+      comments.value = (await api.getArtifact(props.id)).comments
+    } catch (error) {
+      report(error)
+    }
+  },
+)
+
+/** Comments go to the newest version of a document only. */
+const commentProps = computed(() =>
+  artifact.value?.kind === 'document' && !viewingOld.value
+    ? {
+        comments: comments.value,
+        activeComment: activeComment.value,
+        'onUpdate:activeComment': (id: string | null) => (activeComment.value = id),
+        onComment: comment,
+      }
+    : {},
+)
+
+/** The editor's comment change, sent as the server takes it. */
+function toAction(action: CommentAction, quote: string): ArtifactCommentAction | null {
+  switch (action.type) {
+    case 'create': {
+      const first = action.thread.comments[0]
+      if (!first || !quote) return null
+      return {
+        type: 'create',
+        threadId: action.thread.id,
+        commentId: first.id,
+        quote,
+        body: first.body,
+      }
+    }
+    case 'reply':
+      return {
+        type: 'reply',
+        threadId: action.threadId,
+        commentId: action.comment.id,
+        body: action.comment.body,
+      }
+    case 'edit':
+      return {
+        type: 'edit',
+        threadId: action.threadId,
+        commentId: action.commentId,
+        body: action.body,
+      }
+    case 'delete':
+      return { type: 'delete', threadId: action.threadId, commentId: action.commentId }
+    default:
+      return { type: action.type, threadId: action.threadId }
+  }
+}
+
+async function comment(action: CommentAction, quote = '') {
+  const sent = toAction(action, quote)
+  if (!sent) return
+  try {
+    comments.value = (await api.commentArtifact(props.id, sent)).comments
+  } catch (error) {
+    report(error)
+    void load()
+  }
+}
 
 async function save(
   input: { content?: string; title?: string; reason?: string } = {},
@@ -86,8 +169,10 @@ async function save(
       baseVersion: latest.value,
       reason: input.reason ?? t('artifact.saveReason'),
       ...(input.title ? { title: input.title } : {}),
+      ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
     })
     versions.value = detail.versions
+    comments.value = detail.comments
     latest.value = detail.artifact.version
     show(detail.artifact)
     return true
@@ -189,6 +274,13 @@ const time = (at: number) =>
           })
         }}
       </DouText>
+      <CommentList
+        v-if="artifact?.kind === 'document' && !viewingOld"
+        :comments="comments"
+        :anchored="() => body?.anchored?.() ?? new Set()"
+        @open="(id: string) => (activeComment = id)"
+        @action="comment"
+      />
       <div v-if="versionOptions.length > 1" class="artifact-versions">
         <DouSelect
           :model-value="artifact?.version ?? null"
@@ -227,6 +319,8 @@ const time = (at: number) =>
       <component
         :is="bodies[artifact.kind]"
         v-if="artifact"
+        ref="body"
+        v-bind="commentProps"
         :content="artifact.content"
         :project-id="artifact.projectId"
         :artifact-id="artifact.id"
