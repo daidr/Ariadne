@@ -129,7 +129,7 @@ function select(item: CommandItem) {
             <component :is="kindIcon[hit.artifactKind]" v-else-if="hit.kind === 'artifact'" />
             <MessagesIcon v-else />
           </span>
-          <DouText truncate>
+          <DouText truncate class="hit-label">
             <DouHighlight :text="item.label" :keywords="result?.terms ?? []" />
           </DouText>
         </span>
@@ -170,6 +170,11 @@ function select(item: CommandItem) {
   width: 16px;
   font-size: 16px;
   color: var(--dou-color-text-tertiary);
+}
+
+.hit-label {
+  flex: 1;
+  min-width: 0;
 }
 
 .hit-detail {
