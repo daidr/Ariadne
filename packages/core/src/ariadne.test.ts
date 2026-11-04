@@ -1196,7 +1196,9 @@ function rows(): Record<string, string[]> {
     )
     .all()
     .map((row) => row.name)
-    .filter((name) => name !== 'events')
+    // The search index's own storage is laid out afresh by a rebuild; its rows are checked
+    // through the index itself.
+    .filter((name) => name !== 'events' && !name.startsWith('search_text_'))
   return Object.fromEntries(
     tables.map((table) => [
       table,

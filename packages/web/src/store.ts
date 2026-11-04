@@ -44,6 +44,15 @@ export interface ConversationState {
   todo: TodoView | null
   /** The model it uses now, with how much its context holds. */
   model: { id: string; contextTokens: number } | null
+  /** Earlier messages exist than the first one loaded. */
+  more: boolean
+  /**
+   * The first message loaded; refreshes fetch everything from it on, so pages loaded
+   * earlier stay. `null` until the first page is in.
+   */
+  from: string | null
+  /** An earlier page is on its way. */
+  loadingEarlier: boolean
 }
 
 const emptyConversation = (): ConversationState => ({
@@ -52,7 +61,18 @@ const emptyConversation = (): ConversationState => ({
   notices: [],
   todo: null,
   model: null,
+  more: false,
+  from: null,
+  loadingEarlier: false,
 })
+
+/** A message to bring into view and mark for a moment, e.g. one the search found. */
+export interface MessageFocus {
+  conversationId: string
+  messageId: string
+  /** Changes on every jump, so jumping to the same message again still scrolls. */
+  nonce: number
+}
 
 /** A model the user set up, as the page names it. */
 export interface ModelOption {
@@ -85,6 +105,10 @@ interface State {
   creatingProject: boolean
   /** The project source popover in the header is open; the first-run steps open it too. */
   sourceOpen: boolean
+  /** The message to scroll to; the conversation showing it clears it once there. */
+  focus: MessageFocus | null
+  /** The project search is open. */
+  searchOpen: boolean
   /** Bumped whenever the open project's events arrive, so open views can reload. */
   revision: number
   error: string | null
@@ -107,6 +131,8 @@ export const state = reactive<State>({
   threadDefault: null,
   creatingProject: false,
   sourceOpen: false,
+  focus: null,
+  searchOpen: false,
   revision: 0,
   error: null,
 })
@@ -126,9 +152,11 @@ async function refreshCurrent() {
   const threadId = state.threadId
   if (!id) return
   const detail = await api.getProject(id)
+  const coordinatorFrom = state.coordinator.from
+  const threadFrom = state.thread.from
   const [coordinator, thread, plan, artifacts, memory] = await Promise.all([
-    api.getConversation(detail.project.coordinatorId),
-    threadId ? api.getConversation(threadId) : null,
+    api.getConversation(detail.project.coordinatorId, cursorFrom(coordinatorFrom)),
+    threadId ? api.getConversation(threadId, cursorFrom(threadFrom)) : null,
     api.getPlan(id),
     api.listArtifacts(id),
     api.listMemories(id),
@@ -136,17 +164,126 @@ async function refreshCurrent() {
   // The user may have switched while this was loading; a late answer is stale.
   if (state.currentId !== id || state.threadId !== threadId) return
   state.detail = detail
-  state.coordinator = pick(coordinator)
-  state.thread = thread ? pick(thread) : emptyConversation()
+  state.coordinator = take(state.coordinator, coordinator, coordinatorFrom)
+  state.thread = thread ? take(state.thread, thread, threadFrom) : emptyConversation()
   state.plan = plan.plan
   state.artifacts = artifacts.artifacts
   state.memories = memory.memories
   state.revision++
 }
 
-function pick(view: ConversationState): ConversationState {
-  const { conversation, messages, notices, todo, model } = view
-  return { conversation, messages, notices, todo, model }
+type ConversationPage = Awaited<ReturnType<typeof api.getConversation>>
+
+const cursorFrom = (from: string | null) => (from ? { from } : {})
+
+/**
+ * The conversation as just fetched from `from`. If an earlier page or a jump moved the
+ * start meanwhile, what is on screen before `from` stays and the fetched rest follows it.
+ */
+function take(
+  current: ConversationState,
+  page: ConversationPage,
+  from: string | null,
+): ConversationState {
+  const { conversation, todo, model } = page
+  if (current.from !== from) {
+    if (!from) return { ...current, conversation, todo, model }
+    const fetched = new Set(page.notices.map((notice) => notice.id))
+    const startAt = page.messages[0]?.createdAt ?? Infinity
+    return {
+      ...current,
+      conversation,
+      todo,
+      model,
+      messages: [...current.messages.filter((message) => message.id < from), ...page.messages],
+      notices: [
+        ...current.notices.filter(
+          (notice) => !fetched.has(notice.id) && notice.createdAt < startAt,
+        ),
+        ...page.notices,
+      ],
+    }
+  }
+  return {
+    conversation,
+    todo,
+    model,
+    messages: page.messages,
+    notices: page.notices,
+    more: page.more,
+    // Hold on to where it starts, so the next refresh brings the same messages and more.
+    from: page.messages[0]?.id ?? from,
+    loadingEarlier: current.loadingEarlier,
+  }
+}
+
+const slotOf = (conversationId: string): 'coordinator' | 'thread' | null =>
+  state.detail?.project.coordinatorId === conversationId
+    ? 'coordinator'
+    : state.threadId === conversationId
+      ? 'thread'
+      : null
+
+/** Load the page of messages before the first one shown; called when scrolled to the top. */
+export async function loadEarlier(conversationId: string) {
+  const slot = slotOf(conversationId)
+  if (!slot) return
+  const current = state[slot]
+  const first = current.messages[0]
+  if (!current.more || current.loadingEarlier || !first) return
+  current.loadingEarlier = true
+  try {
+    const page = await api.getConversation(conversationId, { before: first.id })
+    // Still the same conversation, starting where it did when this was asked for.
+    if (slotOf(conversationId) !== slot || state[slot].messages[0]?.id !== first.id) return
+    state[slot] = {
+      ...state[slot],
+      messages: [...page.messages, ...state[slot].messages],
+      notices: [...page.notices, ...state[slot].notices],
+      more: page.more,
+      from: page.messages[0]?.id ?? first.id,
+    }
+  } catch (error) {
+    report(error)
+  } finally {
+    if (slotOf(conversationId) === slot) state[slot].loadingEarlier = false
+  }
+}
+
+/**
+ * Show a message wherever it was said: the coordinator's conversation, or its thread
+ * opened beside it, loaded back far enough to hold it, then scrolled to.
+ */
+export async function openMessage(conversationId: string, messageId: string) {
+  const project = state.detail?.project
+  if (!project) return
+  if (conversationId === project.coordinatorId) {
+    if (state.main.kind !== 'conversation') state.main = { kind: 'conversation' }
+  } else {
+    await openThread(conversationId)
+  }
+  const slot = slotOf(conversationId)
+  if (!slot) return
+  if (!state[slot].messages.some((message) => message.id === messageId)) {
+    try {
+      const page = await api.getConversation(conversationId, { from: messageId })
+      if (slotOf(conversationId) !== slot) return
+      state[slot] = {
+        ...state[slot],
+        conversation: page.conversation,
+        todo: page.todo,
+        model: page.model,
+        messages: page.messages,
+        notices: page.notices,
+        more: page.more,
+        from: page.messages[0]?.id ?? null,
+      }
+    } catch (error) {
+      report(error)
+      return
+    }
+  }
+  state.focus = { conversationId, messageId, nonce: (state.focus?.nonce ?? 0) + 1 }
 }
 
 export async function openProject(id: string) {

@@ -62,6 +62,7 @@ import {
   loadPlanGraph,
   MAX_CHECK_ATTEMPTS,
 } from './projections'
+import { searchRows, searchTerms, SEARCH_LIMITS, snippetOf } from './search'
 import { needsUser, threadStage, type ThreadStage } from './stage'
 import { EventStore, toStored as storedEvent, type EventListener, type EventRow } from './store'
 import type {
@@ -74,6 +75,7 @@ import type {
   AttentionView,
   ConversationRole,
   ConversationView,
+  MessagePage,
   MessageView,
   NeedsMeItem,
   PlanNodeStatus,
@@ -83,6 +85,8 @@ import type {
   PlanUndoPreview,
   PlanView,
   ProjectView,
+  SearchHit,
+  SearchResult,
   ThreadArtifact,
   ThreadReport,
   ThreadView,
@@ -95,7 +99,10 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 30
+export const PROJECTION_VERSION = 31
+
+/** How many messages a conversation shows at first, and loads each time it is scrolled up. */
+export const MESSAGE_PAGE = 40
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -585,6 +592,112 @@ export class Ariadne {
       .query<MessageRow, [string]>(`${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY m.id`)
       .all(conversationId)
       .map(toMessage)
+  }
+
+  /**
+   * A stretch of a conversation, so a long one is not sent whole. With no cursor, the
+   * newest `limit` messages; with `before`, the `limit` messages before that one; with
+   * `from`, that message and everything after it (a page already shown, with what came
+   * since). Notices come with the messages they fall among.
+   */
+  pageMessages(
+    conversationId: string,
+    cursor: { before?: string; from?: string; limit?: number } = {},
+  ): MessagePage {
+    const limit = Math.max(1, Math.min(cursor.limit ?? MESSAGE_PAGE, 500))
+    let messages: MessageView[]
+    if (cursor.from !== undefined) {
+      messages = this.db
+        .query<MessageRow, [string, string]>(
+          `${MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.id >= ? ORDER BY m.id`,
+        )
+        .all(conversationId, cursor.from)
+        .map(toMessage)
+    } else {
+      messages = this.db
+        .query<MessageRow, [string, string, number]>(
+          `${MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?`,
+        )
+        .all(conversationId, cursor.before ?? '\uffff', limit)
+        .map(toMessage)
+        .toReversed()
+    }
+    const first = messages[0]
+    const more = !!this.db
+      .query<{ one: number }, [string, string]>(
+        'SELECT 1 AS one FROM messages WHERE conversation_id = ? AND id < ? LIMIT 1',
+      )
+      .get(conversationId, first?.id ?? cursor.before ?? cursor.from ?? '')
+    // Notices go with the page whose messages they follow: from the first message here
+    // (or the very start) up to where the next page begins.
+    const end =
+      cursor.before === undefined
+        ? undefined
+        : this.db
+            .query<{ created_at: number }, [string]>('SELECT created_at FROM messages WHERE id = ?')
+            .get(cursor.before)?.created_at
+    const notices = this.listNotices(conversationId, {
+      ...(more && first ? { from: first.createdAt } : {}),
+      ...(end === undefined ? {} : { to: end }),
+    })
+    return { messages, notices, more }
+  }
+
+  /**
+   * Find what the project said and made: messages of every conversation, threads by title
+   * and latest headline, and artifacts. Every word of `query` must be there.
+   */
+  search(projectId: string, query: string): SearchResult {
+    this.getProject(projectId)
+    const terms = searchTerms(query)
+    const rows = (kind: SearchHit['kind']) =>
+      searchRows(this.db, projectId, kind, terms, SEARCH_LIMITS[kind])
+    const titles = new Map(
+      this.db
+        .query<{ id: string; title: string }, [string]>(
+          'SELECT id, title FROM threads WHERE project_id = ?',
+        )
+        .all(projectId)
+        .map((row) => [row.id, row.title]),
+    )
+    const messages = rows('message')
+    const kinds = new Map(
+      this.db
+        .query<{ id: string; kind: ArtifactKind }, [string]>(
+          'SELECT id, kind FROM artifacts WHERE project_id = ?',
+        )
+        .all(projectId)
+        .map((row) => [row.id, row.kind]),
+    )
+    return {
+      terms,
+      threads: rows('thread').map((row) => ({
+        kind: 'thread',
+        id: row.ref_id,
+        title: row.title,
+        snippet: snippetOf(row.body, terms),
+        at: row.at,
+      })),
+      artifacts: rows('artifact').map((row) => ({
+        kind: 'artifact',
+        id: row.ref_id,
+        artifactKind: kinds.get(row.ref_id) ?? 'document',
+        title: row.title,
+        snippet: snippetOf(row.body, terms),
+        at: row.at,
+      })),
+      messages: messages.map((row) => {
+        const conversationId = row.conversation_id ?? ''
+        return {
+          kind: 'message',
+          id: row.ref_id,
+          conversationId,
+          where: titles.get(conversationId) ?? null,
+          snippet: snippetOf(row.body, terms),
+          at: row.at,
+        }
+      }),
+    }
   }
 
   getTodo(conversationId: string): TodoView {
@@ -1641,8 +1754,11 @@ export class Ariadne {
     this.store.append([{ type: 'memory.removed', projectId, data }])
   }
 
-  /** What happened in a conversation besides its messages, oldest first. */
-  listNotices(conversationId: string): NoticeView[] {
+  /**
+   * What happened in a conversation besides its messages, oldest first; with `range`, only
+   * from `from` (inclusive) to `to` (exclusive), in ms.
+   */
+  listNotices(conversationId: string, range: { from?: number; to?: number } = {}): NoticeView[] {
     return this.db
       .query<
         {
@@ -1653,9 +1769,12 @@ export class Ariadne {
           undone: number
           created_at: number
         },
-        [string]
-      >('SELECT * FROM notices WHERE conversation_id = ? ORDER BY created_at, id')
-      .all(conversationId)
+        [string, number, number]
+      >(
+        `SELECT * FROM notices WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
+         ORDER BY created_at, id`,
+      )
+      .all(conversationId, range.from ?? -1, range.to ?? Number.MAX_SAFE_INTEGER)
       .map((row) => {
         const base = { id: row.id, conversationId: row.conversation_id, createdAt: row.created_at }
         const payload = JSON.parse(row.payload)

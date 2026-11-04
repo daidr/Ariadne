@@ -550,3 +550,43 @@ export interface TraceRequestDetail {
   /** The system prompt differs from the previous step's. */
   systemChanged: boolean
 }
+
+/**
+ * Something the project search found. `snippet` is a line of the text around the first
+ * match; the page marks the query's words in it.
+ */
+export type SearchHit =
+  | {
+      kind: 'message'
+      id: string
+      conversationId: string
+      /** Where it was said: the thread's title, or `null` for the coordinator's conversation. */
+      where: string | null
+      snippet: string
+      at: number
+    }
+  | { kind: 'thread'; id: string; title: string; snippet: string; at: number }
+  | {
+      kind: 'artifact'
+      id: string
+      artifactKind: ArtifactKind
+      title: string
+      snippet: string
+      at: number
+    }
+
+/** What the project search found, by kind; `terms` are the words it looked for. */
+export interface SearchResult {
+  terms: string[]
+  threads: Extract<SearchHit, { kind: 'thread' }>[]
+  artifacts: Extract<SearchHit, { kind: 'artifact' }>[]
+  messages: Extract<SearchHit, { kind: 'message' }>[]
+}
+
+/** A stretch of a conversation's messages, newest last, with the notices among them. */
+export interface MessagePage {
+  messages: MessageView[]
+  notices: NoticeView[]
+  /** Earlier messages exist before the first one here. */
+  more: boolean
+}

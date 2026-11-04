@@ -45,7 +45,7 @@ export function daemonProvider(
           type: 'string',
           title: { 'zh-CN': '远端目录', en: 'Remote directory' },
           description: {
-            'zh-CN': '绝对路径。git 仓库会在远端为每个 thread 建一个独立的 worktree',
+            'zh-CN': '绝对路径。git 仓库会在远端为每个讨论串建一个独立的 worktree',
             en: 'An absolute path. A git repository gets a separate worktree per thread on the remote machine',
           },
         },
