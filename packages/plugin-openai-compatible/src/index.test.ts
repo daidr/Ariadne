@@ -168,6 +168,31 @@ describe('openai-compatible provider', () => {
     ])
   })
 
+  test('reads cache hits where DeepSeek reports them', async () => {
+    reply = () =>
+      sse(
+        { choices: [{ delta: { content: '好' }, finish_reason: 'stop' }] },
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 2,
+            prompt_cache_hit_tokens: 12,
+            prompt_cache_miss_tokens: 8,
+          },
+        },
+        '[DONE]',
+      )
+    const parts: ModelStreamPart[] = []
+    for await (const part of openAICompatibleProvider.stream(
+      { baseUrl: `http://127.0.0.1:${server.port}/v1`, apiKey: '' },
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [] },
+    )) {
+      parts.push(part)
+    }
+    expect(parts).toContainEqual({ type: 'usage', input: 20, output: 2, cached: 12 })
+  })
+
   test('sends reasoning back with the tool calls it led to', () => {
     const body = requestBody(
       { baseUrl: '', apiKey: '' },

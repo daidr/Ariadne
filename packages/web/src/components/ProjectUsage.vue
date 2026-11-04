@@ -37,7 +37,8 @@ const top = computed(() => {
     name: thread.title,
     tokens: thread.usage.input + thread.usage.output,
   }))
-  const coordinator = total.value - used.reduce((sum, row) => sum + row.tokens, 0)
+  const own = state.coordinator.conversation?.usage
+  const coordinator = own ? own.input + own.output : 0
   return [{ id: null, name: t('coordinator.title'), tokens: coordinator }, ...used]
     .filter((row) => row.tokens > 0)
     .toSorted((a, b) => b.tokens - a.tokens)
@@ -83,26 +84,24 @@ function go(id: string | null) {
           <DouText variant="tertiary" size="sm" class="usage-heading">
             {{ t('usage.breakdown') }}
           </DouText>
-          <DouProgressGroup :items="parts" :label="t('usage.breakdown')" tooltip />
-          <ul class="usage-rows">
-            <template v-for="(part, index) in parts" :key="part.label">
-              <li>
-                <span class="usage-label">
-                  <span
-                    class="usage-dot"
-                    :style="{ background: `var(--dou-color-${part.tone})` }"
-                  />
-                  {{ part.label }}
-                </span>
-                <span class="usage-value">{{ count(part.value) }}</span>
-              </li>
-              <!-- Thinking is part of the output, so it sits under it. -->
-              <li v-if="index === 1 && usage.reasoning" class="usage-sub">
-                <span>{{ t('usage.reasoning') }}</span>
-                <span class="usage-value">{{ count(usage.reasoning) }}</span>
-              </li>
+          <DouProgressGroup
+            :items="parts"
+            :label="t('usage.breakdown')"
+            :format="(value) => count(value)"
+            legend
+            tooltip
+          >
+            <!-- Thinking is part of the output, so it is named with it. -->
+            <template #legend="{ item, text }">
+              <span>{{ item.label }}</span>
+              <DouText variant="secondary" size="sm" class="usage-value">
+                {{ text }}
+                <template v-if="item.label === t('usage.output') && usage.reasoning">
+                  · {{ t('usage.reasoning') }} {{ count(usage.reasoning) }}
+                </template>
+              </DouText>
             </template>
-          </ul>
+          </DouProgressGroup>
 
           <DouText variant="tertiary" size="sm" class="usage-heading">
             {{ t('usage.top') }}
@@ -112,7 +111,11 @@ function go(id: string | null) {
               v-for="row in top"
               :key="row.id ?? ''"
               :class="{ 'usage-link': row.id }"
+              :role="row.id ? 'button' : undefined"
+              :tabindex="row.id ? 0 : undefined"
               @click="go(row.id)"
+              @keydown.enter.prevent="go(row.id)"
+              @keydown.space.prevent="go(row.id)"
             >
               <DouText truncate class="usage-name">{{ row.name }}</DouText>
               <span class="usage-value">{{ count(row.tokens) }}</span>
@@ -152,24 +155,6 @@ function go(id: string | null) {
   padding: 4px 0;
 }
 
-.usage-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.usage-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.usage-sub {
-  padding-left: 16px !important;
-  color: var(--dou-color-text-secondary);
-  font-size: var(--dou-font-size-sm);
-}
-
 .usage-value,
 .usage-share {
   font-variant-numeric: tabular-nums;
@@ -177,9 +162,16 @@ function go(id: string | null) {
 
 .usage-link {
   cursor: pointer;
+  border-radius: var(--dou-radius-control);
 }
 
-.usage-link:hover .usage-name {
+.usage-link:focus-visible {
+  outline: 2px solid var(--dou-color-primary);
+  outline-offset: 2px;
+}
+
+.usage-link:hover .usage-name,
+.usage-link:focus-visible .usage-name {
   color: var(--dou-color-primary-text);
 }
 
