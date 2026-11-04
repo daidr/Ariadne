@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
+import { confirmBlock } from './blocks'
 import { DomainError } from './errors'
 import type { PlanOp } from './events'
 import { applyOps, emptyGraph, needsConfirmation, parsePlanOps, previewPlanOps } from './plan'
@@ -26,10 +27,13 @@ const add = (id: string, title = id, kind: 'task' | 'milestone' = 'task'): PlanO
 })
 
 const confirmation = {
-  question: (changes: { key: string }[]) =>
-    ['协调器想修改计划', ...changes.map((c) => c.key)].join('\n'),
-  apply: { label: '同意', consequence: '修改' },
-  keep: { label: '保持', consequence: '不变' },
+  card: (changes: { key: string }[]) =>
+    confirmBlock({
+      title: '协调器想修改计划',
+      detail: changes.map((c) => c.key).join('\n'),
+      approveText: '同意',
+      denyText: '保持',
+    }),
 }
 
 describe('plan graph ops', () => {
@@ -111,7 +115,7 @@ describe('plan revisions', () => {
     expect(app.getPlan(projectId).proposals.map((p) => p.reason)).toEqual(['合并任务'])
     expect(app.listNeedsMe(projectId)).toHaveLength(1)
 
-    app.answerAttention(change.attentionId, { choice: 0 })
+    app.answerAttention(change.attentionId, { type: 'confirm', approved: true })
     const plan = app.getPlan(projectId)
     expect(plan.nodes.map((n) => n.id)).toEqual(['a'])
     expect(plan.proposals).toEqual([])
@@ -127,7 +131,7 @@ describe('plan revisions', () => {
       confirmation,
     })
     if (change.status !== 'proposed') throw new Error('expected a proposal')
-    app.answerAttention(change.attentionId, { choice: 1 })
+    app.answerAttention(change.attentionId, { type: 'confirm', approved: false })
     expect(app.getPlan(projectId).nodes).toHaveLength(1)
     expect(app.getPlan(projectId).proposals).toEqual([])
   })
@@ -181,7 +185,7 @@ describe('plan revisions', () => {
     expect(undo.status).toBe('proposed')
     expect(app.getPlan(projectId).nodes).toHaveLength(1)
     if (undo.status !== 'proposed') return
-    app.answerAttention(undo.attentionId, { choice: 0 })
+    app.answerAttention(undo.attentionId, { type: 'confirm', approved: true })
     const plan = app.getPlan(projectId)
     expect(plan.nodes).toEqual([])
     expect(plan.revisions.find((r) => r.id === first.revisionId)?.revertedBy).toBe(
@@ -204,7 +208,7 @@ describe('plan revisions', () => {
       reason: '用户改',
       ops: [{ op: 'remove', id: 'b' }],
     })
-    app.answerAttention(change.attentionId, { choice: 0 })
+    app.answerAttention(change.attentionId, { type: 'confirm', approved: true })
     const plan = app.getPlan(projectId)
     expect(plan.nodes.map((n) => n.id)).toEqual(['a'])
     expect(plan.proposals).toMatchObject([{ id: change.proposalId, status: 'stale' }])

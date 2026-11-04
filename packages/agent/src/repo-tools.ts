@@ -1,4 +1,10 @@
-import { DomainError, type Ariadne, type ChecksState, type ThreadPullRequest } from '@ariadne/core'
+import {
+  confirmBlock,
+  DomainError,
+  type Ariadne,
+  type ChecksState,
+  type ThreadPullRequest,
+} from '@ariadne/core'
 import type { CheckInfo, PullRequestInfo, RepoCapability } from '@ariadne/plugin-sdk'
 import { createTranslator } from '@ariadne/i18n'
 import {
@@ -121,13 +127,14 @@ async function pushBlocked(ctx: ToolContext, repo: RepoCapability): Promise<Tool
     ctx.projectId,
     ctx.conversationId,
     pushPublicPurpose(repo.remote),
-    () => ({
-      question: t('repo.pushPublic.question', { repo: repo.remote }),
-      options: [
-        { label: t('repo.pushPublic.push'), consequence: t('repo.pushPublic.pushConsequence') },
-        { label: t('repo.pushPublic.keep'), consequence: t('repo.pushPublic.keepConsequence') },
-      ],
-    }),
+    () =>
+      confirmBlock({
+        title: t('repo.pushPublic.question', { repo: repo.remote }),
+        description: t('repo.pushPublic.pushConsequence'),
+        tone: 'warning',
+        approveText: t('repo.pushPublic.push'),
+        denyText: t('repo.pushPublic.keep'),
+      }),
   )
   if (state === 'approved') return null
   if (state === 'declined') {
@@ -219,7 +226,7 @@ const openPullRequest: Tool = {
     if (existing?.state === 'closed') {
       // Closing a pull request is usually the user saying no; a new one would undo that.
       return {
-        content: `Your pull request ${pullRequestRef(existing)} was closed without merging, most likely by the user. Do not open another on your own: ask_user whether they want it reopened, or report "blocked" with why.`,
+        content: `Your pull request ${pullRequestRef(existing)} was closed without merging, most likely by the user. Do not open another on your own: ask the user (post_ui) whether they want it reopened, or report "blocked" with why.`,
         isError: true,
       }
     }

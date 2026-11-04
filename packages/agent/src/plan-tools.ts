@@ -1,4 +1,11 @@
-import { newId, type PlanConfirmation, type PlanNodeKind, type PlanOp } from '@ariadne/core'
+import {
+  BLOCK_LIMITS,
+  confirmBlock,
+  newId,
+  type PlanConfirmation,
+  type PlanNodeKind,
+  type PlanOp,
+} from '@ariadne/core'
 import { createTranslator, type Locale } from '@ariadne/i18n'
 import { json, optionalStr, str, ToolInputError, type Tool } from './tool-helpers'
 
@@ -99,6 +106,28 @@ export function resolvePlanOps(raw: unknown): { ops: PlanOp[]; refs: Record<stri
   return { ops: [...ops, ...links], refs }
 }
 
+const clip = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text
+
+/**
+ * The changes one per line, as many as the card holds; the rest are counted, so a large
+ * batch still asks instead of failing on the card's size. The preview shows them all.
+ */
+function changeLines(lines: string[], more: (count: number) => string): string {
+  const max = BLOCK_LIMITS.answerText - 100
+  const kept: string[] = []
+  let length = 0
+  for (const line of lines) {
+    const next = clip(line, BLOCK_LIMITS.text)
+    if (length + next.length + 1 > max) break
+    kept.push(next)
+    length += next.length + 1
+  }
+  return kept.length < lines.length
+    ? [...kept, more(lines.length - kept.length)].join('\n')
+    : kept.join('\n')
+}
+
 /**
  * The question the user answers before a big change takes effect: the reason, then
  * every change spelled out, in the user's language.
@@ -106,13 +135,16 @@ export function resolvePlanOps(raw: unknown): { ops: PlanOp[]; refs: Record<stri
 export function confirmation(locale: Locale, reason: string): PlanConfirmation {
   const t = createTranslator(locale)
   return {
-    question: (changes) =>
-      [
-        t('plan.confirm.question', { reason }),
-        ...changes.map((change) => `• ${t(change.key, change.params)}`),
-      ].join('\n'),
-    apply: { label: t('plan.confirm.apply'), consequence: t('plan.confirm.applyConsequence') },
-    keep: { label: t('plan.confirm.keep'), consequence: t('plan.confirm.keepConsequence') },
+    card: (changes) =>
+      confirmBlock({
+        title: clip(t('plan.confirm.question', { reason }), BLOCK_LIMITS.text),
+        detail: changeLines(
+          changes.map((change) => `• ${t(change.key, change.params)}`),
+          (count) => t('plan.confirm.more', { count }),
+        ),
+        approveText: t('plan.confirm.apply'),
+        denyText: t('plan.confirm.keep'),
+      }),
   }
 }
 

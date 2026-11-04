@@ -31,6 +31,22 @@ export {
   type WhiteboardEdge,
   type WhiteboardNode,
 } from './artifact-content'
+export {
+  ASK_BLOCK_TYPES,
+  askTitle,
+  BLOCK_LIMITS,
+  BLOCK_TYPES,
+  CHART_KINDS,
+  confirmBlock,
+  describeAnswer,
+  FORM_FIELD_KINDS,
+  isAskBlock,
+  parseAnswer,
+  parseBlock,
+  SHOW_BLOCK_TYPES,
+  STEP_STATUSES,
+} from './blocks'
+export type * from './blocks'
 export { DomainError } from './errors'
 export { FILE_TYPES, MAX_FILE_BYTES, fileUrl, type FileType, type StoredFile } from './files'
 export type * from './events'

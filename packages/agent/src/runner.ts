@@ -1,4 +1,5 @@
 import {
+  askTitle,
   DomainError,
   type Ariadne,
   type CallTiming,
@@ -548,7 +549,7 @@ function currentState(app: Ariadne, conversation: ConversationView): string {
     ? todo.map((item) => `- [${item.status}] ${item.label}`).join('\n')
     : '(empty)'
   const askingText = asking.length
-    ? asking.map((a) => `- [${a.id}] ${a.question}`).join('\n')
+    ? asking.map((a) => `- [${a.id}] ${askTitle(a.block)}`).join('\n')
     : '(none)'
   return `<current_state>\nYour todo list as stored now (update_todo replaces it whole, so keep what still applies):\n${todoText}\nYour questions still waiting for the user's answer (do not ask them again):\n${askingText}\n</current_state>`
 }

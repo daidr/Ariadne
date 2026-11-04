@@ -67,10 +67,18 @@ function togglePreview(id: string) {
           </template>
           {{ planUi.previewId === proposal.id ? t('plan.preview.hide') : t('plan.preview.show') }}
         </DouButton>
-        <DouButton size="sm" variant="outline" @click="answerAttention(proposal.attentionId, 1)">
+        <DouButton
+          size="sm"
+          variant="outline"
+          @click="answerAttention(proposal.attentionId, { type: 'confirm', approved: false })"
+        >
           {{ t('plan.confirm.keep') }}
         </DouButton>
-        <DouButton size="sm" tone="primary" @click="answerAttention(proposal.attentionId, 0)">
+        <DouButton
+          size="sm"
+          tone="primary"
+          @click="answerAttention(proposal.attentionId, { type: 'confirm', approved: true })"
+        >
           {{ t('plan.confirm.apply') }}
         </DouButton>
       </template>

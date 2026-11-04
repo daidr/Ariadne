@@ -190,7 +190,7 @@ describe('issues as context', () => {
 /** Ask for a change of state, say yes, and make it. */
 const step = async (state: 'closed' | 'open') => {
   await run('set_issue_state', { number: 3, state })
-  app.answerAttention(openCards()[0]!.id, { choice: 0 })
+  app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
   return JSON.parse((await run('set_issue_state', { number: 3, state })).content)
 }
 
@@ -201,13 +201,13 @@ describe('changing issues', () => {
     expect(written).toEqual([])
     const [card] = openCards()
     // The user sees the issue and the whole text before agreeing.
-    expect(card?.question).toContain('acme/app#3')
-    expect(card?.question).toContain('已修复，见 PR #7')
+    expect(card?.block).toMatchObject({ type: 'confirm', detail: '已修复，见 PR #7' })
+    expect(card?.block.type === 'confirm' && card.block.title).toContain('acme/app#3')
     // Asking again with the same text joins the same card.
     await run('comment_on_issue', { number: 3, body: '已修复，见 PR #7' })
     expect(openCards()).toHaveLength(1)
 
-    app.answerAttention(card!.id, { choice: 0 })
+    app.answerAttention(card!.id, { type: 'confirm', approved: true })
     const done = JSON.parse(
       (await run('comment_on_issue', { number: 3, body: '已修复，见 PR #7' })).content,
     )
@@ -217,7 +217,7 @@ describe('changing issues', () => {
     const again = await run('comment_on_issue', { number: 3, body: '已修复，见 PR #7' })
     expect(again.content).toContain('asked')
     expect(written).toHaveLength(1)
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     await run('comment_on_issue', { number: 3, body: '已修复，见 PR #7' })
     expect(written).toHaveLength(2)
     expect(app.listNotices(ctx.conversationId).filter((n) => n.kind === 'issue-written')).toEqual([
@@ -227,7 +227,7 @@ describe('changing issues', () => {
 
     // A yes covers its own text only.
     await run('comment_on_issue', { number: 3, body: '另一句' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     await run('comment_on_issue', { number: 3, body: '另一句，改过' })
     expect(openCards()).toHaveLength(1)
     expect(written).toHaveLength(2)
@@ -246,7 +246,7 @@ describe('changing issues', () => {
 
   test('a yes is one project’s: another project on the same repository asks its own', async () => {
     await run('comment_on_issue', { number: 3, body: '同一句' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     await run('comment_on_issue', { number: 3, body: '同一句' })
     const other = app.createProject('Q')
     const thread = app.createThread(other.id, { title: 't' })
@@ -269,7 +269,7 @@ describe('changing issues', () => {
       ctx = { ...ctx, app, projectId, conversationId: thread.id }
       await run('comment_on_issue', { number: 3, body: '修好了' })
       const card = openCards()[0]!
-      app.answerAttention(card.id, { choice: 0 })
+      app.answerAttention(card.id, { type: 'confirm', approved: true })
       // Ariadne stops after starting the change, before hearing back.
       app.startIssueWrite(projectId, {
         threadId: thread.id,
@@ -311,7 +311,7 @@ describe('changing issues', () => {
       }),
     }
     await run('comment_on_issue', { number: 3, body: '修好了' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     const failed = await run('comment_on_issue', { number: 3, body: '修好了' })
     expect(failed.isError).toBe(true)
     expect(failed.content).toContain('timeout')
@@ -327,8 +327,8 @@ describe('changing issues', () => {
   test('a declined close is not made', async () => {
     await run('set_issue_state', { number: 3, state: 'closed', reason: 'not_planned' })
     const [card] = openCards()
-    expect(card?.question).toContain('不做了')
-    app.answerAttention(card!.id, { choice: 1 })
+    expect(card?.block.type === 'confirm' && card.block.title).toContain('不做了')
+    app.answerAttention(card!.id, { type: 'confirm', approved: false })
     const result = await run('set_issue_state', {
       number: 3,
       state: 'closed',
@@ -340,7 +340,7 @@ describe('changing issues', () => {
 
   test('closing after a yes passes the reason on', async () => {
     await run('set_issue_state', { number: 3, state: 'closed' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     await run('set_issue_state', { number: 3, state: 'closed' })
     expect(written).toEqual(['state 3: closed completed'])
   })
@@ -355,7 +355,7 @@ describe('changing issues', () => {
       'already being asked',
     )
     expect(openCards()).toHaveLength(1)
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
 
     as(first)
     expect(
@@ -390,7 +390,7 @@ describe('changing issues', () => {
     await run('set_issue_state', { number: 3, state: 'closed' })
     as(second)
     await run('set_issue_state', { number: 3, state: 'closed' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     as(first)
     expect(
       JSON.parse((await run('set_issue_state', { number: 3, state: 'closed' })).content),
@@ -436,7 +436,7 @@ describe('changing issues', () => {
     await run('comment_on_issue', { number: 3, body: '修好了' })
     ctx = { ...ctx, conversationId: second }
     await run('comment_on_issue', { number: 3, body: '修好了' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
 
     ctx = { ...ctx, conversationId: first }
     const making = run('comment_on_issue', { number: 3, body: '修好了' })
@@ -479,7 +479,7 @@ describe('changing issues', () => {
     await run('comment_on_issue', { number: 3, body: '修好了' })
     ctx = { ...ctx, conversationId: second }
     await run('comment_on_issue', { number: 3, body: '修好了' })
-    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    app.answerAttention(openCards()[0]!.id, { type: 'confirm', approved: true })
     ctx = { ...ctx, conversationId: first }
     expect((await run('comment_on_issue', { number: 3, body: '修好了' })).isError).toBe(true)
     expect(notesOf(first)).toEqual([])

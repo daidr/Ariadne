@@ -1,4 +1,5 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
+import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 
 /** Who wrote a message. */
 export type Author = 'user' | 'coordinator' | 'thread'
@@ -42,11 +43,6 @@ export interface TodoItem {
   status: TodoStatus
   /** For `waiting`: what the item waits on. */
   detail?: string
-}
-
-export interface AttentionOption {
-  label: string
-  consequence: string
 }
 
 /** A tool call as the model made it; `arguments` is the model's JSON text, unparsed. */
@@ -220,20 +216,24 @@ export interface EventMap {
   'thread.stopped': { threadId: string; reason: string; by: string }
   /** Work goes on; `reason` is why it had been stopped, for the thread to read. */
   'thread.resumed': { threadId: string; by: string; reason: string }
+  /**
+   * Something waits on the user: an ask block (choice, confirmation or form). An agent's
+   * comes with the message it posted it in (`messageId`); the system's own (approvals,
+   * plan proposals) are only listed under "needs me".
+   */
   'attention.opened': {
     attentionId: string
     /** `null` when the coordinator asks. */
     threadId: string | null
-    question: string
-    options: AttentionOption[]
-    recommended: number | null
+    block: AskBlock
+    messageId: string | null
     /**
      * Set when the system asks for a standing approval (e.g. `push-public`), so a tool can
-     * check later whether the user agreed. The first option means yes.
+     * check later whether the user agreed. Its block is a confirmation.
      */
     purpose?: string | null
   }
-  'attention.answered': { attentionId: string; choice: number | null; text: string | null }
+  'attention.answered': { attentionId: string; answer: BlockAnswer }
   /**
    * Another thread waits on the same standing approval: it hears the answer too, so the
    * user answers one card instead of one per thread.
@@ -246,6 +246,8 @@ export interface EventMap {
     author: Author
     kind: MessageKind
     content: string
+    /** Tables, charts and steps shown under the text; an ask block is its attention's. */
+    blocks?: ShowBlock[]
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }

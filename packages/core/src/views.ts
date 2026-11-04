@@ -1,9 +1,9 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
+import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   ArtifactKind,
   BranchMerge,
-  AttentionOption,
   IssueWriteAction,
   LinkedIssue,
   MergeMethod,
@@ -80,10 +80,19 @@ export interface AttentionView {
   threadId: string | null
   /** Threads that asked the same since and wait on this card too, in the order they joined. */
   joinedBy: string[]
-  question: string
-  options: AttentionOption[]
-  recommended: number | null
+  block: AskBlock
+  /** The message it was asked in; `null` for the system's own approvals and proposals. */
+  messageId: string | null
+  /** The conversation it was asked in: the thread's, or the coordinator's. */
+  conversationId: string | null
   createdAt: number
+}
+
+/** An ask block in a message, with the user's answer once given. */
+export interface MessageAsk {
+  attentionId: string
+  block: AskBlock
+  answer: BlockAnswer | null
 }
 
 export interface MessageView {
@@ -92,6 +101,10 @@ export interface MessageView {
   author: Author
   kind: MessageKind
   content: string
+  /** Tables, charts and steps, shown under the text. */
+  blocks: ShowBlock[]
+  /** A choice, confirmation or form, shown last. */
+  ask: MessageAsk | null
   createdAt: number
   editedAt: number | null
   editReason: string | null
@@ -238,8 +251,8 @@ export type TranscriptNote =
       type: 'answer'
       attentionId: string
       question: string
-      choice: string | null
-      text: string | null
+      /** The answer as the model reads it, e.g. `choice: …` or `approved`. */
+      answer: string
     }
   | { type: 'user-in-thread'; threadId: string; content: string }
   | { type: 'upstream-done'; threadId: string; nodeTitle: string; summary: string }

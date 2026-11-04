@@ -3,6 +3,7 @@ import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
 import { issueReadTools, issueWriteTools } from './issue-tools'
 import { repoTools } from './repo-tools'
+import { blockLines, postUi } from './ui-tools'
 import {
   json,
   optionalInt,
@@ -68,53 +69,6 @@ const updateTodo: Tool = {
   },
 }
 
-const askUser: Tool = {
-  spec: {
-    name: 'ask_user',
-    description:
-      'Put one decision in front of the user. It appears in their "needs me" list; the answer reaches you later as a <user_answer>. Ask only when the choice changes their goal or cannot be undone, recommend an option, and keep working on that option meanwhile unless it is irreversible.',
-    parameters: {
-      type: 'object',
-      properties: {
-        question: { type: 'string' },
-        options: {
-          type: 'array',
-          minItems: 2,
-          maxItems: 4,
-          items: {
-            type: 'object',
-            properties: {
-              label: { type: 'string' },
-              consequence: { type: 'string', description: 'What happens if chosen, one line.' },
-            },
-            required: ['label', 'consequence'],
-          },
-        },
-        recommended: { type: 'integer', description: 'Index of the option you recommend.' },
-      },
-      required: ['question', 'options'],
-    },
-  },
-  run(args, ctx) {
-    const question = str(args, 'question')
-    if (!Array.isArray(args.options)) throw new ToolInputError('"options" must be an array')
-    const options = args.options.map((raw, index) => {
-      const option = (raw ?? {}) as Record<string, unknown>
-      if (typeof option.label !== 'string' || typeof option.consequence !== 'string') {
-        throw new ToolInputError(`options[${index}] needs a label and a consequence`)
-      }
-      return { label: option.label, consequence: option.consequence }
-    })
-    const attention = ctx.app.openAttention(ctx.projectId, {
-      threadId: ctx.role === 'thread' ? ctx.conversationId : null,
-      question,
-      options,
-      recommended: optionalInt(args, 'recommended'),
-    })
-    return json({ attentionId: attention.id, status: 'asked; the answer will arrive later' })
-  },
-}
-
 const listMessages: Tool = {
   spec: {
     name: 'list_messages',
@@ -131,7 +85,13 @@ const listMessages: Tool = {
       ctx.app
         .listMessages(ctx.conversationId)
         .slice(-limit)
-        .map((m) => ({ id: m.id, author: m.author, content: m.content, edited: !!m.editedAt })),
+        .map((m) => ({
+          id: m.id,
+          author: m.author,
+          content: m.content,
+          ...(m.blocks.length || m.ask ? { blocks: blockLines(m) } : {}),
+          edited: !!m.editedAt,
+        })),
     )
   },
 }
@@ -405,6 +365,7 @@ const readThread: Tool = {
           author: m.author,
           kind: m.kind,
           content: m.content,
+          ...(m.blocks.length || m.ask ? { blocks: blockLines(m) } : {}),
           edited: !!m.editedAt,
         })),
     })
@@ -419,7 +380,7 @@ function refuseUnlessUserSpoke(ctx: ToolContext) {
   // Without a way to tell, it is refused.
   if (!ctx.userSpoke?.()) {
     throw new ToolInputError(
-      'The project memory changes only in a turn that answers the user. Nothing in this turn came from the user, so nothing was saved. If a report or message suggests a preference, ask the user to confirm it (ask_user) and remember it when they answer.',
+      'The project memory changes only in a turn that answers the user. Nothing in this turn came from the user, so nothing was saved. If a report or message suggests a preference, ask the user to confirm it (post_ui) and remember it when they answer.',
     )
   }
 }
@@ -474,7 +435,7 @@ const forget: Tool = {
 /** The coordinator's tools; `models` are those it may give a thread. */
 export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   updateTodo,
-  askUser,
+  postUi,
   createThread(models),
   messageThread,
   stopThread,
@@ -491,7 +452,7 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
 
 export const threadTools: Tool[] = [
   updateTodo,
-  askUser,
+  postUi,
   report,
   listMessages,
   editMessage,
