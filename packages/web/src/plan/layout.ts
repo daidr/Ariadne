@@ -85,9 +85,13 @@ export function freshChanges(plan: PlanView | null, seen: string | null) {
       revisions.push(revision)
     }
   }
+  // Only nodes still on the plan: one removed since cannot be looked at.
+  const present = new Set(plan?.nodes.map((node) => node.id))
   const nodes = new Map<string, string>()
   for (const revision of revisions) {
-    for (const id of touchedBy(revision.ops)) if (!nodes.has(id)) nodes.set(id, revision.id)
+    for (const id of touchedBy(revision.ops)) {
+      if (present.has(id) && !nodes.has(id)) nodes.set(id, revision.id)
+    }
   }
   return { revisions, nodes, truncated: !!seen && !found && revisions.length > 0 }
 }

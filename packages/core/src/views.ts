@@ -368,6 +368,8 @@ export interface PlanNodeView {
     id: string
     title: string
     stage: ThreadStage
+    /** Who holds it stopped, while it is. */
+    stoppedBy: string | null
     lastHeadline: string | null
     pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> | null
   }[]

@@ -310,6 +310,7 @@ export const zhCN = {
   'error.planInvalid': '计划修改无效：{reason}',
   'error.planConflict': '「{title}」在你编辑期间被改过了，你的修改没有保存',
   'error.planReverted': '这次修改已经撤销过了',
+  'error.planUndoRestore': '这是一次恢复；要撤销，请撤销原来那次修改',
   'error.planUndoGone': '「{title}」后来被删掉了',
   'error.planUndoGoneUnnamed': '它改过的节点后来被删掉了',
   'error.planUndoChanged': '「{title}」后来又改过',

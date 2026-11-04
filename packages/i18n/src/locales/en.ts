@@ -330,6 +330,7 @@ export const en: Record<MessageKey, string> = {
   'error.planConflict':
     '"{title}" was changed while you were editing it; your change was not saved',
   'error.planReverted': 'This change has already been reverted',
+  'error.planUndoRestore': 'This is a restore; to undo it, undo the original change again',
   'error.planUndoGone': '"{title}" was removed since',
   'error.planUndoGoneUnnamed': 'A node it changed was removed since',
   'error.planUndoChanged': '"{title}" was changed again since',

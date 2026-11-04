@@ -158,7 +158,7 @@ describe('freshChanges', () => {
       revision('r2', { ops: [{ op: 'update', id: 'c', title: 'C2' }] }),
       revision('r1', { ops: [{ op: 'remove', id: 'z' }] }),
     ]
-    const fresh = freshChanges(plan([], revisions), 'r1')
+    const fresh = freshChanges(plan([node('a'), node('b'), node('c')], revisions), 'r1')
     expect(fresh.revisions.map((r) => r.id)).toEqual(['r5', 'r2'])
     expect([...fresh.nodes].toSorted()).toEqual([
       ['a', 'r5'],
@@ -333,6 +333,7 @@ const thread = (
   id: `t-${stage}`,
   title: 'T',
   stage,
+  stoppedBy: null,
   lastHeadline,
   pullRequest: null,
 })

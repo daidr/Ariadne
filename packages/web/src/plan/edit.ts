@@ -12,9 +12,12 @@ export interface GraphEdit {
   moved: Positions
 }
 
-/** Threads on a node that removing it stops: those not done or stopped already. */
+/**
+ * Threads on a node that the user removing it stops: those not done, unless the user
+ * stopped them already (a stop by the coordinator is taken over). The server's rule.
+ */
 export const liveThreads = (node: Pick<PlanNodeView, 'threads'>) =>
-  node.threads.filter((thread) => thread.stage !== 'done' && thread.stage !== 'stopped').length
+  node.threads.filter((thread) => thread.stage !== 'done' && thread.stoppedBy !== 'user').length
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 

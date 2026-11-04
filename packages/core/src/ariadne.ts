@@ -1855,6 +1855,7 @@ export class Ariadne {
           id: thread.id,
           title: thread.title,
           stage: thread.stage,
+          stoppedBy: thread.stopped?.by ?? null,
           lastHeadline: thread.lastHeadline,
           pullRequest: thread.pullRequest && {
             number: thread.pullRequest.number,
@@ -1942,7 +1943,9 @@ export class Ariadne {
 
   /** What a change would do, one line per op, as the user would read it. */
   describePlanChange(projectId: string, ops: PlanOp[]): LocalizedMessage[] {
-    const threads = this.liveThreads(projectId)
+    // Only the coordinator's proposals are described this way; agreeing to one stops
+    // threads as the coordinator.
+    const threads = this.threadsToStop(projectId, 'coordinator')
     return describePlanOps(
       loadPlanGraph(this.db, projectId),
       ops,
@@ -1950,10 +1953,16 @@ export class Ariadne {
     )
   }
 
-  /** Threads still at work or waiting: those a removed node stops. */
-  private liveThreads(projectId: string): ThreadView[] {
+  /**
+   * Threads a removed node stops: those not done and not stopped yet, and when the user
+   * removes it, also those the coordinator stopped (the user takes the stop over, as in
+   * `stopThread`, so only the user can let them go on).
+   */
+  private threadsToStop(projectId: string, by: string): ThreadView[] {
     return this.listThreads(projectId).filter(
-      (thread) => thread.stage !== 'done' && !thread.stopped,
+      (thread) =>
+        thread.stage !== 'done' &&
+        (!thread.stopped || (by === 'user' && thread.stopped.by !== 'user')),
     )
   }
 
@@ -1970,7 +1979,7 @@ export class Ariadne {
   ): AnyNewEvent[] {
     const removed = new Set(removedNodes(before, after))
     if (!removed.size) return []
-    return this.liveThreads(projectId)
+    return this.threadsToStop(projectId, by)
       .filter((thread) => thread.nodeId && removed.has(thread.nodeId))
       .map((thread) => ({
         type: 'thread.stopped' as const,
@@ -1990,15 +1999,16 @@ export class Ariadne {
     if (blocked) return { changes: [], threads: [], blocked }
     const after = applyOps(graph, undo).graph
     const title = (id: string) => graph.nodes.get(id)?.title ?? id
+    // Threads are listed once, below; the lines only say what changes.
     const changes = [
-      ...this.describePlanChange(projectId, undo),
+      ...describePlanOps(graph, undo, () => 0),
       ...droppedWith(graph, after, undo).map(({ from, to }): LocalizedMessage => ({
         key: 'plan.op.unlink',
         params: { from: title(from), to: title(to) },
       })),
     ]
     const removed = new Set(removedNodes(graph, after))
-    const threads = this.liveThreads(projectId)
+    const threads = this.threadsToStop(projectId, 'user')
       .filter((thread) => thread.nodeId && removed.has(thread.nodeId))
       .map((thread) => ({ id: thread.id, title: thread.title }))
     return { changes, threads, blocked: null }
@@ -2007,14 +2017,26 @@ export class Ariadne {
   private undoOf(projectId: string, revisionId: string) {
     const row = this.db
       .query<
-        { ops: string; inverse: string; reverted_by: string | null; reason: string },
+        {
+          ops: string
+          inverse: string
+          reverted_by: string | null
+          reason: string
+          undone_is_undo: number | null
+        },
         [string, string]
       >(
-        'SELECT ops, inverse, reverted_by, reason FROM plan_revisions WHERE id = ? AND project_id = ?',
+        `SELECT r.ops, r.inverse, r.reverted_by, r.reason, u.revert_of IS NOT NULL AS undone_is_undo
+         FROM plan_revisions r LEFT JOIN plan_revisions u ON u.id = r.revert_of
+         WHERE r.id = ? AND r.project_id = ?`,
       )
       .get(revisionId, projectId)
     if (!row) throw new DomainError('error.notFound', { what: revisionId })
     if (row.reverted_by) throw new DomainError('error.planReverted')
+    // Undo goes one level deep: a change, or the undo that took it back (restoring it). A
+    // restore is undone by undoing the original change again, so every change's state is
+    // read off the change itself.
+    if (row.undone_is_undo) throw new DomainError('error.planUndoRestore')
     const undo = JSON.parse(row.inverse) as PlanOp[]
     // Names for nodes the plan may no longer have, from what the revision itself held.
     const titles = new Map<string, string>()

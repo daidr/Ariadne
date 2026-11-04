@@ -265,7 +265,7 @@ describe('plan revisions', () => {
 
     expect(app.previewPlanUndo(projectId, split.revisionId)).toEqual({
       changes: [
-        { key: 'plan.op.removeWithThreads', params: { title: '实现', count: 1 } },
+        { key: 'plan.op.remove', params: { title: '实现' } },
         { key: 'plan.op.unlink', params: { from: '调研', to: '实现' } },
       ],
       threads: [{ id: working.id, title: '写实现' }],
@@ -329,6 +329,56 @@ describe('plan revisions', () => {
     expect(() => app.revertPlanRevision(projectId, rename.revisionId, 'user', '')).toThrow(
       expect.objectContaining({ code: 'error.planUndoGone' }),
     )
+  })
+
+  test('a restore is undone through the original change, so its state stays right', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', 'a')] })
+    const rename = app.revisePlan(projectId, {
+      author: 'coordinator',
+      reason: '改名',
+      ops: [{ op: 'update', id: 'a', title: 'A2' }],
+    })
+    if (rename.status !== 'applied') throw new Error('expected applied')
+    const undo = app.revertPlanRevision(projectId, rename.revisionId, 'user', '撤销：改名')
+    if (undo.status !== 'applied') throw new Error('expected applied')
+    const restore = app.revertPlanRevision(projectId, undo.revisionId, 'user', '恢复：改名')
+    if (restore.status !== 'applied') throw new Error('expected applied')
+    // Undoing the restore itself is refused, for the user and the coordinator alike.
+    expect(() =>
+      app.revertPlanRevision(projectId, restore.revisionId, 'coordinator', '再撤', confirmation),
+    ).toThrow(expect.objectContaining({ code: 'error.planUndoRestore' }))
+    expect(app.previewPlanUndo.bind(app, projectId, restore.revisionId)).toThrow(
+      expect.objectContaining({ code: 'error.planUndoRestore' }),
+    )
+    // Undoing the original again works, and the change shows as undone and restorable.
+    const again = app.revertPlanRevision(projectId, rename.revisionId, 'coordinator', '再撤')
+    if (again.status !== 'applied') throw new Error('expected applied')
+    let plan = app.getPlan(projectId)
+    expect(plan.nodes[0]?.title).toBe('a')
+    expect(plan.revisions.find((r) => r.id === rename.revisionId)?.revertedBy).toBe(
+      again.revisionId,
+    )
+    app.revertPlanRevision(projectId, again.revisionId, 'user', '恢复：改名')
+    plan = app.getPlan(projectId)
+    expect(plan.nodes[0]?.title).toBe('A2')
+    expect(plan.revisions.find((r) => r.id === rename.revisionId)?.revertedBy).toBeNull()
+  })
+
+  test('the user removing a node takes over the coordinator stopping its thread', () => {
+    app.revisePlan(projectId, { author: 'coordinator', reason: '起步', ops: [add('a', '调研')] })
+    const thread = app.createThread(projectId, { title: '调研', nodeId: 'a' })
+    app.stopThread(thread.id, { by: 'coordinator', reason: '先等等' })
+    const first = app.getPlan(projectId).revisions[0]?.id ?? ''
+    expect(app.previewPlanUndo(projectId, first).threads).toEqual([
+      { id: thread.id, title: '调研' },
+    ])
+    expect(app.getPlan(projectId).nodes[0]?.threads[0]?.stoppedBy).toBe('coordinator')
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '删除「调研」',
+      ops: [{ op: 'remove', id: 'a' }],
+    })
+    expect(app.getThread(thread.id).stopped).toMatchObject({ by: 'user', reason: '删除「调研」' })
   })
 
   test('the user removing a node stops the threads on it', () => {
