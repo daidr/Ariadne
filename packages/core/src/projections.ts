@@ -13,6 +13,7 @@ export const projectionTables = [
   'messages',
   'todos',
   'memories',
+  'notices',
   'conversations',
   'transcript',
   'plan_nodes',
@@ -128,6 +129,10 @@ export const threadsProjection: Projection = {
         )
         break
       }
+      case 'pull_request.closed':
+        // Merged or closed, its checks are no longer the thread's to fix.
+        db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.threadId])
+        break
       case 'checks.failed':
         db.run('UPDATE threads SET check_failures = ? WHERE id = ?', [
           event.data.attempt ?? 1,
@@ -279,6 +284,81 @@ export const todosProjection: Projection = {
 }
 
 /** The project's memory: its standing preferences and facts. */
+/**
+ * Notices shown in line with a conversation's messages. Applied before the memories
+ * projection, so a change still sees what the entry said before it.
+ */
+export const noticesProjection: Projection = {
+  name: 'notices',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS notices (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      undone INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`)
+    db.run(
+      'CREATE INDEX IF NOT EXISTS notices_conversation ON notices (conversation_id, created_at)',
+    )
+  },
+  apply(db, event) {
+    const add = (conversationId: string, kind: string, payload: unknown) =>
+      db.run(
+        'INSERT INTO notices (id, project_id, conversation_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          `ntc_${event.seq}`,
+          event.projectId,
+          conversationId,
+          kind,
+          JSON.stringify(payload),
+          event.at,
+        ],
+      )
+    switch (event.type) {
+      case 'memory.saved':
+      case 'memory.removed': {
+        const { memoryId, author, undoes } = event.data
+        if (undoes) db.run('UPDATE notices SET undone = 1 WHERE id = ?', [undoes])
+        // The user's own changes are in front of them already; an agent's are shown where
+        // it made them.
+        if (author === 'user') break
+        const before =
+          db
+            .query<{ text: string }, [string]>('SELECT text FROM memories WHERE id = ?')
+            .get(memoryId)?.text ?? null
+        if (event.type === 'memory.saved') {
+          add(author, 'memory', {
+            action: 'saved',
+            memoryId,
+            text: event.data.text,
+            previous: before,
+          })
+        } else {
+          add(author, 'memory', {
+            action: 'removed',
+            memoryId,
+            text: before ?? '',
+            previous: before,
+          })
+        }
+        break
+      }
+      case 'conversation.compacted':
+        add(event.data.conversationId, 'compacted', { summary: event.data.summary })
+        break
+      case 'conversation.compaction_failed':
+        add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
+        break
+      case 'notice.dismissed':
+        db.run('UPDATE notices SET undone = 1 WHERE id = ?', [event.data.noticeId])
+        break
+    }
+  },
+}
+
 export const memoriesProjection: Projection = {
   name: 'memories',
   setup(db) {
@@ -1063,6 +1143,7 @@ export const defaultProjections: Projection[] = [
   attentionsProjection,
   messagesProjection,
   todosProjection,
+  noticesProjection,
   memoriesProjection,
   conversationsProjection,
   planProjection,

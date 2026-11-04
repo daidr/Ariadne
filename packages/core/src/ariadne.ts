@@ -36,6 +36,7 @@ import type {
   ArtifactVersionView,
   ArtifactView,
   MemoryView,
+  NoticeView,
   AttentionView,
   ConversationRole,
   ConversationView,
@@ -473,6 +474,14 @@ export class Ariadne {
     this.store.append([{ type: 'conversation.compacted', projectId, data }])
   }
 
+  /** Summarising failed: the user sees it in the conversation, the turn goes on. */
+  recordCompactionFailure(conversationId: string, turnId: string, detail: string): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'conversation.compaction_failed', projectId, data: { conversationId, detail } },
+    ])
+  }
+
   // ---- commands ----
 
   createProject(name: string): ProjectView {
@@ -775,9 +784,10 @@ export class Ariadne {
   /** Save a new memory, or change the one `memoryId` names. */
   saveMemory(
     projectId: string,
-    input: { memoryId?: string; text: string; author: string },
+    input: { memoryId?: string; text: string; author: string; undoes?: string },
   ): MemoryView {
-    const text = input.text.trim()
+    // One line each: an entry cannot start a section of the prompts it is shown in.
+    const text = input.text.replace(/\s+/g, ' ').trim()
     if (!text) throw new DomainError('error.invalidBody', { reason: 'text' })
     if (text.length > MAX_MEMORY) {
       throw new DomainError('error.invalidBody', { reason: `text longer than ${MAX_MEMORY}` })
@@ -792,17 +802,94 @@ export class Ariadne {
     const memoryId = input.memoryId ?? newId('mem')
     const same = existing.find((m) => m.id === memoryId)
     if (same?.text === text) return same
-    this.store.append([
-      { type: 'memory.saved', projectId, data: { memoryId, text, author: input.author } },
-    ])
+    const data = {
+      memoryId,
+      text,
+      author: input.author,
+      ...(input.undoes ? { undoes: input.undoes } : {}),
+    }
+    this.store.append([{ type: 'memory.saved', projectId, data }])
     return this.listMemories(projectId).find((m) => m.id === memoryId)!
   }
 
-  removeMemory(projectId: string, memoryId: string, author: string): void {
+  removeMemory(projectId: string, memoryId: string, author: string, undoes?: string): void {
     if (!this.listMemories(projectId).some((m) => m.id === memoryId)) {
       throw new DomainError('error.notFound', { what: memoryId })
     }
-    this.store.append([{ type: 'memory.removed', projectId, data: { memoryId, author } }])
+    const data = { memoryId, author, ...(undoes ? { undoes } : {}) }
+    this.store.append([{ type: 'memory.removed', projectId, data }])
+  }
+
+  /** What happened in a conversation besides its messages, oldest first. */
+  listNotices(conversationId: string): NoticeView[] {
+    return this.db
+      .query<
+        {
+          id: string
+          conversation_id: string
+          kind: string
+          payload: string
+          undone: number
+          created_at: number
+        },
+        [string]
+      >('SELECT * FROM notices WHERE conversation_id = ? ORDER BY created_at, id')
+      .all(conversationId)
+      .map((row) => {
+        const base = { id: row.id, conversationId: row.conversation_id, createdAt: row.created_at }
+        const payload = JSON.parse(row.payload)
+        return (
+          row.kind === 'memory'
+            ? { ...base, kind: 'memory', ...payload, undone: row.undone === 1 }
+            : { ...base, kind: row.kind, ...payload }
+        ) as NoticeView
+      })
+  }
+
+  /**
+   * The user takes back an agent's change to the project memory: an added entry goes, a
+   * changed one gets its old text back, a removed one returns.
+   */
+  undoMemoryNotice(projectId: string, noticeId: string): void {
+    const row = this.db
+      .query<
+        { conversation_id: string; kind: string; payload: string; undone: number },
+        [string, string]
+      >(
+        'SELECT conversation_id, kind, payload, undone FROM notices WHERE id = ? AND project_id = ?',
+      )
+      .get(noticeId, projectId)
+    if (!row || row.kind !== 'memory') throw new DomainError('error.notFound', { what: noticeId })
+    if (row.undone) return
+    const change = JSON.parse(row.payload) as {
+      action: 'saved' | 'removed'
+      memoryId: string
+      previous: string | null
+    }
+    const exists = this.listMemories(projectId).some((m) => m.id === change.memoryId)
+    if (change.action === 'saved' && change.previous === null) {
+      if (exists) this.removeMemory(projectId, change.memoryId, 'user', noticeId)
+      else this.markUndone(projectId, noticeId)
+      return
+    }
+    const text = change.previous ?? ''
+    this.saveMemory(projectId, {
+      text,
+      author: 'user',
+      undoes: noticeId,
+      ...(exists ? { memoryId: change.memoryId } : {}),
+    })
+    // Saving the text it already has writes nothing; the notice is still settled.
+    this.markUndone(projectId, noticeId)
+  }
+
+  private markUndone(projectId: string, noticeId: string): void {
+    const row = this.db
+      .query<{ undone: number }, [string]>('SELECT undone FROM notices WHERE id = ?')
+      .get(noticeId)
+    if (row?.undone) return
+    // A no-op removal would fail; an empty save cannot exist. Record the undo by itself.
+    this.store.append([{ type: 'notice.dismissed', projectId, data: { noticeId } }])
   }
 
   updateTodo(projectId: string, conversationId: string, items: TodoItem[]): TodoView {

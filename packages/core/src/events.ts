@@ -142,8 +142,14 @@ export interface EventMap {
    * A standing preference or fact of the project ("write in Chinese", "the API lives in
    * packages/server"), saved or changed. Every conversation of the project sees them.
    */
-  'memory.saved': { memoryId: string; text: string; author: string }
-  'memory.removed': { memoryId: string; author: string }
+  'memory.saved': {
+    memoryId: string
+    text: string
+    author: string
+    /** The notice of an agent's change this one takes back, when the user undid it. */
+    undoes?: string
+  }
+  'memory.removed': { memoryId: string; author: string; undoes?: string }
   /**
    * A conversation's older history was summarised: the model sees `summary` in place of
    * every transcript entry it had read up to `upTo` (a position in the model's order).
@@ -154,6 +160,10 @@ export interface EventMap {
     upTo: number
     usage: TokenUsage | null
   }
+  /** The user settled a notice without anything else to record, e.g. undid a stale one. */
+  'notice.dismissed': { noticeId: string }
+  /** Summarising a conversation's history failed; the turn went on with all of it. */
+  'conversation.compaction_failed': { conversationId: string; detail: string }
   /** The agent of a conversation began working. */
   'turn.started': { conversationId: string; turnId: string; model: string }
   /**

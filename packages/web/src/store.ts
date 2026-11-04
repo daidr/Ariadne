@@ -5,6 +5,7 @@ import type {
   ConversationView,
   MemoryView,
   MessageView,
+  NoticeView,
   PlanOp,
   PlanView,
   ProjectView,
@@ -30,6 +31,8 @@ interface State {
   threadId: string | null
   conversation: ConversationView | null
   messages: MessageView[]
+  /** What happened in the conversation besides messages, shown in line with them. */
+  notices: NoticeView[]
   todo: TodoView | null
   plan: PlanView | null
   artifacts: ArtifactSummary[]
@@ -53,6 +56,7 @@ export const state = reactive<State>({
   threadId: null,
   conversation: null,
   messages: [],
+  notices: [],
   todo: null,
   plan: null,
   artifacts: [],
@@ -90,6 +94,7 @@ async function refreshCurrent() {
   state.detail = detail
   state.conversation = conversation.conversation
   state.messages = conversation.messages
+  state.notices = conversation.notices
   state.todo = conversation.todo
   state.plan = plan.plan
   state.artifacts = artifacts.artifacts
@@ -100,6 +105,7 @@ async function refreshCurrent() {
 function clearConversation() {
   state.conversation = null
   state.messages = []
+  state.notices = []
   state.todo = null
 }
 
@@ -320,4 +326,11 @@ export async function saveMemory(id: string | null, text: string | null): Promis
   } catch (error) {
     return error instanceof ApiError ? tm(error.localized) : String(error)
   }
+}
+
+/** Take back an agent's change to the project memory. */
+export async function undoNotice(noticeId: string) {
+  const projectId = state.currentId
+  if (!projectId) return
+  await api.undoNotice(projectId, noticeId).catch(report)
 }

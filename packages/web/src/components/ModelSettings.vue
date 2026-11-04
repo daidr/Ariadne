@@ -8,6 +8,7 @@ import {
   DouForm,
   DouFormItem,
   DouInput,
+  DouInputNumber,
   DouSelect,
   DouTabPanel,
   DouTabs,
@@ -34,6 +35,8 @@ const kinds = ref<ModelKind[]>([])
 const providers = ref<DraftProvider[]>([])
 const defaultProvider = ref<string | null>(null)
 const defaultModel = ref('')
+// In thousands of tokens; empty uses the default.
+const contextK = ref<number | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -54,6 +57,8 @@ function load(settings: ModelSettings) {
   }))
   defaultProvider.value = settings.default?.provider ?? null
   defaultModel.value = settings.default?.model ?? ''
+  const tokens = settings.default?.contextTokens
+  contextK.value = tokens ? Math.round(tokens / 1000) : null
 }
 
 const tab = ref<'models' | 'plugins'>('models')
@@ -120,7 +125,11 @@ async function save() {
         })),
         default:
           defaultProvider.value && defaultModel.value.trim()
-            ? { provider: defaultProvider.value, model: defaultModel.value.trim() }
+            ? {
+                provider: defaultProvider.value,
+                model: defaultModel.value.trim(),
+                ...(contextK.value ? { contextTokens: contextK.value * 1000 } : {}),
+              }
             : null,
       }),
     )
@@ -194,6 +203,18 @@ async function save() {
                 class="settings-grow"
               >
                 <DouInput v-model="defaultModel" />
+              </DouFormItem>
+              <DouFormItem
+                :label="t('settings.contextTokens')"
+                :help="t('settings.contextTokensHelp')"
+              >
+                <DouInputNumber
+                  v-model="contextK"
+                  :min="8"
+                  :max="10000"
+                  :step="8"
+                  placeholder="128"
+                />
               </DouFormItem>
             </div>
           </DouForm>

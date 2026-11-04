@@ -13,6 +13,8 @@ export interface ToolContext {
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */
   repo(): Promise<RepoCapability>
+  /** Whether input of this turn came from the user's own words (a message, an answer). */
+  userSpoke?: () => boolean
 }
 
 export interface ToolResult {

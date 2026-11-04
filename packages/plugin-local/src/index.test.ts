@@ -207,6 +207,37 @@ describe('local directory', () => {
     expect(await readFile(join(base, 'a.txt'), 'utf8')).toBe('outside\n')
   })
 
+  test('a refused write leaves nothing behind outside the workspace', async () => {
+    const dir = join(base, 'plain2')
+    const outside = join(base, 'outside')
+    await run(['mkdir', '-p', join(dir, 'sub'), outside], { cwd: base })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    const ws = (await workspace!.open({ threadId: 'thr_a' })) as LocalWorkspace
+    const resolveFirst = ws.resolve.bind(ws)
+    let calls = 0
+    ws.resolve = async (path: string) => {
+      const resolved = await resolveFirst(path)
+      if (++calls === 1) {
+        await rm(join(dir, 'sub'), { recursive: true })
+        await symlink(outside, join(dir, 'sub'))
+      }
+      return resolved
+    }
+    await expect(ws.writeFile('sub/new/deep.txt', 'x')).rejects.toThrow(WorkspacePathError)
+    expect(existsSync(join(outside, 'new'))).toBe(false)
+  })
+
+  test('output held by a process that left the group does not hang the call', async () => {
+    const dir = join(base, 'plain')
+    await run(['mkdir', '-p', dir], { cwd: base })
+    const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const started = Date.now()
+    const result = await ws.exec('setsid sleep 4 & echo started')
+    expect(result.stdout).toBe('started\n')
+    expect(Date.now() - started).toBeLessThan(3000)
+  })
+
   test('commands time out', async () => {
     const result = await run(['sleep', '5'], { cwd: base, timeoutMs: 50 })
     expect(result.exitCode).not.toBe(0)

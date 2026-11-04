@@ -70,6 +70,30 @@ export interface MessageView {
   editedSinceRead: boolean
 }
 
+/**
+ * Something that happened in a conversation without being a message, shown in line with
+ * them: an agent changed the project memory (the user can undo it), or older history was
+ * summarised for the model.
+ */
+export type NoticeView = {
+  id: string
+  conversationId: string
+  createdAt: number
+} & (
+  | {
+      kind: 'memory'
+      action: 'saved' | 'removed'
+      memoryId: string
+      /** The entry after the change; for a removal, what was removed. */
+      text: string
+      /** What the entry said before a change; `null` when it was added. */
+      previous: string | null
+      undone: boolean
+    }
+  | { kind: 'compacted'; summary: string }
+  | { kind: 'compaction-failed'; detail: string }
+)
+
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */
 export interface MemoryView {
   id: string

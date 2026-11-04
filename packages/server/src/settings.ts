@@ -24,8 +24,11 @@ export interface ModelProviderConfig {
 
 export interface ModelsConfig {
   providers: ModelProviderConfig[]
-  /** The model every conversation uses for now. */
-  default: { provider: string; model: string } | null
+  /**
+   * The model every conversation uses for now. `contextTokens` is how much it reads at
+   * most; older history is summarised before a conversation gets near it.
+   */
+  default: { provider: string; model: string; contextTokens?: number } | null
 }
 
 export interface UserConfig {
@@ -173,12 +176,22 @@ export class SettingsStore {
       if (!providers.some((p) => p.id === chosen.provider)) throw new BadRequest('default.provider')
       if (typeof chosen.model !== 'string' || !chosen.model.trim())
         throw new BadRequest('default.model')
+      const size = chosen.contextTokens
+      if (size !== undefined && size !== null && !(Number.isInteger(size) && size >= 4096)) {
+        throw new BadRequest('default.contextTokens')
+      }
     }
     this.config = {
       ...this.config,
       models: {
         providers,
-        default: chosen && { provider: chosen.provider, model: chosen.model.trim() },
+        default: chosen && {
+          provider: chosen.provider,
+          model: chosen.model.trim(),
+          ...(typeof chosen.contextTokens === 'number'
+            ? { contextTokens: chosen.contextTokens }
+            : {}),
+        },
       },
     }
     this.save()
@@ -278,7 +291,13 @@ export class SettingsStore {
     for (const [key, value] of Object.entries(config.settings)) {
       if (value !== '' && value !== null && value !== undefined) settings[key] = value
     }
-    return { provider, settings, model: chosen.model, label: `${config.name} / ${chosen.model}` }
+    return {
+      provider,
+      settings,
+      model: chosen.model,
+      label: `${config.name} / ${chosen.model}`,
+      ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
+    }
   }
 
   private save(): void {

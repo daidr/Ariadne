@@ -9,7 +9,7 @@ import {
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { constants, existsSync } from 'node:fs'
-import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
+import { mkdir, open, readdir, realpath, rm, rmdir, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface LocalSettings {
@@ -108,15 +108,65 @@ export async function run(
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
-    const stdout = new Response(proc.stdout).text()
-    const stderr = new Response(proc.stderr).text()
+    const stdout = collect(proc.stdout)
+    const stderr = collect(proc.stderr)
     const exitCode = await proc.exited
     // Background processes would keep the output open, and keep running, otherwise.
     if (options.forThread) killGroup()
-    return { exitCode, stdout: clip(await stdout), stderr: clip(await stderr) }
+    // One that left the group (setsid) may still hold the output: give it a moment, then
+    // stop waiting, so the call returns.
+    const [out, err] = await Promise.all([stdout.settle(), stderr.settle()])
+    return { exitCode, stdout: clip(out), stderr: clip(err) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', kill)
+  }
+}
+
+const OUTPUT_GRACE_MS = 1000
+
+/**
+ * Read a process's output as it comes. `settle` gives what was read once the output ends,
+ * or after a short grace, whichever is first, and stops reading.
+ */
+function collect(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  const ended = (async () => {
+    try {
+      for (;;) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        text += decoder.decode(chunk.value, { stream: true })
+      }
+    } catch {
+      // Cancelled after the grace.
+    }
+  })()
+  return {
+    async settle(): Promise<string> {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const late = new Promise<void>((done) => {
+        timer = setTimeout(done, OUTPUT_GRACE_MS)
+      })
+      await Promise.race([ended, late])
+      clearTimeout(timer)
+      await reader.cancel().catch(() => {})
+      return text
+    },
+  }
+}
+
+/** Remove `from` and its parents up to `to`, as long as each is empty. */
+async function removeEmptyDirs(from: string, to: string) {
+  for (let dir = from; ; dir = dirname(dir)) {
+    try {
+      await rmdir(dir)
+    } catch {
+      return
+    }
+    if (dir === to || dirname(dir) === dir) return
   }
 }
 
@@ -171,17 +221,34 @@ export class LocalWorkspace implements Workspace {
    * Open a workspace file, and make sure what was opened is the file inside the root. A
    * command left running could swap a directory on the way for a link between resolving
    * the path and opening it; the open file must then be the one the path resolves to now,
-   * still inside the root, or it is refused. Nothing is truncated before that check.
+   * still inside the root, or it is refused. Nothing is truncated before that check, and a
+   * file this call created for a refused path is removed again.
    */
-  private async open(path: string, flags: number): Promise<FileHandle> {
+  private async open(path: string, flags: number, create = false): Promise<FileHandle> {
     const target = await this.resolve(path)
-    const handle = await open(target, flags | constants.O_NOFOLLOW)
+    let handle: FileHandle | null = null
+    let created = false
+    if (create) {
+      try {
+        handle = await open(
+          target,
+          flags | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        )
+        created = true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new WorkspacePathError(path)
+      }
+    }
+    handle ??= await open(target, flags | constants.O_NOFOLLOW).catch(() => {
+      throw new WorkspacePathError(path)
+    })
     try {
       const [opened, now] = await Promise.all([handle.stat(), stat(await this.resolve(path))])
       if (opened.dev !== now.dev || opened.ino !== now.ino) throw new WorkspacePathError(path)
       return handle
     } catch (error) {
       await handle.close()
+      if (created) await rm(target, { force: true }).catch(() => {})
       throw error instanceof WorkspacePathError ? error : new WorkspacePathError(path)
     }
   }
@@ -197,8 +264,15 @@ export class LocalWorkspace implements Workspace {
 
   async writeFile(path: string, content: string): Promise<void> {
     const target = await this.resolve(path)
-    await mkdir(dirname(target), { recursive: true })
-    const handle = await this.open(path, constants.O_WRONLY | constants.O_CREAT)
+    // The first directory this made, if any, so a refused path leaves nothing behind.
+    const made = await mkdir(dirname(target), { recursive: true })
+    let handle: FileHandle
+    try {
+      handle = await this.open(path, constants.O_WRONLY, true)
+    } catch (error) {
+      if (made) await removeEmptyDirs(dirname(target), made)
+      throw error
+    }
     try {
       await handle.truncate(0)
       await handle.writeFile(content)

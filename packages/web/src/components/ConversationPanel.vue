@@ -12,7 +12,7 @@ import {
   DouTag,
   DouText,
 } from 'dou-ui'
-import type { MessageView } from '@ariadne/core'
+import type { MessageView, NoticeView } from '@ariadne/core'
 import { ChevronLeftIcon, GitBranchIcon, RotateCwIcon, SquareStopIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
@@ -27,6 +27,7 @@ import {
   sendMessage,
   state,
   stopTurn,
+  undoNotice,
 } from '../store'
 
 const emit = defineEmits<{ openSettings: [] }>()
@@ -69,6 +70,30 @@ watch(
   () => (highlighted.value = new Set()),
 )
 
+// Messages and notices in the order they happened.
+const timeline = computed(() =>
+  [
+    ...state.messages.map((message) => ({
+      id: message.id,
+      at: message.createdAt,
+      message,
+      notice: null,
+    })),
+    ...state.notices.map((notice) => ({
+      id: notice.id,
+      at: notice.createdAt,
+      message: null,
+      notice,
+    })),
+  ].toSorted((a, b) => a.at - b.at),
+)
+
+function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
+  if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
+  if (notice.previous === null) return t('notice.memoryAdded', { text: notice.text })
+  return t('notice.memoryChanged', { previous: notice.previous, text: notice.text })
+}
+
 function sender(message: MessageView) {
   return message.author === 'user' ? 'user' : 'assistant'
 }
@@ -110,38 +135,63 @@ watch(
       <PullRequestTag :thread="thread" refreshable />
     </div>
 
-    <DouChatList v-if="state.messages.length || working" class="conversation-list">
-      <template v-for="message in state.messages" :key="message.id">
-        <!-- What the coordinator told a thread: there for whoever wants it, out of the way otherwise. -->
-        <DouCollapse v-if="message.kind === 'relay'" class="relay">
-          <DouCollapseItem :value="message.id" :title="t('message.fromCoordinator')">
-            <DouText size="sm" class="relay-content">{{ message.content }}</DouText>
-          </DouCollapseItem>
-        </DouCollapse>
-        <DouChatMessage
-          v-else
-          :sender="sender(message)"
-          :content="message.content"
-          :class="{ 'conversation-edited': highlighted.has(message.id) }"
-        >
-          <template v-if="message.editedAt" #actions>
-            <!-- Why it changed and what it said before, for whoever wants to check. -->
-            <DouPopover trigger="click" :title="t('message.editedTitle')" :width="360">
-              <DouButton variant="ghost" size="sm">{{ t('message.edited') }}</DouButton>
-              <template #content>
-                <div class="edit-details">
-                  <DouText v-if="message.editReason" size="sm">
-                    {{ t('message.editReason') }}{{ message.editReason }}
-                  </DouText>
-                  <template v-if="message.originalContent !== null">
-                    <DouText variant="tertiary" size="sm">{{ t('message.original') }}</DouText>
-                    <DouText size="sm" class="edit-original">{{ message.originalContent }}</DouText>
-                  </template>
-                </div>
-              </template>
-            </DouPopover>
+    <DouChatList v-if="timeline.length || working" class="conversation-list">
+      <template v-for="item in timeline" :key="item.id">
+        <div v-if="item.notice" class="notice">
+          <template v-if="item.notice.kind === 'memory'">
+            <DouText variant="tertiary" size="sm" class="notice-text">
+              {{ memoryNotice(item.notice) }}
+            </DouText>
+            <DouText v-if="item.notice.undone" variant="tertiary" size="sm">
+              {{ t('notice.undone') }}
+            </DouText>
+            <DouButton v-else size="sm" variant="ghost" @click="undoNotice(item.notice.id)">
+              {{ t('notice.undo') }}
+            </DouButton>
           </template>
-        </DouChatMessage>
+          <DouCollapse v-else-if="item.notice.kind === 'compacted'" class="relay">
+            <DouCollapseItem :value="item.notice.id" :title="t('notice.compacted')">
+              <DouText size="sm" class="relay-content">{{ item.notice.summary }}</DouText>
+            </DouCollapseItem>
+          </DouCollapse>
+          <DouText v-else tone="warning" size="sm" class="notice-text">
+            {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
+          </DouText>
+        </div>
+        <template v-for="message in item.message ? [item.message] : []" v-else :key="message.id">
+          <!-- What the coordinator told a thread: there for whoever wants it, out of the way otherwise. -->
+          <DouCollapse v-if="message.kind === 'relay'" class="relay">
+            <DouCollapseItem :value="message.id" :title="t('message.fromCoordinator')">
+              <DouText size="sm" class="relay-content">{{ message.content }}</DouText>
+            </DouCollapseItem>
+          </DouCollapse>
+          <DouChatMessage
+            v-else
+            :sender="sender(message)"
+            :content="message.content"
+            :class="{ 'conversation-edited': highlighted.has(message.id) }"
+          >
+            <template v-if="message.editedAt" #actions>
+              <!-- Why it changed and what it said before, for whoever wants to check. -->
+              <DouPopover trigger="click" :title="t('message.editedTitle')" :width="360">
+                <DouButton variant="ghost" size="sm">{{ t('message.edited') }}</DouButton>
+                <template #content>
+                  <div class="edit-details">
+                    <DouText v-if="message.editReason" size="sm">
+                      {{ t('message.editReason') }}{{ message.editReason }}
+                    </DouText>
+                    <template v-if="message.originalContent !== null">
+                      <DouText variant="tertiary" size="sm">{{ t('message.original') }}</DouText>
+                      <DouText size="sm" class="edit-original">{{
+                        message.originalContent
+                      }}</DouText>
+                    </template>
+                  </div>
+                </template>
+              </DouPopover>
+            </template>
+          </DouChatMessage>
+        </template>
       </template>
       <DouChatMessage v-if="working" sender="assistant" loading />
     </DouChatList>
@@ -197,6 +247,17 @@ watch(
 </template>
 
 <style scoped>
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.notice-text {
+  overflow-wrap: anywhere;
+}
+
 .edit-details {
   display: flex;
   flex-direction: column;

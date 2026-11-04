@@ -126,6 +126,11 @@ export function createHandler({
     })
     return json({ memory })
   })
+  // The user takes back an agent's change to the memory.
+  add('POST', '/api/projects/:projectId/notices/:noticeId/undo', (_request, params) => {
+    app.undoMemoryNotice(params.projectId ?? '', params.noticeId ?? '')
+    return new Response(null, { status: 204 })
+  })
   add('DELETE', '/api/projects/:projectId/memory/:memoryId', (_request, params) => {
     app.removeMemory(params.projectId ?? '', params.memoryId ?? '', 'user')
     return new Response(null, { status: 204 })
@@ -312,6 +317,7 @@ export function createHandler({
     json({
       conversation: app.getConversation(conversationId),
       messages: app.listMessages(conversationId),
+      notices: app.listNotices(conversationId),
       todo: app.getTodo(conversationId),
     }),
   )

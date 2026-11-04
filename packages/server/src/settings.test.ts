@@ -57,6 +57,16 @@ describe('model settings', () => {
     expect(resolved?.label).toBe('主力 / some-model')
   })
 
+  test("the default model's context size reaches the turn, and must be sensible", () => {
+    const store = new SettingsStore(path, host)
+    const settings = provider({ baseUrl: '', apiKey: 'k' })
+    store.updateModels({ ...settings, default: { ...settings.default, contextTokens: 32_000 } })
+    expect(store.resolveModel({} as never)?.contextTokens).toBe(32_000)
+    expect(() =>
+      store.updateModels({ ...settings, default: { ...settings.default, contextTokens: 10 } }),
+    ).toThrow()
+  })
+
   test('rejects an unknown provider kind', () => {
     const store = new SettingsStore(path, host)
     expect(() =>

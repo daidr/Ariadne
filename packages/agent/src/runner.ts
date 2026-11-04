@@ -3,18 +3,13 @@ import {
   type Ariadne,
   type ConversationView,
   type ToolCallRecord,
+  type TranscriptEntry,
 } from '@ariadne/core'
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { ModelProvider } from '@ariadne/plugin-sdk'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { toolsFor, ToolInputError, type Tool, type ToolContext } from './tools'
-import {
-  COMPACT_AT_TOKENS,
-  compactionCut,
-  estimateTokens,
-  summarise,
-  summaryRequest,
-} from './compaction'
+import { compactAt, compactionCut, estimateTokens, summarise, summaryRequest } from './compaction'
 import { toChatMessages } from './transcript'
 import type { WorkspaceManager } from './workspaces'
 
@@ -25,6 +20,8 @@ export interface ResolvedModel {
   model: string
   /** Shown to the user, e.g. `anthropic / some-model`. */
   label: string
+  /** How many tokens the model reads at most, when its settings say. */
+  contextTokens?: number
 }
 
 export interface TurnOptions {
@@ -134,6 +131,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     options.tools ?? toolsFor(conversation.role, { workspace: hasWorkspace, repo: hasRepo })
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
+  // Input newer than this arrived for this turn.
+  const handledBefore = lastHandled(app.listTranscript(conversationId))
   const turnId = app.startTurn(conversationId, model.label)
   const ctx: ToolContext = {
     app,
@@ -152,6 +151,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces || !isThread) return Promise.reject(new DomainError('error.noRepo'))
       return workspaces.repo(conversation.projectId)
     },
+    userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
   }
   const titleOf = (threadId: string) => {
     try {
@@ -162,8 +162,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
 
   try {
-    const compactAt = options.compactAt ?? COMPACT_AT_TOKENS
+    const threshold = options.compactAt ?? compactAt(model.contextTokens)
+    // One try per turn: a failed summary would fail the same way on every step.
+    let compactionFailed = false
     let lastInput = 0
+    const state = () => currentState(app, conversation)
     for (let step = 0; step < options.maxSteps; step++) {
       const sawSeq = app.lastSeq()
       const system = {
@@ -171,23 +174,26 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         content: systemPrompt(app, conversation, options.locale, hasWorkspace, hasRepo),
       }
       let transcript = app.listTranscript(conversationId)
-      let messages = [system, ...toChatMessages(transcript, titleOf)]
+      let messages = [system, ...toChatMessages(transcript, titleOf, { state })]
       // A long conversation gets its older history summarised before it outgrows the
       // model's context. Between steps every call has its result, so any cut is whole.
-      if (Math.max(lastInput, estimateTokens(messages)) >= compactAt) {
-        const upTo = compactionCut(transcript, compactAt / 4)
+      if (!compactionFailed && Math.max(lastInput, estimateTokens(messages)) >= threshold) {
+        const upTo = compactionCut(transcript, threshold / 4)
         if (upTo !== null) {
           const request = summaryRequest(transcript, upTo, titleOf, conversation.role)
           const summary = await summarise(model, request, signal)
           if (signal.aborted) break
-          if (summary) {
+          if (summary.ok) {
             app.compactConversation(conversationId, turnId, {
               summary: summary.text,
               upTo,
               usage: summary.usage,
             })
             transcript = app.listTranscript(conversationId)
-            messages = [system, ...toChatMessages(transcript, titleOf)]
+            messages = [system, ...toChatMessages(transcript, titleOf, { state })]
+          } else {
+            compactionFailed = true
+            app.recordCompactionFailure(conversationId, turnId, summary.detail.slice(0, 500))
           }
         }
       }
@@ -259,6 +265,44 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           : { key: 'error.modelRequest' as const, params: { detail: String(error) } }
     app.finishTurn(conversationId, turnId, 'failed', localized)
   }
+}
+
+/** The newest event a step of this conversation had seen. */
+function lastHandled(transcript: TranscriptEntry[]): number {
+  let seen = 0
+  for (const entry of transcript) if (entry.kind === 'step') seen = Math.max(seen, entry.sawSeq)
+  return seen
+}
+
+/** Whether the user's own words reached the conversation after `since`. */
+function userSpokeSince(transcript: TranscriptEntry[], since: number): boolean {
+  return transcript.some(
+    (entry) =>
+      entry.seq > since &&
+      ((entry.kind === 'message' && entry.message.author === 'user') ||
+        (entry.kind === 'note' &&
+          (entry.note.type === 'user-in-thread' || entry.note.type === 'answer'))),
+  )
+}
+
+/**
+ * What stored state says now, beside the notes of a summarised conversation: the notes
+ * may blur the todo list, and `update_todo` replaces it whole.
+ */
+function currentState(app: Ariadne, conversation: ConversationView): string {
+  const todo = app.getTodo(conversation.id).items
+  const asking = app
+    .listOpenAttentions(conversation.projectId)
+    .filter((a) =>
+      conversation.role === 'thread' ? a.threadId === conversation.id : a.threadId === null,
+    )
+  const todoText = todo.length
+    ? todo.map((item) => `- [${item.status}] ${item.label}`).join('\n')
+    : '(empty)'
+  const askingText = asking.length
+    ? asking.map((a) => `- [${a.id}] ${a.question}`).join('\n')
+    : '(none)'
+  return `<current_state>\nYour todo list as stored now (update_todo replaces it whole, so keep what still applies):\n${todoText}\nYour questions still waiting for the user's answer (do not ask them again):\n${askingText}\n</current_state>`
 }
 
 /** The scheduler aborts with `interrupted` on shutdown and `cancelled` when the user stops. */
