@@ -7,7 +7,7 @@ import { Scheduler } from './scheduler'
 import { toChatMessages } from './transcript'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}' }
+const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne
@@ -264,7 +264,7 @@ describe('history compaction', () => {
 
   test('the cut keeps a step with its results and always keeps the newest input', () => {
     const entries: TranscriptEntry[] = [
-      { seq: 1, kind: 'message', message: { content: 'a'.repeat(400) } as never },
+      { seq: 1, kind: 'message', message: { content: 'a'.repeat(400), attachments: [] } as never },
       {
         seq: 1,
         kind: 'step',
@@ -273,7 +273,7 @@ describe('history compaction', () => {
         sawSeq: 1,
         toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
       },
-      { seq: 3, kind: 'message', message: { content: 'held' } as never },
+      { seq: 3, kind: 'message', message: { content: 'held', attachments: [] } as never },
       {
         seq: 4,
         kind: 'tool',
@@ -283,7 +283,7 @@ describe('history compaction', () => {
         isError: false,
       },
       { seq: 5, kind: 'step', reasoning: [], text: 'ok', sawSeq: 4, toolCalls: [] },
-      { seq: 6, kind: 'message', message: { content: 'new' } as never },
+      { seq: 6, kind: 'message', message: { content: 'new', attachments: [] } as never },
     ]
     // Keeping very little: the cut falls after the step's result, never between.
     const upTo = compactionCut(entries, 1)
@@ -790,7 +790,11 @@ describe('transcript to model messages', () => {
     const report = { type: 'report', threadId: 't', report: 'done', summary: '好了' } as const
     const messages = toChatMessages(
       [
-        { seq: 1, kind: 'message', message: { content: '开始', kind: 'chat' } as never },
+        {
+          seq: 1,
+          kind: 'message',
+          message: { content: '开始', kind: 'chat', attachments: [] } as never,
+        },
         { seq: 2, kind: 'note', note: report },
         { seq: 3, kind: 'step', reasoning: [], text: '我去安排', toolCalls: [], sawSeq: 1 },
       ],

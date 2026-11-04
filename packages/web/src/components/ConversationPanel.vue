@@ -2,6 +2,7 @@
 import {
   DouAlert,
   DouButton,
+  DouChatAttachments,
   DouChatInput,
   DouChatContextMeter,
   DouChatPlan,
@@ -13,11 +14,13 @@ import {
   DouDropdownItem,
   DouDropdownRadioGroup,
   DouEmpty,
+  DouImagePreview,
   DouInput,
   DouLink,
   DouPopover,
   DouTag,
   DouText,
+  type ChatAttachment,
   type ChatMessageProps,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
@@ -28,18 +31,20 @@ import {
   GitBranchIcon,
   ListTreeIcon,
   MoreHorizontalIcon,
+  PaperclipIcon,
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
   SquareStopIcon,
   CloseIcon,
 } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
+import { shownAttachments, useAttachments } from './attachments'
 import {
   openMain,
   openThread,
@@ -61,6 +66,41 @@ const props = defineProps<{ thread?: boolean }>()
 const emit = defineEmits<{ openSettings: [] }>()
 
 const draft = ref('')
+const attachments = useAttachments(() => state.detail?.project.id ?? null)
+const picker = useTemplateRef<HTMLInputElement>('picker')
+function pick(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files) attachments.add(input.files)
+  input.value = ''
+}
+const canSubmit = computed(
+  () => (!!draft.value.trim() || attachments.files.value.length > 0) && attachments.ready(),
+)
+
+// A message's images open in a preview, its text files in a tab of their own.
+const preview = ref<{ open: boolean; images: string[]; index: number }>({
+  open: false,
+  images: [],
+  index: 0,
+})
+function openAttachment(message: MessageView, file: ChatAttachment) {
+  if (!file.url) return
+  if (!file.type?.startsWith('image/')) {
+    window.open(file.url, '_blank', 'noopener')
+    return
+  }
+  const images = shownAttachments(message.attachments).filter((item) =>
+    item.type?.startsWith('image/'),
+  )
+  preview.value = {
+    open: true,
+    images: images.map((item) => item.url!),
+    index: Math.max(
+      0,
+      images.findIndex((item) => item.uid === file.uid),
+    ),
+  }
+}
 
 const view = computed(() => (props.thread ? state.thread : state.coordinator))
 const conversationId = computed(() =>
@@ -170,9 +210,10 @@ function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
   return t('notice.memoryChanged', { previous: notice.previous, text: notice.text })
 }
 
-/** The text, then tables, charts and steps, then what it asks. */
+/** The files sent with it, the text, then tables, charts and steps, then what it asks. */
 function partsOf(message: MessageView): ChatMessageProps['parts'] {
   return [
+    ...(message.attachments.length ? [{ type: 'attachments' }] : []),
     ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
@@ -185,9 +226,13 @@ function sender(message: MessageView) {
 
 async function submit(value: string) {
   const id = conversationId.value
-  if (!id) return
+  if (!id || !canSubmit.value) return
   draft.value = ''
-  await sendMessage(id, value)
+  const files = attachments.take()
+  const sent = await sendMessage(id, value, files.attachments)
+  files.settle(sent)
+  // Not sent: the text comes back too, unless something new was typed meanwhile.
+  if (!sent && !draft.value) draft.value = value
 }
 
 function stop() {
@@ -435,11 +480,18 @@ watch(
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
           >
             <template #part="{ part }">
+              <DouChatAttachments
+                v-if="part.type === 'attachments'"
+                :model-value="shownAttachments(message.attachments)"
+                :removable="false"
+                @open="(file) => openAttachment(message, file)"
+              />
               <AskBlock
-                v-if="part.type === 'ask' && message.ask"
+                v-else-if="part.type === 'ask' && message.ask"
                 :attention-id="message.ask.attentionId"
                 :block="message.ask.block"
                 :answer="message.ask.answer"
+                :withdrawn="message.ask.withdrawn"
               />
               <ShowBlock
                 v-else-if="part.type === 'block'"
@@ -526,14 +578,35 @@ watch(
       </template>
     </DouAlert>
 
+    <DouImagePreview
+      v-model:open="preview.open"
+      v-model:index="preview.index"
+      :images="preview.images"
+    />
     <div class="conversation-input">
       <DouChatInput
         v-model="draft"
         :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
+        :can-submit="canSubmit"
         @submit="submit"
+        @attach="attachments.add"
       >
+        <template v-if="attachments.files.value.length" #header>
+          <DouChatAttachments v-model="attachments.files.value" @remove="attachments.release" />
+        </template>
         <template #actions>
+          <input ref="picker" type="file" multiple hidden @change="pick" />
+          <DouButton
+            variant="ghost"
+            size="sm"
+            :aria-label="t('composer.attach')"
+            :title="t('composer.attach')"
+            :disabled="!state.detail"
+            @click="picker?.click()"
+          >
+            <PaperclipIcon />
+          </DouButton>
           <!-- Which model answers here, and how full its context is. -->
           <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
             <DouButton variant="ghost" size="sm" :title="t('thread.model')">

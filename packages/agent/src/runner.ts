@@ -2,6 +2,7 @@ import {
   askTitle,
   DomainError,
   type Ariadne,
+  type Attachment,
   type CallTiming,
   type ConversationView,
   type ReasoningRecord,
@@ -17,6 +18,7 @@ import {
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
+  type SearchProvider,
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
@@ -29,7 +31,7 @@ import {
   summaryRequest,
   usageOf,
 } from './compaction'
-import { toChatMessages, visibleHistory } from './transcript'
+import { attachedText, toChatMessages, visibleHistory, withImageData } from './transcript'
 import type { WorkspaceManager } from './workspaces'
 
 /** The model a conversation talks to, with its provider's settings. */
@@ -41,6 +43,8 @@ export interface ResolvedModel {
   label: string
   /** How many tokens the model reads at most, when its settings say. */
   contextTokens?: number
+  /** `false` when the model cannot look at images: they are named in words instead. */
+  images?: boolean
   /** How hard it thinks in this role; without it the request asks nothing. */
   effort?: Effort
 }
@@ -73,6 +77,8 @@ export interface TurnOptions {
   /** First wait before a model request is retried; it doubles each time. */
   retryBaseMs?: number
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /** The plugins' web search services; without any, agents get no search tool. */
+  searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The models the user set up; the coordinator may give one to each thread it opens. */
   models?: ModelChoice[]
 }
@@ -185,6 +191,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       repo: hasRepo,
       tracker: hasTracker,
       models: options.models ?? [],
+      ...(options.searchProviders ? { search: options.searchProviders } : {}),
     })
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
@@ -215,7 +222,21 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
+    ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
+  }
+  const readText = attachedText(app)
+  const images = model.images !== false
+  const chat = { readText, images }
+  const loadImage = (file: Attachment) => {
+    try {
+      return {
+        mime: file.mime,
+        data: Buffer.from(app.getFile(file.fileId).data).toString('base64'),
+      }
+    } catch {
+      return null
+    }
   }
   const titleOf = (threadId: string) => {
     try {
@@ -250,15 +271,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         const transcript = app.listTranscript(conversationId)
         const estimate = estimateTokens([
           { role: 'system', content: system() },
-          ...toChatMessages(transcript, titleOf, { state: state() }),
+          ...toChatMessages(transcript, titleOf, { ...chat, state: state() }),
         ])
         const upTo =
           Math.max(lastInput, estimate) >= threshold
             ? compactionCut(transcript, threshold / 4)
             : null
         if (upTo !== null) {
-          const request = summaryRequest(transcript, upTo, titleOf, conversation.role)
-          const summary = await summarise(model, request, signal)
+          const request = summaryRequest(transcript, upTo, titleOf, conversation.role, readText)
+          const summary = await summarise(model, withImageData(request, loadImage), signal)
           if (signal.aborted) break
           if (summary.ok) {
             app.compactConversation(conversationId, turnId, {
@@ -280,10 +301,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       const sawSeq = app.lastSeq()
       const input = { system: system(), tools: toolsJson, state: state() }
       const transcript = app.listTranscript(conversationId)
-      const messages = [
-        { role: 'system' as const, content: input.system },
-        ...toChatMessages(transcript, titleOf, { state: input.state }),
-      ]
+      const messages = withImageData(
+        [
+          { role: 'system' as const, content: input.system },
+          ...toChatMessages(transcript, titleOf, { ...chat, state: input.state }),
+        ],
+        loadImage,
+      )
       const shownState = visibleHistory(transcript).summary === null ? null : input.state
       const answer = await requestStep(
         model,
@@ -311,6 +335,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           tools: input.tools,
           state: shownState,
           call: callOf(model, model.effort ?? null),
+          images,
         },
         timing,
       })
@@ -333,6 +358,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         if (signal.aborted) break
         const result = await runTool(byName.get(call.name), call, ctx)
         results.push({ content: result.content, isError: result.isError ?? false })
+        const files = result.files ?? []
         let { content } = result
         let count = 0
         if (i === toolCalls.length - 1) {
@@ -347,6 +373,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           name: call.name,
           content,
           isError: result.isError ?? false,
+          ...(files.length ? { files } : {}),
         })
         if (count >= MAX_REPEATS) {
           throw new TurnError({ key: 'error.repeating', params: { count } })
@@ -551,7 +578,7 @@ function currentState(app: Ariadne, conversation: ConversationView): string {
   const askingText = asking.length
     ? asking.map((a) => `- [${a.id}] ${askTitle(a.block)}`).join('\n')
     : '(none)'
-  return `<current_state>\nYour todo list as stored now (update_todo replaces it whole, so keep what still applies):\n${todoText}\nYour questions still waiting for the user's answer (do not ask them again):\n${askingText}\n</current_state>`
+  return `<current_state>\nYour todo list as stored now (update_todo replaces it whole, so keep what still applies):\n${todoText}\nYour questions still waiting for the user's answer (do not ask them again; withdraw one with withdraw_ask once the user answered it in words or it no longer matters):\n${askingText}\n</current_state>`
 }
 
 /** The scheduler aborts with `interrupted` on shutdown and `cancelled` when the user stops. */

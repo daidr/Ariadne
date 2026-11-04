@@ -1,5 +1,6 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
+import type { FileType } from './files'
 
 /** Who wrote a message. */
 export type Author = 'user' | 'coordinator' | 'thread'
@@ -53,6 +54,17 @@ export interface ToolCallRecord {
 }
 
 /**
+ * A file that came with a message or a tool result: an image the model looks at, or text
+ * it reads. The bytes stay in the project's files; `name` is what the user or tool called it.
+ */
+export interface Attachment {
+  fileId: string
+  name: string
+  mime: FileType
+  size: number
+}
+
+/**
  * A block of a model's reasoning as its provider returned it; `signature` (or the opaque
  * `text` of a `redacted` block) is what the provider checks when it is sent back.
  */
@@ -84,6 +96,8 @@ export interface StepInput {
   tools: string
   state: string | null
   call: string
+  /** Whether images went to the model as images; without, they were described in words. */
+  images: boolean
 }
 
 /** When a model call was sent and when its first output came, in ms since the epoch. */
@@ -235,6 +249,11 @@ export interface EventMap {
   }
   'attention.answered': { attentionId: string; answer: BlockAnswer }
   /**
+   * The agent that asked takes its question back, e.g. once the user answered it in words
+   * or it no longer matters. It leaves "needs me"; the message shows it was withdrawn.
+   */
+  'attention.withdrawn': { attentionId: string; reason: string }
+  /**
    * Another thread waits on the same standing approval: it hears the answer too, so the
    * user answers one card instead of one per thread.
    */
@@ -248,6 +267,8 @@ export interface EventMap {
     content: string
     /** Tables, charts and steps shown under the text; an ask block is its attention's. */
     blocks?: ShowBlock[]
+    /** Images and text files the user sent with it. */
+    attachments?: Attachment[]
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }
@@ -336,6 +357,8 @@ export interface EventMap {
     name: string
     content: string
     isError: boolean
+    /** Images the tool handed the model, e.g. a picture read from the workspace. */
+    files?: Attachment[]
   }
   'turn.finished': {
     conversationId: string

@@ -2,17 +2,31 @@ import type { Database } from 'bun:sqlite'
 import { createHash, randomBytes } from 'node:crypto'
 import { DomainError } from './errors'
 
-/** The images a whiteboard can hold. SVG is left out: it can carry script. */
-export const FILE_TYPES = [
+/** The images a whiteboard or a message can hold. SVG is left out: it can carry script. */
+export const IMAGE_TYPES = [
   'image/png',
   'image/jpeg',
   'image/gif',
   'image/webp',
   'image/avif',
 ] as const
-export type FileType = (typeof FILE_TYPES)[number]
+export type ImageType = (typeof IMAGE_TYPES)[number]
+/** A file is an image, or text attached to a message (code, a log, notes), kept as UTF-8. */
+export type FileType = ImageType | 'text/plain'
+
+/** The images both model protocols read; others are described to the model instead. */
+export const MODEL_IMAGE_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]
+/** Larger images are refused by model services, so the model is told about them instead. */
+export const MAX_MODEL_IMAGE_BYTES = 5 * 1024 * 1024
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024
+/** Text attachments are read whole by the model, so they stay small. */
+export const MAX_TEXT_FILE_BYTES = 1024 * 1024
 
 export interface StoredFile {
   id: string
@@ -43,20 +57,43 @@ export function setupFiles(db: Database): void {
   db.run('CREATE INDEX IF NOT EXISTS files_hash ON files (project_id, sha256)')
 }
 
-const isFileType = (mime: string): mime is FileType =>
-  (FILE_TYPES as readonly string[]).includes(mime)
+export const isImageType = (mime: string): mime is ImageType =>
+  (IMAGE_TYPES as readonly string[]).includes(mime)
 
-/** Keep a file; the same bytes in the same project are kept once. */
+/** UTF-8 text without NUL bytes, whatever the browser called it (it may say nothing). */
+export function isText(data: Uint8Array): boolean {
+  if (data.includes(0)) return false
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(data)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Keep a file; the same bytes in the same project are kept once. Images are kept as the
+ * type they say; with `text`, anything else that is UTF-8 text is kept as plain text.
+ */
 export function saveFile(
   db: Database,
   projectId: string,
   input: { mime: string; data: Uint8Array },
   now: number,
+  options: { text?: boolean } = {},
 ): StoredFile {
-  const mime = input.mime.split(';')[0]!.trim().toLowerCase()
-  if (!isFileType(mime)) throw new DomainError('error.fileType', { type: mime || '?' })
-  if (input.data.byteLength > MAX_FILE_BYTES) {
-    throw new DomainError('error.fileTooLarge', { max: MAX_FILE_BYTES / 1024 / 1024 })
+  const given = input.mime.split(';')[0]!.trim().toLowerCase()
+  let mime: FileType
+  if (isImageType(given)) mime = given
+  else if (options.text && !given.startsWith('image/') && isText(input.data)) mime = 'text/plain'
+  else {
+    throw new DomainError(options.text ? 'error.attachmentType' : 'error.fileType', {
+      type: given || '?',
+    })
+  }
+  const max = mime === 'text/plain' ? MAX_TEXT_FILE_BYTES : MAX_FILE_BYTES
+  if (input.data.byteLength > max) {
+    throw new DomainError('error.fileTooLarge', { max: max / 1024 / 1024 })
   }
   const sha256 = createHash('sha256').update(input.data).digest('hex')
   const existing = db
@@ -81,6 +118,21 @@ export function readFile(db: Database, id: string): { mime: FileType; data: Uint
     )
     .get(id)
   return row ?? null
+}
+
+/** A file of this project, without its bytes; `null` when the project has no such file. */
+export function fileInfo(
+  db: Database,
+  projectId: string,
+  id: string,
+): { mime: FileType; size: number } | null {
+  return (
+    db
+      .query<{ mime: FileType; size: number }, [string, string]>(
+        'SELECT mime, size FROM files WHERE id = ? AND project_id = ?',
+      )
+      .get(id, projectId) ?? null
+  )
 }
 
 const DATA_URL = /^data:([\w/+.-]+);base64,(.*)$/s

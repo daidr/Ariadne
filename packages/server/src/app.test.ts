@@ -285,6 +285,43 @@ describe('files', () => {
   })
 })
 
+describe('attachments', () => {
+  test('a message carries text files and images uploaded for it', async () => {
+    const project = app.createProject('P')
+    const text = new TextEncoder().encode('const x = 1\n')
+    const sent = (type: string, body: Uint8Array<ArrayBuffer>) =>
+      handle(
+        new Request(`http://127.0.0.1/api/projects/${project.id}/files?for=message`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': type },
+          body,
+        }),
+      )
+    // A browser may call a .ts file a video, or nothing at all: it is text all the same.
+    const response = await sent('video/mp2t', text)
+    expect(response.status).toBe(201)
+    const { file } = (await response.json()) as { file: { id: string; url: string; mime: string } }
+    expect(file.mime).toBe('text/plain')
+    const served = await call(file.url, {}, false)
+    expect(served.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+    expect((await sent('application/octet-stream', new Uint8Array([0, 1, 2]))).status).toBe(400)
+
+    const posted = await call(`/api/projects/${project.id}/messages`, {
+      method: 'POST',
+      body: {
+        conversationId: project.coordinatorId,
+        content: '',
+        attachments: [{ fileId: file.id, name: 'a.ts' }],
+      },
+    })
+    expect(posted.status).toBe(201)
+    const { message } = (await posted.json()) as { message: { attachments: unknown[] } }
+    expect(message.attachments).toEqual([
+      { fileId: file.id, name: 'a.ts', mime: 'text/plain', size: text.byteLength },
+    ])
+  })
+})
+
 describe('sandbox', () => {
   test('says when thread commands are not isolated', async () => {
     const response = await call('/api/sandbox')

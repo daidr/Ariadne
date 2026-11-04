@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { TraceMessage, TraceRequestDetail } from '@ariadne/core'
-import { DouCollapse, DouCollapseItem, DouText } from 'dou-ui'
+import {
+  DouChatAttachments,
+  DouCollapse,
+  DouCollapseItem,
+  DouText,
+  type ChatAttachment,
+} from 'dou-ui'
 import { computed, ref } from 'vue'
+import { shownAttachments } from '../components/attachments'
 import { t } from '../i18n'
 
 /** The messages of one request, those new since the step before marked and open. */
@@ -39,6 +46,14 @@ function bodyOf(message: Message) {
   return [thought, message.content, calls].filter(Boolean).join('\n\n')
 }
 
+/** The images that went with it, by their files. */
+const imagesOf = (message: Message) =>
+  message.role === 'user' || message.role === 'tool' ? (message.images ?? []) : []
+
+function openFile(file: ChatAttachment) {
+  if (file.url) window.open(file.url, '_blank', 'noopener')
+}
+
 const tools = computed(() => JSON.stringify(input.value.tools, null, 2))
 </script>
 
@@ -62,6 +77,12 @@ const tools = computed(() => JSON.stringify(input.value.tools, null, 2))
           :title="titleOf(message, index)"
         >
           <pre class="trace-input-text">{{ bodyOf(message) }}</pre>
+          <DouChatAttachments
+            v-if="imagesOf(message).length"
+            :model-value="shownAttachments(imagesOf(message))"
+            :removable="false"
+            @open="openFile"
+          />
         </DouCollapseItem>
         <DouCollapseItem
           v-if="input.tools.length"

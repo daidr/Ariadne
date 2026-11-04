@@ -7,7 +7,7 @@ import {
   STEP_STATUSES,
   type MessageView,
 } from '@ariadne/core'
-import { json, ToolInputError, type Tool } from './tool-helpers'
+import { json, str, ToolInputError, type Tool } from './tool-helpers'
 
 const text = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) })
 const label = text()
@@ -209,6 +209,26 @@ export const postUi: Tool = {
   },
 }
 
+export const withdrawAsk: Tool = {
+  spec: {
+    name: 'withdraw_ask',
+    description:
+      'Take back a question you asked with post_ui that the user has not answered there: they answered it in a message instead, or it no longer matters. It leaves their "needs me" list and the message shows it was withdrawn with your reason. Do not withdraw a question just because the answer is slow to come.',
+    parameters: {
+      type: 'object',
+      properties: {
+        attentionId: { type: 'string' },
+        reason: text('Short, shown to the user, e.g. "answered in your message".'),
+      },
+      required: ['attentionId', 'reason'],
+    },
+  },
+  run(args, ctx) {
+    ctx.app.withdrawAttention(ctx.conversationId, str(args, 'attentionId'), str(args, 'reason'))
+    return { content: 'Withdrawn.' }
+  },
+}
+
 /** A message's blocks in a line each, for tools that list messages. */
 export function blockLines(message: MessageView): string[] {
   const shown = message.blocks.map((block) => {
@@ -220,6 +240,10 @@ export function blockLines(message: MessageView): string[] {
   })
   const { ask } = message
   if (!ask) return shown
-  const answer = ask.answer ? describeAnswer(ask.block, ask.answer) : 'waiting for the user'
+  const answer = ask.answer
+    ? describeAnswer(ask.block, ask.answer)
+    : ask.withdrawn
+      ? `withdrawn: ${ask.withdrawn}`
+      : 'waiting for the user'
   return [...shown, `${ask.block.type} "${askTitle(ask.block)}" (${ask.attentionId}): ${answer}`]
 }

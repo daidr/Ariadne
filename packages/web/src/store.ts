@@ -179,10 +179,21 @@ export async function createProject(name: string) {
   }
 }
 
-export async function sendMessage(conversationId: string, content: string) {
+/** Whether it was sent; a failure is reported, and the draft is kept for another try. */
+export async function sendMessage(
+  conversationId: string,
+  content: string,
+  attachments: { fileId: string; name: string }[] = [],
+): Promise<boolean> {
   const project = state.detail?.project
-  if (!project) return
-  await api.postMessage(project.id, conversationId, content).catch(report)
+  if (!project) return false
+  try {
+    await api.postMessage(project.id, conversationId, content, attachments)
+    return true
+  } catch (error) {
+    report(error)
+    return false
+  }
 }
 
 export async function stopTurn(conversationId: string) {

@@ -132,7 +132,7 @@ export interface PluginRecord {
   path: string | null
   status: 'loaded' | 'failed'
   error: string | null
-  provides: { models: string[]; contexts: string[]; dashboards: string[] }
+  provides: { models: string[]; contexts: string[]; dashboards: string[]; searches: string[] }
 }
 
 /** How many turns run at once, plus those kept for answering the user. */
@@ -148,6 +148,8 @@ export interface ModelEntry {
   model: string
   contextTokens?: number
   note?: string
+  /** `false` when the model cannot look at images. */
+  images?: false
 }
 
 export interface ModelSettingsInput {
@@ -198,8 +200,12 @@ export const api = {
     request<void>('POST', `/api/projects/${projectId}/notices/${noticeId}/undo`),
   removeMemory: (projectId: string, memoryId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/memory/${memoryId}`),
-  uploadFile: (projectId: string, file: Blob) =>
-    request<{ file: StoredFile }>('POST', `/api/projects/${projectId}/files`, file),
+  uploadFile: (projectId: string, file: Blob, forMessage = false) =>
+    request<{ file: StoredFile }>(
+      'POST',
+      `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
+      file,
+    ),
   getSandbox: () => request<{ sandbox: SandboxStatus }>('GET', '/api/sandbox'),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
@@ -239,10 +245,16 @@ export const api = {
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins/remove', { path }),
   saveModelSettings: (input: ModelSettingsInput) =>
     request<ModelSettings>('PUT', '/api/settings/models', input),
-  postMessage: (projectId: string, conversationId: string, content: string) =>
+  postMessage: (
+    projectId: string,
+    conversationId: string,
+    content: string,
+    attachments: { fileId: string; name: string }[] = [],
+  ) =>
     request<{ message: MessageView }>('POST', `/api/projects/${projectId}/messages`, {
       conversationId,
       content,
+      ...(attachments.length ? { attachments } : {}),
     }),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),

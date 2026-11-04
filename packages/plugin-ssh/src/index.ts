@@ -1,5 +1,6 @@
 import {
   definePlugin,
+  FileTooLargeError,
   WorkspacePathError,
   type ContextProvider,
   type ExecResult,
@@ -27,6 +28,7 @@ import {
   OUTSIDE,
   PROBE,
   READ,
+  READ_BYTES,
   STARTED,
   WORKTREES,
   WRITE,
@@ -89,6 +91,19 @@ export class RemoteWorkspace implements Workspace {
     const result = await this.shell.run(READ, [this.root, relativePath(path)])
     if (result.exitCode !== 0) throw failure(path, result)
     return result.stdout
+  }
+
+  async readBytes(path: string, maxBytes: number): Promise<Uint8Array> {
+    const result = await this.shell.run(READ_BYTES, [
+      this.root,
+      relativePath(path),
+      String(maxBytes),
+    ])
+    if (result.exitCode === 6) {
+      throw new FileTooLargeError(path, Number(result.stderr.trim()) || maxBytes + 1, maxBytes)
+    }
+    if (result.exitCode !== 0) throw failure(path, result)
+    return new Uint8Array(Buffer.from(result.stdout.replace(/\s+/g, ''), 'base64'))
   }
 
   async writeFile(path: string, content: string): Promise<void> {

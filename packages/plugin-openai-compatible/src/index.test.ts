@@ -1,6 +1,6 @@
 import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
-import { openAICompatibleProvider, requestBody } from './index'
+import { openAICompatibleProvider, requestBody, toWire } from './index'
 
 let lastBody: Record<string, unknown> | null = null
 let lastAuth: string | null = null
@@ -47,6 +47,44 @@ async function collect(): Promise<ModelStreamPart[]> {
 }
 
 describe('openai-compatible provider', () => {
+  test("sends images as parts, and tool images right after the step's results", () => {
+    const image = { mime: 'image/png', data: 'AAAA' }
+    const url = { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }
+    expect(
+      toWire([
+        { role: 'user', content: 'look', images: [image] },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            { id: 't1', name: 'f', arguments: '{}' },
+            { id: 't2', name: 'g', arguments: '{}' },
+          ],
+        },
+        { role: 'tool', toolCallId: 't1', content: 'a picture', images: [image] },
+        { role: 'tool', toolCallId: 't2', content: 'text' },
+        { role: 'user', content: 'next' },
+      ]),
+    ).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'look' }, url] },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 't1', type: 'function', function: { name: 'f', arguments: '{}' } },
+          { id: 't2', type: 'function', function: { name: 'g', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 't1', content: 'a picture' },
+      { role: 'tool', tool_call_id: 't2', content: 'text' },
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Images from the result of tool call t1:' }, url],
+      },
+      { role: 'user', content: 'next' },
+    ])
+  })
+
   test('sends the conversation in wire form and assembles streamed tool calls', async () => {
     reply = () =>
       sse(

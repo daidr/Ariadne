@@ -1,6 +1,6 @@
 import { Ariadne, parseBlock } from '@ariadne/core'
 import type { ContextProvider, ModelRequest, Workspace } from '@ariadne/plugin-sdk'
-import { WorkspacePathError } from '@ariadne/plugin-sdk'
+import { FileTooLargeError, WorkspacePathError } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { confirmation, resolvePlanOps } from './plan-tools'
 import { threadPrompt } from './prompts'
@@ -29,7 +29,7 @@ function checkPath(path: string) {
 }
 
 /** A workspace kept in memory, so tools can be tested without touching the disk. */
-function memoryWorkspace(files: Record<string, string>): Workspace {
+function memoryWorkspace(files: Record<string, string | Uint8Array>): Workspace {
   return {
     id: 'w',
     label: '/work/thread',
@@ -38,7 +38,14 @@ function memoryWorkspace(files: Record<string, string>): Workspace {
     async readFile(path) {
       const content = files[checkPath(path)]
       if (content === undefined) throw new Error(`ENOENT: ${path}`)
-      return content
+      return typeof content === 'string' ? content : new TextDecoder().decode(content)
+    },
+    async readBytes(path, maxBytes) {
+      const content = files[checkPath(path)]
+      if (content === undefined) throw new Error(`ENOENT: ${path}`)
+      const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content
+      if (bytes.byteLength > maxBytes) throw new FileTooLargeError(path, bytes.byteLength, maxBytes)
+      return bytes
     },
     async writeFile(path, content) {
       files[checkPath(path)] = content
@@ -53,7 +60,7 @@ function memoryWorkspace(files: Record<string, string>): Workspace {
   }
 }
 
-async function workspaceHost(files: Record<string, string>) {
+async function workspaceHost(files: Record<string, string | Uint8Array>) {
   const host = new PluginHost('/tmp/ariadne-test-plugins')
   const provider: ContextProvider<never> = {
     kind: 'memory',
@@ -233,6 +240,51 @@ describe('workspace tools', () => {
     })
     const threadRequest = model.requests.find((r) => system(r).includes('You are a thread'))
     expect(toolNames(threadRequest!)).toContain('run_command')
+  })
+})
+
+describe('images in the workspace', () => {
+  test('read_file hands an image to the model; the next request carries it', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7])
+    const files: Record<string, string | Uint8Array> = {
+      'shot.png': png,
+      'fake.png': 'not an image',
+      'big.png': new Uint8Array(6 * 1024 * 1024).fill(0x89),
+    }
+    const host = await workspaceHost(files)
+    const workspaces = new WorkspaceManager(app, host)
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'memory', settings: {} })
+    const thread = app.createThread(project.id, { title: '看截图' })
+    const model = fakeModel((request, role) => {
+      if (role === 'coordinator' || request.messages.some((m) => m.role === 'tool')) return say('')
+      return [
+        call('t1', 'read_file', { path: 'shot.png' }),
+        call('t2', 'read_file', { path: 'fake.png' }),
+        call('t3', 'read_file', { path: 'big.png' }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '看一下',
+    })
+    await startScheduler(model, workspaces).idle()
+
+    const tools = app.listTranscript(thread.id).filter((e) => e.kind === 'tool')
+    expect(tools.map((e) => e.kind === 'tool' && [e.isError, e.files?.length ?? 0])).toEqual([
+      [false, 1],
+      // Named .png but text: read as text.
+      [false, 0],
+      [true, 0],
+    ])
+    const second = model.requests.find((r) => r.messages.some((m) => m.role === 'tool'))!
+    const result = second.messages.find((m) => m.role === 'tool' && m.toolCallId === 't1')
+    expect(result?.role === 'tool' && result.images).toEqual([
+      { mime: 'image/png', data: Buffer.from(png).toString('base64') },
+    ])
   })
 })
 

@@ -9,6 +9,7 @@ import type {
   ModelProvider,
   Plugin,
   PluginContext,
+  SearchProvider,
 } from '@ariadne/plugin-sdk'
 import { noSandbox, type Sandbox } from './sandbox'
 
@@ -26,7 +27,7 @@ export interface PluginRecord {
   status: 'loaded' | 'failed'
   error: string | null
   /** The kinds it registered. */
-  provides: { models: string[]; contexts: string[]; dashboards: string[] }
+  provides: { models: string[]; contexts: string[]; dashboards: string[]; searches: string[] }
 }
 
 interface Loaded {
@@ -78,6 +79,7 @@ export class PluginHost {
   readonly models = new Map<string, ModelProvider<never>>()
   readonly contexts = new Map<string, ContextProvider<never>>()
   readonly dashboards = new Map<string, DashboardSource<never>>()
+  readonly searches = new Map<string, SearchProvider>()
   private readonly loaded: Loaded[] = []
   /** Paths that failed to load, kept so the settings page can say why. */
   private readonly failed: PluginRecord[] = []
@@ -109,7 +111,12 @@ export class PluginHost {
       throw new Error(`plugin ${plugin.id} is already loaded`)
     }
     const disposers: Dispose[] = []
-    const provides: PluginRecord['provides'] = { models: [], contexts: [], dashboards: [] }
+    const provides: PluginRecord['provides'] = {
+      models: [],
+      contexts: [],
+      dashboards: [],
+      searches: [],
+    }
     const register =
       <T extends { kind: string }>(map: Map<string, T>, list: string[]) =>
       (provider: T): Dispose => {
@@ -128,6 +135,7 @@ export class PluginHost {
       registerModelProvider: register(this.models, provides.models),
       registerContextProvider: register(this.contexts, provides.contexts),
       registerDashboardSource: register(this.dashboards, provides.dashboards),
+      registerSearchProvider: register(this.searches, provides.searches),
     }
     try {
       const dispose = await plugin.setup(ctx)
@@ -171,7 +179,7 @@ export class PluginHost {
         path,
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
-        provides: { models: [], contexts: [], dashboards: [] },
+        provides: { models: [], contexts: [], dashboards: [], searches: [] },
       })
       throw error
     }

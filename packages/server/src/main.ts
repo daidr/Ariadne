@@ -83,6 +83,7 @@ const scheduler = new Scheduler({
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
   dashboardSources: host.dashboards,
+  searchProviders: host.searches,
 })
 // Worktrees of work that landed go once the thread is finished with them.
 const janitor = new WorktreeJanitor(app, workspaces)

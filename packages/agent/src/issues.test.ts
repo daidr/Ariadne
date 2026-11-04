@@ -9,7 +9,7 @@ import { ToolInputError, type ToolContext, type ToolResult } from './tool-helper
 import { toolsFor } from './tools'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}' }
+const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne

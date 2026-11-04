@@ -1,7 +1,7 @@
 import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
-export { MergeRefused, WorkspacePathError } from './capabilities'
+export { FileTooLargeError, MergeRefused, WorkspacePathError } from './capabilities'
 export {
   describeHttpError,
   httpErrorPart,
@@ -71,6 +71,12 @@ export interface ToolCall {
   arguments: string
 }
 
+/** A picture for the model: PNG, JPEG, GIF or WebP, base64 encoded. */
+export interface ImagePart {
+  mime: string
+  data: string
+}
+
 /**
  * What a model thought before answering, as its provider returned it. `signature` (or the
  * opaque `text` of a `redacted` block) lets the provider check the block when it is sent
@@ -85,12 +91,21 @@ export interface ReasoningBlock {
 /**
  * One message of a model request. Both protocols require a tool result to follow the
  * assistant message that made the call, so assistant turns carry their calls and the whole
- * request can be rebuilt from the event log.
+ * request can be rebuilt from the event log. Images come after a message's text; a tool's
+ * images belong to its result (a protocol that cannot put them there sends them right
+ * after the results of the step).
  */
 export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string; images?: ImagePart[] }
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; reasoning?: ReasoningBlock[] }
-  | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
+  | {
+      role: 'tool'
+      toolCallId: string
+      content: string
+      isError?: boolean
+      images?: ImagePart[]
+    }
 
 export interface ToolSpec {
   name: string
@@ -209,6 +224,29 @@ export interface DashboardSource<Settings = Record<string, unknown>> {
   ): Promise<Record<string, unknown>>
 }
 
+/** One hit of a web search. */
+export interface SearchResult {
+  title: string
+  url: string
+  /** A few lines from the page about the query. */
+  snippet: string
+}
+
+/**
+ * Web search for threads and the coordinator. Ariadne ships none: a plugin brings the
+ * service, and keeps its credentials (say, an API key from the environment or its own
+ * file) to itself. Without one, agents have no search tool, only `fetch_url`.
+ */
+export interface SearchProvider {
+  kind: string
+  title: LocalizedText
+  /**
+   * Search now and return the best hits first, at most `limit`. Ariadne gives up after
+   * 30 seconds and aborts `signal`.
+   */
+  search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SearchResult[]>
+}
+
 /** What `setup` receives: every method registers something and returns its disposer. */
 export interface PluginContext {
   /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
@@ -218,6 +256,7 @@ export interface PluginContext {
   registerContextProvider(provider: ContextProvider<never>): Dispose
   registerModelProvider(provider: ModelProvider<never>): Dispose
   registerDashboardSource(source: DashboardSource<never>): Dispose
+  registerSearchProvider(provider: SearchProvider): Dispose
 }
 
 export interface Plugin {

@@ -247,6 +247,7 @@ export const en: Record<MessageKey, string> = {
   'block.fill': 'Fill in',
   'block.submit': 'Submit',
   'block.submitted': 'Submitted',
+  'block.withdrawn': 'Withdrawn: {reason}',
   'message.fromCoordinator': 'From the coordinator',
   'conversation.working': 'Working',
   'conversation.queued': 'Queued, starts when a slot frees up',
@@ -254,6 +255,7 @@ export const en: Record<MessageKey, string> = {
   'conversation.retry': 'Retry',
   'conversation.openSettings': 'Open settings',
   'conversation.cancelled': 'Stopped',
+  'composer.attach': 'Add images or files',
   'thread.placeholder': 'Message this thread',
   'thread.empty': 'No messages yet',
   'settings.open': 'Settings',
@@ -267,6 +269,7 @@ export const en: Record<MessageKey, string> = {
   'settings.clearSecret': 'Clear',
   'settings.noProviders': 'No model provider yet',
   'settings.contextTokens': 'Context (thousand tokens)',
+  'settings.modelImages': 'Sees images',
   'settings.slots': 'Turns at once',
   'settings.slotsHelp': 'How many coordinator and thread turns run at the same time',
   'settings.reservedSlots': 'Kept for you',
@@ -318,6 +321,11 @@ export const en: Record<MessageKey, string> = {
   'error.fileType':
     'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',
   'error.fileTooLarge': 'The file is too large; the limit is {max} MB',
+  'error.attachmentType':
+    'This kind of file is not supported: {type} (send an image or a text file)',
+  'error.tooManyAttachments': 'A message can carry at most {max} files',
+  'error.askWithdrawn': 'This question was withdrawn: {reason}',
+  'error.askClosed': 'This question was already answered or withdrawn',
   'error.memoryFull':
     'The project memory is full ({max} entries); remove some you no longer need first',
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',

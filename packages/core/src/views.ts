@@ -2,6 +2,7 @@ import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
+  Attachment,
   ArtifactKind,
   BranchMerge,
   IssueWriteAction,
@@ -93,6 +94,8 @@ export interface MessageAsk {
   attentionId: string
   block: AskBlock
   answer: BlockAnswer | null
+  /** Why the agent took the question back; `null` while it stands or once answered. */
+  withdrawn: string | null
 }
 
 export interface MessageView {
@@ -105,6 +108,8 @@ export interface MessageView {
   blocks: ShowBlock[]
   /** A choice, confirmation or form, shown last. */
   ask: MessageAsk | null
+  /** Images and text files the user sent with it. */
+  attachments: Attachment[]
   createdAt: number
   editedAt: number | null
   editReason: string | null
@@ -216,7 +221,16 @@ export interface ConversationView {
 
 /** One entry of what a conversation's agent has seen, oldest first. */
 export type TranscriptEntry =
-  | { seq: number; kind: 'message'; message: MessageView }
+  | {
+      seq: number
+      kind: 'message'
+      message: MessageView
+      /**
+       * The conversation's own questions still open when the user wrote this: the user may
+       * have answered one in words instead.
+       */
+      openAsks?: { attentionId: string; title: string }[]
+    }
   | { seq: number; kind: 'note'; note: TranscriptNote }
   | {
       seq: number
@@ -235,6 +249,7 @@ export type TranscriptEntry =
       name: string
       content: string
       isError: boolean
+      files?: Attachment[]
     }
   | {
       seq: number
@@ -405,7 +420,7 @@ export interface TraceTurn {
 export interface TraceToolCall extends ToolCallRecord {
   startedAt: number
   /** `null` while it runs, or when the turn ended before it did. */
-  result: { content: string; isError: boolean; finishedAt: number } | null
+  result: { content: string; isError: boolean; finishedAt: number; files: Attachment[] } | null
 }
 
 /** One request to a model: a step of the turn, or the summary of older history. */
@@ -438,14 +453,21 @@ export type TraceItem =
 
 /** A message of a model request, as the provider was handed it. */
 export type TraceMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string; images?: Attachment[] }
   | {
       role: 'assistant'
       content: string
       toolCalls?: ToolCallRecord[]
       reasoning?: ReasoningRecord[]
     }
-  | { role: 'tool'; toolCallId: string; content: string; isError?: boolean }
+  | {
+      role: 'tool'
+      toolCallId: string
+      content: string
+      isError?: boolean
+      images?: Attachment[]
+    }
 
 /** The whole of one model request, rebuilt from the event log. */
 export interface TraceRequestDetail {

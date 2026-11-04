@@ -41,6 +41,40 @@ async function collect(effort?: 'low'): Promise<ModelStreamPart[]> {
 }
 
 describe('anthropic provider', () => {
+  test('sends images after the text, and a tool result with its images', () => {
+    const image = { mime: 'image/png', data: 'AAAA' }
+    const source = { type: 'base64', media_type: 'image/png', data: 'AAAA' }
+    expect(
+      toWire([
+        { role: 'user', content: 'look', images: [image] },
+        { role: 'assistant', content: '', toolCalls: [{ id: 't1', name: 'f', arguments: '{}' }] },
+        { role: 'tool', toolCallId: 't1', content: 'the file', images: [image] },
+      ]).messages,
+    ).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'look' },
+          { type: 'image', source },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'f', input: {} }] },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 't1',
+            content: [
+              { type: 'text', text: 'the file' },
+              { type: 'image', source },
+            ],
+          },
+        ],
+      },
+    ])
+  })
+
   test('merges neighbouring roles and puts tool results in a user message', () => {
     expect(
       toWire([
