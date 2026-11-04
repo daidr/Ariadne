@@ -10,12 +10,15 @@ const status: Record<TodoStatus, ChatPlanItemStatus> = {
   next: 'pending',
 }
 
-/** A todo list as a checklist, in the order the agent wrote it. */
-export function todoPlan(todo: TodoView | null): ChatPlanItem[] {
+/**
+ * A todo list as a checklist, in the order the agent wrote it. A step only shows as running
+ * while a turn runs; between turns nothing is moving.
+ */
+export function todoPlan(todo: TodoView | null, working = true): ChatPlanItem[] {
   return (todo?.items ?? []).map((item, index) => ({
     key: index,
     label: item.label,
-    status: status[item.status],
+    status: item.status === 'doing' && !working ? 'pending' : status[item.status],
     ...(item.status === 'waiting'
       ? {
           description: item.detail

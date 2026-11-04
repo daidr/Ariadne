@@ -3,8 +3,9 @@ import { DouTag, DouText } from 'dou-ui'
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { checksTone, stageTone } from '../stage'
+import { checksTone } from '../stage'
 import type { PlanNodeData } from './layout'
+import StageLabel from '../components/StageLabel.vue'
 
 const props = defineProps<{ data: PlanNodeData }>()
 
@@ -77,9 +78,7 @@ const mark = computed(() => {
           >
             {{ t(`pr.checks.${thread.pullRequest.checks.state}`) }}
           </DouTag>
-          <DouTag size="sm" :tone="stageTone[thread.stage]">
-            {{ t(`thread.stage.${thread.stage}`) }}
-          </DouTag>
+          <StageLabel :stage="thread.stage" />
         </span>
       </li>
       <li v-if="data.threads.length > SHOWN">

@@ -23,6 +23,14 @@ describe('todoPlan', () => {
     expect(items[3]?.description).toBeUndefined()
   })
 
+  it('does not show a step as running between turns', () => {
+    const items = todoPlan(
+      { conversationId: 'c', items: [{ label: 'b', status: 'doing' }] } as never,
+      false,
+    )
+    expect(items[0]?.status).toBe('pending')
+  })
+
   it('is empty without a list', () => {
     expect(todoPlan(null)).toEqual([])
   })

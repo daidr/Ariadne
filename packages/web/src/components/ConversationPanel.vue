@@ -27,7 +27,6 @@ import {
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
-import { stageTone } from '../stage'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
@@ -41,6 +40,7 @@ import {
   stopTurn,
   undoNotice,
 } from '../store'
+import StageLabel from './StageLabel.vue'
 
 /** `thread` shows the open thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ thread?: boolean }>()
@@ -57,8 +57,8 @@ const thread = computed(() =>
     ? (state.detail?.threads.find((item) => item.id === state.threadId) ?? null)
     : null,
 )
-const todo = computed(() => todoPlan(view.value.todo))
 const working = computed(() => !!view.value.conversation?.turn)
+const todo = computed(() => todoPlan(view.value.todo, working.value))
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
   () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
@@ -182,9 +182,7 @@ watch(
         </DouButton>
       </div>
       <div class="conversation-meta">
-        <DouTag size="sm" :tone="stageTone[thread.stage]">
-          {{ t(`thread.stage.${thread.stage}`) }}
-        </DouTag>
+        <StageLabel :stage="thread.stage" />
         <DouTag
           v-if="thread.workspace?.branch"
           size="sm"
@@ -345,7 +343,7 @@ watch(
       <DouChatMessage v-if="working" sender="assistant" loading />
     </DouChatList>
     <div v-else class="conversation-empty">
-      <DouEmpty v-if="thread" :title="thread.title" :description="t('thread.empty')" />
+      <DouEmpty v-if="props.thread" :title="thread?.title" :description="t('thread.empty')" />
       <GettingStarted v-else-if="!started" @open-settings="emit('openSettings')" />
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
@@ -401,7 +399,7 @@ watch(
     <div class="conversation-input">
       <DouChatInput
         v-model="draft"
-        :placeholder="thread ? t('thread.placeholder') : t('coordinator.placeholder')"
+        :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         @submit="submit"
       />

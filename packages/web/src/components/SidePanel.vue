@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import type { ThreadStage } from '@ariadne/core'
-import { DouButton, DouEmpty, DouMenu, DouTabPanel, DouTabs, DouTag, DouText } from 'dou-ui'
+import { DouButton, DouEmpty, DouMenu, DouTabPanel, DouTabs, DouText } from 'dou-ui'
 import { MaximizeIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { stageTone } from '../stage'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import { openMain, openThread, state } from '../store'
 import MemoryList from './MemoryList.vue'
 import ProjectSource from './ProjectSource.vue'
+import StageLabel from './StageLabel.vue'
 
 const tab = ref('plan')
 const threadItems = computed(() =>
@@ -53,9 +53,7 @@ const stageOf = (id: string | number): ThreadStage =>
           <template #label="{ item }">
             <span class="thread">
               <DouText truncate>{{ item.label }}</DouText>
-              <DouTag size="sm" :tone="stageTone[stageOf(item.key)]">
-                {{ t(`thread.stage.${stageOf(item.key)}`) }}
-              </DouTag>
+              <StageLabel :stage="stageOf(item.key)" />
             </span>
           </template>
         </DouMenu>
