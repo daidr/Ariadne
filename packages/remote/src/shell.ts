@@ -59,6 +59,7 @@ export async function spawnScript(
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
+    windowsHide: true,
     env: { ...threadEnv(), ...options.env },
   })
   proc.stdin.write(options.payload)

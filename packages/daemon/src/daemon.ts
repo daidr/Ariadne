@@ -98,7 +98,7 @@ export async function certificate(home: string): Promise<Certificate> {
         '-addext',
         `subjectAltName=DNS:${CERT_NAME}`,
       ],
-      { stdout: 'ignore', stderr: 'pipe', stdin: 'ignore' },
+      { stdout: 'ignore', stderr: 'pipe', stdin: 'ignore', windowsHide: true },
     )
     const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
     if (code !== 0) throw new Error(`openssl 生成证书失败：${stderr.trim()}`)
@@ -211,6 +211,7 @@ export function serveDaemon(options: DaemonOptions) {
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',
+          windowsHide: true,
         },
       )
     } catch (error) {

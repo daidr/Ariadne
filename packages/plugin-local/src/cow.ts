@@ -26,7 +26,12 @@ export const platformCloner: Cloner = async (from, to) => {
     process.platform === 'darwin'
       ? ['cp', '-c', '-R', from, to]
       : ['cp', '-a', '--reflink=always', from, to]
-  const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' })
+  const proc = Bun.spawn(argv, {
+    stdout: 'ignore',
+    stderr: 'ignore',
+    stdin: 'ignore',
+    windowsHide: true,
+  })
   return (await proc.exited) === 0
 }
 

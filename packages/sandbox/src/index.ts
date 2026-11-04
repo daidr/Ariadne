@@ -292,7 +292,12 @@ export function seatbeltProfile(hidden: string[], keep: string[], readOnly: stri
 
 async function works(argv: string[]): Promise<boolean> {
   try {
-    const proc = Bun.spawn(argv, { stdout: 'ignore', stderr: 'ignore', stdin: 'ignore' })
+    const proc = Bun.spawn(argv, {
+      stdout: 'ignore',
+      stderr: 'ignore',
+      stdin: 'ignore',
+      windowsHide: true,
+    })
     return (await proc.exited) === 0
   } catch {
     return false
