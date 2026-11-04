@@ -271,6 +271,12 @@ interface ThreadRow {
   cached_tokens: number | null
   cache_write_tokens: number | null
   reasoning_tokens: number | null
+  turn_started_at: number | null
+  todo_items: string | null
+  todo_at: number | null
+  message_at: number | null
+  /** When the newest entry of what its agent has seen was written: a step, a tool result. */
+  transcript_at: number | null
 }
 
 interface AttentionRow {
@@ -325,14 +331,26 @@ const usageOf = (row: UsageColumns): UsageTotals => ({
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
-  c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, (
+  c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, c.turn_started_at,
+  td.items AS todo_items, td.updated_at AS todo_at,
+  (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
+  (SELECT e.at FROM events e WHERE e.seq = (SELECT tr.seq FROM transcript tr
+    WHERE tr.conversation_id = t.id ORDER BY tr.id DESC LIMIT 1)) AS transcript_at, (
   SELECT json_group_array(json_object('id', ar.id, 'kind', ar.kind, 'title', ar.title))
   FROM (SELECT ar.id, ar.kind, ar.title FROM json_each(t.last_artifacts) j
     JOIN artifacts ar ON ar.id = j.value AND ar.project_id = t.project_id ORDER BY j.key) ar
 ) AS report_artifacts, (
   SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
-) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
+) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id
+  LEFT JOIN todos td ON td.conversation_id = t.id`
+
+/** How many of its todos are done, out of how many; `null` while it has none. */
+function progressOf(items: string | null): ThreadView['progress'] {
+  const todos = items ? (JSON.parse(items) as TodoItem[]) : []
+  if (!todos.length) return null
+  return { done: todos.filter((item) => item.status === 'done').length, total: todos.length }
+}
 
 function toThread(row: ThreadRow): ThreadView {
   const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
@@ -377,8 +395,16 @@ function toThread(row: ThreadRow): ThreadView {
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
     model: row.model,
     usage: usageOf(row),
+    progress: progressOf(row.todo_items),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    activeAt: Math.max(
+      row.updated_at,
+      row.message_at ?? 0,
+      row.transcript_at ?? 0,
+      row.todo_at ?? 0,
+      row.turn_started_at ?? 0,
+    ),
   }
 }
 

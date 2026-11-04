@@ -42,6 +42,49 @@ describe('projects', () => {
   })
 })
 
+describe('thread list facts', () => {
+  test('count done todos and take the latest activity', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    expect(thread.progress).toBeNull()
+    expect(thread.activeAt).toBe(thread.updatedAt)
+
+    app.updateTodo(project.id, thread.id, [
+      { label: '读代码', status: 'done' },
+      { label: '改', status: 'doing' },
+      { label: '测', status: 'next' },
+    ])
+    const todoAt = clock
+    expect(app.getThread(thread.id)).toMatchObject({
+      progress: { done: 1, total: 3 },
+      activeAt: todoAt,
+    })
+
+    const message = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'user',
+      content: '顺便看看测试',
+    })
+    expect(app.getThread(thread.id).activeAt).toBe(message.createdAt)
+    expect(app.getThread(thread.id).updatedAt).toBeLessThan(message.createdAt)
+
+    // A turn that only calls tools still counts, and keeps counting once it ends.
+    const turnId = app.startTurn(thread.id, 'model')
+    app.recordStep(thread.id, turnId, {
+      reasoning: [],
+      text: '',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    const stepAt = clock
+    app.finishTurn(thread.id, turnId, 'failed')
+    expect(app.getThread(thread.id).activeAt).toBe(stepAt)
+  })
+})
+
 describe('thread stages', () => {
   test('follow what the thread waits on', () => {
     const project = app.createProject('P')

@@ -4,6 +4,7 @@ import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem, ThreadView } from '@ariadne/core'
+import { threadLine } from '../stage'
 import { openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
@@ -12,9 +13,9 @@ import ReportArtifacts from './ReportArtifacts.vue'
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
 
-/** What its last report asks of the user; its stage when it said nothing. */
+/** The line the thread list shows for it; its stage when its report said nothing. */
 function headline(thread: ThreadView): string {
-  return thread.lastHeadline ?? t(`thread.stage.${thread.stage}`)
+  return threadLine(thread) ?? t(`thread.stage.${thread.stage}`)
 }
 
 /** Every thread waiting on a card, so the user sees whom one answer reaches. */

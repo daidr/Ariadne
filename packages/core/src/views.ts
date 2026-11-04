@@ -91,8 +91,12 @@ export interface ThreadView {
   model: string | null
   /** Tokens its turns have used. */
   usage: UsageTotals
+  /** How many of its todos are done, out of how many; `null` while it has none. */
+  progress: { done: number; total: number } | null
   createdAt: number
   updatedAt: number
+  /** When it last did or heard something: a message, a model step or tool result, a todo update, a report. */
+  activeAt: number
 }
 
 /** What a thread reports: `summary` for the coordinator, `headline` for the user. */

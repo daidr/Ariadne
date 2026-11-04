@@ -1,20 +1,11 @@
 <script setup lang="ts">
-import {
-  DouButton,
-  DouEmpty,
-  DouSegmentedControl,
-  DouTag,
-  DouText,
-  DouTimeline,
-  DouTimelineItem,
-} from 'dou-ui'
+import { DouButton, DouEmpty, DouTag, DouText, DouTimeline, DouTimelineItem } from 'dou-ui'
 import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon } from '@dou-ui/icons'
 import type { PlanOp } from '@ariadne/core'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { locale, t, tm } from '../i18n'
 import { editPlan, openMain, state } from '../store'
 import { reasonOf } from './edit'
-import PlanBoard from './PlanBoard.vue'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
@@ -22,29 +13,8 @@ import PlanUndoButton from './PlanUndoButton.vue'
 import { clearPositions } from './ui'
 
 const selected = ref<string | null>(null)
-const VIEW_KEY = 'ariadne.planView'
-function savedView(): 'graph' | 'board' {
-  try {
-    return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'graph'
-  } catch {
-    return 'graph'
-  }
-}
-const view = ref<'graph' | 'board'>(savedView())
-watch(view, (next) => {
-  try {
-    localStorage.setItem(VIEW_KEY, next)
-  } catch {
-    // Not remembered; that is fine.
-  }
-})
-const viewOptions = computed(() => [
-  { value: 'graph', label: t('plan.view.graph') },
-  { value: 'board', label: t('plan.view.board') },
-])
-// Editing happens on the graph; the board only shows where the work stands.
 const editing = ref(false)
-const canEdit = computed(() => view.value === 'graph' && !!state.plan)
+const canEdit = computed(() => !!state.plan)
 
 async function addNode() {
   const op: PlanOp = {
@@ -104,20 +74,15 @@ const time = (at: number) =>
           {{ editing ? t('plan.edit.done') : t('plan.edit.start') }}
         </DouButton>
       </div>
-      <DouSegmentedControl
-        v-model="view"
-        size="sm"
-        :options="viewOptions"
-        class="plan-main-view"
-        :aria-label="t('plan.title')"
-      />
     </div>
     <div class="plan-main-body">
       <div class="plan-main-graph">
-        <template v-if="state.plan?.nodes.length">
-          <PlanBoard v-if="view === 'board'" v-model:selected="selected" :plan="state.plan" />
-          <PlanGraph v-else v-model:selected="selected" :plan="state.plan" :editable="editing" />
-        </template>
+        <PlanGraph
+          v-if="state.plan?.nodes.length"
+          v-model:selected="selected"
+          :plan="state.plan"
+          :editable="editing"
+        />
         <DouEmpty v-else :description="t('plan.empty')" />
       </div>
       <aside class="plan-main-side">
