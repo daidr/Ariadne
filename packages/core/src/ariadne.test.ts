@@ -8,7 +8,7 @@ import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
 
 /** A step's input pieces, for tests that record steps by hand. */
-const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}' }
+const STEP_INPUT = { system: 'system', tools: '[]', state: null, call: '{}', images: true }
 const TIMING = { startedAt: 0, firstOutputAt: null }
 
 let app: Ariadne
@@ -1048,7 +1048,7 @@ describe('usage, models and step input', () => {
         toolCalls: [],
         sawSeq: app.lastSeq(),
         usage: { input: 900, output: 30 },
-        input: { system, tools: '[]', state, call: '{}' },
+        input: { system, tools: '[]', state, call: '{}', images: true },
         timing: TIMING,
       })
       app.finishTurn(project.coordinatorId, turnId, 'completed')

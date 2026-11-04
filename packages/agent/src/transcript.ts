@@ -1,10 +1,30 @@
 import {
   MAX_CHECK_ATTEMPTS,
+  MAX_MODEL_IMAGE_BYTES,
+  MODEL_IMAGE_TYPES,
   unknownResult,
+  type Ariadne,
+  type Attachment,
+  type TraceMessage,
   type TranscriptEntry,
   type TranscriptNote,
 } from '@ariadne/core'
-import type { ChatMessage } from '@ariadne/plugin-sdk'
+import type { ChatMessage, ImagePart } from '@ariadne/plugin-sdk'
+import { fenced } from './prompts'
+
+/**
+ * A message of a model request as the transcript gives it: images are named by their
+ * files, read only when the request is sent, so the trace can show them by address.
+ */
+export type ModelMessage = TraceMessage
+
+/**
+ * How many images one request carries at most, the newest ones; older images are named
+ * in words instead. Services limit images per request, and they are costly to read.
+ */
+export const MAX_IMAGES = 20
+/** A text attachment is read up to this many characters. */
+export const MAX_ATTACHED_CHARS = 100_000
 
 /** How a note reads to the model. Titles are looked up so the model sees names, not ids. */
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
@@ -88,7 +108,7 @@ export function visibleHistory(entries: TranscriptEntry[]): {
  * holds tool output too. `state` is what stored state says now (the todo list, open
  * questions), which the notes may have blurred.
  */
-export const summaryMessages = (summary: string, state?: string): ChatMessage[] => [
+export const summaryMessages = (summary: string, state?: string): ModelMessage[] => [
   {
     role: 'user',
     content:
@@ -105,16 +125,25 @@ export const summaryMessages = (summary: string, state?: string): ChatMessage[] 
  * right after the step that made it, so input that arrived while tools ran is held back
  * until the step's results are in, and a call without a result gets one.
  */
+export interface ChatOptions {
+  /** The current state shown beside a summary. */
+  state?: string
+  /** Whether the model looks at images; without, they are named in words. */
+  images?: boolean
+  /** A text attachment's content, from the project's files. */
+  readText?: (fileId: string) => string | null
+}
+
 export function toChatMessages(
   transcript: TranscriptEntry[],
   titleOf: (threadId: string) => string,
-  options: { state?: string } = {},
-): ChatMessage[] {
+  options: ChatOptions = {},
+): ModelMessage[] {
   const visible = visibleHistory(transcript)
   const { entries } = visible
-  const out: ChatMessage[] = visible.summary ? summaryMessages(visible.summary, options.state) : []
+  const out: ModelMessage[] = visible.summary ? summaryMessages(visible.summary, options.state) : []
   let open: { ids: string[]; names: Map<string, string> } | null = null
-  let held: ChatMessage[] = []
+  let held: ModelMessage[] = []
   const results = new Map<string, Extract<TranscriptEntry, { kind: 'tool' }>>()
   for (const entry of entries) if (entry.kind === 'tool') results.set(entry.toolCallId, entry)
 
@@ -122,11 +151,13 @@ export function toChatMessages(
     if (!open) return
     for (const id of open.ids) {
       const result = results.get(id)
+      const images = viewable(result?.files ?? [], options)
       out.push({
         role: 'tool',
         toolCallId: id,
-        content: result?.content ?? unknownResult('missing result'),
+        content: (result?.content ?? unknownResult('missing result')) + images.notes,
         ...(result ? (result.isError ? { isError: true } : {}) : { isError: true }),
+        ...(images.shown.length ? { images: images.shown } : {}),
       })
     }
     open = null
@@ -157,17 +188,28 @@ export function toChatMessages(
         break
       case 'message': {
         const { message } = entry
-        const content =
-          message.kind === 'relay'
-            ? `<message_from_coordinator>\n${message.content}\n</message_from_coordinator>`
-            : message.content
-        const chat: ChatMessage = { role: 'user', content }
+        let chat: ModelMessage
+        if (message.kind === 'relay') {
+          chat = {
+            role: 'user',
+            content: `<message_from_coordinator>\n${message.content}\n</message_from_coordinator>`,
+          }
+        } else {
+          const files = attachedFiles(message.attachments, options)
+          chat = {
+            role: 'user',
+            content: [message.content, files.text, openAsksHint(entry.openAsks ?? [])]
+              .filter(Boolean)
+              .join('\n\n'),
+            ...(files.images.length ? { images: files.images } : {}),
+          }
+        }
         if (open) held.push(chat)
         else out.push(chat)
         break
       }
       case 'note': {
-        const chat: ChatMessage = { role: 'user', content: describeNote(entry.note, titleOf) }
+        const chat: ModelMessage = { role: 'user', content: describeNote(entry.note, titleOf) }
         if (open) held.push(chat)
         else out.push(chat)
         break
@@ -175,5 +217,142 @@ export function toChatMessages(
     }
   }
   closeStep()
-  return out
+  return keepNewestImages(out)
 }
+
+/** The images the model may look at, and words for the others. */
+function viewable(
+  files: Attachment[],
+  options: ChatOptions,
+): { shown: Attachment[]; notes: string } {
+  const shown: Attachment[] = []
+  const notes: string[] = []
+  for (const file of files) {
+    if (!file.mime.startsWith('image/')) continue
+    const why = !options.images
+      ? 'this model cannot look at images'
+      : !MODEL_IMAGE_TYPES.includes(file.mime)
+        ? `${file.mime} is not a type models read; PNG, JPEG, GIF and WebP are`
+        : file.size > MAX_MODEL_IMAGE_BYTES
+          ? `it is larger than ${MAX_MODEL_IMAGE_BYTES / 1024 / 1024} MB`
+          : null
+    if (why) notes.push(`[image "${file.name}" is not shown: ${why}]`)
+    else shown.push(file)
+  }
+  return { shown, notes: notes.length ? `\n${notes.join('\n')}` : '' }
+}
+
+/** What the user attached: text files in blocks of their own, images to look at. */
+function attachedFiles(
+  attachments: Attachment[],
+  options: ChatOptions,
+): { text: string; images: Attachment[] } {
+  const parts: string[] = []
+  for (const file of attachments) {
+    if (file.mime !== 'text/plain') continue
+    let body = options.readText?.(file.fileId) ?? null
+    if (body === null) {
+      parts.push(`[attached file "${file.name}" could not be read]`)
+      continue
+    }
+    const cut = body.length > MAX_ATTACHED_CHARS
+    if (cut) body = body.slice(0, MAX_ATTACHED_CHARS)
+    const block = fenced('attached_file', body, `name="${file.name.replace(/["<>]/g, '_')}"`)
+    parts.push(
+      `The user attached "${file.name}"; its text is inside <${block.tag}>${cut ? `, cut after ${MAX_ATTACHED_CHARS} characters` : ''}.\n${block.text}`,
+    )
+  }
+  const images = viewable(attachments, options)
+  if (images.notes) parts.push(images.notes.trim())
+  if (images.shown.length) {
+    parts.push(
+      `[the user attached ${images.shown.map((file) => `"${file.name}"`).join(', ')}, shown below]`,
+    )
+  }
+  return { text: parts.join('\n\n'), images: images.shown }
+}
+
+/** The user wrote while questions of this conversation were open: one may be answered. */
+function openAsksHint(asks: { attentionId: string; title: string }[]): string {
+  if (!asks.length) return ''
+  const list = asks.map((ask) => `- [${ask.attentionId}] ${ask.title}`).join('\n')
+  return `<open_questions>\nYour questions below were still waiting when the user wrote this. If the message answers one or makes it moot, act on it and withdraw that question with withdraw_ask; otherwise leave it open.\n${list}\n</open_questions>`
+}
+
+/** Only the newest `MAX_IMAGES` images go along; older ones are named instead. */
+function keepNewestImages(messages: ModelMessage[]): ModelMessage[] {
+  let kept = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!
+    if ((message.role !== 'user' && message.role !== 'tool') || !message.images) continue
+    const room = Math.max(0, MAX_IMAGES - kept)
+    const dropped = message.images.slice(0, Math.max(0, message.images.length - room))
+    kept += message.images.length - dropped.length
+    if (!dropped.length) continue
+    const rest = message.images.slice(dropped.length)
+    const note = dropped
+      .map((file) => `[image "${file.name}" was shown earlier and is no longer attached]`)
+      .join('\n')
+    // The messages were just built for this request, so they are changed in place.
+    message.content = `${message.content}\n${note}`
+    if (rest.length) message.images = rest
+    else delete message.images
+  }
+  return messages
+}
+
+/**
+ * The request as the provider gets it: each image read from the project's files. One that
+ * cannot be read is named in words instead.
+ */
+export function withImageData(
+  messages: ModelMessage[],
+  load: (file: Attachment) => ImagePart | null,
+): ChatMessage[] {
+  const read = (files: Attachment[] = []) => {
+    const images: ImagePart[] = []
+    const missing: string[] = []
+    for (const file of files) {
+      const part = load(file)
+      if (part) images.push(part)
+      else missing.push(`\n[image "${file.name}" could not be read]`)
+    }
+    return { images, missing: missing.join('') }
+  }
+  return messages.map((message): ChatMessage => {
+    switch (message.role) {
+      case 'system':
+      case 'assistant':
+        return message
+      case 'user': {
+        const { images, missing } = read(message.images)
+        return {
+          role: 'user',
+          content: message.content + missing,
+          ...(images.length ? { images } : {}),
+        }
+      }
+      case 'tool': {
+        const { images, missing } = read(message.images)
+        return {
+          role: 'tool',
+          toolCallId: message.toolCallId,
+          content: message.content + missing,
+          ...(message.isError ? { isError: true } : {}),
+          ...(images.length ? { images } : {}),
+        }
+      }
+    }
+  })
+}
+
+/** A text attachment's content from the project's files; `null` when it is gone. */
+export const attachedText =
+  (app: Ariadne) =>
+  (fileId: string): string | null => {
+    try {
+      return new TextDecoder().decode(app.getFile(fileId).data)
+    } catch {
+      return null
+    }
+  }

@@ -4,7 +4,8 @@
  * the scripts only have to make sure symbolic links do not lead out of the root.
  *
  * Exit codes: 3 a path outside the workspace, 4 the workspace root is gone, 2 a path that
- * is not what the call needs (a directory to read, a file to list), 5 a checkout problem.
+ * is not what the call needs (a directory to read, a file to list), 5 a checkout problem,
+ * 6 a file larger than the caller takes.
  */
 
 /** What EXEC says when its directory is outside the workspace, so it is told from the command's own exit code 3. */
@@ -47,6 +48,18 @@ path=$(resolve "$1") || exit 3
 [ -d "$path" ] && { printf '%s is a directory\\n' "$1" >&2; exit 2; }
 [ -e "$path" ] || { printf 'no such file: %s\\n' "$1" >&2; exit 2; }
 exec cat -- "$path"
+`
+
+/** The file base64 encoded; exit 6 with its size on the error output when over `$2` bytes. */
+export const READ_BYTES = `${PRELUDE}
+path=$(resolve "$1") || exit 3
+[ -d "$path" ] && { printf '%s is a directory\\n' "$1" >&2; exit 2; }
+[ -e "$path" ] || { printf 'no such file: %s\\n' "$1" >&2; exit 2; }
+size=$(wc -c < "$path") || exit 1
+size=\${size//[!0-9]/}
+[ "$size" -gt "$2" ] && { printf '%s\\n' "$size" >&2; exit 6; }
+# At most one byte past the limit, so a file that grew meanwhile is still caught.
+head -c "$(($2 + 1))" < "$path" | base64
 `
 
 export const WRITE = `${PRELUDE}

@@ -8,9 +8,9 @@ import {
   type TraceToolCall,
   type TraceTurn,
 } from '@ariadne/core'
-import type { ChatMessage, Effort, ModelRequest, ToolSpec } from '@ariadne/plugin-sdk'
+import type { Effort, ModelRequest, ToolSpec } from '@ariadne/plugin-sdk'
 import { summaryRequest } from './compaction'
-import { toChatMessages } from './transcript'
+import { attachedText, toChatMessages, withImageData, type ModelMessage } from './transcript'
 
 /** What a request went with, as `callOf` recorded it. */
 export interface RecordedCall {
@@ -92,6 +92,7 @@ export function buildTrace(
             content: event.data.content,
             isError: event.data.isError,
             finishedAt: event.at,
+            files: event.data.files ?? [],
           }
           running.delete(event.data.toolCallId)
         }
@@ -192,7 +193,8 @@ function parseCall(content: string | null): RecordedCall | null {
  * The whole of one model request of a conversation: a step (`turn.step`) or the summary
  * of its history (`conversation.compacted`). Rebuilt from the transcript as it stood then
  * and the pieces recorded with it, so it is what the provider was handed. `request` is
- * that, ready for the provider's `requestBody`; the detail leaves the body to the caller.
+ * that, ready for the provider's `requestBody`, with each image's bytes named by its file
+ * rather than spelled out; the detail leaves the body to the caller.
  */
 export function traceRequest(
   app: Ariadne,
@@ -237,7 +239,10 @@ export function traceRequest(
   const request: ModelRequest | null = call
     ? {
         model: call.model,
-        messages: current.messages,
+        messages: withImageData(current.messages, (file) => ({
+          mime: file.mime,
+          data: `<${file.size} bytes of file ${file.fileId}>`,
+        })),
         tools: current.tools,
         ...(call.effort ? { effort: call.effort } : {}),
       }
@@ -258,7 +263,7 @@ function requestOf(
   app: Ariadne,
   conversationId: string,
   event: AnyStoredEvent,
-): { messages: ChatMessage[]; tools: ToolSpec[] } {
+): { messages: ModelMessage[]; tools: ToolSpec[] } {
   const titleOf = (threadId: string) => {
     try {
       return app.getThread(threadId).title
@@ -266,11 +271,15 @@ function requestOf(
       return threadId
     }
   }
+  const readText = attachedText(app)
   if (event.type === 'conversation.compacted') {
     // The summary was asked for from the history as it stood when it was read.
     const transcript = app.listTranscript(conversationId, { upTo: event.data.sawSeq })
     const role = app.getConversation(conversationId).role
-    return { messages: summaryRequest(transcript, event.data.upTo, titleOf, role), tools: [] }
+    return {
+      messages: summaryRequest(transcript, event.data.upTo, titleOf, role, readText),
+      tools: [],
+    }
   }
   if (event.type !== 'turn.step') throw new DomainError('error.notFound', { what: event.id })
   const { input, sawSeq } = event.data
@@ -284,7 +293,11 @@ function requestOf(
   return {
     messages: [
       { role: 'system', content: piece(input.system) },
-      ...toChatMessages(transcript, titleOf, state === undefined ? {} : { state }),
+      ...toChatMessages(transcript, titleOf, {
+        readText,
+        images: input.images,
+        ...(state === undefined ? {} : { state }),
+      }),
     ],
     tools: JSON.parse(piece(input.tools)) as ToolSpec[],
   }

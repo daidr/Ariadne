@@ -48,7 +48,18 @@ export {
 } from './blocks'
 export type * from './blocks'
 export { DomainError } from './errors'
-export { FILE_TYPES, MAX_FILE_BYTES, fileUrl, type FileType, type StoredFile } from './files'
+export {
+  IMAGE_TYPES,
+  isImageType,
+  MAX_FILE_BYTES,
+  MAX_MODEL_IMAGE_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  MODEL_IMAGE_TYPES,
+  fileUrl,
+  type FileType,
+  type ImageType,
+  type StoredFile,
+} from './files'
 export type * from './events'
 export { newId } from './ids'
 export { defaultProjections, dropProjectionTables, MAX_CHECK_ATTEMPTS } from './projections'

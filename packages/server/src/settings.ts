@@ -26,7 +26,7 @@ export interface ModelProviderConfig {
  * One model the user set up, on one of their providers. `contextTokens` is how much it
  * reads at most; older history is summarised before a conversation gets near it. `note`
  * is what it is for, in the user's words: the coordinator reads it when it picks a model
- * for a thread.
+ * for a thread. Models look at images unless `images` says they cannot.
  */
 export interface ModelConfig {
   id: string
@@ -34,6 +34,8 @@ export interface ModelConfig {
   model: string
   contextTokens?: number
   note?: string
+  /** `false` when the model cannot look at images; it is told about them in words. */
+  images?: false
 }
 
 /**
@@ -237,6 +239,7 @@ export class SettingsStore {
         model: entry.model.trim(),
         ...(typeof size === 'number' ? { contextTokens: size } : {}),
         ...(note ? { note } : {}),
+        ...(entry.images === false ? { images: false as const } : {}),
       }
     })
     const roles = (body.roles ?? {}) as Partial<Record<Role, Partial<RoleConfig>>>
@@ -375,6 +378,7 @@ export class SettingsStore {
       model: chosen.model,
       label: this.labelOf(chosen),
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
+      images: chosen.images !== false,
       ...(this.config.models.roles[role].effort
         ? { effort: this.config.models.roles[role].effort }
         : {}),

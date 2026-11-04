@@ -5,6 +5,7 @@ import {
   readServerSentEvents,
   transportErrorPart,
   type ChatMessage,
+  type ImagePart,
   type ModelProvider,
   type ModelRequest,
   type ModelStreamPart,
@@ -19,12 +20,28 @@ export interface AnthropicSettings {
 
 const API_VERSION = '2023-06-01'
 
+type ImageBlock = {
+  type: 'image'
+  source: { type: 'base64'; media_type: string; data: string }
+}
+
 type Block =
   | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'redacted_thinking'; data: string }
   | { type: 'text'; text: string }
+  | ImageBlock
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+  | {
+      type: 'tool_result'
+      tool_use_id: string
+      content: string | ({ type: 'text'; text: string } | ImageBlock)[]
+      is_error?: boolean
+    }
+
+const imageBlock = (image: ImagePart): ImageBlock => ({
+  type: 'image',
+  source: { type: 'base64', media_type: image.mime, data: image.data },
+})
 
 interface WireMessage {
   role: 'user' | 'assistant'
@@ -70,7 +87,10 @@ export function toWire(messages: ChatMessage[]): { system: string; messages: Wir
         system.push(message.content)
         break
       case 'user':
-        push('user', message.content ? [{ type: 'text', text: message.content }] : [])
+        push('user', [
+          ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+          ...(message.images ?? []).map(imageBlock),
+        ])
         break
       case 'assistant':
         push('assistant', [
@@ -89,7 +109,12 @@ export function toWire(messages: ChatMessage[]): { system: string; messages: Wir
           {
             type: 'tool_result',
             tool_use_id: message.toolCallId,
-            content: message.content,
+            content: message.images?.length
+              ? [
+                  ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+                  ...message.images.map(imageBlock),
+                ]
+              : message.content,
             ...(message.isError ? { is_error: true } : {}),
           },
         ])

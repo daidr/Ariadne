@@ -23,13 +23,19 @@ import { answerAttention } from '../store'
 
 /**
  * A choice, confirmation or form an agent (or the system) asks the user, the same in the
- * conversation and under "needs me". Once answered it shows the answer in place.
+ * conversation and under "needs me". Once answered it shows the answer in place; once the
+ * agent took it back, only what it asked and why it was withdrawn.
  */
 const props = defineProps<{
   attentionId: string
   block: AskBlock
   answer: BlockAnswer | null
+  withdrawn?: string | null
 }>()
+
+const title = computed(() =>
+  props.block.type === 'choice' ? props.block.question : props.block.title,
+)
 
 const sending = ref(false)
 async function send(answer: BlockAnswer) {
@@ -92,7 +98,13 @@ function submit() {
 
 <template>
   <div class="ask-block">
-    <template v-if="block.type === 'choice'">
+    <template v-if="withdrawn">
+      <DouText weight="medium" class="ask-title">{{ title }}</DouText>
+      <DouText variant="tertiary" size="sm">{{
+        t('block.withdrawn', { reason: withdrawn })
+      }}</DouText>
+    </template>
+    <template v-else-if="block.type === 'choice'">
       <template v-if="answer">
         <DouText weight="medium" class="ask-title">{{ block.question }}</DouText>
         <DouText variant="secondary" size="sm" class="ask-answer">

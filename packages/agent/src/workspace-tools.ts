@@ -1,5 +1,5 @@
-import { DomainError } from '@ariadne/core'
-import type { Workspace } from '@ariadne/plugin-sdk'
+import { DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
+import { FileTooLargeError, type Workspace } from '@ariadne/plugin-sdk'
 import {
   json,
   optionalInt,
@@ -63,10 +63,50 @@ const listDir = workspaceTool(
   },
 )
 
+/** Image files by extension, checked against their first bytes before the model sees them. */
+const IMAGE_EXTENSIONS: Record<string, { mime: string; magic: (bytes: Uint8Array) => boolean }> = {
+  png: { mime: 'image/png', magic: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e },
+  jpg: { mime: 'image/jpeg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 },
+  jpeg: { mime: 'image/jpeg', magic: (b) => b[0] === 0xff && b[1] === 0xd8 },
+  gif: { mime: 'image/gif', magic: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 },
+  webp: {
+    mime: 'image/webp',
+    magic: (b) => b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57 && b[9] === 0x45,
+  },
+}
+
+/** An image of the workspace, kept in the project's files and handed to the model. */
+async function readImage(
+  path: string,
+  workspace: Workspace,
+  ctx: ToolContext,
+): Promise<ToolResult | null> {
+  const type = IMAGE_EXTENSIONS[path.split('.').pop()?.toLowerCase() ?? '']
+  if (!type) return null
+  let data: Uint8Array
+  try {
+    data = await workspace.readBytes(path, MAX_MODEL_IMAGE_BYTES)
+  } catch (error) {
+    if (error instanceof FileTooLargeError) {
+      return {
+        content: `${path} is ${Math.round(error.size / 1024)} KB, larger than the ${MAX_MODEL_IMAGE_BYTES / 1024 / 1024} MB an image can be to look at. Make a smaller copy first (e.g. with an image tool in run_command) and read that.`,
+        isError: true,
+      }
+    }
+    throw error
+  }
+  if (!type.magic(data)) return null
+  const file = ctx.app.saveFile(ctx.projectId, { mime: type.mime, data })
+  return {
+    content: `${path} is an image (${type.mime}, ${Math.max(1, Math.round(file.size / 1024))} KB); it is attached.`,
+    files: [{ fileId: file.id, name: path, mime: file.mime, size: file.size }],
+  }
+}
+
 const readFile = workspaceTool(
   {
     name: 'read_file',
-    description: `Read a text file of your workspace, with line numbers. Reads ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise.`,
+    description: `Read a file of your workspace: text with line numbers, ${DEFAULT_LINES} lines from "offset" (1-based) unless "limit" says otherwise; a PNG, JPEG, GIF or WebP image as a picture you see.`,
     parameters: {
       type: 'object',
       properties: {
@@ -77,8 +117,15 @@ const readFile = workspaceTool(
       required: ['path'],
     },
   },
-  async (args, workspace) => {
-    const lines = (await workspace.readFile(str(args, 'path'))).split('\n')
+  async (args, workspace, ctx) => {
+    const path = str(args, 'path')
+    const image = await readImage(path, workspace, ctx)
+    if (image) return image
+    const text = await workspace.readFile(path)
+    if (text.includes('\u0000')) {
+      return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
+    }
+    const lines = text.split('\n')
     const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
     const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
     const shown = lines.slice(offset - 1, offset - 1 + limit)

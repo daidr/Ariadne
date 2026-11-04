@@ -30,6 +30,11 @@ export interface Workspace {
    * including through symbolic links, with a `WorkspacePathError`.
    */
   readFile(path: string): Promise<string>
+  /**
+   * A file's bytes, for files that are not text (images). Larger than `maxBytes` is
+   * refused with a `FileTooLargeError`, without reading it all.
+   */
+  readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   writeFile(path: string, content: string): Promise<void>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
   exec(
@@ -266,6 +271,18 @@ export class WorkspacePathError extends Error {
   constructor(readonly path: string) {
     super(`${path} is outside the workspace`)
     this.name = 'WorkspacePathError'
+  }
+}
+
+/** A file larger than the caller can take. */
+export class FileTooLargeError extends Error {
+  constructor(
+    readonly path: string,
+    readonly size: number,
+    readonly max: number,
+  ) {
+    super(`${path} has ${size} bytes, more than ${max}`)
+    this.name = 'FileTooLargeError'
   }
 }
 

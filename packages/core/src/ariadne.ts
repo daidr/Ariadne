@@ -17,6 +17,7 @@ import type {
   AnyNewEvent,
   AnyStoredEvent,
   ArtifactKind,
+  Attachment,
   BranchMerge,
   Author,
   IssueWrite,
@@ -36,7 +37,14 @@ import type {
   TurnOutcome,
 } from './events'
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
-import { readFile, saveFile, setupFiles, storeInlineImages, type StoredFile } from './files'
+import {
+  fileInfo,
+  readFile,
+  saveFile,
+  setupFiles,
+  storeInlineImages,
+  type StoredFile,
+} from './files'
 import { newId } from './ids'
 import { applyOps, describePlanOps, needsConfirmation, previewPlanOps } from './plan'
 import {
@@ -74,7 +82,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 22
+export const PROJECTION_VERSION = 23
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -89,6 +97,8 @@ const TURN_EVENT_TYPES = [
 ] as const
 
 /** Memory is read into every model request, so it stays short. */
+/** Files the user can send with one message. */
+export const MAX_ATTACHMENTS = 10
 export const MAX_MEMORIES = 50
 export const MAX_MEMORY = 500
 
@@ -256,19 +266,21 @@ interface MessageRow {
   original_content: string | null
   edited_since_read: number
   blocks: string | null
+  attachments: string | null
   ask_id: string | null
   ask_block: string | null
   ask_answer: string | null
+  ask_withdrawn: string | null
 }
 
 /** Messages with the ask block they carry, if any, and its answer. */
-const MESSAGE_SELECT = `SELECT m.*, a.id AS ask_id, a.block AS ask_block, a.answer AS ask_answer
-  FROM messages m LEFT JOIN attentions a ON a.message_id = m.id`
+const MESSAGE_SELECT = `SELECT m.*, a.id AS ask_id, a.block AS ask_block, a.answer AS ask_answer,
+  a.withdrawn AS ask_withdrawn FROM messages m LEFT JOIN attentions a ON a.message_id = m.id`
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
   c.output_tokens, (
-  SELECT count(*) FROM attentions a WHERE a.answered = 0 AND (a.thread_id = t.id OR EXISTS (
+  SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id`
 
@@ -345,8 +357,10 @@ function toMessage(row: MessageRow): MessageView {
             attentionId: row.ask_id,
             block: JSON.parse(row.ask_block) as AskBlock,
             answer: row.ask_answer ? (JSON.parse(row.ask_answer) as BlockAnswer) : null,
+            withdrawn: row.ask_withdrawn,
           }
         : null,
+    attachments: row.attachments ? (JSON.parse(row.attachments) as Attachment[]) : [],
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
@@ -443,7 +457,7 @@ export class Ariadne {
   listOpenAttentions(projectId: string): AttentionView[] {
     return this.db
       .query<AttentionRow, [string]>(
-        'SELECT * FROM attentions WHERE project_id = ? AND answered = 0 ORDER BY id',
+        'SELECT * FROM attentions WHERE project_id = ? AND closed = 0 ORDER BY id',
       )
       .all(projectId)
       .map((row) => toAttention(row, this.joinedBy(row.id, row.thread_id)))
@@ -551,7 +565,12 @@ export class Ariadne {
           if (message) {
             const content =
               options.upTo === undefined ? message.content : this.contentAt(message, upTo)
-            entries.push({ seq: row.seq, kind: 'message', message: { ...message, content } })
+            entries.push({
+              seq: row.seq,
+              kind: 'message',
+              message: { ...message, content },
+              ...(payload?.openAsks ? { openAsks: payload.openAsks } : {}),
+            })
           }
           break
         }
@@ -815,7 +834,7 @@ export class Ariadne {
       .query<
         {
           id: string
-          answered: number
+          closed: number
           approved: number | null
           thread_id: string | null
           status: string | null
@@ -825,7 +844,7 @@ export class Ariadne {
         },
         [string, string]
       >(
-        `SELECT a.id, a.answered, a.approved, a.thread_id, w.status, w.thread_id AS writer, w.url,
+        `SELECT a.id, a.closed, a.approved, a.thread_id, w.status, w.thread_id AS writer, w.url,
            w.written_seq
          FROM attentions a
          LEFT JOIN issue_writes w ON w.attention_id = a.id
@@ -844,7 +863,7 @@ export class Ariadne {
         { type: 'attention.joined', projectId, data: { attentionId: newest.id, threadId } },
       ])
     }
-    if (!newest.answered) {
+    if (!newest.closed) {
       join()
       return { state: 'pending' }
     }
@@ -983,7 +1002,7 @@ export class Ariadne {
   ): 'approved' | 'declined' | 'pending' | null {
     const approved = this.db
       .query<{ id: string }, [string, string]>(
-        'SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 1 AND approved = 1 LIMIT 1',
+        'SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND closed = 1 AND approved = 1 LIMIT 1',
       )
       .get(projectId, purpose)
     if (approved) return 'approved'
@@ -991,7 +1010,7 @@ export class Ariadne {
     const mine = this.db
       .query<{ approved: number }, [string, string, string, string]>(
         `SELECT a.approved FROM attentions a
-         WHERE a.project_id = ? AND a.purpose = ? AND a.answered = 1
+         WHERE a.project_id = ? AND a.purpose = ? AND a.closed = 1
            AND (a.thread_id = ? OR EXISTS (
              SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = ?))
          ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
@@ -1004,7 +1023,7 @@ export class Ariadne {
     return (
       this.db
         .query<{ id: string }, [string, string]>(
-          `SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 0
+          `SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND closed = 0
            ORDER BY created_at, id LIMIT 1`,
         )
         .get(projectId, purpose)?.id ?? null
@@ -1092,9 +1111,14 @@ export class Ariadne {
 
   answerAttention(attentionId: string, input: unknown) {
     const row = this.db
-      .query<AttentionRow & { answered: number }, [string]>('SELECT * FROM attentions WHERE id = ?')
+      .query<AttentionRow & { closed: number; withdrawn: string | null }, [string]>(
+        'SELECT * FROM attentions WHERE id = ?',
+      )
       .get(attentionId)
-    if (!row || row.answered === 1) throw new DomainError('error.notFound', { what: attentionId })
+    if (row?.withdrawn !== null && row?.withdrawn !== undefined) {
+      throw new DomainError('error.askWithdrawn', { reason: row.withdrawn })
+    }
+    if (!row || row.closed === 1) throw new DomainError('error.notFound', { what: attentionId })
     const answer = parseAnswer(toAttention(row).block, input)
     const events: Parameters<EventStore['append']>[0] = [
       {
@@ -1141,6 +1165,38 @@ export class Ariadne {
   }
 
   /**
+   * An agent takes back a question it asked in its own conversation, e.g. after the user
+   * answered it in words. The system's own approvals and proposals are not the agent's to
+   * withdraw, and neither is a question already answered.
+   */
+  withdrawAttention(conversationId: string, attentionId: string, reason: string): void {
+    const row = this.db
+      .query<
+        {
+          project_id: string
+          conversation_id: string | null
+          message_id: string | null
+          closed: number
+        },
+        [string]
+      >('SELECT project_id, conversation_id, message_id, closed FROM attentions WHERE id = ?')
+      .get(attentionId)
+    if (!row || row.conversation_id !== conversationId || row.message_id === null) {
+      throw new DomainError('error.notFound', { what: attentionId })
+    }
+    if (row.closed === 1) throw new DomainError('error.askClosed')
+    const text = reason.replace(/\s+/g, ' ').trim().slice(0, 200)
+    if (!text) throw new DomainError('error.invalidBody', { reason: 'reason' })
+    this.store.append([
+      {
+        type: 'attention.withdrawn',
+        projectId: row.project_id,
+        data: { attentionId, reason: text },
+      },
+    ])
+  }
+
+  /**
    * The user speaking to a stopped thread (a message, an answer) lets it go on, the same
    * as pressing 继续: the thread and the coordinator are told why it had stopped.
    */
@@ -1174,9 +1230,15 @@ export class Ariadne {
       content: string
       kind?: MessageKind
       blocks?: unknown[]
+      /** Files of this project the user sends with it, as uploaded. */
+      attachments?: { fileId: string; name: string }[]
     },
   ): MessageView {
     this.assertConversationIn(projectId, input.conversationId)
+    const attachments = this.attachmentsOf(projectId, input.attachments ?? [])
+    if (attachments.length && input.author !== 'user') {
+      throw new DomainError('error.invalidBody', { reason: 'attachments' })
+    }
     const kind = input.kind ?? 'chat'
     // Only the coordinator relays into a thread.
     if (kind === 'relay' && input.author !== 'coordinator') {
@@ -1200,7 +1262,7 @@ export class Ariadne {
       })
     }
     const shown = parsed.filter((block): block is ShowBlock => !isAskBlock(block))
-    if (!input.content.trim() && !parsed.length) {
+    if (!input.content.trim() && !parsed.length && !attachments.length) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
     const messageId = newId('msg')
@@ -1220,6 +1282,7 @@ export class Ariadne {
           kind,
           content: input.content,
           ...(shown.length ? { blocks: shown } : {}),
+          ...(attachments.length ? { attachments } : {}),
         },
       },
       ...asks.map((block) =>
@@ -1231,6 +1294,28 @@ export class Ariadne {
       ),
     ])
     return this.getMessage(messageId)
+  }
+
+  /** Attachments checked against the project's files, named as given (trimmed, one line). */
+  private attachmentsOf(
+    projectId: string,
+    given: { fileId: string; name: string }[],
+  ): Attachment[] {
+    if (!Array.isArray(given)) throw new DomainError('error.invalidBody', { reason: 'attachments' })
+    if (given.length > MAX_ATTACHMENTS) {
+      throw new DomainError('error.tooManyAttachments', { max: MAX_ATTACHMENTS })
+    }
+    return given.map((item) => {
+      const fileId = typeof item?.fileId === 'string' ? item.fileId : ''
+      const info = fileId ? fileInfo(this.db, projectId, fileId) : null
+      if (!info) throw new DomainError('error.notFound', { what: fileId || 'file' })
+      const name =
+        (typeof item.name === 'string' ? item.name : '')
+          .replace(/[\s\p{Cc}]+/gu, ' ')
+          .trim()
+          .slice(0, 200) || fileId
+      return { fileId, name, mime: info.mime, size: info.size }
+    })
   }
 
   /**
@@ -1793,9 +1878,13 @@ export class Ariadne {
   // ---- files ----
 
   /** Keep a file people added to the project, such as an image for a whiteboard. */
-  saveFile(projectId: string, input: { mime: string; data: Uint8Array }): StoredFile {
+  saveFile(
+    projectId: string,
+    input: { mime: string; data: Uint8Array },
+    options: { text?: boolean } = {},
+  ): StoredFile {
     this.getProject(projectId)
-    return saveFile(this.db, projectId, input, this.now())
+    return saveFile(this.db, projectId, input, this.now(), options)
   }
 
   getFile(fileId: string): { mime: string; data: Uint8Array } {
@@ -1928,7 +2017,7 @@ export class Ariadne {
       toolCalls: ToolCallRecord[]
       sawSeq: number
       usage: TokenUsage | null
-      input: { system: string; tools: string; state: string | null; call: string }
+      input: { system: string; tools: string; state: string | null; call: string; images: boolean }
       timing: CallTiming
     },
   ): void {
@@ -1939,6 +2028,7 @@ export class Ariadne {
       tools: keep(step.input.tools),
       state: step.input.state === null ? null : keep(step.input.state),
       call: keep(step.input.call),
+      images: step.input.images,
     }
     const { text, reasoning, toolCalls, sawSeq, usage, timing } = step
     const finish = toolCalls.length ? ('tool-calls' as const) : ('stop' as const)
@@ -2056,11 +2146,22 @@ export class Ariadne {
   recordToolResult(
     conversationId: string,
     turnId: string,
-    result: { toolCallId: string; name: string; content: string; isError: boolean },
+    result: {
+      toolCallId: string
+      name: string
+      content: string
+      isError: boolean
+      files?: Attachment[]
+    },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
+    const { files, ...rest } = result
     this.store.append([
-      { type: 'tool.finished', projectId, data: { conversationId, turnId, ...result } },
+      {
+        type: 'tool.finished',
+        projectId,
+        data: { conversationId, turnId, ...rest, ...(files?.length ? { files } : {}) },
+      },
     ])
   }
 
