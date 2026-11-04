@@ -122,6 +122,8 @@ interface Chunk {
     prompt_tokens?: number
     completion_tokens?: number
     prompt_tokens_details?: { cached_tokens?: number }
+    /** DeepSeek reports cache hits here instead of under `prompt_tokens_details`. */
+    prompt_cache_hit_tokens?: number
     completion_tokens_details?: { reasoning_tokens?: number }
   } | null
   error?: { message?: string }
@@ -225,7 +227,8 @@ async function* readStream(
         return
       }
       if (chunk.usage) {
-        const cached = chunk.usage.prompt_tokens_details?.cached_tokens
+        const cached =
+          chunk.usage.prompt_tokens_details?.cached_tokens ?? chunk.usage.prompt_cache_hit_tokens
         const thought = chunk.usage.completion_tokens_details?.reasoning_tokens
         yield {
           type: 'usage',

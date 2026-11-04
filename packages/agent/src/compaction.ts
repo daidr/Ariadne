@@ -27,6 +27,7 @@ export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): Toke
     input: part.input,
     output: part.output,
     ...(part.cached ? { cached: part.cached } : {}),
+    ...(part.cacheWrite ? { cacheWrite: part.cacheWrite } : {}),
     ...(part.reasoning ? { reasoning: part.reasoning } : {}),
   }
 }

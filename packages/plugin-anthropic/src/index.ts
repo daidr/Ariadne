@@ -235,6 +235,7 @@ async function* readStream(
   const thoughts = new Map<number, ReasoningBlock & { startedAt: number }>()
   let input = 0
   let cached = 0
+  let cacheWrite = 0
   let output = 0
   let stop: string | null = null
   let done = false
@@ -255,6 +256,7 @@ async function* readStream(
             (usage?.cache_creation_input_tokens ?? 0) +
             (usage?.cache_read_input_tokens ?? 0)
           cached = usage?.cache_read_input_tokens ?? 0
+          cacheWrite = usage?.cache_creation_input_tokens ?? 0
           output = usage?.output_tokens ?? 0
           break
         }
@@ -339,7 +341,13 @@ async function* readStream(
     if (!signal?.aborted) yield incompletePart()
     return
   }
-  yield { type: 'usage', input, output, ...(cached ? { cached } : {}) }
+  yield {
+    type: 'usage',
+    input,
+    output,
+    ...(cached ? { cached } : {}),
+    ...(cacheWrite ? { cacheWrite } : {}),
+  }
   yield {
     type: 'finish',
     reason: stop === 'tool_use' ? 'tool-calls' : stop === 'max_tokens' ? 'length' : 'stop',

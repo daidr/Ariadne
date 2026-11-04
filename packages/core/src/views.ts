@@ -42,7 +42,20 @@ export interface ProjectView {
   /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
   mcp: string[]
   /** Tokens every conversation of the project has used, summaries included. */
-  usage: { input: number; output: number }
+  usage: UsageTotals
+}
+
+/**
+ * Tokens used, summed over requests: `input` is everything read, of it `cached` from the
+ * provider's cache and `cacheWrite` written to it; `reasoning` is the part of `output`
+ * spent thinking. A part the provider did not report counts as 0.
+ */
+export interface UsageTotals {
+  input: number
+  output: number
+  cached: number
+  cacheWrite: number
+  reasoning: number
 }
 
 export interface ThreadView {
@@ -77,7 +90,7 @@ export interface ThreadView {
   /** The model setting it was given; `null` uses the default for threads. */
   model: string | null
   /** Tokens its turns have used. */
-  usage: { input: number; output: number }
+  usage: UsageTotals
   createdAt: number
   updatedAt: number
 }
@@ -235,7 +248,7 @@ export interface ConversationView {
   turn: { id: string; startedAt: number; model: string | null; activity: string | null } | null
   lastOutcome: TurnOutcome | null
   lastError: LocalizedMessage | null
-  usage: { input: number; output: number }
+  usage: UsageTotals
   /** How many tokens the model read in its latest step: how full its context is. */
   contextTokens: number
 }

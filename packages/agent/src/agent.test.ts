@@ -77,7 +77,13 @@ describe('a coordinator turn', () => {
 
     const coordinator = app.getConversation(project.coordinatorId)
     expect(coordinator).toMatchObject({ pendingSeq: 0, turn: null, lastOutcome: 'completed' })
-    expect(coordinator.usage).toEqual({ input: 10, output: 5 })
+    expect(coordinator.usage).toEqual({
+      input: 10,
+      output: 5,
+      cached: 0,
+      cacheWrite: 0,
+      reasoning: 0,
+    })
 
     // The second request replays the first step and both results, in call order.
     const second = model.requests.find(
