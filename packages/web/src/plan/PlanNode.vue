@@ -13,6 +13,7 @@ const tone = {
   process: 'primary',
   wait: 'warning',
   error: 'danger',
+  paused: 'neutral',
   finish: 'success',
 } as const
 

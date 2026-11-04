@@ -15,7 +15,7 @@ import {
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
-import { api, ApiError, type ModelKind, type ModelSettings } from '../api'
+import { api, ApiError, type Concurrency, type ModelKind, type ModelSettings } from '../api'
 import { state } from '../store'
 import { lt, t, tm } from '../i18n'
 import PluginSettings from './PluginSettings.vue'
@@ -37,6 +37,8 @@ const defaultProvider = ref<string | null>(null)
 const defaultModel = ref('')
 // In thousands of tokens; empty uses the default.
 const contextK = ref<number | null>(null)
+// What the scheduler may run at once; null until loaded, then saved with the models.
+const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -76,7 +78,9 @@ watch(open, async (isOpen) => {
   if (!isOpen) return
   error.value = null
   try {
-    load(await api.getModelSettings())
+    const [models, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
+    load(models)
+    concurrency.value = slots
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
   }
@@ -133,6 +137,7 @@ async function save() {
             : null,
       }),
     )
+    if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
     open.value = false
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -204,9 +209,12 @@ async function save() {
               >
                 <DouInput v-model="defaultModel" />
               </DouFormItem>
+            </div>
+            <div class="settings-row">
               <DouFormItem
                 :label="t('settings.contextTokens')"
                 :help="t('settings.contextTokensHelp')"
+                class="settings-grow"
               >
                 <DouInputNumber
                   v-model="contextK"
@@ -215,6 +223,24 @@ async function save() {
                   :step="8"
                   placeholder="128"
                 />
+              </DouFormItem>
+            </div>
+          </DouForm>
+          <DouForm v-if="concurrency" layout="vertical" size="sm">
+            <div class="settings-row">
+              <DouFormItem
+                :label="t('settings.slots')"
+                :help="t('settings.slotsHelp')"
+                class="settings-grow"
+              >
+                <DouInputNumber v-model="concurrency.slots" :min="1" :max="16" :step="1" />
+              </DouFormItem>
+              <DouFormItem
+                :label="t('settings.reservedSlots')"
+                :help="t('settings.reservedSlotsHelp')"
+                class="settings-grow"
+              >
+                <DouInputNumber v-model="concurrency.reserved" :min="0" :max="4" :step="1" />
               </DouFormItem>
             </div>
           </DouForm>

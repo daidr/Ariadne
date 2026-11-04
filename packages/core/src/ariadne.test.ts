@@ -722,3 +722,61 @@ describe('project memory', () => {
     )
   })
 })
+
+describe('stopped threads', () => {
+  test('a stopped thread is not scheduled; writing to it lets it go on', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    expect(() => app.stopThread(thread.id, { reason: '  ', by: 'user' })).toThrow(DomainError)
+    app.stopThread(thread.id, { reason: '等确认', by: project.coordinatorId })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '补一句',
+    })
+    expect(app.listPendingConversations().map((c) => c.id)).not.toContain(thread.id)
+    expect(app.getThread(thread.id).stage).toBe('stopped')
+    // Stopping again changes nothing; the user's own words resume it.
+    app.stopThread(thread.id, { reason: '别的', by: 'user' })
+    expect(app.getThread(thread.id).stopped?.reason).toBe('等确认')
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '继续吧' })
+    expect(app.getThread(thread.id).stopped).toBeNull()
+    expect(app.listPendingConversations().map((c) => c.id)).toContain(thread.id)
+    app.rebuildProjections()
+    expect(app.getThread(thread.id).stopped).toBeNull()
+  })
+  test('the user resuming by a message or an answer tells the thread and the coordinator', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '实现' })
+    const notes = (id: string) =>
+      app.listTranscript(id).flatMap((e) => (e.kind === 'note' ? [e.note.type] : []))
+    app.stopThread(thread.id, { reason: '先等等', by: project.coordinatorId })
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '继续' })
+    expect(notes(thread.id)).toContain('thread-resumed')
+    expect(notes(project.coordinatorId)).toContain('thread-resumed')
+
+    app.stopThread(thread.id, { reason: '我先看看', by: 'user' })
+    expect(notes(project.coordinatorId)).toContain('thread-stopped-by-user')
+    const attention = app.openAttention(project.id, {
+      threadId: thread.id,
+      question: '用哪个？',
+      options: [{ label: 'A', consequence: 'a' }],
+    })
+    app.answerAttention(attention.id, { choice: 0 })
+    expect(app.getThread(thread.id).stopped).toBeNull()
+    expect(notes(thread.id).filter((n) => n === 'thread-resumed')).toHaveLength(2)
+  })
+
+  test('a node whose threads are all stopped shows as paused, not as not started', () => {
+    const project = app.createProject('P')
+    app.revisePlan(project.id, {
+      author: 'coordinator',
+      reason: '起步',
+      ops: [{ op: 'add', id: 'a', kind: 'task', title: 'A', description: '', acceptance: '' }],
+    })
+    const thread = app.createThread(project.id, { title: 'A', nodeId: 'a' })
+    app.stopThread(thread.id, { reason: '暂停', by: 'user' })
+    expect(app.getPlan(project.id).nodes[0]?.status).toBe('paused')
+  })
+})

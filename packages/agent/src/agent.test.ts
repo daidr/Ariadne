@@ -1,7 +1,7 @@
 import { Ariadne, type ConversationView, type TranscriptEntry } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { compactionCut } from './compaction'
-import type { ResolvedModel } from './runner'
+import { MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
 import { answered, call, fakeModel, lastUser, say } from './test-model'
 import { Scheduler } from './scheduler'
 import { toChatMessages } from './transcript'
@@ -21,12 +21,13 @@ afterEach(async () => {
 
 function startScheduler(
   model: ResolvedModel | null,
-  options: { slots?: number; compactAt?: number } = {},
+  options: { slots?: number; compactAt?: number; retryBaseMs?: number } = {},
 ) {
   scheduler = new Scheduler({
     app,
     resolveModel: () => model,
     locale: () => 'zh-CN',
+    retryBaseMs: 1,
     ...options,
   })
   scheduler.start()
@@ -321,6 +322,47 @@ describe('failures', () => {
     expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('好了')
   })
 
+  test('a passing model error is retried, visibly, and gives up after four retries', async () => {
+    let failures = 2
+    const model = fakeModel(() =>
+      failures-- > 0
+        ? [
+            { type: 'text', text: '半截' },
+            { type: 'finish', reason: 'error', error: 'HTTP 529: overloaded', retryable: true },
+          ]
+        : say('好了'),
+    )
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'hi',
+    })
+    const s = startScheduler(model)
+    await s.idle()
+    expect(model.requests).toHaveLength(3)
+    // What a failed attempt streamed is dropped.
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('好了')
+    const retries = app.listNotices(project.coordinatorId).filter((n) => n.kind === 'model-retry')
+    expect(retries.map((n) => n.kind === 'model-retry' && [n.attempt, n.delayMs])).toEqual([
+      [1, 1],
+      [2, 2],
+    ])
+
+    failures = 99
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: 'again',
+    })
+    await s.idle()
+    expect(model.requests).toHaveLength(3 + 1 + MAX_MODEL_RETRIES)
+    expect(app.getConversation(project.coordinatorId)).toMatchObject({
+      lastOutcome: 'failed',
+      lastError: { key: 'error.modelRequest', params: { detail: 'HTTP 529: overloaded' } },
+    })
+  })
+
   test('without a model the turn fails with a hint, and a failed thread waits on the user', async () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
@@ -541,6 +583,33 @@ describe('control', () => {
     expect(app.listPendingConversations()).toEqual([])
   })
 
+  test('raising the slot limit starts waiting turns at once', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const model = fakeModel(async () => {
+      await gate
+      return say('')
+    })
+    const project = app.createProject('P')
+    for (const title of ['a', 'b']) {
+      const thread = app.createThread(project.id, { title })
+      app.postMessage(project.id, {
+        conversationId: thread.id,
+        author: 'coordinator',
+        kind: 'relay',
+        content: 'go',
+      })
+    }
+    const s = startScheduler(model, { slots: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(app.listRunningConversations()).toHaveLength(1)
+    s.setSlots(2, 1)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(app.listRunningConversations()).toHaveLength(2)
+    release()
+    await s.idle()
+  })
+
   test('a turn left running by a stopped process is closed and resumed', async () => {
     const project = app.createProject('P')
     app.postMessage(project.id, {
@@ -607,5 +676,98 @@ describe('transcript to model messages', () => {
       ['assistant', '我去安排'],
       ['user', '<thr'],
     ])
+  })
+})
+
+describe('stopping a thread', () => {
+  test('the coordinator stops a running thread; it waits until resumed, then hears why', async () => {
+    let threadTurns = 0
+    const model = fakeModel(async (request, role) => {
+      if (role === 'thread') {
+        threadTurns++
+        if (threadTurns === 1) {
+          // Works until it is stopped.
+          await new Promise((done) => request.signal?.addEventListener('abort', done))
+          return []
+        }
+        return say('继续做了')
+      }
+      if (answered(request)) return say('先停下了')
+      if (lastUser(request).includes('停一下')) {
+        const [thread] = app.listThreads(project.id)
+        return [call('s1', 'stop_thread', { threadId: thread!.id, reason: '方向不对，等用户确认' })]
+      }
+      return say('')
+    })
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '重构' })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '开始重构',
+    })
+    const running = startScheduler(model, { slots: 1 })
+    await new Promise((done) => setTimeout(done, 20))
+    expect(running.isRunning(thread.id)).toBe(true)
+    // The user's message takes the reserved slot; the coordinator stops the thread.
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '那个重构停一下',
+    })
+    await running.idle()
+    const stopped = app.getThread(thread.id)
+    expect(stopped.stage).toBe('stopped')
+    expect(stopped.stopped).toMatchObject({
+      reason: '方向不对，等用户确认',
+      by: project.coordinatorId,
+    })
+    expect(app.getConversation(thread.id).lastOutcome).toBe('cancelled')
+    // Messages wait while it is held.
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '还有一件事',
+    })
+    await running.idle()
+    expect(threadTurns).toBe(1)
+    // The user resumes it: it runs, told why it had been stopped.
+    app.resumeThread(thread.id, 'user')
+    await running.idle()
+    expect(threadTurns).toBe(2)
+    const resumed = model.requests.findLast((r) =>
+      r.messages[0]?.content.includes('You are a thread'),
+    )
+    expect(JSON.stringify(resumed?.messages)).toContain('方向不对，等用户确认')
+    expect(app.getThread(thread.id).stage).not.toBe('stopped')
+    // The coordinator hears that the user resumed it.
+    expect(app.listTranscript(project.coordinatorId).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'thread-resumed', by: 'user' },
+    })
+  })
+  test('a thread the user stopped only the user can resume', async () => {
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') return say('')
+      if (answered(request)) return say('好')
+      const [thread] = app.listThreads(project.id)
+      return [call('r1', 'resume_thread', { threadId: thread!.id })]
+    })
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '重构' })
+    app.stopThread(thread.id, { reason: '我来看看', by: 'user' })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '你看着办',
+    })
+    await startScheduler(model).idle()
+    expect(app.getThread(thread.id).stopped?.by).toBe('user')
+    const result = app
+      .listTranscript(project.coordinatorId)
+      .find((e) => e.kind === 'tool' && e.name === 'resume_thread')
+    expect(result).toMatchObject({ isError: true })
   })
 })

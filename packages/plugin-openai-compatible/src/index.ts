@@ -1,7 +1,9 @@
 import {
   definePlugin,
-  describeHttpError,
+  httpErrorPart,
+  incompletePart,
   readServerSentEvents,
+  transportErrorPart,
   type ChatMessage,
   type ModelProvider,
   type ModelStreamPart,
@@ -73,42 +75,61 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
     required: ['baseUrl'],
   },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: request.model,
-        messages: request.messages.map(toWire),
-        ...(request.tools.length
-          ? {
-              tools: request.tools.map((tool) => ({
-                type: 'function',
-                function: {
-                  name: tool.name,
-                  description: tool.description,
-                  parameters: tool.parameters,
-                },
-              })),
-            }
-          : {}),
-        stream: true,
-        stream_options: { include_usage: true },
-      }),
-      ...(request.signal ? { signal: request.signal } : {}),
-    })
-    if (!response.ok || !response.body) {
-      yield { type: 'finish', reason: 'error', error: await describeHttpError(response) }
+    let response: Response
+    try {
+      response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: request.model,
+          messages: request.messages.map(toWire),
+          ...(request.tools.length
+            ? {
+                tools: request.tools.map((tool) => ({
+                  type: 'function',
+                  function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                  },
+                })),
+              }
+            : {}),
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+        ...(request.signal ? { signal: request.signal } : {}),
+      })
+    } catch (error) {
+      const part = transportErrorPart(error, request.signal)
+      if (part) yield part
       return
     }
+    if (!response.ok || !response.body) {
+      yield await httpErrorPart(response)
+      return
+    }
+    yield* readStream(response.body, request.signal)
+  },
+}
 
-    // Tool calls stream in pieces keyed by index; they are emitted whole at the end.
-    const calls = new Map<number, { id: string; name: string; arguments: string }>()
-    let reason: string | null = null
-    for await (const { data } of readServerSentEvents(response.body)) {
-      if (data === '[DONE]') break
+async function* readStream(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<ModelStreamPart> {
+  // Tool calls stream in pieces keyed by index; they are emitted whole at the end.
+  const calls = new Map<number, { id: string; name: string; arguments: string }>()
+  let reason: string | null = null
+  let done = false
+  try {
+    for await (const { data } of readServerSentEvents(body)) {
+      if (data === '[DONE]') {
+        done = true
+        break
+      }
       let chunk: Chunk
       try {
         chunk = JSON.parse(data)
@@ -139,16 +160,25 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
       }
       if (choice.finish_reason) reason = choice.finish_reason
     }
-    for (const [index, call] of [...calls].toSorted(([a], [b]) => a - b)) {
-      yield { type: 'tool-call', id: call.id || `call_${index}`, ...withoutId(call) }
-    }
-    // A token limit hit while streaming tool arguments still reports `length`, so the runner
-    // treats the call as truncated instead of running it with broken arguments.
-    yield {
-      type: 'finish',
-      reason: calls.size && reason !== 'length' ? 'tool-calls' : finishReason(reason),
-    }
-  },
+  } catch (error) {
+    const part = transportErrorPart(error, signal, true)
+    if (part) yield part
+    return
+  }
+  // Some services end without `[DONE]`; a finish reason says the answer is whole too.
+  if (!done && reason === null) {
+    if (!signal?.aborted) yield incompletePart()
+    return
+  }
+  for (const [index, call] of [...calls].toSorted(([a], [b]) => a - b)) {
+    yield { type: 'tool-call', id: call.id || `call_${index}`, ...withoutId(call) }
+  }
+  // A token limit hit while streaming tool arguments still reports `length`, so the runner
+  // treats the call as truncated instead of running it with broken arguments.
+  yield {
+    type: 'finish',
+    reason: calls.size && reason !== 'length' ? 'tool-calls' : finishReason(reason),
+  }
 }
 
 function withoutId(call: { name: string; arguments: string }) {

@@ -2,7 +2,16 @@ import type { Capabilities, CapabilityName } from './capabilities'
 
 export type * from './capabilities'
 export { WorkspacePathError } from './capabilities'
-export { describeHttpError, readServerSentEvents, type ServerSentEvent } from './sse'
+export {
+  describeHttpError,
+  httpErrorPart,
+  incompletePart,
+  MAX_RETRY_AFTER_MS,
+  readServerSentEvents,
+  retryAfterMs,
+  transportErrorPart,
+  type ServerSentEvent,
+} from './sse'
 
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and
@@ -73,7 +82,17 @@ export type ModelStreamPart =
   | { type: 'text'; text: string }
   | ({ type: 'tool-call' } & ToolCall)
   | { type: 'usage'; input: number; output: number }
-  | { type: 'finish'; reason: 'stop' | 'length' | 'tool-calls' | 'error'; error?: string }
+  | {
+      type: 'finish'
+      reason: 'stop' | 'length' | 'tool-calls' | 'error'
+      error?: string
+      /**
+       * The error is worth trying again: rate limited, overloaded, the connection failed or
+       * the stream ended early. `retryAfterMs` is how long the service asked to wait.
+       */
+      retryable?: boolean
+      retryAfterMs?: number
+    }
 
 /** What the agent loop asks of a model provider for one response. */
 export interface ModelRequest {
@@ -90,7 +109,8 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
   settings: SettingsSchema
   /**
    * Stream one response. Text may arrive in pieces; each tool call arrives whole. Errors
-   * of the remote service end the stream with a `finish` part of reason `error`.
+   * of the remote service end the stream with a `finish` part of reason `error`, marked
+   * `retryable` when trying again may help; the agent loop retries only those.
    */
   stream(settings: Settings, request: ModelRequest): AsyncIterable<ModelStreamPart>
 }

@@ -233,6 +233,20 @@ export class SettingsStore {
     this.save()
   }
 
+  /** Change how many turns run at once, plus those kept for answering the user. */
+  updateConcurrency(input: unknown): UserConfig['concurrency'] {
+    const body = (input ?? {}) as Partial<UserConfig['concurrency']>
+    const slots = body.slots
+    const reserved = body.reserved
+    if (!(Number.isInteger(slots) && slots! >= 1 && slots! <= 16)) throw new BadRequest('slots')
+    if (!(Number.isInteger(reserved) && reserved! >= 0 && reserved! <= 4)) {
+      throw new BadRequest('reserved')
+    }
+    this.config = { ...this.config, concurrency: { slots: slots!, reserved: reserved! } }
+    this.save()
+    return this.config.concurrency
+  }
+
   /** The secret settings of a project's source, merged in when it connects. */
   sourceSecrets(projectId: string): Record<string, string> {
     return { ...this.config.sourceSecrets[projectId] }

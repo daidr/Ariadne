@@ -80,6 +80,9 @@ export const threadsProjection: Projection = {
       workspace_branch TEXT,
       pull_request TEXT,
       check_failures INTEGER NOT NULL DEFAULT 0,
+      stopped_reason TEXT,
+      stopped_by TEXT,
+      stopped_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -140,10 +143,24 @@ export const threadsProjection: Projection = {
         ])
         break
       case 'message.posted':
-        // The user stepping in gives the thread fresh tries.
+        // The user stepping in gives the thread fresh tries (a stopped one is resumed by
+        // its own event, appended with the message).
         if (event.data.author === 'user') {
           db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.conversationId])
         }
+        break
+      case 'thread.stopped':
+        db.run(
+          'UPDATE threads SET stopped_reason = ?, stopped_by = ?, stopped_at = ?, updated_at = ? WHERE id = ?',
+          [event.data.reason, event.data.by, event.at, event.at, event.data.threadId],
+        )
+        break
+      case 'thread.resumed':
+        db.run(
+          `UPDATE threads SET stopped_reason = NULL, stopped_by = NULL, stopped_at = NULL,
+             updated_at = ? WHERE id = ?`,
+          [event.at, event.data.threadId],
+        )
         break
     }
   },
@@ -351,6 +368,13 @@ export const noticesProjection: Projection = {
         break
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
+        break
+      case 'conversation.model_retry':
+        add(event.data.conversationId, 'model-retry', {
+          attempt: event.data.attempt,
+          delayMs: event.data.delayMs,
+          detail: event.data.detail,
+        })
         break
       case 'notice.dismissed':
         db.run('UPDATE notices SET undone = 1 WHERE id = ?', [event.data.noticeId])
@@ -648,6 +672,30 @@ export const transcriptProjection: Projection = {
           (event.data.attempt ?? 1) <= MAX_CHECK_ATTEMPTS,
         )
         break
+      case 'thread.stopped': {
+        // The coordinator hears of a stop the user made, so it does not count on the thread.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator && event.data.by === 'user') {
+          const payload = {
+            type: 'thread-stopped-by-user',
+            threadId: event.data.threadId,
+            reason: event.data.reason,
+          }
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
+        }
+        break
+      }
+      case 'thread.resumed': {
+        // The thread learns why it had been held and goes on; the coordinator hears of a
+        // resume it did not do itself.
+        const payload = { type: 'thread-resumed', ...event.data }
+        addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, true)
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator && event.data.by !== coordinator) {
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
+        }
+        break
+      }
       case 'pull_request.closed': {
         const coordinator = coordinatorOf(db, event.projectId)
         const payload = { type: 'pull-request-closed', ...event.data }

@@ -8,12 +8,20 @@ import {
   DouCollapse,
   DouCollapseItem,
   DouEmpty,
+  DouInput,
   DouPopover,
   DouTag,
   DouText,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
-import { ChevronLeftIcon, GitBranchIcon, RotateCwIcon, SquareStopIcon } from '@dou-ui/icons'
+import {
+  ChevronLeftIcon,
+  GitBranchIcon,
+  PauseIcon,
+  PlayIcon,
+  RotateCwIcon,
+  SquareStopIcon,
+} from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { t, tm } from '../i18n'
@@ -26,6 +34,8 @@ import {
   retryTurn,
   sendMessage,
   state,
+  resumeThread,
+  stopThread,
   stopTurn,
   undoNotice,
 } from '../store'
@@ -51,6 +61,14 @@ const failure = computed(() =>
     ? state.conversation.lastError
     : null,
 )
+// The user stops a thread with a reason, the same way the coordinator does.
+const stopOpen = ref(false)
+const stopReason = ref('')
+async function stopThreadNow(threadId: string) {
+  await stopThread(threadId, stopReason.value.trim() || t('thread.stopDefaultReason'))
+  stopOpen.value = false
+  stopReason.value = ''
+}
 const cancelled = computed(() => state.conversation?.lastOutcome === 'cancelled' && !working.value)
 
 // Messages edited after the user read them stay highlighted for this visit, even though
@@ -133,6 +151,26 @@ watch(
         {{ thread.workspace.branch }}
       </DouTag>
       <PullRequestTag :thread="thread" refreshable />
+      <DouPopover
+        v-if="!thread.stopped && thread.stage !== 'done'"
+        v-model:open="stopOpen"
+        trigger="click"
+        :title="t('thread.stopTitle')"
+        :width="320"
+      >
+        <DouButton variant="ghost" size="sm" class="conversation-stop-thread">
+          <template #leading><PauseIcon /></template>
+          {{ t('thread.stop') }}
+        </DouButton>
+        <template #content>
+          <div class="stop-form">
+            <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
+            <DouButton size="sm" tone="primary" @click="stopThreadNow(thread.id)">
+              {{ t('thread.stopConfirm') }}
+            </DouButton>
+          </div>
+        </template>
+      </DouPopover>
     </div>
 
     <DouChatList v-if="timeline.length || working" class="conversation-list">
@@ -154,6 +192,20 @@ watch(
               <DouText size="sm" class="relay-content">{{ item.notice.summary }}</DouText>
             </DouCollapseItem>
           </DouCollapse>
+          <DouText
+            v-else-if="item.notice.kind === 'model-retry'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t('notice.modelRetry', {
+                attempt: item.notice.attempt,
+                seconds: Math.max(1, Math.round(item.notice.delayMs / 1000)),
+                detail: item.notice.detail,
+              })
+            }}
+          </DouText>
           <DouText v-else tone="warning" size="sm" class="notice-text">
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>
@@ -201,7 +253,21 @@ watch(
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
-    <div v-if="working" class="conversation-status" role="status">
+    <!-- A stopped thread is not scheduled, so its reason and 继续 win over "queued". -->
+    <DouAlert v-if="thread?.stopped" tone="warning" class="conversation-alert">
+      {{
+        t(thread.stopped.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator', {
+          reason: thread.stopped.reason,
+        })
+      }}
+      <template #action>
+        <DouButton size="sm" variant="outline" @click="resumeThread(thread.id)">
+          <template #leading><PlayIcon /></template>
+          {{ t('thread.resume') }}
+        </DouButton>
+      </template>
+    </DouAlert>
+    <div v-else-if="working" class="conversation-status" role="status">
       <DouText variant="secondary" size="sm" truncate>
         {{ t('conversation.working') }} · {{ state.conversation?.turn?.model }}
       </DouText>
@@ -312,6 +378,17 @@ watch(
 
 .conversation-input {
   padding: 12px 16px 16px;
+}
+
+.conversation-stop-thread {
+  margin-left: auto;
+}
+
+.stop-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
 }
 
 .conversation-edited {

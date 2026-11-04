@@ -241,6 +241,20 @@ describe('local directory', () => {
     expect(Date.now() - started).toBeLessThan(3000)
   })
 
+  test('a command stopped before it starts never runs', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const marker = join(base, 'ran')
+    const result = await run(['bash', '-c', `touch ${marker}`], {
+      cwd: base,
+      forThread: true,
+      signal: controller.signal,
+    })
+    expect(result.exitCode).not.toBe(0)
+    await Bun.sleep(100)
+    expect(existsSync(marker)).toBe(false)
+  })
+
   test('commands time out', async () => {
     const result = await run(['sleep', '5'], { cwd: base, timeoutMs: 50 })
     expect(result.exitCode).not.toBe(0)

@@ -109,6 +109,12 @@ export interface PluginRecord {
   provides: { models: string[]; contexts: string[] }
 }
 
+/** How many turns run at once, plus those kept for answering the user. */
+export interface Concurrency {
+  slots: number
+  reserved: number
+}
+
 export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   default: { provider: string; model: string; contextTokens?: number } | null
@@ -139,6 +145,10 @@ export const api = {
     request<{ memory: MemoryView }>('PUT', `/api/projects/${projectId}/memory/${memoryId}`, {
       text,
     }),
+  stopThread: (threadId: string, reason: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/stop`, { reason }),
+  resumeThread: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/resume`),
   undoNotice: (projectId: string, noticeId: string) =>
     request<void>('POST', `/api/projects/${projectId}/notices/${noticeId}/undo`),
   removeMemory: (projectId: string, memoryId: string) =>
@@ -159,6 +169,9 @@ export const api = {
     }>('GET', `/api/conversations/${id}`),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
+  getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
+  saveConcurrency: (input: Concurrency) =>
+    request<Concurrency>('PUT', '/api/settings/concurrency', input),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   addPlugin: (path: string) =>

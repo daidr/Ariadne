@@ -1,7 +1,9 @@
 import {
   definePlugin,
-  describeHttpError,
+  httpErrorPart,
+  incompletePart,
   readServerSentEvents,
+  transportErrorPart,
   type ChatMessage,
   type ModelProvider,
   type ModelStreamPart,
@@ -88,7 +90,7 @@ interface StreamEvent {
   content_block?: { type: string; id?: string; name?: string }
   delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string | null }
   usage?: { output_tokens?: number }
-  error?: { message?: string }
+  error?: { type?: string; message?: string }
 }
 
 export const anthropicProvider: ModelProvider<AnthropicSettings> = {
@@ -113,41 +115,60 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
   },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
     const { system, messages } = toWire(request.messages)
-    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'anthropic-version': API_VERSION,
-        'x-api-key': settings.apiKey,
-      },
-      body: JSON.stringify({
-        model: request.model,
-        max_tokens: settings.maxTokens || 8192,
-        ...(system ? { system } : {}),
-        messages,
-        ...(request.tools.length
-          ? {
-              tools: request.tools.map((tool) => ({
-                name: tool.name,
-                description: tool.description,
-                input_schema: tool.parameters,
-              })),
-            }
-          : {}),
-        stream: true,
-      }),
-      ...(request.signal ? { signal: request.signal } : {}),
-    })
-    if (!response.ok || !response.body) {
-      yield { type: 'finish', reason: 'error', error: await describeHttpError(response) }
+    let response: Response
+    try {
+      response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': API_VERSION,
+          'x-api-key': settings.apiKey,
+        },
+        body: JSON.stringify({
+          model: request.model,
+          max_tokens: settings.maxTokens || 8192,
+          ...(system ? { system } : {}),
+          messages,
+          ...(request.tools.length
+            ? {
+                tools: request.tools.map((tool) => ({
+                  name: tool.name,
+                  description: tool.description,
+                  input_schema: tool.parameters,
+                })),
+              }
+            : {}),
+          stream: true,
+        }),
+        ...(request.signal ? { signal: request.signal } : {}),
+      })
+    } catch (error) {
+      const part = transportErrorPart(error, request.signal)
+      if (part) yield part
       return
     }
+    if (!response.ok || !response.body) {
+      yield await httpErrorPart(response)
+      return
+    }
+    yield* readStream(response.body, request.signal)
+  },
+}
 
-    const blocks = new Map<number, { id: string; name: string; json: string }>()
-    let input = 0
-    let output = 0
-    let stop: string | null = null
-    for await (const { data } of readServerSentEvents(response.body)) {
+/** Server errors the service itself says are passing: overloaded, rate limited, internal. */
+const PASSING_ERRORS = new Set(['overloaded_error', 'rate_limit_error', 'api_error'])
+
+async function* readStream(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<ModelStreamPart> {
+  const blocks = new Map<number, { id: string; name: string; json: string }>()
+  let input = 0
+  let output = 0
+  let stop: string | null = null
+  let done = false
+  try {
+    for await (const { data } of readServerSentEvents(body)) {
       let event: StreamEvent
       try {
         event = JSON.parse(data)
@@ -192,17 +213,33 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
           stop = event.delta?.stop_reason ?? stop
           output = event.usage?.output_tokens ?? output
           break
+        case 'message_stop':
+          done = true
+          break
         case 'error':
-          yield { type: 'finish', reason: 'error', error: event.error?.message ?? data }
+          yield {
+            type: 'finish',
+            reason: 'error',
+            error: event.error?.message ?? data,
+            ...(PASSING_ERRORS.has(event.error?.type ?? '') ? { retryable: true } : {}),
+          }
           return
       }
     }
-    yield { type: 'usage', input, output }
-    yield {
-      type: 'finish',
-      reason: stop === 'tool_use' ? 'tool-calls' : stop === 'max_tokens' ? 'length' : 'stop',
-    }
-  },
+  } catch (error) {
+    const part = transportErrorPart(error, signal, true)
+    if (part) yield part
+    return
+  }
+  if (!done) {
+    if (!signal?.aborted) yield incompletePart()
+    return
+  }
+  yield { type: 'usage', input, output }
+  yield {
+    type: 'finish',
+    reason: stop === 'tool_use' ? 'tool-calls' : stop === 'max_tokens' ? 'length' : 'stop',
+  }
 }
 
 export default definePlugin({
