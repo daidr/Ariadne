@@ -339,7 +339,7 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
     for (const loose of LOOSENESS) {
       const trial = structuredClone({ version: 1 as const, nodes, edges })
       relayout(trial.nodes, trial.edges, direction, loose)
-      const count = boardProblems(trial).length
+      const count = allProblems(trial).length
       if (count < best.count) best = { loose, count }
       if (!count) break
     }
@@ -482,6 +482,8 @@ function spread(board: WhiteboardContent): void {
   for (let round = 0; round < 50; round++) {
     let changed = false
     const want = (x: number, y: number) => {
+      // Level on both axes (the same centre): no stretch parts them; clear() below does.
+      if (x === Infinity && y === Infinity) return
       // Stretch along the axis that needs less of it.
       if (x <= y && x > sx) {
         sx = x
@@ -629,6 +631,12 @@ const MAX_PROBLEMS = 20
  * not exact. Freehand drawings may sit on anything and are left out.
  */
 export function boardProblems(board: WhiteboardContent): string[] {
+  const out = allProblems(board)
+  if (out.length <= MAX_PROBLEMS) return out
+  return [...out.slice(0, MAX_PROBLEMS), `and ${out.length - MAX_PROBLEMS} more`]
+}
+
+function allProblems(board: WhiteboardContent): string[] {
   const nodes = board.nodes.filter((n) => kindOf(n) !== 'drawing')
   const box = new Map(nodes.map((n) => [n.id, boxOf(n)]))
   const out: string[] = []
@@ -685,6 +693,5 @@ export function boardProblems(board: WhiteboardContent): string[] {
     }
     labels.push({ id: edge.id, box: label })
   }
-  if (out.length <= MAX_PROBLEMS) return out
-  return [...out.slice(0, MAX_PROBLEMS), `and ${out.length - MAX_PROBLEMS} more`]
+  return out
 }

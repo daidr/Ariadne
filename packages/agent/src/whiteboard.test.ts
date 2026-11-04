@@ -37,7 +37,7 @@ function randomBoard(next: () => number) {
 }
 
 describe('whiteboard layout', () => {
-  test('random boards: no overlapping items, cut-off text or connectors through items; labels rarely meet', () => {
+  test('random boards (fixed seed): no overlapping items, cut-off text or connectors through items; labels rarely meet', () => {
     let seed = 1
     const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
     for (const direction of ['down', 'right'] as const) {
@@ -72,6 +72,20 @@ describe('whiteboard layout', () => {
     expect(at.e!.x).toBeGreaterThan(at.w!.x)
     expect(at.s!.y).toBeGreaterThan(at.e!.y)
     expect(boardProblems(board)).toEqual([])
+  })
+
+  test('items sketched on the same spot are set apart, never at NaN', () => {
+    const board = boardFromItems(
+      [
+        { id: 'a', text: 'A', x: 100, y: 100 },
+        { id: 'b', text: 'B', x: 100, y: 100 },
+      ],
+      [{ from: 'a', to: 'b', label: '同一个点' }],
+    )
+    for (const node of board.nodes) {
+      expect(Number.isFinite(node.x) && Number.isFinite(node.y)).toBe(true)
+    }
+    expect(boardProblems(board).filter((p) => p.startsWith('items'))).toEqual([])
   })
 
   test('the check finds what a user made overlap, and an item that grows pushes down what is below', () => {
