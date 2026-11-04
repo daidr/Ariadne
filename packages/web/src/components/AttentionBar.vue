@@ -8,6 +8,7 @@ import { threadLine } from '../stage'
 import { openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
+import ReviewActions from './ReviewActions.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
@@ -55,7 +56,8 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
           <div v-else :key="item.thread.id" class="attention">
             <div class="attention-thread">
               <DouText weight="medium" truncate>{{ item.thread.title }}</DouText>
-              <DouButton size="sm" variant="ghost" @click="openThread(item.thread.id)">
+              <ReviewActions v-if="item.thread.stage === 'review'" :thread-id="item.thread.id" />
+              <DouButton v-else size="sm" variant="ghost" @click="openThread(item.thread.id)">
                 {{ t('thread.open') }}
               </DouButton>
             </div>

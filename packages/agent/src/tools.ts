@@ -132,6 +132,35 @@ const editMessage: Tool = {
 }
 
 /**
+ * Whether a thread has changes for the user to review and merge: an open pull request, or
+ * commits on its branch the base does not have. Changes left uncommitted are not reviewed,
+ * so the thread is told to commit them first. When it cannot tell, it assumes there are.
+ */
+async function somethingToMerge(ctx: ToolContext): Promise<boolean> {
+  if (ctx.role !== 'thread') return true
+  const thread = ctx.app.getThread(ctx.conversationId)
+  if (thread.pullRequest?.state === 'open') return true
+  const { workspace } = thread
+  if (!workspace?.branch || !workspace.base) return false
+  let changes
+  try {
+    const branches = ctx.branches ? await ctx.branches() : null
+    if (!branches) return true
+    changes = await branches.changes(ctx.conversationId, workspace.base)
+  } catch {
+    return true
+  }
+  if (!changes) return false
+  if (changes.files.length) return true
+  if (changes.uncommitted.length) {
+    throw new ToolInputError(
+      `Your changes are not committed (${changes.uncommitted.slice(0, 5).join(', ')}): commit them before you report "ready"`,
+    )
+  }
+  return false
+}
+
+/**
  * The branch's newest commit, when the user merged the thread's branch before: a report
  * with nothing new since the merge leaves it landed. Read from the branch, so a worktree
  * removed after the merge is neither needed nor checked out again.
@@ -195,7 +224,7 @@ const report: Tool = {
   spec: {
     name: 'report',
     description:
-      'Tell the coordinator where your work stands. "ready" means it waits for the user to review, "blocked"/"failed" that you cannot go on, "done" that it is finished, "waiting" that this round ended, "progress" is an update that needs no reaction.',
+      'Tell the coordinator where your work stands. "ready" means changes on your branch wait for the user to review and merge, "blocked"/"failed" that you cannot go on, "done" that it is finished (a report or research with nothing to merge is "done"), "waiting" that this round ended, "progress" is an update that needs no reaction.',
     parameters: {
       type: 'object',
       properties: {
@@ -220,17 +249,24 @@ const report: Tool = {
     },
   },
   async run(args, ctx) {
-    const kind = args.kind as ReportKind
-    if (!REPORT_KINDS.includes(kind)) throw new ToolInputError('"kind" is not a report kind')
+    const asked = args.kind as ReportKind
+    if (!REPORT_KINDS.includes(asked)) throw new ToolInputError('"kind" is not a report kind')
     const summary = str(args, 'summary')
     const headline = checkHeadline(args.headline)
     const artifacts = artifactIds(args.artifacts)
+    // Review means something to merge: without it the user would have no way to end it.
+    const kind = asked === 'ready' && !(await somethingToMerge(ctx)) ? 'done' : asked
     ctx.app.reportThread(
       ctx.conversationId,
       { kind, summary, headline, artifacts },
       await mergedHead(ctx),
     )
-    return { content: 'Reported.' }
+    return {
+      content:
+        kind === asked
+          ? 'Reported.'
+          : 'Reported as "done": your branch has no changes for the user to merge.',
+    }
   },
 }
 

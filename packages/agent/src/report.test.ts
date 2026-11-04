@@ -1,5 +1,8 @@
-import { describe, expect, test } from 'vitest'
-import { checkHeadline, ToolInputError } from './tools'
+import { Ariadne } from '@ariadne/core'
+import type { BranchCapability, BranchChanges } from '@ariadne/plugin-sdk'
+import { afterEach, describe, expect, test } from 'vitest'
+import type { ToolContext } from './tool-helpers'
+import { checkHeadline, threadTools, ToolInputError } from './tools'
 
 describe('report headline', () => {
   test('keeps a plain line for the user', () => {
@@ -29,5 +32,70 @@ describe('report headline', () => {
     for (const headline of refused) {
       expect(() => checkHeadline(headline), headline).toThrow(ToolInputError)
     }
+  })
+})
+
+describe('report "ready"', () => {
+  const tool = threadTools.find((item) => item.spec.name === 'report')!
+  let app: Ariadne
+  afterEach(() => app.close())
+
+  function setup(changes: Partial<BranchChanges> | null, workspace = true) {
+    app = new Ariadne({ path: ':memory:' })
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    app.startThread(thread.id)
+    if (workspace)
+      app.recordWorkspace(thread.id, { label: 'local', branch: 'ariadne/x', base: 'main' })
+    const branches = {
+      changes: async () =>
+        changes && {
+          branch: 'ariadne/x',
+          base: 'main',
+          from: 'a',
+          head: 'b',
+          commits: [],
+          files: [],
+          uncommitted: [],
+          ...changes,
+        },
+    } as unknown as BranchCapability
+    const ctx = {
+      app,
+      projectId: project.id,
+      conversationId: thread.id,
+      role: 'thread',
+      branches: async () => branches,
+    } as unknown as ToolContext
+    const run = () =>
+      tool.run({ kind: 'ready', summary: '写好了', headline: '调研报告写好了' }, ctx)
+    return { thread, run }
+  }
+
+  test('with nothing to merge counts as done', async () => {
+    for (const [changes, workspace] of [
+      [{}, true],
+      [null, true],
+      [{}, false],
+    ] as const) {
+      const { thread, run } = setup(changes, workspace)
+      expect((await run()).content).toContain('"done"')
+      expect(app.getThread(thread.id).stage).toBe('done')
+      app.close()
+    }
+    app = new Ariadne({ path: ':memory:' })
+  })
+
+  test('with commits on the branch waits for review', async () => {
+    const file = { path: 'a.ts', previousPath: null, status: 'modified' }
+    const { thread, run } = setup({ files: [file] as BranchChanges['files'] })
+    expect((await run()).content).toBe('Reported.')
+    expect(app.getThread(thread.id).stage).toBe('review')
+  })
+
+  test('with only uncommitted changes asks to commit first', async () => {
+    const { thread, run } = setup({ uncommitted: ['a.ts'] })
+    await expect(run()).rejects.toThrow(ToolInputError)
+    expect(app.getThread(thread.id).lastReport).toBeNull()
   })
 })

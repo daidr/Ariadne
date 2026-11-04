@@ -274,6 +274,8 @@ export const api = {
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/stop`, { reason }),
   resumeThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/resume`),
+  reviewThread: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/reviewed`),
   undoNotice: (projectId: string, noticeId: string) =>
     request<void>('POST', `/api/projects/${projectId}/notices/${noticeId}/undo`),
   removeMemory: (projectId: string, memoryId: string) =>

@@ -15,7 +15,7 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
       :key="artifact.id"
       :title="artifact.title"
       class="report-artifact"
-      underline="hover"
+      underline="none"
       @click="openMain({ kind: 'artifact', id: artifact.id })"
     >
       <template #leading><component :is="kindIcon[artifact.kind]" /></template>
@@ -28,12 +28,15 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
 .report-artifacts {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 4px 6px;
   min-width: 0;
 }
 
 .report-artifact {
   max-width: 100%;
+  padding-inline: 4px;
+  border-radius: 4px;
+  background: var(--dou-color-bg-muted);
   overflow: hidden;
   font-size: var(--dou-font-size-sm);
   text-overflow: ellipsis;

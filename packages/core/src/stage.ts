@@ -23,6 +23,8 @@ export interface StageFacts {
    * was merged. A review it waited on is then over.
    */
   landed?: boolean
+  /** The user marked what it last reported as reviewed. */
+  reviewed?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
@@ -36,7 +38,7 @@ export function threadStage(facts: StageFacts): ThreadStage {
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.
   if (facts.turnPending) return 'queued'
   if (facts.turnFailed || facts.checksGaveUp) return 'blocked'
-  if (facts.lastReport === 'ready') return facts.landed ? 'done' : 'review'
+  if (facts.lastReport === 'ready') return facts.landed || facts.reviewed ? 'done' : 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
   if (facts.lastReport === 'done') return 'done'
   if (!facts.started) return 'queued'

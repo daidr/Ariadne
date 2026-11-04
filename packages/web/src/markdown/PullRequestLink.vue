@@ -108,6 +108,7 @@ const tones: Record<State, TagTone> = {
   padding-inline: 4px;
   border-radius: 4px;
   background: var(--dou-color-bg-muted);
+  text-decoration: none;
 }
 .pr-card {
   display: flex;

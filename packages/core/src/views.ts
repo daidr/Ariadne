@@ -340,6 +340,7 @@ export type TranscriptNote =
   | { type: 'merge-conflict'; threadId: string; branch: string; base: string; files: string[] }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
+  | { type: 'thread-reviewed'; threadId: string }
   | { type: 'instructions-changed'; path: string; removed: boolean }
   | {
       /**
