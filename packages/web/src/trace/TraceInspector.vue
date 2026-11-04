@@ -11,6 +11,8 @@ import {
   DouTabs,
   DouText,
 } from 'dou-ui'
+import { DouCodeEditor, json as jsonLanguage } from '@dou-ui/code'
+import '@dou-ui/code/style.css'
 import { CloseIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError } from '../api'
@@ -219,7 +221,16 @@ const title = computed(() =>
               <DouText v-if="detail.body === null" variant="tertiary" size="sm">
                 {{ t('trace.noBody') }}
               </DouText>
-              <DouCodeBlock :code="body" lang="json" copyable wrap />
+              <DouCodeEditor
+                :model-value="body"
+                :language="jsonLanguage"
+                :keys="false"
+                :aria-label="t('trace.tab.body')"
+                readonly
+                line-numbers
+                wrap
+                class="inspector-editor"
+              />
             </template>
           </div>
         </DouTabPanel>
@@ -300,6 +311,10 @@ const title = computed(() =>
   flex-direction: column;
   gap: 8px;
   padding: 12px 16px 16px;
+}
+
+.inspector-editor {
+  height: calc(100vh - 208px);
 }
 
 .inspector-mono {
