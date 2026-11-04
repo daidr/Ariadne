@@ -17,6 +17,7 @@ const git = (cwd: string, ...args: string[]) => run(['git', ...args], { cwd })
 const rawIssue = (number: number, extra: Record<string, unknown> = {}) => ({
   number,
   html_url: `https://github.com/acme/app/issues/${number}`,
+  repository_url: 'https://api.github.com/repos/acme/app',
   title: `Issue ${number}`,
   state: 'open',
   user: { login: 'someone' },
@@ -103,7 +104,13 @@ beforeEach(async () => {
         return Response.json([rawIssue(3), rawIssue(7, { pull_request: {} })])
       }
       if (url.pathname === '/search/issues') {
-        return Response.json({ items: [rawIssue(4)] })
+        // A search can reach other repositories the token reads; those must not come back.
+        return Response.json({
+          items: [
+            rawIssue(4),
+            rawIssue(5, { repository_url: 'https://api.github.com/repos/acme/secret' }),
+          ],
+        })
       }
       if (url.pathname === '/repos/acme/app/issues/3' && request.method === 'GET') {
         return Response.json(rawIssue(3))
@@ -300,9 +307,13 @@ describe('github issues', () => {
     expect(issues.map((i) => i.number)).toEqual([3])
     expect(issues[0]).toMatchObject({ labels: ['bug', 'p1'], author: 'someone', comments: 25 })
     expect(requests.at(-1)?.path).toContain('labels=bug')
-    await tracker.list({ search: 'login', state: 'all' })
+    const found = await tracker.list({
+      search: 'login repo:acme/secret OR -org:acme is:pr NOT crash',
+      state: 'all',
+    })
+    expect(found.map((i) => i.number)).toEqual([4])
     const query = new URL(`http://x${requests.at(-1)!.path}`).searchParams.get('q')
-    expect(query).toBe('login repo:acme/app is:issue')
+    expect(query).toBe('login crash repo:acme/app is:issue')
     expect(requests.at(-1)?.auth).toBe('Bearer tok')
   })
 

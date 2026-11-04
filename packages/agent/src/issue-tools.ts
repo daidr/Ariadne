@@ -131,7 +131,7 @@ const linkIssue: Tool = {
   spec: {
     name: 'link_issue',
     description:
-      "Link an issue to a plan node, so the node's threads know it is what their work is about; unlink: true takes the link back. Applies at once and shows on the plan.",
+      "Link an issue to a plan node, so the node's threads know it is what their work is about; unlink: true takes the link back. Applies at once, shows on the plan with who linked it, and the user sees it in this conversation. A thread links issues to its own node only.",
     parameters: {
       type: 'object',
       properties: {
@@ -146,6 +146,17 @@ const linkIssue: Tool = {
     const tracker = await trackerOf(ctx)
     const nodeId = str(args, 'nodeId')
     const number = issueNumber(args)
+    // A thread points only its own work at an issue; other nodes are the coordinator's.
+    if (ctx.role === 'thread') {
+      const own = ctx.app.getThread(ctx.conversationId).nodeId
+      if (nodeId !== own) {
+        throw new ToolInputError(
+          own
+            ? `A thread links issues to its own node (${own}) only; ask the coordinator for other nodes.`
+            : 'This thread has no plan node; ask the coordinator to link the issue.',
+        )
+      }
+    }
     if (args.unlink === true) {
       ctx.app.unlinkIssue(
         ctx.projectId,
@@ -166,21 +177,26 @@ const linkIssue: Tool = {
   },
 }
 
-/** One approval per exact change: a different text or another issue asks again. */
+/**
+ * Names the change a yes is for: the issue, the action and the whole text's SHA-256, so a
+ * yes to one text never covers another. Each yes is still used for one change only.
+ */
 export function issueWritePurpose(
   tracker: string,
   number: number,
   action: IssueWriteAction,
   text: string,
 ): string {
-  const hash = createHash('sha256').update(text).digest('hex').slice(0, 16)
+  const hash = createHash('sha256').update(text).digest('hex')
   return `issue:${tracker}#${number}:${action}:${hash}`
 }
 
 /**
  * Changing an issue reaches other people and cannot be taken back, so each change waits on
  * the user's yes to exactly that change: the card shows the issue and the whole text. Once
- * they agree, calling again with the same arguments makes it, once.
+ * they agree, calling again with the same arguments makes it, once; the same change later
+ * asks again. The change is recorded before it is made, so one cut off by a crash is
+ * checked rather than made a second time.
  */
 async function writeIssue(
   ctx: ToolContext,
@@ -202,11 +218,9 @@ async function writeIssue(
     }
   }
   const purpose = issueWritePurpose(tracker.name, input.number, input.action, input.text)
-  const done = ctx.app.issueWriteDone(purpose)
-  if (done) return json({ alreadyDone: true, url: done.url })
   const t = createTranslator(ctx.locale)
   const issue = await ask(tracker.issue(input.number))
-  const state = ctx.app.requestApproval(ctx.projectId, ctx.conversationId, purpose, () => ({
+  const approval = ctx.app.issueApproval(ctx.projectId, ctx.conversationId, purpose, () => ({
     question: t(`tracker.${input.action}.question`, {
       issue: `${tracker.name}#${input.number}`,
       title: issue.title,
@@ -217,31 +231,56 @@ async function writeIssue(
       { label: t('tracker.no'), consequence: t('tracker.noConsequence') },
     ],
   }))
-  if (state === 'declined') {
+  if (approval.state === 'asked' || approval.state === 'pending') {
+    return {
+      content:
+        approval.state === 'asked'
+          ? 'Changing an issue reaches other people, so the user was asked to agree to exactly this change. Their answer arrives as a new turn; call this tool again with the same arguments only if they agree. A different text asks again.'
+          : 'The user is already being asked about this change. Their answer arrives as a new turn; do not make it until then.',
+    }
+  }
+  if (approval.state === 'declined') {
     return {
       content:
         'The user declined this change to the issue. Do not make it; if something else should be said, tell the user in your report instead.',
       isError: true,
     }
   }
-  if (state !== 'approved') {
+  if (approval.state === 'unsure') {
+    // Ariadne stopped between starting the change and hearing back: it may have gone
+    // through. The yes is spent; calling again asks the user again.
+    ctx.app.markIssueWriteUnsure(ctx.projectId, approval.attentionId)
     return {
       content:
-        state === 'asked'
-          ? 'Changing an issue reaches other people, so the user was asked to agree to exactly this change. Their answer arrives as a new turn; call this tool again with the same arguments only if they agree. A different text asks again.'
-          : 'The user is already being asked about this change. Their answer arrives as a new turn; do not make it until then.',
+        'An earlier attempt at exactly this change was cut off, and it may have gone through. Check the issue with read_issue first. Only if the change is not there, call this tool again; that asks the user again.',
+      isError: true,
     }
   }
-  const { url } = await ask(write())
-  ctx.app.recordIssueWrite(ctx.projectId, {
+  if (approval.state !== 'approved') throw new Error('unreachable')
+  const { attentionId } = approval
+  const record = {
     threadId: ctx.conversationId,
+    attentionId,
     purpose,
     tracker: tracker.name,
     number: input.number,
     action: input.action,
     text: input.text,
-    url,
-  })
+  }
+  ctx.app.startIssueWrite(ctx.projectId, record)
+  let url: string | null
+  try {
+    ;({ url } = await write())
+  } catch (error) {
+    // A request that failed may still have reached the tracker (a timeout, say): the yes is
+    // spent, and the thread checks before asking again.
+    ctx.app.markIssueWriteUnsure(ctx.projectId, attentionId)
+    throw new ToolInputError(
+      `The tracker refused: ${error instanceof Error ? error.message : String(error)}. Check the issue with read_issue; if the change is not there, calling this tool again asks the user again.`,
+      { cause: error },
+    )
+  }
+  ctx.app.finishIssueWrite(ctx.projectId, record, url)
   return json({ done: true, url })
 }
 
@@ -265,7 +304,7 @@ const commentOnIssue: Tool = {
     const body = str(args, 'body')
     if (body.length > MAX_WRITE) throw new ToolInputError('"body" is longer than 10000 characters')
     return writeIssue(ctx, tracker, { number, action: 'comment', text: body }, async () => ({
-      url: (await ask(tracker.comment(number, body))).url,
+      url: (await tracker.comment(number, body)).url,
     }))
   },
 }
@@ -306,7 +345,7 @@ const setIssueState: Tool = {
       ctx,
       tracker,
       { number, action, text: why ?? '', ...(why ? { shown: t(`tracker.reason.${why}`) } : {}) },
-      async () => ({ url: (await ask(tracker.setState(number, state, why ?? undefined))).url }),
+      async () => ({ url: (await tracker.setState(number, state, why ?? undefined)).url }),
     )
   },
 }

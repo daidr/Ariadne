@@ -7,7 +7,7 @@ import type {
   ArtifactKind,
   AttentionOption,
   Author,
-  EventMap,
+  IssueWrite,
   LinkedIssue,
   MessageKind,
   PlanAuthor,
@@ -660,19 +660,88 @@ export class Ariadne {
     }
   }
 
-  /** Whether the change an approval was for has been made, and where it can be seen. */
-  issueWriteDone(purpose: string): { url: string | null } | null {
-    return (
-      this.db
-        .query<{ url: string | null }, [string]>('SELECT url FROM issue_writes WHERE purpose = ?')
-        .get(purpose) ?? null
-    )
+  /**
+   * The user's yes for one change to an issue. Unlike a standing approval, a yes is used for
+   * one change only: once a change was made with it, the same change again asks again. A
+   * no holds for the threads that waited on that card. `unsure` means a change with this
+   * yes was started but not known to have gone through (Ariadne stopped in between).
+   */
+  issueApproval(
+    projectId: string,
+    threadId: string,
+    purpose: string,
+    card: () => { question: string; options: AttentionOption[] },
+  ):
+    | { state: 'approved' | 'unsure'; attentionId: string }
+    | { state: 'declined' | 'pending' | 'asked' } {
+    this.assertThreadIn(projectId, threadId)
+    const newest = this.db
+      .query<
+        {
+          id: string
+          answered: number
+          choice: number | null
+          thread_id: string | null
+          status: string | null
+        },
+        [string, string]
+      >(
+        `SELECT a.id, a.answered, a.choice, a.thread_id, w.status FROM attentions a
+         LEFT JOIN issue_writes w ON w.attention_id = a.id
+         WHERE a.project_id = ? AND a.purpose = ?
+         ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
+      )
+      .get(projectId, purpose)
+    if (newest && !newest.answered) {
+      const waiting =
+        newest.thread_id === threadId ||
+        !!this.db
+          .query<{ one: number }, [string, string]>(
+            'SELECT 1 AS one FROM attention_waiters WHERE attention_id = ? AND thread_id = ?',
+          )
+          .get(newest.id, threadId)
+      if (!waiting) {
+        this.store.append([
+          { type: 'attention.joined', projectId, data: { attentionId: newest.id, threadId } },
+        ])
+      }
+      return { state: 'pending' }
+    }
+    if (newest?.choice === 0) {
+      if (newest.status === null) return { state: 'approved', attentionId: newest.id }
+      if (newest.status === 'writing') return { state: 'unsure', attentionId: newest.id }
+    }
+    if (newest && newest.choice !== null && newest.choice !== 0) {
+      const waited =
+        newest.thread_id === threadId ||
+        !!this.db
+          .query<{ one: number }, [string, string]>(
+            'SELECT 1 AS one FROM attention_waiters WHERE attention_id = ? AND thread_id = ?',
+          )
+          .get(newest.id, threadId)
+      if (waited) return { state: 'declined' }
+    }
+    this.openAttention(projectId, { threadId, ...card(), purpose })
+    return { state: 'asked' }
   }
 
-  /** A thread made the change to an issue the user agreed to; it is not made again. */
-  recordIssueWrite(projectId: string, data: EventMap['issue.written']): void {
-    this.assertThreadIn(projectId, data.threadId)
-    this.store.append([{ type: 'issue.written', projectId, data }])
+  /** Record that a change to an issue is about to be made with this yes; it is used now. */
+  startIssueWrite(projectId: string, write: IssueWrite): void {
+    this.assertThreadIn(projectId, write.threadId)
+    const used = this.db
+      .query<{ one: number }, [string]>('SELECT 1 AS one FROM issue_writes WHERE attention_id = ?')
+      .get(write.attentionId)
+    if (used) throw new DomainError('error.invalidBody', { reason: 'approval used' })
+    this.store.append([{ type: 'issue.writing', projectId, data: write }])
+  }
+
+  finishIssueWrite(projectId: string, write: IssueWrite, url: string | null): void {
+    this.store.append([{ type: 'issue.written', projectId, data: { ...write, url } }])
+  }
+
+  /** The thread was told to check a change that was cut off; its yes is spent. */
+  markIssueWriteUnsure(projectId: string, attentionId: string): void {
+    this.store.append([{ type: 'issue.write_unsure', projectId, data: { attentionId } }])
   }
 
   stopThread(threadId: string, input: { reason: string; by: string }): ThreadView {
@@ -1195,17 +1264,24 @@ export class Ariadne {
       const [from = '', to = ''] = key.split('>')
       dependsOn.set(to, [...(dependsOn.get(to) ?? []), from])
     }
-    const issues = new Map<string, LinkedIssue[]>()
+    const issues = new Map<string, PlanNodeView['issues']>()
     for (const row of this.db
       .query<
-        { node_id: string; tracker: string; number: number; title: string; url: string },
+        {
+          node_id: string
+          tracker: string
+          number: number
+          title: string
+          url: string
+          linked_by: string
+        },
         [string]
       >(
-        'SELECT node_id, tracker, number, title, url FROM plan_node_issues WHERE project_id = ? ORDER BY seq',
+        'SELECT node_id, tracker, number, title, url, linked_by FROM plan_node_issues WHERE project_id = ? ORDER BY seq',
       )
       .all(projectId)) {
-      const { node_id, ...issue } = row
-      issues.set(node_id, [...(issues.get(node_id) ?? []), issue])
+      const { node_id, linked_by, ...issue } = row
+      issues.set(node_id, [...(issues.get(node_id) ?? []), { ...issue, linkedBy: linked_by }])
     }
     const nodes = graph.order.map((id): PlanNodeView => {
       const node = graph.nodes.get(id) as NonNullable<ReturnType<typeof graph.nodes.get>>

@@ -25,6 +25,18 @@ export interface LinkedIssue {
 
 export type IssueWriteAction = 'comment' | 'close' | 'reopen'
 
+/** One change to an issue, made with the user's yes on `attentionId`. */
+export interface IssueWrite {
+  threadId: string
+  attentionId: string
+  purpose: string
+  tracker: string
+  number: number
+  action: IssueWriteAction
+  /** What is written, exactly as the user agreed to it (the comment, or why it is closed). */
+  text: string
+}
+
 export interface TodoItem {
   label: string
   status: TodoStatus
@@ -272,19 +284,15 @@ export interface EventMap {
   'plan.issue_linked': { nodeId: string; issue: LinkedIssue; by: string }
   'plan.issue_unlinked': { nodeId: string; tracker: string; number: number; by: string }
   /**
-   * A thread changed an issue (a comment, closing or reopening it) after the user agreed to
-   * exactly that change. `purpose` names the approval it used, so it is done only once.
+   * A thread is about to change an issue (comment, close, reopen) with the user's yes on
+   * `attentionId`. Recorded first, so a change cut off by a crash is not made blindly again.
+   * Each yes is used for one change only.
    */
-  'issue.written': {
-    threadId: string
-    purpose: string
-    tracker: string
-    number: number
-    action: IssueWriteAction
-    /** What was written, as the user agreed to it. */
-    text: string
-    url: string | null
-  }
+  'issue.writing': IssueWrite
+  /** The change went through; `url` shows it on the tracker. */
+  'issue.written': IssueWrite & { url: string | null }
+  /** A change was cut off before it was known to be made; the thread was told to check. */
+  'issue.write_unsure': { attentionId: string }
   /** The thread's pull request as last seen on the repository; written only on a change. */
   'pull_request.synced': { threadId: string } & ThreadPullRequest
   /** Checks of the pull request's newest commit failed; the thread gets to fix them. */

@@ -379,6 +379,26 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'plan.issue_linked':
+      case 'plan.issue_unlinked': {
+        // What a thread reads follows from these links; an agent's link is shown where it
+        // made it, so the user can see who pointed which work at which issue.
+        if (event.data.by === 'user') break
+        const node = db
+          .query<{ title: string }, [string, string]>(
+            'SELECT title FROM plan_nodes WHERE project_id = ? AND id = ?',
+          )
+          .get(event.projectId, event.data.nodeId)
+        const linked = event.type === 'plan.issue_linked'
+        add(event.data.by, 'issue-linked', {
+          nodeId: event.data.nodeId,
+          nodeTitle: node?.title ?? event.data.nodeId,
+          tracker: linked ? event.data.issue.tracker : event.data.tracker,
+          number: linked ? event.data.issue.number : event.data.number,
+          linked,
+        })
+        break
+      }
       case 'issue.written': {
         // A change made outside Ariadne, in the user's name: shown where the thread made it.
         const { threadId, tracker, number, action, text, url } = event.data
@@ -1052,12 +1072,16 @@ export const planProjection: Projection = {
       number INTEGER NOT NULL,
       title TEXT NOT NULL,
       url TEXT NOT NULL,
+      linked_by TEXT NOT NULL,
       seq INTEGER NOT NULL,
       PRIMARY KEY (project_id, node_id, tracker, number)
     )`)
+    // Which yes was used for which change: `writing` until it is known to have gone through.
     db.run(`CREATE TABLE IF NOT EXISTS issue_writes (
-      purpose TEXT PRIMARY KEY,
+      attention_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      status TEXT NOT NULL,
       url TEXT
     )`)
     db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
@@ -1125,10 +1149,19 @@ export const planProjection: Projection = {
       case 'plan.issue_linked': {
         const { nodeId, issue } = event.data
         db.run(
-          `INSERT INTO plan_node_issues (project_id, node_id, tracker, number, title, url, seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO plan_node_issues (project_id, node_id, tracker, number, title, url, linked_by, seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO UPDATE SET title = excluded.title, url = excluded.url`,
-          [event.projectId, nodeId, issue.tracker, issue.number, issue.title, issue.url, event.seq],
+          [
+            event.projectId,
+            nodeId,
+            issue.tracker,
+            issue.number,
+            issue.title,
+            issue.url,
+            event.data.by,
+            event.seq,
+          ],
         )
         break
       }
@@ -1138,11 +1171,24 @@ export const planProjection: Projection = {
           [event.projectId, event.data.nodeId, event.data.tracker, event.data.number],
         )
         break
+      case 'issue.writing':
+        db.run(
+          `INSERT OR IGNORE INTO issue_writes (attention_id, project_id, purpose, status)
+           VALUES (?, ?, ?, 'writing')`,
+          [event.data.attentionId, event.projectId, event.data.purpose],
+        )
+        break
       case 'issue.written':
-        db.run('INSERT OR IGNORE INTO issue_writes (purpose, project_id, url) VALUES (?, ?, ?)', [
-          event.data.purpose,
-          event.projectId,
-          event.data.url,
+        db.run(
+          `INSERT INTO issue_writes (attention_id, project_id, purpose, status, url)
+           VALUES (?, ?, ?, 'written', ?)
+           ON CONFLICT DO UPDATE SET status = 'written', url = excluded.url`,
+          [event.data.attentionId, event.projectId, event.data.purpose, event.data.url],
+        )
+        break
+      case 'issue.write_unsure':
+        db.run("UPDATE issue_writes SET status = 'unsure' WHERE attention_id = ?", [
+          event.data.attentionId,
         ])
         break
       case 'plan.proposal.dismissed':

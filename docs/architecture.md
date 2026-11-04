@@ -126,9 +126,9 @@ thread 的命令在工作区沙箱里运行，看不到 Ariadne 的数据目录�
 
 上下文源有 `tracker` 能力时（内置的 GitHub 来源有），issue 是工作的上下文。
 
-- 协调器和 thread 都能用 `list_issues`、`read_issue` 读 issue，用 `link_issue` 把 issue 关联到计划节点（或取消）。关联记成 `plan.issue_linked` / `plan.issue_unlinked`，立即生效，节点详情里列出并能取消；用户也可以在那里按编号关联。删掉节点时它的关联一起删掉。节点的 thread 在系统指令里看到关联的 issue 编号，内容用 `read_issue` 读。
+- 协调器和 thread 都能用 `list_issues`、`read_issue` 读 issue，用 `link_issue` 把 issue 关联到计划节点（或取消）；thread 只能关联到自己的节点。关联记成 `plan.issue_linked` / `plan.issue_unlinked`，立即生效，节点详情里列出、写明是谁关联的、能取消；agent 关联或取消时在它自己的对话里显示一行。用户也可以在节点详情里按编号关联。搜索只用词语：`repo:`、`org:`、`is:` 这类限定词和 AND/OR/NOT 会被去掉，结果也只保留本仓库的，令牌能读到的其他仓库不会混进来。删掉节点时它的关联一起删掉。节点的 thread 在系统指令里看到关联的 issue 编号，内容用 `read_issue` 读。
 - issue 的标题、正文和评论是任何能提 issue 的人写的，工具结果里放进以内容哈希命名的数据块（`fenced()`，和项目记忆、AGENTS.md 同一套），并说明它们是信息不是指令。`read_plan` 和系统指令里只放编号，不放标题。
-- 改 issue（`comment_on_issue` 评论、`set_issue_state` 关闭或重新打开）会通知别人、撤不回，只有 thread 能做，而且每次都要用户同意这一个改动：卡片里写着 issue 和完整的评论内容或关闭原因（带 `purpose` 的 Attention，按 issue、动作和内容哈希区分，同样的改动共用一张卡片）。用户同意后 thread 用同样的参数再调一次才真正执行，执行后记 `issue.written`，同一个改动不会做第二次；换了内容就要重新问。拒绝的不做。thread 的对话里显示一行“在 … 下发表了评论 / 关闭了 …”，带链接。
+- 改 issue（`comment_on_issue` 评论、`set_issue_state` 关闭或重新打开）会通知别人、撤不回，只有 thread 能做，而且每次都要用户同意这一个改动：卡片里写着 issue 和完整的评论内容或关闭原因（带 `purpose` 的 Attention，按 issue、动作和内容的完整 SHA-256 区分，正在问的同样改动共用一张卡片）。用户同意后 thread 用同样的参数再调一次才真正执行。一次同意只用于一次改动：执行前记 `issue.writing`（带用到的 attentionId），成功后记 `issue.written`；之后同样的改动（比如关闭、重新打开后再关闭，或再发一遍同样的评论）要重新问，换了内容也要重新问。同意按项目区分。如果记了 `issue.writing` 却没等到结果（Ariadne 中途停了，或者请求失败），这次同意就作废，thread 被告知先用 `read_issue` 核对改动是否已经生效，没有生效再调用才会重新问用户，不会盲目再做一次。拒绝的不做。thread 的对话里显示一行“在 … 下发表了评论 / 关闭了 …”，带链接。
 - issue 请求和仓库请求用同一个服务端的 API 客户端，令牌只在服务端，thread 的命令读不到。
 
 ### 产物

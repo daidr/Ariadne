@@ -268,7 +268,11 @@ export function createHandler({
     async (request, { projectId = '', nodeId = '' }) => {
       const { number } = await readJson(request)
       if (!Number.isInteger(number) || (number as number) < 1) throw new BadRequest('number')
-      if (!workspaces) throw new DomainError('error.noTracker')
+      // The node first: no request leaves for a link that cannot be made.
+      if (!app.getPlan(projectId).nodes.some((node) => node.id === nodeId)) {
+        throw new DomainError('error.planInvalid', { reason: `no node ${nodeId}` })
+      }
+      if (!workspaces?.hasTracker(projectId)) throw new DomainError('error.noTracker')
       const tracker = await workspaces.tracker(projectId)
       let issue: { title: string; url: string }
       try {

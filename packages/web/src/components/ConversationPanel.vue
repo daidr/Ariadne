@@ -228,6 +228,20 @@ watch(
               <DouText size="sm" class="relay-content">{{ item.notice.content }}</DouText>
             </DouCollapseItem>
           </DouCollapse>
+          <!-- Which work this conversation pointed at which issue. -->
+          <DouText
+            v-else-if="item.notice.kind === 'issue-linked'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.linked ? 'notice.issueLinked' : 'notice.issueUnlinked', {
+                issue: `${item.notice.tracker}#${item.notice.number}`,
+                node: item.notice.nodeTitle,
+              })
+            }}
+          </DouText>
           <!-- A change made to an issue in the user's name, with a link to see it there. -->
           <DouText
             v-else-if="item.notice.kind === 'issue-written'"

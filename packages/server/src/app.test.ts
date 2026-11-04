@@ -1,5 +1,7 @@
 import { Ariadne, type AnyStoredEvent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { PluginHost, WorkspaceManager } from '@ariadne/agent'
+import type { ContextProvider, TrackerCapability } from '@ariadne/plugin-sdk'
 import { createHandler } from './app'
 
 const token = 'test-token'
@@ -275,5 +277,106 @@ describe('sandbox', () => {
   test('says when thread commands are not isolated', async () => {
     const response = await call('/api/sandbox')
     expect(await response.json()).toEqual({ sandbox: { kind: null, mode: 'auto', hidden: [] } })
+  })
+})
+
+/** A project whose source has a tracker, with one plan node `a`. */
+async function withTracker(fail = false) {
+  const host = new PluginHost('/tmp/ariadne-test-plugins')
+  const tracker: TrackerCapability = {
+    name: 'acme/app',
+    webUrl: 'https://github.com/acme/app/issues',
+    list: async () => [],
+    async issue(number) {
+      if (fail || number !== 3) throw new Error('Not Found')
+      return {
+        number,
+        url: 'https://github.com/acme/app/issues/3',
+        title: 'Safari 登录',
+        state: 'open',
+        author: null,
+        labels: [],
+        comments: 0,
+        updatedAt: '',
+        body: '',
+        createdAt: '',
+        recent: [],
+      }
+    },
+    comment: () => Promise.reject(new Error('not here')),
+    setState: () => Promise.reject(new Error('not here')),
+  }
+  const provider: ContextProvider<never> = {
+    kind: 'tracked',
+    title: { 'zh-CN': '有 issue' },
+    settings: { type: 'object', properties: {} },
+    provides: ['tracker'],
+    connect: async () => ({ tracker }),
+  }
+  await host.load({
+    id: 'tracked',
+    name: { 'zh-CN': '有 issue' },
+    setup: (ctx) => ctx.registerContextProvider(provider),
+  })
+  handle = createHandler({ app, token, workspaces: new WorkspaceManager(app, host) })
+  const project = app.createProject('P')
+  app.setProjectSource(project.id, { kind: 'tracked', settings: {} })
+  app.revisePlan(project.id, {
+    author: 'user',
+    reason: '起步',
+    ops: [{ op: 'add', id: 'a', kind: 'task', title: 'A', description: '', acceptance: '' }],
+  })
+  return project.id
+}
+
+const errorOf = async (response: Response) =>
+  ((await response.json()) as { error: { key: string } }).error.key
+
+describe('issues on plan nodes', () => {
+  test('the user links an issue by number and unlinks it', async () => {
+    const projectId = await withTracker()
+    const path = `/api/projects/${projectId}/plan/nodes/a/issues`
+    expect((await call(path, { method: 'POST', body: { number: 3 } }, false)).status).toBe(401)
+    const linked = await call(path, { method: 'POST', body: { number: 3 } })
+    expect(linked.status).toBe(200)
+    expect(app.getPlan(projectId).nodes[0]?.issues).toEqual([
+      {
+        tracker: 'acme/app',
+        number: 3,
+        title: 'Safari 登录',
+        url: 'https://github.com/acme/app/issues/3',
+        linkedBy: 'user',
+      },
+    ])
+    // Unlinking a number that is not linked changes nothing.
+    expect((await call(`${path}/9`, { method: 'DELETE' })).status).toBe(200)
+    expect(app.getPlan(projectId).nodes[0]?.issues).toHaveLength(1)
+    expect((await call(`${path}/3`, { method: 'DELETE' })).status).toBe(200)
+    expect(app.getPlan(projectId).nodes[0]?.issues).toEqual([])
+  })
+
+  test('refuses a bad number, a missing node, no tracker, and a tracker that fails', async () => {
+    const projectId = await withTracker()
+    const path = (node: string) => `/api/projects/${projectId}/plan/nodes/${node}/issues`
+    const bad = await call(path('a'), { method: 'POST', body: { number: 0 } })
+    expect(bad.status).toBe(400)
+    expect(await errorOf(await call(path('nope'), { method: 'POST', body: { number: 3 } }))).toBe(
+      'error.planInvalid',
+    )
+    expect(await errorOf(await call(path('a'), { method: 'POST', body: { number: 9 } }))).toBe(
+      'error.issue',
+    )
+    const plain = app.createProject('Q')
+    app.revisePlan(plain.id, {
+      author: 'user',
+      reason: '起步',
+      ops: [{ op: 'add', id: 'b', kind: 'task', title: 'B', description: '', acceptance: '' }],
+    })
+    const none = await call(`/api/projects/${plain.id}/plan/nodes/b/issues`, {
+      method: 'POST',
+      body: { number: 3 },
+    })
+    expect(await errorOf(none)).toBe('error.noTracker')
+    expect(app.getPlan(projectId).nodes[0]?.issues).toEqual([])
   })
 })

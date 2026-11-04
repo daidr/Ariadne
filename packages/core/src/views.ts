@@ -103,6 +103,14 @@ export type NoticeView = {
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
   | {
+      kind: 'issue-linked'
+      nodeId: string
+      nodeTitle: string
+      tracker: string
+      number: number
+      linked: boolean
+    }
+  | {
       kind: 'issue-written'
       tracker: string
       number: number
@@ -239,8 +247,8 @@ export interface PlanNodeView {
   }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */
   changedIn: string | null
-  /** Issues of the project's tracker that this node's work is about. */
-  issues: LinkedIssue[]
+  /** Issues of the project's tracker that this node's work is about, and who linked each. */
+  issues: (LinkedIssue & { linkedBy: string })[]
 }
 
 export interface PlanRevisionView {

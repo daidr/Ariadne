@@ -124,6 +124,13 @@ async function linkIssue() {
   linking.value = false
   if (!issueProblem.value) issueNumber.value = null
 }
+/** Who linked an issue: the user, the coordinator, or a thread by its title. */
+function linkedBy(by: string): string {
+  if (by === 'user') return t('plan.linkedByUser')
+  if (by === state.detail?.project.coordinatorId) return t('plan.linkedByCoordinator')
+  return state.detail?.threads.find((thread) => thread.id === by)?.title ?? by
+}
+
 async function unlinkIssue(number: number) {
   issueProblem.value = await setNodeIssue(props.node.id, number, false)
 }
@@ -219,6 +226,9 @@ const removeQuestion = computed(() =>
             <CircleDotIcon class="node-detail-issue-icon" />
             <span>#{{ issue.number }} {{ issue.title }}</span>
           </DouLink>
+          <DouText variant="tertiary" size="sm">
+            {{ t('plan.issueLinkedBy', { who: linkedBy(issue.linkedBy) }) }}
+          </DouText>
           <DouButton
             v-if="editable"
             size="sm"

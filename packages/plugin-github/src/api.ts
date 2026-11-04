@@ -55,6 +55,7 @@ interface RawIssue {
   created_at: string
   updated_at: string
   pull_request?: unknown
+  repository_url?: string
 }
 
 interface RawComment {
@@ -251,8 +252,15 @@ export class GitHubApi {
     const limit = Math.min(Math.max(query.limit ?? 30, 1), 100)
     const state = query.state ?? 'open'
     if (query.search?.trim()) {
+      // Only words: a qualifier (`repo:`, `org:`, `is:` …) could reach other repositories
+      // the token can read, so they are dropped, and so are the boolean operators.
+      const words = query.search
+        .split(/\s+/)
+        .filter((word) => word && !/^-?[\w.-]*:/.test(word) && !/^(?:AND|OR|NOT)$/.test(word))
+        .map((word) => word.replace(/^-+/, ''))
+        .filter(Boolean)
       const terms = [
-        query.search.trim(),
+        ...words,
         `repo:${this.options.owner}/${this.options.name}`,
         'is:issue',
         ...(state === 'all' ? [] : [`is:${state}`]),
@@ -262,7 +270,11 @@ export class GitHubApi {
         'GET',
         `/search/issues?q=${encodeURIComponent(terms.join(' '))}&sort=updated&per_page=${limit}`,
       )
-      return found.items.filter((item) => !item.pull_request).map(toIssue)
+      // And whatever search returns, only this repository's issues are this project's.
+      const own = `/repos/${this.options.owner}/${this.options.name}`.toLowerCase()
+      return found.items
+        .filter((item) => !item.pull_request && item.repository_url?.toLowerCase().endsWith(own))
+        .map(toIssue)
     }
     const params = new URLSearchParams({
       state,
