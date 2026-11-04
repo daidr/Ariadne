@@ -47,6 +47,9 @@ export const projectsProjection: Projection = {
       updated_at INTEGER NOT NULL
     )`)
   },
+  forget(db, projectId) {
+    db.run('DELETE FROM projects WHERE id = ?', [projectId])
+  },
   apply(db, event) {
     switch (event.type) {
       case 'project.created':
@@ -111,6 +114,9 @@ export const threadsProjection: Projection = {
       updated_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS threads_project ON threads (project_id, id)')
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM threads WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
     switch (event.type) {
@@ -252,6 +258,13 @@ export const attentionsProjection: Projection = {
       PRIMARY KEY (attention_id, thread_id)
     )`)
   },
+  forget(db, projectId) {
+    db.run(
+      'DELETE FROM attention_waiters WHERE attention_id IN (SELECT id FROM attentions WHERE project_id = ?)',
+      [projectId],
+    )
+    db.run('DELETE FROM attentions WHERE project_id = ?', [projectId])
+  },
   apply(db, event) {
     switch (event.type) {
       case 'attention.opened':
@@ -315,6 +328,9 @@ export const messagesProjection: Projection = {
     )`)
     db.run('CREATE INDEX IF NOT EXISTS messages_conversation ON messages (conversation_id, id)')
   },
+  forget(db, projectId) {
+    db.run('DELETE FROM messages WHERE project_id = ?', [projectId])
+  },
   apply(db, event) {
     switch (event.type) {
       case 'message.posted':
@@ -365,6 +381,9 @@ export const todosProjection: Projection = {
       updated_at INTEGER NOT NULL
     )`)
   },
+  forget(db, projectId) {
+    db.run('DELETE FROM todos WHERE project_id = ?', [projectId])
+  },
   apply(db, event) {
     if (event.type !== 'todo.updated') return
     db.run(
@@ -395,6 +414,9 @@ export const noticesProjection: Projection = {
     db.run(
       'CREATE INDEX IF NOT EXISTS notices_conversation ON notices (conversation_id, created_at)',
     )
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM notices WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
     const add = (conversationId: string, kind: string, payload: unknown) =>
@@ -523,6 +545,9 @@ export const memoriesProjection: Projection = {
     )`)
     db.run('CREATE INDEX IF NOT EXISTS memories_project ON memories (project_id, created_at)')
   },
+  forget(db, projectId) {
+    db.run('DELETE FROM memories WHERE project_id = ?', [projectId])
+  },
   apply(db, event) {
     if (event.type === 'memory.saved') {
       db.run(
@@ -567,6 +592,9 @@ export const conversationsProjection: Projection = {
       context_tokens INTEGER NOT NULL DEFAULT 0,
       instructions TEXT
     )`)
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM conversations WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
     switch (event.type) {
@@ -695,8 +723,9 @@ function addEntry(
   wake: boolean,
 ) {
   db.run(
-    'INSERT INTO transcript (conversation_id, seq, kind, ref, payload) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO transcript (project_id, conversation_id, seq, kind, ref, payload) VALUES (?, ?, ?, ?, ?, ?)',
     [
+      event.projectId,
       entry.conversationId,
       event.seq,
       entry.kind,
@@ -774,6 +803,7 @@ export const transcriptProjection: Projection = {
   setup(db) {
     db.run(`CREATE TABLE IF NOT EXISTS transcript (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
       seq INTEGER NOT NULL,
       kind TEXT NOT NULL,
@@ -781,6 +811,9 @@ export const transcriptProjection: Projection = {
       payload TEXT
     )`)
     db.run('CREATE INDEX IF NOT EXISTS transcript_conversation ON transcript (conversation_id, id)')
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM transcript WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
     switch (event.type) {
@@ -1294,6 +1327,18 @@ export const planProjection: Projection = {
       created_at INTEGER NOT NULL
     )`)
   },
+  forget(db, projectId) {
+    for (const table of [
+      'plan_nodes',
+      'plan_edges',
+      'plan_revisions',
+      'plan_node_issues',
+      'issue_writes',
+      'plan_proposals',
+    ]) {
+      db.run(`DELETE FROM ${table} WHERE project_id = ?`, [projectId])
+    }
+  },
   apply(db, event) {
     switch (event.type) {
       case 'plan.revised': {
@@ -1485,6 +1530,13 @@ export const artifactsProjection: Projection = {
       PRIMARY KEY (artifact_id, version)
     )`)
   },
+  forget(db, projectId) {
+    db.run(
+      'DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?)',
+      [projectId],
+    )
+    db.run('DELETE FROM artifacts WHERE project_id = ?', [projectId])
+  },
   apply(db, event) {
     switch (event.type) {
       case 'artifact.created': {
@@ -1553,6 +1605,9 @@ export const promptsProjection: Projection = {
       content TEXT NOT NULL,
       PRIMARY KEY (project_id, hash)
     )`)
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM prompts WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
     if (event.type !== 'prompt.recorded') return

@@ -128,6 +128,31 @@ export class WorkspaceManager {
     })
   }
 
+  /**
+   * Remove the worktrees of every thread of a project about to be deleted, changes not
+   * committed and all; their branches stay in the repository. The project's turns must
+   * have ended. Throws when the source cannot be reached or a worktree cannot be removed,
+   * so nothing is deleted while worktrees would be left behind.
+   */
+  async discardProject(projectId: string): Promise<void> {
+    let branches: Promise<BranchCapability | null> | null = null
+    for (const { id } of this.app.listThreads(projectId)) {
+      await this.serial(id, async () => {
+        const open = this.open.get(id)
+        this.open.delete(id)
+        if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
+        const workspace = this.app.getThread(id).workspace
+        if (!workspace || workspace.removed) return
+        branches ??= this.branches(projectId)
+        const capability = await branches
+        if (capability && !(await capability.remove(id, { discard: true }))) {
+          throw new DomainError('error.workspace', { detail: workspace.label })
+        }
+      })
+    }
+    this.sources.delete(projectId)
+  }
+
   /** Run `task` after the thread's earlier opening or removal has finished. */
   private serial<T>(threadId: string, task: () => Promise<T>): Promise<T> {
     const before = this.queues.get(threadId) ?? Promise.resolve()

@@ -446,7 +446,8 @@ export function localWorkspaces(input: {
       merged: (threadId, base) => branchMerged(gitRun, branchFor(threadId), `refs/heads/${base}`),
       merge: ({ threadId, ...request }) =>
         mergeBranch(gitRun, localIdentity(repoRoot), { branch: branchFor(threadId), ...request }),
-      remove: (threadId) => removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir)),
+      remove: (threadId, options) =>
+        removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir), options),
       worktrees: () => worktreesIn(worktrees),
     },
     async open({ threadId, base: recorded }) {

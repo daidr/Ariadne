@@ -82,7 +82,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 23
+export const PROJECTION_VERSION = 24
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -392,6 +392,15 @@ export class Ariadne {
       path: options.path,
       projections: defaultProjections,
       ...(options.now ? { now: options.now } : {}),
+      // Nothing is written for a project that is not there, e.g. one deleted while a
+      // plugin or a poll was still at work on it.
+      check: (db, event) => {
+        if (event.type === 'project.created') return
+        const known = db
+          .query<{ one: number }, [string]>('SELECT 1 AS one FROM projects WHERE id = ?')
+          .get(event.projectId)
+        if (!known) throw new DomainError('error.notFound', { what: event.projectId })
+      },
     })
     this.db = this.store.db
     const version =
@@ -699,6 +708,28 @@ export class Ariadne {
   }
 
   /** Cap how many turns of the project run at once (1–16), or lift the cap with `null`. */
+  /**
+   * Delete the project with its threads, conversations, plan, artifacts, memory and files.
+   * Its turns must have ended first: a turn still running would write on into nothing.
+   * Worktrees and the source's own directory are not here; the server sees to worktrees.
+   */
+  deleteProject(projectId: string): void {
+    this.getProject(projectId)
+    const running = this.db
+      .query<{ one: number }, [string]>(
+        'SELECT 1 AS one FROM conversations WHERE project_id = ? AND turn_id IS NOT NULL',
+      )
+      .get(projectId)
+    if (running) throw new DomainError('error.projectBusy')
+    const threads = new Set(this.listThreads(projectId).map((thread) => thread.id))
+    for (const [attentionId, threadId] of this.issueWritesUnderWay) {
+      if (threads.has(threadId)) this.issueWritesUnderWay.delete(attentionId)
+    }
+    this.store.purge(projectId, { type: 'project.deleted', projectId, data: {} }, (db) =>
+      db.run('DELETE FROM files WHERE project_id = ?', [projectId]),
+    )
+  }
+
   setProjectSlots(projectId: string, slots: number | null): ProjectView {
     const project = this.getProject(projectId)
     if (slots !== null && !(Number.isInteger(slots) && slots >= 1 && slots <= 16)) {

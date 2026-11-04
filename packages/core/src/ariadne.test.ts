@@ -1109,3 +1109,135 @@ describe('usage, models and step input', () => {
     expect(app.setThreadModel(thread.id, null, 'user').model).toBeNull()
   })
 })
+
+/** Every projection row, as text, table by table. */
+function rows(): Record<string, string[]> {
+  const db = app.store.db
+  const tables = db
+    .query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .all()
+    .map((row) => row.name)
+    .filter((name) => name !== 'events')
+  return Object.fromEntries(
+    tables.map((table) => [
+      table,
+      db
+        .query<Record<string, unknown>, []>(`SELECT * FROM ${table}`)
+        .all()
+        // Bytes are left out, and so are row numbers, which a rebuild counts afresh.
+        .map((row) =>
+          JSON.stringify(row, (key, value) =>
+            value instanceof Uint8Array || (key === 'id' && typeof value === 'number')
+              ? undefined
+              : value,
+          ),
+        ),
+    ]),
+  )
+}
+
+describe('deleting a project', () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9])
+
+  /** A project with something in every table: threads, a turn, a plan, artifacts, files. */
+  function busyProject(name: string) {
+    const project = app.createProject(name)
+    const a = app.createThread(project.id, { title: `${name} A` })
+    const b = app.createThread(project.id, { title: `${name} B` })
+    app.requestApproval(project.id, a.id, 'push', card)
+    app.requestApproval(project.id, b.id, 'push', card)
+    app.postMessage(project.id, { conversationId: a.id, author: 'user', content: '开始吧' })
+    app.updateTodo(project.id, a.id, [{ label: '调研', status: 'doing' }])
+    app.saveMemory(project.id, { text: `${name} 用中文`, author: 'user' })
+    app.revisePlan(project.id, {
+      author: 'user',
+      reason: '起步',
+      ops: [{ op: 'add', id: 'n', kind: 'task', title: 'N', description: '', acceptance: '' }],
+    })
+    const doc = app.createArtifact(project.id, {
+      kind: 'document',
+      title: 'Doc',
+      author: 'user',
+      content: '# Hello',
+    })
+    app.reviseArtifact(doc.id, { content: '# Bye', author: 'user', reason: 'r' })
+    const file = app.saveFile(project.id, { mime: 'image/png', data: png })
+    const turnId = app.startTurn(a.id, 'model')
+    app.recordStep(a.id, turnId, {
+      reasoning: [],
+      text: '好的',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    app.finishTurn(a.id, turnId, 'completed')
+    return { project, ids: [project.id, project.coordinatorId, a.id, b.id, doc.id], file }
+  }
+
+  test('removes everything of it and leaves other projects as they were', () => {
+    const gone = busyProject('甲')
+    const kept = busyProject('乙')
+    const before = rows()
+    app.deleteProject(gone.project.id)
+    const after = rows()
+
+    expect(app.listProjects().map((p) => p.id)).toEqual([kept.project.id])
+    expect(() => app.getFile(gone.file.id)).toThrow(DomainError)
+    expect(app.getFile(kept.file.id).data).toEqual(png)
+    for (const [table, list] of Object.entries(after)) {
+      for (const row of list) {
+        for (const id of gone.ids) expect(row, `${table} still holds ${id}`).not.toContain(id)
+      }
+      // Rows of the other project are all still there.
+      const others = before[table]!.filter((row) => kept.ids.some((id) => row.includes(id)))
+      expect(list, table).toEqual(expect.arrayContaining(others))
+    }
+    // Only the tombstone is left in the log, and folding the log again changes nothing.
+    expect(app.events({ projectId: gone.project.id }).map((e) => e.type)).toEqual([
+      'project.deleted',
+    ])
+    app.rebuildProjections()
+    expect(rows()).toEqual(after)
+  })
+
+  test('tells subscribers, then refuses anything more written for it', () => {
+    const { project } = busyProject('甲')
+    const heard: AnyStoredEvent[] = []
+    app.subscribe((events) => heard.push(...events))
+    app.deleteProject(project.id)
+    expect(heard.map((e) => [e.type, e.projectId])).toEqual([['project.deleted', project.id]])
+    expect(() =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: '还在吗',
+      }),
+    ).toThrow(DomainError)
+    expect(() =>
+      app.store.append([{ type: 'project.renamed', projectId: project.id, data: { name: 'x' } }]),
+    ).toThrow(DomainError)
+    expect(app.events({ projectId: project.id })).toHaveLength(1)
+  })
+
+  test('waits for its turns to end', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 'A' })
+    const turnId = app.startTurn(thread.id, 'model')
+    const refusal = () => {
+      try {
+        app.deleteProject(project.id)
+        return null
+      } catch (error) {
+        return (error as DomainError).code
+      }
+    }
+    expect(refusal()).toBe('error.projectBusy')
+    app.finishTurn(thread.id, turnId, 'cancelled')
+    expect(refusal()).toBeNull()
+    expect(refusal()).toBe('error.notFound')
+  })
+})

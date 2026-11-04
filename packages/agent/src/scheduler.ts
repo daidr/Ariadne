@@ -39,6 +39,8 @@ interface Running {
  */
 export class Scheduler {
   private readonly running = new Map<string, Running>()
+  /** Projects whose turns may not start, e.g. while one is being deleted. */
+  private readonly held = new Set<string>()
   private unsubscribe: (() => void) | null = null
   private scheduled = false
   private stopped = false
@@ -89,6 +91,21 @@ export class Scheduler {
     return true
   }
 
+  /**
+   * End the project's turns and start none until the returned release is called. Resolves
+   * once every turn of the project has ended.
+   */
+  async holdProject(projectId: string): Promise<() => void> {
+    this.held.add(projectId)
+    const ending = [...this.running.values()].filter((running) => running.projectId === projectId)
+    for (const running of ending) running.controller.abort('cancelled')
+    await Promise.allSettled(ending.map((running) => running.done))
+    return () => {
+      this.held.delete(projectId)
+      this.schedule()
+    }
+  }
+
   /** Abort every turn as interrupted, so each resumes on the next start. */
   async stop(): Promise<void> {
     this.stopped = true
@@ -136,7 +153,7 @@ export class Scheduler {
     }
     for (const conversation of app.listPendingConversations()) {
       if (this.stopped) return
-      if (this.running.has(conversation.id)) continue
+      if (this.running.has(conversation.id) || this.held.has(conversation.projectId)) continue
       const used = [...this.running.values()]
       const general = used.filter((r) => !r.reserved).length
       const reserved = used.length - general

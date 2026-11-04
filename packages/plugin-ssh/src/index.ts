@@ -216,7 +216,7 @@ export function remoteWorkspaces(shell: RemoteShell, source: Probe): WorkspaceCa
       merged: (threadId, base) => branchMerged(git, branchFor(threadId), `refs/heads/${base}`),
       merge: ({ threadId, ...request }) =>
         mergeBranch(git, identity, { branch: branchFor(threadId), ...request }),
-      remove: (threadId) => removeWorktree(git, dirOf(threadId), exists),
+      remove: (threadId, options) => removeWorktree(git, dirOf(threadId), exists, options),
       async worktrees() {
         const result = await shell.run(WORKTREES, [worktrees], { timeoutMs: 120_000 })
         if (result.exitCode !== 0) throw failure(worktrees, result)
