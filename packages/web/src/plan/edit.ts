@@ -1,4 +1,4 @@
-import type { PlanNodeKind, PlanOp } from '@ariadne/core'
+import type { PlanNodeKind, PlanNodeView, PlanOp } from '@ariadne/core'
 import type { MessageKey, MessageParams } from '@ariadne/i18n'
 import type { FlowDocument, FlowEdge, FlowStep } from '@dou-ui/flow'
 import type { Positions } from './layout'
@@ -11,6 +11,13 @@ export interface GraphEdit {
   /** Nodes the user moved, to remember where they put them. */
   moved: Positions
 }
+
+/**
+ * Threads on a node that the user removing it stops: those not done, unless the user
+ * stopped them already (a stop by the coordinator is taken over). The server's rule.
+ */
+export const liveThreads = (node: Pick<PlanNodeView, 'threads'>) =>
+  node.threads.filter((thread) => thread.stage !== 'done' && thread.stoppedBy !== 'user').length
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 

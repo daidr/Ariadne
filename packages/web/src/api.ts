@@ -9,6 +9,7 @@ import type {
   MessageView,
   NeedsMeItem,
   PlanOp,
+  PlanUndoPreview,
   PlanView,
   ProjectView,
   ThreadView,
@@ -376,6 +377,11 @@ export const api = {
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
   revisePlan: (projectId: string, input: { reason: string; ops: PlanOp[] }) =>
     request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/revise`, input),
+  previewPlanUndo: (projectId: string, revisionId: string) =>
+    request<{ preview: PlanUndoPreview }>(
+      'GET',
+      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
+    ),
   revertPlan: (projectId: string, revisionId: string, reason: string) =>
     request<{ plan: PlanView }>(
       'POST',

@@ -8,16 +8,17 @@ import {
   DouTimeline,
   DouTimelineItem,
 } from 'dou-ui'
-import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon, RotateCcwIcon } from '@dou-ui/icons'
+import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon } from '@dou-ui/icons'
 import type { PlanOp } from '@ariadne/core'
 import { computed, ref, watch } from 'vue'
 import { locale, t, tm } from '../i18n'
-import { editPlan, openMain, revertPlan, state } from '../store'
+import { editPlan, openMain, state } from '../store'
 import { reasonOf } from './edit'
 import PlanBoard from './PlanBoard.vue'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
+import PlanUndoButton from './PlanUndoButton.vue'
 import { clearPositions } from './ui'
 
 const selected = ref<string | null>(null)
@@ -146,15 +147,7 @@ const time = (at: number) =>
                 }}
               </DouText>
               <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
-              <DouButton
-                v-else-if="!revision.revertOf"
-                size="sm"
-                variant="ghost"
-                @click="revertPlan(revision.id)"
-              >
-                <template #leading><RotateCcwIcon /></template>
-                {{ t('plan.revert') }}
-              </DouButton>
+              <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
             </div>
           </DouTimelineItem>
         </DouTimeline>

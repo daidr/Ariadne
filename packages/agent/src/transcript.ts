@@ -71,7 +71,7 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
         : `${head}\nThe attempt at this change, made with the yes you waited on, was cut off or failed, and it may have gone through. The yes is spent. Check the issue with read_issue before asking for it again.\n</shared_issue_change>`
     }
     case 'plan-changed-by-user':
-      return `<plan_changed_by_user revision="${note.revisionId}"${note.revertOf ? ` reverts="${note.revertOf}"` : ''}>\n${note.reason}\n</plan_changed_by_user>`
+      return `<plan_changed_by_user revision="${note.revisionId}"${note.revertOf ? ` reverts="${note.revertOf}"` : ''}>\n${note.reason}${note.revertOf ? '\nThe user undid that revision; threads on nodes it removed were stopped. Read the plan and adjust your work to it. Do not make the change again unless the user asks.' : ''}\n</plan_changed_by_user>`
   }
 }
 

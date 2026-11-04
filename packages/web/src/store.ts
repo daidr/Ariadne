@@ -374,11 +374,11 @@ export async function setNodeIssue(
   }
 }
 
-export async function revertPlan(revisionId: string) {
+export async function revertPlan(revisionId: string, reason: string) {
   const project = state.detail?.project
   if (!project) return
   try {
-    const { plan } = await api.revertPlan(project.id, revisionId, t('plan.revertReason'))
+    const { plan } = await api.revertPlan(project.id, revisionId, reason)
     if (state.detail?.project.id === plan.projectId) state.plan = plan
   } catch (error) {
     report(error)

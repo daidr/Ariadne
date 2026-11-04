@@ -1088,7 +1088,8 @@ export const transcriptProjection: Projection = {
               reason: event.data.reason,
             },
           },
-          false,
+          // An undo says the coordinator's change was not wanted: it looks again now.
+          !!event.data.revertOf,
         )
         break
       }
@@ -1447,6 +1448,12 @@ export const planProjection: Projection = {
             event.data.revisionId,
             event.data.revertOf,
           ])
+          // Undoing an undo restores the change it undid: that change stands again.
+          db.run(
+            `UPDATE plan_revisions SET reverted_by = NULL
+             WHERE id = (SELECT revert_of FROM plan_revisions WHERE id = ?)`,
+            [event.data.revertOf],
+          )
         }
         if (event.data.proposalId) {
           db.run("UPDATE plan_proposals SET status = 'applied' WHERE id = ?", [

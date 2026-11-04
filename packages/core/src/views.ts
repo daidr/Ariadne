@@ -368,6 +368,8 @@ export interface PlanNodeView {
     id: string
     title: string
     stage: ThreadStage
+    /** Who holds it stopped, while it is. */
+    stoppedBy: string | null
     lastHeadline: string | null
     pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> | null
   }[]
@@ -403,6 +405,15 @@ export interface PlanProposalView {
   status: 'open' | 'stale'
   staleReason: string | null
   createdAt: number
+}
+
+/** What undoing a revision would do; see `Ariadne.previewPlanUndo`. */
+export interface PlanUndoPreview {
+  changes: LocalizedMessage[]
+  /** Threads on nodes the undo removes; they stop. */
+  threads: { id: string; title: string }[]
+  /** Why it can no longer be undone, or null. */
+  blocked: LocalizedMessage | null
 }
 
 export interface PlanView {

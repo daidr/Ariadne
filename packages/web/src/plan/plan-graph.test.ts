@@ -158,9 +158,13 @@ describe('freshChanges', () => {
       revision('r2', { ops: [{ op: 'update', id: 'c', title: 'C2' }] }),
       revision('r1', { ops: [{ op: 'remove', id: 'z' }] }),
     ]
-    const fresh = freshChanges(plan([], revisions), 'r1')
+    const fresh = freshChanges(plan([node('a'), node('b'), node('c')], revisions), 'r1')
     expect(fresh.revisions.map((r) => r.id)).toEqual(['r5', 'r2'])
-    expect([...fresh.nodes].toSorted()).toEqual(['a', 'b', 'c'])
+    expect([...fresh.nodes].toSorted()).toEqual([
+      ['a', 'r5'],
+      ['b', 'r5'],
+      ['c', 'r2'],
+    ])
     expect(freshChanges(plan([], revisions), 'r5').revisions).toEqual([])
     // The one seen fell out of the latest revisions the plan lists.
     const lost = freshChanges(plan([], revisions), 'r0')
@@ -329,6 +333,7 @@ const thread = (
   id: `t-${stage}`,
   title: 'T',
   stage,
+  stoppedBy: null,
   lastHeadline,
   pullRequest: null,
 })

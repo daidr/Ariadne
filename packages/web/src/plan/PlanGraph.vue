@@ -18,10 +18,10 @@ import { DouButton, DouDialog } from 'dou-ui'
 import { computed, markRaw, ref, watch } from 'vue'
 import { t, tm } from '../i18n'
 import { editPlan } from '../store'
-import { editOf, reasonOf } from './edit'
-import { freshChanges, offsetsOf, toFlowDocument, touchedBy, type PlanMark } from './layout'
+import { editOf, liveThreads, reasonOf } from './edit'
+import { offsetsOf, toFlowDocument, touchedBy, type PlanMark } from './layout'
 import PlanNode from './PlanNode.vue'
-import { loadSeen, planUi, savedOffsets, saveOffsets, seenRevision } from './ui'
+import { loadSeen, markNodeSeen, planUi, savedOffsets, saveOffsets, unseenNodes } from './ui'
 
 const props = defineProps<{ plan: PlanView | null; compact?: boolean; editable?: boolean }>()
 const selected = defineModel<string | null>('selected', { default: null })
@@ -85,9 +85,7 @@ watch(
   (plan) => plan && loadSeen(plan),
   { immediate: true },
 )
-const fresh = computed(() =>
-  props.plan ? freshChanges(props.plan, seenRevision(props.plan)).nodes : new Set<string>(),
-)
+const fresh = computed(() => (props.plan ? unseenNodes(props.plan) : new Set<string>()))
 const proposed = computed(() => {
   const ids = new Set<string>()
   for (const proposal of openProposals.value) for (const id of touchedBy(proposal.ops)) ids.add(id)
@@ -145,7 +143,7 @@ async function onTransaction(tr: FlowTransaction) {
 const removeQuestion = computed(() => {
   const ids = removing.value?.nodes ?? []
   const nodes = (props.plan?.nodes ?? []).filter((node) => ids.includes(node.id))
-  const threads = nodes.reduce((sum, node) => sum + node.threads.length, 0)
+  const threads = nodes.reduce((sum, node) => sum + liveThreads(node), 0)
   if (nodes.length === 1 && nodes[0]) {
     const title = nodes[0].title
     return threads
@@ -175,6 +173,7 @@ watch(selection, (next) => {
   selected.value = next.nodes[0] ?? null
 })
 watch(selected, (id) => {
+  if (id && props.plan) markNodeSeen(props.plan, id)
   if ((selection.value.nodes[0] ?? null) !== id) {
     selection.value = { nodes: id ? [id] : [], edges: [] }
   }

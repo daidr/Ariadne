@@ -486,6 +486,13 @@ export function createHandler({
   })
 
   add(
+    'GET',
+    '/api/projects/:projectId/plan/revisions/:revisionId/revert',
+    (_request, { projectId = '', revisionId = '' }) =>
+      json({ preview: app.previewPlanUndo(projectId, revisionId) }),
+  )
+
+  add(
     'POST',
     '/api/projects/:projectId/plan/revisions/:revisionId/revert',
     async (request, { projectId = '', revisionId = '' }) => {
