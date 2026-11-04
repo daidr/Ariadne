@@ -183,6 +183,8 @@ export const en: Record<MessageKey, string> = {
   'sandbox.off.title': 'The workspace sandbox is off',
   'sandbox.off.body':
     "The sandbox is turned off in the settings (sandbox.mode is off in config.json), so commands threads run can read Ariadne's token and settings and call Ariadne as you.",
+  'sandbox.remote':
+    "Thread commands run on {host} as the user SSH logs in as, outside this machine's sandbox; the connection forwards no agent, ports or X11, so commands cannot reach back to this machine.",
   'sandbox.weaker':
     "macOS's sandbox only restricts files: thread commands cannot read Ariadne's token and settings, but they can see other processes, so isolation is weaker than on Linux.",
   'start.title': 'Getting started',
@@ -192,7 +194,7 @@ export const en: Record<MessageKey, string> = {
   'start.projectHint': 'A project serves one goal, with its own coordinator, plan and artifacts',
   'start.source': 'Choose a working directory (optional)',
   'start.sourceHint':
-    'Set a local folder or repository on the right so threads can edit files and run commands',
+    'Set a local folder, repository or SSH remote directory on the right so threads can edit files and run commands',
   'start.talk': 'Tell the coordinator what you want',
   'start.talkHint': 'Type below; the coordinator plans the work and opens threads',
   'notice.memoryAdded': 'Saved to project memory: {text}',

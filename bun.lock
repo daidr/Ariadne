@@ -70,6 +70,14 @@
       "name": "@ariadne/plugin-sdk",
       "version": "0.0.0",
     },
+    "packages/plugin-ssh": {
+      "name": "@ariadne/plugin-ssh",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/plugin-local": "workspace:*",
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
     "packages/server": {
       "name": "@ariadne/server",
       "version": "0.0.0",
@@ -82,6 +90,7 @@
         "@ariadne/plugin-local": "workspace:*",
         "@ariadne/plugin-openai-compatible": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
+        "@ariadne/plugin-ssh": "workspace:*",
       },
     },
     "packages/web": {
@@ -118,6 +127,8 @@
     "@ariadne/plugin-openai-compatible": ["@ariadne/plugin-openai-compatible@workspace:packages/plugin-openai-compatible"],
 
     "@ariadne/plugin-sdk": ["@ariadne/plugin-sdk@workspace:packages/plugin-sdk"],
+
+    "@ariadne/plugin-ssh": ["@ariadne/plugin-ssh@workspace:packages/plugin-ssh"],
 
     "@ariadne/server": ["@ariadne/server@workspace:packages/server"],
 

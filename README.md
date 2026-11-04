@@ -20,10 +20,12 @@ bun run check    # 格式、lint、类型检查和测试
 
 打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址、API Key 和默认模型名，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
 
-要让 thread 读写代码、运行命令，在右侧“项目来源”里选一个本机目录或 GitHub 仓库。
+要让 thread 读写代码、运行命令，在右侧“项目来源”里选一个本机目录、GitHub 仓库或 SSH 远程目录。
 
 - 本机目录：git 仓库会为每个 thread 建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，thread 的提交留在这个分支上，合并由你决定。
 - GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。thread 在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时 thread 会被唤醒去修，合并由你决定。公开仓库第一次推送前会先问你一次，同意后整个项目有效。令牌存在 `~/.ariadne/config.json`，不进事件日志。
+
+- SSH 远程目录：填主机（`user@host` 或 `~/.ssh/config` 里的 Host）和远端的绝对路径。用你自己的 ssh 配置、密钥和 agent，不支持密码；第一次连接前先在终端里 ssh 一次确认主机指纹。git 仓库会在远端的 `~/.ariadne-worktrees/` 下为每个 thread 建 worktree 和分支 `ariadne/…`，命令在远端以登录用户身份运行，不经过本机沙箱，连接不转发 agent 和端口。thread 在远端推送前每次都会先问你。
 
 协调器和 thread 写的长内容放在“产物”里：文档、画板和仪表盘快照。右侧“产物”页的“全部产物”打开项目的产物总览，可以筛选、搜索，也可以自己新建；每种产物都能直接编辑，每次保存是一个新版本。
 
@@ -48,5 +50,6 @@ bun run check    # 格式、lint、类型检查和测试
 | `@ariadne/plugin-anthropic`         | Anthropic 协议的模型 provider                        |
 | `@ariadne/plugin-local`             | 本地目录上下文源：工作区与 git worktree              |
 | `@ariadne/plugin-github`            | GitHub 仓库上下文源：共享 clone、worktree、PR 与检查 |
+| `@ariadne/plugin-ssh`               | SSH 远程目录上下文源：远端 worktree、文件与命令      |
 | `@ariadne/server`                   | 本地 HTTP 服务、鉴权、事件流与用户设置               |
 | `@ariadne/web`                      | 浏览器界面                                           |

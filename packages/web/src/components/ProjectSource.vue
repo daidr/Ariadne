@@ -8,7 +8,7 @@ import {
   DouSelect,
   DouText,
 } from 'dou-ui'
-import { FolderGitIcon, FolderOpenIcon, PencilIcon } from '@dou-ui/icons'
+import { FolderGitIcon, FolderOpenIcon, PencilIcon, ServerIcon } from '@dou-ui/icons'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
@@ -39,22 +39,43 @@ onMounted(() => {
     (result) => (sandbox.value = result.sandbox),
     () => {},
   )
+  api.sourceKinds().then(
+    (result) => (kinds.value = result.kinds),
+    () => {},
+  )
 })
-const unsandboxed = computed(() => !!source.value && sandbox.value?.kind === null)
+/** The provider of the stored source, once the kinds are known. */
+const storedKind = computed(() => kinds.value.find((k) => k.kind === source.value?.kind) ?? null)
+// A remote source runs commands on another machine; this one's sandbox is beside the point.
+const remote = computed(() => !!storedKind.value?.remote)
+const unsandboxed = computed(() => !!source.value && !remote.value && sandbox.value?.kind === null)
 // macOS's sandbox keeps files out of reach but not the server's processes.
-const weaker = computed(() => !!source.value && sandbox.value?.kind === 'sandbox-exec')
+const weaker = computed(
+  () => !!source.value && !remote.value && sandbox.value?.kind === 'sandbox-exec',
+)
 const current = computed(() => kinds.value.find((k) => k.kind === kind.value) ?? null)
 const kindOptions = computed(() =>
   kinds.value.map((k) => ({ value: k.kind, label: lt(k.title) ?? k.kind })),
 )
 
-/** One line for the source: its first plain setting, e.g. the path or the repository. */
+/**
+ * One line for the source: the provider's summary filled in (e.g. `host:path`), or else
+ * its first plain setting, e.g. the path or the repository.
+ */
 const summary = computed(() => {
   const settings = source.value?.settings ?? {}
+  const template = storedKind.value?.summary
+  if (template) {
+    return template.replace(/\{(\w+)\}/g, (_, key: string) => String(settings[key] ?? ''))
+  }
   const value = Object.values(settings).find((v) => typeof v === 'string' && v)
   return typeof value === 'string' ? value : null
 })
-const isRepo = computed(() => source.value?.kind !== 'local-directory')
+const isRepo = computed(() => !!storedKind.value?.provides.includes('repo'))
+const remoteHost = computed(() => {
+  const host = source.value?.settings.host
+  return typeof host === 'string' ? host : (summary.value ?? '')
+})
 
 async function edit() {
   problem.value = null
@@ -167,7 +188,8 @@ async function save(clear = false) {
       </div>
     </DouForm>
     <div v-else class="source-row">
-      <FolderGitIcon v-if="source && isRepo" class="source-icon" />
+      <ServerIcon v-if="source && remote" class="source-icon" />
+      <FolderGitIcon v-else-if="source && isRepo" class="source-icon" />
       <FolderOpenIcon v-else class="source-icon" />
       <DouText v-if="summary" size="sm" truncate :title="summary" class="source-path">
         {{ summary }}
@@ -194,6 +216,9 @@ async function save(clear = false) {
       {{ t(sandbox.mode === 'off' ? 'sandbox.off.body' : 'sandbox.missing.body') }}
     </DouAlert>
     <DouText v-else-if="weaker" variant="tertiary" size="sm">{{ t('sandbox.weaker') }}</DouText>
+    <DouText v-else-if="source && remote" variant="tertiary" size="sm">
+      {{ t('sandbox.remote', { host: remoteHost }) }}
+    </DouText>
   </section>
 </template>
 

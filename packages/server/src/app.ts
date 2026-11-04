@@ -167,6 +167,8 @@ export function createHandler({
         title: provider.title,
         settings: provider.settings,
         provides: provider.provides,
+        remote: !!provider.remote,
+        summary: provider.summary ?? null,
       })),
     }),
   )

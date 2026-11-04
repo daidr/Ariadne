@@ -172,6 +172,8 @@ export const zhCN = {
   'sandbox.off.title': '工作区沙箱已关闭',
   'sandbox.off.body':
     '设置里关掉了沙箱（config.json 的 sandbox.mode 为 off），thread 运行的命令能读到 Ariadne 的令牌和设置，并能以你的身份调用 Ariadne。',
+  'sandbox.remote':
+    'thread 的命令在 {host} 上以 SSH 登录的用户身份运行，本机的沙箱不管它们；连接不转发 agent、端口和 X11，命令连不回这台机器。',
   'sandbox.weaker':
     'macOS 的沙箱只限制文件访问：thread 的命令读不到 Ariadne 的令牌和设置，但能看到其他进程，隔离比 Linux 弱。',
   'start.title': '开始使用',
@@ -180,7 +182,7 @@ export const zhCN = {
   'start.project': '新建项目',
   'start.projectHint': '一个项目对应一个目标，有自己的协调器、计划和产物',
   'start.source': '选择工作目录（可选）',
-  'start.sourceHint': '在右侧设置本地目录或仓库，threads 才能读写文件、运行命令',
+  'start.sourceHint': '在右侧设置本地目录、仓库或 SSH 远程目录，threads 才能读写文件、运行命令',
   'start.talk': '告诉协调器你想做什么',
   'start.talkHint': '在下方输入需求，协调器会拆解计划并安排 threads',
   'notice.memoryAdded': '记下了一条项目记忆：{text}',

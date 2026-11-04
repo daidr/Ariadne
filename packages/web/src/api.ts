@@ -91,6 +91,10 @@ export interface ModelKind {
 /** A kind of context source a plugin offers. */
 export interface SourceKind extends ModelKind {
   provides: string[]
+  /** Threads' commands run on another machine, outside this one's sandbox. */
+  remote: boolean
+  /** One-line name of a source, `{setting}` replaced by its value. */
+  summary: string | null
 }
 
 export interface ModelProviderInput {
