@@ -288,6 +288,46 @@ describe('images in the workspace', () => {
   })
 })
 
+describe('images in messages', () => {
+  test("a thread's message keeps the workspace images it links; the coordinator's paths stay", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7])
+    const host = await workspaceHost({ 'shots/usage.png': png })
+    const workspaces = new WorkspaceManager(app, host)
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'memory', settings: {} })
+    const thread = app.createThread(project.id, { title: '截图' })
+    const model = fakeModel((_request, role) =>
+      role === 'coordinator'
+        ? say('看 ![用量](shots/usage.png)')
+        : say('截图见 [用量](shots/usage.png)，![用量](shots/usage.png)'),
+    )
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '截个图',
+    })
+    const running = startScheduler(model, workspaces)
+    await running.idle()
+
+    const said = app.listMessages(thread.id).find((m) => m.author === 'thread')!
+    const id = /file:(fil_[\w-]+)/.exec(said.content)?.[1]
+    expect(said.content).toBe(`截图见 [用量](file:${id})，![用量](file:${id})`)
+    expect(app.getFile(id!)).toEqual({ mime: 'image/png', data: png })
+
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '给我看看',
+    })
+    await running.idle()
+    const coordinator = app
+      .listMessages(project.coordinatorId)
+      .findLast((m) => m.author === 'coordinator')
+    expect(coordinator?.content).toBe('看 ![用量](shots/usage.png)')
+  })
+})
+
 describe('repository instructions', () => {
   test('AGENTS.md is read from an open workspace, and a change is noted and recorded', async () => {
     const files: Record<string, string> = { 'AGENTS.md': '用 bun 跑测试' }

@@ -4,6 +4,7 @@ import type {
   IssueDetail,
   IssueSummary,
   PullRequestInfo,
+  PullRequestPreview,
 } from '@ariadne/plugin-sdk'
 
 /** A failed GitHub request, with GitHub's own message. */
@@ -186,6 +187,34 @@ export class GitHubApi {
           b.created_at.localeCompare(a.created_at),
       )
     return ranked[0] ? toPullRequest(ranked[0]) : null
+  }
+
+  /** A pull request with what the card over a link to it shows. */
+  async pullRequestPreview(number: number): Promise<PullRequestPreview> {
+    const raw = await this.request<
+      RawPull & {
+        user: { login: string } | null
+        additions: number
+        deletions: number
+        changed_files: number
+        closed_at: string | null
+      }
+    >('GET', `${this.repoPath}/pulls/${number}`)
+    const info = toPullRequest(raw)
+    return {
+      kind: 'pull-request',
+      repository: `${this.options.owner}/${this.options.name}`,
+      number: raw.number,
+      url: raw.html_url,
+      title: raw.title,
+      state: info.state,
+      draft: info.draft,
+      author: raw.user?.login ?? null,
+      additions: raw.additions,
+      deletions: raw.deletions,
+      changedFiles: raw.changed_files,
+      at: raw.merged_at ?? raw.closed_at ?? raw.created_at,
+    }
   }
 
   async pullRequest(number: number): Promise<PullRequestInfo> {

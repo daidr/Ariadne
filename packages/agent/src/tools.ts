@@ -10,6 +10,7 @@ import {
   optionalInt,
   str,
   ToolInputError,
+  withImages,
   type ModelChoice,
   type Tool,
   type ToolContext,
@@ -116,12 +117,15 @@ const editMessage: Tool = {
       required: ['messageId', 'content', 'reason'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
+    const messageId = str(args, 'messageId')
+    const reason = str(args, 'reason')
+    const content = await withImages(ctx, str(args, 'content'))
     ctx.app.editMessage(
-      str(args, 'messageId'),
+      messageId,
       { author: ctx.role, conversationId: ctx.conversationId },
-      str(args, 'content'),
-      str(args, 'reason'),
+      content,
+      reason,
     )
     return { content: 'Message edited.' }
   },

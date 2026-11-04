@@ -24,6 +24,8 @@ import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   BranchChanges,
   FileVersions,
+  LinkPreview,
+  LinkSummary,
   LocalizedText,
   MergeMethod,
   MergeOutcome,
@@ -180,7 +182,13 @@ export interface PluginRecord {
   path: string | null
   status: 'loaded' | 'failed'
   error: string | null
-  provides: { models: string[]; contexts: string[]; dashboards: string[]; searches: string[] }
+  provides: {
+    models: string[]
+    contexts: string[]
+    dashboards: string[]
+    searches: string[]
+    links: string[]
+  }
 }
 
 /** How many turns run at once, plus those kept for answering the user. */
@@ -401,6 +409,13 @@ export const api = {
     id: string,
     input: { content: string; baseVersion: number; reason: string; title?: string },
   ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
+  summarizeLinks: (urls: string[]) =>
+    request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }),
+  previewLink: (url: string) =>
+    request<{ preview: LinkPreview | null }>(
+      'GET',
+      `/api/links/preview?url=${encodeURIComponent(url)}`,
+    ),
 }
 
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'

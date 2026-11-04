@@ -8,7 +8,7 @@ import {
   type MessageView,
   type ThreadView,
 } from '@ariadne/core'
-import { json, str, ToolInputError, type Tool } from './tool-helpers'
+import { json, str, ToolInputError, withImages, type Tool } from './tool-helpers'
 
 const text = (description?: string) => ({ type: 'string', ...(description ? { description } : {}) })
 const label = text()
@@ -199,7 +199,7 @@ export const postUi: Tool = {
       required: ['blocks'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const content = args.text === undefined || args.text === null ? '' : args.text
     if (typeof content !== 'string') throw new ToolInputError('"text" must be a string')
     if (!Array.isArray(args.blocks) || !args.blocks.length) {
@@ -208,7 +208,7 @@ export const postUi: Tool = {
     const message = ctx.app.postMessage(ctx.projectId, {
       conversationId: ctx.conversationId,
       author: ctx.role,
-      content: content.trim(),
+      content: await withImages(ctx, content.trim()),
       blocks: args.blocks,
     })
     return json({

@@ -61,6 +61,7 @@ const provides = (plugin: PluginRecord) => [
   ...plugin.provides.contexts,
   ...plugin.provides.dashboards,
   ...plugin.provides.searches,
+  ...plugin.provides.links,
 ]
 </script>
 

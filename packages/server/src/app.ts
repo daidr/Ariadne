@@ -3,7 +3,9 @@ import {
   connectSource,
   DEFAULT_CONTEXT_TOKENS,
   HOSTING_SECRET,
+  LinkResolver,
   listWorktrees,
+  MAX_LINKS,
   mergeThread,
   refreshDashboard,
   syncThreadPullRequest,
@@ -682,6 +684,27 @@ export function createHandler({
     const concurrency = settings.updateConcurrency(await readJson(request))
     scheduler?.setSlots(concurrency.slots, concurrency.reserved)
     return json(concurrency)
+  })
+
+  // Links in messages that a plugin knows, such as pull requests: what each names, and the
+  // card shown when the user points at one.
+  const links = new LinkResolver(host?.links ?? new Map())
+  add('POST', '/api/links', async (request) => {
+    const { urls } = await readJson(request)
+    if (
+      !Array.isArray(urls) ||
+      urls.length > MAX_LINKS ||
+      urls.some((url) => typeof url !== 'string')
+    ) {
+      throw new BadRequest('urls')
+    }
+    return json({ links: links.summarize(urls as string[]) })
+  })
+
+  add('GET', '/api/links/preview', async (_request, _params, url) => {
+    const address = url.searchParams.get('url')
+    if (!address) throw new BadRequest('url')
+    return json({ preview: await links.preview(address) })
   })
 
   // The user writes to the coordinator or straight into a thread.

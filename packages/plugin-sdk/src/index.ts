@@ -260,6 +260,54 @@ export interface SearchProvider {
   search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SearchResult[]>
 }
 
+/**
+ * A pull request (or GitHub's kin: a GitLab merge request) as a link to it shows, without
+ * asking its host: `label` is how a message names it, e.g. `daidr/Ariadne#34`.
+ */
+export interface LinkSummary {
+  kind: 'pull-request'
+  label: string
+}
+
+/** What the card over a pull request link shows. Titles are written by anyone who can open one. */
+export interface PullRequestPreview {
+  kind: 'pull-request'
+  /** `owner/name`. */
+  repository: string
+  number: number
+  /** How the host refers to it in text, `#<number>` when left out (see `PullRequestInfo`). */
+  reference?: string
+  url: string
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  draft: boolean
+  author: string | null
+  additions: number
+  deletions: number
+  changedFiles: number
+  /** When it was merged, closed or opened, whichever is its state now; ISO time. */
+  at: string
+}
+
+export type LinkPreview = PullRequestPreview
+
+/**
+ * Links in messages that point at something a host knows, such as a pull request. Ariadne
+ * asks `match` for every full https address it shows, so it must answer from the address
+ * alone; `preview` is asked only when the user points at the link. It keeps its
+ * credentials to itself, like a search provider.
+ */
+export interface LinkProvider {
+  kind: string
+  title: LocalizedText
+  match(url: URL): LinkSummary | null
+  /**
+   * What the link points at now; `null` when it is not there (or not visible). Ariadne
+   * gives up after 10 seconds and aborts `signal`. A thrown error's message is not shown.
+   */
+  preview(url: URL, options: { signal?: AbortSignal }): Promise<LinkPreview | null>
+}
+
 /** What `setup` receives: every method registers something and returns its disposer. */
 export interface PluginContext {
   /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
@@ -270,6 +318,7 @@ export interface PluginContext {
   registerModelProvider(provider: ModelProvider<never>): Dispose
   registerDashboardSource(source: DashboardSource<never>): Dispose
   registerSearchProvider(provider: SearchProvider): Dispose
+  registerLinkProvider(provider: LinkProvider): Dispose
 }
 
 export interface Plugin {

@@ -9,6 +9,7 @@ import type {
   TrackerCapability,
   Workspace,
 } from '@ariadne/plugin-sdk'
+import { keepMessageImages } from './message-images'
 
 export interface ToolContext {
   app: Ariadne
@@ -84,3 +85,13 @@ export function optionalStr(args: Record<string, unknown>, key: string): string 
 }
 
 export const json = (value: unknown): ToolResult => ({ content: JSON.stringify(value) })
+
+/**
+ * A message the agent writes, with the images of its workspace it links kept in the
+ * project's files (see `keepMessageImages`). The coordinator has no workspace: its own
+ * paths stay text, and it shows images by the `file:` links threads wrote.
+ */
+export function withImages(ctx: ToolContext, content: string): Promise<string> {
+  if (ctx.role !== 'thread') return Promise.resolve(content)
+  return keepMessageImages(content, ctx.workspace, (file) => ctx.app.saveFile(ctx.projectId, file))
+}

@@ -5,11 +5,12 @@ import {
   type Capabilities,
   type CommandSandbox,
   type ContextProvider,
+  type LinkProvider,
   type RepoCapability,
   type TrackerCapability,
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
-import { GitHubApi } from './api'
+import { GitHubApi, GitHubError } from './api'
 
 export { GitHubApi, GitHubError } from './api'
 
@@ -189,21 +190,88 @@ export function githubProvider(options: GitHubProviderOptions): ContextProvider<
   }
 }
 
+/** `owner/name` and number of a pull request's page on `web`, e.g. `…/acme/app/pull/12/files`. */
+export function parsePullRequestUrl(
+  url: URL,
+  web: string,
+): { owner: string; name: string; number: number } | null {
+  const home = new URL(web)
+  if (url.protocol !== 'https:' || url.host !== home.host) return null
+  const prefix = home.pathname.replace(/\/+$/, '')
+  if (prefix && !url.pathname.startsWith(`${prefix}/`)) return null
+  const match = /^\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d{1,9})(?:\/[\w/.-]*)?$/.exec(
+    url.pathname.slice(prefix.length),
+  )
+  if (!match?.[1] || !match[2] || !match[3]) return null
+  return { owner: match[1], name: match[2], number: Number(match[3]) }
+}
+
+/**
+ * Pull request links in messages: `owner/name#12` with a card of its state, title, author
+ * and size. Read with the same token as the repositories, so private ones show too.
+ */
+export function githubLinks(
+  options: Omit<GitHubProviderOptions, 'dataDir' | 'sandbox'>,
+): LinkProvider {
+  const web = options.gitBase?.startsWith('https://') ? options.gitBase : 'https://github.com'
+  const env = options.env ?? process.env
+  let token: Promise<string | null> | null = null
+  const getToken = async () => {
+    token ??= findToken(undefined, env)
+    const found = await token
+    if (!found) token = null
+    return found
+  }
+  return {
+    kind: 'github',
+    title: { 'zh-CN': 'GitHub 拉取请求', en: 'GitHub pull requests' },
+    match(url) {
+      const pull = parsePullRequestUrl(url, web)
+      return pull
+        ? { kind: 'pull-request', label: `${pull.owner}/${pull.name}#${pull.number}` }
+        : null
+    },
+    async preview(url, { signal }) {
+      const pull = parsePullRequestUrl(url, web)
+      if (!pull) return null
+      const api = new GitHubApi({
+        base: options.apiBase ?? 'https://api.github.com',
+        owner: pull.owner,
+        name: pull.name,
+        token: getToken,
+        fetch: ((input, init) =>
+          (options.fetch ?? fetch)(input, { ...init, signal: signal ?? null })) as typeof fetch,
+      })
+      try {
+        return await api.pullRequestPreview(pull.number)
+      } catch (error) {
+        if (error instanceof GitHubError && error.status === 404) return null
+        throw error
+      }
+    },
+  }
+}
+
 export default definePlugin({
   id: 'github',
   name: { 'zh-CN': 'GitHub', en: 'GitHub' },
   setup(ctx) {
-    return ctx.registerContextProvider(
+    // Another GitHub host (e.g. GitHub Enterprise), or a stand-in for testing.
+    const hosts = {
+      ...(process.env.ARIADNE_GITHUB_API_URL
+        ? { apiBase: process.env.ARIADNE_GITHUB_API_URL }
+        : {}),
+      ...(process.env.ARIADNE_GITHUB_GIT_URL
+        ? { gitBase: process.env.ARIADNE_GITHUB_GIT_URL }
+        : {}),
+    }
+    // Both are undone with the plugin.
+    ctx.registerLinkProvider(githubLinks(hosts))
+    ctx.registerContextProvider(
       githubProvider({
         dataDir: ctx.dataDir,
         sandbox: ctx.sandbox,
-        // Another GitHub host (e.g. GitHub Enterprise), or a stand-in for testing.
-        ...(process.env.ARIADNE_GITHUB_API_URL
-          ? { apiBase: process.env.ARIADNE_GITHUB_API_URL }
-          : {}),
-        ...(process.env.ARIADNE_GITHUB_GIT_URL
-          ? { gitBase: process.env.ARIADNE_GITHUB_GIT_URL }
-          : {}),
+        ...hosts,
       }) as ContextProvider<never>,
     )
   },
