@@ -16,7 +16,6 @@ import { lt, t } from '../i18n'
 import { setProjectSlots, setSource, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
 
-const open = ref(false)
 const editing = ref(false)
 const saving = ref(false)
 const problem = ref<string | null>(null)
@@ -34,10 +33,15 @@ const storedSecrets = ref<string[]>([])
 /** The source as it was when the form opened, to tell whether it was changed at all. */
 const opened = ref<string | null>(null)
 
-// A form left half filled is dropped when the popover closes.
-watch(open, (value) => {
-  if (!value) editing.value = false
-})
+// With no source there is nothing to look at, so opening goes straight to the form. A form
+// left half filled is dropped when the popover closes.
+watch(
+  () => state.sourceOpen,
+  (open) => {
+    if (!open) editing.value = false
+    else if (!state.detail?.project.source) void edit()
+  },
+)
 
 const source = computed(() => state.detail?.project.source ?? null)
 
@@ -166,7 +170,7 @@ async function save(clear = false) {
 <template>
   <DouPopover
     v-if="state.detail"
-    v-model:open="open"
+    v-model:open="state.sourceOpen"
     :title="t('project.source.title')"
     :width="360"
     placement="bottom-end"

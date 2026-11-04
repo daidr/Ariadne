@@ -42,6 +42,9 @@ const items = computed<StepItem[]>(() =>
       >
         {{ t('nav.newProject') }}
       </DouButton>
+      <DouButton v-else-if="current === 2" size="sm" @click="state.sourceOpen = true">
+        {{ t('start.chooseSource') }}
+      </DouButton>
     </div>
   </section>
 </template>

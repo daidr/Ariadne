@@ -192,6 +192,7 @@ export const en: Record<MessageKey, string> = {
   'start.source': 'Choose a working directory (optional)',
   'start.sourceHint':
     'Set a local folder, repository or SSH remote directory on the right so threads can edit files and run commands',
+  'start.chooseSource': 'Choose a directory',
   'start.talk': 'Tell the coordinator what you want',
   'start.talkHint': 'Type below; the coordinator plans the work and opens threads',
   'notice.memoryAdded': 'Saved to project memory: {text}',
