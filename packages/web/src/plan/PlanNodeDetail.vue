@@ -3,11 +3,12 @@ import type { PlanNodeView, PlanOp } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
+  DouForm,
+  DouFormItem,
   DouInput,
   DouInputNumber,
   DouLink,
   DouPopconfirm,
-  DouTag,
   DouText,
   DouTextarea,
 } from 'dou-ui'
@@ -17,10 +18,12 @@ import { t } from '../i18n'
 import { editPlan, openMain, openThread, setNodeIssue, state } from '../store'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
-import StageLabel from '../components/StageLabel.vue'
+import StageIcon from '../components/StageIcon.vue'
 import ThreadHeadline from '../components/ThreadHeadline.vue'
 import ReportArtifacts from '../components/ReportArtifacts.vue'
 import { showsHeadline } from '../stage'
+import PlanSection from './PlanSection.vue'
+import PlanStatusIcon from './PlanStatusIcon.vue'
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
 
@@ -160,13 +163,16 @@ const removeQuestion = computed(() => {
 
 <template>
   <section class="node-detail" :aria-label="node.title">
-    <template v-if="editable">
-      <DouText variant="secondary" size="sm">{{ t('plan.field.title') }}</DouText>
-      <DouInput v-model="form.title" size="sm" :invalid="!form.title.trim()" />
-      <DouText variant="secondary" size="sm">{{ t('plan.field.description') }}</DouText>
-      <DouTextarea v-model="form.description" size="sm" autosize />
-      <DouText variant="secondary" size="sm">{{ t('plan.acceptance') }}</DouText>
-      <DouTextarea v-model="form.acceptance" size="sm" autosize />
+    <DouForm v-if="editable" layout="vertical" size="sm" class="node-detail-form">
+      <DouFormItem :label="t('plan.field.title')">
+        <DouInput v-model="form.title" :invalid="!form.title.trim()" />
+      </DouFormItem>
+      <DouFormItem :label="t('plan.field.description')">
+        <DouTextarea v-model="form.description" autosize />
+      </DouFormItem>
+      <DouFormItem :label="t('plan.acceptance')">
+        <DouTextarea v-model="form.acceptance" autosize />
+      </DouFormItem>
       <DouAlert v-if="changedMeanwhile.length" tone="warning" :title="t('plan.conflict')">
         <dl class="node-detail-conflict">
           <template v-for="change in changedMeanwhile" :key="change.field">
@@ -205,63 +211,69 @@ const removeQuestion = computed(() => {
           {{ t('plan.save') }}
         </DouButton>
       </div>
-    </template>
+    </DouForm>
     <template v-else>
-      <div class="node-detail-head">
-        <DouText weight="medium">{{ node.title }}</DouText>
-        <DouText variant="tertiary" size="sm">{{ t(`plan.kind.${node.kind}`) }}</DouText>
-      </div>
-      <DouText v-if="node.description" size="sm" class="node-detail-text">
-        {{ node.description }}
-      </DouText>
-      <template v-if="node.acceptance">
-        <DouText variant="secondary" size="sm">{{ t('plan.acceptance') }}</DouText>
+      <header class="node-detail-head">
+        <DouText size="sm" variant="tertiary">{{ t(`plan.kind.${node.kind}`) }}</DouText>
+        <div class="node-detail-title">
+          <PlanStatusIcon :status="node.status" />
+          <DouText as="h2" size="lg" weight="medium" class="node-detail-title-text">
+            {{ node.title }}
+          </DouText>
+        </div>
+        <DouText v-if="node.description" size="sm" class="node-detail-text">
+          {{ node.description }}
+        </DouText>
+      </header>
+      <PlanSection v-if="node.acceptance" :title="t('plan.acceptance')">
         <DouText size="sm" class="node-detail-text">{{ node.acceptance }}</DouText>
-      </template>
+      </PlanSection>
     </template>
-    <DouText variant="secondary" size="sm">{{ t('plan.threads') }}</DouText>
-    <ul v-if="node.threads.length" class="node-detail-threads">
-      <li v-for="thread in node.threads" :key="thread.id" class="node-detail-thread">
-        <DouButton size="sm" variant="ghost" @click="openThread(thread.id)">
-          {{ thread.title }}
-          <template #trailing>
-            <StageLabel :stage="thread.stage" />
-          </template>
-        </DouButton>
-        <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
-        <DouButton
-          v-if="hasBranch(thread.id)"
-          size="sm"
-          variant="ghost"
-          :aria-label="t('changes.open')"
-          :title="t('changes.open')"
-          @click="openMain({ kind: 'changes', threadId: thread.id })"
-        >
-          <FileDiffIcon />
-        </DouButton>
-        <ThreadHeadline
-          class="node-detail-headline"
-          :stage="thread.stage"
-          :headline="thread.lastHeadline"
-        />
-        <ReportArtifacts class="node-detail-headline" :artifacts="reportArtifacts(thread.id)" />
-      </li>
-    </ul>
-    <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>
-    <template v-if="node.issues.length || (editable && state.detail?.hasTracker)">
-      <DouText variant="secondary" size="sm">{{ t('plan.issues') }}</DouText>
-      <ul v-if="node.issues.length" class="node-detail-threads">
-        <li v-for="issue in node.issues" :key="issue.number" class="node-detail-thread">
-          <DouLink :href="issue.url" external class="node-detail-issue">
-            <CircleDotIcon class="node-detail-issue-icon" />
-            <span>#{{ issue.number }} {{ issue.title }}</span>
+    <PlanSection :title="t('plan.threads')" :count="node.threads.length">
+      <ul v-if="node.threads.length" class="node-detail-list">
+        <li v-for="thread in node.threads" :key="thread.id" class="node-thread">
+          <button type="button" class="node-thread-open" @click="openThread(thread.id)">
+            <StageIcon :stage="thread.stage" class="node-thread-icon" />
+            <span class="node-thread-text">
+              <DouText size="sm" :truncate="2" :title="thread.title">{{ thread.title }}</DouText>
+              <ThreadHeadline :stage="thread.stage" :headline="thread.lastHeadline" />
+            </span>
+          </button>
+          <span v-if="thread.pullRequest || hasBranch(thread.id)" class="node-thread-tools">
+            <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
+            <DouButton
+              v-if="hasBranch(thread.id)"
+              size="xs"
+              variant="ghost"
+              :aria-label="t('changes.open')"
+              :title="t('changes.open')"
+              @click="openMain({ kind: 'changes', threadId: thread.id })"
+            >
+              <FileDiffIcon />
+            </DouButton>
+          </span>
+          <ReportArtifacts class="node-thread-extra" :artifacts="reportArtifacts(thread.id)" />
+        </li>
+      </ul>
+      <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>
+    </PlanSection>
+    <PlanSection
+      v-if="node.issues.length || (editable && state.detail?.hasTracker)"
+      :title="t('plan.issues')"
+      :count="node.issues.length"
+    >
+      <ul v-if="node.issues.length" class="node-detail-list">
+        <li v-for="issue in node.issues" :key="issue.number" class="node-issue">
+          <DouLink :href="issue.url" external class="node-issue-link" :title="issue.title">
+            <template #leading><CircleDotIcon /></template>
+            #{{ issue.number }} {{ issue.title }}
           </DouLink>
-          <DouText variant="tertiary" size="sm">
+          <DouText variant="tertiary" size="sm" class="node-issue-by">
             {{ t('plan.issueLinkedBy', { who: linkedBy(issue.linkedBy) }) }}
           </DouText>
           <DouButton
             v-if="editable"
-            size="sm"
+            size="xs"
             variant="ghost"
             :aria-label="t('plan.issueUnlink', { number: issue.number })"
             :title="t('plan.issueUnlink', { number: issue.number })"
@@ -290,7 +302,7 @@ const removeQuestion = computed(() => {
         </DouButton>
       </form>
       <DouText v-if="issueProblem" tone="danger" size="sm" role="alert">{{ issueProblem }}</DouText>
-    </template>
+    </PlanSection>
   </section>
 </template>
 
@@ -298,18 +310,38 @@ const removeQuestion = computed(() => {
 .node-detail {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 16px;
 }
 
 .node-detail-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-detail-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* The icon sits on the first line of a title that wraps. */
+.node-detail-title > :first-child {
+  margin-top: 3px;
+}
+
+.node-detail-title-text {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .node-detail-text {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.node-detail-head .node-detail-text {
+  margin-top: 4px;
 }
 
 .node-detail-conflict {
@@ -328,42 +360,95 @@ const removeQuestion = computed(() => {
   gap: 8px;
 }
 
-.node-detail-threads {
+.node-detail-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.node-detail-issue {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  overflow-wrap: anywhere;
+/* A thread: its stage, title and what it asks of the user open it; the tools sit at the end.
+   The row reaches past the column by its own padding, so its icon lines up with the heading. */
+.node-thread {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 4px;
+  margin-inline: -6px;
+  padding: 4px 6px;
+  border-radius: var(--dou-radius-control);
+  transition: background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);
 }
 
-.node-detail-issue-icon {
+.node-thread:hover {
+  background-color: color-mix(in oklab, var(--dou-color-neutral) 6%, transparent);
+}
+
+.node-thread-open {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.node-thread-open:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: 2px;
+  border-radius: var(--dou-radius-control);
+}
+
+/* On the title's first line. */
+.node-thread-icon {
+  margin-top: 2px;
+}
+
+.node-thread-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.node-thread-tools {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--dou-font-size-sm);
+}
+
+/* Under the title, past the stage icon. */
+.node-thread-extra {
+  flex-basis: 100%;
+  padding-inline-start: 24px;
+}
+
+.node-issue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  padding-block: 2px;
+}
+
+.node-issue-link {
+  min-width: 0;
+  font-size: var(--dou-font-size-sm);
+  overflow-wrap: anywhere;
 }
 
 .node-detail-link {
   display: flex;
   gap: 6px;
-}
-
-.node-detail-thread {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.node-detail-headline {
-  flex-basis: 100%;
-  /* In line with the thread's title, which sits inside a small text button. */
-  padding-inline-start: var(--dou-control-padding-x-sm);
 }
 </style>

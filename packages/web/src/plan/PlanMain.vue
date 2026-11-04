@@ -9,6 +9,7 @@ import { reasonOf } from './edit'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
+import PlanSection from './PlanSection.vue'
 import PlanUndoButton from './PlanUndoButton.vue'
 import { clearPositions } from './ui'
 
@@ -96,27 +97,30 @@ const time = (at: number) =>
           :editable="canEdit && editing"
           @removed="selected = null"
         />
-        <DouText variant="secondary" size="sm">{{ t('plan.history') }}</DouText>
-        <DouTimeline v-if="state.plan?.revisions.length">
-          <DouTimelineItem
-            v-for="revision in state.plan.revisions"
-            :key="revision.id"
-            :title="revision.reason"
-            :time="time(revision.createdAt)"
-            :tone="revision.author === 'user' ? 'primary' : 'neutral'"
-          >
-            <div class="plan-main-revision">
-              <DouText variant="tertiary" size="sm">
-                {{
-                  revision.author === 'user' ? t('artifact.by.user') : t('artifact.by.coordinator')
-                }}
-              </DouText>
-              <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
-              <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
-            </div>
-          </DouTimelineItem>
-        </DouTimeline>
-        <DouText v-else variant="tertiary" size="sm">—</DouText>
+        <PlanSection :title="t('plan.history')" :class="{ 'plan-main-history': node }">
+          <DouTimeline v-if="state.plan?.revisions.length">
+            <DouTimelineItem
+              v-for="revision in state.plan.revisions"
+              :key="revision.id"
+              :title="revision.reason"
+              :time="time(revision.createdAt)"
+              :tone="revision.author === 'user' ? 'primary' : 'neutral'"
+            >
+              <div class="plan-main-revision">
+                <DouText variant="tertiary" size="sm">
+                  {{
+                    revision.author === 'user'
+                      ? t('artifact.by.user')
+                      : t('artifact.by.coordinator')
+                  }}
+                </DouText>
+                <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
+                <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
+              </div>
+            </DouTimelineItem>
+          </DouTimeline>
+          <DouText v-else variant="tertiary" size="sm">—</DouText>
+        </PlanSection>
       </aside>
     </div>
   </div>
@@ -164,11 +168,17 @@ const time = (at: number) =>
 .plan-main-side {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
   width: 280px;
   padding: 12px 16px;
   overflow-y: auto;
   border-left: 1px solid var(--dou-color-border-subtle);
+}
+
+/* Apart from the node above it, which is about one step, not the whole plan. */
+.plan-main-history {
+  padding-top: 16px;
+  border-top: 1px solid var(--dou-color-border-subtle);
 }
 
 .plan-main-revision {
