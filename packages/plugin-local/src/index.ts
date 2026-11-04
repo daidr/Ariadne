@@ -9,7 +9,7 @@ import {
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { constants, existsSync } from 'node:fs'
-import { mkdir, open, readdir, realpath, rm, rmdir, stat, type FileHandle } from 'node:fs/promises'
+import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface LocalSettings {
@@ -158,18 +158,6 @@ function collect(stream: ReadableStream<Uint8Array>) {
   }
 }
 
-/** Remove `from` and its parents up to `to`, as long as each is empty. */
-async function removeEmptyDirs(from: string, to: string) {
-  for (let dir = from; ; dir = dirname(dir)) {
-    try {
-      await rmdir(dir)
-    } catch {
-      return
-    }
-    if (dir === to || dirname(dir) === dir) return
-  }
-}
-
 /** Commands run as they are, for workspaces made without a host. */
 const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
 
@@ -221,25 +209,13 @@ export class LocalWorkspace implements Workspace {
    * Open a workspace file, and make sure what was opened is the file inside the root. A
    * command left running could swap a directory on the way for a link between resolving
    * the path and opening it; the open file must then be the one the path resolves to now,
-   * still inside the root, or it is refused. Nothing is truncated before that check, and a
-   * file this call created for a refused path is removed again.
+   * still inside the root, or it is refused. Nothing is truncated before that check. A
+   * refused write may leave an empty file or directory where the swapped path led: removing
+   * it by path again would follow the same swap and could delete a file outside.
    */
-  private async open(path: string, flags: number, create = false): Promise<FileHandle> {
+  private async open(path: string, flags: number): Promise<FileHandle> {
     const target = await this.resolve(path)
-    let handle: FileHandle | null = null
-    let created = false
-    if (create) {
-      try {
-        handle = await open(
-          target,
-          flags | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        )
-        created = true
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new WorkspacePathError(path)
-      }
-    }
-    handle ??= await open(target, flags | constants.O_NOFOLLOW).catch(() => {
+    const handle = await open(target, flags | constants.O_NOFOLLOW).catch(() => {
       throw new WorkspacePathError(path)
     })
     try {
@@ -248,7 +224,6 @@ export class LocalWorkspace implements Workspace {
       return handle
     } catch (error) {
       await handle.close()
-      if (created) await rm(target, { force: true }).catch(() => {})
       throw error instanceof WorkspacePathError ? error : new WorkspacePathError(path)
     }
   }
@@ -264,15 +239,8 @@ export class LocalWorkspace implements Workspace {
 
   async writeFile(path: string, content: string): Promise<void> {
     const target = await this.resolve(path)
-    // The first directory this made, if any, so a refused path leaves nothing behind.
-    const made = await mkdir(dirname(target), { recursive: true })
-    let handle: FileHandle
-    try {
-      handle = await this.open(path, constants.O_WRONLY, true)
-    } catch (error) {
-      if (made) await removeEmptyDirs(dirname(target), made)
-      throw error
-    }
+    await mkdir(dirname(target), { recursive: true })
+    const handle = await this.open(path, constants.O_WRONLY | constants.O_CREAT)
     try {
       await handle.truncate(0)
       await handle.writeFile(content)

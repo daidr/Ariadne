@@ -16,7 +16,11 @@ How you talk to the user:
 
 /** One line of data: no line breaks, and no tags to close the block it sits in. */
 const asData = (text: string) =>
-  text.replace(/\s+/g, ' ').replace(/</g, '‹').replace(/>/g, '›').trim()
+  text
+    .replace(/[\s\u0085]+/g, ' ')
+    .replace(/[<＜﹤〈⟨]/g, '‹')
+    .replace(/[>＞﹥〉⟩]/g, '›')
+    .trim()
 
 /** The project's memory as every conversation sees it; empty when there is none. */
 export function memorySection(memories: { id: string; text: string }[]): string {

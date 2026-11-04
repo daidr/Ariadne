@@ -57,7 +57,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 12
+export const PROJECTION_VERSION = 13
 
 /** Memory is read into every model request, so it stays short. */
 export const MAX_MEMORIES = 50
@@ -787,7 +787,7 @@ export class Ariadne {
     input: { memoryId?: string; text: string; author: string; undoes?: string },
   ): MemoryView {
     // One line each: an entry cannot start a section of the prompts it is shown in.
-    const text = input.text.replace(/\s+/g, ' ').trim()
+    const text = input.text.replace(/[\s\u0085]+/g, ' ').trim()
     if (!text) throw new DomainError('error.invalidBody', { reason: 'text' })
     if (text.length > MAX_MEMORY) {
       throw new DomainError('error.invalidBody', { reason: `text longer than ${MAX_MEMORY}` })

@@ -204,11 +204,11 @@ describe('history compaction', () => {
     const last = model.requests.findLast((r) => r.messages[0]?.content.includes('coordinator'))!
     // The summary comes back as the model's own notes, not as something the user said,
     // with the stored todo list beside it.
-    expect(last.messages[1]).toMatchObject({ role: 'system' })
-    expect(last.messages[1]?.content).toContain('<your_notes>')
-    expect(last.messages[1]?.content).toContain('甲、乙、丙')
-    expect(last.messages[1]?.content).toContain('- [doing] 整理')
-    expect(last.messages[2]?.role).toBe('user')
+    expect(last.messages[1]?.role).toBe('user')
+    expect(last.messages[2]).toMatchObject({ role: 'assistant' })
+    expect(last.messages[2]?.content).toContain('<your_notes>')
+    expect(last.messages[2]?.content).toContain('甲、乙、丙')
+    expect(last.messages[2]?.content).toContain('- [doing] 整理')
     expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).toContain('compacted')
     expect(JSON.stringify(last.messages)).not.toContain('第 1 份需求')
     expect(lastUser(last)).toContain('第 4 份需求')

@@ -207,24 +207,27 @@ describe('local directory', () => {
     expect(await readFile(join(base, 'a.txt'), 'utf8')).toBe('outside\n')
   })
 
-  test('a refused write leaves nothing behind outside the workspace', async () => {
+  test('a refused write neither fills nor deletes what lies outside the workspace', async () => {
     const dir = join(base, 'plain2')
     const outside = join(base, 'outside')
-    await run(['mkdir', '-p', join(dir, 'sub'), outside], { cwd: base })
+    await run(['mkdir', '-p', join(dir, 'sub'), join(outside, 'new')], { cwd: base })
+    // Stands for a file outside, such as Ariadne's own settings.
+    await writeFile(join(outside, 'new', 'config.json'), 'keep\n')
     const { workspace } = await localDirectoryProvider(join(base, 'data')).connect({ path: dir })
     const ws = (await workspace!.open({ threadId: 'thr_a' })) as LocalWorkspace
     const resolveFirst = ws.resolve.bind(ws)
     let calls = 0
+    // The swap lands after the file was opened inside, just before the check: removing the
+    // new file by its path then would delete the one outside.
     ws.resolve = async (path: string) => {
-      const resolved = await resolveFirst(path)
-      if (++calls === 1) {
+      if (++calls === 3) {
         await rm(join(dir, 'sub'), { recursive: true })
         await symlink(outside, join(dir, 'sub'))
       }
-      return resolved
+      return resolveFirst(path)
     }
-    await expect(ws.writeFile('sub/new/deep.txt', 'x')).rejects.toThrow(WorkspacePathError)
-    expect(existsSync(join(outside, 'new'))).toBe(false)
+    await expect(ws.writeFile('sub/new/config.json', 'x')).rejects.toThrow(WorkspacePathError)
+    expect(await readFile(join(outside, 'new', 'config.json'), 'utf8')).toBe('keep\n')
   })
 
   test('output held by a process that left the group does not hang the call', async () => {
