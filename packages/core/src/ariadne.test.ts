@@ -317,8 +317,20 @@ describe('standing approvals', () => {
     expect(
       app.events({ projectId: project.id }).filter((e) => e.type === 'attention.joined'),
     ).toHaveLength(1)
+    // The thread that joined waits on the user too, and the card names both; it is not
+    // listed again on its own.
+    expect(cards[0]!.joinedBy).toEqual([b.id])
+    expect(app.getThread(b.id).stage).toBe('answer')
+    expect(app.listNeedsMe(project.id)).toEqual([
+      expect.objectContaining({
+        kind: 'attention',
+        thread: expect.objectContaining({ id: a.id }),
+        joined: [expect.objectContaining({ id: b.id })],
+      }),
+    ])
 
     app.answerAttention(cards[0]!.id, { choice: 0 })
+    expect(app.getThread(b.id).stage).not.toBe('answer')
     // Both threads hear the answer and are woken.
     for (const thread of [a, b]) {
       expect(app.listTranscript(thread.id).at(-1)).toMatchObject({

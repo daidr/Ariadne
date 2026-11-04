@@ -132,7 +132,7 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 
 上下文源是托管仓库时，thread 多五个工具：`repo_status`、`sync_branch`、`push_branch`、`open_pull_request`、`read_check_log`。
 
-- thread 推送自己的分支、开 PR 不需要先问用户：只动它自己的 `ariadne/…` 分支，PR 可以关闭，合并由用户决定。公开仓库例外：第一次推送前进“需要我”问一次（带 `purpose` 的 Attention，按仓库区分）。同意对整个项目有效；同时想推送的 thread 共用一张卡片（`attention.joined`），回答后一起被唤醒；拒绝只对等这张卡片的 thread 有效，之后别的工作可以再问。只回复文字、没有选选项的不算决定，thread 之后可以再问。用户关掉的 PR，`open_pull_request` 不会再开新的，thread 要问用户或报告受阻。
+- thread 推送自己的分支、开 PR 不需要先问用户：只动它自己的 `ariadne/…` 分支，PR 可以关闭，合并由用户决定。公开仓库例外：第一次推送前进“需要我”问一次（带 `purpose` 的 Attention，按仓库区分）。同意对整个项目有效；同时想推送的 thread 共用一张卡片（`attention.joined`），卡片上列出所有在等的 thread，它们都显示为“等你”，回答后一起被唤醒；拒绝只对等这张卡片的 thread 有效，之后别的工作可以再问。只回复文字、没有选选项的不算决定，thread 之后可以再问。用户关掉的 PR，`open_pull_request` 不会再开新的，thread 要问用户或报告受阻。
 - 推送从不强推；远端分支变过的话推送被拒，提示 thread 用 `sync_branch` 取回远端的提交（只更新 `origin/*`，不动本地分支），合并 `origin/<分支>` 或 `origin/<默认分支>` 后再推送。PR 被 squash 合并后继续工作，先合并最新的默认分支，下一个 PR 只含新的改动。
 - 开了 PR 的 thread 由仓库监视器定期（默认每分钟）读取 PR 和最新提交的检查，有变化才记一条 `pull_request.synced`。最新提交的检查失败时记 `checks.failed`，唤醒那个 thread 去读日志、修复、再推送；同一个提交只唤醒一次。连续第 3 次失败时，thread 被告知不要再试，报告受阻、说明试过什么，thread 进入 `blocked`、出现在“需要我”；之后的失败不再唤醒它，只继续计数。检查通过、PR 被合并或关闭，或用户在 thread 里发消息，就重新计数。协调器用 `message_thread` 仍能唤醒它，它推送后的失败照样不唤醒它，直到计数重来。PR 被合并或关闭时记 `pull_request.closed`，协调器收到说明。
 - 界面在 thread 标题旁显示 PR 编号、检查状态，可以手动刷新；看板卡片上也显示。
@@ -143,7 +143,7 @@ SSH 来源（内置插件 `plugin-ssh`）让 thread 在另一台机器上签出�
 
 - 协调器和 thread 都能用 `list_issues`、`read_issue` 读 issue，用 `link_issue` 把 issue 关联到计划节点（或取消）；thread 只能关联到自己的节点。关联记成 `plan.issue_linked` / `plan.issue_unlinked`，立即生效，节点详情里列出、写明是谁关联的、能取消；agent 关联或取消时在它自己的对话里显示一行。用户也可以在节点详情里按编号关联。搜索只用词语：`repo:`、`org:`、`is:` 这类限定词和 AND/OR/NOT 会被去掉，结果也只保留本仓库的，令牌能读到的其他仓库不会混进来。删掉节点时它的关联一起删掉。节点的 thread 在系统指令里看到关联的 issue 编号，内容用 `read_issue` 读。
 - issue 的标题、正文和评论是任何能提 issue 的人写的，工具结果里放进以内容哈希命名的数据块（`fenced()`，和项目记忆、AGENTS.md 同一套），并说明它们是信息不是指令。`read_plan` 和系统指令里只放编号，不放标题。
-- 改 issue（`comment_on_issue` 评论、`set_issue_state` 关闭或重新打开）会通知别人、撤不回，只有 thread 能做，而且每次都要用户同意这一个改动：卡片里写着 issue 和完整的评论内容或关闭原因（带 `purpose` 的 Attention，按 issue、动作和内容的完整 SHA-256 区分，正在问的同样改动共用一张卡片）。用户同意后 thread 用同样的参数再调一次才真正执行。一次同意只用于一次改动：执行前记 `issue.writing`（带用到的 attentionId），成功后记 `issue.written`；之后同样的改动（比如关闭、重新打开后再关闭，或再发一遍同样的评论）要重新问，换了内容也要重新问。同意按项目区分。如果记了 `issue.writing` 却没等到结果（Ariadne 中途停了，或者请求失败），这次同意就作废，thread 被告知先用 `read_issue` 核对改动是否已经生效，没有生效再调用才会重新问用户，不会盲目再做一次。拒绝的不做。thread 的对话里显示一行“在 … 下发表了评论 / 关闭了 …”，带链接。
+- 改 issue（`comment_on_issue` 评论、`set_issue_state` 关闭或重新打开）会通知别人、撤不回，只有 thread 能做，而且每次都要用户同意这一个改动：卡片里写着 issue 和完整的评论内容或关闭原因（带 `purpose` 的 Attention，按 issue、动作和内容的完整 SHA-256 区分，正在问的同样改动共用一张卡片）。用户同意后 thread 用同样的参数再调一次才真正执行。一次同意只用于一次改动：执行前记 `issue.writing`（带用到的 attentionId），成功后记 `issue.written`；之后同样的改动（比如关闭、重新打开后再关闭，或再发一遍同样的评论）要重新问，换了内容也要重新问。同意按项目区分。等同一张卡片的几个 thread 共用这次同意：其中一个做了改动，其余的会收到一条通知（谁做的、链接）；还没读到这条通知就再调用的，直接得到“已经做过”，不会被重新问，也不会再发一遍；读到之后再要同样的改动就是新的工作，照常重新问。改动正在进行时（同一进程里请求还没回来），再调用的 thread 被告知“正在做”，并加入这张卡片，结果出来后一起收到通知；正在进行的改动不会被当成“中途断掉”。如果记了 `issue.writing` 却没等到结果（Ariadne 中途停了，或者请求失败），这次同意就作废，thread 被告知先用 `read_issue` 核对改动是否已经生效，没有生效再调用才会重新问用户，不会盲目再做一次；卡片上其余的 thread 也会收到这条消息。拒绝的不做。thread 的对话里显示一行“在 … 下发表了评论 / 关闭了 …”，带链接。
 - issue 请求和仓库请求用同一个服务端的 API 客户端，令牌只在服务端，thread 的命令读不到。
 
 ### 产物

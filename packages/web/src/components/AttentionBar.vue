@@ -3,11 +3,17 @@ import { DouBadge, DouButton, DouEmpty, DouPopover, DouText } from 'dou-ui'
 import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
+import type { NeedsMeItem } from '@ariadne/core'
 import { answerAttention, state } from '../store'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
+
+/** Every thread waiting on a card, so the user sees whom one answer reaches. */
+function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
+  return [...(item.thread ? [item.thread] : []), ...item.joined].map((thread) => thread.title)
+}
 </script>
 
 <template>
@@ -21,8 +27,8 @@ const count = computed(() => items.value.length)
       <div v-if="count" class="attention-list">
         <template v-for="item in items">
           <div v-if="item.kind === 'attention'" :key="item.attention.id" class="attention">
-            <DouText v-if="item.thread" variant="secondary" size="sm" truncate>
-              {{ item.thread.title }}
+            <DouText v-if="askers(item).length" variant="secondary" size="sm" truncate>
+              {{ askers(item).join(' · ') }}
             </DouText>
             <DouText weight="medium" class="attention-question">{{
               item.attention.question

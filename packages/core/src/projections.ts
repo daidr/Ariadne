@@ -1,6 +1,12 @@
 import type { Database } from 'bun:sqlite'
 import { previewOf } from './artifact-content'
-import type { AnyStoredEvent, ArtifactKind, PlanNodeFields, PlanOp } from './events'
+import type {
+  AnyStoredEvent,
+  ArtifactKind,
+  IssueWriteAction,
+  PlanNodeFields,
+  PlanOp,
+} from './events'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import type { Projection } from './store'
 
@@ -588,6 +594,20 @@ function coordinatorOf(db: Database, projectId: string): string | null {
   )
 }
 
+/** The threads on a card: the one that asked, then those that joined it. */
+function cardThreads(db: Database, attentionId: string): string[] {
+  const asker = db
+    .query<{ thread_id: string | null }, [string]>('SELECT thread_id FROM attentions WHERE id = ?')
+    .get(attentionId)?.thread_id
+  const waiters = db
+    .query<{ thread_id: string }, [string]>(
+      'SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid',
+    )
+    .all(attentionId)
+    .map((w) => w.thread_id)
+  return [...new Set([...(asker ? [asker] : []), ...waiters])]
+}
+
 function addEntry(
   db: Database,
   event: AnyStoredEvent,
@@ -888,6 +908,43 @@ export const transcriptProjection: Projection = {
         }
         break
       }
+      case 'issue.written':
+      case 'issue.write_unsure': {
+        // One thread made the change with a yes the card's other threads share: they hear
+        // how it went, so none of them makes it again or waits on it for nothing.
+        const write = db
+          .query<
+            { thread_id: string; tracker: string; number: number; action: IssueWriteAction },
+            [string]
+          >('SELECT thread_id, tracker, number, action FROM issue_writes WHERE attention_id = ?')
+          .get(event.data.attentionId)
+        // Logs from before who was told was recorded: nobody else heard of it then either.
+        if (!write || (event.type === 'issue.write_unsure' && !event.data.threadId)) break
+        const told = event.type === 'issue.written' ? write.thread_id : event.data.threadId
+        for (const conversationId of cardThreads(db, event.data.attentionId)) {
+          // The one that made it, or was told to check, learns it from its own tool result.
+          if (conversationId === told) continue
+          addEntry(
+            db,
+            event,
+            {
+              conversationId,
+              kind: 'note',
+              payload: {
+                type: 'issue-write-shared',
+                threadId: write.thread_id,
+                tracker: write.tracker,
+                number: write.number,
+                action: write.action,
+                outcome: event.type === 'issue.written' ? 'made' : 'unsure',
+                url: event.type === 'issue.written' ? event.data.url : null,
+              },
+            },
+            true,
+          )
+        }
+        break
+      }
       case 'conversation.compacted':
         addEntry(
           db,
@@ -1085,12 +1142,18 @@ export const planProjection: Projection = {
       PRIMARY KEY (project_id, node_id, tracker, number)
     )`)
     // Which yes was used for which change: `writing` until it is known to have gone through.
+    // The thread making it, and what it is, so the others who waited on the card hear of it.
     db.run(`CREATE TABLE IF NOT EXISTS issue_writes (
       attention_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       purpose TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      tracker TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      action TEXT NOT NULL,
       status TEXT NOT NULL,
-      url TEXT
+      url TEXT,
+      written_seq INTEGER
     )`)
     db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
       id TEXT PRIMARY KEY,
@@ -1180,20 +1243,34 @@ export const planProjection: Projection = {
         )
         break
       case 'issue.writing':
+      case 'issue.written': {
+        const { attentionId, purpose, threadId, tracker, number, action } = event.data
+        const written = event.type === 'issue.written'
         db.run(
-          `INSERT OR IGNORE INTO issue_writes (attention_id, project_id, purpose, status)
-           VALUES (?, ?, ?, 'writing')`,
-          [event.data.attentionId, event.projectId, event.data.purpose],
+          `INSERT INTO issue_writes
+             (attention_id, project_id, purpose, thread_id, tracker, number, action, status, url,
+              written_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO ${
+             written
+               ? "UPDATE SET status = 'written', url = excluded.url, written_seq = excluded.written_seq"
+               : 'NOTHING'
+           }`,
+          [
+            attentionId,
+            event.projectId,
+            purpose,
+            threadId,
+            tracker,
+            number,
+            action,
+            written ? 'written' : 'writing',
+            written ? event.data.url : null,
+            written ? event.seq : null,
+          ],
         )
         break
-      case 'issue.written':
-        db.run(
-          `INSERT INTO issue_writes (attention_id, project_id, purpose, status, url)
-           VALUES (?, ?, ?, 'written', ?)
-           ON CONFLICT DO UPDATE SET status = 'written', url = excluded.url`,
-          [event.data.attentionId, event.projectId, event.data.purpose, event.data.url],
-        )
-        break
+      }
       case 'issue.write_unsure':
         db.run("UPDATE issue_writes SET status = 'unsure' WHERE attention_id = ?", [
           event.data.attentionId,

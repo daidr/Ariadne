@@ -43,6 +43,12 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<pull_request_closed number="${note.number}" thread="${note.threadId}">\nThe pull request was ${note.merged ? 'merged' : 'closed without merging'}.\n</pull_request_closed>`
     case 'proposal-stale':
       return `<plan_proposal_not_applied proposal="${note.proposalId}">\nThe user agreed to "${note.reason}", but the plan had changed and it no longer applied (${note.staleBecause}). Nothing changed. Read the plan and propose again if it is still needed.\n</plan_proposal_not_applied>`
+    case 'issue-write-shared': {
+      const head = `<shared_issue_change issue="${note.tracker}#${note.number}" action="${note.action}" thread="${note.threadId}" title="${titleOf(note.threadId)}">`
+      return note.outcome === 'made'
+        ? `${head}\nThe change you waited on with that thread was made by it${note.url ? `: ${note.url}` : ''}. The yes was used for it; do not make it again.\n</shared_issue_change>`
+        : `${head}\nThe attempt at this change, made with the yes you waited on, was cut off or failed, and it may have gone through. The yes is spent. Check the issue with read_issue before asking for it again.\n</shared_issue_change>`
+    }
     case 'plan-changed-by-user':
       return `<plan_changed_by_user revision="${note.revisionId}"${note.revertOf ? ` reverts="${note.revertOf}"` : ''}>\n${note.reason}\n</plan_changed_by_user>`
   }

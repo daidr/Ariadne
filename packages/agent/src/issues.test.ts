@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Ariadne, DomainError } from '@ariadne/core'
 import type { IssueDetail, TrackerCapability } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -96,6 +99,12 @@ async function run(name: string, args: Record<string, unknown>): Promise<ToolRes
 }
 
 const openCards = () => app.listOpenAttentions(projectId)
+const notesOf = (conversationId: string) =>
+  app
+    .listTranscript(conversationId)
+    .flatMap((entry) =>
+      entry.kind === 'note' && entry.note.type === 'issue-write-shared' ? [entry.note] : [],
+    )
 const node = () => app.getPlan(projectId).nodes.find((n) => n.id === 'login')!
 const names = (tools: { spec: { name: string } }[]) => tools.map((tool) => tool.spec.name)
 
@@ -245,28 +254,45 @@ describe('changing issues', () => {
   })
 
   test('a change cut off midway is checked, not made again', async () => {
-    await run('comment_on_issue', { number: 3, body: '修好了' })
-    const card = openCards()[0]!
-    app.answerAttention(card.id, { choice: 0 })
-    // As if Ariadne stopped after starting the change, before hearing back.
-    app.startIssueWrite(projectId, {
-      threadId: ctx.conversationId,
-      attentionId: card.id,
-      purpose: issueWritePurpose('acme/app', 3, 'comment', '修好了'),
-      tracker: 'acme/app',
-      number: 3,
-      action: 'comment',
-      text: '修好了',
-    })
-    const unsure = await run('comment_on_issue', { number: 3, body: '修好了' })
-    expect(unsure.isError).toBe(true)
-    expect(unsure.content).toContain('read_issue')
-    expect(written).toEqual([])
-    // Having checked, calling again asks the user again rather than reusing the yes.
-    expect((await run('comment_on_issue', { number: 3, body: '修好了' })).content).toContain(
-      'asked',
-    )
-    expect(written).toEqual([])
+    const dir = await mkdtemp(join(tmpdir(), 'ariadne-issues-'))
+    try {
+      const path = join(dir, 'ariadne.db')
+      app.close()
+      app = new Ariadne({ path })
+      const project = app.createProject('P')
+      const thread = app.createThread(project.id, { title: '修登录' })
+      projectId = project.id
+      ctx = { ...ctx, app, projectId, conversationId: thread.id }
+      await run('comment_on_issue', { number: 3, body: '修好了' })
+      const card = openCards()[0]!
+      app.answerAttention(card.id, { choice: 0 })
+      // Ariadne stops after starting the change, before hearing back.
+      app.startIssueWrite(projectId, {
+        threadId: thread.id,
+        attentionId: card.id,
+        purpose: issueWritePurpose('acme/app', 3, 'comment', '修好了'),
+        tracker: 'acme/app',
+        number: 3,
+        action: 'comment',
+        text: '修好了',
+      })
+      app.close()
+      app = new Ariadne({ path })
+      ctx = { ...ctx, app }
+      const unsure = await run('comment_on_issue', { number: 3, body: '修好了' })
+      expect(unsure.isError).toBe(true)
+      expect(unsure.content).toContain('read_issue')
+      expect(written).toEqual([])
+      // Having checked, calling again asks the user again rather than reusing the yes.
+      expect((await run('comment_on_issue', { number: 3, body: '修好了' })).content).toContain(
+        'asked',
+      )
+      expect(written).toEqual([])
+    } finally {
+      app.close()
+      app = new Ariadne({ path: ':memory:' })
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   test('a failed request spends the yes; the thread checks before asking again', async () => {
@@ -313,6 +339,141 @@ describe('changing issues', () => {
     app.answerAttention(openCards()[0]!.id, { choice: 0 })
     await run('set_issue_state', { number: 3, state: 'closed' })
     expect(written).toEqual(['state 3: closed completed'])
+  })
+
+  test('threads that waited on one card share its yes: one makes the change, none is asked again', async () => {
+    const first = ctx.conversationId
+    const second = app.createThread(projectId, { title: '修注册' }).id
+    const as = (conversationId: string) => (ctx = { ...ctx, conversationId })
+    await run('comment_on_issue', { number: 3, body: '两边都修好了' })
+    as(second)
+    expect((await run('comment_on_issue', { number: 3, body: '两边都修好了' })).content).toContain(
+      'already being asked',
+    )
+    expect(openCards()).toHaveLength(1)
+    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+
+    as(first)
+    expect(
+      JSON.parse((await run('comment_on_issue', { number: 3, body: '两边都修好了' })).content),
+    ).toMatchObject({ done: true })
+    // The other thread hears it was made, with where, and does not make it again.
+    expect(notesOf(second)).toEqual([
+      expect.objectContaining({ type: 'issue-write-shared', threadId: first, outcome: 'made' }),
+    ])
+    expect(notesOf(first)).toEqual([])
+    as(second)
+    const made = await run('comment_on_issue', { number: 3, body: '两边都修好了' })
+    expect(made.isError).toBeFalsy()
+    expect(JSON.parse(made.content)).toMatchObject({
+      done: true,
+      madeBy: first,
+      url: 'https://github.com/acme/app/issues/3#c2',
+    })
+    expect(openCards()).toEqual([])
+    expect(written).toHaveLength(1)
+    // The thread that made it asks again for the same change later.
+    as(first)
+    expect((await run('comment_on_issue', { number: 3, body: '两边都修好了' })).content).toContain(
+      'asked',
+    )
+  })
+
+  test('once a thread has seen the shared change made, the same change again asks again', async () => {
+    const first = ctx.conversationId
+    const second = app.createThread(projectId, { title: '修注册' }).id
+    const as = (conversationId: string) => (ctx = { ...ctx, conversationId })
+    await run('set_issue_state', { number: 3, state: 'closed' })
+    as(second)
+    await run('set_issue_state', { number: 3, state: 'closed' })
+    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    as(first)
+    expect(
+      JSON.parse((await run('set_issue_state', { number: 3, state: 'closed' })).content),
+    ).toMatchObject({ done: true })
+    // The other thread's model reads the note that it was made.
+    const turnId = app.startTurn(second, 'm')
+    app.recordStep(second, turnId, { text: '', toolCalls: [], sawSeq: app.lastSeq(), usage: null })
+    app.finishTurn(second, turnId, 'completed')
+    // Reopened with its own yes; closing it again later is a new change.
+    expect(await step('open')).toMatchObject({ done: true })
+    as(second)
+    expect((await run('set_issue_state', { number: 3, state: 'closed' })).content).toContain(
+      'asked',
+    )
+    expect(written).toEqual(['state 3: closed completed', 'state 3: open'])
+  })
+
+  test('a change under way is not taken for one cut off, by its own thread or another', async () => {
+    const tracker = await ctx.tracker!()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    ctx = {
+      ...ctx,
+      tracker: async () => ({
+        ...tracker,
+        comment: async (number, body) => {
+          await held
+          return tracker.comment(number, body)
+        },
+      }),
+    }
+    const first = ctx.conversationId
+    const second = app.createThread(projectId, { title: '修注册' }).id
+    const other = app.createThread(projectId, { title: '别的' }).id
+    await run('comment_on_issue', { number: 3, body: '修好了' })
+    ctx = { ...ctx, conversationId: second }
+    await run('comment_on_issue', { number: 3, body: '修好了' })
+    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+
+    ctx = { ...ctx, conversationId: first }
+    const making = run('comment_on_issue', { number: 3, body: '修好了' })
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const again = await run('comment_on_issue', { number: 3, body: '修好了' })
+    expect(again.isError).toBeFalsy()
+    expect(again.content).toContain('earlier call')
+    for (const conversationId of [second, other]) {
+      ctx = { ...ctx, conversationId }
+      const meanwhile = await run('comment_on_issue', { number: 3, body: '修好了' })
+      expect(meanwhile.isError).toBeFalsy()
+      expect(meanwhile.content).toContain('right now')
+    }
+    expect(openCards()).toEqual([])
+    release()
+    expect(JSON.parse((await making).content)).toMatchObject({ done: true })
+    expect(written).toEqual(['comment 3: 修好了'])
+    // Both that waited hear how it went; one asking meanwhile joined the card for that.
+    for (const conversationId of [second, other]) {
+      expect(notesOf(conversationId)).toEqual([
+        expect.objectContaining({ type: 'issue-write-shared', outcome: 'made', threadId: first }),
+      ])
+    }
+  })
+
+  test('the others on the card hear when the change failed and may not have gone through', async () => {
+    const tracker = await ctx.tracker!()
+    ctx = {
+      ...ctx,
+      tracker: async () => ({
+        ...tracker,
+        comment: async () => {
+          throw new Error('timeout')
+        },
+      }),
+    }
+    const first = ctx.conversationId
+    const second = app.createThread(projectId, { title: '修注册' }).id
+    await run('comment_on_issue', { number: 3, body: '修好了' })
+    ctx = { ...ctx, conversationId: second }
+    await run('comment_on_issue', { number: 3, body: '修好了' })
+    app.answerAttention(openCards()[0]!.id, { choice: 0 })
+    ctx = { ...ctx, conversationId: first }
+    expect((await run('comment_on_issue', { number: 3, body: '修好了' })).isError).toBe(true)
+    expect(notesOf(first)).toEqual([])
+    expect(notesOf(second)).toEqual([
+      expect.objectContaining({ type: 'issue-write-shared', outcome: 'unsure', threadId: first }),
+    ])
   })
 
   test('only threads change issues; the coordinator reads and links them', async () => {

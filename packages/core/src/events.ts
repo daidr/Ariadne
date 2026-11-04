@@ -291,8 +291,11 @@ export interface EventMap {
   'issue.writing': IssueWrite
   /** The change went through; `url` shows it on the tracker. */
   'issue.written': IssueWrite & { url: string | null }
-  /** A change was cut off before it was known to be made; the thread was told to check. */
-  'issue.write_unsure': { attentionId: string }
+  /**
+   * A change was cut off or failed before it was known to be made; `threadId` was told to
+   * check (absent in logs written before it was recorded).
+   */
+  'issue.write_unsure': { attentionId: string; threadId?: string }
   /** The thread's pull request as last seen on the repository; written only on a change. */
   'pull_request.synced': { threadId: string } & ThreadPullRequest
   /** Checks of the pull request's newest commit failed; the thread gets to fix them. */
