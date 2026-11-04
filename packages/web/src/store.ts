@@ -2,6 +2,7 @@ import type {
   AnyStoredEvent,
   ArtifactKind,
   ArtifactSummary,
+  BlockAnswer,
   ConversationView,
   MemoryView,
   MessageView,
@@ -325,8 +326,8 @@ export async function revertPlan(revisionId: string) {
   }
 }
 
-export async function answerAttention(id: string, choice: number) {
-  await api.answerAttention(id, choice).catch(report)
+export async function answerAttention(id: string, answer: BlockAnswer) {
+  await api.answerAttention(id, answer).catch(report)
 }
 
 // Coalesce bursts of events into one refresh per frame, remembering every project touched.

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
+import { confirmBlock, type ConfirmBlock } from './blocks'
 import { DomainError } from './errors'
 import type { AnyStoredEvent } from './events'
 
@@ -50,17 +51,20 @@ describe('thread stages', () => {
 
     const attention = app.openAttention(project.id, {
       threadId: thread.id,
-      question: '用哪个方案？',
-      options: [
-        { label: 'A', consequence: '更快' },
-        { label: 'B', consequence: '更稳' },
-      ],
-      recommended: 1,
+      block: {
+        type: 'choice',
+        question: '用哪个方案？',
+        options: [
+          { label: 'A', consequence: '更快' },
+          { label: 'B', consequence: '更稳' },
+        ],
+        recommended: 1,
+      },
     })
     expect(app.getThread(thread.id).stage).toBe('answer')
     expect(app.getProject(project.id).needsMe).toBe(1)
 
-    app.answerAttention(attention.id, { choice: 1 })
+    app.answerAttention(attention.id, { type: 'choice', choice: 1 })
     // The answer wakes the thread: it waits for a slot to read it.
     expect(app.getThread(thread.id).stage).toBe('queued')
     const turnId = app.startTurn(thread.id, 'model')
@@ -104,7 +108,7 @@ describe('thread stages', () => {
     const thread = app.createThread(project.id, { title: 't' })
     app.startThread(thread.id)
     app.reportThread(thread.id, 'blocked', '缺少权限')
-    app.openAttention(project.id, { question: '要开始吗？', options: [] })
+    app.openAttention(project.id, { block: confirmBlock({ title: '要开始吗？' }) })
     expect(app.getProject(project.id).needsMe).toBe(2)
   })
 
@@ -113,7 +117,10 @@ describe('thread stages', () => {
     const thread = app.createThread(project.id, { title: 't' })
     app.startThread(thread.id)
     const ask = (question: string) =>
-      app.openAttention(project.id, { threadId: thread.id, question, options: [] })
+      app.openAttention(project.id, {
+        threadId: thread.id,
+        block: confirmBlock({ title: question }),
+      })
     ask('一？')
     ask('二？')
     expect(app.listNeedsMe(project.id).map((item) => item.kind)).toEqual(['attention', 'attention'])
@@ -131,13 +138,103 @@ describe('thread stages', () => {
 
   test('rejects a recommendation outside the options', () => {
     const project = app.createProject('P')
-    expect(() =>
-      app.openAttention(project.id, { question: 'q', options: [], recommended: 0 }),
-    ).toThrow(DomainError)
+    const options = [
+      { label: 'A', consequence: 'a' },
+      { label: 'B', consequence: 'b' },
+    ]
+    expect(
+      problem(() =>
+        app.openAttention(project.id, {
+          block: { type: 'choice', question: 'q', options, recommended: 2 },
+        }),
+      ),
+    ).toBe('error.blockInvalid')
   })
 })
 
 describe('messages', () => {
+  test('an agent message carries blocks; its ask waits under "needs me" until answered', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    app.startThread(thread.id)
+    const table = {
+      type: 'table',
+      columns: [{ key: 'name', title: '方案' }],
+      rows: [{ name: 'A' }, { name: 'B' }],
+    }
+    const message = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'thread',
+      content: '两个方案对比如下',
+      blocks: [
+        {
+          type: 'choice',
+          question: '用哪个？',
+          options: [
+            { label: 'A', consequence: '快' },
+            { label: 'B', consequence: '稳' },
+          ],
+          recommended: 1,
+        },
+        table,
+      ],
+    })
+    expect(message.blocks).toEqual([
+      { ...table, title: null, columns: [{ key: 'name', title: '方案', align: 'start' }] },
+    ])
+    expect(message.ask).toMatchObject({ block: { type: 'choice', recommended: 1 }, answer: null })
+    expect(app.getThread(thread.id).stage).toBe('answer')
+    const [item] = app.listNeedsMe(project.id)
+    expect(item?.kind === 'attention' && item.attention).toMatchObject({
+      id: message.ask!.attentionId,
+      messageId: message.id,
+      conversationId: thread.id,
+    })
+
+    app.answerAttention(message.ask!.attentionId, { type: 'choice', choice: 0 })
+    expect(app.listMessages(thread.id).at(-1)?.ask?.answer).toEqual({ type: 'choice', choice: 0 })
+    expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'answer', question: '用哪个？', answer: 'choice: A' },
+    })
+    // Answered once only.
+    expect(
+      problem(() => app.answerAttention(message.ask!.attentionId, { type: 'choice', choice: 1 })),
+    ).toBe('error.notFound')
+  })
+
+  test("the coordinator's ask is its own; only agents post blocks, one ask per message", () => {
+    const project = app.createProject('P')
+    const ask = { type: 'confirm', title: '开始吗？' }
+    const message = app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'coordinator',
+      content: '',
+      blocks: [ask],
+    })
+    expect(app.listOpenAttentions(project.id)[0]).toMatchObject({
+      threadId: null,
+      conversationId: project.coordinatorId,
+    })
+    app.answerAttention(message.ask!.attentionId, { type: 'confirm', approved: true })
+    expect(app.listTranscript(project.coordinatorId).at(-1)).toMatchObject({
+      note: { type: 'answer', answer: 'approved' },
+    })
+
+    const post = (author: 'user' | 'coordinator', blocks: unknown[]) => () =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author,
+        content: 'x',
+        blocks,
+      })
+    expect(problem(post('user', [ask]))).toBe('error.invalidBody')
+    expect(problem(post('coordinator', [ask, ask]))).toBe('error.blockInvalid')
+    expect(problem(post('coordinator', [{ type: 'script', src: 'x' }]))).toBe('error.blockInvalid')
+    // Nothing of a refused message was stored.
+    expect(app.listMessages(project.coordinatorId)).toHaveLength(1)
+  })
+
   test('only the author may edit, and edits after reading are highlighted once', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
@@ -310,13 +407,18 @@ describe('event log', () => {
   })
 })
 
-const card = () => ({
-  question: '推送吗？',
-  options: [
-    { label: '推送', consequence: '推送' },
-    { label: '不推', consequence: '不推' },
-  ],
-})
+/** Not a confirmation, which an approval must be. */
+const choiceCard = () =>
+  ({
+    type: 'choice',
+    question: '推送吗？',
+    options: [
+      { label: '推', consequence: '推' },
+      { label: '不推', consequence: '不推' },
+    ],
+  }) as unknown as ConfirmBlock
+
+const card = () => confirmBlock({ title: '推送吗？', approveText: '推送', denyText: '不推' })
 
 /** The message key of the domain error `fn` throws, or `null`. */
 function problem(fn: () => unknown): string | null {
@@ -354,13 +456,13 @@ describe('standing approvals', () => {
       }),
     ])
 
-    app.answerAttention(cards[0]!.id, { choice: 0 })
+    app.answerAttention(cards[0]!.id, { type: 'confirm', approved: true })
     expect(app.getThread(b.id).stage).not.toBe('answer')
     // Both threads hear the answer and are woken.
     for (const thread of [a, b]) {
       expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
         kind: 'note',
-        note: { type: 'answer', choice: '推送' },
+        note: { type: 'answer', question: '推送吗？', answer: 'approved' },
       })
     }
     expect(app.listPendingConversations().map((conversation) => conversation.id)).toEqual(
@@ -373,20 +475,47 @@ describe('standing approvals', () => {
     expect(app.approvalFor(project.id, c.id, 'push:other')).toBeNull()
   })
 
-  test('a no holds for the threads on that card; an answer in words decides nothing', () => {
+  test('a no holds for the threads on that card', () => {
     const project = app.createProject('P')
     const a = app.createThread(project.id, { title: 'A' })
     const b = app.createThread(project.id, { title: 'B' })
     app.requestApproval(project.id, a.id, 'push', card)
     const [first] = app.listOpenAttentions(project.id)
-    app.answerAttention(first!.id, { text: '等我看完再说' })
-    expect(app.approvalFor(project.id, a.id, 'push')).toBeNull()
-    // So the thread may ask again later.
-    expect(app.requestApproval(project.id, a.id, 'push', card)).toBe('asked')
-    const [second] = app.listOpenAttentions(project.id)
-    app.answerAttention(second!.id, { choice: 1 })
+    app.answerAttention(first!.id, { type: 'confirm', approved: false })
     expect(app.approvalFor(project.id, a.id, 'push')).toBe('declined')
     expect(app.approvalFor(project.id, b.id, 'push')).toBeNull()
+    // Another thread may still ask.
+    expect(app.requestApproval(project.id, b.id, 'push', card)).toBe('asked')
+  })
+
+  test("an agent's own confirmation is never a standing approval", () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'A' })
+    const message = app.postMessage(project.id, {
+      conversationId: a.id,
+      author: 'thread',
+      content: '',
+      blocks: [{ type: 'confirm', title: '推送到公开仓库？', approveText: '允许推送' }],
+    })
+    app.answerAttention(message.ask!.attentionId, { type: 'confirm', approved: true })
+    expect(app.approvalFor(project.id, a.id, 'push')).toBeNull()
+    expect(app.requestApproval(project.id, a.id, 'push', card)).toBe('asked')
+  })
+
+  test('an approval must be a confirmation, answered as one', () => {
+    const project = app.createProject('P')
+    const a = app.createThread(project.id, { title: 'A' })
+    expect(problem(() => app.requestApproval(project.id, a.id, 'push', choiceCard))).toBe(
+      'error.blockInvalid',
+    )
+    app.requestApproval(project.id, a.id, 'push', card)
+    const [open] = app.listOpenAttentions(project.id)
+    expect(problem(() => app.answerAttention(open!.id, { type: 'choice', choice: 0 }))).toBe(
+      'error.blockInvalid',
+    )
+    expect(problem(() => app.answerAttention(open!.id, { type: 'confirm' }))).toBe(
+      'error.blockInvalid',
+    )
   })
 })
 
@@ -802,10 +931,9 @@ describe('stopped threads', () => {
     expect(notes(project.coordinatorId)).toContain('thread-stopped-by-user')
     const attention = app.openAttention(project.id, {
       threadId: thread.id,
-      question: '用哪个？',
-      options: [{ label: 'A', consequence: 'a' }],
+      block: confirmBlock({ title: '继续吗？' }),
     })
-    app.answerAttention(attention.id, { choice: 0 })
+    app.answerAttention(attention.id, { type: 'confirm', approved: true })
     expect(app.getThread(thread.id).stopped).toBeNull()
     expect(notes(thread.id).filter((n) => n === 'thread-resumed')).toHaveLength(2)
   })

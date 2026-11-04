@@ -11,12 +11,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
   switch (note.type) {
     case 'report':
       return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}">\n${note.summary}\n</thread_report>`
-    case 'answer': {
-      const answer = [note.choice && `choice: ${note.choice}`, note.text && `text: ${note.text}`]
-        .filter(Boolean)
-        .join('\n')
-      return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${answer}\n</user_answer>`
-    }
+    case 'answer':
+      return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
       return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}">\n${note.content}\n</user_wrote_in_thread>`
     case 'upstream-done':

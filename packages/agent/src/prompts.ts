@@ -12,7 +12,8 @@ How you talk to the user:
 - Your final text of a turn is posted to the user as a message. End a turn with no text when there is nothing they need to know.
 - Lead with the answer or the decision needed, in short plain sentences. Back claims with what you checked.
 - If an earlier message of yours turns out wrong, fix it with edit_message rather than adding a correction.
-- Ask with ask_user only when a choice changes the user's goal or cannot be undone. Recommend an option and keep working on it meanwhile.
+- Ask with post_ui (a choice, confirm or form block) only when the answer changes the user's goal or the step cannot be undone. Recommend an option and keep working on it meanwhile.
+- When a comparison, numbers or a procedure read better as a table, a chart or steps than as prose, show them with post_ui. Plain answers stay plain text.
 `
 
 /** One line of data: no line breaks, and no tags to close the block it sits in. */
@@ -131,7 +132,7 @@ export interface ThreadContext {
 }
 
 function repoSection(): string {
-  return `Your workspace is a checkout of the project's repository. When the work is ready for review, commit, then open_pull_request (it pushes your branch): this needs no ask_user, since it only touches your own branch and the user decides whether to merge. Never merge, never push other branches, never force-push, and never push with git yourself: it fails by design. After that, push_branch publishes further commits. When a push is rejected or your pull request conflicts, sync_branch fetches the remote; merge origin/<your branch> or origin/<default branch>, resolve, commit and push again. If the repository is public, the first push waits for the user to agree; if they decline, do not push. If your pull request was closed without merging, do not open another unasked. Your pull request's checks are watched: when they fail you get <checks_failed>; read the logs (repo_status, read_check_log), fix the cause, commit and push again. Report "ready" with the pull request's link once its checks pass or while they run.`
+  return `Your workspace is a checkout of the project's repository. When the work is ready for review, commit, then open_pull_request (it pushes your branch): this needs no confirmation from the user, since it only touches your own branch and the user decides whether to merge. Never merge, never push other branches, never force-push, and never push with git yourself: it fails by design. After that, push_branch publishes further commits. When a push is rejected or your pull request conflicts, sync_branch fetches the remote; merge origin/<your branch> or origin/<default branch>, resolve, commit and push again. If the repository is public, the first push waits for the user to agree; if they decline, do not push. If your pull request was closed without merging, do not open another unasked. Your pull request's checks are watched: when they fail you get <checks_failed>; read the logs (repo_status, read_check_log), fix the cause, commit and push again. Report "ready" with the pull request's link once its checks pass or while they run.`
 }
 
 function workspaceSection(workspace: ThreadContext['workspace'], repo: boolean): string {
@@ -144,8 +145,8 @@ function workspaceSection(workspace: ThreadContext['workspace'], repo: boolean):
       : `It is at ${workspace.label}${workspace.branch ? ` on branch ${workspace.branch}` : ''}.`
   const base = workspace !== 'not-open' ? workspace.base : null
   // Without a hosted repository the user reviews the branch and merges it in Ariadne.
-  const local = `${base ? `The user sees your branch's committed changes against ${base} in Ariadne and merges them there; never merge into ${base} or move it yourself.` : 'The user reviews your branch and merges it; never merge it yourself.'} Anything irreversible outside the workspace (pushing, deploying, sending) needs ask_user first.`
-  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done"; files not committed are not part of what the user reviews. Run the project's checks before you report. ${repo ? `${repoSection()} Anything else irreversible outside the workspace (deploying, sending) needs ask_user first.` : local}`
+  const local = `${base ? `The user sees your branch's committed changes against ${base} in Ariadne and merges them there; never merge into ${base} or move it yourself.` : 'The user reviews your branch and merges it; never merge it yourself.'} Anything irreversible outside the workspace (pushing, deploying, sending) needs the user's yes first (a confirm block via post_ui).`
+  return `You have your own workspace with file and command tools (list_dir, read_file, write_file, edit_file, search, run_command). ${where} Other threads cannot see your changes until they are merged. Commit your work on your branch with clear messages before you report "ready" or "done"; files not committed are not part of what the user reviews. Run the project's checks before you report. ${repo ? `${repoSection()} Anything else irreversible outside the workspace (deploying, sending) needs the user's yes first (a confirm block via post_ui).` : local}`
 }
 
 export function threadPrompt(input: ThreadContext): string {

@@ -4,7 +4,8 @@ import { BellIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem } from '@ariadne/core'
-import { answerAttention, openThread, state } from '../store'
+import { openThread, state } from '../store'
+import AskBlock from '../blocks/AskBlock.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
@@ -30,22 +31,19 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
             <DouText v-if="askers(item).length" variant="secondary" size="sm" truncate>
               {{ askers(item).join(' · ') }}
             </DouText>
-            <DouText weight="medium" class="attention-question">{{
-              item.attention.question
-            }}</DouText>
-            <div class="attention-options">
-              <DouButton
-                v-for="(option, index) in item.attention.options"
-                :key="index"
-                size="sm"
-                :variant="index === item.attention.recommended ? 'solid' : 'outline'"
-                :tone="index === item.attention.recommended ? 'primary' : 'neutral'"
-                :title="option.consequence"
-                @click="answerAttention(item.attention.id, index)"
-              >
-                {{ option.label }}
+            <!-- A form is filled in where it was asked; the list only points there. -->
+            <div v-if="item.attention.block.type === 'form'" class="attention-thread">
+              <DouText weight="medium" truncate>{{ item.attention.block.title }}</DouText>
+              <DouButton size="sm" variant="ghost" @click="openThread(item.attention.threadId)">
+                {{ t('block.fill') }}
               </DouButton>
             </div>
+            <AskBlock
+              v-else
+              :attention-id="item.attention.id"
+              :block="item.attention.block"
+              :answer="null"
+            />
           </div>
           <div v-else :key="item.thread.id" class="attention">
             <div class="attention-thread">
@@ -83,14 +81,5 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.attention-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.attention-question {
-  white-space: pre-wrap;
 }
 </style>

@@ -4,6 +4,7 @@ import type {
   ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
+  BlockAnswer,
   ConversationView,
   MessageView,
   NeedsMeItem,
@@ -235,8 +236,8 @@ export const api = {
     }),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
-  answerAttention: (id: string, choice: number) =>
-    request<void>('POST', `/api/attentions/${id}/answer`, { choice }),
+  answerAttention: (id: string, answer: BlockAnswer) =>
+    request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
   getSource: (projectId: string) =>
     request<{ source: ProjectView['source']; secretsSet: string[] }>(

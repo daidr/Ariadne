@@ -585,16 +585,9 @@ export function createHandler({
   )
 
   add('POST', '/api/attentions/:attentionId/answer', async (request, { attentionId = '' }) => {
+    // Checked against the block it answers, so a form's values are what its fields allow.
     const body = await readJson(request)
-    const choice = body.choice ?? null
-    const text = body.text ?? null
-    if (choice !== null && !Number.isInteger(choice)) throw new BadRequest('choice')
-    if (text !== null && typeof text !== 'string') throw new BadRequest('text')
-    if (choice === null && text === null) throw new BadRequest('answer')
-    app.answerAttention(attentionId, {
-      choice: choice as number | null,
-      text: text as string | null,
-    })
+    app.answerAttention(attentionId, body.answer)
     return new Response(null, { status: 204 })
   })
 

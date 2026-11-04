@@ -269,10 +269,13 @@ describe('repository', () => {
     expect(results[0]).toContain('public')
     const [item] = app.listNeedsMe(project.id)
     if (item?.kind !== 'attention') throw new Error('expected a question')
-    expect(item.attention.question).toContain('acme/app')
+    expect(item.attention.block).toMatchObject({ type: 'confirm', tone: 'warning' })
+    expect(item.attention.block.type === 'confirm' && item.attention.block.title).toContain(
+      'acme/app',
+    )
 
     // The user agrees: the thread is woken and its next call pushes.
-    app.answerAttention(item.attention.id, { choice: 0 })
+    app.answerAttention(item.attention.id, { type: 'confirm', approved: true })
     await scheduler.idle()
     expect(state.pushed).toEqual(['ariadne/thread'])
     expect(app.getThread(thread.id).pullRequest?.number).toBe(1)
@@ -331,7 +334,7 @@ describe('repository', () => {
     expect(results.some((r) => r.includes('already being asked'))).toBe(true)
 
     // One yes wakes both threads, and both push.
-    app.answerAttention(cards[0]!.id, { choice: 0 })
+    app.answerAttention(cards[0]!.id, { type: 'confirm', approved: true })
     await scheduler.idle()
     expect(state.pushed).toHaveLength(2)
     expect(app.listOpenAttentions(project.id)).toEqual([])

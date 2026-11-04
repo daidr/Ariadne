@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import { previewOf } from './artifact-content'
+import { askTitle, describeAnswer, type AskBlock, type BlockAnswer } from './blocks'
 import type {
   AnyStoredEvent,
   ArtifactKind,
@@ -221,6 +222,10 @@ export const threadsProjection: Projection = {
   },
 }
 
+/** 1 or 0 for a confirmation's answer, `null` for the others. */
+const approvedOf = (answer: BlockAnswer): number | null =>
+  answer.type === 'confirm' ? (answer.approved ? 1 : 0) : null
+
 export const attentionsProjection: Projection = {
   name: 'attentions',
   setup(db) {
@@ -228,16 +233,17 @@ export const attentionsProjection: Projection = {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       thread_id TEXT,
-      question TEXT NOT NULL,
-      options TEXT NOT NULL,
-      recommended INTEGER,
+      conversation_id TEXT,
+      message_id TEXT,
+      block TEXT NOT NULL,
       answered INTEGER NOT NULL DEFAULT 0,
-      choice INTEGER,
-      answer_text TEXT,
+      answer TEXT,
+      approved INTEGER,
       purpose TEXT,
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS attentions_project ON attentions (project_id, answered)')
+    db.run('CREATE INDEX IF NOT EXISTS attentions_message ON attentions (message_id)')
     // The threads that hear an attention's answer: the one that asked and any that joined.
     db.run(`CREATE TABLE IF NOT EXISTS attention_waiters (
       attention_id TEXT NOT NULL,
@@ -249,14 +255,15 @@ export const attentionsProjection: Projection = {
     switch (event.type) {
       case 'attention.opened':
         db.run(
-          'INSERT INTO attentions (id, project_id, thread_id, question, options, recommended, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          `INSERT INTO attentions (id, project_id, thread_id, conversation_id, message_id, block,
+             purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.attentionId,
             event.projectId,
             event.data.threadId,
-            event.data.question,
-            JSON.stringify(event.data.options),
-            event.data.recommended,
+            event.data.threadId ?? coordinatorOf(db, event.projectId),
+            event.data.messageId,
+            JSON.stringify(event.data.block),
             event.data.purpose ?? null,
             event.at,
           ],
@@ -269,9 +276,10 @@ export const attentionsProjection: Projection = {
         ])
         break
       case 'attention.answered':
-        db.run('UPDATE attentions SET answered = 1, choice = ?, answer_text = ? WHERE id = ?', [
-          event.data.choice,
-          event.data.text,
+        // `approved` is kept apart for confirmations, which standing approvals look up.
+        db.run('UPDATE attentions SET answered = 1, answer = ?, approved = ? WHERE id = ?', [
+          JSON.stringify(event.data.answer),
+          approvedOf(event.data.answer),
           event.data.attentionId,
         ])
         break
@@ -294,7 +302,8 @@ export const messagesProjection: Projection = {
       edit_reason TEXT,
       original_content TEXT,
       read_at INTEGER,
-      edited_since_read INTEGER NOT NULL DEFAULT 0
+      edited_since_read INTEGER NOT NULL DEFAULT 0,
+      blocks TEXT
     )`)
     db.run('CREATE INDEX IF NOT EXISTS messages_conversation ON messages (conversation_id, id)')
   },
@@ -302,7 +311,8 @@ export const messagesProjection: Projection = {
     switch (event.type) {
       case 'message.posted':
         db.run(
-          'INSERT INTO messages (id, project_id, conversation_id, author, kind, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
+             created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -310,6 +320,7 @@ export const messagesProjection: Projection = {
             event.data.author,
             event.data.kind,
             event.data.content,
+            event.data.blocks?.length ? JSON.stringify(event.data.blocks) : null,
             event.at,
           ],
         )
@@ -957,14 +968,13 @@ export const transcriptProjection: Projection = {
       }
       case 'attention.answered': {
         const row = db
-          .query<{ thread_id: string | null; question: string; options: string }, [string]>(
-            'SELECT thread_id, question, options FROM attentions WHERE id = ?',
+          .query<{ conversation_id: string | null; block: string }, [string]>(
+            'SELECT conversation_id, block FROM attentions WHERE id = ?',
           )
           .get(event.data.attentionId)
-        const asker = row?.thread_id ?? coordinatorOf(db, event.projectId)
+        const asker = row?.conversation_id
         if (!row || !asker) break
-        const options = JSON.parse(row.options) as { label: string }[]
-        const choice = event.data.choice === null ? null : options[event.data.choice]?.label
+        const block = JSON.parse(row.block) as AskBlock
         const waiters = db
           .query<{ thread_id: string }, [string]>(
             'SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid',
@@ -981,9 +991,8 @@ export const transcriptProjection: Projection = {
               payload: {
                 type: 'answer',
                 attentionId: event.data.attentionId,
-                question: row.question,
-                choice: choice ?? null,
-                text: event.data.text,
+                question: askTitle(block),
+                answer: describeAnswer(block, event.data.answer),
               },
             },
             true,
@@ -1392,11 +1401,11 @@ export const planProjection: Projection = {
         ])
         break
       case 'attention.answered':
-        // Any answer closes the proposal; the first option's `plan.revised` marks it applied.
+        // Any answer closes the proposal; agreeing's `plan.revised` marks it applied.
         db.run(
-          `UPDATE plan_proposals SET status = CASE WHEN ? = 0 THEN 'accepted' ELSE 'rejected' END
+          `UPDATE plan_proposals SET status = CASE WHEN ? = 1 THEN 'accepted' ELSE 'rejected' END
            WHERE attention_id = ? AND status = 'open'`,
-          [event.data.choice, event.data.attentionId],
+          [approvedOf(event.data.answer), event.data.attentionId],
         )
         break
     }

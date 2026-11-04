@@ -1,6 +1,7 @@
 import type { AnyStoredEvent, ThreadView } from '@ariadne/core'
 import { reactive } from 'vue'
 import { api } from './api'
+import { askTitle } from './blocks/ask'
 import { t, tm } from './i18n'
 import { openProject, openThread, state } from './store'
 
@@ -47,7 +48,7 @@ function reasonOf(
       return {
         threadId: event.data.threadId,
         title: t('notify.answer'),
-        body: event.data.question,
+        body: askTitle(event.data.block),
       }
     case 'thread.reported': {
       const { report, summary, threadId } = event.data

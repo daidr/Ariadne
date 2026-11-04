@@ -1,13 +1,23 @@
 import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
+import {
+  parseAnswer,
+  parseBlock,
+  isAskBlock,
+  type AskBlock,
+  type BlockAnswer,
+  type ConfirmBlock,
+  type ShowBlock,
+  type UiBlock,
+  BLOCK_LIMITS,
+} from './blocks'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   AnyNewEvent,
   AnyStoredEvent,
   ArtifactKind,
   BranchMerge,
-  AttentionOption,
   Author,
   IssueWrite,
   LinkedIssue,
@@ -62,7 +72,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 20
+export const PROJECTION_VERSION = 21
 
 /** The events a conversation's trace is rebuilt from; each names its conversation. */
 const TURN_EVENT_TYPES = [
@@ -182,9 +192,8 @@ function nodeStatus(all: ThreadStage[]): PlanNodeStatus {
  * change does, one line per op, so the user sees exactly what they agree to.
  */
 export interface PlanConfirmation {
-  question: (changes: LocalizedMessage[]) => string
-  apply: AttentionOption
-  keep: AttentionOption
+  /** The card the user agrees on, given every change spelled out. */
+  card: (changes: LocalizedMessage[]) => ConfirmBlock
 }
 
 /** What `revisePlan` did: applied at once, or waiting on the user's yes. */
@@ -227,9 +236,9 @@ interface AttentionRow {
   id: string
   project_id: string
   thread_id: string | null
-  question: string
-  options: string
-  recommended: number | null
+  conversation_id: string | null
+  message_id: string | null
+  block: string
   created_at: number
 }
 
@@ -244,7 +253,15 @@ interface MessageRow {
   edit_reason: string | null
   original_content: string | null
   edited_since_read: number
+  blocks: string | null
+  ask_id: string | null
+  ask_block: string | null
+  ask_answer: string | null
 }
+
+/** Messages with the ask block they carry, if any, and its answer. */
+const MESSAGE_SELECT = `SELECT m.*, a.id AS ask_id, a.block AS ask_block, a.answer AS ask_answer
+  FROM messages m LEFT JOIN attentions a ON a.message_id = m.id`
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
@@ -305,9 +322,9 @@ function toAttention(row: AttentionRow, joinedBy: string[] = []): AttentionView 
     projectId: row.project_id,
     threadId: row.thread_id,
     joinedBy,
-    question: row.question,
-    options: JSON.parse(row.options),
-    recommended: row.recommended,
+    block: JSON.parse(row.block) as AskBlock,
+    messageId: row.message_id,
+    conversationId: row.conversation_id,
     createdAt: row.created_at,
   }
 }
@@ -319,6 +336,15 @@ function toMessage(row: MessageRow): MessageView {
     author: row.author,
     kind: row.kind,
     content: row.content,
+    blocks: row.blocks ? (JSON.parse(row.blocks) as ShowBlock[]) : [],
+    ask:
+      row.ask_id && row.ask_block
+        ? {
+            attentionId: row.ask_id,
+            block: JSON.parse(row.ask_block) as AskBlock,
+            answer: row.ask_answer ? (JSON.parse(row.ask_answer) as BlockAnswer) : null,
+          }
+        : null,
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
@@ -453,7 +479,7 @@ export class Ariadne {
 
   listMessages(conversationId: string): MessageView[] {
     return this.db
-      .query<MessageRow, [string]>('SELECT * FROM messages WHERE conversation_id = ? ORDER BY id')
+      .query<MessageRow, [string]>(`${MESSAGE_SELECT} WHERE m.conversation_id = ? ORDER BY m.id`)
       .all(conversationId)
       .map(toMessage)
   }
@@ -765,7 +791,7 @@ export class Ariadne {
     projectId: string,
     threadId: string,
     purpose: string,
-    card: () => { question: string; options: AttentionOption[] },
+    card: () => ConfirmBlock,
   ):
     | { state: 'approved' | 'unsure'; attentionId: string }
     | { state: 'writing'; by: string }
@@ -777,7 +803,7 @@ export class Ariadne {
         {
           id: string
           answered: number
-          choice: number | null
+          approved: number | null
           thread_id: string | null
           status: string | null
           writer: string | null
@@ -786,7 +812,7 @@ export class Ariadne {
         },
         [string, string]
       >(
-        `SELECT a.id, a.answered, a.choice, a.thread_id, w.status, w.thread_id AS writer, w.url,
+        `SELECT a.id, a.answered, a.approved, a.thread_id, w.status, w.thread_id AS writer, w.url,
            w.written_seq
          FROM attentions a
          LEFT JOIN issue_writes w ON w.attention_id = a.id
@@ -795,7 +821,7 @@ export class Ariadne {
       )
       .get(projectId, purpose)
     if (!newest) {
-      this.openAttention(projectId, { threadId, ...card(), purpose })
+      this.openAttention(projectId, { threadId, block: card(), purpose })
       return { state: 'asked' }
     }
     const onCard = this.onCard(newest.id, newest.thread_id, threadId)
@@ -809,7 +835,7 @@ export class Ariadne {
       join()
       return { state: 'pending' }
     }
-    if (newest.choice === 0) {
+    if (newest.approved === 1) {
       if (newest.status === null) return { state: 'approved', attentionId: newest.id }
       if (newest.status === 'writing') {
         const by = this.issueWritesUnderWay.get(newest.id)
@@ -830,8 +856,8 @@ export class Ariadne {
         return { state: 'made', by: newest.writer, url: newest.url }
       }
     }
-    if (newest.choice !== null && newest.choice !== 0 && onCard) return { state: 'declined' }
-    this.openAttention(projectId, { threadId, ...card(), purpose })
+    if (newest.approved === 0 && onCard) return { state: 'declined' }
+    this.openAttention(projectId, { threadId, block: card(), purpose })
     return { state: 'asked' }
   }
 
@@ -934,8 +960,8 @@ export class Ariadne {
   /**
    * Where the user stands on a standing approval for the project, as seen by one thread.
    * A yes holds for every thread of the project. A no holds only for the threads that
-   * waited on that card, so other work may still ask. An answer in words alone (no option
-   * picked) decides nothing. `null` when there is nothing to go by and the thread may ask.
+   * waited on that card, so other work may still ask. `null` when there is nothing to go by
+   * and the thread may ask.
    */
   approvalFor(
     projectId: string,
@@ -944,15 +970,15 @@ export class Ariadne {
   ): 'approved' | 'declined' | 'pending' | null {
     const approved = this.db
       .query<{ id: string }, [string, string]>(
-        'SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 1 AND choice = 0 LIMIT 1',
+        'SELECT id FROM attentions WHERE project_id = ? AND purpose = ? AND answered = 1 AND approved = 1 LIMIT 1',
       )
       .get(projectId, purpose)
     if (approved) return 'approved'
     if (this.openApproval(projectId, purpose)) return 'pending'
     const mine = this.db
-      .query<{ choice: number }, [string, string, string, string]>(
-        `SELECT a.choice FROM attentions a
-         WHERE a.project_id = ? AND a.purpose = ? AND a.answered = 1 AND a.choice IS NOT NULL
+      .query<{ approved: number }, [string, string, string, string]>(
+        `SELECT a.approved FROM attentions a
+         WHERE a.project_id = ? AND a.purpose = ? AND a.answered = 1
            AND (a.thread_id = ? OR EXISTS (
              SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = ?))
          ORDER BY a.created_at DESC, a.id DESC LIMIT 1`,
@@ -981,7 +1007,7 @@ export class Ariadne {
     projectId: string,
     threadId: string,
     purpose: string,
-    card: () => { question: string; options: AttentionOption[] },
+    card: () => ConfirmBlock,
   ): 'approved' | 'declined' | 'pending' | 'asked' {
     const state = this.approvalFor(projectId, threadId, purpose)
     if (state === 'approved' || state === 'declined') return state
@@ -999,7 +1025,7 @@ export class Ariadne {
       ])
       return 'pending'
     }
-    this.openAttention(projectId, { threadId, ...card(), purpose })
+    this.openAttention(projectId, { threadId, block: card(), purpose })
     return 'asked'
   }
 
@@ -1007,61 +1033,70 @@ export class Ariadne {
     projectId: string,
     input: {
       threadId?: string | null
-      question: string
-      options: AttentionOption[]
-      recommended?: number | null
+      block: AskBlock
+      messageId?: string | null
       purpose?: string | null
     },
   ): AttentionView {
     this.getProject(projectId)
     if (input.threadId) this.assertThreadIn(projectId, input.threadId)
-    const recommended = input.recommended ?? null
-    if (recommended !== null && !input.options[recommended]) {
-      throw new DomainError('error.invalidBody', { reason: 'recommended' })
-    }
     const attentionId = newId('att')
-    this.store.append([
-      {
-        type: 'attention.opened',
-        projectId,
-        data: {
-          attentionId,
-          threadId: input.threadId ?? null,
-          question: input.question,
-          options: input.options,
-          recommended,
-          ...(input.purpose ? { purpose: input.purpose } : {}),
-        },
-      },
-    ])
+    this.store.append([this.attentionOpened(projectId, attentionId, input)])
     const view = this.listOpenAttentions(projectId).find((a) => a.id === attentionId)
     if (!view) throw new Error('attention projection missing')
     return view
   }
 
-  answerAttention(attentionId: string, answer: { choice?: number | null; text?: string | null }) {
+  private attentionOpened(
+    projectId: string,
+    attentionId: string,
+    input: {
+      threadId?: string | null
+      block: AskBlock
+      messageId?: string | null
+      purpose?: string | null
+    },
+  ): AnyNewEvent {
+    // Checked again even when the system builds it: what is stored is what the web draws.
+    const block = parseBlock(input.block)
+    if (!isAskBlock(block))
+      throw new DomainError('error.blockInvalid', { reason: 'not an ask block' })
+    if (input.purpose && block.type !== 'confirm') {
+      throw new DomainError('error.blockInvalid', { reason: 'an approval is a confirm block' })
+    }
+    return {
+      type: 'attention.opened',
+      projectId,
+      data: {
+        attentionId,
+        threadId: input.threadId ?? null,
+        block,
+        messageId: input.messageId ?? null,
+        ...(input.purpose ? { purpose: input.purpose } : {}),
+      },
+    }
+  }
+
+  answerAttention(attentionId: string, input: unknown) {
     const row = this.db
       .query<AttentionRow & { answered: number }, [string]>('SELECT * FROM attentions WHERE id = ?')
       .get(attentionId)
     if (!row || row.answered === 1) throw new DomainError('error.notFound', { what: attentionId })
-    const choice = answer.choice ?? null
-    if (choice !== null && !toAttention(row).options[choice]) {
-      throw new DomainError('error.invalidBody', { reason: 'choice' })
-    }
+    const answer = parseAnswer(toAttention(row).block, input)
     const events: Parameters<EventStore['append']>[0] = [
       {
         type: 'attention.answered',
         projectId: row.project_id,
-        data: { attentionId, choice, text: answer.text ?? null },
+        data: { attentionId, answer },
       },
     ]
-    // The first option of a plan proposal applies it, if it still fits the plan as it is now.
+    // Agreeing to a plan proposal applies it, if it still fits the plan as it is now.
     const proposal = this.db
       .query<{ id: string; reason: string; ops: string; revert_of: string | null }, [string]>(
         "SELECT id, reason, ops, revert_of FROM plan_proposals WHERE attention_id = ? AND status = 'open'",
       )
       .get(attentionId)
-    if (proposal && choice === 0) {
+    if (proposal && answer.type === 'confirm' && answer.approved) {
       const ops = JSON.parse(proposal.ops) as PlanOp[]
       try {
         applyOps(loadPlanGraph(this.db, row.project_id), ops)
@@ -1113,9 +1148,20 @@ export class Ariadne {
     ]
   }
 
+  /**
+   * Post a message. An agent's may carry interface blocks: tables, charts and steps are
+   * shown under the text, and at most one choice, confirmation or form asks the user,
+   * as an attention of the conversation's own.
+   */
   postMessage(
     projectId: string,
-    input: { conversationId: string; author: Author; content: string; kind?: MessageKind },
+    input: {
+      conversationId: string
+      author: Author
+      content: string
+      kind?: MessageKind
+      blocks?: unknown[]
+    },
   ): MessageView {
     this.assertConversationIn(projectId, input.conversationId)
     const kind = input.kind ?? 'chat'
@@ -1123,7 +1169,32 @@ export class Ariadne {
     if (kind === 'relay' && input.author !== 'coordinator') {
       throw new DomainError('error.invalidBody', { reason: 'kind' })
     }
+    const parsed: UiBlock[] = (input.blocks ?? []).map((block, i) =>
+      parseBlock(block, `blocks[${i}]`),
+    )
+    if (parsed.length && (input.author === 'user' || kind !== 'chat')) {
+      throw new DomainError('error.invalidBody', { reason: 'blocks' })
+    }
+    if (parsed.length > BLOCK_LIMITS.blocks) {
+      throw new DomainError('error.blockInvalid', {
+        reason: `a message holds at most ${BLOCK_LIMITS.blocks} blocks`,
+      })
+    }
+    const asks = parsed.filter(isAskBlock)
+    if (asks.length > 1) {
+      throw new DomainError('error.blockInvalid', {
+        reason: 'a message asks at most one thing: one choice, confirm or form',
+      })
+    }
+    const shown = parsed.filter((block): block is ShowBlock => !isAskBlock(block))
+    if (!input.content.trim() && !parsed.length) {
+      throw new DomainError('error.invalidBody', { reason: 'content' })
+    }
     const messageId = newId('msg')
+    const asker =
+      this.getProject(projectId).coordinatorId === input.conversationId
+        ? null
+        : input.conversationId
     this.store.append([
       ...(input.author === 'user' ? this.resumedByUser(input.conversationId) : []),
       {
@@ -1135,8 +1206,16 @@ export class Ariadne {
           author: input.author,
           kind,
           content: input.content,
+          ...(shown.length ? { blocks: shown } : {}),
         },
       },
+      ...asks.map((block) =>
+        this.attentionOpened(projectId, newId('att'), {
+          threadId: asker,
+          block,
+          messageId,
+        }),
+      ),
     ])
     return this.getMessage(messageId)
   }
@@ -1618,17 +1697,9 @@ export class Ariadne {
       const proposalId = newId('prp')
       const attentionId = newId('att')
       this.store.append([
-        {
-          type: 'attention.opened',
-          projectId,
-          data: {
-            attentionId,
-            threadId: null,
-            question: confirmation.question(this.describePlanChange(projectId, ops)),
-            options: [confirmation.apply, confirmation.keep],
-            recommended: 0,
-          },
-        },
+        this.attentionOpened(projectId, attentionId, {
+          block: confirmation.card(this.describePlanChange(projectId, ops)),
+        }),
         {
           type: 'plan.proposed',
           projectId,
@@ -2050,14 +2121,14 @@ export class Ariadne {
 
   private findMessage(messageId: string): MessageView | null {
     const row = this.db
-      .query<MessageRow, [string]>('SELECT * FROM messages WHERE id = ?')
+      .query<MessageRow, [string]>(`${MESSAGE_SELECT} WHERE m.id = ?`)
       .get(messageId)
     return row ? toMessage(row) : null
   }
 
   private getMessage(messageId: string): MessageView {
     const row = this.db
-      .query<MessageRow, [string]>('SELECT * FROM messages WHERE id = ?')
+      .query<MessageRow, [string]>(`${MESSAGE_SELECT} WHERE m.id = ?`)
       .get(messageId)
     if (!row) throw new DomainError('error.notFound', { what: messageId })
     return toMessage(row)
