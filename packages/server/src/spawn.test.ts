@@ -23,10 +23,13 @@ test('every process the code starts hides its window on Windows', () => {
     const source = readFileSync(join(root, file), 'utf8')
     const line = (index: number) => `${file}:${source.slice(0, index).split('\n').length}`
     // node:child_process would need the same option; the code uses Bun.spawn only.
-    for (const match of source.matchAll(/['"](?:node:)?child_process['"]/g)) {
+    // Same for spawn imported from 'bun' and called without the Bun. prefix.
+    for (const match of source.matchAll(
+      /['"](?:node:)?child_process['"]|import\s*\{[^}]*\bspawn(?:Sync)?\b[^}]*\}\s*from\s*['"]bun['"]/g,
+    )) {
       missing.push(line(match.index))
     }
-    for (const match of source.matchAll(/\bBun\.spawn(?:Sync)?\(/g)) {
+    for (const match of source.matchAll(/\bBun\.spawn(?:Sync)?\s*(?:<[^()]*>)?\(/g)) {
       if (!/\bwindowsHide:\s*true\b/.test(callAt(source, match.index)))
         missing.push(line(match.index))
     }
