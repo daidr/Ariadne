@@ -51,14 +51,11 @@ watch(current, (markdown) => emit('draft', markdown === baseline.value ? null : 
   box-sizing: border-box;
 }
 
-/*
- * A readable column: about 40 characters of Chinese a line, centred. Editing adds the
- * handle gutter on the left; the same space on the right keeps the text where it was.
- */
+/* A readable column, about 40 characters of Chinese a line; paragraphs apart, list items close. */
 .document-text {
   --dou-editor-line-height: 1.8;
-  max-width: calc(40em + 2 * var(--dou-editor-gutter));
-  margin-inline: auto;
-  padding-inline-end: var(--dou-editor-gutter);
+  --dou-editor-reading-width: 40em;
+  --dou-editor-block-gap: 10px;
+  --dou-editor-list-gap: 4px;
 }
 </style>

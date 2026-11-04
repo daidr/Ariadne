@@ -355,9 +355,9 @@ export type TranscriptNote =
 
 /**
  * How far a plan node is, from the threads working on it: `none` without threads,
- * `wait` when one needs the user, `error` when one is blocked, `finish` when all are done.
+ * `waiting` when one needs the user, `error` when one is blocked, `done` when all are done.
  */
-export type PlanNodeStatus = 'none' | 'process' | 'wait' | 'error' | 'paused' | 'finish'
+export type PlanNodeStatus = 'none' | 'running' | 'waiting' | 'error' | 'paused' | 'done'
 
 export interface PlanNodeView {
   id: string

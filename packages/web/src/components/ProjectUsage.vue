@@ -89,6 +89,7 @@ function go(id: string | null) {
             :label="t('usage.breakdown')"
             :format="(value) => count(value)"
             legend
+            legend-direction="vertical"
             tooltip
           >
             <!-- Thinking is part of the output, so it is named with it. -->

@@ -18,22 +18,11 @@ import { createProject, deleteProject, openProject, state } from '../store'
 const name = ref('')
 const dialog = useDialog()
 
-/** The project the context menu was opened on. */
-const target = ref<string | null>(null)
-const actions = computed(() =>
-  target.value
-    ? [{ key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const }]
-    : [],
-)
-
-// DouMenu does not say which item a right click was on, so it is read from the item's
-// element until dou-ui hands the item to the context menu.
-function pick(event: MouseEvent) {
-  const item = (event.target as Element | null)?.closest('[data-dou-menu-item]')
-  target.value = item?.querySelector<HTMLElement>('[data-project]')?.dataset.project ?? null
-  // Away from a project the page's own menu stays.
-  if (!target.value) event.stopPropagation()
-}
+/** The project the context menu was opened on; away from a project the page's own menu stays. */
+const target = ref<string>()
+const actions = [
+  { key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const },
+]
 
 async function confirmDelete(id: string) {
   const project = state.projects.find((p) => p.id === id)
@@ -86,7 +75,9 @@ async function submit() {
     </form>
     <DouContextMenu
       v-if="items.length"
+      v-model:target="target"
       :items="actions"
+      :before-open="() => !!target"
       @select="() => target && confirmDelete(target)"
     >
       <div>
@@ -94,10 +85,10 @@ async function submit() {
           :model-value="state.currentId ?? undefined"
           :items="items"
           @select="(key) => openProject(String(key))"
-          @contextmenu="pick"
+          @item-contextmenu="(item) => (target = String(item.key))"
         >
           <template #label="{ item }">
-            <span class="projects-label" :data-project="item.key">
+            <span class="projects-label">
               <span>{{ item.label }}</span>
               <DouBadge
                 :value="state.projects.find((p) => p.id === item.key)?.needsMe ?? 0"

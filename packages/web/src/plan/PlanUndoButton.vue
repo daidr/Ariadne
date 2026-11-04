@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlanRevisionView, PlanUndoPreview } from '@ariadne/core'
-import { DouButton, DouPopover, DouText } from 'dou-ui'
+import { DouButton, DouPopover, DouText, DouTooltip } from 'dou-ui'
 import { RotateCcwIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
@@ -62,12 +62,13 @@ async function confirm() {
 <template>
   <!-- A popover, not a popconfirm: when it cannot be undone there is only one button. -->
   <DouPopover v-model:open="open" :title="title" :width="320">
-    <!-- Icon only: a labelled button stands out from the small text around it. The
-         popover's title names the action. -->
-    <DouButton size="sm" variant="ghost" :aria-label="label">
-      <RotateCwIcon v-if="restore" />
-      <RotateCcwIcon v-else />
-    </DouButton>
+    <!-- Icon only: a labelled button stands out from the small text around it. -->
+    <DouTooltip :content="label">
+      <DouButton size="sm" variant="ghost" :aria-label="label">
+        <RotateCwIcon v-if="restore" />
+        <RotateCcwIcon v-else />
+      </DouButton>
+    </DouTooltip>
     <template #content="{ close }">
       <DouText v-if="blocked" size="sm">{{ blocked }}</DouText>
       <template v-else-if="preview">

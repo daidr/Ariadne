@@ -64,9 +64,10 @@ const chosen = computed(() =>
     : null,
 )
 
-const confirmStatus = computed(() =>
-  props.answer?.type === 'confirm' ? (props.answer.approved ? 'approved' : 'denied') : 'pending',
-)
+const confirmStatus = computed(() => {
+  if (props.answer?.type === 'confirm') return props.answer.approved ? 'approved' : 'denied'
+  return props.withdrawn ? 'withdrawn' : 'waiting'
+})
 function decide(decision: ChatConfirmDecision) {
   if (!sending.value) void send({ type: 'confirm', approved: decision !== 'deny' })
 }
@@ -98,7 +99,8 @@ function submit() {
 
 <template>
   <div class="ask-block">
-    <template v-if="withdrawn">
+    <!-- A confirm says so itself; a choice or form keeps only what it asked. -->
+    <template v-if="withdrawn && block.type !== 'confirm'">
       <DouText weight="medium" class="ask-title">{{ title }}</DouText>
       <DouText variant="tertiary" size="sm">{{
         t('block.withdrawn', { reason: withdrawn })
@@ -140,14 +142,14 @@ function submit() {
     <DouChatConfirm
       v-else-if="block.type === 'confirm'"
       :title="block.title"
-      :description="block.description ?? undefined"
+      :description="(withdrawn ?? block.description) || undefined"
       :tone="block.tone"
       :status="confirmStatus"
       :approve-text="block.approveText ?? undefined"
       :deny-text="block.denyText ?? undefined"
       @decide="decide"
     >
-      <DouCodeBlock v-if="block.detail" :code="block.detail" wrap :max-lines="12" />
+      <DouCodeBlock v-if="block.detail && !withdrawn" :code="block.detail" wrap :max-lines="12" />
     </DouChatConfirm>
 
     <template v-else-if="form">

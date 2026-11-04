@@ -22,7 +22,6 @@ import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import { openMain, state } from '../store'
 import MemoryList from './MemoryList.vue'
-import SideTab from './SideTab.vue'
 import ThreadList from './ThreadList.vue'
 import type { ThreadSort } from '../stage'
 import { threadSort } from './thread-list'
@@ -32,7 +31,7 @@ const sorts = ['active', 'title', 'created'] as const
 </script>
 
 <template>
-  <DouTabs v-model="tab" placement="end" class="side-tabs">
+  <DouTabs v-model="tab" placement="end" height="100%" icon-only class="side-tabs">
     <template #extra>
       <DouTooltip
         v-if="tab === 'plan' && state.plan?.nodes.length"
@@ -57,6 +56,7 @@ const sorts = ['active', 'title', 'created'] as const
         </DouButton>
         <template #menu>
           <DouDropdownRadioGroup
+            :label="t('threads.sort')"
             :model-value="threadSort"
             @update:model-value="(value) => (threadSort = value as ThreadSort)"
           >
@@ -67,28 +67,26 @@ const sorts = ['active', 'title', 'created'] as const
         </template>
       </DouDropdown>
     </template>
-    <DouTabPanel value="plan" class="side-panel">
-      <template #label
-        ><SideTab :label="t('panel.plan')"><WorkflowIcon /></SideTab
-      ></template>
+    <DouTabPanel value="plan" :label="t('panel.plan')" :icon="WorkflowIcon" class="side-panel">
       <PlanPanel />
     </DouTabPanel>
-    <DouTabPanel value="threads" class="side-panel">
-      <template #label
-        ><SideTab :label="t('panel.threads')"><MessagesIcon /></SideTab
-      ></template>
+    <DouTabPanel
+      value="threads"
+      :label="t('panel.threads')"
+      :icon="MessagesIcon"
+      class="side-panel"
+    >
       <ThreadList />
     </DouTabPanel>
-    <DouTabPanel value="artifacts" class="side-panel">
-      <template #label
-        ><SideTab :label="t('panel.artifacts')"><PackageIcon /></SideTab
-      ></template>
+    <DouTabPanel
+      value="artifacts"
+      :label="t('panel.artifacts')"
+      :icon="PackageIcon"
+      class="side-panel"
+    >
       <ArtifactList />
     </DouTabPanel>
-    <DouTabPanel value="memory" class="side-panel">
-      <template #label
-        ><SideTab :label="t('memory.title')"><BrainIcon /></SideTab
-      ></template>
+    <DouTabPanel value="memory" :label="t('memory.title')" :icon="BrainIcon" class="side-panel">
       <MemoryList />
     </DouTabPanel>
   </DouTabs>
@@ -98,14 +96,10 @@ const sorts = ['active', 'title', 'created'] as const
 .side-tabs {
   --dou-tabs-padding-x: 0;
   box-sizing: border-box;
-  height: 100%;
   padding: 8px 8px 0 16px;
 }
 
-/* The tabs stay in place on the right while a long panel scrolls. */
 .side-panel {
-  align-self: stretch;
-  overflow-y: auto;
   padding-bottom: 8px;
 }
 </style>

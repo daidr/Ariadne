@@ -260,7 +260,7 @@ const overlaps = (nodes: PlanNodeView[], at: Map<string, { x: number; y: number 
 describe('layoutPlan', () => {
   test('a node sits below what it depends on', () => {
     const nodes = [node('a'), node('b', ['a']), node('c', ['b']), node('d', ['a'])]
-    const at = layoutPlan(nodes)
+    const at = layoutPlan(nodes).nodes
     expect(at.get('b')!.y).toBeGreaterThan(at.get('a')!.y)
     expect(at.get('c')!.y).toBeGreaterThan(at.get('b')!.y)
     expect(at.get('d')!.y).toBeGreaterThan(at.get('a')!.y)
@@ -270,7 +270,7 @@ describe('layoutPlan', () => {
   test('a source waits on the level just above what needs it', () => {
     // `late` feeds only `c`, three levels down: it sits right above `c`, not in the top row.
     const nodes = [node('a'), node('b', ['a']), node('late'), node('c', ['b', 'late'])]
-    const at = layoutPlan(nodes)
+    const at = layoutPlan(nodes).nodes
     expect(at.get('late')!.y).toBe(at.get('b')!.y)
   })
 
@@ -283,7 +283,7 @@ describe('layoutPlan', () => {
       node('lone1'),
       node('lone2'),
     ]
-    const at = layoutPlan(nodes)
+    const at = layoutPlan(nodes).nodes
     expect(overlaps(nodes, at)).toBe(false)
     const right = (ids: string[]) => Math.max(...ids.map((id) => at.get(id)!.x)) + NODE_WIDTH
     const left = (ids: string[]) => Math.min(...ids.map((id) => at.get(id)!.x))
@@ -302,13 +302,29 @@ describe('layoutPlan', () => {
       node(`s${i}`),
       node(`t${i}`, [`s${i}`]),
     ]).flat()
-    const at = layoutPlan(nodes)
+    const at = layoutPlan(nodes).nodes
     const xs = [...at.values()].map((p) => p.x)
     const ys = [...at.values()].map((p) => p.y)
     const width = Math.max(...xs) - Math.min(...xs) + NODE_WIDTH
     const height = Math.max(...ys) - Math.min(...ys)
     expect(width).toBeLessThan(height * 3)
     expect(overlaps(nodes, at)).toBe(false)
+  })
+
+  test('a long edge runs between the nodes in its way, until one end is moved alone', () => {
+    // a → b → c → d, and a → d skips two levels.
+    const nodes = [node('a'), node('b', ['a']), node('c', ['b']), node('d', ['c', 'a'])]
+    const doc = toFlowDocument(plan(nodes))
+    const long = doc.edges.find((edge) => edge.id === 'a>d')!
+    expect(long.points?.length).toBeGreaterThan(0)
+    expect(doc.edges.find((edge) => edge.id === 'a>b')!.points).toBeUndefined()
+    const moved = toFlowDocument(plan(nodes), { offsets: { d: { x: 300, y: 0 } } })
+    expect(moved.edges.find((edge) => edge.id === 'a>d')!.points).toBeUndefined()
+    const both = { x: 40, y: 16 }
+    const together = toFlowDocument(plan(nodes), { offsets: { a: both, d: both } })
+    expect(together.edges.find((edge) => edge.id === 'a>d')!.points).toEqual(
+      long.points!.map((point) => ({ x: point.x + 40, y: point.y + 16 })),
+    )
   })
 
   test('a previewed change is laid out with its own edges', () => {

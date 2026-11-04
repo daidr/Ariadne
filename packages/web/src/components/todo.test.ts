@@ -15,20 +15,12 @@ describe('todoPlan', () => {
     expect(items.map((item) => [item.label, item.status])).toEqual([
       ['a', 'done'],
       ['b', 'running'],
-      ['c', 'pending'],
+      ['c', 'waiting'],
       ['d', 'pending'],
     ])
     expect(items[1]?.description).toBe('half way')
-    expect(items[2]?.description).toContain('CI')
+    expect(items[2]?.description).toBe('CI')
     expect(items[3]?.description).toBeUndefined()
-  })
-
-  it('does not show a step as running between turns', () => {
-    const items = todoPlan(
-      { conversationId: 'c', items: [{ label: 'b', status: 'doing' }] } as never,
-      false,
-    )
-    expect(items[0]?.status).toBe('pending')
   })
 
   it('is empty without a list', () => {

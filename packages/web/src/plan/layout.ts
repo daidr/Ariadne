@@ -143,6 +143,14 @@ interface Block {
   height: number
   /** Node positions inside the block, from its top left corner. */
   nodes: Map<string, { x: number; y: number }>
+  /** Where long edges pass between the nodes in their way, keyed `from>to`. */
+  edges: Map<string, { x: number; y: number }[]>
+}
+
+export interface PlanLayout {
+  nodes: Map<string, { x: number; y: number }>
+  /** The points an edge spanning several levels runs through, keyed `from>to`. */
+  edges: Map<string, { x: number; y: number }[]>
 }
 
 /**
@@ -156,7 +164,7 @@ export function layoutPlan(
   edges: { from: string; to: string }[] = nodes.flatMap((node) =>
     node.dependsOn.map((from) => ({ from, to: node.id })),
   ),
-): Map<string, { x: number; y: number }> {
+): PlanLayout {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const blocks: Block[] = []
   const lone: string[] = []
@@ -175,10 +183,22 @@ export function layoutPlan(
         anchor: NODE_WIDTH / 2,
       })),
       edges.filter((edge) => inside.has(edge.from) && inside.has(edge.to)),
-      { direction: 'vertical', rankGap: RANK_GAP, laneGap: LANE_GAP, equalWidth: false, grid: 8 },
+      {
+        direction: 'vertical',
+        rankGap: RANK_GAP,
+        laneGap: LANE_GAP,
+        equalWidth: false,
+        straightChains: true,
+        grid: 8,
+      },
     )
     const placed = new Map([...layout.nodes].map(([id, node]) => [id, { x: node.x, y: node.y }]))
-    blocks.push({ width: layout.width, height: layout.height, nodes: placed })
+    const routed = new Map(
+      layout.edges
+        .filter((edge) => edge.points.length)
+        .map((edge) => [`${edge.from}>${edge.to}`, edge.points]),
+    )
+    blocks.push({ width: layout.width, height: layout.height, nodes: placed, edges: routed })
   }
 
   const area =
@@ -199,11 +219,12 @@ export function layoutPlan(
       y += Math.max(...row.map((id) => nodeHeight(byId.get(id)!))) + LANE_GAP
     }
     const width = Math.min(lone.length, columns) * (NODE_WIDTH + LANE_GAP) - LANE_GAP
-    blocks.push({ width, height: y - LANE_GAP, nodes: placed })
+    blocks.push({ width, height: y - LANE_GAP, nodes: placed, edges: new Map() })
   }
 
   // Rows of blocks, each as wide as the widest block or the square root of the whole.
   const positions = new Map<string, { x: number; y: number }>()
+  const routes = new Map<string, { x: number; y: number }[]>()
   let x = 0
   let y = 0
   let rowHeight = 0
@@ -216,10 +237,16 @@ export function layoutPlan(
     for (const [id, at] of block.nodes) {
       positions.set(id, { x: Math.round(x + at.x), y: Math.round(y + at.y) })
     }
+    for (const [key, points] of block.edges) {
+      routes.set(
+        key,
+        points.map((point) => ({ x: Math.round(x + point.x), y: Math.round(y + point.y) })),
+      )
+    }
     x += block.width + PART_GAP
     rowHeight = Math.max(rowHeight, block.height)
   }
-  return positions
+  return { nodes: positions, edges: routes }
 }
 
 function place(auto: { x: number; y: number } | undefined, offset?: { x: number; y: number }) {
@@ -232,7 +259,7 @@ function place(auto: { x: number; y: number } | undefined, offset?: { x: number;
  * the layout doesn't have yet keeps its place as its offset, from the origin.
  */
 export function offsetsOf(plan: PlanView, moved: Positions): Positions {
-  const auto = layoutPlan(plan.nodes)
+  const auto = layoutPlan(plan.nodes).nodes
   const offsets: Positions = {}
   for (const [id, at] of Object.entries(moved)) {
     const from = auto.get(id) ?? { x: 0, y: 0 }
@@ -267,6 +294,17 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
     preview?.edges ??
     nodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
   const auto = layoutPlan(nodes, edges)
+  const offset = (id: string) => options.offsets?.[id] ?? { x: 0, y: 0 }
+  /**
+   * A long edge passes between the nodes in its way, as laid out. Once the user moved one
+   * of its ends on its own the route no longer fits, and the edge goes straight there.
+   */
+  const route = (from: string, to: string) => {
+    const points = auto.edges.get(`${from}>${to}`)
+    const [a, b] = [offset(from), offset(to)]
+    if (!points || a.x !== b.x || a.y !== b.y) return {}
+    return { points: points.map((point) => ({ x: point.x + a.x, y: point.y + a.y })) }
+  }
   return {
     version: 1,
     nodes: nodes.map((node) => {
@@ -284,7 +322,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
       return {
         id: node.id,
         type: 'plan',
-        ...place(auto.get(node.id), options.offsets?.[node.id]),
+        ...place(auto.nodes.get(node.id), options.offsets?.[node.id]),
         data,
       }
     }),
@@ -293,6 +331,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
       source: { node: from, port: 'out' },
       target: { node: to, port: 'in' },
       data: { mark },
+      ...route(from, to),
       ...(mark === 'added' ? { animated: true } : {}),
     })),
   }

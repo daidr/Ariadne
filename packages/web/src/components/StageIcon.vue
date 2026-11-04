@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ThreadStage } from '@ariadne/core'
-import { DouSpinner, DouText, DouTooltip } from 'dou-ui'
+import { DouStatusDot, DouText, DouTooltip } from 'dou-ui'
 import {
   AlertCircleIcon,
   CheckCircleIcon,
@@ -15,7 +15,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
 
-/** A thread's stage as an icon, named on hover: working spins, the rest take its tone. */
+/** A thread's stage as an icon, named on hover: working ripples, the rest take its tone. */
 const props = defineProps<{ stage: ThreadStage }>()
 
 const icons: Record<Exclude<ThreadStage, 'working'>, Component> = {
@@ -41,7 +41,7 @@ const tone = computed(() => (props.stage === 'working' ? 'neutral' : stageTone[p
       role="img"
       :aria-label="label"
     >
-      <DouSpinner v-if="stage === 'working'" size="sm" aria-hidden="true" />
+      <DouStatusDot v-if="stage === 'working'" tone="primary" ripple aria-hidden="true" />
       <component :is="icons[stage]" v-else aria-hidden="true" />
     </DouText>
   </DouTooltip>
