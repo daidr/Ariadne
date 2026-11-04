@@ -6,6 +6,7 @@ import {
   type ContextProvider,
   type ExecResult,
   type RepoCapability,
+  type TrackerCapability,
   type WorkspaceCapability,
 } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
@@ -103,7 +104,12 @@ function check(result: ExecResult, what: string): ExecResult {
 export function connectRepository(
   settings: GitHubSettings,
   options: GitHubProviderOptions,
-): { workspace: WorkspaceCapability; repo: RepoCapability; api: GitHubApi } {
+): {
+  workspace: WorkspaceCapability
+  repo: RepoCapability
+  tracker: TrackerCapability
+  api: GitHubApi
+} {
   const { owner, name } = parseRepository(settings.repository)
   const env = options.env ?? process.env
   // A token found is kept; none found is looked for again, e.g. after `gh auth login`.
@@ -250,7 +256,18 @@ export function connectRepository(
     checkLog: (id) => api.checkLog(id),
   }
 
-  return { workspace, repo, api }
+  // Issues go through the same API client: the token stays with the server, never in a
+  // workspace a thread's commands can read.
+  const tracker: TrackerCapability = {
+    name: `${owner}/${name}`,
+    webUrl: `${repo.webUrl}/issues`,
+    list: (query) => api.issues(query),
+    issue: (number) => api.issue(number),
+    comment: (number, body) => api.comment(number, body),
+    setState: (number, state, reason) => api.setIssueState(number, state, reason),
+  }
+
+  return { workspace, repo, tracker, api }
 }
 
 export function githubProvider(options: GitHubProviderOptions): ContextProvider<GitHubSettings> {
@@ -280,12 +297,12 @@ export function githubProvider(options: GitHubProviderOptions): ContextProvider<
       },
       required: ['repository'],
     },
-    provides: ['workspace', 'repo'],
+    provides: ['workspace', 'repo', 'tracker'],
     async connect(settings): Promise<Partial<Capabilities>> {
       const connected = connectRepository(settings, options)
       // Fails early on a typo or a token without access.
       await connected.api.repository()
-      return { workspace: connected.workspace, repo: connected.repo }
+      return { workspace: connected.workspace, repo: connected.repo, tracker: connected.tracker }
     },
   }
 }

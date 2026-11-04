@@ -78,6 +78,8 @@ export interface ProjectDetail {
   project: ProjectView
   threads: ThreadView[]
   needsMe: NeedsMeItem[]
+  /** Whether the project's source has issues that plan nodes can link to. */
+  hasTracker: boolean
 }
 
 export interface ModelKind {
@@ -209,6 +211,15 @@ export const api = {
     request<{ plan: PlanView }>(
       'POST',
       `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
+    ),
+  linkIssue: (projectId: string, nodeId: string, number: number) =>
+    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/nodes/${nodeId}/issues`, {
+      number,
+    }),
+  unlinkIssue: (projectId: string, nodeId: string, number: number) =>
+    request<{ plan: PlanView }>(
+      'DELETE',
+      `/api/projects/${projectId}/plan/nodes/${nodeId}/issues/${number}`,
     ),
   getPlan: (projectId: string) =>
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),

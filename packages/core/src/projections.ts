@@ -20,6 +20,8 @@ export const projectionTables = [
   'plan_edges',
   'plan_revisions',
   'plan_proposals',
+  'plan_node_issues',
+  'issue_writes',
   'artifacts',
   'artifact_versions',
 ] as const
@@ -377,6 +379,32 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'plan.issue_linked':
+      case 'plan.issue_unlinked': {
+        // What a thread reads follows from these links; an agent's link is shown where it
+        // made it, so the user can see who pointed which work at which issue.
+        if (event.data.by === 'user') break
+        const node = db
+          .query<{ title: string }, [string, string]>(
+            'SELECT title FROM plan_nodes WHERE project_id = ? AND id = ?',
+          )
+          .get(event.projectId, event.data.nodeId)
+        const linked = event.type === 'plan.issue_linked'
+        add(event.data.by, 'issue-linked', {
+          nodeId: event.data.nodeId,
+          nodeTitle: node?.title ?? event.data.nodeId,
+          tracker: linked ? event.data.issue.tracker : event.data.tracker,
+          number: linked ? event.data.issue.number : event.data.number,
+          linked,
+        })
+        break
+      }
+      case 'issue.written': {
+        // A change made outside Ariadne, in the user's name: shown where the thread made it.
+        const { threadId, tracker, number, action, text, url } = event.data
+        add(threadId, 'issue-written', { tracker, number, action, text, url })
+        break
+      }
       case 'conversation.instructions':
         // The user sees what the thread follows, and when it moves.
         add(event.data.conversationId, 'instructions', {
@@ -602,11 +630,14 @@ function upstreamDone(
     .get(data.threadId)
   if (!source?.node_id) return
   const node = db
-    .query<{ title: string }, [string]>('SELECT title FROM plan_nodes WHERE id = ?')
-    .get(source.node_id)
+    .query<{ title: string }, [string, string]>(
+      'SELECT title FROM plan_nodes WHERE project_id = ? AND id = ?',
+    )
+    .get(event.projectId, source.node_id)
   const downstream = db
     .query<{ id: string }, [string, string]>(
-      `SELECT t.id FROM threads t JOIN plan_edges e ON e.to_id = t.node_id
+      `SELECT t.id FROM threads t
+       JOIN plan_edges e ON e.project_id = t.project_id AND e.to_id = t.node_id
        WHERE e.from_id = ? AND t.project_id = ? AND coalesce(t.last_report, '') != 'done'`,
     )
     .all(source.node_id, event.projectId)
@@ -937,7 +968,9 @@ function storePlanGraph(
   at: number,
 ) {
   for (const id of before.order) {
-    if (!next.nodes.has(id)) db.run('DELETE FROM plan_nodes WHERE id = ?', [id])
+    if (!next.nodes.has(id)) {
+      db.run('DELETE FROM plan_nodes WHERE project_id = ? AND id = ?', [projectId, id])
+    }
   }
   next.order.forEach((id, position) => {
     const node = next.nodes.get(id) as PlanNodeFields
@@ -969,7 +1002,7 @@ function storePlanGraph(
         `UPDATE plan_nodes SET title = ?, description = ?, acceptance = ?, position = ?,
            changed_in = CASE WHEN ? THEN ? ELSE changed_in END,
            updated_at = CASE WHEN ? THEN ? ELSE updated_at END
-         WHERE id = ?`,
+         WHERE project_id = ? AND id = ?`,
         [
           node.title,
           node.description,
@@ -979,6 +1012,7 @@ function storePlanGraph(
           revisionId,
           changed ? 1 : 0,
           at,
+          projectId,
           id,
         ],
       )
@@ -1003,8 +1037,9 @@ function storePlanGraph(
 export const planProjection: Projection = {
   name: 'plan',
   setup(db) {
+    // Node ids are the plan's own names ("login", "a"): unique within a project only.
     db.run(`CREATE TABLE IF NOT EXISTS plan_nodes (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       kind TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -1013,7 +1048,8 @@ export const planProjection: Projection = {
       position INTEGER NOT NULL,
       changed_in TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, id)
     )`)
     db.run('CREATE INDEX IF NOT EXISTS plan_nodes_project ON plan_nodes (project_id, position)')
     db.run(`CREATE TABLE IF NOT EXISTS plan_edges (
@@ -1037,6 +1073,25 @@ export const planProjection: Projection = {
       created_at INTEGER NOT NULL
     )`)
     db.run('CREATE INDEX IF NOT EXISTS plan_revisions_project ON plan_revisions (project_id, seq)')
+    db.run(`CREATE TABLE IF NOT EXISTS plan_node_issues (
+      project_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      tracker TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      linked_by TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      PRIMARY KEY (project_id, node_id, tracker, number)
+    )`)
+    // Which yes was used for which change: `writing` until it is known to have gone through.
+    db.run(`CREATE TABLE IF NOT EXISTS issue_writes (
+      attention_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      status TEXT NOT NULL,
+      url TEXT
+    )`)
     db.run(`CREATE TABLE IF NOT EXISTS plan_proposals (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -1062,6 +1117,14 @@ export const planProjection: Projection = {
           break
         }
         storePlanGraph(db, event.projectId, before, result.graph, event.data.revisionId, event.at)
+        // A removed node takes its issue links with it; adding it back starts without them.
+        for (const id of before.nodes.keys()) {
+          if (result.graph.nodes.has(id)) continue
+          db.run('DELETE FROM plan_node_issues WHERE project_id = ? AND node_id = ?', [
+            event.projectId,
+            id,
+          ])
+        }
         db.run(
           `INSERT INTO plan_revisions (id, project_id, author, reason, ops, inverse, revert_of, proposal_id, seq, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1091,6 +1154,51 @@ export const planProjection: Projection = {
         }
         break
       }
+      case 'plan.issue_linked': {
+        const { nodeId, issue } = event.data
+        db.run(
+          `INSERT INTO plan_node_issues (project_id, node_id, tracker, number, title, url, linked_by, seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO UPDATE SET title = excluded.title, url = excluded.url`,
+          [
+            event.projectId,
+            nodeId,
+            issue.tracker,
+            issue.number,
+            issue.title,
+            issue.url,
+            event.data.by,
+            event.seq,
+          ],
+        )
+        break
+      }
+      case 'plan.issue_unlinked':
+        db.run(
+          'DELETE FROM plan_node_issues WHERE project_id = ? AND node_id = ? AND tracker = ? AND number = ?',
+          [event.projectId, event.data.nodeId, event.data.tracker, event.data.number],
+        )
+        break
+      case 'issue.writing':
+        db.run(
+          `INSERT OR IGNORE INTO issue_writes (attention_id, project_id, purpose, status)
+           VALUES (?, ?, ?, 'writing')`,
+          [event.data.attentionId, event.projectId, event.data.purpose],
+        )
+        break
+      case 'issue.written':
+        db.run(
+          `INSERT INTO issue_writes (attention_id, project_id, purpose, status, url)
+           VALUES (?, ?, ?, 'written', ?)
+           ON CONFLICT DO UPDATE SET status = 'written', url = excluded.url`,
+          [event.data.attentionId, event.projectId, event.data.purpose, event.data.url],
+        )
+        break
+      case 'issue.write_unsure':
+        db.run("UPDATE issue_writes SET status = 'unsure' WHERE attention_id = ?", [
+          event.data.attentionId,
+        ])
+        break
       case 'plan.proposal.dismissed':
         db.run("UPDATE plan_proposals SET status = 'expired' WHERE id = ? AND status = 'stale'", [
           event.data.proposalId,

@@ -13,6 +13,22 @@ let pulls: Record<string, unknown>[]
 
 const git = (cwd: string, ...args: string[]) => run(['git', ...args], { cwd })
 
+/** An issue as GitHub's REST API returns it. */
+const rawIssue = (number: number, extra: Record<string, unknown> = {}) => ({
+  number,
+  html_url: `https://github.com/acme/app/issues/${number}`,
+  repository_url: 'https://api.github.com/repos/acme/app',
+  title: `Issue ${number}`,
+  state: 'open',
+  user: { login: 'someone' },
+  labels: [{ name: 'bug' }, 'p1'],
+  comments: 25,
+  body: 'It breaks',
+  created_at: '2026-11-01T00:00:00Z',
+  updated_at: '2026-11-03T00:00:00Z',
+  ...extra,
+})
+
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'ariadne-github-'))
   requests = []
@@ -32,7 +48,8 @@ beforeEach(async () => {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url)
-      const body = request.method === 'POST' ? await request.json() : null
+      const body =
+        request.method === 'POST' || request.method === 'PATCH' ? await request.json() : null
       requests.push({
         method: request.method,
         path: url.pathname + url.search,
@@ -81,6 +98,43 @@ beforeEach(async () => {
         return Response.json({
           statuses: [{ context: 'deploy', state: 'success', target_url: null }],
         })
+      }
+      if (url.pathname === '/repos/acme/app/issues' && request.method === 'GET') {
+        // The issues endpoint lists pull requests too.
+        return Response.json([rawIssue(3), rawIssue(7, { pull_request: {} })])
+      }
+      if (url.pathname === '/search/issues') {
+        // A search can reach other repositories the token reads; those must not come back.
+        return Response.json({
+          items: [
+            rawIssue(4),
+            rawIssue(5, { repository_url: 'https://api.github.com/repos/acme/secret' }),
+          ],
+        })
+      }
+      if (url.pathname === '/repos/acme/app/issues/3' && request.method === 'GET') {
+        return Response.json(rawIssue(3))
+      }
+      if (url.pathname === '/repos/acme/app/issues/3' && request.method === 'PATCH') {
+        return Response.json(rawIssue(3, { state: (body as { state: string }).state }))
+      }
+      if (url.pathname === '/repos/acme/app/issues/3/comments' && request.method === 'GET') {
+        return Response.json([
+          {
+            id: 1,
+            user: null,
+            body: url.searchParams.get('page') === '2' ? 'newest' : 'older',
+            created_at: 'x',
+            html_url: 'c1',
+          },
+        ])
+      }
+      if (url.pathname === '/repos/acme/app/issues/3/comments' && request.method === 'POST') {
+        const { body: text } = body as { body: string }
+        return Response.json(
+          { id: 2, user: { login: 'me' }, body: text, created_at: 'y', html_url: 'c2' },
+          { status: 201 },
+        )
       }
       if (url.pathname === '/repos/acme/app/actions/jobs/11/logs') {
         return new Response('step 1\nError: expected 1 to be 2\n')
@@ -245,3 +299,37 @@ describe('github repository', () => {
 function check(result: { exitCode: number; stderr: string }) {
   if (result.exitCode !== 0) throw new Error(result.stderr)
 }
+
+describe('github issues', () => {
+  test('lists issues without pull requests, and searches within the repository', async () => {
+    const { tracker } = connectRepository({ repository: 'acme/app' }, options())
+    const issues = await tracker.list({ labels: ['bug'] })
+    expect(issues.map((i) => i.number)).toEqual([3])
+    expect(issues[0]).toMatchObject({ labels: ['bug', 'p1'], author: 'someone', comments: 25 })
+    expect(requests.at(-1)?.path).toContain('labels=bug')
+    const found = await tracker.list({
+      search: 'login repo:acme/secret OR -org:acme is:pr NOT crash',
+      state: 'all',
+    })
+    expect(found.map((i) => i.number)).toEqual([4])
+    const query = new URL(`http://x${requests.at(-1)!.path}`).searchParams.get('q')
+    expect(query).toBe('login crash repo:acme/app is:issue')
+    expect(requests.at(-1)?.auth).toBe('Bearer tok')
+  })
+
+  test('reads an issue with its newest comments, comments, and closes it', async () => {
+    const { tracker } = connectRepository({ repository: 'acme/app' }, options())
+    const issue = await tracker.issue(3)
+    expect(issue.body).toBe('It breaks')
+    expect(issue.recent.map((c) => c.body)).toEqual(['older', 'newest'])
+    // 25 comments, 20 a page: the newest are on page 2.
+    expect(
+      requests.filter((r) => r.path.includes('/comments?')).map((r) => r.path.slice(-6)),
+    ).toEqual(['page=2', 'page=1'])
+    const comment = await tracker.comment(3, 'Fixed in #7')
+    expect(comment).toMatchObject({ id: '2', url: 'c2', body: 'Fixed in #7' })
+    const closed = await tracker.setState(3, 'closed', 'not_planned')
+    expect(closed.state).toBe('closed')
+    expect(requests.at(-1)?.body).toEqual({ state: 'closed', state_reason: 'not_planned' })
+  })
+})

@@ -127,6 +127,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         ...node,
         status: current.get(node.id)?.status ?? 'none',
         threads: current.get(node.id)?.threads ?? [],
+        issues: current.get(node.id)?.issues ?? [],
         changedIn: null,
       }))
     : (plan?.nodes ?? []).map((node) => ({ ...node, mark: null }))

@@ -100,6 +100,7 @@ export function createHandler({
       project: app.getProject(projectId),
       threads: app.listThreads(projectId),
       needsMe: app.listNeedsMe(projectId),
+      hasTracker: !!workspaces?.hasTracker(projectId),
     }),
   )
 
@@ -257,6 +258,57 @@ export function createHandler({
         await syncThreadPullRequest(app, await workspaces.repo(thread.projectId), threadId)
       }
       return json({ thread: app.getThread(threadId) })
+    },
+  )
+
+  // The user links an issue to a plan node; its title is read from the tracker.
+  add(
+    'POST',
+    '/api/projects/:projectId/plan/nodes/:nodeId/issues',
+    async (request, { projectId = '', nodeId = '' }) => {
+      const { number } = await readJson(request)
+      if (!Number.isInteger(number) || (number as number) < 1) throw new BadRequest('number')
+      // The node first: no request leaves for a link that cannot be made.
+      if (!app.getPlan(projectId).nodes.some((node) => node.id === nodeId)) {
+        throw new DomainError('error.planInvalid', { reason: `no node ${nodeId}` })
+      }
+      if (!workspaces?.hasTracker(projectId)) throw new DomainError('error.noTracker')
+      const tracker = await workspaces.tracker(projectId)
+      let issue: { title: string; url: string }
+      try {
+        issue = await tracker.issue(number as number)
+      } catch (error) {
+        throw new DomainError('error.issue', {
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+      return json({
+        plan: app.linkIssue(
+          projectId,
+          nodeId,
+          { tracker: tracker.name, number: number as number, title: issue.title, url: issue.url },
+          'user',
+        ),
+      })
+    },
+  )
+
+  add(
+    'DELETE',
+    '/api/projects/:projectId/plan/nodes/:nodeId/issues/:number',
+    (_request, { projectId = '', nodeId = '', number = '' }) => {
+      const plan = app.getPlan(projectId)
+      const node = plan.nodes.find((n) => n.id === nodeId)
+      const linked = node?.issues.find((i) => String(i.number) === number)
+      if (!linked) return json({ plan })
+      return json({
+        plan: app.unlinkIssue(
+          projectId,
+          nodeId,
+          { tracker: linked.tracker, number: linked.number },
+          'user',
+        ),
+      })
     },
   )
 

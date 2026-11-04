@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
 import { DomainError } from './errors'
@@ -800,5 +803,61 @@ describe('stopped threads', () => {
     const thread = app.createThread(project.id, { title: 'A', nodeId: 'a' })
     app.stopThread(thread.id, { reason: '暂停', by: 'user' })
     expect(app.getPlan(project.id).nodes[0]?.status).toBe('paused')
+  })
+})
+
+/** A plain task node to add. */
+const task = (id: string, title: string) => ({
+  op: 'add' as const,
+  id,
+  kind: 'task' as const,
+  title,
+  description: '',
+  acceptance: '',
+})
+
+describe('plan node ids', () => {
+  test('two projects can name a node the same; each keeps its own', () => {
+    const a = app.createProject('A')
+    const b = app.createProject('B')
+    app.revisePlan(a.id, { author: 'user', reason: '起步', ops: [task('login', '修登录 A')] })
+    app.revisePlan(b.id, { author: 'user', reason: '起步', ops: [task('login', '修登录 B')] })
+    app.revisePlan(b.id, {
+      author: 'user',
+      reason: '改名',
+      ops: [{ op: 'update', id: 'login', title: '修登录 B2' }],
+    })
+    expect(app.getPlan(a.id).nodes.map((n) => n.title)).toEqual(['修登录 A'])
+    expect(app.getPlan(b.id).nodes.map((n) => n.title)).toEqual(['修登录 B2'])
+    app.revisePlan(b.id, { author: 'user', reason: '删', ops: [{ op: 'remove', id: 'login' }] })
+    expect(app.getPlan(a.id).nodes).toHaveLength(1)
+    expect(app.getPlan(b.id).nodes).toHaveLength(0)
+  })
+
+  test('a database from before is rebuilt with the per-project key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ariadne-core-'))
+    const path = join(dir, 'ariadne.db')
+    try {
+      const before = new Ariadne({ path })
+      const a = before.createProject('A')
+      before.revisePlan(a.id, { author: 'user', reason: '起步', ops: [task('login', 'A')] })
+      // The table as it was: node ids unique across all projects.
+      before.store.db.run('DROP TABLE plan_nodes')
+      before.store.db.run(`CREATE TABLE plan_nodes (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+        description TEXT NOT NULL, acceptance TEXT NOT NULL, position INTEGER NOT NULL,
+        changed_in TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`)
+      before.store.db.run('PRAGMA user_version = 16')
+      before.close()
+
+      const after = new Ariadne({ path })
+      const b = after.createProject('B')
+      after.revisePlan(b.id, { author: 'user', reason: '起步', ops: [task('login', 'B')] })
+      expect(after.getPlan(a.id).nodes.map((n) => n.title)).toEqual(['A'])
+      expect(after.getPlan(b.id).nodes.map((n) => n.title)).toEqual(['B'])
+      after.close()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

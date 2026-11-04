@@ -78,7 +78,12 @@ function threadContext(
     title: thread.title,
     locale,
     node: node
-      ? { title: node.title, description: node.description, acceptance: node.acceptance }
+      ? {
+          title: node.title,
+          description: node.description,
+          acceptance: node.acceptance,
+          issues: node.issues.map((issue) => issue.number),
+        }
       : null,
     upstream,
     workspace: !hasWorkspace ? 'none' : (thread.workspace ?? 'not-open'),
@@ -141,8 +146,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const isThread = conversation.role === 'thread'
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
   const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
+  const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
   const tools =
-    options.tools ?? toolsFor(conversation.role, { workspace: hasWorkspace, repo: hasRepo })
+    options.tools ??
+    toolsFor(conversation.role, { workspace: hasWorkspace, repo: hasRepo, tracker: hasTracker })
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const conversationId = conversation.id
   // Input newer than this arrived for this turn.
@@ -164,6 +171,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     repo: () => {
       if (!workspaces || !isThread) return Promise.reject(new DomainError('error.noRepo'))
       return workspaces.repo(conversation.projectId)
+    },
+    tracker: () => {
+      if (!workspaces) return Promise.reject(new DomainError('error.noTracker'))
+      return workspaces.tracker(conversation.projectId)
     },
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),

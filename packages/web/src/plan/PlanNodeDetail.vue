@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import type { PlanNodeView, PlanOp } from '@ariadne/core'
-import { DouAlert, DouButton, DouInput, DouPopconfirm, DouTag, DouText, DouTextarea } from 'dou-ui'
-import { TrashIcon } from '@dou-ui/icons'
+import {
+  DouAlert,
+  DouButton,
+  DouInput,
+  DouInputNumber,
+  DouLink,
+  DouPopconfirm,
+  DouTag,
+  DouText,
+  DouTextarea,
+} from 'dou-ui'
+import { CircleDotIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { stageTone } from '../stage'
-import { editPlan, openThread } from '../store'
+import { editPlan, openThread, setNodeIssue, state } from '../store'
 import { mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 
@@ -102,6 +112,29 @@ async function remove() {
     emit('removed')
 }
 
+// Issues the node's work is about. The user links them by number; the title comes from
+// the tracker.
+const issueNumber = ref<number | null>(null)
+const issueProblem = ref<string | null>(null)
+const linking = ref(false)
+async function linkIssue() {
+  if (!issueNumber.value) return
+  linking.value = true
+  issueProblem.value = await setNodeIssue(props.node.id, issueNumber.value, true)
+  linking.value = false
+  if (!issueProblem.value) issueNumber.value = null
+}
+/** Who linked an issue: the user, the coordinator, or a thread by its title. */
+function linkedBy(by: string): string {
+  if (by === 'user') return t('plan.linkedByUser')
+  if (by === state.detail?.project.coordinatorId) return t('plan.linkedByCoordinator')
+  return state.detail?.threads.find((thread) => thread.id === by)?.title ?? by
+}
+
+async function unlinkIssue(number: number) {
+  issueProblem.value = await setNodeIssue(props.node.id, number, false)
+}
+
 const removeQuestion = computed(() =>
   props.node.threads.length
     ? t('plan.removeConfirmThreads', { title: props.node.title, count: props.node.threads.length })
@@ -185,6 +218,49 @@ const removeQuestion = computed(() =>
       </li>
     </ul>
     <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>
+    <template v-if="node.issues.length || (editable && state.detail?.hasTracker)">
+      <DouText variant="secondary" size="sm">{{ t('plan.issues') }}</DouText>
+      <ul v-if="node.issues.length" class="node-detail-threads">
+        <li v-for="issue in node.issues" :key="issue.number" class="node-detail-thread">
+          <DouLink :href="issue.url" external class="node-detail-issue">
+            <CircleDotIcon class="node-detail-issue-icon" />
+            <span>#{{ issue.number }} {{ issue.title }}</span>
+          </DouLink>
+          <DouText variant="tertiary" size="sm">
+            {{ t('plan.issueLinkedBy', { who: linkedBy(issue.linkedBy) }) }}
+          </DouText>
+          <DouButton
+            v-if="editable"
+            size="sm"
+            variant="ghost"
+            :aria-label="t('plan.issueUnlink', { number: issue.number })"
+            :title="t('plan.issueUnlink', { number: issue.number })"
+            @click="unlinkIssue(issue.number)"
+          >
+            <UnlinkIcon />
+          </DouButton>
+        </li>
+      </ul>
+      <form
+        v-if="editable && state.detail?.hasTracker"
+        class="node-detail-link"
+        @submit.prevent="linkIssue"
+      >
+        <DouInputNumber
+          v-model="issueNumber"
+          size="sm"
+          :min="1"
+          :step="1"
+          :placeholder="t('plan.issueNumber')"
+          :aria-label="t('plan.issueNumber')"
+        />
+        <DouButton size="sm" native-type="submit" :disabled="!issueNumber" :loading="linking">
+          <template #leading><LinkPlusIcon /></template>
+          {{ t('plan.issueLink') }}
+        </DouButton>
+      </form>
+      <DouText v-if="issueProblem" tone="danger" size="sm" role="alert">{{ issueProblem }}</DouText>
+    </template>
   </section>
 </template>
 
@@ -229,6 +305,23 @@ const removeQuestion = computed(() =>
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.node-detail-issue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.node-detail-issue-icon {
+  flex: none;
+}
+
+.node-detail-link {
+  display: flex;
+  gap: 6px;
 }
 
 .node-detail-thread {
