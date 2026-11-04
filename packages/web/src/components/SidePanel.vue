@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { ThreadStage } from '@ariadne/core'
-import { DouButton, DouEmpty, DouMenu, DouTabPanel, DouTabs, DouText } from 'dou-ui'
-import { MaximizeIcon } from '@dou-ui/icons'
+import { DouButton, DouEmpty, DouMenu, DouTabPanel, DouTabs, DouText, DouTooltip } from 'dou-ui'
+import {
+  BrainIcon,
+  KanbanIcon,
+  MaximizeIcon,
+  MessagesIcon,
+  PackageIcon,
+  WorkflowIcon,
+} from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { count, t } from '../i18n'
 import ArtifactList from '../artifacts/ArtifactList.vue'
@@ -9,7 +16,7 @@ import PlanBoard from '../plan/PlanBoard.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import { openMain, openThread, state } from '../store'
 import MemoryList from './MemoryList.vue'
-import ProjectSource from './ProjectSource.vue'
+import SideTab from './SideTab.vue'
 import StageLabel from './StageLabel.vue'
 
 const tab = ref('plan')
@@ -22,75 +29,92 @@ const stageOf = (id: string | number): ThreadStage =>
 </script>
 
 <template>
-  <div class="side">
-    <ProjectSource />
-    <DouTabs v-model="tab" class="side-tabs">
-      <template #extra>
+  <DouTabs v-model="tab" placement="end" class="side-tabs">
+    <template #extra>
+      <DouTooltip
+        v-if="tab === 'plan' && state.plan?.nodes.length"
+        :content="t('plan.expand')"
+        placement="left"
+      >
         <DouButton
-          v-if="tab === 'plan' && state.plan?.nodes.length"
           size="sm"
           variant="ghost"
           :aria-label="t('plan.expand')"
-          :title="t('plan.expand')"
           @click="openMain({ kind: 'plan' })"
         >
           <MaximizeIcon />
         </DouButton>
-      </template>
-      <DouTabPanel value="plan" :label="t('panel.plan')">
-        <PlanPanel />
-      </DouTabPanel>
-      <DouTabPanel value="board" :label="t('panel.board')">
-        <PlanBoard v-if="state.plan?.nodes.length" :plan="state.plan" compact />
-        <DouEmpty v-else size="sm" :description="t('plan.empty')" />
-      </DouTabPanel>
-      <DouTabPanel value="threads" :label="t('panel.threads')">
-        <DouText
-          v-if="usage.input || usage.output"
-          variant="tertiary"
-          size="sm"
-          class="usage"
-          :title="t('usage.detail', { input: usage.input, output: usage.output })"
-        >
-          {{ t('usage.project', { value: count(usage.input + usage.output) }) }}
-        </DouText>
-        <DouMenu
-          v-if="threadItems.length"
-          :model-value="state.threadId ?? undefined"
-          :items="threadItems"
-          @select="(key) => openThread(String(key))"
-        >
-          <template #label="{ item }">
-            <span class="thread">
-              <DouText truncate>{{ item.label }}</DouText>
-              <StageLabel :stage="stageOf(item.key)" />
-            </span>
-          </template>
-        </DouMenu>
-        <DouEmpty v-else size="sm" />
-      </DouTabPanel>
-      <DouTabPanel value="artifacts" :label="t('panel.artifacts')">
-        <ArtifactList />
-      </DouTabPanel>
-      <DouTabPanel value="memory" :label="t('memory.title')">
-        <MemoryList />
-      </DouTabPanel>
-    </DouTabs>
-  </div>
+      </DouTooltip>
+    </template>
+    <DouTabPanel value="plan" class="side-panel">
+      <template #label
+        ><SideTab :label="t('panel.plan')"><WorkflowIcon /></SideTab
+      ></template>
+      <PlanPanel />
+    </DouTabPanel>
+    <DouTabPanel value="board" class="side-panel">
+      <template #label
+        ><SideTab :label="t('panel.board')"><KanbanIcon /></SideTab
+      ></template>
+      <PlanBoard v-if="state.plan?.nodes.length" :plan="state.plan" compact />
+      <DouEmpty v-else size="sm" :description="t('plan.empty')" />
+    </DouTabPanel>
+    <DouTabPanel value="threads" class="side-panel">
+      <template #label
+        ><SideTab :label="t('panel.threads')"><MessagesIcon /></SideTab
+      ></template>
+      <DouText
+        v-if="usage.input || usage.output"
+        variant="tertiary"
+        size="sm"
+        class="usage"
+        :title="t('usage.detail', { input: usage.input, output: usage.output })"
+      >
+        {{ t('usage.project', { value: count(usage.input + usage.output) }) }}
+      </DouText>
+      <DouMenu
+        v-if="threadItems.length"
+        :model-value="state.threadId ?? undefined"
+        :items="threadItems"
+        @select="(key) => openThread(String(key))"
+      >
+        <template #label="{ item }">
+          <span class="thread">
+            <DouText truncate>{{ item.label }}</DouText>
+            <StageLabel :stage="stageOf(item.key)" />
+          </span>
+        </template>
+      </DouMenu>
+      <DouEmpty v-else size="sm" />
+    </DouTabPanel>
+    <DouTabPanel value="artifacts" class="side-panel">
+      <template #label
+        ><SideTab :label="t('panel.artifacts')"><PackageIcon /></SideTab
+      ></template>
+      <ArtifactList />
+    </DouTabPanel>
+    <DouTabPanel value="memory" class="side-panel">
+      <template #label
+        ><SideTab :label="t('memory.title')"><BrainIcon /></SideTab
+      ></template>
+      <MemoryList />
+    </DouTabPanel>
+  </DouTabs>
 </template>
 
 <style scoped>
-.side {
-  display: flex;
-  flex-direction: column;
+.side-tabs {
+  --dou-tabs-padding-x: 0;
+  box-sizing: border-box;
   height: 100%;
+  padding: 8px 8px 0 16px;
 }
 
-.side-tabs {
-  flex: 1;
-  min-height: 0;
-  padding: 8px 16px;
+/* The tabs stay in place on the right while a long panel scrolls. */
+.side-panel {
+  align-self: stretch;
   overflow-y: auto;
+  padding-bottom: 8px;
 }
 
 .usage {

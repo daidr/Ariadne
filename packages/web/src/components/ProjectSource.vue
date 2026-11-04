@@ -5,11 +5,12 @@ import {
   DouForm,
   DouFormItem,
   DouInputNumber,
+  DouPopover,
   DouSelect,
   DouText,
 } from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PencilIcon, ServerIcon } from '@dou-ui/icons'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api, type SandboxStatus, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
 import { setProjectSlots, setSource, state } from '../store'
@@ -31,6 +32,16 @@ const slots = ref<number | null>(null)
 const storedSecrets = ref<string[]>([])
 /** The source as it was when the form opened, to tell whether it was changed at all. */
 const opened = ref<string | null>(null)
+
+// With no source there is nothing to look at, so opening goes straight to the form. A form
+// left half filled is dropped when the popover closes.
+watch(
+  () => state.sourceOpen,
+  (open) => {
+    if (!open) editing.value = false
+    else if (!state.detail?.project.source) void edit()
+  },
+)
 
 const source = computed(() => state.detail?.project.source ?? null)
 
@@ -157,101 +168,112 @@ async function save(clear = false) {
 </script>
 
 <template>
-  <section v-if="state.detail" class="source" :aria-label="t('project.source.title')">
-    <DouText variant="secondary" size="sm">{{ t('project.source.title') }}</DouText>
-    <DouForm v-if="editing" layout="vertical" size="sm" class="source-form" @submit="save()">
-      <DouFormItem :label="t('project.source.kind')">
-        <DouSelect
-          :model-value="kind"
-          :options="kindOptions"
-          @update:model-value="(value) => chooseKind(String(value))"
-        />
-      </DouFormItem>
-      <SettingsFields
-        v-if="current"
-        :key="current.kind"
-        :schema="current.settings"
-        :values="values()"
-        :secrets-set="secretsSet"
-        @clear-secret="clearSecret"
-      />
-      <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
-        <DouInputNumber
-          v-model="slots"
-          :min="1"
-          :max="16"
-          :step="1"
-          :placeholder="t('project.slotsShared')"
-        />
-      </DouFormItem>
-      <DouText v-if="problem" tone="danger" size="sm" role="alert" class="source-problem">
-        {{ problem }}
-      </DouText>
-      <div class="source-actions">
-        <DouButton v-if="source" size="sm" variant="ghost" tone="danger" @click="save(true)">
-          {{ t('project.source.clear') }}
-        </DouButton>
-        <DouButton size="sm" variant="ghost" @click="editing = false">
-          {{ t('settings.cancel') }}
-        </DouButton>
-        <DouButton size="sm" tone="primary" native-type="submit" :loading="saving">
-          {{ t('project.source.save') }}
-        </DouButton>
-      </div>
-    </DouForm>
-    <div v-else class="source-row">
-      <ServerIcon v-if="source && remote" class="source-icon" />
-      <FolderGitIcon v-else-if="source && isRepo" class="source-icon" />
-      <FolderOpenIcon v-else class="source-icon" />
-      <DouText v-if="summary" size="sm" truncate :title="summary" class="source-path">
-        {{ summary }}
-      </DouText>
-      <DouText v-else variant="tertiary" size="sm" class="source-path">
-        {{ t('project.source.none') }}
-      </DouText>
-      <DouButton
-        size="sm"
-        variant="ghost"
-        :aria-label="t('project.source.edit')"
-        :title="t('project.source.edit')"
-        @click="edit"
-      >
-        <PencilIcon />
-      </DouButton>
-    </div>
-    <DouAlert
-      v-if="unsandboxed && sandbox"
-      tone="warning"
-      role="alert"
-      :title="t(sandbox.mode === 'off' ? 'sandbox.off.title' : 'sandbox.missing.title')"
+  <DouPopover
+    v-if="state.detail"
+    v-model:open="state.sourceOpen"
+    :title="t('project.source.title')"
+    :width="360"
+    placement="bottom-end"
+  >
+    <!-- Without a sandbox the button is the only sign left in view, so it turns to a warning. -->
+    <DouButton
+      variant="ghost"
+      size="sm"
+      :tone="unsandboxed ? 'warning' : undefined"
+      :aria-label="t('project.source.title')"
+      :title="summary ?? t('project.source.title')"
     >
-      {{ t(sandboxNote) }}
-    </DouAlert>
-    <DouText v-else-if="weaker" variant="tertiary" size="sm">{{ t('sandbox.weaker') }}</DouText>
-    <DouText v-else-if="source && remote" variant="tertiary" size="sm">
-      {{ t('sandbox.remote', { host: remoteHost }) }}
-    </DouText>
-  </section>
+      <ServerIcon v-if="source && remote" />
+      <FolderGitIcon v-else-if="source && isRepo" />
+      <FolderOpenIcon v-else />
+    </DouButton>
+    <template #content>
+      <div class="source">
+        <DouForm v-if="editing" layout="vertical" size="sm" class="source-form" @submit="save()">
+          <DouFormItem :label="t('project.source.kind')">
+            <DouSelect
+              :model-value="kind"
+              :options="kindOptions"
+              @update:model-value="(value) => chooseKind(String(value))"
+            />
+          </DouFormItem>
+          <SettingsFields
+            v-if="current"
+            :key="current.kind"
+            :schema="current.settings"
+            :values="values()"
+            :secrets-set="secretsSet"
+            @clear-secret="clearSecret"
+          />
+          <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
+            <DouInputNumber
+              v-model="slots"
+              :min="1"
+              :max="16"
+              :step="1"
+              :placeholder="t('project.slotsShared')"
+            />
+          </DouFormItem>
+          <DouText v-if="problem" tone="danger" size="sm" role="alert" class="source-problem">
+            {{ problem }}
+          </DouText>
+          <div class="source-actions">
+            <DouButton v-if="source" size="sm" variant="ghost" tone="danger" @click="save(true)">
+              {{ t('project.source.clear') }}
+            </DouButton>
+            <DouButton size="sm" variant="ghost" @click="editing = false">
+              {{ t('settings.cancel') }}
+            </DouButton>
+            <DouButton size="sm" tone="primary" native-type="submit" :loading="saving">
+              {{ t('project.source.save') }}
+            </DouButton>
+          </div>
+        </DouForm>
+        <div v-else class="source-row">
+          <DouText v-if="summary" size="sm" truncate :title="summary" class="source-path">
+            {{ summary }}
+          </DouText>
+          <DouText v-else variant="tertiary" size="sm" class="source-path">
+            {{ t('project.source.none') }}
+          </DouText>
+          <DouButton
+            size="sm"
+            variant="ghost"
+            :aria-label="t('project.source.edit')"
+            :title="t('project.source.edit')"
+            @click="edit"
+          >
+            <PencilIcon />
+          </DouButton>
+        </div>
+        <DouAlert
+          v-if="unsandboxed && sandbox"
+          tone="warning"
+          role="alert"
+          :title="t(sandbox.mode === 'off' ? 'sandbox.off.title' : 'sandbox.missing.title')"
+        >
+          {{ t(sandboxNote) }}
+        </DouAlert>
+        <DouText v-else-if="weaker" variant="tertiary" size="sm">{{ t('sandbox.weaker') }}</DouText>
+        <DouText v-else-if="source && remote" variant="tertiary" size="sm">
+          {{ t('sandbox.remote', { host: remoteHost }) }}
+        </DouText>
+      </div>
+    </template>
+  </DouPopover>
 </template>
 
 <style scoped>
 .source {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
+  gap: 8px;
 }
 
 .source-row {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.source-icon {
-  flex: none;
-  color: var(--dou-color-text-tertiary);
 }
 
 .source-path {
