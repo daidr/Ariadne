@@ -35,10 +35,11 @@ const line = computed(() =>
     percent: meter.value.percent,
   }),
 )
+// In the popover, written like the rest of its numbers.
 const amount = computed(() =>
   t('context.amount', {
-    used: compactNumber(meter.value.used),
-    total: compactNumber(meter.value.total),
+    used: count(meter.value.used),
+    total: count(meter.value.total),
     percent: meter.value.percent,
   }),
 )

@@ -116,6 +116,7 @@ function select(key: string | number) {
           <ReviewActions
             v-if="byId.get(String(item.key))?.stage === 'review'"
             :thread-id="String(item.key)"
+            compact
           />
         </template>
       </DouMenu>

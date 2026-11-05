@@ -143,7 +143,6 @@ const takenAt = computed(() =>
           :editable="editing"
           :label="label"
           @change="changed"
-          @widget-error="({ error }) => console.error(error)"
         />
       </div>
     </div>

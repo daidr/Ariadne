@@ -10,6 +10,7 @@ defineProps<{ src: string; alt: string; title?: string | undefined }>()
     :src="src"
     :alt="alt"
     :title="title"
+    max-width="100%"
     :max-height="320"
     preview
     lazy
