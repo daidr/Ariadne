@@ -155,10 +155,10 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
             event: t('trace.kind.instructions'),
             content: t(
               item.removed
-                ? 'notice.instructionsRemoved'
+                ? 'trace.instructionsRemoved'
                 : item.changed
-                  ? 'notice.instructionsChanged'
-                  : 'notice.instructions',
+                  ? 'trace.instructionsChanged'
+                  : 'trace.instructions',
               { path: item.path },
             ),
           })

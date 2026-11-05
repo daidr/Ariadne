@@ -299,14 +299,6 @@ export type NoticeView = {
       files: TurnFile[]
       total: { files: number; added: number; removed: number }
     }
-  | {
-      kind: 'instructions'
-      path: string
-      /** `null` once the file was removed. */
-      content: string | null
-      changed: boolean
-      uncommitted: boolean
-    }
 )
 
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */

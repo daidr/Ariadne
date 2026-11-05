@@ -614,27 +614,6 @@ watch(
               {{ t('notice.undo') }}
             </DouButton>
           </template>
-          <!-- What the thread follows from the repository, and when it moves. -->
-          <DouText
-            v-else-if="item.notice.kind === 'instructions' && item.notice.content === null"
-            variant="tertiary"
-            size="sm"
-            class="notice-text"
-          >
-            {{ t('notice.instructionsRemoved', { path: item.notice.path }) }}
-          </DouText>
-          <DouCollapse v-else-if="item.notice.kind === 'instructions'" class="relay">
-            <DouCollapseItem
-              :value="item.notice.id"
-              :title="
-                t(item.notice.changed ? 'notice.instructionsChanged' : 'notice.instructions', {
-                  path: item.notice.path,
-                }) + (item.notice.uncommitted ? t('notice.instructionsUncommitted') : '')
-              "
-            >
-              <DouText size="sm" class="relay-content">{{ item.notice.content }}</DouText>
-            </DouCollapseItem>
-          </DouCollapse>
           <!-- Which work this conversation pointed at which issue. -->
           <DouText
             v-else-if="item.notice.kind === 'issue-linked'"
