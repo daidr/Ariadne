@@ -11,6 +11,7 @@
     "start": "bun packages/server/src/start.ts",
     "build": "bun run --filter @ariadne/web build",
     "build:daemon": "bun run --filter @ariadne/daemon build",
+    "record:provider": "bun packages/server/src/record-provider.ts",
     "test": "bun --bun vitest run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "oxlint --deny-warnings",

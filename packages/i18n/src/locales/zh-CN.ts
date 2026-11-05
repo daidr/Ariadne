@@ -625,6 +625,8 @@ export const zhCN = {
     'Windows 上暂时没有工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
   'cli.server.noSandbox': '这台机器上没有可用的工作区沙箱：讨论串的命令能读到 Ariadne 的令牌和设置',
   'cli.server.pluginFailed': '插件加载失败：{path}',
+  'cli.server.leftovers': '上次退出时还在跑的 {count} 个进程已结束',
+  'cli.server.otherServer': '另一个 Ariadne 还在用这个目录：它留下的进程不动',
   'cli.server.started': 'Ariadne 已启动：{url}',
   'cli.start.building': '正在构建页面…',
   'cli.start.buildFailed': '页面构建失败',

@@ -714,6 +714,14 @@ export class Ariadne {
     setupFiles(this.db)
   }
 
+  /**
+   * Run several commands as one: they are written together or not at all, also when the
+   * process dies halfway. Listeners hear the events once all of them are in.
+   */
+  transaction<T>(work: () => T): T {
+    return this.store.transaction(work)
+  }
+
   subscribe(listener: EventListener): () => void {
     return this.store.subscribe(listener)
   }
@@ -2533,6 +2541,10 @@ export class Ariadne {
    * changed one gets its old text back, a removed one returns.
    */
   undoMemoryNotice(projectId: string, noticeId: string): void {
+    this.store.transaction(() => this.undoMemoryNoticeNow(projectId, noticeId))
+  }
+
+  private undoMemoryNoticeNow(projectId: string, noticeId: string): void {
     const row = this.db
       .query<
         { conversation_id: string; kind: string; payload: string; undone: number },
@@ -3516,6 +3528,17 @@ export class Ariadne {
     turnId: string,
     outcome: TurnOutcome,
     error: LocalizedMessage | null = null,
+  ): void {
+    // One transaction: a crash halfway must not leave a finished turn whose review round
+    // never hears that its reviewer left.
+    this.store.transaction(() => this.finishTurnNow(conversationId, turnId, outcome, error))
+  }
+
+  private finishTurnNow(
+    conversationId: string,
+    turnId: string,
+    outcome: TurnOutcome,
+    error: LocalizedMessage | null,
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
     const answered = new Set<string>()

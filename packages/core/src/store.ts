@@ -52,6 +52,8 @@ export class EventStore {
   private readonly listeners = new Set<EventListener>()
   private readonly now: () => number
   private readonly check: ((db: Database, event: AnyNewEvent) => void) | undefined
+  /** Events appended inside `transaction`, told to listeners once it commits. */
+  private held: AnyStoredEvent[] | null = null
 
   constructor(options: EventStoreOptions) {
     this.db = new Database(options.path, { create: true, strict: true })
@@ -98,8 +100,39 @@ export class EventStore {
         return storedEvent
       }),
     )()
-    this.notify(stored)
+    if (this.held) this.held.push(...stored)
+    else this.notify(stored)
     return stored
+  }
+
+  /**
+   * Run `work` in one transaction: every append inside it commits together or not at all,
+   * also when the process dies halfway. Listeners hear the events once it has committed;
+   * when `work` throws, nothing is written and nobody hears anything. Nesting joins the
+   * outer transaction.
+   */
+  transaction<T>(work: () => T): T {
+    if (this.held) {
+      const mark = this.held.length
+      try {
+        return this.db.transaction(work)()
+      } catch (error) {
+        // The inner part was rolled back to its savepoint; its events never happened.
+        this.held.length = mark
+        throw error
+      }
+    }
+    this.held = []
+    let result: T
+    let events: AnyStoredEvent[]
+    try {
+      result = this.db.transaction(work)()
+    } finally {
+      events = this.held
+      this.held = null
+    }
+    this.notify(events)
+    return result
   }
 
   /**

@@ -655,6 +655,8 @@ export const en: Record<MessageKey, string> = {
   'cli.server.noSandbox':
     "No workspace sandbox is available on this machine: threads' commands can read Ariadne's token and settings",
   'cli.server.pluginFailed': 'Could not load the plugin: {path}',
+  'cli.server.leftovers': 'Ended {count} processes left running when Ariadne last stopped',
+  'cli.server.otherServer': 'Another Ariadne is using this directory: its processes are left alone',
   'cli.server.started': 'Ariadne is running: {url}',
   'cli.start.building': 'Building the pages…',
   'cli.start.buildFailed': 'Building the pages failed',

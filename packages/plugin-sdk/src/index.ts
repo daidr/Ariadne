@@ -13,6 +13,7 @@ export {
   type ServerSentEvent,
 } from './sse'
 export { defaultShell, shellArgv } from './shell'
+export { processes, ProcessLedger, type Leftovers, type TrackedProcess } from './processes'
 
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and

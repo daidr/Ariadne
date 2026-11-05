@@ -389,17 +389,23 @@ function createThread(models: ModelChoice[]): Tool {
         }
         model = args.model
       }
-      const thread = ctx.app.createThread(ctx.projectId, {
-        title: str(args, 'title'),
-        nodeId,
-        model,
-        branch: typeof args.branch === 'string' ? args.branch : null,
-      })
-      ctx.app.postMessage(ctx.projectId, {
-        conversationId: thread.id,
-        author: 'coordinator',
-        kind: 'relay',
-        content: str(args, 'brief'),
+      const title = str(args, 'title')
+      const brief = str(args, 'brief')
+      // A thread never exists without its brief, which is all it has to go on.
+      const thread = ctx.app.transaction(() => {
+        const created = ctx.app.createThread(ctx.projectId, {
+          title,
+          nodeId,
+          model,
+          branch: typeof args.branch === 'string' ? args.branch : null,
+        })
+        ctx.app.postMessage(ctx.projectId, {
+          conversationId: created.id,
+          author: 'coordinator',
+          kind: 'relay',
+          content: brief,
+        })
+        return created
       })
       return json({ threadId: thread.id, stage: thread.stage })
     },
