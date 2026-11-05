@@ -277,7 +277,10 @@ async function* readStream(
   let stop: string | null = null
   let done = false
   try {
-    for await (const { data } of readServerSentEvents(body)) {
+    for await (const { data, comment } of readServerSentEvents(body)) {
+      // Anything at all means the service is still at it: thinking can be long and silent.
+      yield { type: 'alive' }
+      if (comment) continue
       let event: StreamEvent
       try {
         event = JSON.parse(data)

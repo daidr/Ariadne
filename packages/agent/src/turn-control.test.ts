@@ -38,10 +38,10 @@ async function trackedHost(files: Record<string, string>) {
     },
     list: async () => [],
     async exec(command, options) {
-      options?.onOutput?.('building…\n')
+      options?.onOutput?.('building…\n', 'stdout')
       // A command changes files behind the tools' back.
       files['out.txt'] = 'built\n'
-      options?.onOutput?.('done\n')
+      options?.onOutput?.('done\n', 'stdout')
       return { exitCode: 0, stdout: `ran: ${command}`, stderr: '' }
     },
     dispose: async () => {},

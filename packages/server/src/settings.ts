@@ -74,9 +74,11 @@ export interface RoleConfig {
 /**
  * `triage` is the coordinator's quick look at what the user wrote inside a thread, when
  * nothing else waits for it: it only decides whether the request belongs elsewhere.
+ * `research` answers a question a conversation hands off with its `research` tool; left
+ * unset, the conversation's own model does.
  */
-export type Role = 'coordinator' | 'thread' | 'triage'
-const ROLES: Role[] = ['thread', 'coordinator', 'triage']
+export type Role = 'coordinator' | 'thread' | 'triage' | 'research'
+const ROLES: Role[] = ['thread', 'coordinator', 'triage', 'research']
 
 /** A request the user sends often, offered after `/` in the message input. */
 export interface Snippet {
@@ -280,7 +282,7 @@ const defaults = (): UserConfig => ({
   models: {
     providers: [],
     models: [],
-    roles: { thread: noRole(), coordinator: noRole(), triage: noRole() },
+    roles: { thread: noRole(), coordinator: noRole(), triage: noRole(), research: noRole() },
   },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
@@ -310,6 +312,7 @@ export function loadUserConfig(path: string): UserConfig {
         thread: storedRole(stored.models?.roles?.thread),
         coordinator: storedRole(stored.models?.roles?.coordinator),
         triage: storedRole(stored.models?.roles?.triage),
+        research: storedRole(stored.models?.roles?.research),
       },
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
@@ -864,6 +867,8 @@ export class SettingsStore {
     if (role === 'triage') {
       return find(roles.triage.model) ?? find(roles.coordinator.model) ?? find(roles.thread.model)
     }
+    // Without one of its own, a research runs on the model of the conversation asking.
+    if (role === 'research') return find(roles.research.model)
     if (role === 'coordinator') return find(roles.coordinator.model) ?? find(roles.thread.model)
     return find(given) ?? find(roles.thread.model)
   }

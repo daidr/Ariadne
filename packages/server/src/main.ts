@@ -110,6 +110,7 @@ const scheduler = new Scheduler({
         }),
   models: () => settings.modelChoices(),
   settings: (projectId) => settings.turnSettings(projectId),
+  researchModel: () => settings.resolveModel('research'),
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,

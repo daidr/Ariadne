@@ -316,9 +316,10 @@ export interface ModelSettingsInput {
   models: ModelEntry[]
   /**
    * `coordinator.model: null` uses the threads' model, `triage.model: null` the
-   * coordinator's; `effort: null` asks nothing.
+   * coordinator's, `research.model: null` the asking conversation's; `effort: null` asks
+   * nothing.
    */
-  roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput }
+  roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput; research: RoleInput }
 }
 
 export type Effort = 'low' | 'medium' | 'high'

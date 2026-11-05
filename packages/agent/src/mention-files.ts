@@ -1,4 +1,4 @@
-import { SHELLS, type Ariadne } from '@ariadne/core'
+import type { Ariadne } from '@ariadne/core'
 import type { SourceView } from '@ariadne/plugin-sdk'
 import type { WorkspaceManager } from './workspaces'
 
@@ -50,11 +50,15 @@ async function filesOf(
   if (threadId && known && !known.removed && workspaces.available(projectId)) {
     const workspace = await workspaces.forThread(projectId, threadId)
     if (workspace.branch) {
-      const shell = SHELLS[app.getProject(projectId).settings.workspace.shell]
-      const result = await workspace.exec('git ls-files -z --cached --others --exclude-standard', {
-        timeoutMs: 15_000,
-        ...(shell ? { shell } : {}),
-      })
+      const argv = ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard']
+      const shell = workspaces.shell(projectId).argv
+      // Without a shell where the workspace can, so it reads the same on every platform.
+      const result = workspace.execFile
+        ? await workspace.execFile(argv, { timeoutMs: 15_000 })
+        : await workspace.exec(argv.join(' '), {
+            timeoutMs: 15_000,
+            ...(shell ? { shell: [...shell] } : {}),
+          })
       if (result.exitCode === 0) {
         return [...new Set(result.stdout.split('\0').filter(Boolean))].slice(0, MAX_WALKED)
       }

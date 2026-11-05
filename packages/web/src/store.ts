@@ -673,6 +673,7 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
       return ['artifacts', 'conversations']
     // What a turn does while it runs; its threads' stages on the plan stay as they are.
     case 'tool':
+    case 'research':
     case 'todo':
     case 'conversation':
     case 'notice':

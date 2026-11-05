@@ -12,6 +12,7 @@ export {
   transportErrorPart,
   type ServerSentEvent,
 } from './sse'
+export { defaultShell, shellArgv } from './shell'
 
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and
@@ -121,6 +122,11 @@ export interface ToolSpec {
 }
 
 export type ModelStreamPart =
+  /**
+   * The service sent something, even if nothing to hand on yet (a piece of reasoning, a
+   * keep-alive): a request that does is not silent, however long the answer takes.
+   */
+  | { type: 'alive' }
   | { type: 'text'; text: string }
   | ({ type: 'tool-call' } & ToolCall)
   /**

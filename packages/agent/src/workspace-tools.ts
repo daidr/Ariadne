@@ -1,10 +1,15 @@
 import { confirmBlock, DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
+import type { CommandOutput } from './background'
 import { createHash } from 'node:crypto'
+import { applyEdit } from './edit-match'
 import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
+import { changedSince, noteFile } from './file-state'
+import { findFiles, MAX_FOUND, MAX_MATCH_LINES, searchLines } from './workspace-search'
 import {
+  optionalBool,
   optionalInt,
   optionalStr,
   str,
@@ -133,7 +138,9 @@ async function readText(
   if (data.includes(0)) {
     return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
   }
-  const lines = new TextDecoder().decode(data).split('\n')
+  const whole = new TextDecoder().decode(data)
+  if (ctx.role === 'thread' && !ctx.sub) noteFile(ctx.conversationId, path, whole)
+  const lines = whole.split('\n')
   const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
   const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
   const shown: string[] = []
@@ -182,29 +189,120 @@ const readFile = workspaceTool(
   { readOnly: true },
 )
 
+/** `value` as one argument of a command line in the shell `shell`. */
+export function quoteFor(shell: string, value: string): string {
+  if (shell === 'pwsh' || shell === 'powershell') return `'${value.replaceAll("'", "''")}'`
+  if (shell === 'cmd') return `"${value.replaceAll('"', '""')}"`
+  return shellQuote(value)
+}
+
+/** What the project's check after edits shows the model at most. */
+const MAX_CHECK_OUTPUT = 6000
+
+/**
+ * Run the user's check after edits, with `{file}` standing for the changed files; what
+ * the model reads after the edit's own result. `''` when the project has none.
+ */
+async function checkAfterEdit(
+  ctx: ToolContext,
+  workspace: Workspace,
+  paths: string[],
+): Promise<string> {
+  const check = ctx.commands?.check?.trim()
+  if (!check) return ''
+  const shell = ctx.commands?.shellName ?? 'bash'
+  const command = check.replaceAll('{file}', paths.map((p) => quoteFor(shell, p)).join(' '))
+  const limits = ctx.limits ?? DEFAULT_LIMITS
+  const env = ctx.commands?.env ?? {}
+  const result = await workspace
+    .exec(command, {
+      timeoutMs: limits.commandTimeout * 1000,
+      signal: ctx.signal,
+      ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
+      ...(Object.keys(env).length ? { env } : {}),
+    })
+    .catch((error: unknown) => ({
+      exitCode: -1,
+      stdout: '',
+      stderr: error instanceof Error ? error.message : String(error),
+    }))
+  if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
+  const output = headAndTail(
+    [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
+    MAX_CHECK_OUTPUT,
+    'run the check with run_command to see all of it',
+  )
+  return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${output || '(no output)'}`
+}
+
+/** The text of a file, or `null` when there is none (or it cannot be read). */
+const currentText = (workspace: Workspace, path: string) =>
+  workspace.readFile(path).catch(() => null)
+
 const writeFile = workspaceTool(
   {
     name: 'write_file',
-    description: 'Create or overwrite a file of your workspace with the given content.',
+    description:
+      'Create a file of your workspace, or overwrite one with the given content. Overwriting a file that changed since you last read or wrote it is refused: read it again first. For a change to part of a file, use edit_file.',
     parameters: {
       type: 'object',
       properties: { path: { type: 'string' }, content: { type: 'string' } },
       required: ['path', 'content'],
     },
   },
-  async (args, workspace) => {
+  async (args, workspace, ctx) => {
+    const path = str(args, 'path')
     const content = typeof args.content === 'string' ? args.content : null
     if (content === null) throw new ToolInputError('"content" must be a string')
-    await workspace.writeFile(str(args, 'path'), content)
-    return { content: 'Written.' }
+    const before = await currentText(workspace, path)
+    if (before !== null && changedSince(ctx.conversationId, path, before)) {
+      return {
+        content: `${path} changed since you last read or wrote it (the user, a command or a tool changed it). Read it again and work from what it holds now; nothing was written.`,
+        isError: true,
+      }
+    }
+    await workspace.writeFile(path, content)
+    noteFile(ctx.conversationId, path, content)
+    return { content: `Written.${await checkAfterEdit(ctx, workspace, [path])}` }
   },
 )
+
+/** One replacement edit_file makes. */
+interface Edit {
+  old: string
+  new: string
+  all: boolean
+}
+
+function oneEdit(raw: Record<string, unknown>, at: string): Edit {
+  if (typeof raw.old !== 'string' || !raw.old) {
+    throw new ToolInputError(`${at}"old" must be a non-empty string`)
+  }
+  if (typeof raw.new !== 'string') throw new ToolInputError(`${at}"new" must be a string`)
+  if (raw.all !== undefined && typeof raw.all !== 'boolean') {
+    throw new ToolInputError(`${at}"all" must be true or false`)
+  }
+  return { old: raw.old, new: raw.new, all: raw.all === true }
+}
+
+function editsOf(args: Record<string, unknown>): Edit[] {
+  if (args.edits !== undefined) {
+    if (!Array.isArray(args.edits) || !args.edits.length) {
+      throw new ToolInputError('"edits" must be a non-empty array')
+    }
+    if (args.old !== undefined) throw new ToolInputError('pass either "edits" or "old", not both')
+    return args.edits.map((raw, i) =>
+      oneEdit((raw ?? {}) as Record<string, unknown>, `edits[${i}]: `),
+    )
+  }
+  return [oneEdit(args, '')]
+}
 
 const editFile = workspaceTool(
   {
     name: 'edit_file',
     description:
-      'Replace an exact piece of text in a file. "old" must occur exactly once unless "all" is true; include enough surrounding lines to make it unique.',
+      'Change part of a file: replace "old" with "new", or make several replacements at once with "edits", applied in order (all or none). "old" must occur once unless "all" is true; copy it from the file, with enough of the lines around it to make it unique. Text that differs only in whitespace (indentation, trailing spaces, line endings) is found too. When "old" is not found, the result shows the nearest lines of the file.',
     parameters: {
       type: 'object',
       properties: {
@@ -212,33 +310,54 @@ const editFile = workspaceTool(
         old: { type: 'string' },
         new: { type: 'string' },
         all: { type: 'boolean' },
+        edits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              old: { type: 'string' },
+              new: { type: 'string' },
+              all: { type: 'boolean' },
+            },
+            required: ['old', 'new'],
+          },
+        },
       },
-      required: ['path', 'old', 'new'],
+      required: ['path'],
     },
   },
-  async (args, workspace) => {
+  async (args, workspace, ctx) => {
     const path = str(args, 'path')
-    const old = str(args, 'old')
-    if (typeof args.new !== 'string') throw new ToolInputError('"new" must be a string')
-    const text = await workspace.readFile(path)
-    const count = text.split(old).length - 1
-    if (count === 0) return { content: `"old" does not occur in ${path}.`, isError: true }
-    if (count > 1 && args.all !== true) {
-      return {
-        content: `"old" occurs ${count} times in ${path}; make it unique or pass all.`,
-        isError: true,
+    const edits = editsOf(args)
+    let text = await workspace.readFile(path)
+    const notes: string[] = []
+    let replaced = 0
+    for (const [i, edit] of edits.entries()) {
+      const outcome = applyEdit(text, edit.old, edit.new, edit.all)
+      const which = edits.length > 1 ? `Edit ${i + 1} of ${edits.length}: ` : ''
+      if (!outcome.ok) {
+        const none = edits.length > 1 ? ' None of the edits was made.' : ''
+        return { content: `${which}${outcome.reason} in ${path}.${none}`, isError: true }
+      }
+      text = outcome.text
+      replaced += outcome.count
+      if (outcome.loose.length) {
+        const where = outcome.loose.map((r) => `${r.from}-${r.to}`).join(', ')
+        notes.push(`${which}matched with other whitespace at lines ${where}`)
       }
     }
-    await workspace.writeFile(path, text.split(old).join(args.new))
-    return { content: `Replaced ${count === 1 ? 'one occurrence' : `${count} occurrences`}.` }
+    await workspace.writeFile(path, text)
+    noteFile(ctx.conversationId, path, text)
+    const done = `Replaced ${replaced === 1 ? 'one occurrence' : `${replaced} occurrences`}.`
+    const loose = notes.length ? ` (${notes.join('; ')}; check the indentation)` : ''
+    return { content: `${done}${loose}${await checkAfterEdit(ctx, workspace, [path])}` }
   },
 )
 
 const search = workspaceTool(
   {
     name: 'search',
-    description:
-      'Search the workspace for a regular expression; prints matching lines with their file and line number.',
+    description: `Search the workspace's files for a regular expression; prints matching lines as file:line:text, at most ${MAX_MATCH_LINES}. Files git ignores are left out.`,
     parameters: {
       type: 'object',
       properties: {
@@ -249,13 +368,47 @@ const search = workspaceTool(
     },
   },
   async (args, workspace, ctx) => {
-    const pattern = shellQuote(str(args, 'pattern'))
-    const path = shellQuote(optionalStr(args, 'path') || '.')
-    const command = `if command -v rg >/dev/null; then rg -n --no-heading --max-count 50 -e ${pattern} -- ${path}; else grep -rnE --exclude-dir=.git -m 50 -e ${pattern} -- ${path}; fi | head -n 300`
-    const result = await workspace.exec(command, { signal: ctx.signal, timeoutMs: 30_000 })
-    if (result.stderr.trim() && !result.stdout.trim())
-      return { content: result.stderr, isError: true }
-    return { content: result.stdout || 'No matches.' }
+    const found = await searchLines(
+      workspace,
+      str(args, 'pattern'),
+      optionalStr(args, 'path') || '.',
+      ctx.signal,
+    )
+    if (found.error) return { content: found.error, isError: true }
+    if (!found.lines.length) return { content: 'No matches.' }
+    const more = found.lines.length >= MAX_MATCH_LINES ? '\n[more matches; narrow the search]' : ''
+    return { content: found.lines.join('\n') + more }
+  },
+  { readOnly: true },
+)
+
+const findFilesTool = workspaceTool(
+  {
+    name: 'find_files',
+    description: `Find files of the workspace by a glob pattern, e.g. "**/*.test.ts" or "src/**/index.{ts,vue}"; a pattern without "/" matches file names at any depth. Files git ignores are left out. Lists at most ${MAX_FOUND} paths, sorted.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string' },
+        path: { type: 'string', description: 'Directory to look in, default ".".' },
+      },
+      required: ['pattern'],
+    },
+  },
+  async (args, workspace, ctx) => {
+    const { found, total, partial } = await findFiles(
+      workspace,
+      str(args, 'pattern'),
+      optionalStr(args, 'path') || '.',
+      ctx.signal,
+    )
+    if (!found.length)
+      return { content: partial ? 'No files found in the part looked at.' : 'No files found.' }
+    const notes = [
+      ...(total > found.length ? [`${total - found.length} more; narrow the pattern`] : []),
+      ...(partial ? ['the directory is large and was only looked at in part'] : []),
+    ]
+    return { content: found.join('\n') + (notes.length ? `\n[${notes.join('; ')}]` : '') }
   },
   { readOnly: true },
 )
@@ -332,7 +485,7 @@ export const outputName = () =>
 export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
   return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when your work is reported finished or you are stopped.`,
     parameters: {
       type: 'object',
       properties: {
@@ -340,8 +493,9 @@ export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'):
         cwd: { type: 'string', description: 'Relative to the workspace root.' },
         timeoutSeconds: {
           type: 'integer',
-          description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}.`,
+          description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}. Not for background commands.`,
         },
+        background: { type: 'boolean', description: 'Run it in the background.' },
       },
       required: ['command'],
     },
@@ -416,6 +570,39 @@ function commandGate(command: string, cwd: string, ctx: ToolContext): ToolResult
   }
 }
 
+/** How long run_command waits for a background command's first output before it answers. */
+const FIRST_OUTPUT_MS = 2000
+/** The longest read_command_output waits for something new. */
+const MAX_WAIT_SECONDS = 60
+
+/** The options a thread's command runs with: where, in what, with which environment. */
+function execOptions(ctx: ToolContext, cwd: string | undefined) {
+  return {
+    ...(cwd ? { cwd } : {}),
+    ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
+    ...(ctx.commands && Object.keys(ctx.commands.env).length ? { env: ctx.commands.env } : {}),
+  }
+}
+
+/** A background command's state and what it printed since the last look, as the model reads it. */
+function outputText(read: CommandOutput, max: number, how: 'started' | 'read' | 'stopped'): string {
+  const { command, text, missed } = read
+  const state = command.result
+    ? command.result.stopped
+      ? `${command.id} was stopped (exit code ${command.result.exitCode})`
+      : `${command.id} ended with exit code ${command.result.exitCode}`
+    : how === 'started'
+      ? `${command.id} runs in the background`
+      : `${command.id} is still running`
+  const lost = missed ? `[… ${missed} characters of output came and went unread …]\n` : ''
+  const body = text
+    ? headAndTail(text, max, 'read on with read_command_output for what comes next')
+    : how === 'started'
+      ? '(no output yet)'
+      : '(no new output)'
+  return `${state}.\n--- output${how === 'started' ? '' : ' since the last read'} ---\n${lost}${body}`
+}
+
 const runCommand: Tool = {
   spec: runCommandSpec(),
   async run(args, ctx) {
@@ -424,10 +611,35 @@ const runCommand: Tool = {
     const seconds = Math.min(limits.commandTimeoutMax, Math.max(1, asked))
     const cwd = optionalStr(args, 'cwd')
     const command = str(args, 'command')
+    const background = optionalBool(args, 'background')
     const gate = commandGate(command, cwd || '.', ctx)
     if (gate) return gate
     const workspace = await ctx.workspace()
-    // The user watches it run; the log gets its result once it ends.
+    try {
+      if (background) {
+        if (!ctx.background) {
+          return { content: 'Commands cannot run in the background here.', isError: true }
+        }
+        const started = ctx.background.start(ctx.conversationId, command, (options) =>
+          workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+        )
+        const first = await ctx.background.read(
+          ctx.conversationId,
+          started.id,
+          FIRST_OUTPUT_MS,
+          ctx.signal,
+        )
+        return {
+          content: first ? outputText(first, limits.commandOutput, 'started') : started.id,
+          isError: !!first?.command.result && first.command.result.exitCode !== 0,
+        }
+      }
+    } catch (error) {
+      if (error instanceof ToolInputError || error instanceof DomainError) throw error
+      return { content: error instanceof Error ? error.message : String(error), isError: true }
+    }
+    // The user watches a command the turn waits for; the log gets its result once it ends.
+    // One left in the background outlives the call and is not shown there.
     const live = ctx.app.live.start({
       projectId: ctx.projectId,
       conversationId: ctx.conversationId,
@@ -438,10 +650,8 @@ const runCommand: Tool = {
       const result = await workspace.exec(command, {
         timeoutMs: seconds * 1000,
         signal: ctx.signal,
-        onOutput: live.output,
-        ...(cwd ? { cwd } : {}),
-        ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
-        ...(ctx.commands && Object.keys(ctx.commands.env).length ? { env: ctx.commands.env } : {}),
+        onOutput: (chunk) => live.output(chunk),
+        ...execOptions(ctx, cwd),
       })
       return {
         content: await commandResult(result, workspace, outputName(), limits.commandOutput),
@@ -456,7 +666,70 @@ const runCommand: Tool = {
   },
 }
 
-export const workspaceTools: Tool[] = [listDir, readFile, writeFile, editFile, search, runCommand]
+/** Says which background commands there are, when the model named one that is not. */
+function unknownCommand(ctx: ToolContext, id: string): ToolResult {
+  const known = ctx.background?.list(ctx.conversationId) ?? []
+  return {
+    content: `You have no background command ${id}.${known.length ? ` Yours: ${known.map((c) => `${c.id} (${c.result ? 'ended' : 'running'}) ${c.command.slice(0, 80)}`).join('; ')}` : ''}`,
+    isError: true,
+  }
+}
+
+const readCommandOutput: Tool = {
+  spec: {
+    name: 'read_command_output',
+    description: `Read what a background command printed since you last read it, and whether it still runs. With "waitSeconds" (at most ${MAX_WAIT_SECONDS}) it waits until something new comes or the command ends.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'What run_command gave, e.g. "cmd-1".' },
+        waitSeconds: { type: 'integer' },
+      },
+      required: ['handle'],
+    },
+  },
+  async run(args, ctx) {
+    const id = str(args, 'handle')
+    const wait = Math.min(MAX_WAIT_SECONDS, Math.max(0, optionalInt(args, 'waitSeconds') ?? 0))
+    const read = await ctx.background?.read(ctx.conversationId, id, wait * 1000, ctx.signal)
+    if (!read) return unknownCommand(ctx, id)
+    const limits = ctx.limits ?? DEFAULT_LIMITS
+    return { content: outputText(read, limits.commandOutput, 'read') }
+  },
+}
+
+const stopCommand: Tool = {
+  spec: {
+    name: 'stop_command',
+    description:
+      'End a background command, and whatever it started; the result has what it printed since you last read it.',
+    parameters: {
+      type: 'object',
+      properties: { handle: { type: 'string' } },
+      required: ['handle'],
+    },
+  },
+  async run(args, ctx) {
+    const id = str(args, 'handle')
+    const stopped = await ctx.background?.stop(ctx.conversationId, id)
+    if (!stopped) return unknownCommand(ctx, id)
+    const read = await ctx.background!.read(ctx.conversationId, id)
+    const limits = ctx.limits ?? DEFAULT_LIMITS
+    return { content: read ? outputText(read, limits.commandOutput, 'stopped') : 'Stopped.' }
+  },
+}
+
+export const workspaceTools: Tool[] = [
+  listDir,
+  readFile,
+  findFilesTool,
+  writeFile,
+  editFile,
+  search,
+  runCommand,
+  readCommandOutput,
+  stopCommand,
+]
 
 const openSource = (ctx: ToolContext): Promise<SourceView> => {
   if (!ctx.source) return Promise.reject(new DomainError('error.noSource'))

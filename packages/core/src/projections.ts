@@ -779,6 +779,7 @@ export const conversationsProjection: Projection = {
           ],
         )
         break
+      case 'research.step':
       case 'conversation.compacted':
         db.run(
           `UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,

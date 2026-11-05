@@ -11,9 +11,9 @@ import {
 } from '@ariadne/daemon/protocol'
 import type { ExecResult } from '@ariadne/plugin-sdk'
 import {
-  clip,
   CONNECTION_FAILED,
   DEFAULT_TIMEOUT_MS,
+  OutputText,
   payload,
   type RemoteShell,
   type ShellRun,
@@ -73,10 +73,10 @@ export function pinnedCertificate(target: DaemonTarget, timeoutMs = 15_000): Pro
 }
 
 interface Pending {
-  stdout: Uint8Array[]
-  stderr: Uint8Array[]
-  /** Hears each stream's output as it comes; its own decoders keep split characters whole. */
-  onOutput?: (data: Uint8Array, stream: 'stdout' | 'stderr') => void
+  /** Takes each piece of output as it arrives: kept (bounded unless whole) and handed on. */
+  output: (data: Uint8Array, stream: 'stdout' | 'stderr') => void
+  /** The output so far, decoding what is left. */
+  text: (stream: 'stdout' | 'stderr') => string
   done: (result: { exitCode: number; failure?: string }) => void
 }
 
@@ -86,11 +86,30 @@ interface Link {
 }
 
 const encoder = new TextEncoder()
-const decoder = () => new TextDecoder()
 
-function joined(chunks: Uint8Array[]): string {
-  const text = decoder()
-  return chunks.map((chunk) => text.decode(chunk, { stream: true })).join('') + text.decode()
+/**
+ * Output kept as text, each stream decoded on its own as pieces arrive, bounded when the
+ * caller clips it (a background command may print for hours), and handed on as it comes
+ * when the caller asked to see it.
+ */
+function outputOf(options: ShellRun): Pick<Pending, 'output' | 'text'> {
+  const streams = {
+    stdout: { decoder: new TextDecoder(), kept: new OutputText(options.clip ?? false) },
+    stderr: { decoder: new TextDecoder(), kept: new OutputText(options.clip ?? false) },
+  }
+  return {
+    output: (data, stream) => {
+      const piece = streams[stream].decoder.decode(data, { stream: true })
+      streams[stream].kept.add(piece)
+      if (piece) options.onOutput?.(piece, stream)
+    },
+    text: (stream) => {
+      const rest = streams[stream].decoder.decode()
+      streams[stream].kept.add(rest)
+      if (rest) options.onOutput?.(rest, stream)
+      return streams[stream].kept.text()
+    },
+  }
 }
 
 /**
@@ -183,8 +202,7 @@ export class DaemonShell implements RemoteShell {
       const parsed = readFrame(new Uint8Array(event.data as ArrayBuffer), true)
       const run = parsed && link.runs.get(parsed.id)
       if (!run) return
-      ;(parsed.stream === STDOUT ? run.stdout : run.stderr).push(parsed.data.slice())
-      run.onOutput?.(parsed.data, parsed.stream === STDOUT ? 'stdout' : 'stderr')
+      run.output(parsed.data, parsed.stream === STDOUT ? 'stdout' : 'stderr')
     })
     ws.addEventListener('close', () => {
       if (this.current === link) {
@@ -228,17 +246,8 @@ export class DaemonShell implements RemoteShell {
     const finished = new Promise<{ exitCode: number; failure?: string; run: Pending }>(
       (resolve) => {
         const run: Pending = {
-          stdout: [],
-          stderr: [],
+          ...outputOf(options),
           done: (result) => resolve({ ...result, run }),
-        }
-        const listen = options.onOutput
-        if (listen) {
-          const decoders = { stdout: decoder(), stderr: decoder() }
-          run.onOutput = (data, stream) => {
-            const text = decoders[stream].decode(data, { stream: true })
-            if (text) listen(text, stream)
-          }
         }
         link.runs.set(id, run)
       },
@@ -260,11 +269,9 @@ export class DaemonShell implements RemoteShell {
     options.signal?.addEventListener('abort', end, { once: true })
     try {
       const { exitCode, failure, run } = await finished
-      const stdout = joined(run.stdout)
-      const stderr = joined(run.stderr) + (failure ? `daemon: ${failure}` : '')
-      return options.clip
-        ? { exitCode, stdout: clip(stdout), stderr: clip(stderr) }
-        : { exitCode, stdout, stderr }
+      const stdout = run.text('stdout')
+      const stderr = run.text('stderr') + (failure ? `daemon: ${failure}` : '')
+      return { exitCode, stdout, stderr }
     } finally {
       clearTimeout(timer)
       options.signal?.removeEventListener('abort', end)

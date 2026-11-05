@@ -610,16 +610,21 @@ export interface TraceToolCall extends ToolCallRecord {
   startedAt: number
   /** `null` while it runs, or when the turn ended before it did. */
   result: { content: string; isError: boolean; finishedAt: number; files: Attachment[] } | null
+  /** For a `research` call: the requests of the research it ran, in their own context. */
+  research?: TraceRequest[]
 }
 
 /** One request to a model: a step of the turn, or the summary of older history. */
 export interface TraceRequest {
   kind: 'request'
-  /** Its `turn.step` or `conversation.compacted` event, which its details are fetched by. */
+  /**
+   * Its `turn.step`, `conversation.compacted` or `research.step` event, which its details
+   * are fetched by.
+   */
   seq: number
-  /** Counted over the whole conversation, from 1. */
+  /** Counted over the whole conversation, from 1; a research's within the research. */
   number: number
-  purpose: 'step' | 'summary'
+  purpose: 'step' | 'summary' | 'research'
   provider: string | null
   model: string | null
   effort: 'low' | 'medium' | 'high' | null
