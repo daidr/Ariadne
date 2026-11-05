@@ -528,6 +528,7 @@ export const zhCN = {
   'trace.instructions': '读到仓库里的 {path}',
   'trace.instructionsChanged': '{path} 有改动，换成新内容',
   'trace.instructionsRemoved': '{path} 已删除',
+  'trace.instructionsUncommitted': '（未提交）',
   'trace.kind.compactionFailed': '摘要失败',
   'trace.kind.resultsCleared': '清理',
   'trace.resultsCleared': '较早的长工具结果换成了占位文字，给上下文腾出空间',

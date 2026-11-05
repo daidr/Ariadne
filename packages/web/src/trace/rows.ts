@@ -153,14 +153,15 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
             ...base(turn, key, item.at, item.at),
             kind: 'instructions',
             event: t('trace.kind.instructions'),
-            content: t(
-              item.removed
-                ? 'trace.instructionsRemoved'
-                : item.changed
-                  ? 'trace.instructionsChanged'
-                  : 'trace.instructions',
-              { path: item.path },
-            ),
+            content:
+              t(
+                item.removed
+                  ? 'trace.instructionsRemoved'
+                  : item.changed
+                    ? 'trace.instructionsChanged'
+                    : 'trace.instructions',
+                { path: item.path },
+              ) + (item.uncommitted ? t('trace.instructionsUncommitted') : ''),
           })
           break
       }

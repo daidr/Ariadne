@@ -202,6 +202,7 @@ export function buildTrace(
           path: event.data.path,
           changed: event.data.changed,
           removed: event.data.content === null,
+          uncommitted: event.data.uncommitted ?? false,
         })
         break
       case 'turn.finished':

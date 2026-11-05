@@ -554,6 +554,7 @@ export const en: Record<MessageKey, string> = {
   'trace.instructions': 'Read {path} from the repository',
   'trace.instructionsChanged': '{path} changed; using the new version',
   'trace.instructionsRemoved': '{path} was removed',
+  'trace.instructionsUncommitted': ' (not committed)',
   'trace.kind.compactionFailed': 'Summary failed',
   'trace.kind.resultsCleared': 'Cleared',
   'trace.resultsCleared': 'Older long tool results were replaced by a placeholder to make room',
