@@ -196,6 +196,13 @@ export const threadsProjection: Projection = {
           [event.at, event.data.verdict === 'pass', event.data.threadId],
         )
         break
+      case 'review.abandoned':
+        // As with a pass, the delivery goes to the user.
+        db.run(
+          'UPDATE threads SET reviewing = 0, review_delivered = 1, updated_at = ? WHERE id = ?',
+          [event.at, event.data.threadId],
+        )
+        break
       case 'thread.model_set':
         db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [
           event.data.model,
@@ -229,6 +236,10 @@ export const threadsProjection: Projection = {
           db.run('UPDATE threads SET review_delivered = 1, reviewing = 0 WHERE id = ?', [
             event.data.threadId,
           ])
+        }
+        // So does work that ends without changes: comments of its rounds wait for no answer.
+        if (event.data.report === 'done' || event.data.report === 'failed') {
+          db.run('UPDATE threads SET review_delivered = 1 WHERE id = ?', [event.data.threadId])
         }
         break
       case 'workspace.opened':
@@ -631,13 +642,19 @@ export const noticesProjection: Projection = {
         add(event.data.threadId, 'worktree-removed', { reason: event.data.reason })
         break
       case 'review.requested':
-      case 'review.submitted': {
+      case 'review.submitted':
+      case 'review.abandoned': {
         const { threadId, reviewerId, round } = event.data
         const payload = {
           threadId,
           reviewerId,
           round,
-          state: event.type === 'review.requested' ? 'started' : event.data.verdict,
+          state:
+            event.type === 'review.requested'
+              ? 'started'
+              : event.type === 'review.abandoned'
+                ? 'abandoned'
+                : event.data.verdict,
           count: event.type === 'review.submitted' ? event.data.comments.length : 0,
         }
         add(threadId, 'review', payload)
@@ -1190,9 +1207,11 @@ export const transcriptProjection: Projection = {
         )
         break
       }
-      case 'review.submitted': {
-        const { threadId, reviewerId, round, verdict, summary, comments } = event.data
-        if (verdict === 'changes') {
+      case 'review.submitted':
+      case 'review.abandoned': {
+        const { threadId, round } = event.data
+        if (event.type === 'review.submitted' && event.data.verdict === 'changes') {
+          const { reviewerId, summary, comments } = event.data
           addEntry(
             db,
             event,
@@ -1212,7 +1231,8 @@ export const transcriptProjection: Projection = {
           )
           break
         }
-        // Passed: the report held back for the review reaches the coordinator now.
+        // Passed, or left without a verdict: the report held back for the review reaches the
+        // coordinator now.
         const coordinator = coordinatorOf(db, event.projectId)
         const author = db
           .query<
@@ -1235,6 +1255,7 @@ export const transcriptProjection: Projection = {
               headline: author.last_headline ?? '',
               artifacts: JSON.parse(author.last_artifacts) as string[],
               reviewRounds: round,
+              ...(event.type === 'review.abandoned' ? { reviewAbandoned: true } : {}),
             },
           },
           true,
@@ -2164,7 +2185,6 @@ function applyComment(
   )
 }
 
-/** Model input stored once by its hash, see `prompt.recorded`. */
 /** Rounds of pre-delivery reviews, per author thread, with the author's answers. */
 export const reviewsProjection: Projection = {
   name: 'reviews',
@@ -2181,7 +2201,8 @@ export const reviewsProjection: Projection = {
       summary TEXT,
       comments TEXT NOT NULL DEFAULT '[]',
       replies TEXT,
-      submitted_at INTEGER
+      submitted_at INTEGER,
+      abandoned_at INTEGER
     )`)
     db.run('CREATE INDEX IF NOT EXISTS reviews_thread ON reviews (thread_id, id)')
   },
@@ -2220,6 +2241,12 @@ export const reviewsProjection: Projection = {
           ],
         )
         break
+      case 'review.abandoned':
+        db.run(`UPDATE reviews SET abandoned_at = ? WHERE ${latest} AND verdict IS NULL`, [
+          event.at,
+          event.data.threadId,
+        ])
+        break
       case 'review.replied':
         db.run(`UPDATE reviews SET replies = ? WHERE ${latest} AND replies IS NULL`, [
           JSON.stringify(event.data.replies),
@@ -2230,6 +2257,7 @@ export const reviewsProjection: Projection = {
   },
 }
 
+/** Model input stored once by its hash, see `prompt.recorded`. */
 export const promptsProjection: Projection = {
   name: 'prompts',
   setup(db) {

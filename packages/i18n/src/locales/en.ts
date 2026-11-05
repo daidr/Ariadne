@@ -771,6 +771,7 @@ export const en: Record<MessageKey, string> = {
   'review.reviewer': 'AI review',
   'review.noticeStarted': 'AI review round {round} started',
   'review.noticePass': 'AI review round {round} passed',
+  'review.noticeAbandoned': 'AI review round {round} ended without a verdict',
   'review.noticeChanges': 'AI review round {round} raised {count} problems',
   'review.openComments': 'View comments',
   'review.openReviewer': 'View review',

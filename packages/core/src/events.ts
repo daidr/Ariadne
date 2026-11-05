@@ -347,6 +347,11 @@ export interface EventMap {
     summary: string
     comments: ReviewComment[]
   }
+  /**
+   * The reviewer left the round without a verdict: its turn failed or ended without one, or
+   * it was stopped. The author's changes go to the user as they are, as with a pass.
+   */
+  'review.abandoned': { threadId: string; reviewerId: string; round: number }
   /** The author's answer to each comment of a round, made with its next `ready`. */
   'review.replied': { threadId: string; round: number; replies: ReviewReply[] }
   /**

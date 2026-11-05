@@ -58,6 +58,21 @@ describe('pre-delivery review', () => {
     })
   /** The reviewer's turn ends without a verdict. */
   const idleReviewer = () => handled(reviewerOf())
+  /** A turn of the conversation reads what waits for it, does `act`, and ends. */
+  const inTurn = (conversationId: string, act: () => void) => {
+    const turnId = app.startTurn(conversationId, 'm1')
+    act()
+    app.recordStep(conversationId, turnId, {
+      reasoning: [],
+      text: '',
+      toolCalls: [],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    app.finishTurn(conversationId, turnId, 'completed')
+  }
   /** A turn of the conversation reads what waits for it, and ends. */
   const handled = (conversationId: string) => {
     const turnId = app.startTurn(conversationId, 'm1')
@@ -97,8 +112,7 @@ describe('pre-delivery review', () => {
 
   test('a pass hands the changes to the user and tells the coordinator', () => {
     ready()
-    handled(reviewerOf())
-    verdict('pass')
+    inTurn(reviewerOf(), () => verdict('pass'))
     const author = app.getThread(authorId)
     expect(author.stage).toBe('review')
     expect(author.review).toMatchObject({ rounds: 1, reviewing: false })
@@ -183,16 +197,76 @@ describe('pre-delivery review', () => {
     expect(app.getThread(authorId).review).toMatchObject({ rounds: 1, reviewing: true })
   })
 
-  test('a reviewer that stops without a verdict hands the changes to the user', () => {
+  test('a reviewer that ends its turn without a verdict lets the round go, as a pass', () => {
     ready()
     idleReviewer()
     const author = app.getThread(authorId)
     expect(author.stage).toBe('review')
     expect(author.review?.reviewing).toBe(false)
-    // The reviewer itself is not something the user has to deal with.
+    expect(app.listReviews(authorId).at(-1)).toMatchObject({ verdict: null, abandoned: true })
+    // The coordinator hears of the changes, as after a pass.
+    expect(notes(coordinatorId).filter((n) => n.type === 'report')).toEqual([
+      expect.objectContaining({
+        threadId: authorId,
+        report: 'ready',
+        reviewRounds: 1,
+        reviewAbandoned: true,
+      }),
+    ])
+    expect(app.listNotices(authorId).map((n) => n.kind === 'review' && n.state)).toEqual([
+      'started',
+      'abandoned',
+    ])
+    // The reviewer waits for the next round; a late verdict is refused.
+    expect(app.getThread(reviewerOf()).stage).toBe('idle')
+    expect(() => verdict('pass')).toThrow(DomainError)
+    // The user is not asked about the reviewer itself.
     expect(
       app.listNeedsMe(projectId).map((item) => (item.kind === 'thread' ? item.thread.id : null)),
     ).toEqual([authorId])
+    // The next delivery is reviewed again, from the first round.
+    app.postMessage(projectId, { conversationId: authorId, author: 'user', content: '还要改' })
+    expect(ready().review).toMatchObject({ rounds: 1, reviewing: true })
+  })
+
+  test('a reviewer whose turn fails or cannot start lets the round go', () => {
+    ready()
+    const turnId = app.startTurn(reviewerOf(), 'm1')
+    app.finishTurn(reviewerOf(), turnId, 'failed', { key: 'error.noModel' })
+    expect(app.getThread(authorId).stage).toBe('review')
+    app.postMessage(projectId, { conversationId: authorId, author: 'user', content: '再改改' })
+    handled(authorId)
+    ready()
+    app.failBeforeTurn(reviewerOf(), null)
+    expect(app.getThread(authorId).stage).toBe('review')
+    expect(notes(coordinatorId).filter((n) => n.type === 'report')).toHaveLength(2)
+  })
+
+  test('an interrupted reviewer keeps the round; a stopped one lets it go and reviews no more', () => {
+    ready()
+    const turnId = app.startTurn(reviewerOf(), 'm1')
+    app.finishTurn(reviewerOf(), turnId, 'interrupted')
+    expect(app.getThread(authorId).review?.reviewing).toBe(true)
+    app.stopThread(reviewerOf(), { reason: '不用审了', by: 'user' })
+    expect(app.getThread(authorId).stage).toBe('review')
+    expect(notes(coordinatorId).filter((n) => n.type === 'report')).toHaveLength(1)
+    // While it stays stopped, deliveries go straight to the user.
+    app.postMessage(projectId, { conversationId: authorId, author: 'user', content: '还要改' })
+    handled(authorId)
+    const author = ready()
+    expect(author.stage).toBe('review')
+    expect(author.review?.reviewing).toBe(false)
+    expect(app.listReviews(authorId)).toHaveLength(1)
+  })
+
+  test('work that ends without changes leaves its comments unanswered', () => {
+    ready()
+    verdict('changes', [comment(3)])
+    app.reportThread(authorId, { kind: 'done', summary: '不改了', headline: '不改了' })
+    expect(app.openReviewRound(authorId)).toBeNull()
+    // Later changes start a delivery of their own, without the old comments.
+    app.postMessage(projectId, { conversationId: authorId, author: 'user', content: '换个做法' })
+    expect(ready().review).toMatchObject({ rounds: 1, reviewing: true })
   })
 
   test('without review, or without changes to review, a ready goes straight to the user', () => {

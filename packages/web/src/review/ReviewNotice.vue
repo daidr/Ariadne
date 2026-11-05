@@ -16,6 +16,7 @@ const text = computed(() => {
   const { round, state, count } = props.notice
   if (state === 'started') return t('review.noticeStarted', { round })
   if (state === 'pass') return t('review.noticePass', { round })
+  if (state === 'abandoned') return t('review.noticeAbandoned', { round })
   return t('review.noticeChanges', { round, count })
 })
 </script>

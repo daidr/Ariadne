@@ -739,6 +739,7 @@ export const zhCN = {
   'review.reviewer': 'AI 审阅',
   'review.noticeStarted': '第 {round} 轮 AI 审阅开始',
   'review.noticePass': '第 {round} 轮 AI 审阅通过',
+  'review.noticeAbandoned': '第 {round} 轮 AI 审阅没有给出结论',
   'review.noticeChanges': '第 {round} 轮 AI 审阅提了 {count} 个问题',
   'review.openComments': '看批注',
   'review.openReviewer': '看审阅',

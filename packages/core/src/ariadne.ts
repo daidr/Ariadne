@@ -219,6 +219,7 @@ interface ReviewRow {
   comments: string
   replies: string | null
   submitted_at: number | null
+  abandoned_at: number | null
 }
 
 const toReviewRound = (row: ReviewRow): ReviewRoundView => ({
@@ -228,6 +229,7 @@ const toReviewRound = (row: ReviewRow): ReviewRoundView => ({
   head: row.head,
   requestedAt: row.requested_at,
   verdict: row.verdict,
+  abandoned: row.abandoned_at !== null,
   summary: row.summary,
   comments: JSON.parse(row.comments) as ReviewComment[],
   replies: row.replies ? (JSON.parse(row.replies) as ReviewReply[]) : null,
@@ -445,7 +447,6 @@ interface ThreadRow {
   review_rounds: number
   reviewing: number
   /** The reviewing thread is held, or idle with nothing to do: it will not finish the round. */
-  reviewer_stuck: number | null
   created_at: number
   updated_at: number
   open_attentions: number
@@ -530,10 +531,7 @@ const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.i
 ) AS report_artifacts, (
   SELECT count(*) FROM attentions a WHERE a.closed = 0 AND (a.thread_id = t.id OR EXISTS (
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
-) AS open_attentions, (
-  SELECT rt.stopped_reason IS NOT NULL OR (rc.turn_id IS NULL AND rc.pending_seq = 0)
-  FROM threads rt JOIN conversations rc ON rc.id = rt.id WHERE rt.id = t.reviewer_id
-) AS reviewer_stuck FROM threads t LEFT JOIN conversations c ON c.id = t.id
+) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id
   LEFT JOIN todos td ON td.conversation_id = t.id`
 
 /** How many of its todos are done, out of how many; `null` while it has none. */
@@ -546,7 +544,7 @@ function progressOf(items: string | null): ThreadView['progress'] {
 function toThread(row: ThreadRow): ThreadView {
   const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
   const pullRequest = row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null
-  const underReview = row.reviewing === 1 && row.reviewer_stuck !== 1
+  const underReview = row.reviewing === 1
   return {
     id: row.id,
     projectId: row.project_id,
@@ -567,6 +565,7 @@ function toThread(row: ThreadRow): ThreadView {
         pullRequest?.state === 'merged',
       reviewed: row.reviewed_at !== null && row.reviewed_at >= (row.reported_at ?? 0),
       underReview,
+      reviewer: row.review_of !== null,
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -1729,6 +1728,8 @@ export class Ariadne {
         projectId: thread.projectId,
         data: { threadId, reason, by: input.by },
       },
+      // A stopped reviewer lets the round under way go.
+      ...(thread.stopped ? [] : this.abandonedReview(threadId)),
     ])
     return this.getThread(threadId)
   }
@@ -1858,7 +1859,9 @@ export class Ariadne {
     const rounds = row && row.review_delivered === 0 ? row.review_rounds : 0
     if (row?.reviewing === 1 && thread.review?.reviewing) return { reviewing: true, round: rounds }
     const enabled = this.getProject(thread.projectId).settings.review.enabled
-    if (reviewable && enabled && rounds < MAX_REVIEW_ROUNDS) {
+    // A reviewer someone stopped reviews nothing more until it is resumed.
+    const reviewer = thread.review ? this.getThread(thread.review.reviewerId) : null
+    if (reviewable && enabled && !reviewer?.stopped && rounds < MAX_REVIEW_ROUNDS) {
       return { reviewing: true, round: rounds + 1 }
     }
     return { reviewing: false, round: rounds }
@@ -1866,8 +1869,42 @@ export class Ariadne {
 
   /** The thread's newest review round, when it asked for changes the author has not answered. */
   openReviewRound(threadId: string): ReviewRoundView | null {
+    // A delivery that ended (reached the user, or the thread reported done or failed)
+    // leaves its comments behind.
+    const delivered = this.db
+      .query<{ review_delivered: number }, [string]>(
+        'SELECT review_delivered FROM threads WHERE id = ?',
+      )
+      .get(threadId)?.review_delivered
+    if (delivered !== 0) return null
     const latest = this.listReviews(threadId).at(-1)
     return latest?.verdict === 'changes' && latest.replies === null ? latest : null
+  }
+
+  /**
+   * `review.abandoned` for the round a reviewer leaves without a verdict, if it reviews one;
+   * none for other conversations.
+   */
+  private abandonedReview(conversationId: string): AnyNewEvent[] {
+    const row = this.db
+      .query<{ review_of: string | null; project_id: string }, [string]>(
+        'SELECT review_of, project_id FROM threads WHERE id = ?',
+      )
+      .get(conversationId)
+    if (!row?.review_of) return []
+    const author = this.db
+      .query<{ reviewing: number }, [string]>('SELECT reviewing FROM threads WHERE id = ?')
+      .get(row.review_of)
+    const round = this.listReviews(row.review_of).at(-1)
+    if (author?.reviewing !== 1 || !round || round.verdict !== null || round.abandoned) return []
+    if (round.reviewerId !== conversationId) return []
+    return [
+      {
+        type: 'review.abandoned',
+        projectId: row.project_id,
+        data: { threadId: row.review_of, reviewerId: conversationId, round: round.round },
+      },
+    ]
   }
 
   /** The review rounds of a thread's changes, oldest first; a reviewer gives its author's. */
@@ -1893,7 +1930,7 @@ export class Ariadne {
     const authorId = reviewer.reviewOf
     if (!authorId) throw new DomainError('error.notReviewer')
     const round = this.listReviews(authorId).at(-1)
-    if (!round || round.verdict !== null || round.reviewerId !== reviewerId) {
+    if (!round || round.verdict !== null || round.abandoned || round.reviewerId !== reviewerId) {
       throw new DomainError('error.noReviewRound')
     }
     const summary = input.summary.trim()
@@ -3503,6 +3540,12 @@ export class Ariadne {
       })),
       { type: 'turn.finished', projectId, data: { conversationId, turnId, outcome, error } },
     ])
+    // A reviewer that ends its turn without a verdict, with nothing more to read, has left
+    // the round; an interrupted turn resumes on the next start.
+    if (outcome === 'interrupted') return
+    if (outcome === 'completed' && this.getConversation(conversationId).pendingSeq > 0) return
+    const abandoned = this.abandonedReview(conversationId)
+    if (abandoned.length) this.store.append(abandoned)
   }
 
   /**
@@ -3560,6 +3603,7 @@ export class Ariadne {
         projectId,
         data: { conversationId, turnId, outcome: 'failed', error: localized },
       },
+      ...this.abandonedReview(conversationId),
     ])
   }
 

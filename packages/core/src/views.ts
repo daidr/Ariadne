@@ -124,8 +124,10 @@ export interface ReviewRoundView {
   /** The branch's newest commit the round was asked for at. */
   head: string | null
   requestedAt: number
-  /** `null` while the round is under way. */
+  /** `null` while the round is under way, and after it was abandoned. */
   verdict: ReviewVerdict | null
+  /** The reviewer left without a verdict, see `review.abandoned`. */
+  abandoned: boolean
   summary: string | null
   comments: ReviewComment[]
   /** The author's answers, by comment number; `null` until it reported again. */
@@ -265,7 +267,7 @@ export type NoticeView = {
       threadId: string
       reviewerId: string
       round: number
-      state: 'started' | ReviewVerdict
+      state: 'started' | ReviewVerdict | 'abandoned'
       count: number
     }
   /** What a turn changed in the thread's workspace, shown under its reply. */
@@ -414,6 +416,8 @@ export type TranscriptNote =
       artifacts: string[]
       /** Review rounds the changes went through before this reached the coordinator. */
       reviewRounds?: number
+      /** The last round ended without a verdict. */
+      reviewAbandoned?: boolean
     }
   | {
       /** For a reviewing thread: the author's changes wait for round `round`. */

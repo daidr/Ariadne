@@ -57,7 +57,7 @@ export function localTime(ms: number): string {
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
   switch (note.type) {
     case 'report':
-      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}"${note.reviewRounds ? ` review_rounds="${note.reviewRounds}"` : ''}>\nfor the user: ${note.headline}\n${note.artifacts.length ? `artifacts: ${note.artifacts.join(', ')}\n` : ''}${note.summary}${note.reviewRounds ? `\n(Another thread reviewed these changes in ${note.reviewRounds} round(s) before they reached you; the user sees the comments and answers in the changes view.)` : ''}\n</thread_report>`
+      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}"${note.reviewRounds ? ` review_rounds="${note.reviewRounds}"` : ''}>\nfor the user: ${note.headline}\n${note.artifacts.length ? `artifacts: ${note.artifacts.join(', ')}\n` : ''}${note.summary}${note.reviewRounds ? `\n(Another thread reviewed these changes in ${note.reviewRounds} round(s) before they reached you${note.reviewAbandoned ? ', but its last round ended without a verdict' : ''}; the user sees the comments and answers in the changes view.)` : ''}\n</thread_report>`
     case 'review-requested': {
       const previous = note.previous
         ? `\nYour comments of the last round, and what the author did:\n${reviewLines(note.previous.comments, note.previous.replies)}\n`

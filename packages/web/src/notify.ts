@@ -68,8 +68,20 @@ function reasonOf(
       // Passed: the changes the review held back are the user's to look at now.
       if (event.data.verdict !== 'pass') return null
       return { threadId: event.data.threadId, title: t('notify.review'), body: event.data.summary }
+    case 'review.abandoned': {
+      // Left without a verdict: the changes go to the user as they are.
+      const { threadId } = event.data
+      const author = state.detail?.threads.find((thread) => thread.id === threadId)
+      return { threadId, title: t('notify.review'), body: author?.lastHeadline ?? '' }
+    }
     case 'turn.finished':
       if (event.data.outcome !== 'failed') return null
+      // A reviewer's failure lets its round go, which notifies by itself.
+      if (
+        state.detail?.threads.some((one) => one.id === event.data.conversationId && one.reviewOf)
+      ) {
+        return null
+      }
       return {
         threadId: event.data.conversationId === coordinatorId ? null : event.data.conversationId,
         title: t('notify.failed'),

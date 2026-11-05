@@ -27,9 +27,11 @@ export interface StageFacts {
   reviewed?: boolean
   /**
    * What it reported `ready` is being reviewed by another thread first, which is still
-   * at it. Once that thread stops or gives up, the changes go to the user as they are.
+   * at it. Once it gives a verdict or leaves the round (`review.abandoned`), it is not.
    */
   underReview?: boolean
+  /** A reviewing thread: between rounds it waits for the next, it never works on its own. */
+  reviewer?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
@@ -49,7 +51,7 @@ export function threadStage(facts: StageFacts): ThreadStage {
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
   if (facts.lastReport === 'done') return 'done'
   if (!facts.started) return 'queued'
-  if (facts.lastReport === 'waiting') return 'idle'
+  if (facts.lastReport === 'waiting' || facts.reviewer) return 'idle'
   return 'working'
 }
 

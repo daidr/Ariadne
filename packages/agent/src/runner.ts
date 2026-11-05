@@ -296,7 +296,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? await mcpTools(
           options.mcp,
           app.getProject(conversation.projectId).mcp,
-          conversation.role,
+          // A reviewer changes nothing: like the coordinator, it gets the read-only ones.
+          reviewOf ? 'coordinator' : conversation.role,
           signal,
         )
       : []
