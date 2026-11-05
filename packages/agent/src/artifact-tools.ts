@@ -383,7 +383,9 @@ const refreshDashboardTool: Tool = {
         signal: ctx.signal,
       },
     )
-    return json({ artifactId, version: artifact.version })
+    // the fetched data may have changed shape, so the widgets are checked against it again
+    const content = JSON.parse(artifact.content) as DashboardContent
+    return json({ artifactId, version: artifact.version, ...dashboardProblemsOf(content) })
   },
 }
 
