@@ -435,9 +435,10 @@ export function commentsText(comments: readonly LineComment[]): string {
   const items = comments.map((comment) => {
     const quote = comment.quote.trim() ? ` \`${comment.quote.trim().replaceAll('`', "'")}\`` : ''
     const body = comment.body.replaceAll('\n', '\n  ')
-    return `- ${comment.path}:${comment.line}${quote}\n  ${body}`
+    const before = comment.side === 'original' ? ' (before your changes)' : ''
+    return `- ${comment.path}:${comment.line}${before}${quote}\n  ${body}`
   })
-  return `<line_comments>\nThe user commented on lines of your changes (file:line as the changes view showed it, that line's text, then the comment). Line numbers may have moved since; find the line by its text.\n${items.join('\n')}\n</line_comments>`
+  return `<line_comments>\nThe user commented on lines of your changes (file:line as the changes view showed it, that line's text, then the comment). A line marked "before your changes" is from the file as it was, often one you removed or rewrote. Line numbers may have moved since; find the line by its text.\n${items.join('\n')}\n</line_comments>`
 }
 
 /** What the user pointed at with `@`, so the model knows which thread, artifact or file. */

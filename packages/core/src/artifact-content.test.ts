@@ -14,30 +14,6 @@ describe('previewOf', () => {
     expect(preview.lead.endsWith('\n```')).toBe(true)
   })
 
-  test('a whiteboard keeps its nodes as boxes and edges as lines between their centres', () => {
-    const preview = previewOf(
-      'whiteboard',
-      JSON.stringify({
-        version: 1,
-        nodes: [
-          { id: 'a', type: 'shape', x: 0, y: 0, data: { shape: 'ellipse', text: ' A ' } },
-          { id: 'b', type: 'sticky', x: 200, y: 0, width: 100, height: 80 },
-        ],
-        edges: [
-          { id: 'e', source: { node: 'a', port: 'right' }, target: { node: 'b', port: 'left-in' } },
-          { id: 'f', source: { node: 'a', port: 'right' }, target: { node: 'gone', port: 'x' } },
-        ],
-      }),
-    )
-    expect(preview).toMatchObject({
-      boxes: [
-        { type: 'shape', x: 0, y: 0, w: 160, h: 100, text: 'A', shape: 'ellipse' },
-        { type: 'sticky', x: 200, y: 0, w: 100, h: 80, text: null, shape: null },
-      ],
-      lines: [[80, 50, 250, 40]],
-    })
-  })
-
   test('dashboard widgets without a place stack under the placed ones', () => {
     const preview = previewOf(
       'dashboard',

@@ -1,8 +1,8 @@
 import type { ReviewComment, ReviewReply, ReviewRoundView } from '@ariadne/core'
-import { defineCodeExtension, type CodeExtension } from '@dou-ui/code'
+import type { CodeDiffGutter, CodeDiffWidget } from '@dou-ui/code'
 import { ScanSearchIcon } from '@dou-ui/icons'
 import type { CommentAuthor, CommentThread } from 'dou-ui'
-import { h } from 'vue'
+import { computed, h, type ComputedRef } from 'vue'
 import { t } from '../i18n'
 import { state } from '../store'
 import ReviewCommentWidget from './ReviewCommentWidget.vue'
@@ -80,14 +80,17 @@ export function noteThread(note: ReviewNote, author: CommentAuthor): CommentThre
   }
 }
 
-/** The line comments of a thread's reviews, under the lines of the file shown in the diff. */
+/**
+ * The line comments of a thread's reviews, under the lines of the changed version of the
+ * file shown in the diff.
+ */
 export function useReviewComments(
   authorId: () => string,
   notes: () => ReviewNote[],
   path: () => string | null,
   text: () => string | null,
-): CodeExtension {
-  const placed = () => {
+): { gutter: ComputedRef<CodeDiffGutter>; widgets: ComputedRef<CodeDiffWidget[]> } {
+  const placed = computed(() => {
     const file = path()
     const lines = (text() ?? '').split('\n')
     const byLine = new Map<number, ReviewNote[]>()
@@ -97,42 +100,40 @@ export function useReviewComments(
       if (line !== null) byLine.set(line, [...(byLine.get(line) ?? []), note])
     }
     return byLine
-  }
+  })
   const authorOf = (): CommentAuthor => ({
     id: authorId(),
     name: state.detail?.threads.find((thread) => thread.id === authorId())?.title ?? '',
   })
-  return defineCodeExtension({
+  const gutter = computed<CodeDiffGutter>(() => ({
     name: 'review-comments',
-    gutters: [
-      {
-        name: 'review-comments',
-        width: 18,
-        markers: () =>
-          [...placed().keys()].map((line) => ({
-            line,
-            icon: ScanSearchIcon,
-            class: 'review-comment-mark',
-            title: t('review.commented'),
+    width: 18,
+    markers: [...placed.value.keys()].map((line) => ({
+      side: 'modified' as const,
+      line,
+      icon: ScanSearchIcon,
+      class: 'review-comment-mark',
+      title: t('review.commented'),
+    })),
+  }))
+  const widgets = computed<CodeDiffWidget[]>(() =>
+    [...placed.value].map(([line, list]) => ({
+      id: `review-${line}`,
+      side: 'modified' as const,
+      line,
+      height: 140 * list.length,
+      label: t('review.commentOn', { line }),
+      render: () =>
+        h(ReviewCommentWidget, {
+          threads: list.map((note) => ({
+            thread: noteThread(note, authorOf()),
+            label: t('review.commentLabel', {
+              round: note.round.round,
+              kind: t(`review.kind.${note.comment.kind}`),
+            }),
           })),
-      },
-    ],
-    widgets: () =>
-      [...placed()].map(([line, list]) => ({
-        id: `review-${line}`,
-        line,
-        height: 140 * list.length,
-        label: t('review.commentOn', { line }),
-        render: () =>
-          h(ReviewCommentWidget, {
-            threads: list.map((note) => ({
-              thread: noteThread(note, authorOf()),
-              label: t('review.commentLabel', {
-                round: note.round.round,
-                kind: t(`review.kind.${note.comment.kind}`),
-              }),
-            })),
-          }),
-      })),
-  })
+        }),
+    })),
+  )
+  return { gutter, widgets }
 }

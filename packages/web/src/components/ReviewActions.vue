@@ -13,7 +13,7 @@ const props = defineProps<{ threadId: string }>()
 </script>
 
 <template>
-  <span class="review-actions" @click.stop @keydown.stop>
+  <span class="review-actions">
     <DouButton size="sm" variant="ghost" @click="reviewThread(props.threadId)">
       <template #leading><CheckIcon /></template>
       {{ t('thread.reviewed') }}

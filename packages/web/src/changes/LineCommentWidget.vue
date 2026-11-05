@@ -16,6 +16,7 @@ const me = commentAuthor('user')
       :author="me"
       :placeholder="t('changes.commentPlaceholder')"
       :autofocus="!thread"
+      :resolvable="false"
       @action="(action: CommentAction) => emit('action', action)"
       @cancel="emit('cancel')"
     />

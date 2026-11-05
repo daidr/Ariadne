@@ -31,8 +31,8 @@ function editedAt(at: number): string {
     :class="{ 'artifact-card-current': current }"
     :aria-current="current ? 'page' : undefined"
   >
-    <ArtifactThumb :preview="artifact.preview" />
-    <div class="card-info">
+    <ArtifactThumb :artifact="artifact" />
+    <span class="card-info">
       <DouAvatar shape="square" :size="36" class="card-icon" :class="`card-icon-${artifact.kind}`">
         <component :is="kindIcon[artifact.kind]" />
       </DouAvatar>
@@ -42,7 +42,7 @@ function editedAt(at: number): string {
           {{ editedAt(artifact.updatedAt) }}
         </DouText>
       </span>
-    </div>
+    </span>
   </DouCard>
 </template>
 
@@ -52,10 +52,6 @@ function editedAt(at: number): string {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  /* DouCard as a button keeps the browser's button padding, font and centring. */
-  padding: 0;
-  text-align: left;
-  font: inherit;
 }
 
 .card-info {

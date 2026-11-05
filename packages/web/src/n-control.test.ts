@@ -51,6 +51,17 @@ describe('line comment drafts', () => {
     expect(left.map((d) => d.id)).toEqual(['b', 'c'])
   })
 
+  test('a line of the old version is its own card, apart from the same line number now', () => {
+    const before = { ...at, side: 'original' as const }
+    const drafts = [draft('a'), draft('b', { side: 'original' })]
+    const left = applyDraftAction(drafts, before, { type: 'remove', threadId: 'x' })
+    expect(left.map((d) => d.id)).toEqual(['a'])
+    expect(sendable(drafts)).toEqual([
+      { path: 'src/a.ts', line: 3, quote: 'const a = 1', body: 'b', side: 'original' },
+      { path: 'src/a.ts', line: 3, quote: 'const a = 1', body: 'a' },
+    ])
+  })
+
   test('go out in file and line order, without their draft ids', () => {
     const drafts = [draft('a', { line: 9 }), draft('b', { path: 'a.ts', line: 1 }), draft('c')]
     expect(sendable(drafts)).toEqual([

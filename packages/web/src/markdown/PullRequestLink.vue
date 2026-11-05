@@ -54,13 +54,7 @@ const tones: Record<State, TagTone> = {
 
 <template>
   <DouPopover trigger="hover" placement="top" :width="380" :show-delay="300" @update:open="load">
-    <DouLink
-      :href="href"
-      target="_blank"
-      rel="noopener noreferrer"
-      underline="none"
-      class="pr-link"
-    >
+    <DouLink :href="href" target="_blank" rel="noopener noreferrer" variant="soft">
       <template #leading><component :is="state ? icons[state] : GitPullRequestIcon" /></template>
       <component :is="children" v-if="children" />
       <template v-else>{{ label }}</template>
@@ -104,12 +98,6 @@ const tones: Record<State, TagTone> = {
 </template>
 
 <style scoped>
-.pr-link {
-  padding-inline: 4px;
-  border-radius: 4px;
-  background: var(--dou-color-bg-muted);
-  text-decoration: none;
-}
 .pr-card {
   display: flex;
   flex-direction: column;

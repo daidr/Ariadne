@@ -87,6 +87,8 @@ export interface LineComment {
   line: number
   quote: string
   body: string
+  /** On the file as it was before the changes; absent for the changed version. */
+  side?: 'original'
 }
 
 /** What a review comment is about: the only things a pre-delivery review reports. */

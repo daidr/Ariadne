@@ -6,18 +6,20 @@ defineProps<{ src: string; alt: string; title?: string | undefined }>()
 </script>
 
 <template>
-  <DouImage :src="src" :alt="alt" :title="title" preview lazy fit="contain" class="message-image" />
+  <DouImage
+    :src="src"
+    :alt="alt"
+    :title="title"
+    :max-height="320"
+    preview
+    lazy
+    class="message-image"
+  />
 </template>
 
 <style scoped>
 .message-image {
   display: block;
-  max-width: 100%;
-  max-height: 320px;
   margin-block: 4px;
-}
-.message-image :deep(img) {
-  max-width: 100%;
-  max-height: 320px;
 }
 </style>

@@ -1,8 +1,13 @@
 import type { LineComment } from '@ariadne/core'
-import { defineCodeExtension, type CodeExtension } from '@dou-ui/code'
+import type {
+  CodeDiffGutter,
+  CodeDiffGutterMarker,
+  CodeDiffSide,
+  CodeDiffWidget,
+} from '@dou-ui/code'
 import { MessageIcon, PlusIcon } from '@dou-ui/icons'
 import type { CommentAction, CommentThread } from 'dou-ui'
-import { h, ref, type Ref } from 'vue'
+import { computed, h, ref, watch, type ComputedRef } from 'vue'
 import { commentAuthor } from '../artifacts/comment-threads'
 import { t } from '../i18n'
 import { state } from '../store'
@@ -28,9 +33,13 @@ function setDrafts(threadId: string, drafts: DraftComment[]) {
 }
 
 /** One line's comments as one comment card. */
-export function lineThread(path: string, line: number, comments: DraftComment[]): CommentThread {
+export function lineThread(
+  path: string,
+  spot: CommentSpot,
+  comments: DraftComment[],
+): CommentThread {
   return {
-    id: `${path}:${line}`,
+    id: `${path}:${spotKey(spot)}`,
     comments: comments.map((comment) => ({
       id: comment.id,
       author: commentAuthor('user'),
@@ -43,15 +52,17 @@ export function lineThread(path: string, line: number, comments: DraftComment[])
 /**
  * What a card's action does to the drafts: a first comment or a reply adds one on the
  * line, an edit changes one, a delete removes one, and removing the card drops the
- * line's comments. Resolving changes nothing: its ✓ reads as "done writing", and a draft
- * lost to it could not be had back.
+ * line's comments. Drafts have no resolved state; the card offers no way to resolve one.
  */
 export function applyDraftAction(
   drafts: readonly DraftComment[],
-  at: { path: string; line: number; quote: string },
+  at: Omit<LineComment, 'body'>,
   action: CommentAction,
 ): DraftComment[] {
-  const onLine = (comment: DraftComment) => comment.path === at.path && comment.line === at.line
+  const onLine = (comment: DraftComment) =>
+    comment.path === at.path &&
+    comment.line === at.line &&
+    sideOf(comment) === (at.side ?? 'modified')
   switch (action.type) {
     case 'create':
     case 'reply': {
@@ -79,79 +90,118 @@ export function applyDraftAction(
 /** The comments as the thread reads them: in file order, then line order. */
 export function sendable(drafts: readonly DraftComment[]): LineComment[] {
   return drafts
-    .toSorted((a, b) => a.path.localeCompare(b.path) || a.line - b.line)
-    .map(({ path, line, quote, body }) => ({ path, line, quote, body }))
+    .toSorted(
+      (a, b) =>
+        a.path.localeCompare(b.path) ||
+        (a.side === b.side ? 0 : a.side ? -1 : 1) ||
+        a.line - b.line,
+    )
+    .map(({ path, line, quote, body, side }) => ({
+      path,
+      line,
+      quote,
+      body,
+      ...(side ? { side } : {}),
+    }))
 }
 
+/** Where a comment sits: the side of the diff and the line on it. */
+export interface CommentSpot {
+  side: CodeDiffSide
+  line: number
+}
+
+const sideOf = (comment: LineComment): CodeDiffSide => comment.side ?? 'modified'
+const spotKey = (spot: CommentSpot) => `${spot.side}:${spot.line}`
+
 /**
- * Comments on the lines of a file's new version in the diff: a press beside a line
- * starts one under it, and the line's comments show there until they are sent.
+ * Comments on the lines of a file in the diff, on either side: a press beside a line
+ * starts one under it, and the line's comments show there until they are sent. A plus
+ * shows beside the line under the pointer.
  */
 export function useLineComments(
   threadId: () => string,
   path: () => string | null,
-  text: () => string | null,
-): { extension: CodeExtension; drafting: Ref<number | null> } {
-  const drafting = ref<number | null>(null)
-  const quoteOf = (line: number) => (text() ?? '').split('\n')[line - 1] ?? ''
+  texts: () => { original: string; modified: string } | null,
+): { gutter: ComputedRef<CodeDiffGutter>; widgets: ComputedRef<CodeDiffWidget[]> } {
+  const drafting = ref<CommentSpot | null>(null)
+  const linesOf = (side: CodeDiffSide) => (texts()?.[side] ?? '').split('\n')
   const forFile = () => draftsOf(threadId()).filter((comment) => comment.path === path())
-  const act = (line: number, action: CommentAction) => {
+  const act = (spot: CommentSpot, action: CommentAction) => {
     const file = path()
     if (!file) return
-    setDrafts(
-      threadId(),
-      applyDraftAction(draftsOf(threadId()), { path: file, line, quote: quoteOf(line) }, action),
-    )
+    const quote = linesOf(spot.side)[spot.line - 1] ?? ''
+    const at = {
+      path: file,
+      line: spot.line,
+      quote,
+      ...(spot.side === 'original' ? { side: 'original' as const } : {}),
+    }
+    setDrafts(threadId(), applyDraftAction(draftsOf(threadId()), at, action))
     if (action.type === 'create') drafting.value = null
   }
-  const extension = defineCodeExtension({
-    name: 'line-comments',
-    gutters: [
-      {
-        name: 'line-comments',
-        width: 18,
-        markers: (editor) => {
-          const commented = new Set(forFile().map((comment) => comment.line))
-          const markers = []
-          for (let line = editor.visible.from; line <= editor.visible.to; line++) {
-            markers.push(
-              commented.has(line)
-                ? {
-                    line,
-                    icon: MessageIcon,
-                    class: 'line-comment-mark',
-                    title: t('changes.commented'),
-                  }
-                : { line, icon: PlusIcon, class: 'line-comment-add', title: t('changes.comment') },
-            )
-          }
-          return markers
-        },
-        onPress: (line) => {
-          if (!forFile().some((comment) => comment.line === line)) drafting.value = line
-        },
-      },
-    ],
-    widgets: () => {
-      const byLine = new Map<number, DraftComment[]>()
-      for (const comment of forFile()) {
-        byLine.set(comment.line, [...(byLine.get(comment.line) ?? []), comment])
+  // A file shown elsewhere drops the comment being started.
+  watch(path, () => (drafting.value = null))
+
+  const gutter = computed<CodeDiffGutter>(() => {
+    const commented = new Set(
+      forFile().map((comment) => spotKey({ side: sideOf(comment), line: comment.line })),
+    )
+    const markers: CodeDiffGutterMarker[] = []
+    for (const side of ['original', 'modified'] as const) {
+      if (!texts()) break
+      const count = linesOf(side).length
+      for (let line = 1; line <= count; line++) {
+        markers.push(
+          commented.has(spotKey({ side, line }))
+            ? {
+                side,
+                line,
+                icon: MessageIcon,
+                class: 'line-comment-mark',
+                title: t('changes.commented'),
+              }
+            : { side, line, icon: PlusIcon, visible: 'hover', title: t('changes.comment') },
+        )
       }
-      const lines = [...byLine.keys()]
-      if (drafting.value !== null && !byLine.has(drafting.value)) lines.push(drafting.value)
-      return lines.map((line) => ({
-        id: `line-${line}`,
-        line,
-        height: 120,
-        label: t('changes.commentOn', { line }),
-        render: () =>
-          h(LineCommentWidget, {
-            thread: byLine.has(line) ? lineThread(path() ?? '', line, byLine.get(line)!) : null,
-            onAction: (action: CommentAction) => act(line, action),
-            onCancel: () => (drafting.value = null),
-          }),
-      }))
-    },
+    }
+    return {
+      name: 'line-comments',
+      width: 18,
+      markers,
+      onPress: (line, _event, side) => {
+        const spot = { side, line }
+        if (!forFile().some((c) => spotKey({ side: sideOf(c), line: c.line }) === spotKey(spot))) {
+          drafting.value = spot
+        }
+      },
+    }
   })
-  return { extension, drafting }
+
+  const widgets = computed<CodeDiffWidget[]>(() => {
+    const bySpot = new Map<string, { spot: CommentSpot; comments: DraftComment[] }>()
+    for (const comment of forFile()) {
+      const spot = { side: sideOf(comment), line: comment.line }
+      const entry = bySpot.get(spotKey(spot)) ?? { spot, comments: [] }
+      entry.comments.push(comment)
+      bySpot.set(spotKey(spot), entry)
+    }
+    if (drafting.value && !bySpot.has(spotKey(drafting.value))) {
+      bySpot.set(spotKey(drafting.value), { spot: drafting.value, comments: [] })
+    }
+    return [...bySpot.values()].map(({ spot, comments }) => ({
+      id: `line-${spotKey(spot)}`,
+      side: spot.side,
+      line: spot.line,
+      height: 120,
+      label: t('changes.commentOn', { line: spot.line }),
+      render: () =>
+        h(LineCommentWidget, {
+          thread: comments.length ? lineThread(path() ?? '', spot, comments) : null,
+          onAction: (action: CommentAction) => act(spot, action),
+          onCancel: () => (drafting.value = null),
+        }),
+    }))
+  })
+  return { gutter, widgets }
 }
