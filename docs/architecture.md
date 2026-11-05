@@ -28,6 +28,7 @@
 | `queued`  | 有新输入，在等槽位                              | 否           |
 | `blocked` | 上一轮失败（如模型请求出错），等用户重试        | 是           |
 | `blocked` | PR 的检查连续失败 3 次（见“仓库、PR 与 CI”）    | 是           |
+| `working` | 最近的 Report 是 `ready`，还在交付前审阅        | 否           |
 | `done`    | 最近的 Report 是 `ready`，之后已合入或已看完    | 否           |
 | `review`  | 最近的 Report 是 `ready`                        | 是           |
 | `blocked` | 最近的 Report 是 `blocked` 或 `failed`          | 是           |
@@ -129,6 +130,22 @@
 新建的 worktree 没有被 git 忽略的依赖目录。本地目录的仓库里，用户自己的签出中被忽略的 `node_modules`、`vendor`、`.pnpm-store`（任意层级，符号链接除外）会以写时复制的方式克隆进新 worktree：Linux 上是 `cp --reflink=always`（btrfs、XFS 等支持 reflink 的文件系统），macOS 上是 `cp -c`（APFS 的 clonefile）。克隆不占额外空间，任一边改了文件才各自分开；它们仍被忽略，不会进讨论串的提交。先在仓库的 git 目录里拿一个小文件试一下能不能克隆，不能（比如 ext4，或签出和数据目录不在同一个文件系统上）就什么都不复制，worktree 就是普通的 worktree，讨论串自己装依赖（`bun install` 本来就从全局缓存硬链接）。构建产物不复制；Python 虚拟环境也不复制，它的脚本和 `activate` 用绝对路径指向原来的环境，克隆出来的会装进用户自己的环境。GitHub、GitLab 仓库的 worktree 来自共享的 bare clone，没有用户签出可借，不做这一步。没有用 overlayfs：它要挂载权限，而且 git worktree 和挂载层叠在一起时，提交、切分支和沙箱的路径都要另外处理，收益只在依赖目录上，reflink 已经覆盖。
 
 本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到讨论串的分支。worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下（SSH 在远端的 `~/.ariadne-worktrees/`），用完会自动清理，见下文。
+
+### 交付前审阅
+
+有代码来源的项目默认开启（项目设置“工具”页可关）。讨论串报告 `ready` 且有要合并的提交或 PR 时，这次交付先不进 `review`，也不报告给协调器，而是交给一个审阅讨论串：
+
+- 审阅讨论串第一次用到时创建（`thread.created` 带 `reviewOf`），模型和作者相同，不挂在计划节点上；同一作者之后的轮次和交付都复用它。界面上它嵌在作者下面，不进「需要我」，也不发通知。
+- 每轮记 `review.requested`（轮次、作者分支的 head）唤醒审阅讨论串。它只读作者的工作区（列目录、读文件、搜索、`read_changes` 看带行号的改动），外部工具和协调器一样只拿标成只读的，按仓库的 `review` 做法文件审，没有时用内置的说明；只报 bug、漏掉的验收标准和安全问题，不提风格。
+- `submit_review` 记 `review.submitted`：`pass` 时作者进入 `review`，协调器收到带轮次的报告；`changes` 时评论（文件、行、引文、类别）作为一条笔记唤醒作者。
+- 作者再报告 `ready` 时必须逐条回复（`fixed`，或 `declined` 加理由），记 `review.replied`，然后进入下一轮。最多 2 轮：第 2 轮仍有评论时，作者回复后这次交付直接交给用户。交付到了用户手里之后再报告 `ready`，又从第 1 轮开始。
+- 审阅讨论串一回合结束却没给结论（没有新输入要读）、回合失败或开始不了、或被停下时，记 `review.abandoned`：和 `pass` 一样，交付进入 `review`，协调器收到报告（注明最后一轮没有结论），用户收到通知。被中断的回合不算，重启后接着审。审阅讨论串停着的时候，之后的交付不再送审。
+- 作者报告 `done` 或 `failed` 时这次交付结束，没回复的评论不再要回复。
+- 改动视图把 AI 评论按行显示成只读评论串，带作者的回复；作者修好的评论串显示为已解决。卡片、「需要我」和讨论串列表用图标加数字显示审过几轮。
+
+### 做法文件
+
+做法文件（skill）是写给模型的工作方法，从两处读：仓库的 `.ariadne/skills/<名字>.md` 和本机的 `~/.ariadne/skills/`，同名时仓库的生效，不读别的工具的目录。第一行（或 front matter 的 `description`）写什么时候用；提示词里只列名字和这一行，模型需要时用 `read_skill` 读全文（上限 32k 字符，最多 40 个）。输入框的 `/` 菜单可以点名一个做法文件，它会随消息告诉模型。协调器每回合重新读，讨论串在仓库指令变化时重新读。
 
 ### 查看与合并改动
 
@@ -339,6 +356,7 @@ SSH 和 daemon 来源可以再选一个代码托管（GitHub 或 GitLab，`Conte
 - 预算：项目设置里每个讨论串和整个项目的 token 上限（输入加输出），默认不限。用到上限时回合不开始或在下一步前停下，错误 `error.budgetThread` / `error.budgetProject` 进「需要我」。
 - 模型请求参数：提供方可加请求头（值只存在服务端）、额外请求字段（不能覆盖 model、messages、tools、stream、system）和无响应超时（每次尝试单独计时，超时算可重试的错误）；模型可设单次最多输出。
 - 工作区：项目的命令环境变量（值存在 config.json 的 `projectEnv`，页面只拿到名字）、新工作区的安装脚本（新建工作区后先跑一次，结果附在第一个工具结果里）、改动后检查、命令用的 shell（默认自动）、分支前缀。分支名由 create_thread 的 `branch` 参数生成可读的 `<前缀><slug>-<id 末 6 位>`，没有时是 `<前缀><id 末 12 位>`。
+- 交付前审阅：项目设置 `review.enabled`，默认开，见“交付前审阅”。
 - 工具开关：项目可关掉 fetch_url、web_search、run_command（连同读后台输出和结束后台命令）、issue 写入、只读子调研几组内置工具。
 - 快捷键：搜索、聚焦输入框、上/下一个讨论串、停止回合、快捷键列表都能改绑（`input.keys`），每个动作一个单键组合，不能重复。
 - 数据：设置里看数据目录用量，`VACUUM INTO` 备份数据库到 `<home>/backups`；项目右键菜单可导出项目（事件日志和文件的 JSON）。

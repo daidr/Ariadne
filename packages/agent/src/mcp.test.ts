@@ -346,6 +346,38 @@ describe('external tools', () => {
       .find((entry) => entry.kind === 'tool' && entry.name === 'mcp__test__echo')
     expect(result?.kind === 'tool' && result.content).toContain('外部')
   })
+
+  test('a reviewing thread gets only the read-only ones', async () => {
+    servers = [testServer({ tools: { echo: 'read', grow: 'ask' } })]
+    app.startThread(threadId)
+    app.recordWorkspace(threadId, { label: 'local', branch: 'ariadne/x', base: 'main' })
+    app.reportThread(threadId, { kind: 'ready', summary: 's', headline: 'h' }, undefined, {
+      reviewable: true,
+      head: 'h1',
+    })
+    const reviewerId = app.getThread(threadId).review!.reviewerId
+    const seen: string[][] = []
+    const model = fakeModel((request) => {
+      const text = request.messages[0]?.content ?? ''
+      if (typeof text === 'string' && text.includes('You are a reviewing thread')) {
+        seen.push(request.tools.map((t) => t.name))
+      }
+      return say('')
+    })
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => model,
+      locale: () => 'zh-CN',
+      retryBaseMs: 1,
+      mcp: hub,
+    })
+    scheduler.start()
+    await scheduler.idle()
+    expect(seen[0]).toContain('mcp__test__echo')
+    expect(seen[0]).not.toContain('mcp__test__grow')
+    // It ended without a verdict: the round is let go.
+    expect(app.listReviews(reviewerId).at(-1)?.abandoned).toBe(true)
+  })
 })
 
 describe('names and purposes', () => {

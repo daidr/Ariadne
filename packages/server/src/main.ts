@@ -112,6 +112,7 @@ const scheduler = new Scheduler({
   models: () => settings.modelChoices(),
   settings: (projectId) => settings.turnSettings(projectId),
   researchModel: () => settings.resolveModel('research'),
+  skillsDir: join(config.home, 'skills'),
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
@@ -143,6 +144,7 @@ const server = Bun.serve({
     workspaces,
     mcp,
     data: new DataStore(app, config.home, config.databasePath),
+    skillsDir: join(config.home, 'skills'),
   }),
 })
 

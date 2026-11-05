@@ -1,7 +1,12 @@
 import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
-import { branchSlug, parseProjectSettings, storedProjectSettings } from './project-settings'
+import {
+  branchSlug,
+  MAX_REVIEW_ROUNDS,
+  parseProjectSettings,
+  storedProjectSettings,
+} from './project-settings'
 import {
   parseAnswer,
   parseBlock,
@@ -31,6 +36,10 @@ import type {
   PlanOp,
   ProjectSource,
   ReportKind,
+  ReviewComment,
+  ReviewCommentKind,
+  ReviewReply,
+  ReviewVerdict,
   StepInput,
   CallTiming,
   EventMap,
@@ -94,6 +103,7 @@ import type {
   PlanUndoPreview,
   PlanView,
   ProjectView,
+  ReviewRoundView,
   SearchHit,
   SearchResult,
   ThreadArtifact,
@@ -108,7 +118,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 40
+export const PROJECTION_VERSION = 41
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -163,6 +173,75 @@ function lineComments(given: unknown[]): LineComment[] {
     }
   })
 }
+const REVIEW_KINDS: readonly ReviewCommentKind[] = ['bug', 'acceptance', 'security']
+const badReplies = () => new DomainError('error.invalidBody', { reason: 'replies' })
+
+/** A reviewer's comments, checked like the user's line comments, each with its kind. */
+function reviewComments(given: unknown[]): ReviewComment[] {
+  const bad = badComments
+  if (!Array.isArray(given)) throw bad()
+  const lines = lineComments(given)
+  return lines.map((comment, i) => {
+    const kind = (given[i] as Record<string, unknown>).kind as ReviewCommentKind
+    if (!REVIEW_KINDS.includes(kind)) throw bad()
+    return { ...comment, kind }
+  })
+}
+
+/** The author's answers to a round's `count` comments: each one once, declines with a reason. */
+export function reviewReplies(given: unknown[], count: number): ReviewReply[] {
+  const bad = badReplies
+  if (!Array.isArray(given) || given.length !== count) throw bad()
+  const seen = new Set<number>()
+  const replies = given.map((item) => {
+    const { comment, outcome, note } = (item ?? {}) as Record<string, unknown>
+    if (!Number.isInteger(comment) || (comment as number) < 1 || (comment as number) > count) {
+      throw bad()
+    }
+    if (seen.has(comment as number)) throw bad()
+    seen.add(comment as number)
+    if (outcome !== 'fixed' && outcome !== 'declined') throw bad()
+    const text = typeof note === 'string' ? note.trim() : ''
+    if ((outcome === 'declined' && !text) || text.length > LINE_COMMENT_LIMITS.body) throw bad()
+    return { comment: comment as number, outcome, note: text } satisfies ReviewReply
+  })
+  return replies.toSorted((a, b) => a.comment - b.comment)
+}
+
+interface ReviewRow {
+  thread_id: string
+  reviewer_id: string
+  round: number
+  head: string | null
+  requested_at: number
+  verdict: ReviewVerdict | null
+  summary: string | null
+  comments: string
+  replies: string | null
+  submitted_at: number | null
+  abandoned_at: number | null
+}
+
+const toReviewRound = (row: ReviewRow): ReviewRoundView => ({
+  threadId: row.thread_id,
+  reviewerId: row.reviewer_id,
+  round: row.round,
+  head: row.head,
+  requestedAt: row.requested_at,
+  verdict: row.verdict,
+  abandoned: row.abandoned_at !== null,
+  summary: row.summary,
+  comments: JSON.parse(row.comments) as ReviewComment[],
+  replies: row.replies ? (JSON.parse(row.replies) as ReviewReply[]) : null,
+  submittedAt: row.submitted_at,
+})
+
+/**
+ * A skill's name, as its file is called without `.md`: letters (any script), digits, `-`,
+ * `_` and `.` inside, at most 64 characters.
+ */
+export const SKILL_NAME = /^[\p{L}\p{N}](?:[\p{L}\p{N}._-]{0,62}[\p{L}\p{N}])?$/u
+
 export const MAX_MEMORIES = 50
 export const MAX_MEMORY = 500
 
@@ -363,6 +442,11 @@ interface ThreadRow {
   stopped_at: number | null
   model: string | null
   branch_slug: string | null
+  review_of: string | null
+  reviewer_id: string | null
+  review_rounds: number
+  reviewing: number
+  /** The reviewing thread is held, or idle with nothing to do: it will not finish the round. */
   created_at: number
   updated_at: number
   open_attentions: number
@@ -460,6 +544,7 @@ function progressOf(items: string | null): ThreadView['progress'] {
 function toThread(row: ThreadRow): ThreadView {
   const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
   const pullRequest = row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null
+  const underReview = row.reviewing === 1
   return {
     id: row.id,
     projectId: row.project_id,
@@ -479,6 +564,8 @@ function toThread(row: ThreadRow): ThreadView {
         (!!merged && (merged.at >= (row.reported_at ?? 0) || merged.head === row.reported_head)) ||
         pullRequest?.state === 'merged',
       reviewed: row.reviewed_at !== null && row.reviewed_at >= (row.reported_at ?? 0),
+      underReview,
+      reviewer: row.review_of !== null,
     }),
     lastReport: row.last_report,
     lastSummary: row.last_summary,
@@ -512,6 +599,10 @@ function toThread(row: ThreadRow): ThreadView {
       row.todo_at ?? 0,
       row.turn_started_at ?? 0,
     ),
+    reviewOf: row.review_of,
+    review: row.reviewer_id
+      ? { reviewerId: row.reviewer_id, rounds: row.review_rounds, reviewing: underReview }
+      : null,
   }
 }
 
@@ -746,7 +837,8 @@ export class Ariadne {
         joined: attention.joinedBy.flatMap((id) => byId.get(id) ?? []),
       })),
       ...threads
-        .filter((thread) => needsUser(thread.stage) && !asked.has(thread.id))
+        // A reviewing thread that stalls hands its author's changes to the user instead.
+        .filter((thread) => needsUser(thread.stage) && !asked.has(thread.id) && !thread.reviewOf)
         .map((thread): NeedsMeItem => ({ kind: 'thread', thread })),
     ]
   }
@@ -1636,6 +1728,8 @@ export class Ariadne {
         projectId: thread.projectId,
         data: { threadId, reason, by: input.by },
       },
+      // A stopped reviewer lets the round under way go.
+      ...(thread.stopped ? [] : this.abandonedReview(threadId)),
     ])
     return this.getThread(threadId)
   }
@@ -1663,8 +1757,24 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
-  /** `head` is the branch's newest commit, to tell whether merged work is all it reports. */
-  reportThread(threadId: string, report: ThreadReport, head?: string): ThreadView {
+  /**
+   * `head` is the branch's newest commit, to tell whether merged work is all it reports.
+   * A `ready` with `review.reviewable` (a branch with changes to merge) goes to the
+   * project's pre-delivery review first, while rounds are left; `replies` answer the
+   * comments of a round that asked for changes, which a `ready` must do.
+   */
+  reportThread(
+    threadId: string,
+    report: ThreadReport,
+    head?: string,
+    review: {
+      reviewable?: boolean
+      /** The branch's newest commit, which the review reads. */
+      head?: string
+      replies?: ReviewReply[]
+      reviewerTitle?: string
+    } = {},
+  ): ThreadView {
     const thread = this.getThread(threadId)
     const summary = report.summary.trim()
     const headline = report.headline.trim()
@@ -1676,21 +1786,189 @@ export class Ariadne {
         throw new DomainError('error.notFound', { what: id })
       }
     }
+    const events: AnyNewEvent[] = []
+    const projectId = thread.projectId
+    const open = this.openReviewRound(threadId)
+    if (report.kind === 'ready' && open) {
+      const replies = reviewReplies(review.replies ?? [], open.comments.length)
+      events.push({
+        type: 'review.replied',
+        projectId,
+        data: { threadId, round: open.round, replies },
+      })
+    }
+    const { reviewing, round } = this.nextReviewRound(thread, report.kind, !!review.reviewable)
+    events.push({
+      type: 'thread.reported',
+      projectId,
+      data: {
+        threadId,
+        report: report.kind,
+        summary,
+        headline,
+        artifacts,
+        ...(head ? { head } : {}),
+        ...(reviewing ? { reviewing: true } : {}),
+        ...(!reviewing && report.kind === 'ready' && round > 0 ? { reviewRounds: round } : {}),
+      },
+    })
+    // A round already under way reads the newer commits by itself.
+    if (reviewing && !thread.review?.reviewing) {
+      let reviewerId = thread.review?.reviewerId
+      if (!reviewerId) {
+        reviewerId = newId('thr')
+        events.push({
+          type: 'thread.created',
+          projectId,
+          data: {
+            threadId: reviewerId,
+            title: review.reviewerTitle?.trim() || thread.title,
+            nodeId: null,
+            model: thread.model,
+            branch: null,
+            reviewOf: threadId,
+          },
+        })
+        events.push({ type: 'thread.started', projectId, data: { threadId: reviewerId } })
+      }
+      events.push({
+        type: 'review.requested',
+        projectId,
+        data: { threadId, reviewerId, round, head: review.head ?? head ?? null },
+      })
+    }
+    this.store.append(events)
+    return this.getThread(threadId)
+  }
+
+  /**
+   * Whether a report goes to review, and the round: the next one of this delivery while
+   * rounds are left, else the rounds it went through (0 for none) as it goes to the user.
+   */
+  private nextReviewRound(
+    thread: ThreadView,
+    kind: ReportKind,
+    reviewable: boolean,
+  ): { reviewing: boolean; round: number } {
+    if (kind !== 'ready' || thread.reviewOf) return { reviewing: false, round: 0 }
+    const row = this.db
+      .query<{ review_rounds: number; review_delivered: number; reviewing: number }, [string]>(
+        'SELECT review_rounds, review_delivered, reviewing FROM threads WHERE id = ?',
+      )
+      .get(thread.id)
+    const rounds = row && row.review_delivered === 0 ? row.review_rounds : 0
+    if (row?.reviewing === 1 && thread.review?.reviewing) return { reviewing: true, round: rounds }
+    const enabled = this.getProject(thread.projectId).settings.review.enabled
+    // A reviewer someone stopped reviews nothing more until it is resumed.
+    const reviewer = thread.review ? this.getThread(thread.review.reviewerId) : null
+    if (reviewable && enabled && !reviewer?.stopped && rounds < MAX_REVIEW_ROUNDS) {
+      return { reviewing: true, round: rounds + 1 }
+    }
+    return { reviewing: false, round: rounds }
+  }
+
+  /** The thread's newest review round, when it asked for changes the author has not answered. */
+  openReviewRound(threadId: string): ReviewRoundView | null {
+    // A delivery that ended (reached the user, or the thread reported done or failed)
+    // leaves its comments behind.
+    const delivered = this.db
+      .query<{ review_delivered: number }, [string]>(
+        'SELECT review_delivered FROM threads WHERE id = ?',
+      )
+      .get(threadId)?.review_delivered
+    if (delivered !== 0) return null
+    const latest = this.listReviews(threadId).at(-1)
+    return latest?.verdict === 'changes' && latest.replies === null ? latest : null
+  }
+
+  /**
+   * `review.abandoned` for the round a reviewer leaves without a verdict, if it reviews one;
+   * none for other conversations.
+   */
+  private abandonedReview(conversationId: string): AnyNewEvent[] {
+    const row = this.db
+      .query<{ review_of: string | null; project_id: string }, [string]>(
+        'SELECT review_of, project_id FROM threads WHERE id = ?',
+      )
+      .get(conversationId)
+    if (!row?.review_of) return []
+    const author = this.db
+      .query<{ reviewing: number }, [string]>('SELECT reviewing FROM threads WHERE id = ?')
+      .get(row.review_of)
+    const round = this.listReviews(row.review_of).at(-1)
+    if (author?.reviewing !== 1 || !round || round.verdict !== null || round.abandoned) return []
+    if (round.reviewerId !== conversationId) return []
+    return [
+      {
+        type: 'review.abandoned',
+        projectId: row.project_id,
+        data: { threadId: row.review_of, reviewerId: conversationId, round: round.round },
+      },
+    ]
+  }
+
+  /** The review rounds of a thread's changes, oldest first; a reviewer gives its author's. */
+  listReviews(threadId: string): ReviewRoundView[] {
+    const thread = this.getThread(threadId)
+    const author = thread.reviewOf ?? thread.id
+    return this.db
+      .query<ReviewRow, [string]>('SELECT * FROM reviews WHERE thread_id = ? ORDER BY id')
+      .all(author)
+      .map(toReviewRound)
+  }
+
+  /**
+   * A reviewing thread's verdict on the round under way. `pass` sends the author's changes
+   * to the user; `changes` sends the comments to the author. `headline` is what the
+   * reviewer's own row says afterwards.
+   */
+  submitReview(
+    reviewerId: string,
+    input: { verdict: ReviewVerdict; summary: string; comments: ReviewComment[]; headline: string },
+  ): ReviewRoundView {
+    const reviewer = this.getThread(reviewerId)
+    const authorId = reviewer.reviewOf
+    if (!authorId) throw new DomainError('error.notReviewer')
+    const round = this.listReviews(authorId).at(-1)
+    if (!round || round.verdict !== null || round.abandoned || round.reviewerId !== reviewerId) {
+      throw new DomainError('error.noReviewRound')
+    }
+    const summary = input.summary.trim()
+    if (!summary) throw new DomainError('error.invalidBody', { reason: 'summary' })
+    if (input.verdict !== 'pass' && input.verdict !== 'changes') {
+      throw new DomainError('error.invalidBody', { reason: 'verdict' })
+    }
+    const comments = reviewComments(input.comments)
+    if ((input.verdict === 'changes') !== comments.length > 0) {
+      throw new DomainError('error.invalidBody', { reason: 'comments' })
+    }
+    const { projectId } = reviewer
     this.store.append([
       {
-        type: 'thread.reported',
-        projectId: thread.projectId,
+        type: 'review.submitted',
+        projectId,
         data: {
-          threadId,
-          report: report.kind,
+          threadId: authorId,
+          reviewerId,
+          round: round.round,
+          verdict: input.verdict,
           summary,
-          headline,
-          artifacts,
-          ...(head ? { head } : {}),
+          comments,
+        },
+      },
+      {
+        type: 'thread.reported',
+        projectId,
+        data: {
+          threadId: reviewerId,
+          report: 'done',
+          summary,
+          headline: input.headline.trim() || summary.slice(0, 60),
+          artifacts: [],
         },
       },
     ])
-    return this.getThread(threadId)
+    return this.listReviews(authorId).at(-1)!
   }
 
   /**
@@ -2052,6 +2330,12 @@ export class Ariadne {
           throw new DomainError('error.invalidBody', { reason: 'mentions' })
         }
         mention = { kind, path: clean }
+      } else if (kind === 'skill') {
+        const { name } = (item ?? {}) as Record<string, unknown>
+        if (typeof name !== 'string' || !SKILL_NAME.test(name)) {
+          throw new DomainError('error.invalidBody', { reason: 'mentions' })
+        }
+        mention = { kind, name }
       } else if (kind === 'thread' || kind === 'artifact') {
         const table = kind === 'thread' ? 'threads' : 'artifacts'
         const row =
@@ -2068,7 +2352,12 @@ export class Ariadne {
       } else {
         throw new DomainError('error.invalidBody', { reason: 'mentions' })
       }
-      const key = mention.kind === 'file' ? `file:${mention.path}` : `${mention.kind}:${mention.id}`
+      const key =
+        mention.kind === 'file'
+          ? `file:${mention.path}`
+          : mention.kind === 'skill'
+            ? `skill:${mention.name}`
+            : `${mention.kind}:${mention.id}`
       if (seen.has(key)) continue
       seen.add(key)
       mentions.push(mention)
@@ -3251,6 +3540,12 @@ export class Ariadne {
       })),
       { type: 'turn.finished', projectId, data: { conversationId, turnId, outcome, error } },
     ])
+    // A reviewer that ends its turn without a verdict, with nothing more to read, has left
+    // the round; an interrupted turn resumes on the next start.
+    if (outcome === 'interrupted') return
+    if (outcome === 'completed' && this.getConversation(conversationId).pendingSeq > 0) return
+    const abandoned = this.abandonedReview(conversationId)
+    if (abandoned.length) this.store.append(abandoned)
   }
 
   /**
@@ -3308,6 +3603,7 @@ export class Ariadne {
         projectId,
         data: { conversationId, turnId, outcome: 'failed', error: localized },
       },
+      ...this.abandonedReview(conversationId),
     ])
   }
 

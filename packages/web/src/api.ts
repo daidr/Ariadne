@@ -18,6 +18,7 @@ import type {
   PlanUndoPreview,
   PlanView,
   ProjectView,
+  ReviewRoundView,
   SearchResult,
   ThreadView,
   TodoView,
@@ -523,6 +524,10 @@ export const api = {
   },
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
+  getReviews: (threadId: string) =>
+    request<{ rounds: ReviewRoundView[] }>('GET', `/api/threads/${threadId}/reviews`),
+  getSkills: (conversationId: string) =>
+    request<{ skills: SkillView[] }>('GET', `/api/conversations/${conversationId}/skills`),
   getChanges: (threadId: string) =>
     request<{ changes: BranchChanges | null; mergeable: boolean }>(
       'GET',
@@ -625,7 +630,16 @@ export interface MessageExtras {
 
 /** Something picked after `@`, as the server takes it; it fills in titles. */
 export type MentionInput =
-  { kind: 'thread' | 'artifact'; id: string } | { kind: 'file'; path: string }
+  | { kind: 'thread' | 'artifact'; id: string }
+  | { kind: 'file'; path: string }
+  | { kind: 'skill'; name: string }
+
+/** A skill the conversation can be asked to work by, with when to use it. */
+export interface SkillView {
+  name: string
+  when: string
+  source: 'repo' | 'local'
+}
 
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
 

@@ -41,6 +41,7 @@ import {
   RotateCwIcon,
   SquareStopIcon,
   CloseIcon,
+  MessagesIcon,
 } from '@dou-ui/icons'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
@@ -63,6 +64,9 @@ import {
   undoNotice,
 } from '../store'
 import ReviewActions from './ReviewActions.vue'
+import ReviewMark from '../review/ReviewMark.vue'
+import ReviewNotice from '../review/ReviewNotice.vue'
+import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
 import LiveCommand from './LiveCommand.vue'
 import BackgroundCommand from './BackgroundCommand.vue'
@@ -136,6 +140,11 @@ const thread = computed(() =>
     ? (state.detail?.threads.find((item) => item.id === state.threadId) ?? null)
     : null,
 )
+/** For a reviewing thread: the thread whose changes it reviews. */
+const reviewed = computed(() => {
+  const id = thread.value?.reviewOf
+  return id ? (state.detail?.threads.find((item) => item.id === id) ?? null) : null
+})
 const working = computed(() => !!view.value.conversation?.turn)
 // The command it is running now, if any, shown in the status line.
 const live = computed(() =>
@@ -280,10 +289,13 @@ async function submit(value: string) {
   const files = attachments.take()
   const sent = await sendMessage(id, value, {
     attachments: files.attachments,
-    mentions: mentions.inText(value),
+    mentions: [...mentions.inText(value), ...skills.inText(value)],
   })
   files.settle(sent)
-  if (sent) mentions.reset()
+  if (sent) {
+    mentions.reset()
+    skills.reset()
+  }
   // Not sent: the text comes back too, unless something new was typed meanwhile.
   if (!sent && !draft.value) draft.value = value
 }
@@ -336,9 +348,12 @@ async function caretToEnd() {
   el?.setSelectionRange(el.value.length, el.value.length)
 }
 
-// `/` at the start offers the user's snippets; picking one puts its text in the input.
+// `/` at the start offers the skills to work by, then the user's snippets; picking a
+// snippet puts its text in the input, picking a skill names it there.
 const MANAGE = ':manage'
+const skills = useSkills(() => conversationId.value)
 const commands = computed<ChatInputOption[]>(() => [
+  ...skills.options.value,
   ...state.input.snippets.map((snippet) => ({
     value: snippet.id,
     label: snippet.name,
@@ -349,6 +364,15 @@ const commands = computed<ChatInputOption[]>(() => [
 function useSnippet(option: ChatInputOption) {
   if (option.value === MANAGE) {
     emit('openSettings', 'input')
+    return
+  }
+  const named = skills.pick(option)
+  if (named) {
+    draft.value = `${named} ${draft.value}`
+    setTimeout(() => {
+      const el = input.value?.textarea
+      el?.setSelectionRange(named.length + 1, named.length + 1)
+    })
     return
   }
   const snippet = state.input.snippets.find((item) => item.id === option.value)
@@ -436,7 +460,10 @@ watch(
         </DouButton>
       </div>
       <div class="conversation-meta">
-        <StageLabel :stage="thread.stage" />
+        <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
+          {{ t('review.underway', { round: thread.review.rounds }) }}
+        </DouShimmer>
+        <StageLabel v-else :stage="thread.stage" />
         <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
         <DouTag
           v-if="thread.workspace?.branch"
@@ -447,6 +474,7 @@ watch(
           {{ thread.workspace.branch }}
         </DouTag>
         <PullRequestTag :thread="thread" refreshable />
+        <ReviewMark :thread="thread" />
         <DouButton
           v-if="thread.workspace?.branch && thread.workspace.base"
           variant="ghost"
@@ -456,6 +484,22 @@ watch(
           <template #leading><FileDiffIcon /></template>
           {{ t('changes.open') }}
         </DouButton>
+        <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
+        <template v-if="reviewed">
+          <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
+            <template #leading><MessagesIcon /></template>
+            {{ t('review.author') }}
+          </DouButton>
+          <DouButton
+            v-if="reviewed.workspace?.branch && reviewed.workspace.base"
+            variant="ghost"
+            size="sm"
+            @click="openMain({ kind: 'changes', threadId: reviewed.id })"
+          >
+            <template #leading><FileDiffIcon /></template>
+            {{ t('changes.open') }}
+          </DouButton>
+        </template>
         <div class="conversation-tools">
           <DouText
             v-if="thread.usage.input || thread.usage.output"
@@ -673,6 +717,7 @@ watch(
             :notice="item.notice"
           />
           <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />
+          <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
           <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
             tone="warning"
@@ -1103,6 +1148,10 @@ watch(
 }
 
 .relay-content {
+  font-size: var(--dou-font-size-sm);
+}
+
+.conversation-reviewing {
   font-size: var(--dou-font-size-sm);
 }
 </style>

@@ -1,7 +1,14 @@
 export { PluginHost } from './plugins'
 export { LinkResolver, MAX_LINKS } from './links'
 export { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
-export { runTurn, type ModelRequestOptions, type ResolvedModel, type TurnOptions } from './runner'
+export {
+  conversationSkills,
+  runTurn,
+  type ModelRequestOptions,
+  type ResolvedModel,
+  type TurnOptions,
+} from './runner'
+export { type Skill } from './skills'
 export { refreshDashboard } from './dashboard-sources'
 export { Scheduler, type SchedulerOptions } from './scheduler'
 export { Timers } from './timers'

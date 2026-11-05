@@ -1263,6 +1263,10 @@ describe('deleting a project', () => {
       what: 'mcp:docs/search',
     })
     app.postMessage(project.id, { conversationId: a.id, author: 'user', content: '开始吧' })
+    app.reportThread(b.id, { kind: 'ready', summary: 's', headline: '改好了' }, undefined, {
+      reviewable: true,
+      head: 'abc',
+    })
     app.updateTodo(project.id, a.id, [{ label: '调研', status: 'doing' }])
     app.saveMemory(project.id, { text: `${name} 用中文`, author: project.coordinatorId })
     app.revisePlan(project.id, {

@@ -20,6 +20,7 @@ import {
   fileIconOf,
   GitMergeIcon,
   MessageIcon,
+  ScanSearchIcon,
   RotateCwIcon,
   SendIcon,
 } from '@dou-ui/icons'
@@ -38,6 +39,9 @@ import PullRequestTag from '../components/PullRequestTag.vue'
 import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
 import { languageOf } from './languages'
 import { draftsOf, sendable, useLineComments } from './line-comments'
+import type { ReviewRoundView } from '@ariadne/core'
+import ReviewMark from '../review/ReviewMark.vue'
+import { reviewNotes, useReviewComments } from '../review/review-comments'
 
 /**
  * What a thread's branch changed against its base, with merging it; or, with `turn`, what
@@ -215,7 +219,33 @@ const { extension: comments } = useLineComments(
   () => file.value?.path ?? null,
   () => versions.value?.after ?? null,
 )
-const extensions = [comments]
+// The reviewer's comments on the branch, with what the author did about each.
+const reviews = ref<ReviewRoundView[]>([])
+const notes = computed(() => (props.turn ? [] : reviewNotes(reviews.value)))
+watch(
+  () => [props.threadId, thread.value?.review?.rounds, thread.value?.review?.reviewing] as const,
+  async ([id, rounds]) => {
+    if (!rounds) {
+      reviews.value = []
+      return
+    }
+    try {
+      const { rounds: found } = await api.getReviews(id)
+      if (props.threadId === id) reviews.value = found
+    } catch (error) {
+      report(error)
+    }
+  },
+  { immediate: true },
+)
+const reviewComments = useReviewComments(
+  () => props.threadId,
+  () => notes.value,
+  () => file.value?.path ?? null,
+  () => versions.value?.after ?? null,
+)
+const reviewCount = (path: string) => notes.value.filter((n) => n.comment.path === path).length
+const extensions = [comments, reviewComments]
 // Side by side, where lines can be commented on; the toolbar switches to one column.
 const diffMode = ref<'split' | 'inline'>('split')
 const drafts = computed(() => draftsOf(props.threadId))
@@ -261,6 +291,7 @@ const methodOptions = computed(() => [
           <span class="changes-removed">−{{ totals.removed }}</span>
         </DouText>
       </div>
+      <ReviewMark v-if="thread && !turn" :thread="thread" />
       <DouButton
         v-if="drafts.length"
         size="sm"
@@ -357,6 +388,15 @@ const methodOptions = computed(() => [
               />
               <span class="file-name">{{ node.label }}</span>
               <template v-if="(node as FileNode).file">
+                <DouText
+                  v-if="reviewCount((node as FileNode).file!.path)"
+                  size="sm"
+                  variant="tertiary"
+                  class="file-comments"
+                  :title="t('review.commented')"
+                >
+                  <ScanSearchIcon />{{ reviewCount((node as FileNode).file!.path) }}
+                </DouText>
                 <DouText
                   v-if="commentCount((node as FileNode).file!.path)"
                   size="sm"
@@ -530,6 +570,10 @@ const methodOptions = computed(() => [
 
 .diff :deep(.line-comment-mark) {
   color: var(--dou-color-primary);
+}
+
+.diff :deep(.review-comment-mark) {
+  color: var(--dou-color-text-tertiary);
 }
 
 .file-comments {

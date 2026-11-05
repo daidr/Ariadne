@@ -719,6 +719,9 @@ const stopCommand: Tool = {
   },
 }
 
+/** The workspace tools that only read, for a thread that reviews another's workspace. */
+export const readWorkspaceTools: Tool[] = [listDir, readFile, findFilesTool, search]
+
 export const workspaceTools: Tool[] = [
   listDir,
   readFile,

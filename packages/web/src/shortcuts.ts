@@ -1,3 +1,4 @@
+import type { ThreadView } from '@ariadne/core'
 import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
 import { locale } from './i18n'
@@ -58,12 +59,18 @@ function activePanel(): PanelHandle | null {
 /** The project's threads in the order the thread list shows them, folded groups too. */
 export function threadOrder(): string[] {
   const threads = state.detail?.threads ?? []
+  const ids = new Set(threads.map((thread) => thread.id))
+  // A reviewing thread comes right after its author, as the list shows it.
+  const nested = (thread: ThreadView) => !!thread.reviewOf && ids.has(thread.reviewOf)
   return threadGroups.flatMap((group) =>
     sortThreads(
-      threads.filter((thread) => groupOf[thread.stage] === group),
+      threads.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
       threadSort.value,
       locale.value,
-    ).map((thread) => thread.id),
+    ).flatMap((thread) => {
+      const reviewer = thread.review?.reviewerId
+      return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]
+    }),
   )
 }
 
