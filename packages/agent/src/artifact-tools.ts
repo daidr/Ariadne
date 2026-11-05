@@ -2,6 +2,7 @@ import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } 
 import { plainText } from './markdown-code'
 import { boardFromItems, boardProblems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
+import { dashboardProblems } from './dashboard-check'
 import {
   checkSourceSettings,
   describeSources,
@@ -286,7 +287,7 @@ const WIDGET_SCHEMA = {
     props: {
       type: 'object',
       description:
-        'stat: { value, prefix?, suffix?, precision? } or { source, field, trend?, delta? } (delta 0.125 shows +12.5%). text: { text, size?: sm|md|lg }. table: { source, path?, columns?: [{ key, title? }] }. chart: { source, path?, kind: line|area|bar|pie, x, y: [fields], labels?: { field: name }, stacked?, horizontal? }. pivot: { source, path?, config: { rows: [fields], columns: [fields], values: [field | { field, aggregate: sum|count|avg|min|max|distinct|median, label? }] } }. Field names may be paths like total.amount.',
+        'By type; field names may be dotted paths like total.amount, read in the data set named by source. stat: { value: number, prefix?, suffix?, precision? } for a number you give, or { source, field, trend?, delta?, prefix?, suffix?, precision? } to read it: field, trend and delta are all field names, never numbers (delta names a field holding the change as a ratio, 0.125 shows +12.5%; trend names a list of numbers). text: { text, size?: sm|md|lg }. table: { source, path?, columns?: [{ key, title? }] }. chart: { source, path?, kind: line|area|bar|pie, x: field, y: [fields], labels?: { field: name }, stacked?, horizontal? }. pivot: { source, path?, config: { rows: [fields], columns: [fields], values: [field | { field, aggregate: sum|count|avg|min|max|distinct|median, label? }] } }. No other props.',
     },
     w: { type: 'integer', description: 'Width in columns, 1 to 12.' },
     h: { type: 'integer', description: 'Height in rows of 80px.' },
@@ -307,6 +308,12 @@ const SOURCE_SCHEMA = {
   properties: { kind: { type: 'string' }, settings: { type: 'object' } },
   required: ['kind'],
 } as const
+
+/** What a dashboard will show wrong, for the model to fix; nothing when it looks right. */
+function dashboardProblemsOf(content: DashboardContent) {
+  const problems = dashboardProblems(content)
+  return problems.length ? { problems } : {}
+}
 
 /** The source the model named, checked, and the data it gives now. */
 async function fetchSource(
@@ -376,7 +383,9 @@ const refreshDashboardTool: Tool = {
         signal: ctx.signal,
       },
     )
-    return json({ artifactId, version: artifact.version })
+    // the fetched data may have changed shape, so the widgets are checked against it again
+    const content = JSON.parse(artifact.content) as DashboardContent
+    return json({ artifactId, version: artifact.version, ...dashboardProblemsOf(content) })
   },
 }
 
@@ -384,7 +393,7 @@ const createDashboard: Tool = {
   spec: {
     name: 'create_dashboard',
     description:
-      'Create a dashboard in the project: numbers, tables, charts and pivot tables over data you gathered. By default it is a snapshot: the data you give is stored with it and never fetched again, and it shows when it was taken; to bring it up to date, update_dashboard with new data. With source, a plugin fetches the data instead and the dashboard can be refreshed (refresh_dashboard, or the refresh button the user sees). Widgets are placed in order on a 12-column grid unless you give w and h.',
+      'Create a dashboard in the project: numbers, tables, charts and pivot tables over data you gathered. By default it is a snapshot: the data you give is stored with it and never fetched again, and it shows when it was taken; to bring it up to date, update_dashboard with new data. With source, a plugin fetches the data instead and the dashboard can be refreshed (refresh_dashboard, or the refresh button the user sees). Widgets are placed in order on a 12-column grid unless you give w and h. Props that do not fit their widget type are refused, nothing saved; the result lists problems the dashboard still has (data sets, fields or rows its widgets read that are not there); fix them with update_dashboard.',
     parameters: {
       type: 'object',
       properties: {
@@ -417,7 +426,11 @@ const createDashboard: Tool = {
       nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
-    return json({ artifactId: artifact.id, version: artifact.version })
+    return json({
+      artifactId: artifact.id,
+      version: artifact.version,
+      ...dashboardProblemsOf(content),
+    })
   },
 }
 
@@ -425,7 +438,7 @@ const updateDashboard: Tool = {
   spec: {
     name: 'update_dashboard',
     description:
-      "Change a dashboard. Widgets are matched by id: a known id changes only the fields you give (props are replaced as a whole; the widget keeps its place), a new id is added at the end. data sets the named sources you give and keeps the others; giving data marks the snapshot as taken now. The user's own layout and widgets stay. baseVersion is the version you read; if anyone saved since, read it again.",
+      "Change a dashboard. Widgets are matched by id: a known id changes only the fields you give (props are replaced as a whole; the widget keeps its place), a new id is added at the end. data sets the named sources you give and keeps the others; giving data marks the snapshot as taken now. The user's own layout and widgets stay. Props that do not fit their widget type are refused; the result lists problems the dashboard still has, and read_artifact lists them too. baseVersion is the version you read; if anyone saved since, read it again.",
     parameters: {
       type: 'object',
       properties: {
@@ -478,7 +491,7 @@ const updateDashboard: Tool = {
       ...(title ? { title } : {}),
       baseVersion,
     })
-    return json({ artifactId, version: artifact.version })
+    return json({ artifactId, version: artifact.version, ...dashboardProblemsOf(content) })
   },
 }
 
@@ -514,7 +527,8 @@ const readArtifact: Tool = {
       return json({ ...head, ...boardSummary(content), ...problemsOf(content) })
     }
     if (artifact.kind === 'dashboard') {
-      return json({ ...head, content: JSON.parse(artifact.content) as DashboardContent })
+      const content = JSON.parse(artifact.content) as DashboardContent
+      return json({ ...head, content, ...dashboardProblemsOf(content) })
     }
     // Comments are on the newest text; an older version is read without them.
     if (version !== null && version !== ctx.app.getArtifact(artifact.id).version) {

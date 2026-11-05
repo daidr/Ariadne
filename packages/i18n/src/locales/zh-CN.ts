@@ -97,6 +97,7 @@ export const zhCN = {
   'artifact.dashboard.snapshot': '静态快照',
   'artifact.dashboard.takenAt': '数据截至 {time}',
   'artifact.dashboard.edit': '编辑布局',
+  'artifact.dashboard.widgetBroken': '控件设置有误，无法显示',
   'artifact.version': '第 {version} 版',
   'artifact.versions': '历史版本',
   'artifact.current': '当前版本',

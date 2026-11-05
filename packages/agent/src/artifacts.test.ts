@@ -363,6 +363,84 @@ describe('dashboards', () => {
   })
 })
 
+describe('dashboard widget props', () => {
+  const summary = { summary: { passRatePct: 97.6, coverage: 71.4, passDelta: 0.012 } }
+
+  test('props that would break a widget are refused, every mistake listed, nothing saved', async () => {
+    const before = app.listArtifacts(ctx.projectId).length
+    const result = await run('create_dashboard', {
+      title: '质量',
+      widgets: [
+        {
+          id: 'w-pass',
+          type: 'stat',
+          props: { source: 'summary', field: 'passRatePct', delta: 0.012, suffix: '%' },
+        },
+        { id: 'w-chart', type: 'chart', props: { source: 'summary', x: 'day', y: 'passed' } },
+        { id: 'w-text', type: 'text', props: { content: '说明' } },
+      ],
+      data: summary,
+    })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('w-pass')
+    expect(result.content).toContain('props.delta must be a field name')
+    expect(result.content).toContain('props.y must be a list of field names')
+    expect(result.content).toContain('has no prop "content"')
+    expect(app.listArtifacts(ctx.projectId)).toHaveLength(before)
+  })
+
+  test('the result lists fields and rows the widgets read that are not in the data', async () => {
+    const result = await ok('create_dashboard', {
+      title: '质量',
+      widgets: [
+        {
+          id: 'w-pass',
+          type: 'stat',
+          props: { source: 'summary', field: 'passRatePct', delta: 'passDelta' },
+        },
+        { id: 'w-cov', type: 'stat', props: { source: 'summary', field: 'cover' } },
+        {
+          id: 'w-runs',
+          type: 'chart',
+          props: { source: 'runs', x: 'day', y: ['passed', 'skipped'] },
+        },
+        { id: 'w-sum', type: 'table', props: { source: 'summary' } },
+      ],
+      data: { ...summary, runs: [{ day: '02-01', passed: 241 }] },
+    })
+    expect(result.problems).toEqual([
+      'widget "w-cov": props.field "cover" is not a number in data set "summary"',
+      'widget "w-runs": rows of data set "runs" have no "skipped"',
+      'widget "w-sum": data set "summary" is not a list of rows',
+    ])
+    const read = await ok('read_artifact', { artifactId: result.artifactId })
+    expect(read.problems).toHaveLength(3)
+  })
+
+  test('changing only the title of a widget keeps its props and is not checked again', async () => {
+    const { artifactId } = await ok('create_dashboard', {
+      title: '质量',
+      widgets: [{ id: 'n', type: 'stat', props: { value: 42 } }],
+    })
+    await ok('update_dashboard', {
+      artifactId,
+      baseVersion: 1,
+      reason: '改标题',
+      widgets: [{ id: 'n', title: '节点数' }],
+    })
+    const bad = await run('update_dashboard', {
+      artifactId,
+      baseVersion: 2,
+      reason: 'x',
+      widgets: [{ id: 'n', props: { value: '42' } }],
+    })
+    expect(bad).toMatchObject({
+      isError: true,
+      content: expect.stringContaining('props.value must be a number'),
+    })
+  })
+})
+
 describe('live dashboards', () => {
   test('a source fetches the data; refreshing stores a new version; null makes it a snapshot', async () => {
     let calls = 0

@@ -3,6 +3,7 @@ import {
   type DashboardContent,
   type DashboardWidgetContent,
 } from '@ariadne/core'
+import { widgetPropsErrors } from './dashboard-check'
 import { ToolInputError } from './tool-helpers'
 
 /** Columns on the widest breakpoint, where `@dou-ui/dashboard` keeps the main place. */
@@ -60,6 +61,7 @@ export function mergeDashboard(
   const widgets = content.dashboard.widgets.filter((w) => !removed.has(w.id))
   const added: { widget: DashboardWidgetContent; w: number; h: number }[] = []
   const seen = new Set<string>()
+  const errors: string[] = []
   for (const input of changes.widgets) {
     const id = input.id
     if (typeof id !== 'string' || !id) throw new ToolInputError('every widget needs an "id"')
@@ -83,6 +85,7 @@ export function mergeDashboard(
       type: type as string,
       props: props as Record<string, unknown>,
     }
+    if (input.props !== undefined || !existing) errors.push(...widgetPropsErrors(widget))
     if (typeof input.title === 'string') {
       if (input.title) widget.title = input.title
       else delete widget.title
@@ -101,6 +104,10 @@ export function mergeDashboard(
       widgets.push(widget)
       added.push({ widget, w: w ?? size.w, h: h ?? size.h })
     }
+  }
+  if (errors.length) {
+    // every widget's mistakes at once, so one more call can fix them all
+    throw new ToolInputError(`Nothing was saved. ${errors.join('; ')}`)
   }
   const bottom = Math.max(
     0,

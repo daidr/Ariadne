@@ -100,6 +100,7 @@ export const en: Record<MessageKey, string> = {
   'artifact.dashboard.snapshot': 'Static snapshot',
   'artifact.dashboard.takenAt': 'Data as of {time}',
   'artifact.dashboard.edit': 'Edit layout',
+  'artifact.dashboard.widgetBroken': 'This widget’s settings are wrong, so it can’t be shown',
   'artifact.version': 'Version {version}',
   'artifact.versions': 'Versions',
   'artifact.current': 'Current version',
