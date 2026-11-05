@@ -176,6 +176,8 @@ function select(item: CommandItem) {
 .hit-label {
   flex: 1;
   min-width: 0;
+  /* Centre the icon on the letters, not on the font's ascent and descent; see ThreadRow. */
+  text-box: trim-both cap alphabetic;
 }
 
 .hit-detail {
