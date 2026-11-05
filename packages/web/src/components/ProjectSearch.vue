@@ -163,6 +163,13 @@ function select(item: CommandItem) {
   min-width: 0;
 }
 
+/* Trimmed text is 2px shorter; keep the line as tall as before, so the two lines don't close up. */
+@supports (text-box: trim-both cap alphabetic) {
+  .hit-line {
+    padding-block: 1px;
+  }
+}
+
 .hit-icon {
   display: inline-flex;
   flex: none;
@@ -176,6 +183,8 @@ function select(item: CommandItem) {
 .hit-label {
   flex: 1;
   min-width: 0;
+  /* Centre the icon on the letters, not on the font's ascent and descent; see ThreadRow. */
+  text-box: trim-both cap alphabetic;
 }
 
 .hit-detail {

@@ -23,7 +23,7 @@ const prTone = computed(() =>
   <span class="row">
     <span class="row-head">
       <StageIcon :stage="thread.stage" />
-      <DouText truncate class="row-title">{{ thread.title }}</DouText>
+      <DouText truncate class="row-title row-trim">{{ thread.title }}</DouText>
       <DouText
         v-if="thread.pullRequest"
         size="sm"
@@ -38,7 +38,9 @@ const prTone = computed(() =>
           aria-hidden="true"
         />
         <GitPullRequestIcon v-else aria-hidden="true" />
-        {{ thread.pullRequest.reference ?? `#${thread.pullRequest.number}` }}
+        <span class="row-trim">{{
+          thread.pullRequest.reference ?? `#${thread.pullRequest.number}`
+        }}</span>
       </DouText>
       <DouText
         v-if="thread.progress && thread.stage !== 'done'"
@@ -55,9 +57,9 @@ const prTone = computed(() =>
           color="var(--dou-color-text-tertiary)"
           :label="t('threads.progress')"
         />
-        {{ thread.progress.done }}/{{ thread.progress.total }}
+        <span class="row-trim">{{ thread.progress.done }}/{{ thread.progress.total }}</span>
       </DouText>
-      <DouText size="sm" variant="tertiary" class="row-time">
+      <DouText size="sm" variant="tertiary" class="row-time row-trim">
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>
     </span>
@@ -82,11 +84,27 @@ const prTone = computed(() =>
   white-space: normal;
 }
 
+/* Trimmed text is 2px shorter; the padding makes it up, so rows stay the same height. */
+@supports (text-box: trim-both cap alphabetic) {
+  .row {
+    padding-block: 8px;
+  }
+}
+
 .row-head {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+/*
+ * The status icon centres on the text's box, and CJK and system fonts sit their glyphs
+ * low in it, so the icon looked high. Trimmed to cap height and baseline, the box is
+ * the letters themselves, as dou-ui does for its own icon and label pairs.
+ */
+.row-trim {
+  text-box: trim-both cap alphabetic;
 }
 
 .row-title {
