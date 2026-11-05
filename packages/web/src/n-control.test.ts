@@ -38,14 +38,16 @@ describe('line comment drafts', () => {
     expect(drafts.map((d) => d.body)).toEqual(['还有这里'])
   })
 
-  test('resolving a line drops only its comments', () => {
+  test('resolving keeps the comments, removing the card drops only its line', () => {
     const drafts = [draft('a'), draft('b', { line: 9 }), draft('c', { path: 'b.ts' })]
-    const left = applyDraftAction(drafts, at, {
+    const resolved = applyDraftAction(drafts, at, {
       type: 'resolve',
       threadId: 'x',
       by: author,
       at: '',
     })
+    expect(resolved.map((d) => d.id)).toEqual(['a', 'b', 'c'])
+    const left = applyDraftAction(drafts, at, { type: 'remove', threadId: 'x' })
     expect(left.map((d) => d.id)).toEqual(['b', 'c'])
   })
 

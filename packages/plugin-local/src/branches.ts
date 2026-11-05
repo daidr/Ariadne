@@ -160,12 +160,20 @@ export async function treeDiff(git: GitRun, from: string, to: string): Promise<C
  */
 export const SNAPSHOT_INDEX = 'ariadne-snapshot-index'
 
+/** Where a thread's snapshots are kept from git's cleanup, one ref per tree. */
+export const snapshotRefs = (threadId: string) => `refs/ariadne/turns/${threadId}/`
+
 /**
  * The files of the worktree `cwd` as they are now, committed or not and ignored ones left
  * out, as a git tree. Written through an index of its own, so the worktree, its index and
- * its branch stay as they are.
+ * its branch stay as they are; a ref under `snapshotRefs(threadId)` keeps the tree, so a
+ * turn's changes still open once `git gc` has pruned what nothing points at.
  */
-export async function worktreeSnapshot(git: GitRun, cwd: string): Promise<string> {
+export async function worktreeSnapshot(
+  git: GitRun,
+  cwd: string,
+  threadId: string,
+): Promise<string> {
   const dir = await git(['rev-parse', '--absolute-git-dir'], { cwd })
   if (dir.exitCode !== 0) fail(dir, 'git rev-parse')
   const env = { GIT_INDEX_FILE: `${dir.stdout.trim()}/${SNAPSHOT_INDEX}` }
@@ -173,7 +181,20 @@ export async function worktreeSnapshot(git: GitRun, cwd: string): Promise<string
   if (add.exitCode !== 0) fail(add, 'git add')
   const tree = await git(['write-tree'], { cwd, env })
   if (tree.exitCode !== 0) fail(tree, 'git write-tree')
-  return tree.stdout.trim()
+  const written = tree.stdout.trim()
+  const kept = await git(['update-ref', `${snapshotRefs(threadId)}${written}`, written], { cwd })
+  if (kept.exitCode !== 0) fail(kept, 'git update-ref')
+  return written
+}
+
+/** Let git clean up a thread's snapshots: its project is going away. */
+export async function dropSnapshots(git: GitRun, threadId: string): Promise<void> {
+  const refs = await git(['for-each-ref', '--format=%(refname)', snapshotRefs(threadId)])
+  if (refs.exitCode !== 0) fail(refs, 'git for-each-ref')
+  for (const ref of refs.stdout.split('\n').filter(Boolean)) {
+    const result = await git(['update-ref', '-d', ref])
+    if (result.exitCode !== 0) fail(result, 'git update-ref')
+  }
 }
 
 async function blob(git: GitRun, commit: string, path: string) {

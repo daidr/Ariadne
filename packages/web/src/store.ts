@@ -792,10 +792,18 @@ function onLive(update: LiveUpdate) {
 export async function sendLineComments(
   threadId: string,
   comments: LineComment[],
+  ids: readonly string[],
 ): Promise<boolean> {
   if (!comments.length) return false
   const sent = await sendMessage(threadId, '', { comments })
-  if (sent) delete state.lineComments[threadId]
+  if (sent) {
+    // Only those sent: one written while they went stays a draft.
+    const left = (state.lineComments[threadId] ?? []).filter(
+      (draft) => !ids.includes((draft as { id?: string }).id ?? ''),
+    )
+    if (left.length) state.lineComments[threadId] = left
+    else delete state.lineComments[threadId]
+  }
   return sent
 }
 

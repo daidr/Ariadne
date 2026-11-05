@@ -6,6 +6,7 @@ import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
 import { call, fakeModel, say } from './test-model'
+import { turnChanges } from './turn-changes'
 import { commentsText, mentionsText } from './transcript'
 import { WorkspaceManager } from './workspaces'
 
@@ -178,6 +179,36 @@ describe('a thread turn', () => {
     expect(user).toContain("- src/a.ts:3 `const 'a' = 1`\n  改成 2\n  再加注释")
     expect(user).toContain(`- thread "调研" (${other.id})`)
     expect(user).toContain('- file src/a.ts')
+  })
+})
+
+describe('a stopped turn', () => {
+  test('waits for its changes only so long, and records none that come late', async () => {
+    let calls = 0
+    const branches = {
+      snapshot: async () => {
+        calls++
+        // The second snapshot, at the turn's end, is slow.
+        if (calls > 1) await new Promise((resolve) => setTimeout(resolve, 200))
+        return `tree${calls}`
+      },
+      diff: async () => [
+        { path: 'a', previousPath: null, status: 'modified' as const, added: 1, removed: 0 },
+      ],
+    }
+    const workspaces = { branches: async () => branches } as unknown as WorkspaceManager
+    const recorded: unknown[] = []
+    const fakeApp = { recordTurnChanges: (...args: unknown[]) => recorded.push(args) } as never
+    const changes = turnChanges(workspaces, 'p', 't')
+    await changes.begin()
+    const started = Date.now()
+    await changes.record(fakeApp, 'turn', 20)
+    expect(Date.now() - started).toBeLessThan(150)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(recorded).toEqual([])
+    // Given the time, it records them.
+    await changes.record(fakeApp, 'turn')
+    expect(recorded).toHaveLength(1)
   })
 })
 

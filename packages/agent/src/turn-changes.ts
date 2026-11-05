@@ -1,6 +1,9 @@
 import type { Ariadne } from '@ariadne/core'
 import type { WorkspaceManager } from './workspaces'
 
+/** How long a stopped turn waits for its changes; past it they are not shown. */
+export const STOPPED_CHANGES_MS = 5_000
+
 /**
  * What one turn of a thread changes in its workspace, however it changed it (its file
  * tools, a command, a script): the workspace is written down as a git tree when the turn
@@ -24,8 +27,25 @@ export function turnChanges(workspaces: WorkspaceManager, projectId: string, thr
       before ??= snapshot()
       return before.then(() => undefined)
     },
-    /** As the turn ends: what changed since `begin`, if anything. */
-    async record(app: Ariadne, turnId: string): Promise<void> {
+    /**
+     * As the turn ends: what changed since `begin`, if anything; given `timeoutMs`, it
+     * gives up past it and records nothing.
+     */
+    async record(app: Ariadne, turnId: string, timeoutMs?: number): Promise<void> {
+      if (!before) return
+      if (timeoutMs === undefined) return this.recordNow(app, turnId)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let late = false
+      const timeout = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          late = true
+          resolve()
+        }, timeoutMs)
+      })
+      await Promise.race([this.recordNow(app, turnId, () => late), timeout])
+      clearTimeout(timer)
+    },
+    async recordNow(app: Ariadne, turnId: string, late = () => false): Promise<void> {
       if (!before) return
       const from = await before
       if (!from) return
@@ -35,6 +55,8 @@ export function turnChanges(workspaces: WorkspaceManager, projectId: string, thr
         const to = await snapshot()
         if (!to || to === from) return
         const files = await branches.diff(from, to)
+        // The turn ended without waiting for it.
+        if (late()) return
         app.recordTurnChanges(threadId, turnId, { from, to, files })
       } catch {
         // A diff that cannot be read leaves the turn as it is.

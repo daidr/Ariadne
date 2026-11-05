@@ -23,6 +23,7 @@ import {
   mergeBranch,
   removeWorktree,
   treeDiff,
+  dropSnapshots,
   worktreeSnapshot,
   type GitRun,
   type Identity,
@@ -519,11 +520,19 @@ export function localWorkspaces(input: {
       file: (request) => fileVersions(gitRun, request),
       merged: ({ branch }, base) => branchMerged(gitRun, branch, `refs/heads/${base}`),
       merge: (request) => mergeBranch(gitRun, localIdentity(repoRoot), request),
-      remove: (threadId, options) =>
-        removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir), options),
+      async remove(threadId, options) {
+        const removed = await removeWorktree(
+          gitRun,
+          dirOf(threadId),
+          async (dir) => existsSync(dir),
+          options,
+        )
+        if (removed && options?.discard) await dropSnapshots(gitRun, threadId)
+        return removed
+      },
       worktrees: () => worktreesIn(worktrees),
       snapshot: async (threadId) =>
-        existsSync(dirOf(threadId)) ? worktreeSnapshot(gitRun, dirOf(threadId)) : null,
+        existsSync(dirOf(threadId)) ? worktreeSnapshot(gitRun, dirOf(threadId), threadId) : null,
       diff: (from, to) => treeDiff(gitRun, from, to),
     },
     async open({ threadId, base: recorded, branch: named }) {

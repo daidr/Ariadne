@@ -18,6 +18,7 @@ import {
   mergeBranch,
   removeWorktree,
   treeDiff,
+  dropSnapshots,
   worktreeSnapshot,
   type GitRun,
 } from '@ariadne/plugin-local'
@@ -314,7 +315,11 @@ export function remoteWorkspaces(
             merge: (request: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
               mergeBranch(git, identity, request),
           }),
-      remove: (threadId, options) => removeWorktree(git, dirOf(threadId), exists, options),
+      async remove(threadId, options) {
+        const removed = await removeWorktree(git, dirOf(threadId), exists, options)
+        if (removed && options?.discard) await dropSnapshots(git, threadId)
+        return removed
+      },
       async worktrees() {
         const result = await shell.run(WORKTREES, [worktrees], { timeoutMs: 120_000 })
         if (result.exitCode !== 0) throw failure(shell, worktrees, result)
@@ -331,7 +336,7 @@ export function remoteWorkspaces(
         return list
       },
       snapshot: async (threadId) =>
-        (await exists(dirOf(threadId))) ? worktreeSnapshot(git, dirOf(threadId)) : null,
+        (await exists(dirOf(threadId))) ? worktreeSnapshot(git, dirOf(threadId), threadId) : null,
       diff: (from, to) => treeDiff(git, from, to),
     },
     async open({ threadId, ref, base: recorded, branch: named }) {

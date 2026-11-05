@@ -224,7 +224,9 @@ const sending = ref(false)
 async function sendComments() {
   sending.value = true
   try {
-    if (await sendLineComments(props.threadId, sendable(drafts.value))) openThread(props.threadId)
+    const outgoing = drafts.value
+    const ids = outgoing.map((draft) => draft.id)
+    if (await sendLineComments(props.threadId, sendable(outgoing), ids)) openThread(props.threadId)
   } finally {
     sending.value = false
   }

@@ -85,6 +85,8 @@ export async function mentionFiles(
   query: string,
 ): Promise<string[]> {
   const key = `${projectId}\0${threadId ?? ''}`
+  // Lists gone stale go, so threads long done do not keep theirs.
+  for (const [other, { at }] of cache) if (Date.now() - at > FRESH_MS) cache.delete(other)
   let entry = cache.get(key)
   if (!entry || Date.now() - entry.at > FRESH_MS) {
     entry = { at: Date.now(), files: filesOf(app, workspaces, projectId, threadId) }

@@ -49,7 +49,7 @@ import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 import { withImages } from './tool-helpers'
-import { turnChanges } from './turn-changes'
+import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 
 /** The model a conversation talks to, with its provider's settings. */
 export interface ResolvedModel {
@@ -290,7 +290,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? turnChanges(workspaces, conversation.projectId, conversationId)
       : null
   const finish = async (...args: TurnEnd) => {
-    await changes?.record(app, turnId)
+    // A stopped turn waits for its changes only briefly, so it does not stay working.
+    await changes?.record(app, turnId, signal.aborted ? STOPPED_CHANGES_MS : undefined)
     app.finishTurn(conversationId, turnId, ...args)
   }
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))

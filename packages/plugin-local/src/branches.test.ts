@@ -389,4 +389,23 @@ describe('turn snapshots', () => {
     const { branches } = await setup()
     expect(await branches.snapshot!('thr_none')).toBeNull()
   })
+
+  test('are kept from git gc until the thread is discarded', async () => {
+    const { dir, capability, branches, thread } = await setup()
+    await thread.writeFile('loose.txt', 'only in a snapshot\n')
+    const tree = (await branches.snapshot!('thr_a'))!
+    expect(
+      await git(dir, 'for-each-ref', '--format=%(objectname)', 'refs/ariadne/turns/thr_a/'),
+    ).toBe(tree)
+    // Removing the worktree keeps them: the thread's turns still show their changes.
+    await thread.exec('rm loose.txt')
+    expect(await branches.remove('thr_a')).toBe(true)
+    expect(await git(dir, 'for-each-ref', 'refs/ariadne/turns/thr_a/')).not.toBe('')
+    await git(dir, 'gc', '--prune=now', '--quiet')
+    expect(await git(dir, 'cat-file', '-t', tree)).toBe('tree')
+    // Discarding them lets them go.
+    await capability.open({ threadId: 'thr_a' })
+    expect(await branches.remove('thr_a', { discard: true })).toBe(true)
+    expect(await git(dir, 'for-each-ref', 'refs/ariadne/turns/thr_a/')).toBe('')
+  })
 })

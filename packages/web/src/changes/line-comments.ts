@@ -42,8 +42,9 @@ export function lineThread(path: string, line: number, comments: DraftComment[])
 
 /**
  * What a card's action does to the drafts: a first comment or a reply adds one on the
- * line, an edit changes one, a delete removes one, and resolving or removing the card
- * drops the line's comments, since nothing is sent for them.
+ * line, an edit changes one, a delete removes one, and removing the card drops the
+ * line's comments. Resolving changes nothing: its ✓ reads as "done writing", and a draft
+ * lost to it could not be had back.
  */
 export function applyDraftAction(
   drafts: readonly DraftComment[],
@@ -68,7 +69,6 @@ export function applyDraftAction(
       )
     case 'delete':
       return drafts.filter((comment) => comment.id !== action.commentId)
-    case 'resolve':
     case 'remove':
       return drafts.filter((comment) => !onLine(comment))
     default:
