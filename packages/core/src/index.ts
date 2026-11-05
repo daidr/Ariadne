@@ -57,11 +57,14 @@ export {
   MAX_SETUP_SCRIPT,
   parseProjectSettings,
   POSIX_SHELLS,
+  SHELL_CHOICES,
   SHELL_NAMES,
+  MAX_CHECK_COMMAND,
   SHELLS,
   threadBranch,
   validBranchPrefix,
   type ProjectSettings,
+  type ShellChoice,
   type ShellName,
 } from './project-settings'
 export {

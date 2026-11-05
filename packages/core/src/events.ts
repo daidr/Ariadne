@@ -415,6 +415,31 @@ export interface EventMap {
     timing: CallTiming
   }
   /**
+   * One model response of a read-only research a conversation's `research` call ran, in a
+   * context of its own: its own question, system prompt and tools (hashes, as in
+   * `StepInput`), and the results of the calls it made, which only it read. The calling
+   * conversation sees the research's answer alone, as that call's result.
+   */
+  'research.step': {
+    conversationId: string
+    turnId: string
+    /** The `research` call it answers. */
+    toolCallId: string
+    /** Counted from 1 within the research. */
+    number: number
+    question: string
+    text: string
+    reasoning: ReasoningRecord[]
+    toolCalls: ToolCallRecord[]
+    results: { toolCallId: string; name: string; content: string; isError: boolean }[]
+    finish: 'stop' | 'tool-calls' | 'length'
+    usage: TokenUsage | null
+    input: { system: string; tools: string; call: string }
+    timing: CallTiming
+    /** When the response was whole; its calls ran from then until the event. */
+    answeredAt: number
+  }
+  /**
    * A piece of model input seen for the first time in the project, stored once by its
    * hash; steps name the pieces they were sent, so the trace can show every request whole.
    */

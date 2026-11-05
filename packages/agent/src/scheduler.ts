@@ -31,7 +31,12 @@ export interface SchedulerOptions {
   models?: () => ModelChoice[]
   /** The user's limits, instructions and command rules, and the project's environment. */
   settings?: (projectId: string) => TurnSettings
+  /** The model researches run on; `null` for the asking conversation's own. */
+  researchModel?: () => ResolvedModel | null
 }
+
+/** Reports after which a thread's background commands have nothing more to do. */
+const FINAL_REPORTS = new Set(['ready', 'done', 'failed', 'blocked'])
 
 interface Running {
   controller: AbortController
@@ -79,7 +84,14 @@ export class Scheduler {
     this.unsubscribe = app.subscribe((events) => {
       // A held thread's turn ends now, with whatever command it runs; that frees its slot.
       for (const event of events) {
-        if (event.type === 'thread.stopped') this.cancel(event.data.threadId)
+        if (event.type === 'thread.stopped') {
+          this.cancel(event.data.threadId)
+          void this.options.workspaces?.stopThread(event.data.threadId)
+        }
+        // Its work is finished: what it left running in the background ends.
+        if (event.type === 'thread.reported' && FINAL_REPORTS.has(event.data.report)) {
+          void this.options.workspaces?.background.stopThread(event.data.threadId)
+        }
       }
       this.schedule()
     })
@@ -218,6 +230,7 @@ export class Scheduler {
         ...(this.options.settings
           ? { settings: this.options.settings(conversation.projectId) }
           : {}),
+        ...(this.options.researchModel ? { researchModel: this.options.researchModel() } : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

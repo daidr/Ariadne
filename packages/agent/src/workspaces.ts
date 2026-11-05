@@ -1,4 +1,5 @@
-import { DomainError, SHELLS, threadBranch, type Ariadne } from '@ariadne/core'
+import { DomainError, SHELLS, threadBranch, type Ariadne, type ShellChoice } from '@ariadne/core'
+import { defaultShell } from '@ariadne/plugin-sdk'
 import type {
   BranchCapability,
   Capabilities,
@@ -13,6 +14,7 @@ import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
 import { headAndTail } from './workspace-tools'
+import { BackgroundCommands } from './background'
 
 /** What the model reads at most of the setup script's output. */
 const MAX_SETUP_OUTPUT = 8000
@@ -99,6 +101,10 @@ export class WorkspaceManager {
   private readonly queues = new Map<string, Promise<void>>()
   /** What the setup script of a thread's new workspace did, until its model is told. */
   private readonly setups = new Map<string, string>()
+  /** Stops the setup script running in a thread's new workspace. */
+  private readonly setupStops = new Map<string, AbortController>()
+  /** Commands threads left running in the background. */
+  readonly background = new BackgroundCommands()
 
   constructor(
     private readonly app: Ariadne,
@@ -140,6 +146,17 @@ export class WorkspaceManager {
   isRemote(projectId: string): boolean {
     const source = this.app.getProject(projectId).source
     return !!source && !!this.host.contexts.get(source.kind)?.remote
+  }
+
+  /**
+   * The shell the project's thread commands run in: its name, as the model is told, and
+   * the command line to hand them to; `argv` is `null` for the machine's own. Another
+   * machine (SSH, a daemon) is POSIX, and its own is bash.
+   */
+  shell(projectId: string): { name: string; argv: readonly string[] | null } {
+    const chosen: ShellChoice = this.app.getProject(projectId).settings.workspace.shell
+    if (chosen !== 'auto') return { name: chosen, argv: SHELLS[chosen] }
+    return { name: this.isRemote(projectId) ? 'bash' : defaultShell().name, argv: null }
   }
 
   /** Whether the project's source has issues to read. */
@@ -232,11 +249,31 @@ export class WorkspaceManager {
     return capabilities.repo
   }
 
-  /** The thread's workspace; throws a `DomainError` the model can read. */
-  async forThread(projectId: string, threadId: string): Promise<Workspace> {
+  /**
+   * The thread's workspace; throws a `DomainError` the model can read. A new workspace's
+   * setup script stops when `signal` aborts (the thread's turn was stopped), and runs again
+   * the next time the workspace is asked for.
+   */
+  async forThread(projectId: string, threadId: string, signal?: AbortSignal): Promise<Workspace> {
     const key = this.sourceKey(projectId)
-    // Not while its worktree is being removed: it would be used, then deleted under it.
-    return this.serial(threadId, () => this.openFor(projectId, threadId, key))
+    const stopSetup = () => this.setupStops.get(threadId)?.abort('stopped')
+    if (signal?.aborted) stopSetup()
+    signal?.addEventListener('abort', stopSetup, { once: true })
+    try {
+      // Not while its worktree is being removed: it would be used, then deleted under it.
+      return await this.serial(threadId, () => this.openFor(projectId, threadId, key))
+    } finally {
+      signal?.removeEventListener('abort', stopSetup)
+    }
+  }
+
+  /**
+   * End what the thread left running: its background commands, and the setup script of
+   * its new workspace.
+   */
+  async stopThread(threadId: string): Promise<void> {
+    this.setupStops.get(threadId)?.abort('stopped')
+    await this.background.stopThread(threadId)
   }
 
   private async openFor(projectId: string, threadId: string, key: string): Promise<Workspace> {
@@ -256,7 +293,7 @@ export class WorkspaceManager {
         branch,
         ...(known ? { base: known.base } : {}),
       })
-      if (fresh && setup.setup) await this.runSetup(projectId, threadId, opened, setup)
+      if (fresh && setup.setup) await this.runSetup(projectId, threadId, opened, setup.setup)
       return opened
     })
     this.open.set(threadId, { key, workspace })
@@ -281,13 +318,17 @@ export class WorkspaceManager {
     projectId: string,
     threadId: string,
     workspace: Workspace,
-    setup: { setup: string; shell: keyof typeof SHELLS },
+    script: string,
   ): Promise<void> {
     const env = this.env(projectId)
+    const { argv } = this.shell(projectId)
+    const stop = new AbortController()
+    this.setupStops.set(threadId, stop)
     const result = await workspace
-      .exec(setup.setup, {
-        shell: SHELLS[setup.shell],
+      .exec(script, {
+        ...(argv ? { shell: argv } : {}),
         timeoutMs: this.options.setupTimeoutMs?.(projectId) ?? 600_000,
+        signal: stop.signal,
         ...(Object.keys(env).length ? { env } : {}),
       })
       .catch((error: unknown) => ({
@@ -295,6 +336,16 @@ export class WorkspaceManager {
         stdout: '',
         stderr: error instanceof Error ? error.message : String(error),
       }))
+      .finally(() => {
+        if (this.setupStops.get(threadId) === stop) this.setupStops.delete(threadId)
+      })
+    // Stopped half way: the workspace is not set up, so it is not handed out; the next
+    // turn opens it again and the script runs from the start.
+    if (stop.signal.aborted) {
+      throw new DomainError('error.workspace', {
+        detail: "the project's setup script was stopped before it finished",
+      })
+    }
     const output = headAndTail(
       [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
       MAX_SETUP_OUTPUT,
@@ -328,6 +379,7 @@ export class WorkspaceManager {
       const branches = await this.branches(projectId)
       if (!branches) return 'dirty'
       if (known && this.app.getConversation(threadId).turn) return 'busy'
+      await this.background.stopThread(threadId)
       const open = this.open.get(threadId)
       this.open.delete(threadId)
       if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
@@ -349,6 +401,7 @@ export class WorkspaceManager {
     let branches: Promise<BranchCapability | null> | null = null
     for (const { id } of this.app.listThreads(projectId)) {
       await this.serial(id, async () => {
+        await this.background.stopThread(id)
         const open = this.open.get(id)
         this.open.delete(id)
         if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
@@ -380,6 +433,8 @@ export class WorkspaceManager {
   }
 
   async dispose(): Promise<void> {
+    for (const stop of this.setupStops.values()) stop.abort('stopped')
+    await this.background.stopAll()
     const all = [...this.open.values()]
     this.open.clear()
     await Promise.allSettled(all.map(async (entry) => (await entry.workspace).dispose()))

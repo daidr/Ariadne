@@ -1,5 +1,7 @@
 import {
+  defaultShell,
   definePlugin,
+  shellArgv,
   FileTooLargeError,
   readOnlyView,
   WorkspacePathError,
@@ -115,26 +117,26 @@ export async function run(
     forThread?: boolean
     /** Keep the whole output, e.g. a file's contents; otherwise long output keeps its end. */
     whole?: boolean
+    /** Called with output as it comes. */
+    onOutput?: ExecOptions['onOutput']
   },
 ): Promise<ExecResult> {
   // Stopped before it started (say, while the worktree was being made): an abort listener
   // added now would never fire, so the command must not start at all.
   if (options.signal?.aborted) return { exitCode: 130, stdout: '', stderr: 'cancelled' }
   const base = options.forThread ? threadEnv() : process.env
-  const proc = Bun.spawn(argv, {
-    cwd: options.cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    stdin: 'ignore',
-    // On Windows a console program gets a console window of its own unless told otherwise;
-    // every spawn in the code passes this (checked by spawn.test.ts in the server).
-    windowsHide: true,
-    env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
-    // A thread's command gets a process group of its own, so what it leaves running in the
-    // background ends with it (on macOS the sandbox does not do this). Windows has no
-    // process groups, and a detached command there would open a console window of its own.
-    detached: !!options.forThread && !windows,
-  })
+  let proc: ReturnType<typeof spawnPiped>
+  try {
+    proc = spawnPiped(argv, {
+      cwd: options.cwd,
+      env: { ...base, GIT_TERMINAL_PROMPT: '0', ...options.env },
+      detached: !!options.forThread && !windows,
+    })
+  } catch (error) {
+    // The program is not there (or cannot run): as a shell says it.
+    const reason = error instanceof Error ? error.message : String(error)
+    return { exitCode: 127, stdout: '', stderr: `${argv[0]}: ${reason}` }
+  }
   const killGroup = () => {
     if (windows) {
       // The command and what it started, while it still runs; once it has exited, the
@@ -157,8 +159,12 @@ export async function run(
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
-    const stdout = collect(proc.stdout)
-    const stderr = collect(proc.stderr)
+    const stdout = collect(
+      proc.stdout,
+      (chunk) => options.onOutput?.(chunk, 'stdout'),
+      !!options.whole,
+    )
+    const stderr = collect(proc.stderr, (chunk) => options.onOutput?.(chunk, 'stderr'))
     const exitCode = await proc.exited
     // Background processes would keep the output open, and keep running, otherwise.
     if (options.forThread && !windows) killGroup()
@@ -172,13 +178,42 @@ export async function run(
   }
 }
 
+/**
+ * Start `argv` with its output piped and no input. On Windows a console program gets a
+ * console window of its own unless told otherwise; every spawn in the code passes
+ * `windowsHide` (checked by spawn.test.ts in the server). A thread's command is `detached`:
+ * it gets a process group of its own, so what it leaves running in the background ends with
+ * it (on macOS the sandbox does not do this). Windows has no process groups, and a detached
+ * command there would open a console window of its own.
+ */
+function spawnPiped(
+  argv: string[],
+  options: { cwd: string; env: Record<string, string | undefined>; detached: boolean },
+) {
+  return Bun.spawn(argv, {
+    cwd: options.cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    stdin: 'ignore',
+    windowsHide: true,
+    env: options.env,
+    detached: options.detached,
+  })
+}
+
 const OUTPUT_GRACE_MS = 1000
 
 /**
- * Read a process's output as it comes. `settle` gives what was read once the output ends,
- * or after a short grace, whichever is first, and stops reading.
+ * Read a process's output as it comes, handing each piece to `onChunk`. `settle` gives what
+ * was read once the output ends, or after a short grace, whichever is first, and stops
+ * reading. Unless the output is wanted `whole`, what is kept is cut in the middle as it
+ * grows, so a command left running for hours does not fill memory.
  */
-function collect(stream: ReadableStream<Uint8Array>) {
+function collect(
+  stream: ReadableStream<Uint8Array>,
+  onChunk?: (chunk: string) => void,
+  whole = false,
+) {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let text = ''
@@ -187,7 +222,10 @@ function collect(stream: ReadableStream<Uint8Array>) {
       for (;;) {
         const chunk = await reader.read()
         if (chunk.done) break
-        text += decoder.decode(chunk.value, { stream: true })
+        const piece = decoder.decode(chunk.value, { stream: true })
+        text += piece
+        if (!whole && text.length > MAX_OUTPUT * 2) text = clip(text)
+        if (piece) onChunk?.(piece)
       }
     } catch {
       // Cancelled after the grace.
@@ -384,18 +422,20 @@ export class LocalWorkspace implements Workspace {
   }
 
   async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
+    const shell = options.shell ?? defaultShell().argv
+    return this.execFile(shellArgv(shell, command), options)
+  }
+
+  async execFile(argv: string[], options: Omit<ExecOptions, 'shell'> = {}): Promise<ExecResult> {
     const cwd = await this.resolve(options.cwd ?? '.')
-    const shell = options.shell ?? ['bash', '-c']
-    return run(
-      this.sandbox.wrap([...shell, command], { keep: this.keep, readOnly: this.readOnly }),
-      {
-        cwd,
-        forThread: true,
-        ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-        ...(options.signal ? { signal: options.signal } : {}),
-        ...(options.env ? { env: options.env } : {}),
-      },
-    )
+    return run(this.sandbox.wrap(argv, { keep: this.keep, readOnly: this.readOnly }), {
+      cwd,
+      forThread: true,
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.env ? { env: options.env } : {}),
+      ...(options.onOutput ? { onOutput: options.onOutput } : {}),
+    })
   }
 
   async dispose(): Promise<void> {

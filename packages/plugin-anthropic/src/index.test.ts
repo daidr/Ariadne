@@ -38,7 +38,8 @@ async function collect(effort?: 'low'): Promise<ModelStreamPart[]> {
       ...(effort ? { effort } : {}),
     },
   )) {
-    parts.push(part)
+    // What says the service is still there is tested on its own.
+    if (part.type !== 'alive') parts.push(part)
   }
   return parts
 }

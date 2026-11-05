@@ -31,6 +31,7 @@ import type {
   ReportKind,
   StepInput,
   CallTiming,
+  EventMap,
   ReasoningRecord,
   ThreadPullRequest,
   TodoItem,
@@ -103,7 +104,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 37
+export const PROJECTION_VERSION = 38
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -112,6 +113,7 @@ export const MESSAGE_PAGE = 40
 const TURN_EVENT_TYPES = [
   'turn.started',
   'turn.step',
+  'research.step',
   'tool.finished',
   'turn.finished',
   'conversation.model_retry',
@@ -2799,6 +2801,44 @@ export class Ariadne {
         },
       },
     ])
+  }
+
+  /**
+   * One step of the research a `research` call runs: the response, and the results of the
+   * calls it made. Its tokens count toward the conversation's.
+   */
+  recordResearchStep(
+    conversationId: string,
+    turnId: string,
+    step: Omit<EventMap['research.step'], 'conversationId' | 'turnId' | 'input'> & {
+      input: { system: string; tools: string; call: string }
+    },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    const { pieces, keep } = this.promptKeeper(projectId)
+    const input = {
+      system: keep(step.input.system),
+      tools: keep(step.input.tools),
+      call: keep(step.input.call),
+    }
+    this.store.append([
+      ...pieces,
+      { type: 'research.step', projectId, data: { ...step, conversationId, turnId, input } },
+    ])
+  }
+
+  /** The steps of one research of a conversation, up to `upTo`, oldest first. */
+  researchSteps(conversationId: string, toolCallId: string, upTo: number): AnyStoredEvent[] {
+    const conversation = this.getConversation(conversationId)
+    return this.db
+      .query<EventRow, [string, string, string, number]>(
+        `SELECT * FROM events WHERE project_id = ? AND type = 'research.step'
+           AND json_extract(data, '$.conversationId') = ?
+           AND json_extract(data, '$.toolCallId') = ? AND seq <= ?
+         ORDER BY seq`,
+      )
+      .all(conversation.projectId, conversationId, toolCallId, upTo)
+      .map(storedEvent)
   }
 
   /** Stores each piece of model input once per project; `keep` gives its hash. */

@@ -38,13 +38,14 @@ import {
   WORKTREES,
   WRITE,
 } from './scripts'
-import { CONNECTION_FAILED, type RemoteShell } from './shell'
+import { CONNECTION_FAILED, shellQuote, type RemoteShell } from './shell'
 
 export {
   clip,
   CONNECTION_FAILED,
   DEFAULT_TIMEOUT_MS,
   LocalShell,
+  OutputText,
   payload,
   REMOTE_COMMAND,
   shellQuote,
@@ -177,6 +178,7 @@ export class RemoteWorkspace implements Workspace {
       clip: true,
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.onOutput ? { onOutput: afterMarker(options.onOutput) } : {}),
     })
     // The command's own failures are its exit code; a path outside is the caller's.
     // Whatever came before the marker is the login shell's own (a greeting in its startup
@@ -192,8 +194,34 @@ export class RemoteWorkspace implements Workspace {
     return { ...result, stderr }
   }
 
+  /** A POSIX machine: the program and its arguments, quoted for bash. */
+  execFile(argv: string[], options: Omit<ExecOptions, 'shell'> = {}): Promise<ExecResult> {
+    return this.exec(argv.map(shellQuote).join(' '), options)
+  }
+
   async dispose(): Promise<void> {
     // Worktrees stay: the branch holds the thread's work.
+  }
+}
+
+/**
+ * Output handed on as it comes, without what the login shell printed to the error output
+ * before EXEC's marker. Error output that never shows the marker within a while is the
+ * command's own after all (the marker was cut), and is handed on from then.
+ */
+function afterMarker(
+  onOutput: NonNullable<ExecOptions['onOutput']>,
+): NonNullable<ExecOptions['onOutput']> {
+  const marker = `${STARTED}\n`
+  let held: string | null = ''
+  return (chunk, stream) => {
+    if (stream === 'stdout' || held === null) return onOutput(chunk, stream)
+    held += chunk
+    const at = held.indexOf(marker)
+    if (at < 0 && held.length < 64 * 1024) return
+    const rest = at < 0 ? held : held.slice(at + marker.length)
+    held = null
+    if (rest) onOutput(rest, 'stderr')
   }
 }
 

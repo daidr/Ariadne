@@ -125,6 +125,7 @@ export class HttpTransport implements Transport {
     if (!body) return
     try {
       for await (const event of readServerSentEvents(body)) {
+        if (event.comment) continue
         if (event.data.length > MAX_MESSAGE_BYTES) {
           // The answer it held is lost, so the connection is no use any more.
           this.end('the server answered with too much data')

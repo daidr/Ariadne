@@ -2,6 +2,7 @@ import {
   DomainError,
   type AnyStoredEvent,
   type Ariadne,
+  type EventMap,
   type TokenUsage,
   type TraceRequest,
   type TraceRequestDetail,
@@ -83,6 +84,46 @@ export function buildTrace(
         turn.items.push({
           ...requestBase(event.seq, ++number, call, timing, event.at, usage),
           purpose: 'step',
+          finish: event.data.finish,
+          text: event.data.text,
+          reasoning: event.data.reasoning.map((block) => ({
+            text: block.redacted ? '' : block.text,
+            redacted: !!block.redacted,
+          })),
+          toolCalls,
+        })
+        break
+      }
+      case 'research.step': {
+        const { usage, timing, input } = event.data
+        if (usage) addUsage(turn.usage, usage)
+        const parent = running.get(event.data.toolCallId)
+        if (!parent) break
+        const toolCalls = event.data.toolCalls.map((tool): TraceToolCall => {
+          const result = event.data.results.find((r) => r.toolCallId === tool.id)
+          return {
+            ...tool,
+            startedAt: event.data.answeredAt,
+            result: result
+              ? {
+                  content: result.content,
+                  isError: result.isError,
+                  finishedAt: event.at,
+                  files: [],
+                }
+              : null,
+          }
+        })
+        ;(parent.research ??= []).push({
+          ...requestBase(
+            event.seq,
+            event.data.number,
+            callOf(event.projectId, input.call),
+            timing,
+            event.data.answeredAt,
+            usage,
+          ),
+          purpose: 'research',
           finish: event.data.finish,
           text: event.data.text,
           reasoning: event.data.reasoning.map((block) => ({
@@ -220,8 +261,12 @@ export function traceRequest(
   }
   const current = requestOf(app, conversationId, event)
   // What the step before it was sent, to mark what is new in this one. Steps only: a
-  // summary request reads differently and would mark everything changed.
-  const previous = app.lastStepBefore(conversationId, seq)
+  // summary request reads differently and would mark everything changed. A research step
+  // follows the research's own steps.
+  const previous =
+    event.type === 'research.step'
+      ? (app.researchSteps(conversationId, event.data.toolCallId, seq - 1).at(-1) ?? null)
+      : app.lastStepBefore(conversationId, seq)
   const before = previous ? requestOf(app, conversationId, previous).messages : []
   // The system prompt moves on its own (the plan, memory, the workspace opening); the
   // conversation after it is compared apart, so one change does not mark everything new.
@@ -235,7 +280,7 @@ export function traceRequest(
     newFrom++
   }
   const hash =
-    event.type === 'turn.step'
+    event.type === 'turn.step' || event.type === 'research.step'
       ? event.data.input.call
       : event.type === 'conversation.compacted'
         ? event.data.call
@@ -270,7 +315,9 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 function belongsTo(event: AnyStoredEvent, conversationId: string): boolean {
   return (
-    (event.type === 'turn.step' || event.type === 'conversation.compacted') &&
+    (event.type === 'turn.step' ||
+      event.type === 'conversation.compacted' ||
+      event.type === 'research.step') &&
     event.data.conversationId === conversationId
   )
 }
@@ -299,13 +346,28 @@ function requestOf(
       tools: [],
     }
   }
-  if (event.type !== 'turn.step') throw new DomainError('error.notFound', { what: event.id })
-  const { input, sawSeq } = event.data
   const piece = (hash: string) => {
     const content = app.getPrompt(event.projectId, hash)
     if (content === null) throw new DomainError('error.notFound', { what: hash })
     return content
   }
+  if (event.type === 'research.step') {
+    // The research's own context: its question, then its earlier steps and their results.
+    const { input, toolCallId, question } = event.data
+    const before = app
+      .researchSteps(conversationId, toolCallId, event.seq - 1)
+      .flatMap((step) => (step.type === 'research.step' ? [step.data] : []))
+    return {
+      messages: [
+        { role: 'system', content: piece(input.system) },
+        { role: 'user', content: question },
+        ...researchHistory(before),
+      ],
+      tools: JSON.parse(piece(input.tools)) as ToolSpec[],
+    }
+  }
+  if (event.type !== 'turn.step') throw new DomainError('error.notFound', { what: event.id })
+  const { input, sawSeq } = event.data
   const transcript = app.listTranscript(conversationId, { upTo: sawSeq })
   const call = parseCall(app.getPrompt(event.projectId, input.call))
   return {
@@ -319,4 +381,24 @@ function requestOf(
     ],
     tools: JSON.parse(piece(input.tools)) as ToolSpec[],
   }
+}
+
+/** A research's steps as the messages its model read after its question. */
+export function researchHistory(
+  steps: Pick<EventMap['research.step'], 'text' | 'reasoning' | 'toolCalls' | 'results'>[],
+): ModelMessage[] {
+  return steps.flatMap((step): ModelMessage[] => [
+    {
+      role: 'assistant',
+      content: step.text,
+      ...(step.toolCalls.length ? { toolCalls: step.toolCalls } : {}),
+      ...(step.reasoning.length ? { reasoning: step.reasoning } : {}),
+    },
+    ...step.results.map((result): ModelMessage => ({
+      role: 'tool',
+      toolCallId: result.toolCallId,
+      content: result.content,
+      ...(result.isError ? { isError: true } : {}),
+    })),
+  ])
 }

@@ -1,6 +1,6 @@
 import type { CallTiming, ReasoningRecord, TokenUsage, TranscriptEntry } from '@ariadne/core'
 import type { ChatMessage, ModelRequest, ModelStreamPart } from '@ariadne/plugin-sdk'
-import type { ResolvedModel } from './runner'
+import type { ResolvedModel } from './model'
 import {
   inModelOrder,
   orderKey,

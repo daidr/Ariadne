@@ -41,7 +41,8 @@ async function collect(): Promise<ModelStreamPart[]> {
       tools: [{ name: 'f', description: 'd', parameters: { type: 'object' } }],
     },
   )) {
-    parts.push(part)
+    // What says the service is still there is tested on its own.
+    if (part.type !== 'alive') parts.push(part)
   }
   return parts
 }
@@ -157,7 +158,7 @@ describe('openai-compatible provider', () => {
       { baseUrl: `http://127.0.0.1:${server.port}/v1`, apiKey: '' },
       { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [], effort: 'medium' },
     )) {
-      parts.push(part)
+      if (part.type !== 'alive') parts.push(part)
     }
     expect(lastBody).toMatchObject({ reasoning_effort: 'medium' })
     expect(parts).toEqual([
@@ -166,6 +167,30 @@ describe('openai-compatible provider', () => {
       { type: 'usage', input: 20, output: 8, cached: 16, reasoning: 6 },
       { type: 'finish', reason: 'stop' },
     ])
+  })
+
+  test('says it is alive on every event, keep-alive comments included', async () => {
+    reply = () =>
+      new Response(
+        [
+          ': keep-alive\n\n',
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'hm' } }] })}\n\n`,
+          ': keep-alive\n\n',
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\n`,
+          'data: [DONE]\n\n',
+        ].join(''),
+        { headers: { 'content-type': 'text/event-stream' } },
+      )
+    const all: ModelStreamPart['type'][] = []
+    for await (const part of openAICompatibleProvider.stream(
+      { baseUrl: `http://127.0.0.1:${server.port}/v1/`, apiKey: 'sk-test' },
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [] },
+    )) {
+      all.push(part.type)
+    }
+    // Reasoning is handed on whole, later; the events before it still count.
+    expect(all.slice(0, 5)).toEqual(['alive', 'alive', 'alive', 'alive', 'reasoning'])
+    expect(all).toContain('text')
   })
 
   test('reads cache hits where DeepSeek reports them', async () => {

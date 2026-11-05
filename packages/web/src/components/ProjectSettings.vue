@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProjectSettings, ShellName } from '@ariadne/core'
+import type { ProjectSettings, ShellChoice } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
@@ -22,7 +22,7 @@ import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPa
 
 /** The open project's own settings: instructions, workspaces, tools, budgets, slots, MCP. */
 
-const SHELLS: ShellName[] = ['bash', 'zsh', 'sh', 'pwsh', 'powershell', 'cmd']
+const SHELLS: ShellChoice[] = ['auto', 'bash', 'zsh', 'sh', 'pwsh', 'powershell', 'cmd']
 
 const tab = ref('instructions')
 const settings = ref<ProjectSettings | null>(null)
@@ -37,7 +37,10 @@ const mcpServers = ref<McpServerView[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-const shellOptions = SHELLS.map((shell) => ({ value: shell, label: shell }))
+const shellOptions = SHELLS.map((shell) => ({
+  value: shell,
+  label: shell === 'auto' ? t('projectSettings.shellAuto') : shell,
+}))
 const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
 )
@@ -124,6 +127,17 @@ async function save() {
               :autosize="{ minRows: 2, maxRows: 8 }"
               :maxlength="8000"
               placeholder="bun install"
+              class="project-code"
+            />
+          </DouFormItem>
+          <DouFormItem
+            :label="t('projectSettings.check')"
+            :help="t('projectSettings.checkHelp', { placeholder: '{file}' })"
+          >
+            <DouInput
+              v-model="settings.workspace.check"
+              :maxlength="2000"
+              placeholder="bunx tsc --noEmit"
               class="project-code"
             />
           </DouFormItem>

@@ -218,7 +218,10 @@ async function* readStream(
   let reasoningFrom = 0
   let done = false
   try {
-    for await (const { data } of readServerSentEvents(body)) {
+    for await (const { data, comment } of readServerSentEvents(body)) {
+      // Anything at all means the service is still at it: thinking can be long and silent.
+      yield { type: 'alive' }
+      if (comment) continue
       if (data === '[DONE]') {
         done = true
         break

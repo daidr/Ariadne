@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { connectRemote, LocalShell, relativePath, WORKTREE_DIR } from './index'
+import { clip, connectRemote, LocalShell, OutputText, relativePath, WORKTREE_DIR } from './index'
 
 let base: string
 
@@ -66,6 +66,23 @@ describe('workspace paths', () => {
   })
 })
 
+describe('output as it arrives', () => {
+  test('bounded, it keeps the start and the latest end, like clip of the whole', () => {
+    const kept = new OutputText(true)
+    let whole = ''
+    for (let i = 0; i < 3000; i++) {
+      const piece = `${i}:${'x'.repeat(1000)}\n`
+      kept.add(piece)
+      whole += piece
+    }
+    expect(kept.text()).toBe(clip(whole))
+    const small = new OutputText(true)
+    small.add('a')
+    small.add('b')
+    expect(small.text()).toBe('ab')
+  })
+})
+
 describe('remote shell', () => {
   // Login shells quote differently; the command line they read has nothing to quote, so
   // every one of them hands the script the same arguments and the same input.
@@ -117,6 +134,24 @@ describe('remote directory', () => {
     expect(await ws.readBytes('a.bin', 4)).toEqual(new Uint8Array([0, 255, 2, 3]))
     await expect(ws.readBytes('a.bin', 3)).rejects.toThrow(FileTooLargeError)
     await expect(ws.readBytes('leak', 10)).rejects.toThrow(WorkspacePathError)
+  })
+
+  test('output comes as it is printed, without what the login shell said first', async () => {
+    const dir = join(base, 'plain')
+    await mkdir(dir, { recursive: true })
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const seen: string[] = []
+    const result = await ws.exec('echo one; echo two >&2; sleep 0.2; echo three', {
+      onOutput: (chunk, stream) => seen.push(`${stream}:${chunk}`),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(seen.join('')).toContain('stdout:one\n')
+    expect(seen.join('')).toContain('stderr:two\n')
+    expect(seen.join('')).not.toContain('ariadne: started')
+    // A program and its arguments go as they are, quoting and all.
+    const file = await ws.execFile!(['printf', '%s|%s', "it's", 'a b'])
+    expect(file.stdout).toBe("it's|a b")
   })
 
   test('commands run in the directory and end with their background processes', async () => {

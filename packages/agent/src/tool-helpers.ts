@@ -11,7 +11,9 @@ import type {
   Workspace,
 } from '@ariadne/plugin-sdk'
 import { keepMessageImages } from './message-images'
+import type { BackgroundCommands } from './background'
 import type { CommandRule, Limits } from './limits'
+import type { Researcher } from './research'
 
 export interface ToolContext {
   app: Ariadne
@@ -20,6 +22,14 @@ export interface ToolContext {
   role: 'coordinator' | 'thread'
   locale: Locale
   signal: AbortSignal
+  /** The running turn, and the call being run. */
+  turnId?: string
+  toolCallId?: string | undefined
+  /**
+   * The call runs for a research, not for the conversation itself: what it reads is not
+   * what the conversation saw.
+   */
+  sub?: boolean
   /** The thread's workspace, opened on first use. */
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */
@@ -40,8 +50,22 @@ export interface ToolContext {
   searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The user's limits; the defaults without. */
   limits?: Limits
-  /** How the project's thread commands run: the user's rules, the shell, the environment. */
-  commands?: { rules: CommandRule[]; shell: readonly string[]; env: Record<string, string> }
+  /**
+   * How the project's thread commands run: the user's rules, the shell (its name, and its
+   * command line, `null` for the machine's own), the environment, and the check the user
+   * wants run after each edit (`''` for none).
+   */
+  commands?: {
+    rules: CommandRule[]
+    shell: readonly string[] | null
+    shellName?: string
+    env: Record<string, string>
+    check?: string
+  }
+  /** Commands threads left running in the background. */
+  background?: BackgroundCommands
+  /** Asks a cheaper model, in a context of its own, to look into something read-only. */
+  research?: Researcher | undefined
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */
@@ -94,6 +118,13 @@ export function optionalStr(args: Record<string, unknown>, key: string): string 
   const value = args[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') throw new ToolInputError(`"${key}" must be a string`)
+  return value
+}
+
+export function optionalBool(args: Record<string, unknown>, key: string): boolean {
+  const value = args[key]
+  if (value === undefined || value === null) return false
+  if (typeof value !== 'boolean') throw new ToolInputError(`"${key}" must be true or false`)
   return value
 }
 
