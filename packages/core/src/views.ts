@@ -299,14 +299,6 @@ export type NoticeView = {
       files: TurnFile[]
       total: { files: number; added: number; removed: number }
     }
-  | {
-      kind: 'instructions'
-      path: string
-      /** `null` once the file was removed. */
-      content: string | null
-      changed: boolean
-      uncommitted: boolean
-    }
 )
 
 /** One entry of the project's memory. `author` is `user`, or the coordinator's id. */
@@ -771,7 +763,15 @@ export type TraceItem =
   | { kind: 'compaction-failed'; at: number; detail: string }
   /** Long tool results read before were replaced by a placeholder to make room. */
   | { kind: 'results-cleared'; at: number }
-  | { kind: 'instructions'; at: number; path: string; changed: boolean; removed: boolean }
+  | {
+      kind: 'instructions'
+      at: number
+      path: string
+      changed: boolean
+      removed: boolean
+      /** Changed in the workspace and not committed. */
+      uncommitted: boolean
+    }
 
 /** A message of a model request, as the provider was handed it. */
 export type TraceMessage =

@@ -581,12 +581,8 @@ describe('repository instructions', () => {
     expect(system(threadRequests[2]!)).toContain('用 bun run check')
     expect(JSON.stringify(threadRequests[2]!.messages)).toContain('instructions_changed')
     expect(app.getInstructions(thread.id)?.content).toBe('用 bun run check')
-    // The user sees both versions in the thread, the second one marked as a change.
-    const notices = app.listNotices(thread.id).filter((n) => n.kind === 'instructions')
-    expect(notices.map((n) => n.kind === 'instructions' && [n.content, n.changed])).toEqual([
-      ['用 bun 跑测试', false],
-      ['用 bun run check', true],
-    ])
+    // The model follows it; the user is not told in the conversation.
+    expect(app.listNotices(thread.id).map((n) => n.kind)).not.toContain('instructions')
   })
 
   test('the file cannot close the block it is shown in', () => {

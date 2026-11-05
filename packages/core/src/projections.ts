@@ -654,15 +654,6 @@ export const noticesProjection: Projection = {
         add(threadId, 'issue-written', { tracker, number, action, text, url })
         break
       }
-      case 'conversation.instructions':
-        // The user sees what the thread follows, and when it moves.
-        add(event.data.conversationId, 'instructions', {
-          path: event.data.path,
-          content: event.data.content,
-          changed: event.data.changed,
-          uncommitted: event.data.uncommitted ?? false,
-        })
-        break
       // What happened to the thread's branch and worktree, where the user follows the thread.
       case 'branch.merged':
         add(event.data.threadId, 'merged', {
