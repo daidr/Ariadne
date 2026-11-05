@@ -17,6 +17,8 @@ bun run dev      # 开发用：同时启动本地服务和前端开发服务器�
 bun run check    # 格式、lint、类型检查和测试
 ```
 
+测试换掉了外部服务和操作系统的部分，发布前在真实环境里按 [真实环境检查清单](./docs/real-env-checklist.md) 过一遍。模型接口的回放样本用 `bun run record:provider` 录制，见清单里的 DeepSeek 一节。
+
 本地服务第一次启动时会在 `~/.ariadne/token` 生成访问令牌，并在终端打印带令牌的链接，`bun run start` 之后直接打开它。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。
 
 打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口或 Anthropic 接口），填好地址和 API Key，再添加一个模型，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。

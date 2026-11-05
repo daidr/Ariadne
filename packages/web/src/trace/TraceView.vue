@@ -3,6 +3,7 @@ import type { TraceTurn } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
+  DouSegmentedControl,
   DouSpinner,
   DouSplitter,
   DouTable,
@@ -10,12 +11,14 @@ import {
   type TableColumn,
 } from 'dou-ui'
 import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { duration, locale, t, tm } from '../i18n'
 import { onLiveEvent, openMain, state } from '../store'
 import TraceInspector from './TraceInspector.vue'
+import TraceTimeline from './TraceTimeline.vue'
 import { findRow, parentKeys, traceRows, type TraceRow } from './rows'
+import { rowsInRange, timelineModel, type TimeRange, type TimelineMode } from './timeline'
 
 const props = defineProps<{ conversationId: string }>()
 
@@ -29,6 +32,8 @@ const more = ref(false)
 const loading = ref(true)
 const problem = ref<string | null>(null)
 const current = ref<string | number | null>(null)
+// The stretch marked out on the timeline.
+const range = ref<TimeRange | null>(null)
 // Rows the user folded; everything else stays open, also as new rows come in.
 const folded = ref(new Set<string>())
 
@@ -73,6 +78,7 @@ watch(
     turns.value = []
     current.value = null
     folded.value = new Set()
+    range.value = null
     loading.value = true
     void load()
   },
@@ -137,7 +143,6 @@ const columns = computed<TableColumn<TraceRow>[]>(() => [
     align: 'end',
     value: (row) => (row.end === null ? null : row.end - row.start),
   },
-  { key: 'timeline', title: t('trace.col.timeline'), width: 160 },
 ])
 
 const tokens = (value: unknown) =>
@@ -146,14 +151,61 @@ const tokens = (value: unknown) =>
 // Now, for what still runs; it moves on with each load.
 const now = computed(() => (turns.value, Date.now()))
 
-/** Where the row sits in its turn, as a share of the turn's time. */
-function bar(row: TraceRow) {
-  const from = row.turn.startedAt
-  const to = Math.max(row.turn.finishedAt ?? now.value, from + 1)
-  const span = to - from
-  const left = Math.min(1, Math.max(0, (row.start - from) / span))
-  const end = Math.min(1, Math.max(left, ((row.end ?? now.value) - from) / span))
-  return { left: `${left * 100}%`, width: `max(2px, ${(end - left) * 100}%)` }
+// Steps or real time, remembered in this browser.
+const MODE_KEY = 'ariadne.traceTimeline'
+const mode = ref<TimelineMode>(readMode())
+function readMode(): TimelineMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'duration' ? 'duration' : 'sequence'
+  } catch {
+    return 'sequence'
+  }
+}
+watch(mode, (value) => {
+  try {
+    localStorage.setItem(MODE_KEY, value)
+  } catch {
+    // Not remembered; steps come back next time.
+  }
+})
+const modes = computed(() => [
+  { value: 'sequence', label: t('trace.mode.sequence') },
+  { value: 'duration', label: t('trace.mode.duration') },
+])
+
+const timeline = computed(() => timelineModel(rows.value, mode.value, now.value))
+const hovered = ref<string | null>(null)
+// The rows in the marked stretch stand out; the rest fade.
+const inRange = computed(() => rowsInRange(rows.value, timeline.value, range.value))
+const table = useTemplateRef<{ scrollToRow: (key: string) => void }>('table')
+
+function rowClass(row: TraceRow) {
+  return [
+    row.tone ? `trace-row--${row.tone}` : '',
+    inRange.value && !inRange.value.has(row.key) ? 'trace-row--outside' : '',
+    hovered.value === row.key ? 'trace-row--hovered' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** A span picked on the timeline: its row opens, folded parents unfold, and it scrolls into view. */
+function pick(key: string) {
+  const open = new Set(folded.value)
+  const unfold = (list: TraceRow[], trail: string[]): boolean => {
+    for (const row of list) {
+      if (row.key === key) {
+        for (const parent of trail) open.delete(parent)
+        return true
+      }
+      if (row.children && unfold(row.children, [...trail, row.key])) return true
+    }
+    return false
+  }
+  unfold(rows.value, [])
+  folded.value = open
+  current.value = key
+  requestAnimationFrame(() => table.value?.scrollToRow(key))
 }
 </script>
 
@@ -167,6 +219,7 @@ function bar(row: TraceRow) {
       <DouText weight="medium" truncate class="trace-title">
         {{ t('trace.title', { name }) }}
       </DouText>
+      <DouSegmentedControl v-if="timeline" v-model="mode" size="sm" :options="modes" />
       <DouButton v-if="more" variant="ghost" size="sm" @click="loadEarlier">
         {{ t('trace.earlier') }}
       </DouButton>
@@ -182,8 +235,19 @@ function bar(row: TraceRow) {
     </div>
     <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>
     <div v-if="loading" class="trace-empty"><DouSpinner /></div>
+    <TraceTimeline
+      v-if="!loading && timeline"
+      :key="conversationId"
+      v-model:range="range"
+      :model="timeline"
+      :mode="mode"
+      :selected-key="current === null ? null : String(current)"
+      :hovered-key="hovered"
+      @select="pick"
+      @hover="hovered = $event"
+    />
     <DouSplitter
-      v-else
+      v-if="!loading"
       v-model="shownSplit"
       :min="30"
       :max="selected ? 80 : 100"
@@ -193,6 +257,7 @@ function bar(row: TraceRow) {
       <template #start>
         <div class="trace-table">
           <DouTable
+            ref="table"
             v-model:current="current"
             v-model:expanded="expanded"
             :data="rows"
@@ -205,7 +270,7 @@ function bar(row: TraceRow) {
             hoverable
             max-height="100%"
             :empty-text="t('trace.empty')"
-            :row-class="(row: TraceRow) => (row.tone ? `trace-row--${row.tone}` : undefined)"
+            :row-class="rowClass"
           >
             <template #cell-event="{ row }">
               <span :class="['trace-event', `trace-event--${row.kind}`]">{{ row.event }}</span>
@@ -222,11 +287,6 @@ function bar(row: TraceRow) {
             <template #cell-reasoning="{ value }">{{ tokens(value) }}</template>
             <template #cell-duration="{ value }">
               {{ typeof value === 'number' ? duration(value) : '' }}
-            </template>
-            <template #cell-timeline="{ row }">
-              <div class="trace-track">
-                <span :class="['trace-bar', `trace-bar--${row.kind}`]" :style="bar(row)" />
-              </div>
             </template>
           </DouTable>
         </div>
@@ -313,37 +373,11 @@ function bar(row: TraceRow) {
   color: var(--dou-color-warning-text);
 }
 
-.trace-track {
-  position: relative;
-  height: 8px;
-  border-radius: 2px;
+:deep(.trace-row--outside) td {
+  opacity: 0.35;
+}
+
+:deep(.trace-row--hovered) td {
   background: var(--dou-color-bg-muted);
-}
-
-.trace-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: 2px;
-  background: var(--dou-color-primary);
-}
-
-.trace-bar--turn {
-  background: var(--dou-color-border-strong);
-}
-
-.trace-bar--tool {
-  background: var(--dou-color-success);
-}
-
-.trace-bar--retry,
-.trace-bar--fallback,
-.trace-bar--compaction-failed {
-  background: var(--dou-color-warning);
-}
-
-.trace-bar--instructions,
-.trace-bar--results-cleared {
-  background: var(--dou-color-text-tertiary);
 }
 </style>

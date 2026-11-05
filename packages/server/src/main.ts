@@ -18,6 +18,7 @@ import github from '@ariadne/plugin-github'
 import gitlab from '@ariadne/plugin-gitlab'
 import local, { threadEnv } from '@ariadne/plugin-local'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
+import { processes } from '@ariadne/plugin-sdk'
 import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -51,6 +52,13 @@ const sandbox = createSandbox({
     join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'git'),
   ],
 })
+// What the last server left running when it died (a dev server, a tool server) ends now,
+// before anything new starts.
+const leftovers = await processes.open(join(config.home, 'processes.json'))
+if (leftovers.ownerAlive) console.warn(t('cli.server.otherServer'))
+else if (leftovers.killed.length) {
+  console.info(t('cli.server.leftovers', { count: leftovers.killed.length }))
+}
 if (!sandbox.kind) {
   console.warn(
     t(

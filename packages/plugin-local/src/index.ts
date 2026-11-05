@@ -1,6 +1,7 @@
 import {
   defaultShell,
   definePlugin,
+  processes,
   shellArgv,
   FileTooLargeError,
   readOnlyView,
@@ -159,6 +160,11 @@ export async function run(
     }
   }
   const kill = () => (options.forThread ? killGroup() : proc.kill())
+  // A thread's command may run for hours (a dev server): if the server dies meanwhile, the
+  // next start ends it.
+  const release = options.forThread
+    ? processes.track(proc.pid, { group: !windows, label: 'command' })
+    : () => {}
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
@@ -178,6 +184,7 @@ export async function run(
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', kill)
+    release()
   }
 }
 

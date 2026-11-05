@@ -576,6 +576,12 @@ export interface EventMap {
     isError: boolean
     /** Images the tool handed the model, e.g. a picture read from the workspace. */
     files?: Attachment[]
+    /**
+     * When the call ran. Calls that only look run at the same time and are recorded once
+     * all of them are done, so the event's own time says neither. Missing for a call the
+     * turn closed without running it.
+     */
+    timing?: { startedAt: number; finishedAt: number }
   }
   /**
    * What a turn changed in its thread's workspace, committed or not: from the workspace as

@@ -1,3 +1,4 @@
+import { processes } from '@ariadne/plugin-sdk'
 import { McpConnectionError, parseMessage, type JsonRpcMessage } from './protocol'
 import { MAX_MESSAGE_BYTES, type Transport } from './transport'
 
@@ -26,6 +27,8 @@ export class StdioTransport implements Transport {
   private stderr = ''
   private closing = false
   private onClose: ((reason: string) => void) | null = null
+  /** Takes it off the ledger of processes to kill after a crash. */
+  private release: () => void = () => {}
 
   constructor(private readonly options: StdioOptions) {}
 
@@ -55,6 +58,7 @@ export class StdioTransport implements Transport {
       )
     }
     this.proc = proc
+    this.release = processes.track(proc.pid, { group: !windows, label: 'mcp' })
     this.onClose = onClose
     void this.readStderr(proc.stderr)
     void this.readLines(proc.stdout, onMessage)
@@ -147,6 +151,14 @@ export class StdioTransport implements Transport {
     if (!proc || this.closing) return
     this.closing = true
     this.onClose = null
+    try {
+      await this.stop(proc)
+    } finally {
+      this.release()
+    }
+  }
+
+  private async stop(proc: NonNullable<StdioTransport['proc']>): Promise<void> {
     try {
       await proc.stdin.end()
     } catch {

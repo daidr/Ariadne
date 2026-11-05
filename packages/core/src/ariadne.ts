@@ -714,6 +714,14 @@ export class Ariadne {
     setupFiles(this.db)
   }
 
+  /**
+   * Run several commands as one: they are written together or not at all, also when the
+   * process dies halfway. Listeners hear the events once all of them are in.
+   */
+  transaction<T>(work: () => T): T {
+    return this.store.transaction(work)
+  }
+
   subscribe(listener: EventListener): () => void {
     return this.store.subscribe(listener)
   }
@@ -2521,8 +2529,9 @@ export class Ariadne {
   listNotices(conversationId: string, range: { from?: number; to?: number } = {}): NoticeView[] {
     return this.db
       .query<NoticeRow, [string, number, number]>(
+        // Notices of the same millisecond in the order they were written: ids are random.
         `SELECT * FROM notices WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
-         ORDER BY created_at, id`,
+         ORDER BY created_at, rowid`,
       )
       .all(conversationId, range.from ?? -1, range.to ?? Number.MAX_SAFE_INTEGER)
       .map(toNotice)
@@ -2533,6 +2542,10 @@ export class Ariadne {
    * changed one gets its old text back, a removed one returns.
    */
   undoMemoryNotice(projectId: string, noticeId: string): void {
+    this.store.transaction(() => this.undoMemoryNoticeNow(projectId, noticeId))
+  }
+
+  private undoMemoryNoticeNow(projectId: string, noticeId: string): void {
     const row = this.db
       .query<
         { conversation_id: string; kind: string; payload: string; undone: number },
@@ -3494,6 +3507,7 @@ export class Ariadne {
       content: string
       isError: boolean
       files?: Attachment[]
+      timing?: { startedAt: number; finishedAt: number }
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
@@ -3516,6 +3530,17 @@ export class Ariadne {
     turnId: string,
     outcome: TurnOutcome,
     error: LocalizedMessage | null = null,
+  ): void {
+    // One transaction: a crash halfway must not leave a finished turn whose review round
+    // never hears that its reviewer left.
+    this.store.transaction(() => this.finishTurnNow(conversationId, turnId, outcome, error))
+  }
+
+  private finishTurnNow(
+    conversationId: string,
+    turnId: string,
+    outcome: TurnOutcome,
+    error: LocalizedMessage | null,
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
     const answered = new Set<string>()
