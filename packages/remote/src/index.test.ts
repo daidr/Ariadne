@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { connectRemote, LocalShell, relativePath, WORKTREE_DIR } from './index'
+import { clip, connectRemote, LocalShell, OutputText, relativePath, WORKTREE_DIR } from './index'
 
 let base: string
 
@@ -63,6 +63,23 @@ describe('workspace paths', () => {
     expect(() => relativePath('../x')).toThrow(WorkspacePathError)
     expect(() => relativePath('a/../../x')).toThrow(WorkspacePathError)
     expect(() => relativePath('/etc/passwd')).toThrow(WorkspacePathError)
+  })
+})
+
+describe('output as it arrives', () => {
+  test('bounded, it keeps the start and the latest end, like clip of the whole', () => {
+    const kept = new OutputText(true)
+    let whole = ''
+    for (let i = 0; i < 3000; i++) {
+      const piece = `${i}:${'x'.repeat(1000)}\n`
+      kept.add(piece)
+      whole += piece
+    }
+    expect(kept.text()).toBe(clip(whole))
+    const small = new OutputText(true)
+    small.add('a')
+    small.add('b')
+    expect(small.text()).toBe('ab')
   })
 })
 

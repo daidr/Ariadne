@@ -45,6 +45,7 @@ export {
   CONNECTION_FAILED,
   DEFAULT_TIMEOUT_MS,
   LocalShell,
+  OutputText,
   payload,
   REMOTE_COMMAND,
   shellQuote,

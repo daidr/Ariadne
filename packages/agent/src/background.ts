@@ -93,7 +93,8 @@ export class BackgroundCommands {
     }
     const append = (chunk: string) => {
       job.output += chunk
-      if (job.output.length > KEPT_OUTPUT) {
+      // Cut once well past the bound, not on every piece: a chatty command sends many.
+      if (job.output.length > KEPT_OUTPUT * 1.25) {
         const cut = job.output.length - KEPT_OUTPUT
         job.output = job.output.slice(cut)
         job.dropped += cut
@@ -155,8 +156,11 @@ export class BackgroundCommands {
   }
 
   /** Stop every command the thread has running. */
+  /** Stop the thread's commands and forget them all, with what they printed. */
   async stopThread(threadId: string): Promise<void> {
-    await this.end([...this.jobs.values()].filter((job) => job.threadId === threadId))
+    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+    await this.end(jobs)
+    for (const job of jobs) this.jobs.delete(job.id)
   }
 
   async stopAll(): Promise<void> {

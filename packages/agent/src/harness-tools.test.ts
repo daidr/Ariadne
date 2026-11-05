@@ -26,7 +26,7 @@ describe('edit matching', () => {
   })
 
   test('finds lines that differ only in whitespace, when there is one such place', () => {
-    const file = 'function f() {\n\tif (x)  {\r\n\t\treturn 1\n\t}\n}\n'
+    const file = 'function f() {\n\tif (x) {\r\n\t\treturn 1\n\t}\n}\n'
     const edit = applyEdit(
       file,
       '  if (x) {\n    return 1\n  }\n',
@@ -39,8 +39,10 @@ describe('edit matching', () => {
       count: 1,
       loose: [{ from: 2, to: 4 }],
     })
-    const twice = 'x = 1\nx  = 1\n'
-    expect(applyEdit(twice, 'x =   1', 'y', false)).toMatchObject({
+    // Whitespace inside a line may be in a string: it has to match as written.
+    expect(applyEdit('say("a  b")\n', 'say("a b")', 'x', false)).toMatchObject({ ok: false })
+    const twice = 'x = 1\n  x = 1\n'
+    expect(applyEdit(twice, '    x = 1', 'y', false)).toMatchObject({
       ok: false,
       reason: expect.stringContaining('2 times once whitespace is set aside'),
     })
@@ -120,6 +122,60 @@ describe('command rules', () => {
     expect(commandVerdict('cmd /c git push', rules).action).toBe('ask')
   })
 
+  test('a command run by another command is still matched', () => {
+    const asked = [
+      'if true; then git push; fi',
+      'for i in 1; do git push; done',
+      '{ git push; }',
+      '! git push',
+      'eval git push',
+      'eval "git push"',
+      'echo x | xargs git push',
+      'find . -exec git push \\;',
+      'timeout 10 git push',
+      'watch git push',
+      'stdbuf -o0 git push',
+      'source <(echo git push)',
+      'sudo -u root git push',
+      'env -u HOME git push',
+      'nice -n 5 git push',
+      'time -p git push',
+      'command -p git push',
+      'exec -a x git push',
+      'bash -ce "git push"',
+      'bash -c -- "git push"',
+      'pwsh -Com "git push"',
+      'g`i`t push',
+      'iex "g`it push"',
+      `pwsh -enc ${Buffer.from('git push', 'utf16le').toString('base64')}`,
+      'timeout 10 git -C repo push',
+    ]
+    for (const command of asked) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'ask'])
+    }
+    for (const command of ['then rm -rf /', 'xargs rm -rf /x', 'eval "rm -rf /x"']) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'deny'])
+    }
+  })
+
+  test('an allow lifts an ask only as far as it spells the command out', () => {
+    const wide = [
+      { pattern: 'git push*', action: 'ask' as const },
+      { pattern: 'timeout *', action: 'allow' as const },
+      { pattern: 'timeout 10 git push', action: 'allow' as const },
+    ]
+    expect(commandVerdict('timeout 5 git push', wide).action).toBe('ask')
+    expect(commandVerdict('timeout 5 make', wide).action).toBe('allow')
+    expect(commandVerdict('timeout 10 git push', wide).action).toBe('allow')
+    // A deny is never lifted.
+    expect(
+      commandVerdict('timeout 5 rm -rf /', [
+        { pattern: 'rm -rf /*', action: 'deny' },
+        { pattern: 'timeout*', action: 'allow' },
+      ]).action,
+    ).toBe('deny')
+  })
+
   test('an allow on one part does not lift an ask on another', () => {
     expect(commandVerdict('ls && git push --force', rules)).toEqual({
       action: 'ask',
@@ -192,7 +248,7 @@ describe('file tools', () => {
         path: 'a.ts',
         edits: [
           { old: 'const a = 1', new: 'const a = 10' },
-          { old: '  const   b = 2', new: 'const b = 20' },
+          { old: '  const b = 2  ', new: 'const b = 20' },
         ],
       },
       ctx,

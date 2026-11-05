@@ -22,22 +22,71 @@ export interface ShellRun {
   onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void
 }
 
+/**
+ * Output beyond this is cut in the middle, keeping how it began and, larger, the end where
+ * errors usually are. Callers cut further for the model; this only bounds memory.
+ */
+const MAX_OUTPUT = 1_000_000
+const HEAD = MAX_OUTPUT / 4
+const TAIL = MAX_OUTPUT - HEAD
 /** Read a stream to its end as text, handing each piece to `onChunk` as it comes. */
 export async function streamText(
   stream: ReadableStream<Uint8Array>,
   onChunk?: (chunk: string) => void,
+  bound = false,
 ): Promise<string> {
-  if (!onChunk) return new Response(stream).text()
+  if (!onChunk && !bound) return new Response(stream).text()
   const decoder = new TextDecoder()
-  let text = ''
+  const text = new OutputText(bound)
   for await (const chunk of stream) {
     const piece = decoder.decode(chunk, { stream: true })
-    text += piece
-    if (piece) onChunk(piece)
+    text.add(piece)
+    if (piece) onChunk?.(piece)
   }
   const rest = decoder.decode()
-  if (rest) onChunk(rest)
-  return text + rest
+  text.add(rest)
+  if (rest) onChunk?.(rest)
+  return text.text()
+}
+
+/**
+ * A command's output as it arrives. Bounded, it keeps only how the output began and its
+ * latest end, so a command that prints for hours holds no more than about `MAX_OUTPUT`;
+ * `text()` then reads as `clip` of the whole would.
+ */
+export class OutputText {
+  private head = ''
+  private tail = ''
+  private cut = 0
+
+  constructor(private readonly bound: boolean) {}
+
+  add(piece: string): void {
+    if (!piece) return
+    if (!this.bound) {
+      this.tail += piece
+      return
+    }
+    if (this.head.length < HEAD && !this.cut && !this.tail) {
+      const take = HEAD - this.head.length
+      this.head += piece.slice(0, take)
+      piece = piece.slice(take)
+    }
+    this.tail += piece
+    if (this.tail.length > TAIL * 2) {
+      const drop = this.tail.length - TAIL
+      this.cut += drop
+      this.tail = this.tail.slice(drop)
+    }
+  }
+
+  text(): string {
+    if (!this.bound) return this.tail
+    const over = Math.max(0, this.tail.length - TAIL)
+    const cut = this.cut + over
+    if (!cut) return this.head + this.tail
+    return `${this.head}\n[… ${cut} characters cut …]\n${this.tail.slice(over)}`
+  }
 }
 
 /**
@@ -57,11 +106,6 @@ export interface RemoteShell {
 /** Commands may run this long unless the caller asks for less. */
 export const DEFAULT_TIMEOUT_MS = 120_000
 /**
- * Output beyond this is cut in the middle, keeping how it began and, larger, the end where
- * errors usually are. Callers cut further for the model; this only bounds memory.
- */
-const MAX_OUTPUT = 1_000_000
-/**
  * The exit code of a call that never reached the machine or lost it on the way: what
  * `ssh` gives, and what the daemon connection gives too.
  */
@@ -69,9 +113,8 @@ export const CONNECTION_FAILED = 255
 
 export function clip(text: string): string {
   if (text.length <= MAX_OUTPUT) return text
-  const head = MAX_OUTPUT / 4
-  const tail = text.length - (MAX_OUTPUT - head)
-  return `${text.slice(0, head)}\n[… ${tail - head} characters cut …]\n${text.slice(tail)}`
+  const tail = text.length - TAIL
+  return `${text.slice(0, HEAD)}\n[… ${tail - HEAD} characters cut …]\n${text.slice(tail)}`
 }
 
 /** Run `argv` with the script's input, collecting its output; ends it on timeout or abort. */
@@ -104,13 +147,11 @@ export async function spawnScript(
   try {
     const { onOutput } = options
     const [stdout, stderr, exitCode] = await Promise.all([
-      streamText(proc.stdout, onOutput && ((chunk) => onOutput(chunk, 'stdout'))),
-      streamText(proc.stderr, onOutput && ((chunk) => onOutput(chunk, 'stderr'))),
+      streamText(proc.stdout, onOutput && ((chunk) => onOutput(chunk, 'stdout')), options.clip),
+      streamText(proc.stderr, onOutput && ((chunk) => onOutput(chunk, 'stderr')), options.clip),
       proc.exited,
     ])
-    return options.clip
-      ? { exitCode, stdout: clip(stdout), stderr: clip(stderr) }
-      : { exitCode, stdout, stderr }
+    return { exitCode, stdout, stderr }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', end)

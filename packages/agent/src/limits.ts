@@ -44,7 +44,8 @@ export const COMMAND_ACTIONS: CommandAction[] = ['allow', 'ask', 'deny']
  * A pattern a command is matched against, whole and trimmed: `*` stands for anything,
  * including nothing; the rest is taken as written. A command made of several (`a && b`,
  * `a; b`, `a | b`, one per line) is matched part by part, each also as what it runs:
- * `FOO=1 git -C . push` matches `git push*`, and so does `bash -c 'git push'`.
+ * `FOO=1 git -C . push` matches `git push*`, and so do `bash -c 'git push'` and
+ * `timeout 10 git push` (see `commandVerdict`).
  */
 export interface CommandRule {
   pattern: string
@@ -205,14 +206,41 @@ function simpleCommands(line: string, depth = 0): SimpleCommand[] {
   return out
 }
 
+/** A word's program name: without its directory (`/usr/bin/git`) or `.exe`. */
+const programOf = (word: string) =>
+  word
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/\.exe$/i, '')
+
+/** `git …` without git's own options before its subcommand: `git -C dir push` → `git push`. */
+function gitForm(words: string[]): string {
+  const rest = words.slice(1)
+  while (rest[0]?.startsWith('-')) {
+    const option = rest.shift()!
+    if (GIT_VALUED.has(option)) rest.shift()
+  }
+  return ['git', ...rest].join(' ')
+}
+
 /**
- * The forms a simple command is matched in: as written, and as what it runs, without
- * leading variable assignments (`FOO=1 cmd`), wrappers (`env`, `nohup`, `sudo`, …), a
- * program's directory (`/usr/bin/git`), or git's own options before its subcommand
- * (`git -C dir push`). `nested` is the command line a shell is handed (`bash -c '…'`,
- * `pwsh -Command …`, `cmd /c …`), whose commands are parts of their own.
+ * One part of a command line as rules see it. `forms` are what the part runs, spelled the
+ * ways an `allow` may name it: as written, and without leading variable assignments
+ * (`FOO=1 cmd`), wrappers (`env`, `nohup`, `sudo`, …), a program's directory, or git's own
+ * options (`git -C dir push`). `loose` are the part from each later word on, each at its
+ * offset in `forms[1]`: whatever runs another command (`then`, `{`, `eval`, `xargs`,
+ * `timeout 10`, `sudo -u root`, …) leaves that command as one of them, so `deny` and `ask`
+ * rules are tried on all of them too. `nested` are the command lines inside the part: what
+ * a shell is handed (`bash -c '…'`, `cmd /c …`) and every word with a space in it, which
+ * may be one (`eval "git push"`, `bash -ce "…"`, `pwsh -Com "…"`).
  */
-function forms(command: SimpleCommand): { forms: string[]; nested: string | null } {
+interface RulePart {
+  forms: string[]
+  loose: { text: string; offset: number }[]
+  nested: string[]
+}
+
+function rulePart(command: SimpleCommand): RulePart {
   const found = [command.raw]
   let words = [...command.words]
   for (;;) {
@@ -230,44 +258,54 @@ function forms(command: SimpleCommand): { forms: string[]; nested: string | null
     } else if (WRAPPERS.has(first)) words = words.slice(1)
     else break
   }
-  if (!words.length) return { forms: found, nested: null }
-  const program = words[0]!
-    .split(/[\\/]/)
-    .pop()!
-    .replace(/\.exe$/i, '')
+  const nested = command.words.filter((word) => /\s/.test(word))
+  if (!words.length) return { forms: found, loose: [], nested }
+  const program = programOf(words[0]!)
   words = [program, ...words.slice(1)]
   found.push(words.join(' '))
-  if (program === 'git') {
-    const rest = words.slice(1)
-    while (rest[0]?.startsWith('-')) {
-      const option = rest.shift()!
-      if (GIT_VALUED.has(option)) rest.shift()
-    }
-    found.push(['git', ...rest].join(' '))
+  if (program === 'git') found.push(gitForm(words))
+  const loose: RulePart['loose'] = []
+  let offset = 0
+  for (let k = 1; k < words.length; k++) {
+    offset += words[k - 1]!.length + 1
+    const rest = [programOf(words[k]!), ...words.slice(k + 1)]
+    loose.push({ text: rest.join(' '), offset })
+    if (rest[0] === 'git') loose.push({ text: gitForm(rest), offset })
   }
-  let nested: string | null = null
   const name = program.toLowerCase()
   if (SHELL_PROGRAMS.has(name)) {
-    const at = words.findIndex(
-      (word, i) => i > 0 && (/^-[a-z]*c$/.test(word) || /^-c(ommand)?$/i.test(word)),
+    const at = words.findIndex((word, i) => i > 0 && /^-[a-z]*c[a-z]*$|^-com/i.test(word))
+    if (at > 0 && words.length > at + 1) nested.push(words.slice(at + 1).join(' '))
+    // PowerShell's `-EncodedCommand` (any prefix from `-e`) takes base64 of UTF-16LE.
+    const encoded = words.findIndex(
+      (word, i) => i > 0 && /^-e(n(c(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)?$/i.test(word),
     )
-    nested = (at > 0 && words.slice(at + 1).join(' ')) || null
+    const value = encoded > 0 ? words[encoded + 1] : undefined
+    if (value) nested.push(Buffer.from(value, 'base64').toString('utf16le'))
   } else if (name === 'cmd') {
     const at = words.findIndex((word) => /^\/[ck]$/i.test(word))
-    nested = (at > 0 && words.slice(at + 1).join(' ')) || null
+    if (at > 0 && words.length > at + 1) nested.push(words.slice(at + 1).join(' '))
   }
-  return { forms: found, nested }
+  return { forms: found, loose, nested }
 }
 
 /**
- * The parts of a command line, each the forms it is matched in: every simple command,
- * and those of the command lines handed to a shell inside it.
+ * The parts of a command line: every simple command, and those of the command lines inside
+ * them. PowerShell takes a backquote for an escape (``g`i`t`` is `git`), so a line with
+ * backquotes is read once more without them.
  */
-function commandForms(command: string, depth = 0): string[][] {
-  return simpleCommands(command).flatMap((part) => {
-    const { forms: own, nested } = forms(part)
-    return [own, ...(nested && depth < 4 ? commandForms(nested, depth + 1) : [])]
-  })
+function ruleParts(command: string, depth = 0): RulePart[] {
+  const lines =
+    command.includes('`') && depth === 0 ? [command, command.replaceAll('`', '')] : [command]
+  return lines.flatMap((line) =>
+    simpleCommands(line).flatMap((simple) => {
+      const part = rulePart(simple)
+      return [
+        part,
+        ...(depth < 4 ? part.nested.flatMap((inner) => ruleParts(inner, depth + 1)) : []),
+      ]
+    }),
+  )
 }
 
 /**
@@ -280,26 +318,45 @@ export function commandParts(command: string): string[] {
   return simpleCommands(command).map((part) => part.raw)
 }
 
+/** How much of a command an `allow` pattern spells out before its first `*`. */
+const spelled = (pattern: string) => pattern.trim().split('*')[0]!.length
+
 /**
- * What to do with `command`, part by part: within one part a `deny` rule that matches
- * wins, then an `allow` (so a narrower allow can lift a wide ask), then an `ask`; a part
- * is matched as written and as what it runs (see `forms`). The whole line counts as a
- * part too. The command is denied when any part is, asked about when any part is, and
- * else allowed. No rule that matches allows it.
+ * What to do with `command`, part by part (see `RulePart`). A part is denied when a `deny`
+ * rule matches any way of reading it. Otherwise an `allow` that matches what it runs wins,
+ * so a narrower allow can lift a wide ask, unless an `ask` matches a command further along
+ * than the allow spells out: `allow timeout *` does not lift `ask git push*` from
+ * `timeout 10 git push`. Otherwise an `ask` that matches any way of reading it asks. The
+ * whole line counts as a part too. The command is denied when any part is, asked about
+ * when any part is, and else allowed. No rule that matches allows it. This errs towards
+ * asking: `echo git push` matches `git push*` too.
  */
 export function commandVerdict(
   command: string,
   rules: readonly CommandRule[],
 ): { action: CommandAction; pattern: string | null } {
-  const parts = [[command.trim()], ...commandForms(command)]
-  const verdicts = parts.map((candidates) => {
-    for (const action of ['deny', 'allow', 'ask'] as const) {
-      const rule = rules.find(
-        (r) => r.action === action && candidates.some((text) => globTest(r.pattern, text)),
-      )
-      if (rule) return { action, pattern: rule.pattern }
+  const whole: RulePart = { forms: [command.trim()], loose: [], nested: [] }
+  const parts = [whole, ...ruleParts(command)]
+  const matching = (action: CommandAction, texts: string[]) =>
+    rules.find((r) => r.action === action && texts.some((text) => globTest(r.pattern, text)))
+  const verdicts = parts.map((part) => {
+    const every = [...part.forms, ...part.loose.map((loose) => loose.text)]
+    const deny = matching('deny', every)
+    if (deny) return { action: 'deny' as const, pattern: deny.pattern }
+    // The allow that spells out most of the command, should several match.
+    const allow = rules
+      .filter((r) => r.action === 'allow' && part.forms.some((text) => globTest(r.pattern, text)))
+      .toSorted((a, b) => spelled(b.pattern) - spelled(a.pattern))[0]
+    if (allow) {
+      const reach = spelled(allow.pattern)
+      const beyond = part.loose.filter((loose) => loose.offset >= reach).map((loose) => loose.text)
+      const ask = matching('ask', beyond)
+      return ask
+        ? { action: 'ask' as const, pattern: ask.pattern }
+        : { action: 'allow' as const, pattern: allow.pattern }
     }
-    return null
+    const ask = matching('ask', every)
+    return ask ? { action: 'ask' as const, pattern: ask.pattern } : null
   })
   for (const action of ['deny', 'ask', 'allow'] as const) {
     const found = verdicts.find((verdict) => verdict?.action === action)

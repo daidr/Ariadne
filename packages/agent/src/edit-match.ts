@@ -1,6 +1,6 @@
 /**
  * Where a piece of text the model wants replaced is in a file: as written, or the same
- * lines with only their whitespace different. When it is in neither, the nearest lines are
+ * lines with only their indentation and trailing whitespace different. When it is in neither, the nearest lines are
  * found, so the model sees what is there instead of guessing again.
  */
 
@@ -8,8 +8,11 @@ export type EditOutcome =
   | { ok: true; text: string; count: number; loose: { from: number; to: number }[] }
   | { ok: false; reason: string }
 
-/** A line with its whitespace runs made one space and its ends trimmed. */
-const squash = (line: string) => line.replace(/\s+/g, ' ').trim()
+/**
+ * A line without its indentation and trailing whitespace. Whitespace inside a line stays:
+ * it may be in a string, which a loose match must not change.
+ */
+const squash = (line: string) => line.trim()
 
 /** The lines of `text`, each with the offset it starts at; a `\r` before `\n` stays out. */
 function linesOf(text: string): { line: string; start: number; end: number }[] {
@@ -32,7 +35,7 @@ function snippetLines(old: string): string[] {
   return lines
 }
 
-/** Line windows of `text` whose lines equal `old`'s once whitespace is set aside. */
+/** Line windows of `text` whose lines equal `old`'s once indentation is set aside. */
 function looseMatches(text: string, old: string) {
   const want = snippetLines(old).map(squash)
   if (!want.some(Boolean)) return { lines: linesOf(text), found: [] as number[], size: 0 }
