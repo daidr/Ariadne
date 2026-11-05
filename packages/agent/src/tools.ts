@@ -18,6 +18,7 @@ import {
 import { fetchUrlTool, webSearchTool } from './web-tools'
 import type { WebAccess } from './web'
 import { sourceTools, workspaceTools } from './workspace-tools'
+import { researchTool } from './research'
 
 export {
   ToolInputError,
@@ -599,7 +600,8 @@ export const threadTools: Tool[] = [
 export const TOOL_SWITCHES = {
   fetch: ['fetch_url'],
   search: ['web_search'],
-  commands: ['run_command'],
+  commands: ['run_command', 'read_command_output', 'stop_command'],
+  research: ['research'],
   issueWrites: ['comment_on_issue', 'set_issue_state'],
 } as const satisfies Record<string, readonly string[]>
 
@@ -625,6 +627,8 @@ export function toolsFor(
     search?: ReadonlyMap<string, SearchProvider>
     /** Swaps the resolver and fetch of fetch_url, for tests. */
     web?: WebAccess
+    /** Whether a research can be handed questions. */
+    research?: boolean
   },
 ): Tool[] {
   const web = [
@@ -637,6 +641,7 @@ export function toolsFor(
       ...web,
       ...(source.workspace ? sourceTools : []),
       ...(source.tracker ? issueReadTools : []),
+      ...(source.research ? [researchTool] : []),
     ]
   }
   return [
@@ -645,5 +650,6 @@ export function toolsFor(
     ...(source.workspace ? workspaceTools : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
+    ...(source.research ? [researchTool] : []),
   ]
 }

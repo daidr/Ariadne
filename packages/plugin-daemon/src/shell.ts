@@ -75,6 +75,8 @@ export function pinnedCertificate(target: DaemonTarget, timeoutMs = 15_000): Pro
 interface Pending {
   stdout: Uint8Array[]
   stderr: Uint8Array[]
+  /** Hands output on as it comes, when the caller asked to see it. */
+  onOutput?: ((data: Uint8Array, stream: 'stdout' | 'stderr') => void) | undefined
   done: (result: { exitCode: number; failure?: string }) => void
 }
 
@@ -89,6 +91,16 @@ const decoder = () => new TextDecoder()
 function joined(chunks: Uint8Array[]): string {
   const text = decoder()
   return chunks.map((chunk) => text.decode(chunk, { stream: true })).join('') + text.decode()
+}
+
+/** Output handed on as text, each stream decoded on its own as pieces arrive. */
+function streamed(onOutput: ShellRun['onOutput']): Pending['onOutput'] {
+  if (!onOutput) return undefined
+  const decoders = { stdout: decoder(), stderr: decoder() }
+  return (data, stream) => {
+    const text = decoders[stream].decode(data, { stream: true })
+    if (text) onOutput(text, stream)
+  }
 }
 
 /**
@@ -181,7 +193,10 @@ export class DaemonShell implements RemoteShell {
       const parsed = readFrame(new Uint8Array(event.data as ArrayBuffer), true)
       const run = parsed && link.runs.get(parsed.id)
       if (!run) return
-      ;(parsed.stream === STDOUT ? run.stdout : run.stderr).push(parsed.data.slice())
+      const data = parsed.data.slice()
+      const stream = parsed.stream === STDOUT ? 'stdout' : 'stderr'
+      run[stream].push(data)
+      run.onOutput?.(data, stream)
     })
     ws.addEventListener('close', () => {
       if (this.current === link) {
@@ -227,6 +242,7 @@ export class DaemonShell implements RemoteShell {
         const run: Pending = {
           stdout: [],
           stderr: [],
+          onOutput: streamed(options.onOutput),
           done: (result) => resolve({ ...result, run }),
         }
         link.runs.set(id, run)

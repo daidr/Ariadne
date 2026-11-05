@@ -1,20 +1,27 @@
 import { DomainError } from './errors'
 
 /**
- * The shells a project's commands can run in, with how each takes a command line. Ariadne's
- * own commands (searching, git) keep bash; this is for what threads run and the setup script.
+ * The shells a project's commands can run in, with how each takes a command line: what
+ * threads run, the setup script and the check after edits. Ariadne's own commands
+ * (searching, finding files, git) run their programs without a shell.
  */
 export const SHELLS = {
   bash: ['bash', '-c'],
   zsh: ['zsh', '-c'],
   sh: ['sh', '-c'],
-  pwsh: ['pwsh', '-NoProfile', '-Command'],
-  powershell: ['powershell', '-NoProfile', '-Command'],
+  pwsh: ['pwsh', '-NoProfile', '-NonInteractive', '-Command'],
+  powershell: ['powershell', '-NoProfile', '-NonInteractive', '-Command'],
   cmd: ['cmd', '/d', '/s', '/c'],
 } as const satisfies Record<string, readonly string[]>
 
 export type ShellName = keyof typeof SHELLS
+/**
+ * A project's choice: one of the shells, or `auto` for the machine's own (bash; on Windows
+ * PowerShell 7, else 5.1).
+ */
+export type ShellChoice = ShellName | 'auto'
 export const SHELL_NAMES = Object.keys(SHELLS) as ShellName[]
+export const SHELL_CHOICES: ShellChoice[] = ['auto', ...SHELL_NAMES]
 /** Shells a POSIX machine (SSH, daemon) has: the others only exist on Windows, mostly. */
 export const POSIX_SHELLS: ShellName[] = ['bash', 'zsh', 'sh']
 
@@ -34,8 +41,14 @@ export interface ProjectSettings {
   workspace: {
     /** Run in a thread's workspace once it is new, e.g. `bun install`; `''` is none. */
     setup: string
-    /** What threads' commands and the setup script run in. */
-    shell: ShellName
+    /** What threads' commands, the setup script and the check run in. */
+    shell: ShellChoice
+    /**
+     * Run after a thread's edit_file or write_file, e.g. a type check or a linter; `{file}`
+     * stands for the files changed. Its failure is told to the model with the edit's
+     * result. `''` is none.
+     */
+    check: string
     /** Threads' branches start with it, e.g. `ariadne/`. */
     branchPrefix: string
   }
@@ -44,12 +57,13 @@ export interface ProjectSettings {
 export const DEFAULT_BRANCH_PREFIX = 'ariadne/'
 export const MAX_PROJECT_INSTRUCTIONS = 16_000
 export const MAX_SETUP_SCRIPT = 8000
+export const MAX_CHECK_COMMAND = 2000
 
 export const defaultProjectSettings = (): ProjectSettings => ({
   instructions: '',
   tools: [],
   budget: { thread: null, project: null },
-  workspace: { setup: '', shell: 'bash', branchPrefix: DEFAULT_BRANCH_PREFIX },
+  workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
 })
 
 /**
@@ -125,13 +139,22 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     const workspace = (body.workspace ?? {}) as Record<string, unknown>
     const setup = workspace.setup ?? ''
     if (typeof setup !== 'string' || setup.length > MAX_SETUP_SCRIPT) throw bad('workspace.setup')
-    const shell = workspace.shell ?? 'bash'
-    if (!SHELL_NAMES.includes(shell as ShellName)) throw bad('workspace.shell')
+    const shell = workspace.shell ?? 'auto'
+    if (!SHELL_CHOICES.includes(shell as ShellChoice)) throw bad('workspace.shell')
+    const check = workspace.check ?? ''
+    if (typeof check !== 'string' || check.length > MAX_CHECK_COMMAND) {
+      throw bad('workspace.check')
+    }
     const prefix = workspace.branchPrefix ?? DEFAULT_BRANCH_PREFIX
     if (typeof prefix !== 'string' || !validBranchPrefix(prefix.trim())) {
       throw bad('workspace.branchPrefix')
     }
-    out.workspace = { setup: setup.trim(), shell: shell as ShellName, branchPrefix: prefix.trim() }
+    out.workspace = {
+      setup: setup.trim(),
+      shell: shell as ShellChoice,
+      check: check.trim(),
+      branchPrefix: prefix.trim(),
+    }
   }
   return out
 }

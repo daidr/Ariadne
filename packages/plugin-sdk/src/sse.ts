@@ -1,9 +1,14 @@
 export interface ServerSentEvent {
   event: string | null
   data: string
+  /** A comment line (`: …`), with no data: only says the connection is alive. */
+  comment?: true
 }
 
-/** Split a `text/event-stream` body into events. Comments and `id`/`retry` fields are skipped. */
+/**
+ * Split a `text/event-stream` body into events. Comments come as `comment` events without
+ * data; `id`/`retry` fields are skipped.
+ */
 export async function* readServerSentEvents(
   body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<ServerSentEvent> {
@@ -23,6 +28,8 @@ export async function* readServerSentEvents(
       const line = buffer.slice(0, newline)
       buffer = buffer.slice(buffer[newline] === '\r' ? newline + 2 : newline + 1)
       if (line === '') yield* flush()
+      // A comment, which services send to keep a slow answer's connection open.
+      else if (line.startsWith(':')) yield { event: null, data: '', comment: true }
       else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
       else if (line.startsWith('event:')) event = line.slice(6).trim()
       newline = buffer.search(/\r?\n/)

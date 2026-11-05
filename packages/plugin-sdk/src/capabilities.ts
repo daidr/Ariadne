@@ -38,6 +38,12 @@ export interface Workspace {
   writeFile(path: string, content: string): Promise<void>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
   exec(command: string, options?: ExecOptions): Promise<ExecResult>
+  /**
+   * Run a program with its arguments, without a shell in between, e.g. `['git', 'status']`:
+   * the same on every platform, whatever shell the machine has. A program that is not
+   * there resolves with exit code 127. Without it, callers quote `argv` for `bash -c`.
+   */
+  execFile?(argv: string[], options?: Omit<ExecOptions, 'shell'>): Promise<ExecResult>
   dispose(): Promise<void>
 }
 
@@ -47,11 +53,16 @@ export interface ExecOptions {
   signal?: AbortSignal
   /**
    * The program and its arguments the command line is handed to, e.g. `['zsh', '-c']`;
-   * `['bash', '-c']` when left out.
+   * the machine's own when left out: `bash` on Linux and macOS, PowerShell on Windows.
    */
   shell?: readonly string[]
   /** Added to the command's environment. */
   env?: Record<string, string>
+  /**
+   * Called with output as it comes, before the call resolves: what a command left running
+   * in the background has printed so far.
+   */
+  onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void
 }
 
 /**

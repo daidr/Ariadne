@@ -54,6 +54,8 @@ function requestContent(request: TraceRequest): string {
 
 function toolRow(turn: TraceTurn, request: TraceRequest, tool: TraceToolCall): TraceRow {
   const args = oneLine(tool.arguments, 120)
+  // A research shows its own requests under the call that ran it.
+  const research = (tool.research ?? []).map((item) => requestRow(turn, item))
   return {
     ...base(turn, `${request.seq}:${tool.id}`, tool.startedAt, tool.result?.finishedAt ?? null),
     kind: 'tool',
@@ -62,6 +64,30 @@ function toolRow(turn: TraceTurn, request: TraceRequest, tool: TraceToolCall): T
     tone: tool.result?.isError ? 'danger' : null,
     request,
     tool,
+    ...(research.length ? { children: research } : {}),
+  }
+}
+
+function requestRow(turn: TraceTurn, item: TraceRequest): TraceRow {
+  const tools = item.toolCalls.map((tool) => toolRow(turn, item, tool))
+  const event =
+    item.purpose === 'summary'
+      ? t('trace.kind.summary', { n: item.number })
+      : item.purpose === 'research'
+        ? t('trace.kind.research', { n: item.number })
+        : t('trace.kind.request', { n: item.number })
+  return {
+    ...base(turn, String(item.seq), item.startedAt, item.finishedAt),
+    kind: 'request',
+    event,
+    content: requestContent(item),
+    input: item.usage?.input ?? null,
+    cached: item.usage?.cached ?? null,
+    cacheWrite: item.usage?.cacheWrite ?? null,
+    output: item.usage?.output ?? null,
+    reasoning: item.usage?.reasoning ?? null,
+    request: item,
+    ...(tools.length ? { children: tools } : {}),
   }
 }
 
@@ -72,25 +98,9 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
     for (const [index, item] of turn.items.entries()) {
       const key = `${turn.turnId}:${index}`
       switch (item.kind) {
-        case 'request': {
-          const tools = item.toolCalls.map((tool) => toolRow(turn, item, tool))
-          children.push({
-            ...base(turn, String(item.seq), item.startedAt, item.finishedAt),
-            kind: 'request',
-            event: t(item.purpose === 'summary' ? 'trace.kind.summary' : 'trace.kind.request', {
-              n: item.number,
-            }),
-            content: requestContent(item),
-            input: item.usage?.input ?? null,
-            cached: item.usage?.cached ?? null,
-            cacheWrite: item.usage?.cacheWrite ?? null,
-            output: item.usage?.output ?? null,
-            reasoning: item.usage?.reasoning ?? null,
-            request: item,
-            ...(tools.length ? { children: tools } : {}),
-          })
+        case 'request':
+          children.push(requestRow(turn, item))
           break
-        }
         case 'retry':
           children.push({
             ...base(turn, key, item.at, item.at + item.delayMs),

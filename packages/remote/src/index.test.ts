@@ -119,6 +119,24 @@ describe('remote directory', () => {
     await expect(ws.readBytes('leak', 10)).rejects.toThrow(WorkspacePathError)
   })
 
+  test('output comes as it is printed, without what the login shell said first', async () => {
+    const dir = join(base, 'plain')
+    await mkdir(dir, { recursive: true })
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const seen: string[] = []
+    const result = await ws.exec('echo one; echo two >&2; sleep 0.2; echo three', {
+      onOutput: (chunk, stream) => seen.push(`${stream}:${chunk}`),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(seen.join('')).toContain('stdout:one\n')
+    expect(seen.join('')).toContain('stderr:two\n')
+    expect(seen.join('')).not.toContain('ariadne: started')
+    // A program and its arguments go as they are, quoting and all.
+    const file = await ws.execFile!(['printf', '%s|%s', "it's", 'a b'])
+    expect(file.stdout).toBe("it's|a b")
+  })
+
   test('commands run in the directory and end with their background processes', async () => {
     const dir = join(base, 'plain')
     await mkdir(join(dir, 'sub'), { recursive: true })

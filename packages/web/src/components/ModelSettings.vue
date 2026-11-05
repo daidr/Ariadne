@@ -79,6 +79,9 @@ const coordinatorModel = ref<string>('')
 // coordinator's own model.
 const triageModel = ref<string>('')
 const triageEffort = ref<Effort | ''>('')
+// Questions a conversation hands to a research; `''` is the asking conversation's own model.
+const researchModel = ref<string>('')
+const researchEffort = ref<Effort | ''>('')
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -105,6 +108,10 @@ const coordinatorOptions = computed(() => [
 ])
 const triageOptions = computed(() => [
   { value: '', label: t('settings.sameAsCoordinator') },
+  ...modelOptions.value,
+])
+const researchOptions = computed(() => [
+  { value: '', label: t('settings.sameAsAsking') },
   ...modelOptions.value,
 ])
 const effortOptions = computed(() => [
@@ -147,6 +154,8 @@ function load(settings: ModelSettings) {
   coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
   triageModel.value = settings.roles.triage.model ?? ''
   triageEffort.value = settings.roles.triage.effort ?? ''
+  researchModel.value = settings.roles.research.model ?? ''
+  researchEffort.value = settings.roles.research.effort ?? ''
 }
 
 export type SettingsTab =
@@ -237,6 +246,7 @@ function removeModel(id: string) {
   if (threadModel.value === id) threadModel.value = models.value[0]?.id ?? null
   if (coordinatorModel.value === id) coordinatorModel.value = ''
   if (triageModel.value === id) triageModel.value = ''
+  if (researchModel.value === id) researchModel.value = ''
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -331,6 +341,10 @@ async function save() {
           triage: {
             model: keep(triageModel.value || null),
             effort: triageEffort.value || null,
+          },
+          research: {
+            model: keep(researchModel.value || null),
+            effort: researchEffort.value || null,
           },
         },
       }),
@@ -528,6 +542,18 @@ async function save() {
                 </DouFormItem>
                 <DouFormItem :label="t('settings.effort')" class="settings-effort">
                   <DouSelect v-model="triageEffort" :options="effortOptions" />
+                </DouFormItem>
+              </div>
+              <div class="settings-row">
+                <DouFormItem
+                  :label="t('settings.researchModel')"
+                  :help="t('settings.researchModelHelp')"
+                  class="settings-grow"
+                >
+                  <DouSelect v-model="researchModel" :options="researchOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                  <DouSelect v-model="researchEffort" :options="effortOptions" />
                 </DouFormItem>
               </div>
             </template>

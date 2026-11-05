@@ -18,6 +18,26 @@ export interface ShellRun {
   signal?: AbortSignal
   /** Cut long output, keeping the end. File contents are never cut. */
   clip?: boolean
+  /** Called with output as it comes. */
+  onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void
+}
+
+/** Read a stream to its end as text, handing each piece to `onChunk` as it comes. */
+export async function streamText(
+  stream: ReadableStream<Uint8Array>,
+  onChunk?: (chunk: string) => void,
+): Promise<string> {
+  if (!onChunk) return new Response(stream).text()
+  const decoder = new TextDecoder()
+  let text = ''
+  for await (const chunk of stream) {
+    const piece = decoder.decode(chunk, { stream: true })
+    text += piece
+    if (piece) onChunk(piece)
+  }
+  const rest = decoder.decode()
+  if (rest) onChunk(rest)
+  return text + rest
 }
 
 /**
@@ -82,9 +102,10 @@ export async function spawnScript(
   const timer = setTimeout(end, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', end, { once: true })
   try {
+    const { onOutput } = options
     const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+      streamText(proc.stdout, onOutput && ((chunk) => onOutput(chunk, 'stdout'))),
+      streamText(proc.stderr, onOutput && ((chunk) => onOutput(chunk, 'stderr'))),
       proc.exited,
     ])
     return options.clip
