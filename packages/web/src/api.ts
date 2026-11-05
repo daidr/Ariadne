@@ -522,6 +522,8 @@ export const api = {
     const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
     return { blob: await response.blob(), name: name ?? `ariadne-${projectId}.json` }
   },
+  setAutopilotPaused: (projectId: string, paused: boolean) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/autopilot`, { paused }),
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
   getReviews: (threadId: string) =>

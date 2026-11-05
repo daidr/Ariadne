@@ -258,6 +258,41 @@ function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   })
 }
 
+/** How the host names the thread's pull request, e.g. `!12` on GitLab. */
+function pullRequestRef(number: number): string {
+  const pr = thread.value?.pullRequest
+  return pr?.number === number && pr.reference ? pr.reference : `#${number}`
+}
+
+/** By the user's hand or the autopilot's, into the base or through the pull request. */
+function mergedNotice(notice: Extract<NoticeView, { kind: 'merged' }>) {
+  const base = notice.base
+  if (notice.pullRequest) {
+    return t('notice.mergedAutoPullRequest', {
+      pullRequest: pullRequestRef(notice.pullRequest),
+      base,
+    })
+  }
+  const sha = notice.sha.slice(0, 7)
+  if (notice.auto) {
+    return t(notice.method === 'squash' ? 'notice.mergedAutoSquash' : 'notice.mergedAutoMerge', {
+      base,
+      sha,
+    })
+  }
+  return t(notice.method === 'squash' ? 'notice.mergedSquash' : 'notice.mergedMerge', { base, sha })
+}
+
+function conflictNotice(notice: Extract<NoticeView, { kind: 'merge-conflict' }>) {
+  if (notice.pullRequest) {
+    return t('notice.mergeConflictPullRequest', {
+      pullRequest: pullRequestRef(notice.pullRequest),
+      base: notice.base,
+    })
+  }
+  return t('notice.mergeConflict', { base: notice.base, files: notice.files.join('、') })
+}
+
 function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
   if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
   if (notice.previous === null) return t('notice.memoryAdded', { text: notice.text })
@@ -676,12 +711,15 @@ watch(
             size="sm"
             class="notice-text"
           >
-            {{
-              t(item.notice.method === 'squash' ? 'notice.mergedSquash' : 'notice.mergedMerge', {
-                base: item.notice.base,
-                sha: item.notice.sha.slice(0, 7),
-              })
-            }}
+            {{ mergedNotice(item.notice) }}
+          </DouText>
+          <DouText
+            v-else-if="item.notice.kind === 'autopilot-held'"
+            tone="warning"
+            size="sm"
+            class="notice-text"
+          >
+            {{ t(`notice.autopilotHeld.${item.notice.reason}`, { detail: item.notice.detail }) }}
           </DouText>
           <DouText
             v-else-if="item.notice.kind === 'merge-conflict'"
@@ -689,12 +727,7 @@ watch(
             size="sm"
             class="notice-text"
           >
-            {{
-              t('notice.mergeConflict', {
-                base: item.notice.base,
-                files: item.notice.files.join('、'),
-              })
-            }}
+            {{ conflictNotice(item.notice) }}
           </DouText>
           <DouText
             v-else-if="item.notice.kind === 'worktree-removed'"

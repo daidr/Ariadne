@@ -1,7 +1,9 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type { FileType } from './files'
-import type { ProjectSettings } from './project-settings'
+import type { MergeMethod, ProjectSettings } from './project-settings'
+
+export type { MergeMethod }
 
 /** Who wrote a message. */
 export type Author = 'user' | 'coordinator' | 'thread'
@@ -242,8 +244,6 @@ export interface ThreadPullRequest {
   checks: { state: ChecksState; failed: string[] }
 }
 
-export type MergeMethod = 'squash' | 'merge'
-
 /** A thread's branch merged into its base by the user. */
 export interface BranchMerge {
   branch: string
@@ -253,7 +253,19 @@ export interface BranchMerge {
   sha: string
   /** The branch's newest commit, which the merge took in. */
   head: string
+  /** Merged by the project's autopilot, not by the user's hand. */
+  auto?: true
 }
+
+/**
+ * Why the autopilot left changes that passed the review for the user to merge:
+ * - `moved`: the branch (or its pull request) has commits the review did not read.
+ * - `no-pull-request`: a hosted repository's branch without an open pull request.
+ * - `refused`: the merge was refused, e.g. the checkout is in the way or the pull request
+ *   cannot be merged as it is; `detail` says why.
+ * - `failed`: merging went wrong.
+ */
+export type AutopilotHold = 'moved' | 'no-pull-request' | 'refused' | 'failed'
 
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
@@ -273,6 +285,11 @@ export interface EventMap {
   /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
   'project.settings.set': { settings: ProjectSettings }
   /**
+   * The user paused the project's autopilot, or let it go on. Paused, nothing is merged or
+   * started on its own; threads at work go on.
+   */
+  'project.autopilot.paused': { paused: boolean }
+  /**
    * `model` is the id of the model setting the coordinator chose for it, if any; `branch`
    * the readable part of its branch's name it suggested.
    */
@@ -287,6 +304,8 @@ export interface EventMap {
      * author's id. It reads the author's workspace and changes nothing.
      */
     reviewOf?: string
+    /** Opened by the autopilot on a plan node whose dependencies were done. */
+    auto?: true
   }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
@@ -309,10 +328,24 @@ export interface EventMap {
   /** The user merged the thread's branch into its base; the base now ends with `sha`. */
   'branch.merged': { threadId: string } & BranchMerge
   /**
-   * The user tried to merge the thread's branch, and these files changed on both sides.
+   * Merging the thread's branch (by the user or the autopilot) stopped at these files,
+   * changed on both sides.
    * Nothing was merged; the thread gets to bring the base in and resolve them.
    */
-  'branch.conflicted': { threadId: string; branch: string; base: string; files: string[] }
+  'branch.conflicted': {
+    threadId: string
+    branch: string
+    base: string
+    files: string[]
+    /** Set when it was the thread's pull request that could not be merged. */
+    pullRequest?: number
+  }
+  /**
+   * Changes that passed the review were left for the user: the autopilot would not merge
+   * them as they were. `head` is the branch's commit it looked at; it does not try that
+   * commit again.
+   */
+  'autopilot.held': { threadId: string; head: string | null; reason: AutopilotHold; detail: string }
   'thread.started': { threadId: string }
   'thread.reported': {
     threadId: string
@@ -670,7 +703,13 @@ export interface EventMap {
     attempt?: number
   }
   /** The pull request was merged or closed. */
-  'pull_request.closed': { threadId: string; number: number; merged: boolean }
+  'pull_request.closed': {
+    threadId: string
+    number: number
+    merged: boolean
+    /** Merged by the project's autopilot: how, and the commit the base moved to. */
+    auto?: { method: MergeMethod; base: string; sha: string | null }
+  }
   'artifact.created': {
     artifactId: string
     kind: ArtifactKind

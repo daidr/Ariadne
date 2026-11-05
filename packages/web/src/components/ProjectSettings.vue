@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProjectSettings, ShellChoice } from '@ariadne/core'
+import type { MergeMethod, ProjectSettings, ShellChoice } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
@@ -45,6 +45,23 @@ const mcp = ref<string[]>([])
 const mcpServers = ref<McpServerView[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+const methodOptions = (['squash', 'merge'] as MergeMethod[]).map((method) => ({
+  value: method,
+  label: t(`changes.method.${method}`),
+}))
+
+// The autopilot merges what the review let through: one goes on with the other.
+function setReview(on: boolean) {
+  if (!settings.value) return
+  settings.value.review.enabled = on
+  if (!on) settings.value.autopilot.enabled = false
+}
+function setAutopilot(on: boolean) {
+  if (!settings.value) return
+  settings.value.autopilot.enabled = on
+  if (on) settings.value.review.enabled = true
+}
 
 const shellOptions = SHELLS.map((shell) => ({
   value: shell,
@@ -117,6 +134,11 @@ async function save() {
     ...settings.value,
     // One left without words does nothing; it goes rather than failing the save.
     routines: settings.value.routines.filter((routine) => routine.prompt.trim()),
+    // Cleared, the cap goes back to its default rather than failing the save.
+    autopilot: {
+      ...settings.value.autopilot,
+      threads: settings.value.autopilot.threads || 3,
+    },
     budget: {
       thread: threadK.value ? threadK.value * 1000 : null,
       project: projectK.value ? projectK.value * 1000 : null,
@@ -192,8 +214,9 @@ async function save() {
           <div class="project-switch">
             <span>{{ t('projectSettings.review') }}</span>
             <DouSwitch
-              v-model="settings.review.enabled"
+              :model-value="settings.review.enabled"
               :aria-label="t('projectSettings.review')"
+              @update:model-value="setReview"
             />
           </div>
           <div v-for="group in tools" :key="group" class="project-switch">
@@ -215,6 +238,38 @@ async function save() {
               :placeholder="t('project.mcpNone')"
             />
           </DouFormItem>
+        </DouForm>
+      </DouTabPanel>
+      <DouTabPanel value="autopilot" :label="t('projectSettings.tab.autopilot')">
+        <DouForm layout="vertical" size="sm">
+          <DouFormItem :help="t('projectSettings.autopilotHelp')">
+            <div class="project-switch">
+              <span>{{ t('projectSettings.autopilot') }}</span>
+              <DouSwitch
+                :model-value="settings.autopilot.enabled"
+                :aria-label="t('projectSettings.autopilot')"
+                @update:model-value="setAutopilot"
+              />
+            </div>
+          </DouFormItem>
+          <div class="project-row">
+            <DouFormItem :label="t('projectSettings.autopilotMethod')" class="project-grow">
+              <DouSelect
+                v-model="settings.autopilot.method"
+                :options="methodOptions"
+                :disabled="!settings.autopilot.enabled"
+              />
+            </DouFormItem>
+            <DouFormItem :label="t('projectSettings.autopilotThreads')" class="project-grow">
+              <DouInputNumber
+                v-model="settings.autopilot.threads"
+                :min="1"
+                :max="16"
+                :step="1"
+                :disabled="!settings.autopilot.enabled"
+              />
+            </DouFormItem>
+          </div>
         </DouForm>
       </DouTabPanel>
       <DouTabPanel value="limits" :label="t('projectSettings.tab.limits')">

@@ -22,6 +22,7 @@ import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   AnyNewEvent,
   AnyStoredEvent,
+  AutopilotHold,
   ArtifactCommentAction,
   ArtifactKind,
   Attachment,
@@ -30,6 +31,7 @@ import type {
   IssueWrite,
   LineComment,
   LinkedIssue,
+  MergeMethod,
   MessageKind,
   MessageMention,
   PlanAuthor,
@@ -118,7 +120,13 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 41
+export const PROJECTION_VERSION = 42
+
+/**
+ * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
+ * lets the work go on past it.
+ */
+export const MILESTONE_GATE = 'milestone'
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -313,6 +321,8 @@ interface ProjectRow {
   slots: number | null
   mcp: string
   settings: string | null
+  autopilot_paused: number
+  autopilot_since: number | null
   created_at: number
   updated_at: number
 }
@@ -390,7 +400,10 @@ function commentText(body: string): string {
 }
 
 /** A plan node's status from the stages of the threads working on it. */
-function nodeStatus(all: ThreadStage[]): PlanNodeStatus {
+function nodeStatus(all: ThreadStage[], gate: PlanNodeView['gate'] = null): PlanNodeStatus {
+  // A milestone the user let the work pass is behind it, whatever ran on it.
+  if (gate === 'passed') return 'done'
+  if (gate === 'open') return 'waiting'
   // A stopped thread does not move its node either way; a node whose threads are all
   // stopped shows as paused, not as never started.
   const stages = all.filter((stage) => stage !== 'stopped')
@@ -443,6 +456,8 @@ interface ThreadRow {
   model: string | null
   branch_slug: string | null
   review_of: string | null
+  autopilot_held: string | null
+  auto: number
   reviewer_id: string | null
   review_rounds: number
   reviewing: number
@@ -603,6 +618,8 @@ function toThread(row: ThreadRow): ThreadView {
     review: row.reviewer_id
       ? { reviewerId: row.reviewer_id, rounds: row.review_rounds, reviewing: underReview }
       : null,
+    auto: row.auto === 1,
+    autopilotHeld: row.autopilot_held,
   }
 }
 
@@ -1396,9 +1413,114 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
+  /** Pause the project's autopilot, or let it go on. */
+  setAutopilotPaused(projectId: string, paused: boolean): ProjectView {
+    const project = this.getProject(projectId)
+    if (!project.settings.autopilot.enabled) throw new DomainError('error.autopilotOff')
+    if (project.autopilotPaused === paused) return project
+    this.store.append([{ type: 'project.autopilot.paused', projectId, data: { paused } }])
+    return this.getProject(projectId)
+  }
+
+  /**
+   * Milestones' gates by node: `passed` once the user agreed to go on past one, `open`
+   * while the question waits.
+   */
+  private milestoneGates(projectId: string): Map<string, 'open' | 'passed'> {
+    const gates = new Map<string, 'open' | 'passed'>()
+    for (const row of this.db
+      .query<{ purpose: string; closed: number; approved: number | null }, [string, string]>(
+        `SELECT purpose, closed, approved FROM attentions WHERE project_id = ? AND purpose LIKE ?
+         ORDER BY created_at, id`,
+      )
+      .all(projectId, `${MILESTONE_GATE}:%`)) {
+      const nodeId = row.purpose.slice(MILESTONE_GATE.length + 1)
+      if (row.closed === 1 && row.approved === 1) gates.set(nodeId, 'passed')
+      else if (row.closed === 0 && gates.get(nodeId) !== 'passed') gates.set(nodeId, 'open')
+    }
+    return gates
+  }
+
+  /**
+   * Whether the autopilot may ask about a milestone's gate now: not while a card is open
+   * or after the user agreed, and not after a no since the autopilot last went on (being
+   * switched on, or resumed after a pause, asks again).
+   */
+  mayAskGate(projectId: string, nodeId: string): boolean {
+    const since =
+      this.db
+        .query<{ autopilot_since: number | null }, [string]>(
+          'SELECT autopilot_since FROM projects WHERE id = ?',
+        )
+        .get(projectId)?.autopilot_since ?? 0
+    const rows = this.db
+      .query<{ closed: number; approved: number | null; created_at: number }, [string, string]>(
+        'SELECT closed, approved, created_at FROM attentions WHERE project_id = ? AND purpose = ?',
+      )
+      .all(projectId, `${MILESTONE_GATE}:${nodeId}`)
+    return !rows.some((row) => row.closed === 0 || row.approved === 1 || row.created_at >= since)
+  }
+
+  /** Ask the user whether the work goes on past a milestone; the coordinator hears the answer. */
+  askGate(projectId: string, nodeId: string, block: ConfirmBlock): AttentionView {
+    this.assertNode(projectId, nodeId)
+    return this.openAttention(projectId, { block, purpose: `${MILESTONE_GATE}:${nodeId}` })
+  }
+
+  /** Gates still asking about milestones that are gone from the plan, by attention. */
+  staleGates(projectId: string): string[] {
+    const graph = loadPlanGraph(this.db, projectId)
+    return this.db
+      .query<{ id: string; purpose: string }, [string, string]>(
+        'SELECT id, purpose FROM attentions WHERE project_id = ? AND closed = 0 AND purpose LIKE ?',
+      )
+      .all(projectId, `${MILESTONE_GATE}:%`)
+      .filter((row) => {
+        const node = graph.nodes.get(row.purpose.slice(MILESTONE_GATE.length + 1))
+        return node?.kind !== 'milestone'
+      })
+      .map((row) => row.id)
+  }
+
+  /** Take back a question the system asked, e.g. a gate whose milestone was removed. */
+  withdrawSystemAttention(projectId: string, attentionId: string, reason: string): void {
+    const row = this.db
+      .query<{ closed: number; message_id: string | null }, [string, string]>(
+        'SELECT closed, message_id FROM attentions WHERE id = ? AND project_id = ?',
+      )
+      .get(attentionId, projectId)
+    if (!row || row.message_id !== null || row.closed === 1) return
+    this.store.append([{ type: 'attention.withdrawn', projectId, data: { attentionId, reason } }])
+  }
+
+  /**
+   * The autopilot leaves changes that passed the review for the user to merge; they stay in
+   * "needs me" as they would without it, and the thread says why.
+   */
+  holdAutopilot(
+    threadId: string,
+    input: { head: string | null; reason: AutopilotHold; detail: string },
+  ): void {
+    const thread = this.getThread(threadId)
+    this.store.append([
+      {
+        type: 'autopilot.held',
+        projectId: thread.projectId,
+        data: { threadId, head: input.head, reason: input.reason, detail: input.detail },
+      },
+    ])
+  }
+
   createThread(
     projectId: string,
-    input: { title: string; nodeId?: string | null; model?: string | null; branch?: string | null },
+    input: {
+      title: string
+      nodeId?: string | null
+      model?: string | null
+      branch?: string | null
+      /** Opened by the autopilot. */
+      auto?: boolean
+    },
   ): ThreadView {
     this.getProject(projectId)
     const title = input.title.trim()
@@ -1417,6 +1539,7 @@ export class Ariadne {
           nodeId: input.nodeId ?? null,
           model: input.model ?? null,
           branch: branchSlug(input.branch),
+          ...(input.auto ? { auto: true as const } : {}),
         },
       },
     ])
@@ -1913,6 +2036,25 @@ export class Ariadne {
         data: { threadId: row.review_of, reviewerId: conversationId, round: round.round },
       },
     ]
+  }
+
+  /**
+   * The round that let the thread's changes now up for review through: its latest, when it
+   * passed after the thread last reported. `null` for changes that reached the user any
+   * other way (no review, a round left without a verdict, comments left after the last round).
+   */
+  passedReview(threadId: string): ReviewRoundView | null {
+    const thread = this.getThread(threadId)
+    if (thread.stage !== 'review' || thread.reviewOf) return null
+    const reportedAt =
+      this.db
+        .query<{ reported_at: number | null }, [string]>(
+          'SELECT reported_at FROM threads WHERE id = ?',
+        )
+        .get(threadId)?.reported_at ?? 0
+    const round = this.listReviews(threadId).at(-1)
+    if (round?.verdict !== 'pass' || (round.submittedAt ?? 0) < reportedAt) return null
+    return round
   }
 
   /** The review rounds of a thread's changes, oldest first; a reviewer gives its author's. */
@@ -2641,7 +2783,7 @@ export class Ariadne {
   /** A merge the user tried stopped at conflicts: the thread is woken to resolve them. */
   recordMergeConflict(
     threadId: string,
-    conflict: { branch: string; base: string; files: string[] },
+    conflict: { branch: string; base: string; files: string[]; pullRequest?: number },
   ): ThreadView {
     const thread = this.getThread(threadId)
     this.store.append([
@@ -2655,7 +2797,12 @@ export class Ariadne {
    * when nothing changed; a new failure of the newest commit's checks wakes the thread,
    * and merging or closing tells the coordinator.
    */
-  syncPullRequest(threadId: string, pullRequest: ThreadPullRequest): void {
+  syncPullRequest(
+    threadId: string,
+    pullRequest: ThreadPullRequest,
+    /** The autopilot just merged it, as this says. */
+    auto?: { method: MergeMethod; base: string; sha: string | null },
+  ): void {
     const thread = this.getThread(threadId)
     const before = thread.pullRequest
     if (JSON.stringify(before) === JSON.stringify(pullRequest)) return
@@ -2687,7 +2834,12 @@ export class Ariadne {
       events.push({
         type: 'pull_request.closed',
         projectId,
-        data: { threadId, number: pullRequest.number, merged: pullRequest.state === 'merged' },
+        data: {
+          threadId,
+          number: pullRequest.number,
+          merged: pullRequest.state === 'merged',
+          ...(auto && pullRequest.state === 'merged' ? { auto } : {}),
+        },
       })
     }
     this.store.append(events)
@@ -2743,6 +2895,7 @@ export class Ariadne {
       const { node_id, linked_by, ...issue } = row
       issues.set(node_id, [...(issues.get(node_id) ?? []), { ...issue, linkedBy: linked_by }])
     }
+    const gates = this.milestoneGates(projectId)
     const nodes = graph.order.map((id): PlanNodeView => {
       const node = graph.nodes.get(id) as NonNullable<ReturnType<typeof graph.nodes.get>>
       const onNode = threads.filter((thread) => thread.nodeId === id)
@@ -2750,7 +2903,10 @@ export class Ariadne {
         id,
         ...node,
         dependsOn: dependsOn.get(id) ?? [],
-        status: nodeStatus(onNode.map((thread) => thread.stage)),
+        status: nodeStatus(
+          onNode.map((thread) => thread.stage),
+          node.kind === 'milestone' ? (gates.get(id) ?? null) : null,
+        ),
         threads: onNode.map((thread) => ({
           id: thread.id,
           title: thread.title,
@@ -2767,6 +2923,7 @@ export class Ariadne {
         })),
         changedIn: changedIn.get(id) ?? null,
         issues: issues.get(id) ?? [],
+        gate: node.kind === 'milestone' ? (gates.get(id) ?? null) : null,
       }
     })
     const revisions = this.db
@@ -3723,6 +3880,7 @@ export class Ariadne {
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],
       settings: storedProjectSettings(row.settings),
+      autopilotPaused: row.autopilot_paused === 1,
       usage: this.projectUsage(row.id),
     }
   }

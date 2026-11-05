@@ -263,6 +263,7 @@ export function connectRepository(
         draft: input.draft ?? false,
       }),
     checks: (sha) => api.checks(sha),
+    mergePullRequest: (iid, input) => api.mergeMergeRequest(iid, input),
     checkLog: (id) => api.checkLog(id),
   }
 

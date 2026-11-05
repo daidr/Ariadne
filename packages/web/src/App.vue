@@ -16,6 +16,7 @@ import {
 import { SettingsIcon } from '@dou-ui/icons'
 import { defineAsyncComponent, onMounted, ref, watch, watchEffect } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
+import AutopilotSwitch from './components/AutopilotSwitch.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
@@ -87,6 +88,7 @@ watchEffect(() => {
             <!-- What belongs to the open project, set apart from the app's own buttons. -->
             <template v-if="state.detail">
               <ProjectSearch />
+              <AutopilotSwitch />
               <AttentionBar />
               <ProjectSource />
               <ProjectUsage />

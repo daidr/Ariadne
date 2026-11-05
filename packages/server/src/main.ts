@@ -1,6 +1,7 @@
 import { Ariadne } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import {
+  Autopilot,
   browserProfiles,
   createSandbox,
   detectSandbox,
@@ -132,10 +133,13 @@ const scheduler = new Scheduler({
 const janitor = new WorktreeJanitor(app, workspaces)
 // Waits and routines that come due wake their conversations, after a restart too.
 const timers = new Timers(app)
+// Projects that switched it on merge reviewed work and start the next nodes on their own.
+const autopilot = new Autopilot(app, workspaces, { locale: () => settings.current.locale })
 scheduler.start()
 timers.start()
 watcher.start()
 janitor.start()
+autopilot.start()
 
 const server = Bun.serve({
   hostname: config.hostname,
@@ -167,6 +171,7 @@ async function shutdown() {
   // Running turns end as interrupted and resume on the next start.
   await watcher.stop()
   await janitor.stop()
+  await autopilot.stop()
   timers.stop()
   await scheduler.stop()
   await mcp.dispose()

@@ -12,6 +12,7 @@ import type {
   IssueWriteAction,
   LinkedIssue,
   MergeMethod,
+  AutopilotHold,
   PlanAuthor,
   PlanNodeKind,
   PlanOp,
@@ -49,6 +50,8 @@ export interface ProjectView {
   /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
   mcp: string[]
   settings: ProjectSettings
+  /** The user paused the autopilot (`settings.autopilot`); it merges and starts nothing. */
+  autopilotPaused: boolean
   /** Tokens every conversation of the project has used, summaries included. */
   usage: UsageTotals
 }
@@ -114,6 +117,13 @@ export interface ThreadView {
    * rounds of the latest delivery, and whether a round is under way now.
    */
   review: { reviewerId: string; rounds: number; reviewing: boolean } | null
+  /** The autopilot opened it on its plan node. */
+  auto: boolean
+  /**
+   * The branch commit the autopilot left for the user in this delivery (`''` when there
+   * was none to name), so it does not try it again; `null` when it did not.
+   */
+  autopilotHeld: string | null
 }
 
 /** One round of a pre-delivery review, with what the author did about each comment. */
@@ -241,7 +251,17 @@ export type NoticeView = {
       text: string
       url: string | null
     }
-  | { kind: 'merged'; base: string; method: MergeMethod; sha: string }
+  /** `auto`: the autopilot merged it; `pullRequest`: through that pull request. */
+  | {
+      kind: 'merged'
+      base: string
+      method: MergeMethod
+      sha: string
+      auto?: boolean
+      pullRequest?: number
+    }
+  /** The autopilot left changes that passed the review for the user to merge. */
+  | { kind: 'autopilot-held'; reason: AutopilotHold; detail: string }
   /** The user's edit of an artifact, where the conversation told about it is followed. */
   | { kind: 'artifact-edited'; artifactId: string; title: string; version: number }
   /**
@@ -256,7 +276,7 @@ export type NoticeView = {
       action: 'create' | 'reply'
       body: string
     }
-  | { kind: 'merge-conflict'; base: string; files: string[] }
+  | { kind: 'merge-conflict'; base: string; files: string[]; pullRequest?: number }
   | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
   /**
    * A pre-delivery review round started or ended, where the author and the reviewer are
@@ -478,9 +498,23 @@ export type TranscriptNote =
       failed: string[]
       attempt?: number
     }
-  | { type: 'pull-request-closed'; threadId: string; number: number; merged: boolean }
+  | {
+      type: 'pull-request-closed'
+      threadId: string
+      number: number
+      merged: boolean
+      auto?: { method: MergeMethod; base: string; sha: string | null }
+    }
   | ({ type: 'branch-merged'; threadId: string } & BranchMerge)
-  | { type: 'merge-conflict'; threadId: string; branch: string; base: string; files: string[] }
+  | {
+      type: 'merge-conflict'
+      threadId: string
+      branch: string
+      base: string
+      files: string[]
+      pullRequest?: number
+    }
+  | { type: 'thread-auto-started'; threadId: string; nodeId: string | null; title: string }
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
   | { type: 'thread-reviewed'; threadId: string }
@@ -527,6 +561,11 @@ export interface PlanNodeView {
   changedIn: string | null
   /** Issues of the project's tracker that this node's work is about, and who linked each. */
   issues: (LinkedIssue & { linkedBy: string })[]
+  /**
+   * A milestone's gate under the autopilot: `open` while "go on to the next stage?" waits
+   * on the user, `passed` once they agreed (the milestone is then done); `null` otherwise.
+   */
+  gate: 'open' | 'passed' | null
 }
 
 export interface PlanRevisionView {

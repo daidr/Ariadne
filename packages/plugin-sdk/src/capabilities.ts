@@ -281,6 +281,20 @@ export interface PullRequestInfo {
   base: string
 }
 
+/**
+ * What came of merging a pull request:
+ * - `merged`: the base now ends with `sha`, when the host said which commit.
+ * - `conflict`: the branch conflicts with the base; nothing was merged.
+ * - `moved`: the pull request got commits after `sha`; nothing was merged.
+ * - `refused`: the host would not merge it as it is (a draft, required approvals or
+ *   checks, branch protection); `detail` is the host's reason.
+ */
+export type PullRequestMergeOutcome =
+  | { kind: 'merged'; sha: string | null }
+  | { kind: 'conflict' }
+  | { kind: 'moved' }
+  | { kind: 'refused'; detail: string }
+
 /** One check of a commit, e.g. one CI job. */
 export interface CheckInfo {
   id: string
@@ -321,6 +335,15 @@ export interface RepoCapability {
     draft?: boolean
   }): Promise<PullRequestInfo>
   checks(sha: string): Promise<CheckInfo[]>
+  /**
+   * Merge a pull request into its base, only while its newest commit is still `sha`.
+   * What the host refuses to merge comes back as an outcome; other failures throw. Left
+   * out by providers that cannot; the user then merges on the host.
+   */
+  mergePullRequest?(
+    number: number,
+    input: { method: MergeMethod; sha: string },
+  ): Promise<PullRequestMergeOutcome>
   /** The end of a check's log, for a thread to see why it failed. */
   checkLog(checkId: string): Promise<string>
   /**

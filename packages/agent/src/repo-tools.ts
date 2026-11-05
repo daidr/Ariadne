@@ -48,6 +48,8 @@ export async function syncThreadPullRequest(
   repo: RepoCapability,
   threadId: string,
   known?: PullRequestInfo,
+  /** The autopilot just merged it, as this says. */
+  auto?: Parameters<Ariadne['syncPullRequest']>[2],
 ): Promise<ThreadPullRequest | null> {
   const thread = app.getThread(threadId)
   const pr =
@@ -67,7 +69,7 @@ export async function syncThreadPullRequest(
     headSha: pr.headSha,
     checks: summarizeChecks(await repo.checks(pr.headSha)),
   }
-  app.syncPullRequest(threadId, synced)
+  app.syncPullRequest(threadId, synced, auto)
   return synced
 }
 

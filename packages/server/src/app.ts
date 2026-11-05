@@ -374,6 +374,12 @@ export function createHandler({
     return json(settings.updateWork(await readJson(request)))
   })
 
+  // The header's switch: pause the project's autopilot, or let it go on.
+  add('PUT', '/api/projects/:projectId/autopilot', async (request, { projectId = '' }) => {
+    const { paused } = await readJson(request)
+    if (typeof paused !== 'boolean') throw new BadRequest('paused')
+    return json({ project: app.setAutopilotPaused(projectId, paused) })
+  })
   add('PUT', '/api/projects/:projectId/slots', async (request, { projectId = '' }) => {
     const { slots } = await readJson(request)
     if (slots !== null && typeof slots !== 'number') throw new BadRequest('slots')
