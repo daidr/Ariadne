@@ -173,7 +173,9 @@ async function runTool(tool: Tool | undefined, call: ToolCallRecord, turnCtx: To
  * so a turn can be replayed or resumed from what is stored.
  */
 export async function runTurn(options: TurnOptions): Promise<void> {
-  const { app, conversation, model, signal } = options
+  const { app, conversation, signal } = options
+  // The main model, until it keeps failing for load and the turn goes on with its fallback.
+  let model = options.model
   const { workspaces } = options
   const settings = options.settings ?? defaultTurnSettings()
   const { limits } = settings
@@ -286,12 +288,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     }
   }
   const readText = attachedText(app)
-  const images = model.images !== false
-  const chat = {
+  let images = model.images !== false
+  const chatFor = (seesImages: boolean) => ({
     readText,
-    images,
+    images: seesImages,
     keepReasoning: writtenBy(app, conversation.projectId, JSON.parse(callOf(model, null))),
-  }
+  })
+  let chat = chatFor(images)
   const loadImage = (file: Attachment) => {
     try {
       return {
@@ -311,7 +314,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   }
 
   try {
-    const threshold = options.compactAt ?? compactAt(model.contextTokens, limits.compactShare)
+    let threshold = options.compactAt ?? compactAt(model.contextTokens, limits.compactShare)
     // One try per turn: a failed summary would fail the same way on every step.
     let compactionFailed = false
     let lastInput = 0
@@ -437,21 +440,41 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         [{ role: 'system' as const, content: input.system }, ...history],
         loadImage,
       )
-      const answer = await requestStep(
-        model,
-        {
-          model: model.model,
-          messages,
-          tools: specs,
-          ...(model.effort ? { effort: model.effort } : {}),
-          ...requestExtras(model),
-          signal,
-        },
-        (retry) => app.recordModelRetry(conversationId, turnId, retry),
-        options.retryBaseMs ?? 1000,
-        limits,
-        model.request?.timeoutSeconds,
-      )
+      let answer: Awaited<ReturnType<typeof requestStep>>
+      try {
+        answer = await requestStep(
+          model,
+          {
+            model: model.model,
+            messages,
+            tools: specs,
+            ...(model.effort ? { effort: model.effort } : {}),
+            ...requestExtras(model),
+            signal,
+          },
+          (retry) => app.recordModelRetry(conversationId, turnId, retry),
+          options.retryBaseMs ?? 1000,
+          limits,
+          model.request?.timeoutSeconds,
+        )
+      } catch (error) {
+        // The main model keeps being turned away: the turn goes on with the fallback, from
+        // this step on. The request is built again for it (its context, images, thinking).
+        const fallback = model.fallback
+        if (!(error instanceof TurnError) || !error.exhausted || !fallback) throw error
+        app.recordModelFallback(conversationId, turnId, {
+          from: model.label,
+          to: fallback.label,
+          detail: error.exhausted.detail,
+        })
+        model = fallback
+        images = model.images !== false
+        chat = chatFor(images)
+        if (!options.compactAt) threshold = compactAt(model.contextTokens, limits.compactShare)
+        lastInput = 0
+        compactionFailed = false
+        continue
+      }
       if (signal.aborted || !answer) break
       const { text, reasoning, toolCalls, usage, timing, cut } = answer
       lastInput = usage?.input ?? 0

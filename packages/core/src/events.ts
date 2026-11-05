@@ -429,6 +429,38 @@ export interface EventMap {
     delayMs: number
     detail: string
   }
+  /**
+   * The model's retries ran out on an error worth retrying (rate limit, overload, a server
+   * error), and the turn goes on with the role's fallback model. Labels as the user named them.
+   */
+  'conversation.model_fallback': {
+    conversationId: string
+    turnId: string
+    from: string
+    to: string
+    detail: string
+  }
+  /**
+   * The agent asked to be woken at `until` (epoch ms), with `note` saying what it wants to
+   * look at then. A conversation waits for one thing at a time: a newer wait replaces it.
+   */
+  'conversation.wait_set': { conversationId: string; waitId: string; until: number; note: string }
+  /**
+   * The wait is over: it came due, the user woke it early (`now`), or the user or the agent
+   * called it off (`cancelled`, by `user` or the conversation's own id). Due and early waits
+   * wake the agent with the note.
+   */
+  'conversation.wait_ended': {
+    conversationId: string
+    waitId: string
+    how: 'due' | 'now' | 'cancelled'
+    by: string
+    /** The wait's own `until` and `note`, so whoever reads this needs nothing else. */
+    until: number
+    note: string
+  }
+  /** A routine of the project came due: the coordinator is woken with its words. */
+  'routine.ran': { routineId: string; prompt: string; dueAt: number }
   /** The agent of a conversation began working. */
   'turn.started': { conversationId: string; turnId: string; model: string }
   /**

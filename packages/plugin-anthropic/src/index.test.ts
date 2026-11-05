@@ -333,7 +333,7 @@ describe('anthropic provider', () => {
   test('reports a stream error event', async () => {
     reply = () => sse({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })
     expect(await collect()).toEqual([
-      { type: 'finish', reason: 'error', error: 'Overloaded', retryable: true },
+      { type: 'finish', reason: 'error', error: 'Overloaded', retryable: true, busy: true },
     ])
   })
 
@@ -358,6 +358,7 @@ describe('anthropic provider', () => {
         type: 'finish',
         reason: 'error',
         error: 'HTTP 429: slow down',
+        busy: true,
         retryable: true,
         retryAfterMs: 3000,
       },

@@ -367,7 +367,7 @@ async function* readStream(
             type: 'finish',
             reason: 'error',
             error: event.error?.message ?? data,
-            ...(PASSING_ERRORS.has(event.error?.type ?? '') ? { retryable: true } : {}),
+            ...(PASSING_ERRORS.has(event.error?.type ?? '') ? { retryable: true, busy: true } : {}),
           }
           return
       }

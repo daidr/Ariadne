@@ -103,8 +103,22 @@ export class WorkspaceManager {
   private readonly setups = new Map<string, string>()
   /** Stops the setup script running in a thread's new workspace. */
   private readonly setupStops = new Map<string, AbortController>()
-  /** Commands threads left running in the background. */
-  readonly background = new BackgroundCommands()
+  /** Commands threads left running in the background; the user sees them in the status line. */
+  readonly background = new BackgroundCommands((threadId) => {
+    let projectId: string
+    try {
+      projectId = this.app.getConversation(threadId).projectId
+    } catch {
+      return
+    }
+    const commands = this.background.list(threadId).map((command) => ({
+      id: command.id,
+      command: command.command,
+      startedAt: command.startedAt,
+      result: command.result,
+    }))
+    this.app.background.set({ projectId, conversationId: threadId, commands })
+  })
 
   constructor(
     private readonly app: Ariadne,

@@ -190,6 +190,12 @@ export type NoticeView = {
     }
   | { kind: 'compaction-failed'; detail: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
+  /** The main model's retries ran out; the turn went on with the fallback. */
+  | { kind: 'model-fallback'; from: string; to: string; detail: string }
+  /** The agent's wait ended: it came due, or the user woke it early (`now`). */
+  | { kind: 'woken'; how: 'due' | 'now'; note: string }
+  /** A routine woke the coordinator with its prompt. */
+  | { kind: 'routine'; routineId: string; prompt: string; dueAt: number }
   | {
       kind: 'issue-linked'
       nodeId: string
@@ -283,12 +289,23 @@ export interface ConversationView {
   /** Newest input that no model response has seen yet; 0 when none. */
   pendingSeq: number
   /** `activity`: what the model said it is doing beside its latest tool calls this turn. */
-  turn: { id: string; startedAt: number; model: string | null; activity: string | null } | null
+  /** `fallback`: the main model failed and the turn goes on with the role's fallback, `model`. */
+  turn: {
+    id: string
+    startedAt: number
+    model: string | null
+    activity: string | null
+    fallback: boolean
+  } | null
   lastOutcome: TurnOutcome | null
   lastError: LocalizedMessage | null
   usage: UsageTotals
   /** How many tokens the model read in its latest step: how full its context is. */
   contextTokens: number
+  /** How many times its older history was summarised. */
+  compactions: number
+  /** What it waits for: woken at `until` (epoch ms) to look at `note`. */
+  wait: { id: string; until: number; note: string } | null
 }
 
 /** One entry of what a conversation's agent has seen, oldest first. */
@@ -365,6 +382,9 @@ export type TranscriptNote =
       answer: string
     }
   | { type: 'user-in-thread'; threadId: string; content: string }
+  /** The agent's wait came due, the user woke it early, or the user called it off. */
+  | { type: 'wait-over'; how: 'due' | 'now' | 'cancelled'; until: number; note: string }
+  | { type: 'routine'; routineId: string; prompt: string; dueAt: number }
   | { type: 'upstream-done'; threadId: string; nodeTitle: string; summary: string }
   | {
       type: 'artifact-edited'
@@ -642,6 +662,8 @@ export interface TraceRequest {
 export type TraceItem =
   | TraceRequest
   | { kind: 'retry'; at: number; attempt: number; delayMs: number; detail: string }
+  /** The main model's retries ran out; the turn went on with `to`. */
+  | { kind: 'fallback'; at: number; from: string; to: string; detail: string }
   | { kind: 'compaction-failed'; at: number; detail: string }
   /** Long tool results read before were replaced by a placeholder to make room. */
   | { kind: 'results-cleared'; at: number }

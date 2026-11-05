@@ -293,6 +293,7 @@ function bar(row: TraceRow) {
 
 .trace-event--tool,
 .trace-event--retry,
+.trace-event--fallback,
 .trace-event--instructions,
 .trace-event--results-cleared,
 .trace-event--compaction-failed {
@@ -336,6 +337,7 @@ function bar(row: TraceRow) {
 }
 
 .trace-bar--retry,
+.trace-bar--fallback,
 .trace-bar--compaction-failed {
   background: var(--dou-color-warning);
 }

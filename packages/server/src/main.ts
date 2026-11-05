@@ -8,6 +8,7 @@ import {
   PluginHost,
   RepoWatcher,
   Scheduler,
+  Timers,
   WorkspaceManager,
   WorktreeJanitor,
 } from '@ariadne/agent'
@@ -120,7 +121,10 @@ const scheduler = new Scheduler({
 })
 // Worktrees of work that landed go once the thread is finished with them.
 const janitor = new WorktreeJanitor(app, workspaces)
+// Waits and routines that come due wake their conversations, after a restart too.
+const timers = new Timers(app)
 scheduler.start()
+timers.start()
 watcher.start()
 janitor.start()
 
@@ -153,6 +157,7 @@ async function shutdown() {
   // Running turns end as interrupted and resume on the next start.
   await watcher.stop()
   await janitor.stop()
+  timers.stop()
   await scheduler.stop()
   await mcp.dispose()
   await workspaces.dispose()

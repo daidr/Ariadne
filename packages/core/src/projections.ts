@@ -592,6 +592,32 @@ export const noticesProjection: Projection = {
         add(conversationId, 'turn-changes', { turnId, from, to, files, total })
         break
       }
+      case 'conversation.model_fallback':
+        add(event.data.conversationId, 'model-fallback', {
+          from: event.data.from,
+          to: event.data.to,
+          detail: event.data.detail,
+        })
+        break
+      // What woke the agent, where the user follows it: its own wait, or a routine.
+      case 'conversation.wait_ended':
+        if (event.data.how === 'cancelled') break
+        add(event.data.conversationId, 'woken', {
+          how: event.data.how,
+          note: event.data.note,
+        })
+        break
+      case 'routine.ran': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator) {
+          add(coordinator, 'routine', {
+            routineId: event.data.routineId,
+            prompt: event.data.prompt,
+            dueAt: event.data.dueAt,
+          })
+        }
+        break
+      }
       case 'conversation.model_retry':
         add(event.data.conversationId, 'model-retry', {
           attempt: event.data.attempt,
@@ -715,7 +741,13 @@ export const conversationsProjection: Projection = {
       reasoning_tokens INTEGER NOT NULL DEFAULT 0,
       context_tokens INTEGER NOT NULL DEFAULT 0,
       instructions TEXT,
-      activity TEXT
+      activity TEXT,
+      -- The turn went on with the fallback model.
+      fallback INTEGER NOT NULL DEFAULT 0,
+      compactions INTEGER NOT NULL DEFAULT 0,
+      wait_id TEXT,
+      wait_until INTEGER,
+      wait_note TEXT
     )`)
   },
   forget(db, projectId) {
@@ -748,7 +780,7 @@ export const conversationsProjection: Projection = {
       case 'turn.started':
         db.run(
           `UPDATE conversations SET turn_id = ?, turn_started_at = ?, turn_started_seq = ?, model = ?,
-             activity = NULL
+             activity = NULL, fallback = 0
            WHERE id = ?`,
           [event.data.turnId, event.at, event.seq, event.data.model, event.data.conversationId],
         )
@@ -779,8 +811,35 @@ export const conversationsProjection: Projection = {
           ],
         )
         break
+      case 'conversation.model_fallback':
+        db.run('UPDATE conversations SET model = ?, fallback = 1 WHERE id = ? AND turn_id = ?', [
+          event.data.to,
+          event.data.conversationId,
+          event.data.turnId,
+        ])
+        break
+      case 'conversation.wait_set':
+        db.run('UPDATE conversations SET wait_id = ?, wait_until = ?, wait_note = ? WHERE id = ?', [
+          event.data.waitId,
+          event.data.until,
+          event.data.note,
+          event.data.conversationId,
+        ])
+        break
+      case 'conversation.wait_ended':
+        db.run(
+          `UPDATE conversations SET wait_id = NULL, wait_until = NULL, wait_note = NULL
+           WHERE id = ? AND wait_id = ?`,
+          [event.data.conversationId, event.data.waitId],
+        )
+        break
       case 'research.step':
       case 'conversation.compacted':
+        if (event.type === 'conversation.compacted') {
+          db.run('UPDATE conversations SET compactions = compactions + 1 WHERE id = ?', [
+            event.data.conversationId,
+          ])
+        }
         db.run(
           `UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
              cached_tokens = cached_tokens + ?, cache_write_tokens = cache_write_tokens + ?,
@@ -1301,6 +1360,43 @@ export const transcriptProjection: Projection = {
           false,
         )
         break
+      // The agent's own wait is over: it hears what it wanted to look at. Called off by the
+      // user, it learns so the next time it works, without being woken for it.
+      case 'conversation.wait_ended': {
+        const { conversationId, how, by, until, note } = event.data
+        if (how === 'cancelled' && by !== 'user') break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId,
+            kind: 'note',
+            payload: { type: 'wait-over', how, until, note },
+          },
+          how !== 'cancelled',
+        )
+        break
+      }
+      case 'routine.ran': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: coordinator,
+            kind: 'note',
+            payload: {
+              type: 'routine',
+              routineId: event.data.routineId,
+              prompt: event.data.prompt,
+              dueAt: event.data.dueAt,
+            },
+          },
+          true,
+        )
+        break
+      }
       case 'conversation.results_cleared':
         addEntry(
           db,

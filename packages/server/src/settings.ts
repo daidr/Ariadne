@@ -69,6 +69,12 @@ export interface ModelConfig {
 export interface RoleConfig {
   model: string | null
   effort: Effort | null
+  /**
+   * What a turn goes on with when the model keeps being turned away (rate limit, overload,
+   * server errors) after its retries. Research has none: a failed research is the asking
+   * conversation's tool error, and it goes on itself.
+   */
+  fallback: string | null
 }
 
 /**
@@ -172,13 +178,14 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const PROJECT_ENV_NAME = /^(?!GIT_CONFIG|ARIADNE_)[A-Za-z_][A-Za-z0-9_]*$/i
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
 
-const noRole = (): RoleConfig => ({ model: null, effort: null })
+const noRole = (): RoleConfig => ({ model: null, effort: null, fallback: null })
 
 function storedRole(raw: unknown): RoleConfig {
   const role = (raw ?? {}) as Partial<RoleConfig>
   return {
     model: typeof role.model === 'string' ? role.model : null,
     effort: EFFORTS.includes(role.effort as Effort) ? (role.effort as Effort) : null,
+    fallback: typeof role.fallback === 'string' ? role.fallback : null,
   }
 }
 
@@ -509,7 +516,9 @@ export class SettingsStore {
       if (model !== null && !ids.has(model)) throw new BadRequest(`roles.${key}.model`)
       const effort = roles[key]?.effort ?? null
       if (effort !== null && !EFFORTS.includes(effort)) throw new BadRequest(`roles.${key}.effort`)
-      return { model, effort }
+      const fallback = key === 'research' ? null : (roles[key]?.fallback ?? null)
+      if (fallback !== null && !ids.has(fallback)) throw new BadRequest(`roles.${key}.fallback`)
+      return { model, effort, fallback }
     }
     this.config = {
       ...this.config,
@@ -807,6 +816,28 @@ export class SettingsStore {
   resolveModel(role: Role, given: string | null = null): ResolvedModel | null {
     const chosen = this.modelFor(role, given)
     if (!chosen) return null
+    const resolved = this.resolveConfig(role, chosen)
+    if (!resolved) return null
+    const fallback = this.fallbackFor(role)
+    // A fallback whose provider is gone, or that is the model itself, is no fallback.
+    const backup = fallback && fallback.id !== chosen.id ? this.resolveConfig(role, fallback) : null
+    return backup ? { ...resolved, fallback: backup } : resolved
+  }
+
+  /**
+   * The fallback a role's turns go on with. A role that takes its model from another (the
+   * coordinator from threads, triage from the coordinator) takes that one's fallback too.
+   */
+  fallbackFor(role: Role): ModelConfig | null {
+    const { models, roles } = this.config.models
+    const find = (id: string | null) => (id ? (models.find((m) => m.id === id) ?? null) : null)
+    const own = find(roles[role].fallback)
+    if (own || role === 'research' || role === 'thread' || roles[role].model) return own
+    return this.fallbackFor(role === 'triage' ? 'coordinator' : 'thread')
+  }
+
+  /** A model setting as a conversation of `role` talks to it. */
+  private resolveConfig(role: Role, chosen: ModelConfig): ResolvedModel | null {
     const effort = this.effortFor(role)
     const config = this.config.models.providers.find((p) => p.id === chosen.provider)
     if (!config) return null

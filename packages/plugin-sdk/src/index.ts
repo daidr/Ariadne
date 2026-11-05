@@ -157,6 +157,12 @@ export type ModelStreamPart =
        */
       retryable?: boolean
       retryAfterMs?: number
+      /**
+       * The service turned the request away for its load or the account's quota (rate
+       * limit, overload, a server error), even when it asks to wait too long to retry:
+       * another model may answer instead.
+       */
+      busy?: boolean
     }
 
 /** How hard a model thinks before it answers. Without it the request asks nothing of it. */

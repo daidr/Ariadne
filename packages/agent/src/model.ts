@@ -15,6 +15,11 @@ export interface ResolvedModel {
   effort?: Effort
   /** What the user added to its requests in the settings. */
   request?: ModelRequestOptions
+  /**
+   * What the turn goes on with when this model keeps failing on errors worth retrying
+   * (rate limits, overload, server errors) after its retries.
+   */
+  fallback?: ResolvedModel
 }
 
 /** Request settings the user gave a provider (headers, body, timeout) or a model (output). */

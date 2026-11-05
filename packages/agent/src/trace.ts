@@ -158,6 +158,15 @@ export function buildTrace(
           detail: event.data.detail,
         })
         break
+      case 'conversation.model_fallback':
+        turn.items.push({
+          kind: 'fallback',
+          at: event.at,
+          from: event.data.from,
+          to: event.data.to,
+          detail: event.data.detail,
+        })
+        break
       case 'conversation.compacted': {
         const { usage, timing, call } = event.data
         if (usage) addUsage(turn.usage, usage)

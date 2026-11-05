@@ -43,6 +43,14 @@ export const clearedResult = (length: number) =>
 export const CUT_HINT =
   '<output_cut_off>Your reply above hit the output length limit and was cut off; anything unfinished in it, such as a tool call whose arguments were not complete, was dropped, and the user has not seen it. Go on from where it stopped, in smaller pieces: keep replies shorter and write a large file in parts (write_file for the first part, then edit_file to add the rest).</output_cut_off>'
 
+/** A moment as the model reads it: the server's local date and time, to the minute. */
+const two = (n: number) => String(n).padStart(2, '0')
+
+export function localTime(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
 /** How a note reads to the model. Titles are looked up so the model sees names, not ids. */
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
   switch (note.type) {
@@ -52,6 +60,15 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
       return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}">\n${note.content}\n</user_wrote_in_thread>`
+    case 'wait-over': {
+      const at = localTime(note.until)
+      if (note.how === 'cancelled') {
+        return `<wait_cancelled until="${at}">\nThe user called off your wait. Do not wait for it again unless they ask.\nYou were going to look at: ${note.note}\n</wait_cancelled>`
+      }
+      return `<wait_over until="${at}" by="${note.how === 'now' ? 'user' : 'time'}">\n${note.how === 'now' ? 'The user woke you before the time you set.' : 'The time you waited for has come.'} You wanted to look at: ${note.note}\n</wait_over>`
+    }
+    case 'routine':
+      return `<routine due="${localTime(note.dueAt)}">\nA routine the user set up in the project's settings came due. Do what it says:\n${note.prompt}\n</routine>`
     case 'upstream-done':
       return `<upstream_done thread="${note.threadId}" node="${note.nodeTitle}">\n${note.summary}\n</upstream_done>`
     case 'artifact-edited':

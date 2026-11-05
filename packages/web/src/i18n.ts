@@ -69,3 +69,15 @@ export function duration(ms: number): string {
   if (ms < 60_000) return t('time.s', { value: (ms / 1000).toFixed(1) })
   return t('time.min', { m: Math.floor(ms / 60_000), s: Math.round((ms % 60_000) / 1000) })
 }
+
+/** A coming moment, as short as it can be: `14:30` today, else with its date (`11/6 14:30`). */
+export function clockText(at: number, now = Date.now()): string {
+  const date = new Date(at)
+  const today = new Date(now).toDateString() === date.toDateString()
+  return date.toLocaleString(locale.value, {
+    ...(today ? {} : { month: 'numeric', day: 'numeric' }),
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}

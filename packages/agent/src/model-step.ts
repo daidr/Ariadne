@@ -7,7 +7,14 @@ import type { ResolvedModel } from './model'
 
 /** Why a turn stopped early, for the user. */
 export class TurnError extends Error {
-  constructor(readonly localized: LocalizedMessage) {
+  /**
+   * `exhausted`: the model failed on an error worth retrying and its retries ran out, so
+   * another model may do better.
+   */
+  constructor(
+    readonly localized: LocalizedMessage,
+    readonly exhausted: { detail: string } | null = null,
+  ) {
     super(localized.key)
   }
 }
@@ -106,10 +113,12 @@ export async function requestStep(
       const images = request.messages.some(
         (message) => (message.role === 'user' || message.role === 'tool') && message.images?.length,
       )
-      throw new TurnError({
-        key: images ? 'error.modelRequestImages' : 'error.modelRequest',
-        params: { detail },
-      })
+      throw new TurnError(
+        { key: images ? 'error.modelRequestImages' : 'error.modelRequest', params: { detail } },
+        // Busy past the retries: another model may answer. A wrong key or a bad request
+        // would fail there the same way.
+        failure.busy ? { detail } : null,
+      )
     }
     const delayMs = Math.min(MAX_RETRY_AFTER_MS, failure.retryAfterMs ?? baseDelayMs * 2 ** attempt)
     onRetry({ attempt: attempt + 1, delayMs, detail })

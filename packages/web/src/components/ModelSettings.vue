@@ -82,6 +82,10 @@ const triageEffort = ref<Effort | ''>('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
 const researchModel = ref<string>('')
 const researchEffort = ref<Effort | ''>('')
+// What a role's turn goes on with when its model keeps being turned away; '' is none.
+const threadFallback = ref('')
+const coordinatorFallback = ref('')
+const triageFallback = ref('')
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -114,6 +118,19 @@ const researchOptions = computed(() => [
   { value: '', label: t('settings.sameAsAsking') },
   ...modelOptions.value,
 ])
+// A role that takes its model from another takes its fallback too, unless it has its own.
+const fallbackOptions = (inherits: 'threads' | 'coordinator' | null) => [
+  {
+    value: '',
+    label:
+      inherits === 'threads'
+        ? t('settings.sameAsThreads')
+        : inherits === 'coordinator'
+          ? t('settings.sameAsCoordinator')
+          : t('settings.fallbackNone'),
+  },
+  ...modelOptions.value,
+]
 const effortOptions = computed(() => [
   { value: '', label: t('settings.effort.default') },
   ...(['low', 'medium', 'high'] as const).map((effort) => ({
@@ -156,6 +173,9 @@ function load(settings: ModelSettings) {
   triageEffort.value = settings.roles.triage.effort ?? ''
   researchModel.value = settings.roles.research.model ?? ''
   researchEffort.value = settings.roles.research.effort ?? ''
+  threadFallback.value = settings.roles.thread.fallback ?? ''
+  coordinatorFallback.value = settings.roles.coordinator.fallback ?? ''
+  triageFallback.value = settings.roles.triage.fallback ?? ''
 }
 
 export type SettingsTab =
@@ -333,18 +353,22 @@ async function save() {
           thread: {
             model: keep(threadModel.value) ?? kept[0]?.id ?? null,
             effort: threadEffort.value || null,
+            fallback: keep(threadFallback.value || null),
           },
           coordinator: {
             model: keep(coordinatorModel.value || null),
             effort: coordinatorEffort.value || null,
+            fallback: keep(coordinatorFallback.value || null),
           },
           triage: {
             model: keep(triageModel.value || null),
             effort: triageEffort.value || null,
+            fallback: keep(triageFallback.value || null),
           },
           research: {
             model: keep(researchModel.value || null),
             effort: researchEffort.value || null,
+            fallback: null,
           },
         },
       }),
@@ -523,6 +547,13 @@ async function save() {
                 <DouFormItem :label="t('settings.effort')" class="settings-effort">
                   <DouSelect v-model="threadEffort" :options="effortOptions" />
                 </DouFormItem>
+                <DouFormItem
+                  :label="t('settings.fallbackModel')"
+                  :help="t('settings.fallbackModelHelp')"
+                  class="settings-grow"
+                >
+                  <DouSelect v-model="threadFallback" :options="fallbackOptions(null)" />
+                </DouFormItem>
               </div>
               <div class="settings-row">
                 <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
@@ -530,6 +561,12 @@ async function save() {
                 </DouFormItem>
                 <DouFormItem :label="t('settings.effort')" class="settings-effort">
                   <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
+                  <DouSelect
+                    v-model="coordinatorFallback"
+                    :options="fallbackOptions(coordinatorModel ? null : 'threads')"
+                  />
                 </DouFormItem>
               </div>
               <div class="settings-row">
@@ -542,6 +579,12 @@ async function save() {
                 </DouFormItem>
                 <DouFormItem :label="t('settings.effort')" class="settings-effort">
                   <DouSelect v-model="triageEffort" :options="effortOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
+                  <DouSelect
+                    v-model="triageFallback"
+                    :options="fallbackOptions(triageModel ? null : 'coordinator')"
+                  />
                 </DouFormItem>
               </div>
               <div class="settings-row">
