@@ -5,6 +5,8 @@ import {
   unknownResult,
   type Ariadne,
   type Attachment,
+  type LineComment,
+  type MessageMention,
   type ReasoningRecord,
   type TraceMessage,
   type TranscriptEntry,
@@ -315,7 +317,13 @@ export function toChatMessages(
           const files = attachedFiles(message.attachments, options)
           chat = {
             role: 'user',
-            content: [message.content, files.text, openAsksHint(entry.openAsks ?? [])]
+            content: [
+              message.content,
+              commentsText(message.comments),
+              mentionsText(message.mentions),
+              files.text,
+              openAsksHint(entry.openAsks ?? []),
+            ]
               .filter(Boolean)
               .join('\n\n'),
             ...(files.images.length ? { images: files.images } : {}),
@@ -387,6 +395,28 @@ function attachedFiles(
     )
   }
   return { text: parts.join('\n\n'), images: images.shown }
+}
+
+/** The user's comments on lines of the thread's changes, in the order they read them. */
+export function commentsText(comments: readonly LineComment[]): string {
+  if (!comments.length) return ''
+  const items = comments.map((comment) => {
+    const quote = comment.quote.trim() ? ` \`${comment.quote.trim().replaceAll('`', "'")}\`` : ''
+    const body = comment.body.replaceAll('\n', '\n  ')
+    return `- ${comment.path}:${comment.line}${quote}\n  ${body}`
+  })
+  return `<line_comments>\nThe user commented on lines of your changes (file:line as the changes view showed it, that line's text, then the comment). Line numbers may have moved since; find the line by its text.\n${items.join('\n')}\n</line_comments>`
+}
+
+/** What the user pointed at with `@`, so the model knows which thread, artifact or file. */
+export function mentionsText(mentions: readonly MessageMention[]): string {
+  if (!mentions.length) return ''
+  const items = mentions.map((mention) =>
+    mention.kind === 'file'
+      ? `- file ${mention.path} (a path in the files you can read; read it if it matters)`
+      : `- ${mention.kind} "${mention.title}" (${mention.id})`,
+  )
+  return `<mentions>\nThe user pointed at these with @:\n${items.join('\n')}\n</mentions>`
 }
 
 /** The user wrote while questions of this conversation were open: one may be answered. */

@@ -634,9 +634,23 @@ const runCommand: Tool = {
           isError: !!first?.command.result && first.command.result.exitCode !== 0,
         }
       }
+    } catch (error) {
+      if (error instanceof ToolInputError || error instanceof DomainError) throw error
+      return { content: error instanceof Error ? error.message : String(error), isError: true }
+    }
+    // The user watches a command the turn waits for; the log gets its result once it ends.
+    // One left in the background outlives the call and is not shown there.
+    const live = ctx.app.live.start({
+      projectId: ctx.projectId,
+      conversationId: ctx.conversationId,
+      command,
+      cwd: cwd || '.',
+    })
+    try {
       const result = await workspace.exec(command, {
         timeoutMs: seconds * 1000,
         signal: ctx.signal,
+        onOutput: (chunk) => live.output(chunk),
         ...execOptions(ctx, cwd),
       })
       return {
@@ -646,6 +660,8 @@ const runCommand: Tool = {
     } catch (error) {
       if (error instanceof ToolInputError || error instanceof DomainError) throw error
       return { content: error instanceof Error ? error.message : String(error), isError: true }
+    } finally {
+      live.end()
     }
   },
 }

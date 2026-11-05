@@ -255,6 +255,14 @@ export interface BranchCapability {
    */
   remove(threadId: string, options?: { discard?: boolean }): Promise<boolean>
   worktrees(): Promise<WorktreeInfo[]>
+  /**
+   * The thread's worktree as it is now, committed or not (ignored files left out), written
+   * as a git tree without touching the worktree, its index or its branch; `null` when the
+   * thread has no worktree. Two of them show what a turn changed, see `diff`.
+   */
+  snapshot?(threadId: string): Promise<string | null>
+  /** What changed from one tree or commit to another, file by file. */
+  diff?(from: string, to: string): Promise<ChangedFile[]>
 }
 
 export interface PullRequestInfo {

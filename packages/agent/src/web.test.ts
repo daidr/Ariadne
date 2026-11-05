@@ -269,7 +269,13 @@ describe('attachments', () => {
       Array.from({ length: MAX_IMAGES + 2 }, (_, i) => ({
         seq: i + 1,
         kind: 'message' as const,
-        message: { content: `m${i}`, kind: 'chat', attachments: [pngFile(i)] } as never,
+        message: {
+          content: `m${i}`,
+          kind: 'chat',
+          attachments: [pngFile(i)],
+          mentions: [],
+          comments: [],
+        } as never,
       })),
       () => '',
       { images: true },

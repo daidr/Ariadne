@@ -23,8 +23,10 @@ import type {
   BranchMerge,
   Author,
   IssueWrite,
+  LineComment,
   LinkedIssue,
   MessageKind,
+  MessageMention,
   PlanAuthor,
   PlanOp,
   ProjectSource,
@@ -37,6 +39,7 @@ import type {
   TodoItem,
   TokenUsage,
   ToolCallRecord,
+  TurnFile,
   TurnOutcome,
 } from './events'
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
@@ -49,6 +52,7 @@ import {
   type StoredFile,
 } from './files'
 import { newId } from './ids'
+import { LiveCommands } from './live'
 import {
   applyOps,
   describePlanOps,
@@ -104,7 +108,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 38
+export const PROJECTION_VERSION = 39
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -126,6 +130,38 @@ const TURN_EVENT_TYPES = [
 /** Memory is read into every model request, so it stays short. */
 /** Files the user can send with one message. */
 export const MAX_ATTACHMENTS = 10
+/** Things one message can point at with `@`. */
+export const MAX_MENTIONS = 20
+/** Line comments one message can carry, and how long each may be. */
+export const LINE_COMMENT_LIMITS = { comments: 100, body: 4000, quote: 500, path: 1000 }
+/** Files a turn's changes keep by name; the rest are counted. */
+export const MAX_TURN_FILES = 200
+
+const badComments = () => new DomainError('error.invalidBody', { reason: 'comments' })
+
+/** Line comments as the user sent them, checked and trimmed. */
+function lineComments(given: unknown[]): LineComment[] {
+  const bad = badComments
+  if (!Array.isArray(given) || given.length > LINE_COMMENT_LIMITS.comments) throw bad()
+  return given.map((item) => {
+    const { path, line, quote, body } = (item ?? {}) as Record<string, unknown>
+    if (typeof path !== 'string' || !path.trim() || path.length > LINE_COMMENT_LIMITS.path) {
+      throw bad()
+    }
+    if (typeof line !== 'number' || !Number.isInteger(line) || line < 1) throw bad()
+    if (typeof body !== 'string' || !body.trim() || body.length > LINE_COMMENT_LIMITS.body) {
+      throw bad()
+    }
+    const text = typeof quote === 'string' ? quote : ''
+    return {
+      path: path.trim(),
+      line,
+      quote:
+        text.length > LINE_COMMENT_LIMITS.quote ? text.slice(0, LINE_COMMENT_LIMITS.quote) : text,
+      body: body.trim(),
+    }
+  })
+}
 export const MAX_MEMORIES = 50
 export const MAX_MEMORY = 500
 
@@ -357,6 +393,8 @@ interface MessageRow {
   edited_since_read: number
   blocks: string | null
   attachments: string | null
+  mentions: string | null
+  comments: string | null
   ask_id: string | null
   ask_block: string | null
   ask_answer: string | null
@@ -515,6 +553,8 @@ function toMessage(row: MessageRow): MessageView {
           }
         : null,
     attachments: row.attachments ? (JSON.parse(row.attachments) as Attachment[]) : [],
+    mentions: row.mentions ? (JSON.parse(row.mentions) as MessageMention[]) : [],
+    comments: row.comments ? (JSON.parse(row.comments) as LineComment[]) : [],
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
@@ -535,6 +575,8 @@ export interface AriadneOptions {
  */
 export class Ariadne {
   readonly store: EventStore
+  /** Commands threads are running now; not part of the log, see `LiveCommands`. */
+  readonly live: LiveCommands
   private readonly db: Database
   private readonly now: () => number
   /** Changes to issues being made right now, by the yes each uses, with the thread making it. */
@@ -542,6 +584,7 @@ export class Ariadne {
 
   constructor(options: AriadneOptions) {
     this.now = options.now ?? Date.now
+    this.live = new LiveCommands(this.now)
     this.store = new EventStore({
       path: options.path,
       projections: defaultProjections,
@@ -1765,12 +1808,26 @@ export class Ariadne {
       blocks?: unknown[]
       /** Files of this project the user sends with it, as uploaded. */
       attachments?: { fileId: string; name: string }[]
+      /** What the user pointed at with `@`; threads and artifacts are titled from the project. */
+      mentions?: unknown[]
+      /** The user's comments on lines of a thread's changes. */
+      comments?: unknown[]
     },
   ): MessageView {
     this.assertConversationIn(projectId, input.conversationId)
     const attachments = this.attachmentsOf(projectId, input.attachments ?? [])
     if (attachments.length && input.author !== 'user') {
       throw new DomainError('error.invalidBody', { reason: 'attachments' })
+    }
+    const mentions = this.mentionsOf(projectId, input.mentions ?? [])
+    const comments = lineComments(input.comments ?? [])
+    if ((mentions.length || comments.length) && input.author !== 'user') {
+      throw new DomainError('error.invalidBody', {
+        reason: mentions.length ? 'mentions' : 'comments',
+      })
+    }
+    if (comments.length && this.getProject(projectId).coordinatorId === input.conversationId) {
+      throw new DomainError('error.invalidBody', { reason: 'comments' })
     }
     const kind = input.kind ?? 'chat'
     // Only the coordinator relays into a thread.
@@ -1806,7 +1863,7 @@ export class Ariadne {
         })
       }
     })
-    if (!input.content.trim() && !parsed.length && !attachments.length) {
+    if (!input.content.trim() && !parsed.length && !attachments.length && !comments.length) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
     const messageId = newId('msg')
@@ -1827,6 +1884,8 @@ export class Ariadne {
           content: input.content,
           ...(shown.length ? { blocks: shown } : {}),
           ...(attachments.length ? { attachments } : {}),
+          ...(mentions.length ? { mentions } : {}),
+          ...(comments.length ? { comments } : {}),
         },
       },
       ...asks.map((block) =>
@@ -1838,6 +1897,80 @@ export class Ariadne {
       ),
     ])
     return this.getMessage(messageId)
+  }
+
+  /**
+   * Mentions checked against the project: threads and artifacts must be its own and take
+   * their titles from it; a file is a path relative to the workspace, which the agent
+   * reads itself.
+   */
+  private mentionsOf(projectId: string, given: unknown[]): MessageMention[] {
+    if (!Array.isArray(given)) throw new DomainError('error.invalidBody', { reason: 'mentions' })
+    if (given.length > MAX_MENTIONS) {
+      throw new DomainError('error.invalidBody', { reason: 'mentions' })
+    }
+    const seen = new Set<string>()
+    const mentions: MessageMention[] = []
+    for (const item of given) {
+      const { kind, id, path } = (item ?? {}) as Record<string, unknown>
+      let mention: MessageMention
+      if (kind === 'file') {
+        const clean = typeof path === 'string' ? path.trim().replace(/^\.\/+/, '') : ''
+        if (!clean || clean.length > 1000 || /[\0\n\r]/.test(clean) || clean.startsWith('/')) {
+          throw new DomainError('error.invalidBody', { reason: 'mentions' })
+        }
+        mention = { kind, path: clean }
+      } else if (kind === 'thread' || kind === 'artifact') {
+        const table = kind === 'thread' ? 'threads' : 'artifacts'
+        const row =
+          typeof id === 'string'
+            ? this.db
+                .query<{ title: string }, [string, string]>(
+                  `SELECT title FROM ${table} WHERE id = ? AND project_id = ?`,
+                )
+                .get(id, projectId)
+            : null
+        if (!row)
+          throw new DomainError('error.notFound', { what: typeof id === 'string' ? id : kind })
+        mention = { kind, id: id as string, title: row.title }
+      } else {
+        throw new DomainError('error.invalidBody', { reason: 'mentions' })
+      }
+      const key = mention.kind === 'file' ? `file:${mention.path}` : `${mention.kind}:${mention.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      mentions.push(mention)
+    }
+    return mentions
+  }
+
+  /**
+   * Record what a turn changed in its thread's workspace. A turn that changed nothing
+   * records nothing.
+   */
+  recordTurnChanges(
+    conversationId: string,
+    turnId: string,
+    input: { from: string; to: string; files: TurnFile[] },
+  ): void {
+    if (!input.files.length) return
+    const projectId = this.runningTurn(conversationId, turnId)
+    const sum = (key: 'added' | 'removed') =>
+      input.files.reduce((total, file) => total + (file[key] ?? 0), 0)
+    this.store.append([
+      {
+        type: 'turn.changed',
+        projectId,
+        data: {
+          conversationId,
+          turnId,
+          from: input.from,
+          to: input.to,
+          files: input.files.slice(0, MAX_TURN_FILES),
+          total: { files: input.files.length, added: sum('added'), removed: sum('removed') },
+        },
+      },
+    ])
   }
 
   /** Attachments checked against the project's files, named as given (trimmed, one line). */

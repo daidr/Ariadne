@@ -9,6 +9,8 @@ export { repoTools, summarizeChecks, syncThreadPullRequest } from './repo-tools'
 export { RepoWatcher } from './repo-watcher'
 export { WorktreeJanitor } from './worktree-janitor'
 export { listWorktrees, mergeThread, threadChanges, threadFile } from './branch-merge'
+export { MENTION_FILES, mentionFiles, mentionRank, walkFiles } from './mention-files'
+export { turnChanges } from './turn-changes'
 export {
   coordinatorTools,
   switchedOff,

@@ -63,6 +63,10 @@ import {
   undoNotice,
 } from '../store'
 import ReviewActions from './ReviewActions.vue'
+import LineComments from './LineComments.vue'
+import LiveCommand from './LiveCommand.vue'
+import TurnChanges from './TurnChanges.vue'
+import { useMentions } from './mentions'
 import StageLabel from './StageLabel.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
 import AskBlock from '../blocks/AskBlock.vue'
@@ -88,6 +92,12 @@ function pick(event: Event) {
 }
 const canSubmit = computed(
   () => (!!draft.value.trim() || attachments.files.value.length > 0) && attachments.ready(),
+)
+// `@` offers threads, artifacts and files; what was picked goes with the message.
+const mentions = useMentions(
+  draft,
+  () => input.value?.textarea?.selectionStart ?? draft.value.length,
+  () => conversationId.value,
 )
 
 // A message's images open in a preview, its text files in a tab of their own.
@@ -125,6 +135,10 @@ const thread = computed(() =>
     : null,
 )
 const working = computed(() => !!view.value.conversation?.turn)
+// The command it is running now, if any, shown in the status line.
+const live = computed(() =>
+  conversationId.value ? (state.live[conversationId.value] ?? null) : null,
+)
 // What the model said it is doing beside its latest tool calls, shown above the input.
 const activity = computed(
   () => view.value.conversation?.turn?.activity ?? t('conversation.working'),
@@ -232,6 +246,7 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
   return [
     ...(message.attachments.length ? [{ type: 'attachments' }] : []),
     ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+    ...(message.comments.length ? [{ type: 'comments' }] : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
   ]
@@ -249,8 +264,12 @@ async function submit(value: string) {
   if (!id || !canSubmit.value) return
   draft.value = ''
   const files = attachments.take()
-  const sent = await sendMessage(id, value, files.attachments)
+  const sent = await sendMessage(id, value, {
+    attachments: files.attachments,
+    mentions: mentions.inText(value),
+  })
   files.settle(sent)
+  if (sent) mentions.reset()
   // Not sent: the text comes back too, unless something new was typed meanwhile.
   if (!sent && !draft.value) draft.value = value
 }
@@ -606,7 +625,13 @@ watch(
             "
             :notice="item.notice"
           />
-          <DouText v-else tone="warning" size="sm" class="notice-text">
+          <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />
+          <DouText
+            v-else-if="item.notice.kind === 'compaction-failed'"
+            tone="warning"
+            size="sm"
+            class="notice-text"
+          >
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>
         </div>
@@ -657,6 +682,11 @@ watch(
                 :block="message.ask.block"
                 :answer="message.ask.answer"
                 :withdrawn="message.ask.withdrawn"
+              />
+              <LineComments
+                v-else-if="part.type === 'comments'"
+                :comments="message.comments"
+                :thread-id="message.conversationId"
               />
               <ShowBlock
                 v-else-if="part.type === 'block'"
@@ -721,7 +751,8 @@ watch(
       </template>
     </DouAlert>
     <div v-else-if="working" class="conversation-status" role="status">
-      <DouText variant="secondary" size="sm" class="conversation-activity">
+      <LiveCommand v-if="live" :command="live" />
+      <DouText v-else variant="secondary" size="sm" class="conversation-activity">
         <DouStatusDot tone="primary" ripple />
         <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
       </DouText>
@@ -766,7 +797,9 @@ watch(
         v-model="draft"
         :submit-on="state.input.submitOn"
         :commands="commands"
+        :mentions="mentions.options.value"
         @command="useSnippet"
+        @mention="mentions.pick"
         :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         :can-submit="canSubmit"

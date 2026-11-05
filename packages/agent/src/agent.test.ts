@@ -356,7 +356,11 @@ describe('history compaction', () => {
 
   test('the cut keeps a step with its results and always keeps the newest input', () => {
     const entries: TranscriptEntry[] = [
-      { seq: 1, kind: 'message', message: { content: 'a'.repeat(400), attachments: [] } as never },
+      {
+        seq: 1,
+        kind: 'message',
+        message: { content: 'a'.repeat(400), attachments: [], mentions: [], comments: [] } as never,
+      },
       {
         seq: 1,
         kind: 'step',
@@ -366,7 +370,11 @@ describe('history compaction', () => {
         sawSeq: 1,
         toolCalls: [{ id: 'x', name: 't', arguments: '{}' }],
       },
-      { seq: 3, kind: 'message', message: { content: 'held', attachments: [] } as never },
+      {
+        seq: 3,
+        kind: 'message',
+        message: { content: 'held', attachments: [], mentions: [], comments: [] } as never,
+      },
       {
         seq: 4,
         kind: 'tool',
@@ -376,7 +384,11 @@ describe('history compaction', () => {
         isError: false,
       },
       { seq: 5, kind: 'step', reasoning: [], call: '{}', text: 'ok', sawSeq: 4, toolCalls: [] },
-      { seq: 6, kind: 'message', message: { content: 'new', attachments: [] } as never },
+      {
+        seq: 6,
+        kind: 'message',
+        message: { content: 'new', attachments: [], mentions: [], comments: [] } as never,
+      },
     ]
     // Keeping very little: the cut falls after the step's result, never between.
     const upTo = compactionCut(entries, 1)
@@ -997,7 +1009,13 @@ describe('transcript to model messages', () => {
         {
           seq: 1,
           kind: 'message',
-          message: { content: '开始', kind: 'chat', attachments: [] } as never,
+          message: {
+            content: '开始',
+            kind: 'chat',
+            attachments: [],
+            mentions: [],
+            comments: [],
+          } as never,
         },
         { seq: 2, kind: 'note', note: report },
         {

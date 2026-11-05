@@ -8,6 +8,8 @@ import type {
   ArtifactView,
   BlockAnswer,
   ConversationView,
+  LineComment,
+  LiveUpdate,
   MessageView,
   NeedsMeItem,
   PlanOp,
@@ -438,13 +440,20 @@ export const api = {
     projectId: string,
     conversationId: string,
     content: string,
-    attachments: { fileId: string; name: string }[] = [],
+    extras: MessageExtras = {},
   ) =>
     request<{ message: MessageView }>('POST', `/api/projects/${projectId}/messages`, {
       conversationId,
       content,
-      ...(attachments.length ? { attachments } : {}),
+      ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
+      ...(extras.mentions?.length ? { mentions: extras.mentions } : {}),
+      ...(extras.comments?.length ? { comments: extras.comments } : {}),
     }),
+  mentionFiles: (projectId: string, conversationId: string, query: string) =>
+    request<{ files: string[] }>(
+      'GET',
+      `/api/projects/${projectId}/mention-files?${new URLSearchParams({ conversationId, q: query })}`,
+    ),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
   answerAttention: (id: string, answer: BlockAnswer) =>
@@ -591,6 +600,17 @@ export const api = {
     ),
 }
 
+/** What a message carries besides its text. */
+export interface MessageExtras {
+  attachments?: { fileId: string; name: string }[]
+  mentions?: MentionInput[]
+  comments?: LineComment[]
+}
+
+/** Something picked after `@`, as the server takes it; it fills in titles. */
+export type MentionInput =
+  { kind: 'thread' | 'artifact'; id: string } | { kind: 'file'; path: string }
+
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
 
 /**
@@ -603,6 +623,7 @@ export function followEvents(
   onEvent: (event: AnyStoredEvent) => void,
   onStatus: (status: StreamStatus) => void,
   onOpen?: () => void,
+  onLive?: (update: LiveUpdate) => void,
 ): () => void {
   let lastSeq = afterSeq
   let source: EventSource | null = null
@@ -625,6 +646,10 @@ export function followEvents(
       const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
       lastSeq = Math.max(lastSeq ?? 0, event.seq)
       onEvent(event)
+    })
+    // A running command's output: not part of the log, so it moves nothing forward.
+    current.addEventListener('live', (message) => {
+      onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
     })
     current.addEventListener('error', () => {
       if (stopped) return

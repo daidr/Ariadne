@@ -382,6 +382,8 @@ export const messagesProjection: Projection = {
       edited_since_read INTEGER NOT NULL DEFAULT 0,
       blocks TEXT,
       attachments TEXT,
+      mentions TEXT,
+      comments TEXT,
       -- The event that last changed the row, for pages that fetch only changes.
       changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
@@ -395,7 +397,8 @@ export const messagesProjection: Projection = {
       case 'message.posted':
         db.run(
           `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
-             attachments, created_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             attachments, mentions, comments, created_at, changed_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -405,6 +408,8 @@ export const messagesProjection: Projection = {
             event.data.content,
             event.data.blocks?.length ? JSON.stringify(event.data.blocks) : null,
             event.data.attachments?.length ? JSON.stringify(event.data.attachments) : null,
+            event.data.mentions?.length ? JSON.stringify(event.data.mentions) : null,
+            event.data.comments?.length ? JSON.stringify(event.data.comments) : null,
             event.at,
             event.seq,
           ],
@@ -582,6 +587,11 @@ export const noticesProjection: Projection = {
       case 'workspace.removed':
         add(event.data.threadId, 'worktree-removed', { reason: event.data.reason })
         break
+      case 'turn.changed': {
+        const { conversationId, turnId, from, to, files, total } = event.data
+        add(conversationId, 'turn-changes', { turnId, from, to, files, total })
+        break
+      }
       case 'conversation.model_retry':
         add(event.data.conversationId, 'model-retry', {
           attempt: event.data.attempt,
@@ -981,9 +991,15 @@ export const transcriptProjection: Projection = {
           addEntry(db, event, { conversationId, kind: 'message', ref: messageId }, true)
         }
         // What the user tells a thread also gets a quick look from the coordinator, which
-        // may hand it to a better place. The thread does not wait for that.
+        // may hand it to a better place. The thread does not wait for that. Comments on the
+        // thread's own changes belong to it.
         const coordinator = coordinatorOf(db, event.projectId)
-        if (author === 'user' && coordinator && coordinator !== conversationId) {
+        if (
+          author === 'user' &&
+          coordinator &&
+          coordinator !== conversationId &&
+          !event.data.comments?.length
+        ) {
           addEntry(
             db,
             event,

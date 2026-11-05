@@ -66,6 +66,39 @@ export interface Attachment {
 }
 
 /**
+ * Something the user pointed at with `@` in a message: a thread or an artifact of the
+ * project (titled as it was then), or a file of the workspace the conversation reads.
+ */
+export type MessageMention =
+  | { kind: 'thread'; id: string; title: string }
+  | { kind: 'artifact'; id: string; title: string }
+  | { kind: 'file'; path: string }
+
+/**
+ * The user's comment on one line of a thread's changes, sent with others in one message.
+ * `line` counts from 1 in the file as the changes showed it; `quote` is that line's text,
+ * so the thread finds it again after the file moved on.
+ */
+export interface LineComment {
+  path: string
+  line: number
+  quote: string
+  body: string
+}
+
+export type TurnFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
+
+/** One file a turn changed in its thread's workspace. */
+export interface TurnFile {
+  path: string
+  previousPath: string | null
+  status: TurnFileStatus
+  /** Lines added and removed; `null` for a binary file. */
+  added: number | null
+  removed: number | null
+}
+
+/**
  * A block of a model's reasoning as its provider returned it; `signature` (or the opaque
  * `text` of a `redacted` block) is what the provider checks when it is sent back.
  */
@@ -318,6 +351,10 @@ export interface EventMap {
     blocks?: ShowBlock[]
     /** Images and text files the user sent with it. */
     attachments?: Attachment[]
+    /** What the user pointed at with `@`. */
+    mentions?: MessageMention[]
+    /** The user's comments on lines of the thread's changes. */
+    comments?: LineComment[]
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }
@@ -453,6 +490,20 @@ export interface EventMap {
     isError: boolean
     /** Images the tool handed the model, e.g. a picture read from the workspace. */
     files?: Attachment[]
+  }
+  /**
+   * What a turn changed in its thread's workspace, committed or not: from the workspace as
+   * the turn first touched it (`from`) to the workspace as the turn left it (`to`), both
+   * git trees. Only for a turn that changed something. `files` stops at a bound; `total`
+   * counts them all.
+   */
+  'turn.changed': {
+    conversationId: string
+    turnId: string
+    from: string
+    to: string
+    files: TurnFile[]
+    total: { files: number; added: number; removed: number }
   }
   'turn.finished': {
     conversationId: string

@@ -348,3 +348,64 @@ describe('thread branches', () => {
     expect(again.branch).toBe('ariadne/thr_b')
   })
 })
+
+describe('turn snapshots', () => {
+  test('write the worktree as a tree without touching its index, and compare two', async () => {
+    const { branches, thread } = await setup()
+    const root = (await thread.exec('pwd')).stdout.trim()
+    const before = await branches.snapshot!('thr_a')
+    expect(before).toMatch(/^[0-9a-f]{40,64}$/)
+    // A command changes one file, adds one, removes one and leaves an ignored one.
+    await thread.writeFile('README.md', '# repo\nmore\n')
+    await thread.writeFile('new.txt', 'fresh\n')
+    await thread.writeFile('.gitignore', 'ignored.log\n')
+    await thread.writeFile('ignored.log', 'noise\n')
+    await thread.exec('rm old.txt')
+    const after = await branches.snapshot!('thr_a')
+    expect(after).not.toBe(before)
+    const files = await branches.diff!(before!, after!)
+    expect(files.map((f) => [f.path, f.status, f.added, f.removed]).toSorted()).toEqual(
+      [
+        ['.gitignore', 'added', 1, 0],
+        ['README.md', 'modified', 1, 0],
+        ['new.txt', 'added', 1, 0],
+        ['old.txt', 'deleted', 0, 5],
+      ].toSorted(),
+    )
+    // The worktree's own index still has nothing staged.
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('')
+    // The same files again give the same tree, and the versions can be read from it.
+    expect(await branches.snapshot!('thr_a')).toBe(after)
+    const versions = await branches.file({
+      from: before!,
+      head: after!,
+      path: 'README.md',
+      previousPath: null,
+    })
+    expect(versions).toEqual({ before: '# repo\n', after: '# repo\nmore\n', skipped: null })
+  })
+
+  test('give nothing for a thread without a worktree', async () => {
+    const { branches } = await setup()
+    expect(await branches.snapshot!('thr_none')).toBeNull()
+  })
+
+  test('are kept from git gc until the thread is discarded', async () => {
+    const { dir, capability, branches, thread } = await setup()
+    await thread.writeFile('loose.txt', 'only in a snapshot\n')
+    const tree = (await branches.snapshot!('thr_a'))!
+    expect(
+      await git(dir, 'for-each-ref', '--format=%(objectname)', 'refs/ariadne/turns/thr_a/'),
+    ).toBe(tree)
+    // Removing the worktree keeps them: the thread's turns still show their changes.
+    await thread.exec('rm loose.txt')
+    expect(await branches.remove('thr_a')).toBe(true)
+    expect(await git(dir, 'for-each-ref', 'refs/ariadne/turns/thr_a/')).not.toBe('')
+    await git(dir, 'gc', '--prune=now', '--quiet')
+    expect(await git(dir, 'cat-file', '-t', tree)).toBe('tree')
+    // Discarding them lets them go.
+    await capability.open({ threadId: 'thr_a' })
+    expect(await branches.remove('thr_a', { discard: true })).toBe(true)
+    expect(await git(dir, 'for-each-ref', 'refs/ariadne/turns/thr_a/')).toBe('')
+  })
+})

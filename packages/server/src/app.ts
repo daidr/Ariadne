@@ -6,6 +6,7 @@ import {
   LinkResolver,
   listWorktrees,
   MAX_LINKS,
+  mentionFiles,
   mergeThread,
   refreshDashboard,
   syncThreadPullRequest,
@@ -872,14 +873,44 @@ export function createHandler({
     const body = await readJson(request)
     const attachments = body.attachments ?? []
     if (!Array.isArray(attachments)) throw new BadRequest('attachments')
+    const mentions = body.mentions ?? []
+    if (!Array.isArray(mentions)) throw new BadRequest('mentions')
+    const comments = body.comments ?? []
+    if (!Array.isArray(comments)) throw new BadRequest('comments')
     const message = app.postMessage(projectId, {
       conversationId: requireString(body, 'conversationId'),
       author: 'user',
       content: typeof body.content === 'string' ? body.content : '',
       attachments,
+      mentions,
+      comments,
     })
     return json({ message }, 201)
   })
+
+  // Files offered after `@` in a conversation's input, for what was typed after it.
+  add(
+    'GET',
+    '/api/projects/:projectId/mention-files',
+    async (_request, { projectId = '' }, url) => {
+      app.getProject(projectId)
+      if (!workspaces?.available(projectId)) return json({ files: [] })
+      const conversationId = url.searchParams.get('conversationId')
+      let threadId: string | null = null
+      if (conversationId) {
+        const conversation = app.getConversation(conversationId)
+        if (conversation.projectId !== projectId) throw new BadRequest('conversationId')
+        if (conversation.role === 'thread') threadId = conversation.id
+      }
+      const query = (url.searchParams.get('q') ?? '').slice(0, 200)
+      try {
+        return json({ files: await mentionFiles(app, workspaces, projectId, threadId, query) })
+      } catch {
+        // A source that cannot be read now offers no files; threads and artifacts still show.
+        return json({ files: [] })
+      }
+    },
+  )
 
   add(
     'POST',

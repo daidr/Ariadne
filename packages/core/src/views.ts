@@ -4,6 +4,9 @@ import type { ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
+  LineComment,
+  MessageMention,
+  TurnFile,
   ArtifactKind,
   BranchMerge,
   IssueWriteAction,
@@ -152,6 +155,10 @@ export interface MessageView {
   ask: MessageAsk | null
   /** Images and text files the user sent with it. */
   attachments: Attachment[]
+  /** What the user pointed at with `@`. */
+  mentions: MessageMention[]
+  /** The user's comments on lines of the thread's changes. */
+  comments: LineComment[]
   createdAt: number
   editedAt: number | null
   editReason: string | null
@@ -216,6 +223,15 @@ export type NoticeView = {
     }
   | { kind: 'merge-conflict'; base: string; files: string[] }
   | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
+  /** What a turn changed in the thread's workspace, shown under its reply. */
+  | {
+      kind: 'turn-changes'
+      turnId: string
+      from: string
+      to: string
+      files: TurnFile[]
+      total: { files: number; added: number; removed: number }
+    }
   | {
       kind: 'instructions'
       path: string
