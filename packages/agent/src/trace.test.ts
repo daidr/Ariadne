@@ -357,6 +357,44 @@ describe('the trace', () => {
     expect(traceRequest(app, project.coordinatorId, compacted.seq).request).toEqual(summaryRequest)
   })
 
+  test('calls that ran together keep their own times', () => {
+    const project = app.createProject('P')
+    const conversationId = project.coordinatorId
+    const turnId = app.startTurn(conversationId, 'm')
+    app.recordStep(conversationId, turnId, {
+      reasoning: [],
+      text: '',
+      toolCalls: [
+        { id: 'a', name: 'read_file', arguments: '{}' },
+        { id: 'b', name: 'read_file', arguments: '{}' },
+      ],
+      sawSeq: app.lastSeq(),
+      usage: null,
+      input: { system: 's', tools: '[]', call: '{}', images: true },
+      timing: { startedAt: 0, firstOutputAt: null },
+    })
+    for (const [id, finishedAt] of [
+      ['a', 5000],
+      ['b', 3000],
+    ] as const) {
+      app.recordToolResult(conversationId, turnId, {
+        toolCallId: id,
+        name: 'read_file',
+        content: 'ok',
+        isError: false,
+        timing: { startedAt: 1000, finishedAt },
+      })
+    }
+    const [request] = buildTrace(app, conversationId).turns[0]!.items
+    expect(
+      request?.kind === 'request' &&
+        request.toolCalls.map((tool) => [tool.startedAt, tool.result?.finishedAt]),
+    ).toEqual([
+      [1000, 5000],
+      [1000, 3000],
+    ])
+  })
+
   test("refuses a seq that is not one of the conversation's calls", async () => {
     const project = app.createProject('P')
     const other = app.createProject('Q')

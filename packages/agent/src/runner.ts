@@ -602,7 +602,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // The same calls with the same results again: the model is not getting anywhere.
       // It is told once, with the last result of the step before the turn is stopped.
       const results: { content: string; isError: boolean }[] = []
-      const record = (index: number, result: Awaited<ReturnType<typeof runTool>>) => {
+      const record = (
+        index: number,
+        result: Awaited<ReturnType<typeof runTool>>,
+        ran: { startedAt: number; finishedAt: number },
+      ) => {
         const call = toolCalls[index]!
         results.push({ content: result.content, isError: result.isError ?? false })
         const files = result.files ?? []
@@ -624,6 +628,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           content,
           isError: result.isError ?? false,
           ...(files.length ? { files } : {}),
+          timing: ran,
         })
         if (count >= limits.loopRepeats) {
           throw new TurnError({ key: 'error.repeating', params: { count } })
@@ -637,11 +642,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       for (const group of callGroups(toolCalls, byName)) {
         if (signal.aborted) break
         const settled = await Promise.allSettled(
-          group.map((index) => runTool(byName.get(toolCalls[index]!.name), toolCalls[index]!, ctx)),
+          group.map(async (index) => {
+            const startedAt = Date.now()
+            const result = await runTool(byName.get(toolCalls[index]!.name), toolCalls[index]!, ctx)
+            return { result, ran: { startedAt, finishedAt: Date.now() } }
+          }),
         )
         for (const [i, outcome] of settled.entries()) {
           if (outcome.status === 'rejected') throw outcome.reason
-          record(group[i]!, outcome.value)
+          record(group[i]!, outcome.value.result, outcome.value.ran)
         }
       }
       // A workspace opened (or opened again) just now has its file to read too.

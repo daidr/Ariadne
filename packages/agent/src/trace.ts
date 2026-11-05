@@ -49,7 +49,7 @@ export function buildTrace(
   }
   const turns: TraceTurn[] = []
   let turn: TraceTurn | null = null
-  // Tools run one after another once their step is answered.
+  // Without times of their own, tools ran one after another once their step was answered.
   let toolsFrom = 0
   const running = new Map<string, TraceToolCall>()
   for (const event of events) {
@@ -137,16 +137,17 @@ export function buildTrace(
       case 'tool.finished': {
         const tool = running.get(event.data.toolCallId)
         if (tool) {
-          tool.startedAt = toolsFrom
+          // Calls that ran together have their own times; one closed unrun ends here.
+          tool.startedAt = event.data.timing?.startedAt ?? toolsFrom
           tool.result = {
             content: event.data.content,
             isError: event.data.isError,
-            finishedAt: event.at,
+            finishedAt: event.data.timing?.finishedAt ?? event.at,
             files: event.data.files ?? [],
           }
           running.delete(event.data.toolCallId)
         }
-        toolsFrom = event.at
+        toolsFrom = event.data.timing?.finishedAt ?? event.at
         break
       }
       case 'conversation.model_retry':

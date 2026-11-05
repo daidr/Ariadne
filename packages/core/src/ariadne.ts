@@ -2529,8 +2529,9 @@ export class Ariadne {
   listNotices(conversationId: string, range: { from?: number; to?: number } = {}): NoticeView[] {
     return this.db
       .query<NoticeRow, [string, number, number]>(
+        // Notices of the same millisecond in the order they were written: ids are random.
         `SELECT * FROM notices WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
-         ORDER BY created_at, id`,
+         ORDER BY created_at, rowid`,
       )
       .all(conversationId, range.from ?? -1, range.to ?? Number.MAX_SAFE_INTEGER)
       .map(toNotice)
@@ -3506,6 +3507,7 @@ export class Ariadne {
       content: string
       isError: boolean
       files?: Attachment[]
+      timing?: { startedAt: number; finishedAt: number }
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
