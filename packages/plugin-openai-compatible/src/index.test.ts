@@ -307,6 +307,8 @@ describe('openai-compatible provider', () => {
       type: 'finish',
       reason: 'error',
       error: 'HTTP 429: quota (the service asks to wait 30 min before trying again)',
+      // Too long to wait for, but another model may answer.
+      busy: true,
     })
   })
 })

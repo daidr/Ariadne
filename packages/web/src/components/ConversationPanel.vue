@@ -44,7 +44,7 @@ import {
 } from '@dou-ui/icons'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
-import { count, t, tm } from '../i18n'
+import { clockText, count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
@@ -65,6 +65,8 @@ import {
 import ReviewActions from './ReviewActions.vue'
 import LineComments from './LineComments.vue'
 import LiveCommand from './LiveCommand.vue'
+import BackgroundCommand from './BackgroundCommand.vue'
+import WaitStatus from './WaitStatus.vue'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
 import StageLabel from './StageLabel.vue'
@@ -139,6 +141,18 @@ const working = computed(() => !!view.value.conversation?.turn)
 const live = computed(() =>
   conversationId.value ? (state.live[conversationId.value] ?? null) : null,
 )
+// What the thread left running between turns, and what the conversation waits for.
+const background = computed(() =>
+  (conversationId.value ? (state.background[conversationId.value] ?? []) : []).filter(
+    (command) => !command.result,
+  ),
+)
+const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
+// The main model kept failing: this turn goes on with the role's fallback.
+const fallback = computed(() => {
+  const turn = view.value.conversation?.turn
+  return turn?.fallback ? turn.model : null
+})
 // What the model said it is doing beside its latest tool calls, shown above the input.
 const activity = computed(
   () => view.value.conversation?.turn?.activity ?? t('conversation.working'),
@@ -578,6 +592,39 @@ watch(
               })
             }}
           </DouText>
+          <DouText
+            v-else-if="item.notice.kind === 'model-fallback'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ t('notice.modelFallback', { from: item.notice.from, to: item.notice.to }) }}
+          </DouText>
+          <DouText
+            v-else-if="item.notice.kind === 'woken'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.how === 'now' ? 'notice.wokenByUser' : 'notice.wokenDue', {
+                note: item.notice.note,
+              })
+            }}
+          </DouText>
+          <!-- A routine's prompt is there for whoever wants it, out of the way otherwise. -->
+          <DouCollapse
+            v-else-if="item.notice.kind === 'routine'"
+            v-model="openRelays"
+            class="relay routine"
+          >
+            <DouCollapseItem
+              :value="item.notice.id"
+              :title="t('notice.routine', { time: clockText(item.notice.dueAt) })"
+            >
+              <DouText size="sm" class="routine-prompt">{{ item.notice.prompt }}</DouText>
+            </DouCollapseItem>
+          </DouCollapse>
           <!-- What happened to its branch and worktree. -->
           <DouText
             v-else-if="item.notice.kind === 'merged'"
@@ -756,10 +803,15 @@ watch(
         <DouStatusDot tone="primary" ripple />
         <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
       </DouText>
-      <DouButton variant="ghost" size="sm" @click="stop">
-        <template #leading><SquareStopIcon /></template>
-        {{ t('conversation.stop') }}
-      </DouButton>
+      <div class="conversation-status-end">
+        <DouText v-if="fallback" variant="tertiary" size="sm" class="conversation-fallback">
+          {{ t('conversation.fallback', { model: fallback }) }}
+        </DouText>
+        <DouButton variant="ghost" size="sm" @click="stop">
+          <template #leading><SquareStopIcon /></template>
+          {{ t('conversation.stop') }}
+        </DouButton>
+      </div>
     </div>
     <div v-else-if="queued" class="conversation-status" role="status">
       <DouText variant="secondary" size="sm">{{ t('conversation.queued') }}</DouText>
@@ -785,6 +837,21 @@ watch(
         </DouButton>
       </template>
     </DouAlert>
+
+    <div v-if="background.length && conversationId" class="conversation-background">
+      <BackgroundCommand
+        v-for="command in background"
+        :key="command.id"
+        :thread-id="conversationId"
+        :command="command"
+      />
+    </div>
+    <WaitStatus
+      v-if="wait && conversationId"
+      :conversation-id="conversationId"
+      :wait="wait"
+      class="conversation-wait"
+    />
 
     <DouImagePreview
       v-model:open="preview.open"
@@ -842,12 +909,11 @@ watch(
           <DouText v-else-if="modelLabel" variant="tertiary" size="sm" class="conversation-model">
             {{ modelLabel }}
           </DouText>
+          <!-- Full at the line where older history is made room for. -->
           <DouChatContextMeter
             v-if="view.model && view.conversation?.contextTokens"
             :used="view.conversation.contextTokens"
-            :total="view.model.contextTokens"
-            :warn-at="0.5"
-            :danger-at="0.6"
+            :total="view.model.compactAt"
           />
         </template>
       </DouChatInput>
@@ -937,6 +1003,37 @@ watch(
   justify-content: space-between;
   gap: 8px;
   margin: 0 16px;
+}
+
+.conversation-status-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-fallback {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-background {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 16px;
+}
+
+.conversation-wait {
+  margin: 0 16px;
+}
+
+.routine-prompt {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .conversation-activity {

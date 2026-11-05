@@ -210,6 +210,40 @@ describe('model settings', () => {
     ).toThrow()
   })
 
+  test('a fallback goes with its role, and a role without a model takes the one it follows', () => {
+    const store = new SettingsStore(path, host)
+    const settings = provider({ baseUrl: '', apiKey: 'k' })
+    const models = [...settings.models, { id: 'm2', provider: 'p1', model: 'backup' }]
+    store.updateModels({
+      ...settings,
+      models,
+      roles: { thread: { model: 'm1', effort: 'high', fallback: 'm2' } },
+    })
+    expect(store.resolveModel('thread')?.fallback).toMatchObject({
+      model: 'backup',
+      effort: 'high',
+    })
+    // The coordinator and triage follow the threads' model, and so their fallback.
+    expect(store.resolveModel('coordinator')?.fallback?.model).toBe('backup')
+    expect(store.resolveModel('triage')?.fallback?.model).toBe('backup')
+    // A thread given the fallback itself has none.
+    expect(store.resolveModel('thread', 'm2')?.fallback).toBeUndefined()
+    // A role with a model of its own and no fallback has none.
+    store.updateModels({
+      ...settings,
+      models,
+      roles: { thread: { model: 'm1', fallback: 'm2' }, coordinator: { model: 'm2' } },
+    })
+    expect(store.resolveModel('coordinator')?.fallback).toBeUndefined()
+    expect(() =>
+      store.updateModels({
+        ...settings,
+        models,
+        roles: { thread: { model: 'm1', fallback: 'x' } },
+      }),
+    ).toThrow()
+  })
+
   test('each role has its model, and a thread may be given another', () => {
     const store = new SettingsStore(path, host)
     const settings = provider({ baseUrl: '', apiKey: 'k' })

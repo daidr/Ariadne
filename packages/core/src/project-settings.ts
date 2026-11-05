@@ -52,6 +52,43 @@ export interface ProjectSettings {
     /** Threads' branches start with it, e.g. `ariadne/`. */
     branchPrefix: string
   }
+  /** Prompts that wake the coordinator on a schedule, e.g. sorting new issues on workdays. */
+  routines: Routine[]
+}
+
+/**
+ * Something the coordinator does on a schedule: at `time` (local, `HH:MM`) on the given
+ * weekdays (0 is Sunday; all seven for every day), it is woken with `prompt`.
+ */
+export interface Routine {
+  id: string
+  prompt: string
+  days: number[]
+  time: string
+  enabled: boolean
+}
+
+export const MAX_ROUTINES = 20
+export const MAX_ROUTINE_PROMPT = 2000
+const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/
+const ROUTINE_ID = /^[A-Za-z0-9_-]{1,40}$/
+
+/**
+ * When `routine` runs next after `after` (epoch ms), in the server's local time; `null`
+ * when it is off or has no days. A run is due at the minute, so one at exactly `after`
+ * counts as past.
+ */
+export function nextRun(routine: Routine, after: number): number | null {
+  if (!routine.enabled || !routine.days.length) return null
+  const match = TIME.exec(routine.time)
+  if (!match) return null
+  const [hours, minutes] = [Number(match[1]), Number(match[2])]
+  const day = new Date(after)
+  for (let i = 0; i <= 7; i++) {
+    const at = new Date(day.getFullYear(), day.getMonth(), day.getDate() + i, hours, minutes)
+    if (at.getTime() > after && routine.days.includes(at.getDay())) return at.getTime()
+  }
+  return null
 }
 
 export const DEFAULT_BRANCH_PREFIX = 'ariadne/'
@@ -64,6 +101,7 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   tools: [],
   budget: { thread: null, project: null },
   workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
+  routines: [],
 })
 
 /**
@@ -156,7 +194,34 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
       branchPrefix: prefix.trim(),
     }
   }
+  if (body.routines !== undefined) out.routines = parseRoutines(body.routines)
   return out
+}
+
+function parseRoutines(raw: unknown): Routine[] {
+  if (!Array.isArray(raw) || raw.length > MAX_ROUTINES) throw bad('routines')
+  const ids = new Set<string>()
+  return raw.map((item, i) => {
+    const at = `routines.${i}`
+    const routine = (item ?? {}) as Record<string, unknown>
+    const { id, prompt, days, time, enabled } = routine
+    if (typeof id !== 'string' || !ROUTINE_ID.test(id) || ids.has(id)) throw bad(`${at}.id`)
+    ids.add(id)
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_ROUTINE_PROMPT) {
+      throw bad(`${at}.prompt`)
+    }
+    if (!Array.isArray(days) || days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
+      throw bad(`${at}.days`)
+    }
+    if (typeof time !== 'string' || !TIME.test(time)) throw bad(`${at}.time`)
+    return {
+      id,
+      prompt: prompt.trim(),
+      days: [...new Set(days as number[])].toSorted(),
+      time,
+      enabled: enabled !== false,
+    }
+  })
 }
 
 /** Stored settings read back; a project that never set any has the defaults. */

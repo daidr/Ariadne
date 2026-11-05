@@ -10,6 +10,8 @@ import type {
   ConversationView,
   LineComment,
   LiveUpdate,
+  BackgroundUpdate,
+  BackgroundView,
   MessageView,
   NeedsMeItem,
   PlanOp,
@@ -327,6 +329,8 @@ export type Effort = 'low' | 'medium' | 'high'
 export interface RoleInput {
   model: string | null
   effort: Effort | null
+  /** Goes on with this when the model keeps being turned away; research has none. */
+  fallback: string | null
 }
 
 export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
@@ -399,7 +403,7 @@ export const api = {
       lastSeq: number
       todo: TodoView
       /** The model it uses now, with how much its context holds. */
-      model: { id: string; contextTokens: number } | null
+      model: { id: string; contextTokens: number; compactAt: number } | null
     }>(
       'GET',
       `/api/conversations/${id}${queryString({
@@ -421,6 +425,18 @@ export const api = {
   setThreadModel: (threadId: string, model: string | null) =>
     request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
+  wakeNow: (id: string) => request<void>('POST', `/api/conversations/${id}/wait/now`),
+  cancelWait: (id: string) => request<void>('DELETE', `/api/conversations/${id}/wait`),
+  commandOutput: (threadId: string, commandId: string) =>
+    request<{ command: BackgroundView; tail: string }>(
+      'GET',
+      `/api/threads/${threadId}/commands/${commandId}`,
+    ),
+  stopCommand: (threadId: string, commandId: string) =>
+    request<{ command: BackgroundView }>(
+      'POST',
+      `/api/threads/${threadId}/commands/${commandId}/stop`,
+    ),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
   getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
   saveConcurrency: (input: Concurrency) =>
@@ -624,6 +640,7 @@ export function followEvents(
   onStatus: (status: StreamStatus) => void,
   onOpen?: () => void,
   onLive?: (update: LiveUpdate) => void,
+  onBackground?: (update: BackgroundUpdate) => void,
 ): () => void {
   let lastSeq = afterSeq
   let source: EventSource | null = null
@@ -650,6 +667,9 @@ export function followEvents(
     // A running command's output: not part of the log, so it moves nothing forward.
     current.addEventListener('live', (message) => {
       onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
+    })
+    current.addEventListener('background', (message) => {
+      onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)
     })
     current.addEventListener('error', () => {
       if (stopped) return

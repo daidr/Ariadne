@@ -3,6 +3,8 @@ import type { ProjectSettings, ShellChoice } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
+  DouCheckTagGroup,
+  DouEmpty,
   DouDialog,
   DouForm,
   DouFormItem,
@@ -12,15 +14,22 @@ import {
   DouSwitch,
   DouTabPanel,
   DouTabs,
+  DouText,
   DouTextarea,
+  DouTimePicker,
 } from 'dou-ui'
+import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError, type McpServerView, type ToolGroup } from '../api'
-import { t, tm } from '../i18n'
+import { clockText, t, tm } from '../i18n'
+import { newRoutine, nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 
-/** The open project's own settings: instructions, workspaces, tools, budgets, slots, MCP. */
+/**
+ * The open project's own settings: instructions, workspaces, tools, budgets, slots, MCP and
+ * routines.
+ */
 
 const SHELLS: ShellChoice[] = ['auto', 'bash', 'zsh', 'sh', 'pwsh', 'powershell', 'cmd']
 
@@ -55,6 +64,7 @@ watch(
     error.value = null
     settings.value = null
     tab.value = 'instructions'
+    now.value = Date.now()
     slots.value = project.slots
     mcp.value = [...project.mcp]
     try {
@@ -82,12 +92,31 @@ function setTool(group: string, on: boolean) {
   settings.value.tools = on ? off : [...off, group]
 }
 
+// A routine's days as tags, Monday first; its next run as it would be once saved.
+const dayOptions = computed(() =>
+  WEEK.map((day) => ({ value: day, label: t(`routine.day.${day}`) })),
+)
+const now = ref(Date.now())
+function nextText(routine: ProjectSettings['routines'][number]): string {
+  if (!routine.enabled) return t('routine.off')
+  const next = nextRunOf(routine, now.value)
+  return next === null ? t('routine.noDays') : t('routine.next', { time: clockText(next) })
+}
+function addRoutine() {
+  settings.value?.routines.push(newRoutine())
+}
+function removeRoutine(id: string) {
+  if (settings.value) settings.value.routines = settings.value.routines.filter((r) => r.id !== id)
+}
+
 async function save() {
   if (!settings.value) return
   saving.value = true
   error.value = null
   const next: ProjectSettings = {
     ...settings.value,
+    // One left without words does nothing; it goes rather than failing the save.
+    routines: settings.value.routines.filter((routine) => routine.prompt.trim()),
     budget: {
       thread: threadK.value ? threadK.value * 1000 : null,
       project: projectK.value ? projectK.value * 1000 : null,
@@ -214,6 +243,59 @@ async function save() {
           </DouFormItem>
         </DouForm>
       </DouTabPanel>
+      <DouTabPanel value="routines" :label="t('projectSettings.tab.routines')">
+        <div class="project-routines">
+          <DouEmpty v-if="!settings.routines.length" size="sm" :description="t('routine.empty')" />
+          <div v-for="routine in settings.routines" :key="routine.id" class="project-routine">
+            <DouTextarea
+              v-model="routine.prompt"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              :maxlength="2000"
+              :placeholder="t('routine.placeholder')"
+              :aria-label="t('routine.prompt')"
+            />
+            <div class="project-routine-when">
+              <DouCheckTagGroup
+                v-model="routine.days as number[]"
+                :options="dayOptions"
+                multiple
+                size="sm"
+              />
+              <div class="project-routine-time">
+                <DouTimePicker
+                  v-model="routine.time as string"
+                  format="HH:mm"
+                  size="sm"
+                  :minute-step="5"
+                />
+              </div>
+              <DouText variant="tertiary" size="sm" class="project-routine-next">
+                {{ nextText(routine) }}
+              </DouText>
+              <DouSwitch v-model="routine.enabled" size="sm" :aria-label="t('routine.enabled')" />
+              <DouButton
+                variant="ghost"
+                size="sm"
+                :aria-label="t('routine.remove')"
+                :title="t('routine.remove')"
+                @click="removeRoutine(routine.id)"
+              >
+                <TrashIcon />
+              </DouButton>
+            </div>
+          </div>
+          <DouButton
+            v-if="settings.routines.length < 20"
+            variant="ghost"
+            size="sm"
+            class="project-routine-add"
+            @click="addRoutine"
+          >
+            <template #leading><PlusIcon /></template>
+            {{ t('routine.add') }}
+          </DouButton>
+        </div>
+      </DouTabPanel>
     </DouTabs>
     <DouAlert v-if="error" tone="danger" class="project-error">{{ error }}</DouAlert>
     <template #footer="{ close }">
@@ -256,6 +338,42 @@ async function save() {
 
 .project-mcp {
   margin-top: 16px;
+}
+
+.project-routines {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.project-routine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-routine-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-routine-time {
+  flex: none;
+  width: 92px;
+}
+
+.project-routine-next {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-routine-add {
+  align-self: flex-start;
 }
 
 .project-error {

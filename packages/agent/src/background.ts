@@ -1,7 +1,10 @@
+import { screenText } from '@ariadne/core'
 import type { ExecOptions, ExecResult } from '@ariadne/plugin-sdk'
 
 /** Output a background command keeps, its newest part: enough to look back over. */
 const KEPT_OUTPUT = 2_000_000
+/** How much of a command's output's end the user sees at once. */
+const PEEK_CHARS = 20_000
 /** Commands one thread may have running in the background at once. */
 export const MAX_RUNNING = 4
 /** Finished commands a thread keeps to read from; older ones are forgotten. */
@@ -48,6 +51,9 @@ export interface CommandOutput {
 export class BackgroundCommands {
   private readonly jobs = new Map<string, Job>()
   private next = 0
+
+  /** `onChange` hears of a thread whose commands started, ended or were forgotten. */
+  constructor(private readonly onChange: (threadId: string) => void = () => {}) {}
 
   /** The thread's commands, oldest first. */
   list(threadId: string): BackgroundCommand[] {
@@ -116,8 +122,10 @@ export class BackgroundCommands {
       .then((exitCode) => {
         job.result = { exitCode, endedAt: Date.now(), stopped: controller.signal.aborted }
         wake()
+        this.onChange(threadId)
       })
     this.jobs.set(job.id, job)
+    this.onChange(threadId)
     return view(job)
   }
 
@@ -147,6 +155,20 @@ export class BackgroundCommands {
     return { command: view(job), text, missed } satisfies CommandOutput
   }
 
+  /**
+   * The end of what the command printed, for the user to look at; the model's own reading
+   * is left where it was. `null` when the thread has no such command.
+   */
+  peek(
+    threadId: string,
+    id: string,
+    chars = PEEK_CHARS,
+  ): { command: BackgroundCommand; tail: string } | null {
+    const job = this.own(threadId, id)
+    if (!job) return null
+    return { command: view(job), tail: screenText(job.output.slice(-chars * 2)).slice(-chars) }
+  }
+
   /** Stop the command and wait a moment for it to end. `null` when there is no such command. */
   async stop(threadId: string, id: string): Promise<BackgroundCommand | null> {
     const job = this.own(threadId, id)
@@ -160,6 +182,7 @@ export class BackgroundCommands {
     const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId)
     await this.end(jobs)
     for (const job of jobs) this.jobs.delete(job.id)
+    if (jobs.length) this.onChange(threadId)
   }
 
   async stopAll(): Promise<void> {

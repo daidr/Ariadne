@@ -7,6 +7,8 @@ import type {
   LineComment,
   LiveCommand,
   LiveUpdate,
+  BackgroundUpdate,
+  BackgroundView,
   MemoryView,
   MessageView,
   NoticeView,
@@ -62,7 +64,7 @@ export interface ConversationState {
   notices: NoticeView[]
   todo: TodoView | null
   /** The model it uses now, with how much its context holds. */
-  model: { id: string; contextTokens: number } | null
+  model: { id: string; contextTokens: number; compactAt: number } | null
   /** Earlier messages exist than the first one loaded. */
   more: boolean
   /**
@@ -140,6 +142,8 @@ interface State {
   input: InputSettings
   /** Commands conversations are running now, by conversation; not part of the log. */
   live: Record<string, LiveCommand>
+  /** Threads' background commands by conversation, as the server last told them. */
+  background: Record<string, BackgroundView[]>
   /**
    * Line comments the user wrote on threads' changes and has not sent yet, by thread;
    * they go to the thread together.
@@ -170,6 +174,7 @@ export const state = reactive<State>({
   projectSettingsOpen: false,
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   live: {},
+  background: {},
   lineComments: {},
   error: null,
 })
@@ -677,6 +682,7 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
     case 'todo':
     case 'conversation':
     case 'notice':
+    case 'routine':
     case 'project':
       return ['detail', 'conversations']
     case 'turn':
@@ -773,12 +779,28 @@ export async function start() {
     () => {
       // The server tells again what is running now.
       state.live = {}
+      state.background = {}
       if (loaded) return
       loaded = true
       void load()
     },
     onLive,
+    onBackground,
   )
+}
+
+function onBackground(update: BackgroundUpdate) {
+  if (update.commands.length) state.background[update.conversationId] = update.commands
+  else delete state.background[update.conversationId]
+}
+
+/** Wake a waiting conversation now, or call its wait off. */
+export async function endWait(conversationId: string, how: 'now' | 'cancel') {
+  await (how === 'now' ? api.wakeNow(conversationId) : api.cancelWait(conversationId)).catch(report)
+}
+
+export async function stopBackground(threadId: string, commandId: string) {
+  await api.stopCommand(threadId, commandId).catch(report)
 }
 
 function onLive(update: LiveUpdate) {

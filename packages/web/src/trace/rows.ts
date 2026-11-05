@@ -5,7 +5,14 @@ import { t, tm } from '../i18n'
 export interface TraceRow {
   key: string
   kind:
-    'turn' | 'request' | 'tool' | 'retry' | 'instructions' | 'compaction-failed' | 'results-cleared'
+    | 'turn'
+    | 'request'
+    | 'tool'
+    | 'retry'
+    | 'fallback'
+    | 'instructions'
+    | 'compaction-failed'
+    | 'results-cleared'
   event: string
   content: string
   tone: 'danger' | 'warning' | null
@@ -109,6 +116,19 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
             content: oneLine(item.detail),
             tone: 'warning',
             retry: { attempt: item.attempt, delayMs: item.delayMs, detail: item.detail },
+          })
+          break
+        case 'fallback':
+          children.push({
+            ...base(turn, key, item.at, item.at),
+            kind: 'fallback',
+            event: t('trace.kind.fallback'),
+            content: t('trace.fallback', {
+              from: item.from,
+              to: item.to,
+              detail: oneLine(item.detail),
+            }),
+            tone: 'warning',
           })
           break
         case 'compaction-failed':

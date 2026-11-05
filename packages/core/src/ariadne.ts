@@ -52,7 +52,7 @@ import {
   type StoredFile,
 } from './files'
 import { newId } from './ids'
-import { LiveCommands } from './live'
+import { BackgroundCommandsList, LiveCommands } from './live'
 import {
   applyOps,
   describePlanOps,
@@ -108,7 +108,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 39
+export const PROJECTION_VERSION = 40
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -121,6 +121,7 @@ const TURN_EVENT_TYPES = [
   'tool.finished',
   'turn.finished',
   'conversation.model_retry',
+  'conversation.model_fallback',
   'conversation.compacted',
   'conversation.results_cleared',
   'conversation.compaction_failed',
@@ -182,6 +183,11 @@ interface ConversationRow {
   cache_write_tokens: number
   reasoning_tokens: number
   context_tokens: number
+  fallback: number
+  compactions: number
+  wait_id: string | null
+  wait_until: number | null
+  wait_note: string | null
 }
 
 /**
@@ -206,11 +212,17 @@ function toConversation(row: ConversationRow): ConversationView {
             startedAt: row.turn_started_at ?? 0,
             model: row.model,
             activity: row.activity,
+            fallback: row.fallback === 1,
           },
     lastOutcome: row.last_outcome,
     lastError: row.last_error ? (JSON.parse(row.last_error) as LocalizedMessage) : null,
     usage: usageOf(row),
     contextTokens: row.context_tokens,
+    compactions: row.compactions,
+    wait:
+      row.wait_id === null
+        ? null
+        : { id: row.wait_id, until: row.wait_until ?? 0, note: row.wait_note ?? '' },
   }
 }
 
@@ -577,6 +589,8 @@ export class Ariadne {
   readonly store: EventStore
   /** Commands threads are running now; not part of the log, see `LiveCommands`. */
   readonly live: LiveCommands
+  /** Threads' background commands, as the user watches them. */
+  readonly background = new BackgroundCommandsList()
   private readonly db: Database
   private readonly now: () => number
   /** Changes to issues being made right now, by the yes each uses, with the thread making it. */
@@ -1102,6 +1116,106 @@ export class Ariadne {
     ])
   }
 
+  /** The main model failed past its retries; the turn goes on with the fallback, `to`. */
+  recordModelFallback(
+    conversationId: string,
+    turnId: string,
+    fallback: { from: string; to: string; detail: string },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      {
+        type: 'conversation.model_fallback',
+        projectId,
+        data: { conversationId, turnId, ...fallback },
+      },
+    ])
+  }
+
+  /**
+   * The agent waits until `until` to look at `note`; a wait it had before is replaced.
+   * Returns the new wait's id.
+   */
+  setWait(conversationId: string, wait: { until: number; note: string }): string {
+    const conversation = this.getConversation(conversationId)
+    const projectId = conversation.projectId
+    const waitId = newId('wat')
+    const before = conversation.wait
+    this.store.append([
+      ...(before
+        ? [
+            {
+              type: 'conversation.wait_ended' as const,
+              projectId,
+              data: {
+                conversationId,
+                waitId: before.id,
+                how: 'cancelled' as const,
+                by: conversationId,
+                until: before.until,
+                note: before.note,
+              },
+            },
+          ]
+        : []),
+      {
+        type: 'conversation.wait_set',
+        projectId,
+        data: { conversationId, waitId, until: wait.until, note: wait.note },
+      },
+    ])
+    return waitId
+  }
+
+  /**
+   * End the conversation's wait: `due` when its time came, `now` when the user wakes it
+   * early, `cancelled` to call it off (by `user` or the conversation itself). With `waitId`,
+   * only that wait: a newer one stays. `false` when there was none to end.
+   */
+  endWait(
+    conversationId: string,
+    how: 'due' | 'now' | 'cancelled',
+    by: string,
+    waitId?: string,
+  ): boolean {
+    const conversation = this.getConversation(conversationId)
+    const wait = conversation.wait
+    if (!wait || (waitId !== undefined && wait.id !== waitId)) return false
+    this.store.append([
+      {
+        type: 'conversation.wait_ended',
+        projectId: conversation.projectId,
+        data: { conversationId, waitId: wait.id, how, by, until: wait.until, note: wait.note },
+      },
+    ])
+    return true
+  }
+
+  /** Every conversation's wait, soonest first. */
+  listWaits(): { conversationId: string; projectId: string; waitId: string; until: number }[] {
+    return this.db
+      .query<{ id: string; project_id: string; wait_id: string; wait_until: number }, []>(
+        `SELECT id, project_id, wait_id, wait_until FROM conversations
+         WHERE wait_id IS NOT NULL ORDER BY wait_until`,
+      )
+      .all()
+      .map((row) => ({
+        conversationId: row.id,
+        projectId: row.project_id,
+        waitId: row.wait_id,
+        until: row.wait_until,
+      }))
+  }
+
+  /** The project's routine came due at `dueAt`: the coordinator is woken with its prompt. */
+  runRoutine(projectId: string, routineId: string, dueAt: number): void {
+    const routine = this.getProject(projectId).settings.routines.find((r) => r.id === routineId)
+    if (!routine) throw new DomainError('error.notFound', { what: routineId })
+    this.store.append([
+      { type: 'routine.ran', projectId, data: { routineId, prompt: routine.prompt, dueAt } },
+    ])
+  }
+
   // ---- commands ----
 
   createProject(name: string): ProjectView {
@@ -1498,7 +1612,25 @@ export class Ariadne {
     if (thread.stopped && !takeover) return thread
     const reason = input.reason.trim() || (takeover ? (thread.stopped?.reason ?? '') : '')
     if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
+    // A stopped thread does not wait for anything: its wait goes with the stop.
+    const wait = this.getConversation(threadId).wait
     this.store.append([
+      ...(wait
+        ? [
+            {
+              type: 'conversation.wait_ended' as const,
+              projectId: thread.projectId,
+              data: {
+                conversationId: threadId,
+                waitId: wait.id,
+                how: 'cancelled' as const,
+                by: input.by,
+                until: wait.until,
+                note: wait.note,
+              },
+            },
+          ]
+        : []),
       {
         type: 'thread.stopped',
         projectId: thread.projectId,

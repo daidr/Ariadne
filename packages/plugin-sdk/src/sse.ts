@@ -55,6 +55,9 @@ export async function describeHttpError(response: Response): Promise<string> {
 /** Statuses that mean "try again later": timeout, rate limit, the service failing or overloaded. */
 const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504, 529])
 
+/** Statuses of a service turning requests away for load or quota: another model may answer. */
+const BUSY_STATUS = new Set([429, 500, 502, 503, 504, 529])
+
 /** How long a `Retry-After` header asks to wait, in milliseconds. */
 export function retryAfterMs(response: Response): number | undefined {
   const header = response.headers.get('retry-after')
@@ -72,18 +75,21 @@ export const MAX_RETRY_AFTER_MS = 60_000
 export async function httpErrorPart(response: Response) {
   const after = retryAfterMs(response)
   const error = await describeHttpError(response)
+  const busy = BUSY_STATUS.has(response.status) ? { busy: true } : {}
   if (after !== undefined && after > MAX_RETRY_AFTER_MS) {
     const minutes = Math.ceil(after / 60_000)
     return {
       type: 'finish' as const,
       reason: 'error' as const,
       error: `${error} (the service asks to wait ${minutes} min before trying again)`,
+      ...busy,
     }
   }
   return {
     type: 'finish' as const,
     reason: 'error' as const,
     error,
+    ...busy,
     ...(RETRYABLE_STATUS.has(response.status) ? { retryable: true } : {}),
     ...(after !== undefined ? { retryAfterMs: after } : {}),
   }

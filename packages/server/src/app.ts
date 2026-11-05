@@ -1,5 +1,6 @@
 import {
   buildTrace,
+  compactAt,
   connectSource,
   DEFAULT_CONTEXT_TOKENS,
   HOSTING_SECRET,
@@ -321,7 +322,12 @@ export function createHandler({
         ? (settings?.updateProjectEnv(projectId, body.env) ?? [])
         : (settings?.projectEnvNames(projectId) ?? [])
     const project = app.setProjectSettings(projectId, next, TOOL_SWITCH_NAMES)
-    return json({ project, settings: project.settings, env, tools: TOOL_SWITCH_NAMES })
+    return json({
+      project,
+      settings: project.settings,
+      env,
+      tools: TOOL_SWITCH_NAMES,
+    })
   })
 
   // Everything the project's log holds, as a file to keep.
@@ -690,11 +696,18 @@ export function createHandler({
   /** The model a conversation uses now, as the page shows it; `null` when none is set up. */
   function modelOf(conversation: ConversationView) {
     const given = conversation.role === 'thread' ? app.getThread(conversation.id).model : null
-    const chosen = settings?.modelFor(conversation.role, given) ?? null
+    let chosen = settings?.modelFor(conversation.role, given) ?? null
+    // A turn on the fallback is compacted where the fallback's context fills.
+    if (chosen && conversation.turn?.fallback) {
+      chosen = settings?.fallbackFor(conversation.role) ?? chosen
+    }
     if (!chosen) return null
+    const contextTokens = chosen.contextTokens ?? DEFAULT_CONTEXT_TOKENS
     return {
       id: chosen.id,
-      contextTokens: chosen.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
+      contextTokens,
+      // Where older history is made room for: the context ring is full there.
+      compactAt: compactAt(contextTokens, settings?.current.limits.compactShare),
     }
   }
 
@@ -765,6 +778,28 @@ export function createHandler({
       throw new BadRequest('model')
     }
     return json({ thread: app.setThreadModel(threadId, model, 'user') })
+  })
+
+  // The user wakes a waiting conversation now, or calls its wait off.
+  add('POST', '/api/conversations/:conversationId/wait/now', (_request, params) => {
+    app.endWait(params.conversationId ?? '', 'now', 'user')
+    return new Response(null, { status: 204 })
+  })
+  add('DELETE', '/api/conversations/:conversationId/wait', (_request, params) => {
+    app.endWait(params.conversationId ?? '', 'cancelled', 'user')
+    return new Response(null, { status: 204 })
+  })
+
+  // A thread's background commands: the end of what one printed, and stopping it.
+  add('GET', '/api/threads/:threadId/commands/:commandId', (_request, params) => {
+    const output = workspaces?.background.peek(params.threadId ?? '', params.commandId ?? '')
+    if (!output) throw new DomainError('error.notFound', { what: params.commandId ?? '' })
+    return json(output)
+  })
+  add('POST', '/api/threads/:threadId/commands/:commandId/stop', async (_request, params) => {
+    const stopped = await workspaces?.background.stop(params.threadId ?? '', params.commandId ?? '')
+    if (!stopped) throw new DomainError('error.notFound', { what: params.commandId ?? '' })
+    return json({ command: stopped })
   })
 
   add('POST', '/api/conversations/:conversationId/stop', (_request, { conversationId = '' }) => {

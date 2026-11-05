@@ -120,3 +120,47 @@ export class LiveCommands {
     for (const listener of this.listeners) listener(update)
   }
 }
+
+/** A command a thread left running in the background, as the user sees it in the status line. */
+export interface BackgroundView {
+  /** What the model names it by, e.g. `cmd-3`. */
+  id: string
+  command: string
+  startedAt: number
+  /** How it ended; `null` while it runs. */
+  result: { exitCode: number; endedAt: number; stopped: boolean } | null
+}
+
+/** A conversation's background commands changed: one started or ended, or they are gone. */
+export interface BackgroundUpdate {
+  projectId: string
+  conversationId: string
+  commands: BackgroundView[]
+}
+
+/**
+ * The background commands of every thread, as the user watches them. Kept in memory only,
+ * like the commands themselves, which end when the server stops.
+ */
+export class BackgroundCommandsList {
+  private readonly lists = new Map<string, BackgroundUpdate>()
+  private readonly listeners = new Set<(update: BackgroundUpdate) => void>()
+
+  subscribe(listener: (update: BackgroundUpdate) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** The conversations that have background commands, of one project or all. */
+  list(projectId: string | null = null): BackgroundUpdate[] {
+    return [...this.lists.values()].filter(
+      (update) => projectId === null || update.projectId === projectId,
+    )
+  }
+
+  set(update: BackgroundUpdate): void {
+    if (update.commands.length) this.lists.set(update.conversationId, update)
+    else this.lists.delete(update.conversationId)
+    for (const listener of this.listeners) listener(update)
+  }
+}

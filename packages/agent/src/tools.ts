@@ -19,6 +19,7 @@ import { fetchUrlTool, webSearchTool } from './web-tools'
 import type { WebAccess } from './web'
 import { sourceTools, workspaceTools } from './workspace-tools'
 import { researchTool } from './research'
+import { waitTool } from './wait-tool'
 
 export {
   ToolInputError,
@@ -570,6 +571,7 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   readThread,
   listMessages,
   editMessage,
+  waitTool,
   remember,
   forget,
   ...planTools,
@@ -583,6 +585,7 @@ export const threadTools: Tool[] = [
   report,
   listMessages,
   editMessage,
+  waitTool,
   readPlan,
   ...artifactTools,
 ]
