@@ -155,7 +155,6 @@ export class BackgroundCommands {
     return view(job)
   }
 
-  /** Stop every command the thread has running. */
   /** Stop the thread's commands and forget them all, with what they printed. */
   async stopThread(threadId: string): Promise<void> {
     const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId)
