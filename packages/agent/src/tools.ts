@@ -1,4 +1,11 @@
-import { DomainError, type ReportKind, type TodoItem } from '@ariadne/core'
+import {
+  DomainError,
+  reviewReplies,
+  type ReportKind,
+  type ReviewReply,
+  type TodoItem,
+} from '@ariadne/core'
+import { createTranslator } from '@ariadne/i18n'
 import type { SearchProvider } from '@ariadne/plugin-sdk'
 import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
@@ -20,6 +27,7 @@ import type { WebAccess } from './web'
 import { sourceTools, workspaceTools } from './workspace-tools'
 import { researchTool } from './research'
 import { waitTool } from './wait-tool'
+import { readSkill, reviewerTools } from './review-tools'
 
 export {
   ToolInputError,
@@ -139,31 +147,52 @@ const editMessage: Tool = {
  * commits on its branch the base does not have. Changes left uncommitted are not reviewed,
  * so the thread is told to commit them first. When it cannot tell, it assumes there are.
  */
-async function somethingToMerge(ctx: ToolContext): Promise<boolean> {
-  if (ctx.role !== 'thread') return true
+async function somethingToMerge(
+  ctx: ToolContext,
+): Promise<{ merge: boolean; head?: string; reviewable: boolean }> {
+  const unsure = { merge: true, reviewable: false }
+  if (ctx.role !== 'thread') return unsure
   const thread = ctx.app.getThread(ctx.conversationId)
-  if (thread.pullRequest?.state === 'open') return true
   const { workspace } = thread
-  if (!workspace?.branch || !workspace.base) return false
+  const open = thread.pullRequest?.state === 'open'
+  if (!workspace?.branch || !workspace.base)
+    return open ? unsure : { merge: false, reviewable: false }
   let changes
   try {
     const branches = ctx.branches ? await ctx.branches() : null
-    if (!branches) return true
+    if (!branches) return unsure
     changes = await branches.changes(
       { threadId: ctx.conversationId, branch: workspace.branch },
       workspace.base,
     )
   } catch {
-    return true
+    return unsure
   }
-  if (!changes) return false
-  if (changes.files.length) return true
+  if (!changes) return open ? unsure : { merge: false, reviewable: false }
+  // Only committed changes are reviewed, as only they are merged.
+  if (changes.files.length) return { merge: true, head: changes.head, reviewable: true }
   if (changes.uncommitted.length) {
     throw new ToolInputError(
       `Your changes are not committed (${changes.uncommitted.slice(0, 5).join(', ')}): commit them before you report "ready"`,
     )
   }
-  return false
+  return open ? unsure : { merge: false, reviewable: false }
+}
+
+/** The author's answers to the open review round's comments, checked as the model wrote them. */
+function replyArgs(value: unknown, count: number): ReviewReply[] {
+  if (!Array.isArray(value) || !value.length) {
+    throw new ToolInputError(
+      `Your last review round has ${count} comment(s) waiting for an answer: pass reviewReplies with one entry per comment (comment 1 to ${count}), each "fixed", or "declined" with the reason in "note".`,
+    )
+  }
+  try {
+    return reviewReplies(value, count)
+  } catch {
+    throw new ToolInputError(
+      `"reviewReplies" needs exactly one entry per comment, numbered 1 to ${count}, each with outcome "fixed" or "declined"; a declined one needs the reason in "note".`,
+    )
+  }
 }
 
 /**
@@ -251,6 +280,24 @@ const report: Tool = {
           description:
             'Ids of the artifacts the user should open, if any; they are shown by title next to the headline.',
         },
+        reviewReplies: {
+          type: 'array',
+          description:
+            'With "ready" after <review_comments>: one entry per comment of that round, by its number.',
+          items: {
+            type: 'object',
+            properties: {
+              comment: { type: 'integer' },
+              outcome: { type: 'string', enum: ['fixed', 'declined'] },
+              note: {
+                type: 'string',
+                description:
+                  "In the user's language: for declined, why the comment is wrong (required); for fixed, optionally what you did.",
+              },
+            },
+            required: ['comment', 'outcome'],
+          },
+        },
       },
       required: ['kind', 'summary', 'headline'],
     },
@@ -261,19 +308,36 @@ const report: Tool = {
     const summary = str(args, 'summary')
     const headline = checkHeadline(args.headline)
     const artifacts = artifactIds(args.artifacts)
+    const open = ctx.role === 'thread' ? ctx.app.openReviewRound(ctx.conversationId) : null
+    const replies =
+      asked === 'ready' && open ? replyArgs(args.reviewReplies, open.comments.length) : []
     // Review means something to merge: without it the user would have no way to end it.
-    const kind = asked === 'ready' && !(await somethingToMerge(ctx)) ? 'done' : asked
-    ctx.app.reportThread(
+    const merge = asked === 'ready' ? await somethingToMerge(ctx) : null
+    const kind = merge && !merge.merge ? 'done' : asked
+    const t = createTranslator(ctx.locale)
+    const thread = ctx.app.reportThread(
       ctx.conversationId,
       { kind, summary, headline, artifacts },
       await mergedHead(ctx),
+      {
+        reviewable: kind === 'ready' && !!merge?.reviewable,
+        ...(merge?.head ? { head: merge.head } : {}),
+        ...(replies.length ? { replies } : {}),
+        reviewerTitle: t('review.threadTitle', {
+          title: ctx.app.getThread(ctx.conversationId).title,
+        }),
+      },
     )
-    return {
-      content:
-        kind === asked
-          ? 'Reported.'
-          : 'Reported as "done": your branch has no changes for the user to merge.',
+    if (kind !== asked) {
+      return { content: 'Reported as "done": your branch has no changes for the user to merge.' }
     }
+    if (kind === 'ready' && thread.review?.reviewing) {
+      return {
+        content:
+          'Reported. Before the user sees it, another thread reviews your branch; if it finds problems they come back to you as <review_comments>. End your turn now.',
+      }
+    }
+    return { content: 'Reported.' }
   },
 }
 
@@ -574,6 +638,7 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   waitTool,
   remember,
   forget,
+  readSkill,
   ...planTools,
   ...artifactTools,
 ]
@@ -587,8 +652,12 @@ export const threadTools: Tool[] = [
   editMessage,
   waitTool,
   readPlan,
+  readSkill,
   ...artifactTools,
 ]
+
+/** A thread that reviews another's changes: it reads, and gives its verdict. */
+export const reviewTools = (): Tool[] => reviewerTools(updateTodo)
 
 /**
  * A thread's tools: the workspace tools only when its project has a directory to work in,

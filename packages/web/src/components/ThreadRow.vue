@@ -1,17 +1,28 @@
 <script setup lang="ts">
 import type { ThreadView } from '@ariadne/core'
-import { DouProgress, DouRelativeTime, DouText } from 'dou-ui'
+import { DouProgress, DouRelativeTime, DouShimmer, DouText } from 'dou-ui'
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone, threadLine } from '../stage'
+import ReviewMark from '../review/ReviewMark.vue'
 import ReviewActions from './ReviewActions.vue'
 import StageIcon from './StageIcon.vue'
 
-/** One thread in the thread list: its status, title, pull request, todos and last word. */
-const props = defineProps<{ thread: ThreadView }>()
+/**
+ * One thread in the thread list: its status, title, pull request, todos and last word.
+ * `nested`: a reviewing thread, under its author's row.
+ */
+const props = defineProps<{ thread: ThreadView; nested?: boolean }>()
 
-const line = computed(() => threadLine(props.thread))
+const line = computed(() =>
+  props.nested
+    ? props.thread.stage === 'done'
+      ? props.thread.lastHeadline
+      : null
+    : threadLine(props.thread),
+)
+const reviewing = computed(() => !!props.thread.review?.reviewing)
 const prTone = computed(() =>
   props.thread.pullRequest?.state === 'open'
     ? checksTone(props.thread.pullRequest.checks.state)
@@ -20,10 +31,17 @@ const prTone = computed(() =>
 </script>
 
 <template>
-  <span class="row">
+  <span class="row" :class="{ 'row-nested': nested }">
     <span class="row-head">
       <StageIcon :stage="thread.stage" />
-      <DouText truncate class="row-title row-trim">{{ thread.title }}</DouText>
+      <DouText
+        truncate
+        class="row-title row-trim"
+        :size="nested ? 'sm' : undefined"
+        :variant="nested ? 'secondary' : undefined"
+      >
+        {{ nested ? t('review.row') : thread.title }}
+      </DouText>
       <DouText
         v-if="thread.pullRequest"
         size="sm"
@@ -42,8 +60,9 @@ const prTone = computed(() =>
           thread.pullRequest.reference ?? `#${thread.pullRequest.number}`
         }}</span>
       </DouText>
+      <ReviewMark :thread="thread" />
       <DouText
-        v-if="thread.progress && thread.stage !== 'done'"
+        v-if="thread.progress && thread.stage !== 'done' && !nested"
         size="sm"
         variant="tertiary"
         class="row-mark"
@@ -63,8 +82,18 @@ const prTone = computed(() =>
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>
     </span>
-    <span v-if="line || thread.stage === 'review'" class="row-foot">
-      <DouText size="sm" variant="secondary" truncate class="row-line" :title="line ?? undefined">
+    <span v-if="line || reviewing || thread.stage === 'review'" class="row-foot">
+      <DouText v-if="reviewing" size="sm" variant="tertiary" class="row-line">
+        <DouShimmer>{{ t('review.underway', { round: thread.review!.rounds }) }}</DouShimmer>
+      </DouText>
+      <DouText
+        v-else
+        size="sm"
+        variant="secondary"
+        truncate
+        class="row-line"
+        :title="line ?? undefined"
+      >
         {{ line }}
       </DouText>
       <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
@@ -88,6 +117,18 @@ const prTone = computed(() =>
 @supports (text-box: trim-both cap alphabetic) {
   .row {
     padding-block: 8px;
+  }
+}
+
+/* A reviewing thread sits under its author, past the author's status icon. */
+.row-nested {
+  padding-block: 4px;
+  padding-inline-start: 24px;
+}
+
+@supports (text-box: trim-both cap alphabetic) {
+  .row-nested {
+    padding-block: 5px;
   }
 }
 

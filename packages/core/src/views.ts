@@ -20,6 +20,9 @@ import type {
   MessageKind,
   ReasoningRecord,
   ReportKind,
+  ReviewComment,
+  ReviewReply,
+  ReviewVerdict,
   ThreadPullRequest,
   TodoItem,
   TokenUsage,
@@ -104,6 +107,30 @@ export interface ThreadView {
   updatedAt: number
   /** When it last did or heard something: a message, a model step or tool result, a todo update, a report. */
   activeAt: number
+  /** For a thread that reviews another's changes: the author's id. */
+  reviewOf: string | null
+  /**
+   * Its changes' pre-delivery review, once one was asked for: the reviewing thread, the
+   * rounds of the latest delivery, and whether a round is under way now.
+   */
+  review: { reviewerId: string; rounds: number; reviewing: boolean } | null
+}
+
+/** One round of a pre-delivery review, with what the author did about each comment. */
+export interface ReviewRoundView {
+  threadId: string
+  reviewerId: string
+  round: number
+  /** The branch's newest commit the round was asked for at. */
+  head: string | null
+  requestedAt: number
+  /** `null` while the round is under way. */
+  verdict: ReviewVerdict | null
+  summary: string | null
+  comments: ReviewComment[]
+  /** The author's answers, by comment number; `null` until it reported again. */
+  replies: ReviewReply[] | null
+  submittedAt: number | null
 }
 
 /** What a thread reports: `summary` for the coordinator, `headline` for the user. */
@@ -229,6 +256,18 @@ export type NoticeView = {
     }
   | { kind: 'merge-conflict'; base: string; files: string[] }
   | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
+  /**
+   * A pre-delivery review round started or ended, where the author and the reviewer are
+   * followed. `count` is the comments of an ended round.
+   */
+  | {
+      kind: 'review'
+      threadId: string
+      reviewerId: string
+      round: number
+      state: 'started' | ReviewVerdict
+      count: number
+    }
   /** What a turn changed in the thread's workspace, shown under its reply. */
   | {
       kind: 'turn-changes'
@@ -373,6 +412,28 @@ export type TranscriptNote =
       summary: string
       headline: string
       artifacts: string[]
+      /** Review rounds the changes went through before this reached the coordinator. */
+      reviewRounds?: number
+    }
+  | {
+      /** For a reviewing thread: the author's changes wait for round `round`. */
+      type: 'review-requested'
+      threadId: string
+      round: number
+      summary: string
+      head: string | null
+      /** The author's answers to the previous round's comments, with those comments. */
+      previous: { comments: ReviewComment[]; replies: ReviewReply[] } | null
+    }
+  | {
+      /** For the author: the review of round `round` asks for changes. */
+      type: 'review-comments'
+      reviewerId: string
+      round: number
+      summary: string
+      comments: ReviewComment[]
+      /** Whether another round follows the next `ready`. */
+      last: boolean
     }
   | {
       type: 'answer'

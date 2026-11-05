@@ -7,7 +7,10 @@ import type {
   IssueWriteAction,
   PlanNodeFields,
   PlanOp,
+  ReviewComment,
+  ReviewReply,
 } from './events'
+import { MAX_REVIEW_ROUNDS } from './project-settings'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import { searchProjection } from './search'
 import type { Projection } from './store'
@@ -34,6 +37,7 @@ export const projectionTables = [
   'artifacts',
   'artifact_versions',
   'artifact_comments',
+  'reviews',
   'prompts',
   'search_docs',
   'search_text',
@@ -136,6 +140,14 @@ export const threadsProjection: Projection = {
       reviewed_at INTEGER,
       model TEXT,
       branch_slug TEXT,
+      -- For a reviewing thread: the author it reviews.
+      review_of TEXT,
+      -- For an author: its reviewing thread, the rounds of its latest delivery, whether a
+      -- round runs now, and whether that delivery reached the user.
+      reviewer_id TEXT,
+      review_rounds INTEGER NOT NULL DEFAULT 0,
+      reviewing INTEGER NOT NULL DEFAULT 0,
+      review_delivered INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -148,7 +160,7 @@ export const threadsProjection: Projection = {
     switch (event.type) {
       case 'thread.created':
         db.run(
-          'INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             event.data.threadId,
             event.projectId,
@@ -156,9 +168,32 @@ export const threadsProjection: Projection = {
             event.data.nodeId,
             event.data.model,
             event.data.branch,
+            event.data.reviewOf ?? null,
             event.at,
             event.at,
           ],
+        )
+        if (event.data.reviewOf) {
+          db.run('UPDATE threads SET reviewer_id = ? WHERE id = ?', [
+            event.data.threadId,
+            event.data.reviewOf,
+          ])
+        }
+        break
+      case 'review.requested':
+        // A round after a delivery that reached the user starts the count again.
+        db.run(
+          `UPDATE threads SET reviewing = 1, review_delivered = 0, review_rounds = ?,
+             updated_at = ? WHERE id = ?`,
+          [event.data.round, event.at, event.data.threadId],
+        )
+        break
+      case 'review.submitted':
+        // A pass hands the delivery to the user.
+        db.run(
+          `UPDATE threads SET reviewing = 0, updated_at = ?,
+             review_delivered = CASE WHEN ? THEN 1 ELSE review_delivered END WHERE id = ?`,
+          [event.at, event.data.verdict === 'pass', event.data.threadId],
         )
         break
       case 'thread.model_set':
@@ -189,6 +224,12 @@ export const threadsProjection: Projection = {
             event.data.threadId,
           ],
         )
+        // Changes that go straight to the user end the delivery's review.
+        if (event.data.report === 'ready' && !event.data.reviewing) {
+          db.run('UPDATE threads SET review_delivered = 1, reviewing = 0 WHERE id = ?', [
+            event.data.threadId,
+          ])
+        }
         break
       case 'workspace.opened':
         db.run(
@@ -488,12 +529,14 @@ export const noticesProjection: Projection = {
     db.run('DELETE FROM notices WHERE project_id = ?', [projectId])
   },
   apply(db, event) {
+    // One event may leave a notice in two conversations (an author and its reviewer).
+    let added = 0
     const add = (conversationId: string, kind: string, payload: unknown) =>
       db.run(
         `INSERT INTO notices (id, project_id, conversation_id, kind, payload, created_at,
            changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
-          `ntc_${event.seq}`,
+          added++ ? `ntc_${event.seq}_${added}` : `ntc_${event.seq}`,
           event.projectId,
           conversationId,
           kind,
@@ -587,6 +630,20 @@ export const noticesProjection: Projection = {
       case 'workspace.removed':
         add(event.data.threadId, 'worktree-removed', { reason: event.data.reason })
         break
+      case 'review.requested':
+      case 'review.submitted': {
+        const { threadId, reviewerId, round } = event.data
+        const payload = {
+          threadId,
+          reviewerId,
+          round,
+          state: event.type === 'review.requested' ? 'started' : event.data.verdict,
+          count: event.type === 'review.submitted' ? event.data.comments.length : 0,
+        }
+        add(threadId, 'review', payload)
+        add(reviewerId, 'review', payload)
+        break
+      }
       case 'turn.changed': {
         const { conversationId, turnId, from, to, files, total } = event.data
         add(conversationId, 'turn-changes', { turnId, from, to, files, total })
@@ -1075,13 +1132,113 @@ export const transcriptProjection: Projection = {
       case 'thread.reported': {
         const coordinator = coordinatorOf(db, event.projectId)
         if (!coordinator) break
+        // Changes under review reach the coordinator once the review lets them through; a
+        // reviewer's own verdict goes to its author, not to the coordinator.
+        const reviewer = db
+          .query<{ review_of: string | null }, [string]>(
+            'SELECT review_of FROM threads WHERE id = ?',
+          )
+          .get(event.data.threadId)?.review_of
+        if (event.data.reviewing || reviewer) break
+        const { reviewing: _, ...report } = event.data
         addEntry(
           db,
           event,
-          { conversationId: coordinator, kind: 'note', payload: { type: 'report', ...event.data } },
+          { conversationId: coordinator, kind: 'note', payload: { type: 'report', ...report } },
           event.data.report !== 'progress',
         )
         if (event.data.report === 'done') upstreamDone(db, event, event.data)
+        break
+      }
+      case 'review.requested': {
+        const { threadId, reviewerId, round, head } = event.data
+        const author = db
+          .query<{ last_summary: string | null }, [string]>(
+            'SELECT last_summary FROM threads WHERE id = ?',
+          )
+          .get(threadId)
+        // From the second round on, the reviewer reads what the author did about its comments.
+        const before = db
+          .query<{ comments: string; replies: string | null }, [string, number]>(
+            `SELECT comments, replies FROM reviews WHERE thread_id = ? AND id < ?
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get(threadId, event.seq)
+        const previous =
+          round > 1 && before?.replies
+            ? {
+                comments: JSON.parse(before.comments) as ReviewComment[],
+                replies: JSON.parse(before.replies) as ReviewReply[],
+              }
+            : null
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: reviewerId,
+            kind: 'note',
+            payload: {
+              type: 'review-requested',
+              threadId,
+              round,
+              summary: author?.last_summary ?? '',
+              head,
+              previous,
+            },
+          },
+          true,
+        )
+        break
+      }
+      case 'review.submitted': {
+        const { threadId, reviewerId, round, verdict, summary, comments } = event.data
+        if (verdict === 'changes') {
+          addEntry(
+            db,
+            event,
+            {
+              conversationId: threadId,
+              kind: 'note',
+              payload: {
+                type: 'review-comments',
+                reviewerId,
+                round,
+                summary,
+                comments,
+                last: round >= MAX_REVIEW_ROUNDS,
+              },
+            },
+            true,
+          )
+          break
+        }
+        // Passed: the report held back for the review reaches the coordinator now.
+        const coordinator = coordinatorOf(db, event.projectId)
+        const author = db
+          .query<
+            { last_summary: string | null; last_headline: string | null; last_artifacts: string },
+            [string]
+          >('SELECT last_summary, last_headline, last_artifacts FROM threads WHERE id = ?')
+          .get(threadId)
+        if (!coordinator || !author) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: coordinator,
+            kind: 'note',
+            payload: {
+              type: 'report',
+              threadId,
+              report: 'ready',
+              summary: author.last_summary ?? '',
+              headline: author.last_headline ?? '',
+              artifacts: JSON.parse(author.last_artifacts) as string[],
+              reviewRounds: round,
+            },
+          },
+          true,
+        )
         break
       }
       case 'checks.failed':
@@ -2008,6 +2165,71 @@ function applyComment(
 }
 
 /** Model input stored once by its hash, see `prompt.recorded`. */
+/** Rounds of pre-delivery reviews, per author thread, with the author's answers. */
+export const reviewsProjection: Projection = {
+  name: 'reviews',
+  setup(db) {
+    db.run(`CREATE TABLE IF NOT EXISTS reviews (
+      id INTEGER PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      reviewer_id TEXT NOT NULL,
+      round INTEGER NOT NULL,
+      head TEXT,
+      requested_at INTEGER NOT NULL,
+      verdict TEXT,
+      summary TEXT,
+      comments TEXT NOT NULL DEFAULT '[]',
+      replies TEXT,
+      submitted_at INTEGER
+    )`)
+    db.run('CREATE INDEX IF NOT EXISTS reviews_thread ON reviews (thread_id, id)')
+  },
+  forget(db, projectId) {
+    db.run('DELETE FROM reviews WHERE project_id = ?', [projectId])
+  },
+  apply(db, event) {
+    // The thread's newest round is the one a verdict or an answer belongs to.
+    const latest = `id = (SELECT max(id) FROM reviews WHERE thread_id = ?)`
+    switch (event.type) {
+      case 'review.requested':
+        db.run(
+          `INSERT INTO reviews (id, project_id, thread_id, reviewer_id, round, head, requested_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            event.seq,
+            event.projectId,
+            event.data.threadId,
+            event.data.reviewerId,
+            event.data.round,
+            event.data.head,
+            event.at,
+          ],
+        )
+        break
+      case 'review.submitted':
+        db.run(
+          `UPDATE reviews SET verdict = ?, summary = ?, comments = ?, submitted_at = ?
+           WHERE ${latest} AND verdict IS NULL`,
+          [
+            event.data.verdict,
+            event.data.summary,
+            JSON.stringify(event.data.comments),
+            event.at,
+            event.data.threadId,
+          ],
+        )
+        break
+      case 'review.replied':
+        db.run(`UPDATE reviews SET replies = ? WHERE ${latest} AND replies IS NULL`, [
+          JSON.stringify(event.data.replies),
+          event.data.threadId,
+        ])
+        break
+    }
+  },
+}
+
 export const promptsProjection: Projection = {
   name: 'prompts',
   setup(db) {
@@ -2043,6 +2265,7 @@ export const defaultProjections: Projection[] = [
   conversationsProjection,
   planProjection,
   artifactsProjection,
+  reviewsProjection,
   // After artifacts: a revision reads the artifact's kind from there.
   searchProjection,
   // Last: it reads plan edges and attention rows written above for the same event.

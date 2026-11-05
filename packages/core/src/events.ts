@@ -73,6 +73,7 @@ export type MessageMention =
   | { kind: 'thread'; id: string; title: string }
   | { kind: 'artifact'; id: string; title: string }
   | { kind: 'file'; path: string }
+  | { kind: 'skill'; name: string }
 
 /**
  * The user's comment on one line of a thread's changes, sent with others in one message.
@@ -85,6 +86,26 @@ export interface LineComment {
   quote: string
   body: string
 }
+
+/** What a review comment is about: the only things a pre-delivery review reports. */
+export type ReviewCommentKind = 'bug' | 'acceptance' | 'security'
+
+/** A reviewing thread's comment on one line of the author's changes, as `LineComment`. */
+export interface ReviewComment extends LineComment {
+  kind: ReviewCommentKind
+}
+
+/**
+ * What the author did about one comment of a review round: `comment` counts from 1 in the
+ * round's order. Declining takes a reason (`note`); a fix may say what it did.
+ */
+export interface ReviewReply {
+  comment: number
+  outcome: 'fixed' | 'declined'
+  note: string
+}
+
+export type ReviewVerdict = 'pass' | 'changes'
 
 export type TurnFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
 
@@ -261,6 +282,11 @@ export interface EventMap {
     nodeId: string | null
     model: string | null
     branch: string | null
+    /**
+     * Set for a thread that reviews another's changes before they reach the user: the
+     * author's id. It reads the author's workspace and changes nothing.
+     */
+    reviewOf?: string
   }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
@@ -299,7 +325,30 @@ export interface EventMap {
     artifacts: string[]
     /** The branch's newest commit when it reported, once the user merged it before. */
     head?: string
+    /** A `ready` that goes to the project's pre-delivery review before the user sees it. */
+    reviewing?: boolean
+    /** A `ready` that reaches the user after this many review rounds. */
+    reviewRounds?: number
   }
+  /**
+   * The thread's changes, as reported `ready`, wait for review round `round` (from 1 in
+   * this delivery) by `reviewerId`; `head` is the branch's newest commit then.
+   */
+  'review.requested': { threadId: string; reviewerId: string; round: number; head: string | null }
+  /**
+   * The reviewer's verdict on a round. `pass` hands the changes to the user; `changes`
+   * sends the comments to the author, who fixes or answers each before reporting again.
+   */
+  'review.submitted': {
+    threadId: string
+    reviewerId: string
+    round: number
+    verdict: ReviewVerdict
+    summary: string
+    comments: ReviewComment[]
+  }
+  /** The author's answer to each comment of a round, made with its next `ready`. */
+  'review.replied': { threadId: string; round: number; replies: ReviewReply[] }
   /**
    * The thread is held: its running turn ends and no new one starts until it is resumed.
    * `by` is `user` or the coordinator's id.

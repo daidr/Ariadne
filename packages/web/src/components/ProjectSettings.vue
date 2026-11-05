@@ -189,6 +189,13 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="tools" :label="t('projectSettings.tab.tools')">
         <div class="project-tools">
+          <div class="project-switch">
+            <span>{{ t('projectSettings.review') }}</span>
+            <DouSwitch
+              v-model="settings.review.enabled"
+              :aria-label="t('projectSettings.review')"
+            />
+          </div>
           <div v-for="group in tools" :key="group" class="project-switch">
             <span>{{ t(`projectSettings.tool.${group}`) }}</span>
             <DouSwitch

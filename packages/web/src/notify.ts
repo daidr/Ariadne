@@ -52,6 +52,11 @@ function reasonOf(
       }
     case 'thread.reported': {
       const { report, summary, threadId } = event.data
+      // Changes still under review are not the user's yet, nor is a reviewer's verdict.
+      if (event.data.reviewing) return null
+      if (state.detail?.threads.some((thread) => thread.id === threadId && thread.reviewOf)) {
+        return null
+      }
       if (report === 'ready') return { threadId, title: t('notify.review'), body: summary }
       if (report === 'done') return { threadId, title: t('notify.done'), body: summary }
       if (report === 'blocked' || report === 'failed') {
@@ -59,6 +64,10 @@ function reasonOf(
       }
       return null
     }
+    case 'review.submitted':
+      // Passed: the changes the review held back are the user's to look at now.
+      if (event.data.verdict !== 'pass') return null
+      return { threadId: event.data.threadId, title: t('notify.review'), body: event.data.summary }
     case 'turn.finished':
       if (event.data.outcome !== 'failed') return null
       return {

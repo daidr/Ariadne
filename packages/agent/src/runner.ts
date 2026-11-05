@@ -11,8 +11,11 @@ import {
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
-import { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
+import { coordinatorPrompt, reviewerPrompt, threadPrompt, type ThreadContext } from './prompts'
+import { loadSkills, SkillSet, type SkillFiles } from './skills'
+import { MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
+  reviewTools,
   switchedOff,
   toolsFor,
   ToolInputError,
@@ -67,6 +70,8 @@ export interface TurnOptions {
   settings?: TurnSettings
   /** The model a research runs on; the conversation's own without it. */
   researchModel?: ResolvedModel | null
+  /** The user's own skills for every project (`<home>/skills`); none without it. */
+  skillsDir?: string | null
 }
 
 function threadContext(
@@ -77,6 +82,7 @@ function threadContext(
   hasRepo: boolean,
   remote: boolean,
   userInstructions: string,
+  skills: SkillSet,
 ): ThreadContext {
   const project = app.getProject(conversation.projectId)
   const thread = app.getThread(conversation.id)
@@ -108,6 +114,8 @@ function threadContext(
     memories: app.listMemories(project.id),
     instructions: recordedInstructions(app, conversation.id),
     userInstructions: { global: userInstructions, project: project.settings.instructions },
+    skills: skills.list(),
+    review: project.settings.review.enabled && hasWorkspace,
   }
 }
 
@@ -126,6 +134,7 @@ function systemPrompt(
   models: ModelChoice[],
   source: { line: string; readable: boolean } | null,
   userInstructions: string,
+  skills: SkillSet,
 ): string {
   if (conversation.role === 'coordinator') {
     const project = app.getProject(conversation.projectId)
@@ -137,11 +146,73 @@ function systemPrompt(
       source,
       userInstructions: { global: userInstructions, project: project.settings.instructions },
       instructions: recordedInstructions(app, conversation.id),
+      skills: skills.list(),
+    })
+  }
+  const thread = app.getThread(conversation.id)
+  if (thread.reviewOf) {
+    const project = app.getProject(conversation.projectId)
+    const author = app.getThread(thread.reviewOf)
+    const node = author.nodeId
+      ? (app.getPlan(project.id).nodes.find((n) => n.id === author.nodeId) ?? null)
+      : null
+    const skill = skills.get('review')
+    return reviewerPrompt({
+      projectName: project.name,
+      locale,
+      author: {
+        title: author.title,
+        branch: author.workspace?.branch ?? null,
+        base: author.workspace?.base ?? null,
+      },
+      node: node
+        ? { title: node.title, description: node.description, acceptance: node.acceptance }
+        : null,
+      memories: app.listMemories(project.id),
+      instructions: recordedInstructions(app, conversation.id),
+      userInstructions: { global: userInstructions, project: project.settings.instructions },
+      reviewSkill: skill ? { source: skill.source, text: skill.text } : null,
+      skills: skills.list(),
+      maxRounds: MAX_REVIEW_ROUNDS,
     })
   }
   return threadPrompt(
-    threadContext(app, conversation, locale, hasWorkspace, hasRepo, remote, userInstructions),
+    threadContext(
+      app,
+      conversation,
+      locale,
+      hasWorkspace,
+      hasRepo,
+      remote,
+      userInstructions,
+      skills,
+    ),
   )
+}
+
+/**
+ * The skills a conversation can read: the repository's from the workspace it reads, when
+ * that is open (a thread's own, a reviewer's author's), else from the project's source;
+ * and the user's own. Reading them never opens a worktree.
+ */
+export async function conversationSkills(
+  app: Ariadne,
+  conversation: ConversationView,
+  owner: string,
+  workspaces: WorkspaceManager | undefined,
+  localDir: string | null,
+): Promise<SkillSet> {
+  let repo: SkillFiles | null = null
+  if (workspaces?.available(conversation.projectId)) {
+    const known = conversation.role === 'thread' ? app.getThread(owner).workspace : null
+    if (known && !known.removed) {
+      repo = await workspaces.forThread(conversation.projectId, owner).catch(() => null)
+    }
+    if (!repo && (await workspaces.viewable(conversation.projectId).catch(() => false))) {
+      repo = await workspaces.view(conversation.projectId).catch(() => null)
+    }
+  }
+  return loadSkills({ repo, localDir })
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, turnCtx: ToolContext) {
@@ -181,8 +252,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const { limits } = settings
   const project = app.getProject(conversation.projectId)
   const isThread = conversation.role === 'thread'
+  // A reviewing thread reads its author's workspace and changes nothing.
+  const reviewOf = isThread ? app.getThread(conversation.id).reviewOf : null
+  const owner = reviewOf ?? conversation.id
   const hasWorkspace = isThread && !!workspaces?.available(conversation.projectId)
-  const hasRepo = hasWorkspace && !!workspaces?.hasRepo(conversation.projectId)
+  const hasRepo = hasWorkspace && !reviewOf && !!workspaces?.hasRepo(conversation.projectId)
   const remote = hasWorkspace && !!workspaces?.isRemote(conversation.projectId)
   const hasTracker = !!workspaces?.hasTracker(conversation.projectId)
   const conversationId = conversation.id
@@ -198,14 +272,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const shellName = shell?.name ?? 'bash'
   const builtIn = (
     options.tools ??
-    toolsFor(conversation.role, {
-      workspace: isThread ? hasWorkspace : hasSource,
-      repo: hasRepo,
-      tracker: hasTracker,
-      models: options.models ?? [],
-      ...(options.searchProviders ? { search: options.searchProviders } : {}),
-      research: true,
-    })
+    (reviewOf
+      ? reviewTools()
+      : toolsFor(conversation.role, {
+          workspace: isThread ? hasWorkspace : hasSource,
+          repo: hasRepo,
+          tracker: hasTracker,
+          models: options.models ?? [],
+          ...(options.searchProviders ? { search: options.searchProviders } : {}),
+          research: true,
+        }))
   )
     .filter((tool) => !off.has(tool.spec.name))
     .map((tool) =>
@@ -227,7 +303,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const tools = [...builtIn, ...external]
   // What the turn changes in the thread's workspace, shown under its reply.
   const changes =
-    isThread && hasWorkspace && workspaces
+    isThread && hasWorkspace && workspaces && !reviewOf
       ? turnChanges(workspaces, conversation.projectId, conversationId)
       : null
   const finish = async (...args: TurnEnd) => {
@@ -236,6 +312,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     app.finishTurn(conversationId, turnId, ...args)
   }
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
+  const localSkills = options.skillsDir ?? null
+  let skills = SkillSet.empty()
+  const reloadSkills = async () => {
+    skills = await conversationSkills(app, conversation, owner, workspaces, localSkills)
+  }
   const ctx: ToolContext = {
     app,
     projectId: conversation.projectId,
@@ -248,7 +329,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
       }
-      const workspace = await workspaces.forThread(conversation.projectId, conversationId, signal)
+      const workspace = await workspaces.forThread(conversation.projectId, owner, signal)
       await changes?.begin()
       return workspace
     },
@@ -266,6 +347,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     },
     branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
+    skills: () => skills,
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
@@ -333,6 +415,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         options.models ?? [],
         line ? { line, readable: hasSource } : null,
         settings.instructions,
+        skills,
       )
     }
     const specs = tools.map((tool) => tool.spec)
@@ -356,10 +439,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     if (!isThread && hasSource && workspaces) {
       await syncSourceInstructions(app, conversation, turnId, workspaces)
     }
+    if (!isThread) await reloadSkills()
     for (;;) {
       if (instructionsStale && isThread && workspaces && hasWorkspace) {
-        await syncInstructions(app, conversation, turnId, workspaces)
+        await syncInstructions(app, conversation, turnId, workspaces, owner)
       }
+      // A thread's skills move with its workspace, as its instruction file does.
+      if (instructionsStale && isThread) await reloadSkills()
       instructionsStale = false
       // Over the budget the turn stops before it spends more; the user raises it or not.
       const over = overBudget(app, conversation.projectId, conversationId)
@@ -596,14 +682,15 @@ async function syncInstructions(
   conversation: ConversationView,
   turnId: string,
   workspaces: WorkspaceManager,
+  owner: string = conversation.id,
 ): Promise<void> {
   // Reading the file must not bring back a worktree that is not there.
-  const known = app.getThread(conversation.id).workspace
+  const known = app.getThread(owner).workspace
   if (!known || known.removed) return
   let content: string | null = null
   let workspace: Awaited<ReturnType<WorkspaceManager['forThread']>> | null = null
   try {
-    workspace = await workspaces.forThread(conversation.projectId, conversation.id)
+    workspace = await workspaces.forThread(conversation.projectId, owner)
     content = await workspace.readFile(INSTRUCTIONS_FILE)
   } catch {
     content = null

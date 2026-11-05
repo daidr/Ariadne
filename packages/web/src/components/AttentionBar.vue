@@ -8,6 +8,7 @@ import { threadLine } from '../stage'
 import { openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
+import ReviewMark from '../review/ReviewMark.vue'
 import ReviewActions from './ReviewActions.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
@@ -56,14 +57,17 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
           <div v-else :key="item.thread.id" class="attention">
             <div class="attention-thread">
               <!-- The title opens the thread, so a review can be looked at before it ends. -->
-              <DouLink
-                class="attention-title"
-                underline="hover"
-                :title="item.thread.title"
-                @click="openThread(item.thread.id)"
-              >
-                {{ item.thread.title }}
-              </DouLink>
+              <span class="attention-name">
+                <DouLink
+                  class="attention-title"
+                  underline="hover"
+                  :title="item.thread.title"
+                  @click="openThread(item.thread.id)"
+                >
+                  {{ item.thread.title }}
+                </DouLink>
+                <ReviewMark :thread="item.thread" />
+              </span>
               <ReviewActions v-if="item.thread.stage === 'review'" :thread-id="item.thread.id" />
               <DouButton v-else size="sm" variant="ghost" @click="openThread(item.thread.id)">
                 {{ t('thread.open') }}
@@ -100,6 +104,13 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
   justify-content: space-between;
   gap: 8px;
 }
+.attention-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .attention-title {
   min-width: 0;
   overflow: hidden;

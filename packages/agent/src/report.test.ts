@@ -65,6 +65,7 @@ describe('report "ready"', () => {
       projectId: project.id,
       conversationId: thread.id,
       role: 'thread',
+      locale: 'zh-CN',
       branches: async () => branches,
     } as unknown as ToolContext
     const run = () =>
@@ -89,8 +90,23 @@ describe('report "ready"', () => {
   test('with commits on the branch waits for review', async () => {
     const file = { path: 'a.ts', previousPath: null, status: 'modified' }
     const { thread, run } = setup({ files: [file] as BranchChanges['files'] })
+    const project = app.getThread(thread.id).projectId
+    app.setProjectSettings(project, { review: { enabled: false } }, [])
     expect((await run()).content).toBe('Reported.')
     expect(app.getThread(thread.id).stage).toBe('review')
+  })
+
+  test('with commits on the branch goes to the project review first', async () => {
+    const file = { path: 'a.ts', previousPath: null, status: 'modified' }
+    const { thread, run } = setup({ files: [file] as BranchChanges['files'] })
+    expect((await run()).content).toContain('<review_comments>')
+    const author = app.getThread(thread.id)
+    expect(author.stage).toBe('working')
+    expect(author.review).toMatchObject({ rounds: 1, reviewing: true })
+    const reviewer = app.getThread(author.review!.reviewerId)
+    expect(reviewer.reviewOf).toBe(thread.id)
+    expect(reviewer.title).toBe('审阅：调研')
+    expect(app.listReviews(thread.id)).toMatchObject([{ round: 1, head: 'b', verdict: null }])
   })
 
   test('with only uncommitted changes asks to commit first', async () => {

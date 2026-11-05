@@ -14,6 +14,7 @@ import { keepMessageImages } from './message-images'
 import type { BackgroundCommands } from './background'
 import type { CommandRule, Limits } from './limits'
 import type { Researcher } from './research'
+import type { SkillSet } from './skills'
 
 export interface ToolContext {
   app: Ariadne
@@ -66,6 +67,8 @@ export interface ToolContext {
   background?: BackgroundCommands
   /** Asks a cheaper model, in a context of its own, to look into something read-only. */
   research?: Researcher | undefined
+  /** The skills the conversation can read, as loaded last. */
+  skills?: () => SkillSet
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */

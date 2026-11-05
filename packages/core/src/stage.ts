@@ -25,6 +25,11 @@ export interface StageFacts {
   landed?: boolean
   /** The user marked what it last reported as reviewed. */
   reviewed?: boolean
+  /**
+   * What it reported `ready` is being reviewed by another thread first, which is still
+   * at it. Once that thread stops or gives up, the changes go to the user as they are.
+   */
+  underReview?: boolean
 }
 
 export function threadStage(facts: StageFacts): ThreadStage {
@@ -38,6 +43,8 @@ export function threadStage(facts: StageFacts): ThreadStage {
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.
   if (facts.turnPending) return 'queued'
   if (facts.turnFailed || facts.checksGaveUp) return 'blocked'
+  // Its changes are with the reviewing thread before they come to the user.
+  if (facts.lastReport === 'ready' && facts.underReview && !facts.landed) return 'working'
   if (facts.lastReport === 'ready') return facts.landed || facts.reviewed ? 'done' : 'review'
   if (facts.lastReport === 'blocked' || facts.lastReport === 'failed') return 'blocked'
   if (facts.lastReport === 'done') return 'done'

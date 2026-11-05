@@ -54,6 +54,11 @@ export interface ProjectSettings {
   }
   /** Prompts that wake the coordinator on a schedule, e.g. sorting new issues on workdays. */
   routines: Routine[]
+  /**
+   * Before changes a thread reports `ready` reach the user, another thread reviews them,
+   * at most `MAX_REVIEW_ROUNDS` times. Only for branches with something to merge.
+   */
+  review: { enabled: boolean }
 }
 
 /**
@@ -91,6 +96,9 @@ export function nextRun(routine: Routine, after: number): number | null {
   return null
 }
 
+/** Review rounds of one delivery before it goes to the user whatever the last verdict. */
+export const MAX_REVIEW_ROUNDS = 2
+
 export const DEFAULT_BRANCH_PREFIX = 'ariadne/'
 export const MAX_PROJECT_INSTRUCTIONS = 16_000
 export const MAX_SETUP_SCRIPT = 8000
@@ -102,6 +110,7 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   budget: { thread: null, project: null },
   workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
   routines: [],
+  review: { enabled: true },
 })
 
 /**
@@ -195,6 +204,11 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     }
   }
   if (body.routines !== undefined) out.routines = parseRoutines(body.routines)
+  if (body.review !== undefined) {
+    const enabled = ((body.review ?? {}) as Record<string, unknown>).enabled ?? true
+    if (typeof enabled !== 'boolean') throw bad('review.enabled')
+    out.review = { enabled }
+  }
   return out
 }
 
@@ -226,4 +240,6 @@ function parseRoutines(raw: unknown): Routine[] {
 
 /** Stored settings read back; a project that never set any has the defaults. */
 export const storedProjectSettings = (raw: string | null): ProjectSettings =>
-  raw ? (JSON.parse(raw) as ProjectSettings) : defaultProjectSettings()
+  raw
+    ? { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) }
+    : defaultProjectSettings()

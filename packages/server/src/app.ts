@@ -2,6 +2,7 @@ import {
   buildTrace,
   compactAt,
   connectSource,
+  conversationSkills,
   DEFAULT_CONTEXT_TOKENS,
   HOSTING_SECRET,
   LinkResolver,
@@ -61,6 +62,8 @@ export interface HandlerOptions {
   mcp?: McpHub
   /** The data directory: its size, and backups of the database. */
   data?: DataStore
+  /** The user's own skills for every project. */
+  skillsDir?: string
 }
 
 type Params = Record<string, string>
@@ -150,6 +153,7 @@ export function createHandler({
   workspaces,
   mcp,
   data: dataStore,
+  skillsDir,
 }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
@@ -921,6 +925,22 @@ export function createHandler({
       comments,
     })
     return json({ message }, 201)
+  })
+
+  // The review rounds of a thread's changes (a reviewing thread gives its author's).
+  add('GET', '/api/threads/:threadId/reviews', (_request, { threadId = '' }) =>
+    json({ rounds: app.listReviews(threadId) }),
+  )
+
+  // Skills offered after `/` in a conversation's input: what that conversation can read.
+  add('GET', '/api/conversations/:conversationId/skills', async (_request, params) => {
+    const conversation = app.getConversation(params.conversationId ?? '')
+    const owner =
+      conversation.role === 'thread'
+        ? (app.getThread(conversation.id).reviewOf ?? conversation.id)
+        : conversation.id
+    const skills = await conversationSkills(app, conversation, owner, workspaces, skillsDir ?? null)
+    return json({ skills: skills.list() })
   })
 
   // Files offered after `@` in a conversation's input, for what was typed after it.

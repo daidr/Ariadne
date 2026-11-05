@@ -8,6 +8,8 @@ import {
   type LineComment,
   type MessageMention,
   type ReasoningRecord,
+  type ReviewComment,
+  type ReviewReply,
   type TraceMessage,
   type TranscriptEntry,
   type TranscriptNote,
@@ -55,7 +57,15 @@ export function localTime(ms: number): string {
 export function describeNote(note: TranscriptNote, titleOf: (threadId: string) => string): string {
   switch (note.type) {
     case 'report':
-      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}">\nfor the user: ${note.headline}\n${note.artifacts.length ? `artifacts: ${note.artifacts.join(', ')}\n` : ''}${note.summary}\n</thread_report>`
+      return `<thread_report thread="${note.threadId}" title="${titleOf(note.threadId)}" kind="${note.report}"${note.reviewRounds ? ` review_rounds="${note.reviewRounds}"` : ''}>\nfor the user: ${note.headline}\n${note.artifacts.length ? `artifacts: ${note.artifacts.join(', ')}\n` : ''}${note.summary}${note.reviewRounds ? `\n(Another thread reviewed these changes in ${note.reviewRounds} round(s) before they reached you; the user sees the comments and answers in the changes view.)` : ''}\n</thread_report>`
+    case 'review-requested': {
+      const previous = note.previous
+        ? `\nYour comments of the last round, and what the author did:\n${reviewLines(note.previous.comments, note.previous.replies)}\n`
+        : ''
+      return `<review_requested thread="${note.threadId}" title="${titleOf(note.threadId)}" round="${note.round}"${note.head ? ` commit="${note.head.slice(0, 12)}"` : ''}>\nThe author reported these changes ready. What it says it did:\n${note.summary}\n${previous}Review the changes (read_changes) and finish with submit_review.\n</review_requested>`
+    }
+    case 'review-comments':
+      return `<review_comments round="${note.round}">\nBefore your changes reach the user, a reviewing thread read them and asks for changes: ${note.summary}\n${reviewLines(note.comments, null)}\nFix what is right, commit, run the checks, and report "ready" again with reviewReplies: one entry per comment, by its number, "fixed", or "declined" with the reason it is wrong. Decline only what you can show is wrong. ${note.last ? 'This was the last review round: your next "ready" goes to the user with your answers.' : 'The reviewer checks your fixes once more.'}\n</review_comments>`
     case 'answer':
       return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
@@ -427,13 +437,38 @@ export function commentsText(comments: readonly LineComment[]): string {
 
 /** What the user pointed at with `@`, so the model knows which thread, artifact or file. */
 export function mentionsText(mentions: readonly MessageMention[]): string {
-  if (!mentions.length) return ''
-  const items = mentions.map((mention) =>
-    mention.kind === 'file'
-      ? `- file ${mention.path} (a path in the files you can read; read it if it matters)`
-      : `- ${mention.kind} "${mention.title}" (${mention.id})`,
+  const skills = mentions.flatMap((m) => (m.kind === 'skill' ? [m.name] : []))
+  const items = mentions.flatMap((mention) =>
+    mention.kind === 'skill'
+      ? []
+      : mention.kind === 'file'
+        ? [`- file ${mention.path} (a path in the files you can read; read it if it matters)`]
+        : [`- ${mention.kind} "${mention.title}" (${mention.id})`],
   )
-  return `<mentions>\nThe user pointed at these with @:\n${items.join('\n')}\n</mentions>`
+  return [
+    items.length
+      ? `<mentions>\nThe user pointed at these with @:\n${items.join('\n')}\n</mentions>`
+      : '',
+    skills.length
+      ? `<skills_asked>\nThe user asks you to work by these skills: ${skills.join(', ')}. Read each with read_skill before you go on, and follow it.\n</skills_asked>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** A round's comments, numbered, with the author's answer to each when there is one. */
+function reviewLines(comments: readonly ReviewComment[], replies: readonly ReviewReply[] | null) {
+  return comments
+    .map((comment, index) => {
+      const quote = comment.quote.trim() ? ` \`${comment.quote.trim().replaceAll('`', "'")}\`` : ''
+      const reply = replies?.find((r) => r.comment === index + 1)
+      const answer = reply
+        ? `\n   → ${reply.outcome}${reply.note ? `: ${reply.note.replaceAll('\n', ' ')}` : ''}`
+        : ''
+      return `${index + 1}. [${comment.kind}] ${comment.path}:${comment.line}${quote}\n   ${comment.body.replaceAll('\n', '\n   ')}${answer}`
+    })
+    .join('\n')
 }
 
 /** The user wrote while questions of this conversation were open: one may be answered. */

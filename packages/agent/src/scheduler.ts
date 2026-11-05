@@ -33,6 +33,8 @@ export interface SchedulerOptions {
   settings?: (projectId: string) => TurnSettings
   /** The model researches run on; `null` for the asking conversation's own. */
   researchModel?: () => ResolvedModel | null
+  /** The user's own skills for every project, `<home>/skills`. */
+  skillsDir?: string
 }
 
 /** Reports after which a thread's background commands have nothing more to do. */
@@ -231,6 +233,7 @@ export class Scheduler {
           ? { settings: this.options.settings(conversation.projectId) }
           : {}),
         ...(this.options.researchModel ? { researchModel: this.options.researchModel() } : {}),
+        ...(this.options.skillsDir ? { skillsDir: this.options.skillsDir } : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

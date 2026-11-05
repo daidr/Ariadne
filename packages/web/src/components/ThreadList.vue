@@ -16,12 +16,19 @@ const threads = computed(() => state.detail?.threads ?? [])
 const byId = computed(() => new Map(threads.value.map((thread) => [thread.id, thread])))
 const showingAll = ref(new Set<ThreadGroup>())
 
+// A reviewing thread is listed under its author, wherever the author is.
+const nested = (thread: ThreadView) => !!thread.reviewOf && byId.value.has(thread.reviewOf)
+const reviewerOf = (thread: ThreadView) => {
+  const id = thread.review?.reviewerId
+  return id ? (byId.value.get(id) ?? null) : null
+}
+
 const groups = computed(() =>
   threadGroups
     .map((group) => ({
       group,
       threads: sortThreads(
-        threads.value.filter((thread) => groupOf[thread.stage] === group),
+        threads.value.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
         threadSort.value,
         locale.value,
       ),
@@ -34,7 +41,13 @@ const MORE = 'more:'
 function itemsOf(group: ThreadGroup, list: ThreadView[]): MenuOption[] {
   const shown = showingAll.value.has(group) ? list : list.slice(0, LIMIT)
   return [
-    ...shown.map((thread) => ({ key: thread.id, label: thread.title })),
+    ...shown.flatMap((thread) => {
+      const reviewer = reviewerOf(thread)
+      return [
+        { key: thread.id, label: thread.title },
+        ...(reviewer ? [{ key: reviewer.id, label: reviewer.title }] : []),
+      ]
+    }),
     ...(shown.length < list.length ? [{ key: `${MORE}${group}`, label: t('threads.more') }] : []),
   ]
 }
@@ -91,7 +104,11 @@ function select(key: string | number) {
           >
             {{ item.label }}
           </DouText>
-          <ThreadRow v-else-if="byId.get(String(item.key))" :thread="byId.get(String(item.key))!" />
+          <ThreadRow
+            v-else-if="byId.get(String(item.key))"
+            :thread="byId.get(String(item.key))!"
+            :nested="nested(byId.get(String(item.key))!)"
+          />
         </template>
       </DouMenu>
     </section>
