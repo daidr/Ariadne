@@ -79,9 +79,16 @@ const prTone = computed(() =>
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  padding: 8px 0;
+  padding: 7px 0;
   line-height: normal;
   white-space: normal;
+}
+
+/* Trimmed text is 2px shorter; the padding makes it up, so rows stay the same height. */
+@supports (text-box: trim-both cap alphabetic) {
+  .row {
+    padding-block: 8px;
+  }
 }
 
 .row-head {
