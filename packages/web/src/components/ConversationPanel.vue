@@ -145,6 +145,10 @@ const reviewed = computed(() => {
   const id = thread.value?.reviewOf
   return id ? (state.detail?.threads.find((item) => item.id === id) ?? null) : null
 })
+/** The brief the autopilot opened this thread with: its very first message. */
+const autoBrief = computed(() =>
+  thread.value?.auto && !view.value.more ? (view.value.messages[0]?.id ?? null) : null,
+)
 const working = computed(() => !!view.value.conversation?.turn)
 // The command it is running now, if any, shown in the status line.
 const live = computed(() =>
@@ -768,7 +772,12 @@ watch(
             :data-message-id="message.id"
             :class="['relay', { 'conversation-focused': focused === message.id }]"
           >
-            <DouCollapseItem :value="message.id" :title="t('message.fromCoordinator')">
+            <DouCollapseItem
+              :value="message.id"
+              :title="
+                message.id === autoBrief ? t('message.fromAutopilot') : t('message.fromCoordinator')
+              "
+            >
               <AgentText :content="message.content" class="relay-content" />
             </DouCollapseItem>
           </DouCollapse>

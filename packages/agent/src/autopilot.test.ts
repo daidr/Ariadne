@@ -119,9 +119,10 @@ const none: AutopilotWorkspaces = {
     throw new Error('no repository')
   },
 }
-const pilot = (workspaces: AutopilotWorkspaces = none) =>
+const pilot = (workspaces: AutopilotWorkspaces = none, noChecksWaitMs = 0) =>
   new Autopilot(app, workspaces, {
     locale: () => 'zh-CN',
+    noChecksWaitMs,
     onError: (error) => {
       throw error
     },
@@ -249,6 +250,20 @@ describe('merging', () => {
     })
     expect(app.getThread(other.id).stage).toBe('review')
   })
+
+  test('a workspace that cannot merge leaves the thread to the user with a word why', async () => {
+    autopilotOn()
+    const thread = deliver('修导出', 'h1')
+    pass(thread.id)
+    await pilot(none).check(projectId)
+    await pilot(none).check(projectId)
+    const held = app.listNotices(thread.id).filter((n) => n.kind === 'autopilot-held')
+    expect(held).toHaveLength(1)
+    expect(held[0]).toMatchObject({
+      reason: 'refused',
+      detail: '这个工作区不能合并分支，请手动合并',
+    })
+  })
 })
 
 /** A hosted repository with pull request 7 at h1, whose checks are as given. */
@@ -292,6 +307,26 @@ function hosted(checks: { status: 'completed' | 'in_progress'; conclusion: strin
 }
 
 describe('pull requests', () => {
+  test('one with no checks is given a while for them to show up', async () => {
+    autopilotOn()
+    const host = hosted([])
+    const thread = deliver('修导出', 'h1')
+    pass(thread.id)
+    const waiting = pilot(host.workspaces, 30)
+    await waiting.check(projectId)
+    expect(host.calls).toEqual([])
+    // Checks that showed up meanwhile are waited for as usual.
+    host.checks.push({ status: 'in_progress', conclusion: null })
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    await waiting.check(projectId)
+    expect(host.calls).toEqual([])
+    // None came after all: then nothing stands in the way.
+    host.checks.pop()
+    await waiting.check(projectId)
+    expect(host.calls).toEqual([{ number: 7, method: 'squash', sha: 'h1' }])
+    await waiting.stop()
+  })
+
   test('merged once its checks are green, and the coordinator hears the autopilot did it', async () => {
     autopilotOn()
     const host = hosted([{ status: 'in_progress', conclusion: null }])
@@ -426,6 +461,25 @@ describe('milestones', () => {
       status: 'done',
     })
     expect(app.listThreads(projectId).map((thread) => thread.nodeId)).toEqual(['a', 'b'])
+  })
+
+  test('switched on midway, milestones the work went past are not asked about', async () => {
+    addNodes(
+      [{ id: 'a' }, { id: 'm', kind: 'milestone' }, { id: 'b' }, { id: 'c' }],
+      [
+        ['a', 'm'],
+        ['m', 'b'],
+        ['m', 'c'],
+      ],
+    )
+    finish('a')
+    finish('b')
+    settle()
+    autopilotOn()
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toEqual([])
+    // What else came after it goes on.
+    expect(app.listThreads(projectId).map((thread) => thread.nodeId)).toEqual(['a', 'b', 'c'])
   })
 
   test('a no holds until the autopilot goes on again', async () => {

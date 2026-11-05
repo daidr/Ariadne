@@ -275,6 +275,7 @@ export const en: Record<MessageKey, string> = {
   'block.blank': 'Left blank',
   'block.withdrawn': 'Withdrawn: {reason}',
   'message.fromCoordinator': 'From the coordinator',
+  'message.fromAutopilot': 'From the autopilot',
   'conversation.working': 'Ariadne is working…',
   'conversation.queued': 'Queued, starts when a slot frees up',
   'conversation.stop': 'Stop',
@@ -806,6 +807,8 @@ export const en: Record<MessageKey, string> = {
   'autopilot.gate.wait': 'Not yet',
   'autopilot.gateGone': 'The milestone was removed from the plan',
   'autopilot.nothingToMerge': 'The base already has these changes',
+  'autopilot.noBranch': 'The thread’s branch was not found',
+  'autopilot.cannotMergeBranch': 'This workspace cannot merge branches; merge it yourself',
   'autopilot.cannotMergePullRequest':
     'This source cannot merge pull requests; merge it on the host',
   'notice.mergedAutoSquash': 'Review passed; squashed into one commit on {base} ({sha})',

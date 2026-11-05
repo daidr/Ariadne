@@ -1546,6 +1546,30 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
+  /**
+   * Open a thread for the autopilot on a plan node, with its first message: both are written
+   * together, so a crash never leaves a thread waiting for a brief that never comes.
+   */
+  startAutoThread(
+    projectId: string,
+    input: { title: string; nodeId: string; brief: string },
+  ): ThreadView {
+    return this.transaction(() => {
+      const thread = this.createThread(projectId, {
+        title: input.title,
+        nodeId: input.nodeId,
+        auto: true,
+      })
+      this.postMessage(projectId, {
+        conversationId: thread.id,
+        author: 'coordinator',
+        kind: 'relay',
+        content: input.brief,
+      })
+      return this.getThread(thread.id)
+    })
+  }
+
   /** Give a thread another model setting from its next step on; `null` is the default. */
   setThreadModel(threadId: string, model: string | null, by: string): ThreadView {
     const thread = this.getThread(threadId)

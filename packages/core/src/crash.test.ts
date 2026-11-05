@@ -100,4 +100,23 @@ describe('a crash in the middle of a write', () => {
     expect(app.listThreads(project.id)).toEqual([])
     app.close()
   })
+
+  test('a thread the autopilot opens is never there without its brief', () => {
+    let app = new Ariadne({ path })
+    const project = app.createProject('P')
+    app.revisePlan(project.id, {
+      author: 'user',
+      reason: '计划',
+      ops: [{ op: 'add', id: 'a', kind: 'task', title: 'A', description: '', acceptance: '' }],
+    })
+    app.close()
+    expect(crash(path, 'message.posted', 'auto-thread', project.id, 'a')).toBe(137)
+    app = new Ariadne({ path })
+    // No thread holds the node or a place under the cap, so the autopilot opens it again.
+    expect(app.listThreads(project.id)).toEqual([])
+    const thread = app.startAutoThread(project.id, { title: 'A', nodeId: 'a', brief: '开始做' })
+    expect(thread.auto).toBe(true)
+    expect(app.listMessages(thread.id).map((message) => message.content)).toEqual(['开始做'])
+    app.close()
+  })
 })

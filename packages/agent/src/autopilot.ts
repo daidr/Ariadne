@@ -58,6 +58,8 @@ export class Autopilot {
   private unsubscribe: (() => void) | null = null
   private queue: Promise<void> = Promise.resolve()
   private readonly waiting = new Set<string>()
+  /** When a pull request's head was first seen without any checks, by `thread:head`. */
+  private readonly noChecksSince = new Map<string, number>()
   private stopped = false
 
   constructor(
@@ -67,6 +69,11 @@ export class Autopilot {
       locale: () => Locale
       /** How long after an event to look, so a burst of events is looked at once. */
       delayMs?: number
+      /**
+       * How long a pull request with no checks at all is given for them to show up, since
+       * a repository's CI may register its checks a little after the push.
+       */
+      noChecksWaitMs?: number
       onError?: (error: unknown) => void
     },
   ) {}
@@ -93,13 +100,13 @@ export class Autopilot {
     return this.queue
   }
 
-  private later(projectId: string) {
+  private later(projectId: string, delayMs = this.options.delayMs ?? 1000) {
     if (this.waiting.has(projectId)) return
     this.waiting.add(projectId)
     setTimeout(() => {
       this.waiting.delete(projectId)
       this.enqueue(projectId)
-    }, this.options.delayMs ?? 1000)
+    }, delayMs)
   }
 
   private enqueue(projectId: string) {
@@ -149,6 +156,7 @@ export class Autopilot {
     const { method } = this.app.getProject(thread.projectId).settings.autopilot
     const hold = (reason: AutopilotHold, detail = '') =>
       this.app.holdAutopilot(thread.id, { head, reason, detail })
+    const t = createTranslator(this.options.locale())
     try {
       if (this.workspaces.hasRepo(thread.projectId)) {
         await this.mergePullRequest(thread, head, hold)
@@ -157,9 +165,11 @@ export class Autopilot {
       const branch = thread.workspace?.branch
       const base = thread.workspace?.base
       const branches = await this.workspaces.branches(thread.projectId)
-      if (!branch || !base || !branches?.merge) return
+      // Left for the user with a word why, as the review's pass no longer notifies.
+      if (!branch || !base) return hold('refused', t('autopilot.noBranch'))
+      if (!branches?.merge) return hold('refused', t('autopilot.cannotMergeBranch'))
       const changes = await branches.changes({ threadId: thread.id, branch }, base)
-      if (!changes) return
+      if (!changes) return hold('refused', t('autopilot.noBranch'))
       if (head && changes.head !== head) return hold('moved')
       const outcome = await branches.merge({
         threadId: thread.id,
@@ -180,11 +190,10 @@ export class Autopilot {
       } else if (outcome.kind === 'conflict') {
         this.app.recordMergeConflict(thread.id, { branch, base, files: outcome.files })
       } else {
-        hold('refused', createTranslator(this.options.locale())('autopilot.nothingToMerge'))
+        hold('refused', t('autopilot.nothingToMerge'))
       }
     } catch (error) {
       if (error instanceof MergeRefused) {
-        const t = createTranslator(this.options.locale())
         return hold(
           'refused',
           t(`error.merge.${error.reason}` as Parameters<typeof t>[0], { detail: error.detail }),
@@ -208,6 +217,9 @@ export class Autopilot {
     // Running checks are waited for, and the repository watcher looks again; a failure
     // wakes the thread to fix it, and its next delivery is reviewed again.
     if (pr.checks.state === 'pending' || pr.checks.state === 'failure') return
+    // No checks may mean none are coming, or the CI has not registered them yet: give them
+    // a while to show up before taking it as green.
+    if (pr.checks.state === 'none' && this.waitForChecks(thread, pr.headSha)) return
     if (!repo.mergePullRequest) {
       const t = createTranslator(this.options.locale())
       return hold('refused', t('autopilot.cannotMergePullRequest'))
@@ -235,6 +247,22 @@ export class Autopilot {
     }
   }
 
+  /** Whether a pull request at `head` with no checks is still given time for them to appear. */
+  private waitForChecks(thread: ThreadView, head: string): boolean {
+    const waitMs = this.options.noChecksWaitMs ?? 60_000
+    const key = `${thread.id}:${head}`
+    const since = this.noChecksSince.get(key)
+    if (since === undefined) {
+      if (waitMs <= 0) return false
+      this.noChecksSince.set(key, Date.now())
+    } else if (Date.now() - since >= waitMs) {
+      this.noChecksSince.delete(key)
+      return false
+    }
+    this.later(thread.projectId, waitMs)
+    return true
+  }
+
   /**
    * Open threads on task nodes whose dependencies are done, while fewer than the cap are at
    * work, and ask at milestones whose dependencies are done.
@@ -245,6 +273,29 @@ export class Autopilot {
     t: ReturnType<typeof createTranslator>,
   ): void {
     const status = new Map(plan.nodes.map((node) => [node.id, node.status]))
+    // A milestone the work went past before the autopilot was on (something after it has
+    // threads already) is behind it: not asked about, and done for what depends on it.
+    const after = new Map<string, string[]>()
+    for (const node of plan.nodes) {
+      for (const id of node.dependsOn) after.set(id, [...(after.get(id) ?? []), node.id])
+    }
+    const threads = new Map(plan.nodes.map((node) => [node.id, node.threads.length]))
+    const started = (id: string): boolean => {
+      const seen = new Set<string>()
+      const next = [...(after.get(id) ?? [])]
+      for (let at = next.pop(); at !== undefined; at = next.pop()) {
+        if (seen.has(at)) continue
+        seen.add(at)
+        if (threads.get(at)) return true
+        next.push(...(after.get(at) ?? []))
+      }
+      return false
+    }
+    for (const node of plan.nodes) {
+      if (node.kind === 'milestone' && node.gate === null && started(node.id)) {
+        status.set(node.id, 'done')
+      }
+    }
     // Nodes a change waiting on the user would touch: it may remove them.
     const pending = new Set(
       plan.proposals
@@ -263,7 +314,7 @@ export class Autopilot {
       if (node.kind === 'milestone') {
         if (
           node.gate === null &&
-          node.status !== 'done' &&
+          status.get(node.id) !== 'done' &&
           this.app.mayAskGate(project.id, node.id)
         ) {
           this.app.askGate(
@@ -282,16 +333,10 @@ export class Autopilot {
       if (node.kind !== 'task' || node.threads.length) continue
       if (outOfBudget || atWork >= project.settings.autopilot.threads) continue
       try {
-        const thread = this.app.createThread(project.id, {
+        this.app.startAutoThread(project.id, {
           title: node.title,
           nodeId: node.id,
-          auto: true,
-        })
-        this.app.postMessage(project.id, {
-          conversationId: thread.id,
-          author: 'coordinator',
-          kind: 'relay',
-          content: t('autopilot.brief', { title: node.title }),
+          brief: t('autopilot.brief', { title: node.title }),
         })
         atWork++
       } catch (error) {

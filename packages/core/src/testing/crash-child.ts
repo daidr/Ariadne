@@ -30,6 +30,9 @@ if (scenario === 'finish-turn') {
       content: '要做的事',
     })
   })
+} else if (scenario === 'auto-thread') {
+  const [projectId, nodeId] = rest
+  app.startAutoThread(projectId!, { title: '自动开的', nodeId: nodeId!, brief: '开始做' })
 } else {
   throw new Error(`unknown scenario ${scenario}`)
 }
