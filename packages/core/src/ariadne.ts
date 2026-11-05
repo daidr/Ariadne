@@ -1612,7 +1612,25 @@ export class Ariadne {
     if (thread.stopped && !takeover) return thread
     const reason = input.reason.trim() || (takeover ? (thread.stopped?.reason ?? '') : '')
     if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
+    // A stopped thread does not wait for anything: its wait goes with the stop.
+    const wait = this.getConversation(threadId).wait
     this.store.append([
+      ...(wait
+        ? [
+            {
+              type: 'conversation.wait_ended' as const,
+              projectId: thread.projectId,
+              data: {
+                conversationId: threadId,
+                waitId: wait.id,
+                how: 'cancelled' as const,
+                by: input.by,
+                until: wait.until,
+                note: wait.note,
+              },
+            },
+          ]
+        : []),
       {
         type: 'thread.stopped',
         projectId: thread.projectId,

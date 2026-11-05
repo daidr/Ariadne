@@ -2,6 +2,11 @@ import { nextRun, type Ariadne, type AnyStoredEvent } from '@ariadne/core'
 
 /** A timer runs this long at most before the next due moment is looked up again. */
 const MAX_TIMER_MS = 60 * 60 * 1000
+/**
+ * A routine run found later than this (the machine slept, or the process stalled) is
+ * skipped like one missed while the server was down: the next one comes on time.
+ */
+export const ROUTINE_GRACE_MS = 5 * 60 * 1000
 
 /** Events after which what comes due next may have changed. */
 const CHANGES = new Set<AnyStoredEvent['type']>([
@@ -88,10 +93,12 @@ export class Timers {
         const due = nextRun(routine, from)
         if (due !== null && due <= now) {
           this.routinesFrom.set(key, now)
-          try {
-            this.app.runRoutine(project.id, routine.id, due)
-          } catch (error) {
-            console.error('routine failed to run', error)
+          if (now - due <= ROUTINE_GRACE_MS) {
+            try {
+              this.app.runRoutine(project.id, routine.id, due)
+            } catch (error) {
+              console.error('routine failed to run', error)
+            }
           }
           const after = nextRun(routine, now)
           if (after !== null) next = Math.min(next, after)

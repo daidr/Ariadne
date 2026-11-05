@@ -696,7 +696,11 @@ export function createHandler({
   /** The model a conversation uses now, as the page shows it; `null` when none is set up. */
   function modelOf(conversation: ConversationView) {
     const given = conversation.role === 'thread' ? app.getThread(conversation.id).model : null
-    const chosen = settings?.modelFor(conversation.role, given) ?? null
+    let chosen = settings?.modelFor(conversation.role, given) ?? null
+    // A turn on the fallback is compacted where the fallback's context fills.
+    if (chosen && conversation.turn?.fallback) {
+      chosen = settings?.fallbackFor(conversation.role) ?? chosen
+    }
     if (!chosen) return null
     const contextTokens = chosen.contextTokens ?? DEFAULT_CONTEXT_TOKENS
     return {

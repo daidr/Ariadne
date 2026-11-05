@@ -468,6 +468,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           detail: error.exhausted.detail,
         })
         model = fallback
+        // A research without a model of its own goes on with the conversation's.
+        if (ctx.research && !options.researchModel) ctx.research.model = model
         images = model.images !== false
         chat = chatFor(images)
         if (!options.compactAt) threshold = compactAt(model.contextTokens, limits.compactShare)

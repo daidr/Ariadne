@@ -137,6 +137,15 @@ describe('the wait tool', () => {
     expect(app.listNotices(thread.id).some((n) => n.kind === 'woken')).toBe(false)
   })
 
+  test('stopping a thread drops its wait', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    app.setWait(thread.id, { until: Date.now() + 60_000, note: '看部署' })
+    app.stopThread(thread.id, { reason: '先停', by: 'user' })
+    expect(app.getConversation(thread.id).wait).toBeNull()
+    expect(app.listWaits()).toEqual([])
+  })
+
   test('a wait that came due while the server was down ends on start', () => {
     const project = app.createProject('P')
     app.setWait(project.coordinatorId, { until: 1000, note: 'x' })
@@ -211,6 +220,22 @@ describe('routines', () => {
     timers.start()
     timers.check()
     expect(app.listNotices(project.coordinatorId)).toEqual([])
+  })
+
+  test('a run found late after the machine slept is skipped', () => {
+    const project = app.createProject('P')
+    let now = at(2026, 11, 5, 8, 0)
+    timers = new Timers(app, () => now)
+    timers.start()
+    app.setProjectSettings(project.id, { routines: [routine()] }, [])
+    timers.check()
+    // Asleep across nine; the timer fires at noon.
+    now = at(2026, 11, 5, 12, 0)
+    timers.check()
+    expect(app.listNotices(project.coordinatorId)).toEqual([])
+    now = at(2026, 11, 6, 9, 2)
+    timers.check()
+    expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).toEqual(['routine'])
   })
 
   test('settings refuse a bad routine', () => {
