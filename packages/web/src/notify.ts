@@ -38,6 +38,12 @@ export async function setNotifications(on: boolean) {
   }
 }
 
+/** Whether the project's autopilot merges what passes the review. */
+function autopilotOn(projectId: string): boolean {
+  const project = state.projects.find((p) => p.id === projectId)
+  return !!project?.settings.autopilot.enabled && !project.autopilotPaused
+}
+
 /** What an event asks of the user, worth a notification; `null` for the rest. */
 function reasonOf(
   event: AnyStoredEvent,
@@ -65,9 +71,16 @@ function reasonOf(
       return null
     }
     case 'review.submitted':
-      // Passed: the changes the review held back are the user's to look at now.
-      if (event.data.verdict !== 'pass') return null
+      // Passed: the changes the review held back are the user's to look at now, unless the
+      // autopilot merges them; if it leaves them, that says so.
+      if (event.data.verdict !== 'pass' || autopilotOn(event.projectId)) return null
       return { threadId: event.data.threadId, title: t('notify.review'), body: event.data.summary }
+    case 'autopilot.held':
+      return {
+        threadId: event.data.threadId,
+        title: t('notify.review'),
+        body: t(`notice.autopilotHeld.${event.data.reason}`, { detail: event.data.detail }),
+      }
     case 'review.abandoned': {
       // Left without a verdict: the changes go to the user as they are.
       const { threadId } = event.data

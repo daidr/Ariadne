@@ -59,7 +59,18 @@ export interface ProjectSettings {
    * at most `MAX_REVIEW_ROUNDS` times. Only for branches with something to merge.
    */
   review: { enabled: boolean }
+  /**
+   * Autopilot: changes that passed the AI review, with green checks and no conflict, are
+   * merged with `method`; plan nodes whose dependencies are done get threads, at most
+   * `threads` at work at once; a milestone waits for the user's yes. Needs the review on.
+   */
+  autopilot: { enabled: boolean; method: MergeMethod; threads: number }
 }
+
+export type MergeMethod = 'squash' | 'merge'
+export const MERGE_METHODS: MergeMethod[] = ['squash', 'merge']
+export const DEFAULT_AUTOPILOT_THREADS = 3
+export const MAX_AUTOPILOT_THREADS = 16
 
 /**
  * Something the coordinator does on a schedule: at `time` (local, `HH:MM`) on the given
@@ -111,6 +122,7 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
   routines: [],
   review: { enabled: true },
+  autopilot: { enabled: false, method: 'squash', threads: DEFAULT_AUTOPILOT_THREADS },
 })
 
 /**
@@ -208,6 +220,19 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     const enabled = ((body.review ?? {}) as Record<string, unknown>).enabled ?? true
     if (typeof enabled !== 'boolean') throw bad('review.enabled')
     out.review = { enabled }
+  }
+  if (body.autopilot !== undefined) {
+    const autopilot = (body.autopilot ?? {}) as Record<string, unknown>
+    const enabled = autopilot.enabled ?? false
+    if (typeof enabled !== 'boolean') throw bad('autopilot.enabled')
+    // What it merges is what the review let through; without the review it has nothing.
+    if (enabled && !out.review.enabled) throw bad('autopilot.enabled')
+    const method = autopilot.method ?? 'squash'
+    if (!MERGE_METHODS.includes(method as MergeMethod)) throw bad('autopilot.method')
+    const threads = autopilot.threads ?? DEFAULT_AUTOPILOT_THREADS
+    if (!Number.isInteger(threads) || (threads as number) < 1) throw bad('autopilot.threads')
+    if ((threads as number) > MAX_AUTOPILOT_THREADS) throw bad('autopilot.threads')
+    out.autopilot = { enabled, method: method as MergeMethod, threads: threads as number }
   }
   return out
 }

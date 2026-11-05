@@ -3,7 +3,9 @@ import type {
   IssueComment,
   IssueDetail,
   IssueSummary,
+  MergeMethod,
   PullRequestInfo,
+  PullRequestMergeOutcome,
   PullRequestPreview,
 } from '@ariadne/plugin-sdk'
 
@@ -12,6 +14,8 @@ export class GitHubError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** GitHub's own words, without the request. */
+    readonly reason = message,
   ) {
     super(message)
     this.name = 'GitHubError'
@@ -159,6 +163,7 @@ export class GitHubApi {
       throw new GitHubError(
         response.status,
         `GitHub ${method} ${path}: ${response.status} ${message}`.trim(),
+        message.trim() || String(response.status),
       )
     }
     return response
@@ -236,6 +241,34 @@ export class GitHubApi {
       draft: input.draft,
     })
     return toPullRequest(raw)
+  }
+
+  /**
+   * Merge the pull request while its head is `sha`. GitHub answers 409 when the head moved
+   * and 405 when it will not merge (conflicts, a draft, branch protection).
+   */
+  async mergePullRequest(
+    number: number,
+    input: { method: MergeMethod; sha: string },
+  ): Promise<PullRequestMergeOutcome> {
+    try {
+      const merged = await this.request<{ sha?: string }>(
+        'PUT',
+        `${this.repoPath}/pulls/${number}/merge`,
+        { merge_method: input.method, sha: input.sha },
+      )
+      return { kind: 'merged', sha: merged.sha ?? null }
+    } catch (error) {
+      if (!(error instanceof GitHubError)) throw error
+      if (error.status === 409) return { kind: 'moved' }
+      if (error.status !== 405 && error.status !== 422) throw error
+      const pull = await this.request<{ mergeable: boolean | null; mergeable_state?: string }>(
+        'GET',
+        `${this.repoPath}/pulls/${number}`,
+      )
+      if (pull.mergeable === false && pull.mergeable_state === 'dirty') return { kind: 'conflict' }
+      return { kind: 'refused', detail: error.reason }
+    }
   }
 
   /** Check runs and commit statuses together: CI may report either way. */

@@ -529,6 +529,18 @@ export async function saveProjectSettings(
   }
 }
 
+/** Pause the open project's autopilot, or let it go on. */
+export async function setAutopilotPaused(paused: boolean) {
+  const project = state.detail?.project
+  if (!project) return
+  try {
+    await api.setAutopilotPaused(project.id, paused)
+    await refreshCurrent(['detail'])
+  } catch (error) {
+    report(error)
+  }
+}
+
 /** Download everything the project's log holds as a file. */
 export async function exportProject(id: string) {
   try {
@@ -698,6 +710,7 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
     case 'branch':
     case 'pull_request':
     case 'checks':
+    case 'autopilot':
     case 'issue':
     case 'mcp':
       return ['detail', 'conversations', 'plan']

@@ -10,7 +10,7 @@ import type {
   ReviewComment,
   ReviewReply,
 } from './events'
-import { MAX_REVIEW_ROUNDS } from './project-settings'
+import { MAX_REVIEW_ROUNDS, type ProjectSettings } from './project-settings'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import { searchProjection } from './search'
 import type { Projection } from './store'
@@ -54,6 +54,9 @@ export const projectsProjection: Projection = {
       slots INTEGER,
       mcp TEXT NOT NULL DEFAULT '[]',
       settings TEXT,
+      -- The user paused its autopilot; and when it last went on (switched on or resumed).
+      autopilot_paused INTEGER NOT NULL DEFAULT 0,
+      autopilot_since INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -90,12 +93,33 @@ export const projectsProjection: Projection = {
           event.projectId,
         ])
         break
-      case 'project.settings.set':
+      case 'project.settings.set': {
+        const before = db
+          .query<{ settings: string | null }, [string]>(
+            'SELECT settings FROM projects WHERE id = ?',
+          )
+          .get(event.projectId)?.settings
+        const was = before ? (JSON.parse(before) as ProjectSettings).autopilot?.enabled : false
         db.run('UPDATE projects SET settings = ?, updated_at = ? WHERE id = ?', [
           JSON.stringify(event.data.settings),
           event.at,
           event.projectId,
         ])
+        // Switched on afresh, it runs: a pause from before it was off does not hold.
+        if (event.data.settings.autopilot?.enabled && !was) {
+          db.run('UPDATE projects SET autopilot_paused = 0, autopilot_since = ? WHERE id = ?', [
+            event.at,
+            event.projectId,
+          ])
+        }
+        break
+      }
+      case 'project.autopilot.paused':
+        db.run(
+          `UPDATE projects SET autopilot_paused = ?1, updated_at = ?2,
+             autopilot_since = CASE WHEN ?1 THEN autopilot_since ELSE ?2 END WHERE id = ?3`,
+          [event.data.paused ? 1 : 0, event.at, event.projectId],
+        )
         break
       case 'project.source.set':
         db.run('UPDATE projects SET source = ?, updated_at = ? WHERE id = ?', [
@@ -148,6 +172,10 @@ export const threadsProjection: Projection = {
       review_rounds INTEGER NOT NULL DEFAULT 0,
       reviewing INTEGER NOT NULL DEFAULT 0,
       review_delivered INTEGER NOT NULL DEFAULT 1,
+      -- The branch commit the autopilot last left for the user (empty for none), so it does
+      -- not try that commit again.
+      autopilot_held TEXT,
+      auto INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -160,7 +188,7 @@ export const threadsProjection: Projection = {
     switch (event.type) {
       case 'thread.created':
         db.run(
-          'INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, auto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             event.data.threadId,
             event.projectId,
@@ -169,6 +197,7 @@ export const threadsProjection: Projection = {
             event.data.model,
             event.data.branch,
             event.data.reviewOf ?? null,
+            event.data.auto ? 1 : 0,
             event.at,
             event.at,
           ],
@@ -231,6 +260,10 @@ export const threadsProjection: Projection = {
             event.data.threadId,
           ],
         )
+        // A new delivery is the autopilot's to try again.
+        if (event.data.report === 'ready') {
+          db.run('UPDATE threads SET autopilot_held = NULL WHERE id = ?', [event.data.threadId])
+        }
         // Changes that go straight to the user end the delivery's review.
         if (event.data.report === 'ready' && !event.data.reviewing) {
           db.run('UPDATE threads SET review_delivered = 1, reviewing = 0 WHERE id = ?', [
@@ -278,6 +311,12 @@ export const threadsProjection: Projection = {
       case 'pull_request.closed':
         // Merged or closed, its checks are no longer the thread's to fix.
         db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.threadId])
+        break
+      case 'autopilot.held':
+        db.run('UPDATE threads SET autopilot_held = ? WHERE id = ?', [
+          event.data.head ?? '',
+          event.data.threadId,
+        ])
         break
       case 'checks.failed':
         db.run('UPDATE threads SET check_failures = ? WHERE id = ?', [
@@ -630,12 +669,33 @@ export const noticesProjection: Projection = {
           base: event.data.base,
           method: event.data.method,
           sha: event.data.sha,
+          ...(event.data.auto ? { auto: true } : {}),
         })
         break
+      case 'pull_request.closed': {
+        // Merged by hand on the host it shows on the pull request; the autopilot's own says so.
+        const { auto } = event.data
+        if (!auto) break
+        add(event.data.threadId, 'merged', {
+          base: auto.base,
+          method: auto.method,
+          sha: auto.sha ?? '',
+          auto: true,
+          pullRequest: event.data.number,
+        })
+        break
+      }
       case 'branch.conflicted':
         add(event.data.threadId, 'merge-conflict', {
           base: event.data.base,
           files: event.data.files,
+          ...(event.data.pullRequest ? { pullRequest: event.data.pullRequest } : {}),
+        })
+        break
+      case 'autopilot.held':
+        add(event.data.threadId, 'autopilot-held', {
+          reason: event.data.reason,
+          detail: event.data.detail,
         })
         break
       case 'workspace.removed':
@@ -1304,6 +1364,19 @@ export const transcriptProjection: Projection = {
           }
           addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
         }
+        break
+      }
+      case 'thread.created': {
+        // The coordinator hears of threads the autopilot opened, without being woken for it.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator || !event.data.auto) break
+        const payload = {
+          type: 'thread-auto-started',
+          threadId: event.data.threadId,
+          nodeId: event.data.nodeId,
+          title: event.data.title,
+        }
+        addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
         break
       }
       case 'thread.reviewed': {

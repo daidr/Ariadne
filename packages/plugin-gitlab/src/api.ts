@@ -3,7 +3,9 @@ import type {
   IssueComment,
   IssueDetail,
   IssueSummary,
+  MergeMethod,
   PullRequestInfo,
+  PullRequestMergeOutcome,
   PullRequestPreview,
 } from '@ariadne/plugin-sdk'
 
@@ -12,6 +14,8 @@ export class GitLabError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** GitLab's own words, without the request. */
+    readonly reason = message,
   ) {
     super(message)
     this.name = 'GitLabError'
@@ -227,6 +231,7 @@ export class GitLabApi {
       throw new GitLabError(
         response.status,
         `GitLab ${method} ${path}: ${response.status} ${message}`.trim(),
+        message.trim() || String(response.status),
       )
     }
     return response
@@ -319,6 +324,37 @@ export class GitLabApi {
         description: input.body,
       }),
     )
+  }
+
+  /**
+   * Merge the merge request while its source branch is at `sha`; `squash` as the method
+   * says. GitLab answers 409 when the branch moved, 406 when it cannot be merged (conflicts
+   * among the reasons) and 405 when it may not be (a draft, an unfinished pipeline).
+   */
+  async mergeMergeRequest(
+    iid: number,
+    input: { method: MergeMethod; sha: string },
+  ): Promise<PullRequestMergeOutcome> {
+    try {
+      const merged = await this.request<{
+        merge_commit_sha?: string | null
+        squash_commit_sha?: string | null
+      }>('PUT', `${this.projectPath}/merge_requests/${iid}/merge`, {
+        sha: input.sha,
+        squash: input.method === 'squash',
+      })
+      return { kind: 'merged', sha: merged.merge_commit_sha ?? merged.squash_commit_sha ?? null }
+    } catch (error) {
+      if (!(error instanceof GitLabError)) throw error
+      if (error.status === 409) return { kind: 'moved' }
+      if (![400, 405, 406, 422].includes(error.status)) throw error
+      const mr = await this.request<{ has_conflicts?: boolean }>(
+        'GET',
+        `${this.projectPath}/merge_requests/${iid}`,
+      )
+      if (mr.has_conflicts) return { kind: 'conflict' }
+      return { kind: 'refused', detail: error.reason }
+    }
   }
 
   /**
