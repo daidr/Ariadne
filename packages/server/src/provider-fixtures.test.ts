@@ -33,8 +33,10 @@ describe('recorded model service samples', () => {
       const provider = providers.get(fixture.provider)
       expect(provider, `provider ${fixture.provider}`).toBeDefined()
       expect(check(fixture)).toEqual([])
-      const { parts, path } = await replay(provider!, fixture)
+      const { parts, path, body } = await replay(provider!, fixture)
       expect(path).toBe(fixture.sent.path)
+      // What we send now is what the service took then (say, the reasoning sent back).
+      expect(body).toEqual(fixture.sent.body)
       expect(parts).toEqual(fixture.parts)
     })
   }
@@ -129,7 +131,9 @@ describe('recording samples', () => {
       const loaded = loadFixtures(dir)
       expect(loaded).toHaveLength(fixtures.length)
       for (const fixture of loaded) {
-        expect((await replay(openai, fixture)).parts).toEqual(fixture.parts)
+        const replayed = await replay(openai, fixture)
+        expect(replayed.parts).toEqual(fixture.parts)
+        expect(replayed.body).toEqual(fixture.sent.body)
       }
     } finally {
       rmSync(dir, { recursive: true, force: true })

@@ -389,17 +389,27 @@ export function loadFixtures(dir: string): ProviderFixture[] {
   })
 }
 
-/** Play a recorded reply back to `provider` and give the parts it makes of it now. */
+/**
+ * Play a recorded reply back to `provider`: the parts it makes of it now, and the request it
+ * sends now, which must still be the one the service took.
+ */
 export async function replay(
   provider: ModelProvider<Record<string, unknown>>,
   fixture: ProviderFixture,
-): Promise<{ parts: ModelStreamPart[]; path: string | null }> {
+): Promise<{ parts: ModelStreamPart[]; path: string | null; body: unknown }> {
   let path: string | null = null
+  let body: unknown = null
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
-    fetch(request) {
+    async fetch(request) {
       path = new URL(request.url).pathname
+      const text = await request.text()
+      try {
+        body = JSON.parse(text)
+      } catch {
+        body = text
+      }
       const { reply } = fixture
       return new Response(reply.body, {
         status: reply.status,
@@ -419,7 +429,7 @@ export async function replay(
     }
     const parts: ModelStreamPart[] = []
     for await (const part of provider.stream(settings, fixture.request)) parts.push(part)
-    return { parts: comparable(parts), path }
+    return { parts: comparable(parts), path, body }
   } finally {
     server.stop(true)
   }

@@ -97,14 +97,14 @@ describe.runIf(posix)('processes left by a server that died', () => {
     })
   })
 
-  test('leave alone a process that got the pid later', async () => {
+  test('leave alone a process that got the pid later, and its group', async () => {
     const proc = spawnGroup()
     started.push(proc)
     writeFileSync(
       path,
       JSON.stringify({
         owner: { pid: await deadPid(), startedAt: 0 },
-        processes: [{ pid: proc.pid, group: false, startedAt: Date.now() - 3_600_000, label: 'x' }],
+        processes: [{ pid: proc.pid, group: true, startedAt: Date.now() - 86_400_000, label: 'x' }],
       }),
     )
     const leftovers = await new ProcessLedger().open(path)

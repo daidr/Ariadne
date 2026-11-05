@@ -78,9 +78,10 @@ function spanStyle(span: TimelineSpan) {
   const { left, width } = placement(props.model, span)
   return {
     left: `${left * 100}%`,
-    width: `max(2px, ${width * 100}%)`,
+    width: span.instant ? '2px' : `max(2px, ${width * 100}%)`,
     top: `${span.lane * LANE + 4}px`,
-    '--waited': span.waited === null ? '0%' : `${span.waited * 100}%`,
+    // A share of real time means nothing on steps of equal width.
+    '--waited': span.waited === null || props.mode === 'sequence' ? '0%' : `${span.waited * 100}%`,
   }
 }
 
@@ -452,7 +453,6 @@ defineExpose({ reset })
 }
 
 .span--instant {
-  width: 2px !important;
   height: 12px;
   margin-top: -2px;
   background: var(--dou-color-text-tertiary);

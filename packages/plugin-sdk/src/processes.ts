@@ -119,9 +119,10 @@ async function reap(path: string): Promise<Leftovers> {
     if (same(entry.pid, entry.startedAt)) {
       kill(entry)
       killed.push(entry)
-    } else if (entry.group && !windows && groupExists(entry.pid)) {
+    } else if (entry.group && !windows && !started.has(entry.pid) && groupExists(entry.pid)) {
       // The leader ended, what it started still runs. A group's id is not given to another
-      // process while the group exists, so it is still that group.
+      // process while the group exists, so it is still that group. A leader that runs but
+      // started at another time is a later process with the pid: its group is not ours.
       kill(entry)
       killed.push(entry)
     }

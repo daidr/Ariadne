@@ -147,7 +147,8 @@ export function buildTrace(
           }
           running.delete(event.data.toolCallId)
         }
-        toolsFrom = event.data.timing?.finishedAt ?? event.at
+        // Calls that ran together end in any order: the next goes on from the latest.
+        toolsFrom = Math.max(toolsFrom, event.data.timing?.finishedAt ?? event.at)
         break
       }
       case 'conversation.model_retry':
