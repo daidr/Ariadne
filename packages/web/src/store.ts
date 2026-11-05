@@ -4,6 +4,9 @@ import type {
   ArtifactSummary,
   BlockAnswer,
   ConversationView,
+  LineComment,
+  LiveCommand,
+  LiveUpdate,
   MemoryView,
   MessageView,
   NoticeView,
@@ -11,6 +14,7 @@ import type {
   PlanView,
   ProjectView,
   TodoView,
+  TurnFile,
 } from '@ariadne/core'
 import { reactive } from 'vue'
 import {
@@ -19,6 +23,7 @@ import {
   DEFAULT_KEYS,
   followEvents,
   type InputSettings,
+  type MessageExtras,
   type ModelSettings,
   type ProjectDetail,
   type SourceInput,
@@ -32,10 +37,22 @@ export type MainView =
   | { kind: 'plan' }
   | { kind: 'artifacts' }
   | { kind: 'artifact'; id: string }
-  /** What a thread's branch changed, with merging it. */
-  | { kind: 'changes'; threadId: string }
+  /**
+   * What a thread's branch changed, with merging it; or with `turn`, what one turn changed
+   * in its workspace. `path` opens that file first.
+   */
+  | { kind: 'changes'; threadId: string; turn?: TurnChangesRef; path?: string }
   /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
   | { kind: 'trace'; conversationId: string }
+
+/** A turn's changes, as its notice names them. */
+export interface TurnChangesRef {
+  turnId: string
+  from: string
+  to: string
+  files: TurnFile[]
+  total: { files: number; added: number; removed: number }
+}
 
 /** One conversation as shown on screen: the coordinator's, or the open thread's. */
 export interface ConversationState {
@@ -121,6 +138,13 @@ interface State {
   projectSettingsOpen: boolean
   /** Which key sends, and the snippets offered after `/`. */
   input: InputSettings
+  /** Commands conversations are running now, by conversation; not part of the log. */
+  live: Record<string, LiveCommand>
+  /**
+   * Line comments the user wrote on threads' changes and has not sent yet, by thread;
+   * they go to the thread together.
+   */
+  lineComments: Record<string, LineComment[]>
   error: string | null
 }
 
@@ -145,6 +169,8 @@ export const state = reactive<State>({
   searchOpen: false,
   projectSettingsOpen: false,
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
+  live: {},
+  lineComments: {},
   error: null,
 })
 
@@ -433,12 +459,12 @@ function forgetProject(id: string) {
 export async function sendMessage(
   conversationId: string,
   content: string,
-  attachments: { fileId: string; name: string }[] = [],
+  extras: MessageExtras = {},
 ): Promise<boolean> {
   const project = state.detail?.project
   if (!project) return false
   try {
-    await api.postMessage(project.id, conversationId, content, attachments)
+    await api.postMessage(project.id, conversationId, content, extras)
     return true
   } catch (error) {
     report(error)
@@ -744,11 +770,33 @@ export async function start() {
     onEvent,
     (status) => (state.stream = status),
     () => {
+      // The server tells again what is running now.
+      state.live = {}
       if (loaded) return
       loaded = true
       void load()
     },
+    onLive,
   )
+}
+
+function onLive(update: LiveUpdate) {
+  if (update.command) state.live[update.conversationId] = update.command
+  else delete state.live[update.conversationId]
+}
+
+/**
+ * Send a thread the line comments written on its changes, all in one message; the drafts
+ * go once it is sent.
+ */
+export async function sendLineComments(
+  threadId: string,
+  comments: LineComment[],
+): Promise<boolean> {
+  if (!comments.length) return false
+  const sent = await sendMessage(threadId, '', { comments })
+  if (sent) delete state.lineComments[threadId]
+  return sent
 }
 
 /** Add a memory entry, change one (`id`), or remove it (`text` null); `null` when it worked. */

@@ -427,10 +427,18 @@ const runCommand: Tool = {
     const gate = commandGate(command, cwd || '.', ctx)
     if (gate) return gate
     const workspace = await ctx.workspace()
+    // The user watches it run; the log gets its result once it ends.
+    const live = ctx.app.live.start({
+      projectId: ctx.projectId,
+      conversationId: ctx.conversationId,
+      command,
+      cwd: cwd || '.',
+    })
     try {
       const result = await workspace.exec(command, {
         timeoutMs: seconds * 1000,
         signal: ctx.signal,
+        onOutput: live.output,
         ...(cwd ? { cwd } : {}),
         ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
         ...(ctx.commands && Object.keys(ctx.commands.env).length ? { env: ctx.commands.env } : {}),
@@ -442,6 +450,8 @@ const runCommand: Tool = {
     } catch (error) {
       if (error instanceof ToolInputError || error instanceof DomainError) throw error
       return { content: error instanceof Error ? error.message : String(error), isError: true }
+    } finally {
+      live.end()
     }
   },
 }

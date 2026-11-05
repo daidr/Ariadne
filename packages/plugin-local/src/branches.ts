@@ -15,7 +15,7 @@ import {
  */
 export type GitRun = (
   args: string[],
-  options?: { cwd?: string; whole?: boolean },
+  options?: { cwd?: string; whole?: boolean; env?: Record<string, string> },
 ) => Promise<ExecResult>
 
 /** Files larger than this are not shown side by side. */
@@ -140,6 +140,40 @@ export async function branchChanges(
     // A worktree that is gone has nothing uncommitted.
     uncommitted: status?.exitCode === 0 ? parseStatus(status.stdout) : [],
   }
+}
+
+/** What changed from one tree or commit to another, file by file. */
+export async function treeDiff(git: GitRun, from: string, to: string): Promise<ChangedFile[]> {
+  const [nameStatus, numstat] = await Promise.all([
+    git(['diff', '--name-status', '-z', '-M', from, to], { whole: true }),
+    git(['diff', '--numstat', '-z', '-M', from, to], { whole: true }),
+  ])
+  if (nameStatus.exitCode !== 0) fail(nameStatus, 'git diff')
+  if (numstat.exitCode !== 0) fail(numstat, 'git diff')
+  return parseDiff(nameStatus.stdout, numstat.stdout)
+}
+
+/**
+ * The index snapshots are written with, in the worktree's own git directory beside its
+ * real index. It stays from one snapshot to the next, so git reads again only the files
+ * whose size or time changed since.
+ */
+export const SNAPSHOT_INDEX = 'ariadne-snapshot-index'
+
+/**
+ * The files of the worktree `cwd` as they are now, committed or not and ignored ones left
+ * out, as a git tree. Written through an index of its own, so the worktree, its index and
+ * its branch stay as they are.
+ */
+export async function worktreeSnapshot(git: GitRun, cwd: string): Promise<string> {
+  const dir = await git(['rev-parse', '--absolute-git-dir'], { cwd })
+  if (dir.exitCode !== 0) fail(dir, 'git rev-parse')
+  const env = { GIT_INDEX_FILE: `${dir.stdout.trim()}/${SNAPSHOT_INDEX}` }
+  const add = await git(['add', '--all'], { cwd, env })
+  if (add.exitCode !== 0) fail(add, 'git add')
+  const tree = await git(['write-tree'], { cwd, env })
+  if (tree.exitCode !== 0) fail(tree, 'git write-tree')
+  return tree.stdout.trim()
 }
 
 async function blob(git: GitRun, commit: string, path: string) {

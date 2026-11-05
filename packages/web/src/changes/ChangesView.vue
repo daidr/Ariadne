@@ -15,16 +15,36 @@ import {
   DouTree,
   type TreeNodeData,
 } from 'dou-ui'
-import { ChevronLeftIcon, fileIconOf, GitMergeIcon, RotateCwIcon } from '@dou-ui/icons'
+import {
+  ChevronLeftIcon,
+  fileIconOf,
+  GitMergeIcon,
+  MessageIcon,
+  RotateCwIcon,
+  SendIcon,
+} from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { t, tm } from '../i18n'
-import { openMain, report, state } from '../store'
+import {
+  openMain,
+  openThread,
+  report,
+  sendLineComments,
+  state,
+  type TurnChangesRef,
+} from '../store'
 import PullRequestTag from '../components/PullRequestTag.vue'
 import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
 import { languageOf } from './languages'
+import { draftsOf, sendable, useLineComments } from './line-comments'
 
-const props = defineProps<{ threadId: string }>()
+/**
+ * What a thread's branch changed against its base, with merging it; or, with `turn`, what
+ * one of its turns changed in the workspace. Lines of either can be commented on, and the
+ * comments go to the thread together.
+ */
+const props = defineProps<{ threadId: string; turn?: TurnChangesRef; path?: string }>()
 
 const thread = computed(
   () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
@@ -42,17 +62,41 @@ const file = computed<ChangedFile | null>(
 )
 const totals = computed(() => lineTotals(changes.value?.files ?? []))
 
+/** The file to open: the one asked for, the open one while still changed, or the first. */
+function pickFile(files: ChangedFile[]) {
+  const has = (path: string | null | undefined) => !!path && files.some((f) => f.path === path)
+  if (has(props.path) && !opened.value) selected.value = props.path!
+  else if (!has(selected.value)) selected.value = orderedFiles(tree.value)[0]?.path ?? null
+  opened.value = true
+}
+const opened = ref(false)
+
 async function load() {
+  if (props.turn) {
+    const { turn } = props
+    changes.value = {
+      branch: thread.value?.workspace?.branch ?? '',
+      base: thread.value?.workspace?.base ?? '',
+      from: turn.from,
+      head: turn.to,
+      commits: [],
+      files: turn.files,
+      uncommitted: [],
+    }
+    mergeable.value = false
+    problem.value = null
+    loading.value = false
+    expanded.value = folderKeys(tree.value)
+    pickFile(turn.files)
+    return
+  }
   try {
     const result = await api.getChanges(props.threadId)
     changes.value = result.changes
     mergeable.value = result.mergeable
     problem.value = null
     expanded.value = folderKeys(tree.value)
-    // Keep the open file while it is still changed; otherwise open the first one.
-    if (!result.changes?.files.some((item) => item.path === selected.value)) {
-      selected.value = orderedFiles(tree.value)[0]?.path ?? null
-    }
+    pickFile(result.changes?.files ?? [])
   } catch (error) {
     problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
   } finally {
@@ -62,8 +106,12 @@ async function load() {
 
 // Again whenever the thread moves on: it may have committed since.
 watch(
-  () => [props.threadId, thread.value?.stage, thread.value?.merged?.sha],
-  () => void load(),
+  () => [props.threadId, props.turn?.turnId, thread.value?.stage, thread.value?.merged?.sha],
+  (now, before) => {
+    // Another thread or turn starts over at the file it asks for.
+    if (!before || now[0] !== before[0] || now[1] !== before[1]) opened.value = false
+    void load()
+  },
   { immediate: true },
 )
 
@@ -161,6 +209,27 @@ async function merge() {
   }
 }
 
+// Comments on lines of the new version, sent to the thread together.
+const { extension: comments } = useLineComments(
+  () => props.threadId,
+  () => file.value?.path ?? null,
+  () => versions.value?.after ?? null,
+)
+const extensions = [comments]
+// Side by side, where lines can be commented on; the toolbar switches to one column.
+const diffMode = ref<'split' | 'inline'>('split')
+const drafts = computed(() => draftsOf(props.threadId))
+const commentCount = (path: string) => drafts.value.filter((c) => c.path === path).length
+const sending = ref(false)
+async function sendComments() {
+  sending.value = true
+  try {
+    if (await sendLineComments(props.threadId, sendable(drafts.value))) openThread(props.threadId)
+  } finally {
+    sending.value = false
+  }
+}
+
 const methodOptions = computed(() => [
   { value: 'squash', label: t('changes.method.squash') },
   { value: 'merge', label: t('changes.method.merge') },
@@ -176,7 +245,13 @@ const methodOptions = computed(() => [
       </DouButton>
       <div class="changes-title">
         <DouText weight="medium" truncate>{{ thread?.title }}</DouText>
-        <DouText v-if="changes" variant="tertiary" size="sm" class="changes-meta">
+        <DouText v-if="turn" variant="tertiary" size="sm" class="changes-meta">
+          {{ t('changes.turn') }} ·
+          {{ t('changes.files', { count: turn.total.files }) }}
+          <span class="changes-added">+{{ turn.total.added }}</span>
+          <span class="changes-removed">−{{ turn.total.removed }}</span>
+        </DouText>
+        <DouText v-else-if="changes" variant="tertiary" size="sm" class="changes-meta">
           {{ changes.branch }} → {{ changes.base }} ·
           {{ t('changes.commits', { count: changes.commits.length }) }} ·
           {{ t('changes.files', { count: changes.files.length }) }}
@@ -185,6 +260,17 @@ const methodOptions = computed(() => [
         </DouText>
       </div>
       <DouButton
+        v-if="drafts.length"
+        size="sm"
+        variant="outline"
+        :loading="sending"
+        @click="sendComments"
+      >
+        <template #leading><SendIcon /></template>
+        {{ t('changes.sendComments', { count: drafts.length }) }}
+      </DouButton>
+      <DouButton
+        v-if="!turn"
         variant="ghost"
         size="sm"
         :aria-label="t('changes.refresh')"
@@ -193,7 +279,7 @@ const methodOptions = computed(() => [
       >
         <RotateCwIcon />
       </DouButton>
-      <PullRequestTag v-if="thread && !mergeable" :thread="thread" />
+      <PullRequestTag v-if="thread && !mergeable && !turn" :thread="thread" />
       <DouTag v-if="mergeable && upToDate" tone="success" size="sm">
         <template #leading><GitMergeIcon /></template>
         {{ t('changes.merged', { base }) }}
@@ -270,6 +356,15 @@ const methodOptions = computed(() => [
               <span class="file-name">{{ node.label }}</span>
               <template v-if="(node as FileNode).file">
                 <DouText
+                  v-if="commentCount((node as FileNode).file!.path)"
+                  size="sm"
+                  variant="tertiary"
+                  class="file-comments"
+                  :title="t('changes.commented')"
+                >
+                  <MessageIcon />{{ commentCount((node as FileNode).file!.path) }}
+                </DouText>
+                <DouText
                   size="sm"
                   :tone="STATUS_TONE[(node as FileNode).file!.status]"
                   class="file-status"
@@ -301,6 +396,8 @@ const methodOptions = computed(() => [
           :original="versions.before ?? ''"
           :model-value="versions.after ?? ''"
           :language="languageOf(file?.path ?? '')"
+          :extensions="extensions"
+          v-model:mode="diffMode"
         />
       </div>
     </div>
@@ -417,6 +514,32 @@ const methodOptions = computed(() => [
   min-height: 0;
   margin: 0 12px 12px;
   width: auto;
+}
+
+/* Beside a line: a plus while the pointer is on it, a mark where comments are. */
+.diff :deep(.line-comment-add) {
+  color: var(--dou-color-text-tertiary);
+  opacity: 0;
+}
+
+.diff :deep(.line-comment-add:hover) {
+  opacity: 1;
+}
+
+.diff :deep(.line-comment-mark) {
+  color: var(--dou-color-primary);
+}
+
+.file-comments {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.file-comments svg {
+  width: 12px;
+  height: 12px;
 }
 
 .merge-form {

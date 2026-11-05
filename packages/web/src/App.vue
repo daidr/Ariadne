@@ -141,6 +141,8 @@ watchEffect(() => {
                 <ChangesView
                   v-else-if="state.main.kind === 'changes'"
                   :thread-id="state.main.threadId"
+                  :turn="state.main.turn"
+                  :path="state.main.path"
                 />
                 <ConversationPanel v-else @open-settings="openSettings" />
               </div>

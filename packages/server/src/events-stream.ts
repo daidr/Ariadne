@@ -1,9 +1,14 @@
-import type { Ariadne, AnyStoredEvent } from '@ariadne/core'
+import type { Ariadne, AnyStoredEvent, LiveUpdate } from '@ariadne/core'
 
 const encoder = new TextEncoder()
 
 function frame(event: AnyStoredEvent): Uint8Array {
   return encoder.encode(`id: ${event.seq}\nevent: ariadne\ndata: ${JSON.stringify(event)}\n\n`)
+}
+
+/** A running command's news: no id, since it is not part of the log and never replayed. */
+function liveFrame(update: LiveUpdate): Uint8Array {
+  return encoder.encode(`event: live\ndata: ${JSON.stringify(update)}\n\n`)
 }
 
 /**
@@ -36,12 +41,23 @@ export function eventStream(
         if (page.length < 500) break
       }
       const unsubscribe = app.subscribe((events) => events.forEach(send))
+      // Commands running now, then what they print and when they end.
+      const sendLive = (update: LiveUpdate) => {
+        if (options.projectId === null || update.projectId === options.projectId) {
+          controller.enqueue(liveFrame(update))
+        }
+      }
+      for (const command of app.live.list(options.projectId)) {
+        sendLive({ projectId: command.projectId, conversationId: command.conversationId, command })
+      }
+      const unsubscribeLive = app.live.subscribe(sendLive)
       const heartbeat = setInterval(
         () => controller.enqueue(encoder.encode(': ping\n\n')),
         options.heartbeatMs ?? 15_000,
       )
       cleanup = () => {
         unsubscribe()
+        unsubscribeLive()
         clearInterval(heartbeat)
       }
     },

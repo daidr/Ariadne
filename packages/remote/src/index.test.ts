@@ -346,3 +346,39 @@ describe('ssh branches', () => {
     expect(await git('branch', '--list', 'ariadne/thr_a')).toContain('ariadne/thr_a')
   })
 })
+
+describe('turn work on a remote machine', () => {
+  test('snapshots of a worktree compare what a command changed', async () => {
+    const dir = await repo()
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const branches = workspace!.branches!
+    const before = await branches.snapshot!('thr_a')
+    await ws.exec('echo b > b.txt && echo more >> README.md')
+    const after = await branches.snapshot!('thr_a')
+    const files = await branches.diff!(before!, after!)
+    expect(files.map((f) => [f.path, f.status]).toSorted()).toEqual([
+      ['README.md', 'modified'],
+      ['b.txt', 'added'],
+    ])
+    expect((await ws.exec('git diff --cached --name-only')).stdout).toBe('')
+    expect(await branches.snapshot!('thr_none')).toBeNull()
+  })
+
+  test('a command hands its output over as it comes, without what came before it', async () => {
+    const dir = join(base, 'plain')
+    await mkdir(dir, { recursive: true })
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    const pieces: string[] = []
+    const result = await ws.exec('echo one; echo two >&2; echo three', {
+      onOutput: (text) => pieces.push(text),
+    })
+    expect(result.stdout).toBe('one\nthree\n')
+    const seen = pieces.join('')
+    expect(seen).toContain('one\n')
+    expect(seen).toContain('two\n')
+    expect(seen).toContain('three\n')
+    expect(seen).not.toContain('ariadne: started')
+  })
+})

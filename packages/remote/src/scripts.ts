@@ -227,6 +227,16 @@ export GIT_TERMINAL_PROMPT=0
 exec git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
 `
 
+/** `GIT` with the index file `$2`, e.g. the one worktree snapshots are written with. */
+export const GIT_INDEX = `
+set -u
+cd -P -- "$1" 2>/dev/null || { printf '%s is missing on the remote machine\\n' "$1" >&2; exit 4; }
+export GIT_INDEX_FILE="$2"
+shift 2
+export GIT_TERMINAL_PROMPT=0
+exec git -c core.hooksPath=/dev/null -c core.fsmonitor=false "$@"
+`
+
 /** Exits 0 when the path `$1` exists. */
 export const EXISTS = `[ -e "$1" ] || [ -L "$1" ]`
 

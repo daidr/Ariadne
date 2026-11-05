@@ -10,6 +10,7 @@ import {
   type TokenUsage,
   type ToolCallRecord,
   type TranscriptEntry,
+  type TurnOutcome,
 } from '@ariadne/core'
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import {
@@ -48,6 +49,7 @@ import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 import { withImages } from './tool-helpers'
+import { turnChanges } from './turn-changes'
 
 /** The model a conversation talks to, with its provider's settings. */
 export interface ResolvedModel {
@@ -282,6 +284,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         )
       : []
   const tools = [...builtIn, ...external]
+  // What the turn changes in the thread's workspace, shown under its reply.
+  const changes =
+    isThread && hasWorkspace && workspaces
+      ? turnChanges(workspaces, conversation.projectId, conversationId)
+      : null
+  const finish = async (...args: TurnEnd) => {
+    await changes?.record(app, turnId)
+    app.finishTurn(conversationId, turnId, ...args)
+  }
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
   const ctx: ToolContext = {
     app,
@@ -290,11 +301,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     role: conversation.role,
     locale: options.locale,
     signal,
-    workspace: () => {
+    workspace: async () => {
       if (!workspaces || conversation.role !== 'thread') {
-        return Promise.reject(new DomainError('error.noSource'))
+        throw new DomainError('error.noSource')
       }
-      return workspaces.forThread(conversation.projectId, conversationId)
+      const workspace = await workspaces.forThread(conversation.projectId, conversationId)
+      await changes?.begin()
+      return workspace
     },
     source: () => {
       if (!workspaces) return Promise.reject(new DomainError('error.noSource'))
@@ -519,7 +532,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             content,
           })
         }
-        app.finishTurn(conversationId, turnId, 'completed')
+        await finish('completed')
         return
       }
       // The same calls with the same results again: the model is not getting anywhere.
@@ -573,10 +586,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         (isThread && JSON.stringify(app.getThread(conversationId).workspace) !== workspaceBefore)
       if (signal.aborted) break
     }
-    app.finishTurn(conversationId, turnId, abortOutcome(signal))
+    await finish(abortOutcome(signal))
   } catch (error) {
     if (signal.aborted) {
-      app.finishTurn(conversationId, turnId, abortOutcome(signal))
+      await finish(abortOutcome(signal))
       return
     }
     const localized =
@@ -585,9 +598,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         : error instanceof DomainError
           ? error.toLocalized()
           : { key: 'error.modelRequest' as const, params: { detail: String(error) } }
-    app.finishTurn(conversationId, turnId, 'failed', localized)
+    await finish('failed', localized)
   }
 }
+
+/** How a turn ends, as `finishTurn` takes it after the ids. */
+type TurnEnd = [outcome: TurnOutcome, error?: LocalizedMessage | null]
 
 /** The repository's instruction file, read from the workspace root. */
 export const INSTRUCTIONS_FILE = 'AGENTS.md'

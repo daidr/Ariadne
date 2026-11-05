@@ -2,6 +2,9 @@ export {
   Ariadne,
   MAX_MEMORIES,
   MAX_MEMORY,
+  LINE_COMMENT_LIMITS,
+  MAX_MENTIONS,
+  MAX_TURN_FILES,
   MESSAGE_PAGE,
   unknownResult,
   type AriadneOptions,
@@ -78,6 +81,14 @@ export {
 } from './files'
 export type * from './events'
 export { newId } from './ids'
+export {
+  LIVE_TAIL,
+  LiveCommands,
+  screenText,
+  type LiveCommand,
+  type LiveHandle,
+  type LiveUpdate,
+} from './live'
 export { defaultProjections, dropProjectionTables, MAX_CHECK_ATTEMPTS } from './projections'
 export { SEARCH_LIMITS, searchTerms } from './search'
 export { needsUser, threadStage, type StageFacts, type ThreadStage } from './stage'

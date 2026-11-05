@@ -22,6 +22,8 @@ import {
   gitIdentity,
   mergeBranch,
   removeWorktree,
+  treeDiff,
+  worktreeSnapshot,
   type GitRun,
   type Identity,
 } from './branches'
@@ -115,6 +117,8 @@ export async function run(
     forThread?: boolean
     /** Keep the whole output, e.g. a file's contents; otherwise long output keeps its end. */
     whole?: boolean
+    /** Hears both streams as they come. */
+    onOutput?: (text: string) => void
   },
 ): Promise<ExecResult> {
   // Stopped before it started (say, while the worktree was being made): an abort listener
@@ -157,8 +161,8 @@ export async function run(
   const timer = setTimeout(kill, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
-    const stdout = collect(proc.stdout)
-    const stderr = collect(proc.stderr)
+    const stdout = collect(proc.stdout, options.onOutput)
+    const stderr = collect(proc.stderr, options.onOutput)
     const exitCode = await proc.exited
     // Background processes would keep the output open, and keep running, otherwise.
     if (options.forThread && !windows) killGroup()
@@ -178,7 +182,7 @@ const OUTPUT_GRACE_MS = 1000
  * Read a process's output as it comes. `settle` gives what was read once the output ends,
  * or after a short grace, whichever is first, and stops reading.
  */
-function collect(stream: ReadableStream<Uint8Array>) {
+function collect(stream: ReadableStream<Uint8Array>, onOutput?: (text: string) => void) {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let text = ''
@@ -187,7 +191,9 @@ function collect(stream: ReadableStream<Uint8Array>) {
       for (;;) {
         const chunk = await reader.read()
         if (chunk.done) break
-        text += decoder.decode(chunk.value, { stream: true })
+        const piece = decoder.decode(chunk.value, { stream: true })
+        text += piece
+        if (piece) onOutput?.(piece)
       }
     } catch {
       // Cancelled after the grace.
@@ -394,6 +400,7 @@ export class LocalWorkspace implements Workspace {
         ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.env ? { env: options.env } : {}),
+        ...(options.onOutput ? { onOutput: options.onOutput } : {}),
       },
     )
   }
@@ -495,7 +502,7 @@ export function localWorkspaces(input: {
   const gitRun: GitRun = (args, options = {}) =>
     run(['git', ...args], {
       cwd: options.cwd ?? repoRoot,
-      env: serverGitEnv(['file']),
+      env: { ...serverGitEnv(['file']), ...options.env },
       ...(options.whole ? { whole: true } : {}),
     })
   return {
@@ -515,6 +522,9 @@ export function localWorkspaces(input: {
       remove: (threadId, options) =>
         removeWorktree(gitRun, dirOf(threadId), async (dir) => existsSync(dir), options),
       worktrees: () => worktreesIn(worktrees),
+      snapshot: async (threadId) =>
+        existsSync(dirOf(threadId)) ? worktreeSnapshot(gitRun, dirOf(threadId)) : null,
+      diff: (from, to) => treeDiff(gitRun, from, to),
     },
     async open({ threadId, base: recorded, branch: named }) {
       const branch = named ?? branchFor(threadId)

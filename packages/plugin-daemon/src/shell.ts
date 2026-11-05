@@ -75,6 +75,8 @@ export function pinnedCertificate(target: DaemonTarget, timeoutMs = 15_000): Pro
 interface Pending {
   stdout: Uint8Array[]
   stderr: Uint8Array[]
+  /** Hears each stream's output as it comes; its own decoders keep split characters whole. */
+  onOutput?: (data: Uint8Array, stream: 'stdout' | 'stderr') => void
   done: (result: { exitCode: number; failure?: string }) => void
 }
 
@@ -182,6 +184,7 @@ export class DaemonShell implements RemoteShell {
       const run = parsed && link.runs.get(parsed.id)
       if (!run) return
       ;(parsed.stream === STDOUT ? run.stdout : run.stderr).push(parsed.data.slice())
+      run.onOutput?.(parsed.data, parsed.stream === STDOUT ? 'stdout' : 'stderr')
     })
     ws.addEventListener('close', () => {
       if (this.current === link) {
@@ -228,6 +231,14 @@ export class DaemonShell implements RemoteShell {
           stdout: [],
           stderr: [],
           done: (result) => resolve({ ...result, run }),
+        }
+        const listen = options.onOutput
+        if (listen) {
+          const decoders = { stdout: decoder(), stderr: decoder() }
+          run.onOutput = (data, stream) => {
+            const text = decoders[stream].decode(data, { stream: true })
+            if (text) listen(text, stream)
+          }
         }
         link.runs.set(id, run)
       },

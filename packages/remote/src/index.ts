@@ -17,6 +17,8 @@ import {
   gitIdentity,
   mergeBranch,
   removeWorktree,
+  treeDiff,
+  worktreeSnapshot,
   type GitRun,
 } from '@ariadne/plugin-local'
 import { createHash } from 'node:crypto'
@@ -27,6 +29,7 @@ import {
   HAS,
   EXISTS,
   GIT,
+  GIT_INDEX,
   LIST,
   OPEN_WORKTREE,
   OUTSIDE,
@@ -172,9 +175,26 @@ export class RemoteWorkspace implements Workspace {
     }
     const env = Object.entries(options.env ?? {}).map(([name, value]) => `${name}=${value}`)
     const args = [this.root, relativePath(cwd), command, this.noPush ?? '', program, ...env]
+    // The command's output as it comes, without what the login shell printed before it.
+    const listen = options.onOutput
+    let begun = false
+    let early = ''
+    const onOutput = listen
+      ? (text: string, stream: 'stdout' | 'stderr') => {
+          if (stream === 'stdout' || begun) return listen(text)
+          early += text
+          const at = early.indexOf(`${STARTED}\n`)
+          if (at === -1) return
+          begun = true
+          const rest = early.slice(at + STARTED.length + 1)
+          early = ''
+          if (rest) listen(rest)
+        }
+      : undefined
     const result = await this.shell.run(EXEC, args, {
       hold: true,
       clip: true,
+      ...(onOutput ? { onOutput } : {}),
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     })
@@ -247,11 +267,15 @@ export function remoteWorkspaces(
   const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
   const worktrees = posix.join(source.home, WORKTREE_DIR, key)
   const dirOf = (threadId: string) => posix.join(worktrees, threadId)
-  const git: GitRun = (args, options = {}) =>
-    shell.run(GIT, [options.cwd ?? repoRoot, ...args], {
+  const git: GitRun = (args, options = {}) => {
+    const cwd = options.cwd ?? repoRoot
+    const { GIT_INDEX_FILE: index, ...rest } = options.env ?? {}
+    if (Object.keys(rest).length) throw new Error('git here takes no environment but its index')
+    return shell.run(index ? GIT_INDEX : GIT, index ? [cwd, index, ...args] : [cwd, ...args], {
       timeoutMs: 120_000,
       ...(options.whole ? {} : { clip: true }),
     })
+  }
   const exists = async (path: string) => (await shell.run(EXISTS, [path])).exitCode === 0
   // The remote user's own identity, as their git there would commit.
   const identity = gitIdentity((name) => git(['config', '--get', name]))
@@ -306,6 +330,9 @@ export function remoteWorkspaces(
         }
         return list
       },
+      snapshot: async (threadId) =>
+        (await exists(dirOf(threadId))) ? worktreeSnapshot(git, dirOf(threadId)) : null,
+      diff: (from, to) => treeDiff(git, from, to),
     },
     async open({ threadId, ref, base: recorded, branch: named }) {
       const branch = named ?? branchFor(threadId)
