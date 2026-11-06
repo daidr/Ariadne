@@ -117,7 +117,7 @@ const spotKey = (spot: CommentSpot) => `${spot.side}:${spot.line}`
 /**
  * Comments on the lines of a file in the diff, on either side: a press beside a line
  * starts one under it, and the line's comments show there until they are sent. A plus
- * shows beside the line under the pointer.
+ * shows beside the line under the pointer; it does not keep unchanged lines unfolded.
  */
 export function useLineComments(
   threadId: () => string,
@@ -147,28 +147,22 @@ export function useLineComments(
     const commented = new Set(
       forFile().map((comment) => spotKey({ side: sideOf(comment), line: comment.line })),
     )
-    const markers: CodeDiffGutterMarker[] = []
-    for (const side of ['original', 'modified'] as const) {
-      if (!texts()) break
-      const count = linesOf(side).length
-      for (let line = 1; line <= count; line++) {
-        markers.push(
-          commented.has(spotKey({ side, line }))
-            ? {
-                side,
-                line,
-                icon: MessageIcon,
-                class: 'line-comment-mark',
-                title: t('changes.commented'),
-              }
-            : { side, line, icon: PlusIcon, visible: 'hover', title: t('changes.comment') },
-        )
+    // Commented lines get a mark; every other line shows a plus under the pointer.
+    const markers: CodeDiffGutterMarker[] = [...commented].map((key) => {
+      const [side, line] = key.split(':') as [CodeDiffSide, string]
+      return {
+        side,
+        line: Number(line),
+        icon: MessageIcon,
+        class: 'line-comment-mark',
+        title: t('changes.commented'),
       }
-    }
+    })
     return {
       name: 'line-comments',
       width: 18,
       markers,
+      hoverMarker: { icon: PlusIcon, title: t('changes.comment') },
       onPress: (line, _event, side) => {
         const spot = { side, line }
         if (!forFile().some((c) => spotKey({ side: sideOf(c), line: c.line }) === spotKey(spot))) {
