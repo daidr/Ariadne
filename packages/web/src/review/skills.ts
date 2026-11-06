@@ -10,9 +10,12 @@ const SKILL = 'skill:'
  * The skills a conversation can be asked to work by, offered after `/` in its input:
  * picking one writes `/name` in the text, and a name still there goes with the message.
  */
-export function useSkills(conversationId: () => string | null) {
+export function useSkills(
+  conversationId: () => string | null,
+  /** The names picked so far; kept elsewhere when the input outlives this component. */
+  picked: Set<string> = new Set(),
+) {
   const skills = ref<SkillView[]>([])
-  const picked = new Set<string>()
 
   // Read again when the conversation changes, and when the project's source does.
   watch(

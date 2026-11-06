@@ -31,7 +31,7 @@ export const zhCN = {
   'panel.artifacts': '产物',
   'side.splitRight': '向右拆分',
   'side.splitDown': '向下拆分',
-  'side.more': '更多',
+  'side.more': '分栏',
   'side.moveTo': '移到',
   'side.groupOf': '「{label}」那组',
   'side.open': '打开',

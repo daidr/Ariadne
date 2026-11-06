@@ -32,7 +32,7 @@ export const en: Record<MessageKey, string> = {
   'panel.artifacts': 'Artifacts',
   'side.splitRight': 'Split right',
   'side.splitDown': 'Split down',
-  'side.more': 'More',
+  'side.more': 'Layout',
   'side.moveTo': 'Move to',
   'side.groupOf': 'Group with “{label}”',
   'side.open': 'Open',

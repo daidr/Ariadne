@@ -1,6 +1,6 @@
 import type { Attachment } from '@ariadne/core'
 import type { ChatAttachment } from 'dou-ui'
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref, type Ref } from 'vue'
 import { api } from '../api'
 import { report } from '../store'
 
@@ -60,8 +60,15 @@ const release = (file: ChatAttachment) => {
 }
 
 /** Files added to a message before it is sent: each uploads as soon as it is added. */
-export function useAttachments(projectId: () => string | null) {
-  const files = ref<Draft[]>([])
+export function useAttachments(
+  projectId: () => string | null,
+  /**
+   * The files, when they are kept elsewhere: they then outlive the component, and whoever
+   * keeps them lets go of their previews.
+   */
+  kept?: Ref<Draft[]>,
+) {
+  const files = kept ?? ref<Draft[]>([])
   let next = 0
 
   async function upload(draft: Draft, file: File) {
@@ -87,7 +94,7 @@ export function useAttachments(projectId: () => string | null) {
   function add(list: Iterable<File>) {
     for (const file of list) {
       const draft: Draft = {
-        uid: `a${next++}`,
+        uid: `a${Date.now().toString(36)}${next++}`,
         name: file.name || 'file',
         size: file.size,
         type: file.type,
@@ -118,7 +125,7 @@ export function useAttachments(projectId: () => string | null) {
     }
   }
 
-  onBeforeUnmount(() => files.value.forEach(release))
+  if (!kept) onBeforeUnmount(() => files.value.forEach(release))
   return { files, add, ready, take, release }
 }
 

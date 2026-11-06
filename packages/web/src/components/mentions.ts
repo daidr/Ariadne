@@ -24,9 +24,10 @@ export function useMentions(
   draft: Ref<string>,
   caret: () => number,
   conversationId: () => string | null,
+  /** What was picked so far; kept elsewhere when the input outlives this component. */
+  picked: Map<string, MentionInput> = new Map(),
 ) {
   const files = ref<string[]>([])
-  const picked = new Map<string, MentionInput>()
 
   // One word per thread or artifact; a title used twice gets a short tail of its id.
   const named = computed(() => {

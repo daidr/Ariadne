@@ -18,7 +18,8 @@ import type {
   TodoView,
   TurnFile,
 } from '@ariadne/core'
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref, type Ref } from 'vue'
+import type { Draft } from './components/attachments'
 import * as side from './side/layout'
 import type { OpenOptions, PaneKey, SideLayout, SplitDirection } from './side/layout'
 import {
@@ -27,6 +28,7 @@ import {
   DEFAULT_KEYS,
   followEvents,
   type InputSettings,
+  type MentionInput,
   type MessageExtras,
   type ModelSettings,
   type ProjectDetail,
@@ -450,6 +452,7 @@ export function setSide(next: SideLayout) {
   for (const threadId of Object.keys(state.threads)) {
     if (!open.has(threadId)) delete state.threads[threadId]
   }
+  for (const threadId of composers.keys()) if (!open.has(threadId)) dropComposer(threadId)
   const projectId = state.currentId
   if (!projectId) return
   try {
@@ -457,6 +460,35 @@ export function setSide(next: SideLayout) {
   } catch {
     // Not remembered; the project opens with its lists next time.
   }
+}
+
+/**
+ * What the user is writing to an open thread and has not sent: kept here rather than in
+ * its panel, so moving the thread's tab to another group, which builds the panel anew,
+ * keeps it. Closing the tab lets it go.
+ */
+export interface Composer {
+  draft: Ref<string>
+  files: Ref<Draft[]>
+  mentions: Map<string, MentionInput>
+  skills: Set<string>
+}
+const composers = new Map<string, Composer>()
+
+export function composerFor(threadId: string): Composer {
+  let composer = composers.get(threadId)
+  if (!composer) {
+    composer = { draft: ref(''), files: ref([]), mentions: new Map(), skills: new Set() }
+    composers.set(threadId, composer)
+  }
+  return composer
+}
+
+function dropComposer(threadId: string) {
+  for (const file of composers.get(threadId)?.files.value ?? []) {
+    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }
+  composers.delete(threadId)
 }
 
 /** The thread in front of the group on the right the user last used. */

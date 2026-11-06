@@ -60,6 +60,7 @@ import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
 import {
+  composerFor,
   emptyConversation,
   loadEarlier,
   openMain,
@@ -99,8 +100,10 @@ import { stepHistory, type Recall } from './input-history'
 const props = defineProps<{ threadId?: string }>()
 const openSettings = inject(openSettingsKey, () => {})
 
-const draft = ref('')
-const attachments = useAttachments(() => state.detail?.project.id ?? null)
+// A thread's input is kept in the store, so moving its tab to another group keeps it.
+const composer = props.threadId ? composerFor(props.threadId) : null
+const draft = composer?.draft ?? ref('')
+const attachments = useAttachments(() => state.detail?.project.id ?? null, composer?.files)
 const picker = useTemplateRef<HTMLInputElement>('picker')
 function pick(event: Event) {
   const input = event.target as HTMLInputElement
@@ -115,6 +118,7 @@ const mentions = useMentions(
   draft,
   () => input.value?.textarea?.selectionStart ?? draft.value.length,
   () => conversationId.value,
+  composer?.mentions,
 )
 
 // A message's images open in a preview, its text files in a tab of their own.
@@ -405,7 +409,7 @@ async function caretToEnd() {
 // `/` at the start offers the skills to work by, then the user's snippets; picking a
 // snippet puts its text in the input, picking a skill names it there.
 const MANAGE = ':manage'
-const skills = useSkills(() => conversationId.value)
+const skills = useSkills(() => conversationId.value, composer?.skills)
 const commands = computed<ChatInputOption[]>(() => [
   ...skills.options.value,
   ...state.input.snippets.map((snippet) => ({

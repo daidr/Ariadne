@@ -15,13 +15,13 @@ import ReviewActions from './ReviewActions.vue'
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
 
-/** The line the thread list shows for it; its stage when its report said nothing. */
 /** Go to where a form was asked: its thread, or the coordinator's conversation. */
 function openAsker(threadId: string | null) {
   if (threadId) void openThread(threadId)
   else if (state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
 }
 
+/** The line the thread list shows for it; its stage when its report said nothing. */
 function headline(thread: ThreadView): string {
   return threadLine(thread) ?? t(`thread.stage.${thread.stage}`)
 }

@@ -9,6 +9,7 @@ import {
   DouTabs,
   DouTooltip,
   type TabsValue,
+  useElementSize,
 } from 'dou-ui'
 import {
   BrainIcon,
@@ -22,7 +23,7 @@ import {
   WorkflowIcon,
 } from '@dou-ui/icons'
 import type { Component } from 'vue'
-import { computed } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { t } from '../i18n'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
@@ -60,6 +61,15 @@ const active = computed(() => props.group.active)
 const groups = computed(() => side.groupsOf(state.side.root))
 const others = computed(() => groups.value.filter((item) => item.id !== props.group.id))
 
+// Splitting halves the group: only offered while both halves still have room to be read.
+const MIN_WIDTH = 220
+const MIN_HEIGHT = 200
+const root = useTemplateRef<HTMLElement>('root')
+const size = useElementSize(root)
+const canSplit = computed(() => props.group.tabs.length > 1)
+const canSplitRight = computed(() => canSplit.value && size.width.value >= MIN_WIDTH * 2)
+const canSplitDown = computed(() => canSplit.value && size.height.value >= MIN_HEIGHT * 2)
+
 function select(value: TabsValue | undefined) {
   if (value === undefined) return
   const key = value as PaneKey
@@ -82,7 +92,7 @@ function bring(key: PaneKey) {
 </script>
 
 <template>
-  <div class="pane-group" @pointerdown.capture="use" @focusin="use">
+  <div ref="root" class="pane-group" @pointerdown.capture="use" @focusin="use">
     <DouTabs
       :model-value="active"
       height="100%"
@@ -125,7 +135,7 @@ function bring(key: PaneKey) {
             </DouDropdownRadioGroup>
           </template>
         </DouDropdown>
-        <DouTooltip v-if="group.tabs.length > 1" :content="t('side.splitRight')" placement="bottom">
+        <DouTooltip v-if="canSplitRight" :content="t('side.splitRight')" placement="bottom">
           <DouButton
             size="sm"
             variant="ghost"
@@ -141,7 +151,7 @@ function bring(key: PaneKey) {
           </DouButton>
           <template #menu>
             <DouDropdownItem
-              v-if="group.tabs.length > 1"
+              v-if="canSplitDown"
               value="split-down"
               @click="splitPane(active, 'vertical')"
             >
