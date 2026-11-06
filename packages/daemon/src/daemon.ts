@@ -4,18 +4,18 @@ import { timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { MAX_FRAME, RelayServer, ServerSocketLink, StreamLink, type Channel } from '@ariadne/relay'
 import {
   CERT_NAME,
   derOf,
+  EXEC,
   fingerprintOf,
-  frame,
   PROTOCOL,
-  readFrame,
   RUN_ARGV,
   STDERR,
+  STDIN,
   STDOUT,
-  type ClientMessage,
-  type DaemonMessage,
+  type ExecControl,
 } from './protocol'
 
 /**
@@ -149,67 +149,25 @@ export class Lockout {
   }
 }
 
-interface Run {
-  proc: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
-  ended: boolean
-}
-
-interface Connection {
-  runs: Map<number, Run>
-}
-
-/** Close a run's input: thread commands end their process group on that. */
-function end(run: Run) {
-  if (run.ended) return
-  run.ended = true
-  void Promise.resolve(run.proc.stdin.end()).catch(() => {})
-}
-
-export interface DaemonOptions {
-  home: string
-  hostname: string
-  port: number
-  certificate: Certificate
+export interface ExecOptions {
   sandbox: CommandSandbox
   /** Paths commands may read but not change, such as the daemon's own code. */
   readOnly?: string[]
 }
 
 /**
- * Serve runs to Ariadne. Each run is bash reading a script from its input, in the sandbox,
- * with the daemon's environment minus Ariadne's own variables. A run whose connection
- * closes gets its input closed (thread commands end their process group on that) and is
- * killed a moment later.
+ * Runs each `exec` channel: bash reading a script from its input, in the sandbox, with the
+ * daemon's environment minus Ariadne's own variables. When the channel ends without bash
+ * having exited (Ariadne closed it, or its session was lost), bash's input is closed, which
+ * ends thread commands' process groups, and bash is killed a moment later.
  */
-export function serveDaemon(options: DaemonOptions) {
-  const lockout = new Lockout()
-  const authorized = (request: Request, address: string): Response | null => {
-    if (lockout.blocked(address)) return new Response('too many failed attempts', { status: 429 })
-    const header = request.headers.get('authorization') ?? ''
-    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-    if (token && tokenMatches(options.home, token)) return null
-    lockout.fail(address)
-    return new Response('unauthorized', { status: 401 })
-  }
-  const send = (ws: Bun.ServerWebSocket<Connection>, message: DaemonMessage) => {
-    ws.send(JSON.stringify(message))
-  }
-
-  async function pump(
-    ws: Bun.ServerWebSocket<Connection>,
-    id: number,
-    stream: ReadableStream<Uint8Array>,
-    kind: number,
-  ) {
-    for await (const chunk of stream) {
-      if (ws.readyState !== 1) return
-      ws.send(frame(id, chunk, kind))
+export function execChannels(options: ExecOptions): (channel: Channel) => void {
+  return (channel) => {
+    if (channel.kind !== EXEC) {
+      channel.close({ error: `the daemon has no ${channel.kind} channels` })
+      return
     }
-  }
-
-  function start(ws: Bun.ServerWebSocket<Connection>, id: number) {
-    if (ws.data.runs.has(id)) return
-    let proc: Run['proc']
+    let proc: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
     try {
       proc = Bun.spawn(
         options.sandbox.wrap(RUN_ARGV, { keep: [], readOnly: options.readOnly ?? [] }),
@@ -223,70 +181,129 @@ export function serveDaemon(options: DaemonOptions) {
         },
       )
     } catch (error) {
-      send(ws, { op: 'fail', id, message: error instanceof Error ? error.message : String(error) })
+      channel.close({ error: error instanceof Error ? error.message : String(error) })
       return
     }
-    const run: Run = { proc, ended: false }
-    ws.data.runs.set(id, run)
+    let inputEnded = false
+    let exited = false
+    const endInput = () => {
+      if (inputEnded) return
+      inputEnded = true
+      void Promise.resolve(proc.stdin.end()).catch(() => {})
+    }
+    channel.onData = (stream, bytes) => {
+      if (stream !== STDIN || inputEnded) return
+      proc.stdin.write(bytes)
+      void Promise.resolve(proc.stdin.flush()).catch(() => {})
+    }
+    channel.onControl = (message) => {
+      const op = (message as ExecControl | null)?.op
+      if (op === 'end') endInput()
+      if (op === 'kill') proc.kill('SIGKILL')
+    }
+    channel.onClose = () => {
+      endInput()
+      setTimeout(() => {
+        if (!exited) proc.kill('SIGKILL')
+      }, 2000).unref?.()
+    }
+    const pump = async (stream: ReadableStream<Uint8Array>, kind: number) => {
+      for await (const chunk of stream) {
+        // Waits for Ariadne to take it, so a flood of output slows bash instead of piling up.
+        if (!(await channel.write(chunk, kind))) return
+      }
+    }
     void (async () => {
       const [code] = await Promise.all([
         proc.exited,
-        pump(ws, id, proc.stdout, STDOUT),
-        pump(ws, id, proc.stderr, STDERR),
+        pump(proc.stdout, STDOUT),
+        pump(proc.stderr, STDERR),
       ])
-      ws.data.runs.delete(id)
-      if (ws.readyState === 1) send(ws, { op: 'exit', id, code })
+      exited = true
+      channel.close({ code })
     })()
   }
+}
 
-  return Bun.serve<Connection>({
+export interface DaemonOptions extends ExecOptions {
+  home: string
+  hostname: string
+  port: number
+  certificate: Certificate
+}
+
+/** Serve relay sessions to Ariadne over TLS, each let in by the token. */
+export function serveDaemon(options: DaemonOptions) {
+  const lockout = new Lockout()
+  const relay = new RelayServer({ onChannel: execChannels(options) })
+  const authorized = (request: Request, address: string): Response | null => {
+    if (lockout.blocked(address)) return new Response('too many failed attempts', { status: 429 })
+    const header = request.headers.get('authorization') ?? ''
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+    if (token && tokenMatches(options.home, token)) return null
+    lockout.fail(address)
+    return new Response('unauthorized', { status: 401 })
+  }
+
+  const server = Bun.serve<{ link: ServerSocketLink | null }>({
     hostname: options.hostname,
     port: options.port,
     tls: { cert: options.certificate.cert, key: options.certificate.key },
-    fetch(request, server) {
-      const address = server.requestIP(request)?.address ?? 'unknown'
+    fetch(request, bun) {
+      const address = bun.requestIP(request)?.address ?? 'unknown'
       const { pathname } = new URL(request.url)
-      if (pathname !== '/v1/hello' && pathname !== '/v1/shell') {
+      if (pathname !== '/v1/hello' && pathname !== '/v2/relay') {
         return new Response('not found', { status: 404 })
       }
       const refused = authorized(request, address)
       if (refused) return refused
       if (pathname === '/v1/hello') return Response.json({ protocol: PROTOCOL })
-      if (server.upgrade(request, { data: { runs: new Map() } })) return undefined
+      if (bun.upgrade(request, { data: { link: null } })) return undefined
       return new Response('expected a WebSocket', { status: 400 })
     },
     websocket: {
-      // Whole files go through as one frame.
-      maxPayloadLength: 256 * 1024 * 1024,
-      message(ws, message) {
-        if (typeof message !== 'string') {
-          const parsed = readFrame(message, false)
-          const run = parsed && ws.data.runs.get(parsed.id)
-          if (run && !run.ended) {
-            run.proc.stdin.write(parsed.data)
-            void Promise.resolve(run.proc.stdin.flush()).catch(() => {})
-          }
-          return
-        }
-        let request: ClientMessage
-        try {
-          request = JSON.parse(message) as ClientMessage
-        } catch {
-          return
-        }
-        if (!Number.isInteger(request.id)) return
-        if (request.op === 'run') start(ws, request.id)
-        const run = ws.data.runs.get(request.id)
-        if (!run) return
-        if (request.op === 'end') end(run)
-        if (request.op === 'kill') run.proc.kill('SIGKILL')
+      // Frames stay below the relay's limit; this leaves room for its header.
+      maxPayloadLength: MAX_FRAME + 1024,
+      open(ws) {
+        const link = new ServerSocketLink(ws as Bun.ServerWebSocket<unknown>)
+        ws.data.link = link
+        void relay.accept(link)
       },
-      close(ws) {
-        for (const run of ws.data.runs.values()) {
-          end(run)
-          setTimeout(() => run.proc.kill('SIGKILL'), 2000).unref?.()
-        }
+      message(ws, message) {
+        ws.data.link?.received(message)
+      },
+      close(ws, _code, reason) {
+        ws.data.link?.ended(reason || undefined)
       },
     },
+  })
+  return Object.assign(server, {
+    /** Stop listening and end every session's commands. */
+    async shutdown() {
+      relay.close()
+      await server.stop(true)
+    },
+  })
+}
+
+/**
+ * Serve one relay session on this process's standard input and output, for Ariadne
+ * connecting through ssh. Resolves when the input ends; the session's commands are ended.
+ */
+export function serveStdio(options: ExecOptions): Promise<void> {
+  return new Promise((resolve) => {
+    // One client, and no coming back: a new ssh connection starts a new daemon.
+    const relay = new RelayServer({
+      onChannel: execChannels(options),
+      keepMs: 0,
+      onSessionEnd: () => resolve(),
+    })
+    const writer = Bun.stdout.writer()
+    const link = new StreamLink(Bun.stdin.stream(), {
+      write: (bytes) => writer.write(bytes),
+      flush: () => writer.flush(),
+      end: () => writer.end(),
+    })
+    void relay.accept(link)
   })
 }

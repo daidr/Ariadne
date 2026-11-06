@@ -57,6 +57,7 @@ export {
   type RemoteShell,
   type ShellRun,
 } from './shell'
+export { RelayShell } from './relay-shell'
 
 /**
  * Where `git push` from a thread's worktree goes: a path that is no repository, named so

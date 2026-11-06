@@ -7,7 +7,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-import { daemonProvider, DaemonShell, type DaemonTarget } from './index'
+import { RelayClient, type Link } from '@ariadne/relay'
+import { daemonProvider, DaemonShell, openLink, type DaemonTarget } from './index'
 
 let base: string
 let home: string
@@ -89,7 +90,7 @@ describe('pairing', () => {
   })
 
   test('the WebSocket is refused without the token too', async () => {
-    const ws = new WebSocket(`wss://127.0.0.1:${target.port}/v1/shell`, {
+    const ws = new WebSocket(`wss://127.0.0.1:${target.port}/v2/relay`, {
       tls: { ca: await Bun.file(join(home, 'cert.pem')).text(), servername: CERT_NAME },
     } as never)
     const opened = await new Promise<boolean>((resolve) => {
@@ -150,6 +151,35 @@ describe('daemon shell', () => {
     const again = await shell.run('echo back', [])
     expect(again.stdout).toBe('back\n')
     await shell.dispose()
+  })
+
+  test('a command keeps running across a dropped connection, and its output arrives whole', async () => {
+    let link: Link | null = null
+    let connects = 0
+    const client = new RelayClient({
+      async connect() {
+        connects++
+        link = await openLink(target)
+        return link
+      },
+    })
+    const channel = await client.open('exec')
+    let stdout = ''
+    const decoder = new TextDecoder()
+    channel.onData = (stream, bytes) => {
+      if (stream === 1) stdout += decoder.decode(bytes, { stream: true })
+    }
+    const closed = new Promise<{ code?: number }>((resolve) => (channel.onClose = resolve))
+    await channel.write(
+      new TextEncoder().encode('for i in 1 2 3 4 5; do echo "line $i"; sleep 0.1; done\n'),
+    )
+    channel.control({ op: 'end' })
+    await Bun.sleep(150)
+    link!.close()
+    expect(await closed).toEqual({ code: 0 })
+    expect(stdout).toBe('line 1\nline 2\nline 3\nline 4\nline 5\n')
+    expect(connects).toBe(2)
+    client.close()
   })
 
   test('an idle connection closes, and the next call opens one again', async () => {

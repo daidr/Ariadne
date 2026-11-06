@@ -28,7 +28,7 @@ bun run check    # 格式、lint、类型检查和测试
 - 本机目录：git 仓库会为每个讨论串建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，讨论串的提交留在这个分支上。讨论串面板上的“改动”逐个文件显示它相对基线分支改了什么，点“合并到 main”合并进来（默认压成一个提交，需要 git 2.38+）；改动合入后 worktree 自动移除，分支保留。
 - GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。讨论串在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时讨论串会被唤醒去修，合并由你决定。公开仓库第一次推送前会先问你一次，同意后整个项目有效。令牌存在 `~/.ariadne/config.json`，不进事件日志。
 - GitLab 仓库：填 `group/project`（可以带子组）或项目地址；自建实例在“实例地址”里填 `https://gitlab.example.com`，或者直接填项目的完整地址。访问令牌需要 `api` 权限，可以留空：会用 `GITLAB_TOKEN`（只用于 `GITLAB_HOST` 指的实例，没设置时是 GitLab.com）或 `glab` 为这个实例保存的令牌。讨论串开的是 merge request（`!12`），流水线失败时同样会被唤醒去修；`internal` 项目对实例上所有人可见，第一次推送前也会先问你。
-- SSH 远程目录：填主机（`user@host` 或 `~/.ssh/config` 里的 Host）和远端的绝对路径。用你自己的 ssh 配置、密钥和 agent，不支持密码；第一次连接前先在终端里 ssh 一次确认主机指纹。git 仓库会在远端的 `~/.ariadne-worktrees/` 下为每个讨论串建 worktree 和分支 `ariadne/…`，看改动和合并与本机目录相同。命令在远端以登录用户身份运行，不经过本机沙箱，连接不转发 agent 和端口。讨论串在远端的 `git push` 推不出去，合并之后由你自己推送。
+- SSH 远程目录：填主机（`user@host` 或 `~/.ssh/config` 里的 Host）和远端的绝对路径。用你自己的 ssh 配置、密钥和 agent，不支持密码；第一次连接前先在终端里 ssh 一次确认主机指纹。git 仓库会在远端的 `~/.ariadne-worktrees/` 下为每个讨论串建 worktree 和分支 `ariadne/…`，看改动和合并与本机目录相同。命令在远端以登录用户身份运行，不经过本机沙箱，连接不转发 agent 和端口。讨论串在远端的 `git push` 推不出去，合并之后由你自己推送。远端的 `PATH` 里有 `ariadne-daemon` 时，Ariadne 只开一个 ssh 进程，所有调用都走它，更快。
 - 远程 daemon：连不了 SSH 的机器用它。在远端运行 `ariadne-daemon`（`bun run build:daemon` 打出单文件程序，或者有 bun 时 `bun packages/daemon/src/main.ts`），第一次启动打印配对码；把地址、配对码和远端目录填进来。默认只监听 `127.0.0.1:7429`，`--listen 0.0.0.0:7429` 让其他机器连上来；连接总是 TLS，按配对码里的证书指纹认 daemon。`ariadne-daemon pair` 换一个配对码，旧的立即失效。daemon 只存令牌的哈希，讨论串的命令在远端的沙箱里看不到 daemon 的目录。需要远端有 openssl。
 - SSH 和 daemon 都可以再选一个“代码托管”（GitHub 或 GitLab）：讨论串在远端写代码，推送和开 PR 由本机做，令牌不去远端。远端目录必须是这个仓库的签出。
 

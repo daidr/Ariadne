@@ -9,6 +9,7 @@
   "dependencies": {
     "@ariadne/daemon": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
+    "@ariadne/relay": "workspace:*",
     "@ariadne/remote": "workspace:*"
   },
   "devDependencies": {

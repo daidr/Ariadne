@@ -4,7 +4,7 @@ import { connectRemote, type RemoteShell } from '@ariadne/remote'
 import { posix } from 'node:path'
 import { DaemonShell, type DaemonTarget } from './shell'
 
-export { DaemonError, DaemonShell, pinnedCertificate, type DaemonTarget } from './shell'
+export { DaemonError, DaemonShell, openLink, pinnedCertificate, type DaemonTarget } from './shell'
 
 export interface DaemonSettings {
   address: string

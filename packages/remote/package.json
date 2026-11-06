@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@ariadne/plugin-local": "workspace:*",
-    "@ariadne/plugin-sdk": "workspace:*"
+    "@ariadne/plugin-sdk": "workspace:*",
+    "@ariadne/relay": "workspace:*"
   }
 }

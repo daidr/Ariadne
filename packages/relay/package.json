@@ -1,0 +1,12 @@
+{
+  "name": "@ariadne/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "msgpackr": "1.11.5"
+  }
+}
