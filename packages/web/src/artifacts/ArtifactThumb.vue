@@ -1,31 +1,42 @@
 <script setup lang="ts">
-import type { ArtifactPreview } from '@ariadne/core'
-import { DouMarkdown, DouSkeleton, DouText } from 'dou-ui'
-import { computed } from 'vue'
+import type { ArtifactSummary } from '@ariadne/core'
+import { DouMarkdown, DouSkeleton, DouText, useColorMode } from 'dou-ui'
+import { computed, ref, watch } from 'vue'
+import { COLOR_MODE_KEY } from '../color-mode'
+import { boardThumbnail } from './board-thumbnail'
 
 /**
  * A small picture of what an artifact holds, drawn from its stored preview: a document's
- * opening as a page, a whiteboard's boxes and lines, a dashboard's tiles. Not interactive.
+ * opening as a page, a whiteboard as the board draws it, a dashboard's tiles. Not interactive.
  */
-const props = defineProps<{ preview: ArtifactPreview }>()
+const props = defineProps<{ artifact: ArtifactSummary }>()
+const preview = computed(() => props.artifact.preview)
 
 /** Links and images stay out of a picture. */
 const noUrl = () => undefined
 
-const PAD = 24
-const board = computed(() => {
-  if (props.preview.kind !== 'whiteboard' || !props.preview.boxes.length) return null
-  const { boxes, lines } = props.preview
-  const left = Math.min(...boxes.map((b) => b.x)) - PAD
-  const top = Math.min(...boxes.map((b) => b.y)) - PAD
-  const right = Math.max(...boxes.map((b) => b.x + b.w)) + PAD
-  const bottom = Math.max(...boxes.map((b) => b.y + b.h)) + PAD
-  return { viewBox: `${left} ${top} ${right - left} ${bottom - top}`, boxes, lines }
-})
+// A whiteboard is drawn from its content, the way the board shows it.
+const picture = ref<string | null>(null)
+const { resolved } = useColorMode({ storageKey: COLOR_MODE_KEY })
+let asked = 0
+watch(
+  () =>
+    props.artifact.preview.kind === 'whiteboard' && props.artifact.preview.items
+      ? ([props.artifact.id, props.artifact.updatedAt, resolved.value] as const)
+      : null,
+  async (target) => {
+    const ask = ++asked
+    if (!target) return void (picture.value = null)
+    const url = await boardThumbnail(...target)
+    // A newer change may have asked for another picture meanwhile.
+    if (ask === asked) picture.value = url
+  },
+  { immediate: true },
+)
 
 const rows = computed(() =>
-  props.preview.kind === 'dashboard'
-    ? Math.max(1, ...props.preview.tiles.map((tile) => tile.y + tile.h))
+  preview.value.kind === 'dashboard'
+    ? Math.max(1, ...preview.value.tiles.map((tile) => tile.y + tile.h))
     : 1,
 )
 </script>
@@ -41,51 +52,12 @@ const rows = computed(() =>
         <DouSkeleton v-else variant="text" :lines="4" :animated="false" class="thumb-blank" />
       </template>
 
-      <svg
-        v-else-if="preview.kind === 'whiteboard' && board"
+      <img
+        v-else-if="preview.kind === 'whiteboard' && picture"
+        :src="picture"
+        alt=""
         class="thumb-board"
-        :viewBox="board.viewBox"
-        preserveAspectRatio="xMidYMin meet"
-      >
-        <line
-          v-for="(line, index) in board.lines"
-          :key="`l${index}`"
-          :x1="line[0]"
-          :y1="line[1]"
-          :x2="line[2]"
-          :y2="line[3]"
-          class="board-line"
-        />
-        <g v-for="(box, index) in board.boxes" :key="index" :class="`board-${box.type}`">
-          <ellipse
-            v-if="box.shape === 'ellipse'"
-            :cx="box.x + box.w / 2"
-            :cy="box.y + box.h / 2"
-            :rx="box.w / 2"
-            :ry="box.h / 2"
-            class="board-box"
-          />
-          <rect
-            v-else-if="box.type !== 'text' && box.type !== 'ink'"
-            :x="box.x"
-            :y="box.y"
-            :width="box.w"
-            :height="box.h"
-            rx="8"
-            class="board-box"
-          />
-          <text
-            v-if="box.text"
-            :x="box.x + box.w / 2"
-            :y="box.y + box.h / 2"
-            text-anchor="middle"
-            dominant-baseline="central"
-            class="board-text"
-          >
-            {{ box.text }}
-          </text>
-        </g>
-      </svg>
+      />
 
       <div
         v-else-if="preview.kind === 'dashboard' && preview.tiles.length"
@@ -168,34 +140,8 @@ const rows = computed(() =>
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.board-line {
-  stroke: var(--dou-color-border-strong);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.board-box {
-  fill: var(--dou-color-bg-muted);
-  stroke: var(--dou-color-border-strong);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.board-sticky .board-box {
-  fill: var(--dou-color-warning-soft);
-  stroke: none;
-}
-
-.board-image .board-box {
-  fill: var(--dou-color-neutral-soft);
-  stroke: none;
-}
-
-.board-text {
-  fill: var(--dou-color-text-secondary);
-  font-size: 18px;
+  object-fit: contain;
+  object-position: top center;
 }
 
 .thumb-grid {

@@ -120,7 +120,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 43
+export const PROJECTION_VERSION = 44
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -163,7 +163,7 @@ function lineComments(given: unknown[]): LineComment[] {
   const bad = badComments
   if (!Array.isArray(given) || given.length > LINE_COMMENT_LIMITS.comments) throw bad()
   return given.map((item) => {
-    const { path, line, quote, body } = (item ?? {}) as Record<string, unknown>
+    const { path, line, quote, body, side } = (item ?? {}) as Record<string, unknown>
     if (typeof path !== 'string' || !path.trim() || path.length > LINE_COMMENT_LIMITS.path) {
       throw bad()
     }
@@ -171,6 +171,7 @@ function lineComments(given: unknown[]): LineComment[] {
     if (typeof body !== 'string' || !body.trim() || body.length > LINE_COMMENT_LIMITS.body) {
       throw bad()
     }
+    if (side !== undefined && side !== 'original') throw bad()
     const text = typeof quote === 'string' ? quote : ''
     return {
       path: path.trim(),
@@ -178,6 +179,7 @@ function lineComments(given: unknown[]): LineComment[] {
       quote:
         text.length > LINE_COMMENT_LIMITS.quote ? text.slice(0, LINE_COMMENT_LIMITS.quote) : text,
       body: body.trim(),
+      ...(side ? { side } : {}),
     }
   })
 }

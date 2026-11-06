@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { DouButton, DouPopover, DouProgressGroup, DouText, type ProgressGroupItem } from 'dou-ui'
+import { DouButton, DouPopover, DouText } from 'dou-ui'
 import { CoinsIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { count, locale, t } from '../i18n'
 import { openThread, state } from '../store'
+import UsageBreakdown from './UsageBreakdown.vue'
 
 const open = ref(false)
 const usage = computed(
@@ -17,17 +18,6 @@ const percent = (part: number, whole: number) =>
         part / whole,
       )
     : '—'
-
-// What the model read, split by how the cache served it, then what it wrote.
-const parts = computed<(ProgressGroupItem & { label: string; tone: string })[]>(() => {
-  const { input, output, cached, cacheWrite } = usage.value
-  return [
-    { label: t('usage.input'), value: Math.max(0, input - cached - cacheWrite), tone: 'primary' },
-    { label: t('usage.output'), value: output, tone: 'danger' },
-    { label: t('usage.cacheWrite'), value: cacheWrite, tone: 'success' },
-    { label: t('usage.cacheRead'), value: cached, tone: 'warning' },
-  ]
-})
 
 /** The conversations that used the most, the coordinator's among them. */
 const top = computed(() => {
@@ -84,25 +74,7 @@ function go(id: string | null) {
           <DouText variant="tertiary" size="sm" class="usage-heading">
             {{ t('usage.breakdown') }}
           </DouText>
-          <DouProgressGroup
-            :items="parts"
-            :label="t('usage.breakdown')"
-            :format="(value) => count(value)"
-            legend
-            legend-direction="vertical"
-            tooltip
-          >
-            <!-- Thinking is part of the output, so it is named with it. -->
-            <template #legend="{ item, text }">
-              <span>{{ item.label }}</span>
-              <DouText variant="secondary" size="sm" class="usage-value">
-                {{ text }}
-                <template v-if="item.label === t('usage.output') && usage.reasoning">
-                  · {{ t('usage.reasoning') }} {{ count(usage.reasoning) }}
-                </template>
-              </DouText>
-            </template>
-          </DouProgressGroup>
+          <UsageBreakdown :usage="usage" />
 
           <DouText variant="tertiary" size="sm" class="usage-heading">
             {{ t('usage.top') }}

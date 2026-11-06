@@ -17,7 +17,6 @@ import '@dou-ui/pivot/style.css'
 import { DouButton, DouSwitch, DouTag, DouText } from 'dou-ui'
 import { RotateCwIcon } from '@dou-ui/icons'
 import { api } from '../api'
-import { guardWidget } from './guardWidget'
 import { report } from '../store'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { locale, t } from '../i18n'
@@ -34,14 +33,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ draft: [content: string | null] }>()
 
-// one broken widget shows a notice in its card; the rest of the dashboard still draws
-const widgets = [
-  guardWidget(statWidget()),
-  guardWidget(textWidget()),
-  guardWidget(tableWidget()),
-  guardWidget(chartWidget()),
-  guardWidget(pivotWidget()),
-]
+const widgets = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
 const snapshot = shallowRef<DashboardContent>({
   version: 1,
   dashboard: { version: 1, widgets: [] },

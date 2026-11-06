@@ -4,7 +4,6 @@ import {
   DouButton,
   DouChatAttachments,
   DouChatInput,
-  DouChatContextMeter,
   DouChatPlan,
   DouChatList,
   DouChatMessage,
@@ -26,6 +25,7 @@ import {
   type ChatAttachment,
   type ChatInputOption,
   type ChatMessageProps,
+  type ChatListExpose,
 } from 'dou-ui'
 import type { MessageView, NoticeView } from '@ariadne/core'
 import {
@@ -63,6 +63,7 @@ import {
   stopTurn,
   undoNotice,
 } from '../store'
+import ContextUsage from './ContextUsage.vue'
 import ReviewActions from './ReviewActions.vue'
 import ReviewMark from '../review/ReviewMark.vue'
 import ReviewNotice from '../review/ReviewNotice.vue'
@@ -430,7 +431,7 @@ function retry() {
 
 // Scrolled to the top: the page before. A first page too short to scroll fetches the
 // next one by itself, since there is no top to reach.
-const list = useTemplateRef<{ viewport: HTMLElement | null }>('list')
+const list = useTemplateRef<ChatListExpose>('list')
 function earlier() {
   if (conversationId.value && view.value.more) void loadEarlier(conversationId.value)
 }
@@ -460,7 +461,7 @@ watch(
     }
     await nextTick()
     const el = list.value?.viewport?.querySelector(`[data-message-id="${focus.messageId}"]`)
-    el?.scrollIntoView({ block: 'center' })
+    list.value?.scrollToMessage(el)
     focused.value = focus.messageId
     clearTimeout(unmark)
     unmark = setTimeout(() => (focused.value = null), 2000)
@@ -766,10 +767,8 @@ watch(
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
             :data-message-id="message.id"
-            :class="{
-              'conversation-edited': highlighted.has(message.id),
-              'conversation-focused': focused === message.id,
-            }"
+            :highlighted="focused === message.id"
+            :class="{ 'conversation-edited': highlighted.has(message.id) }"
           >
             <template #markdown-link="{ node, href, external, children }">
               <MessageLink
@@ -975,11 +974,12 @@ watch(
           <DouText v-else-if="modelLabel" variant="tertiary" size="sm" class="conversation-model">
             {{ modelLabel }}
           </DouText>
-          <!-- Full at the line where older history is made room for. -->
-          <DouChatContextMeter
+          <ContextUsage
             v-if="view.model && view.conversation?.contextTokens"
             :used="view.conversation.contextTokens"
             :total="view.model.compactAt"
+            :compactions="view.conversation.compactions"
+            :usage="view.conversation.usage"
           />
         </template>
       </DouChatInput>
@@ -1146,9 +1146,8 @@ watch(
   padding: 4px 0;
 }
 
-/* A message the search led to, marked until the eye has found it: its text, not the row. */
-.relay.conversation-focused,
-.conversation-focused :deep(.dou-chat-message__content) {
+/* A folded message from the coordinator the search led to, marked like a chat message. */
+.relay.conversation-focused {
   outline: 1px solid var(--dou-color-primary);
   outline-offset: 4px;
   border-radius: var(--dou-radius-container);

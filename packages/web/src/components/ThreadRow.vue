@@ -6,7 +6,6 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone, threadLine } from '../stage'
 import ReviewMark from '../review/ReviewMark.vue'
-import ReviewActions from './ReviewActions.vue'
 import StageIcon from './StageIcon.vue'
 
 /**
@@ -82,7 +81,7 @@ const prTone = computed(() =>
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>
     </span>
-    <span v-if="line || reviewing || thread.stage === 'review'" class="row-foot">
+    <span v-if="line || reviewing" class="row-foot">
       <DouText v-if="reviewing" size="sm" variant="tertiary" class="row-line">
         <DouShimmer>{{ t('review.underway', { round: thread.review!.rounds }) }}</DouShimmer>
       </DouText>
@@ -96,7 +95,6 @@ const prTone = computed(() =>
       >
         {{ line }}
       </DouText>
-      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
     </span>
   </span>
 </template>

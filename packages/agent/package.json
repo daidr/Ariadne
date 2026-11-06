@@ -12,7 +12,7 @@
     "@ariadne/mcp": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
     "@ariadne/sandbox": "workspace:*",
-    "dou-ui": "0.1.0-alpha.3"
+    "dou-ui": "0.1.0-alpha.6"
   },
   "devDependencies": {
     "@ariadne/plugin-local": "workspace:*",

@@ -213,11 +213,14 @@ async function merge() {
   }
 }
 
-// Comments on lines of the new version, sent to the thread together.
-const { extension: comments } = useLineComments(
+// Comments on lines of either version, sent to the thread together.
+const lineComments = useLineComments(
   () => props.threadId,
   () => file.value?.path ?? null,
-  () => versions.value?.after ?? null,
+  () =>
+    versions.value && !versions.value.skipped
+      ? { original: versions.value.before ?? '', modified: versions.value.after ?? '' }
+      : null,
 )
 // The reviewer's comments on the branch, with what the author did about each.
 const reviews = ref<ReviewRoundView[]>([])
@@ -245,8 +248,9 @@ const reviewComments = useReviewComments(
   () => versions.value?.after ?? null,
 )
 const reviewCount = (path: string) => notes.value.filter((n) => n.comment.path === path).length
-const extensions = [comments, reviewComments]
-// Side by side, where lines can be commented on; the toolbar switches to one column.
+const gutters = computed(() => [lineComments.gutter.value, reviewComments.gutter.value])
+const widgets = computed(() => [...lineComments.widgets.value, ...reviewComments.widgets.value])
+// Side by side at first; the toolbar switches to one column.
 const diffMode = ref<'split' | 'inline'>('split')
 const drafts = computed(() => draftsOf(props.threadId))
 const commentCount = (path: string) => drafts.value.filter((c) => c.path === path).length
@@ -438,7 +442,8 @@ const methodOptions = computed(() => [
           :original="versions.before ?? ''"
           :model-value="versions.after ?? ''"
           :language="languageOf(file?.path ?? '')"
-          :extensions="extensions"
+          :gutters="gutters"
+          :widgets="widgets"
           v-model:mode="diffMode"
         />
       </div>
@@ -558,16 +563,7 @@ const methodOptions = computed(() => [
   width: auto;
 }
 
-/* Beside a line: a plus while the pointer is on it, a mark where comments are. */
-.diff :deep(.line-comment-add) {
-  color: var(--dou-color-text-tertiary);
-  opacity: 0;
-}
-
-.diff :deep(.line-comment-add:hover) {
-  opacity: 1;
-}
-
+/* Beside a line: a mark where comments are. */
 .diff :deep(.line-comment-mark) {
   color: var(--dou-color-primary);
 }

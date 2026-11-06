@@ -2,8 +2,8 @@ import type { DashboardContent, DashboardWidgetContent } from '@ariadne/core'
 
 /**
  * The `props` each widget type of `@dou-ui/dashboard` reads, checked before a dashboard is
- * saved: the widgets read them as they are, so a prop of the wrong type breaks the widget
- * when it is shown. Kept to the types in `@dou-ui/dashboard`'s `widgets/types.ts`,
+ * saved: a widget treats a prop of the wrong type as unset, so the setting the agent meant
+ * would quietly be lost. Kept to the types in `@dou-ui/dashboard`'s `widgets/types.ts`,
  * `chart/types.ts` and `pivot/types.ts`.
  */
 
