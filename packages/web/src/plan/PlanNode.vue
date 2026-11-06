@@ -201,15 +201,6 @@ function lineOf(id: string): string | null {
   padding: 6px 12px;
 }
 
-/* A milestone marks a stage of the plan, a decision a fork in it: they read apart from tasks. */
-.plan-node-milestone {
-  border-inline-start: 3px solid var(--dou-color-text-tertiary);
-}
-
-.plan-node-decision {
-  border-inline-start: 3px dashed var(--dou-color-warning);
-}
-
 .plan-node-name {
   display: inline-flex;
   flex: 1;
