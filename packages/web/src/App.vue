@@ -14,7 +14,7 @@ import {
   useColorMode,
 } from 'dou-ui'
 import { SettingsIcon } from '@dou-ui/icons'
-import { defineAsyncComponent, onMounted, ref, watch, watchEffect } from 'vue'
+import { defineAsyncComponent, onMounted, provide, ref, watch, watchEffect } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import AutopilotSwitch from './components/AutopilotSwitch.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
@@ -25,12 +25,13 @@ import ProjectSource from './components/ProjectSource.vue'
 import ProjectUsage from './components/ProjectUsage.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
-import SidePanel from './components/SidePanel.vue'
+import SideLayout from './side/SideLayout.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, start, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
 import { useShortcuts } from './shortcuts'
+import { openSettingsKey } from './open-settings'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
@@ -44,6 +45,7 @@ function openSettings(tab: SettingsTab = 'models') {
   settingsTab.value = tab
   settingsOpen.value = true
 }
+provide(openSettingsKey, openSettings)
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -133,7 +135,7 @@ watchEffect(() => {
           <ProjectList />
         </DouLayoutAside>
         <DouLayoutMain class="main">
-          <!-- A thread opens on the right, so the coordinator stays in view beside it. -->
+          <!-- Threads open on the right, so the coordinator stays in view beside them. -->
           <DouSplitter v-model="split" :min="30" :max="80" class="split">
             <template #start>
               <div class="pane">
@@ -146,18 +148,12 @@ watchEffect(() => {
                   :turn="state.main.turn"
                   :path="state.main.path"
                 />
-                <ConversationPanel v-else @open-settings="openSettings" />
+                <ConversationPanel v-else />
               </div>
             </template>
             <template #end>
               <div class="pane">
-                <ConversationPanel
-                  v-if="state.threadId"
-                  :key="state.threadId"
-                  thread
-                  @open-settings="openSettings"
-                />
-                <SidePanel v-else />
+                <SideLayout />
               </div>
             </template>
           </DouSplitter>

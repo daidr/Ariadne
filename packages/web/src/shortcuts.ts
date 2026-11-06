@@ -3,11 +3,11 @@ import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
 import { locale } from './i18n'
 import { groupOf, sortThreads, threadGroups } from './stage'
-import { openThread, state } from './store'
+import { activeThreadId, openThread, state } from './store'
 import { threadSort } from './components/thread-list'
 
-/** The two conversations on screen: the coordinator's on the left, a thread's on the right. */
-export type PanelKind = 'coordinator' | 'thread'
+/** A conversation on screen: the coordinator's on the left, or a thread's by its id. */
+export type PanelKind = 'coordinator' | (string & {})
 
 /** What the keyboard can ask of a conversation on screen. */
 export interface PanelHandle {
@@ -40,20 +40,26 @@ export async function writeToThread(threadId: string) {
   await openThread(threadId)
   for (let frame = 0; frame < 30; frame++) {
     await new Promise(requestAnimationFrame)
-    const panel = panels.get('thread')
-    if (panel && state.threadId === threadId) {
-      lastPanel.value = 'thread'
+    const panel = panels.get(threadId)
+    if (panel) {
+      lastPanel.value = threadId
       panel.focus()
       return
     }
   }
 }
 
-/** The conversation focus is in, else the one last used, else whichever is on screen. */
+/**
+ * The conversation focus is in, else the one last used, else the thread in front on the
+ * right, else the coordinator's.
+ */
 function activePanel(): PanelHandle | null {
   const focused = document.activeElement?.closest<HTMLElement>('[data-panel]')?.dataset.panel
-  const kind = (focused as PanelKind | undefined) ?? lastPanel.value
-  return panels.get(kind) ?? panels.get('thread') ?? panels.get('coordinator') ?? null
+  const kind = focused ?? lastPanel.value
+  const front = activeThreadId.value
+  return (
+    panels.get(kind) ?? (front ? panels.get(front) : undefined) ?? panels.get('coordinator') ?? null
+  )
 }
 
 /** The project's threads in the order the thread list shows them, folded groups too. */
@@ -145,10 +151,11 @@ export function useShortcuts() {
       if (inField(event) && typesText(key)) return
       event.preventDefault()
       const step = key === keys().previousThread ? -1 : 1
-      const next = steppedThread(threadOrder(), state.threadId, step)
+      const next = steppedThread(threadOrder(), activeThreadId.value, step)
       if (!next) return
-      lastPanel.value = 'thread'
-      void openThread(next)
+      lastPanel.value = next
+      // Stepping through threads swaps the one in front instead of piling up tabs.
+      void openThread(next, { replace: true })
     },
     { allowInInput: true, preventDefault: false },
   )

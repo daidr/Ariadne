@@ -40,10 +40,19 @@ import {
   PlayIcon,
   RotateCwIcon,
   SquareStopIcon,
-  CloseIcon,
   MessagesIcon,
 } from '@dou-ui/icons'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  useTemplateRef,
+  watch,
+} from 'vue'
+import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
 import { clockText, count, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
@@ -51,6 +60,7 @@ import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
 import {
+  emptyConversation,
   loadEarlier,
   openMain,
   openThread,
@@ -85,9 +95,9 @@ import { isBare, sanitizeUrl } from '../markdown/links'
 import { lastPanel, registerPanel } from '../shortcuts'
 import { stepHistory, type Recall } from './input-history'
 
-/** `thread` shows the open thread's conversation; otherwise the coordinator's. */
-const props = defineProps<{ thread?: boolean }>()
-const emit = defineEmits<{ openSettings: [tab?: 'input'] }>()
+/** `threadId` shows that thread's conversation; otherwise the coordinator's. */
+const props = defineProps<{ threadId?: string }>()
+const openSettings = inject(openSettingsKey, () => {})
 
 const draft = ref('')
 const attachments = useAttachments(() => state.detail?.project.id ?? null)
@@ -132,13 +142,17 @@ function openAttachment(message: MessageView, file: ChatAttachment) {
   }
 }
 
-const view = computed(() => (props.thread ? state.thread : state.coordinator))
+// A thread opening shows nothing until its conversation is in.
+const blank = emptyConversation()
+const view = computed(() =>
+  props.threadId ? (state.threads[props.threadId] ?? blank) : state.coordinator,
+)
 const conversationId = computed(() =>
-  props.thread ? state.threadId : (state.detail?.project.coordinatorId ?? null),
+  props.threadId ? props.threadId : (state.detail?.project.coordinatorId ?? null),
 )
 const thread = computed(() =>
-  props.thread && state.threadId
-    ? (state.detail?.threads.find((item) => item.id === state.threadId) ?? null)
+  props.threadId
+    ? (state.detail?.threads.find((item) => item.id === props.threadId) ?? null)
     : null,
 )
 /** For a reviewing thread: the thread whose changes it reviews. */
@@ -346,7 +360,7 @@ function stop() {
 
 // The keyboard reaches this conversation: `/` puts the caret in its input, Escape stops it.
 const input = useTemplateRef<{ focus: () => void; textarea: HTMLTextAreaElement | null }>('input')
-const kind = props.thread ? 'thread' : 'coordinator'
+const kind = props.threadId ?? 'coordinator'
 let unregister: (() => void) | undefined
 onMounted(() => {
   unregister = registerPanel(kind, {
@@ -403,7 +417,7 @@ const commands = computed<ChatInputOption[]>(() => [
 ])
 function useSnippet(option: ChatInputOption) {
   if (option.value === MANAGE) {
-    emit('openSettings', 'input')
+    openSettings('input')
     return
   }
   const named = skills.pick(option)
@@ -487,18 +501,6 @@ watch(
     @pointerdown="lastPanel = kind"
   >
     <div v-if="thread" class="conversation-header">
-      <div class="conversation-title">
-        <DouText weight="medium" truncate>{{ thread.title }}</DouText>
-        <DouButton
-          variant="ghost"
-          size="sm"
-          :aria-label="t('thread.close')"
-          :title="t('thread.close')"
-          @click="openThread(null)"
-        >
-          <CloseIcon />
-        </DouButton>
-      </div>
       <div class="conversation-meta">
         <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
           {{ t('review.underway', { round: thread.review.rounds }) }}
@@ -843,8 +845,8 @@ watch(
       />
     </DouChatList>
     <div v-else class="conversation-empty">
-      <DouEmpty v-if="props.thread" :title="thread?.title" :description="t('thread.empty')" />
-      <GettingStarted v-else-if="!started" @open-settings="emit('openSettings')" />
+      <DouEmpty v-if="props.threadId" :title="thread?.title" :description="t('thread.empty')" />
+      <GettingStarted v-else-if="!started" @open-settings="openSettings()" />
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
@@ -884,7 +886,7 @@ watch(
     <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
       {{ tm(failure) }}
       <template #action>
-        <DouButton v-if="failure.key === 'error.noModel'" size="sm" @click="emit('openSettings')">
+        <DouButton v-if="failure.key === 'error.noModel'" size="sm" @click="openSettings()">
           {{ t('conversation.openSettings') }}
         </DouButton>
         <DouButton size="sm" variant="outline" @click="retry">
@@ -932,7 +934,7 @@ watch(
         :mentions="mentions.options.value"
         @command="useSnippet"
         @mention="mentions.pick"
-        :placeholder="props.thread ? t('thread.placeholder') : t('coordinator.placeholder')"
+        :placeholder="props.threadId ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         :can-submit="canSubmit"
         @submit="submit"
@@ -1032,20 +1034,12 @@ watch(
   border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
-.conversation-title,
 .conversation-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.conversation-title {
-  justify-content: space-between;
-}
-
-.conversation-meta {
-  flex-wrap: wrap;
 }
 
 .conversation-list {
