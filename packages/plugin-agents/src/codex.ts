@@ -66,8 +66,8 @@ export const codex: AgentKind<CodexSettings> = {
         type: 'string',
         title: { 'zh-CN': '命令', en: 'Command' },
         description: {
-          'zh-CN': '启动 Codex 的命令，用它自己登录的账号',
-          en: 'The command that starts Codex; it uses the account it is signed in with',
+          'zh-CN': '用它已登录的账号',
+          en: 'Uses the account it is signed in with',
         },
         default: 'codex',
       },

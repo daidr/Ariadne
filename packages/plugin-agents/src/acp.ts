@@ -45,8 +45,8 @@ export const acp: AgentKind<AcpSettings> = {
         type: 'string',
         title: { 'zh-CN': '命令', en: 'Command' },
         description: {
-          'zh-CN': '以 ACP 方式启动 agent 的命令，例如它的 --acp 模式',
-          en: 'The command that starts the agent in its ACP mode',
+          'zh-CN': '启动它的 ACP 模式的命令',
+          en: 'Starts the agent in its ACP mode',
         },
       },
     },

@@ -13,6 +13,7 @@ export function costText(cost: Partial<Record<Currency, number>> | undefined): s
       return new Intl.NumberFormat(locale.value, {
         style: 'currency',
         currency,
+        currencyDisplay: 'narrowSymbol',
         minimumFractionDigits: 2,
         maximumFractionDigits: amount < 1 ? 4 : 2,
       }).format(amount)
