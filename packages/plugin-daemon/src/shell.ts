@@ -1,23 +1,6 @@
-import {
-  CERT_NAME,
-  fingerprintOf,
-  frame,
-  pemOf,
-  PROTOCOL,
-  readFrame,
-  STDOUT,
-  type ClientMessage,
-  type DaemonMessage,
-} from '@ariadne/daemon/protocol'
-import type { ExecResult } from '@ariadne/plugin-sdk'
-import {
-  CONNECTION_FAILED,
-  DEFAULT_TIMEOUT_MS,
-  OutputText,
-  payload,
-  type RemoteShell,
-  type ShellRun,
-} from '@ariadne/remote'
+import { CERT_NAME, fingerprintOf, pemOf, PROTOCOL } from '@ariadne/daemon/protocol'
+import { RelayRefused, WebSocketLink, type Link } from '@ariadne/relay'
+import { RelayShell } from '@ariadne/remote'
 import { connect as tlsConnect } from 'node:tls'
 
 export interface DaemonTarget {
@@ -62,7 +45,7 @@ export function pinnedCertificate(target: DaemonTarget, timeoutMs = 15_000): Pro
       const der = new Uint8Array(raw)
       if (fingerprintOf(der) !== target.fingerprint) {
         return reject(
-          new DaemonError(
+          new RelayRefused(
             "the daemon's certificate does not match the pairing code: another machine answered, or the daemon made a new certificate (run ariadne-daemon pair there)",
           ),
         )
@@ -72,226 +55,80 @@ export function pinnedCertificate(target: DaemonTarget, timeoutMs = 15_000): Pro
   })
 }
 
-interface Pending {
-  /** Takes each piece of output as it arrives: kept (bounded unless whole) and handed on. */
-  output: (data: Uint8Array, stream: 'stdout' | 'stderr') => void
-  /** The output so far, decoding what is left. */
-  text: (stream: 'stdout' | 'stderr') => string
-  done: (result: { exitCode: number; failure?: string }) => void
-}
-
-interface Link {
-  ws: WebSocket
-  runs: Map<number, Pending>
-}
-
-const encoder = new TextEncoder()
-
 /**
- * Output kept as text, each stream decoded on its own as pieces arrive, bounded when the
- * caller clips it (a background command may print for hours), and handed on as it comes
- * when the caller asked to see it.
+ * A machine reached through its daemon over the network. One relay session over a
+ * WebSocket carries every call; a dropped connection is resumed, and a call that cannot
+ * reach the daemon, or loses it for good, ends with exit code 255 and the reason, like ssh.
  */
-function outputOf(options: ShellRun): Pick<Pending, 'output' | 'text'> {
-  const streams = {
-    stdout: { decoder: new TextDecoder(), kept: new OutputText(options.clip ?? false) },
-    stderr: { decoder: new TextDecoder(), kept: new OutputText(options.clip ?? false) },
-  }
-  return {
-    output: (data, stream) => {
-      const piece = streams[stream].decoder.decode(data, { stream: true })
-      streams[stream].kept.add(piece)
-      if (piece) options.onOutput?.(piece, stream)
-    },
-    text: (stream) => {
-      const rest = streams[stream].decoder.decode()
-      streams[stream].kept.add(rest)
-      if (rest) options.onOutput?.(rest, stream)
-      return streams[stream].kept.text()
-    },
-  }
-}
-
-/**
- * A machine reached through its daemon. One WebSocket carries every call and is opened
- * again when it closed. A call that cannot reach the daemon, or loses it, ends with exit
- * code 255 and the reason, like ssh.
- */
-export class DaemonShell implements RemoteShell {
-  readonly via = 'daemon'
-  readonly host: string
-  private link: Promise<Link> | null = null
-  /** The connection `link` resolved to, to tell whether a closed one is still the one in use. */
-  private current: Link | null = null
-  private nextId = 1
-  private idle: ReturnType<typeof setTimeout> | null = null
-
+export class DaemonShell extends RelayShell {
   constructor(
     private readonly target: DaemonTarget,
     /**
      * The connection closes once no call has used it for this long, like a shared SSH
      * connection: a source replaced or only checked does not keep one open.
      */
-    private readonly idleMs = 120_000,
+    idleMs = 120_000,
   ) {
-    this.host = target.host
+    super('daemon', target.host, () => openLink(target), idleMs)
   }
+}
 
-  /** Whether a connection is open now. */
-  get connected(): boolean {
-    return this.current !== null
-  }
+function base(target: DaemonTarget): string {
+  const host = target.host.includes(':') ? `[${target.host}]` : target.host
+  return `${host}:${target.port}`
+}
 
-  private get base(): string {
-    const host = this.target.host.includes(':') ? `[${this.target.host}]` : this.target.host
-    return `${host}:${this.target.port}`
-  }
-
-  /** Check the token and the version, then open the shell connection. */
-  private async open(): Promise<Link> {
-    const ca = await pinnedCertificate(this.target)
-    const tls = { ca, servername: CERT_NAME }
-    const headers = { authorization: `Bearer ${this.target.token}` }
-    let hello: Response
-    try {
-      hello = await fetch(`https://${this.base}/v1/hello`, {
-        headers,
-        tls,
-        signal: AbortSignal.timeout(15_000),
-      } as RequestInit)
-    } catch (error) {
-      throw new DaemonError(
-        `cannot reach the daemon: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-    if (hello.status === 401) throw new DaemonError('the daemon refused the pairing code')
-    if (hello.status === 429) {
-      throw new DaemonError('the daemon refuses this address for now: too many wrong pairing codes')
-    }
-    if (!hello.ok) throw new DaemonError(`the daemon answered ${hello.status}`)
-    const { protocol } = (await hello.json()) as { protocol?: number }
-    if (protocol !== PROTOCOL) {
-      throw new DaemonError(
-        `the daemon speaks protocol ${protocol}, Ariadne ${PROTOCOL}: run the same version on both sides`,
-      )
-    }
-    const ws = new WebSocket(`wss://${this.base}/v1/shell`, { headers, tls } as never)
-    ws.binaryType = 'arraybuffer'
-    const link: Link = { ws, runs: new Map() }
-    await new Promise<void>((resolve, reject) => {
-      ws.addEventListener('open', () => resolve(), { once: true })
-      ws.addEventListener(
-        'error',
-        () => reject(new DaemonError('the daemon closed the shell connection')),
-        { once: true },
-      )
-    })
-    ws.addEventListener('message', (event) => {
-      if (typeof event.data === 'string') {
-        const message = JSON.parse(event.data) as DaemonMessage
-        const run = link.runs.get(message.id)
-        if (!run) return
-        link.runs.delete(message.id)
-        run.done(
-          message.op === 'exit'
-            ? { exitCode: message.code }
-            : { exitCode: CONNECTION_FAILED, failure: message.message },
-        )
-        return
-      }
-      const parsed = readFrame(new Uint8Array(event.data as ArrayBuffer), true)
-      const run = parsed && link.runs.get(parsed.id)
-      if (!run) return
-      run.output(parsed.data, parsed.stream === STDOUT ? 'stdout' : 'stderr')
-    })
-    ws.addEventListener('close', () => {
-      if (this.current === link) {
-        this.link = null
-        this.current = null
-      }
-      for (const run of link.runs.values()) {
-        run.done({ exitCode: CONNECTION_FAILED, failure: 'the connection to the daemon was lost' })
-      }
-      link.runs.clear()
-    })
-    return link
-  }
-
-  private connection(): Promise<Link> {
-    this.link ??= this.open().then(
-      (link) => (this.current = link),
-      (error: unknown) => {
-        this.link = null
-        throw error
-      },
+/** Check the certificate, the token and the version, then open the relay connection. */
+export async function openLink(target: DaemonTarget): Promise<Link> {
+  const ca = await pinnedCertificate(target)
+  const tls = { ca, servername: CERT_NAME }
+  const headers = { authorization: `Bearer ${target.token}` }
+  let hello: Response
+  try {
+    hello = await fetch(`https://${base(target)}/v1/hello`, {
+      headers,
+      tls,
+      signal: AbortSignal.timeout(15_000),
+    } as RequestInit)
+  } catch (error) {
+    throw new DaemonError(
+      `cannot reach the daemon: ${error instanceof Error ? error.message : String(error)}`,
     )
-    return this.link
   }
-
-  async run(script: string, args: string[], options: ShellRun = {}): Promise<ExecResult> {
-    if (options.signal?.aborted) return { exitCode: 130, stdout: '', stderr: 'cancelled' }
-    let link: Link
-    try {
-      link = await this.connection()
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      return { exitCode: CONNECTION_FAILED, stdout: '', stderr: `daemon: ${reason}` }
-    }
-    if (this.idle) clearTimeout(this.idle)
-    this.idle = null
-    const id = this.nextId++
-    const send = (message: ClientMessage) => {
-      if (link.ws.readyState === WebSocket.OPEN) link.ws.send(JSON.stringify(message))
-    }
-    const finished = new Promise<{ exitCode: number; failure?: string; run: Pending }>(
-      (resolve) => {
-        const run: Pending = {
-          ...outputOf(options),
-          done: (result) => resolve({ ...result, run }),
-        }
-        link.runs.set(id, run)
-      },
+  if (hello.status === 401) throw new RelayRefused('the daemon refused the pairing code')
+  if (hello.status === 429) {
+    throw new RelayRefused('the daemon refuses this address for now: too many wrong pairing codes')
+  }
+  if (!hello.ok) throw new DaemonError(`the daemon answered ${hello.status}`)
+  const { protocol } = (await hello.json()) as { protocol?: number }
+  if (protocol !== PROTOCOL) {
+    throw new RelayRefused(
+      `the daemon speaks protocol ${protocol}, Ariadne ${PROTOCOL}: run the same version on both sides`,
     )
-    send({ op: 'run', id })
-    const input = payload(script, args) + (options.input ?? '')
-    link.ws.send(frame(id, encoder.encode(input)))
-    if (!options.hold) send({ op: 'end', id })
-    let ended = false
-    const end = () => {
-      if (ended) return
-      ended = true
-      // Closing the input ends a thread command's process group; the kill follows in case
-      // something holds on.
-      send({ op: 'end', id })
-      setTimeout(() => send({ op: 'kill', id }), 2000).unref?.()
-    }
-    const timer = setTimeout(end, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-    options.signal?.addEventListener('abort', end, { once: true })
-    try {
-      const { exitCode, failure, run } = await finished
-      const stdout = run.text('stdout')
-      const stderr = run.text('stderr') + (failure ? `daemon: ${failure}` : '')
-      return { exitCode, stdout, stderr }
-    } finally {
-      clearTimeout(timer)
-      options.signal?.removeEventListener('abort', end)
-      if (options.hold) send({ op: 'end', id })
-      if (!link.runs.size && link === this.current) {
-        if (this.idle) clearTimeout(this.idle)
-        this.idle = setTimeout(() => {
-          if (link === this.current && !link.runs.size) void this.dispose()
-        }, this.idleMs)
-        this.idle.unref?.()
-      }
-    }
   }
-
-  async dispose(): Promise<void> {
-    if (this.idle) clearTimeout(this.idle)
-    this.idle = null
-    const link = this.link
-    this.link = null
-    this.current = null
-    if (link) await link.then((open) => open.ws.close()).catch(() => {})
-  }
+  const ws = new WebSocket(`wss://${base(target)}/v2/relay`, { headers, tls } as never)
+  await new Promise<void>((resolve, reject) => {
+    // A daemon that took the connection but never answers would hold every call waiting.
+    const timer = setTimeout(() => {
+      ws.close()
+      reject(new DaemonError('connecting to the daemon timed out'))
+    }, 15_000)
+    ws.addEventListener(
+      'open',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+    ws.addEventListener(
+      'error',
+      () => {
+        clearTimeout(timer)
+        reject(new DaemonError('the daemon closed the connection'))
+      },
+      { once: true },
+    )
+  })
+  return new WebSocketLink(ws)
 }

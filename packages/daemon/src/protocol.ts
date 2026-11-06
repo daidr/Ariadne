@@ -1,21 +1,25 @@
 /**
- * How Ariadne and the daemon talk. Ariadne connects; the daemon only answers. Every request
- * carries `Authorization: Bearer <token>`, over TLS with the daemon's own certificate, which
- * Ariadne pins by its fingerprint.
+ * How Ariadne and the daemon talk. Ariadne connects; the daemon only answers.
+ *
+ * Over the network every request carries `Authorization: Bearer <token>`, over TLS with the
+ * daemon's own certificate, which Ariadne pins by its fingerprint:
  *
  * - `GET /v1/hello` answers `{ protocol }`, so a wrong token, a blocked address or a daemon
- *   of another version is told apart before the shell connection opens.
- * - `GET /v1/shell` upgrades to a WebSocket that carries any number of runs at once. Each
- *   run is `bash --norc --noprofile -s` on the daemon's machine, fed what Ariadne sends.
+ *   of another version is told apart before the relay connection opens. Its path stays the
+ *   same across versions so that any two versions can tell each other apart.
+ * - `GET /v2/relay` upgrades to a WebSocket that carries a relay session.
  *
- * Text frames are JSON: `run`, `end` (its input is done) and `kill` from Ariadne; `exit`
- * and `fail` (it could not start) from the daemon. Binary frames are a run's bytes: four
- * bytes of run id, then for Ariadne's frames the input, for the daemon's one byte of
- * stream (1 output, 2 error output) and the output.
+ * Through SSH, `ariadne-daemon --stdio` speaks the same relay session on its standard input
+ * and output; ssh has already decided who may connect.
+ *
+ * Each command is an `exec` channel: `bash --norc --noprofile -s` on the daemon's machine.
+ * Ariadne sends its input as data on stream 0 and `{ op: 'end' }` or `{ op: 'kill' }` as
+ * control messages; the daemon sends output on streams 1 and 2 and closes the channel with
+ * `{ code }` when bash exits, or `{ error }` when it could not start.
  */
 
 /** Changes whenever the two sides would no longer understand each other. */
-export const PROTOCOL = 1
+export const PROTOCOL = 2
 
 export const DEFAULT_PORT = 7429
 
@@ -25,34 +29,12 @@ export const CERT_NAME = 'ariadne-daemon'
 /** The command line every run starts, the same one SSH sources hand the login shell. */
 export const RUN_ARGV = ['bash', '--norc', '--noprofile', '-s']
 
-export type ClientMessage =
-  { op: 'run'; id: number } | { op: 'end'; id: number } | { op: 'kill'; id: number }
-
-export type DaemonMessage =
-  { op: 'exit'; id: number; code: number } | { op: 'fail'; id: number; message: string }
-
+export const EXEC = 'exec'
+export const STDIN = 0
 export const STDOUT = 1
 export const STDERR = 2
 
-/** A binary frame: the run id, an optional stream byte, then the bytes. */
-export function frame(id: number, data: Uint8Array, stream?: number): Uint8Array<ArrayBuffer> {
-  const head = stream === undefined ? 4 : 5
-  const out = new Uint8Array(new ArrayBuffer(head + data.length))
-  new DataView(out.buffer).setUint32(0, id)
-  if (stream !== undefined) out[4] = stream
-  out.set(data, head)
-  return out
-}
-
-export function readFrame(
-  bytes: Uint8Array,
-  withStream: boolean,
-): { id: number; stream: number; data: Uint8Array } | null {
-  const head = withStream ? 5 : 4
-  if (bytes.length < head) return null
-  const id = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0)
-  return { id, stream: withStream ? bytes[4]! : 0, data: bytes.subarray(head) }
-}
+export type ExecControl = { op: 'end' } | { op: 'kill' }
 
 /**
  * What the user pastes into Ariadne: the token, then the certificate's fingerprint, joined

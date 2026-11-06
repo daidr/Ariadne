@@ -664,7 +664,7 @@ export const zhCN = {
   'project.mcpNone': '不用',
   'project.mcpUsed': 'MCP：{names}',
   'cli.daemon.usage':
-    '用法：\n  ariadne-daemon [--listen 地址:端口] [--hide 路径]... [--no-sandbox]\n  ariadne-daemon pair      换一个新的配对码，旧的立即失效\n\n默认只监听 127.0.0.1:{port}。',
+    '用法：\n  ariadne-daemon [--listen 地址:端口] [--hide 路径]... [--no-sandbox]\n  ariadne-daemon pair      换一个新的配对码，旧的立即失效\n  ariadne-daemon --stdio   不监听端口，用标准输入输出和 Ariadne 通信（Ariadne 经 SSH 连接时自动使用）\n\n默认只监听 127.0.0.1:{port}。',
   'cli.daemon.windows': 'daemon 暂不支持 Windows',
   'cli.daemon.noOpenssl': '需要 openssl 来生成证书',
   'cli.daemon.certificateFailed': '生成证书失败：{reason}',

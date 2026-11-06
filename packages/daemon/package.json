@@ -18,6 +18,7 @@
     "@ariadne/i18n": "workspace:*",
     "@ariadne/plugin-local": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
+    "@ariadne/relay": "workspace:*",
     "@ariadne/sandbox": "workspace:*"
   }
 }

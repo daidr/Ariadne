@@ -689,7 +689,7 @@ export const en: Record<MessageKey, string> = {
   'project.mcpNone': 'None',
   'project.mcpUsed': 'MCP: {names}',
   'cli.daemon.usage':
-    'Usage:\n  ariadne-daemon [--listen host:port] [--hide path]... [--no-sandbox]\n  ariadne-daemon pair      make a new pairing code; the old one stops working at once\n\nListens only on 127.0.0.1:{port} by default.',
+    'Usage:\n  ariadne-daemon [--listen host:port] [--hide path]... [--no-sandbox]\n  ariadne-daemon pair      make a new pairing code; the old one stops working at once\n  ariadne-daemon --stdio   talk to Ariadne on standard input and output instead of a port (Ariadne uses it when it connects through SSH)\n\nListens only on 127.0.0.1:{port} by default.',
   'cli.daemon.windows': 'The daemon does not run on Windows yet',
   'cli.daemon.noOpenssl': 'openssl is needed to make the certificate',
   'cli.daemon.certificateFailed': 'Could not make the certificate: {reason}',

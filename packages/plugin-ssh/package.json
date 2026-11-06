@@ -7,7 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@ariadne/plugin-local": "workspace:*",
     "@ariadne/plugin-sdk": "workspace:*",
+    "@ariadne/relay": "workspace:*",
     "@ariadne/remote": "workspace:*"
   }
 }
