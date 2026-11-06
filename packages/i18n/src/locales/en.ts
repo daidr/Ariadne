@@ -156,11 +156,7 @@ export const en: Record<MessageKey, string> = {
   'plan.removeConfirm': 'Remove "{title}"?',
   'plan.removeConfirmThreads':
     'Remove "{title}"? Its {count} threads will stop. You can undo this from the history.',
-  'plan.mark.added': 'Added',
-  'plan.mark.removed': 'Removed',
-  'plan.mark.changed': 'Changed',
   'plan.mark.fresh': 'Just changed',
-  'plan.mark.proposed': 'Needs your OK',
   'plan.waiting': 'Needs you',
   'plan.moreThreads': '{count} more',
   'plan.start': 'Start a thread on it',

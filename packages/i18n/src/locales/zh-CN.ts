@@ -151,11 +151,7 @@ export const zhCN = {
   'plan.removeConfirm': '删除「{title}」？',
   'plan.removeConfirmThreads':
     '删除「{title}」？上面的 {count} 个讨论串会暂停。可以在修改记录里撤销。',
-  'plan.mark.added': '新增',
-  'plan.mark.removed': '将删除',
-  'plan.mark.changed': '将修改',
   'plan.mark.fresh': '刚改过',
-  'plan.mark.proposed': '待确认',
   'plan.waiting': '等你',
   'plan.moreThreads': '还有 {count} 个',
   'plan.start': '开一个讨论串做它',
