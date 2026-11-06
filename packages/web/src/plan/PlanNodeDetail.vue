@@ -259,7 +259,7 @@ const removeQuestion = computed(() => {
     <template v-else>
       <header class="node-detail-head">
         <div class="node-detail-title">
-          <PlanStatusIcon :status="node.status" />
+          <span class="node-detail-lead"><PlanStatusIcon :status="node.status" /></span>
           <DouText as="h2" size="lg" weight="medium" class="node-detail-title-text">
             {{ node.title }}
           </DouText>
@@ -322,7 +322,7 @@ const removeQuestion = computed(() => {
             class="node-thread-open"
             @click="(event) => openThreadFrom(event, thread.id)"
           >
-            <StageIcon :stage="thread.stage" class="node-thread-icon" />
+            <span class="node-thread-lead"><StageIcon :stage="thread.stage" /></span>
             <span class="node-thread-text">
               <DouText size="sm" :truncate="2" :title="thread.title">{{ thread.title }}</DouText>
               <ThreadHeadline :stage="thread.stage" :headline="thread.lastHeadline" />
@@ -462,13 +462,9 @@ const removeQuestion = computed(() => {
   gap: 6px;
 }
 
-/* The icon sits on the first line of a title that wraps. */
-.node-detail-title > :first-child {
-  margin-top: 3px;
-}
-
 .node-detail-title-text {
   flex: 1;
+  align-self: first baseline;
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
@@ -476,7 +472,7 @@ const removeQuestion = computed(() => {
 
 .node-detail-kind {
   flex: none;
-  margin-top: 2px;
+  align-self: first baseline;
 }
 
 .node-detail-text {
@@ -550,11 +546,6 @@ const removeQuestion = computed(() => {
   outline-offset: 2px;
 }
 
-/* On the title's first line. */
-.node-thread-icon {
-  margin-top: 2px;
-}
-
 .node-thread-text {
   display: flex;
   flex-direction: column;
@@ -593,5 +584,38 @@ const removeQuestion = computed(() => {
 .node-detail-link {
   display: flex;
   gap: 6px;
+}
+
+/*
+ * A status icon in front of a title that may wrap sits on the title's first line, centred
+ * on its letters: its box is one cap tall in the title's font and shares the title's first
+ * baseline, so it covers the capitals, and the icon centres on that. A fixed offset from the
+ * line box's top cannot do this, since the line box is the font's ascent and descent, and
+ * Windows' Segoe UI and Microsoft YaHei leave much more room above the letters than other
+ * fonts: the icon sat 2 to 3 pixels high there. Layout containment keeps the icon's own
+ * box from lending the lead a baseline, so the lead's bottom edge is its baseline.
+ */
+.node-detail-lead,
+.node-thread-lead {
+  display: flex;
+  flex: none;
+  align-self: first baseline;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 1cap;
+  contain: layout;
+}
+
+.node-detail-lead {
+  font-size: var(--dou-font-size-lg);
+}
+
+.node-thread-lead {
+  font-size: var(--dou-font-size-sm);
+}
+
+.node-thread-text {
+  align-self: first baseline;
 }
 </style>

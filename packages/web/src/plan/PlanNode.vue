@@ -213,7 +213,7 @@ function lineOf(id: string): string | null {
 .plan-node-name {
   display: inline-flex;
   flex: 1;
-  align-items: flex-start;
+  align-items: first baseline;
   gap: 4px;
   min-width: 0;
 }
@@ -223,13 +223,25 @@ function lineOf(id: string): string | null {
   display: inline-flex;
   flex: none;
   align-items: center;
-  height: 1.5em;
   font-size: 14px;
+}
+
+/*
+ * The kind icon and the status icons sit on the title's first line, centred on its letters:
+ * each box is one cap tall and shares the title's first baseline. A box as tall as an
+ * assumed line height centres on the line box instead, which Windows' fonts fill with more
+ * room above the letters than below, so the icons sat high there. Layout containment keeps
+ * the icons inside from lending the box a baseline of their own.
+ */
+.plan-node-kind,
+.plan-node-head > .plan-node-tags {
+  height: 1cap;
+  contain: layout;
 }
 
 .plan-node-head {
   display: flex;
-  align-items: flex-start;
+  align-items: first baseline;
   justify-content: space-between;
   gap: 8px;
 }
@@ -251,7 +263,6 @@ function lineOf(id: string): string | null {
 .plan-node-tags {
   display: inline-flex;
   align-items: center;
-  min-height: 1.5em;
   flex-shrink: 0;
   gap: 4px;
 }

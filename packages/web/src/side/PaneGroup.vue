@@ -244,10 +244,13 @@ function bring(key: PaneKey) {
   min-width: 0;
 }
 
+/* Trimmed to its letters, so the stage icon centres on them; see ThreadRow. Clipped
+   sideways only: CJK letters reach below the trimmed baseline. */
 .pane-thread-title {
   max-width: 16em;
-  overflow: hidden;
+  overflow-x: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-box: trim-both cap alphabetic;
 }
 </style>
