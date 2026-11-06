@@ -153,7 +153,14 @@ export class RelayClient {
       this.session = session
     }
     const current = session
-    current.attach(link, welcome.received ?? 0)
+    try {
+      current.attach(link, welcome.received ?? 0)
+    } catch (error) {
+      // The other side claims frames this side never sent: nothing to resume safely.
+      link.close()
+      current.lose(error instanceof Error ? error.message : String(error))
+      throw error
+    }
     const receive = (next: Uint8Array) => {
       try {
         current.receive(next)

@@ -108,10 +108,25 @@ export async function openLink(target: DaemonTarget): Promise<Link> {
   }
   const ws = new WebSocket(`wss://${base(target)}/v2/relay`, { headers, tls } as never)
   await new Promise<void>((resolve, reject) => {
-    ws.addEventListener('open', () => resolve(), { once: true })
+    // A daemon that took the connection but never answers would hold every call waiting.
+    const timer = setTimeout(() => {
+      ws.close()
+      reject(new DaemonError('connecting to the daemon timed out'))
+    }, 15_000)
+    ws.addEventListener(
+      'open',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
     ws.addEventListener(
       'error',
-      () => reject(new DaemonError('the daemon closed the connection')),
+      () => {
+        clearTimeout(timer)
+        reject(new DaemonError('the daemon closed the connection'))
+      },
       { once: true },
     )
   })

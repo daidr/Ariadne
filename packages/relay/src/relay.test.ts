@@ -30,9 +30,11 @@ function pair(): [Link, Link] {
 /** An echo server: every channel sends back what it gets, on stream + 1. */
 function setup(options: { keepMs?: number; resumeMs?: number } = {}) {
   const ends: ChannelEnd[] = []
+  const sessionIds: string[] = []
   const server = new RelayServer({
     keepMs: options.keepMs,
-    onChannel(channel) {
+    onChannel(channel, session) {
+      sessionIds.push(session.id)
       channel.onData = (stream, bytes) => void channel.write(bytes.slice(), stream + 1)
       channel.onControl = (message) => {
         if ((message as { op?: string }).op === 'bye') channel.close({ code: 3 })
@@ -59,6 +61,7 @@ function setup(options: { keepMs?: number; resumeMs?: number } = {}) {
     server,
     client,
     ends,
+    sessionIds,
     serverLinks,
     connects: () => connects,
     refuse: (value: boolean) => (refuse = value),
@@ -191,6 +194,24 @@ describe('relay', () => {
     server.close()
     serverLinks.at(-1)!.close()
     expect((await got.closed).error).toBeTruthy()
+  })
+
+  test('a greeting that claims frames never sent is refused and leaves the session alone', async () => {
+    const { client, server, sessionIds } = setup()
+    const channel = await client.open('echo')
+    const got = collect(channel)
+    await until(() => sessionIds.length === 1)
+    const [mine, theirs] = pair()
+    void server.accept(theirs)
+    const answer = new Promise<Uint8Array>((resolve) =>
+      mine.listen({ frame: resolve, close: () => {} }),
+    )
+    mine.send(encode(HELLO, [], pack({ version: 1, session: sessionIds[0], received: 1e9 })))
+    expect(unpack<{ error: string }>((await answer).subarray(1)).error).toContain('never sent')
+    // The real client's link is still the session's, and still works.
+    await channel.write(new Uint8Array([1, 2, 3]))
+    await until(() => got.length() === 3)
+    client.close()
   })
 
   test('another relay version is refused with a reason', async () => {

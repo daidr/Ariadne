@@ -199,6 +199,11 @@ export class Session {
     return this.link !== null && this.link.buffered < HIGH_WATER
   }
 
+  /** How many reliable frames this side has sent; the other side cannot have more. */
+  get sentCount(): number {
+    return this.sent
+  }
+
   /** How many reliable frames have arrived, for the other side to resume from. */
   get receivedCount(): number {
     return this.received

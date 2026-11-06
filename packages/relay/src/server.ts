@@ -54,6 +54,15 @@ export class RelayServer {
     }
     let entry = hello.session ? this.sessions.get(hello.session) : undefined
     const resumed = entry !== undefined && !entry.session.lost
+    const peerReceived = resumed ? (hello.received ?? 0) : 0
+    // Checked before the session is touched: a bad count must not end it for the real client.
+    if (
+      !Number.isSafeInteger(peerReceived) ||
+      peerReceived < 0 ||
+      (entry && resumed && peerReceived > entry.session.sentCount)
+    ) {
+      return refuse('the greeting claims frames that were never sent')
+    }
     if (!entry || !resumed) {
       const session = new Session(crypto.randomUUID(), false)
       session.onChannel = (channel) => this.options.onChannel(channel, session)
@@ -72,7 +81,7 @@ export class RelayServer {
         pack({ session: session.id, received: session.receivedCount, resumed } satisfies Welcome),
       ),
     )
-    session.attach(link, resumed ? (hello.received ?? 0) : 0)
+    session.attach(link, peerReceived)
     const receive = (frame: Uint8Array) => {
       try {
         session.receive(frame)
