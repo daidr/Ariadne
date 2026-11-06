@@ -54,7 +54,7 @@ import {
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
-import { clockText, count, t, tm } from '../i18n'
+import { clockText, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
@@ -604,14 +604,6 @@ watch(
           </DouButton>
         </template>
         <div class="conversation-tools">
-          <DouText
-            v-if="thread.usage.input || thread.usage.output"
-            variant="tertiary"
-            size="sm"
-            :title="t('usage.detail', { input: thread.usage.input, output: thread.usage.output })"
-          >
-            {{ t('usage.short', { value: count(thread.usage.input + thread.usage.output) }) }}
-          </DouText>
           <!-- Pausing the whole thread is rarer than stopping a turn: it sits in the menu. -->
           <DouPopover
             v-model:open="stopOpen"
