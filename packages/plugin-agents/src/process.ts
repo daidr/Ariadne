@@ -115,6 +115,14 @@ export class AgentProcess {
     void this.readStderr(proc.stderr)
     void this.readLines(proc.stdout, onLine)
     void proc.exited.then((code) => {
+      // Whatever it started dies with it, whoever comes to close it.
+      if (!windows) {
+        try {
+          process.kill(-proc.pid, 'SIGKILL')
+        } catch {
+          // The group is already gone.
+        }
+      }
       this.release()
       if (this.closing) return
       const tail = this.stderrTail().split('\n').slice(-5).join('\n')

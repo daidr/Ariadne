@@ -88,7 +88,7 @@
 外部 agent 也可以当提供方（`@ariadne/plugin-agents`）：Claude Code（`claude -p` 的流式 JSON）、Codex（`codex app-server`）和任何支持 ACP（Agent Client Protocol）的 agent，用它们自己登录的账号，所以订阅账号也能用。它们自带 agent 循环，Ariadne 的做法是只把对话自己的工具交给它，循环仍是 Ariadne 的：
 
 - 工具：Claude Code 和 ACP agent 通过本机的 MCP 端点（`127.0.0.1` 随机端口，路径里带每个会话自己的随机令牌）拿到这一步的工具；ACP agent 不支持 HTTP 的 MCP 时，用一个转发到这个端点的本地小程序（`mcp-stdio.ts`）。Codex 用 app-server 的客户端工具（`dynamicTools`，它调用时回来问客户端）。工具调用由 agent 发起后挂起，作为这一步的 `tool-call` 交给 agent 循环，照常执行、记事件、进追踪、走沙箱和确认，结果随下一次请求还给 agent。一步在 agent 发起调用之后安静 150 毫秒时结束，同时发起的调用算同一步。
-- 它自带的工具全部关掉：Claude Code 用 `--tools ""`，只放行这组 MCP 工具，权限模式 `dontAsk`，不读用户的设置、hooks 和斜杠命令；Codex 关掉 shell、看图、联网搜索等功能和用户自己的 MCP 服务，只读沙箱，要执行命令或改文件的审批一律拒绝；ACP agent 拿不到文件系统和终端，权限请求只放行这组工具的，其余拒绝。agent 进程在和讨论串命令一样的沙箱里跑（看不到 Ariadne 的数据目录），工作目录是插件数据目录下每个会话自己的空目录。
+- 它自带的工具：Claude Code 和 Codex 全部关掉。Claude Code 用 `--tools ""`，只放行这组 MCP 工具，权限模式 `dontAsk`，不读用户的设置、hooks 和斜杠命令；Codex 关掉 shell、看图、联网搜索等功能和用户自己的 MCP 服务，只读沙箱，要执行命令或改文件的审批一律拒绝；ACP 协议没有办法关掉 agent 自带的工具：它拿不到 Ariadne 的文件系统和终端，权限请求只在工具名正好是这组工具之一时放行（`mcp__ariadne__<name>`、`ariadne/<name>`、`<name> (ariadne MCP Server)` 等写法），其余拒绝；不请求权限就直接执行的自带工具（很多 agent 读文件不问）只受沙箱约束。agent 进程在和讨论串命令一样的沙箱里跑（看不到 Ariadne 的数据目录），工作目录是插件数据目录下每个会话自己的空目录。
 - 会话：外部进程按对话（请求的 `conversation`，子调研各有自己的）保活。下一次请求如果是在它看过的内容后面接着（比较消息的指纹：用户消息比开头、回复比调用、结果比调用 id，所以清理旧结果和图片过期不影响），只把新的部分交给它：它在等的调用结果，或者回答之后来的新消息；它在等结果时来的消息附在最后一个结果后面。系统指令变了，把新的指令随下一次输入交给它。接不上（历史被总结、服务重启、换了模型或工具）就关掉旧进程，开新会话，把整段记录写成一份交给它。闲置 20 分钟的会话关掉，每种最多同时 16 个。没有 `conversation` 的请求（摘要）用完即关。
 - 系统指令：Claude Code 用 `--system-prompt-file`，Codex 用 `baseInstructions`，ACP 没有系统指令，放在第一条消息开头。
 - 用量：Claude Code 按消息 id 累计、回合结束时按 `result` 的总数补齐，它报的花费（`total_cost_usd`）直接记下；Codex 按 `thread/tokenUsage/updated` 的累计值求差；ACP 用 `session/prompt` 返回的 `usage`（有的话）。

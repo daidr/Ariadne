@@ -21,12 +21,39 @@ interface PermissionOption {
   kind?: string
 }
 
+/** Fields of a tool call's input where agents put the name of the tool being called. */
+const NAME_FIELDS = ['tool', 'toolName', 'tool_name', 'name']
+
+/** The ways agents spell one of the conversation's tools, lowercased. */
+function spellings(name: string): string[] {
+  const lower = name.toLowerCase()
+  return [
+    `mcp__${SERVER_NAME}__${lower}`,
+    `${SERVER_NAME}__${lower}`,
+    `${SERVER_NAME}/${lower}`,
+    `${SERVER_NAME}.${lower}`,
+    `${lower} (${SERVER_NAME} mcp server)`,
+  ]
+}
+
 /**
- * Whether a permission the agent asks for is for one of the conversation's tools. Those
- * Ariadne runs and confirms itself; anything else is the agent's own tool and is refused.
+ * Whether a permission the agent asks for is for one of the conversation's tools (`tools`,
+ * their names). Those Ariadne runs and confirms itself; anything else is the agent's own
+ * tool and is refused. Only the tool call's title and the name fields of its input count,
+ * each as a whole, so a path or command that happens to say "ariadne" proves nothing.
  */
-export function forOwnTools(toolCall: unknown): boolean {
-  return new RegExp(`\\b${SERVER_NAME}\\b`, 'i').test(JSON.stringify(toolCall ?? {}))
+export function forOwnTools(toolCall: unknown, tools: readonly string[]): boolean {
+  if (!toolCall || typeof toolCall !== 'object' || !tools.length) return false
+  const call = toolCall as { title?: unknown; rawInput?: unknown }
+  const known = new Set(tools.flatMap(spellings))
+  const candidates: unknown[] = [call.title]
+  if (call.rawInput && typeof call.rawInput === 'object') {
+    const input = call.rawInput as Record<string, unknown>
+    candidates.push(...NAME_FIELDS.map((field) => input[field]))
+  }
+  return candidates.some(
+    (value) => typeof value === 'string' && known.has(value.trim().toLowerCase()),
+  )
 }
 
 /**
@@ -84,7 +111,10 @@ export const acp: AgentKind<AcpSettings> = {
         const params = (raw ?? {}) as { toolCall?: unknown; options?: PermissionOption[] }
         if (method === 'session/request_permission') {
           const options = params.options ?? []
-          const own = forOwnTools(params.toolCall)
+          const own = forOwnTools(
+            params.toolCall,
+            ctx.tools.specs.map((tool) => tool.name),
+          )
           const pick = own
             ? (options.find((o) => o.kind === 'allow_once') ??
               options.find((o) => o.kind?.startsWith('allow')))

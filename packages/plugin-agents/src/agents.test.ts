@@ -299,8 +299,46 @@ describe('acp', () => {
       { model: 'fast' },
     )
     expect(result.calls).toHaveLength(1)
-    expect(forOwnTools({ title: 'lookup (ariadne MCP Server)' })).toBe(true)
-    expect(forOwnTools({ title: 'Run shell command: ls' })).toBe(false)
+  })
+
+  test("a permission counts as for the conversation's tools only by the tool's exact name", () => {
+    const tools = ['lookup', 'read_file']
+    for (const title of [
+      'lookup (ariadne MCP Server)',
+      'mcp__ariadne__read_file',
+      'ariadne/lookup',
+      'ariadne__read_file',
+    ]) {
+      expect(forOwnTools({ title }, tools)).toBe(true)
+    }
+    expect(forOwnTools({ title: 'Tool', rawInput: { tool: 'mcp__ariadne__lookup' } }, tools)).toBe(
+      true,
+    )
+    // The agent's own tools, even when their paths or commands say "ariadne".
+    expect(forOwnTools({ title: 'Run shell command: ls' }, tools)).toBe(false)
+    expect(
+      forOwnTools(
+        {
+          kind: 'execute',
+          title: 'ls',
+          rawInput: { command: 'ls', cwd: '/home/u/.ariadne/plugins/agents/sessions/x' },
+        },
+        tools,
+      ),
+    ).toBe(false)
+    expect(
+      forOwnTools(
+        {
+          kind: 'edit',
+          title: 'Edit /home/u/code/ariadne/a.ts',
+          locations: [{ path: '/home/u/code/ariadne/a.ts' }],
+        },
+        tools,
+      ),
+    ).toBe(false)
+    // Not one of this conversation's tools, though it is spelled like one.
+    expect(forOwnTools({ title: 'mcp__ariadne__shell' }, tools)).toBe(false)
+    expect(forOwnTools({ title: 'mcp__ariadne__lookup' }, [])).toBe(false)
   })
 
   test('the first message carries the instructions; images go along', async () => {
