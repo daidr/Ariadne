@@ -23,16 +23,12 @@ const props = defineProps<{ data: PlanNodeData }>()
 const SHOWN = 2
 const shown = computed(() => props.data.threads.slice(0, SHOWN))
 const waiting = computed(() => props.data.status === 'waiting')
-/** What a change does or did to the node, as a dot named on hover. */
-const mark = computed(() => {
-  if (props.data.mark) {
-    const tones = { added: 'success', removed: 'danger', changed: 'primary' } as const
-    return { label: t(`plan.mark.${props.data.mark}`), tone: tones[props.data.mark] }
-  }
-  if (props.data.proposed) return { label: t('plan.mark.proposed'), tone: 'warning' as const }
-  if (props.data.fresh) return { label: t('plan.mark.fresh'), tone: 'primary' as const }
-  return null
-})
+/**
+ * A node the coordinator changed and the user has not looked at yet, as a dot named on
+ * hover. Proposed and previewed nodes say so with their dashed outline, which the dot in
+ * the corner would sit on.
+ */
+const fresh = computed(() => props.data.fresh && !props.data.mark && !props.data.proposed)
 // Most nodes are tasks: only the other kinds say what they are.
 const kindIcon = computed(() =>
   props.data.kind === 'milestone' ? FlagIcon : props.data.kind === 'decision' ? SignpostIcon : null,
@@ -63,9 +59,9 @@ function lineOf(id: string): string | null {
     }"
   >
     <!-- In the corner, out of the layout: a node keeps its shape when the dot comes or goes. -->
-    <DouTooltip v-if="mark" :content="mark.label">
-      <span class="plan-node-mark" role="img" :aria-label="mark.label">
-        <DouBadge dot :tone="mark.tone" />
+    <DouTooltip v-if="fresh" :content="t('plan.mark.fresh')">
+      <span class="plan-node-mark" role="img" :aria-label="t('plan.mark.fresh')">
+        <DouBadge dot tone="primary" />
       </span>
     </DouTooltip>
     <div class="plan-node-head">
