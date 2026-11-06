@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import type { UsageTotals } from '@ariadne/core'
-import {
-  compactNumber,
-  contextUsage,
-  DouButton,
-  DouChatContextMeter,
-  DouPopover,
-  DouTooltip,
-} from 'dou-ui'
+import { contextUsage, DouButton, DouChatContextMeter, DouPopover, DouTooltip } from 'dou-ui'
 import { computed, ref } from 'vue'
 import { count, locale, t } from '../i18n'
 import UsageBreakdown from './UsageBreakdown.vue'
@@ -32,8 +25,8 @@ const meter = computed(() => contextUsage(props.used, props.total))
 // hint names that line, so the number does not read as a wrong context size.
 const line = computed(() =>
   t('context.untilCompact', {
-    used: compactNumber(meter.value.used),
-    total: compactNumber(meter.value.total),
+    used: count(meter.value.used),
+    total: count(meter.value.total),
   }),
 )
 // In the popover, written like the rest of its numbers.
