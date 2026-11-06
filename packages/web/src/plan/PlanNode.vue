@@ -62,6 +62,12 @@ function lineOf(id: string): string | null {
       [`plan-node-${data.kind}`]: true,
     }"
   >
+    <!-- In the corner, out of the layout: a node keeps its shape when the dot comes or goes. -->
+    <DouTooltip v-if="mark" :content="mark.label">
+      <span class="plan-node-mark" role="img" :aria-label="mark.label">
+        <DouBadge dot :tone="mark.tone" />
+      </span>
+    </DouTooltip>
     <div class="plan-node-head">
       <span class="plan-node-name">
         <DouTooltip v-if="kindIcon" :content="t(`plan.kind.${data.kind}`)">
@@ -83,11 +89,6 @@ function lineOf(id: string): string | null {
           <DouText tone="warning" class="plan-node-ahead" role="img" :aria-label="ahead">
             <AlertTriangleIcon aria-hidden="true" />
           </DouText>
-        </DouTooltip>
-        <DouTooltip v-if="mark" :content="mark.label">
-          <span class="plan-node-mark" role="img" :aria-label="mark.label">
-            <DouBadge dot :tone="mark.tone" />
-          </span>
         </DouTooltip>
         <PlanStatusIcon :status="data.status" />
       </span>
@@ -156,6 +157,7 @@ function lineOf(id: string): string | null {
 
 <style scoped>
 .plan-node {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -259,11 +261,10 @@ function lineOf(id: string): string | null {
 }
 
 .plan-node-mark {
+  position: absolute;
+  top: -3px;
+  right: -3px;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
 }
 
 .plan-node-title {

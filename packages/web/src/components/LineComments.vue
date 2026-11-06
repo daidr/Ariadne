@@ -53,6 +53,8 @@ const open = (path: string) => openMain({ kind: 'changes', threadId: props.threa
 }
 
 .line-comment-quote {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--dou-color-border);
   font-family: var(--dou-font-family-mono);
   white-space: pre;
   overflow: hidden;
