@@ -349,7 +349,7 @@ export const zhCN = {
   'project.delete.title': '删除项目「{name}」？',
   'project.delete.body':
     '其中的讨论串、工作区、产物和记忆会一并删除，无法恢复。源码目录和仓库会保留。',
-  'project.delete.working': '有 {count} 个讨论串正在工作，会先停下。',
+  'project.delete.working': '有 {count} 个讨论串正在工作，会先停止。',
   'project.delete.confirm': '删除',
   'error.unauthorized': '缺少或错误的访问令牌',
   'error.notFound': '找不到 {what}',
@@ -369,9 +369,9 @@ export const zhCN = {
   'error.modelRequest': '模型请求失败：{detail}',
   'error.modelRequestImages':
     '模型请求失败：{detail}。这次请求带了图片，如果这个模型看不了图片，在模型设置里关掉“看图片”',
-  'error.repeating': '同样的调用重复了 {count} 次，结果都没变，已停下',
+  'error.repeating': '同样的调用重复了 {count} 次，结果都没变，已停止',
   'error.truncated':
-    '回复连续 {count} 次超出单次 token 上限，这一轮停下了。可以在模型设置里调高上限后重试',
+    '回复连续 {count} 次超出单次 token 上限，这一轮停止了。可以在模型设置里调高上限后重试',
   'error.interrupted': '服务中途停止过，已从断点继续',
   'error.planInvalid': '计划修改无效：{reason}',
   'error.planConflict': '「{title}」在你编辑期间被改过了，你的修改没有保存',
@@ -421,7 +421,7 @@ export const zhCN = {
   'plan.issueNumber': 'issue 编号',
   'plan.issueUnlink': '取消关联 #{number}',
   'error.noBranch': '这个讨论串还没有自己的分支',
-  'error.merge.working': '讨论串正在工作，等它停下再操作',
+  'error.merge.working': '讨论串正在工作，等它停止再操作',
   'error.merge.unsupported': '这个项目的改动通过 PR 合入，不在这里合并',
   'error.merge.failed': '合并失败：{detail}',
   'error.merge.checkout': '基线分支的签出里有改动挡住了合并，提交或暂存后再试：{detail}',
@@ -431,6 +431,7 @@ export const zhCN = {
   'error.merge.git-version': '合并需要 git 2.38 或更新的版本：{detail}',
   'error.merge.no-base': '基线分支不存在了：{detail}',
   'error.worktreeDirty': '工作区里有没提交的改动，没有移除',
+  'changes.skipMerge': '不合并',
   'changes.open': '改动',
   'changes.back': '返回',
   'changes.files': '{count} 个文件',
@@ -625,9 +626,9 @@ export const zhCN = {
   'mcp.ask.yes': '允许',
   'mcp.ask.no': '不要',
   'error.budgetThread':
-    '这个讨论串已用 {used}k token，到了项目设置里每个讨论串 {limit}k 的上限，已停下。调高上限后重试',
+    '这个讨论串已用 {used}k token，到了项目设置里每个讨论串 {limit}k 的上限，已停止。调高上限后重试',
   'error.budgetProject':
-    '这个项目已用 {used}k token，到了项目设置里 {limit}k 的上限，已停下。调高上限后重试',
+    '这个项目已用 {used}k token，到了项目设置里 {limit}k 的上限，已停止。调高上限后重试',
   'command.ask.question': '允许运行这条命令一次？',
   'command.ask.rule': '它命中了你的命令规则「{pattern}」',
   'command.ask.yes': '运行',
@@ -735,7 +736,7 @@ export const zhCN = {
   'work.limit.commandOutput': '命令输出上限（字符）',
   'work.limit.compactShare': '上下文用到多少时压缩（%）',
   'work.limit.modelRetries': '模型出错重试次数',
-  'work.limit.loopRepeats': '重复调用几次后停下',
+  'work.limit.loopRepeats': '重复调用几次后停止',
   'work.limit.reset': '恢复默认',
   'shortcuts.reset': '恢复默认按键',
   'data.home': '数据目录',

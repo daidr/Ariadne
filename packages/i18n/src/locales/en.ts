@@ -455,6 +455,7 @@ export const en: Record<MessageKey, string> = {
   'error.merge.git-version': 'Merging needs git 2.38 or later: {detail}',
   'error.merge.no-base': 'The base branch no longer exists: {detail}',
   'error.worktreeDirty': 'The worktree has changes not committed; it was kept',
+  'changes.skipMerge': "Don't merge",
   'changes.open': 'Changes',
   'changes.back': 'Back',
   'changes.files': '{count} files',

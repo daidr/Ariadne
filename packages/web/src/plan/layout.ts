@@ -20,7 +20,6 @@ const PART_GAP = 96
  * their height is estimated from what they show.
  */
 export const NODE_WIDTH = 272
-const WIDE = NODE_WIDTH
 /** In a narrow pane nodes show their status and title only, this wide (PlanNode.vue). */
 export const COMPACT_WIDTH = 176
 
@@ -125,8 +124,6 @@ export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>, compac
   return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0) + headlines * 18
 }
 
-const heightOf = nodeHeight
-
 /** Groups of nodes linked to each other through dependencies, in planned order. */
 function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): string[][] {
   const root = new Map(nodes.map((node) => [node.id, node.id]))
@@ -176,8 +173,8 @@ export function layoutPlan(
   ),
   compact = false,
 ): PlanLayout {
-  const nodeWidth = compact ? COMPACT_WIDTH : WIDE
-  const heightOfNode = (node: PlanNodeView) => heightOf(node, compact)
+  const nodeWidth = compact ? COMPACT_WIDTH : NODE_WIDTH
+  const heightOfNode = (node: PlanNodeView) => nodeHeight(node, compact)
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const blocks: Block[] = []
   const lone: string[] = []
@@ -293,24 +290,38 @@ export interface GraphOptions {
 }
 
 /**
- * For each node work started on, or that is done, the dependencies not done yet: the plan
- * meant it to wait for them. A milestone the user let pass counts as done.
+ * For each node work started on, or that is done, its dependencies not done yet, by the
+ * dependency they hold it up through: the plan meant it to wait for them. A milestone the
+ * user let pass counts as done; one nobody worked on, like an open decision, is looked
+ * through to what comes before it, as work after it says it was passed.
  */
-export function startedAhead(nodes: PlanNodeView[]): Map<string, string[]> {
+function aheadOf(nodes: PlanNodeView[]): Map<string, Map<string, string[]>> {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  const ahead = new Map<string, string[]>()
+  const open = (id: string, seen: Set<string>): string[] => {
+    const dep = byId.get(id)
+    if (!dep || dep.status === 'done' || seen.has(id)) return []
+    seen.add(id)
+    if (dep.kind === 'task' || dep.status !== 'none') return [dep.title]
+    return dep.dependsOn.flatMap((from) => open(from, seen))
+  }
+  const ahead = new Map<string, Map<string, string[]>>()
   for (const node of nodes) {
     if (node.status === 'none') continue
-    const open = node.dependsOn
-      .map((id) => byId.get(id))
-      .filter((dep): dep is PlanNodeView => !!dep && dep.status !== 'done')
-    if (open.length)
-      ahead.set(
-        node.id,
-        open.map((dep) => dep.title),
-      )
+    const through = new Map<string, string[]>()
+    for (const id of node.dependsOn) {
+      const titles = open(id, new Set())
+      if (titles.length) through.set(id, titles)
+    }
+    if (through.size) ahead.set(node.id, through)
   }
   return ahead
+}
+
+/** For each node work started on too early, the titles of the dependencies not done. */
+export function startedAhead(nodes: PlanNodeView[]): Map<string, string[]> {
+  return new Map(
+    [...aheadOf(nodes)].map(([id, through]) => [id, [...new Set([...through.values()].flat())]]),
+  )
 }
 
 export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}): FlowDocument {
@@ -334,10 +345,9 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
   const auto = layoutPlan(nodes, edges, compact)
   const offsets = compact ? {} : (options.offsets ?? {})
   const offset = (id: string) => offsets[id] ?? { x: 0, y: 0 }
-  const ahead = preview ? new Map<string, string[]>() : startedAhead(nodes)
-  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const through = preview ? new Map<string, Map<string, string[]>>() : aheadOf(nodes)
   // An edge from a dependency not done into work already under way.
-  const skipped = (from: string, to: string) => !!ahead.get(to) && byId.get(from)?.status !== 'done'
+  const skipped = (from: string, to: string) => !!through.get(to)?.has(from)
   /**
    * A long edge passes between the nodes in its way, as laid out. Once the user moved one
    * of its ends on its own the route no longer fits, and the edge goes straight there.
@@ -362,7 +372,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         fresh: !preview && !!options.fresh?.has(node.id),
         proposed: !preview && !!options.proposed?.has(node.id),
         compact,
-        ahead: ahead.get(node.id) ?? [],
+        ahead: [...new Set([...(through.get(node.id)?.values() ?? [])].flat())],
       }
       return {
         id: node.id,

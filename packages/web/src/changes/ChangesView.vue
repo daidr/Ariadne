@@ -31,6 +31,7 @@ import {
   openMain,
   openThread,
   report,
+  reviewThread,
   sendLineComments,
   state,
   type TurnChangesRef,
@@ -55,6 +56,13 @@ const thread = computed(
 )
 const changes = ref<BranchChanges | null>(null)
 const mergeable = ref(false)
+// Handed to the user for review, it can also end without a merge here: they let it go, or
+// took it in some other way. The review's way out is "go merge", so this is the other one.
+const reviewing = computed(() => thread.value?.stage === 'review' && !props.turn)
+async function skipMerge() {
+  await reviewThread(props.threadId)
+  openMain({ kind: 'conversation' })
+}
 const loading = ref(true)
 const problem = ref<string | null>(null)
 
@@ -325,8 +333,11 @@ const methodOptions = computed(() => [
         <template #leading><GitMergeIcon /></template>
         {{ t('changes.merged', { base }) }}
       </DouTag>
+      <DouButton v-if="reviewing" size="sm" variant="ghost" @click="skipMerge">
+        {{ t('changes.skipMerge') }}
+      </DouButton>
       <DouPopover
-        v-else-if="mergeable && changes?.files.length"
+        v-if="mergeable && !upToDate && changes?.files.length"
         v-model:open="mergeOpen"
         trigger="click"
         placement="bottom-end"
