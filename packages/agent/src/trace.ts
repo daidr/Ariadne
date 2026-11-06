@@ -318,6 +318,10 @@ export function traceRequest(
         ...(call.maxTokens ? { maxTokens: call.maxTokens } : {}),
         ...(call.extraBody ? { extraBody: call.extraBody } : {}),
         ...(event.type === 'conversation.compacted' ? { cache: false } : {}),
+        ...(event.type === 'turn.step' ? { conversation: conversationId } : {}),
+        ...(event.type === 'research.step'
+          ? { conversation: `${conversationId}/research/${event.data.toolCallId}` }
+          : {}),
       }
     : null
   return { detail, request }

@@ -540,6 +540,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             tools: specs,
             ...(model.effort ? { effort: model.effort } : {}),
             ...requestExtras(model),
+            conversation: conversationId,
             signal,
           },
           (retry) => app.recordModelRetry(conversationId, turnId, retry),

@@ -14,6 +14,7 @@
     "@ariadne/agent": "workspace:*",
     "@ariadne/core": "workspace:*",
     "@ariadne/i18n": "workspace:*",
+    "@ariadne/plugin-agents": "workspace:*",
     "@ariadne/plugin-anthropic": "workspace:*",
     "@ariadne/plugin-daemon": "workspace:*",
     "@ariadne/plugin-github": "workspace:*",

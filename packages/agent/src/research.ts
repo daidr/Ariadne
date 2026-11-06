@@ -87,6 +87,7 @@ export async function runResearch(question: string, ctx: ToolContext): Promise<T
         messages: withImageData(messages, () => null),
         tools: last ? [] : specs,
         ...(model.effort ? { effort: model.effort } : {}),
+        conversation: `${ctx.conversationId}/research/${ctx.toolCallId}`,
         ...requestExtras(model),
         signal: ctx.signal,
       },

@@ -64,6 +64,13 @@
         "@ariadne/plugin-sdk": "workspace:*",
       },
     },
+    "packages/plugin-agents": {
+      "name": "@ariadne/plugin-agents",
+      "version": "0.0.0",
+      "dependencies": {
+        "@ariadne/plugin-sdk": "workspace:*",
+      },
+    },
     "packages/plugin-anthropic": {
       "name": "@ariadne/plugin-anthropic",
       "version": "0.0.0",
@@ -148,6 +155,7 @@
         "@ariadne/agent": "workspace:*",
         "@ariadne/core": "workspace:*",
         "@ariadne/i18n": "workspace:*",
+        "@ariadne/plugin-agents": "workspace:*",
         "@ariadne/plugin-anthropic": "workspace:*",
         "@ariadne/plugin-daemon": "workspace:*",
         "@ariadne/plugin-github": "workspace:*",
@@ -187,6 +195,8 @@
     "@ariadne/i18n": ["@ariadne/i18n@workspace:packages/i18n"],
 
     "@ariadne/mcp": ["@ariadne/mcp@workspace:packages/mcp"],
+
+    "@ariadne/plugin-agents": ["@ariadne/plugin-agents@workspace:packages/plugin-agents"],
 
     "@ariadne/plugin-anthropic": ["@ariadne/plugin-anthropic@workspace:packages/plugin-anthropic"],
 

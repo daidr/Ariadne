@@ -147,6 +147,11 @@ export type ModelStreamPart =
       cached?: number
       cacheWrite?: number
       reasoning?: number
+      /**
+       * What the service itself says the response cost, in US dollars. A user's price for
+       * the model is used only where this is missing.
+       */
+      costUsd?: number
     }
   | {
       type: 'finish'
@@ -192,6 +197,13 @@ export interface ModelRequest {
    * of the provider's, except the messages, tools, model and streaming, which stay its own.
    */
   extraBody?: Record<string, unknown>
+  /**
+   * Which conversation the request belongs to (a research has its own). A provider that
+   * keeps a session between requests, such as an agent program, keeps one per conversation
+   * and carries it on while the next request extends the last; without it the request
+   * stands alone.
+   */
+  conversation?: string
   signal?: AbortSignal
 }
 
