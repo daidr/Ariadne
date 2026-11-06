@@ -8,6 +8,7 @@ import {
   DouTabPanel,
   DouTabs,
   DouTooltip,
+  type TabsMoveEvent,
   type TabsValue,
   useElementSize,
 } from 'dou-ui'
@@ -36,6 +37,7 @@ import type { ThreadSort } from '../stage'
 import { lastPanel } from '../shortcuts'
 import { closePane, openMain, setSide, splitPane, state } from '../store'
 import * as side from './layout'
+import { MIN_HEIGHT, MIN_WIDTH } from './sizes'
 import type { PaneGroup, PaneKey } from './layout'
 
 /** A group of tabs on the right side: the project's lists and threads, as the user put them. */
@@ -62,8 +64,6 @@ const groups = computed(() => side.groupsOf(state.side.root))
 const others = computed(() => groups.value.filter((item) => item.id !== props.group.id))
 
 // Splitting halves the group: only offered while both halves still have room to be read.
-const MIN_WIDTH = 220
-const MIN_HEIGHT = 200
 const root = useTemplateRef<HTMLElement>('root')
 const size = useElementSize(root)
 const canSplit = computed(() => props.group.tabs.length > 1)
@@ -77,6 +77,12 @@ function select(value: TabsValue | undefined) {
   // The keyboard goes to the thread now in front.
   const threadId = side.threadOf(key)
   if (threadId) lastPanel.value = threadId
+}
+
+/** A tab dragged along this row, or dropped here from another group. */
+function moved(event: TabsMoveEvent) {
+  if (event.to.name === undefined) return
+  setSide(side.place(state.side, event.value as PaneKey, String(event.to.name), event.to.index))
 }
 
 function use() {
@@ -98,7 +104,11 @@ function bring(key: PaneKey) {
       height="100%"
       size="sm"
       class="pane-tabs"
+      draggable
+      group="side"
+      :name="group.id"
       @update:model-value="select"
+      @move="moved"
       @remove="(key) => closePane(key as PaneKey)"
     >
       <template #extra>
