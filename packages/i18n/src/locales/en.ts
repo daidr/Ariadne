@@ -549,8 +549,6 @@ export const en: Record<MessageKey, string> = {
   'context.compactions': 'History summarised',
   'context.times': '{count} times',
   'context.compacted': 'summarised {count} times',
-  'usage.short': '{value} tokens',
-  'usage.detail': '{input} in · {output} out tokens',
   'usage.title': 'Usage',
   'usage.threads': 'Threads',
   'usage.total': 'Total tokens',

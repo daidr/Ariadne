@@ -524,8 +524,6 @@ export const zhCN = {
   'context.compactions': '历史压缩',
   'context.times': '{count} 次',
   'context.compacted': '已压缩 {count} 次',
-  'usage.short': '{value} token',
-  'usage.detail': '输入 {input} · 输出 {output} token',
   'usage.title': '用量',
   'usage.threads': '讨论串',
   'usage.total': '总 token',
