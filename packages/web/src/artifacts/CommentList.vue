@@ -61,7 +61,7 @@ function jump(id: string) {
             class="comment-item"
             @click="jump(thread.id)"
           >
-            <DouText size="sm" variant="secondary" class="comment-quote" truncate>
+            <DouText size="sm" variant="secondary" truncate>
               {{ thread.quote }}
             </DouText>
             <DouText size="sm" truncate>
@@ -84,7 +84,7 @@ function jump(id: string) {
             @action="(action: CommentAction) => emit('action', action)"
           >
             <template #header>
-              <DouText size="sm" variant="secondary" class="comment-quote" truncate>
+              <DouText size="sm" variant="secondary" truncate>
                 <template v-if="!thread.resolved && !marked.has(thread.id)">
                   {{ t('artifact.commentGone') }}
                 </template>
@@ -124,10 +124,5 @@ function jump(id: string) {
 
 .comment-item:hover {
   background: var(--dou-color-bg-muted);
-}
-
-.comment-quote {
-  padding-inline-start: 8px;
-  border-inline-start: 2px solid var(--dou-color-warning);
 }
 </style>
