@@ -421,8 +421,7 @@ export async function openMessage(conversationId: string, messageId: string) {
 
 export async function openProject(id: string) {
   state.currentId = id
-  state.side = readSide(id)
-  state.threads = {}
+  showSide(readSide(id))
   state.detail = null
   state.plan = null
   state.artifacts = []
@@ -442,6 +441,13 @@ function readSide(projectId: string): SideLayout {
   } catch {
     return side.defaultLayout()
   }
+}
+
+/** Show another project's right side: nothing of the last one's threads stays. */
+function showSide(layout: SideLayout) {
+  state.side = layout
+  state.threads = {}
+  for (const threadId of [...composers.keys()]) dropComposer(threadId)
 }
 
 /** Show the right side as `next`, remembered for the project; closed threads let go. */
@@ -550,8 +556,7 @@ function forgetProject(id: string) {
     return
   }
   state.currentId = null
-  state.side = side.defaultLayout()
-  state.threads = {}
+  showSide(side.defaultLayout())
   state.detail = null
   state.plan = null
   state.artifacts = []
