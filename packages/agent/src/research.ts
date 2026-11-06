@@ -3,7 +3,7 @@ import { withImageData, type ModelMessage } from './transcript'
 import { requestExtras } from './compaction'
 import { DEFAULT_LIMITS, type Limits } from './limits'
 import { requestStep } from './model-step'
-import { callOf, type ResolvedModel } from './model'
+import { callOf, withCost, type ResolvedModel } from './model'
 import { researchHistory } from './trace'
 import { str, ToolInputError, type Tool, type ToolContext, type ToolResult } from './tool-helpers'
 
@@ -116,7 +116,7 @@ export async function runResearch(question: string, ctx: ToolContext): Promise<T
       toolCalls: answer.toolCalls,
       results,
       finish: answer.cut ? 'length' : answer.toolCalls.length ? 'tool-calls' : 'stop',
-      usage: answer.usage,
+      usage: withCost(answer.usage, model),
       input,
       timing: answer.timing,
       answeredAt,

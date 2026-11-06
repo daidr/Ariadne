@@ -12,6 +12,8 @@ import {
 import { computed, ref } from 'vue'
 import { count, locale, t } from '../i18n'
 import UsageBreakdown from './UsageBreakdown.vue'
+import { costText } from '../cost'
+import { state } from '../store'
 
 /**
  * How full one conversation's context is, as a ring by its input: its numbers on hover,
@@ -49,6 +51,7 @@ const hint = computed(() =>
     : line.value,
 )
 const tokens = computed(() => props.usage.input + props.usage.output)
+const cost = computed(() => (state.showCost ? costText(props.usage.cost) : null))
 const hitRate = computed(() =>
   props.usage.input
     ? new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 0 }).format(
@@ -78,6 +81,10 @@ const hitRate = computed(() =>
             <li>
               <span>{{ t('usage.total') }}</span>
               <span class="context-value">{{ count(tokens) }}</span>
+            </li>
+            <li v-if="cost">
+              <span>{{ t('usage.cost') }}</span>
+              <span class="context-value">{{ cost }}</span>
             </li>
             <li>
               <span>{{ t('usage.hitRate') }}</span>

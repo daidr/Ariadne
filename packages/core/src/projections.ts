@@ -4,11 +4,13 @@ import { askTitle, describeAnswer, type AskBlock, type BlockAnswer } from './blo
 import type {
   AnyStoredEvent,
   ArtifactKind,
+  Currency,
   IssueWriteAction,
   PlanNodeFields,
   PlanOp,
   ReviewComment,
   ReviewReply,
+  TokenUsage,
 } from './events'
 import { MAX_REVIEW_ROUNDS, type ProjectSettings } from './project-settings'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
@@ -864,6 +866,8 @@ export const conversationsProjection: Projection = {
       cached_tokens INTEGER NOT NULL DEFAULT 0,
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
       reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      cost_cny REAL NOT NULL DEFAULT 0,
       context_tokens INTEGER NOT NULL DEFAULT 0,
       instructions TEXT,
       activity TEXT,
@@ -919,6 +923,7 @@ export const conversationsProjection: Projection = {
              input_tokens = input_tokens + ?2, output_tokens = output_tokens + ?3,
              cached_tokens = cached_tokens + ?7, cache_write_tokens = cache_write_tokens + ?8,
              reasoning_tokens = reasoning_tokens + ?9,
+             cost_usd = cost_usd + ?10, cost_cny = cost_cny + ?11,
              context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END,
              activity = coalesce(?6, activity)
            WHERE id = ?4`,
@@ -933,6 +938,8 @@ export const conversationsProjection: Projection = {
             event.data.usage?.cached ?? 0,
             event.data.usage?.cacheWrite ?? 0,
             event.data.usage?.reasoning ?? 0,
+            costIn(event.data.usage, 'USD'),
+            costIn(event.data.usage, 'CNY'),
           ],
         )
         break
@@ -968,7 +975,8 @@ export const conversationsProjection: Projection = {
         db.run(
           `UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
              cached_tokens = cached_tokens + ?, cache_write_tokens = cache_write_tokens + ?,
-             reasoning_tokens = reasoning_tokens + ?
+             reasoning_tokens = reasoning_tokens + ?, cost_usd = cost_usd + ?,
+             cost_cny = cost_cny + ?
            WHERE id = ?`,
           [
             event.data.usage?.input ?? 0,
@@ -976,6 +984,8 @@ export const conversationsProjection: Projection = {
             event.data.usage?.cached ?? 0,
             event.data.usage?.cacheWrite ?? 0,
             event.data.usage?.reasoning ?? 0,
+            costIn(event.data.usage, 'USD'),
+            costIn(event.data.usage, 'CNY'),
             event.data.conversationId,
           ],
         )
@@ -2369,3 +2379,8 @@ export function dropProjectionTables(db: Database): void {
 }
 
 export type { AnyStoredEvent }
+
+/** The part of a request's estimated cost in `currency`: all of it or nothing. */
+function costIn(usage: TokenUsage | null | undefined, currency: Currency): number {
+  return usage?.cost?.currency === currency ? usage.cost.amount : 0
+}

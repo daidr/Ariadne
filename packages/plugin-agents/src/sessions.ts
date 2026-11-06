@@ -324,6 +324,7 @@ export function agentProvider<Settings>(
     kind: agent.kind,
     title: agent.title,
     settings: agent.settings,
+    program: true,
     requestBody: (settings, request) => agent.describe(settings, request),
     sessions: () => pool.size,
     async dispose() {

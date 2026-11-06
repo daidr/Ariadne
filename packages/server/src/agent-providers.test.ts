@@ -68,4 +68,5 @@ test('a coordinator runs on an agent program across steps and turns', async () =
   expect(provider.sessions()).toBe(1)
   // Its usage and the cost it reported are the conversation's.
   expect(app.getConversation(project.coordinatorId).usage.input).toBeGreaterThan(0)
+  expect(app.getConversation(project.coordinatorId).usage.cost.USD).toBeCloseTo(0.02)
 })

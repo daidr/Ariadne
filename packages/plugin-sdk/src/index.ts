@@ -228,6 +228,11 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
   title: LocalizedText
   settings: SettingsSchema
   /**
+   * It runs an agent program on this machine instead of calling a service over HTTP: the
+   * headers, body fields and timeout a user can add to requests do not apply to it.
+   */
+  program?: boolean
+  /**
    * Stream one response. Text may arrive in pieces; each tool call arrives whole. Errors
    * of the remote service end the stream with a `finish` part of reason `error`, marked
    * `retryable` when trying again may help; the agent loop retries only those.

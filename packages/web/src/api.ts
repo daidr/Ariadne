@@ -164,6 +164,8 @@ export interface ModelKind {
   kind: string
   title: LocalizedText
   settings: SettingsSchema
+  /** An agent program: request headers, body fields and timeout do not apply. */
+  program?: boolean
 }
 
 /** A source as the form sends it: secrets typed in, `null` to clear one. */
@@ -312,6 +314,19 @@ export interface ModelEntry {
   images?: false
   /** The most it may write in one response. */
   maxTokens?: number
+  /** What it costs per million tokens, for estimates. */
+  price?: ModelPrice
+}
+
+export type Currency = 'USD' | 'CNY'
+
+/** Per million tokens; the cache ones cost as much as `input` when left out. */
+export interface ModelPrice {
+  currency: Currency
+  input: number
+  output: number
+  cacheRead?: number
+  cacheWrite?: number
 }
 
 export interface ModelSettingsInput {
@@ -323,6 +338,8 @@ export interface ModelSettingsInput {
    * nothing.
    */
   roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput; research: RoleInput }
+  /** Usage also shows the estimated cost. */
+  showCost: boolean
 }
 
 export type Effort = 'low' | 'medium' | 'high'
@@ -451,6 +468,11 @@ export const api = {
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
   removePlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins/remove', { path }),
+  lookupModelPrice: (model: string, hint: string) =>
+    request<{ price: ModelPrice; source: string }>(
+      'GET',
+      `/api/settings/model-price?${new URLSearchParams({ model, hint })}`,
+    ),
   saveModelSettings: (input: ModelSettingsInput) =>
     request<ModelSettings>('PUT', '/api/settings/models', input),
   postMessage: (

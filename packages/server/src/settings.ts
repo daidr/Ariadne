@@ -1,4 +1,4 @@
-import { DomainError } from '@ariadne/core'
+import { CURRENCIES, DomainError, type Currency } from '@ariadne/core'
 import {
   COMMAND_ACTIONS,
   compactAt,
@@ -10,6 +10,7 @@ import {
   type Limits,
   type McpServerConfig,
   type McpToolMark,
+  type ModelPrice,
   type ModelChoice,
   type ModelRequestOptions,
   type PluginHost,
@@ -59,6 +60,35 @@ export interface ModelConfig {
   images?: false
   /** The most it may write in one response; the provider's default without. */
   maxTokens?: number
+  /** What it costs per million tokens, for estimates; none without. */
+  price?: ModelPrice
+}
+
+/** The most a price per million tokens may be: more is a typo. */
+const MAX_PRICE = 10_000
+
+/** A price as the page sent it, checked; `null` for none. */
+function parsePrice(raw: unknown, at: string): ModelPrice | null {
+  if (raw === undefined || raw === null) return null
+  const price = raw as Record<string, unknown>
+  if (!CURRENCIES.includes(price.currency as Currency)) throw new BadRequest(`${at}.currency`)
+  const amount = (key: string, required: boolean): number | undefined => {
+    const value = price[key]
+    if ((value === undefined || value === null) && !required) return undefined
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_PRICE) {
+      throw new BadRequest(`${at}.${key}`)
+    }
+    return value
+  }
+  const cacheRead = amount('cacheRead', false)
+  const cacheWrite = amount('cacheWrite', false)
+  return {
+    currency: price.currency as Currency,
+    input: amount('input', true)!,
+    output: amount('output', true)!,
+    ...(cacheRead !== undefined ? { cacheRead } : {}),
+    ...(cacheWrite !== undefined ? { cacheWrite } : {}),
+  }
 }
 
 /**
@@ -166,6 +196,8 @@ export interface ModelsConfig {
   models: ModelConfig[]
   /** Threads do the work, so their model comes first; the coordinator may use another. */
   roles: Record<Role, RoleConfig>
+  /** Usage also shows what it cost, estimated; tokens only without. */
+  showCost: boolean
 }
 
 /** A server's id: short, so tool names stay within what model services take. */
@@ -290,6 +322,7 @@ const defaults = (): UserConfig => ({
     providers: [],
     models: [],
     roles: { thread: noRole(), coordinator: noRole(), triage: noRole(), research: noRole() },
+    showCost: false,
   },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
@@ -321,6 +354,7 @@ export function loadUserConfig(path: string): UserConfig {
         triage: storedRole(stored.models?.roles?.triage),
         research: storedRole(stored.models?.roles?.research),
       },
+      showCost: stored.models?.showCost === true,
     },
     concurrency: { ...config.concurrency, ...stored.concurrency },
     sourceSecrets: { ...stored.sourceSecrets },
@@ -391,6 +425,7 @@ export class SettingsStore {
         kind: provider.kind,
         title: provider.title,
         settings: provider.settings,
+        ...(provider.program ? { program: true } : {}),
       })),
       providers: this.config.models.providers.map((provider) => {
         const secrets = secretKeys(this.host.models.get(provider.kind)?.settings)
@@ -409,6 +444,7 @@ export class SettingsStore {
       }),
       models: this.config.models.models,
       roles: this.config.models.roles,
+      showCost: this.config.models.showCost,
     }
   }
 
@@ -500,10 +536,12 @@ export class SettingsStore {
       ) {
         throw new BadRequest(`${at}.maxTokens`)
       }
+      const price = parsePrice(entry.price, `${at}.price`)
       return {
         id: entry.id,
         provider: entry.provider as string,
         model: entry.model.trim(),
+        ...(price ? { price } : {}),
         ...(typeof size === 'number' ? { contextTokens: size } : {}),
         ...(note ? { note } : {}),
         ...(entry.images === false ? { images: false as const } : {}),
@@ -526,6 +564,7 @@ export class SettingsStore {
         providers,
         models,
         roles: Object.fromEntries(ROLES.map((key) => [key, role(key)])) as Record<Role, RoleConfig>,
+        showCost: body.showCost === true,
       },
     }
     this.save()
@@ -861,6 +900,7 @@ export class SettingsStore {
       label: this.labelOf(chosen),
       ...(chosen.contextTokens ? { contextTokens: chosen.contextTokens } : {}),
       images: chosen.images !== false,
+      ...(chosen.price ? { price: chosen.price } : {}),
       ...(effort ? { effort } : {}),
       ...(Object.keys(request).length ? { request } : {}),
     }

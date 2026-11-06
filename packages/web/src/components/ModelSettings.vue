@@ -22,6 +22,7 @@ import {
   api,
   ApiError,
   type Concurrency,
+  type Currency,
   type Effort,
   type ModelKind,
   type ModelSettings,
@@ -64,6 +65,17 @@ interface DraftModel {
   images: boolean
   note: string
   maxTokens: number | null
+  /** Per million tokens; a price needs input and output, the cache ones default to input. */
+  currency: Currency
+  priceInput: number | null
+  priceOutput: number | null
+  priceCacheRead: number | null
+  priceCacheWrite: number | null
+  /** The price fields are shown; they start shown when a price is set. */
+  priceOpen: boolean
+  priceLooking: boolean
+  /** Why the catalog had no price for it. */
+  priceError: string | null
 }
 
 const kinds = ref<ModelKind[]>([])
@@ -86,6 +98,8 @@ const researchEffort = ref<Effort | ''>('')
 const threadFallback = ref('')
 const coordinatorFallback = ref('')
 const triageFallback = ref('')
+// Usage also shows the estimated cost.
+const showCost = ref(false)
 // What the scheduler may run at once; null until loaded, then saved with the models.
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
@@ -164,7 +178,16 @@ function load(settings: ModelSettings) {
     images: model.images !== false,
     note: model.note ?? '',
     maxTokens: model.maxTokens ?? null,
+    currency: model.price?.currency ?? 'USD',
+    priceInput: model.price?.input ?? null,
+    priceOutput: model.price?.output ?? null,
+    priceCacheRead: model.price?.cacheRead ?? null,
+    priceCacheWrite: model.price?.cacheWrite ?? null,
+    priceOpen: !!model.price,
+    priceLooking: false,
+    priceError: null,
   }))
+  showCost.value = settings.showCost
   threadModel.value = settings.roles.thread.model
   threadEffort.value = settings.roles.thread.effort ?? ''
   coordinatorModel.value = settings.roles.coordinator.model ?? ''
@@ -257,6 +280,14 @@ function addModel(provider = providers.value[0]?.id) {
     images: true,
     note: '',
     maxTokens: null,
+    currency: 'USD',
+    priceInput: null,
+    priceOutput: null,
+    priceCacheRead: null,
+    priceCacheWrite: null,
+    priceOpen: false,
+    priceLooking: false,
+    priceError: null,
   })
   threadModel.value ??= id
 }
@@ -267,6 +298,33 @@ function removeModel(id: string) {
   if (coordinatorModel.value === id) coordinatorModel.value = ''
   if (triageModel.value === id) triageModel.value = ''
   if (researchModel.value === id) researchModel.value = ''
+}
+
+const currencyOptions = [
+  { value: 'USD', label: 'USD $' },
+  { value: 'CNY', label: 'CNY ¥' },
+]
+
+/** Fill a model's price from the public catalog; the user saves it or not. */
+async function fillPrice(model: DraftModel) {
+  const provider = providers.value.find((p) => p.id === model.provider)
+  const hint = [provider?.kind, ...Object.values(provider?.settings ?? {})]
+    .filter((value) => typeof value === 'string')
+    .join(' ')
+  model.priceLooking = true
+  model.priceError = null
+  try {
+    const { price } = await api.lookupModelPrice(model.model.trim(), hint)
+    model.currency = price.currency
+    model.priceInput = price.input
+    model.priceOutput = price.output
+    model.priceCacheRead = price.cacheRead ?? null
+    model.priceCacheWrite = price.cacheWrite ?? null
+  } catch (cause) {
+    model.priceError = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+  } finally {
+    model.priceLooking = false
+  }
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -348,7 +406,19 @@ async function save() {
           ...(model.images ? {} : { images: false as const }),
           ...(model.note.trim() ? { note: model.note.trim() } : {}),
           ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
+          ...(model.priceInput !== null && model.priceOutput !== null
+            ? {
+                price: {
+                  currency: model.currency,
+                  input: model.priceInput,
+                  output: model.priceOutput,
+                  ...(model.priceCacheRead !== null ? { cacheRead: model.priceCacheRead } : {}),
+                  ...(model.priceCacheWrite !== null ? { cacheWrite: model.priceCacheWrite } : {}),
+                },
+              }
+            : {}),
         })),
+        showCost: showCost.value,
         roles: {
           thread: {
             model: keep(threadModel.value) ?? kept[0]?.id ?? null,
@@ -436,6 +506,7 @@ async function save() {
                 @clear-secret="(key) => clearSecret(provider, key)"
               />
               <DouButton
+                v-if="!kindOf(provider.kind)?.program"
                 size="sm"
                 variant="ghost"
                 class="settings-more"
@@ -448,7 +519,7 @@ async function save() {
                 </template>
                 {{ t('settings.request') }}
               </DouButton>
-              <template v-if="provider.advanced">
+              <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
                 <DouFormItem :label="t('settings.headers')">
                   <SecretPairs v-model="provider.headers" :add-label="t('mcp.addHeader')" />
                 </DouFormItem>
@@ -534,6 +605,62 @@ async function save() {
                     />
                   </DouFormItem>
                 </div>
+                <DouButton
+                  size="sm"
+                  variant="ghost"
+                  class="settings-more"
+                  :aria-expanded="model.priceOpen"
+                  @click="model.priceOpen = !model.priceOpen"
+                >
+                  <template #leading>
+                    <ChevronDownIcon v-if="model.priceOpen" />
+                    <ChevronRightIcon v-else />
+                  </template>
+                  {{ t('settings.price') }}
+                </DouButton>
+                <template v-if="model.priceOpen">
+                  <div class="settings-row">
+                    <DouFormItem :label="t('settings.currency')" class="settings-currency">
+                      <DouSelect v-model="model.currency" :options="currencyOptions" />
+                    </DouFormItem>
+                    <DouFormItem :label="t('usage.input')" class="settings-grow">
+                      <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
+                    </DouFormItem>
+                    <DouFormItem :label="t('usage.output')" class="settings-grow">
+                      <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
+                    </DouFormItem>
+                    <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
+                      <DouInputNumber
+                        v-model="model.priceCacheRead"
+                        :min="0"
+                        :step="0.01"
+                        :placeholder="t('settings.sameAsInput')"
+                      />
+                    </DouFormItem>
+                    <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
+                      <DouInputNumber
+                        v-model="model.priceCacheWrite"
+                        :min="0"
+                        :step="0.1"
+                        :placeholder="t('settings.sameAsInput')"
+                      />
+                    </DouFormItem>
+                  </div>
+                  <div class="settings-price-actions">
+                    <DouButton
+                      size="sm"
+                      variant="outline"
+                      :disabled="!model.model.trim()"
+                      :loading="model.priceLooking"
+                      @click="fillPrice(model)"
+                    >
+                      {{ t('settings.priceFill') }}
+                    </DouButton>
+                    <DouText v-if="model.priceError" tone="danger" size="sm">
+                      {{ model.priceError }}
+                    </DouText>
+                  </div>
+                </template>
               </DouForm>
             </DouCard>
           </template>
@@ -615,6 +742,10 @@ async function save() {
               >
                 <DouInputNumber v-model="concurrency.reserved" :min="0" :max="4" :step="1" />
               </DouFormItem>
+            </div>
+            <div class="settings-switch">
+              <span>{{ t('settings.showCost') }}</span>
+              <DouSwitch v-model="showCost" />
             </div>
           </DouForm>
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
@@ -715,6 +846,17 @@ async function save() {
 
 .settings-effort {
   width: 120px;
+}
+
+.settings-currency {
+  flex: none;
+  width: 100px;
+}
+
+.settings-price-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .settings-narrow {

@@ -83,6 +83,7 @@ describe('a coordinator turn', () => {
       cached: 0,
       cacheWrite: 0,
       reasoning: 0,
+      cost: { USD: 0, CNY: 0 },
     })
 
     // The second request replays the first step and both results, in call order.

@@ -4,6 +4,8 @@ export { coordinatorPrompt, threadPrompt, type ThreadContext } from './prompts'
 export {
   conversationSkills,
   runTurn,
+  withCost,
+  type ModelPrice,
   type ModelRequestOptions,
   type ResolvedModel,
   type TurnOptions,

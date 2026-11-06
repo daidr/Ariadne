@@ -4,6 +4,7 @@ import type { ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
+  Currency,
   LineComment,
   MessageMention,
   TurnFile,
@@ -67,6 +68,11 @@ export interface UsageTotals {
   cached: number
   cacheWrite: number
   reasoning: number
+  /**
+   * Estimated cost by currency: what services reported, or the user's price for the model.
+   * Requests with neither count nothing.
+   */
+  cost: Record<Currency, number>
 }
 
 export interface ThreadView {

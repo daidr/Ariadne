@@ -120,7 +120,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 44
+export const PROJECTION_VERSION = 45
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -271,6 +271,8 @@ interface ConversationRow {
   cached_tokens: number
   cache_write_tokens: number
   reasoning_tokens: number
+  cost_usd: number
+  cost_cny: number
   context_tokens: number
   fallback: number
   compactions: number
@@ -475,6 +477,8 @@ interface ThreadRow {
   cached_tokens: number | null
   cache_write_tokens: number | null
   reasoning_tokens: number | null
+  cost_usd: number | null
+  cost_cny: number | null
   turn_started_at: number | null
   todo_items: string | null
   todo_at: number | null
@@ -525,6 +529,8 @@ interface UsageColumns {
   cached_tokens?: number | null
   cache_write_tokens?: number | null
   reasoning_tokens?: number | null
+  cost_usd?: number | null
+  cost_cny?: number | null
 }
 
 const usageOf = (row: UsageColumns): UsageTotals => ({
@@ -533,11 +539,12 @@ const usageOf = (row: UsageColumns): UsageTotals => ({
   cached: row.cached_tokens ?? 0,
   cacheWrite: row.cache_write_tokens ?? 0,
   reasoning: row.reasoning_tokens ?? 0,
+  cost: { USD: row.cost_usd ?? 0, CNY: row.cost_cny ?? 0 },
 })
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
 const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
-  c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, c.turn_started_at,
+  c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, c.cost_usd, c.cost_cny, c.turn_started_at,
   td.items AS todo_items, td.updated_at AS todo_at,
   (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
   (SELECT e.at FROM events e WHERE e.seq = (SELECT tr.seq FROM transcript tr
@@ -3887,7 +3894,8 @@ export class Ariadne {
       .query<UsageColumns, [string]>(
         `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
            sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
-           sum(reasoning_tokens) AS reasoning_tokens
+           sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd,
+           sum(cost_cny) AS cost_cny
          FROM conversations WHERE project_id = ?`,
       )
       .get(projectId)

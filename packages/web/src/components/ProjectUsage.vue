@@ -5,12 +5,21 @@ import { computed, ref } from 'vue'
 import { count, locale, t } from '../i18n'
 import { openThread, state } from '../store'
 import UsageBreakdown from './UsageBreakdown.vue'
+import { costText } from '../cost'
 
 const open = ref(false)
 const usage = computed(
   () =>
-    state.detail?.project.usage ?? { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 },
+    state.detail?.project.usage ?? {
+      input: 0,
+      output: 0,
+      cached: 0,
+      cacheWrite: 0,
+      reasoning: 0,
+      cost: { USD: 0, CNY: 0 },
+    },
 )
+const cost = computed(() => (state.showCost ? costText(usage.value.cost) : null))
 const total = computed(() => usage.value.input + usage.value.output)
 const percent = (part: number, whole: number) =>
   whole
@@ -63,6 +72,10 @@ function go(id: string | null) {
           <li>
             <span>{{ t('usage.total') }}</span>
             <span class="usage-value">{{ count(total) }}</span>
+          </li>
+          <li v-if="cost">
+            <span>{{ t('usage.cost') }}</span>
+            <span class="usage-value">{{ cost }}</span>
           </li>
           <li>
             <span>{{ t('usage.hitRate') }}</span>
