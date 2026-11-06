@@ -447,7 +447,7 @@ function readSide(projectId: string): SideLayout {
 function showSide(layout: SideLayout) {
   state.side = layout
   state.threads = {}
-  for (const threadId of [...composers.keys()]) dropComposer(threadId)
+  for (const threadId of composers.keys()) dropComposer(threadId)
 }
 
 /** Show the right side as `next`, remembered for the project; closed threads let go. */
