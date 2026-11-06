@@ -67,6 +67,11 @@ export class Autopilot {
     private readonly workspaces: AutopilotWorkspaces,
     private readonly options: {
       locale: () => Locale
+      /**
+       * How many turns may run at once in all: a project without its own limit has this
+       * many threads at work at most. Three when not given.
+       */
+      slots?: () => number
       /** How long after an event to look, so a burst of events is looked at once. */
       delayMs?: number
       /**
@@ -331,7 +336,9 @@ export class Autopilot {
       }
       // Decisions are the user's and the coordinator's to make.
       if (node.kind !== 'task' || node.threads.length) continue
-      if (outOfBudget || atWork >= project.settings.autopilot.threads) continue
+      // The project's limit on concurrent work, or the shared total: one number for both.
+      const cap = project.slots ?? this.options.slots?.() ?? 3
+      if (outOfBudget || atWork >= cap) continue
       try {
         this.app.startAutoThread(project.id, {
           title: node.title,

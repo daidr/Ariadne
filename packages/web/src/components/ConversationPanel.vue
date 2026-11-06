@@ -65,6 +65,7 @@ import {
   loadEarlier,
   openMain,
   openThread,
+  openThreadFrom,
   retryTurn,
   sendMessage,
   state,
@@ -85,8 +86,9 @@ import BackgroundCommand from './BackgroundCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
-import StageLabel from './StageLabel.vue'
+import { elapsedText } from './command-text'
 import ArtifactNotice from './ArtifactNotice.vue'
+import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
 import AgentText from '../markdown/AgentText.vue'
@@ -185,10 +187,22 @@ const fallback = computed(() => {
   const turn = view.value.conversation?.turn
   return turn?.fallback ? turn.model : null
 })
-// What the model said it is doing beside its latest tool calls, shown above the input.
+// What it is doing, shown above the input: what the model said beside its latest tool
+// calls, else the todo it marked as under way. A thread needs no name for it; the
+// coordinator does, as its column sits beside threads that work too.
 const activity = computed(
-  () => view.value.conversation?.turn?.activity ?? t('conversation.working'),
+  () =>
+    view.value.conversation?.turn?.activity ??
+    thread.value?.doing ??
+    t(props.threadId ? 'conversation.working' : 'conversation.coordinatorWorking'),
 )
+const now = ref(Date.now())
+const clock = setInterval(() => (now.value = Date.now()), 1000)
+onBeforeUnmount(() => clearInterval(clock))
+const elapsed = computed(() => {
+  const startedAt = view.value.conversation?.turn?.startedAt
+  return startedAt ? elapsedText(now.value - startedAt) : ''
+})
 // The model it uses now; a thread's picker also offers going back to the default.
 const modelLabel = computed(() => {
   const id = view.value.model?.id
@@ -208,7 +222,7 @@ function pickModel(value: string | number | undefined) {
 function openTrace() {
   if (conversationId.value) openMain({ kind: 'trace', conversationId: conversationId.value })
 }
-const todo = computed(() => todoPlan(view.value.todo))
+const todo = computed(() => todoPlan(view.value.todo, working.value))
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
   () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
@@ -222,6 +236,11 @@ const failure = computed(() =>
 )
 // The user stops a thread with a reason, the same way the coordinator does.
 const stopOpen = ref(false)
+const canPause = computed(() => {
+  const current = thread.value
+  if (!current) return false
+  return current.stopped ? current.stopped.by !== 'user' : current.stage !== 'done'
+})
 const stopReason = ref('')
 async function stopThreadNow(threadId: string, takeover: boolean) {
   // Taking over without a reason keeps the coordinator's, which says why it stopped.
@@ -233,6 +252,8 @@ async function stopThreadNow(threadId: string, takeover: boolean) {
 const cancelled = computed(
   () => view.value.conversation?.lastOutcome === 'cancelled' && !working.value,
 )
+// Its turn ended without a report, and it was told once already: the user decides.
+const silent = computed(() => thread.value?.stage === 'silent')
 
 // Messages edited after the user read them stay highlighted for this visit, even though
 // opening the conversation marks them read on the server.
@@ -251,7 +272,8 @@ watch(
   () => (highlighted.value = new Set()),
 )
 
-// Messages and notices in the order they happened.
+// Messages and notices in the order they happened. A worktree removed after a merge goes
+// unsaid: the merge's own line says what happened.
 const timeline = computed(() =>
   [
     ...view.value.messages.map((message) => ({
@@ -260,12 +282,14 @@ const timeline = computed(() =>
       message,
       notice: null,
     })),
-    ...view.value.notices.map((notice) => ({
-      id: notice.id,
-      at: notice.createdAt,
-      message: null,
-      notice,
-    })),
+    ...view.value.notices
+      .filter((notice) => !(notice.kind === 'worktree-removed' && notice.reason === 'merged'))
+      .map((notice) => ({
+        id: notice.id,
+        at: notice.createdAt,
+        message: null,
+        notice,
+      })),
   ].toSorted((a, b) => a.at - b.at),
 )
 
@@ -316,6 +340,21 @@ function conflictNotice(notice: Extract<NoticeView, { kind: 'merge-conflict' }>)
   return t('notice.mergeConflict', { base: notice.base, files: notice.files.join('、') })
 }
 
+function planNotice(notice: Extract<NoticeView, { kind: 'plan-changed' }>) {
+  const text = t(notice.revert ? 'notice.planReverted' : 'notice.planChanged', {
+    reason: notice.reason,
+  })
+  return notice.added ? `${text} · ${t('notice.planAdded', { count: notice.added })}` : text
+}
+const revisionOf = (id: string) => state.plan?.revisions.find((revision) => revision.id === id)
+// Narrowed where they are called; the template cannot narrow inside a handler.
+const threadIdOf = (notice: NoticeView) =>
+  notice.kind === 'thread-auto-started' ? notice.threadId : ''
+const titleOf = (notice: NoticeView) =>
+  notice.kind === 'thread-auto-started'
+    ? (state.detail?.threads.find((item) => item.id === notice.threadId)?.title ?? notice.title)
+    : ''
+
 function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
   if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
   if (notice.previous === null) return t('notice.memoryAdded', { text: notice.text })
@@ -359,8 +398,31 @@ async function submit(value: string) {
 }
 
 function stop() {
+  escArmed.value = false
   if (conversationId.value) void stopTurn(conversationId.value)
 }
+
+// Escape is pressed out of habit to close things, so one press only arms the stop: a
+// second one soon after stops the turn. Never while there is text in the input.
+const ESC_WINDOW_MS = 1500
+const escArmed = ref(false)
+let disarm: ReturnType<typeof setTimeout> | undefined
+function escape(): boolean {
+  if (!working.value || draft.value.trim()) return false
+  if (escArmed.value) {
+    clearTimeout(disarm)
+    stop()
+    return true
+  }
+  escArmed.value = true
+  clearTimeout(disarm)
+  disarm = setTimeout(() => (escArmed.value = false), ESC_WINDOW_MS)
+  return true
+}
+watch(working, (busy) => {
+  if (!busy) escArmed.value = false
+})
+onBeforeUnmount(() => clearTimeout(disarm))
 
 // The keyboard reaches this conversation: `/` puts the caret in its input, Escape stops it.
 const input = useTemplateRef<{ focus: () => void; textarea: HTMLTextAreaElement | null }>('input')
@@ -369,11 +431,7 @@ let unregister: (() => void) | undefined
 onMounted(() => {
   unregister = registerPanel(kind, {
     focus: () => input.value?.focus(),
-    stop: () => {
-      if (!working.value) return false
-      stop()
-      return true
-    },
+    stop: escape,
   })
 })
 onBeforeUnmount(() => unregister?.())
@@ -509,7 +567,6 @@ watch(
         <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
           {{ t('review.underway', { round: thread.review.rounds }) }}
         </DouShimmer>
-        <StageLabel v-else :stage="thread.stage" />
         <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
         <DouTag
           v-if="thread.workspace?.branch"
@@ -555,17 +612,34 @@ watch(
           >
             {{ t('usage.short', { value: count(thread.usage.input + thread.usage.output) }) }}
           </DouText>
+          <!-- Pausing the whole thread is rarer than stopping a turn: it sits in the menu. -->
           <DouPopover
-            v-if="thread.stopped ? thread.stopped.by !== 'user' : thread.stage !== 'done'"
             v-model:open="stopOpen"
-            trigger="click"
+            trigger="manual"
+            placement="bottom-end"
             :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
             :width="320"
           >
-            <DouButton variant="ghost" size="sm">
-              <template #leading><PauseIcon /></template>
-              {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
-            </DouButton>
+            <DouDropdown placement="bottom-end">
+              <DouButton
+                variant="ghost"
+                size="sm"
+                :aria-label="t('thread.more')"
+                :title="t('thread.more')"
+              >
+                <MoreHorizontalIcon />
+              </DouButton>
+              <template #menu>
+                <DouDropdownItem v-if="canPause" value="pause" @click="stopOpen = true">
+                  <template #prefix><PauseIcon /></template>
+                  {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
+                </DouDropdownItem>
+                <DouDropdownItem value="trace" @click="openTrace">
+                  <template #prefix><ListTreeIcon /></template>
+                  {{ t('trace.open') }}
+                </DouDropdownItem>
+              </template>
+            </DouDropdown>
             <template #content>
               <div class="stop-form">
                 <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
@@ -579,22 +653,6 @@ watch(
               </div>
             </template>
           </DouPopover>
-          <DouDropdown placement="bottom-end">
-            <DouButton
-              variant="ghost"
-              size="sm"
-              :aria-label="t('thread.more')"
-              :title="t('thread.more')"
-            >
-              <MoreHorizontalIcon />
-            </DouButton>
-            <template #menu>
-              <DouDropdownItem value="trace" @click="openTrace">
-                <template #prefix><ListTreeIcon /></template>
-                {{ t('trace.open') }}
-              </DouDropdownItem>
-            </template>
-          </DouDropdown>
         </div>
       </div>
     </div>
@@ -740,6 +798,30 @@ watch(
             :notice="item.notice"
           />
           <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />
+          <!-- A change the coordinator made to the plan without asking, to undo from here. -->
+          <template v-else-if="item.notice.kind === 'plan-changed'">
+            <DouText variant="tertiary" size="sm" class="notice-text">
+              {{ planNotice(item.notice) }}
+            </DouText>
+            <PlanUndoButton
+              v-if="revisionOf(item.notice.revisionId)"
+              :revision="revisionOf(item.notice.revisionId)!"
+            />
+          </template>
+          <DouText
+            v-else-if="item.notice.kind === 'thread-auto-started'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ t('notice.autoStarted') }}
+            <DouLink
+              underline="hover"
+              @click="(event: MouseEvent) => openThreadFrom(event, threadIdOf(item.notice))"
+            >
+              {{ titleOf(item.notice) }}
+            </DouLink>
+          </DouText>
           <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
           <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
@@ -873,8 +955,12 @@ watch(
       <DouText v-else variant="secondary" size="sm" class="conversation-activity">
         <DouStatusDot tone="primary" ripple />
         <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
+        <span class="conversation-elapsed">{{ elapsed }}</span>
       </DouText>
       <div class="conversation-status-end">
+        <DouText v-if="escArmed" variant="tertiary" size="sm" role="status">
+          {{ t('conversation.escAgain') }}
+        </DouText>
         <DouText v-if="fallback" variant="tertiary" size="sm" class="conversation-fallback">
           {{ t('conversation.fallback', { model: fallback }) }}
         </DouText>
@@ -899,12 +985,12 @@ watch(
         </DouButton>
       </template>
     </DouAlert>
-    <DouAlert v-else-if="cancelled" tone="neutral" class="conversation-alert">
-      {{ t('conversation.cancelled') }}
+    <DouAlert v-else-if="cancelled || silent" tone="neutral" class="conversation-alert">
+      {{ t(cancelled ? 'conversation.cancelled' : 'conversation.silent') }}
       <template #action>
         <DouButton size="sm" variant="outline" @click="retry">
-          <template #leading><RotateCwIcon /></template>
-          {{ t('conversation.retry') }}
+          <template #leading><PlayIcon /></template>
+          {{ t('conversation.continue') }}
         </DouButton>
       </template>
     </DouAlert>
@@ -929,7 +1015,12 @@ watch(
       v-model:index="preview.index"
       :images="preview.images"
     />
-    <div class="conversation-input" data-message-input @keydown="onInputKeydown">
+    <div
+      v-if="state.detail"
+      class="conversation-input"
+      data-message-input
+      @keydown="onInputKeydown"
+    >
       <DouChatInput
         ref="input"
         v-model="draft"
@@ -1111,6 +1202,12 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-elapsed {
+  flex: none;
+  color: var(--dou-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .conversation-input {

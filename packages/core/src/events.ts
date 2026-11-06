@@ -416,6 +416,11 @@ export interface EventMap {
    */
   'thread.reviewed': { threadId: string }
   /**
+   * Its turn ended without a report: it is told once to report what came of it. A second
+   * silent turn is left for the user.
+   */
+  'thread.nudged': { threadId: string }
+  /**
    * Something waits on the user: an ask block (choice, confirmation or form). An agent's
    * comes with the message it posted it in (`messageId`); the system's own (approvals,
    * plan proposals) are only listed under "needs me".

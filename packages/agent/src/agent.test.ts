@@ -2,7 +2,7 @@ import { Ariadne, type ConversationView, type TranscriptEntry } from '@ariadne/c
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { compactionCut } from './compaction'
 import { MAX_CUTS, MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
-import { answered, call, fakeModel, lastUser, say } from './test-model'
+import { answered, call, fakeModel, lastUser, reminded, say } from './test-model'
 import { Scheduler } from './scheduler'
 import { CUT_HINT, toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
@@ -1044,6 +1044,7 @@ describe('stopping a thread', () => {
     let threadTurns = 0
     const model = fakeModel(async (request, role) => {
       if (role === 'thread') {
+        if (reminded(request)) return say('')
         threadTurns++
         if (threadTurns === 1) {
           // Works until it is stopped.

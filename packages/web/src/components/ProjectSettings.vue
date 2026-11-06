@@ -19,11 +19,12 @@ import {
   DouTimePicker,
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { api, ApiError, type McpServerView, type ToolGroup } from '../api'
 import { clockText, t, tm } from '../i18n'
 import { newRoutine, nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
+import { openSettingsKey } from '../open-settings'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 
 /**
@@ -43,6 +44,8 @@ const projectK = ref<number | null>(null)
 const slots = ref<number | null>(null)
 const mcp = ref<string[]>([])
 const mcpServers = ref<McpServerView[]>([])
+/** How many turns may run at once in all, the cap of a project without its own. */
+const totalSlots = ref(3)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
@@ -61,6 +64,44 @@ function setAutopilot(on: boolean) {
   if (!settings.value) return
   settings.value.autopilot.enabled = on
   if (on) settings.value.review.enabled = true
+}
+
+/**
+ * The plan nodes the autopilot would start on right away: tasks with nothing open before
+ * them and no thread yet, up to the project's limit on concurrent work.
+ */
+const startsNow = computed(() => {
+  const plan = state.plan
+  if (!plan) return []
+  const status = new Map(plan.nodes.map((node) => [node.id, node.status]))
+  const asked = new Set(
+    plan.proposals
+      .filter((proposal) => proposal.status === 'open')
+      .flatMap((proposal) =>
+        proposal.ops.flatMap((op) => ('id' in op ? [op.id] : [op.from, op.to])),
+      ),
+  )
+  const atWork =
+    state.detail?.threads.filter(
+      (thread) => !thread.reviewOf && thread.stage !== 'done' && thread.stage !== 'stopped',
+    ).length ?? 0
+  const room = Math.max(0, (slots.value || totalSlots.value) - atWork)
+  return plan.nodes
+    .filter(
+      (node) =>
+        node.kind === 'task' &&
+        !node.threads.length &&
+        !asked.has(node.id) &&
+        node.dependsOn.every((id) => status.get(id) === 'done'),
+    )
+    .slice(0, room)
+    .map((node) => node.title)
+})
+
+const openSettings = inject(openSettingsKey, () => {})
+function openMcp() {
+  state.projectSettingsOpen = false
+  openSettings('mcp')
 }
 
 const shellOptions = SHELLS.map((shell) => ({
@@ -85,10 +126,12 @@ watch(
     slots.value = project.slots
     mcp.value = [...project.mcp]
     try {
-      const [view, servers] = await Promise.all([
+      const [view, servers, concurrency] = await Promise.all([
         api.getProjectSettings(project.id),
         api.getMcpSettings().catch(() => ({ servers: [] as McpServerView[] })),
+        api.getConcurrency().catch(() => null),
       ])
+      if (concurrency) totalSlots.value = concurrency.slots
       settings.value = structuredClone(view.settings)
       env.value = storedPairs(view.env)
       tools.value = view.tools
@@ -134,11 +177,6 @@ async function save() {
     ...settings.value,
     // One left without words does nothing; it goes rather than failing the save.
     routines: settings.value.routines.filter((routine) => routine.prompt.trim()),
-    // Cleared, the cap goes back to its default rather than failing the save.
-    autopilot: {
-      ...settings.value.autopilot,
-      threads: settings.value.autopilot.threads || 3,
-    },
     budget: {
       thread: threadK.value ? threadK.value * 1000 : null,
       project: projectK.value ? projectK.value * 1000 : null,
@@ -211,14 +249,6 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="tools" :label="t('projectSettings.tab.tools')">
         <div class="project-tools">
-          <div class="project-switch">
-            <span>{{ t('projectSettings.review') }}</span>
-            <DouSwitch
-              :model-value="settings.review.enabled"
-              :aria-label="t('projectSettings.review')"
-              @update:model-value="setReview"
-            />
-          </div>
           <div v-for="group in tools" :key="group" class="project-switch">
             <span>{{ t(`projectSettings.tool.${group}`) }}</span>
             <DouSwitch
@@ -228,20 +258,33 @@ async function save() {
             />
           </div>
         </div>
-        <DouForm v-if="mcpOptions.length" layout="vertical" size="sm" class="project-mcp">
+        <DouForm layout="vertical" size="sm" class="project-mcp">
           <DouFormItem :label="t('project.mcp')">
             <DouSelect
+              v-if="mcpOptions.length"
               v-model="mcp"
               multiple
               clearable
               :options="mcpOptions"
               :placeholder="t('project.mcpNone')"
             />
+            <!-- Servers are set up for all projects at once; a project picks from them. -->
+            <DouButton v-else size="sm" variant="outline" @click="openMcp">
+              {{ t('project.mcpAdd') }}
+            </DouButton>
           </DouFormItem>
         </DouForm>
       </DouTabPanel>
       <DouTabPanel value="autopilot" :label="t('projectSettings.tab.autopilot')">
         <DouForm layout="vertical" size="sm">
+          <div class="project-switch">
+            <span>{{ t('projectSettings.review') }}</span>
+            <DouSwitch
+              :model-value="settings.review.enabled"
+              :aria-label="t('projectSettings.review')"
+              @update:model-value="setReview"
+            />
+          </div>
           <DouFormItem :help="t('projectSettings.autopilotHelp')">
             <div class="project-switch">
               <span>{{ t('projectSettings.autopilot') }}</span>
@@ -252,24 +295,25 @@ async function save() {
               />
             </div>
           </DouFormItem>
-          <div class="project-row">
-            <DouFormItem :label="t('projectSettings.autopilotMethod')" class="project-grow">
-              <DouSelect
-                v-model="settings.autopilot.method"
-                :options="methodOptions"
-                :disabled="!settings.autopilot.enabled"
-              />
-            </DouFormItem>
-            <DouFormItem :label="t('projectSettings.autopilotThreads')" class="project-grow">
-              <DouInputNumber
-                v-model="settings.autopilot.threads"
-                :min="1"
-                :max="16"
-                :step="1"
-                :disabled="!settings.autopilot.enabled"
-              />
-            </DouFormItem>
-          </div>
+          <!-- Switching it on starts work at once: which, is said before saving. -->
+          <DouText
+            v-if="settings.autopilot.enabled && !state.detail?.project.settings.autopilot.enabled"
+            size="sm"
+            variant="secondary"
+          >
+            {{
+              startsNow.length
+                ? t('projectSettings.autopilotStarts', { titles: startsNow.join('、') })
+                : t('projectSettings.autopilotStartsNone')
+            }}
+          </DouText>
+          <DouFormItem :label="t('projectSettings.autopilotMethod')">
+            <DouSelect
+              v-model="settings.autopilot.method"
+              :options="methodOptions"
+              :disabled="!settings.autopilot.enabled"
+            />
+          </DouFormItem>
         </DouForm>
       </DouTabPanel>
       <DouTabPanel value="limits" :label="t('projectSettings.tab.limits')">
@@ -294,7 +338,7 @@ async function save() {
               />
             </DouFormItem>
           </div>
-          <DouFormItem :label="t('project.slots')" :help="t('project.slotsHelp')">
+          <DouFormItem :label="t('project.slots')">
             <DouInputNumber
               v-model="slots"
               :min="1"

@@ -698,6 +698,25 @@ export class SettingsStore {
     this.save()
   }
 
+  /**
+   * Change how thread commands are isolated: on (`auto`) or `off`, and the paths hidden
+   * from them besides Ariadne's own. Read on start: it takes effect after a restart.
+   */
+  updateSandbox(input: unknown): UserConfig['sandbox'] {
+    const body = (input ?? {}) as Partial<UserConfig['sandbox']>
+    if (body.mode !== 'auto' && body.mode !== 'off') throw new BadRequest('mode')
+    if (!Array.isArray(body.hide) || body.hide.length > 100) throw new BadRequest('hide')
+    const hide: string[] = []
+    for (const path of body.hide) {
+      if (typeof path !== 'string' || path.length > 1000) throw new BadRequest('hide')
+      const trimmed = path.trim()
+      if (trimmed && !hide.includes(trimmed)) hide.push(trimmed)
+    }
+    this.config = { ...this.config, sandbox: { mode: body.mode, hide } }
+    this.save()
+    return this.config.sandbox
+  }
+
   /** Change how many turns run at once, plus those kept for answering the user. */
   updateConcurrency(input: unknown): UserConfig['concurrency'] {
     const body = (input ?? {}) as Partial<UserConfig['concurrency']>

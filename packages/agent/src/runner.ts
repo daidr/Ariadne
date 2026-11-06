@@ -153,9 +153,7 @@ function systemPrompt(
       userInstructions: { global: userInstructions, project: project.settings.instructions },
       instructions: recordedInstructions(app, conversation.id),
       skills: skills.list(),
-      autopilot: project.settings.autopilot.enabled
-        ? { paused: project.autopilotPaused, threads: project.settings.autopilot.threads }
-        : null,
+      autopilot: project.settings.autopilot.enabled ? { paused: project.autopilotPaused } : null,
     })
   }
   const thread = app.getThread(conversation.id)

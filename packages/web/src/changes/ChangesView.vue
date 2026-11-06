@@ -200,6 +200,10 @@ async function merge() {
       }
     } else if (outcome.kind === 'empty') {
       result.value = { tone: 'neutral', text: t('changes.nothing', { base: base.value }) }
+    } else {
+      // Merged: what is left to do is with the coordinator again.
+      openMain({ kind: 'conversation' })
+      return
     }
     await load()
   } catch (error) {

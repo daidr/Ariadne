@@ -8,7 +8,9 @@ import {
   ClockIcon,
   EyeIcon,
   HelpCircleIcon,
+  MessageOffIcon,
   PauseCircleIcon,
+  StopCircleIcon,
 } from '@dou-ui/icons'
 import type { Component } from 'vue'
 import { computed } from 'vue'
@@ -23,6 +25,8 @@ const icons: Record<Exclude<ThreadStage, 'working'>, Component> = {
   review: EyeIcon,
   blocked: AlertCircleIcon,
   stopped: PauseCircleIcon,
+  halted: StopCircleIcon,
+  silent: MessageOffIcon,
   queued: ClockIcon,
   idle: CircleDashedIcon,
   done: CheckCircleIcon,

@@ -136,7 +136,10 @@ const janitor = new WorktreeJanitor(app, workspaces)
 // Waits and routines that come due wake their conversations, after a restart too.
 const timers = new Timers(app)
 // Projects that switched it on merge reviewed work and start the next nodes on their own.
-const autopilot = new Autopilot(app, workspaces, { locale: () => settings.current.locale })
+const autopilot = new Autopilot(app, workspaces, {
+  locale: () => settings.current.locale,
+  slots: () => settings.current.concurrency.slots,
+})
 scheduler.start()
 timers.start()
 watcher.start()

@@ -361,7 +361,7 @@ describe('attachments', () => {
 describe('sandbox', () => {
   test('says when thread commands are not isolated', async () => {
     const response = await call('/api/sandbox')
-    expect(await response.json()).toEqual({
+    expect(await response.json()).toMatchObject({
       sandbox: { kind: null, mode: 'auto', hidden: [], platform: process.platform },
     })
   })

@@ -37,9 +37,6 @@ function togglePreview(id: string) {
       <DouText v-if="unfit(proposal)" size="sm" variant="secondary">
         {{ t('plan.preview.stale') }}
       </DouText>
-      <DouText v-else-if="planUi.previewId === proposal.id" size="sm" variant="secondary">
-        {{ t('plan.preview.on') }}
-      </DouText>
       <template #action>
         <DouButton
           v-if="!unfit(proposal)"

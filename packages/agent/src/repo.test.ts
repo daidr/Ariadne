@@ -11,7 +11,7 @@ import { PluginHost } from './plugins'
 import { summarizeChecks, syncThreadPullRequest } from './repo-tools'
 import { RepoWatcher } from './repo-watcher'
 import { Scheduler } from './scheduler'
-import { call, fakeModel, say } from './test-model'
+import { call, fakeModel, reminded, say } from './test-model'
 import { WorkspaceManager } from './workspaces'
 
 let app: Ariadne
@@ -245,7 +245,7 @@ describe('repository', () => {
 
     const results: string[] = []
     const model = fakeModel((request, role) => {
-      if (role === 'coordinator') return say('')
+      if (role === 'coordinator' || reminded(request)) return say('')
       const last = request.messages.at(-1)
       if (last?.role === 'tool') {
         results.push(last.content)
@@ -306,7 +306,7 @@ describe('repository', () => {
     ]
     const results: string[] = []
     const model = fakeModel((request, role) => {
-      if (role === 'coordinator') return say('')
+      if (role === 'coordinator' || reminded(request)) return say('')
       const last = request.messages.at(-1)
       if (last?.role === 'tool') {
         results.push(last.content)

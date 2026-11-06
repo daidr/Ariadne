@@ -20,6 +20,9 @@ const PART_GAP = 96
  * their height is estimated from what they show.
  */
 export const NODE_WIDTH = 272
+const WIDE = NODE_WIDTH
+/** In a narrow pane nodes show their status and title only, this wide (PlanNode.vue). */
+export const COMPACT_WIDTH = 176
 
 /** How a node or edge stands in a change shown on the graph. */
 export type PlanMark = 'added' | 'removed' | 'changed' | null
@@ -37,6 +40,10 @@ export interface PlanNodeData {
   fresh: boolean
   /** A change waiting on the user's yes touches this node. */
   proposed: boolean
+  /** Drawn small, with its status and title only. */
+  compact: boolean
+  /** Its dependencies that are not done, by title, while work on it started anyway. */
+  ahead: string[]
   [key: string]: unknown
 }
 
@@ -108,7 +115,8 @@ function textWidth(text: string): number {
  * and up to two threads, each with the line it waits on the user for, plus a "more" line.
  * Only used to keep nodes apart, so a little over is fine.
  */
-export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>): number {
+export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>, compact = false): number {
+  if (compact) return 20 + Math.max(1, Math.ceil(textWidth(node.title) / (COMPACT_WIDTH - 44))) * 20
   const lines = Math.max(1, Math.ceil(textWidth(node.title) / (NODE_WIDTH - 24)))
   const threads = Math.min(node.threads.length, 2) + (node.threads.length > 2 ? 1 : 0)
   const headlines = node.threads
@@ -116,6 +124,8 @@ export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>): numbe
     .filter((thread) => thread.lastHeadline && showsHeadline(thread.stage)).length
   return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0) + headlines * 18
 }
+
+const heightOf = nodeHeight
 
 /** Groups of nodes linked to each other through dependencies, in planned order. */
 function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): string[][] {
@@ -164,7 +174,10 @@ export function layoutPlan(
   edges: { from: string; to: string }[] = nodes.flatMap((node) =>
     node.dependsOn.map((from) => ({ from, to: node.id })),
   ),
+  compact = false,
 ): PlanLayout {
+  const nodeWidth = compact ? COMPACT_WIDTH : WIDE
+  const heightOfNode = (node: PlanNodeView) => heightOf(node, compact)
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const blocks: Block[] = []
   const lone: string[] = []
@@ -177,10 +190,10 @@ export function layoutPlan(
     const layout = layoutGraph(
       ids.map((id) => ({
         id,
-        width: NODE_WIDTH,
-        height: nodeHeight(byId.get(id)!),
+        width: nodeWidth,
+        height: heightOfNode(byId.get(id)!),
         // Ports sit in the middle of the top and bottom edges.
-        anchor: NODE_WIDTH / 2,
+        anchor: nodeWidth / 2,
       })),
       edges.filter((edge) => inside.has(edge.from) && inside.has(edge.to)),
       {
@@ -204,21 +217,21 @@ export function layoutPlan(
   const area =
     blocks.reduce((sum, block) => sum + block.width * block.height, 0) +
     lone.reduce(
-      (sum, id) => sum + (NODE_WIDTH + LANE_GAP) * (nodeHeight(byId.get(id)!) + RANK_GAP),
+      (sum, id) => sum + (nodeWidth + LANE_GAP) * (heightOfNode(byId.get(id)!) + RANK_GAP),
       0,
     )
-  const rowWidth = Math.max(NODE_WIDTH, ...blocks.map((block) => block.width), Math.sqrt(area))
+  const rowWidth = Math.max(nodeWidth, ...blocks.map((block) => block.width), Math.sqrt(area))
 
   if (lone.length) {
-    const columns = Math.max(1, Math.floor((rowWidth + LANE_GAP) / (NODE_WIDTH + LANE_GAP)))
+    const columns = Math.max(1, Math.floor((rowWidth + LANE_GAP) / (nodeWidth + LANE_GAP)))
     const placed = new Map<string, { x: number; y: number }>()
     let y = 0
     for (let i = 0; i < lone.length; i += columns) {
       const row = lone.slice(i, i + columns)
-      row.forEach((id, k) => placed.set(id, { x: k * (NODE_WIDTH + LANE_GAP), y }))
-      y += Math.max(...row.map((id) => nodeHeight(byId.get(id)!))) + LANE_GAP
+      row.forEach((id, k) => placed.set(id, { x: k * (nodeWidth + LANE_GAP), y }))
+      y += Math.max(...row.map((id) => heightOfNode(byId.get(id)!))) + LANE_GAP
     }
-    const width = Math.min(lone.length, columns) * (NODE_WIDTH + LANE_GAP) - LANE_GAP
+    const width = Math.min(lone.length, columns) * (nodeWidth + LANE_GAP) - LANE_GAP
     blocks.push({ width, height: y - LANE_GAP, nodes: placed, edges: new Map() })
   }
 
@@ -275,6 +288,29 @@ export interface GraphOptions {
   preview?: PlanPreview | null
   fresh?: Set<string>
   proposed?: Set<string>
+  /** Drawn for a narrow pane: small nodes, laid out as they come, without moved offsets. */
+  compact?: boolean
+}
+
+/**
+ * For each node work started on, or that is done, the dependencies not done yet: the plan
+ * meant it to wait for them. A milestone the user let pass counts as done.
+ */
+export function startedAhead(nodes: PlanNodeView[]): Map<string, string[]> {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const ahead = new Map<string, string[]>()
+  for (const node of nodes) {
+    if (node.status === 'none') continue
+    const open = node.dependsOn
+      .map((id) => byId.get(id))
+      .filter((dep): dep is PlanNodeView => !!dep && dep.status !== 'done')
+    if (open.length)
+      ahead.set(
+        node.id,
+        open.map((dep) => dep.title),
+      )
+  }
+  return ahead
 }
 
 export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}): FlowDocument {
@@ -294,8 +330,14 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
   const edges: { from: string; to: string; mark: PlanMark }[] =
     preview?.edges ??
     nodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
-  const auto = layoutPlan(nodes, edges)
-  const offset = (id: string) => options.offsets?.[id] ?? { x: 0, y: 0 }
+  const compact = !!options.compact
+  const auto = layoutPlan(nodes, edges, compact)
+  const offsets = compact ? {} : (options.offsets ?? {})
+  const offset = (id: string) => offsets[id] ?? { x: 0, y: 0 }
+  const ahead = preview ? new Map<string, string[]>() : startedAhead(nodes)
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  // An edge from a dependency not done into work already under way.
+  const skipped = (from: string, to: string) => !!ahead.get(to) && byId.get(from)?.status !== 'done'
   /**
    * A long edge passes between the nodes in its way, as laid out. Once the user moved one
    * of its ends on its own the route no longer fits, and the edge goes straight there.
@@ -319,11 +361,13 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         mark: node.mark,
         fresh: !preview && !!options.fresh?.has(node.id),
         proposed: !preview && !!options.proposed?.has(node.id),
+        compact,
+        ahead: ahead.get(node.id) ?? [],
       }
       return {
         id: node.id,
         type: 'plan',
-        ...place(auto.nodes.get(node.id), options.offsets?.[node.id]),
+        ...place(auto.nodes.get(node.id), offsets[node.id]),
         data,
       }
     }),
@@ -331,7 +375,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
       id: `${from}>${to}`,
       source: { node: from, port: 'out' },
       target: { node: to, port: 'in' },
-      data: { mark },
+      data: { mark, skipped: !mark && skipped(from, to) },
       ...route(from, to),
       ...(mark === 'added' ? { animated: true } : {}),
     })),

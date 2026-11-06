@@ -9,6 +9,7 @@ import {
   DouFormItem,
   DouInput,
   DouInputNumber,
+  DouSegmentedControl,
   DouSelect,
   DouSwitch,
   DouTabPanel,
@@ -214,6 +215,13 @@ export type SettingsTab =
   | 'data'
 type WorkPart = 'instructions' | 'commands' | 'limits'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
+const modelPart = ref<'roles' | 'models' | 'providers'>('roles')
+const modelParts = computed(() =>
+  (['roles', 'models', 'providers'] as const).map((value) => ({
+    value,
+    label: t(`settings.part.${value}`),
+  })),
+)
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
@@ -261,6 +269,18 @@ function addProvider() {
     advanced: false,
   })
   if (!models.value.length) addModel(id)
+}
+
+/** A new type brings its own settings; a name still the old type's follows the new one. */
+function setKind(provider: (typeof providers.value)[number], kind: string) {
+  const before = kindOf(provider.kind)
+  const after = kindOf(kind)
+  const oldName = before ? (lt(before.title) ?? before.kind) : provider.kind
+  if (!provider.name.trim() || provider.name === oldName) {
+    provider.name = after ? (lt(after.title) ?? after.kind) : kind
+  }
+  provider.kind = kind
+  provider.secretsSet = []
 }
 
 function removeProvider(id: string) {
@@ -463,103 +483,237 @@ async function save() {
     <DouTabs v-model="tab" placement="start" :height="560" class="settings-tabs">
       <DouTabPanel value="models" :label="t('settings.tab.models')">
         <div class="settings">
-          <div class="settings-head">
-            <span>{{ t('settings.providers') }}</span>
-            <DouButton size="sm" variant="outline" :disabled="!kinds.length" @click="addProvider">
-              <template #leading><PlusIcon /></template>
-              {{ t('settings.add') }}
-            </DouButton>
-          </div>
-          <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
-          <DouCard v-for="provider in providers" :key="provider.id" padding="sm">
-            <DouForm layout="vertical" size="sm">
-              <div class="settings-row">
-                <DouFormItem :label="t('settings.kind')" class="settings-grow">
-                  <DouSelect
-                    :model-value="provider.kind"
-                    :options="kindOptions"
-                    @update:model-value="
-                      (value) => ((provider.kind = String(value)), (provider.secretsSet = []))
-                    "
-                  />
+          <!-- Who uses which model is what changes most; adding models and providers comes after. -->
+          <DouSegmentedControl
+            v-model="modelPart"
+            :options="modelParts"
+            size="sm"
+            class="settings-parts"
+          />
+          <template v-if="modelPart === 'roles'">
+            <DouEmpty
+              v-if="!modelOptions.length && !concurrency"
+              size="sm"
+              :description="t('settings.noModels')"
+            />
+            <DouForm v-else layout="vertical" size="sm">
+              <template v-if="modelOptions.length">
+                <div class="settings-row">
+                  <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
+                    <DouSelect v-model="threadModel" :options="modelOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                    <DouSelect v-model="threadEffort" :options="effortOptions" />
+                  </DouFormItem>
+                  <DouFormItem
+                    :label="t('settings.fallbackModel')"
+                    :help="t('settings.fallbackModelHelp')"
+                    class="settings-grow"
+                  >
+                    <DouSelect v-model="threadFallback" :options="fallbackOptions(null)" />
+                  </DouFormItem>
+                </div>
+                <div class="settings-row">
+                  <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
+                    <DouSelect v-model="coordinatorModel" :options="coordinatorOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                    <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
+                    <DouSelect
+                      v-model="coordinatorFallback"
+                      :options="fallbackOptions(coordinatorModel ? null : 'threads')"
+                    />
+                  </DouFormItem>
+                </div>
+                <div class="settings-row">
+                  <DouFormItem
+                    :label="t('settings.triageModel')"
+                    :help="t('settings.triageModelHelp')"
+                    class="settings-grow"
+                  >
+                    <DouSelect v-model="triageModel" :options="triageOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                    <DouSelect v-model="triageEffort" :options="effortOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
+                    <DouSelect
+                      v-model="triageFallback"
+                      :options="fallbackOptions(triageModel ? null : 'coordinator')"
+                    />
+                  </DouFormItem>
+                </div>
+                <div class="settings-row">
+                  <DouFormItem
+                    :label="t('settings.researchModel')"
+                    :help="t('settings.researchModelHelp')"
+                    class="settings-grow"
+                  >
+                    <DouSelect v-model="researchModel" :options="researchOptions" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
+                    <DouSelect v-model="researchEffort" :options="effortOptions" />
+                  </DouFormItem>
+                </div>
+              </template>
+              <div v-if="concurrency" class="settings-row">
+                <DouFormItem :label="t('settings.slots')" class="settings-grow">
+                  <DouInputNumber v-model="concurrency.slots" :min="1" :max="16" :step="1" />
                 </DouFormItem>
-                <DouFormItem :label="t('settings.name')" class="settings-grow">
-                  <DouInput v-model="provider.name" />
-                </DouFormItem>
-                <DouButton
-                  size="sm"
-                  variant="ghost"
-                  tone="danger"
-                  class="settings-remove"
-                  :aria-label="t('settings.remove')"
-                  :title="t('settings.remove')"
-                  @click="removeProvider(provider.id)"
-                >
-                  <TrashIcon />
+              </div>
+            </DouForm>
+          </template>
+          <template v-else-if="modelPart === 'models'">
+            <template v-if="providers.length">
+              <div class="settings-switch">
+                <span>{{ t('settings.showCost') }}</span>
+                <DouSwitch v-model="showCost" />
+              </div>
+              <div class="settings-head">
+                <span>{{ t('settings.models') }}</span>
+                <DouButton size="sm" variant="outline" @click="addModel()">
+                  <template #leading><PlusIcon /></template>
+                  {{ t('settings.addModel') }}
                 </DouButton>
               </div>
-              <SettingsFields
-                v-if="kindOf(provider.kind)"
-                :schema="kindOf(provider.kind)!.settings"
-                :values="provider.settings"
-                :secrets-set="provider.secretsSet"
-                @clear-secret="(key) => clearSecret(provider, key)"
-              />
-              <DouButton
-                v-if="!kindOf(provider.kind)?.program"
-                size="sm"
-                variant="ghost"
-                class="settings-more"
-                :aria-expanded="provider.advanced"
-                @click="provider.advanced = !provider.advanced"
-              >
-                <template #leading>
-                  <ChevronDownIcon v-if="provider.advanced" />
-                  <ChevronRightIcon v-else />
-                </template>
-                {{ t('settings.request') }}
-              </DouButton>
-              <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
-                <DouFormItem :label="t('settings.headers')">
-                  <SecretPairs v-model="provider.headers" :add-label="t('mcp.addHeader')" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.extraBody')">
-                  <DouTextarea
-                    v-model="provider.extraBody"
-                    :autosize="{ minRows: 2, maxRows: 10 }"
-                    placeholder='{ "temperature": 0.2 }'
-                    class="settings-code"
-                  />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.timeoutSeconds')" class="settings-narrow">
-                  <DouInputNumber
-                    v-model="provider.timeoutSeconds"
-                    :min="10"
-                    :max="3600"
-                    :step="10"
-                    :placeholder="t('settings.timeoutNone')"
-                  />
-                </DouFormItem>
-              </template>
-            </DouForm>
-          </DouCard>
+              <DouCard v-for="model in models" :key="model.id" padding="sm">
+                <DouForm layout="vertical" size="sm">
+                  <div class="settings-row">
+                    <DouFormItem :label="t('settings.provider')" class="settings-grow">
+                      <DouSelect v-model="model.provider" :options="providerOptions" />
+                    </DouFormItem>
+                    <DouFormItem :label="t('settings.modelName')" class="settings-grow">
+                      <DouInput v-model="model.model" />
+                    </DouFormItem>
+                    <DouButton
+                      size="sm"
+                      variant="ghost"
+                      tone="danger"
+                      class="settings-remove"
+                      :aria-label="t('settings.remove')"
+                      :title="t('settings.remove')"
+                      @click="removeModel(model.id)"
+                    >
+                      <TrashIcon />
+                    </DouButton>
+                  </div>
+                  <div class="settings-row">
+                    <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
+                      <DouInputNumber
+                        v-model="model.contextK"
+                        :min="8"
+                        :max="10000"
+                        :step="8"
+                        placeholder="128"
+                      />
+                    </DouFormItem>
+                    <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
+                      <DouInputNumber
+                        v-model="model.maxTokens"
+                        :min="256"
+                        :max="1000000"
+                        :step="1024"
+                        :placeholder="t('settings.maxTokensDefault')"
+                      />
+                    </DouFormItem>
+                    <DouFormItem :label="t('settings.modelImages')">
+                      <DouSwitch v-model="model.images" />
+                    </DouFormItem>
+                  </div>
+                  <div class="settings-row">
+                    <DouFormItem :label="t('settings.modelNote')" class="settings-grow">
+                      <DouInput
+                        v-model="model.note"
+                        :maxlength="200"
+                        :placeholder="t('settings.modelNotePlaceholder')"
+                      />
+                    </DouFormItem>
+                  </div>
+                  <DouButton
+                    size="sm"
+                    variant="ghost"
+                    class="settings-more"
+                    :aria-expanded="model.priceOpen"
+                    @click="model.priceOpen = !model.priceOpen"
+                  >
+                    <template #leading>
+                      <ChevronDownIcon v-if="model.priceOpen" />
+                      <ChevronRightIcon v-else />
+                    </template>
+                    {{ t('settings.price') }}
+                  </DouButton>
+                  <template v-if="model.priceOpen">
+                    <div class="settings-row">
+                      <DouFormItem :label="t('settings.currency')" class="settings-currency">
+                        <DouSelect v-model="model.currency" :options="currencyOptions" />
+                      </DouFormItem>
+                      <DouFormItem :label="t('usage.input')" class="settings-grow">
+                        <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
+                      </DouFormItem>
+                      <DouFormItem :label="t('usage.output')" class="settings-grow">
+                        <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
+                      </DouFormItem>
+                      <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
+                        <DouInputNumber
+                          v-model="model.priceCacheRead"
+                          :min="0"
+                          :step="0.01"
+                          :placeholder="t('settings.sameAsInput')"
+                        />
+                      </DouFormItem>
+                      <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
+                        <DouInputNumber
+                          v-model="model.priceCacheWrite"
+                          :min="0"
+                          :step="0.1"
+                          :placeholder="t('settings.sameAsInput')"
+                        />
+                      </DouFormItem>
+                    </div>
+                    <div class="settings-price-actions">
+                      <DouButton
+                        size="sm"
+                        variant="outline"
+                        :disabled="!model.model.trim()"
+                        :loading="model.priceLooking"
+                        @click="fillPrice(model)"
+                      >
+                        {{ t('settings.priceFill') }}
+                      </DouButton>
+                      <DouText v-if="model.priceError" tone="danger" size="sm">
+                        {{ model.priceError }}
+                      </DouText>
+                    </div>
+                  </template>
+                </DouForm>
+              </DouCard>
+            </template>
 
-          <template v-if="providers.length">
+            <DouEmpty v-else size="sm" :description="t('settings.noProviders')" />
+          </template>
+          <template v-else>
             <div class="settings-head">
-              <span>{{ t('settings.models') }}</span>
-              <DouButton size="sm" variant="outline" @click="addModel()">
+              <span>{{ t('settings.providers') }}</span>
+              <DouButton size="sm" variant="outline" :disabled="!kinds.length" @click="addProvider">
                 <template #leading><PlusIcon /></template>
-                {{ t('settings.addModel') }}
+                {{ t('settings.add') }}
               </DouButton>
             </div>
-            <DouCard v-for="model in models" :key="model.id" padding="sm">
+            <DouEmpty v-if="!providers.length" size="sm" :description="t('settings.noProviders')" />
+            <DouCard v-for="provider in providers" :key="provider.id" padding="sm">
               <DouForm layout="vertical" size="sm">
                 <div class="settings-row">
-                  <DouFormItem :label="t('settings.provider')" class="settings-grow">
-                    <DouSelect v-model="model.provider" :options="providerOptions" />
+                  <DouFormItem :label="t('settings.kind')" class="settings-grow">
+                    <DouSelect
+                      :model-value="provider.kind"
+                      :options="kindOptions"
+                      @update:model-value="(value) => setKind(provider, String(value))"
+                    />
                   </DouFormItem>
-                  <DouFormItem :label="t('settings.modelName')" class="settings-grow">
-                    <DouInput v-model="model.model" />
+                  <DouFormItem :label="t('settings.name')" class="settings-grow">
+                    <DouInput v-model="provider.name" />
                   </DouFormItem>
                   <DouButton
                     size="sm"
@@ -568,186 +722,57 @@ async function save() {
                     class="settings-remove"
                     :aria-label="t('settings.remove')"
                     :title="t('settings.remove')"
-                    @click="removeModel(model.id)"
+                    @click="removeProvider(provider.id)"
                   >
                     <TrashIcon />
                   </DouButton>
                 </div>
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
-                    <DouInputNumber
-                      v-model="model.contextK"
-                      :min="8"
-                      :max="10000"
-                      :step="8"
-                      placeholder="128"
-                    />
-                  </DouFormItem>
-                  <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
-                    <DouInputNumber
-                      v-model="model.maxTokens"
-                      :min="256"
-                      :max="1000000"
-                      :step="1024"
-                      :placeholder="t('settings.maxTokensDefault')"
-                    />
-                  </DouFormItem>
-                  <DouFormItem :label="t('settings.modelImages')">
-                    <DouSwitch v-model="model.images" />
-                  </DouFormItem>
-                </div>
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.modelNote')" class="settings-grow">
-                    <DouInput
-                      v-model="model.note"
-                      :maxlength="200"
-                      :placeholder="t('settings.modelNotePlaceholder')"
-                    />
-                  </DouFormItem>
-                </div>
+                <SettingsFields
+                  v-if="kindOf(provider.kind)"
+                  :schema="kindOf(provider.kind)!.settings"
+                  :values="provider.settings"
+                  :secrets-set="provider.secretsSet"
+                  @clear-secret="(key) => clearSecret(provider, key)"
+                />
                 <DouButton
+                  v-if="!kindOf(provider.kind)?.program"
                   size="sm"
                   variant="ghost"
                   class="settings-more"
-                  :aria-expanded="model.priceOpen"
-                  @click="model.priceOpen = !model.priceOpen"
+                  :aria-expanded="provider.advanced"
+                  @click="provider.advanced = !provider.advanced"
                 >
                   <template #leading>
-                    <ChevronDownIcon v-if="model.priceOpen" />
+                    <ChevronDownIcon v-if="provider.advanced" />
                     <ChevronRightIcon v-else />
                   </template>
-                  {{ t('settings.price') }}
+                  {{ t('settings.request') }}
                 </DouButton>
-                <template v-if="model.priceOpen">
-                  <div class="settings-row">
-                    <DouFormItem :label="t('settings.currency')" class="settings-currency">
-                      <DouSelect v-model="model.currency" :options="currencyOptions" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.input')" class="settings-grow">
-                      <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.output')" class="settings-grow">
-                      <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
-                      <DouInputNumber
-                        v-model="model.priceCacheRead"
-                        :min="0"
-                        :step="0.01"
-                        :placeholder="t('settings.sameAsInput')"
-                      />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
-                      <DouInputNumber
-                        v-model="model.priceCacheWrite"
-                        :min="0"
-                        :step="0.1"
-                        :placeholder="t('settings.sameAsInput')"
-                      />
-                    </DouFormItem>
-                  </div>
-                  <div class="settings-price-actions">
-                    <DouButton
-                      size="sm"
-                      variant="outline"
-                      :disabled="!model.model.trim()"
-                      :loading="model.priceLooking"
-                      @click="fillPrice(model)"
-                    >
-                      {{ t('settings.priceFill') }}
-                    </DouButton>
-                    <DouText v-if="model.priceError" tone="danger" size="sm">
-                      {{ model.priceError }}
-                    </DouText>
-                  </div>
+                <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
+                  <DouFormItem :label="t('settings.headers')">
+                    <SecretPairs v-model="provider.headers" :add-label="t('mcp.addHeader')" />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.extraBody')">
+                    <DouTextarea
+                      v-model="provider.extraBody"
+                      :autosize="{ minRows: 2, maxRows: 10 }"
+                      placeholder='{ "temperature": 0.2 }'
+                      class="settings-code"
+                    />
+                  </DouFormItem>
+                  <DouFormItem :label="t('settings.timeoutSeconds')" class="settings-narrow">
+                    <DouInputNumber
+                      v-model="provider.timeoutSeconds"
+                      :min="10"
+                      :max="3600"
+                      :step="10"
+                      :placeholder="t('settings.timeoutNone')"
+                    />
+                  </DouFormItem>
                 </template>
               </DouForm>
             </DouCard>
           </template>
-
-          <DouForm v-if="modelOptions.length || concurrency" layout="vertical" size="sm">
-            <template v-if="modelOptions.length">
-              <div class="settings-row">
-                <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
-                  <DouSelect v-model="threadModel" :options="modelOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                  <DouSelect v-model="threadEffort" :options="effortOptions" />
-                </DouFormItem>
-                <DouFormItem
-                  :label="t('settings.fallbackModel')"
-                  :help="t('settings.fallbackModelHelp')"
-                  class="settings-grow"
-                >
-                  <DouSelect v-model="threadFallback" :options="fallbackOptions(null)" />
-                </DouFormItem>
-              </div>
-              <div class="settings-row">
-                <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
-                  <DouSelect v-model="coordinatorModel" :options="coordinatorOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                  <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
-                  <DouSelect
-                    v-model="coordinatorFallback"
-                    :options="fallbackOptions(coordinatorModel ? null : 'threads')"
-                  />
-                </DouFormItem>
-              </div>
-              <div class="settings-row">
-                <DouFormItem
-                  :label="t('settings.triageModel')"
-                  :help="t('settings.triageModelHelp')"
-                  class="settings-grow"
-                >
-                  <DouSelect v-model="triageModel" :options="triageOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                  <DouSelect v-model="triageEffort" :options="effortOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.fallbackModel')" class="settings-grow">
-                  <DouSelect
-                    v-model="triageFallback"
-                    :options="fallbackOptions(triageModel ? null : 'coordinator')"
-                  />
-                </DouFormItem>
-              </div>
-              <div class="settings-row">
-                <DouFormItem
-                  :label="t('settings.researchModel')"
-                  :help="t('settings.researchModelHelp')"
-                  class="settings-grow"
-                >
-                  <DouSelect v-model="researchModel" :options="researchOptions" />
-                </DouFormItem>
-                <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                  <DouSelect v-model="researchEffort" :options="effortOptions" />
-                </DouFormItem>
-              </div>
-            </template>
-            <div v-if="concurrency" class="settings-row">
-              <DouFormItem
-                :label="t('settings.slots')"
-                :help="t('settings.slotsHelp')"
-                class="settings-grow"
-              >
-                <DouInputNumber v-model="concurrency.slots" :min="1" :max="16" :step="1" />
-              </DouFormItem>
-              <DouFormItem
-                :label="t('settings.reservedSlots')"
-                :help="t('settings.reservedSlotsHelp')"
-                class="settings-grow"
-              >
-                <DouInputNumber v-model="concurrency.reserved" :min="0" :max="4" :step="1" />
-              </DouFormItem>
-            </div>
-            <div class="settings-switch">
-              <span>{{ t('settings.showCost') }}</span>
-              <DouSwitch v-model="showCost" />
-            </div>
-          </DouForm>
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
       </DouTabPanel>

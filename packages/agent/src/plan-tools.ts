@@ -187,6 +187,25 @@ export const readPlan: Tool = {
   },
 }
 
+/** Titles compared the way a reader would: case, spacing and punctuation aside. */
+const sameTitle = (title: string) => title.toLowerCase().replace(/[\s\p{P}]+/gu, '')
+
+/**
+ * Nodes to add whose title a node of the plan, or another added in the same call, already
+ * has: adding the same work twice is a slip, and the user would only find it much later.
+ */
+export function duplicateTitles(existing: string[], ops: PlanOp[]): string[] {
+  const seen = new Set(existing.map(sameTitle))
+  const duplicates: string[] = []
+  for (const op of ops) {
+    if (op.op !== 'add') continue
+    const key = sameTitle(op.title)
+    if (seen.has(key)) duplicates.push(op.title)
+    seen.add(key)
+  }
+  return duplicates
+}
+
 const updatePlan: Tool = {
   spec: {
     name: 'update_plan',
@@ -204,6 +223,21 @@ const updatePlan: Tool = {
   run(args, ctx) {
     const reason = str(args, 'reason')
     const { ops, refs } = resolvePlanOps(args.ops)
+    // A node renamed or removed in the same call no longer holds its title.
+    const touched = new Set(
+      ops.flatMap((op) => (op.op === 'remove' || (op.op === 'update' && op.title) ? [op.id] : [])),
+    )
+    const existing = ctx.app
+      .getPlan(ctx.projectId)
+      .nodes.filter((node) => !touched.has(node.id))
+      .map((node) => node.title)
+    const renamed = ops.flatMap((op) => (op.op === 'update' && op.title ? [op.title] : []))
+    const duplicates = duplicateTitles([...existing, ...renamed], ops)
+    if (duplicates.length) {
+      throw new ToolInputError(
+        `The plan already has nodes titled ${duplicates.map((title) => `"${title}"`).join(', ')}. Nothing was changed. Read the plan (read_plan) and add only what is missing; to change an existing node, update it by its id.`,
+      )
+    }
     const change = ctx.app.revisePlan(ctx.projectId, {
       author: 'coordinator',
       reason,

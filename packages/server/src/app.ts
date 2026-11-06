@@ -245,7 +245,8 @@ export function createHandler({
     return new Response(null, { status: 204 })
   })
 
-  // How thread commands are isolated, so the page can say when they are not.
+  // How thread commands are isolated, so the page can say when they are not; `configured`
+  // is what the settings say, which a restart puts in place.
   add('GET', '/api/sandbox', () =>
     json({
       sandbox: host?.sandbox.status ?? {
@@ -254,8 +255,14 @@ export function createHandler({
         hidden: [],
         platform: process.platform,
       },
+      configured: settings?.current.sandbox ?? null,
     }),
   )
+  add('PUT', '/api/sandbox', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json({ configured: settings.updateSandbox(await readJson(request)) })
+  })
 
   // Plugins: the built-in ones and those loaded from a path, with why a path failed.
   add('GET', '/api/plugins', () => json({ plugins: host?.records() ?? [] }))

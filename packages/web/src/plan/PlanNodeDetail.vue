@@ -12,10 +12,22 @@ import {
   DouText,
   DouTextarea,
 } from 'dou-ui'
-import { CircleDotIcon, FileDiffIcon, LinkPlusIcon, TrashIcon, UnlinkIcon } from '@dou-ui/icons'
+import {
+  AlertTriangleIcon,
+  CircleDotIcon,
+  FileDiffIcon,
+  LinkPlusIcon,
+  PlayIcon,
+  SendIcon,
+  TrashIcon,
+  UnlinkIcon,
+} from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
-import { editPlan, openMain, openThread, setNodeIssue, state } from '../store'
+import { editPlan, openMain, openThreadFrom, sendMessage, setNodeIssue, state } from '../store'
+import { kindIcon } from '../artifacts/kinds'
+import ReviewActions from '../components/ReviewActions.vue'
+import { startedAhead } from './layout'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
 import StageIcon from '../components/StageIcon.vue'
@@ -39,6 +51,38 @@ const hasBranch = (threadId: string) => {
   return !!workspace?.branch && !!workspace.base
 }
 const emit = defineEmits<{ removed: [] }>()
+
+/** Dependencies not done while work on this node started anyway. */
+const ahead = computed(() =>
+  state.plan ? (startedAhead(state.plan.nodes).get(props.node.id) ?? []) : [],
+)
+/** Artifacts made for this node. */
+const artifacts = computed(() =>
+  state.artifacts.filter((artifact) => artifact.nodeId === props.node.id),
+)
+
+// Starting work and making a decision go through the coordinator, in the user's words in
+// its conversation: it briefs the thread, or changes the plan by what was decided.
+const sending = ref(false)
+const decision = ref('')
+const canStart = computed(
+  () => props.node.kind === 'task' && props.node.status !== 'done' && !liveThreads(props.node),
+)
+async function ask(content: string) {
+  const coordinator = state.detail?.project.coordinatorId
+  if (!coordinator) return false
+  sending.value = true
+  const sent = await sendMessage(coordinator, content)
+  sending.value = false
+  if (sent && state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
+  return sent
+}
+const start = () => ask(t('plan.startAsk', { title: props.node.title }))
+async function decide() {
+  const text = decision.value.trim()
+  if (!text) return
+  if (await ask(t('plan.decideSay', { title: props.node.title, text }))) decision.value = ''
+}
 
 type Fields = { title: string; description: string; acceptance: string }
 const FIELDS = ['title', 'description', 'acceptance'] as const
@@ -227,21 +271,68 @@ const removeQuestion = computed(() => {
           {{ node.description }}
         </DouText>
       </header>
+      <DouText v-if="ahead.length" tone="warning" size="sm" class="node-detail-ahead">
+        <AlertTriangleIcon aria-hidden="true" />
+        {{ t('plan.ahead', { titles: ahead.join('、') }) }}
+      </DouText>
       <PlanSection v-if="node.acceptance" :title="t('plan.acceptance')">
         <DouText size="sm" class="node-detail-text">{{ node.acceptance }}</DouText>
       </PlanSection>
+      <!-- A decision is the user's to make: said here, it reaches the coordinator. -->
+      <form
+        v-if="node.kind === 'decision' && node.status !== 'done'"
+        class="node-detail-decide"
+        @submit.prevent="decide"
+      >
+        <DouTextarea
+          v-model="decision"
+          size="sm"
+          :autosize="{ minRows: 2, maxRows: 6 }"
+          :placeholder="t('plan.decidePlaceholder')"
+          :aria-label="t('plan.decide')"
+        />
+        <DouButton
+          size="sm"
+          tone="primary"
+          native-type="submit"
+          :disabled="!decision.trim()"
+          :loading="sending"
+        >
+          <template #leading><SendIcon /></template>
+          {{ t('plan.decide') }}
+        </DouButton>
+      </form>
+      <DouButton
+        v-else-if="canStart"
+        size="sm"
+        variant="outline"
+        class="node-detail-start"
+        :loading="sending"
+        @click="start"
+      >
+        <template #leading><PlayIcon /></template>
+        {{ t('plan.start') }}
+      </DouButton>
     </template>
     <PlanSection :title="t('plan.threads')" :count="node.threads.length">
       <ul v-if="node.threads.length" class="node-detail-list">
         <li v-for="thread in node.threads" :key="thread.id" class="node-thread">
-          <button type="button" class="node-thread-open" @click="openThread(thread.id)">
+          <button
+            type="button"
+            class="node-thread-open"
+            @click="(event) => openThreadFrom(event, thread.id)"
+          >
             <StageIcon :stage="thread.stage" class="node-thread-icon" />
             <span class="node-thread-text">
               <DouText size="sm" :truncate="2" :title="thread.title">{{ thread.title }}</DouText>
               <ThreadHeadline :stage="thread.stage" :headline="thread.lastHeadline" />
             </span>
           </button>
-          <span v-if="thread.pullRequest || hasBranch(thread.id)" class="node-thread-tools">
+          <span
+            v-if="thread.pullRequest || hasBranch(thread.id) || thread.stage === 'review'"
+            class="node-thread-tools"
+          >
+            <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" compact />
             <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
             <DouButton
               v-if="hasBranch(thread.id)"
@@ -258,6 +349,21 @@ const removeQuestion = computed(() => {
         </li>
       </ul>
       <DouText v-else variant="tertiary" size="sm">{{ t('plan.noThread') }}</DouText>
+    </PlanSection>
+    <PlanSection v-if="artifacts.length" :title="t('plan.artifacts')" :count="artifacts.length">
+      <ul class="node-detail-list">
+        <li v-for="artifact in artifacts" :key="artifact.id">
+          <DouLink
+            underline="hover"
+            :title="artifact.title"
+            class="node-artifact"
+            @click="openMain({ kind: 'artifact', id: artifact.id })"
+          >
+            <template #leading><component :is="kindIcon[artifact.kind]" /></template>
+            {{ artifact.title }}
+          </DouLink>
+        </li>
+      </ul>
     </PlanSection>
     <PlanSection
       v-if="node.issues.length || (editable && state.detail?.hasTracker)"
@@ -309,6 +415,35 @@ const removeQuestion = computed(() => {
 </template>
 
 <style scoped>
+.node-detail-ahead {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.node-detail-ahead svg {
+  flex: none;
+  margin-top: 0.2em;
+}
+
+.node-detail-decide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.node-detail-start {
+  align-self: flex-start;
+}
+
+.node-artifact {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .node-detail {
   display: flex;
   flex-direction: column;

@@ -129,19 +129,17 @@ const pilot = (workspaces: AutopilotWorkspaces = none, noChecksWaitMs = 0) =>
   })
 
 describe('settings', () => {
-  test('off by default; on only with the review, squash and three threads unless set', () => {
+  test('off by default; on only with the review, squash unless set', () => {
     expect(app.getProject(projectId).settings.autopilot).toEqual({
       enabled: false,
       method: 'squash',
-      threads: 3,
     })
     expect(() =>
       parseProjectSettings({ review: { enabled: false }, autopilot: { enabled: true } }, []),
     ).toThrow()
-    expect(() => parseProjectSettings({ autopilot: { threads: 0 } }, [])).toThrow()
     expect(
       parseProjectSettings({ autopilot: { enabled: true, method: 'merge' } }, []).autopilot,
-    ).toEqual({ enabled: true, method: 'merge', threads: 3 })
+    ).toEqual({ enabled: true, method: 'merge' })
   })
 
   test('pausing needs it on; switching it on again lets it run', () => {
@@ -370,8 +368,9 @@ describe('pull requests', () => {
 })
 
 describe('starting nodes', () => {
-  test('nodes whose dependencies are done get threads, up to the cap', async () => {
-    autopilotOn({ threads: 2 })
+  test('nodes whose dependencies are done get threads, up to the project limit', async () => {
+    autopilotOn()
+    app.setProjectSlots(projectId, 2)
     addNodes([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], [['a', 'd']])
     await pilot().check(projectId)
     const opened = app.listThreads(projectId)

@@ -4,7 +4,7 @@ import { DouImagePreview, DouLink } from 'dou-ui'
 import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
-import { openMain, openThread, state } from '../store'
+import { openMain, openThreadFrom, state } from '../store'
 import { askLinkSummary, linkSummary } from './link-summaries'
 import { fileSrc, innerLink } from './links'
 import PullRequestLink from './PullRequestLink.vue'
@@ -43,8 +43,8 @@ watch(
 )
 const summary = computed(() => (props.href ? linkSummary(props.href) : null))
 
-function open() {
-  if (thread.value) openThread(thread.value.id)
+function open(event?: MouseEvent) {
+  if (thread.value) openThreadFrom(event, thread.value.id)
   else if (artifact.value) openMain({ kind: 'artifact', id: artifact.value.id })
   else if (image.value) viewing.value = true
 }

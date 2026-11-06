@@ -33,8 +33,10 @@ watch(threadSort, (value) => keep(SORT_KEY, value))
 
 /** The open groups of the thread list; finished threads start folded away. */
 export const openGroups = ref<ThreadGroup[]>(
-  load(OPEN_KEY, ['review', 'waiting', 'working', 'idle'], (value): value is ThreadGroup[] =>
-    Array.isArray(value),
+  load(
+    OPEN_KEY,
+    ['review', 'waiting', 'working', 'paused', 'idle'],
+    (value): value is ThreadGroup[] => Array.isArray(value),
   ),
 )
 watch(openGroups, (value) => keep(OPEN_KEY, value))

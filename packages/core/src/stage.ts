@@ -2,7 +2,16 @@ import type { ReportKind } from './events'
 
 /** What a thread waits on. The first matching rule wins; see docs/architecture.md. */
 export type ThreadStage =
-  'answer' | 'stopped' | 'working' | 'blocked' | 'review' | 'done' | 'queued' | 'idle'
+  | 'answer'
+  | 'stopped'
+  | 'halted'
+  | 'silent'
+  | 'working'
+  | 'blocked'
+  | 'review'
+  | 'done'
+  | 'queued'
+  | 'idle'
 
 export interface StageFacts {
   openAttentions: number
@@ -14,6 +23,12 @@ export interface StageFacts {
   turnPending: boolean
   /** The last turn failed (e.g. the model request errored) and waits for a retry. */
   turnFailed: boolean
+  /** The user stopped its last turn, and nothing has run since. */
+  turnCancelled?: boolean
+  /** Its last turn ended on its own without a report, so nothing says what came of it. */
+  unreported?: boolean
+  /** It set itself a wait that has not come due: it goes on by itself then. */
+  waiting?: boolean
   /** Its pull request's checks failed too many times in a row for it to try again alone. */
   checksGaveUp?: boolean
   /** Held by the coordinator or the user until resumed. */
@@ -45,6 +60,8 @@ export function threadStage(facts: StageFacts): ThreadStage {
   // Waiting for a slot to handle new input, e.g. an answer after it reported done.
   if (facts.turnPending) return 'queued'
   if (facts.turnFailed || facts.checksGaveUp) return 'blocked'
+  // Stopped halfway by the user: nobody moves it on until they say so.
+  if (facts.turnCancelled && !facts.reviewer) return 'halted'
   // Its changes are with the reviewing thread before they come to the user.
   if (facts.lastReport === 'ready' && facts.underReview && !facts.landed) return 'working'
   if (facts.lastReport === 'ready') return facts.landed || facts.reviewed ? 'done' : 'review'
@@ -52,10 +69,18 @@ export function threadStage(facts: StageFacts): ThreadStage {
   if (facts.lastReport === 'done') return 'done'
   if (!facts.started) return 'queued'
   if (facts.lastReport === 'waiting' || facts.reviewer) return 'idle'
+  // Nothing runs and nothing came of its last turn: showing it at work would be a lie.
+  if (facts.unreported && !facts.waiting) return 'silent'
   return 'working'
 }
 
 /** Stages in which the thread cannot go on without the user. */
 export function needsUser(stage: ThreadStage): boolean {
-  return stage === 'answer' || stage === 'review' || stage === 'blocked'
+  return (
+    stage === 'answer' ||
+    stage === 'review' ||
+    stage === 'blocked' ||
+    stage === 'halted' ||
+    stage === 'silent'
+  )
 }

@@ -112,6 +112,8 @@ export interface ThreadView {
   usage: UsageTotals
   /** How many of its todos are done, out of how many; `null` while it has none. */
   progress: { done: number; total: number } | null
+  /** The todo it marked as under way, if any: what it is doing, in its own words. */
+  doing: string | null
   createdAt: number
   updatedAt: number
   /** When it last did or heard something: a message, a model step or tool result, a todo update, a report. */
@@ -284,6 +286,10 @@ export type NoticeView = {
     }
   | { kind: 'merge-conflict'; base: string; files: string[]; pullRequest?: number }
   | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
+  /** The coordinator changed the plan without asking: what it did, to undo from here. */
+  | { kind: 'plan-changed'; revisionId: string; reason: string; added: number; revert: boolean }
+  /** The autopilot opened a thread on a plan node. */
+  | { kind: 'thread-auto-started'; threadId: string; title: string }
   /**
    * A pre-delivery review round started or ended, where the author and the reviewer are
    * followed. `count` is the comments of an ended round.
@@ -516,6 +522,8 @@ export type TranscriptNote =
   | { type: 'thread-resumed'; threadId: string; by: string; reason: string }
   | { type: 'thread-stopped-by-user'; threadId: string; reason: string }
   | { type: 'thread-reviewed'; threadId: string }
+  /** Its last turn ended without a report. */
+  | { type: 'report-missing' }
   | { type: 'instructions-changed'; path: string; removed: boolean }
   | {
       /**

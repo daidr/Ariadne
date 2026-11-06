@@ -7,7 +7,6 @@ import {
   DouChatContextMeter,
   DouPopover,
   DouTooltip,
-  useLocale,
 } from 'dou-ui'
 import { computed, ref } from 'vue'
 import { count, locale, t } from '../i18n'
@@ -28,13 +27,13 @@ const props = defineProps<{
 }>()
 
 const open = ref(false)
-const dou = useLocale()
 const meter = computed(() => contextUsage(props.used, props.total))
+// The ring fills up to where older history is summarised, not to the model's window: the
+// hint names that line, so the number does not read as a wrong context size.
 const line = computed(() =>
-  dou.t('chat.context', {
+  t('context.untilCompact', {
     used: compactNumber(meter.value.used),
     total: compactNumber(meter.value.total),
-    percent: meter.value.percent,
   }),
 )
 // In the popover, written like the rest of its numbers.

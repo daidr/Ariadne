@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { DouBadge, DouTag, DouText, DouTooltip } from 'dou-ui'
-import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
+import {
+  AlertTriangleIcon,
+  FlagIcon,
+  GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestIcon,
+  SignpostIcon,
+} from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { checksTone } from '../stage'
+import { checksTone, questionOf, showsHeadline, statusLine } from '../stage'
+import { state } from '../store'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
 import PlanStatusIcon from './PlanStatusIcon.vue'
@@ -25,20 +33,57 @@ const mark = computed(() => {
   if (props.data.fresh) return { label: t('plan.mark.fresh'), tone: 'primary' as const }
   return null
 })
+// Most nodes are tasks: only the other kinds say what they are.
+const kindIcon = computed(() =>
+  props.data.kind === 'milestone' ? FlagIcon : props.data.kind === 'decision' ? SignpostIcon : null,
+)
+const ahead = computed(() =>
+  props.data.ahead.length ? t('plan.ahead', { titles: props.data.ahead.join('、') }) : null,
+)
+/** A thread named as its node only adds its state, which the icon already gives. */
+const named = (title: string) => title.trim() !== props.data.title.trim()
+const hasHeadline = (thread: PlanNodeData['threads'][number]) =>
+  !!thread.lastHeadline && showsHeadline(thread.stage)
+/** For a thread named as its node: what it is doing or asks, from the live thread. */
+function lineOf(id: string): string | null {
+  const thread = state.detail?.threads.find((item) => item.id === id)
+  return thread ? (statusLine(thread, questionOf(id, state.detail?.needsMe))?.text ?? null) : null
+}
 </script>
 
 <template>
   <div
     class="plan-node"
     :class="{
+      'plan-node-compact': data.compact,
       'plan-node-wait': waiting,
       'plan-node-proposed': data.proposed,
       [`plan-node-${data.mark}`]: !!data.mark,
+      [`plan-node-${data.kind}`]: true,
     }"
   >
     <div class="plan-node-head">
-      <DouText size="sm" variant="tertiary">{{ t(`plan.kind.${data.kind}`) }}</DouText>
+      <span class="plan-node-name">
+        <DouTooltip v-if="kindIcon" :content="t(`plan.kind.${data.kind}`)">
+          <DouText
+            variant="tertiary"
+            class="plan-node-kind"
+            role="img"
+            :aria-label="t(`plan.kind.${data.kind}`)"
+          >
+            <component :is="kindIcon" aria-hidden="true" />
+          </DouText>
+        </DouTooltip>
+        <DouText class="plan-node-title" :size="data.compact ? 'sm' : undefined" weight="medium">
+          {{ data.title }}
+        </DouText>
+      </span>
       <span class="plan-node-tags">
+        <DouTooltip v-if="ahead" :content="ahead">
+          <DouText tone="warning" class="plan-node-ahead" role="img" :aria-label="ahead">
+            <AlertTriangleIcon aria-hidden="true" />
+          </DouText>
+        </DouTooltip>
         <DouTooltip v-if="mark" :content="mark.label">
           <span class="plan-node-mark" role="img" :aria-label="mark.label">
             <DouBadge dot :tone="mark.tone" />
@@ -47,12 +92,32 @@ const mark = computed(() => {
         <PlanStatusIcon :status="data.status" />
       </span>
     </div>
-    <DouText class="plan-node-title" weight="medium">{{ data.title }}</DouText>
-    <ul v-if="data.threads.length" class="plan-node-threads">
+    <ul v-if="data.threads.length && !data.compact" class="plan-node-threads">
       <li v-for="thread in shown" :key="thread.id" class="plan-node-thread">
-        <DouText size="sm" class="plan-node-thread-title" :title="thread.title">
+        <DouText
+          v-if="named(thread.title)"
+          size="sm"
+          class="plan-node-thread-title"
+          :title="thread.title"
+        >
           {{ thread.title }}
         </DouText>
+        <DouText
+          v-else-if="!hasHeadline(thread)"
+          size="sm"
+          variant="secondary"
+          class="plan-node-thread-title"
+          :title="lineOf(thread.id) ?? thread.title"
+        >
+          {{ lineOf(thread.id) ?? t(`thread.stage.${thread.stage}`) }}
+        </DouText>
+        <ThreadHeadline
+          v-else
+          class="plan-node-thread-title"
+          :stage="thread.stage"
+          :headline="thread.lastHeadline"
+          :lines="1"
+        />
         <span class="plan-node-tags">
           <span v-if="thread.pullRequest" class="plan-node-pr">
             <GitMergeIcon v-if="thread.pullRequest.state === 'merged'" />
@@ -73,6 +138,7 @@ const mark = computed(() => {
           <StageIcon :stage="thread.stage" />
         </span>
         <ThreadHeadline
+          v-if="named(thread.title)"
           class="plan-node-headline"
           :stage="thread.stage"
           :headline="thread.lastHeadline"
@@ -130,7 +196,44 @@ const mark = computed(() => {
   text-decoration: line-through;
 }
 
-.plan-node-head,
+.plan-node-compact {
+  width: 152px;
+  padding: 6px 12px;
+}
+
+/* A milestone marks a stage of the plan, a decision a fork in it: they read apart from tasks. */
+.plan-node-milestone {
+  border-inline-start: 3px solid var(--dou-color-text-tertiary);
+}
+
+.plan-node-decision {
+  border-inline-start: 3px dashed var(--dou-color-warning);
+}
+
+.plan-node-name {
+  display: inline-flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plan-node-kind,
+.plan-node-ahead {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 1.5em;
+  font-size: 14px;
+}
+
+.plan-node-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .plan-node-thread {
   display: flex;
   flex-wrap: wrap;
@@ -148,6 +251,7 @@ const mark = computed(() => {
 .plan-node-tags {
   display: inline-flex;
   align-items: center;
+  min-height: 1.5em;
   flex-shrink: 0;
   gap: 4px;
 }

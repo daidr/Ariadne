@@ -153,6 +153,8 @@ export const threadsProjection: Projection = {
       last_artifacts TEXT NOT NULL DEFAULT '[]',
       reported_at INTEGER,
       reported_head TEXT,
+      -- When it was last told to report after a turn that ended without one.
+      nudged_at INTEGER,
       workspace_label TEXT,
       workspace_branch TEXT,
       workspace_base TEXT,
@@ -338,6 +340,9 @@ export const threadsProjection: Projection = {
           'UPDATE threads SET stopped_reason = ?, stopped_by = ?, stopped_at = ?, updated_at = ? WHERE id = ?',
           [event.data.reason, event.data.by, event.at, event.at, event.data.threadId],
         )
+        break
+      case 'thread.nudged':
+        db.run('UPDATE threads SET nudged_at = ? WHERE id = ?', [event.at, event.data.threadId])
         break
       case 'thread.reviewed':
         db.run('UPDATE threads SET reviewed_at = ?, updated_at = ? WHERE id = ?', [
@@ -685,6 +690,28 @@ export const noticesProjection: Projection = {
           ...(event.data.pullRequest ? { pullRequest: event.data.pullRequest } : {}),
         })
         break
+      // The coordinator's own changes to the plan, and the threads the autopilot opened, are
+      // said where the user talks to it: nothing on the plan changes behind their back.
+      case 'plan.revised': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator || event.data.author !== 'coordinator') break
+        add(coordinator, 'plan-changed', {
+          revisionId: event.data.revisionId,
+          reason: event.data.reason,
+          added: event.data.ops.filter((op) => op.op === 'add').length,
+          revert: event.data.revertOf !== null,
+        })
+        break
+      }
+      case 'thread.created': {
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator || !event.data.auto) break
+        add(coordinator, 'thread-auto-started', {
+          threadId: event.data.threadId,
+          title: event.data.title,
+        })
+        break
+      }
       case 'autopilot.held':
         add(event.data.threadId, 'autopilot-held', {
           reason: event.data.reason,
@@ -858,6 +885,8 @@ export const conversationsProjection: Projection = {
       turn_id TEXT,
       turn_started_seq INTEGER,
       turn_started_at INTEGER,
+      -- When its newest turn started, kept after it ends: was there a report since?
+      last_turn_at INTEGER,
       model TEXT,
       last_outcome TEXT,
       last_error TEXT,
@@ -908,9 +937,9 @@ export const conversationsProjection: Projection = {
         break
       case 'turn.started':
         db.run(
-          `UPDATE conversations SET turn_id = ?, turn_started_at = ?, turn_started_seq = ?, model = ?,
-             activity = NULL, fallback = 0
-           WHERE id = ?`,
+          `UPDATE conversations SET turn_id = ?1, turn_started_at = ?2, last_turn_at = ?2,
+             turn_started_seq = ?3, model = ?4, activity = NULL, fallback = 0
+           WHERE id = ?5`,
           [event.data.turnId, event.at, event.seq, event.data.model, event.data.conversationId],
         )
         break
@@ -1378,6 +1407,11 @@ export const transcriptProjection: Projection = {
           title: event.data.title,
         }
         addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, false)
+        break
+      }
+      case 'thread.nudged': {
+        const payload = { type: 'report-missing' }
+        addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, true)
         break
       }
       case 'thread.reviewed': {

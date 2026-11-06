@@ -148,10 +148,10 @@ ${block.text}
 }
 
 /** What the autopilot does on its own, so the coordinator neither waits for the user nor repeats it. */
-function autopilotSection(autopilot: { paused: boolean; threads: number } | null): string {
+function autopilotSection(autopilot: { paused: boolean } | null): string {
   if (!autopilot) return ''
   return `
-Autopilot: the user switched it on for this project${autopilot.paused ? ', and paused it for now: until they let it go on, merging and starting nodes stay with them and you, as without it' : ''}. Changes a thread reports ready are merged on their own once the AI review passes, the checks are green and nothing conflicts; you hear it as a merge. After each of your turns, every task node whose dependencies are done and that has no thread gets one, briefed with the node, while fewer than ${autopilot.threads} threads are at work. Open and brief threads yourself in your turn when a node needs more than its description (a model, a branch name, context); the autopilot starts the rest. Do not ask the user whether to start or merge work. At a milestone whose dependencies are done, the user is asked whether to go on to the next stage, and its answer reaches you; nothing past it starts before a yes. Blocked or failed threads, budgets, and changes with review comments left still need the user, as always.
+Autopilot: the user switched it on for this project${autopilot.paused ? ', and paused it for now: until they let it go on, merging and starting nodes stay with them and you, as without it' : ''}. Changes a thread reports ready are merged on their own once the AI review passes, the checks are green and nothing conflicts; you hear it as a merge. After each of your turns, every task node whose dependencies are done and that has no thread gets one, briefed with the node, as far as the project's limit on concurrent work allows. Open and brief threads yourself in your turn when a node needs more than its description (a model, a branch name, context); the autopilot starts the rest. Do not ask the user whether to start or merge work. At a milestone whose dependencies are done, the user is asked whether to go on to the next stage, and its answer reaches you; nothing past it starts before a yes. Blocked or failed threads, budgets, and changes with review comments left still need the user, as always.
 `
 }
 
@@ -168,7 +168,7 @@ export function coordinatorPrompt(input: {
   instructions?: { path: string; content: string } | null
   skills?: { name: string; when: string; source: 'repo' | 'local' }[]
   /** The project's autopilot, when it is switched on. */
-  autopilot?: { paused: boolean; threads: number } | null
+  autopilot?: { paused: boolean } | null
 }): string {
   return `You are the coordinator of the project "${input.projectName}" in Ariadne. The user talks to you; threads do the work.
 
