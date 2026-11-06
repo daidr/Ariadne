@@ -13,6 +13,7 @@ import {
   WorkspaceManager,
   WorktreeJanitor,
 } from '@ariadne/agent'
+import agents from '@ariadne/plugin-agents'
 import anthropic from '@ariadne/plugin-anthropic'
 import daemon from '@ariadne/plugin-daemon'
 import github from '@ariadne/plugin-github'
@@ -75,6 +76,7 @@ if (!sandbox.kind) {
 const host = new PluginHost(join(config.home, 'plugins'), sandbox)
 await host.load(openAICompatible)
 await host.load(anthropic)
+await host.load(agents)
 await host.load(local)
 await host.load(github)
 await host.load(gitlab)

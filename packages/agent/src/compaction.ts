@@ -31,6 +31,9 @@ export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): Toke
     ...(part.cached ? { cached: part.cached } : {}),
     ...(part.cacheWrite ? { cacheWrite: part.cacheWrite } : {}),
     ...(part.reasoning ? { reasoning: part.reasoning } : {}),
+    ...(part.costUsd !== undefined
+      ? { cost: { amount: part.costUsd, currency: 'USD' as const } }
+      : {}),
   }
 }
 

@@ -45,6 +45,7 @@ import {
   sameToken,
   toErrorResponse,
 } from './http'
+import { PriceCatalog } from './prices'
 
 export interface HandlerOptions {
   app: Ariadne
@@ -64,6 +65,8 @@ export interface HandlerOptions {
   data?: DataStore
   /** The user's own skills for every project. */
   skillsDir?: string
+  /** List prices of models, to fill in a model's price on request. */
+  prices?: PriceCatalog
 }
 
 type Params = Record<string, string>
@@ -154,6 +157,7 @@ export function createHandler({
   mcp,
   data: dataStore,
   skillsDir,
+  prices = new PriceCatalog(),
 }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
@@ -833,6 +837,26 @@ export function createHandler({
       return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
     settings.updateModels(await readJson(request))
     return json(settings.publicModels())
+  })
+
+  // A model's list price from the public catalog: only a suggestion for the form.
+  add('GET', '/api/settings/model-price', async (_request, _params, url) => {
+    const model = (url.searchParams.get('model') ?? '').trim().slice(0, 200)
+    if (!model) throw new BadRequest('model')
+    let match
+    try {
+      match = await prices.lookup(model, (url.searchParams.get('hint') ?? '').slice(0, 500))
+    } catch (error) {
+      return errorResponse(
+        {
+          key: 'error.priceCatalog',
+          params: { detail: error instanceof Error ? error.message : String(error) },
+        },
+        502,
+      )
+    }
+    if (!match) return errorResponse({ key: 'error.priceUnknown', params: { model } }, 404)
+    return json(match)
   })
 
   // External tool servers: what is set up, secrets left out, and how each stands.

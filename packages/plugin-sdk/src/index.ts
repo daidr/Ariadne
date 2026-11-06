@@ -147,6 +147,11 @@ export type ModelStreamPart =
       cached?: number
       cacheWrite?: number
       reasoning?: number
+      /**
+       * What the service itself says the response cost, in US dollars. A user's price for
+       * the model is used only where this is missing.
+       */
+      costUsd?: number
     }
   | {
       type: 'finish'
@@ -192,6 +197,13 @@ export interface ModelRequest {
    * of the provider's, except the messages, tools, model and streaming, which stay its own.
    */
   extraBody?: Record<string, unknown>
+  /**
+   * Which conversation the request belongs to (a research has its own). A provider that
+   * keeps a session between requests, such as an agent program, keeps one per conversation
+   * and carries it on while the next request extends the last; without it the request
+   * stands alone.
+   */
+  conversation?: string
   signal?: AbortSignal
 }
 
@@ -215,6 +227,11 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
   kind: string
   title: LocalizedText
   settings: SettingsSchema
+  /**
+   * It runs an agent program on this machine instead of calling a service over HTTP: the
+   * headers, body fields and timeout a user can add to requests do not apply to it.
+   */
+  program?: boolean
   /**
    * Stream one response. Text may arrive in pieces; each tool call arrives whole. Errors
    * of the remote service end the stream with a `finish` part of reason `error`, marked

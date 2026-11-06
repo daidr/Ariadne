@@ -42,7 +42,7 @@ describe('model settings', () => {
     const store = new SettingsStore(path, host)
     store.updateConcurrency({ slots: 2, reserved: 1 })
     const saved = JSON.parse(readFileSync(path, 'utf8')).models
-    expect(Object.keys(saved).toSorted()).toEqual(['models', 'providers', 'roles'])
+    expect(Object.keys(saved).toSorted()).toEqual(['models', 'providers', 'roles', 'showCost'])
   })
 
   test('work slots are checked and kept', () => {
@@ -317,6 +317,27 @@ describe('model settings', () => {
     const role = (thread: unknown) => ({ ...settings, roles: { ...settings.roles, thread } })
     expect(() => store.updateModels(role({ model: 'nope', effort: null }))).toThrow()
     expect(() => store.updateModels(role({ model: 'm1', effort: 'max' }))).toThrow()
+  })
+
+  test('a model’s price reaches the turn, is checked, and the cost switch is kept', () => {
+    const store = new SettingsStore(path, host)
+    const price = { currency: 'CNY', input: 2, output: 8, cacheRead: 0.5 }
+    store.updateModels({ ...provider({ apiKey: 'k' }, { price }), showCost: true })
+    expect(store.resolveModel('thread')?.price).toEqual(price)
+    expect(store.publicModels().showCost).toBe(true)
+    expect(new SettingsStore(path, host).publicModels().showCost).toBe(true)
+    for (const bad of [
+      { ...price, currency: 'EUR' },
+      { ...price, output: undefined },
+      { ...price, input: -1 },
+      { ...price, cacheWrite: 'x' },
+    ]) {
+      expect(() => store.updateModels(provider({ apiKey: 'k' }, { price: bad }))).toThrow()
+    }
+    // Without the switch, usage shows tokens only.
+    store.updateModels(provider({ apiKey: 'k' }))
+    expect(store.publicModels().showCost).toBe(false)
+    expect(store.resolveModel('thread')?.price).toBeUndefined()
   })
 
   test('rejects an unknown provider kind', () => {

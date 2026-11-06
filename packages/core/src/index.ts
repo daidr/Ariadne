@@ -94,6 +94,7 @@ export {
   type StoredFile,
 } from './files'
 export type * from './events'
+export { CURRENCIES } from './events'
 export { newId } from './ids'
 export {
   LIVE_TAIL,

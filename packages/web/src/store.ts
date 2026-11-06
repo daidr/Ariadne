@@ -133,6 +133,8 @@ interface State {
   models: ModelOption[]
   /** The model threads use unless given another. */
   threadDefault: string | null
+  /** Usage shows the estimated cost too. */
+  showCost: boolean
   /** The new-project form is open. */
   creatingProject: boolean
   /** The project source popover in the header is open; the first-run steps open it too. */
@@ -172,6 +174,7 @@ export const state = reactive<State>({
   modelReady: null,
   models: [],
   threadDefault: null,
+  showCost: false,
   creatingProject: false,
   sourceOpen: false,
   focus: null,
@@ -852,6 +855,7 @@ function onEvent(event: AnyStoredEvent) {
 export function applyModelSettings(settings: ModelSettings) {
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
+  state.showCost = settings.showCost
   state.models = settings.models.map((model) => ({
     id: model.id,
     label: `${settings.providers.find((p) => p.id === model.provider)?.name ?? model.provider} / ${model.model}`,

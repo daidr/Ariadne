@@ -1195,7 +1195,7 @@ describe('usage, models and step input', () => {
       usage: { input: 2500, output: 150 },
       contextTokens: 1500,
     })
-    const parts = { cached: 1200, cacheWrite: 200, reasoning: 30 }
+    const parts = { cached: 1200, cacheWrite: 200, reasoning: 30, cost: { USD: 0, CNY: 0 } }
     expect(app.getThread(thread.id).usage).toEqual({ input: 2500, output: 150, ...parts })
     expect(app.getProject(project.id).usage).toEqual({ input: 2700, output: 170, ...parts })
   })

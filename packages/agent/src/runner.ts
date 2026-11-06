@@ -40,11 +40,17 @@ import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 import { withImages } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
-import { callOf, type ResolvedModel } from './model'
+import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
 import { requestStep, TurnError } from './model-step'
 
-export { callOf, type ModelRequestOptions, type ResolvedModel } from './model'
+export {
+  callOf,
+  withCost,
+  type ModelPrice,
+  type ModelRequestOptions,
+  type ResolvedModel,
+} from './model'
 
 export interface TurnOptions {
   app: Ariadne
@@ -505,7 +511,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
                 summary: summary.text,
                 upTo: cut,
                 sawSeq: readAt,
-                usage: summary.usage,
+                usage: withCost(summary.usage, model),
                 call: callOf(model, null),
                 timing: summary.timing,
                 reasoning: summary.reasoning,
@@ -540,6 +546,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             tools: specs,
             ...(model.effort ? { effort: model.effort } : {}),
             ...requestExtras(model),
+            conversation: conversationId,
             signal,
           },
           (retry) => app.recordModelRetry(conversationId, turnId, retry),
@@ -575,7 +582,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         reasoning,
         toolCalls,
         sawSeq,
-        usage,
+        usage: withCost(usage, model),
         input: {
           system: input.system,
           tools: input.tools,

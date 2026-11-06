@@ -144,6 +144,20 @@ export interface TokenUsage {
   /** The part of `input` written to the provider's cache. */
   cacheWrite?: number
   reasoning?: number
+  /**
+   * What the request cost, estimated: as the service reported it, or from the price the
+   * user gave the model, at the time.
+   */
+  cost?: Cost
+}
+
+export type Currency = 'USD' | 'CNY'
+export const CURRENCIES: readonly Currency[] = ['USD', 'CNY']
+
+/** An amount of money in one currency. */
+export interface Cost {
+  amount: number
+  currency: Currency
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { Currency, TokenUsage } from '@ariadne/core'
 import type { Effort, ModelProvider } from '@ariadne/plugin-sdk'
 
 /** The model a conversation talks to, with its provider's settings. */
@@ -20,6 +21,40 @@ export interface ResolvedModel {
    * (rate limits, overload, server errors) after its retries.
    */
   fallback?: ResolvedModel
+  /** What the user said the model costs; requests are estimated with it. */
+  price?: ModelPrice
+}
+
+/**
+ * A model's price per million tokens: what it reads afresh (`input`), what it writes
+ * (`output`, thinking included), and what it reads from or writes to the provider's cache;
+ * without those, they cost as much as `input`.
+ */
+export interface ModelPrice {
+  currency: Currency
+  input: number
+  output: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
+/**
+ * `usage` with what it cost: what the service reported, else estimated from the model's
+ * price. Unpriced usage stays as it is.
+ */
+export function withCost(usage: TokenUsage | null, model: ResolvedModel): TokenUsage | null {
+  if (!usage || usage.cost || !model.price) return usage
+  const price = model.price
+  const cached = usage.cached ?? 0
+  const written = usage.cacheWrite ?? 0
+  const fresh = Math.max(0, usage.input - cached - written)
+  const amount =
+    (fresh * price.input +
+      cached * (price.cacheRead ?? price.input) +
+      written * (price.cacheWrite ?? price.input) +
+      usage.output * price.output) /
+    1_000_000
+  return { ...usage, cost: { amount, currency: price.currency } }
 }
 
 /** Request settings the user gave a provider (headers, body, timeout) or a model (output). */
