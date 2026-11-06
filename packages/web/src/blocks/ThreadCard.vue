@@ -7,7 +7,7 @@ import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
 import { threadLine } from '../stage'
-import { openThread, state } from '../store'
+import { activeThreadId, openThread, state } from '../store'
 
 /** An entry to a thread an agent put in a message; follows the thread as it moves on. */
 const props = defineProps<{ threadId: string }>()
@@ -28,7 +28,7 @@ const headline = computed(() => {
     v-if="thread"
     :title="thread.title"
     :description="headline"
-    :active="state.threadId === thread.id"
+    :active="activeThreadId === thread.id"
     @open="openThread(thread.id)"
   >
     <template #icon><MessagesIcon /></template>

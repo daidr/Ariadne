@@ -18,13 +18,17 @@ import type {
   TodoView,
   TurnFile,
 } from '@ariadne/core'
-import { reactive } from 'vue'
+import { computed, reactive, ref, type Ref } from 'vue'
+import type { Draft } from './components/attachments'
+import * as side from './side/layout'
+import type { OpenOptions, PaneKey, SideLayout, SplitDirection } from './side/layout'
 import {
   api,
   ApiError,
   DEFAULT_KEYS,
   followEvents,
   type InputSettings,
+  type MentionInput,
   type MessageExtras,
   type ModelSettings,
   type ProjectDetail,
@@ -81,7 +85,7 @@ export interface ConversationState {
   seq: number | null
 }
 
-const emptyConversation = (): ConversationState => ({
+export const emptyConversation = (): ConversationState => ({
   conversation: null,
   messages: [],
   notices: [],
@@ -114,9 +118,10 @@ interface State {
   detail: ProjectDetail | null
   /** The coordinator's conversation, always on screen. */
   coordinator: ConversationState
-  /** The thread open beside the coordinator; `null` shows the project panel there. */
-  threadId: string | null
-  thread: ConversationState
+  /** What the right side shows, beside the coordinator: groups of tabs, split as the user likes. */
+  side: SideLayout
+  /** The conversations of the threads open on the right side, by thread. */
+  threads: Record<string, ConversationState>
   plan: PlanView | null
   artifacts: ArtifactSummary[]
   /** The project's memory: standing preferences every conversation sees. */
@@ -158,8 +163,8 @@ export const state = reactive<State>({
   currentId: null,
   detail: null,
   coordinator: emptyConversation(),
-  threadId: null,
-  thread: emptyConversation(),
+  side: side.defaultLayout(),
+  threads: {},
   plan: null,
   artifacts: [],
   memories: [],
@@ -208,13 +213,22 @@ function refreshCurrent(parts: Iterable<Part> = ALL_PARTS): Promise<void> {
 
 async function loadParts(parts: ReadonlySet<Part>) {
   const id = state.currentId
-  const threadId = state.threadId
   if (!id) return
   const detail = parts.has('detail') || !state.detail ? await api.getProject(id) : state.detail
   const conversations = parts.has('conversations')
-  const [coordinator, thread, plan, artifacts, memory] = await Promise.all([
+  // A thread that no longer exists closes; its tab would show nothing.
+  const known = new Set(detail.threads.map((thread) => thread.id))
+  const threadIds = side.openThreads(state.side).filter((threadId) => known.has(threadId))
+  const [coordinator, threads, plan, artifacts, memory] = await Promise.all([
     conversations ? fetchConversation(detail.project.coordinatorId, state.coordinator) : null,
-    conversations && threadId ? fetchConversation(threadId, state.thread) : null,
+    conversations
+      ? Promise.all(
+          threadIds.map(async (threadId) => {
+            const current = state.threads[threadId] ?? emptyConversation()
+            return [threadId, await fetchConversation(threadId, current)] as const
+          }),
+        )
+      : null,
     parts.has('plan') ? api.getPlan(id) : null,
     parts.has('artifacts') ? api.listArtifacts(id) : null,
     parts.has('memories') ? api.listMemories(id) : null,
@@ -223,9 +237,14 @@ async function loadParts(parts: ReadonlySet<Part>) {
   // stale. Another thread only makes the thread's own part stale; opening it loads that.
   if (state.currentId !== id) return
   state.detail = detail
+  setSide(
+    side.prune(state.side, (key) => known.has(side.threadOf(key) ?? '') || !side.threadOf(key)),
+  )
   if (coordinator) state.coordinator = coordinator(state.coordinator)
-  if (conversations && state.threadId === threadId) {
-    state.thread = thread ? thread(state.thread) : emptyConversation()
+  // A thread closed meanwhile stays closed.
+  for (const [threadId, apply] of threads ?? []) {
+    if (!side.groupWith(state.side, side.threadKey(threadId))) continue
+    state.threads[threadId] = apply(state.threads[threadId] ?? emptyConversation())
   }
   if (plan) state.plan = plan.plan
   if (artifacts) state.artifacts = artifacts.artifacts
@@ -325,36 +344,40 @@ export function merge(current: ConversationState, page: ConversationPage): Conve
   }
 }
 
-const slotOf = (conversationId: string): 'coordinator' | 'thread' | null =>
-  state.detail?.project.coordinatorId === conversationId
-    ? 'coordinator'
-    : state.threadId === conversationId
-      ? 'thread'
-      : null
+/** The conversation on screen with this id: the coordinator's or an open thread's. */
+export function conversationState(conversationId: string): ConversationState | null {
+  if (state.detail?.project.coordinatorId === conversationId) return state.coordinator
+  return state.threads[conversationId] ?? null
+}
+
+function setConversation(conversationId: string, value: ConversationState) {
+  if (state.detail?.project.coordinatorId === conversationId) state.coordinator = value
+  else if (state.threads[conversationId]) state.threads[conversationId] = value
+}
 
 /** Load the page of messages before the first one shown; called when scrolled to the top. */
 export async function loadEarlier(conversationId: string) {
-  const slot = slotOf(conversationId)
-  if (!slot) return
-  const current = state[slot]
-  const first = current.messages[0]
-  if (!current.more || current.loadingEarlier || !first) return
+  const current = conversationState(conversationId)
+  const first = current?.messages[0]
+  if (!current || !current.more || current.loadingEarlier || !first) return
   current.loadingEarlier = true
   try {
     const page = await api.getConversation(conversationId, { before: first.id })
-    // Still the same conversation, starting where it did when this was asked for.
-    if (slotOf(conversationId) !== slot || state[slot].messages[0]?.id !== first.id) return
-    state[slot] = {
-      ...state[slot],
-      messages: [...page.messages, ...state[slot].messages],
-      notices: [...page.notices, ...state[slot].notices],
+    // Still on screen, starting where it did when this was asked for.
+    const now = conversationState(conversationId)
+    if (!now || now.messages[0]?.id !== first.id) return
+    setConversation(conversationId, {
+      ...now,
+      messages: [...page.messages, ...now.messages],
+      notices: [...page.notices, ...now.notices],
       more: page.more,
       from: page.messages[0]?.id ?? first.id,
-    }
+    })
   } catch (error) {
     report(error)
   } finally {
-    if (slotOf(conversationId) === slot) state[slot].loadingEarlier = false
+    const now = conversationState(conversationId)
+    if (now) now.loadingEarlier = false
   }
 }
 
@@ -370,14 +393,15 @@ export async function openMessage(conversationId: string, messageId: string) {
   } else {
     await openThread(conversationId)
   }
-  const slot = slotOf(conversationId)
-  if (!slot) return
-  if (!state[slot].messages.some((message) => message.id === messageId)) {
+  const shown = conversationState(conversationId)
+  if (!shown) return
+  if (!shown.messages.some((message) => message.id === messageId)) {
     try {
       const page = await api.getConversation(conversationId, { from: messageId })
-      if (slotOf(conversationId) !== slot) return
-      state[slot] = {
-        ...state[slot],
+      const now = conversationState(conversationId)
+      if (!now) return
+      setConversation(conversationId, {
+        ...now,
         conversation: page.conversation,
         todo: page.todo,
         model: page.model,
@@ -386,7 +410,7 @@ export async function openMessage(conversationId: string, messageId: string) {
         more: page.more,
         from: page.messages[0]?.id ?? null,
         seq: page.lastSeq,
-      }
+      })
     } catch (error) {
       report(error)
       return
@@ -397,26 +421,108 @@ export async function openMessage(conversationId: string, messageId: string) {
 
 export async function openProject(id: string) {
   state.currentId = id
-  state.threadId = null
+  showSide(readSide(id))
   state.detail = null
   state.plan = null
   state.artifacts = []
   state.memories = []
   state.main = { kind: 'conversation' }
   state.coordinator = emptyConversation()
-  state.thread = emptyConversation()
   await refreshCurrent().catch(report)
 }
 
+const SIDE_KEY = (projectId: string) => `ariadne.side.${projectId}`
+
+/** How the user left the project's right side, in this browser. */
+function readSide(projectId: string): SideLayout {
+  try {
+    const raw = localStorage.getItem(SIDE_KEY(projectId))
+    return (raw && side.parseLayout(JSON.parse(raw))) || side.defaultLayout()
+  } catch {
+    return side.defaultLayout()
+  }
+}
+
+/** Show another project's right side: nothing of the last one's threads stays. */
+function showSide(layout: SideLayout) {
+  state.side = layout
+  state.threads = {}
+  for (const threadId of composers.keys()) dropComposer(threadId)
+}
+
+/** Show the right side as `next`, remembered for the project; closed threads let go. */
+export function setSide(next: SideLayout) {
+  if (next === state.side) return
+  state.side = next
+  const open = new Set(side.openThreads(next))
+  for (const threadId of Object.keys(state.threads)) {
+    if (!open.has(threadId)) delete state.threads[threadId]
+  }
+  for (const threadId of composers.keys()) if (!open.has(threadId)) dropComposer(threadId)
+  const projectId = state.currentId
+  if (!projectId) return
+  try {
+    localStorage.setItem(SIDE_KEY(projectId), JSON.stringify(next))
+  } catch {
+    // Not remembered; the project opens with its lists next time.
+  }
+}
+
 /**
- * Open a thread's conversation beside the coordinator's, or close it with `null`. The
- * coordinator stays where it is.
+ * What the user is writing to an open thread and has not sent: kept here rather than in
+ * its panel, so moving the thread's tab to another group, which builds the panel anew,
+ * keeps it. Closing the tab lets it go.
  */
-export async function openThread(threadId: string | null) {
-  if (state.threadId === threadId) return
-  state.threadId = threadId
-  state.thread = emptyConversation()
+export interface Composer {
+  draft: Ref<string>
+  files: Ref<Draft[]>
+  mentions: Map<string, MentionInput>
+  skills: Set<string>
+}
+const composers = new Map<string, Composer>()
+
+export function composerFor(threadId: string): Composer {
+  let composer = composers.get(threadId)
+  if (!composer) {
+    composer = { draft: ref(''), files: ref([]), mentions: new Map(), skills: new Set() }
+    composers.set(threadId, composer)
+  }
+  return composer
+}
+
+function dropComposer(threadId: string) {
+  for (const file of composers.get(threadId)?.files.value ?? []) {
+    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }
+  composers.delete(threadId)
+}
+
+/** The thread in front of the group on the right the user last used. */
+export const activeThreadId = computed(() => side.focusedThread(state.side))
+
+/**
+ * Open something on the right side, beside the coordinator, which stays where it is: where
+ * it already is, else in the group last used, or in a new group beside it.
+ */
+export async function openPane(key: PaneKey, options: OpenOptions = {}) {
+  setSide(side.open(state.side, key, options))
+  const threadId = side.threadOf(key)
+  if (!threadId || state.threads[threadId]) return
+  state.threads[threadId] = emptyConversation()
   await refreshCurrent(['conversations']).catch(report)
+}
+
+/** Open a thread's conversation on the right side; see `openPane`. */
+export function openThread(threadId: string, options: OpenOptions = {}) {
+  return openPane(side.threadKey(threadId), options)
+}
+
+export function closePane(key: PaneKey) {
+  setSide(side.close(state.side, key))
+}
+
+export function splitPane(key: PaneKey, direction: SplitDirection) {
+  setSide(side.split(state.side, key, direction))
 }
 
 export async function createProject(name: string) {
@@ -450,14 +556,13 @@ function forgetProject(id: string) {
     return
   }
   state.currentId = null
-  state.threadId = null
+  showSide(side.defaultLayout())
   state.detail = null
   state.plan = null
   state.artifacts = []
   state.memories = []
   state.main = { kind: 'conversation' }
   state.coordinator = emptyConversation()
-  state.thread = emptyConversation()
 }
 
 /** Whether it was sent; a failure is reported, and the draft is kept for another try. */

@@ -5,7 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
 import { groupOf, sortThreads, threadGroups, type ThreadGroup } from '../stage'
-import { openThread, state } from '../store'
+import { activeThreadId, openThread, state } from '../store'
 import ReviewActions from './ReviewActions.vue'
 import ThreadRow from './ThreadRow.vue'
 import { openGroups, threadSort } from './thread-list'
@@ -66,12 +66,21 @@ function select(key: string | number) {
     showingAll.value = new Set([...showingAll.value, id.slice(MORE.length) as ThreadGroup])
     return
   }
-  openThread(id)
+  openThread(id, beside ? { beside: 'horizontal' } : {})
 }
+
+// Alt held while picking a thread opens it in a group of its own beside the one last used.
+let beside = false
+const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey)
 </script>
 
 <template>
-  <div v-if="groups.length" class="thread-list">
+  <div
+    v-if="groups.length"
+    class="thread-list"
+    @click.capture="noteBeside"
+    @keydown.capture="noteBeside"
+  >
     <section v-for="{ group, threads: list } in groups" :key="group" class="thread-group">
       <DouButton
         size="sm"
@@ -92,7 +101,7 @@ function select(key: string | number) {
         :id="`thread-group-${group}`"
         class="thread-menu"
         :aria-label="t(`threads.group.${group}`)"
-        :model-value="state.threadId ?? undefined"
+        :model-value="activeThreadId ?? undefined"
         :items="itemsOf(group, list)"
         actions-visible="always"
         @select="select"

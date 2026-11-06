@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem, ThreadView } from '@ariadne/core'
 import { threadLine } from '../stage'
-import { openThread, state } from '../store'
+import { openMain, openThread, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -14,6 +14,12 @@ import ReviewActions from './ReviewActions.vue'
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
+
+/** Go to where a form was asked: its thread, or the coordinator's conversation. */
+function openAsker(threadId: string | null) {
+  if (threadId) void openThread(threadId)
+  else if (state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
+}
 
 /** The line the thread list shows for it; its stage when its report said nothing. */
 function headline(thread: ThreadView): string {
@@ -43,7 +49,7 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
             <!-- A form is filled in where it was asked; the list only points there. -->
             <div v-if="item.attention.block.type === 'form'" class="attention-thread">
               <DouText weight="medium" truncate>{{ item.attention.block.title }}</DouText>
-              <DouButton size="sm" variant="ghost" @click="openThread(item.attention.threadId)">
+              <DouButton size="sm" variant="ghost" @click="openAsker(item.attention.threadId)">
                 {{ t('block.fill') }}
               </DouButton>
             </div>
