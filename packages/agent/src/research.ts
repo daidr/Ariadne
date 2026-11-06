@@ -31,8 +31,8 @@ function researchSystem(role: 'coordinator' | 'thread', tools: Tool[]): string {
 Look as far as the question needs, and no further. Then answer in the language of the question: the conclusion first, then the facts it rests on, each with where you found it (file path and line numbers, or the address). Say plainly what you did not find or could not check. Keep it short: no account of how you searched, no restating the question.`
 }
 
-const usageLine = (usage: TokenUsage) =>
-  `${Math.round((usage.input + usage.output) / 1000)}k tokens`
+const tokens = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+const usageLine = (usage: TokenUsage) => `${tokens.format(usage.input + usage.output)} tokens`
 
 /**
  * Run a research: a model (often a cheaper one) with the conversation's looking tools, in
