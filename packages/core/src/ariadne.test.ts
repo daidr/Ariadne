@@ -137,6 +137,52 @@ describe('thread stages', () => {
     expect(app.getProject(project.id).needsMe).toBe(0)
   })
 
+  test('a turn that ends without a report is not shown as work; one stopped by the user waits on them', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '导出' })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '开始',
+    })
+    const silentTurn = () => {
+      const turnId = app.startTurn(thread.id, 'model')
+      expect(app.getThread(thread.id).stage).toBe('working')
+      app.recordStep(thread.id, turnId, {
+        reasoning: [],
+        text: '做完了。',
+        toolCalls: [],
+        sawSeq: app.lastSeq(),
+        usage: null,
+        input: STEP_INPUT,
+        timing: TIMING,
+      })
+      app.finishTurn(thread.id, turnId, 'completed')
+    }
+    // The first silent turn is told once to report, which wakes it again.
+    silentTurn()
+    expect(app.getThread(thread.id).stage).toBe('queued')
+    expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
+      kind: 'note',
+      note: { type: 'report-missing' },
+    })
+    // Silent again: it is left for the user, under "needs me", and not told again.
+    silentTurn()
+    expect(app.getThread(thread.id).stage).toBe('silent')
+    expect(app.getConversation(thread.id).pendingSeq).toBe(0)
+    expect(app.listNeedsMe(project.id).map((item) => item.kind)).toEqual(['thread'])
+
+    // A report settles it; a turn the user stops halfway waits on them.
+    app.reportThread(thread.id, { kind: 'waiting', summary: '好了', headline: '好了' })
+    expect(app.getThread(thread.id).stage).toBe('idle')
+    app.requestTurn(thread.id)
+    const turnId = app.startTurn(thread.id, 'model')
+    app.finishTurn(thread.id, turnId, 'cancelled')
+    expect(app.getThread(thread.id).stage).toBe('halted')
+    expect(app.listNeedsMe(project.id)).toHaveLength(1)
+  })
+
   test('a merge after the thread asked for review ends the review', () => {
     let tick = 1000
     const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })

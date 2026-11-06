@@ -6,6 +6,7 @@ import { api, ApiError, type ProjectWorktrees } from '../api'
 import { formatBytes } from '../bytes'
 import { t, tm } from '../i18n'
 import StageLabel from './StageLabel.vue'
+import SandboxSettings from './SandboxSettings.vue'
 
 // Threads' worktrees on disk, project by project, to see what they take and remove some.
 const projects = ref<ProjectWorktrees[] | null>(null)
@@ -51,6 +52,7 @@ async function remove(projectId: string, threadId: string) {
 
 <template>
   <div class="worktrees">
+    <SandboxSettings />
     <DouAlert v-if="error" tone="danger" closable @close="error = null">{{ error }}</DouAlert>
     <div v-if="!projects" class="worktrees-loading"><DouSpinner /></div>
     <DouEmpty v-else-if="!projects.length" size="sm" :description="t('worktrees.empty')" />

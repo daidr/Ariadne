@@ -12,7 +12,7 @@ import { commandParts, commandVerdict, DEFAULT_LIMITS } from './limits'
 import { PluginHost } from './plugins'
 import { Scheduler } from './scheduler'
 import { buildTrace, traceRequest } from './trace'
-import { call, fakeModel, say } from './test-model'
+import { call, fakeModel, reminded, say } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
 import { TOOL_SWITCH_NAMES } from './tools'
 import { workspaceTools } from './workspace-tools'
@@ -492,7 +492,7 @@ describe('research', () => {
       ]
     })
     const model = fakeModel((request, role) => {
-      if (role === 'coordinator') return say('')
+      if (role === 'coordinator' || reminded(request)) return say('')
       if (request.messages.at(-1)?.role === 'tool') return say('好')
       return [
         call('t1', 'research', { question: 'README 写了什么？' }),
@@ -530,8 +530,9 @@ describe('research', () => {
       .find((e) => e.kind === 'tool' && e.name === 'research')
     expect(result?.kind === 'tool' && result.content).toContain('README 只有标题。')
     expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('# hi')
-    // Its tokens count toward the thread's: one answer of each.
-    expect(app.getConversation(thread.id).usage.input).toBe(20)
+    // Its tokens count toward the thread's: one answer of each, and the turn it was told
+    // to report in, as it ended without a report.
+    expect(app.getConversation(thread.id).usage.input).toBe(30)
 
     const { turns } = buildTrace(app, thread.id)
     const step = turns[0]!.items.find((item) => item.kind === 'request')

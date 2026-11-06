@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { DouBadge, DouButton, DouEmpty, DouLink, DouPopover, DouText } from 'dou-ui'
-import { BellIcon } from '@dou-ui/icons'
+import { BellIcon, PlayIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem, ThreadView } from '@ariadne/core'
 import { threadLine } from '../stage'
-import { openMain, openThread, state } from '../store'
+import { openMain, openThread, openThreadFrom, retryTurn, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -27,24 +27,39 @@ function headline(thread: ThreadView): string {
 }
 
 /** Every thread waiting on a card, so the user sees whom one answer reaches. */
-function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
-  return [...(item.thread ? [item.thread] : []), ...item.joined].map((thread) => thread.title)
+function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[] {
+  return [...(item.thread ? [item.thread] : []), ...item.joined]
 }
 </script>
 
 <template>
   <DouPopover :title="t('attention.title')" :width="360" placement="bottom-end">
-    <DouButton variant="ghost" size="sm">
+    <!-- With nothing waiting only the bell stays, so it takes no room from the header. -->
+    <DouButton
+      variant="ghost"
+      size="sm"
+      :aria-label="t('attention.title')"
+      :title="count ? undefined : t('attention.title')"
+    >
       <template #leading><BellIcon /></template>
-      {{ t('attention.title') }}
-      <DouBadge v-if="count" :value="count" tone="warning" />
+      <template v-if="count">
+        {{ t('attention.title') }}
+        <DouBadge :value="count" tone="warning" />
+      </template>
     </DouButton>
     <template #content>
       <div v-if="count" class="attention-list">
         <template v-for="item in items">
           <div v-if="item.kind === 'attention'" :key="item.attention.id" class="attention">
             <DouText v-if="askers(item).length" variant="secondary" size="sm" truncate>
-              {{ askers(item).join(' · ') }}
+              <template v-for="(thread, index) in askers(item)" :key="thread.id">
+                <template v-if="index"> · </template>
+                <DouLink
+                  underline="hover"
+                  @click="(event: MouseEvent) => openThreadFrom(event, thread.id)"
+                  >{{ thread.title }}</DouLink
+                >
+              </template>
             </DouText>
             <!-- A form is filled in where it was asked; the list only points there. -->
             <div v-if="item.attention.block.type === 'form'" class="attention-thread">
@@ -68,14 +83,28 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): string[] {
                   class="attention-title"
                   underline="hover"
                   :title="item.thread.title"
-                  @click="openThread(item.thread.id)"
+                  @click="(event: MouseEvent) => openThreadFrom(event, item.thread.id)"
                 >
                   {{ item.thread.title }}
                 </DouLink>
                 <ReviewMark :thread="item.thread" />
               </span>
               <ReviewActions v-if="item.thread.stage === 'review'" :thread-id="item.thread.id" />
-              <DouButton v-else size="sm" variant="ghost" @click="openThread(item.thread.id)">
+              <DouButton
+                v-else-if="item.thread.stage === 'halted' || item.thread.stage === 'silent'"
+                size="sm"
+                variant="ghost"
+                @click="retryTurn(item.thread.id)"
+              >
+                <template #leading><PlayIcon /></template>
+                {{ t('conversation.continue') }}
+              </DouButton>
+              <DouButton
+                v-else
+                size="sm"
+                variant="ghost"
+                @click="(event: MouseEvent) => openThreadFrom(event, item.thread.id)"
+              >
                 {{ t('thread.open') }}
               </DouButton>
             </div>

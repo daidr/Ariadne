@@ -127,6 +127,8 @@ interface State {
   /** The project's memory: standing preferences every conversation sees. */
   memories: MemoryView[]
   main: MainView
+  /** The plan is shown large across the side too, until something opens there. */
+  planWide: boolean
   /** Whether the coordinator has a model; `null` until known. */
   modelReady: boolean | null
   /** The models set up, to pick one for a thread. */
@@ -171,6 +173,7 @@ export const state = reactive<State>({
   artifacts: [],
   memories: [],
   main: { kind: 'conversation' },
+  planWide: false,
   modelReady: null,
   models: [],
   threadDefault: null,
@@ -508,6 +511,7 @@ export const activeThreadId = computed(() => side.focusedThread(state.side))
  * it already is, else in the group last used, or in a new group beside it.
  */
 export async function openPane(key: PaneKey, options: OpenOptions = {}) {
+  state.planWide = false
   setSide(side.open(state.side, key, options))
   const threadId = side.threadOf(key)
   if (!threadId || state.threads[threadId]) return
@@ -518,6 +522,14 @@ export async function openPane(key: PaneKey, options: OpenOptions = {}) {
 /** Open a thread's conversation on the right side; see `openPane`. */
 export function openThread(threadId: string, options: OpenOptions = {}) {
   return openPane(side.threadKey(threadId), options)
+}
+
+/**
+ * Open a thread from a click or key press: with Alt held it goes into a group of its own
+ * beside the one last used, the same from every place a thread opens.
+ */
+export function openThreadFrom(event: MouseEvent | KeyboardEvent | undefined, threadId: string) {
+  return openThread(threadId, event?.altKey ? { beside: 'horizontal' } : {})
 }
 
 export function closePane(key: PaneKey) {
@@ -596,6 +608,7 @@ export async function retryTurn(conversationId: string) {
 /** Show the plan graph large, or an artifact, in the middle column. */
 export function openMain(view: MainView) {
   state.main = view
+  state.planWide = view.kind === 'plan'
 }
 
 /** Start an empty artifact of the user's own and open it. */

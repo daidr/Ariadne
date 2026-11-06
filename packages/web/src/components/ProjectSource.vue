@@ -211,7 +211,18 @@ async function save(clear = false) {
           })
         : null
   saving.value = false
-  if (!problem.value) editing.value = false
+  // Saved: what is left is the conversation it opened for.
+  if (!problem.value) {
+    editing.value = false
+    state.sourceOpen = false
+  }
+}
+
+/** A long path cut in the middle: its start and the folder it ends in both stay readable. */
+function middle(text: string, max = 44): string {
+  if (text.length <= max) return text
+  const tail = Math.ceil(max * 0.6)
+  return `${text.slice(0, max - tail - 1)}…${text.slice(-tail)}`
 }
 </script>
 
@@ -286,8 +297,8 @@ async function save(clear = false) {
           </div>
         </DouForm>
         <div v-else class="source-row">
-          <DouText v-if="summary" size="sm" truncate :title="summary" class="source-path">
-            {{ summary }}
+          <DouText v-if="summary" size="sm" :title="summary" class="source-path">
+            {{ middle(summary) }}
           </DouText>
           <DouText v-else variant="tertiary" size="sm" class="source-path">
             {{ t('project.source.none') }}

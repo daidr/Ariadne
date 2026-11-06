@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { PlanNodeStatus } from '@ariadne/core'
-import { DouText, DouTooltip } from 'dou-ui'
+import { DouStatusDot, DouText, DouTooltip } from 'dou-ui'
 import {
   AlertCircleIcon,
   CheckCircleIcon,
   CircleDashedIcon,
-  CircleHalfIcon,
   PauseCircleIcon,
   UserCircleIcon,
 } from '@dou-ui/icons'
@@ -16,9 +15,8 @@ import { t } from '../i18n'
 /** A plan node's status as an icon in its tone, named on hover. */
 const props = defineProps<{ status: PlanNodeStatus }>()
 
-const icons: Record<PlanNodeStatus, Component> = {
+const icons: Record<Exclude<PlanNodeStatus, 'running'>, Component> = {
   none: CircleDashedIcon,
-  running: CircleHalfIcon,
   waiting: UserCircleIcon,
   error: AlertCircleIcon,
   paused: PauseCircleIcon,
@@ -41,13 +39,15 @@ const label = computed(() =>
 <template>
   <DouTooltip :content="label">
     <DouText
-      :tone="tone"
+      :tone="status === 'running' ? 'neutral' : tone"
       :variant="tone === 'neutral' ? 'tertiary' : 'default'"
       class="plan-status"
       role="img"
       :aria-label="label"
     >
-      <component :is="icons[status]" aria-hidden="true" />
+      <!-- Under way reads the same as a working thread: a ripple, not a half-filled circle. -->
+      <DouStatusDot v-if="status === 'running'" tone="primary" ripple aria-hidden="true" />
+      <component :is="icons[status]" v-else aria-hidden="true" />
     </DouText>
   </DouTooltip>
 </template>

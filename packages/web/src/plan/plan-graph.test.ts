@@ -8,6 +8,7 @@ import {
   NODE_WIDTH,
   nodeHeight,
   offsetsOf,
+  startedAhead,
   toFlowDocument,
 } from './layout'
 
@@ -362,5 +363,21 @@ describe('nodeHeight', () => {
     const silent = nodeHeight(node('a', [], { threads: [thread('blocked', null)] }))
     expect(waiting).toBeGreaterThan(plain)
     expect(silent).toBe(plain)
+  })
+})
+
+describe('startedAhead', () => {
+  test('work started before a task it depends on is done is flagged, through the milestones and decisions between', () => {
+    const nodes = [
+      node('a', [], { status: 'running' }),
+      node('m', ['a'], { kind: 'milestone' }),
+      node('d', [], { kind: 'decision' }),
+      node('b', ['m', 'd'], { status: 'running' }),
+      node('c', ['d'], { status: 'running' }),
+    ]
+    expect(startedAhead(nodes)).toEqual(new Map([['b', ['A']]]))
+    const doc = toFlowDocument(plan(nodes))
+    const skipped = doc.edges.filter((edge) => edge.data?.skipped).map((edge) => edge.id)
+    expect(skipped).toEqual(['m>b'])
   })
 })

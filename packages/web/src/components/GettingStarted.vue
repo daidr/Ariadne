@@ -20,7 +20,8 @@ const current = computed(() => {
 const items = computed<StepItem[]>(() =>
   (['model', 'project', 'source', 'talk'] as const).map((step, index) => ({
     title: t(`start.${step}`),
-    description: t(`start.${step}Hint`),
+    // Only the step at hand says more; the rest are a glance at what is left.
+    ...(index === current.value ? { description: t(`start.${step}Hint`) } : {}),
     ...(done.value[index] ? { status: 'done' as const } : {}),
   })),
 )

@@ -120,7 +120,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 45
+export const PROJECTION_VERSION = 46
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -414,7 +414,13 @@ function nodeStatus(all: ThreadStage[], gate: PlanNodeView['gate'] = null): Plan
   if (!all.length) return 'none'
   if (!stages.length) return 'paused'
   if (stages.some((stage) => stage === 'blocked')) return 'error'
-  if (stages.some((stage) => stage === 'answer' || stage === 'review')) return 'waiting'
+  if (
+    stages.some(
+      (stage) =>
+        stage === 'answer' || stage === 'review' || stage === 'halted' || stage === 'silent',
+    )
+  )
+    return 'waiting'
   if (stages.every((stage) => stage === 'done')) return 'done'
   return 'running'
 }
@@ -472,6 +478,9 @@ interface ThreadRow {
   turn_id: string | null
   pending_seq: number | null
   last_outcome: TurnOutcome | null
+  last_turn_at: number | null
+  wait_id: string | null
+  nudged_at: number | null
   input_tokens: number | null
   output_tokens: number | null
   cached_tokens: number | null
@@ -543,7 +552,8 @@ const usageOf = (row: UsageColumns): UsageTotals => ({
 })
 
 // A thread that joined another's card waits on the user just as much as the one that asked.
-const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.input_tokens,
+const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.last_turn_at,
+  c.wait_id, c.input_tokens,
   c.output_tokens, c.cached_tokens, c.cache_write_tokens, c.reasoning_tokens, c.cost_usd, c.cost_cny, c.turn_started_at,
   td.items AS todo_items, td.updated_at AS todo_at,
   (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
@@ -557,6 +567,22 @@ const THREAD_SELECT = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.i
     SELECT 1 FROM attention_waiters w WHERE w.attention_id = a.id AND w.thread_id = t.id))
 ) AS open_attentions FROM threads t LEFT JOIN conversations c ON c.id = t.id
   LEFT JOIN todos td ON td.conversation_id = t.id`
+
+/** Its last turn ended this way, and it has not reported since that turn began. */
+function unreported(row: ThreadRow, outcome: TurnOutcome): boolean {
+  return (
+    row.turn_id === null &&
+    row.last_outcome === outcome &&
+    row.last_turn_at !== null &&
+    (row.reported_at ?? 0) < row.last_turn_at
+  )
+}
+
+/** What it is doing now, by its todos: the first one it marked as under way. */
+function doingOf(items: string | null): string | null {
+  const todos = items ? (JSON.parse(items) as TodoItem[]) : []
+  return todos.find((item) => item.status === 'doing')?.label ?? null
+}
 
 /** How many of its todos are done, out of how many; `null` while it has none. */
 function progressOf(items: string | null): ThreadView['progress'] {
@@ -581,6 +607,9 @@ function toThread(row: ThreadRow): ThreadView {
       turnRunning: row.turn_id !== null,
       turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
       turnFailed: row.turn_id === null && row.last_outcome === 'failed',
+      turnCancelled: unreported(row, 'cancelled'),
+      unreported: unreported(row, 'completed'),
+      waiting: row.wait_id !== null,
       checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
       stopped: row.stopped_reason !== null,
       // Merged after it reported, or it reported the very commit that was merged.
@@ -614,6 +643,7 @@ function toThread(row: ThreadRow): ThreadView {
     branchSlug: row.branch_slug,
     usage: usageOf(row),
     progress: progressOf(row.todo_items),
+    doing: doingOf(row.todo_items),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     activeAt: Math.max(
@@ -3761,6 +3791,18 @@ export class Ariadne {
     if (outcome === 'completed' && this.getConversation(conversationId).pendingSeq > 0) return
     const abandoned = this.abandonedReview(conversationId)
     if (abandoned.length) this.store.append(abandoned)
+    if (outcome === 'completed') this.nudgeUnreported(conversationId, projectId)
+  }
+
+  /**
+   * A thread whose turn ended without a report is told once to report; when that turn is
+   * silent too, it stays `silent` for the user. A question it asked speaks for itself.
+   */
+  private nudgeUnreported(threadId: string, projectId: string): void {
+    const row = this.db.query<ThreadRow, [string]>(`${THREAD_SELECT} WHERE t.id = ?`).get(threadId)
+    if (!row || toThread(row).stage !== 'silent') return
+    if (row.nudged_at !== null && row.nudged_at >= (row.reported_at ?? 0)) return
+    this.store.append([{ type: 'thread.nudged', projectId, data: { threadId } }])
   }
 
   /**

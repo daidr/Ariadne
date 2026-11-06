@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import {
   DouButton,
-  DouDivider,
+  DouCollapse,
+  DouCollapseItem,
   DouEmpty,
   DouTag,
   DouText,
@@ -17,11 +18,11 @@ import { reasonOf } from './edit'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
-import PlanSection from './PlanSection.vue'
 import PlanUndoButton from './PlanUndoButton.vue'
 import { clearPositions } from './ui'
 
 const selected = ref<string | null>(null)
+const historyOpen = ref<string[]>([])
 const editing = ref(false)
 const canEdit = computed(() => !!state.plan)
 
@@ -102,31 +103,33 @@ const time = (at: number) =>
           :editable="canEdit && editing"
           @removed="selected = null"
         />
-        <DouDivider v-if="node" class="plan-main-divider" />
-        <PlanSection :title="t('plan.history')">
-          <DouTimeline v-if="state.plan?.revisions.length">
-            <DouTimelineItem
-              v-for="revision in state.plan.revisions"
-              :key="revision.id"
-              :title="revision.reason"
-              :time="time(revision.createdAt)"
-              :tone="revision.author === 'user' ? 'primary' : 'neutral'"
-            >
-              <div class="plan-main-revision">
-                <DouText variant="tertiary" size="sm">
-                  {{
-                    revision.author === 'user'
-                      ? t('artifact.by.user')
-                      : t('artifact.by.coordinator')
-                  }}
-                </DouText>
-                <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
-                <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
-              </div>
-            </DouTimelineItem>
-          </DouTimeline>
-          <DouText v-else variant="tertiary" size="sm">—</DouText>
-        </PlanSection>
+        <!-- The history is there when looked for; the graph and the node come first. -->
+        <DouCollapse v-model="historyOpen" class="plan-main-history">
+          <DouCollapseItem value="history" :title="t('plan.history')">
+            <DouTimeline v-if="state.plan?.revisions.length">
+              <DouTimelineItem
+                v-for="revision in state.plan.revisions"
+                :key="revision.id"
+                :title="revision.reason"
+                :time="time(revision.createdAt)"
+                :tone="revision.author === 'user' ? 'primary' : 'neutral'"
+              >
+                <div class="plan-main-revision">
+                  <DouText variant="tertiary" size="sm">
+                    {{
+                      revision.author === 'user'
+                        ? t('artifact.by.user')
+                        : t('artifact.by.coordinator')
+                    }}
+                  </DouText>
+                  <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
+                  <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
+                </div>
+              </DouTimelineItem>
+            </DouTimeline>
+            <DouText v-else variant="tertiary" size="sm">—</DouText>
+          </DouCollapseItem>
+        </DouCollapse>
       </aside>
     </div>
   </div>
@@ -175,15 +178,10 @@ const time = (at: number) =>
   display: flex;
   flex-direction: column;
   gap: 16px;
-  width: 280px;
+  width: 320px;
   padding: 12px 16px;
   overflow-y: auto;
   border-left: 1px solid var(--dou-color-border-subtle);
-}
-
-/* The side panel's gap already spaces it. */
-.plan-main-divider {
-  --dou-divider-spacing: 0;
 }
 
 .plan-main-revision {

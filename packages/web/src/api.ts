@@ -368,6 +368,12 @@ export interface ArtifactDetail {
   comments: ArtifactCommentThreadView[]
 }
 
+/** What the settings say about the sandbox; it takes effect when Ariadne starts. */
+export interface SandboxConfig {
+  mode: 'auto' | 'off'
+  hide: string[]
+}
+
 export interface SandboxStatus {
   kind: 'bwrap' | 'unshare' | 'sandbox-exec' | null
   mode: 'auto' | 'off'
@@ -400,7 +406,10 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
-  getSandbox: () => request<{ sandbox: SandboxStatus }>('GET', '/api/sandbox'),
+  getSandbox: () =>
+    request<{ sandbox: SandboxStatus; configured: SandboxConfig | null }>('GET', '/api/sandbox'),
+  saveSandbox: (input: SandboxConfig) =>
+    request<{ configured: SandboxConfig }>('PUT', '/api/sandbox', input),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),

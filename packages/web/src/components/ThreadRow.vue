@@ -4,7 +4,8 @@ import { DouProgress, DouRelativeTime, DouShimmer, DouText } from 'dou-ui'
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { checksTone, threadLine } from '../stage'
+import { checksTone, questionOf, statusLine } from '../stage'
+import { state } from '../store'
 import ReviewMark from '../review/ReviewMark.vue'
 import StageIcon from './StageIcon.vue'
 
@@ -14,14 +15,15 @@ import StageIcon from './StageIcon.vue'
  */
 const props = defineProps<{ thread: ThreadView; nested?: boolean }>()
 
-const line = computed(() =>
-  props.nested
-    ? props.thread.stage === 'done'
-      ? props.thread.lastHeadline
-      : null
-    : threadLine(props.thread),
-)
-const reviewing = computed(() => !!props.thread.review?.reviewing)
+const line = computed(() => {
+  if (!props.nested) {
+    return statusLine(props.thread, questionOf(props.thread.id, state.detail?.needsMe))
+  }
+  if (props.thread.review?.reviewing) return statusLine(props.thread, null)
+  return props.thread.stage === 'done' && props.thread.lastHeadline
+    ? { text: props.thread.lastHeadline, live: false }
+    : null
+})
 const prTone = computed(() =>
   props.thread.pullRequest?.state === 'open'
     ? checksTone(props.thread.pullRequest.checks.state)
@@ -81,19 +83,12 @@ const prTone = computed(() =>
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>
     </span>
-    <span v-if="line || reviewing" class="row-foot">
-      <DouText v-if="reviewing" size="sm" variant="tertiary" class="row-line">
-        <DouShimmer>{{ t('review.underway', { round: thread.review!.rounds }) }}</DouShimmer>
+    <span v-if="line" class="row-foot">
+      <DouText v-if="line.live" size="sm" variant="tertiary" truncate class="row-line">
+        <DouShimmer>{{ line.text }}</DouShimmer>
       </DouText>
-      <DouText
-        v-else
-        size="sm"
-        variant="secondary"
-        truncate
-        class="row-line"
-        :title="line ?? undefined"
-      >
-        {{ line }}
+      <DouText v-else size="sm" variant="secondary" truncate class="row-line" :title="line.text">
+        {{ line.text }}
       </DouText>
     </span>
   </span>

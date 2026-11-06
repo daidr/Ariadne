@@ -32,7 +32,9 @@ describe('thread list', () => {
     expect(groupOf.answer).toBe('waiting')
     expect(groupOf.blocked).toBe('waiting')
     expect(groupOf.queued).toBe('working')
-    expect(groupOf.stopped).toBe('idle')
+    expect(groupOf.stopped).toBe('paused')
+    expect(groupOf.halted).toBe('waiting')
+    expect(groupOf.silent).toBe('waiting')
   })
 
   test('sorts by activity, title or creation without touching the list', () => {

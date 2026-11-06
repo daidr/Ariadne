@@ -73,8 +73,6 @@ export {
   nextRun,
   MAX_ROUTINES,
   MAX_ROUTINE_PROMPT,
-  DEFAULT_AUTOPILOT_THREADS,
-  MAX_AUTOPILOT_THREADS,
   MERGE_METHODS,
   type Routine,
   type ProjectSettings,

@@ -11,7 +11,7 @@ import { commandParts, commandVerdict, DEFAULT_LIMITS, type TurnSettings } from 
 import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
-import { call, fakeModel, say } from './test-model'
+import { call, fakeModel, reminded, say } from './test-model'
 import { TOOL_SWITCH_NAMES } from './tools'
 import { WorkspaceManager } from './workspaces'
 
@@ -216,6 +216,7 @@ describe('command rules', () => {
     const thread = app.createThread(project.id, { title: '跑测试' })
     const model = fakeModel((request, role) => {
       if (role === 'coordinator' || request.messages.at(-1)?.role === 'tool') return say('')
+      if (reminded(request)) return say('')
       return [
         call('t1', 'run_command', { command: 'bun test' }),
         call('t2', 'run_command', { command: 'bun run build', timeoutSeconds: 9999 }),

@@ -61,16 +61,15 @@ export interface ProjectSettings {
   review: { enabled: boolean }
   /**
    * Autopilot: changes that passed the AI review, with green checks and no conflict, are
-   * merged with `method`; plan nodes whose dependencies are done get threads, at most
-   * `threads` at work at once; a milestone waits for the user's yes. Needs the review on.
+   * merged with `method`; plan nodes whose dependencies are done get threads, as many at
+   * work as the project's slots allow; a milestone waits for the user's yes. Needs the
+   * review on.
    */
-  autopilot: { enabled: boolean; method: MergeMethod; threads: number }
+  autopilot: { enabled: boolean; method: MergeMethod }
 }
 
 export type MergeMethod = 'squash' | 'merge'
 export const MERGE_METHODS: MergeMethod[] = ['squash', 'merge']
-export const DEFAULT_AUTOPILOT_THREADS = 3
-export const MAX_AUTOPILOT_THREADS = 16
 
 /**
  * Something the coordinator does on a schedule: at `time` (local, `HH:MM`) on the given
@@ -122,7 +121,7 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
   routines: [],
   review: { enabled: true },
-  autopilot: { enabled: false, method: 'squash', threads: DEFAULT_AUTOPILOT_THREADS },
+  autopilot: { enabled: false, method: 'squash' },
 })
 
 /**
@@ -229,10 +228,7 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     if (enabled && !out.review.enabled) throw bad('autopilot.enabled')
     const method = autopilot.method ?? 'squash'
     if (!MERGE_METHODS.includes(method as MergeMethod)) throw bad('autopilot.method')
-    const threads = autopilot.threads ?? DEFAULT_AUTOPILOT_THREADS
-    if (!Number.isInteger(threads) || (threads as number) < 1) throw bad('autopilot.threads')
-    if ((threads as number) > MAX_AUTOPILOT_THREADS) throw bad('autopilot.threads')
-    out.autopilot = { enabled, method: method as MergeMethod, threads: threads as number }
+    out.autopilot = { enabled, method: method as MergeMethod }
   }
   return out
 }

@@ -6,8 +6,8 @@ import ReviewActions from '../components/ReviewActions.vue'
 import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
-import { threadLine } from '../stage'
-import { activeThreadId, openThread, state } from '../store'
+import { questionOf, statusLine } from '../stage'
+import { activeThreadId, openThreadFrom, state } from '../store'
 
 /** An entry to a thread an agent put in a message; follows the thread as it moves on. */
 const props = defineProps<{ threadId: string }>()
@@ -15,11 +15,17 @@ const props = defineProps<{ threadId: string }>()
 const thread = computed(
   () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
 )
+function open(event: MouseEvent) {
+  openThreadFrom(event, props.threadId)
+}
+
+// What it does now, asks, or delivered, so the card answers "how far is it" by itself.
 const headline = computed(() => {
   if (!thread.value) return undefined
-  const { review } = thread.value
-  if (review?.reviewing) return t('review.underway', { round: review.rounds })
-  return threadLine(thread.value) ?? undefined
+  const line = statusLine(thread.value, questionOf(thread.value.id, state.detail?.needsMe))
+  const progress = thread.value.stage === 'working' ? thread.value.progress : null
+  if (!line) return progress ? t('thread.progressShort', progress) : undefined
+  return progress ? `${line.text} · ${t('thread.progressShort', progress)}` : line.text
 })
 </script>
 
@@ -29,7 +35,7 @@ const headline = computed(() => {
     :title="thread.title"
     :description="headline"
     :active="activeThreadId === thread.id"
-    @open="openThread(thread.id)"
+    @open="open"
   >
     <template #icon><MessagesIcon /></template>
     <template #actions>

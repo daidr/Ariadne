@@ -130,7 +130,7 @@ async function submit() {
         </DouMenu>
       </div>
     </DouContextMenu>
-    <DouEmpty v-else size="sm" :description="t('nav.noProjects')" />
+    <DouEmpty v-else-if="!state.creatingProject" size="sm" :description="t('nav.noProjects')" />
   </div>
 </template>
 

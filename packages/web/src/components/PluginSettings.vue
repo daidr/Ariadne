@@ -67,7 +67,14 @@ const provides = (plugin: PluginRecord) => [
 
 <template>
   <div class="plugins">
-    <DouText size="sm" variant="secondary">{{ t('plugins.help') }}</DouText>
+    <!-- The warning matters once code from elsewhere is loaded. -->
+    <DouText
+      v-if="plugins.some((plugin) => plugin.source !== 'builtin')"
+      size="sm"
+      variant="secondary"
+    >
+      {{ t('plugins.help') }}
+    </DouText>
     <form class="plugins-add" @submit.prevent="add">
       <DouInput
         v-model="path"
@@ -86,9 +93,7 @@ const provides = (plugin: PluginRecord) => [
         <div class="plugins-main">
           <div class="plugins-title">
             <DouText weight="medium">{{ nameOf(plugin) }}</DouText>
-            <DouTag size="sm">
-              {{ plugin.source === 'builtin' ? t('plugins.builtin') : t('plugins.path') }}
-            </DouTag>
+            <DouTag v-if="plugin.source !== 'builtin'" size="sm">{{ t('plugins.path') }}</DouTag>
             <DouTag v-if="plugin.status !== 'loaded'" size="sm" tone="danger">
               {{ t('plugins.failed') }}
             </DouTag>
@@ -99,7 +104,7 @@ const provides = (plugin: PluginRecord) => [
           <DouText v-if="plugin.error" size="sm" class="plugins-error plugins-text">
             {{ plugin.error }}
           </DouText>
-          <DouText v-else-if="plugin.source !== 'builtin'" size="sm" variant="secondary">
+          <DouText v-else size="sm" variant="secondary">
             {{
               provides(plugin).length
                 ? t('plugins.provides', { kinds: provides(plugin).join('、') })

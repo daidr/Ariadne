@@ -15,7 +15,16 @@ import {
 } from '@dou-ui/flow'
 import '@dou-ui/flow/style.css'
 import { DouButton, DouDialog } from 'dou-ui'
-import { computed, markRaw, ref, watch } from 'vue'
+import {
+  computed,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import { t, tm } from '../i18n'
 import { editPlan } from '../store'
 import { editOf, liveThreads, reasonOf } from './edit'
@@ -49,6 +58,10 @@ const edgeTypes = [
     ...bezierEdge,
     style: (edge) => {
       const mark = edge.data?.mark as PlanMark | undefined
+      // Work went ahead of this dependency: the edge it skipped shows it.
+      if (!mark && edge.data?.skipped) {
+        return { stroke: 'var(--dou-color-warning)', strokeDasharray: '4 4', strokeWidth: 1.5 }
+      }
       if (!mark) return bezierEdge.style?.(edge)
       return { stroke: markStroke[mark], strokeDasharray: '6 4', strokeWidth: 2 }
     },
@@ -100,6 +113,7 @@ const source = computed<FlowDocument>(() => {
     preview: preview.value,
     fresh: fresh.value,
     proposed: proposed.value,
+    compact: props.compact,
   })
 })
 // The editor works on its own copy while the user edits; every change to the plan, or a
@@ -168,6 +182,81 @@ async function confirmRemove() {
   if ((await editPlan(reasonOf(ops, titleOf, t), ops)) === 'ok') selected.value = null
 }
 
+// Opened, the graph shows all of itself while it stays readable; past that it shows what
+// wants the user: nodes waiting on them, changed since they looked, or in a change asked.
+const editor = useTemplateRef<{
+  $el: HTMLElement
+  setViewport: (viewport: { x: number; y: number; zoom: number }, animate?: boolean) => void
+  getNodeRect: (id: string) => { x: number; y: number; width: number; height: number } | null
+}>('editor')
+const viewport = ref({ x: 0, y: 0, zoom: 1 })
+const READABLE = props.compact ? 0.75 : 0.6
+const PAD = 24
+function focusIds(): string[] {
+  const plan = props.plan
+  if (!plan) return []
+  if (preview.value)
+    return [...touchedBy(openProposals.value.find((p) => p.id === planUi.previewId)?.ops ?? [])]
+  const waiting = plan.nodes.filter((node) => node.status === 'waiting').map((node) => node.id)
+  return [...new Set([...waiting, ...proposed.value, ...fresh.value])]
+}
+function boxOf(ids: string[]) {
+  const rects = ids.flatMap((id) => editor.value?.getNodeRect(id) ?? [])
+  if (!rects.length) return null
+  const left = Math.min(...rects.map((r) => r.x))
+  const top = Math.min(...rects.map((r) => r.y))
+  const right = Math.max(...rects.map((r) => r.x + r.width))
+  const bottom = Math.max(...rects.map((r) => r.y + r.height))
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+// The view is worked out here rather than by the editor's fit, so a graph too large to read
+// whole is shown at a readable size, from its top left or around what wants the user.
+function frame() {
+  const flow = editor.value
+  const el = flow?.$el
+  if (!flow || !el?.clientWidth) return
+  const width = el.clientWidth - PAD * 2
+  const height = el.clientHeight - PAD * 2
+  const zoomFor = (box: { width: number; height: number }) =>
+    Math.min(1, width / box.width, height / box.height)
+  let box = boxOf(doc.value.nodes.map((node) => node.id))
+  if (!box) return
+  let zoom = zoomFor(box)
+  let centred = true
+  if (zoom < READABLE) {
+    const focus = boxOf(focusIds())
+    if (focus) box = focus
+    else centred = false
+    zoom = READABLE
+  }
+  const x =
+    centred || box.width * zoom <= width
+      ? PAD + (width - box.width * zoom) / 2 - box.x * zoom
+      : PAD - box.x * zoom
+  const y =
+    box.height * zoom <= height
+      ? PAD + (height - box.height * zoom) / 2 - box.y * zoom
+      : PAD - box.y * zoom
+  flow.setViewport({ x, y, zoom }, false)
+}
+// Nodes are measured a frame or two after they mount; until then there is nothing to fit.
+let frameRequest = 0
+function frameWhenMeasured(tries = 30) {
+  cancelAnimationFrame(frameRequest)
+  frameRequest = requestAnimationFrame(() => {
+    const first = doc.value.nodes[0]?.id
+    if (first && !editor.value?.getNodeRect(first) && tries > 0) frameWhenMeasured(tries - 1)
+    else frame()
+  })
+}
+onMounted(frameWhenMeasured)
+onBeforeUnmount(() => cancelAnimationFrame(frameRequest))
+// A change shown on the graph is framed, so the nodes it adds are not off screen.
+watch(preview, async () => {
+  await nextTick()
+  frameWhenMeasured()
+})
+
 const selection = ref<FlowSelection>({ nodes: [], edges: [] })
 watch(selection, (next) => {
   selected.value = next.nodes[0] ?? null
@@ -182,16 +271,16 @@ watch(selected, (id) => {
 
 <template>
   <DouFlowEditor
+    ref="editor"
     v-model="doc"
     v-model:selection="selection"
+    v-model:viewport="viewport"
     :extensions="extensions"
     :node-types="nodeTypes"
     :edge-types="edgeTypes"
     :readonly="!editing"
     acyclic
     :can-connect="canConnect"
-    fit-view
-    :fit-min-zoom="0.6"
     direction="vertical"
     :searchable="!compact"
     edge-type="bezier"

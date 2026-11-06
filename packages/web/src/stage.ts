@@ -1,4 +1,5 @@
-import type { ThreadStage, ThreadView } from '@ariadne/core'
+import type { NeedsMeItem, ThreadStage, ThreadView } from '@ariadne/core'
+import { t } from './i18n'
 
 /** How each thread stage is tinted wherever it is shown. */
 export const stageTone: Record<
@@ -7,6 +8,8 @@ export const stageTone: Record<
 > = {
   answer: 'warning',
   stopped: 'neutral',
+  halted: 'warning',
+  silent: 'warning',
   review: 'primary',
   blocked: 'danger',
   queued: 'neutral',
@@ -47,18 +50,58 @@ export function threadLine(thread: ThreadView): string | null {
   return showsHeadline(thread.stage) || thread.stage === 'done' ? thread.lastHeadline : null
 }
 
+/**
+ * What a thread is up to, in one line wherever it is shown with room for one: what it is
+ * doing while it works, the question it waits on, why it stands still, or what its last
+ * report asks of the user. `question` is the title of the card it asked, if any.
+ */
+export function statusLine(
+  thread: ThreadView,
+  question: string | null,
+): { text: string; live: boolean } | null {
+  if (thread.review?.reviewing) {
+    return { text: t('review.underway', { round: thread.review.rounds }), live: true }
+  }
+  switch (thread.stage) {
+    case 'working':
+      return thread.doing ? { text: thread.doing, live: true } : null
+    case 'answer':
+      return question ? { text: question, live: false } : null
+    case 'halted':
+    case 'silent':
+      return { text: t(`thread.stage.${thread.stage}`), live: false }
+  }
+  const line = threadLine(thread)
+  return line ? { text: line, live: false } : null
+}
+
+/** The title of the card a thread waits on the user's answer to, if any. */
+export function questionOf(threadId: string, needsMe: NeedsMeItem[] | undefined): string | null {
+  for (const item of needsMe ?? []) {
+    if (item.kind !== 'attention') continue
+    const { attention } = item
+    if (attention.threadId === threadId || attention.joinedBy.includes(threadId)) {
+      const { block } = attention
+      return block.type === 'choice' ? block.question : block.title
+    }
+  }
+  return null
+}
+
 /** How the thread list groups threads, in the order the groups are shown. */
-export const threadGroups = ['review', 'waiting', 'working', 'idle', 'done'] as const
+export const threadGroups = ['review', 'waiting', 'working', 'paused', 'idle', 'done'] as const
 export type ThreadGroup = (typeof threadGroups)[number]
 
 export const groupOf: Record<ThreadStage, ThreadGroup> = {
   review: 'review',
   answer: 'waiting',
   blocked: 'waiting',
+  halted: 'waiting',
+  silent: 'waiting',
   working: 'working',
   queued: 'working',
   idle: 'idle',
-  stopped: 'idle',
+  stopped: 'paused',
   done: 'done',
 }
 

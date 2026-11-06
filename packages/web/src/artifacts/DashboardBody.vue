@@ -14,7 +14,7 @@ import { statWidget, tableWidget, textWidget } from '@dou-ui/dashboard/widgets'
 import '@dou-ui/dashboard/style.css'
 import '@dou-ui/chart/style.css'
 import '@dou-ui/pivot/style.css'
-import { DouButton, DouSwitch, DouTag, DouText } from 'dou-ui'
+import { DouButton, DouSwitch, DouText } from 'dou-ui'
 import { RotateCwIcon } from '@dou-ui/icons'
 import { api } from '../api'
 import { report } from '../store'
@@ -104,11 +104,10 @@ const takenAt = computed(() =>
 <template>
   <div class="dashboard">
     <div class="dashboard-bar">
-      <DouTag size="sm" :tone="live ? 'primary' : 'neutral'">
-        {{ t(live ? 'artifact.dashboard.live' : 'artifact.dashboard.snapshot') }}
-      </DouTag>
+      <!-- Live or a snapshot, said in passing: no badge for a state. -->
       <DouText variant="tertiary" size="sm" class="dashboard-taken">
-        {{ takenAt ? t('artifact.dashboard.takenAt', { time: takenAt }) : '' }}
+        {{ t(live ? 'artifact.dashboard.live' : 'artifact.dashboard.snapshot')
+        }}{{ takenAt ? ` · ${t('artifact.dashboard.takenAt', { time: takenAt })}` : '' }}
       </DouText>
       <DouButton
         v-if="live && !readonly"

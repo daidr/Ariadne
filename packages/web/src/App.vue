@@ -136,7 +136,11 @@ watchEffect(() => {
         </DouLayoutAside>
         <DouLayoutMain class="main">
           <!-- Threads open on the right, so the coordinator stays in view beside them. -->
-          <DouSplitter v-model="split" :min="30" :max="80" class="split">
+          <!-- The plan shown large takes the side too, so it is not drawn twice. -->
+          <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
+            <PlanMain />
+          </div>
+          <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
             <template #start>
               <div class="pane">
                 <PlanMain v-if="state.main.kind === 'plan'" />
