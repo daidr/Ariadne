@@ -213,16 +213,10 @@ export function split(layout: SideLayout, key: PaneKey, direction: SplitDirectio
   return splitWith(left, target.id, key, direction)
 }
 
-/** Move `key` to the group `groupId`, in front there. */
+/** Move `key` to the end of the group `groupId`, in front there. */
 export function move(layout: SideLayout, key: PaneKey, groupId: string): SideLayout {
-  const from = groupWith(layout, key)
-  if (!from || from.id === groupId) return layout
-  const left = close(layout, key)
-  if (!groupsOf(left.root).some((item) => item.id === groupId)) return layout
-  return {
-    ...updateGroup(left, groupId, (g) => ({ ...g, tabs: [...g.tabs, key], active: key })),
-    focused: groupId,
-  }
+  if (groupWith(layout, key)?.id === groupId) return layout
+  return place(layout, key, groupId, Infinity)
 }
 
 /**
