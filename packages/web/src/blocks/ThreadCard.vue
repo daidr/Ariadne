@@ -20,12 +20,19 @@ function open(event: MouseEvent) {
 }
 
 // What it does now, asks, or delivered, so the card answers "how far is it" by itself.
+const line = computed(() =>
+  thread.value
+    ? statusLine(thread.value, questionOf(thread.value.id, state.detail?.needsMe))
+    : null,
+)
+// While it works the line shimmers, the way a running artifact card shows it is underway.
+const running = computed(() => thread.value?.stage === 'working' || !!line.value?.live)
 const headline = computed(() => {
   if (!thread.value) return undefined
-  const line = statusLine(thread.value, questionOf(thread.value.id, state.detail?.needsMe))
   const progress = thread.value.stage === 'working' ? thread.value.progress : null
-  if (!line) return progress ? t('thread.progressShort', progress) : undefined
-  return progress ? `${line.text} · ${t('thread.progressShort', progress)}` : line.text
+  const text = line.value?.text ?? (running.value ? t('thread.stage.working') : null)
+  if (!text) return progress ? t('thread.progressShort', progress) : undefined
+  return progress ? `${text} · ${t('thread.progressShort', progress)}` : text
 })
 </script>
 
@@ -34,6 +41,7 @@ const headline = computed(() => {
     v-if="thread"
     :title="thread.title"
     :description="headline"
+    :status="running ? 'running' : 'done'"
     :active="activeThreadId === thread.id"
     @open="open"
   >
@@ -41,7 +49,7 @@ const headline = computed(() => {
     <template #actions>
       <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
       <ReviewMark :thread="thread" />
-      <StageIcon :stage="thread.stage" />
+      <StageIcon v-if="!running" :stage="thread.stage" />
     </template>
   </DouChatArtifact>
 </template>

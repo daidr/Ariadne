@@ -12,6 +12,7 @@ import {
   open,
   openThreads,
   parseLayout,
+  place,
   prune,
   resize,
   split,
@@ -65,6 +66,28 @@ describe('side layout', () => {
       ['threads', 'artifacts', 'memory'],
       ['vertical', ['thread:a'], ['plan']],
     ])
+  })
+
+  test('places a dragged tab along its row or in another group, in front there', () => {
+    let layout = defaultLayout()
+    const first = focusedGroup(layout).id
+    layout = place(layout, 'memory', first, 1)
+    expect(tabs(layout)).toEqual([['plan', 'memory', 'threads', 'artifacts']])
+    expect(focusedGroup(layout).active).toBe('memory')
+    layout = split(layout, 'threads', 'horizontal')
+    const second = focusedGroup(layout).id
+    layout = place(layout, 'plan', second, 0)
+    expect(tabs(layout)).toEqual([
+      ['memory', 'artifacts'],
+      ['plan', 'threads'],
+    ])
+    expect(focusedGroup(layout).id).toBe(second)
+    // Dragging out the last tab of a group takes the group away.
+    layout = place(layout, 'memory', second, 9)
+    layout = place(layout, 'artifacts', second, 1)
+    expect(shape(layout.root)).toEqual(['plan', 'artifacts', 'threads', 'memory'])
+    // A group that is not there leaves the layout as it was.
+    expect(place(layout, 'plan', 'missing', 0)).toBe(layout)
   })
 
   test('splits a tab out, and an emptied group gives its room back', () => {

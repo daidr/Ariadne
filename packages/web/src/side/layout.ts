@@ -213,16 +213,33 @@ export function split(layout: SideLayout, key: PaneKey, direction: SplitDirectio
   return splitWith(left, target.id, key, direction)
 }
 
-/** Move `key` to the group `groupId`, in front there. */
+/** Move `key` to the end of the group `groupId`, in front there. */
 export function move(layout: SideLayout, key: PaneKey, groupId: string): SideLayout {
+  if (groupWith(layout, key)?.id === groupId) return layout
+  return place(layout, key, groupId, Infinity)
+}
+
+/**
+ * Put `key` at `index` of the group `groupId` and bring it to the front there, as a tab
+ * dragged along its row or onto another group's row lands. `index` counts the tabs once
+ * `key` is in place; the group it leaves goes if nothing is left in it.
+ */
+export function place(
+  layout: SideLayout,
+  key: PaneKey,
+  groupId: string,
+  index: number,
+): SideLayout {
   const from = groupWith(layout, key)
-  if (!from || from.id === groupId) return layout
-  const left = close(layout, key)
+  if (!from) return layout
+  const left = from.id === groupId ? layout : close(layout, key)
   if (!groupsOf(left.root).some((item) => item.id === groupId)) return layout
-  return {
-    ...updateGroup(left, groupId, (g) => ({ ...g, tabs: [...g.tabs, key], active: key })),
-    focused: groupId,
-  }
+  const next = updateGroup(left, groupId, (g) => {
+    const tabs = g.tabs.filter((item) => item !== key)
+    tabs.splice(Math.max(0, Math.min(index, tabs.length)), 0, key)
+    return { ...g, tabs, active: key }
+  })
+  return { ...next, focused: groupId }
 }
 
 export function resize(layout: SideLayout, splitId: string, size: number): SideLayout {
