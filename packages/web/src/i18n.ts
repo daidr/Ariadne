@@ -54,12 +54,13 @@ export function lt(text: LocalizedText | undefined): string | undefined {
   return text ? (text[locale.value] ?? text['zh-CN']) : undefined
 }
 
-// Token counts keep K/M in every locale: people know those units, and 万/亿 read as no size at all.
+// Token counts keep k/M in every locale: people know those units, and 万/亿 read as no size at all.
+// Thousands are a lowercase k, as the SI prefix is; millions stay M.
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
-/** A token count, e.g. `950`, `12.3K` or `1.2M`, the same in every locale. */
+/** A token count, e.g. `950`, `12.3k` or `1.2M`, the same in every locale. */
 export function count(value: number): string {
-  return compact.format(value)
+  return compact.format(value).replace('K', 'k')
 }
 
 /** A duration in seconds or milliseconds, short. */
