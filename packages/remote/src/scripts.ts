@@ -292,13 +292,14 @@ g update-ref --stdin < "$updates"
 export const NOT_A_DIRECTORY = 3
 
 /**
- * The directories in `$1` (the home directory when empty), for a picker: the real path,
+ * The directories in `$1` (the home directory when empty), for a picker: its path with links
+ * kept as typed,
  * then each name, each ending in NUL. Links to directories count as directories.
  */
 export const DIRECTORIES = `
 set -u
-cd -P -- "\${1:-$HOME}" 2>/dev/null || exit ${NOT_A_DIRECTORY}
-printf '%s\\0' "$(pwd -P)"
+CDPATH= cd -- "\${1:-$HOME}" 2>/dev/null || exit ${NOT_A_DIRECTORY}
+printf '%s\\0' "$(pwd -L)"
 for entry in * .[!.]* ..?*; do
   [ -d "$entry" ] && printf '%s\\0' "$entry"
 done

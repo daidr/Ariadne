@@ -1,5 +1,5 @@
 import { parseAddress, parsePairingCode } from '@ariadne/daemon/protocol'
-import { definePlugin, type ContextProvider } from '@ariadne/plugin-sdk'
+import { definePlugin, NothingToBrowse, type ContextProvider } from '@ariadne/plugin-sdk'
 import { BrowseShells, browseRemote, connectRemote, type RemoteShell } from '@ariadne/remote'
 import { posix } from 'node:path'
 import { DaemonShell, type DaemonTarget } from './shell'
@@ -55,8 +55,15 @@ export function daemonProvider(
       required: ['address', 'pairing', 'path'],
     },
     provides: ['workspace'],
-    browse(settings, typed, { signal }) {
-      return browseRemote(browsing.get(machineOf(settings)), typed, signal)
+    async browse(settings, typed, { signal }) {
+      let machine
+      try {
+        machine = machineOf(settings)
+      } catch (error) {
+        // The form is not filled in that far yet.
+        throw new NothingToBrowse(String(error))
+      }
+      return browseRemote(browsing.get(machine), typed, signal)
     },
     async connect(settings) {
       const machine = machineOf(settings)

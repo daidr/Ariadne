@@ -516,13 +516,16 @@ export const api = {
     kind: string,
     body: { projectId: string | null; settings: Record<string, unknown>; path: string },
   ) =>
-    request<{ listing: DirectoryListing }>(
+    request<{ listing: DirectoryListing | null }>(
       'POST',
       `/api/source-kinds/${encodeURIComponent(kind)}/browse`,
       body,
     ),
   browseLocal: (path: string) =>
-    request<{ listing: DirectoryListing }>('GET', `/api/directories${queryString({ path })}`),
+    request<{ listing: DirectoryListing | null }>(
+      'GET',
+      `/api/directories${queryString({ path })}`,
+    ),
   getSource: (projectId: string) =>
     request<{ source: ProjectView['source']; secretsSet: string[] }>(
       'GET',

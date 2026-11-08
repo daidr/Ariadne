@@ -9,7 +9,7 @@ import { tm } from '../i18n'
 // one above, then the ones inside (or, part way through a name, those starting like it).
 const model = defineModel<string>({ default: '' })
 const props = defineProps<{
-  browse: (typed: string) => Promise<DirectoryListing>
+  browse: (typed: string) => Promise<DirectoryListing | null>
   placeholder?: string | undefined
   size?: 'sm' | 'md' | 'lg'
   ariaLabel?: string | undefined
@@ -22,6 +22,8 @@ async function suggest(typed: string): Promise<AutocompleteOption[]> {
   try {
     const listing = await props.browse(typed)
     problem.value = null
+    // Nothing to list yet: no machine named, or nothing there by that name.
+    if (!listing) return []
     return [
       ...(listing.parent ? [{ value: listing.parent, label: PARENT }] : []),
       ...listing.directories.map((entry) => ({ value: entry.path, label: entry.name })),

@@ -1,7 +1,7 @@
 import { FileTooLargeError, WorkspacePathError, type SourceView } from '@ariadne/plugin-sdk'
 import { branchFor, run } from '@ariadne/plugin-local'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -434,14 +434,22 @@ describe('browsing the remote machine', () => {
     await writeFile(join(home, 'projects', 'file'), '')
     const shell = new TestShell()
     const start = await browseRemote(shell, '')
-    expect(start.path).toBe(await realpath(home))
+    expect(start.path).toBe(home)
     expect(start.directories.map((entry) => entry.name)).toEqual(['projects'])
     const inside = await browseRemote(shell, join(home, 'projects', 't'))
     expect(inside.directories).toEqual([
-      { name: 'two words', path: join(await realpath(home), 'projects', 'two words') },
+      { name: 'two words', path: join(home, 'projects', 'two words') },
     ])
     const dotted = await browseRemote(shell, `${home}/.`)
     expect(dotted.directories.map((entry) => entry.name)).toEqual(['.hidden'])
+  })
+
+  test('keeps links in the path as typed', async () => {
+    await mkdir(join(home, 'real', 'inner'), { recursive: true })
+    await symlink(join(home, 'real'), join(home, 'link'))
+    const listing = await browseRemote(new TestShell(), join(home, 'link'))
+    expect(listing.path).toBe(join(home, 'link'))
+    expect(listing.directories).toEqual([{ name: 'inner', path: join(home, 'link', 'inner') }])
   })
 
   test('says why when the machine cannot be reached', async () => {

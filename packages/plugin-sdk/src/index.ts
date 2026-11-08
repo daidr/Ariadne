@@ -21,6 +21,7 @@ export {
   DirectoryNotFound,
   listLocalDirectory,
   MAX_DIRECTORIES,
+  NothingToBrowse,
   type DirectoryEntry,
   type DirectoryListing,
   type ListDirectory,

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { NothingToBrowse } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { sshOptions, sshProvider, SshShell } from './index'
 
@@ -41,6 +42,12 @@ describe('ssh connection', () => {
     await expect(
       sshProvider(join(base, 'data')).connect({ host: 'box', path: 'relative' }),
     ).rejects.toThrow('absolute')
+  })
+
+  test('browsing before a host is typed lists nothing, quietly', async () => {
+    await expect(
+      sshProvider(join(base, 'data')).browse!({ host: '' }, '/srv', {}),
+    ).rejects.toBeInstanceOf(NothingToBrowse)
   })
 
   test('a long data directory gets no shared connection', () => {

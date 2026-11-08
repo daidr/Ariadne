@@ -81,6 +81,14 @@ describe('directories on this machine', () => {
     expect(listing.directories[0]!.path).toBe(join(base, 'a'))
   })
 
+  test('keeps a link in the path as typed', async () => {
+    await mkdir(join(base, 'real', 'inner'), { recursive: true })
+    await symlink(join(base, 'real'), join(base, 'link'))
+    const listing = await browseLocal(join(base, 'link'))
+    expect(listing.path).toBe(join(base, 'link'))
+    expect(listing.directories[0]!.path).toBe(join(base, 'link', 'inner'))
+  })
+
   test('a file lists its directory, filtered by its name', async () => {
     await mkdir(join(base, 'notes'))
     await writeFile(join(base, 'note.txt'), '')

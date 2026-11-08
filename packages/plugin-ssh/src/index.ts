@@ -1,4 +1,4 @@
-import { definePlugin, type ContextProvider } from '@ariadne/plugin-sdk'
+import { definePlugin, NothingToBrowse, type ContextProvider } from '@ariadne/plugin-sdk'
 import { BrowseShells, browseRemote, connectRemote, type RemoteShell } from '@ariadne/remote'
 import { posix } from 'node:path'
 import { SshShell } from './transport'
@@ -49,8 +49,15 @@ export function sshProvider(
       required: ['host', 'path'],
     },
     provides: ['workspace'],
-    browse(settings, typed, { signal }) {
-      return browseRemote(browsing.get(machineOf(settings)), typed, signal)
+    async browse(settings, typed, { signal }) {
+      let machine
+      try {
+        machine = machineOf(settings)
+      } catch (error) {
+        // The form is not filled in that far yet.
+        throw new NothingToBrowse(String(error))
+      }
+      return browseRemote(browsing.get(machine), typed, signal)
     },
     async connect(settings) {
       const path = settings.path?.trim()

@@ -33,7 +33,7 @@ import {
   type ProjectSource,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
-import { browseLocal } from '@ariadne/plugin-sdk'
+import { browseLocal, NothingToBrowse } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
 import type { DataStore } from './data'
 import type { SettingsStore } from './settings'
@@ -54,11 +54,15 @@ const BROWSE_TIMEOUT_MS = 15_000
 /** How long a listing may take: a remote machine may be slow to reach. */
 const browseOptions = () => ({ signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS) })
 
-/** A listing, or why there is none, said the way a broken source is. */
-async function browsing<T>(list: () => Promise<T>): Promise<T> {
+/**
+ * A listing; `null` when there is nothing to list yet (no host typed, a path that is not
+ * there), else why there is none, said the way a broken source is.
+ */
+async function browsing<T>(list: () => Promise<T>): Promise<T | null> {
   try {
     return await list()
   } catch (error) {
+    if (error instanceof NothingToBrowse) return null
     if (error instanceof DomainError) throw error
     throw new DomainError('error.browse', {
       detail: error instanceof Error ? error.message : String(error),

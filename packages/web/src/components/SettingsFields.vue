@@ -12,7 +12,7 @@ const props = defineProps<{
   values: Record<string, unknown>
   secretsSet: string[]
   /** Lists directories for `directory` settings; without it they are only typed. */
-  browse?: ((key: string, typed: string) => Promise<DirectoryListing>) | undefined
+  browse?: ((key: string, typed: string) => Promise<DirectoryListing | null>) | undefined
 }>()
 const emit = defineEmits<{ clearSecret: [key: string] }>()
 

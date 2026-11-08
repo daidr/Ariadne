@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { posix } from 'node:path'
 import nodePath from 'node:path'
@@ -66,19 +66,32 @@ export async function browseTyped(
   return { path: found.path, parent: above === found.path ? null : above, directories }
 }
 
+/**
+ * There is nothing to list yet, which is no error to show: the settings do not name a
+ * machine yet (no host typed), or what was typed is not a path there.
+ */
+export class NothingToBrowse extends Error {
+  constructor(reason: string) {
+    super(reason)
+    this.name = 'NothingToBrowse'
+  }
+}
+
 /** Neither what was typed nor the directory above it is a directory one can list. */
-export class DirectoryNotFound extends Error {
+export class DirectoryNotFound extends NothingToBrowse {
   constructor(readonly path: string) {
     super(`${path || 'the home directory'} is not a directory`)
     this.name = 'DirectoryNotFound'
   }
 }
 
-/** Lists directories on this machine. */
+/**
+ * Lists directories on this machine. The path stays as typed (only tidied): links in it
+ * are not resolved, so picking keeps the prefix the user knows.
+ */
 export const listLocalDirectory: ListDirectory = async (path) => {
-  const target = path || homedir()
+  const real = nodePath.resolve(path || homedir())
   try {
-    const real = await realpath(target)
     if (!(await stat(real)).isDirectory()) return null
     const entries = await readdir(real, { withFileTypes: true })
     const names: string[] = []

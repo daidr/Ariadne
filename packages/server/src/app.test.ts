@@ -716,7 +716,8 @@ describe('directory pickers', () => {
     const listed = await call(`/api/directories?path=${encodeURIComponent(dir)}`)
     const { listing } = await listed.json()
     expect(listing.directories.map((entry: { name: string }) => entry.name)).toEqual(['inner'])
+    // Nothing there is nothing to list, not an error to show.
     const missing = await call('/api/directories?path=/no/such/place/at/all')
-    expect(missing.status).toBe(400)
+    expect(await missing.json()).toEqual({ listing: null })
   })
 })
