@@ -147,6 +147,19 @@ async function edit() {
   }
 }
 
+/** The directories at what was typed, on the machine the form so far points at. */
+function browse(_key: string, typed: string) {
+  const of = current.value
+  if (!of) return Promise.reject(new Error('no kind'))
+  return api
+    .browseSource(of.kind, {
+      projectId: state.detail?.project.id ?? null,
+      settings: { ...values() },
+      path: typed,
+    })
+    .then((result) => result.listing)
+}
+
 function values(): Record<string, unknown> {
   const key = kind.value ?? ''
   drafts[key] ??= {}
@@ -262,6 +275,7 @@ function middle(text: string, max = 44): string {
             :schema="current.settings"
             :values="values()"
             :secrets-set="secretsSet"
+            :browse="current.browse ? browse : undefined"
             @clear-secret="clearSecret"
           />
           <template v-if="takesHosting">

@@ -391,6 +391,7 @@ export const zhCN = {
   'error.noSource': '项目还没有设置工作目录',
   'error.noRepo': '项目的上下文源不是托管仓库，没有分支、PR 和检查',
   'error.workspace': '准备工作区失败：{detail}',
+  'error.browse': '列不出目录：{detail}',
   'error.noTracker': '项目的上下文源没有 issue 追踪',
   'error.issue': '读取 issue 失败：{detail}',
   'tracker.comment.question': '在 {issue}「{title}」下发表这条评论？',

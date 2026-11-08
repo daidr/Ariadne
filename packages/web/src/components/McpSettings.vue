@@ -25,6 +25,9 @@ import {
   type McpToolMark,
 } from '../api'
 import { t, tm } from '../i18n'
+import DirectoryInput from './DirectoryInput.vue'
+
+const browseLocal = (typed: string) => api.browseLocal(typed).then((result) => result.listing)
 
 interface DraftPair {
   name: string
@@ -257,7 +260,11 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
               <DouInput v-model="server.command" placeholder="npx" />
             </DouFormItem>
             <DouFormItem :label="t('mcp.cwd')" class="mcp-grow">
-              <DouInput v-model="server.cwd" :placeholder="t('mcp.cwdPlaceholder')" />
+              <DirectoryInput
+                v-model="server.cwd"
+                :browse="browseLocal"
+                :placeholder="t('mcp.cwdPlaceholder')"
+              />
             </DouFormItem>
           </div>
           <DouFormItem :label="t('mcp.args')">

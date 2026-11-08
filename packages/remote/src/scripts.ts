@@ -287,3 +287,20 @@ base64 -d > "$file" || exit 1
 if [ -s "$file" ]; then g bundle unbundle "$file" > /dev/null || exit 1; fi
 g update-ref --stdin < "$updates"
 `
+
+/** Exit code of `DIRECTORIES` when `$1` is not a directory it can enter. */
+export const NOT_A_DIRECTORY = 3
+
+/**
+ * The directories in `$1` (the home directory when empty), for a picker: the real path,
+ * then each name, each ending in NUL. Links to directories count as directories.
+ */
+export const DIRECTORIES = `
+set -u
+cd -P -- "\${1:-$HOME}" 2>/dev/null || exit ${NOT_A_DIRECTORY}
+printf '%s\\0' "$(pwd -P)"
+for entry in * .[!.]* ..?*; do
+  [ -d "$entry" ] && printf '%s\\0' "$entry"
+done
+exit 0
+`

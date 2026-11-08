@@ -1,6 +1,6 @@
 import { parseAddress, parsePairingCode } from '@ariadne/daemon/protocol'
 import { definePlugin, type ContextProvider } from '@ariadne/plugin-sdk'
-import { connectRemote, type RemoteShell } from '@ariadne/remote'
+import { BrowseShells, browseRemote, connectRemote, type RemoteShell } from '@ariadne/remote'
 import { posix } from 'node:path'
 import { DaemonShell, type DaemonTarget } from './shell'
 
@@ -16,6 +16,7 @@ export interface DaemonSettings {
 export function daemonProvider(
   makeShell: (target: DaemonTarget) => RemoteShell = (target) => new DaemonShell(target),
 ): ContextProvider<DaemonSettings> {
+  const browsing = new BrowseShells(makeShell)
   return {
     kind: 'daemon',
     title: { 'zh-CN': '远程 daemon', en: 'Remote daemon' },
@@ -44,6 +45,7 @@ export function daemonProvider(
         path: {
           type: 'string',
           title: { 'zh-CN': '远端目录', en: 'Remote directory' },
+          directory: true,
           description: {
             'zh-CN': '绝对路径。git 仓库会在远端为每个讨论串建一个独立的 worktree',
             en: 'An absolute path. A git repository gets a separate worktree per thread on the remote machine',
@@ -53,19 +55,27 @@ export function daemonProvider(
       required: ['address', 'pairing', 'path'],
     },
     provides: ['workspace'],
+    browse(settings, typed, { signal }) {
+      return browseRemote(browsing.get(machineOf(settings)), typed, signal)
+    },
     async connect(settings) {
-      const address = parseAddress(settings.address ?? '')
-      if (!address) throw new Error('the address is not valid')
-      const pairing = parsePairingCode(settings.pairing ?? '')
-      if (!pairing) throw new Error('the pairing code is not valid')
+      const machine = machineOf(settings)
       const path = settings.path?.trim()
       if (!path || !posix.isAbsolute(path)) {
         throw new Error('the directory must be an absolute path')
       }
-      const shell = makeShell({ ...address, ...pairing })
-      return { workspace: await connectRemote(shell, path) }
+      return { workspace: await connectRemote(makeShell(machine), path) }
     },
   }
+}
+
+/** The daemon the settings name, with the pairing that lets Ariadne in. */
+function machineOf(settings: Partial<DaemonSettings>): DaemonTarget {
+  const address = parseAddress(settings.address ?? '')
+  if (!address) throw new Error('the address is not valid')
+  const pairing = parsePairingCode(settings.pairing ?? '')
+  if (!pairing) throw new Error('the pairing code is not valid')
+  return { ...address, ...pairing }
 }
 
 export default definePlugin({

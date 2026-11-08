@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { DouButton, DouFormItem, DouInput, DouInputNumber, DouSelect, DouSwitch } from 'dou-ui'
 import type { SettingsSchema } from '@ariadne/plugin-sdk'
+import type { DirectoryListing } from '../api'
 import { lt, t } from '../i18n'
+import DirectoryInput from './DirectoryInput.vue'
 
 // The form a plugin describes with its settings schema. Values are edited in place.
 // A stored secret is never sent to the browser: it shows as "set" and can be cleared.
@@ -9,6 +11,8 @@ const props = defineProps<{
   schema: SettingsSchema
   values: Record<string, unknown>
   secretsSet: string[]
+  /** Lists directories for `directory` settings; without it they are only typed. */
+  browse?: ((key: string, typed: string) => Promise<DirectoryListing>) | undefined
 }>()
 const emit = defineEmits<{ clearSecret: [key: string] }>()
 
@@ -28,8 +32,15 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
           : lt(field.description)
       "
     >
+      <DirectoryInput
+        v-if="field.type === 'string' && field.directory && browse"
+        :model-value="asString(values[key])"
+        :placeholder="field.default"
+        :browse="(typed) => browse!(String(key), typed)"
+        @update:model-value="(value) => (values[key] = value)"
+      />
       <DouInput
-        v-if="field.type === 'string'"
+        v-else-if="field.type === 'string'"
         :model-value="asString(values[key])"
         :type="field.secret ? 'password' : 'text'"
         :show-password="field.secret"

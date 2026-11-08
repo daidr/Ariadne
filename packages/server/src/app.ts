@@ -33,6 +33,7 @@ import {
   type ProjectSource,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
+import { browseLocal } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
 import type { DataStore } from './data'
 import type { SettingsStore } from './settings'
@@ -46,6 +47,24 @@ import {
   toErrorResponse,
 } from './http'
 import { PriceCatalog } from './prices'
+
+/** A directory listing gives up after this long. */
+const BROWSE_TIMEOUT_MS = 15_000
+
+/** How long a listing may take: a remote machine may be slow to reach. */
+const browseOptions = () => ({ signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS) })
+
+/** A listing, or why there is none, said the way a broken source is. */
+async function browsing<T>(list: () => Promise<T>): Promise<T> {
+  try {
+    return await list()
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('error.browse', {
+      detail: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
 
 export interface HandlerOptions {
   app: Ariadne
@@ -289,9 +308,41 @@ export function createHandler({
         provides: provider.provides,
         remote: !!provider.remote,
         hosting: !!provider.hosting,
+        browse: !!provider.browse,
         summary: provider.summary ?? null,
       })),
     }),
+  )
+
+  // Directories at what the user typed into a source's directory setting, on the machine
+  // the rest of the form points at. Secrets left empty are the project's stored ones.
+  add('POST', '/api/source-kinds/:kind/browse', async (request, { kind = '' }) => {
+    const provider = host?.contexts.get(kind)
+    if (!provider) throw new DomainError('error.notFound', { what: kind })
+    if (!provider.browse) throw new BadRequest('kind')
+    const body = await readJson(request)
+    const typed = typeof body.path === 'string' ? body.path : ''
+    const given = (
+      body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)
+        ? body.settings
+        : {}
+    ) as Record<string, unknown>
+    let filled = given
+    const projectId = typeof body.projectId === 'string' ? body.projectId : null
+    if (projectId && settings) {
+      const previous = app.getProject(projectId).source?.kind ?? null
+      const split = settings.splitSourceSettings(projectId, kind, given, previous)
+      filled = { ...split.settings, ...split.secrets }
+    }
+    return json({
+      listing: await browsing(() => provider.browse!(filled as never, typed, browseOptions())),
+    })
+  })
+
+  // Directories on this machine, for paths the server itself uses (an MCP server's working
+  // directory, a plugin's location).
+  add('GET', '/api/directories', async (_request, _params, url) =>
+    json({ listing: await browsing(() => browseLocal(url.searchParams.get('path') ?? '')) }),
   )
 
   add('GET', '/api/projects/:projectId/source', (_request, { projectId = '' }) =>
