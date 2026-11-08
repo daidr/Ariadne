@@ -6,6 +6,7 @@ import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
 import { groupOf, sortThreads, threadGroups, type ThreadGroup } from '../stage'
 import { activeThreadId, openThread, state } from '../store'
+import { dragThread } from '../side/dock'
 import ReviewActions from './ReviewActions.vue'
 import ThreadRow from './ThreadRow.vue'
 import { openGroups, threadSort } from './thread-list'
@@ -119,6 +120,8 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
             v-else-if="byId.get(String(item.key))"
             :thread="byId.get(String(item.key))!"
             :nested="nested(byId.get(String(item.key))!)"
+            class="thread-drag"
+            @pointerdown="(event: PointerEvent) => dragThread(event, String(item.key))"
           />
         </template>
         <template #actions="{ item }">
@@ -157,6 +160,11 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
 .thread-menu {
   align-self: stretch;
   --dou-menu-item-height: auto;
+}
+
+/* A row can be dragged onto the side; a swipe still scrolls the list. */
+.thread-drag {
+  touch-action: pan-y;
 }
 
 .more {

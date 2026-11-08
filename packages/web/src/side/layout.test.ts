@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
+import type { DockNode } from 'dou-ui'
 import {
-  type PaneNode,
   type SideLayout,
   close,
   closeOthers,
@@ -12,16 +12,14 @@ import {
   open,
   openThreads,
   parseLayout,
-  place,
   prune,
-  resize,
   split,
   threadKey,
 } from './layout'
 
 const tabs = (layout: SideLayout) => groupsOf(layout.root).map((g) => g.tabs)
-const shape = (node: PaneNode): unknown =>
-  node.type === 'group' ? node.tabs : [node.direction, shape(node.first), shape(node.second)]
+const shape = (node: DockNode): unknown =>
+  node.type === 'group' ? node.tabs : [node.direction, shape(node.start), shape(node.end)]
 
 describe('side layout', () => {
   test('starts with the lists in one group, the plan in front', () => {
@@ -66,28 +64,6 @@ describe('side layout', () => {
       ['threads', 'artifacts', 'memory'],
       ['vertical', ['thread:a'], ['plan']],
     ])
-  })
-
-  test('places a dragged tab along its row or in another group, in front there', () => {
-    let layout = defaultLayout()
-    const first = focusedGroup(layout).id
-    layout = place(layout, 'memory', first, 1)
-    expect(tabs(layout)).toEqual([['plan', 'memory', 'threads', 'artifacts']])
-    expect(focusedGroup(layout).active).toBe('memory')
-    layout = split(layout, 'threads', 'horizontal')
-    const second = focusedGroup(layout).id
-    layout = place(layout, 'plan', second, 0)
-    expect(tabs(layout)).toEqual([
-      ['memory', 'artifacts'],
-      ['plan', 'threads'],
-    ])
-    expect(focusedGroup(layout).id).toBe(second)
-    // Dragging out the last tab of a group takes the group away.
-    layout = place(layout, 'memory', second, 9)
-    layout = place(layout, 'artifacts', second, 1)
-    expect(shape(layout.root)).toEqual(['plan', 'artifacts', 'threads', 'memory'])
-    // A group that is not there leaves the layout as it was.
-    expect(place(layout, 'plan', 'missing', 0)).toBe(layout)
   })
 
   test('splits a tab out, and an emptied group gives its room back', () => {
@@ -136,12 +112,10 @@ describe('side layout', () => {
     expect(groupsOf(layout.root).some((g) => g.id === left!.id)).toBe(false)
   })
 
-  test('resizes a split and lists the threads open anywhere', () => {
+  test('lists the threads open anywhere', () => {
     let layout = open(defaultLayout(), threadKey('a'), { beside: 'horizontal' })
     layout = open(layout, threadKey('b'))
     expect(openThreads(layout)).toEqual(['a', 'b'])
-    layout = resize(layout, layout.root.id, 35)
-    expect(layout.root.type === 'split' && layout.root.size).toBe(35)
   })
 
   test('prunes tabs of threads that are gone', () => {
@@ -151,8 +125,8 @@ describe('side layout', () => {
   })
 
   test('reads back what it stored, and turns down what it cannot use', () => {
-    let layout = open(defaultLayout(), threadKey('a'), { beside: 'vertical' })
-    layout = resize(layout, layout.root.id, 40)
+    const opened = open(defaultLayout(), threadKey('a'), { beside: 'vertical' })
+    const layout = { ...opened, root: { ...opened.root, size: 40 } as DockNode }
     expect(parseLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout)
     expect(parseLayout(null)).toBeNull()
     expect(parseLayout({ root: { type: 'group', id: 'g', tabs: [] } })).toBeNull()
@@ -160,11 +134,10 @@ describe('side layout', () => {
     const parsed = parseLayout({
       root: {
         type: 'split',
-        id: 's',
         direction: 'sideways',
         size: 500,
-        first: { type: 'group', id: 'g1', tabs: ['plan', 'nonsense', 'plan'], active: 'x' },
-        second: { type: 'group', id: 'g2', tabs: ['plan'] },
+        start: { type: 'group', id: 'g1', tabs: ['plan', 'nonsense', 'plan'], active: 'x' },
+        end: { type: 'group', id: 'g2', tabs: ['plan'] },
       },
       focused: 'missing',
     })
