@@ -32,6 +32,7 @@ import type {
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type {
   BranchChanges,
+  DirectoryListing,
   FileVersions,
   LinkPreview,
   LinkSummary,
@@ -176,12 +177,16 @@ export interface SourceInput {
 }
 
 /** A kind of context source a plugin offers. */
+export type { DirectoryListing }
+
 export interface SourceKind extends ModelKind {
   provides: string[]
   /** Threads' commands run on another machine, outside this one's sandbox. */
   remote: boolean
   /** Can bring its repository and issues to a remote source. */
   hosting: boolean
+  /** Can list directories for its `directory` settings. */
+  browse: boolean
   /** One-line name of a source, `{setting}` replaced by its value. */
   summary: string | null
 }
@@ -507,6 +512,20 @@ export const api = {
   answerAttention: (id: string, answer: BlockAnswer) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
+  browseSource: (
+    kind: string,
+    body: { projectId: string | null; settings: Record<string, unknown>; path: string },
+  ) =>
+    request<{ listing: DirectoryListing | null }>(
+      'POST',
+      `/api/source-kinds/${encodeURIComponent(kind)}/browse`,
+      body,
+    ),
+  browseLocal: (path: string) =>
+    request<{ listing: DirectoryListing | null }>(
+      'GET',
+      `/api/directories${queryString({ path })}`,
+    ),
   getSource: (projectId: string) =>
     request<{ source: ProjectView['source']; secretsSet: string[] }>(
       'GET',

@@ -413,6 +413,7 @@ export const en: Record<MessageKey, string> = {
   'error.noRepo':
     'The project source is not a hosted repository, so there are no branches, pull requests or checks',
   'error.workspace': 'Could not prepare the workspace: {detail}',
+  'error.browse': 'Could not list directories: {detail}',
   'error.noTracker': 'The project source has no issue tracker',
   'error.issue': 'Could not read the issue: {detail}',
   'tracker.comment.question': 'Post this comment on {issue} "{title}"?',

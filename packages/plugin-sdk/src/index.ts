@@ -1,4 +1,5 @@
 import type { Capabilities, CapabilityName } from './capabilities'
+import type { DirectoryListing } from './directories'
 
 export type * from './capabilities'
 export { FileTooLargeError, MergeRefused, readOnlyView, WorkspacePathError } from './capabilities'
@@ -14,6 +15,18 @@ export {
 } from './sse'
 export { defaultShell, shellArgv } from './shell'
 export { processes, ProcessLedger, type Leftovers, type TrackedProcess } from './processes'
+export {
+  browseLocal,
+  browseTyped,
+  DirectoryNotFound,
+  listLocalDirectory,
+  MAX_DIRECTORIES,
+  NothingToBrowse,
+  type DirectoryEntry,
+  type DirectoryListing,
+  type ListDirectory,
+  type PathFlavor,
+} from './directories'
 
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and
@@ -34,6 +47,11 @@ export type SettingField =
       title: LocalizedText
       description?: LocalizedText
       secret?: boolean
+      /**
+       * A directory path: the form offers to pick it from a listing, where the provider can
+       * list directories (see `ContextProvider.browse`).
+       */
+      directory?: boolean
       default?: string
     }
   | { type: 'number'; title: LocalizedText; description?: LocalizedText; default?: number }
@@ -70,6 +88,16 @@ export interface ContextProvider<Settings = Record<string, unknown>> {
   hosting?: boolean
   /** Build the capabilities of one configured source. */
   connect(settings: Settings): Promise<Partial<Capabilities>>
+  /**
+   * The directories at what the user typed into a `directory` setting, on the machine the
+   * other settings (filled in as far as the user got) point at; see `browseTyped`. Without
+   * it the path is only typed. Ariadne gives up after 15 seconds and aborts `signal`.
+   */
+  browse?(
+    settings: Partial<Settings>,
+    typed: string,
+    options: { signal?: AbortSignal },
+  ): Promise<DirectoryListing>
 }
 
 export interface ToolCall {

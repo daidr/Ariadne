@@ -5,7 +5,15 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { clip, connectRemote, LocalShell, OutputText, relativePath, WORKTREE_DIR } from './index'
+import {
+  browseRemote,
+  clip,
+  connectRemote,
+  LocalShell,
+  OutputText,
+  relativePath,
+  WORKTREE_DIR,
+} from './index'
 
 let base: string
 
@@ -415,5 +423,41 @@ describe('turn work on a remote machine', () => {
     expect(seen).toContain('two\n')
     expect(seen).toContain('three\n')
     expect(seen).not.toContain('ariadne: started')
+  })
+})
+
+describe('browsing the remote machine', () => {
+  test('lists directories there, starting at home', async () => {
+    await mkdir(join(home, 'projects', 'one'), { recursive: true })
+    await mkdir(join(home, 'projects', 'two words'))
+    await mkdir(join(home, '.hidden'))
+    await writeFile(join(home, 'projects', 'file'), '')
+    const shell = new TestShell()
+    const start = await browseRemote(shell, '')
+    expect(start.path).toBe(home)
+    expect(start.directories.map((entry) => entry.name)).toEqual(['projects'])
+    const inside = await browseRemote(shell, join(home, 'projects', 't'))
+    expect(inside.directories).toEqual([
+      { name: 'two words', path: join(home, 'projects', 'two words') },
+    ])
+    const dotted = await browseRemote(shell, `${home}/.`)
+    expect(dotted.directories.map((entry) => entry.name)).toEqual(['.hidden'])
+  })
+
+  test('keeps links in the path as typed', async () => {
+    await mkdir(join(home, 'real', 'inner'), { recursive: true })
+    await symlink(join(home, 'real'), join(home, 'link'))
+    const listing = await browseRemote(new TestShell(), join(home, 'link'))
+    expect(listing.path).toBe(join(home, 'link'))
+    expect(listing.directories).toEqual([{ name: 'inner', path: join(home, 'link', 'inner') }])
+  })
+
+  test('says why when the machine cannot be reached', async () => {
+    class Down extends LocalShell {
+      override async run() {
+        return { exitCode: 255, stdout: '', stderr: 'connection refused' }
+      }
+    }
+    await expect(browseRemote(new Down(), '/srv')).rejects.toThrow('connection refused')
   })
 })

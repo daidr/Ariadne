@@ -2,7 +2,7 @@ import { Ariadne, type AnyStoredEvent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { McpHub, noSandbox, PluginHost, WorkspaceManager } from '@ariadne/agent'
 import type { ContextProvider, TrackerCapability } from '@ariadne/plugin-sdk'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHandler } from './app'
@@ -643,5 +643,81 @@ describe('project settings, export and backups', () => {
     expect(body.project.name).toBe('导出')
     expect(body.events.map((e) => e.type)).toContain('message.posted')
     expect(body.files[0]?.data).toBe('iVBORw==')
+  })
+})
+
+describe('directory pickers', () => {
+  test("lists a source's directories with the project's stored secret filled in", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ariadne-app-browse-'))
+    const host = new PluginHost(dir)
+    const asked: unknown[] = []
+    await host.load({
+      id: 'remote',
+      name: { 'zh-CN': '远端' },
+      setup: (ctx) =>
+        ctx.registerContextProvider({
+          kind: 'remote',
+          title: { 'zh-CN': '远端' },
+          settings: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', secret: true, title: { 'zh-CN': '密钥' } },
+              path: { type: 'string', directory: true, title: { 'zh-CN': '目录' } },
+            },
+            required: ['key', 'path'],
+          },
+          provides: ['workspace'],
+          async connect() {
+            return {}
+          },
+          async browse(settings: unknown, typed: string) {
+            asked.push({ settings, typed })
+            if (typed === '/down') throw new Error('connection refused')
+            return { path: '/srv', parent: '/', directories: [{ name: 'app', path: '/srv/app' }] }
+          },
+        } as never),
+    })
+    const settings = new SettingsStore(join(dir, 'config.json'), host)
+    handle = createHandler({ app, token, settings, host })
+    const project = app.createProject('P')
+    await call(`/api/projects/${project.id}/source`, {
+      method: 'PUT',
+      body: { source: { kind: 'remote', settings: { key: 'k-1', path: '/srv' } } },
+    })
+
+    const kinds = await (await call('/api/source-kinds')).json()
+    expect(kinds.kinds[0]).toMatchObject({ kind: 'remote', browse: true })
+    const browse = (body: unknown) =>
+      call('/api/source-kinds/remote/browse', { method: 'POST', body })
+    const listed = await browse({ projectId: project.id, settings: { key: '' }, path: '/srv' })
+    expect(await listed.json()).toEqual({
+      listing: { path: '/srv', parent: '/', directories: [{ name: 'app', path: '/srv/app' }] },
+    })
+    expect(asked.at(-1)).toEqual({ settings: { key: 'k-1' }, typed: '/srv' })
+    // A key typed in wins; one cleared is not filled in.
+    await browse({ projectId: project.id, settings: { key: 'k-2' }, path: '' })
+    expect(asked.at(-1)).toEqual({ settings: { key: 'k-2' }, typed: '' })
+    await browse({ projectId: project.id, settings: { key: null }, path: '' })
+    expect(asked.at(-1)).toEqual({ settings: {}, typed: '' })
+
+    const down = await browse({ projectId: project.id, settings: {}, path: '/down' })
+    expect(down.status).toBe(400)
+    expect(await down.json()).toEqual({
+      error: { key: 'error.browse', params: { detail: 'connection refused' } },
+    })
+    expect((await call('/api/source-kinds/none/browse', { method: 'POST', body: {} })).status).toBe(
+      404,
+    )
+  })
+
+  test("lists this machine's directories", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ariadne-app-dirs-'))
+    mkdirSync(join(dir, 'inner'))
+    const listed = await call(`/api/directories?path=${encodeURIComponent(dir)}`)
+    const { listing } = await listed.json()
+    expect(listing.directories.map((entry: { name: string }) => entry.name)).toEqual(['inner'])
+    // Nothing there is nothing to list, not an error to show.
+    const missing = await call('/api/directories?path=/no/such/place/at/all')
+    expect(await missing.json()).toEqual({ listing: null })
   })
 })

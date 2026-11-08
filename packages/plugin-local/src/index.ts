@@ -1,4 +1,5 @@
 import {
+  browseLocal,
   defaultShell,
   definePlugin,
   processes,
@@ -638,6 +639,7 @@ export function localDirectoryProvider(
         path: {
           type: 'string',
           title: { 'zh-CN': '目录', en: 'Directory' },
+          directory: true,
           description: {
             'zh-CN': 'git 仓库会为每个讨论串建一个独立的 worktree',
             en: 'A git repository gets a separate worktree per thread',
@@ -647,6 +649,7 @@ export function localDirectoryProvider(
       required: ['path'],
     },
     provides: ['workspace'],
+    browse: (_settings, typed) => browseLocal(typed),
     async connect(settings) {
       const path = settings.path?.trim()
       if (!path || !isAbsolute(path)) throw new Error('the directory must be an absolute path')

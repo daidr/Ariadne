@@ -1,8 +1,10 @@
 import {
+  browseTyped,
   FileTooLargeError,
   readOnlyView,
   WorkspacePathError,
   type BranchCapability,
+  type DirectoryListing,
   type ExecOptions,
   type ExecResult,
   type GitObjects,
@@ -26,12 +28,14 @@ import { createHash } from 'node:crypto'
 import { posix } from 'node:path'
 import {
   BUNDLE,
+  DIRECTORIES,
   EXEC,
   HAS,
   EXISTS,
   GIT,
   GIT_INDEX,
   LIST,
+  NOT_A_DIRECTORY,
   OPEN_WORKTREE,
   OUTSIDE,
   PROBE,
@@ -434,4 +438,55 @@ export async function connectRemote(
   path: string,
 ): Promise<WorkspaceCapability> {
   return remoteWorkspaces(shell, await probe(shell, path))
+}
+
+/** The listing for what a user typed, on the machine `shell` reaches; see `browseTyped`. */
+export function browseRemote(
+  shell: RemoteShell,
+  typed: string,
+  signal?: AbortSignal,
+): Promise<DirectoryListing> {
+  return browseTyped(
+    typed,
+    async (path) => {
+      const result = await shell.run(DIRECTORIES, [path], {
+        timeoutMs: 15_000,
+        ...(signal ? { signal } : {}),
+      })
+      if (result.exitCode === NOT_A_DIRECTORY) return null
+      if (result.exitCode !== 0) throw failure(shell, path, result)
+      const [real = path, ...names] = result.stdout.split('\0')
+      return { path: real, names: names.filter(Boolean) }
+    },
+    posix,
+  )
+}
+
+/**
+ * Shells kept for browsing, one per machine, so typing a path does not connect again for
+ * every listing; the shells close their own connections once idle.
+ */
+export class BrowseShells<Target> {
+  private readonly shells = new Map<string, RemoteShell>()
+  constructor(
+    private readonly make: (target: Target) => RemoteShell,
+    private readonly limit = 8,
+  ) {}
+
+  get(target: Target): RemoteShell {
+    const key = JSON.stringify(target)
+    let shell = this.shells.get(key)
+    if (shell) {
+      this.shells.delete(key)
+    } else {
+      shell = this.make(target)
+      if (this.shells.size >= this.limit) {
+        const [oldest, old] = this.shells.entries().next().value!
+        this.shells.delete(oldest)
+        void old.dispose().catch(() => {})
+      }
+    }
+    this.shells.set(key, shell)
+    return shell
+  }
 }

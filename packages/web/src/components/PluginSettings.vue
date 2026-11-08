@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouCard, DouInput, DouPopconfirm, DouTag, DouText } from 'dou-ui'
+import { DouAlert, DouButton, DouCard, DouPopconfirm, DouTag, DouText } from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
 import { onMounted, ref } from 'vue'
 import { api, ApiError, type PluginRecord } from '../api'
 import { lt, t, tm } from '../i18n'
+import DirectoryInput from './DirectoryInput.vue'
+
+const browseLocal = (typed: string) => api.browseLocal(typed).then((result) => result.listing)
 
 // Changes apply at once: a plugin is loaded (or unloaded) as soon as it is added (or removed).
 const emit = defineEmits<{ changed: [] }>()
@@ -76,10 +79,11 @@ const provides = (plugin: PluginRecord) => [
       {{ t('plugins.help') }}
     </DouText>
     <form class="plugins-add" @submit.prevent="add">
-      <DouInput
+      <DirectoryInput
         v-model="path"
         size="sm"
         class="plugins-path"
+        :browse="browseLocal"
         :placeholder="t('plugins.placeholder')"
         :aria-label="t('plugins.placeholder')"
       />
