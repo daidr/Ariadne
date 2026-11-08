@@ -465,6 +465,10 @@ export function setSide(next: SideLayout) {
     if (!open.has(threadId)) delete state.threads[threadId]
   }
   for (const threadId of composers.keys()) if (!open.has(threadId)) dropComposer(threadId)
+  // A thread dragged in from the thread list has nothing loaded yet.
+  const opened = [...open].filter((threadId) => !state.threads[threadId])
+  for (const threadId of opened) state.threads[threadId] = emptyConversation()
+  if (opened.length) void refreshCurrent(['conversations']).catch(report)
   const projectId = state.currentId
   if (!projectId) return
   try {
@@ -512,11 +516,10 @@ export const activeThreadId = computed(() => side.focusedThread(state.side))
  */
 export async function openPane(key: PaneKey, options: OpenOptions = {}) {
   state.planWide = false
-  setSide(side.open(state.side, key, options))
   const threadId = side.threadOf(key)
-  if (!threadId || state.threads[threadId]) return
-  state.threads[threadId] = emptyConversation()
-  await refreshCurrent(['conversations']).catch(report)
+  const loading = !!threadId && !state.threads[threadId]
+  setSide(side.open(state.side, key, options))
+  if (loading) await refreshing
 }
 
 /** Open a thread's conversation on the right side; see `openPane`. */

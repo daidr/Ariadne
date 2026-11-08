@@ -8,6 +8,7 @@ import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
 import { questionOf, statusLine } from '../stage'
 import { activeThreadId, openThreadFrom, state } from '../store'
+import { dragThread } from '../side/dock'
 
 /** An entry to a thread an agent put in a message; follows the thread as it moves on. */
 const props = defineProps<{ threadId: string }>()
@@ -43,7 +44,9 @@ const headline = computed(() => {
     :description="headline"
     :status="running ? 'running' : 'done'"
     :active="activeThreadId === thread.id"
+    class="thread-card"
     @open="open"
+    @pointerdown="(event: PointerEvent) => dragThread(event, thread!.id)"
   >
     <template #icon><MessagesIcon /></template>
     <template #actions>
@@ -53,3 +56,10 @@ const headline = computed(() => {
     </template>
   </DouChatArtifact>
 </template>
+
+<style scoped>
+/* The card can be dragged onto the side; a swipe still scrolls the chat. */
+.thread-card {
+  touch-action: pan-y;
+}
+</style>
