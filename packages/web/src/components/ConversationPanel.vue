@@ -39,7 +39,6 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
-  SquareStopIcon,
   MessagesIcon,
 } from '@dou-ui/icons'
 import {
@@ -74,7 +73,6 @@ import {
   state,
   resumeThread,
   setThreadModel,
-  stopThread,
   stopTurn,
   undoNotice,
 } from '../store'
@@ -1028,10 +1026,6 @@ watch(
         <DouText v-if="fallback" variant="tertiary" size="sm" class="conversation-fallback">
           {{ t('conversation.fallback', { model: fallback }) }}
         </DouText>
-        <DouButton variant="ghost" size="sm" @click="stop">
-          <template #leading><SquareStopIcon /></template>
-          {{ t('conversation.stop') }}
-        </DouButton>
       </div>
     </div>
     <div v-else-if="queued" class="conversation-status" role="status">
@@ -1096,7 +1090,9 @@ watch(
         :placeholder="props.threadId ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         :can-submit="canSubmit"
+        :loading="working"
         @submit="submit"
+        @stop="stop"
         @attach="attachments.add"
       >
         <template v-if="attachments.files.value.length" #header>
