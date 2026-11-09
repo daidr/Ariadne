@@ -20,7 +20,15 @@ import {
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { createProject, deleteProject, exportProject, openMain, openProject, state } from '../store'
+import {
+  createProject,
+  deleteProject,
+  exportProject,
+  openMain,
+  openProject,
+  state,
+  openProjectSettings,
+} from '../store'
 
 const name = ref('')
 // Opened from the button here or from the getting-started steps: the name is typed next.
@@ -56,7 +64,7 @@ async function openTrace(id: string) {
 /** The project's own settings, in its project. */
 async function openSettings(id: string) {
   if (state.currentId !== id) await openProject(id)
-  state.projectSettingsOpen = true
+  openProjectSettings()
 }
 
 function act(key: unknown, id: string) {

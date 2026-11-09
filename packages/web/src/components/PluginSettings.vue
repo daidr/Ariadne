@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DouAlert, DouButton, DouCard, DouPopconfirm, DouTag, DouText } from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type PluginRecord } from '../api'
 import { lt, t, tm } from '../i18n'
 import DirectoryInput from './DirectoryInput.vue'
@@ -57,6 +57,9 @@ async function add() {
   if (await run(() => api.addPlugin(path.value.trim()))) path.value = ''
 }
 
+// The built-in ones cannot be turned off: only those loaded from a folder are listed.
+const local = computed(() => plugins.value.filter((plugin) => plugin.source !== 'builtin'))
+
 const nameOf = (plugin: PluginRecord) =>
   lt(plugin.name ?? undefined) ?? plugin.id ?? plugin.path ?? ''
 // A source and its link cards share a name (github, github): each kind is listed once.
@@ -74,11 +77,7 @@ const provides = (plugin: PluginRecord) => [
 <template>
   <div class="plugins">
     <!-- The warning matters once code from elsewhere is loaded. -->
-    <DouText
-      v-if="plugins.some((plugin) => plugin.source !== 'builtin')"
-      size="sm"
-      variant="secondary"
-    >
+    <DouText v-if="local.length" size="sm" variant="secondary">
       {{ t('plugins.help') }}
     </DouText>
     <form class="plugins-add" @submit.prevent="add">
@@ -95,12 +94,11 @@ const provides = (plugin: PluginRecord) => [
       </DouButton>
     </form>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
-    <DouCard v-for="plugin in plugins" :key="plugin.id ?? plugin.path ?? ''" padding="sm">
+    <DouCard v-for="plugin in local" :key="plugin.id ?? plugin.path ?? ''" padding="sm">
       <div class="plugins-row">
         <div class="plugins-main">
           <div class="plugins-title">
             <DouText weight="medium">{{ nameOf(plugin) }}</DouText>
-            <DouTag v-if="plugin.source !== 'builtin'" size="sm">{{ t('plugins.path') }}</DouTag>
             <DouTag v-if="plugin.status !== 'loaded'" size="sm" tone="danger">
               {{ t('plugins.failed') }}
             </DouTag>

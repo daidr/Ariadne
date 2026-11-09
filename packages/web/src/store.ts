@@ -110,6 +110,14 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
+export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot'
+
+/** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
+export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
+  state.projectSettingsTab = tab
+  state.projectSettingsOpen = true
+}
+
 /** A message to bring into view and mark for a moment, e.g. one the search found. */
 export interface MessageFocus {
   conversationId: string
@@ -156,14 +164,13 @@ interface State {
   showCost: boolean
   /** The new-project form is open. */
   creatingProject: boolean
-  /** The project source popover in the header is open; the first-run steps open it too. */
-  sourceOpen: boolean
   /** The message to scroll to; the conversation showing it clears it once there. */
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
-  /** The open project's settings dialog is open. */
+  /** The open project's settings dialog is open, and the tab it opens on. */
   projectSettingsOpen: boolean
+  projectSettingsTab: ProjectSettingsTab
   /** Which key sends, and the snippets offered after `/`. */
   input: InputSettings
   /** Commands conversations are running now, by conversation; not part of the log. */
@@ -203,10 +210,10 @@ export const state = reactive<State>({
   threadDefault: null,
   showCost: false,
   creatingProject: false,
-  sourceOpen: false,
   focus: null,
   searchOpen: false,
   projectSettingsOpen: false,
+  projectSettingsTab: 'source',
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   live: {},
   writing: {},

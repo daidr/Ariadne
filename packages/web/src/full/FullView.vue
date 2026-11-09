@@ -24,8 +24,8 @@ const label = computed(() => {
   const view = full.value?.view
   if (!view) return ''
   if (view.kind === 'artifact') return state.artifacts.find((a) => a.id === view.id)?.title ?? ''
-  const thread = state.detail?.threads.find((th) => th.id === view.threadId)
-  return thread ? t('view.changesOf', { title: thread.title }) : ''
+  const owner = state.detail?.threads.find((th) => th.id === view.threadId)
+  return owner ? t('view.changesOf', { title: owner.title }) : ''
 })
 </script>
 

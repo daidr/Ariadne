@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MergeMethod, ProjectSettings, ShellChoice } from '@ariadne/core'
+import type { MergeMethod, ProjectSettings } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
@@ -20,24 +20,28 @@ import {
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, inject, ref, watch } from 'vue'
-import { api, ApiError, type McpServerView, type ToolGroup } from '../api'
+import { api, ApiError, type McpServerView } from '../api'
 import { clockText, t, tm } from '../i18n'
 import { newRoutine, nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
 import { openSettingsKey } from '../open-settings'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
+import SourceForm from './SourceForm.vue'
 
 /**
- * The open project's own settings: instructions, workspaces, tools, budgets, slots, MCP and
- * routines.
+ * The open project's own settings: where its files are, instructions, workspaces and MCP,
+ * and the review, autopilot, budgets and routines. What the page no longer shows (tool
+ * switches, the shell, the branch prefix, the project's own concurrency) is saved back as
+ * it was.
  */
 
-const SHELLS: ShellChoice[] = ['auto', 'bash', 'zsh', 'sh', 'pwsh', 'powershell', 'cmd']
-
-const tab = ref('instructions')
+const tab = computed({
+  get: () => state.projectSettingsTab,
+  set: (value) => (state.projectSettingsTab = value),
+})
+const source = ref<InstanceType<typeof SourceForm> | null>(null)
 const settings = ref<ProjectSettings | null>(null)
 const env = ref<DraftPair[]>([])
-const tools = ref<ToolGroup[]>([])
 /** Budgets in thousands of tokens, as typed; empty is no cap. */
 const threadK = ref<number | null>(null)
 const projectK = ref<number | null>(null)
@@ -104,10 +108,6 @@ function openMcp() {
   openSettings('mcp')
 }
 
-const shellOptions = SHELLS.map((shell) => ({
-  value: shell,
-  label: shell === 'auto' ? t('projectSettings.shellAuto') : shell,
-}))
 const mcpOptions = computed(() =>
   mcpServers.value.map((server) => ({ value: server.id, label: server.name })),
 )
@@ -121,7 +121,6 @@ watch(
     if (!open || !project) return
     error.value = null
     settings.value = null
-    tab.value = 'instructions'
     now.value = Date.now()
     slots.value = project.slots
     mcp.value = [...project.mcp]
@@ -134,7 +133,6 @@ watch(
       if (concurrency) totalSlots.value = concurrency.slots
       settings.value = structuredClone(view.settings)
       env.value = storedPairs(view.env)
-      tools.value = view.tools
       threadK.value = toK(view.settings.budget.thread)
       projectK.value = toK(view.settings.budget.project)
       mcpServers.value = servers.servers
@@ -143,14 +141,6 @@ watch(
     }
   },
 )
-
-/** Whether the group is on: settings list the groups switched off. */
-const toolOn = (group: string) => !settings.value?.tools.includes(group)
-function setTool(group: string, on: boolean) {
-  if (!settings.value) return
-  const off = settings.value.tools.filter((name) => name !== group)
-  settings.value.tools = on ? off : [...off, group]
-}
 
 // A routine's days as tags, Monday first; its next run as it would be once saved.
 const dayOptions = computed(() =>
@@ -173,6 +163,12 @@ async function save() {
   if (!settings.value) return
   saving.value = true
   error.value = null
+  // The source first: one refused keeps the dialog open on it.
+  if (source.value && !(await source.value.save())) {
+    tab.value = 'source'
+    saving.value = false
+    return
+  }
   const next: ProjectSettings = {
     ...settings.value,
     // One left without words does nothing; it goes rather than failing the save.
@@ -199,6 +195,9 @@ async function save() {
     :width="680"
   >
     <DouTabs v-if="settings" v-model="tab" placement="start" :height="460">
+      <DouTabPanel value="source" :label="t('projectSettings.tab.source')">
+        <SourceForm ref="source" />
+      </DouTabPanel>
       <DouTabPanel value="instructions" :label="t('projectSettings.tab.instructions')">
         <DouTextarea
           v-model="settings.instructions"
@@ -230,35 +229,9 @@ async function save() {
               class="project-code"
             />
           </DouFormItem>
-          <div class="project-row">
-            <DouFormItem :label="t('projectSettings.shell')" class="project-grow">
-              <DouSelect v-model="settings.workspace.shell" :options="shellOptions" />
-            </DouFormItem>
-            <DouFormItem :label="t('projectSettings.branchPrefix')" class="project-grow">
-              <DouInput
-                v-model="settings.workspace.branchPrefix"
-                :maxlength="40"
-                class="project-code"
-              />
-            </DouFormItem>
-          </div>
           <DouFormItem :label="t('projectSettings.env')">
             <SecretPairs v-model="env" :add-label="t('mcp.addEnv')" />
           </DouFormItem>
-        </DouForm>
-      </DouTabPanel>
-      <DouTabPanel value="tools" :label="t('projectSettings.tab.tools')">
-        <div class="project-tools">
-          <div v-for="group in tools" :key="group" class="project-switch">
-            <span>{{ t(`projectSettings.tool.${group}`) }}</span>
-            <DouSwitch
-              :model-value="toolOn(group)"
-              :aria-label="t(`projectSettings.tool.${group}`)"
-              @update:model-value="(on: boolean) => setTool(group, on)"
-            />
-          </div>
-        </div>
-        <DouForm layout="vertical" size="sm" class="project-mcp">
           <DouFormItem :label="t('project.mcp')">
             <DouSelect
               v-if="mcpOptions.length"
@@ -314,10 +287,6 @@ async function save() {
               :disabled="!settings.autopilot.enabled"
             />
           </DouFormItem>
-        </DouForm>
-      </DouTabPanel>
-      <DouTabPanel value="limits" :label="t('projectSettings.tab.limits')">
-        <DouForm layout="vertical" size="sm">
           <div class="project-row">
             <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
               <DouInputNumber
@@ -338,19 +307,9 @@ async function save() {
               />
             </DouFormItem>
           </div>
-          <DouFormItem :label="t('project.slots')">
-            <DouInputNumber
-              v-model="slots"
-              :min="1"
-              :max="16"
-              :step="1"
-              :placeholder="t('project.slotsShared')"
-            />
-          </DouFormItem>
         </DouForm>
-      </DouTabPanel>
-      <DouTabPanel value="routines" :label="t('projectSettings.tab.routines')">
         <div class="project-routines">
+          <DouText weight="medium" size="sm">{{ t('projectSettings.tab.routines') }}</DouText>
           <DouEmpty v-if="!settings.routines.length" size="sm" :description="t('routine.empty')" />
           <div v-for="routine in settings.routines" :key="routine.id" class="project-routine">
             <DouTextarea
@@ -429,12 +388,6 @@ async function save() {
   font-family: var(--dou-font-family-mono);
 }
 
-.project-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .project-switch {
   display: flex;
   align-items: center;
@@ -442,14 +395,11 @@ async function save() {
   gap: 12px;
 }
 
-.project-mcp {
-  margin-top: 16px;
-}
-
 .project-routines {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-top: 24px;
 }
 
 .project-routine {

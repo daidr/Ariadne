@@ -1,34 +1,15 @@
 <script setup lang="ts">
-import {
-  DouAlert,
-  DouButton,
-  DouEmpty,
-  DouForm,
-  DouFormItem,
-  DouInput,
-  DouInputNumber,
-  DouSelect,
-  DouTextarea,
-} from 'dou-ui'
+import { DouAlert, DouButton, DouEmpty, DouInput, DouSelect, DouTextarea } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
-import { api, ApiError, type CommandRule, type Limits, type WorkSettings } from '../api'
+import { api, ApiError, type CommandRule, type WorkSettings } from '../api'
 import { t, tm } from '../i18n'
 
-/** One part of how the work is done everywhere; each tab saves its own. */
-const props = defineProps<{ part: 'instructions' | 'commands' | 'limits' }>()
+/** One part of how the work is done everywhere; the settings dialog saves them together. */
+const props = defineProps<{ part: 'instructions' | 'commands' }>()
 
 const instructions = ref('')
 const rules = ref<CommandRule[]>([])
-const limits = ref<Limits | null>(null)
-const defaults = ref<Limits | null>(null)
-/** The share of the context, shown as a percentage. */
-const compactPercent = computed({
-  get: () => (limits.value ? Math.round(limits.value.compactShare * 100) : null),
-  set: (value) => {
-    if (limits.value && value) limits.value.compactShare = value / 100
-  },
-})
 const error = ref<string | null>(null)
 
 const actionOptions = computed(() =>
@@ -38,11 +19,13 @@ const actionOptions = computed(() =>
   })),
 )
 
+/** Loaded: before that, saving would send nothing over what is saved. */
+const loaded = ref(false)
+
 function load(work: WorkSettings) {
+  loaded.value = true
   instructions.value = work.instructions
   rules.value = work.rules.map((rule) => ({ ...rule }))
-  limits.value = { ...work.limits }
-  defaults.value = work.defaults
 }
 
 onMounted(async () => {
@@ -54,14 +37,13 @@ onMounted(async () => {
 })
 
 async function save(): Promise<boolean> {
+  if (!loaded.value) return true
   error.value = null
   try {
     const input =
       props.part === 'instructions'
         ? { instructions: instructions.value }
-        : props.part === 'commands'
-          ? { rules: rules.value.filter((rule) => rule.pattern.trim()) }
-          : { limits: limits.value ?? undefined }
+        : { rules: rules.value.filter((rule) => rule.pattern.trim()) }
     load(await api.saveWorkSettings(input))
     return true
   } catch (cause) {
@@ -123,66 +105,6 @@ defineExpose({ save })
       </div>
     </template>
 
-    <DouForm v-else-if="limits && defaults" layout="vertical" size="sm">
-      <div class="work-grid">
-        <DouFormItem :label="t('work.limit.commandTimeout')">
-          <DouInputNumber
-            v-model="limits.commandTimeout"
-            :min="5"
-            :max="3600"
-            :placeholder="String(defaults.commandTimeout)"
-          />
-        </DouFormItem>
-        <DouFormItem :label="t('work.limit.commandTimeoutMax')">
-          <DouInputNumber
-            v-model="limits.commandTimeoutMax"
-            :min="5"
-            :max="7200"
-            :placeholder="String(defaults.commandTimeoutMax)"
-          />
-        </DouFormItem>
-        <DouFormItem :label="t('work.limit.commandOutput')">
-          <DouInputNumber
-            v-model="limits.commandOutput"
-            :min="2000"
-            :max="200000"
-            :step="1000"
-            :placeholder="String(defaults.commandOutput)"
-          />
-        </DouFormItem>
-        <DouFormItem :label="t('work.limit.compactShare')">
-          <DouInputNumber
-            v-model="compactPercent"
-            :min="30"
-            :max="90"
-            :step="5"
-            :placeholder="String(defaults.compactShare * 100)"
-          />
-        </DouFormItem>
-        <DouFormItem :label="t('work.limit.modelRetries')">
-          <DouInputNumber
-            v-model="limits.modelRetries"
-            :min="0"
-            :max="10"
-            :placeholder="String(defaults.modelRetries)"
-          />
-        </DouFormItem>
-        <DouFormItem :label="t('work.limit.loopRepeats')">
-          <DouInputNumber
-            v-model="limits.loopRepeats"
-            :min="2"
-            :max="20"
-            :placeholder="String(defaults.loopRepeats)"
-          />
-        </DouFormItem>
-      </div>
-      <div class="work-head">
-        <DouButton size="sm" variant="ghost" @click="limits = { ...defaults }">
-          {{ t('work.limit.reset') }}
-        </DouButton>
-      </div>
-    </DouForm>
-
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
   </div>
 </template>
@@ -217,11 +139,5 @@ defineExpose({ save })
 
 .work-pattern :deep(input) {
   font-family: var(--dou-font-family-mono);
-}
-
-.work-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
 }
 </style>
