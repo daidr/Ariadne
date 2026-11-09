@@ -150,6 +150,7 @@ function systemPrompt(
   source: { line: string; readable: boolean } | null,
   userInstructions: string,
   skills: SkillSet,
+  references: { name: string; line: string }[],
 ): string {
   if (conversation.role === 'coordinator') {
     const project = app.getProject(conversation.projectId)
@@ -159,6 +160,7 @@ function systemPrompt(
       memories: app.listMemories(conversation.projectId),
       models,
       source,
+      references,
       userInstructions: { global: userInstructions, project: project.settings.instructions },
       instructions: recordedInstructions(app, conversation.id),
       skills: skills.list(),
@@ -190,10 +192,11 @@ function systemPrompt(
       reviewSkill: skill ? { source: skill.source, text: skill.text } : null,
       skills: skills.list(),
       maxRounds: MAX_REVIEW_ROUNDS,
+      references,
     })
   }
-  return threadPrompt(
-    threadContext(
+  return threadPrompt({
+    ...threadContext(
       app,
       conversation,
       locale,
@@ -203,7 +206,8 @@ function systemPrompt(
       userInstructions,
       skills,
     ),
-  )
+    references,
+  })
 }
 
 /**
@@ -281,6 +285,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const turnId = app.startTurn(conversationId, model.label)
   // The coordinator looks at the source only when its provider offers a view.
   const hasSource = !isThread && !!(await workspaces?.viewable(conversation.projectId))
+  // Sources the project only reads: the looking tools take one by name.
+  const hasReferences = !!workspaces && project.references.length > 0
   // The project's switches turn built-in tools off; the user's limits and shell show in
   // run_command's description.
   const off = switchedOff(project.settings.tools)
@@ -289,9 +295,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const builtIn = (
     options.tools ??
     (reviewOf
-      ? reviewTools()
+      ? reviewTools(hasReferences)
       : toolsFor(conversation.role, {
           workspace: isThread ? hasWorkspace : hasSource,
+          references: hasReferences,
+          ...(!isThread && workspaces
+            ? { referenceKinds: workspaces.referenceKinds(options.locale) }
+            : {}),
           repo: hasRepo,
           tracker: hasTracker,
           models: options.models ?? [],
@@ -366,6 +376,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces) return Promise.reject(new DomainError('error.noSource'))
       return workspaces.view(conversation.projectId)
     },
+    reference: (name) => {
+      if (!workspaces) return Promise.reject(new DomainError('error.noReference', { name }))
+      return workspaces.referenceView(conversation.projectId, name)
+    },
+    ...(workspaces
+      ? {
+          checkReference: (reference) =>
+            workspaces.checkReference(conversation.projectId, reference),
+        }
+      : {}),
     repo: () => {
       if (!workspaces || !isThread) return Promise.reject(new DomainError('error.noRepo'))
       return workspaces.repo(conversation.projectId)
@@ -454,6 +474,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         line ? { line, readable: hasSource } : null,
         settings.instructions,
         skills,
+        workspaces?.references(conversation.projectId, options.locale) ?? [],
       )
     }
     const specs = tools.map((tool) => tool.spec)

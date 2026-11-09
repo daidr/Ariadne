@@ -305,8 +305,10 @@ describe('the coordinator and the project source', () => {
     expect(system(request)).toContain('本地目录 D:\\devFolder\\story-verse')
     expect(system(request)).toContain('Never tell the user the project is empty')
     const names = toolNames(request)
-    expect(names).toEqual(expect.arrayContaining(['list_dir', 'read_file']))
-    for (const name of ['write_file', 'edit_file', 'run_command', 'search']) {
+    expect(names).toEqual(
+      expect.arrayContaining(['list_dir', 'read_file', 'search', 'find_files']),
+    )
+    for (const name of ['write_file', 'edit_file', 'run_command']) {
       expect(names).not.toContain(name)
     }
     const results = app
@@ -319,7 +321,7 @@ describe('the coordinator and the project source', () => {
     expect(app.listThreads(project.id)).toEqual([])
   })
 
-  test('a source without a view is still named, with no tools to read it', async () => {
+  test('a source without a view is still named, and the coordinator told it cannot read it', async () => {
     const workspaces = new WorkspaceManager(app, await sourceHost({}, false))
     const project = app.createProject('P')
     app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/srv/app' } })
@@ -332,7 +334,8 @@ describe('the coordinator and the project source', () => {
     await startScheduler(model, workspaces).idle()
     expect(system(model.requests[0]!)).toContain('本地目录 /srv/app')
     expect(system(model.requests[0]!)).toContain('You cannot read it from here')
-    expect(toolNames(model.requests[0]!)).not.toContain('list_dir')
+    // The looking tools stay, for reference sources it may add; nothing that writes or runs.
+    expect(toolNames(model.requests[0]!)).not.toContain('run_command')
   })
 
   test('reading is bounded: big files are refused, long lines cut, and the ref is named', async () => {

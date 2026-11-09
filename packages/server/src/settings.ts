@@ -9,6 +9,8 @@ import {
   LIMIT_RANGES,
   MCP_TOOL_MARKS,
   searchingModels,
+  REFERENCE_SECRET,
+  referenceSecretPrefix,
   type CommandAction,
   type CommandRule,
   type Limits,
@@ -905,7 +907,9 @@ export class SettingsStore {
 
   /** Which secrets of a project's source are set; their values never leave the server. */
   sourceSecretsSet(projectId: string): string[] {
-    return Object.keys(this.config.sourceSecrets[projectId] ?? {})
+    return Object.keys(this.config.sourceSecrets[projectId] ?? {}).filter(
+      (key) => !key.startsWith(REFERENCE_SECRET),
+    )
   }
 
   /**
@@ -935,7 +939,31 @@ export class SettingsStore {
     return { settings: plain, secrets }
   }
 
+  /** The secrets of the project's own source (and its hosting); its references keep theirs. */
   saveSourceSecrets(projectId: string, secrets: Record<string, string>): void {
+    const kept = Object.entries(this.config.sourceSecrets[projectId] ?? {}).filter(([key]) =>
+      key.startsWith(REFERENCE_SECRET),
+    )
+    this.writeSourceSecrets(projectId, { ...Object.fromEntries(kept), ...secrets })
+  }
+
+  /** The secrets of one reference source, by their plain names; none removes them. */
+  saveReferenceSecrets(
+    projectId: string,
+    referenceId: string,
+    secrets: Record<string, string>,
+  ): void {
+    const prefix = referenceSecretPrefix(referenceId)
+    const others = Object.entries(this.config.sourceSecrets[projectId] ?? {}).filter(
+      ([key]) => !key.startsWith(prefix),
+    )
+    this.writeSourceSecrets(projectId, {
+      ...Object.fromEntries(others),
+      ...Object.fromEntries(Object.entries(secrets).map(([key, value]) => [prefix + key, value])),
+    })
+  }
+
+  private writeSourceSecrets(projectId: string, secrets: Record<string, string>): void {
     const all = { ...this.config.sourceSecrets }
     if (Object.keys(secrets).length) all[projectId] = secrets
     else delete all[projectId]

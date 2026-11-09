@@ -1,4 +1,9 @@
-import { FileTooLargeError, WorkspacePathError, type SourceView } from '@ariadne/plugin-sdk'
+import {
+  FileTooLargeError,
+  MAX_MATCH_LINES,
+  WorkspacePathError,
+  type SourceView,
+} from '@ariadne/plugin-sdk'
 import type { GitRun } from './branches'
 
 /**
@@ -58,7 +63,60 @@ export class GitTreeView implements SourceView {
     if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `cannot list ${path}`)
     return parseTree(result.stdout)
   }
+
+  async files(path: string): Promise<{ files: string[]; partial: boolean }> {
+    const under = treePath(path)
+    const result = await this.git(
+      ['ls-tree', '-r', '-z', '--name-only', this.rev, ...(under ? ['--', under] : [])],
+      { whole: true },
+    )
+    if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `cannot list ${path}`)
+    return { files: result.stdout.split('\0').filter(Boolean), partial: false }
+  }
+
+  async search(
+    pattern: string,
+    path: string,
+  ): Promise<{ lines: string[]; error: string | null }> {
+    const under = treePath(path)
+    const result = await this.git(
+      [
+        'grep',
+        '-n',
+        '-I',
+        '-E',
+        '--no-color',
+        '-e',
+        pattern,
+        this.rev,
+        ...(under ? ['--', under] : []),
+      ],
+      { whole: true },
+    )
+    // 1 is "nothing matched".
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      return { lines: [], error: result.stderr.trim() || `exit code ${result.exitCode}` }
+    }
+    // git names the commit before each file: `<rev>:<file>:<line>:<text>`.
+    const prefix = `${this.rev}:`
+    const perFile = new Map<string, number>()
+    const lines: string[] = []
+    for (const raw of result.stdout.split('\n')) {
+      if (!raw) continue
+      const line = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
+      const file = line.slice(0, line.indexOf(':'))
+      const seen = perFile.get(file) ?? 0
+      if (seen >= MAX_FILE_MATCHES) continue
+      perFile.set(file, seen + 1)
+      lines.push(line)
+      if (lines.length >= MAX_MATCH_LINES) break
+    }
+    return { lines, error: null }
+  }
 }
+
+/** Matching lines of one file a search shows at most, as a search of a workspace does. */
+const MAX_FILE_MATCHES = 50
 
 /** `ls-tree -z` output: `<mode> <type> <sha>\t<name>`, each ended by NUL. */
 export function parseTree(text: string): { name: string; kind: 'file' | 'directory' }[] {

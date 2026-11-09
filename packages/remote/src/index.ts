@@ -1,7 +1,9 @@
 import {
   browseTyped,
   FileTooLargeError,
+  listFiles,
   readOnlyView,
+  searchLines,
   WorkspacePathError,
   type BranchCapability,
   type DirectoryListing,
@@ -272,6 +274,10 @@ export function remoteWorkspaces(
     return readOnlyView({
       readBytes: async (path, maxBytes) => files.readBytes(visible(path), maxBytes),
       list: async (path) => (await files.list(visible(path))).filter((e) => e.name !== '.git'),
+      // One search on that machine, rather than a listing per directory over the link.
+      files: (path, options) => listFiles(files, visible(path), options?.signal),
+      search: (pattern, path, options) =>
+        searchLines(files, pattern, visible(path), options?.signal),
     })
   }
   if (!repoRoot) {

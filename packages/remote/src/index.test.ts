@@ -295,9 +295,16 @@ describe('remote directory', () => {
     await writeFile(join(dir, 'draft.md'), 'not committed\n')
     const { workspace } = await provider().connect({ host: 'box', path: dir })
     const view = await workspace!.view!()
-    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
+    expect(Object.keys(view).toSorted()).toEqual(['files', 'list', 'readBytes', 'search'])
     expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'pkg', 'README.md'])
     expect(await textOf(view, 'pkg/index.ts')).toBe('export {}\n')
+    expect((await view.files!('.')).files.toSorted()).toEqual([
+      'README.md',
+      'draft.md',
+      'pkg/index.ts',
+    ])
+    expect((await view.search!('not commit', '.')).lines).toEqual(['draft.md:1:not committed'])
+    await expect(view.files!('.git')).rejects.toThrow(WorkspacePathError)
     await expect(view.readBytes('../x', 10)).rejects.toThrow(WorkspacePathError)
     await expect(view.readBytes('.git/config', 1000)).rejects.toThrow(WorkspacePathError)
     await expect(view.list('.git')).rejects.toThrow(WorkspacePathError)

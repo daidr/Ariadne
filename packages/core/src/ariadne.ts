@@ -41,6 +41,7 @@ import type {
   MessageMention,
   PlanAuthor,
   PlanOp,
+  ProjectReference,
   ProjectSource,
   ReportKind,
   ReviewComment,
@@ -59,6 +60,7 @@ import type {
   ChangeTotals,
   TurnOutcome,
 } from './events'
+import { MAX_REFERENCES, referenceName } from './events'
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
 import {
   fileInfo,
@@ -340,6 +342,7 @@ interface ProjectRow {
   name: string
   coordinator_id: string
   source: string | null
+  reference_sources: string
   slots: number | null
   mcp: string
   settings: string | null
@@ -1940,7 +1943,8 @@ export class Ariadne {
    * The user's yes for one call by one thread (an external tool, a command): `purpose` names
    * the call and its exact arguments. A yes is used for one call (`useApproval`), and the
    * same call later asks again. A no holds until the user writes in the thread again, so
-   * the thread does not ask the same thing twice on its own.
+   * the thread does not ask the same thing twice on its own. The coordinator asks the same
+   * way, for what it does by itself (adding a reference source): `threadId` is then its id.
    */
   callApproval(
     projectId: string,
@@ -1948,7 +1952,8 @@ export class Ariadne {
     purpose: string,
     card: () => ConfirmBlock,
   ): { state: 'approved'; attentionId: string } | { state: 'asked' | 'pending' | 'declined' } {
-    this.assertThreadIn(projectId, threadId)
+    this.assertConversationIn(projectId, threadId)
+    const coordinator = this.projectRow(projectId).coordinator_id === threadId
     const newest = this.db
       .query<
         { id: string; closed: number; approved: number | null; used: number | null },
@@ -1962,7 +1967,11 @@ export class Ariadne {
       )
       .get(projectId, purpose, threadId)
     const ask = () => {
-      this.openAttention(projectId, { threadId, block: card(), purpose })
+      this.openAttention(projectId, {
+        threadId: coordinator ? null : threadId,
+        block: card(),
+        purpose,
+      })
       return { state: 'asked' as const }
     }
     if (!newest) return ask()
@@ -1992,7 +2001,7 @@ export class Ariadne {
     projectId: string,
     input: { threadId: string; attentionId: string; what: string },
   ): void {
-    this.assertThreadIn(projectId, input.threadId)
+    this.assertConversationIn(projectId, input.threadId)
     const used = this.db
       .query<{ one: number }, [string]>(
         'SELECT 1 AS one FROM used_approvals WHERE attention_id = ?',
@@ -3079,6 +3088,46 @@ export class Ariadne {
       },
     ])
     return this.getProject(thread.projectId)
+  }
+
+  /**
+   * Add a source the project only reads. `where` is what its name is made from: its path
+   * or repository as the user sees it. The caller has checked that it connects.
+   */
+  addProjectReference(
+    projectId: string,
+    source: { kind: string; settings: Record<string, unknown> },
+    where: string,
+  ): ProjectReference {
+    const { references } = this.getProject(projectId)
+    if (references.length >= MAX_REFERENCES) {
+      throw new DomainError('error.tooManyReferences', { max: MAX_REFERENCES })
+    }
+    const reference: ProjectReference = {
+      id: newId('ref'),
+      name: referenceName(
+        where,
+        references.map((known) => known.name),
+      ),
+      kind: source.kind,
+      settings: source.settings,
+    }
+    this.store.append([
+      {
+        type: 'project.references.set',
+        projectId,
+        data: { references: [...references, reference] },
+      },
+    ])
+    return reference
+  }
+
+  removeProjectReference(projectId: string, referenceId: string): ProjectView {
+    const project = this.getProject(projectId)
+    const references = project.references.filter((reference) => reference.id !== referenceId)
+    if (references.length === project.references.length) return project
+    this.store.append([{ type: 'project.references.set', projectId, data: { references } }])
+    return this.getProject(projectId)
   }
 
   /** Record that a thread's workspace is ready, so the user can see where it works. */
@@ -4344,6 +4393,7 @@ export class Ariadne {
       updatedAt: row.updated_at,
       needsMe,
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
+      references: JSON.parse(row.reference_sources) as ProjectReference[],
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],
       settings: storedProjectSettings(row.settings),

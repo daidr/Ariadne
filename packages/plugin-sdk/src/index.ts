@@ -14,6 +14,15 @@ export {
   type ServerSentEvent,
 } from './sse'
 export { defaultShell, shellArgv } from './shell'
+export {
+  execArgv,
+  listFiles,
+  MAX_MATCH_LINES,
+  searchableView,
+  searchByReading,
+  searchLines,
+  walk,
+} from './search'
 export { processes, ProcessLedger, type Leftovers, type TrackedProcess } from './processes'
 export {
   browseLocal,

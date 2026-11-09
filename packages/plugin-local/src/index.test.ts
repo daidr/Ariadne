@@ -71,9 +71,12 @@ describe('local directory', () => {
     const { workspace } = await provider.connect({ path: dir })
     const view = await workspace!.view!()
     // Only reading: nothing behind it to write or run with.
-    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
+    expect(Object.keys(view).toSorted()).toEqual(['files', 'list', 'readBytes', 'search'])
     expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'README.md'])
     expect(await textOf(view, 'draft.md')).toBe('not committed\n')
+    // Found and searched as it is now, the file not committed included.
+    expect((await view.files!('.')).files.toSorted()).toEqual(['README.md', 'draft.md'])
+    expect((await view.search!('not commit', '.')).lines).toEqual(['draft.md:1:not committed'])
     await expect(view.readBytes('../outside', 10)).rejects.toBeInstanceOf(WorkspacePathError)
     // git's own directory, which may hold credentials in a remote's URL, is not shown.
     for (const path of ['.git/config', './.git/config', 'sub/../.git/HEAD', '.GIT/config']) {

@@ -54,6 +54,8 @@ export const projectsProjection: Projection = {
       name TEXT NOT NULL,
       coordinator_id TEXT NOT NULL,
       source TEXT,
+      -- Sources the project only reads, as JSON.
+      reference_sources TEXT NOT NULL DEFAULT '[]',
       slots INTEGER,
       mcp TEXT NOT NULL DEFAULT '[]',
       settings TEXT,
@@ -87,6 +89,13 @@ export const projectsProjection: Projection = {
       case 'project.slots.set':
         db.run('UPDATE projects SET slots = ?, updated_at = ? WHERE id = ?', [
           event.data.slots,
+          event.at,
+          event.projectId,
+        ])
+        break
+      case 'project.references.set':
+        db.run('UPDATE projects SET reference_sources = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(event.data.references),
           event.at,
           event.projectId,
         ])
