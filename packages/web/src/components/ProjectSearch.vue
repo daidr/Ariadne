@@ -7,20 +7,46 @@ import {
   DouSpinner,
   DouText,
   DouTooltip,
+  useColorMode,
   type CommandItem,
 } from 'dou-ui'
-import { MessagesIcon, SearchIcon } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import {
+  CoinsIcon,
+  DownloadIcon,
+  FolderCogIcon,
+  KeyboardIcon,
+  ListTreeIcon,
+  MessagesIcon,
+  MoonIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+  SunIcon,
+} from '@dou-ui/icons'
+import { computed, inject, ref, watch, type Component } from 'vue'
 import { api } from '../api'
 import { kindIcon } from '../artifacts/kinds'
 import { locale, t } from '../i18n'
-import { openMessage, openThread, report, state } from '../store'
+import {
+  exportProject,
+  openMain,
+  openMessage,
+  openProjectSettings,
+  openThread,
+  report,
+  state,
+} from '../store'
+import { openSettingsKey } from '../open-settings'
+import { sheetOpen } from '../shortcuts'
 import StageIcon from './StageIcon.vue'
 import { useOpenView } from '../opened-from'
 
 const openView = useOpenView()
 
-/** Find what was said and made in the open project: ⌘K or Ctrl+K anywhere, unless rebound. */
+/**
+ * Find what was said and made in the open project, or something to do: ⌘K or Ctrl+K
+ * anywhere, unless rebound. What the header has no button for is reached from here.
+ */
 
 const query = ref('')
 const result = ref<SearchResult | null>(null)
@@ -70,7 +96,95 @@ const hits = computed(() => {
   return new Map(all.map((hit) => [`${hit.kind}:${hit.id}`, hit]))
 })
 
-const items = computed<CommandItem[]>(() =>
+const openSettings = inject(openSettingsKey, () => {})
+const { isDark } = useColorMode()
+
+interface Action {
+  label: string
+  icon: Component
+  shortcut?: string
+  run: () => void
+}
+
+/** What can be done from here; the project's own only while one is open. */
+const actions = computed(() => {
+  const project = state.detail?.project
+  const own: [string, Action][] = project
+    ? [
+        [
+          'projectSettings',
+          {
+            label: t('projectSettings.open'),
+            icon: FolderCogIcon,
+            run: () => openProjectSettings(),
+          },
+        ],
+        [
+          'usage',
+          { label: t('usage.title'), icon: CoinsIcon, run: () => openProjectSettings('usage') },
+        ],
+        [
+          'trace',
+          {
+            label: t('trace.coordinator'),
+            icon: ListTreeIcon,
+            run: () => openMain({ kind: 'trace', conversationId: project.coordinatorId }),
+          },
+        ],
+        [
+          'export',
+          {
+            label: t('project.export'),
+            icon: DownloadIcon,
+            run: () => void exportProject(project.id),
+          },
+        ],
+      ]
+    : []
+  return new Map<string, Action>([
+    [
+      'newProject',
+      { label: t('nav.newProject'), icon: PlusIcon, run: () => (state.creatingProject = true) },
+    ],
+    ...own,
+    ['settings', { label: t('settings.open'), icon: SettingsIcon, run: () => openSettings() }],
+    [
+      'theme',
+      {
+        label: t(isDark.value ? 'appearance.toLight' : 'appearance.toDark'),
+        icon: isDark.value ? SunIcon : MoonIcon,
+        run: () => (isDark.value = !isDark.value),
+      },
+    ],
+    [
+      'shortcuts',
+      {
+        label: t('shortcuts.title'),
+        icon: KeyboardIcon,
+        shortcut: state.input.keys.sheet,
+        run: () => (sheetOpen.value = true),
+      },
+    ],
+  ])
+})
+
+/** The actions the words typed so far name; all of them before anything is typed. */
+const actionItems = computed<CommandItem[]>(() => {
+  const words = query.value.trim().toLowerCase()
+  return [...actions.value]
+    .filter(([, action]) => action.label.toLowerCase().includes(words))
+    .map(([key, action]) => ({
+      value: `action:${key}`,
+      label: action.label,
+      group: t('search.actions'),
+      ...(action.shortcut ? { shortcut: action.shortcut } : {}),
+    }))
+})
+const actionOf = (value: unknown) => actions.value.get(String(value).slice('action:'.length))
+
+const items = computed<CommandItem[]>(() => [...actionItems.value, ...foundItems.value])
+
+const foundItems = computed<CommandItem[]>(() =>
   [...hits.value].map(([value, hit]) =>
     hit.kind === 'message'
       ? {
@@ -92,6 +206,10 @@ const items = computed<CommandItem[]>(() =>
 const keepAll = () => ({ score: 0, indices: [] })
 
 function select(item: CommandItem) {
+  if (String(item.value).startsWith('action:')) {
+    actionOf(item.value)?.run()
+    return
+  }
   const hit = hits.value.get(String(item.value))
   if (!hit) return
   if (hit.kind === 'thread') void openThread(hit.id)
@@ -123,7 +241,15 @@ function select(item: CommandItem) {
     @select="select"
   >
     <template #item="{ item }">
-      <div v-for="hit in [hits.get(String(item.value))!]" :key="item.value" class="hit">
+      <span v-if="actionOf(item.value)" class="hit-line">
+        <span class="hit-icon"><component :is="actionOf(item.value)!.icon" /></span>
+        <DouText truncate class="hit-label">{{ item.label }}</DouText>
+      </span>
+      <div
+        v-for="hit in hits.has(String(item.value)) ? [hits.get(String(item.value))!] : []"
+        :key="item.value"
+        class="hit"
+      >
         <!-- The icon sits on the first line, centred on it; the second line starts under the text. -->
         <span class="hit-line">
           <span class="hit-icon">

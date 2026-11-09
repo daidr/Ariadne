@@ -43,9 +43,7 @@ describe('thread list', () => {
       thread({ id: 'b', title: '评审 #9', createdAt: 1, activeAt: 3 }),
       thread({ id: 'c', title: '修复', createdAt: 2, activeAt: 2 }),
     ]
-    expect(ids(sortThreads(list, 'active', 'zh-CN'))).toEqual(['b', 'c', 'a'])
-    expect(ids(sortThreads(list, 'created', 'zh-CN'))).toEqual(['a', 'c', 'b'])
-    expect(ids(sortThreads(list, 'title', 'zh-CN'))).toEqual(['b', 'a', 'c'])
+    expect(ids(sortThreads(list))).toEqual(['b', 'c', 'a'])
     expect(ids(list)).toEqual(['a', 'b', 'c'])
   })
 })

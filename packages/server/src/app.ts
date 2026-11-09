@@ -461,6 +461,7 @@ export function createHandler({
       detected: app.getProject(projectId).detected,
       env: settings?.projectEnvNames(projectId) ?? [],
       tools: TOOL_SWITCH_NAMES,
+      hostedMerge: !!workspaces?.hasRepo(projectId),
     })
   })
 
@@ -482,6 +483,7 @@ export function createHandler({
       detected: project.detected,
       env,
       tools: TOOL_SWITCH_NAMES,
+      hostedMerge: !!workspaces?.hasRepo(projectId),
     })
   })
 

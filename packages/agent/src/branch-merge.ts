@@ -88,7 +88,10 @@ export async function mergeThread(
     const { sha, head } = outcome
     return {
       outcome,
-      thread: app.recordMerge(threadId, { branch, base, method: input.method, sha, head }),
+      thread: app.transaction(() => {
+        app.rememberMergeMethod(thread.projectId, input.method)
+        return app.recordMerge(threadId, { branch, base, method: input.method, sha, head })
+      }),
     }
   }
   if (outcome.kind === 'conflict') {

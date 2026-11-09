@@ -2,7 +2,6 @@
 import {
   DouAlert,
   DouButton,
-  DouColorModeButton,
   DouConfigProvider,
   DouDivider,
   DouLayout,
@@ -21,8 +20,6 @@ import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import ProjectSearch from './components/ProjectSearch.vue'
-import ProjectSource from './components/ProjectSource.vue'
-import ProjectUsage from './components/ProjectUsage.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import SideLayout from './side/SideLayout.vue'
@@ -33,6 +30,7 @@ import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
+import { useSourceStatus } from './source-status'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
@@ -47,6 +45,9 @@ function openSettings(tab: SettingsTab = 'models') {
   settingsOpen.value = true
 }
 provide(openSettingsKey, openSettings)
+
+// Where the project's files are rides on its settings button; without a sandbox it warns.
+const { summary, unsandboxed } = useSourceStatus()
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -87,17 +88,18 @@ watchEffect(() => {
           <DouText weight="medium">{{ t('app.name') }}</DouText>
           <div class="header-actions">
             <!-- What belongs to the open project, set apart from the app's own buttons. -->
+            <ProjectSearch />
             <template v-if="state.detail">
-              <ProjectSearch />
               <AutopilotSwitch />
               <AttentionBar />
-              <ProjectSource />
-              <ProjectUsage />
               <DouButton
                 variant="ghost"
                 size="sm"
+                :tone="unsandboxed ? 'warning' : undefined"
                 :aria-label="t('projectSettings.open')"
-                :title="t('projectSettings.open')"
+                :title="
+                  summary ? `${t('projectSettings.open')} · ${summary}` : t('projectSettings.open')
+                "
                 @click="openProjectSettings()"
               >
                 <FolderCogIcon />
@@ -113,7 +115,6 @@ watchEffect(() => {
             >
               <SettingsIcon />
             </DouButton>
-            <DouColorModeButton />
           </div>
         </div>
       </DouLayoutHeader>
