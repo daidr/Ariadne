@@ -1610,7 +1610,13 @@ export class Ariadne {
         'SELECT closed, approved, changed_seq FROM attentions WHERE project_id = ? AND purpose = ?',
       )
       .all(projectId, `${MILESTONE_GATE}:${nodeId}`)
-    return !rows.some((row) => row.closed === 0 || row.approved === 1 || row.changed_seq > since)
+    return !rows.some(
+      (row) =>
+        row.closed === 0 ||
+        row.approved === 1 ||
+        // A question taken back (its milestone left the plan) is not a no.
+        (row.approved === 0 && row.changed_seq > since),
+    )
   }
 
   /** Ask the user whether the work goes on past a milestone; the coordinator hears the answer. */

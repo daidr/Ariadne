@@ -525,4 +525,20 @@ describe('milestones', () => {
     await pilot().check(projectId)
     expect(app.listNeedsMe(projectId)).toEqual([])
   })
+
+  test('a milestone removed and put back is asked about again', async () => {
+    autopilotOn()
+    addNodes([{ id: 'm', kind: 'milestone' }], [])
+    await pilot().check(projectId)
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '不要了',
+      ops: [{ op: 'remove', id: 'm' }],
+    })
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toEqual([])
+    addNodes([{ id: 'm', kind: 'milestone' }], [])
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toHaveLength(1)
+  })
 })
