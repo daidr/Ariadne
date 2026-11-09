@@ -165,7 +165,9 @@ async function load() {
   }
 }
 
-// Again whenever the thread moves on: it may have committed since.
+// Again whenever the thread moves on: it may have committed since. The thread is replaced
+// only when something of it changed, and `activeAt` does at every step, which is what runs
+// this and the two watches further down while it works.
 watch(
   () => [props.threadId, props.turn?.turnId, thread.value?.stage, thread.value?.merged?.sha],
   (now, before) => {

@@ -76,6 +76,13 @@ describe('a conversation brought up to date', () => {
     expect(next.notices).toEqual([notice('ntc_1', 15, { undone: true })])
   })
 
+  test('nothing new leaves the lists the ones they were', () => {
+    const current = shown()
+    const next = merge(current, page({}))
+    expect(next.messages).toBe(current.messages)
+    expect(next.notices).toBe(current.notices)
+  })
+
   test('never goes back to an older event', () => {
     expect(merge(shown({ seq: 12 }), page({ lastSeq: 9 })).seq).toBe(12)
   })
@@ -90,6 +97,7 @@ describe('events', () => {
     expect(partsOf('memory.saved')).toEqual(['memories', 'conversations'])
     expect(partsOf('artifact.created')).toContain('artifacts')
     expect(partsOf('message.posted')).not.toContain('artifacts')
+    expect(partsOf('message.read')).toEqual(['conversations'])
   })
 })
 

@@ -898,11 +898,28 @@ export class Ariadne {
   }
 
   getProject(projectId: string): ProjectView {
+    return this.toProject(this.projectRow(projectId))
+  }
+
+  /** The project as stored, or an error when there is none; costs one row, no counting. */
+  private projectRow(projectId: string): ProjectRow {
     const row = this.db
       .query<ProjectRow, [string]>('SELECT * FROM projects WHERE id = ?')
       .get(projectId)
     if (!row) throw new DomainError('error.notFound', { what: projectId })
-    return this.toProject(row)
+    return row
+  }
+
+  /** The project with its threads and "needs me" list, reading the threads once. */
+  getProjectDetail(projectId: string): {
+    project: ProjectView
+    threads: ThreadView[]
+    needsMe: NeedsMeItem[]
+  } {
+    const row = this.projectRow(projectId)
+    const threads = this.listThreads(projectId)
+    const needsMe = this.needsMeOf(projectId, threads)
+    return { project: this.toProject(row, needsMe.length), threads, needsMe }
   }
 
   listThreads(projectId: string): ThreadView[] {
@@ -939,7 +956,10 @@ export class Ariadne {
 
   /** The project's "needs me" list: open attentions first, then threads waiting on the user. */
   listNeedsMe(projectId: string): NeedsMeItem[] {
-    const threads = this.listThreads(projectId)
+    return this.needsMeOf(projectId, this.listThreads(projectId))
+  }
+
+  private needsMeOf(projectId: string, threads: ThreadView[]): NeedsMeItem[] {
     const byId = new Map(threads.map((thread) => [thread.id, thread]))
     const attentions = this.listOpenAttentions(projectId)
     // A thread waiting on a card is shown with that card, not again on its own.
@@ -1046,7 +1066,7 @@ export class Ariadne {
    * and latest headline, and artifacts. Every word of `query` must be there.
    */
   search(projectId: string, query: string): SearchResult {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const terms = searchTerms(query)
     const rows = (kind: SearchHit['kind']) =>
       searchRows(this.db, projectId, kind, terms, SEARCH_LIMITS[kind])
@@ -1436,7 +1456,7 @@ export class Ariadne {
   }
 
   renameProject(projectId: string, name: string): ProjectView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const trimmed = name.trim()
     if (!trimmed) throw new DomainError('error.invalidBody', { reason: 'name' })
     this.store.append([{ type: 'project.renamed', projectId, data: { name: trimmed } }])
@@ -1449,7 +1469,7 @@ export class Ariadne {
    * Worktrees and the source's own directory are not here; the server sees to worktrees.
    */
   deleteProject(projectId: string): void {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const running = this.db
       .query<{ one: number }, [string]>(
         'SELECT 1 AS one FROM conversations WHERE project_id = ? AND turn_id IS NOT NULL',
@@ -1613,7 +1633,7 @@ export class Ariadne {
       auto?: boolean
     },
   ): ThreadView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
     if (input.nodeId && !loadPlanGraph(this.db, projectId).nodes.has(input.nodeId)) {
@@ -1731,7 +1751,7 @@ export class Ariadne {
   }
 
   private assertNode(projectId: string, nodeId: string) {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     if (!loadPlanGraph(this.db, projectId).nodes.has(nodeId)) {
       throw new DomainError('error.planInvalid', { reason: `no node ${nodeId}` })
     }
@@ -2336,7 +2356,7 @@ export class Ariadne {
       purpose?: string | null
     },
   ): AttentionView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     if (input.threadId) this.assertThreadIn(projectId, input.threadId)
     const attentionId = newId('att')
     this.store.append([this.attentionOpened(projectId, attentionId, input)])
@@ -2522,7 +2542,7 @@ export class Ariadne {
         reason: mentions.length ? 'mentions' : 'comments',
       })
     }
-    if (comments.length && this.getProject(projectId).coordinatorId === input.conversationId) {
+    if (comments.length && this.projectRow(projectId).coordinator_id === input.conversationId) {
       throw new DomainError('error.invalidBody', { reason: 'comments' })
     }
     const kind = input.kind ?? 'chat'
@@ -2564,7 +2584,7 @@ export class Ariadne {
     }
     const messageId = input.messageId ?? newId('msg')
     const asker =
-      this.getProject(projectId).coordinatorId === input.conversationId
+      this.projectRow(projectId).coordinator_id === input.conversationId
         ? null
         : input.conversationId
     this.store.append([
@@ -2733,6 +2753,14 @@ export class Ariadne {
     if (message.conversationId !== conversationId) {
       throw new DomainError('error.notFound', { what: upTo })
     }
+    // Opening a conversation again says the same as last time: nothing to record.
+    const unseen = this.db
+      .query<{ n: number }, [string, string]>(
+        `SELECT 1 AS n FROM messages WHERE conversation_id = ? AND id <= ? AND author != 'user'
+           AND (read_at IS NULL OR edited_since_read = 1) LIMIT 1`,
+      )
+      .get(conversationId, upTo)
+    if (!unseen) return
     const projectId = this.projectOfMessage(upTo)
     this.store.append([{ type: 'message.read', projectId, data: { conversationId, upTo } }])
   }
@@ -2740,7 +2768,7 @@ export class Ariadne {
   // ---- memory ----
 
   listMemories(projectId: string): MemoryView[] {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     return this.db
       .query<
         {
@@ -2875,7 +2903,7 @@ export class Ariadne {
   }
 
   setProjectSource(projectId: string, source: ProjectSource | null): ProjectView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     this.store.append([{ type: 'project.source.set', projectId, data: { source } }])
     return this.getProject(projectId)
   }
@@ -2999,7 +3027,7 @@ export class Ariadne {
   }
 
   getPlan(projectId: string): PlanView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const graph = loadPlanGraph(this.db, projectId)
     const changedIn = new Map(
       this.db
@@ -3009,7 +3037,13 @@ export class Ariadne {
         .all(projectId)
         .map((row) => [row.id, row.changed_in]),
     )
-    const threads = this.listThreads(projectId)
+    const onNodes = new Map<string, ThreadView[]>()
+    for (const thread of this.listThreads(projectId)) {
+      if (thread.nodeId === null) continue
+      const onNode = onNodes.get(thread.nodeId)
+      if (onNode) onNode.push(thread)
+      else onNodes.set(thread.nodeId, [thread])
+    }
     const dependsOn = new Map<string, string[]>()
     for (const key of graph.edges) {
       const [from = '', to = ''] = key.split('>')
@@ -3037,7 +3071,7 @@ export class Ariadne {
     const gates = this.milestoneGates(projectId)
     const nodes = graph.order.map((id): PlanNodeView => {
       const node = graph.nodes.get(id) as NonNullable<ReturnType<typeof graph.nodes.get>>
-      const onNode = threads.filter((thread) => thread.nodeId === id)
+      const onNode = onNodes.get(id) ?? []
       return {
         id,
         ...node,
@@ -3130,7 +3164,7 @@ export class Ariadne {
     projectId: string,
     input: { author: PlanAuthor; reason: string; ops: PlanOp[]; confirmation?: PlanConfirmation },
   ): PlanChange {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const reason = input.reason.trim()
     if (!reason) throw new DomainError('error.invalidBody', { reason: 'reason' })
     if (!input.ops.length) throw new DomainError('error.invalidBody', { reason: 'ops' })
@@ -3371,7 +3405,7 @@ export class Ariadne {
     input: { mime: string; data: Uint8Array },
     options: { text?: boolean } = {},
   ): StoredFile {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     return saveFile(this.db, projectId, input, this.now(), options)
   }
 
@@ -3398,7 +3432,7 @@ export class Ariadne {
       content: string
     },
   ): ArtifactView {
-    this.getProject(projectId)
+    this.projectRow(projectId)
     const title = input.title.trim()
     if (!title) throw new DomainError('error.invalidBody', { reason: 'title' })
     // Images are kept only for content that passes; a refused save leaves no files behind.
@@ -3507,7 +3541,7 @@ export class Ariadne {
       )
       .get(artifactId)
     if (!row) return null
-    const coordinator = this.getProject(row.project_id).coordinatorId
+    const coordinator = this.projectRow(row.project_id).coordinator_id
     if (!row.last_agent || row.last_agent === coordinator) return coordinator
     const thread = this.db
       .query<{ stopped_at: number | null }, [string]>('SELECT stopped_at FROM threads WHERE id = ?')
@@ -4099,8 +4133,7 @@ export class Ariadne {
 
   /** A conversation is the project's coordinator or one of its threads. */
   private assertConversationIn(projectId: string, conversationId: string): void {
-    const project = this.getProject(projectId)
-    if (project.coordinatorId === conversationId) return
+    if (this.projectRow(projectId).coordinator_id === conversationId) return
     this.assertThreadIn(projectId, conversationId)
   }
 
@@ -4117,14 +4150,14 @@ export class Ariadne {
     return usageOf(row ?? {})
   }
 
-  private toProject(row: ProjectRow): ProjectView {
+  private toProject(row: ProjectRow, needsMe = this.listNeedsMe(row.id).length): ProjectView {
     return {
       id: row.id,
       name: row.name,
       coordinatorId: row.coordinator_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      needsMe: this.listNeedsMe(row.id).length,
+      needsMe,
       source: row.source ? (JSON.parse(row.source) as ProjectSource) : null,
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],

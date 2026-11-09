@@ -759,3 +759,20 @@ describe('artifact comments', () => {
     }
   })
 })
+
+describe('the built page', () => {
+  test('assets named by their content are kept; the shell is asked for again', async () => {
+    const dist = mkdtempSync(join(tmpdir(), 'ariadne-dist-'))
+    mkdirSync(join(dist, 'assets'))
+    await Bun.write(join(dist, 'index.html'), '<!doctype html>')
+    await Bun.write(join(dist, 'assets', 'index-abc123.js'), 'export {}')
+    handle = createHandler({ app, token, webDist: dist })
+    const asset = await call('/assets/index-abc123.js', {}, false)
+    expect(asset.headers.get('cache-control')).toContain('immutable')
+    for (const path of ['/', '/index.html', '/some/route']) {
+      const shell = await call(path, {}, false)
+      expect(await shell.text()).toBe('<!doctype html>')
+      expect(shell.headers.get('cache-control')).toBe('no-cache')
+    }
+  })
+})
