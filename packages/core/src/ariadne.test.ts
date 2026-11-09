@@ -181,6 +181,12 @@ describe('thread stages', () => {
     app.finishTurn(thread.id, turnId, 'cancelled')
     expect(app.getThread(thread.id).stage).toBe('halted')
     expect(app.listNeedsMe(project.id)).toHaveLength(1)
+    // The detail read in one go says the same as its parts asked for one by one.
+    expect(app.getProjectDetail(project.id)).toEqual({
+      project: app.getProject(project.id),
+      threads: app.listThreads(project.id),
+      needsMe: app.listNeedsMe(project.id),
+    })
   })
 
   test('a merge after the thread asked for review ends the review', () => {
@@ -428,6 +434,11 @@ describe('messages', () => {
 
     app.markRead(thread.id, message.id)
     expect(app.listMessages(thread.id)[0]?.editedSinceRead).toBe(false)
+
+    // Reading what is already read records nothing.
+    const seq = app.lastSeq()
+    app.markRead(thread.id, message.id)
+    expect(app.lastSeq()).toBe(seq)
   })
 
   test("one thread cannot edit another thread's message", () => {

@@ -20,8 +20,9 @@ import type {
   TodoView,
   TurnFile,
 } from '@ariadne/core'
-import { computed, reactive, ref, type Ref } from 'vue'
+import { computed, reactive, ref, toRaw, type Ref } from 'vue'
 import type { Draft } from './components/attachments'
+import { reuse } from './reuse'
 import * as side from './side/layout'
 import type { OpenOptions, PaneKey, SideLayout, SplitDirection } from './side/layout'
 import {
@@ -228,7 +229,7 @@ export function report(error: unknown) {
 
 async function refreshProjects() {
   const { projects, lastSeq } = await api.listProjects()
-  state.projects = projects
+  state.projects = reuse(toRaw(state.projects), projects)
   return lastSeq
 }
 
@@ -274,7 +275,8 @@ async function loadParts(parts: ReadonlySet<Part>) {
   // The user may have opened another project while this was loading: a late answer is
   // stale. Another thread only makes the thread's own part stale; opening it loads that.
   if (state.currentId !== id) return
-  state.detail = detail
+  // What did not change stays the object it was, so nothing showing it draws again.
+  state.detail = reuse(toRaw(state.detail), detail)
   const artifactIds = artifacts ? new Set(artifacts.artifacts.map((a) => a.id)) : null
   setSide(side.prune(state.side, (key) => stillThere(key, known, artifactIds)))
   if (state.full && !fullStillThere(state.full.view, known, artifactIds)) setFull(null)
@@ -284,9 +286,9 @@ async function loadParts(parts: ReadonlySet<Part>) {
     if (!shownThreads().includes(threadId)) continue
     state.threads[threadId] = apply(state.threads[threadId] ?? emptyConversation())
   }
-  if (plan) state.plan = plan.plan
-  if (artifacts) state.artifacts = artifacts.artifacts
-  if (memory) state.memories = memory.memories
+  if (plan) state.plan = reuse(toRaw(state.plan), plan.plan)
+  if (artifacts) state.artifacts = reuse(toRaw(state.artifacts), artifacts.artifacts)
+  if (memory) state.memories = reuse(toRaw(state.memories), memory.memories)
 }
 
 /**
@@ -373,27 +375,29 @@ function take(
 
 /** The conversation on screen with what changed in it: new messages added, changed ones replaced. */
 export function merge(current: ConversationState, page: ConversationPage): ConversationState {
-  const messages = [...current.messages]
+  // Nothing new leaves the lists the ones they were: what shows them has nothing to redo.
+  const messages = page.messages.length ? [...current.messages] : current.messages
   for (const message of page.messages) {
     const at = messages.findIndex((shown) => shown.id === message.id)
     if (at !== -1) messages[at] = message
     else if (!current.from || message.id >= current.from) messages.push(message)
   }
-  messages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  if (page.messages.length) messages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   // A notice before the first message loaded comes with the earlier page instead.
   const firstAt = current.more ? (messages[0]?.createdAt ?? Infinity) : -Infinity
-  const notices = [...current.notices]
+  const notices = page.notices.length ? [...current.notices] : current.notices
   for (const notice of page.notices) {
     const at = notices.findIndex((shown) => shown.id === notice.id)
     if (at !== -1) notices[at] = notice
     else if (notice.createdAt >= firstAt) notices.push(notice)
   }
-  notices.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  if (page.notices.length)
+    notices.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return {
     ...current,
-    conversation: page.conversation,
-    todo: page.todo,
-    model: page.model,
+    conversation: reuse(toRaw(current.conversation), page.conversation),
+    todo: reuse(toRaw(current.todo), page.todo),
+    model: reuse(toRaw(current.model), page.model),
     messages,
     notices,
     from: current.from ?? messages[0]?.id ?? null,
@@ -1009,9 +1013,11 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
         ? ['detail', 'conversations']
         : ['detail', 'conversations', 'plan']
     // Anything that may move a thread's stage, which the plan's nodes show.
+    case 'message':
+      // Reading only clears marks on the messages themselves.
+      return type === 'message.read' ? ['conversations'] : ['detail', 'conversations', 'plan']
     case 'plan':
     case 'thread':
-    case 'message':
     case 'attention':
     case 'workspace':
     case 'branch':

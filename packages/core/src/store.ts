@@ -206,7 +206,11 @@ export class EventStore {
     this.db.transaction(() => {
       reset(this.db)
       for (const projection of this.projections) projection.setup(this.db)
-      for (const event of this.readAllUnbounded()) {
+      // One row at a time: the whole log never sits in memory at once.
+      for (const row of this.db
+        .query<EventRow, []>('SELECT * FROM events ORDER BY seq')
+        .iterate()) {
+        const event = toStored(row)
         for (const projection of this.projections) projection.apply(this.db, event)
       }
     })()
@@ -215,9 +219,5 @@ export class EventStore {
   close(): void {
     this.listeners.clear()
     this.db.close()
-  }
-
-  private readAllUnbounded(): AnyStoredEvent[] {
-    return this.db.query<EventRow, []>('SELECT * FROM events ORDER BY seq').all().map(toStored)
   }
 }

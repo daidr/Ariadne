@@ -257,9 +257,7 @@ export function createHandler({
 
   add('GET', '/api/projects/:projectId', (_request, { projectId = '' }) =>
     json({
-      project: app.getProject(projectId),
-      threads: app.listThreads(projectId),
-      needsMe: app.listNeedsMe(projectId),
+      ...app.getProjectDetail(projectId),
       hasTracker: !!workspaces?.hasTracker(projectId),
     }),
   )
@@ -1182,8 +1180,17 @@ export function createHandler({
     const path = url.pathname === '/' ? '/index.html' : url.pathname
     const file = Bun.file(`${webDist}${path}`)
     // Unknown paths fall back to the app shell, so client-side routes work on reload.
-    if (!path.includes('..') && (await file.exists())) return new Response(file)
-    return new Response(Bun.file(`${webDist}/index.html`))
+    if (!path.includes('..') && (await file.exists())) {
+      // Built assets carry a hash of their content in the name: the browser keeps them.
+      const headers: Record<string, string> = path.startsWith('/assets/')
+        ? { 'cache-control': 'public, max-age=31536000, immutable' }
+        : { 'cache-control': 'no-cache' }
+      return new Response(file, { headers })
+    }
+    // The shell names the assets of this build, so it is asked for again every time.
+    return new Response(Bun.file(`${webDist}/index.html`), {
+      headers: { 'cache-control': 'no-cache' },
+    })
   }
 
   /**

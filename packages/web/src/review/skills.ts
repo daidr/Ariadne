@@ -19,7 +19,8 @@ export function useSkills(
 
   // Read again when the conversation changes, and when the project's source does.
   watch(
-    () => [conversationId(), state.detail?.project.source] as const,
+    // Each on its own: a refresh that leaves both as they were does not read again.
+    [conversationId, () => state.detail?.project.source] as const,
     async ([id]) => {
       skills.value = []
       if (!id) return

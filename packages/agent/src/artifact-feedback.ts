@@ -147,7 +147,11 @@ export class ArtifactFeedback {
     let board: WhiteboardContent | null = null
     if (artifact.kind === 'document') {
       // Both as the room writes Markdown, so how it is spelled is not taken for a change.
-      const diff = lineDiff(normalized(since.content), normalized(artifact.content))
+      // Untouched since then, which most are: nothing to parse.
+      const diff =
+        since.content === artifact.content
+          ? null
+          : lineDiff(normalized(since.content), normalized(artifact.content))
       if (diff) items.push({ kind: 'edit', diff })
     } else if (artifact.kind === 'whiteboard') {
       board = JSON.parse(artifact.content) as WhiteboardContent
