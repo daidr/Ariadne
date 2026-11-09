@@ -5,15 +5,17 @@ export interface ThreadSyncResult<T> {
   /** `threads` holds only the ones changed since the cursor asked with, not all of them. */
   partial: boolean
   threads: T[]
-  /** Every thread's id in order; left out of a partial answer whose set did not change. */
+  /** Every thread's id in order; left out of a partial answer when none came, went or moved. */
   ids?: string[]
 }
 
 interface Known {
   /** The `rev` at which anything of it last changed. */
   rev: number
-  /** The `rev` at which a thread last came or went. */
+  /** The `rev` at which a thread last came, went or moved. */
   idsRev: number
+  /** The ids in the order last seen. */
+  ids: string
   /** Each thread as it was last seen, and the `rev` at which it last changed. */
   threads: Map<string, { hash: number | bigint; rev: number }>
 }
@@ -36,14 +38,15 @@ export class ThreadSync {
     since: string | null,
   ): ThreadSyncResult<T> {
     let known = this.projects.get(projectId)
-    if (!known) this.projects.set(projectId, (known = { rev: 0, idsRev: 0, threads: new Map() }))
+    if (!known)
+      this.projects.set(projectId, (known = { rev: 0, idsRev: 0, ids: '', threads: new Map() }))
     const hashes = threads.map((thread) => Bun.hash(JSON.stringify(thread)))
-    const gone =
-      known.threads.size > threads.length || threads.some((t) => !known.threads.has(t.id))
+    const ids = threads.map((thread) => thread.id).join('\n')
+    const moved = ids !== known.ids
     const changed = threads.some(
       (thread, index) => known.threads.get(thread.id)?.hash !== hashes[index],
     )
-    if (changed || gone) {
+    if (changed || moved) {
       const rev = (known.rev = ++this.rev)
       const before = known.threads
       known.threads = new Map(
@@ -53,8 +56,7 @@ export class ThreadSync {
           return [thread.id, was?.hash === hash ? was : { hash, rev }]
         }),
       )
-      if (known.threads.size !== before.size || threads.some((t) => !before.has(t.id)))
-        known.idsRev = rev
+      if (moved) [known.ids, known.idsRev] = [ids, rev]
     }
     const cursor = `${this.epoch}.${known.rev}`
     const from = this.revOf(since, known)

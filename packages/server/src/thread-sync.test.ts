@@ -33,7 +33,7 @@ describe('ThreadSync', () => {
     expect(sync.delta('p', next, one.cursor).threads).toEqual([])
   })
 
-  it('names every id when a thread came or went', () => {
+  it('names every id when a thread came, went or moved', () => {
     const sync = new ThreadSync()
     const { cursor } = sync.delta('p', [thread('a'), thread('b')], null)
     const added = sync.delta('p', [thread('a'), thread('b'), thread('c')], cursor)
@@ -46,6 +46,9 @@ describe('ThreadSync', () => {
     const swapped = sync.delta('p', [thread('a'), thread('d')], removed.cursor)
     expect(swapped.threads).toEqual([thread('d')])
     expect(swapped.ids).toEqual(['a', 'd'])
+    // The same threads in another order are told too.
+    const moved = sync.delta('p', [thread('d'), thread('a')], swapped.cursor)
+    expect(moved).toMatchObject({ threads: [], ids: ['d', 'a'] })
   })
 
   it('sends everything for a cursor it did not give', () => {
