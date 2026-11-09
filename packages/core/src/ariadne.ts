@@ -272,6 +272,13 @@ const toReviewRound = (row: ReviewRow): ReviewRoundView => ({
  */
 export const SKILL_NAME = /^[\p{L}\p{N}](?:[\p{L}\p{N}._-]{0,62}[\p{L}\p{N}])?$/u
 
+/**
+ * A skill as it is called: its name, and `@` with where it is from when another place has
+ * a skill of the same name.
+ */
+export const SKILL_REF =
+  /^[\p{L}\p{N}](?:[\p{L}\p{N}._-]{0,62}[\p{L}\p{N}])?(?:@[a-z][a-z0-9-]{0,31})?$/u
+
 export const MAX_MEMORIES = 50
 export const MAX_MEMORY = 500
 
@@ -2770,7 +2777,7 @@ export class Ariadne {
         mention = { kind, path: clean }
       } else if (kind === 'skill') {
         const { name } = (item ?? {}) as Record<string, unknown>
-        if (typeof name !== 'string' || !SKILL_NAME.test(name)) {
+        if (typeof name !== 'string' || !SKILL_REF.test(name)) {
           throw new DomainError('error.invalidBody', { reason: 'mentions' })
         }
         mention = { kind, name }

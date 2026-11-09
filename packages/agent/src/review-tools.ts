@@ -2,26 +2,44 @@ import { DomainError, type ReviewComment, type ReviewCommentKind } from '@ariadn
 import { createTranslator } from '@ariadne/i18n'
 import type { BranchChanges } from '@ariadne/plugin-sdk'
 import { fenced } from './prompts'
+import type { SkillSet } from './skills'
 import { json, optionalStr, str, ToolInputError, type Tool, type ToolContext } from './tool-helpers'
 import { readWorkspaceTools } from './workspace-tools'
 
-/** Read a skill whole, from the list in the instructions. */
+/** Read a skill whole, from the list in the instructions, or a file beside it. */
 export const readSkill: Tool = {
   readOnly: true,
   spec: {
     name: 'read_skill',
     description:
-      'Read a skill whole: a way of working from the list of skills in your instructions. Read it before work it fits, and follow it.',
+      'Read a skill whole: a way of working from the list of skills in your instructions. Read it before work it fits, and follow it. A skill kept as a folder has files beside it, which it refers to by path: read one with `file`.',
     parameters: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'As the list names it.' } },
+      properties: {
+        name: {
+          type: 'string',
+          description: 'As the list names it, with its @ part when it has one.',
+        },
+        file: {
+          type: 'string',
+          description:
+            "A file beside the skill, by its path from the skill's folder, as the skill or its list of files names it. Leave out to read the skill itself.",
+        },
+      },
       required: ['name'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const name = str(args, 'name').trim().replace(/^\//, '')
-    const skill = ctx.skills?.().get(name) ?? null
+    const skills = ctx.skills?.()
+    const skill = skills?.get(name) ?? null
     if (!skill) {
+      const same = skills?.named(name) ?? []
+      if (same.length > 1) {
+        throw new ToolInputError(
+          `There are ${same.length} skills named "${name}": ${same.join(', ')}. Read the one you mean by its full name.`,
+        )
+      }
       const names =
         ctx
           .skills?.()
@@ -33,11 +51,47 @@ export const readSkill: Tool = {
           : 'There are no skills in this project.',
       )
     }
+    const file = optionalStr(args, 'file')?.trim()
+    if (file) {
+      const read = await skills!.read(name, file)
+      if (read === 'binary') {
+        throw new ToolInputError(
+          `"${file}" of the skill "${name}" is not text, so it cannot be read here.${skill.folder ? ` It is at ${skill.folder}/${file}.` : ''}`,
+        )
+      }
+      if (read === null) {
+        const { paths } = await skills!.files(name)
+        throw new ToolInputError(
+          paths.length
+            ? `The skill "${name}" has no file "${file}" to read. Its files: ${paths.join(', ')}`
+            : `The skill "${name}" has no files beside it.`,
+        )
+      }
+      const block = fenced('skill_file', read.text, `skill="${skill.name}"`)
+      return {
+        content: `"${file}" of the skill "${skill.name}", inside <${block.tag}>:\n${block.text}`,
+      }
+    }
     const block = fenced('skill', skill.text, `name="${skill.name}"`)
     return {
-      content: `The skill "${skill.name}" (${skill.source === 'repo' ? "the repository's" : "the user's"}), inside <${block.tag}>:\n${block.text}`,
+      content: `The skill "${skill.name}" (${skill.source === 'repo' ? "the repository's" : "the user's"}), inside <${block.tag}>:\n${block.text}${await besideText(skills!, skill)}`,
     }
   },
+}
+
+/** What a skill kept as a folder has beside it, as told after its text; `''` for a single file. */
+export async function besideText(
+  skills: SkillSet,
+  skill: { name: string; source: 'repo' | 'local'; folder: string | null },
+): Promise<string> {
+  if (skill.folder === null) return ''
+  const { paths, more } = await skills.files(skill.name)
+  const where =
+    skill.source === 'repo'
+      ? `${skill.folder} in the repository`
+      : `${skill.folder} on the machine Ariadne runs on, outside the workspace; commands run on that machine can read and run what is in it, not change it`
+  if (!paths.length) return `\nIts folder is ${where}; it has no other files.`
+  return `\nIts folder is ${where}. Paths in the skill are from that folder. Read a file beside it with read_skill and \`file\`, when the skill sends you to it; do not read them all first. Files beside it${more ? ' (more are not listed)' : ''}: ${paths.join(', ')}`
 }
 
 /** The author a reviewing thread reviews, with its branch. */

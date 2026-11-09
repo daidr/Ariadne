@@ -125,7 +125,7 @@ const cover = (path: string): Mount => ({
  * paths read-only. A hidden directory is covered whole, so files saved into it later (a
  * settings file replaced by a rename) stay hidden too; kept paths inside it are put back.
  * A kept path that holds a hidden one does not show it: a workspace at the home directory
- * still cannot see `~/.ariadne`.
+ * still cannot see `~/.ariadne`, but for the kept paths inside that.
  */
 export function mountPlan(hidden: string[], keep: string[], readOnly: string[] = []): Mount[] {
   const kept = [...new Set(keep.map(realPath))]
@@ -134,6 +134,10 @@ export function mountPlan(hidden: string[], keep: string[], readOnly: string[] =
   const outer = roots.filter((root) => !within(root, kept))
   const restored = kept.filter((path) => strictlyWithin(path, outer) && existing(path))
   const nested = roots.filter((root) => within(root, kept))
+  // Kept paths inside those again: skills under Ariadne's home, for a workspace at `~`.
+  const inner = kept.filter(
+    (path) => strictlyWithin(path, nested) && !restored.includes(path) && existing(path),
+  )
   // Read-only paths outside every kept path are locked first, so covers made after stay;
   // kept paths inside them are opened again, and read-only paths inside kept ones (a git
   // directory's config) locked last, where the sandbox shows them.
@@ -143,18 +147,21 @@ export function mountPlan(hidden: string[], keep: string[], readOnly: string[] =
     (path) => strictlyWithin(path, outerLocked) && !restored.includes(path) && existing(path),
   )
   const shown = (path: string) =>
-    !within(path, nested) && (!within(path, outer) || within(path, restored))
+    within(path, inner) ||
+    (!within(path, nested) && (!within(path, outer) || within(path, restored)))
   const innerLocked = locked.filter((path) => within(path, kept) && shown(path))
   const as =
     (kind: Mount['kind']) =>
     (path: string): Mount => ({ kind, path })
   return [
     ...restored.map(as('hold')),
+    ...inner.map(as('hold')),
     ...outerLocked.map(as('ro')),
     ...outer.map(cover),
     ...restored.map(as('bind')),
     ...reopened.map(as('rw')),
     ...nested.map(cover),
+    ...inner.map(as('bind')),
     ...innerLocked.map(as('ro')),
   ]
 }
@@ -350,6 +357,11 @@ export function createSandbox(options: {
    * for each command, so a plugin path added in the settings is locked from then on.
    */
   readOnly?: () => string[]
+  /**
+   * Paths every command may read, though inside a hidden one, and never change: the
+   * user's own skills, which a command runs scripts from.
+   */
+  show?: () => string[]
 }): Sandbox {
   const kind = options.mode === 'off' ? null : options.kind
   const hidden = [...new Set(options.hide.map(realPath))]
@@ -358,8 +370,10 @@ export function createSandbox(options: {
     kind,
     status: { kind, mode: options.mode, hidden, platform: process.platform },
     hidden,
-    wrap(argv, { keep, readOnly = [] }) {
-      const locked = [...fixed(), ...readOnly]
+    wrap(argv, { keep: asked, readOnly = [] }) {
+      const shown = options.show?.() ?? []
+      const keep = [...asked, ...shown]
+      const locked = [...fixed(), ...readOnly, ...shown]
       switch (kind) {
         case 'bwrap':
           return bwrapArgs(mountPlan(hidden, keep, locked), argv)

@@ -11,6 +11,7 @@ export {
   MILESTONE_GATE,
   reviewReplies,
   SKILL_NAME,
+  SKILL_REF,
   unknownResult,
   type AriadneOptions,
   type PlanChange,

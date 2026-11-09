@@ -59,6 +59,16 @@ describe('mountPlan', () => {
     expect(mountPlan([home], [base])).toEqual([{ kind: 'tmpfs', path: home }])
   })
 
+  test('a kept path inside a hidden directory that a kept path holds is put back', () => {
+    const skills = join(home, 'plugins', 'github', 'repos')
+    expect(mountPlan([home], [base, skills], [skills])).toEqual([
+      { kind: 'hold', path: skills },
+      { kind: 'tmpfs', path: home },
+      { kind: 'bind', path: skills },
+      { kind: 'ro', path: skills },
+    ])
+  })
+
   test('hidden files are covered with /dev/null; missing paths are skipped', () => {
     const token = join(home, 'token')
     expect(mountPlan([token, join(base, 'missing')], [])).toEqual([{ kind: 'null', path: token }])
@@ -168,6 +178,24 @@ describe.skipIf(!linuxKinds.length)('running in the sandbox', () => {
       // Its own process list: the server is not in it.
       const ps = await exec(wrap('ls /proc | grep -c "^[0-9]"'), work)
       expect(Number(ps.stdout.trim())).toBeLessThan(10)
+      // Shown paths inside a hidden one can be read and run by every command, not changed;
+      // also when the workspace holds the hidden directory.
+      const skills = join(home, 'skills')
+      await mkdir(join(skills, 'release'), { recursive: true })
+      await writeFile(join(skills, 'release', 'tag.sh'), 'echo tagged\n')
+      const showing = createSandbox({ kind, mode: 'auto', hide: [home], show: () => [skills] })
+      const script = join(skills, 'release', 'tag.sh')
+      for (const keep of [[work], [base]]) {
+        const ran = await exec(
+          showing.wrap(
+            ['bash', '-c', `bash ${script}; echo x >> ${script}; cat ${join(home, 'token')}`],
+            { keep },
+          ),
+          keep[0]!,
+        )
+        expect(ran.stdout).toBe('tagged\n')
+      }
+      expect(await readFile(script, 'utf8')).toBe('echo tagged\n')
       // Read-only paths can be read but not changed, nor replaced.
       const locked = sandbox.wrap(
         [

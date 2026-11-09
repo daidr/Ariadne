@@ -99,8 +99,8 @@ export interface HandlerOptions {
   mcp?: McpHub
   /** The data directory: its size, and backups of the database. */
   data?: DataStore
-  /** The user's own skills for every project. */
-  skillsDir?: string
+  /** The user's own skill folders for every project: Ariadne's own first, then shared ones. */
+  skillsDirs?: readonly string[]
   /** What is publicly known of models, to fill in a model's settings. */
   prices?: ModelCatalog
   /** Asks a model set up whether it answers; swapped in tests. */
@@ -264,7 +264,7 @@ export function createHandler({
   workspaces,
   mcp,
   data: dataStore,
-  skillsDir,
+  skillsDirs,
   prices = new ModelCatalog(),
   check = checkModel,
   shared,
@@ -1397,7 +1397,7 @@ export function createHandler({
       conversation.role === 'thread'
         ? (app.getThread(conversation.id).reviewOf ?? conversation.id)
         : conversation.id
-    const skills = await conversationSkills(app, conversation, owner, workspaces, skillsDir ?? null)
+    const skills = await conversationSkills(app, conversation, owner, workspaces, skillsDirs ?? [])
     return json({ skills: skills.list() })
   })
 
