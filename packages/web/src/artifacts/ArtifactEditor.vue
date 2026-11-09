@@ -175,6 +175,8 @@ watch(
 const QUIET_MS = 10_000
 let quiet: ReturnType<typeof setTimeout> | null = null
 let waiting = false
+/** A round is being sent with pictures, which takes a moment. */
+let sending = false
 
 function touched() {
   waiting = true
@@ -189,6 +191,7 @@ async function sendFeedback(leaving = false) {
   waiting = false
   const id = room.id
   if (leaving) return api.sendFeedback(id, [], true)
+  sending = true
   try {
     const pictures = (await body.value?.markedPictures?.()) ?? []
     const projectId = artifact.value?.projectId ?? ''
@@ -200,6 +203,8 @@ async function sendFeedback(leaving = false) {
   } catch (error) {
     // The server sends what waits on its own a little later, without the pictures.
     console.warn('feedback not sent', error)
+  } finally {
+    sending = false
   }
 }
 
@@ -217,7 +222,18 @@ function hidden() {
   if (document.visibilityState === 'hidden') void sendFeedback()
 }
 document.addEventListener('visibilitychange', hidden)
-onBeforeUnmount(() => document.removeEventListener('visibilitychange', hidden))
+// Closing the page cancels what is still being sent: what waits goes at once, without
+// pictures, in a request that outlives the page.
+function closing() {
+  if (!room || (!waiting && !sending)) return
+  waiting = false
+  void api.sendFeedback(room.id, [], true)
+}
+window.addEventListener('pagehide', closing)
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', hidden)
+  window.removeEventListener('pagehide', closing)
+})
 
 /** Comments go to the newest version of a document or whiteboard. */
 const commentProps = computed(() =>

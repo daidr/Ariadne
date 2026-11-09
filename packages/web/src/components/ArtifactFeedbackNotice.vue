@@ -2,7 +2,7 @@
 import type { ArtifactFeedbackItem, NoticeView } from '@ariadne/core'
 import { DouLink, DouShimmer, DouText } from 'dou-ui'
 import { computed, ref } from 'vue'
-import { t } from '../i18n'
+import { list, t } from '../i18n'
 import { useOpenView } from '../opened-from'
 
 const openView = useOpenView()
@@ -35,7 +35,7 @@ function line(item: ArtifactFeedbackItem): string[] {
     case 'choice':
       return [
         item.chosen.length
-          ? t('notice.feedback.choice', { titles: item.chosen.map((c) => c.title).join('、') })
+          ? t('notice.feedback.choice', { titles: list(item.chosen.map((c) => c.title)) })
           : t('notice.feedback.noChoice'),
       ]
     case 'comment':

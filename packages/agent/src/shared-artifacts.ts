@@ -138,11 +138,14 @@ export class SharedArtifacts {
     if (next !== null) {
       room.doc.transact(() => this.bridge(room).update(room.doc, next, input.base), { agent: by })
     }
-    return this.saveVersion(room, {
+    const saved = this.saveVersion(room, {
       reason: input.reason,
       title: input.title,
       force: !!input.title,
     })
+    // Nobody has it open: the room was only for this write.
+    if (!room.sockets.size) this.close(room)
+    return saved
   }
 
   /** Save what waits as a version now, e.g. before the server stops. */
@@ -241,10 +244,15 @@ export class SharedArtifacts {
     const ids = room.sockets.get(socket)
     room.sockets.delete(socket)
     if (ids?.size) awarenessProtocol.removeAwarenessStates(room.awareness, [...ids], null)
-    if (room.sockets.size) return
-    // The last page left: what waits is saved, and the room closes.
+    // The last page left: the room closes.
+    if (!room.sockets.size) this.close(room)
+  }
+
+  /** What waits is saved, and the room closes. */
+  private close(room: Room) {
     this.saveVersion(room)
     this.saveState(room)
+    if (room.stateTimer) clearTimeout(room.stateTimer)
     room.awareness.destroy()
     room.doc.destroy()
     this.rooms.delete(room.artifactId)

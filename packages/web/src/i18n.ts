@@ -63,6 +63,13 @@ export function count(value: number): string {
   return compact.format(value).replace('K', 'k')
 }
 
+/** Names joined as the locale lists them: `A、B和C`, `A, B, and C`. */
+export function list(items: string[]): string {
+  return new Intl.ListFormat(locale.value === 'en' ? 'en' : 'zh-CN', {
+    type: 'conjunction',
+  }).format(items)
+}
+
 /** A duration in seconds or milliseconds, short. */
 export function duration(ms: number): string {
   if (ms < 1000) return t('time.ms', { value: Math.round(ms) })

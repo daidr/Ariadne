@@ -7,7 +7,9 @@ import {
   type WhiteboardContent,
   type WhiteboardNode,
 } from '@ariadne/core'
-import type { SharedArtifacts } from './shared-artifacts'
+import * as Y from 'yjs'
+import { SharedArtifacts } from './shared-artifacts'
+import { bridges } from './shared-content'
 
 /**
  * What the user does in a document or whiteboard reaches the agent that wrote it on its
@@ -19,6 +21,8 @@ import type { SharedArtifacts } from './shared-artifacts'
 export class ArtifactFeedback {
   private readonly waiting = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly stops: (() => void)[] = []
+  /** When each conversation's running turn started. */
+  private readonly turns = new Map<string, number>()
   private readonly fallbackMs: number
 
   constructor(
@@ -36,18 +40,74 @@ export class ArtifactFeedback {
         for (const event of events) {
           if (event.type === 'artifact.commented' && event.data.by === 'user') {
             this.touched(event.data.artifactId)
+          } else if (event.type === 'turn.started') {
+            this.turns.set(event.data.conversationId, event.at)
+          } else if (event.type === 'turn.finished') {
+            const started = this.turns.get(event.data.conversationId)
+            this.turns.delete(event.data.conversationId)
+            if (event.data.outcome === 'completed' && started !== undefined) {
+              this.settle(event.projectId, event.data.conversationId, started)
+            }
           }
         }
       }),
     )
     // Before an agent writes, the user's part so far goes to it as a round of its own.
     this.stops.push(this.shared.onBeforeAgentWrite((artifactId) => void this.send(artifactId)))
+    this.recover()
   }
 
+  /** Send what still waits, before the rooms close: nothing the user did is left unsent. */
   stop(): void {
     for (const stop of this.stops.splice(0)) stop()
+    for (const artifactId of Array.from(this.waiting.keys())) this.trySend(artifactId)
     for (const timer of this.waiting.values()) clearTimeout(timer)
     this.waiting.clear()
+  }
+
+  /**
+   * What the user did before the server last stopped without it being sent (it stopped
+   * abruptly) goes out now, as a round of its own.
+   */
+  private recover() {
+    for (const project of this.app.listProjects()) {
+      for (const artifact of this.app.listArtifacts(project.id)) {
+        if (!SharedArtifacts.shared(artifact.kind)) continue
+        try {
+          const items = this.itemsOf(artifact.id)
+          if (items.length) this.app.sendArtifactFeedback(artifact.id, { items })
+        } catch (error) {
+          console.error('could not send the feedback left on', artifact.id, error)
+        }
+      }
+    }
+  }
+
+  /**
+   * A turn that saw a round ended without saying it finished it: the round counts as done,
+   * so it does not look worked on forever.
+   */
+  private settle(projectId: string, conversationId: string, started: number) {
+    try {
+      for (const artifact of this.app.listArtifacts(projectId)) {
+        if (!SharedArtifacts.shared(artifact.kind)) continue
+        for (const round of this.app.listArtifactFeedback(artifact.id)) {
+          if (round.doneAt !== null || round.notify !== conversationId) continue
+          if (round.createdAt > started) continue
+          this.app.finishArtifactFeedback(artifact.id, round.round, conversationId, '')
+        }
+      }
+    } catch (error) {
+      console.error('could not settle the feedback rounds of', conversationId, error)
+    }
+  }
+
+  private trySend(artifactId: string) {
+    try {
+      this.send(artifactId)
+    } catch (error) {
+      console.error('could not send the feedback on', artifactId, error)
+    }
   }
 
   /** Whether the user did something in the artifact that was not sent yet. */
@@ -75,13 +135,7 @@ export class ArtifactFeedback {
     if (timer) clearTimeout(timer)
     this.waiting.set(
       artifactId,
-      setTimeout(() => {
-        try {
-          this.send(artifactId)
-        } catch (error) {
-          console.error('could not send the feedback on', artifactId, error)
-        }
-      }, this.fallbackMs),
+      setTimeout(() => this.trySend(artifactId), this.fallbackMs),
     )
   }
 
@@ -92,7 +146,8 @@ export class ArtifactFeedback {
     const items: ArtifactFeedbackItem[] = []
     let board: WhiteboardContent | null = null
     if (artifact.kind === 'document') {
-      const diff = lineDiff(since.content, artifact.content)
+      // Both as the room writes Markdown, so how it is spelled is not taken for a change.
+      const diff = lineDiff(normalized(since.content), normalized(artifact.content))
       if (diff) items.push({ kind: 'edit', diff })
     } else if (artifact.kind === 'whiteboard') {
       board = JSON.parse(artifact.content) as WhiteboardContent
@@ -128,6 +183,17 @@ export class ArtifactFeedback {
     const version = fromRound ? last.version : (agent?.version ?? 1)
     const at = fromRound ? last.createdAt : (agent?.createdAt ?? 0)
     return { content: this.app.getArtifact(artifactId, version).content, at }
+  }
+}
+
+/** A document's Markdown as its room writes it. */
+function normalized(markdown: string): string {
+  const doc = new Y.Doc()
+  try {
+    bridges.document.seed(doc, markdown)
+    return bridges.document.read(doc)
+  } finally {
+    doc.destroy()
   }
 }
 

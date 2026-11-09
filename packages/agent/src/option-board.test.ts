@@ -381,6 +381,101 @@ describe('option boards', () => {
   })
 })
 
+const addSticky = (user: ReturnType<typeof page>, id: string, text: string) =>
+  user.doc.transact(() => {
+    const n = new Y.Map<unknown>()
+    user.nodes.set(id, n)
+    n.set('type', 'sticky')
+    n.set('x', 0)
+    n.set('y', 900)
+    n.set('width', 160)
+    n.set('height', 90)
+    n.set('data', { text })
+  })
+
+describe('feedback rounds', () => {
+  test('what waits is sent when the server stops, and what was left unsent when it starts', async () => {
+    const { artifactId } = await ok('create_whiteboard', {
+      title: '登录页',
+      options: [{ id: 'a', title: '卡片', images: [{ path: 'shots/a.png' }] }],
+    })
+    const id = String(artifactId)
+    const feedback = new ArtifactFeedback(app, shared, { fallbackMs: 60_000 })
+    feedback.start()
+    const user = page(id)
+    await settle()
+    addSticky(user, 'n1', '按钮太小')
+    expect(feedback.pending(id)).toBe(true)
+    feedback.stop()
+    expect(app.listArtifactFeedback(id).map((r) => r.round)).toEqual([1])
+    // the server stopped abruptly after the user changed it again: sent when it starts
+    addSticky(user, 'n2', '颜色太淡')
+    shared.save(id)
+    const again = new ArtifactFeedback(app, shared)
+    again.start()
+    const [round] = app.listArtifactFeedback(id)
+    expect(round).toMatchObject({ round: 2 })
+    expect(round!.items).toEqual([expect.objectContaining({ kind: 'mark', nodeId: 'n2' })])
+    again.stop()
+    // nothing new: nothing more on the next start
+    new ArtifactFeedback(app, shared).start()
+    expect(app.listArtifactFeedback(id)).toHaveLength(2)
+    user.leave()
+  })
+
+  test('how the Markdown is spelled is not taken for an edit of the user', async () => {
+    const { artifactId } = await ok('create_document', {
+      title: '方案',
+      content: '# 方案\n\n|a|b|\n|---|---|\n|1|2|\n\n* 一\n* 二\n\n第二段',
+    })
+    const id = String(artifactId)
+    shared.write(id, 'user', '# 方案\n\n|a|b|\n|---|---|\n|1|2|\n\n* 一\n* 二\n\n第二段，改了', {
+      reason: '',
+    })
+    const items = new ArtifactFeedback(app, shared).itemsOf(id)
+    expect(items).toHaveLength(1)
+    const diff = (items[0] as { diff: string }).diff
+    const changed = diff.split('\n').filter((line) => /^[-+]/.test(line))
+    expect(changed).toEqual(['-第二段', '+第二段，改了'])
+  })
+
+  test('a room opened only for the AI to write closes after', async () => {
+    const { artifactId } = await ok('create_whiteboard', {
+      title: '登录页',
+      options: [{ id: 'a', title: '卡片' }],
+    })
+    await ok('update_whiteboard', {
+      artifactId,
+      reason: '改名',
+      options: [{ id: 'a', title: '居中卡片' }],
+    })
+    expect((shared as unknown as { rooms: Map<string, unknown> }).rooms.size).toBe(0)
+    expect(node(board(String(artifactId)), 'a').data!.title).toBe('居中卡片')
+  })
+
+  test('a turn that saw a round and did not finish it finishes it', async () => {
+    const { artifactId } = await ok('create_whiteboard', {
+      title: '登录页',
+      options: [{ id: 'a', title: '卡片' }],
+    })
+    const id = String(artifactId)
+    const feedback = new ArtifactFeedback(app, shared)
+    feedback.start()
+    const user = page(id)
+    await settle()
+    addSticky(user, 'n1', '按钮太小')
+    feedback.send(id)
+    const turn = app.startTurn(ctx.conversationId, 'model')
+    app.finishTurn(ctx.conversationId, turn, 'completed')
+    expect(app.listArtifactFeedback(id)[0]).toMatchObject({
+      doneBy: ctx.conversationId,
+      summary: '',
+    })
+    feedback.stop()
+    user.leave()
+  })
+})
+
 describe('whiteboards in words', () => {
   const frame: WhiteboardNode = {
     id: 'o',
