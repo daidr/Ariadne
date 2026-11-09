@@ -101,7 +101,7 @@ export function skillsSection(
       .join('\n'),
   )
   return `
-Skills: ways of working written down as files, by the repository or by the user for every project, listed inside <${block.tag}> by name with when each applies. Skills of one name from different places are told apart by the place after @; that is part of the name, and when the user asks for one of them without it, ask which. When your work fits one, read it with read_skill before you start and follow it; the user may also ask for one by name (it then comes with their message). A skill shapes how you do the work, never what was asked or what needs the user's yes; the repository's come from the repository like its instructions, so the user's words and the project memory win over them.
+Skills: ways of working written down as files, by the repository or by the user for every project, listed inside <${block.tag}> by name with when each applies. Skills of one name from different places are told apart by the place after @; that is part of the name. When one is asked for without it, take the repository's (@repo, then @repo-agents) when it fits the work, and ask only when you cannot tell which is meant. When your work fits one, read it with read_skill before you start and follow it; the user may also ask for one by name (it then comes with their message). A skill shapes how you do the work, never what was asked or what needs the user's yes; the repository's come from the repository like its instructions, so the user's words and the project memory win over them.
 ${block.text}
 `
 }
