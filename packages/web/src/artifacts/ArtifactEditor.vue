@@ -6,7 +6,7 @@ import type {
   ArtifactView,
 } from '@ariadne/core'
 import { DouAlert, DouButton, DouInput, DouSelect, DouText, type CommentAction } from 'dou-ui'
-import { CheckIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
+import { CheckIcon, PencilIcon, RotateCcwIcon } from '@dou-ui/icons'
 import {
   computed,
   defineAsyncComponent,
@@ -315,6 +315,15 @@ async function comment(
   }
 }
 
+/**
+ * A dashboard's layout is saved when the user is done arranging it, or leaves with changes;
+ * documents and whiteboards are written as they are edited.
+ */
+function autosave() {
+  if (dirty.value && !saving.value) void save()
+}
+onBeforeUnmount(autosave)
+
 async function save(
   input: { content?: string; title?: string; reason?: string } = {},
 ): Promise<boolean> {
@@ -463,17 +472,6 @@ const time = (at: number) =>
         <template #leading><RotateCcwIcon /></template>
         {{ t('artifact.restore') }}
       </DouButton>
-      <DouButton
-        v-else-if="!together"
-        size="sm"
-        tone="primary"
-        :disabled="!dirty"
-        :loading="saving && !renaming"
-        @click="save()"
-      >
-        <template #leading><SaveIcon /></template>
-        {{ t('artifact.save') }}
-      </DouButton>
       <ViewActions :view="{ kind: 'artifact', id }" :place="place" />
     </div>
     <DouAlert v-if="viewingOld" tone="neutral" class="artifact-alert">
@@ -482,9 +480,6 @@ const time = (at: number) =>
     <DouAlert v-else-if="conflict && !together" tone="warning" class="artifact-alert">
       {{ conflict }}
     </DouAlert>
-    <DouText v-else-if="dirty" variant="tertiary" size="sm" class="artifact-dirty">
-      {{ t('artifact.unsaved') }}
-    </DouText>
     <div class="artifact-body">
       <component
         :is="bodies[artifact.kind]"
@@ -499,6 +494,7 @@ const time = (at: number) =>
         :readonly="viewingOld"
         :label="artifact.title"
         @draft="onDraft"
+        @settled="autosave"
       />
     </div>
   </div>
@@ -551,10 +547,6 @@ const time = (at: number) =>
 
 .artifact-alert {
   margin: 8px 16px 0;
-}
-
-.artifact-dirty {
-  padding: 4px 16px 0;
 }
 
 .artifact-body {

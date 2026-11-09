@@ -31,7 +31,11 @@ const props = defineProps<{
   label?: string
   artifactId?: string
 }>()
-const emit = defineEmits<{ draft: [content: string | null] }>()
+const emit = defineEmits<{
+  draft: [content: string | null]
+  /** The user finished arranging the layout: what changed can be saved. */
+  settled: []
+}>()
 
 const widgets = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
 const snapshot = shallowRef<DashboardContent>({
@@ -68,6 +72,11 @@ watch(
     if (readonly) editing.value = false
   },
 )
+
+// Leaving the layout editing is the user's "done": the last change is reported first.
+watch(editing, (on) => {
+  if (!on) void nextTick(() => nextTick(() => emit('settled')))
+})
 
 function changed() {
   void nextTick(() => {

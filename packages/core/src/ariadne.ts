@@ -5,6 +5,7 @@ import {
   branchSlug,
   MAX_REVIEW_ROUNDS,
   parseProjectSettings,
+  parseRoutines,
   storedProjectSettings,
 } from './project-settings'
 import {
@@ -1522,6 +1523,26 @@ export class Ariadne {
     if (JSON.stringify(settings) === JSON.stringify(project.settings)) return project
     this.store.append([{ type: 'project.settings.set', projectId, data: { settings } }])
     return this.getProject(projectId)
+  }
+
+  /** Replace the project's routines, checked like the rest of its settings. */
+  setRoutines(projectId: string, routines: unknown): ProjectView {
+    const { settings } = this.getProject(projectId)
+    const next = { ...settings, routines: parseRoutines(routines) }
+    if (JSON.stringify(next) === JSON.stringify(settings)) return this.getProject(projectId)
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings: next } }])
+    return this.getProject(projectId)
+  }
+
+  /**
+   * Keep the way the user last merged in this project: the next merge starts from it, and
+   * the autopilot merges the same way.
+   */
+  rememberMergeMethod(projectId: string, method: MergeMethod): void {
+    const { settings } = this.getProject(projectId)
+    if (settings.autopilot.method === method) return
+    const next = { ...settings, autopilot: { ...settings.autopilot, method } }
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings: next } }])
   }
 
   /** Pause the project's autopilot, or let it go on. */

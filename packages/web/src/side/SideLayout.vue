@@ -12,14 +12,12 @@ import {
   type DockPanel,
 } from 'dou-ui'
 import {
-  BrainIcon,
   FileDiffIcon,
   LayoutColumnsIcon,
   LayoutRowsIcon,
   MaximizeIcon,
   MessagesIcon,
   PackageIcon,
-  SortIcon,
   WorkflowIcon,
 } from '@dou-ui/icons'
 import type { Component } from 'vue'
@@ -31,11 +29,8 @@ import ThreadTools from '../components/ThreadTools.vue'
 import ConversationPanel from '../components/ConversationPanel.vue'
 import OpenedView from '../full/OpenedView.vue'
 import { kindIcon } from '../artifacts/kinds'
-import MemoryList from '../components/MemoryList.vue'
 import StageIcon from '../components/StageIcon.vue'
 import ThreadList from '../components/ThreadList.vue'
-import { threadSort } from '../components/thread-list'
-import type { ThreadSort } from '../stage'
 import { lastPanel } from '../shortcuts'
 import {
   activeThreadId,
@@ -57,13 +52,10 @@ import { MIN_HEIGHT, MIN_WIDTH } from './sizes'
  * own there.
  */
 
-const sorts = ['active', 'title', 'created'] as const
-
 const lists: Record<string, { label: () => string; icon: Component }> = {
   plan: { label: () => t('panel.plan'), icon: WorkflowIcon },
   threads: { label: () => t('panel.threads'), icon: MessagesIcon },
   artifacts: { label: () => t('panel.artifacts'), icon: PackageIcon },
-  memory: { label: () => t('memory.title'), icon: BrainIcon },
 }
 
 const threadById = computed(() => new Map((state.detail?.threads ?? []).map((th) => [th.id, th])))
@@ -170,7 +162,6 @@ function bring(group: DockGroup, key: PaneKey) {
           <PlanPanel v-if="value === 'plan'" />
           <ThreadList v-else-if="value === 'threads'" />
           <ArtifactList v-else-if="value === 'artifacts'" />
-          <MemoryList v-else-if="value === 'memory'" />
         </div>
         <ConversationPanel
           v-else-if="side.threadOf(value as PaneKey)"
@@ -198,25 +189,6 @@ function bring(group: DockGroup, key: PaneKey) {
             <MaximizeIcon />
           </DouButton>
         </DouTooltip>
-        <DouDropdown
-          v-else-if="active === 'threads' && state.detail?.threads.length"
-          placement="bottom-end"
-        >
-          <DouButton size="sm" variant="ghost" :aria-label="t('threads.sort')">
-            <SortIcon />
-          </DouButton>
-          <template #menu>
-            <DouDropdownRadioGroup
-              :label="t('threads.sort')"
-              :model-value="threadSort"
-              @update:model-value="(value) => (threadSort = value as ThreadSort)"
-            >
-              <DouDropdownItem v-for="sort in sorts" :key="sort" :value="sort">
-                {{ t(`threads.sort.${sort}`) }}
-              </DouDropdownItem>
-            </DouDropdownRadioGroup>
-          </template>
-        </DouDropdown>
         <DouTooltip
           v-if="canSplit(group, 'right')"
           :content="t('side.splitRight')"

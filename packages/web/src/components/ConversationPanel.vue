@@ -76,6 +76,7 @@ import {
   stopTurn,
   undoNotice,
 } from '../store'
+import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewActions from './ReviewActions.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -460,6 +461,7 @@ const markdown = { linkTarget: '_blank', sanitizeUrl } as const
 async function submit(value: string) {
   const id = conversationId.value
   if (!id || !canSubmit.value) return
+  offerNotifications()
   draft.value = ''
   const files = attachments.take()
   const sent = await sendMessage(id, value, {

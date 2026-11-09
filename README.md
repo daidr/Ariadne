@@ -23,7 +23,7 @@ bun run check    # 格式、lint、类型检查和测试
 
 打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口、Anthropic 接口，或本机已登录的 Claude Code、Codex 和 ACP agent），填好地址和 API Key（外部 agent 只要命令），再添加一个模型，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
 
-要让讨论串读写代码、运行命令，在右侧“项目来源”里选一个本机目录、GitHub 仓库、GitLab 仓库、SSH 远程目录或远程 daemon。
+要让讨论串读写代码、运行命令，在顶栏的“项目设置”里给项目来源选一个本机目录、GitHub 仓库、GitLab 仓库、SSH 远程目录或远程 daemon。
 
 - 本机目录：git 仓库会为每个讨论串建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，讨论串的提交留在这个分支上。讨论串面板上的“改动”逐个文件显示它相对基线分支改了什么，点“合并到 main”合并进来（默认压成一个提交，需要 git 2.38+）；改动合入后 worktree 自动移除，分支保留。
 - GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。讨论串在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时讨论串会被唤醒去修，合并由你决定。公开仓库第一次推送前会先问你一次，同意后整个项目有效。令牌存在 `~/.ariadne/config.json`，不进事件日志。

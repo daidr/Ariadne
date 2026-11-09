@@ -9,6 +9,7 @@ import {
   DouSwitch,
   DouText,
   DouTextarea,
+  useColorMode,
 } from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
@@ -29,6 +30,15 @@ const snippets = ref<DraftSnippet[]>([])
 const keys = ref<Record<ShortcutAction, string>>({ ...DEFAULT_KEYS })
 
 const error = ref<string | null>(null)
+
+// The page's look follows the system unless set here; it changes at once, in this browser.
+const { mode } = useColorMode()
+const modeOptions = computed(() =>
+  (['system', 'light', 'dark'] as const).map((value) => ({
+    value,
+    label: t(`appearance.${value}`),
+  })),
+)
 
 const submitOptions = computed(() => [
   { value: 'enter', label: t('input.submitEnter') },
@@ -83,6 +93,10 @@ defineExpose({ save })
     <div class="input-row">
       <span>{{ t('input.submitOn') }}</span>
       <DouSegmentedControl v-model="submitOn" size="sm" :options="submitOptions" />
+    </div>
+    <div class="input-row">
+      <span>{{ t('appearance.title') }}</span>
+      <DouSegmentedControl v-model="mode" size="sm" :options="modeOptions" />
     </div>
     <div class="input-row">
       <span class="input-heading">

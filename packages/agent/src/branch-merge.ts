@@ -86,6 +86,7 @@ export async function mergeThread(
   }
   if (outcome.kind === 'merged') {
     const { sha, head } = outcome
+    app.rememberMergeMethod(thread.projectId, input.method)
     return {
       outcome,
       thread: app.recordMerge(threadId, { branch, base, method: input.method, sha, head }),

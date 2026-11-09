@@ -277,6 +277,79 @@ describe('project memory', () => {
   })
 })
 
+describe('routines', () => {
+  test('the coordinator sets one up when the user asks, and removes it again', async () => {
+    const results: string[] = []
+    const model = fakeModel((request) => {
+      const last = request.messages.at(-1)
+      if (last?.role === 'tool') {
+        results.push(last.content)
+        return say('好了。')
+      }
+      const routines = app.getProject(project.id).settings.routines
+      return routines.length
+        ? [call('r2', 'routine', { action: 'remove', routineId: routines[0]!.id })]
+        : [
+            call('r1', 'routine', {
+              action: 'add',
+              prompt: '整理新 issue',
+              days: [1, 2, 3, 4, 5],
+              time: '09:00',
+            }),
+          ]
+    })
+    const project = app.createProject('P')
+    const ask = (content: string) =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content,
+      })
+    ask('每个工作日 9 点整理一下新 issue')
+    await startScheduler(model).idle()
+    expect(app.getProject(project.id).settings.routines).toMatchObject([
+      { prompt: '整理新 issue', days: [1, 2, 3, 4, 5], time: '09:00', enabled: true },
+    ])
+    expect(results[0]).toContain('整理新 issue')
+
+    ask('不用了，去掉吧')
+    await scheduler!.idle()
+    expect(app.getProject(project.id).settings.routines).toEqual([])
+    expect(results[1]).toBe('No routines.')
+  })
+
+  test('a time that is not one is turned down, and nothing but the user adds one', async () => {
+    const results: string[] = []
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') return say('')
+      const last = request.messages.at(-1)
+      if (last?.role === 'tool') {
+        results.push(last.content)
+        return say('')
+      }
+      return [call('r1', 'routine', { action: 'add', prompt: 'x', days: [1], time: '9am' })]
+    })
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    app.reportThread(thread.id, {
+      kind: 'waiting',
+      summary: 'run x daily',
+      headline: 'run x daily',
+    })
+    await startScheduler(model).idle()
+    expect(results[0]).toContain('only in a turn that answers the user')
+
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '每天跑一下 x',
+    })
+    await scheduler!.idle()
+    expect(results[1]).toContain('HH:mm')
+    expect(app.getProject(project.id).settings.routines).toEqual([])
+  })
+})
+
 describe('memory from untrusted input', () => {
   test('a thread report alone cannot change the memory', async () => {
     const results: string[] = []

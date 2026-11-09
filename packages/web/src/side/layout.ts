@@ -23,13 +23,12 @@ export type PaneKey =
   | 'plan'
   | 'threads'
   | 'artifacts'
-  | 'memory'
   | `thread:${string}`
   | `artifact:${string}`
   | `changes:${string}`
   | `turn:${string}`
 
-export const LISTS = ['plan', 'threads', 'artifacts', 'memory'] as const satisfies PaneKey[]
+export const LISTS = ['plan', 'threads', 'artifacts'] as const satisfies PaneKey[]
 
 export type SplitDirection = 'horizontal' | 'vertical'
 
@@ -164,7 +163,7 @@ export function close(layout: SideLayout, key: PaneKey): SideLayout {
 
 /**
  * Close the other tabs of the group but its lists: they never close, so the project's
- * plan, threads, artifacts and memory are always somewhere on the side.
+ * plan, threads and artifacts are always somewhere on the side.
  */
 export function closeOthers(layout: SideLayout, key: PaneKey): SideLayout {
   const target = groupWith(layout, key)

@@ -11,13 +11,18 @@ type Permission = NotificationPermission | 'unsupported'
 
 const supported = () => typeof Notification !== 'undefined'
 
-function readEnabled(): boolean {
+/** The user's choice as remembered here; `null` when they never made one. */
+function readChoice(): boolean | null {
   try {
-    return localStorage.getItem(KEY) === 'on'
+    const stored = localStorage.getItem(KEY)
+    return stored === null ? null : stored === 'on'
   } catch {
-    return false
+    return null
   }
 }
+
+// Allowed in the browser and never switched off here: on, without a visit to the settings.
+const readEnabled = () => readChoice() ?? (supported() && Notification.permission === 'granted')
 
 /** Whether the user turned browser notifications on here, and what the browser allows. */
 export const notifications = reactive<{ enabled: boolean; permission: Permission }>({
@@ -36,6 +41,16 @@ export async function setNotifications(on: boolean) {
   } catch {
     // Not remembered; it is off again next time.
   }
+}
+
+/**
+ * Switch notifications on by themselves, the first time the user sends a message: the
+ * browser asks once, and its answer is the choice. Someone who chose already, here or in
+ * the browser, is not asked again.
+ */
+export function offerNotifications() {
+  if (readChoice() !== null || !supported() || Notification.permission !== 'default') return
+  void setNotifications(true)
 }
 
 /** Whether the project's autopilot merges what passes the review. */

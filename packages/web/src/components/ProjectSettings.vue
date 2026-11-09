@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MergeMethod, ProjectSettings } from '@ariadne/core'
+import type { ProjectSettings } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
@@ -22,11 +22,14 @@ import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, inject, ref, watch } from 'vue'
 import { api, ApiError, type McpServerView } from '../api'
 import { clockText, t, tm } from '../i18n'
-import { newRoutine, nextRunOf, WEEK } from './routines'
+import { nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
 import { openSettingsKey } from '../open-settings'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 import SourceForm from './SourceForm.vue'
+import SourceNotes from './SourceNotes.vue'
+import MemoryList from './MemoryList.vue'
+import ProjectUsage from './ProjectUsage.vue'
 
 /**
  * The open project's own settings: where its files are, instructions, workspaces and MCP,
@@ -52,11 +55,6 @@ const mcpServers = ref<McpServerView[]>([])
 const totalSlots = ref(3)
 const saving = ref(false)
 const error = ref<string | null>(null)
-
-const methodOptions = (['squash', 'merge'] as MergeMethod[]).map((method) => ({
-  value: method,
-  label: t(`changes.method.${method}`),
-}))
 
 // The autopilot merges what the review let through: one goes on with the other.
 function setReview(on: boolean) {
@@ -152,9 +150,6 @@ function nextText(routine: ProjectSettings['routines'][number]): string {
   const next = nextRunOf(routine, now.value)
   return next === null ? t('routine.noDays') : t('routine.next', { time: clockText(next) })
 }
-function addRoutine() {
-  settings.value?.routines.push(newRoutine())
-}
 function removeRoutine(id: string) {
   if (settings.value) settings.value.routines = settings.value.routines.filter((r) => r.id !== id)
 }
@@ -196,16 +191,23 @@ async function save() {
   >
     <DouTabs v-if="settings" v-model="tab" placement="start" :height="560">
       <DouTabPanel value="source" :label="t('projectSettings.tab.source')">
-        <SourceForm ref="source" />
+        <div class="project-stack">
+          <SourceForm ref="source" />
+          <SourceNotes />
+        </div>
       </DouTabPanel>
       <DouTabPanel value="instructions" :label="t('projectSettings.tab.instructions')">
-        <DouTextarea
-          v-model="settings.instructions"
-          :autosize="{ minRows: 10, maxRows: 20 }"
-          :maxlength="16000"
-          :placeholder="t('projectSettings.instructionsPlaceholder')"
-          :aria-label="t('projectSettings.tab.instructions')"
-        />
+        <div class="project-stack">
+          <DouTextarea
+            v-model="settings.instructions"
+            :autosize="{ minRows: 6, maxRows: 14 }"
+            :maxlength="16000"
+            :placeholder="t('projectSettings.instructionsPlaceholder')"
+            :aria-label="t('projectSettings.tab.instructions')"
+          />
+          <DouText weight="medium" size="sm">{{ t('memory.title') }}</DouText>
+          <MemoryList />
+        </div>
       </DouTabPanel>
       <DouTabPanel value="workspace" :label="t('projectSettings.tab.workspace')">
         <DouForm layout="vertical" size="sm">
@@ -280,13 +282,6 @@ async function save() {
                 : t('projectSettings.autopilotStartsNone')
             }}
           </DouText>
-          <DouFormItem :label="t('projectSettings.autopilotMethod')">
-            <DouSelect
-              v-model="settings.autopilot.method"
-              :options="methodOptions"
-              :disabled="!settings.autopilot.enabled"
-            />
-          </DouFormItem>
           <div class="project-row">
             <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
               <DouInputNumber
@@ -349,17 +344,10 @@ async function save() {
               </DouButton>
             </div>
           </div>
-          <DouButton
-            v-if="settings.routines.length < 20"
-            variant="ghost"
-            size="sm"
-            class="project-routine-add"
-            @click="addRoutine"
-          >
-            <template #leading><PlusIcon /></template>
-            {{ t('routine.add') }}
-          </DouButton>
         </div>
+      </DouTabPanel>
+      <DouTabPanel value="usage" :label="t('usage.title')">
+        <ProjectUsage />
       </DouTabPanel>
     </DouTabs>
     <DouAlert v-if="error" tone="danger" class="project-error">{{ error }}</DouAlert>
@@ -373,6 +361,12 @@ async function save() {
 </template>
 
 <style scoped>
+.project-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .project-row {
   display: flex;
   gap: 12px;

@@ -113,7 +113,7 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
-export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot'
+export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot' | 'usage'
 
 /** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
 export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
