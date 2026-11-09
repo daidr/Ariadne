@@ -180,6 +180,12 @@ export type ModelStreamPart =
    * then not the answer, and is no longer shown as it is written.
    */
   | { type: 'calling' }
+  /**
+   * The arguments of a tool call as far as they are written: `call` counts the calls of
+   * this response from 0, and `arguments` is the JSON text so far, cut wherever the
+   * service is in it. For showing a long call at work before it comes whole as `tool-call`.
+   */
+  | { type: 'tool-input'; call: number; name: string; arguments: string }
   | ({ type: 'tool-call' } & ToolCall)
   /**
    * One whole block of reasoning; it comes before the answer it led to. `startedAt` is
@@ -299,6 +305,63 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
    * already talk to the model with, and no search service needs setting up.
    */
   search?: ModelSearch<Settings>
+  /**
+   * The names of the models the account behind `settings` can use, for the settings form
+   * to offer, newest first where the service says. Throws with the reason when the service cannot be asked (a wrong address or
+   * key): the form shows it. Without it, model names are only typed.
+   */
+  models?(
+    settings: Settings,
+    options?: { headers?: Record<string, string>; signal?: AbortSignal },
+  ): Promise<string[]>
+  /**
+   * Whether the setup can work at all, without asking a model: the reason when it cannot
+   * (the program is not installed), in the user's languages, `null` when it can. Checked when the settings are
+   * saved; without it the model is asked for one word instead.
+   */
+  check?(settings: Settings): Promise<LocalizedText | null>
+  /**
+   * Setups of this kind already on the machine (a key in the environment, a program
+   * signed in), offered on first run so the user need not type them in.
+   */
+  find?(context: FindContext): FoundSetup<Settings>[]
+}
+
+/** Where a setup was found on this machine: an environment variable, or a program. */
+export type FoundFrom = { env: string } | { program: string }
+
+/** A setup of a model provider found on this machine, ready to use as it is. */
+export interface FoundSetup<Settings = Record<string, unknown>> {
+  /** Tells the provider's finds apart, e.g. the variable's name. */
+  id: string
+  /** The service it talks to, where the provider's own title says too little. */
+  name?: string
+  from: FoundFrom
+  settings: Settings
+}
+
+/** What a provider may look at to find a setup; never the network. */
+export interface FindContext {
+  env: Readonly<Record<string, string | undefined>>
+  /** The user's home directory. */
+  home: string
+  /** The path of a program on the user's PATH, `null` when there is none. */
+  which(program: string): string | null
+}
+
+/** The reason a service gave for turning a request down, short enough to show in a form. */
+export async function refusalText(response: Response): Promise<string> {
+  const body = (await response.text().catch(() => '')).trim()
+  let detail = body
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown }
+    const message =
+      typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message ?? parsed.message)
+    if (typeof message === 'string' && message.trim()) detail = message.trim()
+  } catch {
+    // Not JSON: the text itself, as far as it goes.
+  }
+  return `${response.status}${detail ? ` ${detail.slice(0, 300)}` : ''}`
 }
 
 /** What a model's own web search is asked. */

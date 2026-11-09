@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   CommandSandbox,
   Effort,
+  FindContext,
   LocalizedText,
   ModelProvider,
   ModelRequest,
@@ -13,6 +14,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolBridge, ToolOutput } from './bridge'
+import { splitCommand } from './process'
 import {
   fingerprint,
   joinInput,
@@ -91,9 +93,25 @@ export interface AgentKind<Settings> {
   kind: string
   title: LocalizedText
   settings: SettingsSchema
+  /**
+   * The model names it takes besides `default` (whatever the program itself is set to),
+   * when they are the same for every account.
+   */
+  models?: string[]
+  /**
+   * Whether the program is on this machine and signed in, as far as files and the
+   * environment tell: it is then offered on first run.
+   */
+  signedIn?(context: FindContext): boolean
   create(context: DriverContext<Settings>): Driver
   /** What starting it looks like, for the trace: the program, its options, the tools. */
   describe(settings: Settings, request: ModelRequest): unknown
+}
+
+/** The program a kind starts when the user names none. */
+const PROGRAM = <Settings>(agent: AgentKind<Settings>): string => {
+  const command = agent.settings.properties.command
+  return (command?.type === 'string' && command.default) || agent.kind
 }
 
 class EventQueue {
@@ -327,6 +345,18 @@ export function agentProvider<Settings>(
     title: agent.title,
     settings: agent.settings,
     program: true,
+    models: async () => ['default', ...(agent.models ?? [])],
+    async check(settings) {
+      const [program] = splitCommand(String((settings as { command?: unknown }).command ?? ''))
+      return !program || Bun.which(program)
+        ? null
+        : { 'zh-CN': `找不到命令 ${program}`, en: `command not found: ${program}` }
+    },
+    find(context) {
+      return agent.signedIn?.(context)
+        ? [{ id: agent.kind, from: { program: PROGRAM(agent) }, settings: {} as Settings }]
+        : []
+    },
     requestBody: (settings, request) => agent.describe(settings, request),
     sessions: () => pool.size,
     async dispose() {

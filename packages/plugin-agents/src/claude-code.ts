@@ -1,5 +1,5 @@
 import type { ModelRequest } from '@ariadne/plugin-sdk'
-import { writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SERVER_NAME } from './bridge'
 import { agentEnv, AgentProcess, splitCommand } from './process'
@@ -84,6 +84,18 @@ const FIELDS = ['input', 'output', 'cached', 'cacheWrite', 'reasoning'] as const
 export const claudeCode: AgentKind<ClaudeCodeSettings> = {
   kind: 'claude-code',
   title: { 'zh-CN': 'Claude Code', en: 'Claude Code' },
+  models: ['sonnet', 'opus', 'haiku'],
+  // It keeps who is signed in under its own directory, or in the system's keychain with
+  // only its settings file left to tell.
+  signedIn({ env, home, which }) {
+    if (!which('claude')) return false
+    const dir = env.CLAUDE_CONFIG_DIR?.trim() || join(home, '.claude')
+    return (
+      !!env.CLAUDE_CODE_OAUTH_TOKEN ||
+      existsSync(join(dir, '.credentials.json')) ||
+      existsSync(join(home, '.claude.json'))
+    )
+  },
   settings: {
     type: 'object',
     properties: {

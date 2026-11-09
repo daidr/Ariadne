@@ -29,7 +29,14 @@ import { join, resolve } from 'node:path'
 import { createHandler, joinShared, type SharedSocketData } from './app'
 import { DailyBackup, DataStore } from './data'
 import { loadConfig } from './config'
+import { openBrowser } from './open-browser'
 import { loadUserConfig, SettingsStore } from './settings'
+
+/**
+ * How long a page left open may take to reconnect after a restart before a new one opens:
+ * a little longer than the longest the page waits between tries.
+ */
+const RECONNECT_WAIT_MS = 12_000
 
 const config = loadConfig()
 const app = new Ariadne({ path: config.databasePath })
@@ -144,6 +151,10 @@ const scheduler = new Scheduler({
   searchService: () => settings.searchService(),
   mcp,
   shared,
+  everywhere: {
+    add: (line) => settings.addInstruction(line),
+    remove: (line) => settings.removeInstruction(line),
+  },
 })
 // Worktrees of work that landed go once the thread is finished with them.
 const janitor = new WorktreeJanitor(app, workspaces)
@@ -167,6 +178,8 @@ watcher.start()
 janitor.start()
 autopilot.start()
 
+// Pages that asked for events since the start: one left open reconnects by itself.
+let pages = 0
 const server = Bun.serve<SharedSocketData>({
   hostname: config.hostname,
   port: config.port,
@@ -187,6 +200,7 @@ const server = Bun.serve<SharedSocketData>({
     },
   },
   fetch(request, bun) {
+    if (new URL(request.url).pathname === '/api/events') pages++
     const joined = joinShared(request, bun, { app, token: config.token })
     return joined === null ? handle(request) : joined
   },
@@ -206,11 +220,17 @@ const handle = createHandler({
   feedback,
 })
 
-console.info(
-  t('cli.server.started', {
-    url: `http://${server.hostname}:${server.port}/#token=${config.token}`,
-  }),
-)
+const pageUrl = `http://${server.hostname}:${server.port}/#token=${config.token}`
+console.info(t('cli.server.started', { url: pageUrl }))
+if (config.open && config.webDist) {
+  // A page left open from before comes back within moments; only without one is a new
+  // one opened. On the first run there is none to wait for.
+  const open = () => {
+    if (!pages) openBrowser(pageUrl)
+  }
+  if (config.firstRun) open()
+  else setTimeout(open, RECONNECT_WAIT_MS).unref()
+}
 
 async function shutdown() {
   server.stop()
