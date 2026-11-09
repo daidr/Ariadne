@@ -1,4 +1,4 @@
-import type { ConversationView, MessageView, NoticeView, TodoView } from '@ariadne/core'
+import type { ConversationView, MessageView, NoticeView, ThreadView, TodoView } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
 import {
   backMain,
@@ -11,6 +11,7 @@ import {
   openThread,
   openView,
   partsOf,
+  patchThreads,
   setSide,
   state,
   type ConversationState,
@@ -205,5 +206,30 @@ describe('artifacts and changes', () => {
     closeFull()
     await openThread('th_1')
     expect(tabs()).toContain(side.threadKey('th_1'))
+  })
+})
+
+const row = (id: string, title = id) => ({ id, title }) as ThreadView
+
+describe('patchThreads', () => {
+  const had = [row('a'), row('b')]
+
+  test('puts the changed threads in place of the ones had, keeping the rest', () => {
+    const changed = row('b', 'renamed')
+    const next = patchThreads(had, [changed], undefined)
+    expect(next).toEqual([had[0], changed])
+    expect(next![0]).toBe(had[0])
+    expect(patchThreads(had, [], undefined)).toEqual(had)
+  })
+
+  test('follows the ids when threads came or went', () => {
+    const added = row('c')
+    expect(patchThreads(had, [added], ['a', 'b', 'c'])).toEqual([...had, added])
+    expect(patchThreads(had, [], ['b'])).toEqual([had[1]])
+  })
+
+  test('gives up on a thread it was never sent', () => {
+    expect(patchThreads(had, [row('c')], undefined)).toBeNull()
+    expect(patchThreads(had, [], ['a', 'b', 'c'])).toBeNull()
   })
 })

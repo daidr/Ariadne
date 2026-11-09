@@ -50,6 +50,7 @@ import {
   toErrorResponse,
 } from './http'
 import { PriceCatalog } from './prices'
+import { ThreadSync } from './thread-sync'
 
 /** A directory listing gives up after this long. */
 const BROWSE_TIMEOUT_MS = 15_000
@@ -255,12 +256,17 @@ export function createHandler({
     return json({ project: app.createProject(requireString(body, 'name')) }, 201)
   })
 
-  add('GET', '/api/projects/:projectId', (_request, { projectId = '' }) =>
-    json({
-      ...app.getProjectDetail(projectId),
-      hasTracker: !!workspaces?.hasTracker(projectId),
-    }),
-  )
+  // With `since` (a `sync.cursor` given before), only the threads changed after it.
+  const threadSync = new ThreadSync()
+  add('GET', '/api/projects/:projectId', (_request, { projectId = '' }, url) => {
+    const detail = app.getProjectDetail(projectId)
+    const { threads, ...sync } = threadSync.delta(
+      projectId,
+      detail.threads,
+      url.searchParams.get('since'),
+    )
+    return json({ ...detail, threads, sync, hasTracker: !!workspaces?.hasTracker(projectId) })
+  })
 
   // Delete a project with everything Ariadne keeps for it. Its turns end first, then its
   // threads' worktrees go (branches stay), then its data. The source's own directory or
@@ -275,6 +281,7 @@ export function createHandler({
         try {
           await workspaces?.discardProject(projectId)
           app.deleteProject(projectId)
+          threadSync.forget(projectId)
           settings?.forgetProject(projectId)
         } finally {
           release()
