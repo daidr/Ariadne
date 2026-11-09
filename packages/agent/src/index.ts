@@ -78,3 +78,5 @@ export {
 export { mcpTools } from './mcp-tools'
 export { SharedArtifacts, type SharedSocket } from './shared-artifacts'
 export { ArtifactFeedback, boardChanges, whereOn } from './artifact-feedback'
+export { canSearch, forgetRefusedSearches, searchingModels, type SearchRoutes } from './web-tools'
+export { keyedSearch } from './search-service'

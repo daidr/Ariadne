@@ -1,6 +1,6 @@
 import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
-import { openAICompatibleProvider, requestBody, toWire } from './index'
+import { openAICompatibleProvider, readSearch, requestBody, toWire } from './index'
 
 let lastBody: Record<string, unknown> | null = null
 let lastAuth: string | null = null
@@ -311,5 +311,98 @@ describe('openai-compatible provider', () => {
       // Too long to wait for, but another model may answer.
       busy: true,
     })
+  })
+})
+
+describe("the service's own web search", () => {
+  test('only the service the protocol comes from is taken to search', () => {
+    const { available } = openAICompatibleProvider.search!
+    expect(available({ baseUrl: 'https://api.openai.com/v1', apiKey: 'k' })).toBe(true)
+    expect(available({ baseUrl: 'https://api.deepseek.com/v1', apiKey: 'k' })).toBe(false)
+    expect(available({ baseUrl: 'http://localhost:11434/v1', apiKey: '' })).toBe(false)
+  })
+
+  test('one request to the responses endpoint; cited pages first, then the others read', async () => {
+    let path = ''
+    const search = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        path = new URL(request.url).pathname
+        lastAuth = request.headers.get('authorization')
+        lastBody = (await request.json()) as Record<string, unknown>
+        return Response.json({
+          output: [
+            {
+              type: 'web_search_call',
+              status: 'completed',
+              action: {
+                type: 'search',
+                query: 'q',
+                sources: [
+                  { type: 'url', url: 'https://a.example' },
+                  { type: 'url', url: 'https://b.example' },
+                ],
+              },
+            },
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'It shipped ([B](https://b.example)).',
+                  annotations: [
+                    {
+                      type: 'url_citation',
+                      url: 'https://b.example',
+                      title: 'B',
+                      start_index: 0,
+                      end_index: 5,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          usage: {
+            input_tokens: 50,
+            output_tokens: 10,
+            input_tokens_details: { cached_tokens: 5 },
+          },
+        })
+      },
+    })
+    try {
+      const answer = await openAICompatibleProvider.search!.run(
+        { baseUrl: `http://127.0.0.1:${search.port}/v1/`, apiKey: 'sk-test' },
+        { model: 'm', query: 'did it ship', limit: 5 },
+      )
+      expect(path).toBe('/v1/responses')
+      expect(lastAuth).toBe('Bearer sk-test')
+      expect(lastBody).toMatchObject({
+        model: 'm',
+        tools: [{ type: 'web_search' }],
+        include: ['web_search_call.action.sources'],
+      })
+      expect(String(lastBody?.input)).toContain('Query: did it ship')
+      expect(answer).toEqual({
+        text: 'It shipped ([B](https://b.example)).',
+        sources: [
+          { title: 'B', url: 'https://b.example', snippet: '' },
+          { title: '', url: 'https://a.example', snippet: '' },
+        ],
+        usage: { input: 50, output: 10, cached: 5 },
+      })
+    } finally {
+      await search.stop(true)
+    }
+  })
+
+  test('an answer cut off before any text is an error, not a list of pages', () => {
+    const output = [
+      { type: 'web_search_call', action: { sources: [{ url: 'https://a.example' }] } },
+    ]
+    expect(() => readSearch({ status: 'incomplete', output }, 5)).toThrow('ended early')
+    expect(readSearch({ status: 'completed', output }, 5).sources).toHaveLength(1)
   })
 })

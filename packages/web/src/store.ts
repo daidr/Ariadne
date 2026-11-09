@@ -1073,6 +1073,9 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
     case 'routine':
     case 'project':
       return ['detail', 'conversations']
+    // A recap is a line of the coordinator's conversation.
+    case 'user':
+      return ['conversations']
     case 'turn':
       return type === 'turn.step'
         ? ['detail', 'conversations']

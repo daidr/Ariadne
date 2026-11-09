@@ -28,6 +28,7 @@ import type {
   TraceTurn,
   MemoryView,
   NoticeView,
+  ProjectDetected,
   ProjectSettings,
   StoredFile,
 } from '@ariadne/core'
@@ -289,6 +290,12 @@ export interface Limits {
 }
 
 /** How the work is done everywhere: the user's instructions, command rules, limits. */
+/** Web search in the settings: whether a key is stored, and whether search waits for one. */
+export interface SearchSettings {
+  keySet: boolean
+  needed: boolean
+}
+
 export interface WorkSettings {
   instructions: string
   rules: CommandRule[]
@@ -300,6 +307,8 @@ export type ToolGroup = 'fetch' | 'search' | 'commands' | 'issueWrites'
 
 export interface ProjectSettingsView {
   settings: ProjectSettings
+  /** What Ariadne found out about the repository, shown where the user wrote nothing. */
+  detected: ProjectDetected
   /** Names of the project's command environment variables; values stay on the server. */
   env: string[]
   /** The built-in tool groups a project can switch off. */
@@ -497,6 +506,10 @@ export const api = {
   saveInputSettings: (input: InputSettings) =>
     request<InputSettings>('PUT', '/api/settings/input', input),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
+  getSearchSettings: () => request<SearchSettings>('GET', '/api/settings/search'),
+  /** `null` clears the stored key. */
+  saveSearchSettings: (input: { apiKey: string | null }) =>
+    request<SearchSettings>('PUT', '/api/settings/search', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   addPlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
@@ -537,6 +550,9 @@ export const api = {
     ),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
+  /** The user is back at the project after `away` ms without touching it. */
+  noteReturn: (projectId: string, away: number) =>
+    request<void>('POST', `/api/projects/${projectId}/return`, { away }),
   answerAttention: (id: string, answer: BlockAnswer) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),

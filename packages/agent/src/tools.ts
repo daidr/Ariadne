@@ -9,7 +9,6 @@ import {
   type TodoItem,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
-import type { SearchProvider } from '@ariadne/plugin-sdk'
 import { artifactTools } from './artifact-tools'
 import { planTools, readPlan } from './plan-tools'
 import { issueReadTools, issueWriteTools } from './issue-tools'
@@ -25,9 +24,9 @@ import {
   type Tool,
   type ToolContext,
 } from './tool-helpers'
-import { fetchUrlTool, webSearchTool } from './web-tools'
+import { canSearch, fetchUrlTool, webSearchTool, type SearchRoutes } from './web-tools'
 import type { WebAccess } from './web'
-import { sourceTools, workspaceTools } from './workspace-tools'
+import { noteCheck, sourceTools, workspaceTools } from './workspace-tools'
 import { researchTool } from './research'
 import { waitTool } from './wait-tool'
 import { readSkill, reviewerTools } from './review-tools'
@@ -792,17 +791,20 @@ export function toolsFor(
     repo: boolean
     tracker?: boolean
     models?: ModelChoice[]
-    /** The plugins' search services; without any there is no web_search. */
-    search?: ReadonlyMap<string, SearchProvider>
+    /** What searches the web; without any of it there is no web_search. */
+    search?: SearchRoutes
     /** Swaps the resolver and fetch of fetch_url, for tests. */
     web?: WebAccess
     /** Whether a research can be handed questions. */
     research?: boolean
+    /** A thread that may note the project's check after edits (`Ariadne.canNoteCheck`). */
+    noteCheck?: boolean
   },
 ): Tool[] {
+  const searches = canSearch(source.search)
   const web = [
-    fetchUrlTool(source.web),
-    ...(source.search?.size ? [webSearchTool(source.search)] : []),
+    fetchUrlTool(source.web, searches),
+    ...(searches && source.search ? [webSearchTool(source.search)] : []),
   ]
   if (role === 'coordinator') {
     return [
@@ -817,6 +819,7 @@ export function toolsFor(
     ...threadTools,
     ...web,
     ...(source.workspace ? workspaceTools : []),
+    ...(source.workspace && source.noteCheck ? [noteCheck] : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
     ...(source.research ? [researchTool] : []),

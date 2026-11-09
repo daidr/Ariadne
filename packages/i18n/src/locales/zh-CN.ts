@@ -308,6 +308,9 @@ export const zhCN = {
   'settings.name': '名称',
   'settings.secretSet': '已设置，留空则保持不变',
   'settings.clearSecret': '清除',
+  'settings.search': '联网搜索',
+  'settings.searchKey': 'Tavily API Key',
+  'settings.searchKeyHelp': '当前模型接口不带搜索，填入后可用',
   'settings.noProviders': '还没有模型提供方',
   'settings.contextTokens': '上下文（k token）',
   'settings.modelImages': '看图片',
@@ -823,6 +826,14 @@ export const zhCN = {
     '审阅通过、检查全绿就自动合并，依赖完成的节点自动开工，到里程碑先问你',
   'projectSettings.autopilotStarts': '打开后马上开工：{titles}',
   'projectSettings.autopilotStartsNone': '打开后暂时没有可以开工的节点',
+  'recap.title': '离开 {time}：{parts}',
+  'recap.join': '，',
+  'recap.done': '{count} 个完成',
+  'recap.merged': '{count} 个合并',
+  'recap.waiting': '{count} 个等你',
+  'recap.minutes': '{count} 分钟',
+  'recap.hours': '{count} 小时',
+  'recap.days': '{count} 天',
 } as const
 
 export type MessageKey = keyof typeof zhCN

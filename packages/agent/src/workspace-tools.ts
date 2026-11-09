@@ -1,4 +1,10 @@
-import { confirmBlock, DomainError, MAX_MODEL_IMAGE_BYTES } from '@ariadne/core'
+import {
+  checkCommand,
+  confirmBlock,
+  DomainError,
+  MAX_CHECK_COMMAND,
+  MAX_MODEL_IMAGE_BYTES,
+} from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
 import type { CommandOutput } from './background'
@@ -210,6 +216,13 @@ async function checkAfterEdit(
 ): Promise<string> {
   const check = ctx.commands?.check?.trim()
   if (!check) return ''
+  const { command, result } = await runCheck(ctx, workspace, check, paths)
+  if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
+  return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${checkOutput(result)}`
+}
+
+/** Run a check after edits on `paths`, which `{file}` in it stands for. */
+async function runCheck(ctx: ToolContext, workspace: Workspace, check: string, paths: string[]) {
   const shell = ctx.commands?.shellName ?? 'bash'
   const command = check.replaceAll('{file}', paths.map((p) => quoteFor(shell, p)).join(' '))
   const limits = ctx.limits ?? DEFAULT_LIMITS
@@ -226,14 +239,84 @@ async function checkAfterEdit(
       stdout: '',
       stderr: error instanceof Error ? error.message : String(error),
     }))
-  if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
-  const output = headAndTail(
+  return { command, result }
+}
+
+const checkOutput = (result: { stdout: string; stderr: string }) =>
+  headAndTail(
     [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
     MAX_CHECK_OUTPUT,
     'run the check with run_command to see all of it',
-  )
-  return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${output || '(no output)'}`
-}
+  ) || '(no output)'
+
+/**
+ * For a project whose user set no check after edits: the first thread to know the
+ * repository notes one, and every thread's edits are checked with it from then on. It is
+ * run once here, so a command that does not work is found out now and not after each edit.
+ */
+export const noteCheck = workspaceTool(
+  {
+    name: 'note_check',
+    description:
+      'Note the check Ariadne runs after every edit_file and write_file in this project, for all its threads; its failures come back with the edit. The project has none yet, and you are the first thread that can tell: look at how the repository checks its code (package scripts, AGENTS.md or CLAUDE.md, CI config), then note one quick command, a type check or a linter, never the tests or a build. `{file}` in it stands for the files just changed; use it when the tool can check single files, so the check stays fast. The command is run once now on `files` and you get its result: call again with a corrected command if it did not run as meant. Pass an empty command when the repository has nothing fit. The user sees what you noted in the project settings.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Files of the workspace to try the command on; needed when it has {file}.',
+        },
+      },
+      required: ['command'],
+    },
+  },
+  async (args, workspace, ctx) => {
+    if (typeof args.command !== 'string') throw new ToolInputError('"command" must be a string')
+    const command = args.command.trim()
+    if (command.length > MAX_CHECK_COMMAND) {
+      throw new ToolInputError(`"command" must be at most ${MAX_CHECK_COMMAND} characters`)
+    }
+    const files = Array.isArray(args.files)
+      ? args.files.filter((file): file is string => typeof file === 'string' && !!file.trim())
+      : []
+    if (!ctx.app.canNoteCheck(ctx.conversationId)) {
+      const current = checkCommand(ctx.app.getProject(ctx.projectId))
+      return {
+        content: current
+          ? `The project already has its check after edits: ${current}`
+          : 'The check after edits of this project is not yours to note.',
+        isError: true,
+      }
+    }
+    if (!command) {
+      ctx.app.noteCheck(ctx.conversationId, '')
+      return { content: 'Noted: this project has no check after edits.' }
+    }
+    if (commandVerdict(command, ctx.commands?.rules ?? []).action !== 'allow') {
+      return {
+        content:
+          "The user's command rules do not let this command run unasked, so it cannot be the check after edits. Note another, or none.",
+        isError: true,
+      }
+    }
+    if (command.includes('{file}') && !files.length) {
+      throw new ToolInputError(
+        '"files" must name a file to try the command on, since it has {file}',
+      )
+    }
+    const { command: ran, result } = await runCheck(ctx, workspace, command, files)
+    if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
+    ctx.app.noteCheck(ctx.conversationId, command)
+    return {
+      content:
+        result.exitCode === 0
+          ? `Noted. It passed just now: ${ran}`
+          : `Noted. It failed just now (exit code ${result.exitCode}): ${ran}\n${checkOutput(result)}\nIf the command itself is wrong (not found, bad arguments), note the corrected one now; if it found real problems in the code, it works.`,
+    }
+  },
+)
 
 /** The text of a file, or `null` when there is none (or it cannot be read). */
 const currentText = (workspace: Workspace, path: string) =>

@@ -526,3 +526,35 @@ describe('MCP servers', () => {
     expect(store.current.mcp.servers).toEqual([])
   })
 })
+
+describe('web search', () => {
+  test('a key is asked for only when no model service searches the web itself', () => {
+    const store = new SettingsStore(path, host)
+    // Nothing set up yet: nothing to ask.
+    expect(store.publicSearch()).toEqual({ keySet: false, needed: false })
+    store.updateModels(provider({ baseUrl: 'https://relay.example', apiKey: 'k' }))
+    expect(store.searchModels()).toEqual([])
+    expect(store.publicSearch()).toEqual({ keySet: false, needed: true })
+    store.updateModels(provider({ baseUrl: 'https://api.anthropic.com', apiKey: 'k' }))
+    expect(store.searchModels().map((model) => model.label)).toEqual(['主力 / some-model'])
+    expect(store.publicSearch()).toEqual({ keySet: false, needed: false })
+  })
+
+  test('the key is kept out of what the page gets; empty keeps it, null clears it', () => {
+    const store = new SettingsStore(path, host)
+    expect(store.searchService()).toBeNull()
+    expect(store.updateSearch({ apiKey: ' tvly-secret ' })).toEqual({ keySet: true, needed: false })
+    expect(JSON.parse(readFileSync(path, 'utf8')).search).toEqual({ apiKey: 'tvly-secret' })
+    const service = store.searchService()
+    expect(service?.kind).toBe('tavily')
+    store.updateSearch({ apiKey: '' })
+    store.updateSearch({})
+    expect(new SettingsStore(path, host).searchService()).not.toBeNull()
+    expect(store.searchService()).toBe(service)
+    expect(() => store.updateSearch({ apiKey: 5 })).toThrow()
+    expect(() => store.updateSearch({ apiKey: 'two words' })).toThrow()
+    store.updateSearch({ apiKey: null })
+    expect(store.searchService()).toBeNull()
+    expect(store.publicSearch().keySet).toBe(false)
+  })
+})

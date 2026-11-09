@@ -1,6 +1,6 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
-import type { ProjectSettings } from './project-settings'
+import type { ProjectDetected, ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
@@ -54,6 +54,8 @@ export interface ProjectView {
   /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
   mcp: string[]
   settings: ProjectSettings
+  /** What Ariadne found out about the repository itself, in place of settings left to it. */
+  detected: ProjectDetected
   /** The user paused the autopilot (`settings.autopilot`); it merges and starts nothing. */
   autopilotPaused: boolean
   /** Tokens every conversation of the project has used, summaries included. */
@@ -253,6 +255,18 @@ export type NoticeView = {
   | { kind: 'compaction-failed'; detail: string }
   /** An agent added or removed one of the project's routines. */
   | { kind: 'routine-change'; action: 'added' | 'removed'; prompt: string }
+  /**
+   * What happened while the user was away since `since`, in the coordinator's conversation
+   * where they came back; see `user.returned`. A project keeps its latest one only.
+   */
+  | {
+      kind: 'recap'
+      since: number
+      done: string[]
+      merged: string[]
+      waiting: string[]
+      asks: string[]
+    }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
   /** The main model's retries ran out; the turn went on with the fallback. */
   | { kind: 'model-fallback'; from: string; to: string; detail: string }

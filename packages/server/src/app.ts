@@ -54,6 +54,8 @@ import { ThreadSync } from './thread-sync'
 
 /** A directory listing gives up after this long. */
 const BROWSE_TIMEOUT_MS = 15_000
+/** How long opening a project's settings waits for its source to say what it installs. */
+const DETECT_WAIT_MS = 1500
 
 /** How long a listing may take: a remote machine may be slow to reach. */
 const browseOptions = () => ({ signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS) })
@@ -325,6 +327,13 @@ export function createHandler({
     })
     return json({ memory })
   })
+  // The user is back at the project: what happened while they were away is told, if anything.
+  add('POST', '/api/projects/:projectId/return', async (request, params) => {
+    const { away } = await readJson(request)
+    if (typeof away !== 'number') throw new BadRequest('away')
+    app.noteReturn(params.projectId ?? '', away)
+    return new Response(null, { status: 204 })
+  })
   // The user takes back an agent's change to the memory.
   add('POST', '/api/projects/:projectId/notices/:noticeId/undo', (_request, params) => {
     app.undoMemoryNotice(params.projectId ?? '', params.noticeId ?? '')
@@ -439,14 +448,22 @@ export function createHandler({
 
   // The project's own settings, with the names of its command environment variables (their
   // values never leave the server).
-  add('GET', '/api/projects/:projectId/settings', (_request, { projectId = '' }) =>
-    json({
+  add('GET', '/api/projects/:projectId/settings', async (_request, { projectId = '' }) => {
+    app.getProject(projectId)
+    // Before any workspace was opened, what a new one would install is read from the
+    // source, so the user sees it here first; a source slow to answer is not waited for.
+    await Promise.race([
+      workspaces?.detectSetup(projectId).catch(() => {}),
+      new Promise((done) => setTimeout(done, DETECT_WAIT_MS)),
+    ])
+    return json({
       settings: app.getProject(projectId).settings,
+      detected: app.getProject(projectId).detected,
       env: settings?.projectEnvNames(projectId) ?? [],
       tools: TOOL_SWITCH_NAMES,
       hostedMerge: !!workspaces?.hasRepo(projectId),
-    }),
-  )
+    })
+  })
 
   add('PUT', '/api/projects/:projectId/settings', async (request, { projectId = '' }) => {
     const body = await readJson(request)
@@ -463,6 +480,7 @@ export function createHandler({
     return json({
       project,
       settings: project.settings,
+      detected: project.detected,
       env,
       tools: TOOL_SWITCH_NAMES,
       hostedMerge: !!workspaces?.hasRepo(projectId),
@@ -1068,6 +1086,18 @@ export function createHandler({
     if (!settings)
       return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
     return json(settings.updateInput(await readJson(request)))
+  })
+
+  add('GET', '/api/settings/search', () => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.publicSearch())
+  })
+
+  add('PUT', '/api/settings/search', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(settings.updateSearch(await readJson(request)))
   })
 
   // Links in messages that a plugin knows, such as pull requests: what each names, and the

@@ -106,6 +106,7 @@ const workspaces = new WorkspaceManager(
   (projectId) => settings.sourceSecrets(projectId),
   {
     env: (projectId) => settings.turnSettings(projectId).env,
+    commandRules: (projectId) => settings.turnSettings(projectId).commandRules,
     setupTimeoutMs: () => settings.current.limits.commandTimeoutMax * 1000,
   },
 )
@@ -135,6 +136,8 @@ const scheduler = new Scheduler({
   reservedSlots: settings.current.concurrency.reserved,
   dashboardSources: host.dashboards,
   searchProviders: host.searches,
+  searchModels: () => settings.searchModels(),
+  searchService: () => settings.searchService(),
   mcp,
   shared,
 })

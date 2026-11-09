@@ -55,6 +55,14 @@ const mcpServers = ref<McpServerView[]>([])
 const totalSlots = ref(3)
 const saving = ref(false)
 const error = ref<string | null>(null)
+/**
+ * The setup script and the check as the fields show them. Left to Ariadne, a field shows
+ * what it found (`found`), and saved as it stands it stays Ariadne's; changed or emptied,
+ * it is the user's own from then on.
+ */
+const setup = ref('')
+const check = ref('')
+let found = { setup: '', check: '' }
 
 // Where merging happens in the app, the autopilot merges the way the user last did. A hosted
 // repository is merged on its platform, so there the way is chosen here.
@@ -142,6 +150,10 @@ watch(
       settings.value = structuredClone(view.settings)
       hostedMerge.value = view.hostedMerge
       loadedRoutines = JSON.stringify(view.settings.routines)
+      const { auto } = view.settings.workspace
+      found = { setup: view.detected.setup ?? '', check: view.detected.check?.command ?? '' }
+      setup.value = auto.setup ? found.setup : view.settings.workspace.setup
+      check.value = auto.check ? found.check : view.settings.workspace.check
       env.value = storedPairs(view.env)
       threadK.value = toK(view.settings.budget.thread)
       projectK.value = toK(view.settings.budget.project)
@@ -176,8 +188,19 @@ async function save() {
     saving.value = false
     return
   }
+  const { workspace } = settings.value
+  const auto = {
+    setup: workspace.auto.setup && setup.value.trim() === found.setup,
+    check: workspace.auto.check && check.value.trim() === found.check,
+  }
   const next: ProjectSettings = {
     ...settings.value,
+    workspace: {
+      ...workspace,
+      auto,
+      setup: auto.setup ? '' : setup.value,
+      check: auto.check ? '' : check.value,
+    },
     routines:
       JSON.stringify(settings.value.routines) === loadedRoutines
         ? (state.detail?.project.settings.routines ?? settings.value.routines)
@@ -228,7 +251,7 @@ async function save() {
         <DouForm layout="vertical" size="sm">
           <DouFormItem :label="t('projectSettings.setup')">
             <DouTextarea
-              v-model="settings.workspace.setup"
+              v-model="setup"
               :autosize="{ minRows: 2, maxRows: 8 }"
               :maxlength="8000"
               placeholder="bun install"
@@ -240,7 +263,7 @@ async function save() {
             :help="t('projectSettings.checkHelp', { placeholder: '{file}' })"
           >
             <DouInput
-              v-model="settings.workspace.check"
+              v-model="check"
               :maxlength="2000"
               placeholder="bunx tsc --noEmit"
               class="project-code"

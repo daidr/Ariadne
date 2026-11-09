@@ -3,8 +3,11 @@ import {
   COMMAND_ACTIONS,
   compactAt,
   DEFAULT_LIMITS,
+  forgetRefusedSearches,
+  keyedSearch,
   LIMIT_RANGES,
   MCP_TOOL_MARKS,
+  searchingModels,
   type CommandAction,
   type CommandRule,
   type Limits,
@@ -18,7 +21,7 @@ import {
   type TurnSettings,
 } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
-import { EFFORTS, type Effort, type SettingsSchema } from '@ariadne/plugin-sdk'
+import { EFFORTS, type Effort, type SearchProvider, type SettingsSchema } from '@ariadne/plugin-sdk'
 import {
   chmodSync,
   existsSync,
@@ -244,7 +247,15 @@ export interface UserConfig {
   limits: Limits
   /** Environment variables of each project's thread commands, by project id; may be secret. */
   projectEnv: Record<string, Record<string, string>>
+  /**
+   * The key of the search service agents use when no model service searches the web
+   * itself; `''` for none.
+   */
+  search: { apiKey: string }
 }
+
+/** The longest a search key may be: more is not a key. */
+const MAX_SEARCH_KEY = 200
 
 export const MAX_INSTRUCTIONS = 16_000
 const MAX_COMMAND_RULES = 200
@@ -333,6 +344,7 @@ const defaults = (): UserConfig => ({
   commands: { rules: [] },
   limits: { ...DEFAULT_LIMITS },
   projectEnv: {},
+  search: { apiKey: '' },
 })
 
 /** The settings stored at `path`, filled in with the defaults. */
@@ -368,6 +380,7 @@ export function loadUserConfig(path: string): UserConfig {
     commands: { rules: parseRules(stored.commands?.rules, false) },
     limits: parseLimits(stored.limits, false),
     projectEnv: { ...stored.projectEnv },
+    search: { apiKey: typeof stored.search?.apiKey === 'string' ? stored.search.apiKey : '' },
     sandbox: {
       mode: sandbox.mode === 'off' ? 'off' : 'auto',
       hide: Array.isArray(sandbox.hide)
@@ -567,6 +580,8 @@ export class SettingsStore {
         showCost: body.showCost === true,
       },
     }
+    // A model whose service turned search down gets asked again: the key or model may differ.
+    forgetRefusedSearches()
     this.save()
   }
 
@@ -781,6 +796,60 @@ export class SettingsStore {
     this.config = { ...this.config, instructions, commands, limits }
     this.save()
     return this.work()
+  }
+
+  /**
+   * Web search as the settings page shows it. `needed` says a key is what search waits
+   * for: models are set up, none of their services searches the web itself, and no plugin
+   * brought a search service. The key itself stays here.
+   */
+  publicSearch() {
+    const searches = this.host.searches.size > 0 || this.searchModels().length > 0
+    return {
+      keySet: !!this.config.search.apiKey,
+      needed: this.config.models.models.length > 0 && !searches,
+    }
+  }
+
+  /** Save the search key: `null` clears it, an empty one keeps what is stored. */
+  updateSearch(input: unknown) {
+    const { apiKey } = (input ?? {}) as { apiKey?: unknown }
+    if (apiKey !== undefined && apiKey !== null && typeof apiKey !== 'string') {
+      throw new BadRequest('apiKey')
+    }
+    const key = typeof apiKey === 'string' ? apiKey.trim() : apiKey
+    if (typeof key === 'string' && (key.length > MAX_SEARCH_KEY || /\s/.test(key))) {
+      throw new BadRequest('apiKey')
+    }
+    if (key === null || key) {
+      this.config = { ...this.config, search: { apiKey: key ?? '' } }
+      this.save()
+    }
+    return this.publicSearch()
+  }
+
+  private keyed: { apiKey: string; service: SearchProvider } | null = null
+
+  /** The search service the saved key is for; `null` without a key. */
+  searchService(): SearchProvider | null {
+    const { apiKey } = this.config.search
+    if (!apiKey) return null
+    if (this.keyed?.apiKey !== apiKey) this.keyed = { apiKey, service: keyedSearch(apiKey) }
+    return this.keyed.service
+  }
+
+  /** The models set up whose service searches the web itself, in the order listed. */
+  searchModels(): ResolvedModel[] {
+    return searchingModels(
+      this.config.models.models.map((model) => {
+        try {
+          return this.resolveConfig('research', model)
+        } catch {
+          // Its plugin is gone: it cannot search either.
+          return null
+        }
+      }),
+    )
   }
 
   /** The names of the project's command environment variables; values stay here. */
