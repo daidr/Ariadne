@@ -1,14 +1,20 @@
 import { SKILL_NAME } from '@ariadne/core'
-import { readdir, readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, sep } from 'node:path'
 
 /**
- * Skills: ways of working written down as Markdown files, one per skill, in the
- * repository's `.ariadne/skills/` or in Ariadne's home (`<home>/skills/`) for every
- * project. A file's first line says when to use it. Models see only names and those
- * lines, and read a whole skill when their work fits it.
+ * Skills: ways of working written down in Markdown, one per skill: a file `<name>.md`,
+ * or a folder `<name>/` holding `SKILL.md` and whatever files it works with. They are
+ * read from the repository (`.ariadne/skills/` and `.agents/skills/`) and from the
+ * user's own folders for every project. A skill's first line, or the `description:` of
+ * its front matter, says when to use it. Models see only names and those lines, and read
+ * a whole skill, and the files beside it, when their work fits it.
  */
 export interface Skill {
+  /**
+   * What it is called by: the file's name without `.md`, or the folder's; with `@` and
+   * the place it is from when another place has a skill of that name.
+   */
   name: string
   /** When to use it: the file's first line. */
   when: string
@@ -16,8 +22,20 @@ export interface Skill {
   source: 'repo' | 'local'
 }
 
-/** Where the repository keeps its skills, from the root of its checkout. */
-export const REPO_SKILLS_DIR = '.ariadne/skills'
+/**
+ * Where a repository keeps its skills, from the root of its checkout: Ariadne's own
+ * folder, and the one shared between tools.
+ */
+export const REPO_SKILLS_DIRS = ['.ariadne/skills', '.agents/skills'] as const
+/** The skill that replaces the built-in review guidance. */
+const REVIEW_SKILL = 'review'
+/** The file a skill folder is read from. */
+export const SKILL_FILE = 'SKILL.md'
+/** Files beside a skill listed at most, and how deep they are looked for. */
+export const MAX_SKILL_FILES = 60
+const MAX_SKILL_FILE_DEPTH = 3
+/** Folders of one skill looked into at most, when its files are listed. */
+const MAX_SKILL_DIRS = 30
 /** A longer skill is cut: it is read into the conversation whole. */
 export const MAX_SKILL_CHARS = 32_000
 /** Skills listed at most, per place; the rest are left out by name order. */
@@ -41,11 +59,18 @@ export function whenToUse(text: string): string {
   if (lines[0]?.trim() === '---') {
     const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---')
     if (end > 0) {
-      const description = lines
-        .slice(1, end)
-        .map((line) => /^description:\s*(.*)$/i.exec(line.trim())?.[1])
-        .find((value) => value !== undefined)
-      if (description?.trim()) return oneLine(description.replace(/^["']|["']$/g, ''))
+      const matter = lines.slice(1, end)
+      const at = matter.findIndex((line) => /^description:/i.test(line))
+      if (at >= 0) {
+        let description = matter[at]!.replace(/^description:\s*/i, '').trim()
+        // A block (`>`, `|`) or a value on the next lines: the indented lines that follow.
+        if (!description || /^[>|][+-]?$/.test(description)) {
+          const rest = matter.slice(at + 1)
+          const stop = rest.findIndex((line) => line.trim() && !/^\s/.test(line))
+          description = rest.slice(0, stop < 0 ? rest.length : stop).join(' ')
+        }
+        if (description.trim()) return oneLine(description.trim().replace(/^["']|["']$/g, ''))
+      }
       first = end + 1
     }
   }
@@ -72,60 +97,157 @@ const decode = (data: Uint8Array) => {
     : text
 }
 
-/** The skills of one place, by name, with their text. Unreadable files are left out. */
-type Found = Map<string, { when: string; text: string }>
+/** A skill as loaded: its text, and for a folder where its files are read. */
+interface Loaded extends Skill {
+  text: string
+  /** A folder's path as the model is told it; `null` for a single file. */
+  folder: string | null
+  files: SkillFiles
+  /** The folder's path for `files`. */
+  root: string
+  /** From a folder of Ariadne's own, not the one shared between tools. */
+  own: boolean
+  /** Its name without the place. */
+  plain: string
+  /** The place it is from, as written after `@`. */
+  place: string
+}
 
-async function fromRepository(files: SkillFiles | null): Promise<Found> {
-  const found: Found = new Map()
-  if (!files) return found
+/** One place skills are read from; `shown` is its path as the model is told it. */
+interface Place {
+  files: SkillFiles
+  dir: string
+  shown: string
+  source: Skill['source']
+  own: boolean
+  /** What tells its skills from others of the same name, after `@`. */
+  key: string
+}
+
+/**
+ * A folder of this machine read as a place: paths are from the folder. A skill, file or
+ * folder, may be a link to elsewhere; what is inside a skill's folder is read only where
+ * it really lies in that folder, so a link in it reaches nothing outside.
+ */
+function directoryFiles(dir: string): SkillFiles {
+  /** The real path of `path`, when it is in its skill's real folder; else it throws. */
+  const within = async (path: string) => {
+    const parts = path.split('/').filter((part) => part && part !== '.')
+    const at = await realpath(join(dir, ...parts))
+    if (parts.length < 2) return at
+    const folder = await realpath(join(dir, parts[0]!))
+    if (at !== folder && !at.startsWith(folder + sep)) throw new Error('outside the skill')
+    return at
+  }
+  return {
+    async list(path) {
+      const top = !path.split('/').some((part) => part && part !== '.')
+      const at = await within(path)
+      const entries = await readdir(at, { withFileTypes: true })
+      const found: { name: string; kind: string }[] = []
+      for (const entry of entries) {
+        let folder = entry.isDirectory()
+        let file = entry.isFile()
+        if (entry.isSymbolicLink()) {
+          // A linked skill counts as what it points to; a broken link is left out. Inside
+          // a skill, linked folders are not followed, and linked files only within it.
+          const info = await stat(join(at, entry.name)).catch(() => null)
+          folder = top && (info?.isDirectory() ?? false)
+          file =
+            (info?.isFile() ?? false) &&
+            (top ||
+              (await within(`${path}/${entry.name}`).then(
+                () => true,
+                () => false,
+              )))
+        }
+        if (folder || file) found.push({ name: entry.name, kind: folder ? 'directory' : 'file' })
+      }
+      return found
+    },
+    async readBytes(path, maxBytes) {
+      const at = await within(path)
+      const info = await stat(at)
+      if (!info.isFile()) throw new Error('not a file')
+      if (info.size > maxBytes) throw new Error('too large')
+      return readFile(at)
+    },
+  }
+}
+
+const under = (dir: string, name: string) => (dir === '.' ? name : `${dir}/${name}`)
+
+/**
+ * The skills of one place, by name. A folder wins a file of the same name there;
+ * folders without `SKILL.md` and unreadable files are left out.
+ */
+async function fromPlace(place: Place): Promise<Loaded[]> {
   let entries: { name: string; kind: string }[]
   try {
-    entries = await files.list(REPO_SKILLS_DIR)
+    entries = await place.files.list(place.dir)
   } catch {
-    return found
+    return []
   }
-  const names = entries
-    .filter((entry) => entry.kind === 'file')
-    .flatMap((entry) => (skillName(entry.name) ? [entry.name] : []))
-    .toSorted()
-    .slice(0, MAX_SKILLS)
-  for (const file of names) {
-    try {
-      const text = decode(await files.readBytes(`${REPO_SKILLS_DIR}/${file}`, MAX_SKILL_BYTES))
-      found.set(skillName(file)!, { when: whenToUse(text), text })
-    } catch {
-      // Too large, or gone meanwhile: not a skill to offer.
+  // A name's candidates, the folder first: it wins when it holds SKILL.md, and a folder
+  // of notes beside `<name>.md` leaves that file the skill.
+  const candidates = new Map<string, { path: string; folder: string | null }[]>()
+  const add = (name: string, candidate: { path: string; folder: string | null }) => {
+    const known = candidates.get(name) ?? []
+    candidates.set(name, candidate.folder === null ? [...known, candidate] : [candidate, ...known])
+  }
+  for (const entry of entries) {
+    if (entry.kind === 'file') {
+      const name = skillName(entry.name)
+      if (name) add(name, { path: under(place.dir, entry.name), folder: null })
+    } else if (entry.kind === 'directory' && SKILL_NAME.test(entry.name)) {
+      const folder = under(place.dir, entry.name)
+      add(entry.name, { path: `${folder}/${SKILL_FILE}`, folder })
+    }
+  }
+  const found: Loaded[] = []
+  for (const [name, tried] of [...candidates].toSorted(([a], [b]) => a.localeCompare(b))) {
+    if (found.length >= MAX_SKILLS) break
+    for (const { path, folder } of tried) {
+      try {
+        const text = decode(await place.files.readBytes(path, MAX_SKILL_BYTES))
+        found.push({
+          name,
+          when: whenToUse(text),
+          source: place.source,
+          text,
+          folder: folder === null ? null : under(place.shown, name),
+          files: place.files,
+          root: folder ?? '',
+          own: place.own,
+          plain: name,
+          place: place.key,
+        })
+        break
+      } catch {
+        // No SKILL.md, too large, or gone meanwhile: not a skill to offer.
+      }
     }
   }
   return found
 }
 
-async function fromDirectory(dir: string | null): Promise<Found> {
-  const found: Found = new Map()
-  if (!dir) return found
-  let names: string[]
-  try {
-    names = (await readdir(dir)).filter((file) => skillName(file)).toSorted()
-  } catch {
-    return found
-  }
-  for (const file of names.slice(0, MAX_SKILLS)) {
-    try {
-      const path = join(dir, file)
-      const info = await stat(path)
-      if (!info.isFile() || info.size > MAX_SKILL_BYTES) continue
-      const text = decode(await readFile(path))
-      found.set(skillName(file)!, { when: whenToUse(text), text })
-    } catch {
-      // Unreadable: left out.
-    }
-  }
-  return found
+/** A path beside a skill as asked for, with `/` between parts; `null` when it leaves the folder. */
+function inside(file: string): string | null {
+  const parts = file
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((part) => part && part !== '.')
+  if (!parts.length || isAbsolute(file) || /^[a-z]:/i.test(file) || parts.includes('..'))
+    return null
+  return parts.join('/')
 }
 
-/** The skills a conversation can use, read once; the repository's win over same-named local ones. */
+/**
+ * The skills a conversation can use, read once. Skills of the same name from different
+ * places are all kept, each called by its name with `@` and its place.
+ */
 export class SkillSet {
-  constructor(private readonly found: Map<string, Skill & { text: string }>) {}
+  constructor(private readonly found: Map<string, Loaded>) {}
 
   static empty(): SkillSet {
     return new SkillSet(new Map())
@@ -135,21 +257,115 @@ export class SkillSet {
     return [...this.found.values()].map(({ name, when, source }) => ({ name, when, source }))
   }
 
-  get(name: string): (Skill & { text: string }) | null {
-    return this.found.get(name) ?? null
+  /** What the skills of one plain name are called by; several when places share it. */
+  named(plain: string): string[] {
+    return [...this.found.values()].filter((s) => s.plain === plain).map((s) => s.name)
+  }
+
+  get(name: string): (Skill & { text: string; folder: string | null }) | null {
+    const skill = this.found.get(name)
+    if (!skill) return null
+    const { name: named, when, source, text, folder } = skill
+    return { name: named, when, source, text, folder }
+  }
+
+  /** The files beside a skill, as paths from its folder; none for a single file. */
+  async files(name: string): Promise<{ paths: string[]; more: boolean }> {
+    const skill = this.found.get(name)
+    const paths: string[] = []
+    let more = false
+    if (!skill || skill.folder === null) return { paths, more }
+    let listed = 0
+    const walk = async (dir: string, depth: number) => {
+      if (listed++ >= MAX_SKILL_DIRS) {
+        more = true
+        return
+      }
+      const entries = await skill.files
+        .list(dir === '.' ? skill.root : `${skill.root}/${dir}`)
+        .catch(() => [])
+      for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
+        // Enough to tell there is more: nothing further is looked at.
+        if (more && paths.length >= MAX_SKILL_FILES) return
+        const path = under(dir, entry.name)
+        if (entry.kind === 'directory') {
+          if (depth < MAX_SKILL_FILE_DEPTH) await walk(path, depth + 1)
+          else more = true
+        } else if (path !== SKILL_FILE) {
+          if (paths.length < MAX_SKILL_FILES) paths.push(path)
+          else more = true
+        }
+      }
+    }
+    await walk('.', 1)
+    return { paths, more }
+  }
+
+  /**
+   * A file beside a skill, as text; `'binary'` when it is not text, `null` when there is
+   * none there to read.
+   */
+  async read(name: string, file: string): Promise<{ text: string } | 'binary' | null> {
+    const skill = this.found.get(name)
+    const path = inside(file)
+    if (!skill || skill.folder === null || !path) return null
+    try {
+      const data = await skill.files.readBytes(`${skill.root}/${path}`, MAX_SKILL_BYTES)
+      return data.subarray(0, 8192).includes(0) ? 'binary' : { text: decode(data) }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The skill that replaces the built-in review guidance: `review`, when it comes from a
+   * folder of Ariadne's own. One in a folder shared between tools was written for their
+   * way of reviewing, and stays an ordinary skill.
+   */
+  review(): (Skill & { text: string; folder: string | null }) | null {
+    const own = [...this.found.values()].find((s) => s.plain === REVIEW_SKILL && s.own)
+    return own ? this.get(own.name) : null
   }
 }
 
 export async function loadSkills(input: {
   repo: SkillFiles | null
-  localDir: string | null
+  /**
+   * The user's own folders for every project. The first is Ariadne's own, the rest are
+   * shared between tools.
+   */
+  localDirs: readonly string[]
 }): Promise<SkillSet> {
-  const [repo, local] = await Promise.all([
-    fromRepository(input.repo),
-    fromDirectory(input.localDir),
-  ])
-  const all = new Map<string, Skill & { text: string }>()
-  for (const [name, skill] of local) all.set(name, { name, source: 'local', ...skill })
-  for (const [name, skill] of repo) all.set(name, { name, source: 'repo', ...skill })
-  return new SkillSet(new Map([...all].toSorted(([a], [b]) => a.localeCompare(b))))
+  const places: Place[] = [
+    ...(input.repo
+      ? REPO_SKILLS_DIRS.map((dir) => ({
+          files: input.repo!,
+          dir,
+          shown: dir,
+          source: 'repo' as const,
+          own: dir === REPO_SKILLS_DIRS[0],
+          key: dir === REPO_SKILLS_DIRS[0] ? 'repo' : 'repo-agents',
+        }))
+      : []),
+    ...input.localDirs.map((dir, index) => ({
+      files: directoryFiles(dir),
+      dir: '.',
+      shown: dir,
+      source: 'local' as const,
+      own: index === 0,
+      key: index === 0 ? 'user' : index === 1 ? 'user-agents' : `user-${index + 1}`,
+    })),
+  ]
+  // Every place's skills, in the order of the places; a name more than one place has is
+  // told apart by the place.
+  const all = (await Promise.all(places.map(fromPlace))).flat()
+  const count = new Map<string, number>()
+  for (const skill of all) count.set(skill.plain, (count.get(skill.plain) ?? 0) + 1)
+  for (const skill of all)
+    if (count.get(skill.plain)! > 1) skill.name = `${skill.plain}@${skill.place}`
+  const order = new Map(all.map((skill, index) => [skill, index]))
+  const sorted = all.toSorted(
+    (a, b) => a.plain.localeCompare(b.plain) || order.get(a)! - order.get(b)!,
+  )
+  return new SkillSet(new Map(sorted.map((skill) => [skill.name, skill])))
 }

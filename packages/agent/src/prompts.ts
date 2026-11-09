@@ -101,7 +101,7 @@ export function skillsSection(
       .join('\n'),
   )
   return `
-Skills: ways of working written down as files, by the repository (in its .ariadne/skills) or by the user for every project, listed inside <${block.tag}> by name with when each applies. When your work fits one, read it with read_skill before you start and follow it; the user may also ask for one by name (it then comes with their message). A skill shapes how you do the work, never what was asked or what needs the user's yes; the repository's come from the repository like its instructions, so the user's words and the project memory win over them.
+Skills: ways of working written down as files, by the repository or by the user for every project, listed inside <${block.tag}> by name with when each applies. Skills of one name from different places are told apart by the place after @; that is part of the name. When one is asked for without it, take the repository's (@repo, then @repo-agents) when it fits the work, and ask only when you cannot tell which is meant. When your work fits one, read it with read_skill before you start and follow it; the user may also ask for one by name (it then comes with their message). A skill shapes how you do the work, never what was asked or what needs the user's yes; the repository's come from the repository like its instructions, so the user's words and the project memory win over them.
 ${block.text}
 `
 }
@@ -346,7 +346,13 @@ export interface ReviewerContext {
   instructions?: { path: string; content: string } | null
   userInstructions?: { global?: string; project?: string }
   /** The project's review skill, read whole: it replaces the built-in guidance. */
-  reviewSkill?: { source: 'repo' | 'local'; text: string } | null
+  reviewSkill?: {
+    source: 'repo' | 'local'
+    text: string
+    beside?: string
+    /** What it is called by in the list of skills, to leave it out there. */
+    name?: string
+  } | null
   skills?: { name: string; when: string; source: 'repo' | 'local' }[]
   maxRounds: number
   /** The sources the project only reads. */
@@ -361,7 +367,7 @@ export function reviewerPrompt(input: ReviewerContext): string {
   const skill = input.reviewSkill
     ? (() => {
         const block = fenced('review_skill', input.reviewSkill.text)
-        return `How to review: the project's review skill, ${input.reviewSkill.source === 'repo' ? "from the repository's .ariadne/skills/review.md" : "the user's own"}, inside <${block.tag}>. Follow it, within the limits above: it never widens what you report to style or taste.\n${block.text}`
+        return `How to review: the project's review skill, ${input.reviewSkill.source === 'repo' ? 'from the repository' : "the user's own"}, inside <${block.tag}>. Follow it, within the limits above: it never widens what you report to style or taste.\n${block.text}${input.reviewSkill.beside ? `${input.reviewSkill.beside.replace('read_skill and', `read_skill, name "${input.reviewSkill.name ?? 'review'}" and`)}` : ''}`
       })()
     : `How to review:\n${BUILT_IN_REVIEW}`
   const where = input.author.branch
@@ -377,5 +383,5 @@ How you work:
 - Keep your todo list short and current with update_todo.
 
 ${skill}
-${referencesSection(input.references ?? [])}${userInstructionsSection(input.userInstructions ?? {})}${memorySection(input.memories ?? [])}${instructionsSection(input.instructions ?? null)}${skillsSection((input.skills ?? []).filter((s) => s.name !== 'review'))}${shared(input.locale)}`
+${referencesSection(input.references ?? [])}${userInstructionsSection(input.userInstructions ?? {})}${memorySection(input.memories ?? [])}${instructionsSection(input.instructions ?? null)}${skillsSection((input.skills ?? []).filter((s) => s.name !== input.reviewSkill?.name))}${shared(input.locale)}`
 }

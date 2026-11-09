@@ -42,8 +42,8 @@ export interface SchedulerOptions {
   settings?: (projectId: string) => TurnSettings
   /** The model researches run on; `null` for the asking conversation's own. */
   researchModel?: () => ResolvedModel | null
-  /** The user's own skills for every project, `<home>/skills`. */
-  skillsDir?: string
+  /** The user's own skill folders for every project: Ariadne's own first, then shared ones. */
+  skillsDirs?: readonly string[]
   /** The user's instructions for every project, for the coordinator to add a line to. */
   everywhere?: EverywhereMemory
 }
@@ -257,7 +257,7 @@ export class Scheduler {
           ? { settings: this.options.settings(conversation.projectId) }
           : {}),
         ...(this.options.researchModel ? { researchModel: this.options.researchModel() } : {}),
-        ...(this.options.skillsDir ? { skillsDir: this.options.skillsDir } : {}),
+        ...(this.options.skillsDirs ? { skillsDirs: this.options.skillsDirs } : {}),
         ...(this.options.everywhere ? { everywhere: this.options.everywhere } : {}),
       })
     })()
