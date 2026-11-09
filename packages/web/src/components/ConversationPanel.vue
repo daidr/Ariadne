@@ -994,10 +994,11 @@ watch(
                 class="turn-changes"
               />
             </template>
-            <template v-if="message.editedAt" #actions>
-              <!-- Why it changed and what it said before, for whoever wants to check. -->
+            <template v-if="message.editedAt" #trailing>
+              <!-- Right after the text, as chat apps do: why it changed and what it said before. -->
+              {{ ' ' }}
               <DouPopover trigger="click" :title="t('message.editedTitle')" :width="360">
-                <DouButton variant="ghost" size="sm">{{ t('message.edited') }}</DouButton>
+                <DouLink class="edited-mark" underline="hover">{{ t('message.edited') }}</DouLink>
                 <template #content>
                   <div class="edit-details">
                     <DouText v-if="message.editReason" size="sm">
@@ -1201,6 +1202,22 @@ watch(
 
 .notice-text {
   overflow-wrap: anywhere;
+}
+
+/* A quiet mark after the text; on touch screens it takes taps from 40px around it. */
+.edited-mark {
+  --dou-link-tone: var(--dou-color-text-tertiary);
+  position: relative;
+  font-size: var(--dou-font-size-sm);
+  font-weight: inherit;
+}
+
+@media (pointer: coarse) {
+  .edited-mark::after {
+    position: absolute;
+    inset: min(0px, calc(50% - 20px));
+    content: '';
+  }
 }
 
 .edit-details {
