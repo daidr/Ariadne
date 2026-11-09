@@ -1951,6 +1951,8 @@ export class Ariadne {
     threadId: string,
     purpose: string,
     card: () => ConfirmBlock,
+    /** `inChat` also shows the card in the conversation, as a message of the asker's. */
+    options: { inChat?: boolean } = {},
   ): { state: 'approved'; attentionId: string } | { state: 'asked' | 'pending' | 'declined' } {
     this.assertConversationIn(projectId, threadId)
     const coordinator = this.projectRow(projectId).coordinator_id === threadId
@@ -1967,11 +1969,24 @@ export class Ariadne {
       )
       .get(projectId, purpose, threadId)
     const ask = () => {
-      this.openAttention(projectId, {
-        threadId: coordinator ? null : threadId,
-        block: card(),
-        purpose,
-      })
+      const asked = { threadId: coordinator ? null : threadId, block: card(), purpose }
+      if (options.inChat) {
+        const messageId = newId('msg')
+        this.store.append([
+          {
+            type: 'message.posted',
+            projectId,
+            data: {
+              messageId,
+              conversationId: threadId,
+              author: coordinator ? 'coordinator' : 'thread',
+              kind: 'chat',
+              content: '',
+            },
+          },
+          this.attentionOpened(projectId, newId('att'), { ...asked, messageId }),
+        ])
+      } else this.openAttention(projectId, asked)
       return { state: 'asked' as const }
     }
     if (!newest) return ask()

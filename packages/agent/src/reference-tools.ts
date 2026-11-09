@@ -100,6 +100,7 @@ export function addReferenceTool(kinds: ReferenceKind[]): Tool {
             approveText: t('reference.add.yes'),
             denyText: t('reference.add.no'),
           }),
+        { inChat: true },
       )
       if (approval.state === 'approved') {
         ctx.app.useApproval(ctx.projectId, {

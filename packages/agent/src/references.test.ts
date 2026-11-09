@@ -337,6 +337,10 @@ describe('the coordinator adds a reference source', () => {
     })
     expect(toolResults(project.coordinatorId).at(-1)?.[2]).toContain('The user was asked')
 
+    // The card is in the coordinator's chat too, not only in the list of what needs the user.
+    expect(
+      app.listMessages(project.coordinatorId).map((m) => m.ask?.attentionId ?? null),
+    ).toContain(card!.id)
     app.answerAttention(card!.id, { type: 'confirm', approved: true })
     await scheduler!.idle()
     const [reference] = app.getProject(project.id).references

@@ -126,8 +126,10 @@ async function add() {
         class="reference-icon"
       />
       <FolderOpenIcon v-else class="reference-icon" />
+      <DouText size="sm" class="reference-name">{{ reference.name }}</DouText>
       <DouText
         size="sm"
+        variant="secondary"
         class="reference-where"
         :title="failed[reference.id] ?? summaryOf(reference)"
       >
@@ -158,6 +160,7 @@ async function add() {
         :schema="current.settings"
         :values="values()"
         :secrets-set="[]"
+        bare
         :browse="current.browse ? browse : undefined"
       />
       <DouText v-if="problem" tone="danger" size="sm" role="alert" class="reference-problem">
@@ -205,6 +208,10 @@ async function add() {
   color: var(--dou-color-warning);
 }
 
+.reference-name {
+  flex: none;
+}
+
 .reference-where {
   flex: 1;
   min-width: 0;
@@ -224,6 +231,7 @@ async function add() {
 }
 
 .reference-form {
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 12px;
