@@ -148,6 +148,11 @@ export interface WorkspaceCapability {
   open(request: WorkspaceRequest): Promise<Workspace>
   /** The source itself, read-only; without it the coordinator cannot look at the files. */
   view?(): Promise<SourceView>
+  /**
+   * Nothing to work in, only to look at: a single file rather than a directory. A project
+   * reads it as a reference and cannot take it as the source its threads work in.
+   */
+  viewOnly?: true
   /** Threads' branches and worktrees, when workspaces are worktrees of a git repository. */
   branches?: BranchCapability
   /**

@@ -317,3 +317,32 @@ export function searchableView(workspace: Workspace, checks: ViewChecks = {}): S
     checks.ref,
   )
 }
+
+/** A view's path in parts, checked by its spelling. */
+const plain = (path: string) => partsOf(viewPath(path)).filter((part) => part !== '.')
+
+/**
+ * One file of a directory and nothing else of it: what a source that is a single file (a
+ * log, a dump) hands out as its view. The file is listed at the root under its own name
+ * and read by that name; every other path is outside.
+ */
+export function singleFileView(
+  directory: Pick<SourceView, 'readBytes'>,
+  name: string,
+  ref?: string,
+): SourceView {
+  return readOnlyView(
+    {
+      async readBytes(path, maxBytes) {
+        const parts = plain(path)
+        if (parts.length !== 1 || parts[0] !== name) throw new WorkspacePathError(path)
+        return directory.readBytes(name, maxBytes)
+      },
+      async list(path) {
+        if (plain(path).length) throw new WorkspacePathError(path)
+        return [{ name, kind: 'file' as const }]
+      },
+    },
+    ref,
+  )
+}

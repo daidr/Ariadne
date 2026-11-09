@@ -21,6 +21,7 @@ import type {
   PlanNodeKind,
   PlanOp,
   ProjectReference,
+  ThreadReference,
   ProjectSource,
   Author,
   MessageKind,
@@ -125,6 +126,10 @@ export interface ThreadView {
   pullRequest: ThreadPullRequest | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
   stopped: { reason: string; by: string; at: number } | null
+  /** The sources it alone reads, each allowed by the user on a card of this thread. */
+  references: ThreadReference[]
+  /** The cards whose source the user has since taken back, or kept for the project. */
+  endedReferences: { attentionId: string; kept: boolean }[]
   /** The model setting it was given; `null` uses the default for threads. */
   model: string | null
   /** The readable part of its branch name the coordinator gave it, e.g. `fix-export`. */
@@ -601,6 +606,8 @@ export type TranscriptNote =
   /** Its last turn ended without a report. */
   | { type: 'report-missing' }
   | { type: 'instructions-changed'; path: string; removed: boolean }
+  /** The user took back a source this thread alone read (`now` null), or gave it to the project. */
+  | { type: 'reference-ended'; name: string; now: string | null }
   | {
       /**
        * A change to an issue that this thread waited on with others was made by

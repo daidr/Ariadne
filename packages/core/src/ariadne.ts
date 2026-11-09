@@ -16,6 +16,7 @@ import {
   isAskBlock,
   type AskBlock,
   type BlockAnswer,
+  type ChoiceBlock,
   type ConfirmBlock,
   type ShowBlock,
   type UiBlock,
@@ -42,6 +43,7 @@ import type {
   PlanAuthor,
   PlanOp,
   ProjectReference,
+  ThreadReference,
   ProjectSource,
   ReportKind,
   ReviewComment,
@@ -137,7 +139,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 56
+export const PROJECTION_VERSION = 57
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -525,6 +527,8 @@ interface ThreadRow {
   user_at: number | null
   changes: string | null
   pull_request: string | null
+  reference_sources: string
+  reference_ended: string
   check_failures: number
   stopped_reason: string | null
   stopped_by: string | null
@@ -728,6 +732,8 @@ function toThread(row: ThreadRow, now: number): ThreadView {
       row.stopped_reason === null
         ? null
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
+    references: JSON.parse(row.reference_sources) as ThreadReference[],
+    endedReferences: JSON.parse(row.reference_ended) as ThreadView['endedReferences'],
     model: row.model,
     branchSlug: row.branch_slug,
     usage: usageOf(row),
@@ -2025,18 +2031,30 @@ export class Ariadne {
     projectId: string,
     threadId: string,
     purpose: string,
-    card: () => ConfirmBlock,
-    /** `inChat` also shows the card in the conversation, as a message of the asker's. */
-    options: { inChat?: boolean } = {},
-  ): { state: 'approved'; attentionId: string } | { state: 'asked' | 'pending' | 'declined' } {
+    card: () => ConfirmBlock | ChoiceBlock,
+    /**
+     * `inChat` also shows the card in the conversation, as a message of the asker's. A card
+     * that is a choice between ways of saying yes names the option that says no in `no`;
+     * the option picked comes back as `choice`.
+     */
+    options: { inChat?: boolean; no?: number } = {},
+  ):
+    | { state: 'approved'; attentionId: string; choice: number | null }
+    | { state: 'asked' | 'pending' | 'declined' } {
     this.assertConversationIn(projectId, threadId)
     const coordinator = this.projectRow(projectId).coordinator_id === threadId
     const newest = this.db
       .query<
-        { id: string; closed: number; approved: number | null; used: number | null },
+        {
+          id: string
+          closed: number
+          approved: number | null
+          answer: string | null
+          used: number | null
+        },
         [string, string, string]
       >(
-        `SELECT a.id, a.closed, a.approved,
+        `SELECT a.id, a.closed, a.approved, a.answer,
            (SELECT 1 FROM used_approvals c WHERE c.attention_id = a.id) AS used
          FROM attentions a
          WHERE a.project_id = ? AND a.purpose = ? AND a.conversation_id = ?
@@ -2044,7 +2062,12 @@ export class Ariadne {
       )
       .get(projectId, purpose, threadId)
     const ask = () => {
-      const asked = { threadId: coordinator ? null : threadId, block: card(), purpose }
+      const asked = {
+        threadId: coordinator ? null : threadId,
+        block: card(),
+        purpose,
+        choice: options.no !== undefined,
+      }
       if (options.inChat) {
         const messageId = newId('msg')
         this.store.append([
@@ -2066,8 +2089,14 @@ export class Ariadne {
     }
     if (!newest) return ask()
     if (!newest.closed) return { state: 'pending' }
-    if (newest.approved === 1 && !newest.used) return { state: 'approved', attentionId: newest.id }
-    if (newest.approved === 0 && !this.userWroteSince(threadId, newest.id)) {
+    // A choice says yes by any option but `no`; a card taken back has no answer at all.
+    const answer = newest.answer ? (JSON.parse(newest.answer) as BlockAnswer) : null
+    const choice = answer?.type === 'choice' ? answer.choice : null
+    const approved = choice === null ? newest.approved : choice === options.no ? 0 : 1
+    if (approved === 1 && !newest.used) {
+      return { state: 'approved', attentionId: newest.id, choice }
+    }
+    if (approved === 0 && !this.userWroteSince(threadId, newest.id)) {
       return { state: 'declined' }
     }
     return ask()
@@ -2512,13 +2541,16 @@ export class Ariadne {
       block: AskBlock
       messageId?: string | null
       purpose?: string | null
+      /** The approval may be a choice: its asker tells a yes from a no by the option. */
+      choice?: boolean
     },
   ): AnyNewEvent {
     // Checked again even when the system builds it: what is stored is what the web draws.
     const block = parseBlock(input.block)
     if (!isAskBlock(block))
       throw new DomainError('error.blockInvalid', { reason: 'not an ask block' })
-    if (input.purpose && block.type !== 'confirm') {
+    // A yes or no; only `callApproval` reads a choice between ways of saying yes.
+    if (input.purpose && block.type !== 'confirm' && !(input.choice && block.type === 'choice')) {
       throw new DomainError('error.blockInvalid', { reason: 'an approval is a confirm block' })
     }
     return {
@@ -3248,6 +3280,116 @@ export class Ariadne {
         type: 'project.references.set',
         projectId,
         data: { references: [...references, reference] },
+      },
+    ])
+    return reference
+  }
+
+  /**
+   * Let one thread read a source for its task: the user allowed it on the card
+   * `attentionId`, for this thread alone. Its name is told apart from the project's
+   * references and the thread's other ones. The caller has checked that it connects.
+   */
+  addThreadReference(
+    threadId: string,
+    source: { kind: string; settings: Record<string, unknown> },
+    where: string,
+    attentionId: string,
+  ): ThreadReference {
+    const thread = this.getThread(threadId)
+    const same = (settings: Record<string, unknown>) =>
+      JSON.stringify(Object.entries(settings).toSorted()) ===
+      JSON.stringify(Object.entries(source.settings).toSorted())
+    const already = thread.references.find((ref) => ref.kind === source.kind && same(ref.settings))
+    if (already) return already
+    const reference: ThreadReference = {
+      id: newId('ref'),
+      name: referenceName(where, [
+        ...this.getProject(thread.projectId).references.map((known) => known.name),
+        ...thread.references.map((known) => known.name),
+      ]),
+      kind: source.kind,
+      settings: source.settings,
+      attentionId,
+    }
+    this.store.append([
+      {
+        type: 'thread.references.set',
+        projectId: thread.projectId,
+        data: { threadId, references: [...thread.references, reference] },
+      },
+    ])
+    return reference
+  }
+
+  /** Take back a source a thread alone reads. */
+  removeThreadReference(threadId: string, referenceId: string): ThreadView {
+    const thread = this.getThread(threadId)
+    const gone = thread.references.find((reference) => reference.id === referenceId)
+    if (!gone) return thread
+    this.store.append([
+      {
+        type: 'thread.references.set',
+        projectId: thread.projectId,
+        data: {
+          threadId,
+          references: thread.references.filter((reference) => reference !== gone),
+          ended: { attentionId: gone.attentionId, name: gone.name, now: null },
+        },
+      },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /**
+   * Keep a source a thread alone reads for the whole project: it becomes one of the
+   * project's references, under the same name unless the project has that name or the
+   * source already. The thread is told the name to read it by from now on.
+   */
+  keepThreadReference(threadId: string, referenceId: string): ProjectReference {
+    const thread = this.getThread(threadId)
+    const kept = thread.references.find((reference) => reference.id === referenceId)
+    if (!kept) throw new DomainError('error.notFound', { what: referenceId })
+    const { references } = this.getProject(thread.projectId)
+    if (references.length >= MAX_REFERENCES) {
+      throw new DomainError('error.tooManyReferences', { max: MAX_REFERENCES })
+    }
+    const same = (settings: Record<string, unknown>) =>
+      JSON.stringify(Object.entries(settings).toSorted()) ===
+      JSON.stringify(Object.entries(kept.settings).toSorted())
+    const already = references.find((ref) => ref.kind === kept.kind && same(ref.settings))
+    // The thread's name for it was told apart from the project's when it was allowed; a
+    // reference added to the project since may have taken it.
+    const taken = references.some((ref) => ref.name === kept.name)
+    const reference: ProjectReference = already ?? {
+      id: kept.id,
+      name: taken
+        ? referenceName(
+            kept.name,
+            references.map((known) => known.name),
+          )
+        : kept.name,
+      kind: kept.kind,
+      settings: kept.settings,
+    }
+    this.store.append([
+      ...(already
+        ? []
+        : [
+            {
+              type: 'project.references.set' as const,
+              projectId: thread.projectId,
+              data: { references: [...references, reference] },
+            },
+          ]),
+      {
+        type: 'thread.references.set' as const,
+        projectId: thread.projectId,
+        data: {
+          threadId,
+          references: thread.references.filter((ref) => ref.id !== referenceId),
+          ended: { attentionId: kept.attentionId, name: kept.name, now: reference.name },
+        },
       },
     ])
     return reference

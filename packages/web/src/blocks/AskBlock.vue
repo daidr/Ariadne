@@ -123,17 +123,24 @@ function submit() {
     <template v-else-if="block.type === 'choice'">
       <template v-if="answered">
         <DouText weight="medium" class="ask-title">{{ block.question }}</DouText>
-        <DouText variant="secondary" size="sm" class="ask-answer">
-          <CheckIcon />{{ t('block.chosen', { label: chosen ?? '' }) }}
-        </DouText>
+        <div class="ask-chosen">
+          <DouText variant="secondary" size="sm" class="ask-answer">
+            <CheckIcon />{{ t('block.chosen', { label: chosen ?? '' }) }}
+          </DouText>
+          <!-- What can still be done about the answer, e.g. taking it back. -->
+          <slot name="after" />
+        </div>
       </template>
       <DouChatSuggestions
         v-else
         :items="suggestions"
-        :title="block.question"
         variant="card"
         @select="(value) => send({ type: 'choice', choice: Number(value) })"
       >
+        <!-- Its own lines kept: a question may say where and why under what it asks. -->
+        <template #title>
+          <span class="ask-title">{{ block.question }}</span>
+        </template>
         <template #item="{ item }">
           <span class="ask-option">
             <DouText weight="medium" size="sm">
@@ -274,6 +281,13 @@ function submit() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.ask-chosen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .ask-actions {

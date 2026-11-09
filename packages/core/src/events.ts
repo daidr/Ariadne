@@ -250,6 +250,14 @@ export interface ProjectReference {
   settings: Record<string, unknown>
 }
 
+/**
+ * A source one thread alone reads, for what only its task needs (a log directory, a dump):
+ * the user allowed it on the card `attentionId`, and it goes with the thread.
+ */
+export interface ThreadReference extends ProjectReference {
+  attentionId: string
+}
+
 /** More than this is another project's worth of code, and a line each in every prompt. */
 export const MAX_REFERENCES = 8
 
@@ -420,6 +428,16 @@ export interface EventMap {
     reviewOf?: string
     /** Opened by the autopilot on a plan node whose dependencies were done. */
     auto?: true
+  }
+  /** The sources this thread alone reads, whole; see `ThreadReference`. */
+  'thread.references.set': {
+    threadId: string
+    references: ThreadReference[]
+    /**
+     * The one the user took from the thread with this: `now` is the name the project has
+     * it under when they kept it for the project, `null` when they took it back.
+     */
+    ended?: { attentionId: string; name: string; now: string | null }
   }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }

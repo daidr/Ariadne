@@ -875,14 +875,14 @@ export function toolsFor(
     noteCheck?: boolean
     /** Whether the project has sources it only reads; the looking tools then take one. */
     references?: boolean
-    /** The kinds of source the coordinator may add as a reference, when it may. */
+    /** The kinds of source the conversation may ask to read as a reference, when it may. */
     referenceKinds?: ReferenceKind[]
     /** The project has no name of its own yet: the coordinator gives it one. */
     unnamed?: boolean
   },
 ): Tool[] {
-  // The coordinator may add a reference in the middle of a turn, and reads it at once.
-  const canAdd = role === 'coordinator' && !!source.referenceKinds?.length
+  // A reference may be added in the middle of a turn, and is read at once.
+  const canAdd = !!source.referenceKinds?.length
   const looking = (tools: Tool[]) => (source.references || canAdd ? withReferences(tools) : tools)
   const searches = canSearch(source.search)
   const web = [
@@ -896,7 +896,9 @@ export function toolsFor(
       ...web,
       // With references alone there are still files to look at.
       ...(source.workspace || source.references || canAdd ? looking(sourceTools) : []),
-      ...(source.referenceKinds?.length ? [addReferenceTool(source.referenceKinds)] : []),
+      ...(source.referenceKinds?.length
+        ? [addReferenceTool(source.referenceKinds, 'coordinator')]
+        : []),
       ...(source.tracker ? issueReadTools : []),
       ...(source.research ? [researchTool] : []),
     ]
@@ -906,9 +908,10 @@ export function toolsFor(
     ...web,
     ...(source.workspace
       ? looking(workspaceTools)
-      : source.references
+      : source.references || canAdd
         ? looking(readWorkspaceTools)
         : []),
+    ...(source.referenceKinds?.length ? [addReferenceTool(source.referenceKinds, 'thread')] : []),
     ...(source.workspace && source.noteCheck ? [noteCheck] : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
