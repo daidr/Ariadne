@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import ChangeTotals from './ChangeTotals.vue'
 import type { ThreadView } from '@ariadne/core'
-import { DouProgress, DouRelativeTime, DouShimmer, DouText } from 'dou-ui'
+import { DouProgress, DouRelativeTime, DouShimmer, DouText, DouTooltip } from 'dou-ui'
 import {
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -48,16 +48,16 @@ const prTone = computed(() =>
   <span class="row" :class="{ 'row-nested': nested }">
     <span class="row-head">
       <!-- A review that ended says nothing of its verdict: no green check for it. -->
-      <DouText
-        v-if="nested && thread.stage === 'done'"
-        variant="tertiary"
-        class="row-reviewed"
-        role="img"
-        :title="t('review.ended')"
-        :aria-label="t('review.ended')"
-      >
-        <ScanSearchIcon />
-      </DouText>
+      <DouTooltip v-if="nested && thread.stage === 'done'" :content="t('review.ended')">
+        <DouText
+          variant="tertiary"
+          class="row-reviewed"
+          role="img"
+          :aria-label="t('review.ended')"
+        >
+          <ScanSearchIcon aria-hidden="true" />
+        </DouText>
+      </DouTooltip>
       <StageIcon v-else :stage="thread.stage" />
       <DouText
         truncate
