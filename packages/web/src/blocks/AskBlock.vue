@@ -134,10 +134,13 @@ function submit() {
       <DouChatSuggestions
         v-else
         :items="suggestions"
-        :title="block.question"
         variant="card"
         @select="(value) => send({ type: 'choice', choice: Number(value) })"
       >
+        <!-- Its own lines kept: a question may say where and why under what it asks. -->
+        <template #title>
+          <span class="ask-title">{{ block.question }}</span>
+        </template>
         <template #item="{ item }">
           <span class="ask-option">
             <DouText weight="medium" size="sm">
