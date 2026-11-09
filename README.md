@@ -55,11 +55,11 @@ bun run check    # 格式、lint、类型检查和测试
 | `@ariadne/plugin-openai-compatible` | OpenAI 兼容协议的模型 provider                                |
 | `@ariadne/plugin-anthropic`         | Anthropic 协议的模型 provider                                 |
 | `@ariadne/plugin-agents`            | 外部 agent（Claude Code、Codex、ACP）当模型 provider          |
-| `@ariadne/plugin-local`             | 本地目录上下文源：工作区与 git worktree，托管仓库的共享 clone |
-| `@ariadne/plugin-github`            | GitHub 仓库上下文源：共享 clone、worktree、PR 与检查          |
-| `@ariadne/plugin-gitlab`            | GitLab 仓库上下文源：MR、流水线、issue，支持自建实例          |
-| `@ariadne/plugin-ssh`               | SSH 远程目录上下文源：远端 worktree、文件与命令               |
-| `@ariadne/plugin-daemon`            | 远程 daemon 上下文源：配对、证书指纹、一条连接跑所有调用      |
+| `@ariadne/plugin-local`             | 本地目录项目来源：工作区与 git worktree，托管仓库的共享 clone |
+| `@ariadne/plugin-github`            | GitHub 仓库项目来源：共享 clone、worktree、PR 与检查          |
+| `@ariadne/plugin-gitlab`            | GitLab 仓库项目来源：MR、流水线、issue，支持自建实例          |
+| `@ariadne/plugin-ssh`               | SSH 远程目录项目来源：远端 worktree、文件与命令               |
+| `@ariadne/plugin-daemon`            | 远程 daemon 项目来源：配对、证书指纹、一条连接跑所有调用      |
 | `@ariadne/daemon`                   | 在远端运行的 `ariadne-daemon`                                 |
 | `@ariadne/remote`                   | 远端工作区：脚本与 worktree，SSH 和 daemon 共用               |
 | `@ariadne/sandbox`                  | 工作区沙箱，本机服务和 daemon 共用                            |

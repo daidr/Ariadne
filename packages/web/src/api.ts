@@ -304,6 +304,11 @@ export interface ProjectSettingsView {
   env: string[]
   /** The built-in tool groups a project can switch off. */
   tools: ToolGroup[]
+  /**
+   * The project's changes are merged on its code host, not here: nothing in the app
+   * remembers how, so its settings ask.
+   */
+  hostedMerge: boolean
 }
 
 export interface BackupInfo {

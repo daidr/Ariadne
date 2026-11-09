@@ -311,11 +311,20 @@ describe('routines', () => {
       { prompt: '整理新 issue', days: [1, 2, 3, 4, 5], time: '09:00', enabled: true },
     ])
     expect(results[0]).toContain('整理新 issue')
+    const notices = () =>
+      app
+        .listNotices(project.coordinatorId)
+        .map((n) => n.kind === 'routine-change' && [n.action, n.prompt])
+    expect(notices()).toEqual([['added', '整理新 issue']])
 
     ask('不用了，去掉吧')
     await scheduler!.idle()
     expect(app.getProject(project.id).settings.routines).toEqual([])
     expect(results[1]).toBe('No routines.')
+    expect(notices()).toEqual([
+      ['added', '整理新 issue'],
+      ['removed', '整理新 issue'],
+    ])
   })
 
   test('a time that is not one is turned down, and nothing but the user adds one', async () => {

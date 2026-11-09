@@ -2,7 +2,7 @@
  * Where the open project's files are, in one line, and what the user should know about
  * how its thread commands are isolated. Shared by the header and the project settings.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api, type SandboxStatus, type SourceKind } from './api'
 import { state } from './store'
 
@@ -15,9 +15,12 @@ const source = computed(() => state.detail?.project.source ?? null)
 // Without a sandbox, thread commands can read Ariadne's token; the user should know.
 const sandbox = ref<SandboxStatus | null>(null)
 let asked = false
-/** Ask once what isolates commands here and which kinds of source there are. */
+/**
+ * Ask what isolates commands here and which kinds of source there are. Asked again with
+ * each project opened and each time its settings open: plugins come and go while the page
+ * stays, and a request that failed is tried anew.
+ */
 function load() {
-  if (asked) return
   asked = true
   api.getSandbox().then(
     (result) => (sandbox.value = result.sandbox),
@@ -31,6 +34,12 @@ function load() {
     () => {},
   )
 }
+watch(
+  () => [state.detail?.project.id, state.projectSettingsOpen],
+  () => {
+    if (asked) load()
+  },
+)
 /** The provider of the stored source, once the kinds are known. */
 const storedKind = computed(() => kinds.value.find((k) => k.kind === source.value?.kind) ?? null)
 // A remote source runs commands on another machine; this one's sandbox is beside the point.
@@ -73,6 +82,6 @@ const remoteHost = computed(() => {
 })
 
 export function useSourceStatus() {
-  load()
+  if (!asked) load()
   return { source, sandbox, summary, remote, remoteHost, unsandboxed, weaker, sandboxNote }
 }

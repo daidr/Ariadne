@@ -875,6 +875,18 @@ watch(
           </DouText>
           <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
           <DouText
+            v-else-if="item.notice.kind === 'routine-change'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.action === 'added' ? 'notice.routineAdded' : 'notice.routineRemoved', {
+                prompt: item.notice.prompt,
+              })
+            }}
+          </DouText>
+          <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
             tone="warning"
             size="sm"

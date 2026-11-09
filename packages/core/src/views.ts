@@ -251,6 +251,8 @@ export type NoticeView = {
       undone: boolean
     }
   | { kind: 'compaction-failed'; detail: string }
+  /** An agent added or removed one of the project's routines. */
+  | { kind: 'routine-change'; action: 'added' | 'removed'; prompt: string }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
   /** The main model's retries ran out; the turn went on with the fallback. */
   | { kind: 'model-fallback'; from: string; to: string; detail: string }

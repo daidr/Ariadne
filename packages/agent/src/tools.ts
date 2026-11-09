@@ -674,6 +674,7 @@ const routineTool: Tool = {
     if (action === 'list') return { content: describeRoutines(current, Date.now()) }
     refuseUnlessUserSpoke(ctx, 'routines')
     let next: unknown[]
+    let change: { by: string; action: 'added' | 'removed'; prompt: string }
     if (action === 'add') {
       if (current.length >= MAX_ROUTINES) {
         throw new ToolInputError(
@@ -690,18 +691,21 @@ const routineTool: Tool = {
           enabled: true,
         },
       ]
+      change = { by: ctx.conversationId, action: 'added', prompt: str(args, 'prompt').trim() }
     } else if (action === 'remove') {
       const id = str(args, 'routineId')
-      if (!current.some((routine) => routine.id === id)) {
+      const removed = current.find((routine) => routine.id === id)
+      if (!removed) {
         throw new ToolInputError(`No routine ${id}.\n${describeRoutines(current, Date.now())}`)
       }
       next = current.filter((routine) => routine.id !== id)
+      change = { by: ctx.conversationId, action: 'removed', prompt: removed.prompt }
     } else {
       throw new ToolInputError('"action" must be one of: list, add, remove')
     }
     let saved: Routine[]
     try {
-      saved = ctx.app.setRoutines(ctx.projectId, next).settings.routines
+      saved = ctx.app.setRoutines(ctx.projectId, next, change).settings.routines
     } catch (error) {
       if (error instanceof DomainError) {
         throw new ToolInputError(

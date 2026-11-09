@@ -444,6 +444,7 @@ export function createHandler({
       settings: app.getProject(projectId).settings,
       env: settings?.projectEnvNames(projectId) ?? [],
       tools: TOOL_SWITCH_NAMES,
+      hostedMerge: !!workspaces?.hasRepo(projectId),
     }),
   )
 
@@ -464,6 +465,7 @@ export function createHandler({
       settings: project.settings,
       env,
       tools: TOOL_SWITCH_NAMES,
+      hostedMerge: !!workspaces?.hasRepo(projectId),
     })
   })
 

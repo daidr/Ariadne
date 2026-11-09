@@ -127,7 +127,6 @@ export const en: Record<MessageKey, string> = {
   'artifact.by.user': 'You',
   'artifact.by.coordinator': 'Coordinator',
   'artifact.updated': '{who} · {time}',
-  'project.source.title': 'Project source',
   'project.source.kind': 'Kind',
   'pr.state.merged': 'Merged',
   'pr.state.closed': 'Closed',
@@ -187,9 +186,7 @@ export const en: Record<MessageKey, string> = {
     'These model providers use it: {names}. They stop working once it is removed.',
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
-  'project.source.none': 'Not set',
   'project.source.clear': 'Remove',
-  'project.source.edit': 'Set the project source',
   'sandbox.missing.title': 'Thread commands are not isolated',
   'sandbox.missing.body':
     "No sandbox is available on this machine (Linux needs bubblewrap, or unshare with user namespaces; macOS uses the built-in sandbox-exec), so commands threads run can read Ariadne's token and settings and call Ariadne as you. Only give this project to models and repositories you trust.",
@@ -225,6 +222,8 @@ export const en: Record<MessageKey, string> = {
   'notice.memoryAdded': 'Saved to project memory: {text}',
   'notice.memoryChanged': 'Changed a project memory entry: {previous} → {text}',
   'notice.memoryRemoved': 'Removed from project memory: {text}',
+  'notice.routineAdded': 'Set up a routine: {prompt}',
+  'notice.routineRemoved': 'Removed a routine: {prompt}',
   'notice.planChanged': 'Changed the plan: {reason}',
   'notice.planReverted': 'Undid a plan change: {reason}',
   'notice.planAdded': 'added {count} nodes',
@@ -388,7 +387,8 @@ export const en: Record<MessageKey, string> = {
   'error.planUndoGoneUnnamed': 'A node it changed was removed since',
   'error.planUndoChanged': '"{title}" was changed again since',
   'error.planUndoLink': 'The dependency between "{from}" and "{to}" was changed again since',
-  'error.artifactConflict': 'This artifact is now at version {version}; reload before saving',
+  'error.artifactConflict':
+    'This artifact was just updated to version {version}; your change was not saved',
   'error.fileType':
     'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',
   'error.fileTooLarge': 'The file is too large; the limit is {max} MB',
@@ -795,6 +795,7 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.checkHelp':
     'Runs after each file a thread edits, and a failure goes back to it; {placeholder} becomes the changed files',
   'projectSettings.env': 'Command environment variables',
+  'projectSettings.autopilotMethod': 'Merge method',
   'projectSettings.budgetThread': 'Most one thread may use (k tokens)',
   'projectSettings.budgetProject': 'Most the project may use (k tokens)',
   'projectSettings.noCap': 'No cap',

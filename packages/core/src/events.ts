@@ -341,7 +341,11 @@ export interface EventMap {
   /** The external tool servers (MCP) this project's conversations may use, by id. */
   'project.mcp.set': { servers: string[] }
   /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
-  'project.settings.set': { settings: ProjectSettings }
+  'project.settings.set': {
+    settings: ProjectSettings
+    /** A routine an agent added or removed, and in which conversation: shown there. */
+    routine?: { by: string; action: 'added' | 'removed'; prompt: string }
+  }
   /**
    * The user paused the project's autopilot, or let it go on. Paused, nothing is merged or
    * started on its own; threads at work go on.

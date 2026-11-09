@@ -322,7 +322,13 @@ async function comment(
 function autosave() {
   if (dirty.value && !saving.value) void save()
 }
-onBeforeUnmount(autosave)
+onBeforeUnmount(() => {
+  if (!dirty.value) return
+  // The editor shown next (full screen, or the tab opened again) starts from what is
+  // saved, not from these edits a second time.
+  unsavedEdits.delete(props.id)
+  if (!saving.value) void save()
+})
 
 async function save(
   input: { content?: string; title?: string; reason?: string } = {},
@@ -347,10 +353,19 @@ async function save(
     versions.value = detail.versions
     comments.value = detail.comments
     latest.value = detail.artifact.version
+    // The edits are saved; said here too, as nothing watches the draft once the editor is gone.
+    if (input.content === undefined) unsavedEdits.delete(props.id)
     show(detail.artifact)
     return true
   } catch (error) {
-    if (error instanceof ApiError && error.status === 409) conflict.value = tm(error.localized)
+    if (error instanceof ApiError && error.status === 409) {
+      // Someone saved meanwhile: theirs is shown, and the user is told theirs was not kept.
+      const lost = tm(error.localized)
+      unsavedEdits.delete(props.id)
+      draft.value = null
+      await load()
+      conflict.value = lost
+    }
     // The reason is written for the agent; the user gets a plain line.
     else if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
       state.error = t('artifact.invalidSave')

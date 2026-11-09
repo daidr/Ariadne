@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ProjectSettings } from '@ariadne/core'
+import type { MergeMethod, ProjectSettings } from '@ariadne/core'
 import {
   DouAlert,
   DouButton,
@@ -55,6 +55,16 @@ const mcpServers = ref<McpServerView[]>([])
 const totalSlots = ref(3)
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+// Where merging happens in the app, the autopilot merges the way the user last did. A hosted
+// repository is merged on its platform, so there the way is chosen here.
+const hostedMerge = ref(false)
+const methodOptions = (['squash', 'merge'] as MergeMethod[]).map((method) => ({
+  value: method,
+  label: t(`changes.method.${method}`),
+}))
+/** The routines as loaded: left alone, a save keeps what the coordinator set meanwhile. */
+let loadedRoutines = ''
 
 // The autopilot merges what the review let through: one goes on with the other.
 function setReview(on: boolean) {
@@ -130,6 +140,8 @@ watch(
       ])
       if (concurrency) totalSlots.value = concurrency.slots
       settings.value = structuredClone(view.settings)
+      hostedMerge.value = view.hostedMerge
+      loadedRoutines = JSON.stringify(view.settings.routines)
       env.value = storedPairs(view.env)
       threadK.value = toK(view.settings.budget.thread)
       projectK.value = toK(view.settings.budget.project)
@@ -166,8 +178,11 @@ async function save() {
   }
   const next: ProjectSettings = {
     ...settings.value,
-    // One left without words does nothing; it goes rather than failing the save.
-    routines: settings.value.routines.filter((routine) => routine.prompt.trim()),
+    routines:
+      JSON.stringify(settings.value.routines) === loadedRoutines
+        ? (state.detail?.project.settings.routines ?? settings.value.routines)
+        : // One left without words does nothing; it goes rather than failing the save.
+          settings.value.routines.filter((routine) => routine.prompt.trim()),
     budget: {
       thread: threadK.value ? threadK.value * 1000 : null,
       project: projectK.value ? projectK.value * 1000 : null,
@@ -282,6 +297,12 @@ async function save() {
                 : t('projectSettings.autopilotStartsNone')
             }}
           </DouText>
+          <DouFormItem
+            v-if="hostedMerge && settings.autopilot.enabled"
+            :label="t('projectSettings.autopilotMethod')"
+          >
+            <DouSelect v-model="settings.autopilot.method" :options="methodOptions" />
+          </DouFormItem>
           <div class="project-row">
             <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
               <DouInputNumber

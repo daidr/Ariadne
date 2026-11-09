@@ -415,7 +415,8 @@ async function saveModels(): Promise<boolean> {
           },
           coordinator: {
             model: keep(coordinatorModel.value || null),
-            effort: coordinatorEffort.value || null,
+            // With one model the page shows one depth: both think that hard.
+            effort: (several.value ? coordinatorEffort.value : threadEffort.value) || null,
             fallback: keep(fallback.value || null),
           },
           triage: {
