@@ -60,7 +60,7 @@ defineExpose({ save })
       >
         <DouInput v-model="apiKey" type="password" show-password placeholder="tvly-…">
           <template v-if="search.keySet && !cleared" #suffix>
-            <DouButton size="sm" variant="ghost" @click="clear">
+            <DouButton class="clear-secret" size="xs" variant="ghost" @click="clear">
               {{ t('settings.clearSecret') }}
             </DouButton>
           </template>
@@ -76,5 +76,10 @@ defineExpose({ save })
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Sits inside the input's edge, the same distance from it on three sides. */
+.clear-secret {
+  margin-inline-end: calc(2px - var(--dou-input-padding-x));
 }
 </style>
