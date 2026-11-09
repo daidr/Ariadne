@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS, PluginHost } from '@ariadne/agent'
+import { DEFAULT_COMMAND_RULES, DEFAULT_LIMITS, PluginHost } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -100,6 +100,13 @@ describe('model settings', () => {
       search: 'mod+p',
       stop: 'shift+escape',
     })
+  })
+
+  test('command rules start as the defaults until the user saves their own', () => {
+    const store = new SettingsStore(path, host)
+    expect(store.work().rules).toEqual(DEFAULT_COMMAND_RULES)
+    store.updateWork({ rules: [] })
+    expect(new SettingsStore(path, host).work().rules).toEqual([])
   })
 
   test('instructions, command rules and limits are checked and kept', () => {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { BackgroundCommands } from './background'
 import { applyEdit } from './edit-match'
 import { globToRegExp } from './glob'
-import { commandParts, commandVerdict, DEFAULT_LIMITS } from './limits'
+import { commandParts, commandVerdict, DEFAULT_COMMAND_RULES, DEFAULT_LIMITS } from './limits'
 import { PluginHost } from './plugins'
 import { Scheduler } from './scheduler'
 import { buildTrace, traceRequest } from './trace'
@@ -174,6 +174,67 @@ describe('command rules', () => {
         { pattern: 'timeout*', action: 'allow' },
       ]).action,
     ).toBe('deny')
+  })
+
+  test('text a command only prints or looks for is not asked about, but still denied', () => {
+    const mentioned = [
+      'git commit -m "docs: explain the git push flow"',
+      'git log --grep "git push"',
+      'rg -n "git push" docs',
+      'cat notes.md | grep "git push"',
+      'echo git push',
+      'printf "%s\\n" "git push"',
+    ]
+    for (const command of mentioned) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'allow'])
+    }
+    // Something on the line runs text, or the phrase is run after all.
+    const run = [
+      'echo "git push" | sh',
+      'echo git push | xargs -I{} bash -c {}',
+      'echo "$(git push)"',
+      'git commit -m x && git push',
+      'git rebase --exec "git push" main',
+    ]
+    for (const command of run) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'ask'])
+    }
+    expect(commandVerdict('echo "rm -rf /x"', rules).action).toBe('deny')
+  })
+
+  test('the default rules ask before pushing, publishing, merging and releasing', () => {
+    const asked = [
+      'git push',
+      'git -C . push origin +main',
+      'cd pkg && bun publish --access public',
+      'sudo npm publish',
+      'npx npm publish',
+      'pnpm publish --no-git-checks',
+      'yarn publish',
+      'cargo publish',
+      'gh pr merge 12 --squash',
+      'gh release create v1.0.0',
+    ]
+    for (const command of asked) {
+      expect([command, commandVerdict(command, DEFAULT_COMMAND_RULES).action]).toEqual([
+        command,
+        'ask',
+      ])
+    }
+    const free = [
+      'git stash push -m wip',
+      'git commit -m "ci: npm publish with provenance"',
+      'gh pr view 12',
+      'gh release list',
+      'bun test',
+      'rg "gh pr merge" .',
+    ]
+    for (const command of free) {
+      expect([command, commandVerdict(command, DEFAULT_COMMAND_RULES).action]).toEqual([
+        command,
+        'allow',
+      ])
+    }
   })
 
   test('an allow on one part does not lift an ask on another', () => {

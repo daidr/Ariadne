@@ -2,6 +2,7 @@ import { CURRENCIES, DomainError, type Currency } from '@ariadne/core'
 import {
   COMMAND_ACTIONS,
   compactAt,
+  DEFAULT_COMMAND_RULES,
   DEFAULT_LIMITS,
   forgetRefusedSearches,
   keyedSearch,
@@ -341,7 +342,7 @@ const defaults = (): UserConfig => ({
   mcp: { servers: [] },
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   instructions: '',
-  commands: { rules: [] },
+  commands: { rules: DEFAULT_COMMAND_RULES.map((rule) => ({ ...rule })) },
   limits: { ...DEFAULT_LIMITS },
   projectEnv: {},
   search: { apiKey: '' },
@@ -377,7 +378,13 @@ export function loadUserConfig(path: string): UserConfig {
       keys: parseKeys(stored.input?.keys, false),
     },
     instructions: typeof stored.instructions === 'string' ? stored.instructions : '',
-    commands: { rules: parseRules(stored.commands?.rules, false) },
+    // Rules never saved start as the defaults; a saved list, even an empty one, is the user's.
+    commands: {
+      rules:
+        stored.commands?.rules === undefined
+          ? config.commands.rules
+          : parseRules(stored.commands.rules, false),
+    },
     limits: parseLimits(stored.limits, false),
     projectEnv: { ...stored.projectEnv },
     search: { apiKey: typeof stored.search?.apiKey === 'string' ? stored.search.apiKey : '' },

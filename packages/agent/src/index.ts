@@ -51,6 +51,7 @@ export {
   COMMAND_ACTIONS,
   commandParts,
   commandVerdict,
+  DEFAULT_COMMAND_RULES,
   DEFAULT_LIMITS,
   defaultTurnSettings,
   LIMIT_RANGES,
