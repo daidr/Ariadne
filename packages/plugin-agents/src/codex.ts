@@ -89,6 +89,8 @@ export const codex: AgentKind<CodexSettings> = {
     let threadId = ''
     let started = false
     let total: Breakdown = {}
+    // Answers whose text came in pieces, so their whole copy is not handed on again.
+    const streamed = new Set<string>()
     const proc = new AgentProcess({
       argv: argvOf(ctx.settings),
       cwd: ctx.cwd,
@@ -125,15 +127,26 @@ export const codex: AgentKind<CodexSettings> = {
       notification: (method, raw) => {
         const params = (raw ?? {}) as Record<string, unknown>
         switch (method) {
+          case 'item/agentMessage/delta': {
+            const delta = typeof params.delta === 'string' ? params.delta : ''
+            if (delta) {
+              if (typeof params.itemId === 'string') streamed.add(params.itemId)
+              ctx.emit({ type: 'text', text: delta })
+            } else ctx.emit({ type: 'alive' })
+            return
+          }
           case 'item/completed': {
             const item = (params.item ?? {}) as {
               type?: string
+              id?: string
               text?: string
               summary?: string[]
               content?: string[]
             }
             if (item.type === 'agentMessage' && item.text) {
-              ctx.emit({ type: 'text', text: item.text })
+              // Its pieces came already as they were written.
+              if (item.id && streamed.delete(item.id)) ctx.emit({ type: 'alive' })
+              else ctx.emit({ type: 'text', text: item.text })
             } else if (item.type === 'reasoning') {
               const text = [...(item.summary ?? []), ...(item.content ?? [])].join('\n').trim()
               if (text) ctx.emit({ type: 'reasoning', text })

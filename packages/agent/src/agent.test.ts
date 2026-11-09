@@ -133,6 +133,89 @@ describe('a coordinator turn', () => {
     ])
   })
 
+  test('the reply shows as it is written; text beside a tool call is taken back', async () => {
+    const shown: (string | null)[] = []
+    app.drafts.subscribe((update) =>
+      shown.push(
+        update.draft ? `${update.draft.posted ? 'posted ' : ''}${update.draft.text}` : null,
+      ),
+    )
+    const model = fakeModel((request) => {
+      if (!answered(request)) {
+        return [
+          { type: 'text', text: '先看看有哪些 thread，' },
+          { type: 'text', text: '再看计划图\n然后决定' },
+          { type: 'calling' },
+          { type: 'text', text: '不该出现' },
+          call('c1', 'list_threads', {}),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return [
+        { type: 'text', text: '现在没有' },
+        { type: 'text', text: '在跑的 thread。\n\n要我开一个吗？' },
+        { type: 'finish', reason: 'stop' },
+      ]
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+
+    const reply = app.listMessages(project.coordinatorId).at(-1)!
+    expect(reply.content).toBe('现在没有在跑的 thread。\n\n要我开一个吗？')
+    expect(shown).toEqual([
+      '先看看有哪些 thread，再看计划图\n然后决定',
+      null,
+      '现在没有在跑的 thread。\n\n要我开一个吗？',
+      'posted 现在没有在跑的 thread。\n\n要我开一个吗？',
+    ])
+    expect(app.drafts.list()).toEqual([])
+  })
+
+  test('a posted reply keeps the id of its draft', async () => {
+    const ids: string[] = []
+    app.drafts.subscribe((update) => update.draft && ids.push(update.draft.messageId))
+    const model = fakeModel(() => say('第一段。\n\n第二段。'))
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '你好',
+    })
+    await startScheduler(model).idle()
+    const reply = app.listMessages(project.coordinatorId).at(-1)!
+    expect(new Set(ids)).toEqual(new Set([reply.id]))
+  })
+
+  test('a failed attempt takes its draft back before the retry', async () => {
+    const shown: (string | null)[] = []
+    app.drafts.subscribe((update) => shown.push(update.draft?.text ?? null))
+    let attempt = 0
+    const model = fakeModel(() => {
+      attempt++
+      if (attempt === 1) {
+        return [
+          { type: 'text', text: '写到一半\n断了' },
+          { type: 'finish', reason: 'error', error: 'reset', retryable: true },
+        ]
+      }
+      return say('完整的回答\n第二行')
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '你好',
+    })
+    await startScheduler(model).idle()
+    expect(shown.slice(0, 3)).toEqual(['写到一半\n断了', null, '完整的回答\n第二行'])
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('完整的回答\n第二行')
+  })
+
   test('a thread report wakes the coordinator; a progress report does not', async () => {
     const model = fakeModel((request, role) => {
       if (role === 'thread') {

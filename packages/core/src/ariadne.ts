@@ -63,7 +63,7 @@ import {
   type StoredFile,
 } from './files'
 import { newId } from './ids'
-import { BackgroundCommandsList, LiveCommands } from './live'
+import { BackgroundCommandsList, LiveCommands, ReplyDrafts } from './live'
 import {
   applyOps,
   describePlanOps,
@@ -736,6 +736,8 @@ export class Ariadne {
   readonly store: EventStore
   /** Commands threads are running now; not part of the log, see `LiveCommands`. */
   readonly live: LiveCommands
+  /** Replies models are writing now; not part of the log, see `ReplyDrafts`. */
+  readonly drafts: ReplyDrafts
   /** Threads' background commands, as the user watches them. */
   readonly background = new BackgroundCommandsList()
   private readonly db: Database
@@ -746,6 +748,7 @@ export class Ariadne {
   constructor(options: AriadneOptions) {
     this.now = options.now ?? Date.now
     this.live = new LiveCommands(this.now)
+    this.drafts = new ReplyDrafts(this.now)
     this.store = new EventStore({
       path: options.path,
       projections: defaultProjections,
@@ -2435,6 +2438,8 @@ export class Ariadne {
       mentions?: unknown[]
       /** The user's comments on lines of a thread's changes. */
       comments?: unknown[]
+      /** The id its draft was shown under while the model wrote it. */
+      messageId?: string
     },
   ): MessageView {
     this.assertConversationIn(projectId, input.conversationId)
@@ -2489,7 +2494,7 @@ export class Ariadne {
     if (!input.content.trim() && !parsed.length && !attachments.length && !comments.length) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
-    const messageId = newId('msg')
+    const messageId = input.messageId ?? newId('msg')
     const asker =
       this.getProject(projectId).coordinatorId === input.conversationId
         ? null

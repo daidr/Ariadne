@@ -89,6 +89,8 @@
 
 模型由插件提供，每个插件实现一种协议（OpenAI 兼容、Anthropic）。用户在界面的“设置 → 模型”里添加提供方，再在提供方上添加模型（模型名、上下文大小、用途），配置写在 `~/.ariadne/config.json`（仅所有者可读写）；API Key 不写进事件日志，也不会返回给浏览器。
 
+回复是边写边显示的：模型每一步的文字一边到达一边作为草稿推给页面（SSE 的 `draft`，只在内存里，不进事件日志），用 dou-ui 的流式 Markdown 显示。只有最终回复会显示出来：调工具那一步开头的一行“在做什么”只进状态栏，所以只有一行、不到 120 字的文字先压着不显示；模型一开始写工具调用（提供方给出 `calling`），这一步的草稿就撤掉。尝试失败重试、输出被截断、回合停下时草稿也撤掉。回复发出时消息沿用草稿的 id，页面上还是同一条，接着显示完剩下的字。外部 agent 能流就流：Claude Code 加 `--include-partial-messages`，Codex 用 `item/agentMessage/delta`，ACP 本来就是分片的。
+
 外部 agent 也可以当提供方（`@ariadne/plugin-agents`）：Claude Code（`claude -p` 的流式 JSON）、Codex（`codex app-server`）和任何支持 ACP（Agent Client Protocol）的 agent，用它们自己登录的账号，所以订阅账号也能用。它们自带 agent 循环，Ariadne 的做法是只把对话自己的工具交给它，循环仍是 Ariadne 的：
 
 - 工具：Claude Code 和 ACP agent 通过本机的 MCP 端点（`127.0.0.1` 随机端口，路径里带每个会话自己的随机令牌）拿到这一步的工具；ACP agent 不支持 HTTP 的 MCP 时，用一个转发到这个端点的本地小程序（`mcp-stdio.ts`）。Codex 用 app-server 的客户端工具（`dynamicTools`，它调用时回来问客户端）。工具调用由 agent 发起后挂起，作为这一步的 `tool-call` 交给 agent 循环，照常执行、记事件、进追踪、走沙箱和确认，结果随下一次请求还给 agent。一步在 agent 发起调用之后安静 150 毫秒时结束，同时发起的调用算同一步。

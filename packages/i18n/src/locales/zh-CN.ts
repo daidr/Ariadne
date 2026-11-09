@@ -285,6 +285,7 @@ export const zhCN = {
   'message.fromAutopilot': '托管推进的消息',
   'conversation.working': '工作中…',
   'conversation.coordinatorWorking': '协调器工作中…',
+  'conversation.replying': '正在回复…',
   'conversation.escAgain': '再按一次 Esc 停止',
   'conversation.continue': '继续',
   'conversation.silent': '这一回合没汇报就结束了',

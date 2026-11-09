@@ -1,4 +1,10 @@
-import type { Ariadne, AnyStoredEvent, BackgroundUpdate, LiveUpdate } from '@ariadne/core'
+import type {
+  Ariadne,
+  AnyStoredEvent,
+  BackgroundUpdate,
+  DraftUpdate,
+  LiveUpdate,
+} from '@ariadne/core'
 
 const encoder = new TextEncoder()
 
@@ -14,6 +20,11 @@ function liveFrame(update: LiveUpdate): Uint8Array {
 /** A thread's background commands as they stand now; like `live`, never replayed. */
 function backgroundFrame(update: BackgroundUpdate): Uint8Array {
   return encoder.encode(`event: background\ndata: ${JSON.stringify(update)}\n\n`)
+}
+
+/** A reply as the model writes it; like `live`, never replayed. */
+function draftFrame(update: DraftUpdate): Uint8Array {
+  return encoder.encode(`event: draft\ndata: ${JSON.stringify(update)}\n\n`)
 }
 
 /**
@@ -63,6 +74,13 @@ export function eventStream(
       }
       for (const update of app.background.list(options.projectId)) sendBackground(update)
       const unsubscribeBackground = app.background.subscribe(sendBackground)
+      const sendDraft = (update: DraftUpdate) => {
+        if (options.projectId === null || update.projectId === options.projectId) {
+          controller.enqueue(draftFrame(update))
+        }
+      }
+      for (const update of app.drafts.list(options.projectId)) sendDraft(update)
+      const unsubscribeDrafts = app.drafts.subscribe(sendDraft)
       const heartbeat = setInterval(
         () => controller.enqueue(encoder.encode(': ping\n\n')),
         options.heartbeatMs ?? 15_000,
@@ -71,6 +89,7 @@ export function eventStream(
         unsubscribe()
         unsubscribeLive()
         unsubscribeBackground()
+        unsubscribeDrafts()
         clearInterval(heartbeat)
       }
     },

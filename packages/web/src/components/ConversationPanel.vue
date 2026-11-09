@@ -190,11 +190,13 @@ const fallback = computed(() => {
 // What it is doing, shown above the input: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
-const activity = computed(
-  () =>
-    view.value.conversation?.turn?.activity ??
-    thread.value?.doing ??
-    t(props.threadId ? 'conversation.working' : 'conversation.coordinatorWorking'),
+const activity = computed(() =>
+  // Once the reply shows, the line before the last tool calls is no longer what it does.
+  writing.value
+    ? t('conversation.replying')
+    : (view.value.conversation?.turn?.activity ??
+      thread.value?.doing ??
+      t(props.threadId ? 'conversation.working' : 'conversation.coordinatorWorking')),
 )
 const now = ref(Date.now())
 const clock = setInterval(() => (now.value = Date.now()), 1000)
@@ -272,6 +274,33 @@ watch(
   () => (highlighted.value = new Set()),
 )
 
+// The reply being written now, shown where its message will be: it keeps the message's id,
+// so the same bubble goes on once the message is posted and loaded.
+const writing = computed<MessageView | null>(() => {
+  const id = conversationId.value
+  const reply = id ? state.writing[id] : undefined
+  if (!id || !reply || view.value.messages.some((message) => message.id === reply.messageId)) {
+    return null
+  }
+  return {
+    id: reply.messageId,
+    conversationId: id,
+    author: props.threadId ? 'thread' : 'coordinator',
+    kind: 'chat',
+    content: reply.text,
+    blocks: [],
+    ask: null,
+    attachments: [],
+    mentions: [],
+    comments: [],
+    createdAt: reply.startedAt,
+    editedAt: null,
+    editReason: null,
+    originalContent: null,
+    editedSinceRead: false,
+  }
+})
+
 // Messages and notices in the order they happened. A worktree removed after a merge goes
 // unsaid: the merge's own line says what happened.
 const timeline = computed(() =>
@@ -290,6 +319,16 @@ const timeline = computed(() =>
         message: null,
         notice,
       })),
+    ...(writing.value
+      ? [
+          {
+            id: writing.value.id,
+            at: writing.value.createdAt,
+            message: writing.value,
+            notice: null,
+          },
+        ]
+      : []),
   ].toSorted((a, b) => a.at - b.at),
 )
 
@@ -363,9 +402,12 @@ function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
 
 /** The files sent with it, the text, then tables, charts and steps, then what it asks. */
 function partsOf(message: MessageView): ChatMessageProps['parts'] {
+  // Still being written while it is the draft, not yet a message of the log.
+  const streaming =
+    message.id === writing.value?.id && !state.writing[message.conversationId]?.posted
   return [
     ...(message.attachments.length ? [{ type: 'attachments' }] : []),
-    ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+    ...(message.content ? [{ type: 'text' as const, text: message.content, streaming }] : []),
     ...(message.comments.length ? [{ type: 'comments' }] : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
@@ -859,7 +901,13 @@ watch(
               />
             </template>
             <template #markdown-image="{ src, alt, title }">
-              <MessageImage :src="src" :alt="alt" :title="title" />
+              <!-- A workspace path becomes a stored file only once posted: none while written. -->
+              <MessageImage
+                v-if="message.id !== writing?.id || /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(src ?? '')"
+                :src="src"
+                :alt="alt"
+                :title="title"
+              />
             </template>
             <template #part="{ part }">
               <DouChatAttachments

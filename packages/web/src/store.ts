@@ -7,6 +7,8 @@ import type {
   LineComment,
   LiveCommand,
   LiveUpdate,
+  DraftUpdate,
+  ReplyDraft,
   BackgroundUpdate,
   BackgroundView,
   MemoryView,
@@ -151,6 +153,11 @@ interface State {
   input: InputSettings
   /** Commands conversations are running now, by conversation; not part of the log. */
   live: Record<string, LiveCommand>
+  /**
+   * Replies being written now, by conversation; not part of the log. A posted one stays
+   * until its message is loaded, so it goes on showing in the same place.
+   */
+  writing: Record<string, ReplyDraft>
   /** Threads' background commands by conversation, as the server last told them. */
   background: Record<string, BackgroundView[]>
   /**
@@ -185,6 +192,7 @@ export const state = reactive<State>({
   projectSettingsOpen: false,
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   live: {},
+  writing: {},
   background: {},
   lineComments: {},
   error: null,
@@ -918,13 +926,36 @@ export async function start() {
       // The server tells again what is running now.
       state.live = {}
       state.background = {}
+      for (const [id, draft] of Object.entries(state.writing)) {
+        if (!draft.posted) delete state.writing[id]
+      }
       if (loaded) return
       loaded = true
       void load()
     },
     onLive,
     onBackground,
+    onDraft,
   )
+}
+
+/** How long a posted draft waits for its message to load before it goes anyway. */
+const POSTED_KEEP_MS = 15_000
+
+function onDraft(update: DraftUpdate) {
+  const { conversationId, draft } = update
+  if (!draft) {
+    // A posted one is left to its message; only one being written is taken back.
+    if (!state.writing[conversationId]?.posted) delete state.writing[conversationId]
+    return
+  }
+  state.writing[conversationId] = draft
+  if (!draft.posted) return
+  setTimeout(() => {
+    if (state.writing[conversationId]?.messageId === draft.messageId) {
+      delete state.writing[conversationId]
+    }
+  }, POSTED_KEEP_MS)
 }
 
 function onBackground(update: BackgroundUpdate) {

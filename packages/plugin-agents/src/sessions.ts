@@ -45,6 +45,8 @@ export interface AgentUsage {
 /** What an agent program does, as a driver reports it. */
 export type AgentEvent =
   | { type: 'text'; text: string }
+  /** It began a tool call: the text so far is not its answer. */
+  | { type: 'calling' }
   | { type: 'reasoning'; text: string }
   | { type: 'usage'; usage: AgentUsage }
   /** It sent something with nothing to hand on: it is still working. */
@@ -421,7 +423,10 @@ export function agentProvider<Settings>(
           switch (event.type) {
             case 'call':
               calls.push({ id: event.id, name: event.name, arguments: event.arguments })
-              yield { type: 'alive' }
+              yield { type: 'calling' }
+              break
+            case 'calling':
+              yield { type: 'calling' }
               break
             case 'text':
               if (event.text) yield { type: 'text', text: event.text }

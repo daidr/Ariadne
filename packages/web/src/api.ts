@@ -10,6 +10,7 @@ import type {
   ConversationView,
   LineComment,
   LiveUpdate,
+  DraftUpdate,
   BackgroundUpdate,
   BackgroundView,
   MessageView,
@@ -707,6 +708,7 @@ export function followEvents(
   onOpen?: () => void,
   onLive?: (update: LiveUpdate) => void,
   onBackground?: (update: BackgroundUpdate) => void,
+  onDraft?: (update: DraftUpdate) => void,
 ): () => void {
   let lastSeq = afterSeq
   let source: EventSource | null = null
@@ -733,6 +735,10 @@ export function followEvents(
     // A running command's output: not part of the log, so it moves nothing forward.
     current.addEventListener('live', (message) => {
       onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
+    })
+    // A reply as it is written: not part of the log either.
+    current.addEventListener('draft', (message) => {
+      onDraft?.(JSON.parse((message as MessageEvent<string>).data) as DraftUpdate)
     })
     current.addEventListener('background', (message) => {
       onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)

@@ -26,6 +26,8 @@ function argvOf(settings: ClaudeCodeSettings, model: string, effort?: string): s
     '--output-format',
     'stream-json',
     '--verbose',
+    // The answer as it is written, not only once whole.
+    '--include-partial-messages',
     ...(model && model !== 'default' ? ['--model', model] : []),
     ...(effort ? ['--effort', effort] : []),
     // None of its own tools: it works only through the conversation's, which Ariadne runs.
@@ -146,10 +148,19 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
       label: 'agent',
     })
 
+    // Messages whose text came in pieces already, so their whole copy is not handed on again.
+    const streamed = new Set<string>()
+    let writing: string | null = null
     const onLine = (value: unknown) => {
       sawOutput = true
       const line = value as {
         type?: string
+        event?: {
+          type?: string
+          message?: { id?: string }
+          content_block?: { type?: string }
+          delta?: { type?: string; text?: string }
+        }
         subtype?: string
         is_error?: boolean
         result?: string
@@ -158,11 +169,26 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
         usage?: ApiUsage
         message?: { id?: string; content?: ContentBlock[] | string; usage?: ApiUsage }
       }
+      if (line.type === 'stream_event' && line.event) {
+        const event = line.event
+        if (event.type === 'message_start') writing = event.message?.id ?? null
+        else if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+          ctx.emit({ type: 'calling' })
+        } else if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          if (event.delta.text) {
+            if (writing) streamed.add(writing)
+            ctx.emit({ type: 'text', text: event.delta.text })
+          }
+        } else ctx.emit({ type: 'alive' })
+        return
+      }
       if (line.type === 'assistant' && line.message) {
         const content = Array.isArray(line.message.content) ? line.message.content : []
+        const whole = !line.message.id || !streamed.has(line.message.id)
         for (const block of content) {
-          if (block.type === 'text' && block.text) ctx.emit({ type: 'text', text: block.text })
-          else if (block.type === 'thinking' && block.thinking) {
+          if (block.type === 'text' && block.text) {
+            if (whole) ctx.emit({ type: 'text', text: block.text })
+          } else if (block.type === 'thinking' && block.thinking) {
             ctx.emit({ type: 'reasoning', text: block.thinking })
           }
         }
@@ -182,6 +208,8 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
         }
         turn = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 }
         seen.clear()
+        streamed.clear()
+        writing = null
         if (typeof line.total_cost_usd === 'number') {
           // The total so far in this process; a smaller one started over.
           const cost =

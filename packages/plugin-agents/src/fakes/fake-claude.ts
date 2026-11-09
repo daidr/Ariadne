@@ -41,6 +41,19 @@ for await (const message of lines()) {
     continue
   }
   const answer = `turn ${turn}: ${results.join(' | ')} len ${text.length} images ${images} system ${system.length}`
+  if (args.includes('--include-partial-messages')) {
+    write({ type: 'stream_event', event: { type: 'message_start', message: { id } } })
+    for (const piece of [answer.slice(0, 6), answer.slice(6)]) {
+      write({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: piece },
+        },
+      })
+    }
+  }
   write({
     type: 'assistant',
     message: {
