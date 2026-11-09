@@ -494,9 +494,22 @@ describe('milestones', () => {
     expect(app.listThreads(projectId)).toEqual([])
     app.setAutopilotPaused(projectId, true)
     app.setAutopilotPaused(projectId, false)
-    await new Promise((resolve) => setTimeout(resolve, 2))
     await pilot().check(projectId)
     expect(app.listNeedsMe(projectId)).toHaveLength(1)
+  })
+
+  test('a no to a question from before a pause holds once it goes on again', async () => {
+    autopilotOn()
+    addNodes([{ id: 'm', kind: 'milestone' }, { id: 'b' }], [['m', 'b']])
+    await pilot().check(projectId)
+    const card = app.listNeedsMe(projectId)[0]!
+    if (card.kind !== 'attention') throw new Error('not a card')
+    app.setAutopilotPaused(projectId, true)
+    app.setAutopilotPaused(projectId, false)
+    app.answerAttention(card.attention.id, { type: 'confirm', approved: false })
+    settle()
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toEqual([])
   })
 
   test('a milestone removed from the plan takes its question back', async () => {
@@ -511,5 +524,21 @@ describe('milestones', () => {
     })
     await pilot().check(projectId)
     expect(app.listNeedsMe(projectId)).toEqual([])
+  })
+
+  test('a milestone removed and put back is asked about again', async () => {
+    autopilotOn()
+    addNodes([{ id: 'm', kind: 'milestone' }], [])
+    await pilot().check(projectId)
+    app.revisePlan(projectId, {
+      author: 'user',
+      reason: '不要了',
+      ops: [{ op: 'remove', id: 'm' }],
+    })
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toEqual([])
+    addNodes([{ id: 'm', kind: 'milestone' }], [])
+    await pilot().check(projectId)
+    expect(app.listNeedsMe(projectId)).toHaveLength(1)
   })
 })
