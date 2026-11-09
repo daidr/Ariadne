@@ -81,6 +81,8 @@ interface DraftModel {
   lookError: string | null
   /** The name its settings were last filled in for; another name gets them filled anew. */
   described: string
+  /** What the catalog last filled in, untouched since; `null` for the user's own values. */
+  filled: string | null
 }
 
 const kinds = ref<ModelKind[]>([])
@@ -195,6 +197,7 @@ function load(settings: ModelSettings) {
     looking: false,
     lookError: null,
     described: model.model,
+    filled: null,
   }))
   showCost.value = settings.showCost
   threadModel.value = settings.roles.thread.model
@@ -309,6 +312,7 @@ function addModel(provider: string) {
     looking: false,
     lookError: null,
     described: '',
+    filled: null,
   })
   presetModel(models.value.at(-1)!)
   threadModel.value ??= id
@@ -372,6 +376,19 @@ async function suggest(provider: DraftProvider, typed: string) {
     .map((model) => model.id)
 }
 
+/** The settings a catalog entry fills in, to tell later whether the user changed them. */
+const filledOf = (model: DraftModel) =>
+  JSON.stringify([
+    model.contextK,
+    model.images,
+    model.maxTokens,
+    model.currency,
+    model.priceInput,
+    model.priceOutput,
+    model.priceCacheRead,
+    model.priceCacheWrite,
+  ])
+
 function fill(model: DraftModel, info: ModelInfo | null) {
   model.contextK = info?.contextTokens ? Math.floor(info.contextTokens / 1000) : null
   model.images = info?.images !== false
@@ -381,6 +398,16 @@ function fill(model: DraftModel, info: ModelInfo | null) {
   model.priceOutput = info?.price?.output ?? null
   model.priceCacheRead = info?.price?.cacheRead ?? null
   model.priceCacheWrite = info?.price?.cacheWrite ?? null
+  model.filled = filledOf(model)
+}
+
+/**
+ * A name nobody knows: what the catalog filled in for the name before goes, since it was
+ * another model's; what the user typed in themselves stays.
+ */
+function unknown(model: DraftModel) {
+  if (model.filled !== null && model.filled === filledOf(model)) fill(model, null)
+  model.filled = null
 }
 
 // Models being filled in from the catalog; saving waits for them.
@@ -389,8 +416,8 @@ const describing = new Set<Promise<void>>()
 /**
  * Fill a model's settings in for its name, once per name: how much it reads and writes,
  * whether it looks at images, what it costs. From what its provider listed, else from the
- * catalog by the name alone; a name nobody knows gets the defaults. `again` asks anew for
- * the same name, and says why when nothing comes back.
+ * catalog by the name alone; a name nobody knows keeps what the user typed in. `again` asks
+ * anew for the same name, and says why when nothing comes back.
  */
 function describe(model: DraftModel, again = false): Promise<void> {
   const name = model.model.trim()
@@ -398,7 +425,7 @@ function describe(model: DraftModel, again = false): Promise<void> {
   model.described = name
   model.lookError = null
   if (!name) {
-    fill(model, null)
+    unknown(model)
     return Promise.resolve()
   }
   const provider = providers.value.find((p) => p.id === model.provider)
@@ -414,7 +441,9 @@ function describe(model: DraftModel, again = false): Promise<void> {
       if (again) model.lookError = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     }
     // Typed on meanwhile: the newer name is described by its own call.
-    if (model.described === name && (info || !again)) fill(model, info)
+    if (model.described !== name) return
+    if (info) fill(model, info)
+    else if (!again) unknown(model)
   })().finally(() => {
     model.looking = false
     describing.delete(filling)
@@ -920,7 +949,7 @@ async function saveModels(): Promise<boolean> {
 .settings-model {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .settings-model-more {

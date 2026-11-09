@@ -480,9 +480,10 @@ describe('found on this machine', () => {
   test('an agent program is checked by whether its command is there', async () => {
     const made = provider(claudeCode as AgentKind<never>)
     expect(await made.check!({ command: `${process.execPath} --x` } as never)).toBeNull()
-    expect(await made.check!({ command: 'no-such-program-here --x' } as never)).toBe(
-      'command not found: no-such-program-here',
-    )
+    expect(await made.check!({ command: 'no-such-program-here --x' } as never)).toEqual({
+      'zh-CN': '找不到命令 no-such-program-here',
+      en: 'command not found: no-such-program-here',
+    })
     expect((await made.models!({} as never))[0]).toBe('default')
   })
 })

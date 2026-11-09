@@ -348,7 +348,9 @@ export function agentProvider<Settings>(
     models: async () => ['default', ...(agent.models ?? [])],
     async check(settings) {
       const [program] = splitCommand(String((settings as { command?: unknown }).command ?? ''))
-      return !program || Bun.which(program) ? null : `command not found: ${program}`
+      return !program || Bun.which(program)
+        ? null
+        : { 'zh-CN': `找不到命令 ${program}`, en: `command not found: ${program}` }
     },
     find(context) {
       return agent.signedIn?.(context)

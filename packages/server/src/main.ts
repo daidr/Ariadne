@@ -32,8 +32,11 @@ import { loadConfig } from './config'
 import { openBrowser } from './open-browser'
 import { loadUserConfig, SettingsStore } from './settings'
 
-/** How long a page left open may take to reconnect after a restart before a new one opens. */
-const RECONNECT_WAIT_MS = 3000
+/**
+ * How long a page left open may take to reconnect after a restart before a new one opens:
+ * a little longer than the longest the page waits between tries.
+ */
+const RECONNECT_WAIT_MS = 12_000
 
 const config = loadConfig()
 const app = new Ariadne({ path: config.databasePath })

@@ -310,10 +310,10 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
   ): Promise<string[]>
   /**
    * Whether the setup can work at all, without asking a model: the reason when it cannot
-   * (the program is not installed), `null` when it can. Checked when the settings are
+   * (the program is not installed), in the user's languages, `null` when it can. Checked when the settings are
    * saved; without it the model is asked for one word instead.
    */
-  check?(settings: Settings): Promise<string | null>
+  check?(settings: Settings): Promise<LocalizedText | null>
   /**
    * Setups of this kind already on the machine (a key in the environment, a program
    * signed in), offered on first run so the user need not type them in.

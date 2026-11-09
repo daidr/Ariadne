@@ -1163,7 +1163,7 @@ export function createHandler({
     const asked = await Promise.all(
       changed.map(async (model) => {
         const resolved = settings.resolveSaved(model)
-        const problem = resolved ? await check(resolved) : null
+        const problem = resolved ? await check(resolved, settings.current.locale) : null
         return problem ? [{ model: model.id, provider: model.provider, problem }] : []
       }),
     )
@@ -1260,10 +1260,10 @@ export function createHandler({
     }
     const info = await describe(listed, hint)
     const model = suggestModel(listed, info)
-    if (!model) throw new DomainError('error.modelCheck', { detail: 'no models' })
+    if (!model) throw new DomainError('error.modelNone')
     const saved = settings.useFound(setup, model, info.get(model))
     const resolved = settings.resolveSaved(saved)
-    const problem = resolved ? await check(resolved) : null
+    const problem = resolved ? await check(resolved, settings.current.locale) : null
     return json({
       ...settings.publicModels(),
       problems: problem ? [{ model: saved.id, provider: saved.provider, problem }] : [],

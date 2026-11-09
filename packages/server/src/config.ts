@@ -32,7 +32,8 @@ export function loadToken(home: string): string {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): ServerConfig {
   const home = env.ARIADNE_HOME ?? join(homedir(), '.ariadne')
-  const firstRun = !existsSync(join(home, 'token'))
+  // By the database and not the token, which a given `ARIADNE_TOKEN` never writes.
+  const firstRun = !existsSync(join(home, 'ariadne.sqlite'))
   mkdirSync(home, { recursive: true, mode: 0o700 })
   // A path, not a URL pathname: those are percent-encoded and break on non-ASCII directories.
   const webDist = join(import.meta.dir, '../../web/dist')

@@ -370,6 +370,8 @@ export const en: Record<MessageKey, string> = {
   'error.priceCatalog': 'Could not read the model catalog: {detail}',
   'error.priceUnknown': 'The model catalog does not list {model}',
   'error.modelCheck': 'Could not reach it: {detail}',
+  'error.modelCheckTimeout': 'Could not reach it: no answer in {seconds} seconds',
+  'error.modelNone': 'This service lists no models to use',
   'error.instructionsFull':
     'The instructions for every project are full; remove some in the settings first',
   'error.projectBusy': 'A turn in this project is still running; try again shortly',

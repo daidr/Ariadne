@@ -1,22 +1,29 @@
 import type { ResolvedModel } from '@ariadne/agent'
-import type { LocalizedMessage } from '@ariadne/i18n'
+import type { LocalizedMessage, Locale } from '@ariadne/i18n'
 import type { ModelInfo } from './prices'
 
 /** How long a model may take to start answering before the check gives up. */
 const CHECK_TIMEOUT_MS = 20_000
 
-/** What is wrong with a model as set up, or `null` when it answers. */
-export type ModelCheck = (model: ResolvedModel) => Promise<LocalizedMessage | null>
+const TIMED_OUT: LocalizedMessage = {
+  key: 'error.modelCheckTimeout',
+  params: { seconds: CHECK_TIMEOUT_MS / 1000 },
+}
+
+/** What is wrong with a model as set up, or `null` when it answers; `locale` is the user's. */
+export type ModelCheck = (model: ResolvedModel, locale: Locale) => Promise<LocalizedMessage | null>
 
 /**
  * Ask the model for one word and stop at the first sign of an answer: the address, the key
  * and the model's name are right then. A provider with a check of its own (an agent
  * program, which takes long to start) is asked that instead.
  */
-export const checkModel: ModelCheck = async (model) => {
+export const checkModel: ModelCheck = async (model, locale) => {
   if (model.provider.check) {
     const problem = await model.provider.check(model.settings as never)
-    return problem ? { key: 'error.modelCheck', params: { detail: problem } } : null
+    return problem
+      ? { key: 'error.modelCheck', params: { detail: problem[locale] ?? problem['zh-CN'] } }
+      : null
   }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS)
@@ -34,13 +41,14 @@ export const checkModel: ModelCheck = async (model) => {
       if (part.type === 'finish' && part.reason === 'error') {
         return { key: 'error.modelCheck', params: { detail: part.error ?? '' } }
       }
+      // A sign of life before anything was read: what follows may still be a refusal.
+      if (part.type === 'alive') continue
       // It is answering: the rest of the answer is not needed.
       return null
     }
-    return controller.signal.aborted
-      ? { key: 'error.modelCheck', params: { detail: 'timed out' } }
-      : null
+    return controller.signal.aborted ? TIMED_OUT : null
   } catch (error) {
+    if (controller.signal.aborted) return TIMED_OUT
     return {
       key: 'error.modelCheck',
       params: { detail: error instanceof Error ? error.message : String(error) },

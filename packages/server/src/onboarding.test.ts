@@ -249,22 +249,36 @@ describe('the model form', () => {
         settings: {},
         model: 'm',
       }) as never
-    expect(await checkModel(provider([{ type: 'text', text: 'Hello' }]))).toBeNull()
+    expect(await checkModel(provider([{ type: 'text', text: 'Hello' }]), 'zh-CN')).toBeNull()
     expect(asked[0]).toMatchObject({ model: 'm', messages: [{ role: 'user', content: 'Hi' }] })
+    // A sign of life is not an answer yet: the refusal after it counts.
+    const refused = [
+      { type: 'alive' },
+      { type: 'finish', reason: 'error', error: 'insufficient quota' },
+    ] as ModelStreamPart[]
+    expect(await checkModel(provider(refused), 'zh-CN')).toEqual({
+      key: 'error.modelCheck',
+      params: { detail: 'insufficient quota' },
+    })
     expect(
-      await checkModel(
-        provider([{ type: 'finish', reason: 'error', error: 'HTTP 401' } as ModelStreamPart]),
-      ),
-    ).toEqual({ key: 'error.modelCheck', params: { detail: 'HTTP 401' } })
-    expect(await checkModel(provider(new Error('refused')))).toEqual({
+      await checkModel(provider([{ type: 'alive' }, { type: 'text', text: 'Hi' }]), 'zh-CN'),
+    ).toBeNull()
+    expect(await checkModel(provider(new Error('refused')), 'zh-CN')).toEqual({
       key: 'error.modelCheck',
       params: { detail: 'refused' },
     })
-    // An agent program is asked whether it is there, not for an answer.
-    const program = { provider: { check: async () => 'command not found: x' }, settings: {} }
-    expect(await checkModel(program as never)).toEqual({
+    // An agent program is asked whether it is there, not for an answer; it says why not
+    // in the user's language.
+    const program = {
+      provider: { check: async () => ({ 'zh-CN': '找不到命令 x', en: 'command not found: x' }) },
+      settings: {},
+    }
+    expect(await checkModel(program as never, 'en')).toEqual({
       key: 'error.modelCheck',
       params: { detail: 'command not found: x' },
+    })
+    expect(await checkModel(program as never, 'zh-CN')).toMatchObject({
+      params: { detail: '找不到命令 x' },
     })
   })
 })
@@ -324,6 +338,14 @@ describe('what is already on this machine', () => {
     expect(await used.json()).toEqual({
       error: { key: 'error.modelCheck', params: { detail: 'HTTP 401: bad key' } },
     })
+    expect(settings.publicModels().providers).toEqual([])
+    // Nothing to start with is said in the user's language, not passed on as a detail.
+    service.listed = []
+    const empty = await call('/api/settings/found/use', {
+      method: 'POST',
+      body: { id: 'demo:DEMO_API_KEY' },
+    })
+    expect(await empty.json()).toEqual({ error: { key: 'error.modelNone' } })
     expect(settings.publicModels().providers).toEqual([])
     const missing = await call('/api/settings/found/use', { method: 'POST', body: { id: 'x' } })
     expect(missing.status).toBeGreaterThanOrEqual(400)

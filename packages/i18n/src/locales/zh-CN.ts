@@ -355,6 +355,8 @@ export const zhCN = {
   'error.priceCatalog': '读不到模型目录：{detail}',
   'error.priceUnknown': '模型目录里没有 {model}',
   'error.modelCheck': '连不上：{detail}',
+  'error.modelCheckTimeout': '连不上：{seconds} 秒没有回应',
+  'error.modelNone': '这个服务没有列出可用的模型',
   'error.instructionsFull': '给所有项目的指令已经写满了，先去设置里删掉一些',
   'error.projectBusy': '项目里还有回合没结束，请稍后再试',
   'error.invalidBody': '请求内容不合法：{reason}',
