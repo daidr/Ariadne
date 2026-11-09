@@ -140,6 +140,8 @@ export function hostedClone(input: {
       cwd: options.cwd ?? bare,
       env: serverGitEnv(['file']),
       ...(options.whole ? { whole: true } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
     })
 
   // What the coordinator reads: the default branch as last fetched, at most a minute old.

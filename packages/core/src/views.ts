@@ -20,6 +20,7 @@ import type {
   PlanAuthor,
   PlanNodeKind,
   PlanOp,
+  ProjectReference,
   ProjectSource,
   Author,
   MessageKind,
@@ -46,6 +47,8 @@ export interface ProjectView {
   needsMe: number
   /** Where threads work; `null` until the user picks a directory. */
   source: ProjectSource | null
+  /** Sources its conversations read and never change, beside the one threads work in. */
+  references: ProjectReference[]
   /**
    * How many turns of this project may run at once, within the shared total; `null`
    * leaves it to the total. A turn answering the user may still take a reserved slot.

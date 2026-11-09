@@ -84,6 +84,25 @@ export interface SourceView {
   /** Larger than `maxBytes` is refused with a `FileTooLargeError`, without reading it all. */
   readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
+  /**
+   * Every file under `path`, relative to the root, without what git ignores: what finding
+   * files by name goes through. `partial` when the listing stopped short. A view without
+   * it is listed directory by directory, which is slow on another machine.
+   */
+  files?(
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ files: string[]; partial: boolean }>
+  /**
+   * Lines under `path` matching the regular expression `pattern`, as `file:line:text`;
+   * `error` when the pattern or the search failed. A view without it is searched by
+   * reading file after file.
+   */
+  search?(
+    pattern: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ lines: string[]; error: string | null }>
 }
 
 /**
@@ -91,13 +110,17 @@ export interface SourceView {
  * whatever object stands behind it.
  */
 export function readOnlyView(
-  files: Pick<SourceView, 'readBytes' | 'list'>,
+  files: Pick<SourceView, 'readBytes' | 'list' | 'files' | 'search'>,
   ref?: string,
 ): SourceView {
   return {
     ...(ref ? { ref } : {}),
     readBytes: async (path, maxBytes) => files.readBytes(path, maxBytes),
     list: async (path) => files.list(path),
+    ...(files.files ? { files: async (path, options) => files.files!(path, options) } : {}),
+    ...(files.search
+      ? { search: async (pattern, path, options) => files.search!(pattern, path, options) }
+      : {}),
   }
 }
 

@@ -120,7 +120,7 @@ describe("a hosted repository's view", () => {
     })
     const view = await clone.workspace.view!()
     expect(view.ref).toBe('origin/main')
-    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes', 'ref'])
+    expect(Object.keys(view).toSorted()).toEqual(['files', 'list', 'readBytes', 'ref', 'search'])
     expect(await view.list('.')).toEqual([
       { name: 'docs', kind: 'directory' },
       { name: 'logo.png', kind: 'file' },
@@ -128,6 +128,13 @@ describe("a hosted repository's view", () => {
       { name: 'README.md', kind: 'file' },
     ])
     expect(await view.list('docs/')).toEqual([{ name: 'a.md', kind: 'file' }])
+    // Finding and searching go through git, on the same commit and without a checkout.
+    expect((await view.files!('.')).files).toEqual(['NEW.md', 'README.md', 'docs/a.md', 'logo.png'])
+    expect((await view.files!('docs')).files).toEqual(['docs/a.md'])
+    expect(await view.search!('^A$', '.')).toEqual({ lines: ['docs/a.md:1:A'], error: null })
+    expect((await view.search!('^A$', 'docs')).lines).toEqual(['docs/a.md:1:A'])
+    expect((await view.search!('nowhere to be found', '.')).lines).toEqual([])
+    expect((await view.search!('(', '.')).error).toBeTruthy()
     expect(await textOf(view, './docs/a.md')).toBe('A\n')
     expect(await textOf(view, 'docs\\a.md')).toBe('A\n')
     expect(await view.readBytes('logo.png', 4)).toEqual(new Uint8Array([0x89, 0x50, 0, 255]))

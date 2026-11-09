@@ -24,6 +24,7 @@ import type { PluginHost } from './plugins'
 import { commandVerdict, type CommandRule } from './limits'
 import { headAndTail } from './workspace-tools'
 import { BackgroundCommands } from './background'
+import type { ReferenceKind } from './reference-tools'
 
 /** How long setting up a new workspace may take, unless the user's limits say. */
 const SETUP_TIMEOUT_MS = 600_000
@@ -83,6 +84,83 @@ export async function connectSource(
       detail: error instanceof Error ? error.message : String(error),
     })
   }
+}
+
+/** Secret settings of a reference source are kept under this prefix and its id. */
+export const REFERENCE_SECRET = 'reference.'
+
+export const referenceSecretPrefix = (referenceId: string) => `${REFERENCE_SECRET}${referenceId}.`
+
+/**
+ * The secret settings a reference source connects with: its own, and for those it has
+ * none of, the main source's (or its hosting's) when that is of the same kind and sends
+ * them to the same place, so one token reads two repositories of the same host without
+ * being typed twice, and never reaches a host it was not given for.
+ */
+export function referenceSecrets(
+  contexts: Map<string, ContextProvider<never>>,
+  source: ProjectSource | null,
+  reference: { id?: string; kind: string; settings: Record<string, unknown> },
+  secrets: Record<string, unknown>,
+): Record<string, unknown> {
+  const picked: Record<string, unknown> = {}
+  const take = (prefix: string, strict: boolean) => {
+    for (const [key, value] of Object.entries(secrets)) {
+      if (!key.startsWith(prefix)) continue
+      const name = key.slice(prefix.length)
+      // The main source's own secrets are the keys under no prefix at all.
+      if (strict || !name.includes('.')) picked[name] = value
+    }
+  }
+  const lends = (other: { kind: string; settings: Record<string, unknown> } | null | undefined) => {
+    if (other?.kind !== reference.kind) return false
+    const goes = contexts.get(reference.kind)?.secretsFor
+    if (!goes) return true
+    try {
+      return goes(reference.settings as never) === goes(other.settings as never)
+    } catch {
+      return false
+    }
+  }
+  if (lends(source?.hosting)) take(HOSTING_SECRET, true)
+  if (lends(source)) take('', false)
+  if (reference.id) take(referenceSecretPrefix(reference.id), true)
+  return picked
+}
+
+/** What went wrong with a source, as a `DomainError` the user or the model can read. */
+const unreadable = (error: unknown) =>
+  error instanceof DomainError
+    ? error
+    : new DomainError('error.workspace', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+
+/**
+ * Connect a source that is only read. What comes back hands out its view, fresh each time
+ * (a hosted repository fetches when its view is asked for). Throws a `DomainError` the
+ * user or the model can read when it cannot be reached or offers nothing to look at.
+ */
+export async function connectReference(
+  contexts: Map<string, ContextProvider<never>>,
+  reference: { kind: string; settings: Record<string, unknown> },
+  secrets: Record<string, unknown>,
+): Promise<() => Promise<SourceView>> {
+  const provider = contexts.get(reference.kind)
+  if (!provider) throw new DomainError('error.notFound', { what: reference.kind })
+  let workspace: Partial<Capabilities>['workspace']
+  try {
+    workspace = (await provider.connect({ ...reference.settings, ...secrets } as never)).workspace
+  } catch (error) {
+    throw unreadable(error)
+  }
+  const view = workspace?.view
+  if (!workspace || !view) {
+    throw new DomainError('error.workspace', {
+      detail: 'this kind of source cannot be read without working in it',
+    })
+  }
+  return () => view.call(workspace).catch((error: unknown) => Promise.reject(unreadable(error)))
 }
 
 /**
@@ -155,6 +233,11 @@ export class WorkspaceManager {
   private readonly sources = new Map<
     string,
     { key: string; capabilities: Promise<Partial<Capabilities>> }
+  >()
+  /** Reference sources as connected, by project and reference id. */
+  private readonly referenceViews = new Map<
+    string,
+    { key: string; view: Promise<() => Promise<SourceView>> }
   >()
   private readonly open = new Map<string, { key: string; workspace: Promise<Workspace> }>()
   private readonly queues = new Map<string, Promise<void>>()
@@ -303,6 +386,100 @@ export class WorkspaceManager {
       ...(source.hosting ? [line(source.hosting.kind, source.hosting.settings)] : []),
       line(source.kind, source.settings),
     ].join(' · ')
+  }
+
+  /**
+   * The sources the project only reads, each with the name conversations call it by and
+   * where it is in one line, like `describe`.
+   */
+  references(projectId: string, locale: Locale): { name: string; line: string }[] {
+    return this.app.getProject(projectId).references.map((reference) => {
+      const provider = this.host.contexts.get(reference.kind)
+      const title = provider ? (provider.title[locale] ?? provider.title['zh-CN']) : reference.kind
+      const summary = sourceSummary(provider?.summary, reference.settings)
+      return { name: reference.name, line: summary ? `${title} ${summary}` : title }
+    })
+  }
+
+  /**
+   * A reference source by its name, read-only; throws a `DomainError` the model can read.
+   * It is connected once per configuration, and again after a failure.
+   */
+  async referenceView(projectId: string, name: string): Promise<SourceView> {
+    const project = this.app.getProject(projectId)
+    const reference = project.references.find((known) => known.name === name)
+    if (!reference) throw new DomainError('error.noReference', { name })
+    const secrets = referenceSecrets(
+      this.host.contexts,
+      project.source,
+      reference,
+      this.secrets(projectId),
+    )
+    const key = JSON.stringify([reference.kind, reference.settings, secrets])
+    const id = `${projectId}:${reference.id}`
+    let known = this.referenceViews.get(id)
+    if (known?.key !== key) {
+      const connected = connectReference(this.host.contexts, reference, secrets)
+      known = { key, view: connected }
+      this.referenceViews.set(id, known)
+      connected.catch(() => {
+        if (this.referenceViews.get(id)?.view === connected) this.referenceViews.delete(id)
+      })
+    }
+    try {
+      return await (
+        await known.view
+      )()
+    } catch (error) {
+      const detail =
+        error instanceof DomainError
+          ? String(error.params?.detail ?? error.params?.what ?? error.code)
+          : String(error)
+      throw new DomainError('error.referenceUnreadable', { name, detail })
+    }
+  }
+
+  /**
+   * Whether a source to be added as a reference can be read, before it is saved: connects
+   * it (with `secrets`, or else the main source's when it is of the same kind) and lists
+   * its root. Returns where it is in one line, which its name is made from.
+   */
+  async checkReference(
+    projectId: string,
+    reference: { kind: string; settings: Record<string, unknown> },
+    secrets?: Record<string, unknown>,
+  ): Promise<{ where: string }> {
+    const project = this.app.getProject(projectId)
+    const connected = await connectReference(this.host.contexts, reference, {
+      ...referenceSecrets(this.host.contexts, project.source, reference, this.secrets(projectId)),
+      ...secrets,
+    })
+    try {
+      await (await connected()).list('.')
+    } catch (error) {
+      if (error instanceof DomainError) throw error
+      throw new DomainError('error.workspace', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+    const provider = this.host.contexts.get(reference.kind)
+    return { where: sourceSummary(provider?.summary, reference.settings) ?? reference.kind }
+  }
+
+  /** The kinds of source a reference can be, for the coordinator to pick among. */
+  referenceKinds(locale: Locale): ReferenceKind[] {
+    return [...this.host.contexts.values()].map((provider) => {
+      // Secrets are the user's to type in the settings, never the model's.
+      const settings = Object.entries(provider.settings.properties)
+        .filter(([, field]) => !(field.type === 'string' && field.secret))
+        .map(([key]) => key)
+      return {
+        kind: provider.kind,
+        title: provider.title[locale] ?? provider.title['zh-CN'],
+        settings,
+        required: (provider.settings.required ?? []).filter((key) => settings.includes(key)),
+      }
+    })
   }
 
   /**
@@ -584,6 +761,9 @@ export class WorkspaceManager {
       })
     }
     this.sources.delete(projectId)
+    for (const id of this.referenceViews.keys()) {
+      if (id.startsWith(`${projectId}:`)) this.referenceViews.delete(id)
+    }
   }
 
   /** Run `task` after the thread's earlier opening or removal has finished. */

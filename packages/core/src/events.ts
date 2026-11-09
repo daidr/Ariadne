@@ -235,6 +235,45 @@ export interface ProjectSource {
   hosting?: { kind: string; settings: Record<string, unknown> }
 }
 
+/**
+ * A source the project only reads, beside the one its threads work in: another repository
+ * or directory to look things up in. Nothing is changed, run or checked out there.
+ */
+export interface ProjectReference {
+  id: string
+  /**
+   * The short name conversations call it by, unique in the project and made from where it
+   * is (`dou-ui` for a repository `owner/dou-ui`), see `referenceName`.
+   */
+  name: string
+  kind: string
+  settings: Record<string, unknown>
+}
+
+/** More than this is another project's worth of code, and a line each in every prompt. */
+export const MAX_REFERENCES = 8
+
+/**
+ * A reference's name from where it is: the last part of its path or repository, kept to
+ * letters, digits, `.`, `_` and `-`, and numbered when `taken` has it already.
+ */
+export function referenceName(where: string, taken: readonly string[]): string {
+  const last =
+    where
+      .trim()
+      .split(/[\\/:]+/)
+      .filter(Boolean)
+      .pop() ?? ''
+  const base =
+    last
+      .replace(/\.git$/i, '')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 40) || 'reference'
+  if (!taken.includes(base)) return base
+  for (let n = 2; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`
+}
+
 /** Markdown documents, whiteboards and dashboard snapshots; see artifact-content.ts. */
 export type ArtifactKind = 'document' | 'whiteboard' | 'dashboard'
 
@@ -336,6 +375,8 @@ export interface EventMap {
   'project.deleted': Record<string, never>
   /** The project's context source; `null` removes it. */
   'project.source.set': { source: ProjectSource | null }
+  /** The sources the project only reads, whole; see `ProjectReference`. */
+  'project.references.set': { references: ProjectReference[] }
   /** How many of the shared work slots this project may take at once; `null` is no cap. */
   'project.slots.set': { slots: number | null }
   /** The external tool servers (MCP) this project's conversations may use, by id. */

@@ -417,6 +417,9 @@ export function gitlabProvider(
   return {
     kind: 'gitlab',
     title: { 'zh-CN': 'GitLab 仓库', en: 'GitLab repository' },
+    // A token goes to the instance, which the settings choose.
+    secretsFor: (settings) =>
+      parseRepository(settings.repository ?? '', settings.instance).instance,
     settings: {
       type: 'object',
       properties: {

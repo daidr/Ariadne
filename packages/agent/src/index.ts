@@ -38,8 +38,13 @@ export {
 } from './tools'
 export { shellQuote } from './workspace-tools'
 export {
+  connectReference,
   connectSource,
   HOSTING_SECRET,
+  REFERENCE_SECRET,
+  referenceSecretPrefix,
+  referenceSecrets,
+  sourceSummary,
   WorkspaceManager,
   type WorkspaceManagerOptions,
 } from './workspaces'
@@ -51,6 +56,7 @@ export {
   COMMAND_ACTIONS,
   commandParts,
   commandVerdict,
+  DEFAULT_COMMAND_RULES,
   DEFAULT_LIMITS,
   defaultTurnSettings,
   LIMIT_RANGES,

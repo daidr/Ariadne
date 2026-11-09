@@ -14,6 +14,17 @@ export {
   type ServerSentEvent,
 } from './sse'
 export { defaultShell, shellArgv } from './shell'
+export {
+  execArgv,
+  listFiles,
+  MAX_MATCH_LINES,
+  searchableView,
+  searchByReading,
+  searchLines,
+  viewPath,
+  walk,
+  type ViewChecks,
+} from './search'
 export { processes, ProcessLedger, type Leftovers, type TrackedProcess } from './processes'
 export {
   browseLocal,
@@ -86,6 +97,13 @@ export interface ContextProvider<Settings = Record<string, unknown>> {
    * credentials, which never reach that machine.
    */
   hosting?: boolean
+  /**
+   * Where a source with these settings sends its secret settings, e.g. an instance's
+   * address, for kinds whose settings choose the host. A source that has no secret of its
+   * own borrows another's of the same kind only when both name the same place; a kind
+   * without this always sends them to the same place. Throws on settings it cannot read.
+   */
+  secretsFor?(settings: Partial<Settings>): string
   /** Build the capabilities of one configured source. */
   connect(settings: Settings): Promise<Partial<Capabilities>>
   /**

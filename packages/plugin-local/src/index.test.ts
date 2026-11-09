@@ -71,14 +71,37 @@ describe('local directory', () => {
     const { workspace } = await provider.connect({ path: dir })
     const view = await workspace!.view!()
     // Only reading: nothing behind it to write or run with.
-    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
+    expect(Object.keys(view).toSorted()).toEqual(['files', 'list', 'readBytes', 'search'])
     expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'README.md'])
     expect(await textOf(view, 'draft.md')).toBe('not committed\n')
+    // Found and searched as it is now, the file not committed included.
+    expect((await view.files!('.')).files.toSorted()).toEqual(['README.md', 'draft.md'])
+    expect((await view.search!('not commit', '.')).lines).toEqual(['draft.md:1:not committed'])
     await expect(view.readBytes('../outside', 10)).rejects.toBeInstanceOf(WorkspacePathError)
     // git's own directory, which may hold credentials in a remote's URL, is not shown.
     for (const path of ['.git/config', './.git/config', 'sub/../.git/HEAD', '.GIT/config']) {
       await expect(view.readBytes(path, 1000)).rejects.toBeInstanceOf(WorkspacePathError)
     }
+    // Finding and searching run programs on the path: it stays inside the same way.
+    await writeFile(join(base, 'outside.txt'), 'OUTSIDE\n')
+    await symlink(join(base, 'outside.txt'), join(dir, 'link.txt'))
+    for (const path of [
+      '..',
+      '../outside.txt',
+      join(base, 'outside.txt'),
+      '/etc/hostname',
+      '.git/config',
+      '.GIT',
+      'sub/../.git',
+      'link.txt',
+    ]) {
+      await expect(view.search!('.', path)).rejects.toBeInstanceOf(WorkspacePathError)
+      await expect(view.files!(path)).rejects.toBeInstanceOf(WorkspacePathError)
+    }
+    // A link met on the way is not followed out either.
+    expect((await view.search!('OUTSIDE', '.')).lines).toEqual([])
+    expect((await view.files!('.')).files).not.toContain('link.txt')
+
     // Looking makes no worktree and no branch.
     expect(existsSync(join(base, 'data', 'worktrees'))).toBe(false)
     const branches = await run(['git', 'branch', '--list'], { cwd: dir })

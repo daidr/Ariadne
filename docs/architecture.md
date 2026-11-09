@@ -159,6 +159,18 @@
 
 本地目录的工作区直接建在用户的仓库上（worktree 和分支都在这个仓库里），用户不用额外拉取就能看到讨论串的分支。worktree 目录在 `~/.ariadne/plugins/local/worktrees/`、`~/.ariadne/plugins/github/worktrees/` 和 `~/.ariadne/plugins/gitlab/worktrees/` 下（SSH 在远端的 `~/.ariadne-worktrees/`），用完会自动清理，见下文。
 
+### 参考来源
+
+项目的来源只有一个，讨论串在它上面建工作区、改代码、开 PR。项目另外可以带至多 8 个参考来源（`ProjectView.references`，`project.references.set`），只读，种类和项目来源相同：
+
+- 参考来源不建工作区，也不挂进文件系统：读的是插件已有的只读视图（`workspace.view()`），托管仓库是默认分支的最新提交，本地和远端目录是目录里现在的文件。命令看不到参考来源。
+- 协调器、讨论串和审阅讨论串的 `list_dir`、`read_file`、`search`、`find_files` 多一个可选的 `source` 参数，填参考来源的名字就读它，不填读自己的工作区（协调器是项目来源的只读视图）。名字只在 `WorkspaceManager.referenceView` 一处认。`search`、`find_files` 的路径和读文件走同一套检查（不出根目录、不进 `.git`、不跟着链接出去），找到的文件也再查一遍。提示词里列出每个参考来源的名字和位置。
+- 只读视图可以自带 `files` 和 `search`（本地目录用 ripgrep，托管仓库的 clone 用 `git ls-tree` 和 `git grep`，远端目录在远端跑）；没有的视图靠逐个目录读文件来找。
+- 名字从位置的最后一段取（`referenceName`），重名时加序号，用户不用起名。
+- 密钥存在 config.json 的 `sourceSecrets` 里，键是 `reference.<id>.<字段>`；没填、种类和项目来源相同、令牌发往的地方也相同（插件的 `secretsFor`，GitLab 是实例地址）时才用项目来源的。
+- 添加有两处：项目设置的“项目来源”页；协调器的 `add_reference` 工具，先连一次确认读得到，再在对话里出一张确认卡片（同时进“需要我”），用户点“添加”才加上，同一回合就能读。连不上的不出卡片。
+- 页面打开时问一次哪些参考来源现在读不到（`GET /api/projects/:id/references/status`，每个最多等 5 秒），读不到的那一行换成警告图标；原因以 key 和参数返回，由页面翻译。
+
 ### 交付前审阅
 
 有代码来源的项目默认开启（项目设置“工具”页可关）。讨论串报告 `ready` 且有要合并的提交或 PR 时，这次交付先不进 `review`，也不报告给协调器，而是交给一个审阅讨论串：
@@ -411,7 +423,7 @@ SSH 和 daemon 来源可以再选一个代码托管（GitHub 或 GitLab，`Conte
 全局设置在 `~/.ariadne/config.json`，项目设置是事件 `project.settings.set`（项目视图的 `settings`）。
 
 - 指令：全局指令和项目指令以 `user_instructions` 块进协调器和讨论串的提示词；协调器每回合还通过项目来源的只读视图读根目录的 AGENTS.md（上限 1 MiB）。
-- 命令规则：`allow` / `ask` / `deny` 三种，模式里 `*` 匹配任意内容。命令按 shell 的读法拆成简单命令（`;`、`&&`、`||`、`|`、`&`、括号、换行；`2>&1`、`> out`、`&> log` 这类重定向不算分隔，`$(…)` 和反引号里的命令也拆出来），每部分既按原文、也按实际运行的样子匹配：去掉开头的 `FOO=1`、`env`、`sudo`、`nohup` 这类包装、程序的目录，以及 git 子命令前的全局选项（`git -C dir push` 按 `git push` 算）；`bash -c '…'`、`pwsh -Command …`、`cmd /c …` 里的命令行再拆成各自的部分。别的命令带着跑的命令（`then git push`、`{ git push; }`、`eval`、`xargs`、`timeout 10 …`、`sudo -u root …`）也要拦住，所以 deny 和 ask 还在每部分从每个词起的后半截上匹配，带空格的单词（`eval "git push"`、`bash -ce "…"`）当作命令行再拆一次，含反引号的命令行去掉反引号再读一遍（PowerShell 的转义），`pwsh -EncodedCommand` 解码后再拆；宁可多问，`echo git push` 也会问。allow 只按实际运行的样子匹配，而且只放行它字面写出的部分：`allow timeout *` 不抵消 `timeout 10 git push` 上的 `ask git push*`，`allow timeout 10 git push` 可以。同一部分内 deny > allow > ask；整条命令只要有一部分 deny 就拒绝，有一部分 ask 就要问（别的部分命中 allow 也不抵消），没有命中就直接运行。`ask` 发确认块进「需要我」，同意只能用一次（`approval.used`，MCP 的一次性同意也用它）。默认没有规则。
+- 命令规则：`allow` / `ask` / `deny` 三种，模式里 `*` 匹配任意内容。命令按 shell 的读法拆成简单命令（`;`、`&&`、`||`、`|`、`&`、括号、换行；`2>&1`、`> out`、`&> log` 这类重定向不算分隔，`$(…)` 和反引号里的命令也拆出来），每部分既按原文、也按实际运行的样子匹配：去掉开头的 `FOO=1`、`env`、`sudo`、`nohup` 这类包装、程序的目录，以及 git 子命令前的全局选项（`git -C dir push` 按 `git push` 算）；`bash -c '…'`、`pwsh -Command …`、`cmd /c …` 里的命令行再拆成各自的部分。别的命令带着跑的命令（`then git push`、`{ git push; }`、`eval`、`xargs`、`timeout 10 …`、`sudo -u root …`）也要拦住，所以 deny 和 ask 还在每部分从每个词起的后半截上匹配，带空格的单词（`eval "git push"`、`bash -ce "…"`）当作命令行再拆一次，含反引号的命令行去掉反引号再读一遍（PowerShell 的转义），`pwsh -EncodedCommand` 解码后再拆；宁可多问。只有一种情况不问：命令只是打印或查找一段文字（`echo`、`printf`、`grep`、`rg`，以及 `git commit`、`git tag`、`git log` 这类带说明或模式的子命令），文字里提到的命令不算在运行，`git commit -m "说明 git push 的流程"`、`rg "npm publish"` 都直接运行；同一条命令行里还有会执行文字的东西（shell、`eval`、`xargs`，比如 `echo "git push" | sh`）时照旧要问。deny 规则没有这个例外。allow 只按实际运行的样子匹配，而且只放行它字面写出的部分：`allow timeout *` 不抵消 `timeout 10 git push` 上的 `ask git push*`，`allow timeout 10 git push` 可以。同一部分内 deny > allow > ask；整条命令只要有一部分 deny 就拒绝，有一部分 ask 就要问（别的部分命中 allow 也不抵消），没有命中就直接运行。`ask` 发确认块进「需要我」，同意只能用一次（`approval.used`，MCP 的一次性同意也用它）。新装时带 8 条 ask 规则，和用户自己加的一样可以改、可以删：`git push*`、`npm publish*`、`pnpm publish*`、`yarn publish*`、`bun publish*`、`cargo publish*`、`gh pr merge*`、`gh release create*`。它们都是后果离开本机、收不回来，而讨论串正常干活又用不到的命令。规则只看敲出来的命令行：藏在脚本里的发布（`bun run release`）和子命令前带选项的写法（`pnpm -r publish`）拦不到，提示词里“不可撤销的事先问”仍然管着这些。保存过的规则列表（哪怕是空的）以用户的为准，不再补默认规则。
 - 上限：命令默认/最长超时（120/600 秒）、命令输出上限（30k 字符）、压缩时机（上下文的 60%）、模型重试次数（4）、重复调用几次后停下（4）。
 - 预算：项目设置里每个讨论串和整个项目的 token 上限（输入加输出），默认不限。用到上限时回合不开始或在下一步前停下，错误 `error.budgetThread` / `error.budgetProject` 进「需要我」。
 - 模型请求参数：提供方可加请求头（值只存在服务端）、额外请求字段（不能覆盖 model、messages、tools、stream、system）和无响应超时（每次尝试单独计时，超时算可重试的错误）；模型可设单次最多输出。

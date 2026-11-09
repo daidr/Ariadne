@@ -2,6 +2,7 @@ import {
   browseTyped,
   FileTooLargeError,
   readOnlyView,
+  searchableView,
   WorkspacePathError,
   type BranchCapability,
   type DirectoryListing,
@@ -270,9 +271,25 @@ export function remoteWorkspaces(
   // The coordinator reads the directory as it is on that machine, without git's own.
   const view = async () => {
     const files = new RemoteWorkspace('source', shell, source.path, null)
+    // Listing resolves the path on that machine, links included; a file is not a
+    // directory, which reading none of it tells apart from one outside.
+    const check = async (path: string) => {
+      try {
+        await files.list(visible(path))
+      } catch (error) {
+        if (error instanceof WorkspacePathError) throw error
+        await files.readBytes(path, 0).catch((failed: unknown) => {
+          if (failed instanceof WorkspacePathError) throw failed
+        })
+      }
+    }
+    const searched = searchableView(files, { check })
     return readOnlyView({
       readBytes: async (path, maxBytes) => files.readBytes(visible(path), maxBytes),
       list: async (path) => (await files.list(visible(path))).filter((e) => e.name !== '.git'),
+      // One search on that machine, rather than a listing per directory over the link.
+      files: searched.files!,
+      search: searched.search!,
     })
   }
   if (!repoRoot) {

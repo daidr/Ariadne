@@ -135,6 +135,10 @@ export const en: Record<MessageKey, string> = {
   'pr.checks.success': 'Checks passed',
   'pr.checks.failure': 'Checks failed',
   'pr.refresh': 'Refresh pull request',
+  'reference.add.question': 'Add this reference source?',
+  'reference.add.note': 'Read-only: nothing in it is changed',
+  'reference.add.yes': 'Add',
+  'reference.add.no': 'No',
   'repo.pushPublic.question':
     'A thread wants to push its branch to the public repository {repo} and open a pull request. What is pushed is public at once and cannot be taken back. Threads asking at the same time share this card.',
   'repo.pushPublic.push': 'Allow pushing',
@@ -185,6 +189,11 @@ export const en: Record<MessageKey, string> = {
     'Remove the {count} selected nodes? Their {threads} threads will stop. You can undo this from the history.',
   'plugins.removeAffects':
     'These model providers use it: {names}. They stop working once it is removed.',
+  'project.references.title': 'References',
+  'project.references.add': 'Add',
+  'project.references.confirm': 'Add',
+  'project.references.removeAsk': 'Remove the reference source {name}?',
+  'project.references.remove': 'Remove',
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
   'project.source.clear': 'Remove',
@@ -406,6 +415,10 @@ export const en: Record<MessageKey, string> = {
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',
   'error.blockInvalid': 'The interface block is not valid: {reason}',
   'error.noSource': 'The project has no source yet',
+  'error.tooManyReferences': 'A project takes at most {max} reference sources',
+  'error.referenceExists': 'Already a reference source: {name}',
+  'error.noReference': 'There is no reference source called {name}',
+  'error.referenceUnreadable': 'The reference source {name} cannot be read: {detail}',
   'error.noRepo':
     'The project source is not a hosted repository, so there are no branches, pull requests or checks',
   'error.workspace': 'Could not prepare the workspace: {detail}',

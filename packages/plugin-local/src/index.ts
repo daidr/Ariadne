@@ -5,7 +5,7 @@ import {
   processes,
   shellArgv,
   FileTooLargeError,
-  readOnlyView,
+  searchableView,
   WorkspacePathError,
   type CommandSandbox,
   type ContextProvider,
@@ -534,8 +534,9 @@ export function localWorkspaces(input: {
   const clone = input.clone === undefined ? platformCloner : input.clone
   // The coordinator reads the directory as the user has it, changes not committed and all,
   // without git's own directory and what the sandbox hides.
-  const view = async () =>
-    readOnlyView(new LocalWorkspace('source', input.path, null, { sandbox, git: false }))
+  const source = new LocalWorkspace('source', input.path, null, { sandbox, git: false })
+  const inside = (path: string) => source.resolve(path)
+  const view = async () => searchableView(source, { check: inside, checkFound: inside })
   if (!repoRoot) {
     return {
       isolated: false,
