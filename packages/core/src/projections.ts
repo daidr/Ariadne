@@ -1056,6 +1056,7 @@ export const conversationsProjection: Projection = {
         )
         break
       case 'research.step':
+      case 'search.answered':
       case 'conversation.compacted':
         if (event.type === 'conversation.compacted') {
           db.run('UPDATE conversations SET compactions = compactions + 1 WHERE id = ?', [

@@ -8,6 +8,12 @@ import {
   type ImagePart,
   type ModelProvider,
   type ModelRequest,
+  type ModelSearch,
+  type ModelSearchRequest,
+  onHost,
+  searchAsk,
+  searchHttpError,
+  type SearchResult,
   type ModelStreamPart,
   withExtraBody,
 } from '@ariadne/plugin-sdk'
@@ -164,6 +170,96 @@ function baseBody(request: ModelRequest) {
   }
 }
 
+/** Room for the answer, and for the thinking some models do first, which counts here too. */
+const SEARCH_MAX_TOKENS = 8192
+
+/**
+ * The body of a search request. Search is not part of chat completions: it goes to the
+ * service's `responses` endpoint, as one question with the search tool on.
+ */
+export function searchBody(request: Pick<ModelSearchRequest, 'model' | 'query'>) {
+  return {
+    model: request.model,
+    tools: [{ type: 'web_search' }],
+    include: ['web_search_call.action.sources'],
+    max_output_tokens: SEARCH_MAX_TOKENS,
+    input: searchAsk(request.query),
+  }
+}
+
+interface SearchResponse {
+  status?: string
+  output?: {
+    type: string
+    action?: { sources?: { url?: string }[] }
+    content?: {
+      type: string
+      text?: string
+      annotations?: { type?: string; url?: string; title?: string }[]
+    }[]
+  }[]
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    input_tokens_details?: { cached_tokens?: number }
+  }
+}
+
+/** What a search response says and its pages: the ones the answer cites first, then the rest read. */
+export function readSearch(response: SearchResponse, limit: number) {
+  const sources = new Map<string, SearchResult>()
+  const read: string[] = []
+  let text = ''
+  for (const item of response.output ?? []) {
+    if (item.type === 'web_search_call') {
+      for (const source of item.action?.sources ?? []) if (source.url) read.push(source.url)
+    } else if (item.type === 'message') {
+      for (const part of item.content ?? []) {
+        if (part.type !== 'output_text') continue
+        text += part.text ?? ''
+        for (const cite of part.annotations ?? []) {
+          if (cite.type === 'url_citation' && cite.url && !sources.has(cite.url)) {
+            sources.set(cite.url, { title: cite.title ?? '', url: cite.url, snippet: '' })
+          }
+        }
+      }
+    }
+  }
+  // The room ran out on thinking before it wrote anything: pages alone are not an answer.
+  if (!text.trim() && response.status === 'incomplete') throw new Error('the search ended early')
+  for (const url of read) if (!sources.has(url)) sources.set(url, { title: '', url, snippet: '' })
+  const usage = response.usage
+  const cached = usage?.input_tokens_details?.cached_tokens
+  return {
+    text: text.trim(),
+    sources: [...sources.values()].slice(0, limit),
+    ...(usage
+      ? {
+          usage: {
+            input: usage.input_tokens ?? 0,
+            output: usage.output_tokens ?? 0,
+            ...(cached ? { cached } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+const search: ModelSearch<OpenAICompatibleSettings>['run'] = async (settings, request) => {
+  const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/responses`, {
+    method: 'POST',
+    headers: {
+      ...request.headers,
+      'content-type': 'application/json',
+      ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
+    },
+    body: JSON.stringify(searchBody(request)),
+    ...(request.signal ? { signal: request.signal } : {}),
+  })
+  if (!response.ok) throw searchHttpError(response.status)
+  return readSearch((await response.json()) as SearchResponse, request.limit)
+}
+
 export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> = {
   kind: 'openai-compatible',
   title: { 'zh-CN': 'OpenAI 兼容接口', en: 'OpenAI-compatible API' },
@@ -181,6 +277,9 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
     required: ['baseUrl'],
   },
   requestBody,
+  // Only the service the protocol comes from searches this way; the others each have
+  // their own, or none.
+  search: { available: (settings) => onHost(settings.baseUrl, 'api.openai.com'), run: search },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
     let response: Response
     try {

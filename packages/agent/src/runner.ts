@@ -44,6 +44,7 @@ import { withImages } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
+import { searchingModels } from './web-tools'
 import { requestStep, TurnError } from './model-step'
 
 export {
@@ -70,8 +71,12 @@ export interface TurnOptions {
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   /** Documents and whiteboards edited together. */
   shared?: SharedArtifacts
-  /** The plugins' web search services; without any, agents get no search tool. */
+  /** The plugins' web search services. */
   searchProviders?: ReadonlyMap<string, SearchProvider>
+  /** The other models the user set up: one whose service searches the web may be asked to. */
+  searchModels?: readonly ResolvedModel[]
+  /** The search service the user saved a key for. */
+  searchService?: SearchProvider | null
   /** The models the user set up; the coordinator may give one to each thread it opens. */
   models?: ModelChoice[]
   /** The user's external tool servers; the project's enabled ones bring their tools. */
@@ -290,7 +295,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           repo: hasRepo,
           tracker: hasTracker,
           models: options.models ?? [],
-          ...(options.searchProviders ? { search: options.searchProviders } : {}),
+          // The conversation's own model searches first, then the research's, then the rest.
+          search: {
+            ...(options.searchProviders ? { services: options.searchProviders } : {}),
+            models: searchingModels([
+              model,
+              options.researchModel,
+              ...(options.searchModels ?? []),
+            ]),
+            keyed: options.searchService ?? null,
+          },
           research: true,
         }))
   )
@@ -364,7 +378,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     skills: () => skills,
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.shared ? { shared: options.shared } : {}),
-    ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
     limits,
     commands: {

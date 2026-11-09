@@ -132,7 +132,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 49
+export const PROJECTION_VERSION = 50
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -3909,6 +3909,18 @@ export class Ariadne {
     this.store.append([
       ...pieces,
       { type: 'research.step', projectId, data: { ...step, conversationId, turnId, input } },
+    ])
+  }
+
+  /** The tokens of a web search a model's own service ran for a call of this turn. */
+  recordSearch(
+    conversationId: string,
+    turnId: string,
+    search: { model: string; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'search.answered', projectId, data: { ...search, conversationId, turnId } },
     ])
   }
 
