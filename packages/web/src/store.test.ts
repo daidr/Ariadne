@@ -1,6 +1,6 @@
 import type { ConversationView, MessageView, NoticeView, TodoView } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { merge, partsOf, type ConversationState } from './store'
+import { backMain, merge, openMain, partsOf, state, type ConversationState } from './store'
 
 const conversation = { id: 'crd_1' } as ConversationView
 const todo = { items: [] } as unknown as TodoView
@@ -75,5 +75,37 @@ describe('events', () => {
     expect(partsOf('memory.saved')).toEqual(['memories', 'conversations'])
     expect(partsOf('artifact.created')).toContain('artifacts')
     expect(partsOf('message.posted')).not.toContain('artifacts')
+  })
+})
+
+describe('back in the middle column', () => {
+  test('returns to where a view was opened from, then to the coordinator', () => {
+    openMain({ kind: 'conversation' })
+    openMain({ kind: 'artifacts' })
+    openMain({ kind: 'artifact', id: 'art_1' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'artifacts' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'conversation' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'conversation' })
+  })
+
+  test('an artifact opened from a message goes back to the message', () => {
+    openMain({ kind: 'conversation' })
+    openMain({ kind: 'artifact', id: 'art_1' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'conversation' })
+  })
+
+  test('a view opened again is not visited twice on the way back', () => {
+    openMain({ kind: 'conversation' })
+    openMain({ kind: 'artifacts' })
+    openMain({ kind: 'artifact', id: 'art_1' })
+    openMain({ kind: 'artifacts' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'artifact', id: 'art_1' })
+    backMain()
+    expect(state.main).toEqual({ kind: 'conversation' })
   })
 })

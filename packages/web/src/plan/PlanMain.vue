@@ -13,7 +13,7 @@ import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon } from '@dou-ui/icons
 import type { PlanOp } from '@ariadne/core'
 import { computed, ref } from 'vue'
 import { locale, t, tm } from '../i18n'
-import { editPlan, openMain, state } from '../store'
+import { editPlan, backMain, state } from '../store'
 import { reasonOf } from './edit'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
@@ -52,7 +52,7 @@ const time = (at: number) =>
 <template>
   <div class="plan-main">
     <div class="plan-main-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'conversation' })">
+      <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('artifact.back') }}
       </DouButton>

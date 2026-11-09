@@ -14,7 +14,7 @@ import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
 import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { duration, locale, t, tm } from '../i18n'
-import { onLiveEvent, openMain, state } from '../store'
+import { onLiveEvent, backMain, state } from '../store'
 import TraceInspector from './TraceInspector.vue'
 import TraceTimeline from './TraceTimeline.vue'
 import { findRow, parentKeys, traceRows, type TraceRow } from './rows'
@@ -212,7 +212,7 @@ function pick(key: string) {
 <template>
   <div class="trace">
     <div class="trace-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'conversation' })">
+      <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('changes.back') }}
       </DouButton>

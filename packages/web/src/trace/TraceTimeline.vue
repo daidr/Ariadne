@@ -24,7 +24,8 @@ const emit = defineEmits<{
 /** The stretch the user marked out; the table brings out its rows. */
 const range = defineModel<TimeRange | null>('range', { required: true })
 
-const LANE = 12
+// Tall enough for its label: a smaller lane lets the labels of two lanes overlap.
+const LANE = 16
 const track = useTemplateRef<HTMLDivElement>('track')
 /** The part in view once zoomed in; `null` shows it all. */
 const viewport = shallowRef<TimeRange | null>(null)
@@ -79,7 +80,7 @@ function spanStyle(span: TimelineSpan) {
   return {
     left: `${left * 100}%`,
     width: span.instant ? '2px' : `max(2px, ${width * 100}%)`,
-    top: `${span.lane * LANE + 4}px`,
+    top: `${span.lane * LANE + 6}px`,
     // A share of real time means nothing on steps of equal width.
     '--waited': span.waited === null || props.mode === 'sequence' ? '0%' : `${span.waited * 100}%`,
   }

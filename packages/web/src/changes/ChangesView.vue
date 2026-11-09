@@ -28,6 +28,7 @@ import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { t, tm } from '../i18n'
 import {
+  backMain,
   openMain,
   openThread,
   report,
@@ -287,7 +288,7 @@ const methodOptions = computed(() => [
 <template>
   <div class="changes">
     <div class="changes-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'conversation' })">
+      <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('changes.back') }}
       </DouButton>

@@ -51,7 +51,7 @@ function open(event?: MouseEvent) {
 </script>
 
 <template>
-  <DouLink v-if="thread || artifact || image" variant="soft" @click="open">
+  <DouLink v-if="thread || artifact || image" variant="soft" class="inline-ref" @click="open">
     <template #leading>
       <StageIcon v-if="thread" :stage="thread.stage" />
       <component :is="kindIcon[artifact.kind]" v-else-if="artifact" />
@@ -71,3 +71,10 @@ function open(event?: MouseEvent) {
   </DouLink>
   <component :is="children" v-else />
 </template>
+
+<style scoped>
+/* Set off from the words around it: CJK runs have no spaces, so the fill would touch them. */
+.inline-ref {
+  margin-inline: 0.25em;
+}
+</style>

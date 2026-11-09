@@ -403,7 +403,7 @@ export async function openMessage(conversationId: string, messageId: string) {
   const project = state.detail?.project
   if (!project) return
   if (conversationId === project.coordinatorId) {
-    if (state.main.kind !== 'conversation') state.main = { kind: 'conversation' }
+    if (state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
   } else {
     await openThread(conversationId)
   }
@@ -440,7 +440,7 @@ export async function openProject(id: string) {
   state.plan = null
   state.artifacts = []
   state.memories = []
-  state.main = { kind: 'conversation' }
+  openMain({ kind: 'conversation' })
   state.coordinator = emptyConversation()
   await refreshCurrent().catch(report)
 }
@@ -587,7 +587,7 @@ function forgetProject(id: string) {
   state.plan = null
   state.artifacts = []
   state.memories = []
-  state.main = { kind: 'conversation' }
+  openMain({ kind: 'conversation' })
   state.coordinator = emptyConversation()
 }
 
@@ -616,8 +616,27 @@ export async function retryTurn(conversationId: string) {
   await api.retryTurn(conversationId).catch(report)
 }
 
+/**
+ * Where "back" leads from the view in the middle column: the views opened on the way there,
+ * so an artifact opened from a message goes back to the message, not to the artifact list.
+ */
+let mainTrail: MainView[] = []
+const sameView = (a: MainView, b: MainView) => JSON.stringify(a) === JSON.stringify(b)
+
 /** Show the plan graph large, or an artifact, in the middle column. */
 export function openMain(view: MainView) {
+  if (view.kind === 'conversation') mainTrail = []
+  else if (!sameView(view, state.main)) {
+    mainTrail = mainTrail.filter((seen) => !sameView(seen, view))
+    mainTrail.push(state.main)
+  }
+  state.main = view
+  state.planWide = view.kind === 'plan'
+}
+
+/** Go back to the view this one was opened from; the coordinator when there is none. */
+export function backMain() {
+  const view = mainTrail.pop() ?? { kind: 'conversation' }
   state.main = view
   state.planWide = view.kind === 'plan'
 }
