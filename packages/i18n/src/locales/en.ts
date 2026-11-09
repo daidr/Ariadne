@@ -813,6 +813,7 @@ export const en: Record<MessageKey, string> = {
   'review.changesHeadline': 'Raised {count} problems',
   'review.rounds': 'Reviewed by AI in {count} rounds',
   'review.row': 'AI review',
+  'review.ended': 'Review ended',
   'review.underway': 'AI review · round {round}',
   'review.author': 'Reviewed thread',
   'review.reviewer': 'AI review',

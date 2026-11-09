@@ -237,9 +237,13 @@ function openTrace() {
 const todo = computed(() => todoPlan(view.value.todo, working.value))
 // A list all ticked folds to its title; one with steps left opens again.
 const todoOpen = ref(true)
+// Another conversation starts from its own list, not from how the last one was left.
 watch(
-  () => todo.value.length > 0 && todo.value.every((item) => item.status === 'done'),
-  (finished) => (todoOpen.value = !finished),
+  [
+    () => todo.value.length > 0 && todo.value.every((item) => item.status === 'done'),
+    conversationId,
+  ],
+  ([finished]) => (todoOpen.value = !finished),
   { immediate: true },
 )
 // Set up enough to talk: a model, a project, and its working directory.
@@ -662,6 +666,7 @@ watch(
           <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
           <DouTag
             v-if="thread.workspace?.branch"
+            class="conversation-branch"
             size="sm"
             :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
           >
@@ -1277,11 +1282,17 @@ watch(
   align-items: center;
   gap: 4px 8px;
   min-width: 0;
-  min-height: 28px;
+}
+
+/* The first line is as tall as the menu beside it, so a lone chip centres on it. */
+.conversation-meta-main::before {
+  content: '';
+  height: 28px;
+  margin-inline-end: -8px;
 }
 
 /* A long branch name is cut, not pushed to a line of its own. */
-.conversation-meta-main > :deep(.dou-tag) {
+.conversation-branch {
   min-width: 0;
   max-width: 100%;
 }

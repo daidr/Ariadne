@@ -52,7 +52,9 @@ const prTone = computed(() =>
         v-if="nested && thread.stage === 'done'"
         variant="tertiary"
         class="row-reviewed"
-        aria-hidden="true"
+        role="img"
+        :title="t('review.ended')"
+        :aria-label="t('review.ended')"
       >
         <ScanSearchIcon />
       </DouText>

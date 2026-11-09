@@ -273,8 +273,22 @@ onMounted(() => {
   frameWhenMeasured()
   const el = editor.value?.$el
   if (!el) return
+  // A node the user had panned away from stays where they left it.
+  let width = el.clientWidth
+  let height = el.clientHeight
   resized = new ResizeObserver(() => {
-    if (selected.value) reveal(selected.value)
+    const id = selected.value
+    const rect = id ? editor.value?.getNodeRect(id) : undefined
+    const { x, y, zoom } = viewport.value
+    const seen =
+      rect &&
+      rect.x * zoom + x < width &&
+      (rect.x + rect.width) * zoom + x > 0 &&
+      rect.y * zoom + y < height &&
+      (rect.y + rect.height) * zoom + y > 0
+    width = el.clientWidth
+    height = el.clientHeight
+    if (id && seen) reveal(id)
   })
   resized.observe(el)
 })
