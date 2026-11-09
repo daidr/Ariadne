@@ -284,13 +284,11 @@ function bring(group: DockGroup, key: PaneKey) {
 }
 
 /* The groups sit flush with the side's edges and a conversation brings its own room, as
-   the lists do theirs; DouDock has no setting for either yet (dou-ui#384). */
-.side-dock :deep(.dou-dock__group) {
-  padding: 4px 0 0;
-}
-
-.side-dock :deep(.dou-tabs__panel) {
-  padding-top: 0;
+   the lists do theirs. */
+.side-dock {
+  --dou-dock-group-padding-x: 0px;
+  --dou-dock-group-padding-bottom: 0px;
+  --dou-dock-panel-gap: 0px;
 }
 
 .pane-list {

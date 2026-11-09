@@ -721,3 +721,41 @@ describe('directory pickers', () => {
     expect(await missing.json()).toEqual({ listing: null })
   })
 })
+
+describe('artifact comments', () => {
+  test('a whiteboard comment is kept on the item it was put on', async () => {
+    const project = app.createProject('P')
+    const board = app.createArtifact(project.id, {
+      kind: 'whiteboard',
+      title: 'B',
+      author: 'user',
+      content: JSON.stringify({
+        version: 1,
+        nodes: [{ id: 'n1', type: 'sticky', x: 0, y: 0, width: 100, height: 100, data: {} }],
+        edges: [],
+      }),
+    })
+    const post = (body: unknown) =>
+      call(`/api/artifacts/${board.id}/comments`, { method: 'POST', body })
+    const res = await post({
+      type: 'create',
+      threadId: 'ct1',
+      commentId: 'c1',
+      anchor: { node: 'n1' },
+      body: '这里改一下',
+    })
+    expect(res.status).toBe(200)
+    const { comments } = (await res.json()) as { comments: { anchor: unknown; quote: string }[] }
+    expect(comments[0]).toMatchObject({ anchor: { node: 'n1' }, quote: '' })
+    for (const anchor of [{}, { node: 'n1', edge: 'e1' }, null]) {
+      const bad = await post({
+        type: 'create',
+        threadId: 'ct2',
+        commentId: 'c2',
+        anchor,
+        body: 'x',
+      })
+      expect(bad.status).toBe(400)
+    }
+  })
+})

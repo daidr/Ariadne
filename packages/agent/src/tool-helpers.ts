@@ -1,3 +1,4 @@
+import type { SharedArtifacts } from './shared-artifacts'
 import type { Ariadne, Attachment } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import type {
@@ -45,6 +46,11 @@ export interface ToolContext {
   userSpoke?: () => boolean
   /** The plugins' live data sources for dashboards, by kind. */
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /**
+   * Documents and whiteboards edited together: an agent writes them into their room,
+   * where people may be editing at the same time. Without it they are saved whole.
+   */
+  shared?: SharedArtifacts
   /** The models the user set up, which the coordinator may give a thread. */
   models?: ModelChoice[]
   /** The plugins' web search services, by kind. */

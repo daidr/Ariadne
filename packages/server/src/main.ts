@@ -1,6 +1,7 @@
 import { Ariadne } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import {
+  ArtifactFeedback,
   Autopilot,
   browserProfiles,
   createSandbox,
@@ -9,6 +10,7 @@ import {
   PluginHost,
   RepoWatcher,
   Scheduler,
+  SharedArtifacts,
   Timers,
   WorkspaceManager,
   WorktreeJanitor,
@@ -24,7 +26,7 @@ import { processes } from '@ariadne/plugin-sdk'
 import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { createHandler } from './app'
+import { createHandler, joinShared, type SharedSocketData } from './app'
 import { DataStore } from './data'
 import { loadConfig } from './config'
 import { loadUserConfig, SettingsStore } from './settings'
@@ -109,6 +111,10 @@ const workspaces = new WorkspaceManager(
 )
 // Pull requests are polled for their checks; ARIADNE_REPO_POLL_MS shortens it for testing.
 const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO_POLL_MS) || 60_000)
+// Documents and whiteboards are edited together; what the user does in them reaches the
+// agent that wrote them in rounds.
+const shared = new SharedArtifacts(app)
+const feedback = new ArtifactFeedback(app, shared)
 const scheduler = new Scheduler({
   app,
   workspaces,
@@ -130,6 +136,7 @@ const scheduler = new Scheduler({
   dashboardSources: host.dashboards,
   searchProviders: host.searches,
   mcp,
+  shared,
 })
 // Worktrees of work that landed go once the thread is finished with them.
 const janitor = new WorktreeJanitor(app, workspaces)
@@ -142,27 +149,48 @@ const autopilot = new Autopilot(app, workspaces, {
 })
 scheduler.start()
 timers.start()
+feedback.start()
 watcher.start()
 janitor.start()
 autopilot.start()
 
-const server = Bun.serve({
+const server = Bun.serve<SharedSocketData>({
   hostname: config.hostname,
   port: config.port,
   // Event streams stay open; Bun's default idle timeout would cut them.
   idleTimeout: 0,
-  fetch: createHandler({
-    app,
-    token: config.token,
-    webDist: config.webDist,
-    scheduler,
-    settings,
-    host,
-    workspaces,
-    mcp,
-    data: new DataStore(app, config.home, config.databasePath),
-    skillsDir: join(config.home, 'skills'),
-  }),
+  websocket: {
+    open(ws) {
+      ws.data.link = shared.join(ws.data.artifactId, {
+        send: (data) => void ws.sendBinary(data),
+        close: (code, reason) => ws.close(code, reason),
+      })
+    },
+    message(ws, message) {
+      if (typeof message !== 'string') ws.data.link?.message(new Uint8Array(message))
+    },
+    close(ws) {
+      ws.data.link?.close()
+    },
+  },
+  fetch(request, bun) {
+    const joined = joinShared(request, bun, { app, token: config.token })
+    return joined === null ? handle(request) : joined
+  },
+})
+const handle = createHandler({
+  app,
+  token: config.token,
+  webDist: config.webDist,
+  scheduler,
+  settings,
+  host,
+  workspaces,
+  mcp,
+  data: new DataStore(app, config.home, config.databasePath),
+  skillsDir: join(config.home, 'skills'),
+  shared,
+  feedback,
 })
 
 console.info(
@@ -178,7 +206,9 @@ async function shutdown() {
   await janitor.stop()
   await autopilot.stop()
   timers.stop()
+  feedback.stop()
   await scheduler.stop()
+  shared.dispose()
   await mcp.dispose()
   await workspaces.dispose()
   await host.unloadAll()

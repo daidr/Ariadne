@@ -652,13 +652,34 @@ export const api = {
   saveArtifact: (
     id: string,
     input: {
-      content: string
+      /** `null` keeps what a document or whiteboard edited together holds now. */
+      content: string | null
       baseVersion: number
       reason: string
       title?: string
       quotes?: Record<string, string>
     },
   ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
+  /**
+   * The user stopped for a moment in an artifact, or left it: what they did goes to the
+   * agent, with pictures of the options they marked. `leaving` lets it go out as the page
+   * closes, without the pictures.
+   */
+  sendFeedback: (id: string, images: string[], leaving = false) =>
+    leaving
+      ? void fetch(`/api/artifacts/${id}/feedback`, {
+          method: 'POST',
+          keepalive: true,
+          headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ images: [] }),
+        }).catch(() => {})
+      : request<{ feedback: unknown }>('POST', `/api/artifacts/${id}/feedback`, { images }),
+  /** Where a page joins an artifact's room, and the query that lets it in. */
+  sharedRoom: (id: string) => ({
+    server: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/artifacts`,
+    room: `${id}/live`,
+    params: { token: token() ?? '' },
+  }),
   commentArtifact: (id: string, action: ArtifactCommentAction) =>
     request<{ comments: ArtifactCommentThreadView[] }>(
       'POST',

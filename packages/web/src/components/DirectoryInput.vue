@@ -7,6 +7,7 @@ import { tm } from '../i18n'
 
 // A directory path typed in, with the directories at what is typed listed under it: the
 // one above, then the ones inside (or, part way through a name, those starting like it).
+// Picking one keeps the list open on what is inside it, so the user goes down step by step.
 const model = defineModel<string>({ default: '' })
 const props = defineProps<{
   browse: (typed: string) => Promise<DirectoryListing | null>
@@ -42,6 +43,7 @@ async function suggest(typed: string): Promise<AutocompleteOption[]> {
     :placeholder="placeholder"
     :size="size"
     :aria-label="ariaLabel"
+    :hide-on-select="false"
     spellcheck="false"
   >
     <template #option="{ option }">

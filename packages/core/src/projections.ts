@@ -39,6 +39,7 @@ export const projectionTables = [
   'artifacts',
   'artifact_versions',
   'artifact_comments',
+  'artifact_feedback',
   'reviews',
   'prompts',
   'search_docs',
@@ -809,6 +810,39 @@ export const noticesProjection: Projection = {
         })
         break
       }
+      case 'artifact.feedback': {
+        // Where the agent woken for it is followed: what was sent, until it says it is done.
+        const { notify, artifactId, round, items } = event.data
+        const title =
+          db
+            .query<{ title: string }, [string]>('SELECT title FROM artifacts WHERE id = ?')
+            .get(artifactId)?.title ?? ''
+        add(notify, 'artifact-feedback', {
+          artifactId,
+          title,
+          round,
+          items,
+          done: false,
+          summary: null,
+        })
+        break
+      }
+      case 'artifact.feedback_done': {
+        const { artifactId, round, summary } = event.data
+        const row = db
+          .query<{ id: string; payload: string }, [string, string, number]>(
+            `SELECT id, payload FROM notices WHERE kind = 'artifact-feedback' AND project_id = ?
+               AND json_extract(payload, '$.artifactId') = ? AND json_extract(payload, '$.round') = ?`,
+          )
+          .get(event.projectId, artifactId, round)
+        if (!row) break
+        db.run('UPDATE notices SET payload = ?, changed_seq = ? WHERE id = ?', [
+          JSON.stringify({ ...JSON.parse(row.payload), done: true, summary: summary || null }),
+          event.seq,
+          row.id,
+        ])
+        break
+      }
       case 'notice.dismissed':
         db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [
           event.seq,
@@ -1513,6 +1547,35 @@ export const transcriptProjection: Projection = {
         )
         break
       }
+      case 'artifact.feedback': {
+        // The user stopped for a moment in an artifact: the agent told is woken with it all.
+        const { notify, artifactId, round, items, images } = event.data
+        const artifact = db
+          .query<{ title: string; kind: ArtifactKind }, [string]>(
+            'SELECT title, kind FROM artifacts WHERE id = ?',
+          )
+          .get(artifactId)
+        if (!artifact) break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: notify,
+            kind: 'note',
+            payload: {
+              type: 'artifact-feedback',
+              artifactId,
+              title: artifact.title,
+              kind: artifact.kind,
+              round,
+              items,
+              images,
+            },
+          },
+          true,
+        )
+        break
+      }
       case 'plan.proposal.stale': {
         const coordinator = coordinatorOf(db, event.projectId)
         const proposal = db
@@ -2124,6 +2187,8 @@ export const artifactsProjection: Projection = {
       id TEXT PRIMARY KEY,
       artifact_id TEXT NOT NULL,
       quote TEXT NOT NULL,
+      -- On a whiteboard: the item or connector (JSON), see ArtifactCommentAnchor.
+      anchor TEXT,
       comments TEXT NOT NULL,
       resolved_by TEXT,
       resolved_at INTEGER,
@@ -2132,6 +2197,20 @@ export const artifactsProjection: Projection = {
     db.run(
       'CREATE INDEX IF NOT EXISTS artifact_comments_artifact ON artifact_comments (artifact_id, created_at)',
     )
+    // Rounds of the user's feedback, see ArtifactFeedbackView.
+    db.run(`CREATE TABLE IF NOT EXISTS artifact_feedback (
+      artifact_id TEXT NOT NULL,
+      round INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      notify TEXT NOT NULL,
+      items TEXT NOT NULL,
+      images TEXT NOT NULL,
+      done_by TEXT,
+      done_at INTEGER,
+      summary TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (artifact_id, round)
+    )`)
   },
   forget(db, projectId) {
     db.run(
@@ -2140,6 +2219,10 @@ export const artifactsProjection: Projection = {
     )
     db.run(
       'DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?)',
+      [projectId],
+    )
+    db.run(
+      'DELETE FROM artifact_feedback WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?)',
       [projectId],
     )
     db.run('DELETE FROM artifacts WHERE project_id = ?', [projectId])
@@ -2208,6 +2291,29 @@ export const artifactsProjection: Projection = {
       case 'artifact.commented':
         applyComment(db, event.data.artifactId, event.data.by, event.data.action, event.at)
         break
+      case 'artifact.feedback': {
+        const { artifactId, round, version, notify, items, images } = event.data
+        db.run(
+          `INSERT INTO artifact_feedback (artifact_id, round, version, notify, items, images, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            artifactId,
+            round,
+            version,
+            notify,
+            JSON.stringify(items),
+            JSON.stringify(images),
+            event.at,
+          ],
+        )
+        break
+      }
+      case 'artifact.feedback_done':
+        db.run(
+          'UPDATE artifact_feedback SET done_by = ?, done_at = ?, summary = ? WHERE artifact_id = ? AND round = ?',
+          [event.data.by, event.at, event.data.summary, event.data.artifactId, event.data.round],
+        )
+        break
     }
   },
 }
@@ -2241,11 +2347,12 @@ function applyComment(
   switch (action.type) {
     case 'create':
       db.run(
-        'INSERT INTO artifact_comments (id, artifact_id, quote, comments, created_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO artifact_comments (id, artifact_id, quote, anchor, comments, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         [
           action.threadId,
           artifactId,
           action.quote,
+          action.anchor ? JSON.stringify(action.anchor) : null,
           JSON.stringify([
             { id: action.commentId, author: by, body: action.body, createdAt: at, editedAt: null },
           ]),

@@ -9,6 +9,8 @@ import type {
   MessageMention,
   TurnFile,
   ArtifactKind,
+  ArtifactCommentAnchor,
+  ArtifactFeedbackItem,
   BranchMerge,
   IssueWriteAction,
   LinkedIssue,
@@ -273,6 +275,19 @@ export type NoticeView = {
   /** The user's edit of an artifact, where the conversation told about it is followed. */
   | { kind: 'artifact-edited'; artifactId: string; title: string; version: number }
   /**
+   * A round of the user's feedback on an artifact, where the conversation woken for it is
+   * followed: how many things it holds, and whether the agent finished it.
+   */
+  | {
+      kind: 'artifact-feedback'
+      artifactId: string
+      title: string
+      round: number
+      items: ArtifactFeedbackItem[]
+      done: boolean
+      summary: string | null
+    }
+  /**
    * A comment on an artifact: the user's, where the conversation woken for it is followed,
    * or the agent's own.
    */
@@ -492,6 +507,15 @@ export type TranscriptNote =
       quote: string
       body: string
     }
+  | {
+      type: 'artifact-feedback'
+      artifactId: string
+      title: string
+      kind: ArtifactKind
+      round: number
+      items: ArtifactFeedbackItem[]
+      images: Attachment[]
+    }
   | { type: 'plan-changed-by-user'; revisionId: string; revertOf: string | null; reason: string }
   | { type: 'proposal-stale'; proposalId: string; reason: string; staleBecause: string }
   | {
@@ -652,10 +676,29 @@ export interface ArtifactCommentView {
 export interface ArtifactCommentThreadView {
   id: string
   artifactId: string
-  /** The text it is about, as it read when last saved. */
+  /** A document's text it is about, as it read when last saved; empty on a whiteboard. */
   quote: string
+  /** On a whiteboard: the item or connector it is about. */
+  anchor: ArtifactCommentAnchor | null
   comments: ArtifactCommentView[]
   resolved: { by: string; at: number } | null
+  createdAt: number
+}
+
+/** A round of the user's feedback on an artifact, as sent to the agent. */
+export interface ArtifactFeedbackView {
+  artifactId: string
+  round: number
+  version: number
+  /** The conversation it woke. */
+  notify: string
+  items: ArtifactFeedbackItem[]
+  /** Pictures of the whiteboard options the user marked, with the marks. */
+  images: Attachment[]
+  /** The agent that finished it, when, and what it said it did. */
+  doneBy: string | null
+  doneAt: number | null
+  summary: string | null
   createdAt: number
 }
 

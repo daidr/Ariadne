@@ -543,7 +543,7 @@ describe('user edits and comments on artifacts', () => {
     expect(app.listNotices(coordinatorOf()).map((n) => n.kind)).toEqual(['artifact-edited'])
   })
 
-  test("the user's comment wakes the writer, whose reply shows where it wrote it", () => {
+  test("the user's comment reaches the writer with its round of feedback; its reply shows where it wrote it", () => {
     const thread = app.createThread(projectId, { title: '写' })
     const written = doc(thread.id)
     app.commentOnArtifact(written.id, 'user', {
@@ -553,11 +553,30 @@ describe('user edits and comments on artifacts', () => {
       quote: '全场八折',
       body: '能和会员价叠加吗？',
     })
+    // Not on its own: it goes with the rest of what the user does there, as a round.
+    expect(app.getConversation(thread.id).pendingSeq).toBe(0)
+    const round = app.sendArtifactFeedback(written.id, {
+      items: [
+        {
+          kind: 'comment',
+          threadId: 'c1',
+          action: 'create',
+          body: '能和会员价叠加吗？',
+          where: 'on the text "全场八折"',
+        },
+      ],
+    })
+    expect(round).toMatchObject({ round: 1, notify: thread.id })
     expect(app.listTranscript(thread.id).at(-1)).toMatchObject({
       kind: 'note',
-      note: { type: 'artifact-comment', threadId: 'c1', action: 'create', quote: '全场八折' },
+      note: { type: 'artifact-feedback', artifactId: written.id, round: 1 },
     })
     expect(app.getConversation(thread.id).pendingSeq).toBeGreaterThan(0)
+    app.finishArtifactFeedback(written.id, 1, thread.id, '回复了')
+    expect(app.listArtifactFeedback(written.id)[0]).toMatchObject({
+      doneBy: thread.id,
+      summary: '回复了',
+    })
     expect(app.getArtifact(written.id)).toMatchObject({ openComments: 1 })
 
     app.commentOnArtifact(written.id, thread.id, {
@@ -577,8 +596,9 @@ describe('user edits and comments on artifacts', () => {
       resolved: { by: thread.id },
     })
     expect(app.getArtifact(written.id).openComments).toBe(0)
+    // The round shows where it was sent, its reply where it wrote it.
     expect(app.listNotices(thread.id).map((n) => n.kind)).toEqual([
-      'artifact-comment',
+      'artifact-feedback',
       'artifact-comment',
     ])
     // Its own reply does not come back to it.
@@ -586,7 +606,7 @@ describe('user edits and comments on artifacts', () => {
       app
         .listTranscript(thread.id)
         .filter((e) => e.kind === 'note' && e.note.type === 'artifact-comment'),
-    ).toHaveLength(1)
+    ).toHaveLength(0)
   })
 
   test('only an author changes a comment, and the first goes only with its thread', () => {

@@ -24,6 +24,8 @@ import type {
   AnyStoredEvent,
   AutopilotHold,
   ArtifactCommentAction,
+  ArtifactCommentAnchor,
+  ArtifactFeedbackItem,
   ArtifactKind,
   Attachment,
   BranchMerge,
@@ -56,12 +58,19 @@ import type {
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
 import {
   fileInfo,
+  isImageType,
   readFile,
   saveFile,
   setupFiles,
   storeInlineImages,
   type StoredFile,
 } from './files'
+import {
+  readSharedState,
+  setupSharedState,
+  writeSharedState,
+  type SharedState,
+} from './shared-state'
 import { newId } from './ids'
 import { BackgroundCommandsList, LiveCommands, ReplyDrafts } from './live'
 import {
@@ -86,6 +95,7 @@ import { EventStore, toStored as storedEvent, type EventListener, type EventRow 
 import { lineDiff } from './text-diff'
 import type {
   ArtifactCommentThreadView,
+  ArtifactFeedbackView,
   ArtifactPreview,
   ArtifactSummary,
   ArtifactVersionView,
@@ -120,7 +130,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 46
+export const PROJECTION_VERSION = 47
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -354,6 +364,9 @@ const ARTIFACT_COLUMNS =
 /** A comment's text is kept to this many characters, a quote to this many. */
 export const MAX_COMMENT = 4000
 export const MAX_COMMENT_QUOTE = 1000
+const MAX_COMMENT_BODY = MAX_COMMENT
+/** Pictures one round of feedback carries: one per option the user marked. */
+export const MAX_FEEDBACK_IMAGES = 6
 
 function toArtifactSummary(row: ArtifactRow): ArtifactSummary {
   return {
@@ -377,6 +390,7 @@ interface CommentThreadRow {
   id: string
   artifact_id: string
   quote: string
+  anchor: string | null
   comments: string
   resolved_by: string | null
   resolved_at: number | null
@@ -388,8 +402,37 @@ function toCommentThread(row: CommentThreadRow): ArtifactCommentThreadView {
     id: row.id,
     artifactId: row.artifact_id,
     quote: row.quote,
+    anchor: row.anchor ? (JSON.parse(row.anchor) as ArtifactCommentAnchor) : null,
     comments: JSON.parse(row.comments),
     resolved: row.resolved_by ? { by: row.resolved_by, at: row.resolved_at ?? 0 } : null,
+    createdAt: row.created_at,
+  }
+}
+
+interface FeedbackRow {
+  artifact_id: string
+  round: number
+  version: number
+  notify: string
+  items: string
+  images: string
+  done_by: string | null
+  done_at: number | null
+  summary: string | null
+  created_at: number
+}
+
+function toFeedbackView(row: FeedbackRow): ArtifactFeedbackView {
+  return {
+    artifactId: row.artifact_id,
+    round: row.round,
+    version: row.version,
+    notify: row.notify,
+    items: JSON.parse(row.items),
+    images: JSON.parse(row.images),
+    doneBy: row.done_by,
+    doneAt: row.done_at,
+    summary: row.summary,
     createdAt: row.created_at,
   }
 }
@@ -771,6 +814,7 @@ export class Ariadne {
       this.db.run(`PRAGMA user_version = ${PROJECTION_VERSION}`)
     }
     setupFiles(this.db)
+    setupSharedState(this.db)
   }
 
   /**
@@ -1412,9 +1456,10 @@ export class Ariadne {
     for (const [attentionId, threadId] of this.issueWritesUnderWay) {
       if (threads.has(threadId)) this.issueWritesUnderWay.delete(attentionId)
     }
-    this.store.purge(projectId, { type: 'project.deleted', projectId, data: {} }, (db) =>
-      db.run('DELETE FROM files WHERE project_id = ?', [projectId]),
-    )
+    this.store.purge(projectId, { type: 'project.deleted', projectId, data: {} }, (db) => {
+      db.run('DELETE FROM files WHERE project_id = ?', [projectId])
+      db.run('DELETE FROM artifact_shared WHERE project_id = ?', [projectId])
+    })
   }
 
   /** Cap how many turns of the project run at once (1–16), or lift the cap with `null`. */
@@ -3371,6 +3416,11 @@ export class Ariadne {
       baseVersion?: number
       /** The user's edit: the commented text as it now reads, by comment thread. */
       quotes?: Record<string, string>
+      /**
+       * Saved from the shared editing state, where people and agents edit together: the
+       * user's part reaches the agent as feedback, not as a note on this version.
+       */
+      shared?: boolean
     },
   ): ArtifactView {
     const current = this.getArtifact(artifactId)
@@ -3394,7 +3444,7 @@ export class Ariadne {
     const moved = Object.keys(quotes).length > 0
     // A quote moves only with the text it is in.
     if (title === current.title && content === current.content) return current
-    const byUser = input.author === 'user'
+    const byUser = input.author === 'user' && !input.shared
     this.store.append([
       {
         type: 'artifact.revised',
@@ -3460,7 +3510,8 @@ export class Ariadne {
     action: ArtifactCommentAction,
   ): ArtifactCommentThreadView[] {
     const artifact = this.getArtifact(artifactId)
-    if (artifact.kind !== 'document') throw new DomainError('error.invalidBody', { reason: 'kind' })
+    if (artifact.kind === 'dashboard')
+      throw new DomainError('error.invalidBody', { reason: 'kind' })
     const thread = this.listArtifactComments(artifactId).find((t) => t.id === action.threadId)
     let checked: ArtifactCommentAction
     if (action.type === 'create') {
@@ -3469,9 +3520,25 @@ export class Ariadne {
         .query<{ id: string }, [string]>('SELECT id FROM artifact_comments WHERE id = ?')
         .get(action.threadId)
       if (taken) throw invalid('threadId')
-      const quote = action.quote.trim()
-      if (!quote || quote.length > MAX_COMMENT_QUOTE) throw invalid('quote')
-      checked = { ...action, quote, body: commentText(action.body) }
+      if (artifact.kind === 'whiteboard') {
+        // A whiteboard's thread is about an item or a connector, named by its id.
+        const anchor = action.anchor
+        const id = anchor && ('node' in anchor ? anchor.node : anchor.edge)
+        if (!anchor || typeof id !== 'string' || !id || id.length > 200) throw invalid('anchor')
+        checked = {
+          type: 'create',
+          threadId: action.threadId,
+          commentId: action.commentId,
+          quote: '',
+          body: commentText(action.body),
+          anchor: 'node' in anchor ? { node: id } : { edge: id },
+        }
+      } else {
+        const quote = action.quote.trim()
+        if (!quote || quote.length > MAX_COMMENT_QUOTE) throw invalid('quote')
+        const { anchor: _, ...rest } = action
+        checked = { ...rest, quote, body: commentText(action.body) }
+      }
     } else {
       if (!thread) throw new DomainError('error.notFound', { what: action.threadId })
       const comment =
@@ -3503,20 +3570,95 @@ export class Ariadne {
           checked = action
       }
     }
-    const asks = by === 'user' && (checked.type === 'create' || checked.type === 'reply')
+    // The user's comments reach the agent with the next round of feedback, not one by one.
     this.store.append([
       {
         type: 'artifact.commented',
         projectId: artifact.projectId,
-        data: {
-          artifactId,
-          by,
-          action: checked,
-          notify: asks ? this.artifactListener(artifactId) : null,
-        },
+        data: { artifactId, by, action: checked, notify: null },
       },
     ])
     return this.listArtifactComments(artifactId)
+  }
+
+  // ---- editing together ----
+
+  /** The shared editing state of a document or whiteboard; `null` before anyone opened it. */
+  readSharedState(artifactId: string): SharedState | null {
+    return readSharedState(this.db, artifactId)
+  }
+
+  writeSharedState(artifactId: string, shared: SharedState): void {
+    const artifact = this.getArtifact(artifactId)
+    writeSharedState(this.db, artifact.projectId, artifactId, shared, this.now())
+  }
+
+  /**
+   * Send what the user did in an artifact since the last round to the agent that hears
+   * about it, which it wakes. Nothing is sent without items.
+   */
+  sendArtifactFeedback(
+    artifactId: string,
+    input: { items: ArtifactFeedbackItem[]; images?: string[] },
+  ): ArtifactFeedbackView | null {
+    const artifact = this.getArtifact(artifactId)
+    if (!input.items.length) return null
+    const notify = this.artifactListener(artifactId)
+    if (!notify) return null
+    const images: Attachment[] = []
+    for (const [i, fileId] of (input.images ?? []).entries()) {
+      const file = fileInfo(this.db, artifact.projectId, fileId)
+      if (!file || !isImageType(file.mime)) throw invalid('images')
+      images.push({ fileId, name: `${artifact.title} ${i + 1}.png`, ...file })
+    }
+    const round = (this.listArtifactFeedback(artifactId)[0]?.round ?? 0) + 1
+    this.store.append([
+      {
+        type: 'artifact.feedback',
+        projectId: artifact.projectId,
+        data: {
+          artifactId,
+          round,
+          version: artifact.version,
+          notify,
+          items: input.items,
+          images: images.slice(0, MAX_FEEDBACK_IMAGES),
+        },
+      },
+    ])
+    return this.listArtifactFeedback(artifactId)[0] ?? null
+  }
+
+  /** The agent says it finished a round of feedback, and what it did about it. */
+  finishArtifactFeedback(
+    artifactId: string,
+    round: number,
+    by: string,
+    summary: string,
+  ): ArtifactFeedbackView {
+    const artifact = this.getArtifact(artifactId)
+    const found = this.listArtifactFeedback(artifactId).find((f) => f.round === round)
+    if (!found) throw new DomainError('error.notFound', { what: `${artifactId} round ${round}` })
+    if (found.doneAt === null) {
+      this.store.append([
+        {
+          type: 'artifact.feedback_done',
+          projectId: artifact.projectId,
+          data: { artifactId, round, by, summary: summary.trim().slice(0, MAX_COMMENT_BODY) },
+        },
+      ])
+    }
+    return this.listArtifactFeedback(artifactId).find((f) => f.round === round)!
+  }
+
+  /** The rounds of feedback sent on an artifact, newest first. */
+  listArtifactFeedback(artifactId: string): ArtifactFeedbackView[] {
+    return this.db
+      .query<FeedbackRow, [string]>(
+        'SELECT * FROM artifact_feedback WHERE artifact_id = ? ORDER BY round DESC',
+      )
+      .all(artifactId)
+      .map(toFeedbackView)
   }
 
   // ---- turns ----

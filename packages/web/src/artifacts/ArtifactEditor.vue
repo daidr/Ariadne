@@ -7,7 +7,17 @@ import type {
 } from '@ariadne/core'
 import { DouAlert, DouButton, DouInput, DouSelect, DouText, type CommentAction } from 'dou-ui'
 import { CheckIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
-import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  effectScope,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+  type EffectScope,
+} from 'vue'
 import { api, ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
 import { report, state, unsavedEdits } from '../store'
@@ -15,6 +25,7 @@ import ViewActions from '../full/ViewActions.vue'
 import { authorName } from './author'
 import CommentList from './CommentList.vue'
 import { kindIcon } from './kinds'
+import { useSharedArtifact, type SharedArtifact } from './shared'
 
 /** `place` is where it is shown: in a tab on the right side, or full screen. */
 const props = defineProps<{ id: string; place: 'side' | 'full' }>()
@@ -31,9 +42,12 @@ const versions = ref<ArtifactVersionView[]>([])
 const comments = ref<ArtifactCommentThreadView[]>([])
 /** The comment thread open in the text. */
 const activeComment = ref<string | null>(null)
-const body = ref<{ quotes?: () => Record<string, string>; anchored?: () => Set<string> } | null>(
-  null,
-)
+const body = ref<{
+  quotes?: () => Record<string, string>
+  anchored?: () => Set<string>
+  markedPictures?: () => Promise<Blob[]>
+  markHeard?: () => void
+} | null>(null)
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
 /** Content edited and not saved yet; `null` when nothing changed. */
@@ -45,7 +59,9 @@ const title = ref('')
 const titleInput = ref<InstanceType<typeof DouInput> | null>(null)
 
 const viewingOld = computed(() => !!artifact.value && artifact.value.version !== latest.value)
-const dirty = computed(() => !viewingOld.value && draft.value !== null)
+/** Documents and whiteboards are edited together: changes go out as they are made. */
+const together = computed(() => artifact.value?.kind !== 'dashboard')
+const dirty = computed(() => !viewingOld.value && !together.value && draft.value !== null)
 
 const versionOptions = computed(() =>
   versions.value.map((v) => ({
@@ -131,9 +147,81 @@ watch(
   },
 )
 
-/** Comments go to the newest version of a document only. */
+// ---- editing together ----
+
+/** The room of the artifact open now, joined while its newest version is shown. */
+const shared = shallowRef<SharedArtifact | null>(null)
+let room: { id: string; scope: EffectScope } | null = null
+watch(
+  () => (artifact.value && together.value && !viewingOld.value ? artifact.value.id : null),
+  (id) => {
+    if (room?.id === id) return
+    leave()
+    if (!id) return
+    const scope = effectScope()
+    shared.value = scope.run(() => useSharedArtifact(id)) ?? null
+    room = { id, scope }
+    shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
+      // The page's own edits; what comes from the server is the provider's.
+      if (origin !== shared.value?.provider.value) touched()
+    })
+  },
+)
+
+/**
+ * What the user does here reaches the agent on its own, a moment after they stop: the
+ * changes, comments and picks together, with pictures of the options they marked.
+ */
+const QUIET_MS = 10_000
+let quiet: ReturnType<typeof setTimeout> | null = null
+let waiting = false
+
+function touched() {
+  waiting = true
+  if (quiet) clearTimeout(quiet)
+  quiet = setTimeout(() => void sendFeedback(), QUIET_MS)
+}
+
+async function sendFeedback(leaving = false) {
+  if (quiet) clearTimeout(quiet)
+  quiet = null
+  if (!waiting || !room) return
+  waiting = false
+  const id = room.id
+  if (leaving) return api.sendFeedback(id, [], true)
+  try {
+    const pictures = (await body.value?.markedPictures?.()) ?? []
+    const projectId = artifact.value?.projectId ?? ''
+    const images = await Promise.all(
+      pictures.map(async (picture) => (await api.uploadFile(projectId, picture)).file.id),
+    )
+    await api.sendFeedback(id, images)
+    body.value?.markHeard?.()
+  } catch (error) {
+    // The server sends what waits on its own a little later, without the pictures.
+    console.warn('feedback not sent', error)
+  }
+}
+
+function leave() {
+  if (!room) return
+  void sendFeedback(true)
+  room.scope.stop()
+  room = null
+  shared.value = null
+}
+onBeforeUnmount(leave)
+
+// Going to another tab or window is leaving for a while: what waits goes now.
+function hidden() {
+  if (document.visibilityState === 'hidden') void sendFeedback()
+}
+document.addEventListener('visibilitychange', hidden)
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', hidden))
+
+/** Comments go to the newest version of a document or whiteboard. */
 const commentProps = computed(() =>
-  artifact.value?.kind === 'document' && !viewingOld.value
+  artifact.value && together.value && !viewingOld.value
     ? {
         comments: comments.value,
         activeComment: activeComment.value,
@@ -147,11 +235,25 @@ const commentProps = computed(() =>
 const MAX_QUOTE = 1000
 
 /** The editor's comment change, sent as the server takes it. */
-function toAction(action: CommentAction, quote: string): ArtifactCommentAction | null {
+function toAction(
+  action: CommentAction,
+  quote: string | { node: string } | { edge: string } | null,
+): ArtifactCommentAction | null {
   switch (action.type) {
     case 'create': {
       const first = action.thread.comments[0]
       if (!first || !quote) return null
+      // On a whiteboard, the item or connector the thread is about.
+      if (typeof quote !== 'string') {
+        return {
+          type: 'create',
+          threadId: action.thread.id,
+          commentId: first.id,
+          quote: '',
+          body: first.body,
+          anchor: quote,
+        }
+      }
       // A long passage is kept by its opening, which still finds it.
       return {
         type: 'create',
@@ -182,9 +284,13 @@ function toAction(action: CommentAction, quote: string): ArtifactCommentAction |
   }
 }
 
-async function comment(action: CommentAction, quote = '') {
+async function comment(
+  action: CommentAction,
+  quote: string | { node: string } | { edge: string } | null = '',
+) {
   const sent = toAction(action, quote)
   if (!sent) return
+  if (sent.type === 'create' || sent.type === 'reply') touched()
   try {
     comments.value = (await api.commentArtifact(props.id, sent)).comments
   } catch (error) {
@@ -202,7 +308,11 @@ async function save(
   conflict.value = null
   try {
     const detail = await api.saveArtifact(props.id, {
-      content: input.content ?? draft.value ?? current.content,
+      // Edited together, the room holds the content: a rename leaves it as it is there.
+      content:
+        together.value && input.content === undefined
+          ? null
+          : (input.content ?? draft.value ?? current.content),
       // Content given here is the newest version's own (a rename, a restore), not the edits.
       baseVersion: input.content === undefined ? (draftBase.value ?? latest.value) : latest.value,
       reason: input.reason ?? t('artifact.saveReason'),
@@ -252,7 +362,7 @@ async function rename() {
   const keptBase = draftBase.value
   if (
     await save({
-      content: artifact.value?.content,
+      ...(together.value ? {} : { content: artifact.value?.content }),
       title: next,
       reason: t('artifact.renameReason'),
     })
@@ -338,7 +448,7 @@ const time = (at: number) =>
         {{ t('artifact.restore') }}
       </DouButton>
       <DouButton
-        v-else
+        v-else-if="!together"
         size="sm"
         tone="primary"
         :disabled="!dirty"
@@ -353,7 +463,7 @@ const time = (at: number) =>
     <DouAlert v-if="viewingOld" tone="neutral" class="artifact-alert">
       {{ t('artifact.viewing', { version: artifact?.version ?? 0 }) }}
     </DouAlert>
-    <DouAlert v-else-if="conflict" tone="warning" class="artifact-alert">
+    <DouAlert v-else-if="conflict && !together" tone="warning" class="artifact-alert">
       {{ conflict }}
     </DouAlert>
     <DouText v-else-if="dirty" variant="tertiary" size="sm" class="artifact-dirty">
@@ -362,9 +472,11 @@ const time = (at: number) =>
     <div class="artifact-body">
       <component
         :is="bodies[artifact.kind]"
-        v-if="artifact"
+        v-if="artifact && (!together || viewingOld || shared)"
+        :key="`${artifact.id}:${viewingOld ? artifact.version : 'live'}`"
         ref="body"
         v-bind="commentProps"
+        :shared="viewingOld ? undefined : (shared ?? undefined)"
         :content="bodyContent"
         :project-id="artifact.projectId"
         :artifact-id="artifact.id"

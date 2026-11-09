@@ -1,3 +1,4 @@
+import type { SharedArtifacts } from './shared-artifacts'
 import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import type { Ariadne, ConversationView } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
@@ -23,6 +24,8 @@ export interface SchedulerOptions {
   retryBaseMs?: number
   /** The plugins' live data sources for dashboards. */
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /** Documents and whiteboards edited together. */
+  shared?: SharedArtifacts
   searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The user's external tool servers. */
   mcp?: McpHub
@@ -227,6 +230,7 @@ export class Scheduler {
         ...(this.options.dashboardSources
           ? { dashboardSources: this.options.dashboardSources }
           : {}),
+        ...(this.options.shared ? { shared: this.options.shared } : {}),
         ...(this.options.searchProviders ? { searchProviders: this.options.searchProviders } : {}),
         ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
         ...(this.options.settings
