@@ -18,6 +18,7 @@ import type {
   PlanView,
   ProjectView,
   TodoView,
+  ThreadView,
   TurnFile,
 } from '@ariadne/core'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
@@ -250,10 +251,52 @@ function refreshCurrent(parts: Iterable<Part> = ALL_PARTS): Promise<void> {
   return run
 }
 
+/** Where the open project's threads were last synced to, to ask only for what changed. */
+let synced: { projectId: string; cursor: string } | null = null
+
+/**
+ * `current` brought up to date by a partial answer: the threads it brings take the place
+ * of the ones shown, and `ids`, when the set of threads changed, says which stay and in
+ * what order. `null` when a thread it names is in neither, so everything must be asked for.
+ */
+export function patchThreads(
+  current: readonly ThreadView[],
+  changed: readonly ThreadView[],
+  ids: readonly string[] | undefined,
+): ThreadView[] | null {
+  const byId = new Map(current.map((thread) => [thread.id, thread]))
+  for (const thread of changed) {
+    if (!ids && !byId.has(thread.id)) return null
+    byId.set(thread.id, thread)
+  }
+  const merged: ThreadView[] = []
+  for (const id of ids ?? current.map((thread) => thread.id)) {
+    const thread = byId.get(id)
+    if (!thread) return null
+    merged.push(thread)
+  }
+  return merged
+}
+
+/** The project's detail, and the cursor to keep once it is the one shown. */
+async function fetchDetail(id: string): Promise<{ detail: ProjectDetail; cursor: string }> {
+  const shown = state.detail?.project.id === id ? toRaw(state.detail) : null
+  const since = shown && synced?.projectId === id ? synced.cursor : undefined
+  let { sync, ...detail } = await api.getProject(id, since)
+  if (sync.partial) {
+    const threads = shown && patchThreads(shown.threads, detail.threads, sync.ids)
+    if (threads) detail.threads = threads
+    // What was shown is gone or does not fit: start over from everything.
+    else ({ sync, ...detail } = await api.getProject(id))
+  }
+  return { detail, cursor: sync.cursor }
+}
+
 async function loadParts(parts: ReadonlySet<Part>) {
   const id = state.currentId
   if (!id) return
-  const detail = parts.has('detail') || !state.detail ? await api.getProject(id) : state.detail
+  const fetched = parts.has('detail') || !state.detail ? await fetchDetail(id) : null
+  const detail = fetched?.detail ?? state.detail!
   const conversations = parts.has('conversations')
   // A thread that no longer exists closes; its tab would show nothing.
   const known = new Set(detail.threads.map((thread) => thread.id))
@@ -277,6 +320,8 @@ async function loadParts(parts: ReadonlySet<Part>) {
   if (state.currentId !== id) return
   // What did not change stays the object it was, so nothing showing it draws again.
   state.detail = reuse(toRaw(state.detail), detail)
+  // Only now: an answer dropped above must be asked for again from where this one began.
+  if (fetched) synced = { projectId: id, cursor: fetched.cursor }
   const artifactIds = artifacts ? new Set(artifacts.artifacts.map((a) => a.id)) : null
   setSide(side.prune(state.side, (key) => stillThere(key, known, artifactIds)))
   if (state.full && !fullStillThere(state.full.view, known, artifactIds)) setFull(null)

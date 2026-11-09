@@ -163,6 +163,16 @@ export interface ProjectDetail {
   hasTracker: boolean
 }
 
+/** How the threads of a project detail were sent; see `patchThreads`. */
+export interface ThreadSync {
+  /** Given back as `since` next time. */
+  cursor: string
+  /** `threads` holds only the ones changed since the cursor asked with. */
+  partial: boolean
+  /** Every thread's id in order, when a partial answer's set of threads changed. */
+  ids?: string[]
+}
+
 export interface ModelKind {
   kind: string
   title: LocalizedText
@@ -421,7 +431,12 @@ export const api = {
   createProject: (name: string) =>
     request<{ project: ProjectView }>('POST', '/api/projects', { name }),
   deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
-  getProject: (id: string) => request<ProjectDetail>('GET', `/api/projects/${id}`),
+  /** With `since` (a `sync.cursor` given before), only the threads changed after it. */
+  getProject: (id: string, since?: string) =>
+    request<ProjectDetail & { sync: ThreadSync }>(
+      'GET',
+      `/api/projects/${id}${since ? `?since=${encodeURIComponent(since)}` : ''}`,
+    ),
   /**
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.

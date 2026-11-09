@@ -43,6 +43,33 @@ describe('auth', () => {
   })
 })
 
+describe('project detail', () => {
+  test('sends only the threads changed since the cursor', async () => {
+    const project = app.createProject('P')
+    const first = app.createThread(project.id, { title: '一' })
+    type Detail = {
+      threads: { id: string }[]
+      sync: { cursor: string; partial: boolean; ids?: string[] }
+    }
+    const detail = async (since = '') =>
+      (await (
+        await call(`/api/projects/${project.id}${since && `?since=${since}`}`)
+      ).json()) as Detail
+
+    const whole = await detail()
+    expect(whole.threads.map((thread) => thread.id)).toEqual([first.id])
+    expect(whole.sync.partial).toBe(false)
+    const same = await detail(whole.sync.cursor)
+    expect(same).toMatchObject({ threads: [], sync: { cursor: whole.sync.cursor, partial: true } })
+
+    const second = app.createThread(project.id, { title: '二' })
+    const more = await detail(whole.sync.cursor)
+    expect(more.threads.map((thread) => thread.id)).toEqual([second.id])
+    expect(more.sync.ids).toEqual([first.id, second.id])
+    expect((await detail('nope')).threads).toHaveLength(2)
+  })
+})
+
 describe('pages and search', () => {
   test('pages a conversation and finds what was said', async () => {
     const project = app.createProject('P')
