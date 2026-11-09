@@ -1,8 +1,8 @@
 import { BookTextIcon } from '@dou-ui/icons'
 import type { ChatInputOption } from 'dou-ui'
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { api, type MentionInput, type SkillView } from '../api'
-import { state } from '../store'
+import { onLiveEvent, state } from '../store'
 
 const SKILL = 'skill:'
 
@@ -17,21 +17,31 @@ export function useSkills(
 ) {
   const skills = ref<SkillView[]>([])
 
+  async function read(id: string) {
+    try {
+      const { skills: found } = await api.getSkills(id)
+      if (conversationId() === id) skills.value = found
+    } catch {
+      // No skills to offer; snippets still are.
+    }
+  }
+
   // Read again when the conversation changes, and when the project's source does.
   watch(
     // Each on its own: a refresh that leaves both as they were does not read again.
     [conversationId, () => state.detail?.project.source] as const,
-    async ([id]) => {
+    ([id]) => {
       skills.value = []
-      if (!id) return
-      try {
-        const { skills: found } = await api.getSkills(id)
-        if (conversationId() === id) skills.value = found
-      } catch {
-        // No skills to offer; snippets still are.
-      }
+      if (id) void read(id)
     },
     { immediate: true },
+  )
+  // A turn may have written a skill; the ones offered stay until the new list is here.
+  onScopeDispose(
+    onLiveEvent((event) => {
+      if (event.type === 'turn.finished' && event.data.conversationId === conversationId())
+        void read(event.data.conversationId)
+    }),
   )
 
   const options = computed<ChatInputOption[]>(() =>
