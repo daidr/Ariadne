@@ -14,6 +14,7 @@ import { keepMessageImages } from './message-images'
 import type { BackgroundCommands } from './background'
 import type { CommandRule, Limits } from './limits'
 import type { Researcher } from './research'
+import type { OpenPath } from './partial-json'
 import type { SkillSet } from './skills'
 
 export interface ToolContext {
@@ -79,6 +80,19 @@ export interface ToolContext {
   research?: Researcher | undefined
   /** The skills the conversation can read, as loaded last. */
   skills?: () => SkillSet
+  /** The user's instructions for every project, which the coordinator may add a line to. */
+  everywhere?: EverywhereMemory
+}
+
+/**
+ * The user's instructions for every project, as far as an agent may change them: one line
+ * at a time. They live in the user's settings, outside any project.
+ */
+export interface EverywhereMemory {
+  /** Add a line; `false` when it is there already. */
+  add(line: string): boolean
+  /** Take a line out, by its exact words; `false` when it is not there. */
+  remove(line: string): boolean
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */
@@ -107,6 +121,23 @@ export interface Tool {
    */
   readOnly?: boolean
   run(args: Record<string, unknown>, ctx: ToolContext): ToolResult | Promise<ToolResult>
+  /**
+   * Shows the call at work while the model is still writing its arguments, for a tool
+   * whose change the user can watch land (a document, a whiteboard). The call still runs
+   * once whole, and takes over from what was shown.
+   */
+  live?(ctx: ToolContext): LiveCall
+}
+
+/** One tool call shown while it is written. */
+export interface LiveCall {
+  /**
+   * The arguments as far as they are written: `open` is the path of the value the text
+   * stops in (see `readPartialJson`), so a string still growing can be told from a whole one.
+   */
+  input(args: Record<string, unknown>, open: OpenPath | null): void
+  /** The call will not run: take back what was shown. A call that ran is left alone. */
+  cancel(): void
 }
 
 /** A bad argument the model can fix; it gets the message back as an error result. */

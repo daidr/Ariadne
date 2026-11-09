@@ -1,6 +1,9 @@
 import type { ModelPrice } from '@ariadne/agent'
 
-/** The public catalog of models and their list prices (US dollars per million tokens). */
+/**
+ * The public catalog of models: their list prices (US dollars per million tokens), how
+ * much they read and write, and what they can do.
+ */
 export const CATALOG_URL = 'https://models.dev/api.json'
 /** The catalog is fetched again after this long. */
 const CATALOG_MS = 12 * 60 * 60 * 1000
@@ -23,6 +26,10 @@ const MAKERS = [
 interface CatalogModel {
   id?: string
   cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number }
+  limit?: { context?: number; output?: number }
+  modalities?: { input?: string[] }
+  tool_call?: boolean
+  release_date?: string
 }
 type Catalog = Record<string, { id?: string; models?: Record<string, CatalogModel> }>
 
@@ -33,10 +40,44 @@ export interface PriceMatch {
 }
 
 /**
- * List prices from the public catalog, for filling in a model's price. Asked only when
- * the user clicks for it; what comes back is only a suggestion they save or not.
+ * What the catalog knows of a model besides its price, each only where it says: the form
+ * fills a model's settings in with it, and the user changes what is wrong.
  */
-export class PriceCatalog {
+export interface ModelInfo {
+  contextTokens?: number
+  /** The most it writes in one response. */
+  maxTokens?: number
+  /** Whether it looks at images. */
+  images?: boolean
+  price?: ModelPrice
+  /** Whether it calls tools; Ariadne works through them. */
+  tools?: boolean
+  /** The day it came out, `YYYY-MM-DD`. */
+  released?: string
+}
+
+const priced = (model: CatalogModel) =>
+  typeof model.cost?.input === 'number' && typeof model.cost?.output === 'number'
+
+function priceOf(model: CatalogModel): ModelPrice {
+  const cost = model.cost!
+  return {
+    currency: 'USD',
+    input: cost.input!,
+    output: cost.output!,
+    ...(typeof cost.cache_read === 'number' ? { cacheRead: cost.cache_read } : {}),
+    ...(typeof cost.cache_write === 'number' ? { cacheWrite: cost.cache_write } : {}),
+  }
+}
+
+const whole = (value: unknown, least: number): number | undefined =>
+  typeof value === 'number' && Number.isInteger(value) && value >= least ? value : undefined
+
+/**
+ * The public catalog of models, for filling in a model's settings. Asked only from the
+ * settings form; what comes back is a suggestion the user saves or changes.
+ */
+export class ModelCatalog {
   private catalog: { at: number; data: Catalog } | null = null
 
   constructor(private readonly fetcher: typeof fetch = fetch) {}
@@ -46,8 +87,63 @@ export class PriceCatalog {
    * the name is listed by several, e.g. a DeepSeek model on its own address.
    */
   async lookup(model: string, hint = ''): Promise<PriceMatch | null> {
+    const best = this.matches(await this.load(), model, hint).find((m) => priced(m.model))
+    return best ? { source: best.provider, price: priceOf(best.model) } : null
+  }
+
+  /**
+   * What the catalog knows of each of `models`, by name; a model it does not list is left
+   * out. Each fact comes from the best service that states it.
+   */
+  async describe(models: string[], hint = ''): Promise<Map<string, ModelInfo>> {
     const catalog = await this.load()
+    const out = new Map<string, ModelInfo>()
+    for (const model of models) {
+      const found = this.matches(catalog, model, hint).map((m) => m.model)
+      if (!found.length) continue
+      const first = <T>(read: (model: CatalogModel) => T | undefined): T | undefined => {
+        for (const entry of found) {
+          const value = read(entry)
+          if (value !== undefined) return value
+        }
+        return undefined
+      }
+      const contextTokens = first((m) => whole(m.limit?.context, 4096))
+      const maxTokens = first((m) => whole(m.limit?.output, 256))
+      const inputs = first((m) =>
+        Array.isArray(m.modalities?.input) ? m.modalities.input : undefined,
+      )
+      const price = first((m) => (priced(m) ? priceOf(m) : undefined))
+      const tools = first((m) => (typeof m.tool_call === 'boolean' ? m.tool_call : undefined))
+      const released = first((m) =>
+        typeof m.release_date === 'string' && /^\d{4}-\d{2}/.test(m.release_date)
+          ? m.release_date
+          : undefined,
+      )
+      out.set(model, {
+        ...(contextTokens ? { contextTokens } : {}),
+        // More than it reads at once is a mistake in the catalog.
+        ...(maxTokens && maxTokens <= 1_000_000 ? { maxTokens } : {}),
+        ...(inputs ? { images: inputs.includes('image') } : {}),
+        ...(price ? { price } : {}),
+        ...(tools !== undefined ? { tools } : {}),
+        ...(released ? { released } : {}),
+      })
+    }
+    return out
+  }
+
+  /**
+   * The catalog's entries for `model`, best first: the service `hint` (the provider's
+   * kind and address) names, then those that make their own models.
+   */
+  private matches(
+    catalog: Catalog,
+    model: string,
+    hint: string,
+  ): { provider: string; model: CatalogModel }[] {
     const name = model.trim().toLowerCase()
+    if (!name) return []
     const matches: { provider: string; model: CatalogModel }[] = []
     for (const [provider, entry] of Object.entries(catalog)) {
       for (const [id, found] of Object.entries(entry.models ?? {})) {
@@ -55,28 +151,13 @@ export class PriceCatalog {
         if (key === name || key.endsWith(`/${name}`)) matches.push({ provider, model: found })
       }
     }
-    const priced = matches.filter(
-      (m) => typeof m.model.cost?.input === 'number' && typeof m.model.cost?.output === 'number',
-    )
-    if (!priced.length) return null
     const lowerHint = hint.toLowerCase()
     const rank = (provider: string) => {
       if (lowerHint && lowerHint.includes(provider.toLowerCase())) return -1
       const maker = MAKERS.indexOf(provider)
       return maker === -1 ? MAKERS.length : maker
     }
-    const best = priced.toSorted((a, b) => rank(a.provider) - rank(b.provider))[0]!
-    const cost = best.model.cost!
-    return {
-      source: best.provider,
-      price: {
-        currency: 'USD',
-        input: cost.input!,
-        output: cost.output!,
-        ...(typeof cost.cache_read === 'number' ? { cacheRead: cost.cache_read } : {}),
-        ...(typeof cost.cache_write === 'number' ? { cacheWrite: cost.cache_write } : {}),
-      },
-    }
+    return matches.toSorted((a, b) => rank(a.provider) - rank(b.provider))
   }
 
   private async load(): Promise<Catalog> {

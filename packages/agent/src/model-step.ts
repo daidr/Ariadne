@@ -8,6 +8,7 @@ import type {
 import { MAX_RETRY_AFTER_MS, type ModelRequest, type ModelStreamPart } from '@ariadne/plugin-sdk'
 import { usageOf } from './compaction'
 import type { Limits } from './limits'
+import type { LiveCalls } from './live-calls'
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { ResolvedModel } from './model'
 
@@ -32,7 +33,8 @@ export class TurnError extends Error {
  * `timeoutSeconds` is given up and counts as such an error. `null` when aborted.
  *
  * The text is handed to `draft` as it comes, until a tool call begins: then it is not the
- * answer, and the draft is taken back, as it is when an attempt fails.
+ * answer, and the draft is taken back, as it is when an attempt fails. The arguments of
+ * tool calls are handed to `live` as they come, for the tools that show their work.
  */
 export async function requestStep(
   model: ResolvedModel,
@@ -42,6 +44,7 @@ export async function requestStep(
   limits: Limits,
   timeoutSeconds?: number,
   draft?: DraftHandle,
+  live?: LiveCalls,
 ): Promise<{
   text: string
   reasoning: ReasoningRecord[]
@@ -92,6 +95,7 @@ export async function requestStep(
           calling = true
           draft?.withdraw()
         }
+        if (part.type === 'tool-input') live?.input(part.call, part.name, part.arguments)
         if (part.type === 'text') {
           text += part.text
           if (!calling) draft?.text(part.text)
@@ -115,6 +119,8 @@ export async function requestStep(
       request.signal.removeEventListener('abort', forward)
     }
     if (request.signal.aborted || silent || failure || cut) draft?.withdraw()
+    // What was shown of calls that will not run is taken back.
+    if (request.signal.aborted || silent || failure || cut) live?.reset()
     if (request.signal.aborted) return null
     if (silent) {
       failure = {

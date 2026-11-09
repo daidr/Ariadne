@@ -41,6 +41,8 @@ import type { ThreadStage } from './stage'
 export interface ProjectView {
   id: string
   name: string
+  /** Nobody named it yet: `name` is the start of what the user first said. */
+  unnamed: boolean
   coordinatorId: string
   createdAt: number
   updatedAt: number
@@ -264,6 +266,11 @@ export type NoticeView = {
       previous: string | null
       undone: boolean
     }
+  /**
+   * An agent changed the user's instructions for every project: `text` is the line it
+   * added or took away. The user can undo it.
+   */
+  | { kind: 'memory-everywhere'; action: 'saved' | 'removed'; text: string; undone: boolean }
   | { kind: 'compaction-failed'; detail: string }
   /** An agent added or removed one of the project's routines. */
   | { kind: 'routine-change'; action: 'added' | 'removed'; prompt: string }

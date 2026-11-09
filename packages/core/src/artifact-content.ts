@@ -69,7 +69,8 @@ export interface DashboardContent {
 /**
  * The node types the web's whiteboard registers: `whiteboardKit()`'s, `flowKit()`'s plain
  * `default` node and `group`, and Ariadne's `option`: a frame holding one option the
- * user can pick, with what shows it inside (`data: { title, note?, chosen? }`).
+ * user can pick, with what shows it inside (`data: { title, note?, chosen? }`), and
+ * `pending`: a placeholder for what an agent will put there (`data: { text }`).
  */
 export const WHITEBOARD_NODE_TYPES = [
   'shape',
@@ -80,11 +81,22 @@ export const WHITEBOARD_NODE_TYPES = [
   'default',
   'group',
   'option',
+  'pending',
 ] as const
 /** Node types that hold others: a node inside names one in `parent`. */
 export const WHITEBOARD_CONTAINERS = ['group', 'option'] as const
-/** The dashboard widget types the web registers. */
-export const DASHBOARD_WIDGET_TYPES = ['stat', 'text', 'table', 'chart', 'pivot'] as const
+/**
+ * The dashboard widget types the web registers; `pending` is a placeholder for a widget
+ * an agent will put there (`props: { text }`).
+ */
+export const DASHBOARD_WIDGET_TYPES = [
+  'stat',
+  'text',
+  'table',
+  'chart',
+  'pivot',
+  'pending',
+] as const
 
 /** Big enough for a whiteboard with a few pasted images. */
 export const MAX_ARTIFACT_JSON = 8 * 1024 * 1024
@@ -293,8 +305,11 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
       ? { kind, items: 0, connectors: 0, texts: [] }
       : { kind: 'dashboard', widgets: 0, takenAt: null, titles: [], tiles: [] }
   }
+  // A placeholder reads as its text in brackets, as the page shows it.
+  const shown = content.replace(/<pending>([\s\S]*?)<\/pending>/g, '\\[$1\\]')
   // Markdown without its marks, on one line.
-  const text = content
+  const text = shown
+    .replace(/\\([[\]])/g, '$1')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/^\s*(?:[-+]|\d+\.)\s+/gm, ' ')
@@ -305,7 +320,7 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
   return {
     kind: 'document',
     excerpt: text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text,
-    lead: leadOf(content),
+    lead: leadOf(shown),
   }
 }
 

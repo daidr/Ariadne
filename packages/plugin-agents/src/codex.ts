@@ -1,4 +1,6 @@
 import type { ModelRequest } from '@ariadne/plugin-sdk'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { agentEnv, AgentProcess, AgentProcessError, splitCommand } from './process'
 import { busyText, RpcPeer, Unhandled } from './rpc'
 import type { AgentKind, AgentUsage, DriverContext } from './sessions'
@@ -59,6 +61,12 @@ const dataUrl = (image: { mime: string; data: string }) => `data:${image.mime};b
 export const codex: AgentKind<CodexSettings> = {
   kind: 'codex',
   title: { 'zh-CN': 'Codex', en: 'Codex' },
+  signedIn({ env, home, which }) {
+    return (
+      !!which('codex') &&
+      existsSync(join(env.CODEX_HOME?.trim() || join(home, '.codex'), 'auth.json'))
+    )
+  },
   settings: {
     type: 'object',
     properties: {

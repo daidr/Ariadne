@@ -21,6 +21,7 @@ import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import ProjectSearch from './components/ProjectSearch.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
+import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
@@ -149,9 +150,9 @@ watchEffect(() => {
           <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
             <PlanMain />
           </div>
-          <!-- Before there is a project, the side has nothing to show. -->
-          <div v-else-if="!state.currentId" class="pane">
-            <ConversationPanel />
+          <!-- Before there is a project, and while a new one is begun: say what you want. -->
+          <div v-else-if="!state.currentId || state.starting" class="pane">
+            <StartScreen />
           </div>
           <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
             <template #start>

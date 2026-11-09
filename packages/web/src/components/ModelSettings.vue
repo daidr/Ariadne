@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   DouAlert,
+  DouAutocomplete,
   DouButton,
   DouCard,
   DouDialog,
@@ -24,7 +25,10 @@ import {
   type Concurrency,
   type Currency,
   type Effort,
+  type ListedModel,
+  type ModelInfo,
   type ModelKind,
+  type ModelProblem,
   type ModelSettings,
 } from '../api'
 import { applyModelSettings } from '../store'
@@ -70,11 +74,15 @@ interface DraftModel {
   priceOutput: number | null
   priceCacheRead: number | null
   priceCacheWrite: number | null
-  /** The price fields are shown; they start shown when a price is set. */
-  priceOpen: boolean
-  priceLooking: boolean
-  /** Why the catalog had no price for it. */
-  priceError: string | null
+  /** Everything past its name is shown: filled in from the catalog, there to be corrected. */
+  open: boolean
+  looking: boolean
+  /** Why the catalog could not fill it in, when the user asked it to. */
+  lookError: string | null
+  /** The name its settings were last filled in for; another name gets them filled anew. */
+  described: string
+  /** What the catalog last filled in, untouched since; `null` for the user's own values. */
+  filled: string | null
 }
 
 const kinds = ref<ModelKind[]>([])
@@ -107,14 +115,25 @@ const showCost = ref(false)
 const concurrency = ref<Concurrency | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
+// The models just saved that did not answer when asked, shown where each is set up.
+const problems = ref<ModelProblem[]>([])
+const problemOf = (model: DraftModel) =>
+  problems.value.find((problem) => problem.model === model.id)?.problem ?? null
 
 const kindOf = (kind: string) => kinds.value.find((k) => k.kind === kind)
 const kindOptions = computed(() =>
   kinds.value.map((kind) => ({ value: kind.kind, label: lt(kind.title) ?? kind.kind })),
 )
-const providerOptions = computed(() =>
-  providers.value.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
-)
+const titleOf = (kind: string) => {
+  const known = kindOf(kind)
+  return known ? (lt(known.title) ?? known.kind) : kind
+}
+// A provider is told by its type; a name is asked for only where that is not enough.
+const named = (provider: DraftProvider) =>
+  providers.value.filter((other) => other.kind === provider.kind).length > 1 ||
+  (!!provider.name.trim() && provider.name !== titleOf(provider.kind))
+const modelsOf = (provider: DraftProvider) =>
+  models.value.filter((model) => model.provider === provider.id)
 const modelOptions = computed(() =>
   modelLabels(
     models.value.filter((model) => model.model.trim()),
@@ -174,9 +193,11 @@ function load(settings: ModelSettings) {
     priceOutput: model.price?.output ?? null,
     priceCacheRead: model.price?.cacheRead ?? null,
     priceCacheWrite: model.price?.cacheWrite ?? null,
-    priceOpen: !!model.price,
-    priceLooking: false,
-    priceError: null,
+    open: false,
+    looking: false,
+    lookError: null,
+    described: model.model,
+    filled: null,
   }))
   showCost.value = settings.showCost
   threadModel.value = settings.roles.thread.model
@@ -215,6 +236,7 @@ async function reloadKinds() {
 watch(open, async (isOpen) => {
   if (!isOpen) return
   error.value = null
+  problems.value = []
   // Not loaded yet: saving now would send an empty list over the saved one.
   hiddenRoles.value = null
   try {
@@ -243,7 +265,7 @@ function addProvider() {
     timeoutSeconds: null,
     advanced: false,
   })
-  if (!models.value.length) addModel(id)
+  addModel(id)
 }
 
 /** A new type brings its own settings; a name still the old type's follows the new one. */
@@ -256,6 +278,13 @@ function setKind(provider: (typeof providers.value)[number], kind: string) {
   }
   provider.kind = kind
   provider.secretsSet = []
+  for (const model of modelsOf(provider)) presetModel(model)
+}
+
+/** An agent program runs the model it is itself set to, unless told another. */
+function presetModel(model: DraftModel) {
+  const provider = providers.value.find((p) => p.id === model.provider)
+  if (provider && kindOf(provider.kind)?.program && !model.model.trim()) model.model = 'default'
 }
 
 function removeProvider(id: string) {
@@ -264,8 +293,7 @@ function removeProvider(id: string) {
   for (const model of models.value.filter((m) => m.provider === id)) removeModel(model.id)
 }
 
-function addModel(provider = providers.value[0]?.id) {
-  if (!provider) return
+function addModel(provider: string) {
   const id = newId('m')
   models.value.push({
     id,
@@ -280,10 +308,13 @@ function addModel(provider = providers.value[0]?.id) {
     priceOutput: null,
     priceCacheRead: null,
     priceCacheWrite: null,
-    priceOpen: false,
-    priceLooking: false,
-    priceError: null,
+    open: false,
+    looking: false,
+    lookError: null,
+    described: '',
+    filled: null,
   })
+  presetModel(models.value.at(-1)!)
   threadModel.value ??= id
 }
 
@@ -299,26 +330,126 @@ const currencyOptions = [
   { value: 'CNY', label: 'CNY ¥' },
 ]
 
-/** Fill a model's price from the public catalog; the user saves it or not. */
-async function fillPrice(model: DraftModel) {
-  const provider = providers.value.find((p) => p.id === model.provider)
-  const hint = [provider?.kind, ...Object.values(provider?.settings ?? {})]
+/** A provider's kind and what is typed for it, to tell services apart in the catalog. */
+const hintOf = (provider: DraftProvider | undefined) =>
+  [provider?.kind, ...Object.values(provider?.settings ?? {})]
     .filter((value) => typeof value === 'string')
     .join(' ')
-  model.priceLooking = true
-  model.priceError = null
-  try {
-    const { price } = await api.lookupModelPrice(model.model.trim(), hint)
-    model.currency = price.currency
-    model.priceInput = price.input
-    model.priceOutput = price.output
-    model.priceCacheRead = price.cacheRead ?? null
-    model.priceCacheWrite = price.cacheWrite ?? null
-  } catch (cause) {
-    model.priceError = cause instanceof ApiError ? tm(cause.localized) : String(cause)
-  } finally {
-    model.priceLooking = false
+
+// What each provider lists, asked once for what is typed into it: its address and key.
+const listings = new Map<string, { key: string; models: Promise<ListedModel[]> }>()
+// Why a provider's models could not be listed, shown under the name being typed.
+const listProblems = ref<Record<string, string>>({})
+
+function listed(provider: DraftProvider): Promise<ListedModel[]> {
+  const key = JSON.stringify([provider.kind, provider.settings, provider.secretsSet])
+  const known = listings.get(provider.id)
+  if (known?.key === key) return known.models
+  const asked = api
+    .listModels({ id: provider.id, kind: provider.kind, settings: provider.settings })
+    .then(
+      (result) => {
+        delete listProblems.value[provider.id]
+        return result.models ?? []
+      },
+      (cause) => {
+        // Not filled in far enough to ask (no address, no key) is no problem to show.
+        if (cause instanceof ApiError && cause.status === 502) {
+          listProblems.value[provider.id] = tm(cause.localized)
+        } else delete listProblems.value[provider.id]
+        // Asked again once the form changes, or the name is focused again.
+        if (listings.get(provider.id)?.models === asked) listings.delete(provider.id)
+        return []
+      },
+    )
+  listings.set(provider.id, { key, models: asked })
+  return asked
+}
+
+/** The provider's models for what is typed; all of them once a whole name stands there. */
+async function suggest(provider: DraftProvider, typed: string) {
+  const all = await listed(provider)
+  const text = typed.trim().toLowerCase()
+  const whole = all.some((model) => model.id.toLowerCase() === text)
+  return all
+    .filter((model) => whole || !text || model.id.toLowerCase().includes(text))
+    .map((model) => model.id)
+}
+
+/** The settings a catalog entry fills in, to tell later whether the user changed them. */
+const filledOf = (model: DraftModel) =>
+  JSON.stringify([
+    model.contextK,
+    model.images,
+    model.maxTokens,
+    model.currency,
+    model.priceInput,
+    model.priceOutput,
+    model.priceCacheRead,
+    model.priceCacheWrite,
+  ])
+
+function fill(model: DraftModel, info: ModelInfo | null) {
+  model.contextK = info?.contextTokens ? Math.floor(info.contextTokens / 1000) : null
+  model.images = info?.images !== false
+  model.maxTokens = info?.maxTokens ?? null
+  model.currency = info?.price?.currency ?? 'USD'
+  model.priceInput = info?.price?.input ?? null
+  model.priceOutput = info?.price?.output ?? null
+  model.priceCacheRead = info?.price?.cacheRead ?? null
+  model.priceCacheWrite = info?.price?.cacheWrite ?? null
+  model.filled = filledOf(model)
+}
+
+/**
+ * A name nobody knows: what the catalog filled in for the name before goes, since it was
+ * another model's; what the user typed in themselves stays.
+ */
+function unknown(model: DraftModel) {
+  if (model.filled !== null && model.filled === filledOf(model)) fill(model, null)
+  model.filled = null
+}
+
+// Models being filled in from the catalog; saving waits for them.
+const describing = new Set<Promise<void>>()
+
+/**
+ * Fill a model's settings in for its name, once per name: how much it reads and writes,
+ * whether it looks at images, what it costs. From what its provider listed, else from the
+ * catalog by the name alone; a name nobody knows keeps what the user typed in. `again` asks
+ * anew for the same name, and says why when nothing comes back.
+ */
+function describe(model: DraftModel, again = false): Promise<void> {
+  const name = model.model.trim()
+  if (!again && name === model.described) return Promise.resolve()
+  model.described = name
+  model.lookError = null
+  if (!name) {
+    unknown(model)
+    return Promise.resolve()
   }
+  const provider = providers.value.find((p) => p.id === model.provider)
+  model.looking = true
+  const filling = (async () => {
+    let info: ModelInfo | null = null
+    try {
+      const known = provider
+        ? (await listed(provider)).find((entry) => entry.id === name)?.info
+        : undefined
+      info = known ?? (await api.modelInfo(name, hintOf(provider))).info
+    } catch (cause) {
+      if (again) model.lookError = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+    }
+    // Typed on meanwhile: the newer name is described by its own call.
+    if (model.described !== name) return
+    if (info) fill(model, info)
+    else if (!again) unknown(model)
+  })().finally(() => {
+    model.looking = false
+    describing.delete(filling)
+  })
+  describing.add(filling)
+  return filling
 }
 
 /** Forget a stored secret: saving sends `null`, which the server treats as "clear". */
@@ -350,7 +481,9 @@ async function saveAll() {
         return
       }
     }
-    if (tab.value !== 'mcp') open.value = false
+    // A model that did not answer is saved all the same, and shown to be put right.
+    if (problems.value.length) tab.value = 'models'
+    else if (tab.value !== 'mcp') open.value = false
   } finally {
     saving.value = false
   }
@@ -360,6 +493,9 @@ async function saveModels(): Promise<boolean> {
   if (!hiddenRoles.value) return true
   error.value = null
   try {
+    // A name typed and saved at once has its settings filled in first.
+    for (const model of models.value) void describe(model)
+    await Promise.all(describing)
     // A model without a name is left out, and so is a role that pointed at it.
     const kept = models.value.filter((model) => model.model.trim())
     const keep = (id: string | null) => (id && kept.some((m) => m.id === id) ? id : null)
@@ -378,63 +514,63 @@ async function saveModels(): Promise<boolean> {
       }
       return body as Record<string, unknown>
     })
-    load(
-      await api.saveModelSettings({
-        providers: providers.value.map((provider, at) => ({
-          id: provider.id,
-          kind: provider.kind,
-          name: provider.name,
-          settings: provider.settings,
-          headers: pairsInput(provider.headers),
-          extraBody: bodies[at]!,
-          timeoutSeconds: provider.timeoutSeconds || null,
-        })),
-        models: kept.map((model) => ({
-          id: model.id,
-          provider: model.provider,
-          model: model.model.trim(),
-          ...(model.contextK ? { contextTokens: model.contextK * 1000 } : {}),
-          ...(model.images ? {} : { images: false as const }),
-          ...(model.note.trim() ? { note: model.note.trim() } : {}),
-          ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
-          ...(model.priceInput !== null && model.priceOutput !== null
-            ? {
-                price: {
-                  currency: model.currency,
-                  input: model.priceInput,
-                  output: model.priceOutput,
-                  ...(model.priceCacheRead !== null ? { cacheRead: model.priceCacheRead } : {}),
-                  ...(model.priceCacheWrite !== null ? { cacheWrite: model.priceCacheWrite } : {}),
-                },
-              }
-            : {}),
-        })),
-        showCost: showCost.value,
-        roles: {
-          thread: {
-            model: keep(threadModel.value) ?? kept[0]?.id ?? null,
-            effort: threadEffort.value || null,
-            fallback: keep(fallback.value || null),
-          },
-          coordinator: {
-            model: keep(coordinatorModel.value || null),
-            // With one model the page shows one depth: both think that hard.
-            effort: (several.value ? coordinatorEffort.value : threadEffort.value) || null,
-            fallback: keep(fallback.value || null),
-          },
-          triage: {
-            model: keep(hidden?.triage.model ?? null),
-            effort: hidden?.triage.effort ?? null,
-            fallback: keep(hidden?.triage.fallback ?? null),
-          },
-          research: {
-            model: keep(researchModel.value || null),
-            effort: hidden?.research.effort ?? null,
-            fallback: null,
-          },
+    const saved = await api.saveModelSettings({
+      providers: providers.value.map((provider, at) => ({
+        id: provider.id,
+        kind: provider.kind,
+        name: provider.name,
+        settings: provider.settings,
+        headers: pairsInput(provider.headers),
+        extraBody: bodies[at]!,
+        timeoutSeconds: provider.timeoutSeconds || null,
+      })),
+      models: kept.map((model) => ({
+        id: model.id,
+        provider: model.provider,
+        model: model.model.trim(),
+        ...(model.contextK ? { contextTokens: model.contextK * 1000 } : {}),
+        ...(model.images ? {} : { images: false as const }),
+        ...(model.note.trim() ? { note: model.note.trim() } : {}),
+        ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
+        ...(model.priceInput !== null && model.priceOutput !== null
+          ? {
+              price: {
+                currency: model.currency,
+                input: model.priceInput,
+                output: model.priceOutput,
+                ...(model.priceCacheRead !== null ? { cacheRead: model.priceCacheRead } : {}),
+                ...(model.priceCacheWrite !== null ? { cacheWrite: model.priceCacheWrite } : {}),
+              },
+            }
+          : {}),
+      })),
+      showCost: showCost.value,
+      roles: {
+        thread: {
+          model: keep(threadModel.value) ?? kept[0]?.id ?? null,
+          effort: threadEffort.value || null,
+          fallback: keep(fallback.value || null),
         },
-      }),
-    )
+        coordinator: {
+          model: keep(coordinatorModel.value || null),
+          // With one model the page shows one depth: both think that hard.
+          effort: (several.value ? coordinatorEffort.value : threadEffort.value) || null,
+          fallback: keep(fallback.value || null),
+        },
+        triage: {
+          model: keep(hidden?.triage.model ?? null),
+          effort: hidden?.triage.effort ?? null,
+          fallback: keep(hidden?.triage.fallback ?? null),
+        },
+        research: {
+          model: keep(researchModel.value || null),
+          effort: hidden?.research.effort ?? null,
+          fallback: null,
+        },
+      },
+    })
+    load(saved)
+    problems.value = saved.problems
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
     return true
   } catch (cause) {
@@ -454,7 +590,7 @@ async function saveModels(): Promise<boolean> {
   <DouDialog v-model:open="open" :title="t('settings.title')" :width="760">
     <DouTabs v-model="tab" placement="start" :height="560" class="settings-tabs">
       <DouTabPanel value="models" :label="t('settings.tab.models')">
-        <!-- In the order they are set up: a provider, then its models, then who uses which. -->
+        <!-- A provider with its models, then who uses which. -->
         <div class="settings">
           <section class="settings-section">
             <div class="settings-head">
@@ -475,7 +611,11 @@ async function saveModels(): Promise<boolean> {
                       @update:model-value="(value) => setKind(provider, String(value))"
                     />
                   </DouFormItem>
-                  <DouFormItem :label="t('settings.name')" class="settings-grow">
+                  <DouFormItem
+                    v-if="named(provider)"
+                    :label="t('settings.name')"
+                    class="settings-grow"
+                  >
                     <DouInput v-model="provider.name" />
                   </DouFormItem>
                   <DouButton
@@ -497,6 +637,136 @@ async function saveModels(): Promise<boolean> {
                   :secrets-set="provider.secretsSet"
                   @clear-secret="(key) => clearSecret(provider, key)"
                 />
+                <DouFormItem :label="t('settings.models')">
+                  <div class="settings-models">
+                    <div v-for="model in modelsOf(provider)" :key="model.id" class="settings-model">
+                      <div class="settings-row" @focusout="describe(model)">
+                        <DouAutocomplete
+                          v-model="model.model"
+                          :fetch="(typed: string) => suggest(provider, typed)"
+                          :highlight="false"
+                          :placeholder="t('settings.modelName')"
+                          :aria-label="t('settings.modelName')"
+                          spellcheck="false"
+                          class="settings-grow"
+                          @select="describe(model)"
+                        >
+                          <template v-if="listProblems[provider.id]" #empty>
+                            <DouText size="sm" tone="danger">{{
+                              listProblems[provider.id]
+                            }}</DouText>
+                          </template>
+                        </DouAutocomplete>
+                        <DouButton
+                          size="sm"
+                          variant="ghost"
+                          :aria-expanded="model.open"
+                          :aria-label="t('settings.modelMore')"
+                          :title="t('settings.modelMore')"
+                          @click="model.open = !model.open"
+                        >
+                          <ChevronDownIcon v-if="model.open" />
+                          <ChevronRightIcon v-else />
+                        </DouButton>
+                        <DouButton
+                          size="sm"
+                          variant="ghost"
+                          tone="danger"
+                          :aria-label="t('settings.remove')"
+                          :title="t('settings.remove')"
+                          @click="removeModel(model.id)"
+                        >
+                          <TrashIcon />
+                        </DouButton>
+                      </div>
+                      <DouText v-if="problemOf(model)" tone="danger" size="sm">
+                        {{ tm(problemOf(model)!) }}
+                      </DouText>
+                      <div v-if="model.open" class="settings-model-more">
+                        <div class="settings-row">
+                          <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
+                            <DouInputNumber
+                              v-model="model.contextK"
+                              :min="8"
+                              :max="10000"
+                              :step="8"
+                              placeholder="128"
+                            />
+                          </DouFormItem>
+                          <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
+                            <DouInputNumber
+                              v-model="model.maxTokens"
+                              :min="256"
+                              :max="1000000"
+                              :step="1024"
+                              :placeholder="t('settings.maxTokensDefault')"
+                            />
+                          </DouFormItem>
+                          <DouFormItem :label="t('settings.modelImages')">
+                            <DouSwitch v-model="model.images" />
+                          </DouFormItem>
+                        </div>
+                        <DouFormItem v-if="several" :label="t('settings.modelNote')">
+                          <DouInput
+                            v-model="model.note"
+                            :maxlength="200"
+                            :placeholder="t('settings.modelNotePlaceholder')"
+                          />
+                        </DouFormItem>
+                        <div class="settings-row">
+                          <DouFormItem :label="t('settings.currency')" class="settings-currency">
+                            <DouSelect v-model="model.currency" :options="currencyOptions" />
+                          </DouFormItem>
+                          <DouFormItem :label="t('usage.input')" class="settings-grow">
+                            <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
+                          </DouFormItem>
+                          <DouFormItem :label="t('usage.output')" class="settings-grow">
+                            <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
+                          </DouFormItem>
+                          <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
+                            <DouInputNumber
+                              v-model="model.priceCacheRead"
+                              :min="0"
+                              :step="0.01"
+                              :placeholder="t('settings.sameAsInput')"
+                            />
+                          </DouFormItem>
+                          <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
+                            <DouInputNumber
+                              v-model="model.priceCacheWrite"
+                              :min="0"
+                              :step="0.1"
+                              :placeholder="t('settings.sameAsInput')"
+                            />
+                          </DouFormItem>
+                        </div>
+                        <div class="settings-price-actions">
+                          <DouButton
+                            size="sm"
+                            variant="outline"
+                            :disabled="!model.model.trim()"
+                            :loading="model.looking"
+                            @click="describe(model, true)"
+                          >
+                            {{ t('settings.priceFill') }}
+                          </DouButton>
+                          <DouText v-if="model.lookError" tone="danger" size="sm">
+                            {{ model.lookError }}
+                          </DouText>
+                        </div>
+                      </div>
+                    </div>
+                    <DouButton
+                      size="sm"
+                      variant="ghost"
+                      class="settings-more"
+                      @click="addModel(provider.id)"
+                    >
+                      <template #leading><PlusIcon /></template>
+                      {{ t('settings.addModel') }}
+                    </DouButton>
+                  </div>
+                </DouFormItem>
                 <DouButton
                   v-if="!kindOf(provider.kind)?.program"
                   size="sm"
@@ -532,126 +802,6 @@ async function saveModels(): Promise<boolean> {
                       :placeholder="t('settings.timeoutNone')"
                     />
                   </DouFormItem>
-                </template>
-              </DouForm>
-            </DouCard>
-          </section>
-
-          <section v-if="providers.length" class="settings-section">
-            <div class="settings-head">
-              <DouText weight="medium">{{ t('settings.models') }}</DouText>
-              <DouButton size="sm" variant="ghost" @click="addModel()">
-                <template #leading><PlusIcon /></template>
-                {{ t('settings.addModel') }}
-              </DouButton>
-            </div>
-            <DouEmpty v-if="!models.length" size="sm" :description="t('settings.noModels')" />
-            <DouCard v-for="model in models" :key="model.id" padding="sm">
-              <DouForm layout="vertical" size="sm">
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.provider')" class="settings-grow">
-                    <DouSelect v-model="model.provider" :options="providerOptions" />
-                  </DouFormItem>
-                  <DouFormItem :label="t('settings.modelName')" class="settings-grow">
-                    <DouInput v-model="model.model" />
-                  </DouFormItem>
-                  <DouButton
-                    size="sm"
-                    variant="ghost"
-                    tone="danger"
-                    class="settings-remove"
-                    :aria-label="t('settings.remove')"
-                    :title="t('settings.remove')"
-                    @click="removeModel(model.id)"
-                  >
-                    <TrashIcon />
-                  </DouButton>
-                </div>
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.contextTokens')" class="settings-narrow">
-                    <DouInputNumber
-                      v-model="model.contextK"
-                      :min="8"
-                      :max="10000"
-                      :step="8"
-                      placeholder="128"
-                    />
-                  </DouFormItem>
-                  <DouFormItem :label="t('settings.modelImages')">
-                    <DouSwitch v-model="model.images" />
-                  </DouFormItem>
-                </div>
-                <DouFormItem v-if="several" :label="t('settings.modelNote')">
-                  <DouInput
-                    v-model="model.note"
-                    :maxlength="200"
-                    :placeholder="t('settings.modelNotePlaceholder')"
-                  />
-                </DouFormItem>
-                <DouButton
-                  size="sm"
-                  variant="ghost"
-                  class="settings-more"
-                  :aria-expanded="model.priceOpen"
-                  @click="model.priceOpen = !model.priceOpen"
-                >
-                  <template #leading>
-                    <ChevronDownIcon v-if="model.priceOpen" />
-                    <ChevronRightIcon v-else />
-                  </template>
-                  {{ t('settings.modelMore') }}
-                </DouButton>
-                <template v-if="model.priceOpen">
-                  <DouFormItem :label="t('settings.maxTokens')" class="settings-narrow">
-                    <DouInputNumber
-                      v-model="model.maxTokens"
-                      :min="256"
-                      :max="1000000"
-                      :step="1024"
-                      :placeholder="t('settings.maxTokensDefault')"
-                    />
-                  </DouFormItem>
-                  <div class="settings-row">
-                    <DouFormItem :label="t('settings.currency')" class="settings-currency">
-                      <DouSelect v-model="model.currency" :options="currencyOptions" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.input')" class="settings-grow">
-                      <DouInputNumber v-model="model.priceInput" :min="0" :step="0.1" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.output')" class="settings-grow">
-                      <DouInputNumber v-model="model.priceOutput" :min="0" :step="0.1" />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.cacheRead')" class="settings-grow">
-                      <DouInputNumber
-                        v-model="model.priceCacheRead"
-                        :min="0"
-                        :step="0.01"
-                        :placeholder="t('settings.sameAsInput')"
-                      />
-                    </DouFormItem>
-                    <DouFormItem :label="t('usage.cacheWrite')" class="settings-grow">
-                      <DouInputNumber
-                        v-model="model.priceCacheWrite"
-                        :min="0"
-                        :step="0.1"
-                        :placeholder="t('settings.sameAsInput')"
-                      />
-                    </DouFormItem>
-                  </div>
-                  <div class="settings-price-actions">
-                    <DouButton
-                      size="sm"
-                      variant="outline"
-                      :disabled="!model.model.trim()"
-                      :loading="model.priceLooking"
-                      @click="fillPrice(model)"
-                    >
-                      {{ t('settings.priceFill') }}
-                    </DouButton>
-                    <DouText v-if="model.priceError" tone="danger" size="sm">
-                      {{ model.priceError }}
-                    </DouText>
-                  </div>
                 </template>
               </DouForm>
             </DouCard>
@@ -787,6 +937,26 @@ async function saveModels(): Promise<boolean> {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.settings-models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-model {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-model-more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-block: 4px 8px;
 }
 
 .settings-narrow {

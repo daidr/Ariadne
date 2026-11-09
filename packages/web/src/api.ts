@@ -350,6 +350,37 @@ export interface ModelEntry {
   price?: ModelPrice
 }
 
+/** What the public catalog knows of a model, each only where it says. */
+export interface ModelInfo {
+  contextTokens?: number
+  maxTokens?: number
+  images?: boolean
+  price?: ModelPrice
+  tools?: boolean
+  released?: string
+}
+
+/** A model a provider lists, with what the catalog knows of it. */
+export interface ListedModel {
+  id: string
+  info?: ModelInfo
+}
+
+/** A model just saved that did not answer when asked. */
+export interface ModelProblem {
+  model: string
+  provider: string
+  problem: LocalizedMessage
+}
+
+/** A way to talk to a model found on this machine: a key in the environment, a program signed in. */
+export interface FoundSetup {
+  id: string
+  kind: string
+  title: LocalizedText
+  from: { env: string } | { program: string }
+}
+
 export type Currency = 'USD' | 'CNY'
 
 /** Per million tokens; the cache ones cost as much as `input` when left out. */
@@ -448,8 +479,14 @@ export const api = {
   saveSandbox: (input: SandboxConfig) =>
     request<{ configured: SandboxConfig }>('PUT', '/api/sandbox', input),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
-  createProject: (name: string) =>
-    request<{ project: ProjectView }>('POST', '/api/projects', { name }),
+  /**
+   * A new project, begun by saying what is wanted: with where its files are and the first
+   * message. Without a name it is called after the message until someone names it.
+   */
+  createProject: (input: { name?: string; source?: SourceInput; message?: string }) =>
+    request<{ project: ProjectView }>('POST', '/api/projects', input),
+  renameProject: (id: string, name: string) =>
+    request<{ project: ProjectView }>('PUT', `/api/projects/${id}`, { name }),
   deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
   /** With `since` (a `sync.cursor` given before), only the threads changed after it. */
   getProject: (id: string, since?: string) =>
@@ -523,13 +560,24 @@ export const api = {
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
   removePlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins/remove', { path }),
-  lookupModelPrice: (model: string, hint: string) =>
-    request<{ price: ModelPrice; source: string }>(
+  /** What the public catalog knows of a model, by the name typed. */
+  modelInfo: (model: string, hint: string) =>
+    request<{ info: ModelInfo }>(
       'GET',
-      `/api/settings/model-price?${new URLSearchParams({ model, hint })}`,
+      `/api/settings/model-info?${new URLSearchParams({ model, hint })}`,
     ),
+  /** The models a provider in the form can use; `null` when it cannot say. */
+  listModels: (provider: Pick<ModelProviderInput, 'id' | 'kind' | 'settings'>) =>
+    request<{ models: ListedModel[] | null }>('POST', '/api/settings/model-list', { provider }),
+  /** Saved as sent; `problems` names the new models that did not answer. */
   saveModelSettings: (input: ModelSettingsInput) =>
-    request<ModelSettings>('PUT', '/api/settings/models', input),
+    request<ModelSettings & { problems: ModelProblem[] }>('PUT', '/api/settings/models', input),
+  /** Setups already on this machine that no provider uses yet. */
+  foundSetups: () => request<{ found: FoundSetup[] }>('GET', '/api/settings/found'),
+  useFoundSetup: (id: string) =>
+    request<ModelSettings & { problems: ModelProblem[] }>('POST', '/api/settings/found/use', {
+      id,
+    }),
   postMessage: (
     projectId: string,
     conversationId: string,
