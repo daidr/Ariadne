@@ -6,19 +6,14 @@ import {
   DouInput,
   DouKbd,
   DouSegmentedControl,
+  DouSwitch,
+  DouText,
   DouTextarea,
 } from 'dou-ui'
-import { PlusIcon, RotateCcwIcon, TrashIcon } from '@dou-ui/icons'
+import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
-import {
-  api,
-  ApiError,
-  DEFAULT_KEYS,
-  SHORTCUT_ACTIONS,
-  type InputSettings,
-  type ShortcutAction,
-} from '../api'
-import KeyRecorder from './KeyRecorder.vue'
+import { api, ApiError, DEFAULT_KEYS, type InputSettings, type ShortcutAction } from '../api'
+import { notifications, setNotifications } from '../notify'
 import { t, tm } from '../i18n'
 import { state } from '../store'
 
@@ -30,14 +25,9 @@ interface DraftSnippet {
 
 const submitOn = ref<InputSettings['submitOn']>(state.input.submitOn)
 const snippets = ref<DraftSnippet[]>([])
+// Keys are no longer rebound here; ones set before are saved back as they were.
 const keys = ref<Record<ShortcutAction, string>>({ ...DEFAULT_KEYS })
 
-/** Bind `key` to `action`; an action that had it takes this one's old key, so none is lost. */
-function bind(action: ShortcutAction, key: string) {
-  const other = SHORTCUT_ACTIONS.find((a) => a !== action && keys.value[a] === key)
-  if (other) keys.value[other] = keys.value[action]
-  keys.value[action] = key
-}
 const error = ref<string | null>(null)
 
 const submitOptions = computed(() => [
@@ -133,27 +123,30 @@ defineExpose({ save })
         <TrashIcon />
       </DouButton>
     </div>
-    <span class="input-heading">{{ t('shortcuts.title') }}</span>
-    <div v-for="action in SHORTCUT_ACTIONS" :key="action" class="input-row">
-      <span>{{ t(`shortcuts.${action}`) }}</span>
-      <span class="input-key">
-        <DouButton
-          v-if="keys[action] !== DEFAULT_KEYS[action]"
-          size="sm"
-          variant="ghost"
-          :aria-label="t('shortcuts.reset')"
-          :title="t('shortcuts.reset')"
-          @click="bind(action, DEFAULT_KEYS[action])"
-        >
-          <RotateCcwIcon />
-        </DouButton>
-        <KeyRecorder
-          :model-value="keys[action]"
-          :label="t(`shortcuts.${action}`)"
-          @update:model-value="(key) => bind(action, key)"
-        />
-      </span>
+    <div class="input-row">
+      <span>{{ t('settings.notify') }}</span>
+      <DouSwitch
+        :model-value="notifications.enabled"
+        :disabled="
+          notifications.permission === 'unsupported' || notifications.permission === 'denied'
+        "
+        :aria-label="t('settings.notify')"
+        @update:model-value="(on: boolean) => setNotifications(on)"
+      />
     </div>
+    <DouText
+      v-if="notifications.permission === 'denied' || notifications.permission === 'unsupported'"
+      tone="warning"
+      size="sm"
+    >
+      {{
+        t(
+          notifications.permission === 'denied'
+            ? 'settings.notifyDenied'
+            : 'settings.notifyUnsupported',
+        )
+      }}
+    </DouText>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
   </div>
 </template>
@@ -176,12 +169,6 @@ defineExpose({ save })
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.input-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 
 .snippet {

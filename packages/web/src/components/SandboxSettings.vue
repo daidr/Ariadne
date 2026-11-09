@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouButton, DouSwitch, DouText, DouTextarea } from 'dou-ui'
+import { DouSwitch, DouText, DouTextarea } from 'dou-ui'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type SandboxConfig, type SandboxStatus } from '../api'
 import { t, tm } from '../i18n'
@@ -12,14 +12,18 @@ const status = ref<SandboxStatus | null>(null)
 const saved = ref<SandboxConfig | null>(null)
 const isolate = ref(true)
 const hide = ref('')
-const saving = ref(false)
 const error = ref<string | null>(null)
+/** Loaded: before that, or when loading failed, saving would send the defaults over it. */
+const loaded = ref(false)
+/** What runs when nothing was ever set. */
+const DEFAULT: SandboxConfig = { mode: 'auto', hide: [] }
 
 onMounted(async () => {
   try {
     const result = await api.getSandbox()
     status.value = result.sandbox
     saved.value = result.configured
+    loaded.value = true
     if (result.configured) apply(result.configured)
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -38,9 +42,10 @@ const draft = computed<SandboxConfig>(() => ({
     .map((line) => line.trim())
     .filter(Boolean),
 }))
-const same = (a: SandboxConfig | null, b: SandboxConfig) =>
-  !!a && a.mode === b.mode && a.hide.join('\n') === b.hide.join('\n')
-const dirty = computed(() => !same(saved.value, draft.value))
+const same = (a: SandboxConfig, b: SandboxConfig) =>
+  a.mode === b.mode && a.hide.join('\n') === b.hide.join('\n')
+// Never set is the same as the defaults: nothing to save until the user changes them.
+const dirty = computed(() => loaded.value && !same(saved.value ?? DEFAULT, draft.value))
 // The setting is read when Ariadne starts: once it differs from what runs, say so.
 const savedNow = ref(false)
 const pending = computed(
@@ -57,19 +62,22 @@ const now = computed(() => {
   return t(current.platform === 'win32' ? 'sandbox.now.windows' : 'sandbox.now.none')
 })
 
-async function save() {
-  saving.value = true
+/** Saved with the rest of the settings; nothing is sent when nothing changed. */
+async function save(): Promise<boolean> {
+  if (!dirty.value) return true
   error.value = null
   try {
     saved.value = (await api.saveSandbox(draft.value)).configured
     apply(saved.value)
     savedNow.value = true
+    return true
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
-  } finally {
-    saving.value = false
+    return false
   }
 }
+
+defineExpose({ save })
 </script>
 
 <template>
@@ -91,15 +99,10 @@ async function save() {
       :aria-label="t('sandbox.hide')"
       class="sandbox-paths"
     />
-    <div class="sandbox-actions">
-      <DouText v-if="error" tone="danger" size="sm">{{ error }}</DouText>
-      <DouText v-else-if="pending" size="sm" variant="tertiary">
-        {{ t('sandbox.restart') }}
-      </DouText>
-      <DouButton size="sm" :disabled="!dirty" :loading="saving" @click="save">
-        {{ t('settings.save') }}
-      </DouButton>
-    </div>
+    <DouText v-if="error" tone="danger" size="sm">{{ error }}</DouText>
+    <DouText v-else-if="pending" size="sm" variant="tertiary">
+      {{ t('sandbox.restart') }}
+    </DouText>
   </section>
 </template>
 
@@ -126,12 +129,5 @@ async function save() {
 
 .sandbox-paths :deep(textarea) {
   font-family: var(--dou-font-family-mono);
-}
-
-.sandbox-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
 }
 </style>

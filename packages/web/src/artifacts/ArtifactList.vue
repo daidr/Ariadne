@@ -6,9 +6,26 @@ import { t } from '../i18n'
 import { createItems } from './create'
 import { openMain, state } from '../store'
 import ArtifactCard from './ArtifactCard.vue'
+import { useOpenView } from '../opened-from'
+import * as side from '../side/layout'
+
+const openView = useOpenView()
 
 /** The project's artifacts in the side panel, as the same cards the overview shows. */
-const current = computed(() => (state.main.kind === 'artifact' ? state.main.id : undefined))
+// Marked while open, in a tab of its own or full screen.
+const open = computed(() => {
+  const ids = new Set(
+    side
+      .groupsOf(state.side.root)
+      .map(side.activeOf)
+      .flatMap((key) => {
+        const view = side.viewOf(key)
+        return view?.kind === 'artifact' ? [view.id] : []
+      }),
+  )
+  if (state.full?.view.kind === 'artifact') ids.add(state.full.view.id)
+  return ids
+})
 </script>
 
 <template>
@@ -26,8 +43,8 @@ const current = computed(() => (state.main.kind === 'artifact' ? state.main.id :
       v-for="artifact in state.artifacts"
       :key="artifact.id"
       :artifact="artifact"
-      :current="artifact.id === current"
-      @click="openMain({ kind: 'artifact', id: artifact.id })"
+      :current="open.has(artifact.id)"
+      @click="openView({ kind: 'artifact', id: artifact.id })"
     />
   </div>
   <DouEmpty v-else size="sm" :description="t('artifacts.empty')">

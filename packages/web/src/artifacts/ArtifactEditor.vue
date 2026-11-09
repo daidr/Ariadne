@@ -6,16 +6,18 @@ import type {
   ArtifactView,
 } from '@ariadne/core'
 import { DouAlert, DouButton, DouInput, DouSelect, DouText, type CommentAction } from 'dou-ui'
-import { CheckIcon, ChevronLeftIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
+import { CheckIcon, PencilIcon, RotateCcwIcon, SaveIcon } from '@dou-ui/icons'
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
-import { backMain, report, state } from '../store'
+import { report, state, unsavedEdits } from '../store'
+import ViewActions from '../full/ViewActions.vue'
 import { authorName } from './author'
 import CommentList from './CommentList.vue'
 import { kindIcon } from './kinds'
 
-const props = defineProps<{ id: string }>()
+/** `place` is where it is shown: in a tab on the right side, or full screen. */
+const props = defineProps<{ id: string; place: 'side' | 'full' }>()
 
 // Each kind has its own dou-ui package; load only the one in use.
 const bodies = {
@@ -52,10 +54,35 @@ const versionOptions = computed(() =>
   })),
 )
 
+/** What the editor starts from: the version shown, or edits carried over from elsewhere. */
+const bodyContent = ref('')
+/**
+ * The version carried edits were made on, when someone saved a newer one meanwhile: saving
+ * them names it, so the server turns them down as a conflict instead of writing over it.
+ */
+const draftBase = ref<number | null>(null)
+
 function show(next: ArtifactView) {
   artifact.value = next
+  bodyContent.value = next.content
   draft.value = null
+  draftBase.value = null
 }
+
+/** The body reports no draft once it is back where it started, which may be carried edits. */
+function onDraft(content: string | null) {
+  const carried = bodyContent.value !== artifact.value?.content ? bodyContent.value : null
+  draft.value = content ?? carried
+}
+
+// Unsaved edits outlive this editor: taking the artifact full screen or back to the side
+// shows it anew, with the edits still there.
+watch(draft, (content) => {
+  // Looking at an older version keeps them.
+  if (viewingOld.value) return
+  if (content === null) unsavedEdits.delete(props.id)
+  else unsavedEdits.set(props.id, { version: draftBase.value ?? latest.value, content })
+})
 
 async function load(version?: number) {
   try {
@@ -64,6 +91,12 @@ async function load(version?: number) {
     comments.value = detail.comments
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
+    const carried = unsavedEdits.get(props.id)
+    if (version === undefined && carried) {
+      bodyContent.value = carried.content
+      draft.value = carried.content
+      if (carried.version !== latest.value) draftBase.value = carried.version
+    }
     conflict.value = null
   } catch (error) {
     report(error)
@@ -170,7 +203,8 @@ async function save(
   try {
     const detail = await api.saveArtifact(props.id, {
       content: input.content ?? draft.value ?? current.content,
-      baseVersion: latest.value,
+      // Content given here is the newest version's own (a rename, a restore), not the edits.
+      baseVersion: input.content === undefined ? (draftBase.value ?? latest.value) : latest.value,
       reason: input.reason ?? t('artifact.saveReason'),
       ...(input.title ? { title: input.title } : {}),
       ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
@@ -215,6 +249,7 @@ async function rename() {
   }
   // A rename carries no unsaved edits with it: those stay a draft until saved.
   const kept = draft.value
+  const keptBase = draftBase.value
   if (
     await save({
       content: artifact.value?.content,
@@ -223,7 +258,10 @@ async function rename() {
     })
   ) {
     renaming.value = false
+    // The editor goes on showing the edits, not the version just saved.
+    if (kept !== null) bodyContent.value = kept
     draft.value = kept
+    draftBase.value = keptBase
   }
 }
 
@@ -232,12 +270,8 @@ const time = (at: number) =>
 </script>
 
 <template>
-  <div class="artifact">
+  <div class="artifact" :class="`is-${place}`">
     <div class="artifact-header">
-      <DouButton variant="ghost" size="sm" @click="backMain">
-        <template #leading><ChevronLeftIcon /></template>
-        {{ t('artifact.back') }}
-      </DouButton>
       <component :is="kindIcon[artifact.kind]" v-if="artifact" class="artifact-kind" />
       <form v-if="renaming" class="artifact-title" @submit.prevent="rename">
         <DouInput
@@ -270,7 +304,12 @@ const time = (at: number) =>
           <PencilIcon />
         </DouButton>
       </div>
-      <DouText v-if="artifact" variant="tertiary" size="sm" class="artifact-meta">
+      <DouText
+        v-if="artifact && place === 'full'"
+        variant="tertiary"
+        size="sm"
+        class="artifact-meta"
+      >
         {{
           t('artifact.updated', {
             who: authorName(artifact.updatedBy),
@@ -309,6 +348,7 @@ const time = (at: number) =>
         <template #leading><SaveIcon /></template>
         {{ t('artifact.save') }}
       </DouButton>
+      <ViewActions :view="{ kind: 'artifact', id }" :place="place" />
     </div>
     <DouAlert v-if="viewingOld" tone="neutral" class="artifact-alert">
       {{ t('artifact.viewing', { version: artifact?.version ?? 0 }) }}
@@ -325,12 +365,12 @@ const time = (at: number) =>
         v-if="artifact"
         ref="body"
         v-bind="commentProps"
-        :content="artifact.content"
+        :content="bodyContent"
         :project-id="artifact.projectId"
         :artifact-id="artifact.id"
         :readonly="viewingOld"
         :label="artifact.title"
-        @draft="(content: string | null) => (draft = content)"
+        @draft="onDraft"
       />
     </div>
   </div>
@@ -348,7 +388,7 @@ const time = (at: number) =>
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 4px 8px 4px 16px;
   border-bottom: 1px solid var(--dou-color-border);
 }
 
@@ -373,6 +413,12 @@ const time = (at: number) =>
 .artifact-versions {
   flex: none;
   width: 200px;
+}
+
+/* A tab on the side is narrow: the version list gives up room before the title does. */
+.is-side .artifact-versions {
+  flex: 0 1 160px;
+  min-width: 96px;
 }
 
 .artifact-alert {

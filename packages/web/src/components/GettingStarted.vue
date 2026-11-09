@@ -2,7 +2,7 @@
 import { DouButton, DouSteps, DouText, type StepItem } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { state } from '../store'
+import { openProjectSettings, state } from '../store'
 
 // What a first run needs before the coordinator can do anything useful, in order.
 const emit = defineEmits<{ openSettings: [] }>()
@@ -43,7 +43,7 @@ const items = computed<StepItem[]>(() =>
       >
         {{ t('nav.newProject') }}
       </DouButton>
-      <DouButton v-else-if="current === 2" size="sm" @click="state.sourceOpen = true">
+      <DouButton v-else-if="current === 2" size="sm" @click="openProjectSettings('source')">
         {{ t('start.chooseSource') }}
       </DouButton>
     </div>

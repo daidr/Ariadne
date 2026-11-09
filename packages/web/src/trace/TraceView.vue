@@ -214,7 +214,7 @@ function pick(key: string) {
     <div class="trace-header">
       <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
-        {{ t('changes.back') }}
+        {{ t('view.back') }}
       </DouButton>
       <DouText weight="medium" truncate class="trace-title">
         {{ t('trace.title', { name }) }}

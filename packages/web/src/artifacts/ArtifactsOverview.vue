@@ -4,10 +4,13 @@ import { DouButton, DouDropdown, DouEmpty, DouInput, DouSegmentedControl, DouTex
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { backMain, openMain, state } from '../store'
+import { backMain, state } from '../store'
 import { createItems } from './create'
 import ArtifactCard from './ArtifactCard.vue'
 import { ARTIFACT_KINDS } from './kinds'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** Every artifact of the project as cards: a picture of what it holds, its name and when. */
 const filter = ref<ArtifactKind | 'all'>('all')
@@ -56,7 +59,7 @@ const shown = computed(() => {
     <div class="overview-header">
       <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
-        {{ t('artifact.back') }}
+        {{ t('view.back') }}
       </DouButton>
       <DouText weight="medium" class="overview-title">{{ t('artifacts.title') }}</DouText>
       <DouDropdown :items="createItems" placement="bottom-end">
@@ -84,7 +87,7 @@ const shown = computed(() => {
         v-for="artifact in shown"
         :key="artifact.id"
         :artifact="artifact"
-        @click="openMain({ kind: 'artifact', id: artifact.id })"
+        @click="openView({ kind: 'artifact', id: artifact.id })"
       />
     </div>
     <DouEmpty

@@ -177,6 +177,8 @@ async function check(id: string) {
 
 /** Save the servers, then connect those not connected yet. `false` when it was refused. */
 async function save(): Promise<boolean> {
+  // Saved with the rest of the settings: nothing is sent unless the servers changed.
+  if (!dirty.value) return true
   error.value = null
   try {
     load(await api.saveMcpSettings(servers.value.map(inputOf)))

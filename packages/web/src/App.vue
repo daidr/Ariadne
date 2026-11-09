@@ -13,7 +13,7 @@ import {
   DouText,
   useColorMode,
 } from 'dou-ui'
-import { SettingsIcon } from '@dou-ui/icons'
+import { FolderCogIcon, SettingsIcon } from '@dou-ui/icons'
 import { defineAsyncComponent, onMounted, provide, ref, watch, watchEffect } from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import AutopilotSwitch from './components/AutopilotSwitch.vue'
@@ -26,8 +26,9 @@ import ProjectUsage from './components/ProjectUsage.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import SideLayout from './side/SideLayout.vue'
+import FullView from './full/FullView.vue'
 import { douLocale, t } from './i18n'
-import { onLiveEvent, start, state } from './store'
+import { onLiveEvent, openProjectSettings, start, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
 import { useShortcuts } from './shortcuts'
@@ -68,9 +69,7 @@ watch(split, (value) => {
 
 // The flow and document editors are large; load them when first opened.
 const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
-const ArtifactEditor = defineAsyncComponent(() => import('./artifacts/ArtifactEditor.vue'))
 const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
-const ChangesView = defineAsyncComponent(() => import('./changes/ChangesView.vue'))
 const TraceView = defineAsyncComponent(() => import('./trace/TraceView.vue'))
 
 // The tab says how many things wait on the user, across projects.
@@ -94,6 +93,15 @@ watchEffect(() => {
               <AttentionBar />
               <ProjectSource />
               <ProjectUsage />
+              <DouButton
+                variant="ghost"
+                size="sm"
+                :aria-label="t('projectSettings.open')"
+                :title="t('projectSettings.open')"
+                @click="openProjectSettings()"
+              >
+                <FolderCogIcon />
+              </DouButton>
               <DouDivider direction="vertical" />
             </template>
             <DouButton
@@ -148,14 +156,7 @@ watchEffect(() => {
             <template #start>
               <div class="pane">
                 <PlanMain v-if="state.main.kind === 'plan'" />
-                <ArtifactEditor v-else-if="state.main.kind === 'artifact'" :id="state.main.id" />
                 <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
-                <ChangesView
-                  v-else-if="state.main.kind === 'changes'"
-                  :thread-id="state.main.threadId"
-                  :turn="state.main.turn"
-                  :path="state.main.path"
-                />
                 <ConversationPanel v-else />
               </div>
             </template>
@@ -171,6 +172,7 @@ watchEffect(() => {
     <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
     <ShortcutSheet />
     <ProjectSettings />
+    <FullView />
   </DouConfigProvider>
 </template>
 

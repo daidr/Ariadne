@@ -44,14 +44,25 @@ export type MainView =
   | { kind: 'conversation' }
   | { kind: 'plan' }
   | { kind: 'artifacts' }
-  | { kind: 'artifact'; id: string }
-  /**
-   * What a thread's branch changed, with merging it; or with `turn`, what one turn changed
-   * in its workspace. `path` opens that file first.
-   */
-  | { kind: 'changes'; threadId: string; turn?: TurnChangesRef; path?: string }
   /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
   | { kind: 'trace'; conversationId: string }
+
+/**
+ * Something read beside the conversations, in a tab on the right side or full screen: an
+ * artifact; or what a thread's branch changed, with merging it, or with `turn`, what one
+ * turn changed in its workspace. `path` opens that file first.
+ */
+export type OpenedView =
+  | { kind: 'artifact'; id: string }
+  | { kind: 'changes'; threadId: string; turn?: TurnChangesRef; path?: string }
+
+/** A view shown full screen, with the thread it was opened from beside it. */
+export interface FullView {
+  view: OpenedView
+  threadId: string | null
+  /** It was a tab on the right side, and goes back there when closed. */
+  fromSide: boolean
+}
 
 /** A turn's changes, as its notice names them. */
 export interface TurnChangesRef {
@@ -99,6 +110,14 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
+export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot'
+
+/** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
+export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
+  state.projectSettingsTab = tab
+  state.projectSettingsOpen = true
+}
+
 /** A message to bring into view and mark for a moment, e.g. one the search found. */
 export interface MessageFocus {
   conversationId: string
@@ -129,6 +148,10 @@ interface State {
   /** The project's memory: standing preferences every conversation sees. */
   memories: MemoryView[]
   main: MainView
+  /** What a changes tab compares and opens first; not remembered with the layout. */
+  paneParams: Record<string, { turn?: TurnChangesRef; path?: string }>
+  /** The view shown full screen, if one is. */
+  full: FullView | null
   /** The plan is shown large across the side too, until something opens there. */
   planWide: boolean
   /** Whether the coordinator has a model; `null` until known. */
@@ -141,14 +164,13 @@ interface State {
   showCost: boolean
   /** The new-project form is open. */
   creatingProject: boolean
-  /** The project source popover in the header is open; the first-run steps open it too. */
-  sourceOpen: boolean
   /** The message to scroll to; the conversation showing it clears it once there. */
   focus: MessageFocus | null
   /** The project search is open. */
   searchOpen: boolean
-  /** The open project's settings dialog is open. */
+  /** The open project's settings dialog is open, and the tab it opens on. */
   projectSettingsOpen: boolean
+  projectSettingsTab: ProjectSettingsTab
   /** Which key sends, and the snippets offered after `/`. */
   input: InputSettings
   /** Commands conversations are running now, by conversation; not part of the log. */
@@ -180,16 +202,18 @@ export const state = reactive<State>({
   artifacts: [],
   memories: [],
   main: { kind: 'conversation' },
+  paneParams: {},
+  full: null,
   planWide: false,
   modelReady: null,
   models: [],
   threadDefault: null,
   showCost: false,
   creatingProject: false,
-  sourceOpen: false,
   focus: null,
   searchOpen: false,
   projectSettingsOpen: false,
+  projectSettingsTab: 'source',
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   live: {},
   writing: {},
@@ -232,7 +256,7 @@ async function loadParts(parts: ReadonlySet<Part>) {
   const conversations = parts.has('conversations')
   // A thread that no longer exists closes; its tab would show nothing.
   const known = new Set(detail.threads.map((thread) => thread.id))
-  const threadIds = side.openThreads(state.side).filter((threadId) => known.has(threadId))
+  const threadIds = shownThreads().filter((threadId) => known.has(threadId))
   const [coordinator, threads, plan, artifacts, memory] = await Promise.all([
     conversations ? fetchConversation(detail.project.coordinatorId, state.coordinator) : null,
     conversations
@@ -251,18 +275,37 @@ async function loadParts(parts: ReadonlySet<Part>) {
   // stale. Another thread only makes the thread's own part stale; opening it loads that.
   if (state.currentId !== id) return
   state.detail = detail
-  setSide(
-    side.prune(state.side, (key) => known.has(side.threadOf(key) ?? '') || !side.threadOf(key)),
-  )
+  const artifactIds = artifacts ? new Set(artifacts.artifacts.map((a) => a.id)) : null
+  setSide(side.prune(state.side, (key) => stillThere(key, known, artifactIds)))
+  if (state.full && !fullStillThere(state.full.view, known, artifactIds)) setFull(null)
   if (coordinator) state.coordinator = coordinator(state.coordinator)
   // A thread closed meanwhile stays closed.
   for (const [threadId, apply] of threads ?? []) {
-    if (!side.groupWith(state.side, side.threadKey(threadId))) continue
+    if (!shownThreads().includes(threadId)) continue
     state.threads[threadId] = apply(state.threads[threadId] ?? emptyConversation())
   }
   if (plan) state.plan = plan.plan
   if (artifacts) state.artifacts = artifacts.artifacts
   if (memory) state.memories = memory.memories
+}
+
+/**
+ * Whether a tab still has something to show: its thread, or its artifact. Artifacts are
+ * only checked when they were loaded; `artifactIds` is `null` otherwise.
+ */
+function stillThere(key: PaneKey, threads: Set<string>, artifactIds: Set<string> | null) {
+  const threadId = side.threadOf(key)
+  if (threadId) return threads.has(threadId)
+  const view = side.viewOf(key)
+  if (!view) return true
+  if (view.kind === 'artifact') return !artifactIds || artifactIds.has(view.id)
+  return threads.has(view.threadId) && (view.kind === 'changes' || !!state.paneParams[key]?.turn)
+}
+
+function fullStillThere(view: OpenedView, threads: Set<string>, artifactIds: Set<string> | null) {
+  return view.kind === 'artifact'
+    ? !artifactIds || artifactIds.has(view.id)
+    : threads.has(view.threadId)
 }
 
 /**
@@ -460,6 +503,8 @@ function readSide(projectId: string): SideLayout {
 /** Show another project's right side: nothing of the last one's threads stays. */
 function showSide(layout: SideLayout) {
   state.side = layout
+  state.paneParams = {}
+  state.full = null
   state.threads = {}
   for (const threadId of composers.keys()) dropComposer(threadId)
 }
@@ -468,7 +513,28 @@ function showSide(layout: SideLayout) {
 export function setSide(next: SideLayout) {
   if (next === state.side) return
   state.side = next
-  const open = new Set(side.openThreads(next))
+  syncThreads()
+  const keys = new Set(side.groupsOf(next.root).flatMap(side.tabsOf) as string[])
+  for (const key of Object.keys(state.paneParams)) if (!keys.has(key)) delete state.paneParams[key]
+  const projectId = state.currentId
+  if (!projectId) return
+  try {
+    localStorage.setItem(SIDE_KEY(projectId), JSON.stringify(next))
+  } catch {
+    // Not remembered; the project opens with its lists next time.
+  }
+}
+
+/** The threads whose conversations are on screen: in tabs, or beside a full-screen view. */
+function shownThreads(): string[] {
+  const shown = side.openThreads(state.side)
+  const beside = state.full?.threadId
+  return beside && !shown.includes(beside) ? [...shown, beside] : shown
+}
+
+/** Load the conversations newly on screen, and let go of those gone from it. */
+function syncThreads() {
+  const open = new Set(shownThreads())
   for (const threadId of Object.keys(state.threads)) {
     if (!open.has(threadId)) delete state.threads[threadId]
   }
@@ -477,13 +543,12 @@ export function setSide(next: SideLayout) {
   const opened = [...open].filter((threadId) => !state.threads[threadId])
   for (const threadId of opened) state.threads[threadId] = emptyConversation()
   if (opened.length) void refreshCurrent(['conversations']).catch(report)
-  const projectId = state.currentId
-  if (!projectId) return
-  try {
-    localStorage.setItem(SIDE_KEY(projectId), JSON.stringify(next))
-  } catch {
-    // Not remembered; the project opens with its lists next time.
-  }
+}
+
+/** Show a view full screen, or none; the thread beside it loads. */
+function setFull(full: FullView | null) {
+  state.full = full
+  syncThreads()
 }
 
 /**
@@ -641,6 +706,89 @@ export function backMain() {
   state.planWide = view.kind === 'plan'
 }
 
+/**
+ * Edits to artifacts not saved yet, by artifact, with the version they were made on: kept
+ * while the page is open, so an artifact shown anew elsewhere still has them.
+ */
+export const unsavedEdits = new Map<string, { version: number; content: string }>()
+
+/** The tab a view opens in on the right side. */
+export function paneKeyOf(view: OpenedView): PaneKey {
+  if (view.kind === 'artifact') return side.artifactKey(view.id)
+  return view.turn ? side.turnKey(view.threadId, view.turn.turnId) : side.changesKey(view.threadId)
+}
+
+/** The view a tab on the right side shows, if it shows one. */
+export function openedViewOf(key: PaneKey): OpenedView | null {
+  const view = side.viewOf(key)
+  if (!view) return null
+  if (view.kind === 'artifact') return view
+  const params = state.paneParams[key] ?? {}
+  if (view.kind === 'changes') return { kind: 'changes', threadId: view.threadId, ...params }
+  return params.turn ? { kind: 'changes', threadId: view.threadId, ...params } : null
+}
+
+export interface OpenViewOptions {
+  /** The thread it was opened from: it shows full screen, with that thread beside it. */
+  from?: string | null
+  /** Show it full screen even when not opened from a thread. */
+  full?: boolean
+}
+
+/**
+ * Open an artifact or changes: in a tab on the right side, beside the coordinator; full
+ * screen when opened from a thread, with the thread beside it so the user can read and
+ * talk to it at once.
+ */
+export async function openView(view: OpenedView, options: OpenViewOptions = {}) {
+  const from = options.from ?? null
+  if (from || options.full) {
+    // One taken from the right side goes back there rather than being lost.
+    const before = state.full
+    if (before?.fromSide && !sameOpened(before.view, view)) await openInPane(before.view)
+    setFull({ view, threadId: from, fromSide: false })
+    return
+  }
+  await openInPane(view)
+}
+
+function openInPane(view: OpenedView) {
+  const key = paneKeyOf(view)
+  if (view.kind === 'changes') state.paneParams[key] = { turn: view.turn, path: view.path }
+  return openPane(key)
+}
+
+/** Take a tab on the right side full screen; closing it puts it back. */
+export function fullScreenPane(key: PaneKey) {
+  const view = openedViewOf(key)
+  if (!view) return
+  const threadId = view.kind === 'changes' ? view.threadId : null
+  setFull({ view, threadId, fromSide: true })
+  closePane(key)
+}
+
+/** Put the full-screen view in a tab on the right side. */
+export function fullToSide() {
+  const full = state.full
+  setFull(null)
+  if (full && state.currentId) void openView(full.view)
+}
+
+/** Close a view, full screen or in its tab, once it has nothing left to show, e.g. merged. */
+export function closeView(view: OpenedView) {
+  if (state.full && sameOpened(state.full.view, view)) setFull(null)
+  else closePane(paneKeyOf(view))
+}
+
+const sameOpened = (a: OpenedView, b: OpenedView) => paneKeyOf(a) === paneKeyOf(b)
+
+/** Close the full-screen view; one taken from the right side goes back there. */
+export function closeFull() {
+  const full = state.full
+  setFull(null)
+  if (full?.fromSide && state.currentId) void openView(full.view)
+}
+
 /** Start an empty artifact of the user's own and open it. */
 export async function createArtifact(kind: ArtifactKind) {
   const id = state.currentId
@@ -651,7 +799,7 @@ export async function createArtifact(kind: ArtifactKind) {
       title: t(`artifact.untitled.${kind}`),
     })
     await refreshCurrent()
-    openMain({ kind: 'artifact', id: artifact.id })
+    void openView({ kind: 'artifact', id: artifact.id })
   } catch (error) {
     report(error)
   }

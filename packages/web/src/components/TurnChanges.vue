@@ -3,14 +3,16 @@ import type { NoticeView } from '@ariadne/core'
 import { FileDiffIcon } from '@dou-ui/icons'
 import { DouButton } from 'dou-ui'
 import { t } from '../i18n'
-import { openMain } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** What a turn changed in the thread's workspace, under its reply; opens those changes. */
 const props = defineProps<{ notice: Extract<NoticeView, { kind: 'turn-changes' }> }>()
 
 function open() {
   const { turnId, from, to, files, total } = props.notice
-  openMain({
+  openView({
     kind: 'changes',
     threadId: props.notice.conversationId,
     turn: { turnId, from, to, files, total },
