@@ -1,10 +1,8 @@
 import type { ThreadView } from '@ariadne/core'
 import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
-import { locale } from './i18n'
 import { groupOf, sortThreads, threadGroups } from './stage'
 import { activeThreadId, openThread, state } from './store'
-import { threadSort } from './components/thread-list'
 
 /** A conversation on screen: the coordinator's on the left, or a thread's by its id. */
 export type PanelKind = 'coordinator' | (string & {})
@@ -81,8 +79,6 @@ export function threadOrder(): string[] {
   return threadGroups.flatMap((group) =>
     sortThreads(
       threads.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
-      threadSort.value,
-      locale.value,
     ).flatMap((thread) => {
       const reviewer = thread.review?.reviewerId
       return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]

@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { DouButton, DouPopover, DouText } from 'dou-ui'
-import { CoinsIcon } from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { DouText } from 'dou-ui'
+import { computed } from 'vue'
 import { count, locale, t } from '../i18n'
 import { openThread, state } from '../store'
 import UsageBreakdown from './UsageBreakdown.vue'
 import { costText } from '../cost'
 
-const open = ref(false)
+/** What the open project has used so far, and which conversations used the most. */
 const usage = computed(
   () =>
     state.detail?.project.usage ?? {
@@ -46,72 +45,59 @@ const top = computed(() => {
 
 function go(id: string | null) {
   if (!id) return
-  open.value = false
+  state.projectSettingsOpen = false
   openThread(id)
 }
 </script>
 
 <template>
-  <DouPopover
-    v-if="state.detail"
-    v-model:open="open"
-    :title="t('usage.title')"
-    :width="320"
-    placement="bottom-end"
-  >
-    <DouButton variant="ghost" size="sm" :aria-label="t('usage.title')" :title="t('usage.title')">
-      <CoinsIcon />
-    </DouButton>
-    <template #content>
-      <div class="usage">
-        <ul class="usage-rows">
-          <li>
-            <span>{{ t('usage.threads') }}</span>
-            <span class="usage-value">{{ state.detail.threads.length }}</span>
-          </li>
-          <li>
-            <span>{{ t('usage.total') }}</span>
-            <span class="usage-value">{{ count(total) }}</span>
-          </li>
-          <li v-if="cost">
-            <span>{{ t('usage.cost') }}</span>
-            <span class="usage-value">{{ cost }}</span>
-          </li>
-          <li>
-            <span>{{ t('usage.hitRate') }}</span>
-            <span class="usage-value">{{ percent(usage.cached, usage.input) }}</span>
-          </li>
-        </ul>
+  <div v-if="state.detail" class="usage">
+    <ul class="usage-rows">
+      <li>
+        <span>{{ t('usage.threads') }}</span>
+        <span class="usage-value">{{ state.detail.threads.length }}</span>
+      </li>
+      <li>
+        <span>{{ t('usage.total') }}</span>
+        <span class="usage-value">{{ count(total) }}</span>
+      </li>
+      <li v-if="cost">
+        <span>{{ t('usage.cost') }}</span>
+        <span class="usage-value">{{ cost }}</span>
+      </li>
+      <li>
+        <span>{{ t('usage.hitRate') }}</span>
+        <span class="usage-value">{{ percent(usage.cached, usage.input) }}</span>
+      </li>
+    </ul>
 
-        <template v-if="total">
-          <DouText variant="tertiary" size="sm" class="usage-heading">
-            {{ t('usage.breakdown') }}
-          </DouText>
-          <UsageBreakdown :usage="usage" />
+    <template v-if="total">
+      <DouText variant="tertiary" size="sm" class="usage-heading">
+        {{ t('usage.breakdown') }}
+      </DouText>
+      <UsageBreakdown :usage="usage" />
 
-          <DouText variant="tertiary" size="sm" class="usage-heading">
-            {{ t('usage.top') }}
-          </DouText>
-          <ul class="usage-rows">
-            <li
-              v-for="row in top"
-              :key="row.id ?? ''"
-              :class="{ 'usage-link': row.id }"
-              :role="row.id ? 'button' : undefined"
-              :tabindex="row.id ? 0 : undefined"
-              @click="go(row.id)"
-              @keydown.enter.prevent="go(row.id)"
-              @keydown.space.prevent="go(row.id)"
-            >
-              <DouText truncate class="usage-name">{{ row.name }}</DouText>
-              <span class="usage-value">{{ count(row.tokens) }}</span>
-              <span class="usage-share">{{ percent(row.tokens, total) }}</span>
-            </li>
-          </ul>
-        </template>
-      </div>
+      <DouText variant="tertiary" size="sm" class="usage-heading">
+        {{ t('usage.top') }}
+      </DouText>
+      <ul class="usage-rows">
+        <li
+          v-for="row in top"
+          :key="row.id ?? ''"
+          :class="{ 'usage-link': row.id }"
+          :role="row.id ? 'button' : undefined"
+          :tabindex="row.id ? 0 : undefined"
+          @click="go(row.id)"
+          @keydown.enter.prevent="go(row.id)"
+          @keydown.space.prevent="go(row.id)"
+        >
+          <DouText truncate class="usage-name">{{ row.name }}</DouText>
+          <span class="usage-value">{{ count(row.tokens) }}</span>
+          <span class="usage-share">{{ percent(row.tokens, total) }}</span>
+        </li>
+      </ul>
     </template>
-  </DouPopover>
+  </div>
 </template>
 
 <style scoped>

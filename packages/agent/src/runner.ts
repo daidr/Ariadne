@@ -15,7 +15,7 @@ import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, reviewerPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { loadSkills, SkillSet, type SkillFiles } from './skills'
-import { MAX_REVIEW_ROUNDS } from '@ariadne/core'
+import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
   reviewTools,
   switchedOff,
@@ -36,7 +36,7 @@ import {
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import { repoTools } from './repo-tools'
 import { runCommandSpec, workspaceTools } from './workspace-tools'
-import { DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
+import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -45,6 +45,7 @@ import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
 import { liveCalls } from './live-calls'
+import { searchingModels } from './web-tools'
 import { requestStep, TurnError } from './model-step'
 
 export {
@@ -71,8 +72,12 @@ export interface TurnOptions {
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   /** Documents and whiteboards edited together. */
   shared?: SharedArtifacts
-  /** The plugins' web search services; without any, agents get no search tool. */
+  /** The plugins' web search services. */
   searchProviders?: ReadonlyMap<string, SearchProvider>
+  /** The other models the user set up: one whose service searches the web may be asked to. */
+  searchModels?: readonly ResolvedModel[]
+  /** The search service the user saved a key for. */
+  searchService?: SearchProvider | null
   /** The models the user set up; the coordinator may give one to each thread it opens. */
   models?: ModelChoice[]
   /** The user's external tool servers; the project's enabled ones bring their tools. */
@@ -291,8 +296,18 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           repo: hasRepo,
           tracker: hasTracker,
           models: options.models ?? [],
-          ...(options.searchProviders ? { search: options.searchProviders } : {}),
+          // The conversation's own model searches first, then the research's, then the rest.
+          search: {
+            ...(options.searchProviders ? { services: options.searchProviders } : {}),
+            models: searchingModels([
+              model,
+              options.researchModel,
+              ...(options.searchModels ?? []),
+            ]),
+            keyed: options.searchService ?? null,
+          },
           research: true,
+          noteCheck: isThread && app.canNoteCheck(conversationId),
         }))
   )
     .filter((tool) => !off.has(tool.spec.name))
@@ -365,7 +380,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     skills: () => skills,
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.shared ? { shared: options.shared } : {}),
-    ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
     limits,
     commands: {
@@ -373,7 +387,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       shell: shell?.argv ?? null,
       shellName,
       env: settings.env,
-      check: project.settings.workspace.check,
+      // Read anew each time: a check noted in this turn holds for its later edits. One a
+      // thread noted runs only while the project's threads run commands and the user's
+      // command rules let it run unasked.
+      get check() {
+        const now = app.getProject(conversation.projectId)
+        const check = checkCommand(now)
+        if (!now.settings.workspace.auto.check || !check) return check
+        if (now.settings.tools.includes('commands')) return ''
+        return commandVerdict(check, settings.commandRules).action === 'allow' ? check : ''
+      },
     },
     ...(workspaces ? { background: workspaces.background } : {}),
   }

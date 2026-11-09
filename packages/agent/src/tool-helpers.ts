@@ -5,7 +5,6 @@ import type {
   BranchCapability,
   DashboardSource,
   RepoCapability,
-  SearchProvider,
   SourceView,
   ToolSpec,
   TrackerCapability,
@@ -54,8 +53,6 @@ export interface ToolContext {
   shared?: SharedArtifacts
   /** The models the user set up, which the coordinator may give a thread. */
   models?: ModelChoice[]
-  /** The plugins' web search services, by kind. */
-  searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The user's limits; the defaults without. */
   limits?: Limits
   /**

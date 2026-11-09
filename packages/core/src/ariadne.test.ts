@@ -30,6 +30,22 @@ describe('projects', () => {
     expect(app.listProjects().map((p) => p.id)).toEqual([project.id])
   })
 
+  test('keeps the way the user last merged, and the routines set for it', () => {
+    const project = app.createProject('P')
+    expect(app.getProject(project.id).settings.autopilot.method).toBe('squash')
+    app.rememberMergeMethod(project.id, 'merge')
+    expect(app.getProject(project.id).settings.autopilot).toEqual({
+      enabled: false,
+      method: 'merge',
+    })
+    const routine = { id: 'rtn_1', prompt: '看看新 issue', days: [1], time: '09:00' }
+    expect(app.setRoutines(project.id, [routine]).settings.routines).toEqual([
+      { ...routine, enabled: true },
+    ])
+    expect(app.getProject(project.id).settings.autopilot.method).toBe('merge')
+    expect(() => app.setRoutines(project.id, [{ ...routine, time: '9am' }])).toThrow()
+  })
+
   test('rejects an empty name', () => {
     expect(() => app.createProject('   ')).toThrow(DomainError)
   })

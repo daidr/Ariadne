@@ -12,7 +12,7 @@ import type {
   ReviewReply,
   TokenUsage,
 } from './events'
-import { MAX_REVIEW_ROUNDS, type ProjectSettings } from './project-settings'
+import { MAX_REVIEW_ROUNDS, type ProjectDetected, type ProjectSettings } from './project-settings'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import { searchProjection } from './search'
 import type { Projection } from './store'
@@ -57,6 +57,8 @@ export const projectsProjection: Projection = {
       slots INTEGER,
       mcp TEXT NOT NULL DEFAULT '[]',
       settings TEXT,
+      -- What Ariadne found out about the repository itself (JSON, ProjectDetected).
+      detected TEXT,
       -- The user paused its autopilot; and when it last went on (switched on or resumed).
       autopilot_paused INTEGER NOT NULL DEFAULT 0,
       autopilot_since INTEGER,
@@ -124,8 +126,28 @@ export const projectsProjection: Projection = {
           [event.data.paused ? 1 : 0, event.at, event.projectId],
         )
         break
+      case 'project.setup.detected':
+      case 'project.check.noted': {
+        const before = db
+          .query<{ detected: string | null }, [string]>(
+            'SELECT detected FROM projects WHERE id = ?',
+          )
+          .get(event.projectId)?.detected
+        const detected: ProjectDetected = before
+          ? (JSON.parse(before) as ProjectDetected)
+          : { setup: null, check: null }
+        if (event.type === 'project.setup.detected') detected.setup = event.data.setup
+        else detected.check = { command: event.data.command, threadId: event.data.threadId }
+        db.run('UPDATE projects SET detected = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(detected),
+          event.at,
+          event.projectId,
+        ])
+        break
+      }
       case 'project.source.set':
-        db.run('UPDATE projects SET source = ?, updated_at = ? WHERE id = ?', [
+        // Another source is another repository: what was found out about the old one goes.
+        db.run('UPDATE projects SET source = ?, detected = NULL, updated_at = ? WHERE id = ?', [
           event.data.source ? JSON.stringify(event.data.source) : null,
           event.at,
           event.projectId,
@@ -647,6 +669,13 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'project.settings.set': {
+        // A routine runs on its own later: where an agent set one up or took one away, it shows.
+        const { routine } = event.data
+        if (routine)
+          add(routine.by, 'routine-change', { action: routine.action, prompt: routine.prompt })
+        break
+      }
       case 'plan.issue_linked':
       case 'plan.issue_unlinked': {
         // What a thread reads follows from these links; an agent's link is shown where it
@@ -861,6 +890,15 @@ export const noticesProjection: Projection = {
         ])
         break
       }
+      case 'user.returned': {
+        // Said where the user talks to the coordinator. An older one is about a time long
+        // past: only the latest stays.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator) break
+        db.run("DELETE FROM notices WHERE project_id = ? AND kind = 'recap'", [event.projectId])
+        add(coordinator, 'recap', event.data)
+        break
+      }
       case 'notice.dismissed':
         db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [
           event.seq,
@@ -1047,6 +1085,7 @@ export const conversationsProjection: Projection = {
         )
         break
       case 'research.step':
+      case 'search.answered':
       case 'conversation.compacted':
         if (event.type === 'conversation.compacted') {
           db.run('UPDATE conversations SET compactions = compactions + 1 WHERE id = ?', [

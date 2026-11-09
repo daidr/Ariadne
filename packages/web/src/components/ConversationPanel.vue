@@ -76,6 +76,7 @@ import {
   stopTurn,
   undoNotice,
 } from '../store'
+import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewActions from './ReviewActions.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -92,6 +93,7 @@ import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
+import RecapNotice from './RecapNotice.vue'
 import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
@@ -305,6 +307,8 @@ const writing = computed<MessageView | null>(() => {
   }
 })
 
+const recap = computed(() => view.value.notices.findLast((notice) => notice.kind === 'recap')?.id)
+
 // Messages and notices in the order they happened. A worktree removed after a merge goes
 // unsaid: the merge's own line says what happened.
 const timeline = computed(() =>
@@ -317,6 +321,8 @@ const timeline = computed(() =>
     })),
     ...view.value.notices
       .filter((notice) => !(notice.kind === 'worktree-removed' && notice.reason === 'merged'))
+      // A newer recap takes the place of the one before it.
+      .filter((notice) => notice.kind !== 'recap' || notice.id === recap.value)
       .map((notice) => ({
         id: notice.id,
         at: notice.createdAt,
@@ -460,6 +466,7 @@ const markdown = { linkTarget: '_blank', sanitizeUrl } as const
 async function submit(value: string) {
   const id = conversationId.value
   if (!id || !canSubmit.value) return
+  offerNotifications()
   draft.value = ''
   const files = attachments.take()
   const sent = await sendMessage(id, value, {
@@ -872,6 +879,19 @@ watch(
             </DouLink>
           </DouText>
           <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
+          <RecapNotice v-else-if="item.notice.kind === 'recap'" :notice="item.notice" />
+          <DouText
+            v-else-if="item.notice.kind === 'routine-change'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.action === 'added' ? 'notice.routineAdded' : 'notice.routineRemoved', {
+                prompt: item.notice.prompt,
+              })
+            }}
+          </DouText>
           <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
             tone="warning"
@@ -1150,6 +1170,11 @@ watch(
   align-items: center;
   gap: 8px;
   padding: 4px 0;
+}
+
+/* A recap with nothing left to tell draws nothing, and leaves no gap either. */
+.notice:empty {
+  display: none;
 }
 
 /* Under the reply's text, lined up with it: the button's own padding sits outside. */

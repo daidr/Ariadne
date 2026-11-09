@@ -1,5 +1,6 @@
 export {
   Ariadne,
+  AWAY_MS,
   MAX_MEMORIES,
   MAX_FEEDBACK_IMAGES,
   MAX_MEMORY,
@@ -76,6 +77,9 @@ export {
   MAX_ROUTINES,
   MAX_ROUTINE_PROMPT,
   MERGE_METHODS,
+  checkCommand,
+  installCommands,
+  type ProjectDetected,
   type Routine,
   type ProjectSettings,
   type ShellChoice,

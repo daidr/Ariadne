@@ -3,9 +3,12 @@ import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
 import {
   branchSlug,
+  MAX_CHECK_COMMAND,
   MAX_REVIEW_ROUNDS,
   parseProjectSettings,
+  parseRoutines,
   storedProjectSettings,
+  type ProjectDetected,
 } from './project-settings'
 import {
   parseAnswer,
@@ -132,13 +135,16 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 49
+export const PROJECTION_VERSION = 52
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
  * lets the work go on past it.
  */
 export const MILESTONE_GATE = 'milestone'
+
+/** How long the user is gone from a project before coming back counts as a return. */
+export const AWAY_MS = 10 * 60_000
 
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
@@ -337,6 +343,7 @@ interface ProjectRow {
   slots: number | null
   mcp: string
   settings: string | null
+  detected: string | null
   autopilot_paused: number
   autopilot_since: number | null
   created_at: number
@@ -1522,6 +1529,39 @@ export class Ariadne {
     if (JSON.stringify(settings) === JSON.stringify(project.settings)) return project
     this.store.append([{ type: 'project.settings.set', projectId, data: { settings } }])
     return this.getProject(projectId)
+  }
+
+  /**
+   * Replace the project's routines, checked like the rest of its settings. `change` is the
+   * one an agent added or removed: its conversation gets a line saying so.
+   */
+  setRoutines(
+    projectId: string,
+    routines: unknown,
+    change?: { by: string; action: 'added' | 'removed'; prompt: string },
+  ): ProjectView {
+    const { settings } = this.getProject(projectId)
+    const next = { ...settings, routines: parseRoutines(routines) }
+    if (JSON.stringify(next) === JSON.stringify(settings)) return this.getProject(projectId)
+    this.store.append([
+      {
+        type: 'project.settings.set',
+        projectId,
+        data: { settings: next, ...(change ? { routine: change } : {}) },
+      },
+    ])
+    return this.getProject(projectId)
+  }
+
+  /**
+   * Keep the way the user last merged in this project: the next merge starts from it, and
+   * the autopilot merges the same way.
+   */
+  rememberMergeMethod(projectId: string, method: MergeMethod): void {
+    const { settings } = this.getProject(projectId)
+    if (settings.autopilot.method === method) return
+    const next = { ...settings, autopilot: { ...settings.autopilot, method } }
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings: next } }])
   }
 
   /** Pause the project's autopilot, or let it go on. */
@@ -2765,6 +2805,94 @@ export class Ariadne {
     this.store.append([{ type: 'message.read', projectId, data: { conversationId, upTo } }])
   }
 
+  /**
+   * The user is back at the project after `awayMs` without touching it. Away for long
+   * enough, with threads that finished, were merged or came to need them meanwhile, it is
+   * recorded, and the coordinator's conversation shows it as a recap; otherwise nothing
+   * is. Read from the log and the projections alone: no model is asked.
+   */
+  noteReturn(projectId: string, awayMs: number): void {
+    const project = this.projectRow(projectId)
+    if (!Number.isFinite(awayMs) || awayMs < AWAY_MS) return
+    const now = this.now()
+    // What an earlier recap told is not told again.
+    const told =
+      this.db
+        .query<{ at: number }, [string]>(
+          `SELECT created_at AS at FROM notices WHERE conversation_id = ? AND kind = 'recap'
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(project.coordinator_id)?.at ?? 0
+    const since = Math.max(now - awayMs, told)
+    if (now - since < AWAY_MS) return
+
+    const threads = this.listThreads(projectId)
+    const byId = new Map(threads.map((thread) => [thread.id, thread]))
+    const reported = new Set<string>()
+    const landed = new Set<string>()
+    const rows = this.db
+      .query<{ type: string; data: string }, [string, number]>(
+        `SELECT type, data FROM events WHERE project_id = ? AND seq >= ?
+           AND type IN ('thread.reported', 'branch.merged', 'pull_request.closed')
+         ORDER BY seq`,
+      )
+      .all(projectId, this.firstSeqAfter(since))
+    for (const row of rows) {
+      const data = JSON.parse(row.data) as { threadId: string; report?: string; merged?: boolean }
+      if (row.type === 'thread.reported') {
+        if (data.report === 'done') reported.add(data.threadId)
+      } else if (row.type === 'branch.merged' || data.merged) {
+        landed.add(data.threadId)
+      }
+    }
+
+    // What waits on the user now and did not when they left.
+    const waiting = new Set<string>()
+    const asks: string[] = []
+    for (const item of this.needsMeOf(projectId, threads)) {
+      if (item.kind === 'thread') {
+        if (Math.max(item.thread.activeAt, item.thread.updatedAt) > since) {
+          waiting.add(item.thread.id)
+        }
+      } else if (item.attention.createdAt > since) {
+        const askers = [item.thread, ...item.joined].flatMap((thread) => thread ?? [])
+        for (const thread of askers) waiting.add(thread.id)
+        if (!askers.length) asks.push(item.attention.id)
+      }
+    }
+    // Each thread is told once, by what matters most of it: a review's own thread never.
+    const tells = (id: string) => !!byId.get(id) && !byId.get(id)!.reviewOf && !waiting.has(id)
+    const merged = [...landed].filter(tells)
+    const done = [...reported].filter(
+      (id) => tells(id) && !landed.has(id) && byId.get(id)!.stage === 'done',
+    )
+    if (!done.length && !merged.length && !waiting.size && !asks.length) return
+    this.store.append([
+      {
+        type: 'user.returned',
+        projectId,
+        data: { since, done, merged, waiting: [...waiting], asks },
+      },
+    ])
+  }
+
+  /** The first event written after `at`; one past the newest when there is none. */
+  private firstSeqAfter(at: number): number {
+    const first = this.db.query<{ seq: number; at: number }, [number]>(
+      'SELECT seq, at FROM events WHERE seq >= ? ORDER BY seq LIMIT 1',
+    )
+    // Events are written in the order of their times, so the log is searched by halves.
+    let low = 1
+    let high = this.store.lastSeq() + 1
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      const event = first.get(middle)
+      if (!event || event.at > at) high = middle
+      else low = event.seq + 1
+    }
+    return low
+  }
+
   // ---- memory ----
 
   listMemories(projectId: string): MemoryView[] {
@@ -2906,6 +3034,51 @@ export class Ariadne {
     this.projectRow(projectId)
     this.store.append([{ type: 'project.source.set', projectId, data: { source } }])
     return this.getProject(projectId)
+  }
+
+  /**
+   * Record the install commands a new workspace's lockfiles called for (one a line, `''`
+   * for none), when they are not the ones known: the settings show them.
+   */
+  recordDetectedSetup(projectId: string, setup: string): void {
+    if (this.getProject(projectId).detected.setup === setup) return
+    this.store.append([{ type: 'project.setup.detected', projectId, data: { setup } }])
+  }
+
+  /**
+   * Whether `threadId` may note the project's check after edits: the user left it to
+   * Ariadne, and no other thread noted one. The thread that did may correct its own. Not
+   * in a project whose threads run no commands: a check is a command of the thread's choosing.
+   */
+  canNoteCheck(threadId: string): boolean {
+    const thread = this.getThread(threadId)
+    if (thread.reviewOf) return false
+    const project = this.getProject(thread.projectId)
+    if (!project.settings.workspace.auto.check) return false
+    if (project.settings.tools.includes('commands')) return false
+    return !project.detected.check || project.detected.check.threadId === threadId
+  }
+
+  /** A thread notes the check to run after edits; `''` when the repository has none fit. */
+  noteCheck(threadId: string, command: string): ProjectView {
+    const thread = this.getThread(threadId)
+    const project = this.getProject(thread.projectId)
+    if (!this.canNoteCheck(threadId)) {
+      throw new DomainError('error.invalidBody', { reason: 'check' })
+    }
+    const noted = command.trim()
+    if (noted.length > MAX_CHECK_COMMAND) {
+      throw new DomainError('error.invalidBody', { reason: 'command' })
+    }
+    if (project.detected.check?.command === noted) return project
+    this.store.append([
+      {
+        type: 'project.check.noted',
+        projectId: thread.projectId,
+        data: { command: noted, threadId },
+      },
+    ])
+    return this.getProject(thread.projectId)
   }
 
   /** Record that a thread's workspace is ready, so the user can see where it works. */
@@ -3821,6 +3994,18 @@ export class Ariadne {
     ])
   }
 
+  /** The tokens of a web search a model's own service ran for a call of this turn. */
+  recordSearch(
+    conversationId: string,
+    turnId: string,
+    search: { model: string; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'search.answered', projectId, data: { ...search, conversationId, turnId } },
+    ])
+  }
+
   /** The steps of one research of a conversation, up to `upTo`, oldest first. */
   researchSteps(conversationId: string, toolCallId: string, upTo: number): AnyStoredEvent[] {
     const conversation = this.getConversation(conversationId)
@@ -4162,6 +4347,9 @@ export class Ariadne {
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],
       settings: storedProjectSettings(row.settings),
+      detected: row.detected
+        ? (JSON.parse(row.detected) as ProjectDetected)
+        : { setup: null, check: null },
       autopilotPaused: row.autopilot_paused === 1,
       usage: this.projectUsage(row.id),
     }

@@ -25,16 +25,5 @@ export function nextRunOf(routine: Routine, after = Date.now()): number | null {
   return null
 }
 
-/** A new routine: workdays at nine, until the user changes it. */
-export function newRoutine(): Routine {
-  return {
-    id: `rtn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    prompt: '',
-    days: [1, 2, 3, 4, 5],
-    time: '09:00',
-    enabled: true,
-  }
-}
-
 /** Weekdays in the order a week reads here: Monday first. */
 export const WEEK = [1, 2, 3, 4, 5, 6, 0] as const

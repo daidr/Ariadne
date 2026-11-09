@@ -1,4 +1,4 @@
-import type { ModelStreamPart } from '@ariadne/plugin-sdk'
+import { ModelSearchRefused, type ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
 import { anthropicProvider, requestBody, toWire } from './index'
 
@@ -366,5 +366,116 @@ describe('anthropic provider', () => {
         retryAfterMs: 3000,
       },
     ])
+  })
+})
+
+const searchSettings = () => ({ baseUrl: `http://127.0.0.1:${server.port}`, apiKey: 'key' })
+const askSearch = () =>
+  anthropicProvider.search!.run(searchSettings(), { model: 'm', query: 'q', limit: 5 })
+
+describe("the service's own web search", () => {
+  test('only the service itself is taken to search, not a relay under another address', () => {
+    const { available } = anthropicProvider.search!
+    expect(available({ baseUrl: 'https://api.anthropic.com/', apiKey: 'k' })).toBe(true)
+    expect(available({ baseUrl: 'https://relay.example/anthropic', apiKey: 'k' })).toBe(false)
+    expect(available({ baseUrl: 'not an address', apiKey: 'k' })).toBe(false)
+  })
+
+  test('one request with the search tool; the answer, its quoted pages first, and the tokens', async () => {
+    reply = () =>
+      Response.json({
+        stop_reason: 'end_turn',
+        content: [
+          { type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: { query: 'q' } },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'srvtoolu_1',
+            content: [
+              {
+                type: 'web_search_result',
+                url: 'https://a.example',
+                title: 'A',
+                encrypted_content: 'x',
+              },
+              {
+                type: 'web_search_result',
+                url: 'https://b.example',
+                title: 'B',
+                encrypted_content: 'y',
+              },
+            ],
+          },
+          { type: 'text', text: 'B says ' },
+          {
+            type: 'text',
+            text: 'it shipped.',
+            citations: [
+              {
+                type: 'web_search_result_location',
+                url: 'https://b.example',
+                title: 'B',
+                cited_text: 'It shipped today.',
+              },
+            ],
+          },
+        ],
+        usage: { input_tokens: 100, cache_read_input_tokens: 20, output_tokens: 30 },
+      })
+    const answer = await anthropicProvider.search!.run(searchSettings(), {
+      model: 'm',
+      query: 'did it ship',
+      limit: 5,
+      headers: { 'x-extra': 'yes', 'x-api-key': 'not this' },
+    })
+    expect(lastHeaders?.get('x-api-key')).toBe('key')
+    expect(lastHeaders?.get('x-extra')).toBe('yes')
+    expect(lastBody).toMatchObject({
+      model: 'm',
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+    })
+    expect(JSON.stringify(lastBody?.messages)).toContain('Query: did it ship')
+    expect(lastBody).not.toHaveProperty('stream')
+    expect(answer).toEqual({
+      text: 'B says it shipped.',
+      sources: [
+        { title: 'B', url: 'https://b.example', snippet: 'It shipped today.' },
+        { title: 'A', url: 'https://a.example', snippet: '' },
+      ],
+      usage: { input: 120, output: 30, cached: 20 },
+    })
+  })
+
+  test('a search the service could not run, or a refused request, is an error', async () => {
+    reply = () =>
+      Response.json({
+        stop_reason: 'end_turn',
+        content: [
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 't',
+            content: { type: 'web_search_tool_result_error', error_code: 'max_uses_exceeded' },
+          },
+          { type: 'text', text: 'I could not search.' },
+        ],
+      })
+    await expect(askSearch()).rejects.toThrow('max_uses_exceeded')
+    reply = () => Response.json({ error: { message: 'bad key sk-secret' } }, { status: 401 })
+    await expect(askSearch()).rejects.toThrow(/^HTTP 401$/)
+    // Turned down outright, as when search is off for the organisation: not worth asking again.
+    await expect(askSearch()).rejects.toBeInstanceOf(ModelSearchRefused)
+    reply = () => Response.json({ error: { message: 'overloaded' } }, { status: 529 })
+    await expect(askSearch()).rejects.not.toBeInstanceOf(ModelSearchRefused)
+    reply = () =>
+      Response.json({
+        stop_reason: 'max_tokens',
+        content: [
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 't',
+            content: [{ url: 'https://a.example' }],
+          },
+        ],
+      })
+    await expect(askSearch()).rejects.toThrow('ended early')
   })
 })

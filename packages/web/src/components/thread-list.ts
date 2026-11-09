@@ -1,7 +1,6 @@
 import { ref, watch } from 'vue'
-import type { ThreadGroup, ThreadSort } from '../stage'
+import type { ThreadGroup } from '../stage'
 
-const SORT_KEY = 'ariadne.threadSort'
 const OPEN_KEY = 'ariadne.threadGroups'
 
 function load<T>(key: string, fallback: T, valid: (value: unknown) => value is T): T {
@@ -22,14 +21,6 @@ function keep(key: string, value: unknown) {
     // Not remembered in this browser; that is fine.
   }
 }
-
-const sorts: ThreadSort[] = ['active', 'title', 'created']
-
-/** How the thread list is sorted, remembered in this browser. */
-export const threadSort = ref<ThreadSort>(
-  load(SORT_KEY, 'active', (value): value is ThreadSort => sorts.includes(value as ThreadSort)),
-)
-watch(threadSort, (value) => keep(SORT_KEY, value))
 
 /** The open groups of the thread list; finished threads start folded away. */
 export const openGroups = ref<ThreadGroup[]>(

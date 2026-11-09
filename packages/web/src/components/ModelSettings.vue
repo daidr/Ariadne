@@ -33,8 +33,10 @@ import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
+import SearchSettings from './SearchSettings.vue'
 import SettingsFields from './SettingsFields.vue'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
+import { modelLabels } from '../model-label'
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -82,6 +84,14 @@ const models = ref<DraftModel[]>([])
 const threadModel = ref<string | null>(null)
 const threadEffort = ref<Effort | ''>('')
 const coordinatorEffort = ref<Effort | ''>('')
+// The one model's effort, for threads and the coordinator alike.
+const soleEffort = computed({
+  get: () => threadEffort.value,
+  set: (effort) => {
+    threadEffort.value = effort
+    coordinatorEffort.value = effort
+  },
+})
 // `''` stands for "the threads'", which the select cannot hold as `null`.
 const coordinatorModel = ref<string>('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
@@ -106,13 +116,14 @@ const providerOptions = computed(() =>
   providers.value.map((provider) => ({ value: provider.id, label: provider.name || provider.id })),
 )
 const modelOptions = computed(() =>
-  models.value
-    .filter((model) => model.model.trim())
-    .map((model) => ({
-      value: model.id,
-      label: `${providers.value.find((p) => p.id === model.provider)?.name ?? ''} / ${model.model.trim()}`,
-    })),
+  modelLabels(
+    models.value.filter((model) => model.model.trim()),
+    providers.value,
+  ).map(({ id, label }) => ({ value: id, label })),
 )
+// With one model there is nothing to divide: the roles all use it, and only how hard it
+// thinks is left to choose.
+const several = computed(() => modelOptions.value.length > 1)
 const coordinatorOptions = computed(() => [
   { value: '', label: t('settings.sameAsThreads') },
   ...modelOptions.value,
@@ -188,6 +199,7 @@ const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
 const data = ref<InstanceType<typeof DataTab> | null>(null)
+const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
 
@@ -325,6 +337,7 @@ async function saveAll() {
   try {
     const parts: [SettingsTab, (() => Promise<boolean>) | undefined][] = [
       ['models', saveModels],
+      ['models', search.value?.save],
       ['instructions', work.value.instructions?.save],
       ['commands', work.value.commands?.save],
       ['input', input.value?.save],
@@ -405,7 +418,8 @@ async function saveModels(): Promise<boolean> {
           },
           coordinator: {
             model: keep(coordinatorModel.value || null),
-            effort: coordinatorEffort.value || null,
+            // With one model the page shows one depth: both think that hard.
+            effort: (several.value ? coordinatorEffort.value : threadEffort.value) || null,
             fallback: keep(fallback.value || null),
           },
           triage: {
@@ -567,7 +581,7 @@ async function saveModels(): Promise<boolean> {
                     <DouSwitch v-model="model.images" />
                   </DouFormItem>
                 </div>
-                <DouFormItem :label="t('settings.modelNote')">
+                <DouFormItem v-if="several" :label="t('settings.modelNote')">
                   <DouInput
                     v-model="model.note"
                     :maxlength="200"
@@ -650,7 +664,14 @@ async function saveModels(): Promise<boolean> {
           <section v-if="modelOptions.length || concurrency" class="settings-section">
             <DouText weight="medium">{{ t('settings.part.roles') }}</DouText>
             <DouForm layout="vertical" size="sm">
-              <template v-if="modelOptions.length">
+              <DouFormItem
+                v-if="modelOptions.length === 1"
+                :label="t('settings.effort')"
+                class="settings-effort"
+              >
+                <DouSelect v-model="soleEffort" :options="effortOptions" />
+              </DouFormItem>
+              <template v-else-if="several">
                 <div class="settings-row">
                   <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
                     <DouSelect v-model="threadModel" :options="modelOptions" />
@@ -689,6 +710,7 @@ async function saveModels(): Promise<boolean> {
               </DouFormItem>
             </DouForm>
           </section>
+          <SearchSettings v-if="open" ref="search" />
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
       </DouTabPanel>
