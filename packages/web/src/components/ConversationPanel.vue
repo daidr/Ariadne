@@ -64,6 +64,8 @@ import {
   emptyConversation,
   loadEarlier,
   openMain,
+  openView as openFrom,
+  type OpenedView,
   openThread,
   openThreadFrom,
   retryTurn,
@@ -97,9 +99,14 @@ import MessageLink from '../markdown/MessageLink.vue'
 import { isBare, sanitizeUrl } from '../markdown/links'
 import { lastPanel, registerPanel } from '../shortcuts'
 import { stepHistory, type Recall } from './input-history'
+import { provideFromThread } from '../opened-from'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
 const props = defineProps<{ threadId?: string }>()
+
+// What opens from a thread shows full screen, with this thread beside it.
+provideFromThread(() => props.threadId ?? null)
+const openView = (view: OpenedView) => openFrom(view, { from: props.threadId ?? null })
 const openSettings = inject(openSettingsKey, () => {})
 
 // A thread's input is kept in the store, so moving its tab to another group keeps it.
@@ -624,7 +631,7 @@ watch(
           v-if="thread.workspace?.branch && thread.workspace.base"
           variant="ghost"
           size="sm"
-          @click="openMain({ kind: 'changes', threadId: thread.id })"
+          @click="openView({ kind: 'changes', threadId: thread.id })"
         >
           <template #leading><FileDiffIcon /></template>
           {{ t('changes.open') }}
@@ -639,7 +646,7 @@ watch(
             v-if="reviewed.workspace?.branch && reviewed.workspace.base"
             variant="ghost"
             size="sm"
-            @click="openMain({ kind: 'changes', threadId: reviewed.id })"
+            @click="openView({ kind: 'changes', threadId: reviewed.id })"
           >
             <template #leading><FileDiffIcon /></template>
             {{ t('changes.open') }}

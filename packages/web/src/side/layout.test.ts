@@ -4,6 +4,7 @@ import {
   type SideLayout,
   close,
   closeOthers,
+  viewOf,
   defaultLayout,
   focusedGroup,
   focusedThread,
@@ -145,5 +146,32 @@ describe('side layout', () => {
       root: { type: 'group', id: 'g1', tabs: ['plan'], active: 'plan' },
       focused: 'g1',
     })
+  })
+
+  test('keeps artifacts and branch changes, not what a turn changed', () => {
+    const parsed = parseLayout({
+      root: {
+        type: 'group',
+        id: 'g',
+        tabs: ['plan', 'artifact:art_1', 'changes:th_1', 'turn:th_1:tu_1'],
+        active: 'turn:th_1:tu_1',
+      },
+    })
+    expect(parsed?.root).toEqual({
+      type: 'group',
+      id: 'g',
+      tabs: ['plan', 'artifact:art_1', 'changes:th_1'],
+      active: 'plan',
+    })
+    expect(viewOf('turn:th_1:tu_1')).toEqual({ kind: 'turn', threadId: 'th_1', turnId: 'tu_1' })
+    expect(viewOf('artifact:art_1')).toEqual({ kind: 'artifact', id: 'art_1' })
+    expect(viewOf('thread:th_1')).toBeNull()
+  })
+
+  test('closes the other artifacts and changes with the threads, not the lists', () => {
+    let layout = open(defaultLayout(), 'artifact:art_1')
+    layout = open(layout, threadKey('a'))
+    layout = closeOthers(layout, 'plan')
+    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts', 'memory'])
   })
 })

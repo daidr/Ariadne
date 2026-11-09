@@ -36,6 +36,9 @@ import ReportArtifacts from '../components/ReportArtifacts.vue'
 import { showsHeadline } from '../stage'
 import PlanSection from './PlanSection.vue'
 import PlanStatusIcon from './PlanStatusIcon.vue'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 const props = defineProps<{ node: PlanNodeView; editable?: boolean }>()
 
@@ -340,7 +343,7 @@ const removeQuestion = computed(() => {
               variant="ghost"
               :aria-label="t('changes.open')"
               :title="t('changes.open')"
-              @click="openMain({ kind: 'changes', threadId: thread.id })"
+              @click="openView({ kind: 'changes', threadId: thread.id })"
             >
               <FileDiffIcon />
             </DouButton>
@@ -357,7 +360,7 @@ const removeQuestion = computed(() => {
             underline="hover"
             :title="artifact.title"
             class="node-artifact"
-            @click="openMain({ kind: 'artifact', id: artifact.id })"
+            @click="openView({ kind: 'artifact', id: artifact.id })"
           >
             <template #leading><component :is="kindIcon[artifact.kind]" /></template>
             {{ artifact.title }}

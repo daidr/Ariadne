@@ -3,7 +3,10 @@ import type { NoticeView } from '@ariadne/core'
 import { DouLink, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { openMain, openThread } from '../store'
+import { openThread } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /**
  * A review round started or ended, in line with the author's and the reviewer's
@@ -26,7 +29,7 @@ const text = computed(() => {
     {{ text }}
     <DouLink
       v-if="notice.state === 'changes'"
-      @click="openMain({ kind: 'changes', threadId: notice.threadId })"
+      @click="openView({ kind: 'changes', threadId: notice.threadId })"
     >
       {{ t('review.openComments') }}
     </DouLink>

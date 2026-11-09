@@ -4,10 +4,13 @@ import { DouImagePreview, DouLink } from 'dou-ui'
 import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
-import { openMain, openThreadFrom, state } from '../store'
+import { openThreadFrom, state } from '../store'
 import { askLinkSummary, linkSummary } from './link-summaries'
 import { fileSrc, innerLink } from './links'
 import PullRequestLink from './PullRequestLink.vue'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /**
  * A link in an agent's message. A thread shows its state and opens beside the coordinator,
@@ -45,7 +48,7 @@ const summary = computed(() => (props.href ? linkSummary(props.href) : null))
 
 function open(event?: MouseEvent) {
   if (thread.value) openThreadFrom(event, thread.value.id)
-  else if (artifact.value) openMain({ kind: 'artifact', id: artifact.value.id })
+  else if (artifact.value) openView({ kind: 'artifact', id: artifact.value.id })
   else if (image.value) viewing.value = true
 }
 </script>

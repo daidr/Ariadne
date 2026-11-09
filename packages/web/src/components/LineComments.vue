@@ -2,12 +2,14 @@
 import type { LineComment } from '@ariadne/core'
 import { DouLink, DouText } from 'dou-ui'
 import { t } from '../i18n'
-import { openMain } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** The line comments a message took to a thread, each with the line it is about. */
 const props = defineProps<{ comments: LineComment[]; threadId: string }>()
 
-const open = (path: string) => openMain({ kind: 'changes', threadId: props.threadId, path })
+const open = (path: string) => openView({ kind: 'changes', threadId: props.threadId, path })
 </script>
 
 <template>

@@ -14,8 +14,11 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 import { kindIcon } from '../artifacts/kinds'
 import { locale, t } from '../i18n'
-import { openMain, openMessage, openThread, report, state } from '../store'
+import { openMessage, openThread, report, state } from '../store'
 import StageIcon from './StageIcon.vue'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** Find what was said and made in the open project: ⌘K or Ctrl+K anywhere, unless rebound. */
 
@@ -92,7 +95,7 @@ function select(item: CommandItem) {
   const hit = hits.value.get(String(item.value))
   if (!hit) return
   if (hit.kind === 'thread') void openThread(hit.id)
-  else if (hit.kind === 'artifact') openMain({ kind: 'artifact', id: hit.id })
+  else if (hit.kind === 'artifact') openView({ kind: 'artifact', id: hit.id })
   else void openMessage(hit.conversationId, hit.id)
 }
 </script>

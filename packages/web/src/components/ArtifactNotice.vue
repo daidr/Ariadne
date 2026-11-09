@@ -4,7 +4,9 @@ import type { MessageKey } from '@ariadne/i18n'
 import { DouLink, DouText } from 'dou-ui'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { openMain } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** A user's edit or a comment on an artifact, with the artifact's title to open it. */
 const props = defineProps<{
@@ -31,7 +33,7 @@ const parts = computed(() => {
 <template>
   <DouText variant="tertiary" size="sm" class="artifact-notice">
     {{ parts.before
-    }}<DouLink underline="hover" @click="openMain({ kind: 'artifact', id: notice.artifactId })">{{
+    }}<DouLink underline="hover" @click="openView({ kind: 'artifact', id: notice.artifactId })">{{
       notice.title
     }}</DouLink
     >{{ parts.after }}

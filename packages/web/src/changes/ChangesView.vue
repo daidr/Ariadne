@@ -16,7 +16,6 @@ import {
   type TreeNodeData,
 } from 'dou-ui'
 import {
-  ChevronLeftIcon,
   fileIconOf,
   GitMergeIcon,
   MessageIcon,
@@ -28,8 +27,7 @@ import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { t, tm } from '../i18n'
 import {
-  backMain,
-  openMain,
+  closeView,
   openThread,
   report,
   reviewThread,
@@ -38,6 +36,7 @@ import {
   type TurnChangesRef,
 } from '../store'
 import PullRequestTag from '../components/PullRequestTag.vue'
+import ViewActions from '../full/ViewActions.vue'
 import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
 import { languageOf } from './languages'
 import { draftsOf, sendable, useLineComments } from './line-comments'
@@ -50,7 +49,19 @@ import { reviewNotes, useReviewComments } from '../review/review-comments'
  * one of its turns changed in the workspace. Lines of either can be commented on, and the
  * comments go to the thread together.
  */
-const props = defineProps<{ threadId: string; turn?: TurnChangesRef; path?: string }>()
+const props = defineProps<{
+  threadId: string
+  turn?: TurnChangesRef
+  path?: string
+  /** Where it is shown: in a tab on the right side, or full screen. */
+  place: 'side' | 'full'
+}>()
+const view = computed(() => ({
+  kind: 'changes' as const,
+  threadId: props.threadId,
+  turn: props.turn,
+  path: props.path,
+}))
 
 const thread = computed(
   () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
@@ -62,7 +73,7 @@ const mergeable = ref(false)
 const reviewing = computed(() => thread.value?.stage === 'review' && !props.turn)
 async function skipMerge() {
   await reviewThread(props.threadId)
-  openMain({ kind: 'conversation' })
+  closeView(view.value)
 }
 const loading = ref(true)
 const problem = ref<string | null>(null)
@@ -210,8 +221,8 @@ async function merge() {
     } else if (outcome.kind === 'empty') {
       result.value = { tone: 'neutral', text: t('changes.nothing', { base: base.value }) }
     } else {
-      // Merged: what is left to do is with the coordinator again.
-      openMain({ kind: 'conversation' })
+      // Merged: nothing is left to show.
+      closeView(view.value)
       return
     }
     await load()
@@ -273,7 +284,8 @@ async function sendComments() {
   try {
     const outgoing = drafts.value
     const ids = outgoing.map((draft) => draft.id)
-    if (await sendLineComments(props.threadId, sendable(outgoing), ids)) openThread(props.threadId)
+    if ((await sendLineComments(props.threadId, sendable(outgoing), ids)) && props.place === 'side')
+      openThread(props.threadId)
   } finally {
     sending.value = false
   }
@@ -286,12 +298,8 @@ const methodOptions = computed(() => [
 </script>
 
 <template>
-  <div class="changes">
+  <div class="changes" :class="`is-${place}`">
     <div class="changes-header">
-      <DouButton variant="ghost" size="sm" @click="backMain">
-        <template #leading><ChevronLeftIcon /></template>
-        {{ t('changes.back') }}
-      </DouButton>
       <div class="changes-title">
         <DouText weight="medium" truncate>{{ thread?.title }}</DouText>
         <DouText v-if="turn" variant="tertiary" size="sm" class="changes-meta">
@@ -365,6 +373,7 @@ const methodOptions = computed(() => [
           </form>
         </template>
       </DouPopover>
+      <ViewActions :view="view" :place="place" />
     </div>
 
     <DouAlert v-if="problem" tone="danger" class="changes-alert">{{ problem }}</DouAlert>
@@ -479,8 +488,14 @@ const methodOptions = computed(() => [
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 4px 8px 4px 16px;
   border-bottom: 1px solid var(--dou-color-border);
+}
+
+/* A tab on the side is narrow: what does not fit goes to a second line. */
+.is-side .changes-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 
 .changes-title {
@@ -525,6 +540,7 @@ const methodOptions = computed(() => [
 .changes-files {
   flex: none;
   width: 240px;
+  max-width: 35%;
   overflow: auto;
   padding: 8px;
   border-right: 1px solid var(--dou-color-border-subtle);

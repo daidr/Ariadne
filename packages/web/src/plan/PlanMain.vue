@@ -54,7 +54,7 @@ const time = (at: number) =>
     <div class="plan-main-header">
       <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
-        {{ t('artifact.back') }}
+        {{ t('view.back') }}
       </DouButton>
       <DouText weight="medium">{{ t('plan.title') }}</DouText>
       <div class="plan-main-tools">

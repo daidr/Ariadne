@@ -17,6 +17,8 @@ export interface PanelHandle {
 }
 
 const panels = new Map<PanelKind, PanelHandle>()
+/** The handles of the conversations still on screen. */
+const shown = new Set<PanelHandle>()
 
 /** The conversation the user last clicked or typed in; keys with no focus go there. */
 export const lastPanel = ref<PanelKind>('coordinator')
@@ -26,9 +28,17 @@ export const sheetOpen = ref(false)
 
 /** Make a conversation reachable from the keyboard while it is on screen. */
 export function registerPanel(kind: PanelKind, handle: PanelHandle): () => void {
+  // A thread shown full screen beside an artifact is in its tab too: the one shown last
+  // takes the keys, and the other gets them back when it goes.
+  const earlier = panels.get(kind)
   panels.set(kind, handle)
+  shown.add(handle)
   return () => {
-    if (panels.get(kind) === handle) panels.delete(kind)
+    if (panels.get(kind) === handle) {
+      if (earlier && shown.has(earlier)) panels.set(kind, earlier)
+      else panels.delete(kind)
+    }
+    shown.delete(handle)
   }
 }
 

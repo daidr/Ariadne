@@ -1,6 +1,20 @@
 import type { ConversationView, MessageView, NoticeView, TodoView } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { backMain, merge, openMain, partsOf, state, type ConversationState } from './store'
+import {
+  backMain,
+  closeFull,
+  closeView,
+  fullScreenPane,
+  merge,
+  openedViewOf,
+  openMain,
+  openView,
+  partsOf,
+  setSide,
+  state,
+  type ConversationState,
+} from './store'
+import * as side from './side/layout'
 
 const conversation = { id: 'crd_1' } as ConversationView
 const todo = { items: [] } as unknown as TodoView
@@ -82,7 +96,7 @@ describe('back in the middle column', () => {
   test('returns to where a view was opened from, then to the coordinator', () => {
     openMain({ kind: 'conversation' })
     openMain({ kind: 'artifacts' })
-    openMain({ kind: 'artifact', id: 'art_1' })
+    openMain({ kind: 'trace', conversationId: 'c_1' })
     backMain()
     expect(state.main).toEqual({ kind: 'artifacts' })
     backMain()
@@ -91,21 +105,71 @@ describe('back in the middle column', () => {
     expect(state.main).toEqual({ kind: 'conversation' })
   })
 
-  test('an artifact opened from a message goes back to the message', () => {
-    openMain({ kind: 'conversation' })
-    openMain({ kind: 'artifact', id: 'art_1' })
-    backMain()
-    expect(state.main).toEqual({ kind: 'conversation' })
-  })
-
   test('a view opened again is not visited twice on the way back', () => {
     openMain({ kind: 'conversation' })
     openMain({ kind: 'artifacts' })
-    openMain({ kind: 'artifact', id: 'art_1' })
+    openMain({ kind: 'trace', conversationId: 'c_1' })
     openMain({ kind: 'artifacts' })
     backMain()
-    expect(state.main).toEqual({ kind: 'artifact', id: 'art_1' })
+    expect(state.main).toEqual({ kind: 'trace', conversationId: 'c_1' })
     backMain()
     expect(state.main).toEqual({ kind: 'conversation' })
+  })
+})
+
+const tabs = () => side.groupsOf(state.side.root).flatMap(side.tabsOf)
+
+describe('artifacts and changes', () => {
+  test('open in a tab on the right side, beside the coordinator', async () => {
+    setSide(side.defaultLayout())
+    await openView({ kind: 'artifact', id: 'art_1' })
+    expect(tabs()).toContain('artifact:art_1')
+    expect(state.main).toEqual({ kind: 'conversation' })
+    expect(state.full).toBeNull()
+  })
+
+  test('opened from a thread, show full screen with the thread beside them', async () => {
+    setSide(side.defaultLayout())
+    await openView({ kind: 'artifact', id: 'art_1' }, { from: 'th_1' })
+    expect(state.full).toEqual({
+      view: { kind: 'artifact', id: 'art_1' },
+      threadId: 'th_1',
+      fromSide: false,
+    })
+    expect(tabs()).not.toContain('artifact:art_1')
+    closeFull()
+    expect(state.full).toBeNull()
+    expect(tabs()).not.toContain('artifact:art_1')
+  })
+
+  test('a tab taken full screen goes back to the side when closed', async () => {
+    state.currentId = 'p_1'
+    setSide(side.defaultLayout())
+    const turn = {
+      turnId: 'tu_1',
+      from: 'a',
+      to: 'b',
+      files: [],
+      total: { files: 0, added: 0, removed: 0 },
+    }
+    await openView({ kind: 'changes', threadId: 'th_1', turn })
+    fullScreenPane('turn:th_1:tu_1')
+    expect(tabs()).not.toContain('turn:th_1:tu_1')
+    // The changes come with their thread beside them.
+    expect(state.full?.threadId).toBe('th_1')
+    closeFull()
+    expect(tabs()).toContain('turn:th_1:tu_1')
+    expect(openedViewOf('turn:th_1:tu_1')).toEqual({ kind: 'changes', threadId: 'th_1', turn })
+    state.currentId = null
+  })
+
+  test('a merged branch closes, wherever it is shown', async () => {
+    setSide(side.defaultLayout())
+    await openView({ kind: 'changes', threadId: 'th_1' })
+    closeView({ kind: 'changes', threadId: 'th_1' })
+    expect(tabs()).not.toContain('changes:th_1')
+    await openView({ kind: 'changes', threadId: 'th_1' }, { full: true })
+    closeView({ kind: 'changes', threadId: 'th_1' })
+    expect(state.full).toBeNull()
   })
 })

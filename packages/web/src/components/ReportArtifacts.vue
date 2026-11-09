@@ -2,7 +2,9 @@
 import { DouLink } from 'dou-ui'
 import type { ThreadArtifact } from '@ariadne/core'
 import { kindIcon } from '../artifacts/kinds'
-import { openMain } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /** The artifacts a thread's report points to, opened by their titles. */
 defineProps<{ artifacts: ThreadArtifact[] }>()
@@ -16,7 +18,7 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
       :title="artifact.title"
       class="report-artifact"
       underline="none"
-      @click="openMain({ kind: 'artifact', id: artifact.id })"
+      @click="openView({ kind: 'artifact', id: artifact.id })"
     >
       <template #leading><component :is="kindIcon[artifact.kind]" /></template>
       {{ artifact.title }}

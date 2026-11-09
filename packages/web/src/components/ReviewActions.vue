@@ -4,7 +4,10 @@ import { CheckIcon, GitMergeIcon, PencilIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { writeToThread } from '../shortcuts'
-import { openMain, reviewThread, state } from '../store'
+import { reviewThread, state } from '../store'
+import { useOpenView } from '../opened-from'
+
+const openView = useOpenView()
 
 /**
  * The two ways out of a review: the user is through with it, or wants more done, which
@@ -21,7 +24,7 @@ const mergeable = computed(() => {
   return !!workspace?.branch && !!workspace.base && !workspace.removed && !thread?.pullRequest
 })
 function done() {
-  if (mergeable.value) openMain({ kind: 'changes', threadId: props.threadId })
+  if (mergeable.value) openView({ kind: 'changes', threadId: props.threadId })
   else void reviewThread(props.threadId)
 }
 </script>

@@ -13,6 +13,7 @@ import {
 } from 'dou-ui'
 import {
   BrainIcon,
+  FileDiffIcon,
   LayoutColumnsIcon,
   LayoutRowsIcon,
   MaximizeIcon,
@@ -28,13 +29,23 @@ import { t } from '../i18n'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
 import ConversationPanel from '../components/ConversationPanel.vue'
+import OpenedView from '../full/OpenedView.vue'
+import { kindIcon } from '../artifacts/kinds'
 import MemoryList from '../components/MemoryList.vue'
 import StageIcon from '../components/StageIcon.vue'
 import ThreadList from '../components/ThreadList.vue'
 import { threadSort } from '../components/thread-list'
 import type { ThreadSort } from '../stage'
 import { lastPanel } from '../shortcuts'
-import { activeThreadId, closePane, openMain, setSide, splitPane, state } from '../store'
+import {
+  activeThreadId,
+  closePane,
+  openedViewOf,
+  openMain,
+  setSide,
+  splitPane,
+  state,
+} from '../store'
 import { sideDock } from './dock'
 import * as side from './layout'
 import type { PaneKey } from './layout'
@@ -60,10 +71,35 @@ const threadAt = (key: PaneKey) => {
   const id = side.threadOf(key)
   return id ? (threadById.value.get(id) ?? null) : null
 }
-const labelOf = (key: PaneKey) => lists[key]?.label() ?? threadAt(key)?.title ?? ''
+const artifactById = computed(() => new Map(state.artifacts.map((a) => [a.id, a])))
+
+/** What an artifact or changes tab is called, with its icon. */
+function viewLabel(key: PaneKey): { label: string; icon: Component } | null {
+  const view = side.viewOf(key)
+  if (!view) return null
+  if (view.kind === 'artifact') {
+    const artifact = artifactById.value.get(view.id)
+    return { label: artifact?.title ?? '', icon: kindIcon[artifact?.kind ?? 'document'] }
+  }
+  const title = threadById.value.get(view.threadId)?.title ?? ''
+  const label =
+    view.kind === 'turn' ? `${title} · ${t('changes.turn')}` : t('view.changesOf', { title })
+  return { label, icon: FileDiffIcon }
+}
+
+const labelOf = (key: PaneKey) =>
+  lists[key]?.label() ?? threadAt(key)?.title ?? viewLabel(key)?.label ?? ''
+
+/** The artifacts and changes open in tabs. */
+const openViews = computed(() =>
+  side
+    .groupsOf(state.side.root)
+    .flatMap(side.tabsOf)
+    .filter((key) => side.viewOf(key)),
+)
 
 // Every thread of the project is listed, open or not, so one can be dragged in from the
-// thread list. Lists never close; threads do.
+// thread list. Lists never close; threads, artifacts and changes do.
 const panels = computed<DockPanel[]>(() => [
   ...side.LISTS.map((key) => ({ value: key, label: lists[key]!.label(), icon: lists[key]!.icon })),
   ...(state.detail?.threads ?? []).map((thread) => ({
@@ -71,6 +107,7 @@ const panels = computed<DockPanel[]>(() => [
     label: thread.title,
     closable: true,
   })),
+  ...openViews.value.map((key) => ({ value: key, ...viewLabel(key)!, closable: true })),
 ])
 
 const min = { width: `${MIN_WIDTH}px`, height: `${MIN_HEIGHT}px` } as const
@@ -125,13 +162,21 @@ function bring(group: DockGroup, key: PaneKey) {
         <template v-else>{{ labelOf(value as PaneKey) }}</template>
       </template>
       <template #default="{ value }">
-        <div v-if="!side.threadOf(value as PaneKey)" class="pane-list">
+        <div v-if="side.isList(value as PaneKey)" class="pane-list">
           <PlanPanel v-if="value === 'plan'" />
           <ThreadList v-else-if="value === 'threads'" />
           <ArtifactList v-else-if="value === 'artifacts'" />
           <MemoryList v-else-if="value === 'memory'" />
         </div>
-        <ConversationPanel v-else :thread-id="side.threadOf(value as PaneKey)!" />
+        <ConversationPanel
+          v-else-if="side.threadOf(value as PaneKey)"
+          :thread-id="side.threadOf(value as PaneKey)!"
+        />
+        <OpenedView
+          v-else-if="openedViewOf(value as PaneKey)"
+          :view="openedViewOf(value as PaneKey)!"
+          place="side"
+        />
       </template>
       <template #extra="{ group, active }">
         <DouTooltip
@@ -217,7 +262,7 @@ function bring(group: DockGroup, key: PaneKey) {
               </DouDropdownItem>
             </DouDropdownSub>
             <DouDropdownItem
-              v-if="group.tabs.some((key) => key !== active && side.threadOf(key as PaneKey))"
+              v-if="group.tabs.some((key) => key !== active && !side.isList(key as PaneKey))"
               value="close-others"
               divided
               @click="setSide(side.closeOthers(state.side, active as PaneKey))"

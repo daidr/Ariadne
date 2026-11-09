@@ -15,8 +15,19 @@ import {
   type DockNode,
 } from 'dou-ui'
 
-/** What a tab shows: one of the project's lists, or a thread's conversation. */
-export type PaneKey = 'plan' | 'threads' | 'artifacts' | 'memory' | `thread:${string}`
+/**
+ * What a tab shows: one of the project's lists, a thread's conversation, an artifact, a
+ * thread's branch changes, or what one turn of a thread changed.
+ */
+export type PaneKey =
+  | 'plan'
+  | 'threads'
+  | 'artifacts'
+  | 'memory'
+  | `thread:${string}`
+  | `artifact:${string}`
+  | `changes:${string}`
+  | `turn:${string}`
 
 export const LISTS = ['plan', 'threads', 'artifacts', 'memory'] as const satisfies PaneKey[]
 
@@ -33,6 +44,29 @@ export const threadKey = (id: string): PaneKey => `thread:${id}`
 /** The thread a tab shows, or `null` for a list. */
 export const threadOf = (key: PaneKey): string | null =>
   key.startsWith('thread:') ? key.slice('thread:'.length) : null
+
+export const artifactKey = (id: string): PaneKey => `artifact:${id}`
+export const changesKey = (threadId: string): PaneKey => `changes:${threadId}`
+export const turnKey = (threadId: string, turnId: string): PaneKey => `turn:${threadId}:${turnId}`
+
+/** What a tab other than a list or a thread shows. */
+export type PaneView =
+  | { kind: 'artifact'; id: string }
+  | { kind: 'changes'; threadId: string }
+  | { kind: 'turn'; threadId: string; turnId: string }
+
+export function viewOf(key: PaneKey): PaneView | null {
+  if (key.startsWith('artifact:')) return { kind: 'artifact', id: key.slice('artifact:'.length) }
+  if (key.startsWith('changes:')) return { kind: 'changes', threadId: key.slice('changes:'.length) }
+  if (key.startsWith('turn:')) {
+    const [threadId = '', turnId = ''] = key.slice('turn:'.length).split(':')
+    return { kind: 'turn', threadId, turnId }
+  }
+  return null
+}
+
+/** Lists never close; everything else does. */
+export const isList = (key: PaneKey) => (LISTS as readonly string[]).includes(key)
 
 /** The tabs of a group; the layout only ever holds pane keys. */
 export const tabsOf = (group: DockGroup) => group.tabs as PaneKey[]
@@ -129,15 +163,15 @@ export function close(layout: SideLayout, key: PaneKey): SideLayout {
 }
 
 /**
- * Close the threads of the group but `key`. The lists stay: they never close, so the
- * project's plan, threads, artifacts and memory are always somewhere on the side.
+ * Close the other tabs of the group but its lists: they never close, so the project's
+ * plan, threads, artifacts and memory are always somewhere on the side.
  */
 export function closeOthers(layout: SideLayout, key: PaneKey): SideLayout {
   const target = groupWith(layout, key)
   if (!target) return layout
   let root = selectDockTab(layout.root, key)
   for (const other of tabsOf(target)) {
-    if (other !== key && threadOf(other)) root = removeDockTab(root, other)
+    if (other !== key && !isList(other)) root = removeDockTab(root, other)
   }
   return withRoot(layout, root, target.id)
 }
@@ -165,9 +199,10 @@ export function prune(layout: SideLayout, keep: (key: PaneKey) => boolean): Side
   return next
 }
 
+// A turn's changes are not kept: what it compares is only known while the page is open.
 const isKey = (value: unknown): value is PaneKey =>
   typeof value === 'string' &&
-  ((LISTS as readonly string[]).includes(value) || /^thread:.+/.test(value))
+  ((LISTS as readonly string[]).includes(value) || /^(thread|artifact|changes):.+/.test(value))
 
 function parseNode(value: unknown, seen: Set<string>, ids: Set<string>): DockNode | null {
   if (!value || typeof value !== 'object') return null
