@@ -4,7 +4,7 @@ import { DouButton, DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
-import { groupOf, sortThreads, threadGroups, type ThreadGroup } from '../stage'
+import { groupOfThread, sortThreads, threadGroups, type ThreadGroup } from '../stage'
 import { activeThreadId, openThread, state } from '../store'
 import { dragThread } from '../side/dock'
 import ReviewActions from './ReviewActions.vue'
@@ -30,7 +30,7 @@ const groups = computed(() =>
     .map((group) => ({
       group,
       threads: sortThreads(
-        threads.value.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
+        threads.value.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
       ),
     }))
     .filter((entry) => entry.threads.length),

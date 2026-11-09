@@ -1,7 +1,7 @@
 import type { ThreadView } from '@ariadne/core'
 import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
-import { groupOf, sortThreads, threadGroups } from './stage'
+import { groupOfThread, sortThreads, threadGroups } from './stage'
 import { activeThreadId, openThread, state } from './store'
 
 /** A conversation on screen: the coordinator's on the left, or a thread's by its id. */
@@ -78,7 +78,7 @@ export function threadOrder(): string[] {
   const nested = (thread: ThreadView) => !!thread.reviewOf && ids.has(thread.reviewOf)
   return threadGroups.flatMap((group) =>
     sortThreads(
-      threads.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
+      threads.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
     ).flatMap((thread) => {
       const reviewer = thread.review?.reviewerId
       return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]

@@ -20,7 +20,7 @@ export { repoTools, summarizeChecks, syncThreadPullRequest } from './repo-tools'
 export { RepoWatcher } from './repo-watcher'
 export { Autopilot, type AutopilotWorkspaces } from './autopilot'
 export { WorktreeJanitor } from './worktree-janitor'
-export { listWorktrees, mergeThread, threadChanges, threadFile } from './branch-merge'
+export { listWorktrees, mergeThread, threadChanges, threadFile, undoMerge } from './branch-merge'
 export { MENTION_FILES, mentionFiles, mentionRank, walkFiles } from './mention-files'
 export { turnChanges } from './turn-changes'
 export {
