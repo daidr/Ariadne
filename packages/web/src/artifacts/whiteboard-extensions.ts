@@ -1,9 +1,13 @@
 import { defineFlowExtension, flowKit } from '@dou-ui/flow'
 import { whiteboardKit, type WhiteboardUpload } from '@dou-ui/flow/whiteboard'
 import { optionNode } from './option-node'
+import { pendingNode } from './pending-node'
 
-/** Options the agent lays out for the user to compare and pick. */
-const options = defineFlowExtension({ name: 'ariadne-options', nodeTypes: [optionNode] })
+/** Options the agent lays out for the user to compare and pick, and its placeholders. */
+const options = defineFlowExtension({
+  name: 'ariadne-options',
+  nodeTypes: [optionNode, pendingNode],
+})
 
 /**
  * The editor parts a whiteboard is drawn with. Every node type registered here must pass

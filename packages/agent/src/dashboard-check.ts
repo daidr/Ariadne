@@ -107,6 +107,7 @@ const SCHEMAS: Record<string, Record<string, Check>> = {
     filter: text,
   },
   pivot: { source: text, path, config: pivotConfig, filter: flag },
+  pending: { text },
 }
 
 /** What makes a widget's props unreadable for its type; nothing when they are fine. */
@@ -193,7 +194,7 @@ export function dashboardProblems(content: DashboardContent): string[] {
       }
       continue
     }
-    if (widget.type === 'text') continue
+    if (widget.type === 'text' || widget.type === 'pending') continue
     const rows = valueAt(data, props.path as string | undefined)
     if (!Array.isArray(rows)) {
       const where = props.path

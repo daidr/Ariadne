@@ -122,6 +122,7 @@ export const zhCN = {
   'view.changesOf': '{title} 的改动',
   'artifact.by.user': '你',
   'artifact.by.coordinator': '协调器',
+  'artifact.pending': '待补充',
   'artifact.updated': '{who} · {time}',
   'project.source.title': '项目来源',
   'project.source.kind': '类型',

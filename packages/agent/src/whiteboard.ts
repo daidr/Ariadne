@@ -10,7 +10,8 @@ import { fitText, labelWidth, layoutBoard, rankGap, type Direction } from './whi
  */
 
 const SHAPES = ['rect', 'ellipse', 'diamond'] as const
-const KINDS = [...SHAPES, 'sticky', 'text'] as const
+/** `pending` is a placeholder: what will be at a place, before the item itself is there. */
+const KINDS = [...SHAPES, 'sticky', 'text', 'pending'] as const
 type ItemKind = (typeof KINDS)[number]
 const TONES = ['neutral', 'primary', 'success', 'warning', 'danger']
 const ROUTES = ['straight', 'elbow', 'curve']
@@ -23,6 +24,7 @@ const SIZE: Record<ItemKind, { width: number; height: number }> = {
   diamond: { width: 160, height: 110 },
   sticky: { width: 160, height: 160 },
   text: { width: 200, height: 40 },
+  pending: { width: 160, height: 90 },
 }
 const GAP_Y = 40
 
@@ -82,7 +84,7 @@ function kindOf(node: WhiteboardNode): ItemKind | FixedKind {
     const shape = node.data?.shape
     return SHAPES.includes(shape as never) ? (shape as ItemKind) : 'rect'
   }
-  if (node.type === 'sticky' || node.type === 'text') return node.type
+  if (node.type === 'sticky' || node.type === 'text' || node.type === 'pending') return node.type
   if (node.type === 'ink') return 'drawing'
   return node.type === 'image' ? 'image' : 'node'
 }
@@ -144,7 +146,7 @@ function applyItem(item: Record<string, unknown>, existing?: WhiteboardNode): Wh
   if (label !== undefined) data.text = label
   const tone = oneOf(item, 'tone', TONES)
   if (tone !== undefined) data.tone = tone
-  if (kind === 'text') delete data.tone
+  if (kind === 'text' || kind === 'pending') delete data.tone
   const type = SHAPES.includes(kind as never) ? 'shape' : kind
   const node: WhiteboardNode = {
     ...existing,

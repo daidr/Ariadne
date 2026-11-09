@@ -20,6 +20,7 @@ import { api } from '../api'
 import { report } from '../store'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { locale, t } from '../i18n'
+import { pendingWidget } from './pending-widget'
 
 /**
  * A dashboard snapshot. The data was copied in when it was taken, so each source just
@@ -33,7 +34,10 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ draft: [content: string | null] }>()
 
-const widgets = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
+const own = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
+// An agent's placeholders are shown, not offered among the widgets to add.
+const widgets = [...own, pendingWidget()]
+const offered = own.map((widget) => widget.type)
 const snapshot = shallowRef<DashboardContent>({
   version: 1,
   dashboard: { version: 1, widgets: [] },
@@ -129,6 +133,7 @@ const takenAt = computed(() =>
       <DouDashboardPalette
         v-if="editing"
         :for="dashboard"
+        :types="offered"
         direction="horizontal"
         class="dashboard-palette"
       />

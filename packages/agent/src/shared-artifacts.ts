@@ -4,7 +4,7 @@ import * as encoding from 'lib0/encoding'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
-import { bridges, sharedKinds, type SharedKind } from './shared-content'
+import { bridges, sharedKinds, type SharedEvent, type SharedKind } from './shared-content'
 
 /**
  * Documents and whiteboards people and agents edit at the same time. Each one open
@@ -26,6 +26,42 @@ export interface SharedSocket {
 /** Who made a change: the user on a page, or an agent by its conversation. */
 type Origin = { user: SharedSocket } | { agent: string } | 'load'
 
+/** How the others see an agent that is writing: its name at its cursor or outline. */
+export interface Writer {
+  name: string
+}
+
+/**
+ * An agent writing an artifact piece by piece, while the model is still producing the
+ * change: each `write` gives the content as far as it has got, and the page shows it land
+ * with the agent's cursor there. It ends when the agent saves the artifact (`write` of the
+ * room, which takes it from here), or with `cancel`, which takes back all it wrote.
+ */
+export interface LiveWrite {
+  /**
+   * The artifact's newest version when the writing began, and what it holds: what each
+   * `write` is worked out from.
+   */
+  readonly version: number
+  readonly base: string
+  write(next: string): void
+  cancel(): void
+}
+
+interface Live extends LiveWrite {
+  by: string
+  origin: Origin
+  /** What was written last: the room goes from this to the next. */
+  last: string
+  /** Takes the writing back, leaving what others did meanwhile. */
+  undo: Y.UndoManager
+}
+
+/** The color of an agent's cursor and outlines: the theme's own, in either mode. */
+const WRITER_COLOR = 'var(--dou-color-primary)'
+/** How long the cursor stays where the agent wrote last. */
+const LINGER_MS = 2500
+
 interface Room {
   artifactId: string
   projectId: string
@@ -40,6 +76,10 @@ interface Room {
   version: number
   stateTimer: ReturnType<typeof setTimeout> | null
   versionTimer: ReturnType<typeof setTimeout> | null
+  /** The agent writing it piece by piece now. */
+  live: Live | null
+  /** Takes the agent's cursor away a moment after it wrote last. */
+  presenceTimer: ReturnType<typeof setTimeout> | null
 }
 
 export interface SharedArtifactsOptions {
@@ -129,15 +169,21 @@ export class SharedArtifacts {
     artifactId: string,
     by: string,
     next: string | null,
-    input: { reason: string; title?: string; base?: string },
+    input: { reason: string; title?: string; base?: string; writer?: Writer },
   ): ArtifactView {
-    if (by !== 'user') for (const listener of this.writeListeners) listener(artifactId)
     const room = this.room(artifactId)
-    this.saveVersion(room)
+    // What the agent wrote piece by piece is its own already: the rest goes on top.
+    const live = room.live?.by === by ? room.live : null
+    if (by !== 'user' && !live) for (const listener of this.writeListeners) listener(artifactId)
+    if (!live || room.pending !== by) this.saveVersion(room)
     // `null`: only the title changes.
     if (next !== null) {
-      room.doc.transact(() => this.bridge(room).update(room.doc, next, input.base), { agent: by })
+      const base = live ? live.last : input.base
+      this.change(room, { agent: by }, input.writer, () =>
+        this.bridge(room).update(room.doc, next, base),
+      )
     }
+    if (live) this.endLive(room)
     const saved = this.saveVersion(room, {
       reason: input.reason,
       title: input.title,
@@ -146,6 +192,61 @@ export class SharedArtifacts {
     // Nobody has it open: the room was only for this write.
     if (!room.sockets.size) this.close(room)
     return saved
+  }
+
+  /**
+   * An agent starts writing the artifact piece by piece. `null` when another writing of it
+   * is going on, or nobody has it open to watch.
+   */
+  live(artifactId: string, by: string, writer: Writer): LiveWrite | null {
+    const room = this.rooms.get(artifactId)
+    if (!room?.sockets.size || room.live) return null
+    for (const listener of this.writeListeners) listener(artifactId)
+    // What the user was changing is theirs: saved before the agent's first piece.
+    this.saveVersion(room)
+    const origin: Origin = { agent: by }
+    // The version as stored, which is what the agent read; the room holds the same.
+    const { content: base, version } = this.app.getArtifact(artifactId)
+    const live: Live = {
+      by,
+      origin,
+      version,
+      base,
+      last: base,
+      undo: new Y.UndoManager(this.bridge(room).parts(room.doc), {
+        trackedOrigins: new Set([origin]),
+        // One step, however long the writing takes.
+        captureTimeout: Number.MAX_SAFE_INTEGER,
+      }),
+      write: (next) => {
+        if (room.live !== live || next === live.last) return
+        try {
+          this.change(room, origin, writer, () =>
+            this.bridge(room).update(room.doc, next, live.last),
+          )
+          live.last = next
+        } catch {
+          // A piece that does not read yet (half a table, a connector to nowhere) waits.
+        }
+      },
+      cancel: () => {
+        if (room.live !== live) return
+        while (live.undo.undoStack.length) live.undo.undo()
+        // Nothing of the agent's is left to save.
+        if (room.pending === by) room.pending = null
+        this.endLive(room)
+        this.setPresence(room, null)
+        if (!room.sockets.size) this.close(room)
+      },
+    }
+    room.live = live
+    return live
+  }
+
+  /** What the agent wrote into the artifact piece by piece and has not saved yet, if any. */
+  writing(artifactId: string, by: string): LiveWrite | null {
+    const live = this.rooms.get(artifactId)?.live
+    return live?.by === by ? live : null
   }
 
   /** Save what waits as a version now, e.g. before the server stops. */
@@ -164,6 +265,52 @@ export class SharedArtifacts {
       room.doc.destroy()
     }
     this.rooms.clear()
+  }
+
+  // ---- writing ----
+
+  /**
+   * Change the room as an agent, and show where: the parts it touched give the cursor or
+   * outline the others see under the writer's name, for a moment after the last change.
+   */
+  private change(room: Room, origin: Origin, writer: Writer | undefined, run: () => void) {
+    const bridge = this.bridge(room)
+    // Read as the change is made: Yjs only tells what changed while it does.
+    let presence: Record<string, unknown> | null = null
+    const watch = (events: SharedEvent[]) => {
+      presence = bridge.presence(room.doc, events) ?? presence
+    }
+    const parts = writer && room.sockets.size ? bridge.parts(room.doc) : []
+    for (const part of parts) part.observeDeep(watch)
+    try {
+      room.doc.transact(run, origin)
+    } finally {
+      for (const part of parts) part.unobserveDeep(watch)
+    }
+    if (writer && presence) {
+      this.setPresence(room, { user: { ...writer, color: WRITER_COLOR }, ...(presence as object) })
+    }
+  }
+
+  private setPresence(room: Room, state: Record<string, unknown> | null) {
+    if (room.presenceTimer) clearTimeout(room.presenceTimer)
+    room.presenceTimer = null
+    room.awareness.setLocalState(state)
+    if (!state) return
+    room.presenceTimer = setTimeout(() => {
+      room.presenceTimer = null
+      // While the writing goes on the cursor stays, however long the model thinks.
+      if (!room.live) room.awareness.setLocalState(null)
+    }, LINGER_MS)
+  }
+
+  private endLive(room: Room) {
+    const live = room.live
+    if (!live) return
+    room.live = null
+    live.undo.destroy()
+    // The cursor goes a moment after, as after any write.
+    if (room.awareness.getLocalState()) this.setPresence(room, room.awareness.getLocalState())
   }
 
   // ---- rooms ----
@@ -196,6 +343,8 @@ export class SharedArtifacts {
       version: artifact.version,
       stateTimer: null,
       versionTimer: null,
+      live: null,
+      presenceTimer: null,
     }
     // The server is not someone people edit with.
     room.awareness.setLocalState(null)
@@ -250,9 +399,12 @@ export class SharedArtifacts {
 
   /** What waits is saved, and the room closes. */
   private close(room: Room) {
+    // Left half written with nobody there to watch: the agent's save writes it whole.
+    if (room.live) return
     this.saveVersion(room)
     this.saveState(room)
     if (room.stateTimer) clearTimeout(room.stateTimer)
+    if (room.presenceTimer) clearTimeout(room.presenceTimer)
     room.awareness.destroy()
     room.doc.destroy()
     this.rooms.delete(room.artifactId)
@@ -268,16 +420,22 @@ export class SharedArtifacts {
     const from = typeof origin === 'object' && 'user' in origin ? origin.user : null
     for (const socket of room.sockets.keys()) if (socket !== from) socket.send(frame)
     if (origin === 'load') return
-    const author = from
-      ? 'user'
-      : typeof origin === 'object' && 'agent' in origin
-        ? origin.agent
-        : 'user'
+    // Writing taken back is the agent's too.
+    const live =
+      room.live && (origin === room.live.origin || (origin as unknown) === room.live.undo)
+    const author = live
+      ? room.live!.by
+      : from
+        ? 'user'
+        : typeof origin === 'object' && 'agent' in origin
+          ? origin.agent
+          : 'user'
     // Another author's changes start a version of their own.
     if (room.pending && room.pending !== author) this.saveVersion(room)
     room.pending = author
     this.later(room, 'stateTimer', this.stateDelayMs, () => this.saveState(room))
-    this.later(room, 'versionTimer', this.versionDelayMs, () => this.saveVersion(room))
+    // What an agent is still writing is saved when it is whole.
+    if (!live) this.later(room, 'versionTimer', this.versionDelayMs, () => this.saveVersion(room))
     if (author === 'user') {
       for (const listener of this.userListeners) {
         listener({ artifactId: room.artifactId, projectId: room.projectId })

@@ -1,5 +1,7 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
-import { SharedArtifacts } from './shared-artifacts'
+import { SharedArtifacts, type LiveWrite, type Writer } from './shared-artifacts'
+import { applyDocumentEdits, editsSoFar, rewriteSoFar } from './document-writing'
+import { isOpen } from './partial-json'
 import { anchorWhere } from './artifact-feedback'
 import { OPTION_SCHEMA, placeOptions } from './whiteboard-options'
 import { plainText } from './markdown-code'
@@ -19,6 +21,7 @@ import {
   optionalStr,
   str,
   ToolInputError,
+  type LiveCall,
   type Tool,
   type ToolContext,
 } from './tool-helpers'
@@ -80,8 +83,77 @@ function sharedIn(
 function toChange(ctx: ToolContext, artifactId: string, kind?: ArtifactKind): ArtifactView {
   const artifact = ownArtifact(ctx, artifactId, kind)
   if (!sharedIn(ctx, artifact)) return artifact
+  // Shown while the call was written: the change is worked out from where that began.
+  const writing = ctx.shared.writing(artifactId, ctx.conversationId)
+  if (writing) return { ...artifact, content: writing.base, version: writing.version }
   ctx.shared.save(artifactId)
   return ctx.app.getArtifact(artifactId)
+}
+
+/** The agent's name at its cursor, as the artifact's versions name it. */
+function writerOf(ctx: ToolContext): Writer {
+  if (ctx.role === 'coordinator') {
+    return { name: createTranslator(ctx.locale)('artifact.by.coordinator') }
+  }
+  try {
+    return { name: ctx.app.getThread(ctx.conversationId).title }
+  } catch {
+    return { name: createTranslator(ctx.locale)('artifact.by.coordinator') }
+  }
+}
+
+/**
+ * Run a call that changes an artifact; when it fails, what was shown of it while it was
+ * written is taken back at once.
+ */
+async function settled<T>(ctx: ToolContext, artifactId: string, run: () => T | Promise<T>) {
+  try {
+    return await run()
+  } catch (error) {
+    ctx.shared?.writing(artifactId, ctx.conversationId)?.cancel()
+    throw error
+  }
+}
+
+/**
+ * Shows a call that changes a document or whiteboard while it is written: once the
+ * artifact is named and the change has begun, `next` gives the content as far as the
+ * arguments go (`null` or a throw: nothing to show for this piece).
+ */
+function showWriting(
+  ctx: ToolContext,
+  kind: ArtifactKind,
+  begun: (args: Record<string, unknown>) => boolean,
+  next: (
+    args: Record<string, unknown>,
+    open: Parameters<LiveCall['input']>[1],
+    base: string,
+  ) => string | null,
+): LiveCall {
+  // `null`: it cannot be shown (nobody watching, another writing going on).
+  let writing: LiveWrite | null | undefined
+  return {
+    input(args, open) {
+      if (writing === null) return
+      if (!writing) {
+        const id = args.artifactId
+        if (typeof id !== 'string' || isOpen(open, 'artifactId') || !begun(args)) return
+        const artifact = ownArtifact(ctx, id, kind)
+        writing =
+          (sharedIn(ctx, artifact) && ctx.shared.live(id, ctx.conversationId, writerOf(ctx))) ||
+          null
+        if (!writing) return
+      }
+      let content: string | null = null
+      try {
+        content = next(args, open, writing.base)
+      } catch {
+        // A piece that does not hold together yet: the next one may.
+      }
+      if (content !== null) writing.write(content)
+    },
+    cancel: () => writing?.cancel(),
+  }
 }
 
 /**
@@ -105,12 +177,19 @@ function save(
       ...(input.baseVersion !== undefined ? { baseVersion: input.baseVersion } : {}),
     })
   }
+  // Shown while written from the newest version: a change made from an older one is not
+  // what was shown, so that is taken back and the change merged in as usual.
+  const writing = ctx.shared.writing(artifact.id, ctx.conversationId)
+  if (writing && input.baseVersion !== undefined && input.baseVersion !== writing.version) {
+    writing.cancel()
+  }
   const base =
     input.baseVersion === undefined
       ? undefined
       : ctx.app.getArtifact(artifact.id, input.baseVersion).content
   return ctx.shared.write(artifact.id, ctx.conversationId, content, {
     reason: input.reason,
+    writer: writerOf(ctx),
     ...title,
     ...(base === undefined ? {} : { base }),
   })
@@ -123,11 +202,13 @@ const NODE_ID = {
 
 // ---- documents ----
 
+const PENDING_HINT =
+  'A part you have not written yet can stand as a placeholder, on a line of its own: <pending>what will be here, in a few words</pending>. The user sees it in grey, as an outline of what is coming.'
+
 const createDocument: Tool = {
   spec: {
     name: 'create_document',
-    description:
-      'Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; say in one line that it exists.',
+    description: `Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; say in one line that it exists. For a long document, create it as its outline first (the title, the headings you are sure of, and a placeholder for each part), then write the parts one at a time with update_document edits: the user watches it fill in instead of waiting for all of it. ${PENDING_HINT}`,
     parameters: {
       type: 'object',
       properties: {
@@ -153,29 +234,57 @@ const createDocument: Tool = {
 const updateDocument: Tool = {
   spec: {
     name: 'update_document',
-    description:
-      'Save a new version of a document with its full Markdown content. The user may be editing it at the same time: baseVersion is the version you read, and only what you changed from it is written, so their edits since stay. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text.',
+    description: `Change a document. With edits, replace parts of it: each "old" is text of the document as read_artifact gives it (a placeholder line, a paragraph, a few lines; it must occur once) and "new" is what goes there; use this to write a part, fill a placeholder or fix a passage. With content, save its full Markdown again, for a change all over; baseVersion is then the version you read, and only what you changed from it is written. Either way the user may be editing it at the same time and their edits stay, and they see your change land as you write it. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text. ${PENDING_HINT}`,
     parameters: {
       type: 'object',
       properties: {
         artifactId: { type: 'string' },
+        baseVersion: { type: 'integer', description: 'With content: the version you read.' },
+        edits: {
+          type: 'array',
+          description: 'Replacements, applied in order; all or none.',
+          items: {
+            type: 'object',
+            properties: { old: { type: 'string' }, new: { type: 'string' } },
+            required: ['old', 'new'],
+          },
+        },
         content: { type: 'string', description: 'The whole document, in Markdown.' },
         reason: { type: 'string', description: 'What changed, in one line.' },
         title: { type: 'string' },
-        baseVersion: { type: 'integer' },
       },
-      required: ['artifactId', 'content', 'reason', 'baseVersion'],
+      required: ['artifactId', 'reason'],
     },
   },
   run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    const artifact = save(ctx, ownArtifact(ctx, artifactId, 'document'), str(args, 'content'), {
-      reason: str(args, 'reason'),
-      title: optionalStr(args, 'title'),
-      baseVersion: baseVersionOf(args),
+    return settled(ctx, artifactId, () => {
+      const edits = args.edits !== undefined && args.edits !== null
+      if (edits === (typeof args.content === 'string')) {
+        throw new ToolInputError('Give "edits" or "content", one of them.')
+      }
+      const now = edits
+        ? toChange(ctx, artifactId, 'document')
+        : ownArtifact(ctx, artifactId, 'document')
+      const content = edits ? applyDocumentEdits(now.content, args.edits) : str(args, 'content')
+      const artifact = save(ctx, now, content, {
+        reason: str(args, 'reason'),
+        title: optionalStr(args, 'title'),
+        baseVersion: edits ? now.version : baseVersionOf(args),
+      })
+      return json({ artifactId, version: artifact.version })
     })
-    return json({ artifactId, version: artifact.version })
   },
+  live: (ctx) =>
+    showWriting(
+      ctx,
+      'document',
+      (args) => args.edits !== undefined || args.content !== undefined,
+      (args, open, base) => {
+        if (typeof args.content !== 'string') return editsSoFar(base, args.edits, open)
+        return isOpen(open, 'content') ? rewriteSoFar(base, args.content) : args.content
+      },
+    ),
 }
 
 // ---- whiteboards ----
@@ -184,7 +293,12 @@ const NEW_ITEM_SCHEMA = {
   type: 'object',
   properties: {
     id: { type: 'string', description: 'Your own short id, used by connectors and later edits.' },
-    kind: { type: 'string', enum: ['rect', 'ellipse', 'diamond', 'sticky', 'text'] },
+    kind: {
+      type: 'string',
+      enum: ['rect', 'ellipse', 'diamond', 'sticky', 'text', 'pending'],
+      description:
+        'pending is a placeholder, drawn in grey: its text says what will be there. Give the item again with its real kind and text once you get to it.',
+    },
     text: {
       type: 'string',
       description:
@@ -302,7 +416,7 @@ const updateWhiteboard: Tool = {
   spec: {
     name: 'update_whiteboard',
     description:
-      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed next to what it connects from. Everything else on the board stays, including the user's drawings, images and what they put in options; the user may be changing the board at the same time, and their changes and yours are merged. With relayout, every item but the user's drawings and images is laid out again, as on a new board; use it after adding several items, not to undo where the user moved things. The result lists problems the board still has; read_artifact lists them too, also after the user changed the board.",
+      "Change a whiteboard; the user sees each item appear as you write it. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed next to what it connects from. Everything else on the board stays, including the user's drawings, images and what they put in options; the user may be changing the board at the same time, and their changes and yours are merged. With relayout, every item but the user's drawings and images is laid out again, as on a new board; use it after adding several items, not to undo where the user moved things. The result lists problems the board still has; read_artifact lists them too, also after the user changed the board.",
     parameters: {
       type: 'object',
       properties: {
@@ -322,29 +436,52 @@ const updateWhiteboard: Tool = {
       required: ['artifactId', 'reason'],
     },
   },
-  async run(args, ctx) {
+  run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    const now = toChange(ctx, artifactId, 'whiteboard')
-    const shared = sharedIn(ctx, now)
-    if (!shared) baseVersionOf(args)
-    let board = mergeBoard(JSON.parse(now.content) as WhiteboardContent, {
-      items: arrayOf(args, 'items'),
-      connectors: arrayOf(args, 'connectors'),
-      removeItems: stringsOf(args, 'removeItems'),
-      removeConnectors: stringsOf(args, 'removeConnectors'),
-      relayout: args.relayout === true,
-      direction: directionOf(args),
+    return settled(ctx, artifactId, async () => {
+      const now = toChange(ctx, artifactId, 'whiteboard')
+      const shared = sharedIn(ctx, now)
+      if (!shared) baseVersionOf(args)
+      let board = mergeBoard(JSON.parse(now.content) as WhiteboardContent, {
+        items: arrayOf(args, 'items'),
+        connectors: arrayOf(args, 'connectors'),
+        removeItems: stringsOf(args, 'removeItems'),
+        removeConnectors: stringsOf(args, 'removeConnectors'),
+        relayout: args.relayout === true,
+        direction: directionOf(args),
+      })
+      const options = arrayOf(args, 'options')
+      if (options.length) board = await placeOptions(ctx, board, options, pickOf(args))
+      const artifact = save(ctx, now, JSON.stringify(board), {
+        reason: str(args, 'reason'),
+        title: optionalStr(args, 'title'),
+        // Edited together, the changes from the version read go in; others' since stay.
+        baseVersion: shared ? now.version : baseVersionOf(args),
+      })
+      return json({ artifactId, version: artifact.version, ...problemsOf(board) })
     })
-    const options = arrayOf(args, 'options')
-    if (options.length) board = await placeOptions(ctx, board, options, pickOf(args))
-    const artifact = save(ctx, now, JSON.stringify(board), {
-      reason: str(args, 'reason'),
-      title: optionalStr(args, 'title'),
-      // Edited together, the changes from the version read go in; others' since stay.
-      baseVersion: shared ? now.version : baseVersionOf(args),
-    })
-    return json({ artifactId, version: artifact.version, ...problemsOf(board) })
   },
+  // The items show one by one as each is written; what is taken away goes at the end.
+  live: (ctx) =>
+    showWriting(
+      ctx,
+      'whiteboard',
+      (args) => Array.isArray(args.items) || Array.isArray(args.connectors),
+      (args, open, base) => {
+        const whole = (key: string) =>
+          (Array.isArray(args[key]) ? (args[key] as unknown[]) : []).filter(
+            (item, index): item is Record<string, unknown> =>
+              typeof item === 'object' && item !== null && !isOpen(open, key, index),
+          )
+        const board = mergeBoard(JSON.parse(base) as WhiteboardContent, {
+          items: whole('items'),
+          connectors: whole('connectors'),
+          removeItems: [],
+          removeConnectors: [],
+        })
+        return JSON.stringify(board)
+      },
+    ),
 }
 
 // ---- dashboards ----
@@ -353,12 +490,12 @@ const WIDGET_SCHEMA = {
   type: 'object',
   properties: {
     id: { type: 'string' },
-    type: { type: 'string', enum: ['stat', 'text', 'table', 'chart', 'pivot'] },
+    type: { type: 'string', enum: ['stat', 'text', 'table', 'chart', 'pivot', 'pending'] },
     title: { type: 'string' },
     props: {
       type: 'object',
       description:
-        'By type; field names may be dotted paths like total.amount, read in the data set named by source. stat: { value: number, prefix?, suffix?, precision? } for a number you give, or { source, field, trend?, delta?, prefix?, suffix?, precision? } to read it: field, trend and delta are all field names, never numbers (delta names a field holding the change as a ratio, 0.125 shows +12.5%; trend names a list of numbers). text: { text, size?: sm|md|lg }. table: { source, path?, columns?: [{ key, title? }] }. chart: { source, path?, kind: line|area|bar|pie, x: field, y: [fields], labels?: { field: name }, stacked?, horizontal? }. pivot: { source, path?, config: { rows: [fields], columns: [fields], values: [field | { field, aggregate: sum|count|avg|min|max|distinct|median, label? }] } }. No other props.',
+        'By type; field names may be dotted paths like total.amount, read in the data set named by source. stat: { value: number, prefix?, suffix?, precision? } for a number you give, or { source, field, trend?, delta?, prefix?, suffix?, precision? } to read it: field, trend and delta are all field names, never numbers (delta names a field holding the change as a ratio, 0.125 shows +12.5%; trend names a list of numbers). text: { text, size?: sm|md|lg }. table: { source, path?, columns?: [{ key, title? }] }. chart: { source, path?, kind: line|area|bar|pie, x: field, y: [fields], labels?: { field: name }, stacked?, horizontal? }. pivot: { source, path?, config: { rows: [fields], columns: [fields], values: [field | { field, aggregate: sum|count|avg|min|max|distinct|median, label? }] } }. pending: { text }, a placeholder drawn in grey that says what will be there; give the widget again with its real type and props once you have its data, and it keeps its place. No other props.',
     },
     w: { type: 'integer', description: 'Width in columns, 1 to 12.' },
     h: { type: 'integer', description: 'Height in rows of 80px.' },

@@ -96,6 +96,7 @@ export {
 export type * from './events'
 export { CURRENCIES } from './events'
 export { newId } from './ids'
+export { PENDING, pendingBlock } from './pending'
 export {
   LIVE_TAIL,
   LiveCommands,
