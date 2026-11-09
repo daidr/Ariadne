@@ -148,7 +148,7 @@ export function keptNote(commands: { id: string; command: string; url: string | 
   const list = commands
     .map((c) => `${c.id}${c.url ? ` at ${c.url}` : ''}: ${c.command.slice(0, 120)}`)
     .join('\n')
-  return `Still running in the background from before your last report, kept so the user could open them while looking at your work:\n${list}\nUse them as they are (read_command_output), or stop_command one that needs a restart; do not start a second copy.`
+  return `Still running in the background from before your last report, kept because the user wanted to try them:\n${list}\nUse them as they are (read_command_output), or stop_command one that needs a restart; do not start a second copy.`
 }
 
 export class WorkspaceManager {

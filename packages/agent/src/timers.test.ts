@@ -335,11 +335,11 @@ describe('background commands for the status line', () => {
     expect(changed).toHaveLength(3)
   })
 
-  test('a served address stays open while the work waits to be looked at', async () => {
+  test('what the user asked to try stays up while the work waits to be looked at', async () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: '改页面' })
     const background = new BackgroundCommands()
-    const run = (output: string) =>
+    const run = (output: string, keep = false) =>
       background.start(
         thread.id,
         'bun dev',
@@ -349,7 +349,7 @@ describe('background commands for the status line', () => {
             signal?.addEventListener('abort', () => done({ exitCode: 143, stdout: '', stderr: '' }))
           })
         },
-        { local: true },
+        { local: true, keep },
       )
     scheduler = new Scheduler({
       app,
@@ -359,7 +359,9 @@ describe('background commands for the status line', () => {
     })
     scheduler.start()
     app.startThread(thread.id)
-    const server = run('Local: http://localhost:5173/\n')
+    const server = run('Local: http://localhost:5173/\n', true)
+    // Not asked for by the user: these end with the report, an address or not.
+    run('Local: http://localhost:5174/\n')
     run('building\n')
     app.reportThread(thread.id, { kind: 'ready', summary: '改好了', headline: '看一下' })
     await settled()
@@ -402,7 +404,7 @@ describe('background commands for the status line', () => {
             signal?.addEventListener('abort', () => done({ exitCode: 143, stdout: '', stderr: '' }))
           })
         },
-        { local: true },
+        { local: true, keep: true },
       )
       app.reportThread(other.id, { kind: 'ready', summary: '写好了', headline: '看一下' })
       await settled()

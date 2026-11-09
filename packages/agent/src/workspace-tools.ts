@@ -568,7 +568,7 @@ export const outputName = () =>
 export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
   return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when your work is reported finished or you are stopped.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when you report or are stopped. Only when the user said they want to try the result themselves, start it with "keepForUser": it then stays up after you report ready, until they are done looking. Otherwise show what changed with your report.`,
     parameters: {
       type: 'object',
       properties: {
@@ -579,6 +579,10 @@ export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'):
           description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}. Not for background commands.`,
         },
         background: { type: 'boolean', description: 'Run it in the background.' },
+        keepForUser: {
+          type: 'boolean',
+          description: 'With background, and only when the user asked to try it themselves.',
+        },
       },
       required: ['command'],
     },
@@ -707,15 +711,22 @@ const runCommand: Tool = {
         // so they do not pile up or fight over a port.
         const replaced: string[] = []
         for (const old of ctx.background.list(ctx.conversationId)) {
-          if (old.result || old.command !== command) continue
-          await ctx.background.stop(ctx.conversationId, old.id)
+          if (old.result || old.command !== command || old.cwd !== (cwd || '.')) continue
+          const ended = await ctx.background.stop(ctx.conversationId, old.id)
+          // Still going after the wait: a second copy would fight it over its port.
+          if (!ended?.result) {
+            return {
+              content: `${old.id} runs the same command and has not ended yet after being told to stop. Check it with read_command_output, then start this again.`,
+              isError: true,
+            }
+          }
           replaced.push(old.id)
         }
         const started = ctx.background.start(
           ctx.conversationId,
           command,
           (options) => workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
-          { local: workspace.local },
+          { local: workspace.local, keep: optionalBool(args, 'keepForUser'), cwd: cwd || '.' },
         )
         const first = await ctx.background.read(
           ctx.conversationId,
