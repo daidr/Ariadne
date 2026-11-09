@@ -1,8 +1,8 @@
 import type { ExecResult } from '@ariadne/plugin-sdk'
-import { existsSync } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { copyFile, cp, lstat, mkdir, readlink, rm, symlink, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 
 /**
  * Dependency directories a fresh worktree lacks because git ignores them. A new thread
@@ -14,18 +14,49 @@ export const SEED_DIRS = new Set(['node_modules', 'vendor', '.pnpm-store'])
 // Python environments are left out: their scripts and `activate` name the environment by
 // absolute path, so a clone would install into the user's own environment.
 
-/** Clone `from` to `to` sharing storage, or fail; never a full copy. */
+/** Clone the file or directory `from` to `to` sharing storage, or fail; never a full copy. */
 export type Cloner = (from: string, to: string) => Promise<boolean>
 
+const windows = process.platform === 'win32'
+
+/** The drive a Windows path is on, as `D`; `null` for a network share. */
+const driveOf = (path: string) =>
+  /^([a-zA-Z]):[\\/]/.exec(resolve(path))?.[1]?.toUpperCase() ?? null
+
+const blockCloning = new Map<string, Promise<boolean>>()
+
 /**
- * The platform's clone: `cp --reflink=always` (btrfs, XFS, bcachefs and other Linux
- * filesystems with reflinks) or `cp -c` (APFS clonefile on macOS).
+ * Whether copies on a Windows drive share storage: ReFS, which a Dev Drive is, clones the
+ * blocks of a file copied within the volume (Windows 11 24H2 and later; before that the
+ * copy is a full one, as a checkout would be). NTFS never does.
  */
-export const platformCloner: Cloner = async (from, to) => {
-  const argv =
-    process.platform === 'darwin'
-      ? ['cp', '-c', '-R', from, to]
-      : ['cp', '-a', '--reflink=always', from, to]
+function clonesBlocks(drive: string): Promise<boolean> {
+  let known = blockCloning.get(drive)
+  if (!known) {
+    known = (async () => {
+      try {
+        const proc = Bun.spawn(
+          [
+            'powershell.exe',
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `(Get-Volume -DriveLetter ${drive}).FileSystemType`,
+          ],
+          { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', windowsHide: true },
+        )
+        const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+        return code === 0 && out.trim().toLowerCase() === 'refs'
+      } catch {
+        return false
+      }
+    })()
+    blockCloning.set(drive, known)
+  }
+  return known
+}
+
+async function copies(argv: string[]): Promise<boolean> {
   const proc = Bun.spawn(argv, {
     stdout: 'ignore',
     stderr: 'ignore',
@@ -36,15 +67,44 @@ export const platformCloner: Cloner = async (from, to) => {
 }
 
 /**
+ * The platform's clone: reflinks on Linux (btrfs, XFS, bcachefs and other filesystems
+ * with them), `clonefile` on macOS (APFS), and on Windows a copy within a ReFS volume
+ * (a Dev Drive), which the system turns into a block clone. A file is cloned in this
+ * process, a directory by `cp` where there is one.
+ */
+export const platformCloner: Cloner = async (from, to) => {
+  try {
+    if (windows) {
+      const drive = driveOf(from)
+      if (!drive || drive !== driveOf(to) || !(await clonesBlocks(drive))) return false
+      await cp(from, to, { recursive: true, verbatimSymlinks: true, errorOnExist: true })
+      return true
+    }
+    if ((await lstat(from)).isDirectory()) {
+      return await copies(
+        process.platform === 'darwin'
+          ? ['cp', '-c', '-R', from, to]
+          : ['cp', '-a', '--reflink=always', from, to],
+      )
+    }
+    await copyFile(from, to, constants.COPYFILE_FICLONE_FORCE)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Whether the checkout and the worktree sit on storage that clones: one small file in the
  * repository's git directory is tried, so nothing appears among the user's files.
  */
-async function canClone(clone: Cloner, gitDir: string, targetDir: string): Promise<boolean> {
+export async function canClone(clone: Cloner, gitDir: string, targetDir: string): Promise<boolean> {
   // Unique per call: threads open their worktrees at the same time.
   const tag = randomUUID()
   const probe = join(gitDir, `ariadne-clone-probe-${tag}`)
   const copy = join(targetDir, `.ariadne-clone-probe-${tag}`)
   try {
+    await mkdir(targetDir, { recursive: true })
     await writeFile(probe, 'probe')
     return await clone(probe, copy)
   } catch {
@@ -97,4 +157,59 @@ export async function seedWorktree(
     else await rm(target, { recursive: true, force: true })
   }
   return seeded
+}
+
+/** How many files are cloned at a time. */
+const CLONES_AT_ONCE = 32
+
+/** Git in `cwd`; `whole` keeps long output whole. */
+export type CloneGit = (cwd: string, args: string[], whole?: boolean) => Promise<ExecResult>
+
+/**
+ * Check out a worktree that was added with `--no-checkout` by cloning the files its commit
+ * tracks from `from` (the user's checkout, or another thread's worktree), so they take no
+ * room until changed. Files missing from `from` or different there (changes not
+ * committed, another commit) are then written by git, and only those: the index is
+ * refreshed against what was cloned before the checkout. Returns how many files were
+ * cloned.
+ */
+export async function checkoutCloned(
+  from: string,
+  worktree: string,
+  git: CloneGit,
+  clone: Cloner = platformCloner,
+): Promise<number> {
+  const listed = await git(worktree, ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], true)
+  const paths = listed.exitCode === 0 ? listed.stdout.split('\0').filter(Boolean) : []
+  const made = new Set<string>()
+  let cloned = 0
+  let next = 0
+  const work = async () => {
+    while (next < paths.length) {
+      const path = paths[next++]!
+      const source = join(from, path)
+      const target = join(worktree, path)
+      const info = await lstat(source).catch(() => null)
+      // A submodule's directory and anything else that is not a file are git's to make.
+      if (!info || !(info.isFile() || info.isSymbolicLink())) continue
+      const dir = dirname(target)
+      if (!made.has(dir)) {
+        await mkdir(dir, { recursive: true }).catch(() => {})
+        made.add(dir)
+      }
+      if (info.isSymbolicLink()) {
+        await readlink(source)
+          .then((link) => symlink(link, target))
+          .catch(() => {})
+      } else if (await clone(source, target)) cloned++
+    }
+  }
+  await Promise.all(Array.from({ length: CLONES_AT_ONCE }, work))
+  // Fill the index and compare it with the files; then write what differs.
+  await git(worktree, ['reset', '-q'])
+  const result = await git(worktree, ['reset', '-q', '--hard'])
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || `git reset exited ${result.exitCode}`)
+  }
+  return cloned
 }

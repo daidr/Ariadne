@@ -23,7 +23,6 @@ test('a coordinator runs on an agent program across steps and turns', async () =
   const bridge = new ToolBridge()
   const provider = agentProvider(claudeCode as AgentKind<unknown>, {
     dataDir: dir,
-    sandbox: { kind: null, wrap: (argv) => argv },
     bridge,
   })
   const model: ResolvedModel = {

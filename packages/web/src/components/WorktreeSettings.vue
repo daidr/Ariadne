@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouEmpty, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
+import { DouAlert, DouButton, DouEmpty, DouLink, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type ProjectWorktrees } from '../api'
@@ -11,15 +11,18 @@ import StageLabel from './StageLabel.vue'
 const projects = ref<ProjectWorktrees[] | null>(null)
 const error = ref<string | null>(null)
 const removing = ref<string | null>(null)
+// On Windows a Dev Drive is what lets worktrees share storage; elsewhere there is nothing to do.
+const windows = ref(false)
+const DEV_DRIVE = 'https://learn.microsoft.com/windows/dev-drive/'
 
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
 
 async function load() {
   try {
-    projects.value = (await api.listWorktrees()).projects.filter(
-      (project) => project.worktrees.length || project.error,
-    )
+    const listed = await api.listWorktrees()
+    windows.value = listed.windows
+    projects.value = listed.projects.filter((project) => project.worktrees.length || project.error)
   } catch (cause) {
     error.value = message(cause)
     projects.value = []
@@ -29,8 +32,11 @@ onMounted(load)
 
 const size = formatBytes
 
+// Worktrees that share storage with their checkout take only what changed, which the
+// size of their files does not tell: they are left out of the sizes.
 const total = computed(() =>
   (projects.value ?? [])
+    .filter((project) => !project.shared)
     .flatMap((project) => project.worktrees)
     .reduce((sum, worktree) => sum + (worktree.bytes ?? 0), 0),
 )
@@ -55,11 +61,20 @@ async function remove(projectId: string, threadId: string) {
     <div v-if="!projects" class="worktrees-loading"><DouSpinner /></div>
     <DouEmpty v-else-if="!projects.length" size="sm" :description="t('worktrees.empty')" />
     <template v-else>
-      <DouText size="sm" variant="secondary">{{
+      <DouText v-if="total" size="sm" variant="secondary">{{
         t('worktrees.total', { size: size(total) })
       }}</DouText>
       <section v-for="project in projects" :key="project.id" class="worktrees-project">
-        <DouText weight="medium" size="sm">{{ project.name }}</DouText>
+        <div class="worktrees-head">
+          <DouText weight="medium" size="sm">{{ project.name }}</DouText>
+          <DouText v-if="project.shared" size="sm" variant="tertiary">
+            {{ t('worktrees.shared') }}
+          </DouText>
+          <DouText v-else-if="project.shared === false && windows" size="sm" variant="tertiary">
+            {{ t('worktrees.copied') }}
+            <DouLink :href="DEV_DRIVE" external>Dev Drive</DouLink>
+          </DouText>
+        </div>
         <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>
         <ul class="worktrees-list">
           <li v-for="worktree in project.worktrees" :key="worktree.threadId" class="worktree">
@@ -78,7 +93,7 @@ async function remove(projectId: string, threadId: string) {
               </DouText>
             </div>
             <DouText
-              v-if="worktree.bytes !== null"
+              v-if="worktree.bytes !== null && !project.shared"
               size="sm"
               variant="secondary"
               class="worktree-size"
@@ -130,6 +145,13 @@ async function remove(projectId: string, threadId: string) {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.worktrees-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .worktrees-list {

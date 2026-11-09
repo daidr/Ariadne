@@ -350,6 +350,12 @@ export interface ThreadPullRequest {
 }
 
 /** A thread's branch merged into its base by the user. */
+/**
+ * Why a thread's worktree went: its changes landed, the user removed it, or it sat idle and
+ * only made room (the changes are still on the branch to look through and merge).
+ */
+export type WorktreeRemoval = 'merged' | 'user' | 'idle'
+
 export interface BranchMerge {
   branch: string
   base: string
@@ -456,7 +462,7 @@ export interface EventMap {
    * again. `merged`: removed on its own once the work was merged (or its pull request
    * closed) and the thread was finished with it; `user`: the user removed it.
    */
-  'workspace.removed': { threadId: string; reason: 'merged' | 'user' }
+  'workspace.removed': { threadId: string; reason: WorktreeRemoval }
   /** The user merged the thread's branch into its base; the base now ends with `sha`. */
   'branch.merged': { threadId: string } & BranchMerge
   /**

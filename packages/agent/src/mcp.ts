@@ -9,7 +9,6 @@ import {
   type ServerInfo,
   type Transport,
 } from '@ariadne/mcp'
-import type { CommandSandbox } from '@ariadne/plugin-sdk'
 import { homedir } from 'node:os'
 
 /**
@@ -97,8 +96,6 @@ interface Connection {
 export interface McpHubOptions {
   /** The servers as the settings hold them now. */
   servers: () => McpServerConfig[]
-  /** Local servers run in it, like thread commands: Ariadne's home stays out of sight. */
-  sandbox: CommandSandbox
   /** The environment local servers start from: the server's own, without its credentials. */
   env: () => Record<string, string>
   /** Swaps the fetch of HTTP servers, for tests. */
@@ -230,10 +227,8 @@ export class McpHub {
       })
     }
     const argv = [config.command ?? '', ...(config.args ?? [])]
-    // Nothing is kept visible for it: a directory under Ariadne's home stays hidden even
-    // when it is asked to run there.
     return new StdioTransport({
-      argv: this.options.sandbox.wrap(argv, { keep: [] }),
+      argv,
       cwd: config.cwd || homedir(),
       env: { ...this.options.env(), ...config.env },
     })

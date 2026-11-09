@@ -47,8 +47,8 @@ function openSettings(tab: SettingsTab = 'models') {
 }
 provide(openSettingsKey, openSettings)
 
-// Where the project's files are rides on its settings button; without a sandbox it warns.
-const { summary, unsandboxed } = useSourceStatus()
+// Where the project's files are rides on its settings button.
+const { summary } = useSourceStatus()
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -96,7 +96,6 @@ watchEffect(() => {
               <DouButton
                 variant="ghost"
                 size="sm"
-                :tone="unsandboxed ? 'warning' : undefined"
                 :aria-label="t('projectSettings.open')"
                 :title="
                   summary ? `${t('projectSettings.open')} · ${summary}` : t('projectSettings.open')

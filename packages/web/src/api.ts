@@ -152,6 +152,11 @@ export interface ProjectWorktrees {
   id: string
   name: string
   worktrees: (WorktreeInfo & { thread: ThreadView | null })[]
+  /**
+   * Whether worktrees share storage with the checkout they are cloned from, so each takes
+   * room only for what its thread changed; `null` when that cannot be told.
+   */
+  shared: boolean | null
   /** Why they could not be listed, e.g. the remote machine was unreachable. */
   error: LocalizedMessage | null
 }
@@ -194,7 +199,7 @@ export type { DirectoryListing }
 
 export interface SourceKind extends ModelKind {
   provides: string[]
-  /** Threads' commands run on another machine, outside this one's sandbox. */
+  /** Threads' commands run on another machine. */
   remote: boolean
   /** Can bring its repository and issues to a remote source. */
   hosting: boolean
@@ -431,19 +436,6 @@ export interface ArtifactDetail {
   comments: ArtifactCommentThreadView[]
 }
 
-/** What the settings say about the sandbox; it takes effect when Ariadne starts. */
-export interface SandboxConfig {
-  mode: 'auto' | 'off'
-  hide: string[]
-}
-
-export interface SandboxStatus {
-  kind: 'bwrap' | 'unshare' | 'sandbox-exec' | null
-  mode: 'auto' | 'off'
-  hidden: string[]
-  platform: string
-}
-
 export const api = {
   listMemories: (projectId: string) =>
     request<{ memories: MemoryView[] }>('GET', `/api/projects/${projectId}/memory`),
@@ -474,10 +466,6 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
-  getSandbox: () =>
-    request<{ sandbox: SandboxStatus; configured: SandboxConfig | null }>('GET', '/api/sandbox'),
-  saveSandbox: (input: SandboxConfig) =>
-    request<{ configured: SandboxConfig }>('PUT', '/api/sandbox', input),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   /**
    * A new project, begun by saying what is wanted: with where its files are and the first
@@ -725,7 +713,8 @@ export const api = {
     ),
   undoMerge: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/merge/undo`),
-  listWorktrees: () => request<{ projects: ProjectWorktrees[] }>('GET', '/api/worktrees'),
+  listWorktrees: () =>
+    request<{ projects: ProjectWorktrees[]; windows: boolean }>('GET', '/api/worktrees'),
   removeWorktree: (projectId: string, threadId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),
   refreshPullRequest: (threadId: string) =>

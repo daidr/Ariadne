@@ -219,7 +219,6 @@ type WorkPart = 'instructions' | 'commands'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
-const data = ref<InstanceType<typeof DataTab> | null>(null)
 const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
@@ -473,7 +472,6 @@ async function saveAll() {
       ['commands', work.value.commands?.save],
       ['input', input.value?.save],
       ['mcp', mcp.value?.save],
-      ['data', data.value?.save],
     ]
     for (const [part, save] of parts) {
       if (save && !(await save())) {
@@ -883,7 +881,7 @@ async function saveModels(): Promise<boolean> {
         <McpSettings v-if="open" ref="mcp" />
       </DouTabPanel>
       <DouTabPanel value="data" :label="t('settings.tab.data')">
-        <DataTab v-if="open" ref="data" @plugins-changed="reloadKinds" />
+        <DataTab v-if="open" @plugins-changed="reloadKinds" />
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">

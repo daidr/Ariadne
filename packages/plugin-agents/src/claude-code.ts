@@ -156,7 +156,6 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
       ],
       cwd: ctx.cwd,
       env: agentEnv({ MCP_TOOL_TIMEOUT: TOOL_TIMEOUT_MS, MAX_MCP_OUTPUT_TOKENS: '200000' }),
-      sandbox: ctx.sandbox,
       label: 'agent',
     })
 

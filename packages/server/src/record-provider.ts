@@ -9,7 +9,7 @@
  * `--only text,tool-call` records only those scenarios. The samples go to
  * packages/server/fixtures/providers/<set>/ and are checked in.
  */
-import { noSandbox, PluginHost } from '@ariadne/agent'
+import { PluginHost } from '@ariadne/agent'
 import anthropic from '@ariadne/plugin-anthropic'
 import openAICompatible from '@ariadne/plugin-openai-compatible'
 import type { ModelProvider } from '@ariadne/plugin-sdk'
@@ -32,7 +32,7 @@ const { values, positionals } = parseArgs({
 })
 
 const config = loadConfig()
-const host = new PluginHost(join(config.home, 'plugins'), noSandbox)
+const host = new PluginHost(join(config.home, 'plugins'))
 await host.load(openAICompatible)
 await host.load(anthropic)
 const settings = new SettingsStore(join(config.home, 'config.json'), host)

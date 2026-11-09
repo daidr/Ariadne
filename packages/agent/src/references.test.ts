@@ -652,7 +652,7 @@ describe('a thread asks to read a source', () => {
 
 describe('what a conversation may not ask for', () => {
   const home = '/home/someone'
-  const hidden = ['/home/someone/.ariadne', '/home/someone/.config/google-chrome']
+  const hidden = ['/home/someone/.ariadne']
 
   test('on this machine: protected places, and anything wide enough to hold one', () => {
     expect(localRefusal('/home/someone/code/dou-ui', hidden, home)).toBeNull()

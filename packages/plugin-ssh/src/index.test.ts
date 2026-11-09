@@ -74,7 +74,7 @@ async function machine(withDaemon: boolean) {
     const main = fileURLToPath(new URL('../../daemon/src/main.ts', import.meta.url))
     await writeFile(
       join(bin, 'ariadne-daemon'),
-      `#!/bin/sh\nARIADNE_DAEMON_HOME='${join(base, 'daemon-home')}' exec '${process.execPath}' '${main}' --no-sandbox "$@"\n`,
+      `#!/bin/sh\nARIADNE_DAEMON_HOME='${join(base, 'daemon-home')}' exec '${process.execPath}' '${main}' "$@"\n`,
       { mode: 0o755 },
     )
   }

@@ -4,11 +4,16 @@ import type { WorkspaceManager } from './workspaces'
 /** Stages in which a thread has finished with its worktree for now. */
 const FINISHED = new Set(['review', 'done'])
 
+/** How long a finished thread's worktree stays before it is removed to make room. */
+export const IDLE_MS = 24 * 3600_000
+
 /**
  * Removes the worktrees of threads whose work has landed: the user merged the branch (in
  * Ariadne or by hand), or its pull request was merged or closed, and the thread is not
- * working. Branches stay, and a thread that works again gets its worktree back. A worktree
- * with changes not committed is left alone.
+ * working. A thread that is done or waiting for review and heard nothing for a day gives
+ * up its worktree too: the checkout takes room, and the changes are on the branch to look
+ * through and merge all the same. Branches stay, and a thread that works again gets its
+ * worktree back. A worktree with changes not committed is left alone.
  *
  * Checks follow the events that can settle it, and a slow sweep catches merges made
  * outside Ariadne.
@@ -26,6 +31,9 @@ export class WorktreeJanitor {
       intervalMs?: number
       /** How long after an event to look, so the thread's stage has settled. */
       delayMs?: number
+      /** Swaps `IDLE_MS`, and the clock, for tests. */
+      idleMs?: number
+      now?: () => number
       onError?: (error: unknown) => void
     } = {},
   ) {}
@@ -93,10 +101,16 @@ export class WorktreeJanitor {
       return
     }
     if (!candidate(thread)) return
-    if (!(await this.landed(thread))) return
+    const reason = (await this.landed(thread)) ? 'merged' : this.idle(thread) ? 'idle' : null
+    if (!reason) return
     // It may have been woken while the branch was being checked.
     if (!candidate(this.app.getThread(threadId))) return
-    await this.workspaces.removeWorktree(thread.projectId, threadId, 'merged')
+    await this.workspaces.removeWorktree(thread.projectId, threadId, reason)
+  }
+
+  private idle(thread: ThreadView): boolean {
+    const now = (this.options.now ?? Date.now)()
+    return now - thread.activeAt >= (this.options.idleMs ?? IDLE_MS)
   }
 
   /** Whether the thread's work is where it was going. */

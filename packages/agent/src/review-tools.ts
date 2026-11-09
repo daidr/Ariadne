@@ -89,7 +89,7 @@ export async function besideText(
   const where =
     skill.source === 'repo'
       ? `${skill.folder} in the repository`
-      : `${skill.folder} on the machine Ariadne runs on, outside the workspace; commands run on that machine can read and run what is in it, not change it`
+      : `${skill.folder} on the machine Ariadne runs on, outside the workspace; commands run on that machine can read and run what is in it`
   if (!paths.length) return `\nIts folder is ${where}; it has no other files.`
   return `\nIts folder is ${where}. Paths in the skill are from that folder. Read a file beside it with read_skill and \`file\`, when the skill sends you to it; do not read them all first. Files beside it${more ? ' (more are not listed)' : ''}: ${paths.join(', ')}`
 }

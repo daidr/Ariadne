@@ -99,7 +99,6 @@ export const acp: AgentKind<AcpSettings> = {
       argv,
       cwd: ctx.cwd,
       env: agentEnv(),
-      sandbox: ctx.sandbox,
       label: 'agent',
     })
     const flushThought = () => {

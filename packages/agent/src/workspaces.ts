@@ -5,6 +5,7 @@ import {
   threadBranch,
   type Ariadne,
   type ShellChoice,
+  type WorktreeRemoval,
 } from '@ariadne/core'
 import { defaultShell } from '@ariadne/plugin-sdk'
 import type {
@@ -435,7 +436,7 @@ export class WorkspaceManager {
   referenceRefusal(reference: { kind: string; settings: Record<string, unknown> }): string | null {
     const provider = this.host.contexts.get(reference.kind)
     if (!provider) return null
-    return referenceRefusal(provider, reference.settings, this.host.sandbox.hidden ?? [])
+    return referenceRefusal(provider, reference.settings, this.host.kept)
   }
 
   /**
@@ -759,13 +760,15 @@ export class WorkspaceManager {
   async removeWorktree(
     projectId: string,
     threadId: string,
-    reason: 'merged' | 'user',
+    reason: WorktreeRemoval,
   ): Promise<'removed' | 'dirty' | 'busy'> {
     const known = this.app.listThreads(projectId).some((thread) => thread.id === threadId)
     return this.serial(threadId, async () => {
       const branches = await this.branches(projectId)
       if (!branches) return 'dirty'
       if (known && this.app.getConversation(threadId).turn) return 'busy'
+      // What the user asked to keep running to try is not ended to make room.
+      if (reason === 'idle' && this.background.running(threadId)) return 'busy'
       await this.background.stopThread(threadId)
       const open = this.open.get(threadId)
       this.open.delete(threadId)

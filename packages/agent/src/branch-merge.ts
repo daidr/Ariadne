@@ -144,7 +144,9 @@ export async function listWorktrees(app: Ariadne, workspaces: WorkspaceManager) 
         if (thread && thread.projectId !== project.id) continue
         worktrees.push({ ...worktree, thread })
       }
-      projects.push({ id: project.id, name: project.name, worktrees, error: null })
+      // Only said when there is something it applies to.
+      const shared = worktrees.length ? ((await branches.sharesStorage?.()) ?? null) : null
+      projects.push({ id: project.id, name: project.name, worktrees, shared, error: null })
     } catch (error) {
       const failure =
         error instanceof DomainError
@@ -156,6 +158,7 @@ export async function listWorktrees(app: Ariadne, workspaces: WorkspaceManager) 
         id: project.id,
         name: project.name,
         worktrees: [],
+        shared: null,
         error: failure.toLocalized(),
       })
     }

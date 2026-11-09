@@ -13,7 +13,6 @@
     "@ariadne/remote": "workspace:*"
   },
   "devDependencies": {
-    "@ariadne/plugin-local": "workspace:*",
-    "@ariadne/sandbox": "workspace:*"
+    "@ariadne/plugin-local": "workspace:*"
   }
 }

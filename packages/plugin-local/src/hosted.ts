@@ -1,16 +1,12 @@
 import { readOnlyView } from '@ariadne/plugin-sdk'
-import type {
-  CommandSandbox,
-  ExecResult,
-  GitObjects,
-  WorkspaceCapability,
-} from '@ariadne/plugin-sdk'
+import type { ExecResult, GitObjects, WorkspaceCapability } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { branchChanges, branchMerged, fileVersions, removeWorktree, type GitRun } from './branches'
-import { branchFor, gitControlPaths, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
+import { canClone, checkoutCloned, platformCloner, type Cloner } from './cow'
+import { branchFor, cloneGit, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
 import { GitTreeView } from './tree'
 
 /** The coordinator's view fetches again once what it shows is older than this. */
@@ -80,7 +76,8 @@ export function hostedClone(input: {
   user: string
   token: () => Promise<string | null>
   defaultBranch: () => Promise<string>
-  sandbox?: CommandSandbox
+  /** How files are cloned between worktrees; `null` turns it off. */
+  clone?: Cloner | null
 }): {
   workspace: WorkspaceCapability
   fetch(): Promise<void>
@@ -134,6 +131,19 @@ export function hostedClone(input: {
 
   const worktrees = join(input.dataDir, 'worktrees', ...segments, last)
   const dirOf = (threadId: string) => join(worktrees, threadId)
+  const clone = input.clone === undefined ? platformCloner : input.clone
+  let cloning: Promise<boolean> | null = null
+  /** Whether worktrees share storage: files cloned from one to the next take no room. */
+  const clones = (): Promise<boolean> => {
+    // Asked again until the shared clone is there to try it with.
+    if (!clone || !existsSync(join(bare, 'HEAD'))) return Promise.resolve(false)
+    return (cloning ??= canClone(clone, bare, worktrees).catch(() => false))
+  }
+  /** Another thread's worktree, to clone a new one's files from. */
+  const sibling = async (threadId: string) =>
+    (await readdir(worktrees).catch(() => []))
+      .filter((name) => name !== threadId && existsSync(join(worktrees, name, '.git')))
+      .map((name) => join(worktrees, name))[0] ?? null
   // Reading the shared clone needs no network and no token.
   const local: GitRun = (args, options = {}) =>
     run(['git', ...args], {
@@ -177,6 +187,7 @@ export function hostedClone(input: {
           removeWorktree(local, dirOf(threadId), async (dir) => existsSync(dir), options),
         ),
       worktrees: () => worktreesIn(worktrees),
+      sharesStorage: clones,
     },
     open: ({ threadId, base: recorded, branch: named }) =>
       serial(async () => {
@@ -190,23 +201,28 @@ export function hostedClone(input: {
           const hasBranch =
             (await git(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))
               .exitCode === 0
+          // Where clones work, the files come from another thread's worktree instead of git.
+          const from = clone && (await clones()) ? await sibling(threadId) : null
+          const plain = from ? ['--no-checkout'] : []
           check(
             hasBranch
-              ? await git(bare, 'worktree', 'add', dir, branch)
-              : await git(bare, 'worktree', 'add', '--no-track', '-b', branch, dir, baseRef(base)),
+              ? await git(bare, 'worktree', 'add', ...plain, dir, branch)
+              : await git(
+                  bare,
+                  'worktree',
+                  'add',
+                  ...plain,
+                  '--no-track',
+                  '-b',
+                  branch,
+                  dir,
+                  baseRef(base),
+                ),
             'git worktree add',
           )
+          if (clone && from) await checkoutCloned(from, dir, cloneGit(['file']), clone)
         }
-        // A hooks directory that is missing could be made by a thread; make it first.
-        await mkdir(join(bare, 'hooks'), { recursive: true })
-        return new LocalWorkspace(threadId, dir, branch, {
-          base,
-          ...(input.sandbox ? { sandbox: input.sandbox } : {}),
-          keep: [dir, bare],
-          // The server fetches and pushes in the shared clone; its config and hooks stay as
-          // the server set them.
-          readOnly: gitControlPaths(bare),
-        })
+        return new LocalWorkspace(threadId, dir, branch, { base })
       }),
   }
 

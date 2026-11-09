@@ -328,7 +328,7 @@ describe('github repository', () => {
     const { workspace, repo } = connectRepository({ repository: 'acme/app' }, options())
     const ws = await workspace.open({ threadId: 'thr_ffffffffffff' })
     const marker = join(base, 'ran')
-    // Without a sandbox the workspace can write the config; the server's git must still
+    // The workspace can write the config; the server's git must still
     // ignore what would run a command.
     const remote = `file://${join(base, 'remote')}/`
     await ws.exec('echo 1 > a && git add . && git -c user.email=t@e -c user.name=t commit -qm one')

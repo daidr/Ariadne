@@ -296,6 +296,12 @@ export interface BranchCapability {
   remove(threadId: string, options?: { discard?: boolean }): Promise<boolean>
   worktrees(): Promise<WorktreeInfo[]>
   /**
+   * Whether a new worktree's files share storage with the checkout they come from
+   * (copy-on-write clones), so a thread takes room only for what it changes. Left out
+   * where it cannot be told.
+   */
+  sharesStorage?(): Promise<boolean>
+  /**
    * The thread's worktree as it is now, committed or not (ignored files left out), written
    * as a git tree without touching the worktree, its index or its branch; `null` when the
    * thread has no worktree. Two of them show what a turn changed, see `diff`.

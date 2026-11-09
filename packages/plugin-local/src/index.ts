@@ -8,7 +8,6 @@ import {
   searchableView,
   singleFileView,
   WorkspacePathError,
-  type CommandSandbox,
   type ContextProvider,
   type ExecOptions,
   type ExecResult,
@@ -17,8 +16,8 @@ import {
   type WorktreeInfo,
 } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
-import { constants, existsSync, realpathSync } from 'node:fs'
-import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
+import { constants, existsSync } from 'node:fs'
+import { mkdir, open, readdir, realpath, rmdir, stat, type FileHandle } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   branchChanges,
@@ -34,7 +33,7 @@ import {
   type GitRun,
   type Identity,
 } from './branches'
-import { platformCloner, seedWorktree, type Cloner } from './cow'
+import { canClone, checkoutCloned, platformCloner, seedWorktree, type Cloner } from './cow'
 
 export * from './branches'
 
@@ -74,7 +73,7 @@ const HIDDEN_ENV = new Set([
  * The environment for commands a thread runs: the server's own, without its credentials
  * (Ariadne's local token, GitHub and GitLab tokens, git config passed through the environment).
  * This keeps them out of tool results, and so out of the event log and the model's input.
- * It is not a sandbox: a command can still read files the user can read.
+ * Nothing else is kept from a command: it can read whatever files the user can read.
  */
 export function threadEnv(
   base: Record<string, string | undefined> = process.env,
@@ -89,7 +88,7 @@ export function threadEnv(
 }
 
 /**
- * Git run by the server, outside the sandbox, in a git directory threads write to. It
+ * Git run by the server in a git directory threads write to. It
  * reads no global or system config (a thread can write the user's `~/.gitconfig`), runs
  * no hooks and no fsmonitor, and only speaks the protocols given, so whatever a thread
  * left in the repository cannot make the server's git run a command.
@@ -106,9 +105,6 @@ export function serverGitEnv(protocols: string[] = ['https']): Record<string, st
     GIT_CONFIG_VALUE_1: 'false',
   }
 }
-
-/** The parts of a git directory that make git run something: kept read-only for threads. */
-export const gitControlPaths = (gitDir: string) => [join(gitDir, 'config'), join(gitDir, 'hooks')]
 
 const windows = process.platform === 'win32'
 
@@ -196,7 +192,7 @@ export async function run(
  * console window of its own unless told otherwise; every spawn in the code passes
  * `windowsHide` (checked by spawn.test.ts in the server). A thread's command is `detached`:
  * it gets a process group of its own, so what it leaves running in the background ends with
- * it (on macOS the sandbox does not do this). Windows has no process groups, and a detached
+ * it. Windows has no process groups, and a detached
  * command there would open a console window of its own.
  */
 function spawnPiped(
@@ -264,41 +260,9 @@ function within(path: string, dir: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-function real(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return resolve(path)
-  }
-}
-
-/**
- * Whether the real path `path` is hidden: inside a hidden path, and not inside a kept path
- * that is itself in there (a worktree under Ariadne's home). A kept path that holds a
- * hidden one does not show it, as with the sandbox's mounts.
- */
-export function hiddenPath(path: string, hidden: readonly string[], keep: string[]): boolean {
-  return hidden.some(
-    (dir) => within(path, dir) && !keep.some((kept) => within(kept, dir) && within(path, kept)),
-  )
-}
-
-/** Commands run as they are, for workspaces made without a host. */
-const unsandboxed: CommandSandbox = { kind: null, wrap: (argv) => argv }
-
-/**
- * A directory on this machine, with every path kept inside it. Commands run in `sandbox`,
- * which keeps `keep` visible: the root, or the whole checkout and the git directory
- * behind it when the root is part of one.
- */
+/** A directory on this machine, with every path kept inside it. */
 export class LocalWorkspace implements Workspace {
   readonly base: string | null
-  private readonly sandbox: CommandSandbox
-  private readonly keep: string[]
-  /** `keep` through symbolic links, to compare with real paths. */
-  private readonly kept: string[]
-  private readonly readOnly: string[]
-  private readonly hidden: readonly string[]
   private readonly git: boolean
 
   constructor(
@@ -306,22 +270,12 @@ export class LocalWorkspace implements Workspace {
     readonly root: string,
     readonly branch: string | null,
     options: {
-      sandbox?: CommandSandbox
-      keep?: string[]
-      readOnly?: string[]
       base?: string | null
-      /** Real paths not to read, list or write; the sandbox's own by default. */
-      hidden?: readonly string[]
       /** `false` refuses paths through a `.git` directory, for a view of the source. */
       git?: boolean
     } = {},
   ) {
     this.base = options.base ?? null
-    this.sandbox = options.sandbox ?? unsandboxed
-    this.keep = options.keep ?? [root]
-    this.kept = this.keep.map(real)
-    this.readOnly = options.readOnly ?? []
-    this.hidden = options.hidden ?? this.sandbox.hidden ?? []
     this.git = options.git ?? true
   }
 
@@ -348,9 +302,8 @@ export class LocalWorkspace implements Workspace {
     return full
   }
 
-  /** A hidden path, or one through git's own directory when that is not shown. */
+  /** A path through git's own directory, when that is not shown. */
   private refused(full: string, root: string): boolean {
-    if (hiddenPath(full, this.hidden, this.kept)) return true
     if (this.git) return false
     return relative(root, full)
       .split(/[\\/]/)
@@ -425,10 +378,7 @@ export class LocalWorkspace implements Workspace {
     const dir = await this.resolve(path)
     const entries = await readdir(dir, { withFileTypes: true })
     return entries
-      .filter(
-        (entry) =>
-          entry.name !== '.git' && !hiddenPath(join(dir, entry.name), this.hidden, this.kept),
-      )
+      .filter((entry) => entry.name !== '.git')
       .map((entry) => ({
         name: entry.name,
         kind: entry.isDirectory() ? ('directory' as const) : ('file' as const),
@@ -443,7 +393,7 @@ export class LocalWorkspace implements Workspace {
 
   async execFile(argv: string[], options: Omit<ExecOptions, 'shell'> = {}): Promise<ExecResult> {
     const cwd = await this.resolve(options.cwd ?? '.')
-    return run(this.sandbox.wrap(argv, { keep: this.keep, readOnly: this.readOnly }), {
+    return run(argv, {
       cwd,
       forThread: true,
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
@@ -498,6 +448,15 @@ async function git(cwd: string, ...args: string[]): Promise<ExecResult> {
   return run(['git', ...args], { cwd, env: serverGitEnv(['file']) })
 }
 
+/** Git for cloning a checkout into a worktree: the server's, with long output kept whole. */
+export const cloneGit =
+  (protocols: string[]) =>
+  (cwd: string, args: string[], whole = false): Promise<ExecResult> =>
+    run(['git', ...args], { cwd, env: serverGitEnv(protocols), ...(whole ? { whole } : {}) })
+
+/** Where worktrees go when they are kept beside a repository rather than in Ariadne's data. */
+export const WORKTREE_DIR = '.ariadne-worktrees'
+
 /** The checkout's branch, or `null` when it is on no branch. */
 async function currentBranch(repoRoot: string): Promise<string | null> {
   const result = await git(repoRoot, 'symbolic-ref', '--quiet', '--short', 'HEAD')
@@ -528,26 +487,51 @@ export function localWorkspaces(input: {
   path: string
   repoRoot: string | null
   dataDir: string
-  sandbox?: CommandSandbox
   clone?: Cloner | null
 }): WorkspaceCapability {
-  const { sandbox, repoRoot } = input
+  const { repoRoot } = input
   const clone = input.clone === undefined ? platformCloner : input.clone
   // The coordinator reads the directory as the user has it, changes not committed and all,
-  // without git's own directory and what the sandbox hides.
-  const source = new LocalWorkspace('source', input.path, null, { sandbox, git: false })
+  // without git's own directory.
+  const source = new LocalWorkspace('source', input.path, null, { git: false })
   const inside = (path: string) => source.resolve(path)
   const view = async () => searchableView(source, { check: inside, checkFound: inside })
   if (!repoRoot) {
     return {
       isolated: false,
-      open: async ({ threadId }) => new LocalWorkspace(threadId, input.path, null, { sandbox }),
+      open: async ({ threadId }) => new LocalWorkspace(threadId, input.path, null),
       view,
     }
   }
   const key = createHash('sha256').update(repoRoot).digest('hex').slice(0, 12)
-  const worktrees = join(input.dataDir, 'worktrees', key)
-  const dirOf = (threadId: string) => join(worktrees, threadId)
+  // Worktrees live in Ariadne's data, or beside the repository when only that shares
+  // storage with it (the repository on another disk, say a Dev Drive).
+  const roots = [
+    join(input.dataDir, 'worktrees', key),
+    join(dirname(repoRoot), WORKTREE_DIR, key),
+  ] as const
+  const dirOf = (threadId: string) =>
+    roots.map((root) => join(root, threadId)).find((dir) => existsSync(dir)) ??
+    join(roots[0], threadId)
+  const commonDir = async () =>
+    (await git(repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir')).stdout.trim()
+  /** Where new worktrees go when clones work there, else `null`: the first root that clones. */
+  let cloning: Promise<string | null> | null = null
+  const cloneRoot = () =>
+    (cloning ??= (async () => {
+      const common = clone ? await commonDir() : ''
+      if (!clone || !common) return null
+      for (const root of roots) {
+        const made = !existsSync(root)
+        if (await canClone(clone, common, root).catch(() => false)) return root
+        // Leave nothing beside the user's repository when it is no use.
+        if (made)
+          await rmdir(root)
+            .then(() => rmdir(dirname(root)))
+            .catch(() => {})
+      }
+      return null
+    })())
   const gitRun: GitRun = (args, options = {}) =>
     run(['git', ...args], {
       cwd: options.cwd ?? repoRoot,
@@ -579,16 +563,19 @@ export function localWorkspaces(input: {
         if (removed && options?.discard) await dropSnapshots(gitRun, threadId)
         return removed
       },
-      worktrees: () => worktreesIn(worktrees),
+      worktrees: async () => (await Promise.all(roots.map(worktreesIn))).flat(),
+      sharesStorage: async () => (await cloneRoot()) !== null,
       snapshot: async (threadId) =>
         existsSync(dirOf(threadId)) ? worktreeSnapshot(gitRun, dirOf(threadId), threadId) : null,
       diff: (from, to) => treeDiff(gitRun, from, to),
     },
     async open({ threadId, base: recorded, branch: named }) {
       const branch = named ?? branchFor(threadId)
-      const dir = dirOf(threadId)
       const base = recorded === undefined ? await currentBranch(repoRoot) : recorded
+      let dir = dirOf(threadId)
       if (!existsSync(join(dir, '.git'))) {
+        const shared = await cloneRoot()
+        if (shared) dir = join(shared, threadId)
         await mkdir(dirname(dir), { recursive: true })
         // A worktree whose directory was deleted by hand is still registered; forget it
         // first or `worktree add` refuses the branch.
@@ -596,13 +583,18 @@ export function localWorkspaces(input: {
         const hasBranch =
           (await git(repoRoot, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))
             .exitCode === 0
+        // Where clones work, the files come from the user's checkout instead of git.
+        const plain = shared ? ['--no-checkout'] : []
         const result = hasBranch
-          ? await git(repoRoot, 'worktree', 'add', dir, branch)
-          : await git(repoRoot, 'worktree', 'add', '-b', branch, dir, 'HEAD')
+          ? await git(repoRoot, 'worktree', 'add', ...plain, dir, branch)
+          : await git(repoRoot, 'worktree', 'add', ...plain, '-b', branch, dir, 'HEAD')
         if (result.exitCode !== 0) {
           throw new Error(result.stderr.trim() || `git worktree add exited ${result.exitCode}`)
         }
-        if (clone) await seedWorktree(repoRoot, dir, git, clone)
+        if (clone && shared) {
+          await checkoutCloned(repoRoot, dir, cloneGit(['file']), clone)
+          await seedWorktree(repoRoot, dir, git, clone)
+        }
       }
       // A subdirectory of the repository stays the workspace root inside the worktree.
       const sub = relative(await realpath(repoRoot), await realpath(input.path))
@@ -613,30 +605,17 @@ export function localWorkspaces(input: {
           `${sub} is not in the repository's current commit (untracked or ignored), so the thread's checkout has no such directory; commit it, or choose the repository root`,
         )
       }
-      // git in the worktree writes to the repository's own git directory, but must not
-      // change what makes git run something: the server runs git there, and so does the user.
-      const common = (
-        await git(repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir')
-      ).stdout.trim()
-      // A hooks directory that is missing could be made by a thread; make it first.
-      if (common) await mkdir(join(common, 'hooks'), { recursive: true })
-      return new LocalWorkspace(threadId, root, branch, {
-        sandbox,
-        keep: [dir, ...(common ? [common] : [])],
-        readOnly: common ? gitControlPaths(common) : [],
-        base,
-      })
+      return new LocalWorkspace(threadId, root, branch, { base })
     },
   }
 }
 
 /**
  * One file on this machine, read-only: its directory is opened as a source is, and only
- * the file is shown of it, so what the sandbox hides and links out of the directory stay
- * out of reach the same way.
+ * the file is shown of it, so links out of the directory stay out of reach the same way.
  */
-export function localFile(path: string, sandbox?: CommandSandbox): WorkspaceCapability {
-  const directory = new LocalWorkspace('source', dirname(path), null, { sandbox, git: false })
+export function localFile(path: string): WorkspaceCapability {
+  const directory = new LocalWorkspace('source', dirname(path), null, { git: false })
   return {
     isolated: false,
     viewOnly: true,
@@ -650,7 +629,6 @@ export function localFile(path: string, sandbox?: CommandSandbox): WorkspaceCapa
 /** The "local directory" context source; checkouts go under `dataDir`. */
 export function localDirectoryProvider(
   dataDir: string,
-  sandbox?: CommandSandbox,
   clone?: Cloner | null,
 ): ContextProvider<LocalSettings> {
   return {
@@ -679,7 +657,7 @@ export function localDirectoryProvider(
       const info = await stat(path).catch(() => null)
       // A single file is something to read, never to work in: a log, a dump.
       // Where it really is, so a link to it reads like the file itself.
-      if (info?.isFile()) return { workspace: localFile(await realpath(path), sandbox) }
+      if (info?.isFile()) return { workspace: localFile(await realpath(path)) }
       if (!info?.isDirectory()) throw new Error(`${path} is not a directory`)
       const repoRoot = await gitRoot(path)
       return {
@@ -687,7 +665,6 @@ export function localDirectoryProvider(
           path,
           repoRoot,
           dataDir,
-          ...(sandbox ? { sandbox } : {}),
           ...(clone !== undefined ? { clone } : {}),
         }),
       }
@@ -700,7 +677,7 @@ export default definePlugin({
   name: { 'zh-CN': '本地目录', en: 'Local directory' },
   setup(ctx) {
     return ctx.registerContextProvider(
-      localDirectoryProvider(ctx.dataDir, ctx.sandbox) as ContextProvider<never>,
+      localDirectoryProvider(ctx.dataDir) as ContextProvider<never>,
     )
   },
 })

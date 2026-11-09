@@ -1,6 +1,6 @@
 import { Ariadne, type AnyStoredEvent } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { McpHub, noSandbox, PluginHost, WorkspaceManager } from '@ariadne/agent'
+import { McpHub, PluginHost, WorkspaceManager } from '@ariadne/agent'
 import type { ContextProvider, TrackerCapability } from '@ariadne/plugin-sdk'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -385,15 +385,6 @@ describe('attachments', () => {
   })
 })
 
-describe('sandbox', () => {
-  test('says when thread commands are not isolated', async () => {
-    const response = await call('/api/sandbox')
-    expect(await response.json()).toMatchObject({
-      sandbox: { kind: null, mode: 'auto', hidden: [], platform: process.platform },
-    })
-  })
-})
-
 /** A project whose source has a tracker, with one plan node `a`. */
 async function withTracker(fail = false) {
   const host = new PluginHost('/tmp/ariadne-test-plugins')
@@ -503,7 +494,6 @@ describe('MCP servers', () => {
     )
     const mcp = new McpHub({
       servers: () => settings.current.mcp.servers,
-      sandbox: noSandbox,
       env: () => ({}),
     })
     handle = createHandler({ app, token, settings, mcp })

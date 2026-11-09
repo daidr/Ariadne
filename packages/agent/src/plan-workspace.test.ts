@@ -237,6 +237,7 @@ describe('workspace tools', () => {
       branch: 'ariadne/thread',
       base: 'main',
       removed: false,
+      parked: false,
     })
     const threadRequest = model.requests.find((r) => system(r).includes('You are a thread'))
     expect(toolNames(threadRequest!)).toContain('run_command')

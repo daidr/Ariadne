@@ -3,9 +3,6 @@ import { createTranslator } from '@ariadne/i18n'
 import {
   ArtifactFeedback,
   Autopilot,
-  browserProfiles,
-  createSandbox,
-  detectSandbox,
   McpHub,
   PluginHost,
   RepoWatcher,
@@ -25,7 +22,7 @@ import openAICompatible from '@ariadne/plugin-openai-compatible'
 import { processes } from '@ariadne/plugin-sdk'
 import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { createHandler, joinShared, type SharedSocketData } from './app'
 import { DailyBackup, DataStore } from './data'
 import { loadConfig } from './config'
@@ -45,28 +42,9 @@ const configPath = join(config.home, 'config.json')
 // The user's own skills for every project: Ariadne's first, then the folder shared between tools.
 const skillsDirs = [join(config.home, 'skills'), join(homedir(), '.agents', 'skills')]
 
-// Thread commands must not see the token or the settings, nor a browser that holds the token.
 const userConfig = loadUserConfig(configPath)
 // What the server prints is in the language the user chose for Ariadne.
 const t = createTranslator(userConfig.locale)
-// The plugin paths as the settings hold them now, once the settings are loaded.
-let pluginPaths = () => userConfig.plugins
-const sandboxSettings = userConfig.sandbox
-const sandbox = createSandbox({
-  kind: sandboxSettings.mode === 'off' ? null : await detectSandbox(),
-  mode: sandboxSettings.mode,
-  hide: [config.home, ...browserProfiles(), ...sandboxSettings.hide],
-  // What the server runs later, outside the sandbox: its own code, the plugins it loads,
-  // and the user's git config.
-  // Skills are read, and their scripts run, by every thread; none of them changes them.
-  show: () => skillsDirs,
-  readOnly: () => [
-    resolve(import.meta.dir, '../../..'),
-    ...pluginPaths(),
-    join(homedir(), '.gitconfig'),
-    join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'git'),
-  ],
-})
 // What the last server left running when it died (a dev server, a tool server) ends now,
 // before anything new starts.
 const leftovers = await processes.open(join(config.home, 'processes.json'))
@@ -74,19 +52,7 @@ if (leftovers.ownerAlive) console.warn(t('cli.server.otherServer'))
 else if (leftovers.killed.length) {
   console.info(t('cli.server.leftovers', { count: leftovers.killed.length }))
 }
-if (!sandbox.kind) {
-  console.warn(
-    t(
-      sandboxSettings.mode === 'off'
-        ? 'cli.server.sandboxOff'
-        : process.platform === 'win32'
-          ? 'cli.server.sandboxWindows'
-          : 'cli.server.noSandbox',
-    ),
-  )
-}
-
-const host = new PluginHost(join(config.home, 'plugins'), sandbox)
+const host = new PluginHost(join(config.home, 'plugins'), [config.home])
 await host.load(openAICompatible)
 await host.load(anthropic)
 await host.load(agents)
@@ -96,18 +62,16 @@ await host.load(gitlab)
 await host.load(ssh)
 await host.load(daemon)
 const settings = new SettingsStore(configPath, host)
-pluginPaths = () => settings.current.plugins
 for (const path of settings.current.plugins) {
   await host
     .loadFromPath(path)
     .catch((error) => console.error(t('cli.server.pluginFailed', { path }), error))
 }
 
-// External tool servers run like thread commands: in the sandbox, without the server's
-// credentials, with only what the user gave them on top.
+// External tool servers run like thread commands: without the server's credentials, with
+// only what the user gave them on top.
 const mcp = new McpHub({
   servers: () => settings.current.mcp.servers,
-  sandbox,
   env: () => threadEnv(),
 })
 

@@ -25,7 +25,6 @@
         "@ariadne/i18n": "workspace:*",
         "@ariadne/mcp": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/sandbox": "workspace:*",
         "@dou-ui/editor": "0.1.0-alpha.11",
         "@dou-ui/flow": "0.1.0-alpha.11",
         "dou-ui": "0.1.0-alpha.11",
@@ -58,7 +57,6 @@
         "@ariadne/plugin-local": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
         "@ariadne/relay": "workspace:*",
-        "@ariadne/sandbox": "workspace:*",
       },
     },
     "packages/i18n": {
@@ -97,7 +95,6 @@
       },
       "devDependencies": {
         "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/sandbox": "workspace:*",
       },
     },
     "packages/plugin-github": {
@@ -158,13 +155,6 @@
         "@ariadne/plugin-local": "workspace:*",
         "@ariadne/plugin-sdk": "workspace:*",
         "@ariadne/relay": "workspace:*",
-      },
-    },
-    "packages/sandbox": {
-      "name": "@ariadne/sandbox",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
       },
     },
     "packages/server": {
@@ -239,8 +229,6 @@
     "@ariadne/relay": ["@ariadne/relay@workspace:packages/relay"],
 
     "@ariadne/remote": ["@ariadne/remote@workspace:packages/remote"],
-
-    "@ariadne/sandbox": ["@ariadne/sandbox@workspace:packages/sandbox"],
 
     "@ariadne/server": ["@ariadne/server@workspace:packages/server"],
 

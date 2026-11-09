@@ -32,7 +32,7 @@ beforeEach(async () => {
     name: { 'zh-CN': '本地目录' },
     setup: (ctx) =>
       ctx.registerContextProvider(
-        localDirectoryProvider(join(base, 'data'), undefined, null) as ContextProvider<never>,
+        localDirectoryProvider(join(base, 'data'), null) as ContextProvider<never>,
       ),
   })
   workspaces = new WorkspaceManager(app, host)
@@ -197,6 +197,38 @@ describe('thread changes', () => {
     const again = await workspaces.forThread(project.id, thread.id)
     expect(existsSync(again.label)).toBe(true)
     expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })
+    await janitor.stop()
+  })
+
+  test('a finished thread left idle gives up its worktree, and can still be merged', async () => {
+    const { thread, ws } = await setup()
+    let now = Date.now()
+    const janitor = new WorktreeJanitor(app, workspaces, {
+      delayMs: 0,
+      idleMs: 1000,
+      now: () => now,
+    })
+    await ws.exec('echo thread > README.md && git commit -qam readme')
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
+    // Just reported: kept.
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    // Changes not committed keep it, however long it sat.
+    now += 5000
+    await writeFile(join(ws.label, 'draft.txt'), 'draft\n')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    await rm(join(ws.label, 'draft.txt'))
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(false)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: true })
+
+    // The branch holds the work: it merges without a worktree, and is then no longer parked.
+    const merged = await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(merged.status).toBe(200)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: false })
     await janitor.stop()
   })
 
