@@ -59,7 +59,8 @@ export const projectsProjection: Projection = {
       settings TEXT,
       -- What Ariadne found out about the repository itself (JSON, ProjectDetected).
       detected TEXT,
-      -- The user paused its autopilot; and when it last went on (switched on or resumed).
+      -- The user paused its autopilot; and the event at which it last went on (switched on
+      -- or resumed).
       autopilot_paused INTEGER NOT NULL DEFAULT 0,
       autopilot_since INTEGER,
       created_at INTEGER NOT NULL,
@@ -113,7 +114,7 @@ export const projectsProjection: Projection = {
         // Switched on afresh, it runs: a pause from before it was off does not hold.
         if (event.data.settings.autopilot?.enabled && !was) {
           db.run('UPDATE projects SET autopilot_paused = 0, autopilot_since = ? WHERE id = ?', [
-            event.at,
+            event.seq,
             event.projectId,
           ])
         }
@@ -122,8 +123,8 @@ export const projectsProjection: Projection = {
       case 'project.autopilot.paused':
         db.run(
           `UPDATE projects SET autopilot_paused = ?1, updated_at = ?2,
-             autopilot_since = CASE WHEN ?1 THEN autopilot_since ELSE ?2 END WHERE id = ?3`,
-          [event.data.paused ? 1 : 0, event.at, event.projectId],
+             autopilot_since = CASE WHEN ?1 THEN autopilot_since ELSE ?3 END WHERE id = ?4`,
+          [event.data.paused ? 1 : 0, event.at, event.seq, event.projectId],
         )
         break
       case 'project.setup.detected':

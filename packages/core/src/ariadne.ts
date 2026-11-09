@@ -135,7 +135,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 52
+export const PROJECTION_VERSION = 53
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -1595,7 +1595,8 @@ export class Ariadne {
   /**
    * Whether the autopilot may ask about a milestone's gate now: not while a card is open
    * or after the user agreed, and not after a no since the autopilot last went on (being
-   * switched on, or resumed after a pause, asks again).
+   * switched on, or resumed after a pause, asks again). Before and after are the order of
+   * the events, not their times: two can fall in the same millisecond.
    */
   mayAskGate(projectId: string, nodeId: string): boolean {
     const since =
@@ -1605,11 +1606,11 @@ export class Ariadne {
         )
         .get(projectId)?.autopilot_since ?? 0
     const rows = this.db
-      .query<{ closed: number; approved: number | null; created_at: number }, [string, string]>(
-        'SELECT closed, approved, created_at FROM attentions WHERE project_id = ? AND purpose = ?',
+      .query<{ closed: number; approved: number | null; changed_seq: number }, [string, string]>(
+        'SELECT closed, approved, changed_seq FROM attentions WHERE project_id = ? AND purpose = ?',
       )
       .all(projectId, `${MILESTONE_GATE}:${nodeId}`)
-    return !rows.some((row) => row.closed === 0 || row.approved === 1 || row.created_at >= since)
+    return !rows.some((row) => row.closed === 0 || row.approved === 1 || row.changed_seq > since)
   }
 
   /** Ask the user whether the work goes on past a milestone; the coordinator hears the answer. */
