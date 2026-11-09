@@ -58,6 +58,8 @@ interface Job extends BackgroundCommand {
   read: number
   controller: AbortController
   ended: Promise<void>
+  /** Left running when the thread reported, and the thread has not been told since. */
+  kept?: boolean
   /** Wakes whoever waits for more output or the end. */
   changed: Set<() => void>
 }
@@ -219,12 +221,23 @@ export class BackgroundCommands {
    * leaves the running ones that serve at an address: the user may open it while reviewing.
    */
   async stopThread(threadId: string, options: { keepServed?: boolean } = {}): Promise<void> {
-    const jobs = [...this.jobs.values()].filter(
-      (job) => job.threadId === threadId && !(options.keepServed && job.url && !job.result),
-    )
+    const own = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+    const kept = (job: Job) => !!options.keepServed && !!job.url && !job.result
+    for (const job of own) job.kept = kept(job)
+    const jobs = own.filter((job) => !kept(job))
     await this.end(jobs)
     for (const job of jobs) this.jobs.delete(job.id)
     if (jobs.length) this.onChange(threadId)
+  }
+
+  /**
+   * The commands that were left running over a report and still run, once: the thread is
+   * told of them when it works again, so it uses them instead of starting them anew.
+   */
+  takeKept(threadId: string): BackgroundCommand[] {
+    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId && job.kept)
+    for (const job of jobs) job.kept = false
+    return jobs.filter((job) => !job.result).map(view)
   }
 
   async stopAll(): Promise<void> {

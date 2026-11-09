@@ -703,6 +703,14 @@ const runCommand: Tool = {
         if (!ctx.background) {
           return { content: 'Commands cannot run in the background here.', isError: true }
         }
+        // Started again, e.g. a dev server after more changes: the one before makes way,
+        // so they do not pile up or fight over a port.
+        const replaced: string[] = []
+        for (const old of ctx.background.list(ctx.conversationId)) {
+          if (old.result || old.command !== command) continue
+          await ctx.background.stop(ctx.conversationId, old.id)
+          replaced.push(old.id)
+        }
         const started = ctx.background.start(
           ctx.conversationId,
           command,
@@ -715,8 +723,11 @@ const runCommand: Tool = {
           FIRST_OUTPUT_MS,
           ctx.signal,
         )
+        const note = replaced.length
+          ? `\n[${replaced.join(', ')} ran the same command and was ended first]`
+          : ''
         return {
-          content: first ? outputText(first, limits.commandOutput, 'started') : started.id,
+          content: (first ? outputText(first, limits.commandOutput, 'started') : started.id) + note,
           isError: !!first?.command.result && first.command.result.exitCode !== 0,
         }
       }

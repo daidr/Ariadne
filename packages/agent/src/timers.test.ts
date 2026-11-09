@@ -7,7 +7,7 @@ import { Scheduler } from './scheduler'
 import type { ResolvedModel } from './runner'
 import { Timers } from './timers'
 import { waitUntil } from './wait-tool'
-import type { WorkspaceManager } from './workspaces'
+import { keptNote, type WorkspaceManager } from './workspaces'
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -366,6 +366,12 @@ describe('background commands for the status line', () => {
     expect(background.list(thread.id)).toMatchObject([
       { id: server.id, url: 'http://localhost:5173/', result: null },
     ])
+    // Back at work, the thread is told once what it left serving.
+    expect(background.takeKept(thread.id)).toMatchObject([{ id: server.id }])
+    expect(background.takeKept(thread.id)).toEqual([])
+    expect(keptNote(background.list(thread.id))).toContain(
+      `${server.id} at http://localhost:5173/: bun dev`,
+    )
     // Reported again after more work: still there for the thread and the user.
     app.reportThread(thread.id, { kind: 'ready', summary: '又改了', headline: '再看一下' })
     await settled()
