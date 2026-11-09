@@ -39,7 +39,6 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
-  SquareStopIcon,
   MessagesIcon,
 } from '@dou-ui/icons'
 import {
@@ -56,6 +55,7 @@ import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
 import { clockText, t, tm } from '../i18n'
 import GettingStarted from './GettingStarted.vue'
+import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
@@ -73,7 +73,6 @@ import {
   state,
   resumeThread,
   setThreadModel,
-  stopThread,
   stopTurn,
   undoNotice,
 } from '../store'
@@ -105,7 +104,9 @@ import { stepHistory, type Recall } from './input-history'
 import { provideFromThread } from '../opened-from'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
-const props = defineProps<{ threadId?: string }>()
+// `tabbed`: in a side tab group, whose own menu holds the thread's.
+// `merging`: its changes are open beside it, with the ways out of the review on them.
+const props = defineProps<{ threadId?: string; tabbed?: boolean; merging?: boolean }>()
 
 // What opens from a thread shows full screen, with this thread beside it.
 provideFromThread(() => props.threadId ?? null)
@@ -231,9 +232,6 @@ const pickedModel = computed(() => {
 function pickModel(value: string | number | undefined) {
   if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
 }
-function openTrace() {
-  if (conversationId.value) openMain({ kind: 'trace', conversationId: conversationId.value })
-}
 const todo = computed(() => todoPlan(view.value.todo, working.value))
 // A list all ticked folds to its title; one with steps left opens again.
 const todoOpen = ref(true)
@@ -257,21 +255,6 @@ const failure = computed(() =>
     ? view.value.conversation.lastError
     : null,
 )
-// The user stops a thread with a reason, the same way the coordinator does.
-const stopOpen = ref(false)
-const canPause = computed(() => {
-  const current = thread.value
-  if (!current) return false
-  return current.stopped ? current.stopped.by !== 'user' : current.stage !== 'done'
-})
-const stopReason = ref('')
-async function stopThreadNow(threadId: string, takeover: boolean) {
-  // Taking over without a reason keeps the coordinator's, which says why it stopped.
-  const reason = stopReason.value.trim() || (takeover ? '' : t('thread.stopDefaultReason'))
-  await stopThread(threadId, reason)
-  stopOpen.value = false
-  stopReason.value = ''
-}
 const cancelled = computed(
   () => view.value.conversation?.lastOutcome === 'cancelled' && !working.value,
 )
@@ -663,7 +646,10 @@ watch(
           <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
             {{ t('review.underway', { round: thread.review.rounds }) }}
           </DouShimmer>
-          <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+          <ReviewActions
+            v-if="thread.stage === 'review' && !(merging && mergeOffered(thread))"
+            :thread-id="thread.id"
+          />
           <DouTag
             v-if="thread.workspace?.branch"
             class="conversation-branch"
@@ -710,48 +696,8 @@ watch(
             </DouButton>
           </template>
         </div>
-        <div class="conversation-tools">
-          <!-- Pausing the whole thread is rarer than stopping a turn: it sits in the menu. -->
-          <DouPopover
-            v-model:open="stopOpen"
-            trigger="manual"
-            placement="bottom-end"
-            :title="t(thread.stopped ? 'thread.takeOverTitle' : 'thread.stopTitle')"
-            :width="320"
-          >
-            <DouDropdown placement="bottom-end">
-              <DouButton
-                variant="ghost"
-                size="sm"
-                :aria-label="t('thread.more')"
-                :title="t('thread.more')"
-              >
-                <MoreHorizontalIcon />
-              </DouButton>
-              <template #menu>
-                <DouDropdownItem v-if="canPause" value="pause" @click="stopOpen = true">
-                  <template #prefix><PauseIcon /></template>
-                  {{ t(thread.stopped ? 'thread.takeOver' : 'thread.stop') }}
-                </DouDropdownItem>
-                <DouDropdownItem value="trace" @click="openTrace">
-                  <template #prefix><ListTreeIcon /></template>
-                  {{ t('trace.open') }}
-                </DouDropdownItem>
-              </template>
-            </DouDropdown>
-            <template #content>
-              <div class="stop-form">
-                <DouInput v-model="stopReason" :placeholder="t('thread.stopReasonPlaceholder')" />
-                <DouButton
-                  size="sm"
-                  tone="primary"
-                  @click="stopThreadNow(thread.id, !!thread.stopped)"
-                >
-                  {{ t('thread.stopConfirm') }}
-                </DouButton>
-              </div>
-            </template>
-          </DouPopover>
+        <div v-if="!tabbed" class="conversation-tools">
+          <ThreadTools :thread="thread" :label="t('thread.more')" />
         </div>
       </div>
     </div>
@@ -1080,10 +1026,6 @@ watch(
         <DouText v-if="fallback" variant="tertiary" size="sm" class="conversation-fallback">
           {{ t('conversation.fallback', { model: fallback }) }}
         </DouText>
-        <DouButton variant="ghost" size="sm" @click="stop">
-          <template #leading><SquareStopIcon /></template>
-          {{ t('conversation.stop') }}
-        </DouButton>
       </div>
     </div>
     <div v-else-if="queued" class="conversation-status" role="status">
@@ -1148,7 +1090,9 @@ watch(
         :placeholder="props.threadId ? t('thread.placeholder') : t('coordinator.placeholder')"
         :disabled="!state.detail"
         :can-submit="canSubmit"
+        :loading="working"
         @submit="submit"
+        @stop="stop"
         @attach="attachments.add"
       >
         <template v-if="attachments.files.value.length" #header>
@@ -1275,6 +1219,11 @@ watch(
   min-width: 0;
 }
 
+/* With no branch, review or menu to show, the bar is not drawn at all. */
+.conversation-header:has(.conversation-meta-main:empty):not(:has(.conversation-tools)) {
+  display: none;
+}
+
 .conversation-meta-main {
   display: flex;
   flex: 1;
@@ -1298,6 +1247,7 @@ watch(
 }
 
 .conversation-list {
+  --dou-chat-list-gap: 8px;
   flex: 1;
   min-height: 0;
 }
@@ -1387,13 +1337,6 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.stop-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-end;
 }
 
 .earlier {

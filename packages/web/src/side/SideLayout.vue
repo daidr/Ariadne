@@ -18,7 +18,6 @@ import {
   LayoutRowsIcon,
   MaximizeIcon,
   MessagesIcon,
-  MoreHorizontalIcon,
   PackageIcon,
   SortIcon,
   WorkflowIcon,
@@ -28,6 +27,7 @@ import { computed, onBeforeUnmount, useTemplateRef, watch, watchEffect } from 'v
 import { t } from '../i18n'
 import ArtifactList from '../artifacts/ArtifactList.vue'
 import PlanPanel from '../plan/PlanPanel.vue'
+import ThreadTools from '../components/ThreadTools.vue'
 import ConversationPanel from '../components/ConversationPanel.vue'
 import OpenedView from '../full/OpenedView.vue'
 import { kindIcon } from '../artifacts/kinds'
@@ -162,7 +162,11 @@ function bring(group: DockGroup, key: PaneKey) {
         <template v-else>{{ labelOf(value as PaneKey) }}</template>
       </template>
       <template #default="{ value }">
-        <div v-if="side.isList(value as PaneKey)" class="pane-list">
+        <div
+          v-if="side.isList(value as PaneKey)"
+          class="pane-list"
+          :class="{ 'pane-flush': value === 'plan' }"
+        >
           <PlanPanel v-if="value === 'plan'" />
           <ThreadList v-else-if="value === 'threads'" />
           <ArtifactList v-else-if="value === 'artifacts'" />
@@ -171,6 +175,7 @@ function bring(group: DockGroup, key: PaneKey) {
         <ConversationPanel
           v-else-if="side.threadOf(value as PaneKey)"
           :thread-id="side.threadOf(value as PaneKey)!"
+          tabbed
         />
         <OpenedView
           v-else-if="openedViewOf(value as PaneKey)"
@@ -226,51 +231,49 @@ function bring(group: DockGroup, key: PaneKey) {
             <LayoutColumnsIcon />
           </DouButton>
         </DouTooltip>
-        <DouDropdown placement="bottom-end">
-          <DouButton size="sm" variant="ghost" :aria-label="t('side.more')">
-            <MoreHorizontalIcon />
-          </DouButton>
-          <template #menu>
+        <ThreadTools
+          :thread="threadAt(active as PaneKey)"
+          :label="t(threadAt(active as PaneKey) ? 'thread.more' : 'side.more')"
+        >
+          <DouDropdownItem
+            v-if="canSplit(group, 'bottom')"
+            value="split-down"
+            @click="splitPane(active as PaneKey, 'vertical')"
+          >
+            <template #prefix><LayoutRowsIcon /></template>
+            {{ t('side.splitDown') }}
+          </DouDropdownItem>
+          <DouDropdownSub v-if="othersThan(group).length" :title="t('side.moveTo')">
             <DouDropdownItem
-              v-if="canSplit(group, 'bottom')"
-              value="split-down"
-              @click="splitPane(active as PaneKey, 'vertical')"
+              v-for="other in othersThan(group)"
+              :key="other.id"
+              :value="other.id"
+              @click="setSide(side.move(state.side, active as PaneKey, other.id))"
             >
-              <template #prefix><LayoutRowsIcon /></template>
-              {{ t('side.splitDown') }}
+              {{ t('side.groupOf', { label: labelOf(side.activeOf(other)) }) }}
             </DouDropdownItem>
-            <DouDropdownSub v-if="othersThan(group).length" :title="t('side.moveTo')">
-              <DouDropdownItem
-                v-for="other in othersThan(group)"
-                :key="other.id"
-                :value="other.id"
-                @click="setSide(side.move(state.side, active as PaneKey, other.id))"
-              >
-                {{ t('side.groupOf', { label: labelOf(side.activeOf(other)) }) }}
-              </DouDropdownItem>
-            </DouDropdownSub>
-            <DouDropdownSub :title="t('side.open')">
-              <DouDropdownItem
-                v-for="key in side.LISTS"
-                :key="key"
-                :value="key"
-                :disabled="group.tabs.includes(key)"
-                @click="bring(group, key)"
-              >
-                <template #prefix><component :is="lists[key]!.icon" /></template>
-                {{ lists[key]!.label() }}
-              </DouDropdownItem>
-            </DouDropdownSub>
+          </DouDropdownSub>
+          <DouDropdownSub :title="t('side.open')">
             <DouDropdownItem
-              v-if="group.tabs.some((key) => key !== active && !side.isList(key as PaneKey))"
-              value="close-others"
-              divided
-              @click="setSide(side.closeOthers(state.side, active as PaneKey))"
+              v-for="key in side.LISTS"
+              :key="key"
+              :value="key"
+              :disabled="group.tabs.includes(key)"
+              @click="bring(group, key)"
             >
-              {{ t('side.closeOthers') }}
+              <template #prefix><component :is="lists[key]!.icon" /></template>
+              {{ lists[key]!.label() }}
             </DouDropdownItem>
-          </template>
-        </DouDropdown>
+          </DouDropdownSub>
+          <DouDropdownItem
+            v-if="group.tabs.some((key) => key !== active && !side.isList(key as PaneKey))"
+            value="close-others"
+            divided
+            @click="setSide(side.closeOthers(state.side, active as PaneKey))"
+          >
+            {{ t('side.closeOthers') }}
+          </DouDropdownItem>
+        </ThreadTools>
       </template>
     </DouDock>
   </div>
@@ -295,6 +298,11 @@ function bring(group: DockGroup, key: PaneKey) {
   box-sizing: border-box;
   height: 100%;
   padding: 8px 8px 8px 16px;
+}
+
+/* The plan's canvas fills its pane. */
+.pane-flush {
+  padding: 0;
 }
 
 .pane-thread-label {
