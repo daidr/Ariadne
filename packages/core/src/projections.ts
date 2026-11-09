@@ -754,8 +754,15 @@ export const noticesProjection: Projection = {
         break
       }
       case 'turn.changed': {
-        const { conversationId, turnId, from, to, files, total } = event.data
-        add(conversationId, 'turn-changes', { turnId, from, to, files, total })
+        const { conversationId, turnId, from, to, files, total, startedAt } = event.data
+        add(conversationId, 'turn-changes', {
+          turnId,
+          from,
+          to,
+          files,
+          total,
+          ...(startedAt ? { startedAt } : {}),
+        })
         break
       }
       case 'conversation.model_fallback':

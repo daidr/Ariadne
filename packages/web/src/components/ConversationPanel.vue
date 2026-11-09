@@ -87,7 +87,7 @@ import LiveCommand from './LiveCommand.vue'
 import BackgroundCommand from './BackgroundCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 import ChangeTotals from './ChangeTotals.vue'
-import { mergeOffered } from '../review/merge-offered'
+import { branchChanges, mergeOffered } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
@@ -353,13 +353,19 @@ type TurnChangesNotice = Extract<NoticeView, { kind: 'turn-changes' }>
 const shown = computed(() => {
   const changes = new Map<string, TurnChangesNotice>()
   const items: typeof timeline.value = []
-  let reply: string | null = null
+  let reply: { id: string; at: number } | null = null
   for (const item of timeline.value) {
     if (item.message) {
       const agent = item.message.author !== 'user' && item.message.kind !== 'relay'
-      reply = agent ? item.message.id : null
-    } else if (item.notice?.kind === 'turn-changes' && reply && !changes.has(reply)) {
-      changes.set(reply, item.notice)
+      reply = agent ? { id: item.message.id, at: item.message.createdAt } : null
+    } else if (
+      item.notice?.kind === 'turn-changes' &&
+      reply &&
+      !changes.has(reply.id) &&
+      // A reply of an earlier turn: this one ended without saying anything.
+      reply.at >= (item.notice.startedAt ?? 0)
+    ) {
+      changes.set(reply.id, item.notice)
       continue
     }
     items.push(item)
@@ -659,8 +665,8 @@ watch(
         <!-- Under review, "go merge" opens the same changes. -->
         <template v-if="thread.workspace?.branch && thread.workspace.base && !mergeAsked">
           <ChangeTotals
-            v-if="thread.changes"
-            :totals="thread.changes"
+            v-if="branchChanges(thread)"
+            :totals="branchChanges(thread)!"
             :thread-id="thread.id"
             button
           />

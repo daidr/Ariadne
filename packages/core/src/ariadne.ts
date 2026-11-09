@@ -132,7 +132,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 48
+export const PROJECTION_VERSION = 49
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -2662,6 +2662,7 @@ export class Ariadne {
   ): void {
     if (!input.files.length) return
     const projectId = this.runningTurn(conversationId, turnId)
+    const startedAt = this.getConversation(conversationId).turn?.startedAt
     const sum = (key: 'added' | 'removed') =>
       input.files.reduce((total, file) => total + (file[key] ?? 0), 0)
     this.store.append([
@@ -2675,6 +2676,7 @@ export class Ariadne {
           to: input.to,
           files: input.files.slice(0, MAX_TURN_FILES),
           total: { files: input.files.length, added: sum('added'), removed: sum('removed') },
+          ...(startedAt ? { startedAt } : {}),
           ...(input.branch ? { branch: input.branch } : {}),
         },
       },

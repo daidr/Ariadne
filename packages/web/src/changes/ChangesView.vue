@@ -288,7 +288,8 @@ const lineComments = useLineComments(
     versions.value && !versions.value.skipped
       ? { original: versions.value.before ?? '', modified: versions.value.after ?? '' }
       : null,
-  () => sent.value,
+  // As with the reviewer's: what was sent is about the branch, not one turn of it.
+  () => (props.turn ? [] : sent.value),
 )
 // The reviewer's comments on the branch, with what the author did about each.
 const reviews = ref<ReviewRoundView[]>([])

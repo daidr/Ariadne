@@ -8,6 +8,7 @@ import { t } from '../i18n'
 import { checksTone, questionOf, statusLine } from '../stage'
 import { state } from '../store'
 import ReviewMark from '../review/ReviewMark.vue'
+import { branchChanges } from '../review/merge-offered'
 import StageIcon from './StageIcon.vue'
 
 /**
@@ -64,8 +65,8 @@ const prTone = computed(() =>
       </DouText>
       <ReviewMark :thread="thread" />
       <ChangeTotals
-        v-if="thread.changes && !nested"
-        :totals="thread.changes"
+        v-if="branchChanges(thread) && !nested"
+        :totals="branchChanges(thread)!"
         :thread-id="thread.id"
         class="row-mark row-trim"
       />

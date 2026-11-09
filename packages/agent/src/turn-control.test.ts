@@ -128,6 +128,8 @@ describe('a thread turn', () => {
       added: 2,
       removed: 1,
     })
+    // When the turn started, so the changes go under a reply of this turn only.
+    expect(notice?.kind === 'turn-changes' && notice.startedAt).toBeGreaterThan(0)
     // The command was shown while it ran, and gone once it ended; none of it is in the log.
     expect(updates[0]?.command).toMatchObject({ command: 'bun run build', cwd: '.' })
     expect(updates.at(-1)).toEqual({

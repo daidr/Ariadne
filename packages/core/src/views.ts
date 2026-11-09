@@ -338,6 +338,8 @@ export type NoticeView = {
       to: string
       files: TurnFile[]
       total: { files: number; added: number; removed: number }
+      /** When the turn started; missing on older notices. */
+      startedAt?: number
     }
 )
 

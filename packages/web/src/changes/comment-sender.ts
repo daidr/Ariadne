@@ -11,13 +11,19 @@ export const QUIET_MS = 10_000
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const sending = new Set<string>()
+/**
+ * The project of each thread with drafts, taken while its changes are open: the user may
+ * have moved to another project by the time they go.
+ */
+const projects = new Map<string, string>()
 
 /** The thread's drafts changed: they go once nothing more changes for a while. */
-export function draftsChanged(threadId: string) {
+export function draftsChanged(threadId: string, projectId = state.currentId) {
   const timer = timers.get(threadId)
   if (timer) clearTimeout(timer)
   timers.delete(threadId)
   if (!draftsOf(threadId).length) return
+  if (projectId && !projects.has(threadId)) projects.set(threadId, projectId)
   timers.set(
     threadId,
     setTimeout(() => void flushComments(threadId), QUIET_MS),
@@ -30,14 +36,18 @@ export async function flushComments(threadId: string): Promise<boolean> {
   if (timer) clearTimeout(timer)
   timers.delete(threadId)
   const drafts = draftsOf(threadId)
-  if (!drafts.length || sending.has(threadId)) return false
+  const projectId = projects.get(threadId)
+  if (!drafts.length || !projectId || sending.has(threadId)) return false
   sending.add(threadId)
   try {
-    return await sendLineComments(
+    const sent = await sendLineComments(
+      projectId,
       threadId,
       sendable(drafts),
       drafts.map((draft) => draft.id),
     )
+    if (!draftsOf(threadId).length) projects.delete(threadId)
+    return sent
   } finally {
     sending.delete(threadId)
   }
@@ -56,12 +66,12 @@ document.addEventListener('visibilitychange', () => {
 })
 // Closing the page would cancel a request in flight: what waits goes in one that outlives it.
 window.addEventListener('pagehide', () => {
-  const projectId = state.detail?.project.id
-  if (!projectId) return
   for (const threadId of Object.keys(state.lineComments)) {
     const drafts = draftsOf(threadId)
-    if (!drafts.length || sending.has(threadId)) continue
+    const projectId = projects.get(threadId)
+    if (!drafts.length || !projectId || sending.has(threadId)) continue
     api.postCommentsLeaving(projectId, threadId, sendable(drafts))
     delete state.lineComments[threadId]
+    projects.delete(threadId)
   }
 })

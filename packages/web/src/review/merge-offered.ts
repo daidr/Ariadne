@@ -8,3 +8,13 @@ export function mergeOffered(thread: ThreadView | null | undefined): boolean {
   const workspace = thread?.workspace
   return !!workspace?.branch && !!workspace.base && !workspace.removed && !thread?.pullRequest
 }
+
+/**
+ * The thread's changes on its branch while they can still be opened: none once it has no
+ * branch or its workspace is gone (dropped, or removed after merging).
+ */
+export function branchChanges(thread: ThreadView | null | undefined): ThreadView['changes'] {
+  const workspace = thread?.workspace
+  if (!workspace?.branch || !workspace.base || workspace.removed) return null
+  return thread?.changes ?? null
+}
