@@ -414,12 +414,13 @@ describe('background commands', () => {
     const ws = new LocalWorkspace('w', dir, null)
     const ctx = context(ws)
     const command = 'echo "Local: http://localhost:4321/"; sleep 30'
-    await tool('run_command').run({ command, background: true }, ctx)
+    await tool('run_command').run({ command, background: true, keepForUser: true }, ctx)
     await tool('run_command').run({ command: 'sleep 30', background: true }, ctx)
     // The same words somewhere else are another command.
     await mkdir(join(dir, 'docs'), { recursive: true })
     await tool('run_command').run({ command, background: true, cwd: 'docs' }, ctx)
-    const again = await tool('run_command').run({ command, background: true }, ctx)
+    // Another spelling of the same directory is the same one.
+    const again = await tool('run_command').run({ command, background: true, cwd: './' }, ctx)
     expect(again.content).toContain('cmd-4 runs in the background')
     expect(again.content).toContain('[cmd-1 ran the same command and was ended first]')
     expect(
@@ -428,6 +429,9 @@ describe('background commands', () => {
         .filter((c) => !c.result)
         .map((c) => c.id),
     ).toEqual(['cmd-2', 'cmd-3', 'cmd-4'])
+    // What the user asked to try is still theirs to try after the restart.
+    await ctx.background!.stopThread(ctx.conversationId, { keepAsked: true })
+    expect(ctx.background!.list(ctx.conversationId).map((c) => c.id)).toEqual(['cmd-4'])
     await ctx.background!.stopThread(ctx.conversationId)
   })
 

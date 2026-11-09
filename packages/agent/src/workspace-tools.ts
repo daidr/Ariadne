@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import {
   checkCommand,
   confirmBlock,
@@ -671,6 +672,10 @@ function execOptions(ctx: ToolContext, cwd: string | undefined) {
   }
 }
 
+/** One spelling for a directory in the workspace, so `docs`, `./docs/` and `docs/.` compare equal. */
+const sameDir = (cwd: string | undefined) =>
+  posix.normalize(`${cwd || '.'}/`).replace(/\/+$/, '') || '.'
+
 /** A background command's state and what it printed since the last look, as the model reads it. */
 function outputText(read: CommandOutput, max: number, how: 'started' | 'read' | 'stopped'): string {
   const { command, text, missed } = read
@@ -710,8 +715,11 @@ const runCommand: Tool = {
         // Started again, e.g. a dev server after more changes: the one before makes way,
         // so they do not pile up or fight over a port.
         const replaced: string[] = []
+        const where = sameDir(cwd)
+        // What the user asked to try stays theirs to try after a restart.
+        let keep = optionalBool(args, 'keepForUser')
         for (const old of ctx.background.list(ctx.conversationId)) {
-          if (old.result || old.command !== command || old.cwd !== (cwd || '.')) continue
+          if (old.result || old.command !== command || old.cwd !== where) continue
           const ended = await ctx.background.stop(ctx.conversationId, old.id)
           // Still going after the wait: a second copy would fight it over its port.
           if (!ended?.result) {
@@ -721,12 +729,13 @@ const runCommand: Tool = {
             }
           }
           replaced.push(old.id)
+          keep ||= old.keep
         }
         const started = ctx.background.start(
           ctx.conversationId,
           command,
           (options) => workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
-          { local: workspace.local, keep: optionalBool(args, 'keepForUser'), cwd: cwd || '.' },
+          { local: workspace.local, keep, cwd: where },
         )
         const first = await ctx.background.read(
           ctx.conversationId,

@@ -49,6 +49,8 @@ export interface BackgroundCommand {
   url: string | null
   /** How it ended; `null` while it runs. */
   result: { exitCode: number; endedAt: number; stopped: boolean } | null
+  /** The user asked to try it themselves: it outlives the report that asks them to look. */
+  keep: boolean
 }
 
 interface Job extends BackgroundCommand {
@@ -60,8 +62,6 @@ interface Job extends BackgroundCommand {
   read: number
   controller: AbortController
   ended: Promise<void>
-  /** The user asked to try it themselves: it outlives the report that asks them to look. */
-  keep: boolean
   /** Left running when the thread reported, and the thread has not been told since. */
   kept?: boolean
   /** Wakes whoever waits for more output or the end. */
@@ -287,4 +287,5 @@ const view = (job: Job): BackgroundCommand => ({
   startedAt: job.startedAt,
   url: job.url,
   result: job.result,
+  keep: job.keep,
 })
