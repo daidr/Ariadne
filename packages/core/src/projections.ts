@@ -861,6 +861,15 @@ export const noticesProjection: Projection = {
         ])
         break
       }
+      case 'user.returned': {
+        // Said where the user talks to the coordinator. An older one is about a time long
+        // past: only the latest stays.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator) break
+        db.run("DELETE FROM notices WHERE project_id = ? AND kind = 'recap'", [event.projectId])
+        add(coordinator, 'recap', event.data)
+        break
+      }
       case 'notice.dismissed':
         db.run('UPDATE notices SET undone = 1, changed_seq = ? WHERE id = ?', [
           event.seq,

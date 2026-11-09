@@ -325,6 +325,13 @@ export function createHandler({
     })
     return json({ memory })
   })
+  // The user is back at the project: what happened while they were away is told, if anything.
+  add('POST', '/api/projects/:projectId/return', async (request, params) => {
+    const { away } = await readJson(request)
+    if (typeof away !== 'number') throw new BadRequest('away')
+    app.noteReturn(params.projectId ?? '', away)
+    return new Response(null, { status: 204 })
+  })
   // The user takes back an agent's change to the memory.
   add('POST', '/api/projects/:projectId/notices/:noticeId/undo', (_request, params) => {
     app.undoMemoryNotice(params.projectId ?? '', params.noticeId ?? '')

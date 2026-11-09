@@ -1,5 +1,6 @@
 export {
   Ariadne,
+  AWAY_MS,
   MAX_MEMORIES,
   MAX_FEEDBACK_IMAGES,
   MAX_MEMORY,

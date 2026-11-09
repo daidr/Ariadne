@@ -92,6 +92,7 @@ import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
+import RecapNotice from './RecapNotice.vue'
 import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
@@ -305,6 +306,8 @@ const writing = computed<MessageView | null>(() => {
   }
 })
 
+const recap = computed(() => view.value.notices.findLast((notice) => notice.kind === 'recap')?.id)
+
 // Messages and notices in the order they happened. A worktree removed after a merge goes
 // unsaid: the merge's own line says what happened.
 const timeline = computed(() =>
@@ -317,6 +320,8 @@ const timeline = computed(() =>
     })),
     ...view.value.notices
       .filter((notice) => !(notice.kind === 'worktree-removed' && notice.reason === 'merged'))
+      // A newer recap takes the place of the one before it.
+      .filter((notice) => notice.kind !== 'recap' || notice.id === recap.value)
       .map((notice) => ({
         id: notice.id,
         at: notice.createdAt,
@@ -872,6 +877,7 @@ watch(
             </DouLink>
           </DouText>
           <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
+          <RecapNotice v-else-if="item.notice.kind === 'recap'" :notice="item.notice" />
           <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
             tone="warning"
