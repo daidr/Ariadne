@@ -130,6 +130,7 @@ describe('openai-compatible provider', () => {
     ])
     expect(parts).toEqual([
       { type: 'text', text: '好' },
+      { type: 'calling' },
       { type: 'usage', input: 7, output: 3 },
       { type: 'tool-call', id: 'x1', name: 'f', arguments: '{"q":2}' },
       { type: 'finish', reason: 'tool-calls' },

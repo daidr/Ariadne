@@ -163,6 +163,7 @@ describe('anthropic provider', () => {
     })
     expect(parts).toEqual([
       { type: 'text', text: '好的' },
+      { type: 'calling' },
       { type: 'tool-call', id: 'tu1', name: 'f', arguments: '{"a":1}' },
       { type: 'usage', input: 12, output: 9 },
       { type: 'finish', reason: 'tool-calls' },

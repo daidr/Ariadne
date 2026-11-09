@@ -140,6 +140,10 @@ export const acp: AgentKind<AcpSettings> = {
           if (content.text) ctx.emit({ type: 'text', text: content.text })
           return
         }
+        if (update.sessionUpdate === 'tool_call') {
+          ctx.emit({ type: 'calling' })
+          return
+        }
         ctx.emit({ type: 'alive' })
       },
     })

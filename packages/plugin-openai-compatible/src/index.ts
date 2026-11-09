@@ -261,6 +261,7 @@ async function* readStream(
       }
       if (delta?.content) yield { type: 'text', text: delta.content }
       for (const piece of delta?.tool_calls ?? []) {
+        if (!calls.has(piece.index)) yield { type: 'calling' }
         const call = calls.get(piece.index) ?? { id: '', name: '', arguments: '' }
         if (piece.id) call.id = piece.id
         if (piece.function?.name) call.name += piece.function.name

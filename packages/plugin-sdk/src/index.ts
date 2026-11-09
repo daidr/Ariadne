@@ -157,6 +157,11 @@ export type ModelStreamPart =
    */
   | { type: 'alive' }
   | { type: 'text'; text: string }
+  /**
+   * A tool call has begun; it comes whole as `tool-call` once written. The text so far is
+   * then not the answer, and is no longer shown as it is written.
+   */
+  | { type: 'calling' }
   | ({ type: 'tool-call' } & ToolCall)
   /**
    * One whole block of reasoning; it comes before the answer it led to. `startedAt` is

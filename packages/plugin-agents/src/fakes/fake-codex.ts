@@ -63,6 +63,9 @@ async function runTurn(id: number, params: any) {
     item: { type: 'reasoning', id: 'r', summary: ['thinking'], content: [] },
   })
   const answer = `turn ${turn}: ${results.join(' | ')} len ${text.length} images ${images} system ${system.length} approval ${approval.decision} effort ${params.effort ?? '-'}`
+  for (const delta of [answer.slice(0, 6), answer.slice(6)]) {
+    notify('item/agentMessage/delta', { threadId: 'th', turnId, itemId: 'm', delta })
+  }
   notify('item/completed', {
     threadId: 'th',
     turnId,

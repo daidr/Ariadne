@@ -1,6 +1,7 @@
 import {
   askTitle,
   DomainError,
+  newId,
   type Ariadne,
   type Attachment,
   type ConversationView,
@@ -315,6 +316,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? turnChanges(workspaces, conversation.projectId, conversationId)
       : null
   const finish = async (...args: TurnEnd) => {
+    // However the turn ended, nothing it was writing stays shown.
+    app.drafts.drop(conversationId)
     // A stopped turn waits for its changes only briefly, so it does not stay working.
     await changes?.record(app, turnId, signal.aborted ? STOPPED_CHANGES_MS : undefined)
     app.finishTurn(conversationId, turnId, ...args)
@@ -535,6 +538,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         loadImage,
       )
       let answer: Awaited<ReturnType<typeof requestStep>>
+      // The reply as it is written, shown until the step turns out to call tools.
+      const draft = app.drafts.start({
+        projectId: conversation.projectId,
+        conversationId,
+        messageId: newId('msg'),
+      })
       try {
         answer = await requestStep(
           model,
@@ -551,8 +560,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           options.retryBaseMs ?? 1000,
           limits,
           model.request?.timeoutSeconds,
+          draft,
         )
       } catch (error) {
+        draft.withdraw()
         // The main model keeps being turned away: the turn goes on with the fallback, from
         // this step on. The request is built again for it (its context, images, thinking).
         const fallback = model.fallback
@@ -602,8 +613,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             conversationId,
             author: conversation.role,
             content,
+            messageId: draft.messageId,
           })
-        }
+          draft.posted()
+        } else draft.withdraw()
         await finish('completed')
         return
       }

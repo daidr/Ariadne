@@ -164,3 +164,154 @@ export class BackgroundCommandsList {
     for (const listener of this.listeners) listener(update)
   }
 }
+
+/** A reply the model is writing now, as far as it has come. */
+export interface ReplyDraft {
+  /** The id the message gets once posted, so the page keeps showing the same one. */
+  messageId: string
+  text: string
+  startedAt: number
+  /** It was posted as `messageId`; the message itself follows in the log. */
+  posted?: boolean
+}
+
+/** A conversation's reply draft grew, was posted, or was taken back (`null`). */
+export interface DraftUpdate {
+  projectId: string
+  conversationId: string
+  draft: ReplyDraft | null
+}
+
+/** One step's reply draft, for the turn that writes it. */
+export interface DraftHandle {
+  readonly messageId: string
+  /** More of the step's text. */
+  text(piece: string): void
+  /** It is not the reply after all (a tool call began, or the attempt failed): forget it. */
+  withdraw(): void
+  /** It was posted as `messageId`; calls after this change nothing. */
+  posted(): void
+}
+
+/** Drafts reach watchers at most this often. */
+const DRAFT_INTERVAL_MS = 100
+/** A single line shorter than this is held back: it may be what the model does next. */
+const DRAFT_HOLD = 120
+
+/**
+ * Whether text is shown while it is written. The model starts a step that calls tools with
+ * one short line on what it does now, which goes to the status line, never to the chat: so
+ * text shows once it is more than that, a second line or a long first one.
+ */
+export function draftShows(text: string): boolean {
+  const body = text.trimStart()
+  return body.length >= DRAFT_HOLD || /\n\s*\S/.test(body.trimEnd())
+}
+
+/**
+ * The replies models are writing now, by conversation. Kept in memory only: the reply is
+ * logged whole once posted, and text beside tool calls goes to the trace with its step.
+ */
+export class ReplyDrafts {
+  private readonly drafts = new Map<string, { id: number; update: DraftUpdate }>()
+  private readonly listeners = new Set<(update: DraftUpdate) => void>()
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
+  private next = 1
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  subscribe(listener: (update: DraftUpdate) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** The drafts shown now, of one project or all. */
+  list(projectId: string | null = null): DraftUpdate[] {
+    return [...this.drafts.values()]
+      .map((entry) => entry.update)
+      .filter((update) => projectId === null || update.projectId === projectId)
+  }
+
+  /** Take back a conversation's draft, if one is shown. */
+  drop(conversationId: string): void {
+    const entry = this.drafts.get(conversationId)
+    if (!entry) return
+    clearTimeout(this.timers.get(conversationId))
+    this.timers.delete(conversationId)
+    this.drafts.delete(conversationId)
+    this.emit({ projectId: entry.update.projectId, conversationId, draft: null })
+  }
+
+  /** A step starts writing in a conversation; it takes the place of a draft still there. */
+  start(input: { projectId: string; conversationId: string; messageId: string }): DraftHandle {
+    const id = this.next++
+    const key = input.conversationId
+    let text = ''
+    let startedAt = 0
+    let over = false
+    const current = () => this.drafts.get(key)?.id === id
+    const clear = () => {
+      clearTimeout(this.timers.get(key))
+      this.timers.delete(key)
+    }
+    const drop = () => {
+      clear()
+      if (!current()) return
+      this.drafts.delete(key)
+      this.emit({ projectId: input.projectId, conversationId: key, draft: null })
+    }
+    const set = (posted: boolean) => {
+      const draft: ReplyDraft = {
+        messageId: input.messageId,
+        text,
+        startedAt,
+        ...(posted ? { posted: true } : {}),
+      }
+      const update = { projectId: input.projectId, conversationId: key, draft }
+      if (posted) this.drafts.delete(key)
+      else this.drafts.set(key, { id, update })
+      this.emit(update)
+    }
+    // A draft of an earlier step still shown is gone with this one.
+    this.drop(key)
+    return {
+      messageId: input.messageId,
+      text: (piece) => {
+        if (over || !piece) return
+        if (!text) startedAt = this.now()
+        text += piece
+        if (!draftShows(text)) return
+        if (!current()) {
+          // Shown from its first lines at once, then as it grows.
+          this.drafts.set(key, { id, update: { ...input, draft: null } })
+          set(false)
+          return
+        }
+        if (this.timers.has(key)) return
+        this.timers.set(
+          key,
+          setTimeout(() => {
+            this.timers.delete(key)
+            if (current() && !over) set(false)
+          }, DRAFT_INTERVAL_MS),
+        )
+      },
+      withdraw: () => {
+        if (over) return
+        text = ''
+        drop()
+      },
+      posted: () => {
+        if (over) return
+        over = true
+        clear()
+        // Only a draft the user saw needs handing over to its message.
+        if (current()) set(true)
+      },
+    }
+  }
+
+  private emit(update: DraftUpdate) {
+    for (const listener of this.listeners) listener(update)
+  }
+}
