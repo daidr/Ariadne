@@ -50,6 +50,7 @@ function jump(id: string) {
   >
     <DouButton variant="ghost" size="sm" :aria-label="t('artifact.comments')">
       <template #leading><MessageIcon /></template>
+      <!-- No label slot at all when empty, so the button turns square. -->
       <template v-if="count" #default>{{ count }}</template>
     </DouButton>
     <template #content>
