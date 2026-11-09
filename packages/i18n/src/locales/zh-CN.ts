@@ -824,6 +824,14 @@ export const zhCN = {
   'projectSettings.autopilotMethod': '合并方式',
   'projectSettings.autopilotStarts': '打开后马上开工：{titles}',
   'projectSettings.autopilotStartsNone': '打开后暂时没有可以开工的节点',
+  'recap.title': '离开 {time}：{parts}',
+  'recap.join': '，',
+  'recap.done': '{count} 个完成',
+  'recap.merged': '{count} 个合并',
+  'recap.waiting': '{count} 个等你',
+  'recap.minutes': '{count} 分钟',
+  'recap.hours': '{count} 小时',
+  'recap.days': '{count} 天',
 } as const
 
 export type MessageKey = keyof typeof zhCN

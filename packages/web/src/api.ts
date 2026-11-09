@@ -532,6 +532,9 @@ export const api = {
     ),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
+  /** The user is back at the project after `away` ms without touching it. */
+  noteReturn: (projectId: string, away: number) =>
+    request<void>('POST', `/api/projects/${projectId}/return`, { away }),
   answerAttention: (id: string, answer: BlockAnswer) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
