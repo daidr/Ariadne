@@ -1,0 +1,12 @@
+/* A placeholder for what an agent will write here: grey, in brackets, like a stage direction. */
+.dou-editor__content--pending {
+  color: var(--dou-color-text-tertiary);
+}
+
+.dou-editor__content--pending::before {
+  content: '[';
+}
+
+.dou-editor__content--pending::after {
+  content: ']';
+}

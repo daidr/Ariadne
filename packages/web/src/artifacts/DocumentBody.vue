@@ -8,6 +8,7 @@ import type { CommentAction, CommentThread } from 'dou-ui'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
+import { pendingDocumentBlock } from './pending-block'
 import type { SharedArtifact } from './shared'
 
 /**
@@ -33,13 +34,14 @@ const me = commentAuthor('user')
 const extensions = props.shared
   ? [
       editorKit(),
+      pendingDocumentBlock,
       collaboration({
         map: props.shared.doc.getMap('document'),
         awareness: props.shared.awareness,
         user: { name: me.name },
       }),
     ]
-  : [editorKit()]
+  : [editorKit(), pendingDocumentBlock]
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 /** Markdown of the document as loaded, written the way saving would write it. */
 const baseline = ref('')

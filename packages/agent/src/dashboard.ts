@@ -1,5 +1,6 @@
 import {
   DASHBOARD_WIDGET_TYPES,
+  PENDING,
   type DashboardContent,
   type DashboardWidgetContent,
 } from '@ariadne/core'
@@ -16,6 +17,7 @@ const SIZE: Record<string, { w: number; h: number }> = {
   table: { w: 6, h: 4 },
   chart: { w: 6, h: 4 },
   pivot: { w: 12, h: 5 },
+  pending: { w: 6, h: 3 },
 }
 
 export interface DashboardChanges {
@@ -72,10 +74,13 @@ export function mergeDashboard(
     if (!(DASHBOARD_WIDGET_TYPES as readonly unknown[]).includes(type)) {
       throw new ToolInputError(`widget "${id}" needs a type: ${DASHBOARD_WIDGET_TYPES.join(', ')}`)
     }
-    if (existing && type !== existing.type) {
+    // A placeholder becomes the widget it stood for, in its place.
+    if (existing && type !== existing.type && existing.type !== PENDING) {
       throw new ToolInputError(`widget "${id}" is a ${existing.type}; remove it and add another`)
     }
-    const props = input.props ?? existing?.props ?? {}
+    const became = !!existing && type !== existing.type
+    // A placeholder's text is not a prop of what takes its place.
+    const props = input.props ?? (became ? {} : existing?.props) ?? {}
     if (typeof props !== 'object' || Array.isArray(props) || props === null) {
       throw new ToolInputError(`widget "${id}" props must be an object`)
     }
@@ -85,7 +90,7 @@ export function mergeDashboard(
       type: type as string,
       props: props as Record<string, unknown>,
     }
-    if (input.props !== undefined || !existing) errors.push(...widgetPropsErrors(widget))
+    if (input.props !== undefined || !existing || became) errors.push(...widgetPropsErrors(widget))
     if (typeof input.title === 'string') {
       if (input.title) widget.title = input.title
       else delete widget.title

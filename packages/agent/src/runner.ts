@@ -44,6 +44,7 @@ import { withImages, type EverywhereMemory } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
+import { liveCalls } from './live-calls'
 import { searchingModels } from './web-tools'
 import { requestStep, TurnError } from './model-step'
 
@@ -458,6 +459,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     }
   }
 
+  const live = liveCalls(byName, ctx)
   try {
     let threshold = options.compactAt ?? compactAt(model.contextTokens, limits.compactShare)
     // One try per turn: a failed summary would fail the same way on every step.
@@ -591,6 +593,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         loadImage,
       )
       let answer: Awaited<ReturnType<typeof requestStep>>
+      // Calls that show their work while written; what never ran is taken back.
+      live.reset()
       // The reply as it is written, shown until the step turns out to call tools.
       const draft = app.drafts.start({
         projectId: conversation.projectId,
@@ -614,9 +618,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           limits,
           model.request?.timeoutSeconds,
           draft,
+          live,
         )
       } catch (error) {
         draft.withdraw()
+        live.reset()
         // The main model keeps being turned away: the turn goes on with the fallback, from
         // this step on. The request is built again for it (its context, images, thinking).
         const fallback = model.fallback
@@ -733,8 +739,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         (isThread && JSON.stringify(app.getThread(conversationId).workspace) !== workspaceBefore)
       if (signal.aborted) break
     }
+    live.reset()
     await finish(abortOutcome(signal))
   } catch (error) {
+    live.reset()
     if (signal.aborted) {
       await finish(abortOutcome(signal))
       return
