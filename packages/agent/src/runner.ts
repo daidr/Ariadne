@@ -374,11 +374,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       shellName,
       env: settings.env,
       // Read anew each time: a check noted in this turn holds for its later edits. One a
-      // thread noted runs only while the user's command rules let it run unasked.
+      // thread noted runs only while the project's threads run commands and the user's
+      // command rules let it run unasked.
       get check() {
         const now = app.getProject(conversation.projectId)
         const check = checkCommand(now)
         if (!now.settings.workspace.auto.check || !check) return check
+        if (now.settings.tools.includes('commands')) return ''
         return commandVerdict(check, settings.commandRules).action === 'allow' ? check : ''
       },
     },

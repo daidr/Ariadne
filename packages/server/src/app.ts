@@ -54,6 +54,8 @@ import { ThreadSync } from './thread-sync'
 
 /** A directory listing gives up after this long. */
 const BROWSE_TIMEOUT_MS = 15_000
+/** How long opening a project's settings waits for its source to say what it installs. */
+const DETECT_WAIT_MS = 1500
 
 /** How long a listing may take: a remote machine may be slow to reach. */
 const browseOptions = () => ({ signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS) })
@@ -446,14 +448,21 @@ export function createHandler({
 
   // The project's own settings, with the names of its command environment variables (their
   // values never leave the server).
-  add('GET', '/api/projects/:projectId/settings', (_request, { projectId = '' }) =>
-    json({
+  add('GET', '/api/projects/:projectId/settings', async (_request, { projectId = '' }) => {
+    app.getProject(projectId)
+    // Before any workspace was opened, what a new one would install is read from the
+    // source, so the user sees it here first; a source slow to answer is not waited for.
+    await Promise.race([
+      workspaces?.detectSetup(projectId).catch(() => {}),
+      new Promise((done) => setTimeout(done, DETECT_WAIT_MS)),
+    ])
+    return json({
       settings: app.getProject(projectId).settings,
       detected: app.getProject(projectId).detected,
       env: settings?.projectEnvNames(projectId) ?? [],
       tools: TOOL_SWITCH_NAMES,
-    }),
-  )
+    })
+  })
 
   add('PUT', '/api/projects/:projectId/settings', async (request, { projectId = '' }) => {
     const body = await readJson(request)

@@ -3013,13 +3013,15 @@ export class Ariadne {
 
   /**
    * Whether `threadId` may note the project's check after edits: the user left it to
-   * Ariadne, and no other thread noted one. The thread that did may correct its own.
+   * Ariadne, and no other thread noted one. The thread that did may correct its own. Not
+   * in a project whose threads run no commands: a check is a command of the thread's choosing.
    */
   canNoteCheck(threadId: string): boolean {
     const thread = this.getThread(threadId)
     if (thread.reviewOf) return false
     const project = this.getProject(thread.projectId)
     if (!project.settings.workspace.auto.check) return false
+    if (project.settings.tools.includes('commands')) return false
     return !project.detected.check || project.detected.check.threadId === threadId
   }
 

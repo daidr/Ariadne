@@ -320,7 +320,8 @@ export function checkCommand(project: {
 
 /**
  * The dependency managers a new workspace is set up for, by the lockfile each leaves at
- * the root of a repository. Installs keep to the lockfile, so the workspace stays clean.
+ * the root of a repository. Only those with an install that keeps to the lockfile and
+ * installs nothing else, so the workspace stays clean; the others are left to the thread.
  */
 const INSTALLS: { files: string[]; command: string; js?: string }[] = [
   { files: ['bun.lock', 'bun.lockb'], command: 'bun install --frozen-lockfile', js: 'bun' },
@@ -328,10 +329,8 @@ const INSTALLS: { files: string[]; command: string; js?: string }[] = [
   { files: ['yarn.lock'], command: 'yarn install --frozen-lockfile', js: 'yarn' },
   { files: ['package-lock.json', 'npm-shrinkwrap.json'], command: 'npm ci', js: 'npm' },
   { files: ['uv.lock'], command: 'uv sync --locked' },
-  { files: ['poetry.lock'], command: 'poetry install --no-interaction' },
   { files: ['Cargo.lock'], command: 'cargo fetch --locked' },
   { files: ['go.sum'], command: 'go mod download' },
-  { files: ['Gemfile.lock'], command: 'bundle install' },
   { files: ['composer.lock'], command: 'composer install --no-interaction' },
 ]
 

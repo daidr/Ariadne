@@ -21,15 +21,20 @@ import type { ProjectSource } from '@ariadne/core'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
+import { commandVerdict, type CommandRule } from './limits'
 import { headAndTail } from './workspace-tools'
 import { BackgroundCommands } from './background'
 
+/** How long setting up a new workspace may take, unless the user's limits say. */
+const SETUP_TIMEOUT_MS = 600_000
 /** What the model reads at most of the setup script's output. */
 const MAX_SETUP_OUTPUT = 8000
 
 export interface WorkspaceManagerOptions {
   /** The environment variables the user gave the project's commands; they may be secret. */
   env?: (projectId: string) => Record<string, string>
+  /** The user's rules for thread commands: an install Ariadne chose keeps to them too. */
+  commandRules?: (projectId: string) => readonly CommandRule[]
   /** How long the project's setup script may run. */
   setupTimeoutMs?: (projectId: string) => number
 }
@@ -103,25 +108,32 @@ const outputOf = (result: ExecResult) =>
 const CHECK_HINT =
   '[Ariadne: this project has no check after edits yet. Once you know how the repository checks its code, note one with note_check.]'
 
+const heldNote = (held: string[]) =>
+  `[Ariadne: your workspace is new, and its dependencies were not installed: the user's command rules do not let ${held.map((command) => `\`${command}\``).join(', ')} run unasked. When the work needs them, run it with run_command, which asks the user where the rules say so.]`
+
 /**
- * The install commands the lockfiles at the root of `workspace` call for; none when it
- * has none Ariadne knows, or cannot be listed.
+ * The install commands the lockfiles at the root of a workspace, or of the source as it
+ * is, call for; none when it has none Ariadne knows, or cannot be listed.
  */
-async function lockfileInstalls(workspace: Workspace): Promise<string[]> {
-  const entries = await workspace.list('.').catch(() => [])
+async function lockfileInstalls(root: Pick<Workspace, 'list' | 'readBytes'>): Promise<string[]> {
+  const entries = await root.list('.').catch(() => [])
   const files = entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name)
   let manager: string | undefined
   if (files.includes('package.json')) {
     try {
-      const field = (
-        JSON.parse(await workspace.readFile('package.json')) as { packageManager?: unknown }
-      ).packageManager
+      const text = new TextDecoder().decode(await root.readBytes('package.json', 1024 * 1024))
+      const field = (JSON.parse(text) as { packageManager?: unknown }).packageManager
       if (typeof field === 'string') manager = field
     } catch {
       // Not readable as JSON: the lockfiles alone decide.
     }
   }
-  return installCommands(files, manager)
+  // `npm ci` starts by deleting node_modules: one that came with the workspace (a local
+  // worktree gets the source's, copied on write) is kept as it is.
+  const seeded = entries.some(
+    (entry) => entry.kind === 'directory' && entry.name === 'node_modules',
+  )
+  return installCommands(files, manager).filter((command) => !(seeded && command === 'npm ci'))
 }
 
 /**
@@ -137,6 +149,8 @@ export class WorkspaceManager {
   private readonly queues = new Map<string, Promise<void>>()
   /** What setting up a thread's new workspace did, until its model is told. */
   private readonly setups = new Map<string, string>()
+  /** Threads whose new workspace was opened, until they are told the project wants a check. */
+  private readonly hinted = new Set<string>()
   /** Stops the setup script running in a thread's new workspace. */
   private readonly setupStops = new Map<string, AbortController>()
   /** Commands threads left running in the background; the user sees them in the status line. */
@@ -174,9 +188,51 @@ export class WorkspaceManager {
    * reads it with the result of the call that opened the workspace.
    */
   takeSetup(threadId: string): string | null {
-    const report = this.setups.get(threadId) ?? null
+    const notes = [this.setups.get(threadId) ?? '']
     this.setups.delete(threadId)
-    return report
+    // Asked only now: the call that opened the workspace may have noted the check itself.
+    if (this.hinted.delete(threadId) && this.checkWanted(threadId)) notes.push(CHECK_HINT)
+    return notes.filter(Boolean).join('\n\n') || null
+  }
+
+  private checkWanted(threadId: string): boolean {
+    try {
+      const { projectId } = this.app.getThread(threadId)
+      return this.app.canNoteCheck(threadId) && !this.app.getProject(projectId).detected.check
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * The install commands among `commands` the user's command rules let run unasked
+   * (`run`), and the others (`held`), which are not run for the thread.
+   */
+  private installs(projectId: string, commands: string[]): { run: string[]; held: string[] } {
+    const rules = this.options.commandRules?.(projectId) ?? []
+    const allowed = (command: string) => commandVerdict(command, rules).action === 'allow'
+    return {
+      run: commands.filter(allowed),
+      held: commands.filter((command) => !allowed(command)),
+    }
+  }
+
+  /**
+   * Find out what a new workspace of the project would install, before any was opened, so
+   * the settings can show it: read from the source as it is. Nothing when it is known
+   * already, the user wrote their own, or the source cannot be looked at.
+   */
+  async detectSetup(projectId: string): Promise<void> {
+    const project = this.app.getProject(projectId)
+    if (!project.source || !project.settings.workspace.auto.setup) return
+    if (project.detected.setup !== null) return
+    const key = this.sourceKey(projectId)
+    const { workspace } = await this.connect(projectId, key)
+    if (!workspace?.isolated || !workspace.view) return
+    const commands = await lockfileInstalls(await workspace.view())
+    // The source may have changed while it was read.
+    if (this.sourceKey(projectId) !== key) return
+    this.app.recordDetectedSetup(projectId, this.installs(projectId, commands).run.join('\n'))
   }
 
   /** Whether the project's threads can get a workspace at all. */
@@ -345,17 +401,17 @@ export class WorkspaceManager {
       })
       if (fresh) {
         const notes: string[] = []
-        if (setup.auto.setup) {
-          const commands = await lockfileInstalls(opened)
-          this.app.recordDetectedSetup(projectId, commands.join('\n'))
-          if (commands.length) notes.push(await this.install(projectId, threadId, opened, commands))
-        } else if (setup.setup) {
-          notes.push(await this.runSetup(projectId, threadId, opened, setup.setup))
-        }
-        if (this.app.canNoteCheck(threadId) && !this.app.getProject(projectId).detected.check) {
-          notes.push(CHECK_HINT)
+        if (!setup.auto.setup) {
+          if (setup.setup) notes.push(await this.runSetup(projectId, threadId, opened, setup.setup))
+        } else if (capabilities.workspace.isolated) {
+          // Only in a directory of the thread's own: a shared one is the user's, as it is.
+          const { run, held } = this.installs(projectId, await lockfileInstalls(opened))
+          this.app.recordDetectedSetup(projectId, run.join('\n'))
+          if (run.length) notes.push(await this.install(projectId, threadId, opened, run))
+          if (held.length) notes.push(heldNote(held))
         }
         if (notes.length) this.setups.set(threadId, notes.join('\n\n'))
+        this.hinted.add(threadId)
       }
       return opened
     })
@@ -400,8 +456,11 @@ export class WorkspaceManager {
     commands: string[],
   ): Promise<string> {
     const ran: string[] = []
+    // One time limit for all of them, as for a setup script.
+    const until = Date.now() + (this.options.setupTimeoutMs?.(projectId) ?? SETUP_TIMEOUT_MS)
     for (const command of commands) {
-      const result = await this.setupExec(projectId, threadId, workspace, command)
+      const left = Math.max(1000, until - Date.now())
+      const result = await this.setupExec(projectId, threadId, workspace, command, left)
       if (result.exitCode === 0) {
         ran.push(command)
         continue
@@ -421,6 +480,7 @@ export class WorkspaceManager {
     threadId: string,
     workspace: Workspace,
     command: string,
+    timeoutMs = this.options.setupTimeoutMs?.(projectId) ?? SETUP_TIMEOUT_MS,
   ): Promise<ExecResult> {
     const env = this.env(projectId)
     const { argv } = this.shell(projectId)
@@ -429,7 +489,7 @@ export class WorkspaceManager {
     const result = await workspace
       .exec(command, {
         ...(argv ? { shell: argv } : {}),
-        timeoutMs: this.options.setupTimeoutMs?.(projectId) ?? 600_000,
+        timeoutMs,
         signal: stop.signal,
         ...(Object.keys(env).length ? { env } : {}),
       })
