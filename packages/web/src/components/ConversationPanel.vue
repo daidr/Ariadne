@@ -235,6 +235,13 @@ function openTrace() {
   if (conversationId.value) openMain({ kind: 'trace', conversationId: conversationId.value })
 }
 const todo = computed(() => todoPlan(view.value.todo, working.value))
+// A list all ticked folds to its title; one with steps left opens again.
+const todoOpen = ref(true)
+watch(
+  () => todo.value.length > 0 && todo.value.every((item) => item.status === 'done'),
+  (finished) => (todoOpen.value = !finished),
+  { immediate: true },
+)
 // Set up enough to talk: a model, a project, and its working directory.
 const started = computed(
   () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
@@ -648,54 +655,56 @@ watch(
   >
     <div v-if="thread" class="conversation-header">
       <div class="conversation-meta">
-        <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
-          {{ t('review.underway', { round: thread.review.rounds }) }}
-        </DouShimmer>
-        <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
-        <DouTag
-          v-if="thread.workspace?.branch"
-          size="sm"
-          :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
-        >
-          <template #leading><GitBranchIcon /></template>
-          {{ thread.workspace.branch }}
-        </DouTag>
-        <PullRequestTag :thread="thread" refreshable />
-        <ReviewMark :thread="thread" />
-        <!-- Under review, "go merge" opens the same changes. -->
-        <template v-if="thread.workspace?.branch && thread.workspace.base && !mergeAsked">
-          <ChangeTotals
-            v-if="branchChanges(thread)"
-            :totals="branchChanges(thread)!"
-            :thread-id="thread.id"
-            button
-          />
-          <DouButton
-            v-else
-            variant="ghost"
+        <div class="conversation-meta-main">
+          <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
+            {{ t('review.underway', { round: thread.review.rounds }) }}
+          </DouShimmer>
+          <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+          <DouTag
+            v-if="thread.workspace?.branch"
             size="sm"
-            @click="openView({ kind: 'changes', threadId: thread.id })"
+            :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
           >
-            <template #leading><FileDiffIcon /></template>
-            {{ t('changes.open') }}
-          </DouButton>
-        </template>
-        <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
-        <template v-if="reviewed">
-          <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
-            <template #leading><MessagesIcon /></template>
-            {{ t('review.author') }}
-          </DouButton>
-          <DouButton
-            v-if="reviewed.workspace?.branch && reviewed.workspace.base"
-            variant="ghost"
-            size="sm"
-            @click="openView({ kind: 'changes', threadId: reviewed.id })"
-          >
-            <template #leading><FileDiffIcon /></template>
-            {{ t('changes.open') }}
-          </DouButton>
-        </template>
+            <template #leading><GitBranchIcon /></template>
+            {{ thread.workspace.branch }}
+          </DouTag>
+          <PullRequestTag :thread="thread" refreshable />
+          <ReviewMark :thread="thread" />
+          <!-- Under review, "go merge" opens the same changes. -->
+          <template v-if="thread.workspace?.branch && thread.workspace.base && !mergeAsked">
+            <ChangeTotals
+              v-if="branchChanges(thread)"
+              :totals="branchChanges(thread)!"
+              :thread-id="thread.id"
+              button
+            />
+            <DouButton
+              v-else
+              variant="ghost"
+              size="sm"
+              @click="openView({ kind: 'changes', threadId: thread.id })"
+            >
+              <template #leading><FileDiffIcon /></template>
+              {{ t('changes.open') }}
+            </DouButton>
+          </template>
+          <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
+          <template v-if="reviewed">
+            <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
+              <template #leading><MessagesIcon /></template>
+              {{ t('review.author') }}
+            </DouButton>
+            <DouButton
+              v-if="reviewed.workspace?.branch && reviewed.workspace.base"
+              variant="ghost"
+              size="sm"
+              @click="openView({ kind: 'changes', threadId: reviewed.id })"
+            >
+              <template #leading><FileDiffIcon /></template>
+              {{ t('changes.open') }}
+            </DouButton>
+          </template>
+        </div>
         <div class="conversation-tools">
           <!-- Pausing the whole thread is rarer than stopping a turn: it sits in the menu. -->
           <DouPopover
@@ -1027,7 +1036,7 @@ watch(
         v-if="todo.length"
         :items="todo"
         :title="t('todo.title')"
-        :collapsible="false"
+        v-model:open="todoOpen"
         :live="working"
         class="todo"
       />
@@ -1253,12 +1262,28 @@ watch(
   border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
+/* The menu keeps its corner however far the rest wraps. */
 .conversation-meta {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
+}
+
+.conversation-meta-main {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+/* A long branch name is cut, not pushed to a line of its own. */
+.conversation-meta-main > :deep(.dou-tag) {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .conversation-list {
@@ -1341,6 +1366,7 @@ watch(
 .conversation-tools {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 4px;
   margin-left: auto;
 }
