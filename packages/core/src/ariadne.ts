@@ -3960,6 +3960,18 @@ export class Ariadne {
     ])
   }
 
+  /** The tokens of a web search a model's own service ran for a call of this turn. */
+  recordSearch(
+    conversationId: string,
+    turnId: string,
+    search: { model: string; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'search.answered', projectId, data: { ...search, conversationId, turnId } },
+    ])
+  }
+
   /** The steps of one research of a conversation, up to `upTo`, oldest first. */
   researchSteps(conversationId: string, toolCallId: string, upTo: number): AnyStoredEvent[] {
     const conversation = this.getConversation(conversationId)

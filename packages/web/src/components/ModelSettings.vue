@@ -33,6 +33,7 @@ import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
+import SearchSettings from './SearchSettings.vue'
 import SettingsFields from './SettingsFields.vue'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 
@@ -188,6 +189,7 @@ const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
 const input = ref<InstanceType<typeof InputSettings> | null>(null)
 const data = ref<InstanceType<typeof DataTab> | null>(null)
+const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
 
@@ -325,6 +327,7 @@ async function saveAll() {
   try {
     const parts: [SettingsTab, (() => Promise<boolean>) | undefined][] = [
       ['models', saveModels],
+      ['models', search.value?.save],
       ['instructions', work.value.instructions?.save],
       ['commands', work.value.commands?.save],
       ['input', input.value?.save],
@@ -689,6 +692,7 @@ async function saveModels(): Promise<boolean> {
               </DouFormItem>
             </DouForm>
           </section>
+          <SearchSettings v-if="open" ref="search" />
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
       </DouTabPanel>

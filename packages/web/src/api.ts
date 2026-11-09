@@ -290,6 +290,12 @@ export interface Limits {
 }
 
 /** How the work is done everywhere: the user's instructions, command rules, limits. */
+/** Web search in the settings: whether a key is stored, and whether search waits for one. */
+export interface SearchSettings {
+  keySet: boolean
+  needed: boolean
+}
+
 export interface WorkSettings {
   instructions: string
   rules: CommandRule[]
@@ -495,6 +501,10 @@ export const api = {
   saveInputSettings: (input: InputSettings) =>
     request<InputSettings>('PUT', '/api/settings/input', input),
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
+  getSearchSettings: () => request<SearchSettings>('GET', '/api/settings/search'),
+  /** `null` clears the stored key. */
+  saveSearchSettings: (input: { apiKey: string | null }) =>
+    request<SearchSettings>('PUT', '/api/settings/search', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   addPlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),

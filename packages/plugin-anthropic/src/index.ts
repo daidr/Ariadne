@@ -8,6 +8,12 @@ import {
   type ImagePart,
   type ModelProvider,
   type ModelRequest,
+  type ModelSearch,
+  type ModelSearchRequest,
+  onHost,
+  searchAsk,
+  searchHttpError,
+  type SearchResult,
   type ModelStreamPart,
   type ReasoningBlock,
   withExtraBody,
@@ -218,6 +224,116 @@ export function requestBody(_settings: AnthropicSettings, request: ModelRequest)
 /** What a response may hold when the model's settings do not say: the protocol needs a number. */
 export const DEFAULT_MAX_TOKENS = 8192
 
+/** Searches one answer makes at most: the query, and once more when it comes back thin. */
+const SEARCH_USES = 2
+/** Room for the answer, and for the thinking newer models do unasked. */
+const SEARCH_MAX_TOKENS = 4096
+
+/** The body of a search request: one question, answered with the service's own search. */
+export function searchBody(request: Pick<ModelSearchRequest, 'model' | 'query'>) {
+  return {
+    model: request.model,
+    max_tokens: SEARCH_MAX_TOKENS,
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: SEARCH_USES }],
+    messages: [{ role: 'user', content: searchAsk(request.query) }],
+  }
+}
+
+interface SearchResponse {
+  stop_reason?: string | null
+  content?: {
+    type: string
+    text?: string
+    citations?: { type?: string; url?: string; title?: string | null; cited_text?: string }[]
+    /** A list of pages on success, one error object on failure. */
+    content?: { type?: string; url?: string; title?: string | null }[] | { error_code?: string }
+  }[]
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+}
+
+/**
+ * What a search response says and the pages behind it: those the answer quotes first, with
+ * the passage quoted, then the others the search returned.
+ */
+export function readSearch(response: SearchResponse, limit: number) {
+  const sources = new Map<string, SearchResult>()
+  const found: SearchResult[] = []
+  let text = ''
+  let failed: string | null = null
+  for (const block of response.content ?? []) {
+    if (block.type === 'text') {
+      text += block.text ?? ''
+      for (const cite of block.citations ?? []) {
+        if (!cite.url) continue
+        const known = sources.get(cite.url)
+        const quoted = (cite.cited_text ?? '').trim()
+        if (!known)
+          sources.set(cite.url, { title: cite.title ?? '', url: cite.url, snippet: quoted })
+        else if (quoted && !known.snippet.includes(quoted)) {
+          known.snippet = known.snippet ? `${known.snippet} … ${quoted}` : quoted
+        }
+      }
+    } else if (block.type === 'web_search_tool_result') {
+      if (Array.isArray(block.content)) {
+        for (const page of block.content) {
+          if (page.url) found.push({ title: page.title ?? '', url: page.url, snippet: '' })
+        }
+      } else failed = block.content?.error_code ?? 'unavailable'
+    }
+  }
+  for (const page of found) if (!sources.has(page.url)) sources.set(page.url, page)
+  if (!sources.size && failed) throw new Error(`web search failed: ${failed}`)
+  if (response.stop_reason === 'refusal') throw new Error('the model declined to search')
+  // Cut off or paused before it wrote anything: pages alone are not an answer.
+  if (
+    !text.trim() &&
+    (response.stop_reason === 'max_tokens' || response.stop_reason === 'pause_turn')
+  ) {
+    throw new Error(`the search ended early: ${response.stop_reason}`)
+  }
+  const usage = response.usage
+  return {
+    text: text.trim(),
+    sources: [...sources.values()].slice(0, limit),
+    ...(usage
+      ? {
+          usage: {
+            input:
+              (usage.input_tokens ?? 0) +
+              (usage.cache_creation_input_tokens ?? 0) +
+              (usage.cache_read_input_tokens ?? 0),
+            output: usage.output_tokens ?? 0,
+            ...(usage.cache_read_input_tokens ? { cached: usage.cache_read_input_tokens } : {}),
+            ...(usage.cache_creation_input_tokens
+              ? { cacheWrite: usage.cache_creation_input_tokens }
+              : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+const search: ModelSearch<AnthropicSettings>['run'] = async (settings, request) => {
+  const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      ...request.headers,
+      'content-type': 'application/json',
+      'anthropic-version': API_VERSION,
+      'x-api-key': settings.apiKey,
+    },
+    body: JSON.stringify(searchBody(request)),
+    ...(request.signal ? { signal: request.signal } : {}),
+  })
+  if (!response.ok) throw searchHttpError(response.status)
+  return readSearch((await response.json()) as SearchResponse, request.limit)
+}
+
 export const anthropicProvider: ModelProvider<AnthropicSettings> = {
   kind: 'anthropic',
   title: { 'zh-CN': 'Anthropic 接口', en: 'Anthropic API' },
@@ -234,6 +350,7 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
     required: ['baseUrl', 'apiKey'],
   },
   requestBody,
+  search: { available: (settings) => onHost(settings.baseUrl, 'api.anthropic.com'), run: search },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
     let response: Response
     try {
