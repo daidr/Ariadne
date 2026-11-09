@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import {
   checkCommand,
   confirmBlock,
@@ -599,7 +600,7 @@ export const outputName = () =>
 export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
   return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when your work is reported finished or you are stopped.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when you report or are stopped. Only when the user said they want to try the result themselves, start it with "keepForUser": it then stays up after you report ready, until they are done looking. Otherwise show what changed with your report.`,
     parameters: {
       type: 'object',
       properties: {
@@ -610,6 +611,10 @@ export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'):
           description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}. Not for background commands.`,
         },
         background: { type: 'boolean', description: 'Run it in the background.' },
+        keepForUser: {
+          type: 'boolean',
+          description: 'With background, and only when the user asked to try it themselves.',
+        },
       },
       required: ['command'],
     },
@@ -698,6 +703,10 @@ function execOptions(ctx: ToolContext, cwd: string | undefined) {
   }
 }
 
+/** One spelling for a directory in the workspace, so `docs`, `./docs/` and `docs/.` compare equal. */
+const sameDir = (cwd: string | undefined) =>
+  posix.normalize(`${cwd || '.'}/`).replace(/\/+$/, '') || '.'
+
 /** A background command's state and what it printed since the last look, as the model reads it. */
 function outputText(read: CommandOutput, max: number, how: 'started' | 'read' | 'stopped'): string {
   const { command, text, missed } = read
@@ -734,8 +743,30 @@ const runCommand: Tool = {
         if (!ctx.background) {
           return { content: 'Commands cannot run in the background here.', isError: true }
         }
-        const started = ctx.background.start(ctx.conversationId, command, (options) =>
-          workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+        // Started again, e.g. a dev server after more changes: the one before makes way,
+        // so they do not pile up or fight over a port.
+        const replaced: string[] = []
+        const where = sameDir(cwd)
+        // What the user asked to try stays theirs to try after a restart.
+        let keep = optionalBool(args, 'keepForUser')
+        for (const old of ctx.background.list(ctx.conversationId)) {
+          if (old.result || old.command !== command || old.cwd !== where) continue
+          const ended = await ctx.background.stop(ctx.conversationId, old.id)
+          // Still going after the wait: a second copy would fight it over its port.
+          if (!ended?.result) {
+            return {
+              content: `${old.id} runs the same command and has not ended yet after being told to stop. Check it with read_command_output, then start this again.`,
+              isError: true,
+            }
+          }
+          replaced.push(old.id)
+          keep ||= old.keep
+        }
+        const started = ctx.background.start(
+          ctx.conversationId,
+          command,
+          (options) => workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+          { local: workspace.local, keep, cwd: where },
         )
         const first = await ctx.background.read(
           ctx.conversationId,
@@ -743,8 +774,11 @@ const runCommand: Tool = {
           FIRST_OUTPUT_MS,
           ctx.signal,
         )
+        const note = replaced.length
+          ? `\n[${replaced.join(', ')} ran the same command and was ended first]`
+          : ''
         return {
-          content: first ? outputText(first, limits.commandOutput, 'started') : started.id,
+          content: (first ? outputText(first, limits.commandOutput, 'started') : started.id) + note,
           isError: !!first?.command.result && first.command.result.exitCode !== 0,
         }
       }

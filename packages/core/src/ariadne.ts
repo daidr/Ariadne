@@ -137,7 +137,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 53
+export const PROJECTION_VERSION = 55
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -513,6 +513,8 @@ interface ThreadRow {
   workspace_base: string | null
   workspace_removed: number
   merged: string | null
+  landed_at: number | null
+  user_at: number | null
   changes: string | null
   pull_request: string | null
   check_failures: number
@@ -647,35 +649,48 @@ function progressOf(items: string | null): ThreadView['progress'] {
   return { done: todos.filter((item) => item.status === 'done').length, total: todos.length }
 }
 
-function toThread(row: ThreadRow): ThreadView {
+/** How long a finished thread stays in sight with nothing happening in it. */
+export const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/** How long one whose work landed stays first: it was finished just now, not "earlier". */
+export const ARCHIVE_LANDED_AFTER_MS = 24 * 60 * 60 * 1000
+
+function toThread(row: ThreadRow, now: number): ThreadView {
   const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
   const pullRequest = row.pull_request ? (JSON.parse(row.pull_request) as ThreadPullRequest) : null
   const underReview = row.reviewing === 1
+  const stage = threadStage({
+    openAttentions: row.open_attentions,
+    started: row.started === 1,
+    lastReport: row.last_report,
+    turnRunning: row.turn_id !== null,
+    turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
+    turnFailed: row.turn_id === null && row.last_outcome === 'failed',
+    turnCancelled: unreported(row, 'cancelled'),
+    unreported: unreported(row, 'completed'),
+    waiting: row.wait_id !== null,
+    checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
+    stopped: row.stopped_reason !== null,
+    // Merged after it reported, or it reported the very commit that was merged.
+    landed:
+      (!!merged && (merged.at >= (row.reported_at ?? 0) || merged.head === row.reported_head)) ||
+      pullRequest?.state === 'merged',
+    reviewed: row.reviewed_at !== null && row.reviewed_at >= (row.reported_at ?? 0),
+    underReview,
+    reviewer: row.review_of !== null,
+  })
+  const activeAt = Math.max(
+    row.updated_at,
+    row.message_at ?? 0,
+    row.transcript_at ?? 0,
+    row.todo_at ?? 0,
+    row.turn_started_at ?? 0,
+  )
   return {
     id: row.id,
     projectId: row.project_id,
     title: row.title,
     nodeId: row.node_id,
-    stage: threadStage({
-      openAttentions: row.open_attentions,
-      started: row.started === 1,
-      lastReport: row.last_report,
-      turnRunning: row.turn_id !== null,
-      turnPending: row.turn_id === null && (row.pending_seq ?? 0) > 0,
-      turnFailed: row.turn_id === null && row.last_outcome === 'failed',
-      turnCancelled: unreported(row, 'cancelled'),
-      unreported: unreported(row, 'completed'),
-      waiting: row.wait_id !== null,
-      checksGaveUp: row.check_failures >= MAX_CHECK_ATTEMPTS,
-      stopped: row.stopped_reason !== null,
-      // Merged after it reported, or it reported the very commit that was merged.
-      landed:
-        (!!merged && (merged.at >= (row.reported_at ?? 0) || merged.head === row.reported_head)) ||
-        pullRequest?.state === 'merged',
-      reviewed: row.reviewed_at !== null && row.reviewed_at >= (row.reported_at ?? 0),
-      underReview,
-      reviewer: row.review_of !== null,
-    }),
+    stage,
     lastReport: row.last_report,
     lastSummary: row.last_summary,
     lastHeadline: row.last_headline,
@@ -690,6 +705,15 @@ function toThread(row: ThreadRow): ThreadView {
             removed: row.workspace_removed === 1,
           },
     merged,
+    archived:
+      stage === 'done' &&
+      // Landed after its last report and nothing written to it since: what it did after
+      // landing (a later report) has not landed.
+      ((row.landed_at !== null &&
+        row.landed_at >= (row.reported_at ?? 0) &&
+        (row.user_at ?? 0) <= row.landed_at &&
+        now - row.landed_at >= ARCHIVE_LANDED_AFTER_MS) ||
+        now - activeAt >= ARCHIVE_AFTER_MS),
     changes: row.changes ? (JSON.parse(row.changes) as ChangeTotals) : null,
     pullRequest,
     stopped:
@@ -703,13 +727,7 @@ function toThread(row: ThreadRow): ThreadView {
     doing: doingOf(row.todo_items),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    activeAt: Math.max(
-      row.updated_at,
-      row.message_at ?? 0,
-      row.transcript_at ?? 0,
-      row.todo_at ?? 0,
-      row.turn_started_at ?? 0,
-    ),
+    activeAt,
     reviewOf: row.review_of,
     review: row.reviewer_id
       ? { reviewerId: row.reviewer_id, rounds: row.review_rounds, reviewing: underReview }
@@ -747,7 +765,9 @@ function toNotice(row: NoticeRow): NoticeView {
   return (
     row.kind === 'memory'
       ? { ...base, kind: 'memory', ...payload, undone: row.undone === 1 }
-      : { ...base, kind: row.kind, ...payload }
+      : row.kind === 'merged' && row.undone === 1
+        ? { ...base, kind: 'merged', ...payload, undone: true }
+        : { ...base, kind: row.kind, ...payload }
   ) as NoticeView
 }
 
@@ -936,13 +956,13 @@ export class Ariadne {
     return this.db
       .query<ThreadRow, [string]>(`${THREAD_SELECT} WHERE t.project_id = ? ORDER BY t.id`)
       .all(projectId)
-      .map(toThread)
+      .map((row) => toThread(row, this.now()))
   }
 
   getThread(threadId: string): ThreadView {
     const row = this.db.query<ThreadRow, [string]>(`${THREAD_SELECT} WHERE t.id = ?`).get(threadId)
     if (!row) throw new DomainError('error.notFound', { what: threadId })
-    return toThread(row)
+    return toThread(row, this.now())
   }
 
   listOpenAttentions(projectId: string): AttentionView[] {
@@ -1598,7 +1618,8 @@ export class Ariadne {
   /**
    * Whether the autopilot may ask about a milestone's gate now: not while a card is open
    * or after the user agreed, and not after a no since the autopilot last went on (being
-   * switched on, or resumed after a pause, asks again).
+   * switched on, or resumed after a pause, asks again). Before and after are the order of
+   * the events, not their times: two can fall in the same millisecond.
    */
   mayAskGate(projectId: string, nodeId: string): boolean {
     const since =
@@ -1608,11 +1629,17 @@ export class Ariadne {
         )
         .get(projectId)?.autopilot_since ?? 0
     const rows = this.db
-      .query<{ closed: number; approved: number | null; created_at: number }, [string, string]>(
-        'SELECT closed, approved, created_at FROM attentions WHERE project_id = ? AND purpose = ?',
+      .query<{ closed: number; approved: number | null; changed_seq: number }, [string, string]>(
+        'SELECT closed, approved, changed_seq FROM attentions WHERE project_id = ? AND purpose = ?',
       )
       .all(projectId, `${MILESTONE_GATE}:${nodeId}`)
-    return !rows.some((row) => row.closed === 0 || row.approved === 1 || row.created_at >= since)
+    return !rows.some(
+      (row) =>
+        row.closed === 0 ||
+        row.approved === 1 ||
+        // A question taken back (its milestone left the plan) is not a no.
+        (row.approved === 0 && row.changed_seq > since),
+    )
   }
 
   /** Ask the user whether the work goes on past a milestone; the coordinator hears the answer. */
@@ -3189,6 +3216,21 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
+  /** The user took the thread's last merge back: its changes wait to be merged again. */
+  recordMergeUndone(threadId: string): ThreadView {
+    const thread = this.getThread(threadId)
+    if (!thread.merged) throw new DomainError('error.undoMerge.none')
+    const { branch, base, sha, head } = thread.merged
+    this.store.append([
+      {
+        type: 'branch.merge_undone',
+        projectId: thread.projectId,
+        data: { threadId, branch, base, sha, head },
+      },
+    ])
+    return this.getThread(threadId)
+  }
+
   /** A merge the user tried stopped at conflicts: the thread is woken to resolve them. */
   recordMergeConflict(
     threadId: string,
@@ -4261,7 +4303,7 @@ export class Ariadne {
    */
   private nudgeUnreported(threadId: string, projectId: string): void {
     const row = this.db.query<ThreadRow, [string]>(`${THREAD_SELECT} WHERE t.id = ?`).get(threadId)
-    if (!row || toThread(row).stage !== 'silent') return
+    if (!row || toThread(row, this.now()).stage !== 'silent') return
     if (row.nudged_at !== null && row.nudged_at >= (row.reported_at ?? 0)) return
     this.store.append([{ type: 'thread.nudged', projectId, data: { threadId } }])
   }

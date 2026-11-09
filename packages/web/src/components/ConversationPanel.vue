@@ -20,7 +20,6 @@ import {
   DouShimmer,
   DouSpinner,
   DouStatusDot,
-  DouTag,
   DouText,
   type ChatAttachment,
   type ChatInputOption,
@@ -32,7 +31,6 @@ import {
   ChevronDownIcon,
   CpuIcon,
   FileDiffIcon,
-  GitBranchIcon,
   ListTreeIcon,
   MoreHorizontalIcon,
   PaperclipIcon,
@@ -74,8 +72,10 @@ import {
   resumeThread,
   setThreadModel,
   stopTurn,
+  undoMerge,
   undoNotice,
 } from '../store'
+import WorkspaceTag from './WorkspaceTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewActions from './ReviewActions.vue'
@@ -392,6 +392,14 @@ function pullRequestRef(number: number): string {
 }
 
 /** By the user's hand or the autopilot's, into the base or through the pull request. */
+const undoing = ref(false)
+async function undoLastMerge() {
+  if (!props.threadId) return
+  undoing.value = true
+  await undoMerge(props.threadId)
+  undoing.value = false
+}
+
 function mergedNotice(notice: Extract<NoticeView, { kind: 'merged' }>) {
   const base = notice.base
   if (notice.pullRequest) {
@@ -657,15 +665,7 @@ watch(
             v-if="thread.stage === 'review' && !(merging && mergeOffered(thread))"
             :thread-id="thread.id"
           />
-          <DouTag
-            v-if="thread.workspace?.branch"
-            class="conversation-branch"
-            size="sm"
-            :title="`${t('thread.workspace')}: ${thread.workspace.label}`"
-          >
-            <template #leading><GitBranchIcon /></template>
-            {{ thread.workspace.branch }}
-          </DouTag>
+          <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
           <PullRequestTag :thread="thread" refreshable />
           <ReviewMark :thread="thread" />
           <!-- Under review, "go merge" opens the same changes. -->
@@ -805,14 +805,26 @@ watch(
             </DouCollapseItem>
           </DouCollapse>
           <!-- What happened to its branch and worktree. -->
-          <DouText
-            v-else-if="item.notice.kind === 'merged'"
-            variant="tertiary"
-            size="sm"
-            class="notice-text"
-          >
-            {{ mergedNotice(item.notice) }}
-          </DouText>
+          <template v-else-if="item.notice.kind === 'merged'">
+            <DouText variant="tertiary" size="sm" class="notice-text">
+              {{ mergedNotice(item.notice) }}
+            </DouText>
+            <DouText v-if="item.notice.undone" variant="tertiary" size="sm">
+              {{ t('notice.undone') }}
+            </DouText>
+            <!-- Only its last merge, made here, can be taken back. -->
+            <DouButton
+              v-else-if="
+                thread && !item.notice.pullRequest && thread.merged?.sha === item.notice.sha
+              "
+              size="sm"
+              variant="ghost"
+              :loading="undoing"
+              @click="undoLastMerge"
+            >
+              {{ t('notice.undo') }}
+            </DouButton>
+          </template>
           <DouText
             v-else-if="item.notice.kind === 'autopilot-held'"
             tone="warning"
@@ -1263,12 +1275,6 @@ watch(
   content: '';
   height: 28px;
   margin-inline-end: -8px;
-}
-
-/* A long branch name is cut, not pushed to a line of its own. */
-.conversation-branch {
-  min-width: 0;
-  max-width: 100%;
 }
 
 .conversation-list {

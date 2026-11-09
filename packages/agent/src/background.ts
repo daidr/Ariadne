@@ -12,14 +12,45 @@ const KEPT_FINISHED = 8
 /** The longest a background command runs: a server left behind does not run for days. */
 export const BACKGROUND_TIMEOUT_MS = 8 * 60 * 60 * 1000
 
+/** How much of a command's first output is looked through for the address it serves at. */
+const URL_SEARCH = 20_000
+
+const SERVED =
+  /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):\d{2,5}(?:\/[^\s'"<>)\]]*)?(?=[\s'"<>)\],])/
+
+const SERVING = /\b(?:local|listening|running|ready|serving|started|available)\b/i
+
+/**
+ * The address on this machine a command says it serves at, e.g. a dev server's
+ * `http://localhost:5173/`; an address it listens on for every interface is reached
+ * through `localhost`. Only one followed by more output counts, so it is not cut short.
+ */
+export function servedUrl(output: string): string | null {
+  const lines = screenText(output).split(/(?<=\n)/)
+  // A line that says it serves there beats one that merely names an address (a proxy
+  // target, a failed request).
+  const found = (
+    lines.find((line) => SERVING.test(line) && SERVED.test(line)) ??
+    lines.find((line) => SERVED.test(line))
+  )?.match(SERVED)?.[0]
+  if (!found) return null
+  return found.replace(/\/\/(?:0\.0\.0\.0|\[::\])(?=:)/, '//localhost').replace(/[.,;:]+$/, '')
+}
+
 export interface BackgroundCommand {
   /** What the model names it by, e.g. `cmd-3`. */
   id: string
   threadId: string
   command: string
+  /** Where it was started, relative to the workspace root. */
+  cwd: string
   startedAt: number
+  /** The address it says it serves at, when it runs on this machine and named one. */
+  url: string | null
   /** How it ended; `null` while it runs. */
   result: { exitCode: number; endedAt: number; stopped: boolean } | null
+  /** The user asked to try it themselves: it outlives the report that asks them to look. */
+  keep: boolean
 }
 
 interface Job extends BackgroundCommand {
@@ -31,6 +62,8 @@ interface Job extends BackgroundCommand {
   read: number
   controller: AbortController
   ended: Promise<void>
+  /** Left running when the thread reported, and the thread has not been told since. */
+  kept?: boolean
   /** Wakes whoever waits for more output or the end. */
   changed: Set<() => void>
 }
@@ -46,7 +79,8 @@ export interface CommandOutput {
 /**
  * Commands threads left running in the background, e.g. a dev server or a long build.
  * They outlive the turn that started them, and end when the thread is stopped, its work
- * is reported finished, its worktree goes, or the server stops.
+ * is reported finished, its worktree goes, or the server stops. One the user asked to
+ * try themselves stays while the work waits to be looked at, until that ends.
  */
 export class BackgroundCommands {
   private readonly jobs = new Map<string, Job>()
@@ -72,6 +106,11 @@ export class BackgroundCommands {
     threadId: string,
     command: string,
     exec: (options: Pick<ExecOptions, 'signal' | 'onOutput' | 'timeoutMs'>) => Promise<ExecResult>,
+    /**
+     * `local`: it runs on this machine, so an address it serves at can be opened from here.
+     * `keep`: the user asked to try it themselves.
+     */
+    options: { local?: boolean; keep?: boolean; cwd?: string } = {},
   ): BackgroundCommand {
     if (this.running(threadId) >= MAX_RUNNING) {
       throw new Error(
@@ -84,8 +123,11 @@ export class BackgroundCommands {
       id: `cmd-${++this.next}`,
       threadId,
       command,
+      cwd: options.cwd ?? '.',
       startedAt: Date.now(),
+      url: null,
       result: null,
+      keep: !!options.keep,
       output: '',
       dropped: 0,
       read: 0,
@@ -93,6 +135,7 @@ export class BackgroundCommands {
       ended: Promise.resolve(),
       changed: new Set(),
     }
+    let seeking = !!options.local
     const wake = () => {
       for (const done of job.changed) done()
       job.changed.clear()
@@ -104,6 +147,11 @@ export class BackgroundCommands {
         const cut = job.output.length - KEPT_OUTPUT
         job.output = job.output.slice(cut)
         job.dropped += cut
+      }
+      if (seeking) {
+        job.url = servedUrl(job.output.slice(0, URL_SEARCH))
+        seeking = !job.url && job.output.length < URL_SEARCH
+        if (job.url) this.onChange(threadId)
       }
       wake()
     }
@@ -177,12 +225,28 @@ export class BackgroundCommands {
     return view(job)
   }
 
-  /** Stop the thread's commands and forget them all, with what they printed. */
-  async stopThread(threadId: string): Promise<void> {
-    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+  /**
+   * Stop the thread's commands and forget them all, with what they printed. `keepAsked`
+   * leaves the running ones the user asked to try themselves: they open it while reviewing.
+   */
+  async stopThread(threadId: string, options: { keepAsked?: boolean } = {}): Promise<void> {
+    const own = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+    const kept = (job: Job) => !!options.keepAsked && job.keep && !job.result
+    for (const job of own) job.kept = kept(job)
+    const jobs = own.filter((job) => !kept(job))
     await this.end(jobs)
     for (const job of jobs) this.jobs.delete(job.id)
     if (jobs.length) this.onChange(threadId)
+  }
+
+  /**
+   * The commands that were left running over a report and still run, once: the thread is
+   * told of them when it works again, so it uses them instead of starting them anew.
+   */
+  takeKept(threadId: string): BackgroundCommand[] {
+    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId && job.kept)
+    for (const job of jobs) job.kept = false
+    return jobs.filter((job) => !job.result).map(view)
   }
 
   async stopAll(): Promise<void> {
@@ -219,6 +283,9 @@ const view = (job: Job): BackgroundCommand => ({
   id: job.id,
   threadId: job.threadId,
   command: job.command,
+  cwd: job.cwd,
   startedAt: job.startedAt,
+  url: job.url,
   result: job.result,
+  keep: job.keep,
 })

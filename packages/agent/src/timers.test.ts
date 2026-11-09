@@ -7,6 +7,7 @@ import { Scheduler } from './scheduler'
 import type { ResolvedModel } from './runner'
 import { Timers } from './timers'
 import { waitUntil } from './wait-tool'
+import { keptNote, type WorkspaceManager } from './workspaces'
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -310,6 +311,8 @@ describe('the fallback model', () => {
   })
 })
 
+const settled = () => new Promise((resolve) => setTimeout(resolve, 20))
+
 describe('background commands for the status line', () => {
   test('the list changes as commands start and end, and peeking leaves the model its reads', async () => {
     const changed: string[] = []
@@ -330,5 +333,85 @@ describe('background commands for the status line', () => {
     expect(changed).toEqual(['thr_1', 'thr_1'])
     await background.stopThread('thr_1')
     expect(changed).toHaveLength(3)
+  })
+
+  test('what the user asked to try stays up while the work waits to be looked at', async () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '改页面' })
+    const background = new BackgroundCommands()
+    const run = (output: string, keep = false) =>
+      background.start(
+        thread.id,
+        'bun dev',
+        ({ signal, onOutput }) => {
+          onOutput?.(output, 'stdout')
+          return new Promise((done) => {
+            signal?.addEventListener('abort', () => done({ exitCode: 143, stdout: '', stderr: '' }))
+          })
+        },
+        { local: true, keep },
+      )
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => null,
+      locale: () => 'zh-CN',
+      workspaces: { background, stopThread: async () => {} } as unknown as WorkspaceManager,
+    })
+    scheduler.start()
+    app.startThread(thread.id)
+    const server = run('Local: http://localhost:5173/\n', true)
+    // Not asked for by the user: these end with the report, an address or not.
+    run('Local: http://localhost:5174/\n')
+    run('building\n')
+    app.reportThread(thread.id, { kind: 'ready', summary: '改好了', headline: '看一下' })
+    await settled()
+    expect(background.list(thread.id)).toMatchObject([
+      { id: server.id, url: 'http://localhost:5173/', result: null },
+    ])
+    // Back at work, the thread is told once what it left serving.
+    expect(background.takeKept(thread.id)).toMatchObject([{ id: server.id }])
+    expect(background.takeKept(thread.id)).toEqual([])
+    expect(keptNote(background.list(thread.id))).toContain(
+      `${server.id} at http://localhost:5173/: bun dev`,
+    )
+    // Reported again after more work: still there for the thread and the user.
+    app.reportThread(thread.id, { kind: 'ready', summary: '又改了', headline: '再看一下' })
+    await settled()
+    expect(background.running(thread.id)).toBe(1)
+    app.recordMerge(thread.id, {
+      branch: 'ariadne/x',
+      base: 'main',
+      method: 'squash',
+      sha: 'a',
+      head: 'b',
+    })
+    await settled()
+    expect(background.list(thread.id)).toEqual([])
+
+    // The other ways out of waiting end it too.
+    const other = app.createThread(project.id, { title: '写文档' })
+    for (const leave of [
+      () => app.reviewThread(other.id),
+      () => app.reportThread(other.id, { kind: 'blocked', summary: '卡住了', headline: '卡住了' }),
+    ]) {
+      app.startThread(other.id)
+      background.start(
+        other.id,
+        'bun preview',
+        ({ signal, onOutput }) => {
+          onOutput?.('http://127.0.0.1:4173/\n', 'stdout')
+          return new Promise((done) => {
+            signal?.addEventListener('abort', () => done({ exitCode: 143, stdout: '', stderr: '' }))
+          })
+        },
+        { local: true, keep: true },
+      )
+      app.reportThread(other.id, { kind: 'ready', summary: '写好了', headline: '看一下' })
+      await settled()
+      expect(background.running(other.id)).toBe(1)
+      leave()
+      await settled()
+      expect(background.list(other.id)).toEqual([])
+    }
   })
 })

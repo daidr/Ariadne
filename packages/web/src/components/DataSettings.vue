@@ -96,7 +96,10 @@ async function remove(name: string) {
       <ul v-else class="data-list">
         <li v-for="item in usage.backups" :key="item.name" class="data-row">
           <div class="data-main">
-            <DouText size="sm">{{ time(item.createdAt) }}</DouText>
+            <DouText size="sm">
+              {{ time(item.createdAt) }}
+              <DouText v-if="item.auto" variant="tertiary">{{ t('data.auto') }}</DouText>
+            </DouText>
             <DouText
               size="sm"
               variant="tertiary"

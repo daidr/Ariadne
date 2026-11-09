@@ -1,6 +1,6 @@
 import type { ThreadStage, ThreadView } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { groupOf, sortThreads, threadLine } from './stage'
+import { groupOf, groupOfThread, sortThreads, threadGroups, threadLine } from './stage'
 
 const thread = (over: Partial<ThreadView>): ThreadView =>
   ({
@@ -35,6 +35,12 @@ describe('thread list', () => {
     expect(groupOf.stopped).toBe('paused')
     expect(groupOf.halted).toBe('waiting')
     expect(groupOf.silent).toBe('waiting')
+  })
+
+  test('archived threads are listed last, whatever they ended as', () => {
+    expect(threadGroups.at(-1)).toBe('archived')
+    expect(groupOfThread({ stage: 'done', archived: true } as ThreadView)).toBe('archived')
+    expect(groupOfThread({ stage: 'done', archived: false } as ThreadView)).toBe('done')
   })
 
   test('sorts by activity, title or creation without touching the list', () => {

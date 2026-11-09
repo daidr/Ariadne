@@ -324,6 +324,7 @@ export interface BackupInfo {
   name: string
   size: number
   createdAt: number
+  auto: boolean
 }
 
 export interface DataUsage {
@@ -667,6 +668,8 @@ export const api = {
       `/api/threads/${threadId}/merge`,
       input,
     ),
+  undoMerge: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/merge/undo`),
   listWorktrees: () => request<{ projects: ProjectWorktrees[] }>('GET', '/api/worktrees'),
   removeWorktree: (projectId: string, threadId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),

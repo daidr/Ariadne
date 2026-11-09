@@ -47,6 +47,8 @@ export interface SchedulerOptions {
 
 /** Reports after which a thread's background commands have nothing more to do. */
 const FINAL_REPORTS = new Set(['ready', 'done', 'failed', 'blocked'])
+/** The user is through with looking at a thread's work. */
+const LOOKED_AT = new Set<string>(['branch.merged', 'pull_request.closed', 'thread.reviewed'])
 
 interface Running {
   controller: AbortController
@@ -98,9 +100,17 @@ export class Scheduler {
           this.cancel(event.data.threadId)
           void this.options.workspaces?.stopThread(event.data.threadId)
         }
-        // Its work is finished: what it left running in the background ends.
+        // Its work is finished: what it left running in the background ends. What the
+        // user asked to try themselves stays while they look at the work.
         if (event.type === 'thread.reported' && FINAL_REPORTS.has(event.data.report)) {
-          void this.options.workspaces?.background.stopThread(event.data.threadId)
+          void this.options.workspaces?.background.stopThread(event.data.threadId, {
+            keepAsked: event.data.report === 'ready',
+          })
+        }
+        if (LOOKED_AT.has(event.type)) {
+          void this.options.workspaces?.background.stopThread(
+            (event.data as { threadId: string }).threadId,
+          )
         }
       }
       this.schedule()

@@ -25,6 +25,7 @@ import {
   fileVersions,
   gitIdentity,
   mergeBranch,
+  undoMerge,
   removeWorktree,
   treeDiff,
   dropSnapshots,
@@ -323,6 +324,8 @@ export class LocalWorkspace implements Workspace {
     this.git = options.git ?? true
   }
 
+  readonly local = true
+
   get label(): string {
     return this.root
   }
@@ -564,6 +567,7 @@ export function localWorkspaces(input: {
       file: (request) => fileVersions(gitRun, request),
       merged: ({ branch }, base) => branchMerged(gitRun, branch, `refs/heads/${base}`),
       merge: (request) => mergeBranch(gitRun, localIdentity(repoRoot), request),
+      undoMerge: (request) => undoMerge(gitRun, request),
       async remove(threadId, options) {
         const removed = await removeWorktree(
           gitRun,

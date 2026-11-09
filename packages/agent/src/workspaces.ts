@@ -221,6 +221,14 @@ async function lockfileInstalls(
  * Opens each thread's workspace from its project's context source, once, and keeps it
  * for later turns. A source that changes gets connected again.
  */
+/** Tells a thread at work again what still runs from before, so it does not start it twice. */
+export function keptNote(commands: { id: string; command: string; url: string | null }[]): string {
+  const list = commands
+    .map((c) => `${c.id}${c.url ? ` at ${c.url}` : ''}: ${c.command.slice(0, 120)}`)
+    .join('\n')
+  return `Still running in the background from before your last report, kept because the user wanted to try them:\n${list}\nUse them as they are (read_command_output), or stop_command one that needs a restart; do not start a second copy.`
+}
+
 export class WorkspaceManager {
   private readonly sources = new Map<
     string,
@@ -251,6 +259,7 @@ export class WorkspaceManager {
       id: command.id,
       command: command.command,
       startedAt: command.startedAt,
+      url: command.url,
       result: command.result,
     }))
     this.app.background.set({ projectId, conversationId: threadId, commands })
@@ -270,14 +279,17 @@ export class WorkspaceManager {
   }
 
   /**
-   * What the setup script did in the thread's workspace opened just now, once: the model
-   * reads it with the result of the call that opened the workspace.
+   * What the thread should hear with its next tool result, once: what the setup script did
+   * in the workspace opened just now, and what it left running when it last reported.
    */
   takeSetup(threadId: string): string | null {
     const notes = [this.setups.get(threadId) ?? '']
     this.setups.delete(threadId)
     // Asked only now: the call that opened the workspace may have noted the check itself.
     if (this.hinted.delete(threadId) && this.checkWanted(threadId)) notes.push(CHECK_HINT)
+    // Back at work after a report: what it left serving is still there to use.
+    const kept = this.background.takeKept(threadId)
+    if (kept.length) notes.push(keptNote(kept))
     return notes.filter(Boolean).join('\n\n') || null
   }
 

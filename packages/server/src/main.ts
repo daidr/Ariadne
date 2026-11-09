@@ -27,7 +27,7 @@ import ssh from '@ariadne/plugin-ssh'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createHandler, joinShared, type SharedSocketData } from './app'
-import { DataStore } from './data'
+import { DailyBackup, DataStore } from './data'
 import { loadConfig } from './config'
 import { loadUserConfig, SettingsStore } from './settings'
 
@@ -150,7 +150,13 @@ const autopilot = new Autopilot(app, workspaces, {
   locale: () => settings.current.locale,
   slots: () => settings.current.concurrency.slots,
 })
+// The database is copied once a day, so a bad day costs at most that day.
+const dataStore = new DataStore(app, config.home, config.databasePath)
+const backups = new DailyBackup(dataStore, (error) =>
+  console.error(t('cli.server.backupFailed'), error),
+)
 scheduler.start()
+backups.start()
 timers.start()
 feedback.start()
 watcher.start()
@@ -190,7 +196,7 @@ const handle = createHandler({
   host,
   workspaces,
   mcp,
-  data: new DataStore(app, config.home, config.databasePath),
+  data: dataStore,
   skillsDir: join(config.home, 'skills'),
   shared,
   feedback,
@@ -209,6 +215,7 @@ async function shutdown() {
   await janitor.stop()
   await autopilot.stop()
   timers.stop()
+  backups.stop()
   feedback.stop()
   await scheduler.stop()
   shared.dispose()

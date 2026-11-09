@@ -31,6 +31,7 @@ export const en: Record<MessageKey, string> = {
   'threads.group.idle': 'Idle',
   'threads.group.paused': 'Paused',
   'threads.group.done': 'Done',
+  'threads.group.archived': 'Earlier',
   'threads.more': 'Show more',
   'threads.progress': 'Todo progress',
   'thread.progressShort': '{done}/{total}',
@@ -454,11 +455,17 @@ export const en: Record<MessageKey, string> = {
   'error.merge.checkout':
     'Changes in the checkout of the base branch are in the way; commit or stash them and try again: {detail}',
   'error.merge.filters':
-    'The repository uses .gitattributes filters (such as Git LFS); merge it in your checkout by hand',
+    'The repository uses .gitattributes filters (such as Git LFS); do it in your checkout by hand',
   'error.merge.base-moved': 'The base branch just got new commits; merge again',
   'error.merge.identity': 'git has no user.name or user.email; set them and merge again',
   'error.merge.git-version': 'Merging needs git 2.38 or later: {detail}',
   'error.merge.no-base': 'The base branch no longer exists: {detail}',
+  'error.merge.undo-moved':
+    'The base branch got new commits after the merge; it cannot be undone here',
+  'error.merge.undo-pushed': 'The merge was already pushed ({detail}); it cannot be undone here',
+  'error.merge.undo-branched':
+    'The branch {detail} was started after this merge and has it; it cannot be undone here',
+  'error.undoMerge.none': 'This thread has no merge to undo',
   'error.worktreeDirty': 'The worktree has changes not committed; it was kept',
   'changes.skipMerge': "Don't merge",
   'changes.open': 'Changes',
@@ -729,6 +736,7 @@ export const en: Record<MessageKey, string> = {
   'cli.server.pluginFailed': 'Could not load the plugin: {path}',
   'cli.server.leftovers': 'Ended {count} processes left running when Ariadne last stopped',
   'cli.server.otherServer': 'Another Ariadne is using this directory: its processes are left alone',
+  'cli.server.backupFailed': 'The daily backup failed',
   'cli.server.started': 'Ariadne is running: {url}',
   'cli.start.building': 'Building the pages…',
   'cli.start.buildFailed': 'Building the pages failed',
@@ -780,6 +788,7 @@ export const en: Record<MessageKey, string> = {
   'data.plugins': 'Workspaces and clones',
   'data.backups': 'Backups',
   'data.backup': 'Back up now',
+  'data.auto': 'Automatic',
   'data.noBackups': 'No backups yet',
   'data.removeConfirm': 'Delete this backup?',
   'projectSettings.open': 'Project settings',
