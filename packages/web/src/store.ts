@@ -595,9 +595,17 @@ export async function openPane(key: PaneKey, options: OpenOptions = {}) {
   if (loading) await refreshing
 }
 
-/** Open a thread's conversation on the right side; see `openPane`. */
-export function openThread(threadId: string, options: OpenOptions = {}) {
-  return openPane(side.threadKey(threadId), options)
+/**
+ * Open a thread's conversation on the right side; see `openPane`. Over a full-screen view
+ * it shows beside that view instead, where the user can see it, not behind it.
+ */
+export async function openThread(threadId: string, options: OpenOptions = {}) {
+  const full = state.full
+  if (!full) return openPane(side.threadKey(threadId), options)
+  if (full.threadId === threadId) return
+  const loading = !state.threads[threadId]
+  setFull({ ...full, threadId })
+  if (loading) await refreshing
 }
 
 /**
