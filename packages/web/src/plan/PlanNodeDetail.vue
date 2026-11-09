@@ -321,7 +321,12 @@ const removeQuestion = computed(() => {
         {{ t('plan.start') }}
       </DouButton>
     </template>
-    <PlanSection :title="t('plan.threads')" :count="node.threads.length">
+    <!-- With a start button above, "no thread yet" says the same thing twice. -->
+    <PlanSection
+      v-if="node.threads.length || !canStart"
+      :title="t('plan.threads')"
+      :count="node.threads.length"
+    >
       <ul v-if="node.threads.length" class="node-detail-list">
         <li v-for="thread in node.threads" :key="thread.id" class="node-thread">
           <button

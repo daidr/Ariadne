@@ -61,6 +61,8 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
                 >
               </template>
             </DouText>
+            <!-- The coordinator's own question says so, as a thread's carries its title. -->
+            <DouText v-else variant="secondary" size="sm">{{ t('coordinator.title') }}</DouText>
             <!-- A form is filled in where it was asked; the list only points there. -->
             <div v-if="item.attention.block.type === 'form'" class="attention-thread">
               <DouText weight="medium" truncate>{{ item.attention.block.title }}</DouText>
@@ -131,6 +133,11 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.attention + .attention {
+  padding-top: 12px;
+  border-top: 1px solid var(--dou-color-border-subtle);
 }
 
 .attention-thread {

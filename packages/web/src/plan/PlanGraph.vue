@@ -249,8 +249,53 @@ function frameWhenMeasured(tries = 30) {
     else frame()
   })
 }
-onMounted(frameWhenMeasured)
-onBeforeUnmount(() => cancelAnimationFrame(frameRequest))
+// The canvas shrinks when a node's detail opens beside or under it: the node picked is
+// moved back into sight, clear of the zoom controls at the bottom.
+const CONTROLS = 56
+function reveal(id: string) {
+  const flow = editor.value
+  const el = flow?.$el
+  const rect = flow?.getNodeRect(id)
+  if (!flow || !el?.clientWidth || !rect) return
+  const { x, y, zoom } = viewport.value
+  const shift = (start: number, size: number, room: number, end: number) => {
+    if (size > room - PAD - end) return PAD - start
+    if (start < PAD) return PAD - start
+    if (start + size > room - end) return room - end - start - size
+    return 0
+  }
+  const dx = shift(rect.x * zoom + x, rect.width * zoom, el.clientWidth, PAD)
+  const dy = shift(rect.y * zoom + y, rect.height * zoom, el.clientHeight, CONTROLS)
+  if (dx || dy) flow.setViewport({ x: x + dx, y: y + dy, zoom }, true)
+}
+let resized: ResizeObserver | undefined
+onMounted(() => {
+  frameWhenMeasured()
+  const el = editor.value?.$el
+  if (!el) return
+  // A node the user had panned away from stays where they left it.
+  let width = el.clientWidth
+  let height = el.clientHeight
+  resized = new ResizeObserver(() => {
+    const id = selected.value
+    const rect = id ? editor.value?.getNodeRect(id) : undefined
+    const { x, y, zoom } = viewport.value
+    const seen =
+      rect &&
+      rect.x * zoom + x < width &&
+      (rect.x + rect.width) * zoom + x > 0 &&
+      rect.y * zoom + y < height &&
+      (rect.y + rect.height) * zoom + y > 0
+    width = el.clientWidth
+    height = el.clientHeight
+    if (id && seen) reveal(id)
+  })
+  resized.observe(el)
+})
+onBeforeUnmount(() => {
+  cancelAnimationFrame(frameRequest)
+  resized?.disconnect()
+})
 // A change shown on the graph is framed, so the nodes it adds are not off screen.
 watch(preview, async () => {
   await nextTick()

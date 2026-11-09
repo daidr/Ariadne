@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import ChangeTotals from './ChangeTotals.vue'
 import type { ThreadView } from '@ariadne/core'
-import { DouProgress, DouRelativeTime, DouShimmer, DouText } from 'dou-ui'
-import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
+import { DouProgress, DouRelativeTime, DouShimmer, DouText, DouTooltip } from 'dou-ui'
+import {
+  GitMergeIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestIcon,
+  ScanSearchIcon,
+} from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone, questionOf, statusLine } from '../stage'
@@ -26,6 +31,12 @@ const line = computed(() => {
     ? { text: props.thread.lastHeadline, live: false }
     : null
 })
+// Todos all ticked have nothing left to say in a row.
+const unfinished = computed(() => {
+  const progress = props.thread.progress
+  if (!progress || props.thread.stage === 'done' || progress.done >= progress.total) return null
+  return progress
+})
 const prTone = computed(() =>
   props.thread.pullRequest?.state === 'open'
     ? checksTone(props.thread.pullRequest.checks.state)
@@ -36,7 +47,13 @@ const prTone = computed(() =>
 <template>
   <span class="row" :class="{ 'row-nested': nested }">
     <span class="row-head">
-      <StageIcon :stage="thread.stage" />
+      <!-- A review that ended says nothing of its verdict: no green check for it. -->
+      <DouTooltip v-if="nested && thread.stage === 'done'" :content="t('review.ended')">
+        <DouText variant="tertiary" class="row-reviewed" role="img" :aria-label="t('review.ended')">
+          <ScanSearchIcon aria-hidden="true" />
+        </DouText>
+      </DouTooltip>
+      <StageIcon v-else :stage="thread.stage" />
       <DouText
         truncate
         class="row-title row-trim"
@@ -70,22 +87,17 @@ const prTone = computed(() =>
         :thread-id="thread.id"
         class="row-mark row-trim"
       />
-      <DouText
-        v-if="thread.progress && thread.stage !== 'done' && !nested"
-        size="sm"
-        variant="tertiary"
-        class="row-mark"
-      >
+      <DouText v-if="unfinished && !nested" size="sm" variant="tertiary" class="row-mark">
         <DouProgress
           type="circle"
-          :value="thread.progress.done"
-          :max="thread.progress.total"
+          :value="unfinished.done"
+          :max="unfinished.total"
           :width="12"
           :stroke-width="2"
           color="var(--dou-color-text-tertiary)"
           :label="t('threads.progress')"
         />
-        <span class="row-trim">{{ thread.progress.done }}/{{ thread.progress.total }}</span>
+        <span class="row-trim">{{ unfinished.done }}/{{ unfinished.total }}</span>
       </DouText>
       <DouText size="sm" variant="tertiary" class="row-time row-trim">
         <DouRelativeTime :value="thread.activeAt" short />
@@ -147,6 +159,16 @@ const prTone = computed(() =>
  */
 .row-trim {
   text-box: trim-both cap alphabetic;
+}
+
+.row-reviewed {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
 }
 
 .row-title {
