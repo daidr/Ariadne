@@ -1,6 +1,6 @@
 import { SKILL_NAME } from '@ariadne/core'
-import { readdir, readFile, stat } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, sep } from 'node:path'
 
 /**
  * Skills: ways of working written down in Markdown, one per skill: a file `<name>.md`,
@@ -24,11 +24,15 @@ export interface Skill {
  * a name. The second is the folder shared between tools.
  */
 export const REPO_SKILLS_DIRS = ['.ariadne/skills', '.agents/skills'] as const
+/** The skill that replaces the built-in review guidance. */
+const REVIEW_SKILL = 'review'
 /** The file a skill folder is read from. */
 export const SKILL_FILE = 'SKILL.md'
 /** Files beside a skill listed at most, and how deep they are looked for. */
 export const MAX_SKILL_FILES = 60
 const MAX_SKILL_FILE_DEPTH = 3
+/** Folders of one skill looked into at most, when its files are listed. */
+const MAX_SKILL_DIRS = 30
 /** A longer skill is cut: it is read into the conversation whole. */
 export const MAX_SKILL_CHARS = 32_000
 /** Skills listed at most, per place; the rest are left out by name order. */
@@ -98,6 +102,8 @@ interface Loaded extends Skill {
   files: SkillFiles
   /** The folder's path for `files`. */
   root: string
+  /** From a folder of Ariadne's own, not the one shared between tools. */
+  own: boolean
 }
 
 /** One place skills are read from; `shown` is its path as the model is told it. */
@@ -106,30 +112,52 @@ interface Place {
   dir: string
   shown: string
   source: Skill['source']
+  own: boolean
 }
 
-/** A folder of this machine read as a place: paths are from the folder. */
+/**
+ * A folder of this machine read as a place: paths are from the folder. A skill, file or
+ * folder, may be a link to elsewhere; what is inside a skill's folder is read only where
+ * it really lies in that folder, so a link in it reaches nothing outside.
+ */
 function directoryFiles(dir: string): SkillFiles {
+  /** The real path of `path`, when it is in its skill's real folder; else it throws. */
+  const within = async (path: string) => {
+    const parts = path.split('/').filter((part) => part && part !== '.')
+    const at = await realpath(join(dir, ...parts))
+    if (parts.length < 2) return at
+    const folder = await realpath(join(dir, parts[0]!))
+    if (at !== folder && !at.startsWith(folder + sep)) throw new Error('outside the skill')
+    return at
+  }
   return {
     async list(path) {
-      const at = join(dir, path)
+      const top = !path.split('/').some((part) => part && part !== '.')
+      const at = await within(path)
       const entries = await readdir(at, { withFileTypes: true })
       const found: { name: string; kind: string }[] = []
       for (const entry of entries) {
         let folder = entry.isDirectory()
         let file = entry.isFile()
         if (entry.isSymbolicLink()) {
-          // A linked skill counts as what it points to; a broken link is left out.
+          // A linked skill counts as what it points to; a broken link is left out. Inside
+          // a skill, linked folders are not followed, and linked files only within it.
           const info = await stat(join(at, entry.name)).catch(() => null)
-          folder = info?.isDirectory() ?? false
-          file = info?.isFile() ?? false
+          folder = top && (info?.isDirectory() ?? false)
+          file =
+            (info?.isFile() ?? false) &&
+            (top ||
+              (await within(`${path}/${entry.name}`).then(
+                () => true,
+                () => false,
+              )))
         }
         if (folder || file) found.push({ name: entry.name, kind: folder ? 'directory' : 'file' })
       }
       return found
     },
     async readBytes(path, maxBytes) {
-      const at = join(dir, path)
+      const at = await within(path)
       const info = await stat(at)
       if (!info.isFile()) throw new Error('not a file')
       if (info.size > maxBytes) throw new Error('too large')
@@ -151,38 +179,42 @@ async function fromPlace(place: Place): Promise<Loaded[]> {
   } catch {
     return []
   }
-  const candidates = new Map<string, { path: string; folder: string | null }>()
+  // A name's candidates, the folder first: it wins when it holds SKILL.md, and a folder
+  // of notes beside `<name>.md` leaves that file the skill.
+  const candidates = new Map<string, { path: string; folder: string | null }[]>()
+  const add = (name: string, candidate: { path: string; folder: string | null }) => {
+    const known = candidates.get(name) ?? []
+    candidates.set(name, candidate.folder === null ? [...known, candidate] : [candidate, ...known])
+  }
   for (const entry of entries) {
     if (entry.kind === 'file') {
       const name = skillName(entry.name)
-      if (name && !candidates.has(name))
-        candidates.set(name, {
-          path: under(place.dir, entry.name),
-          folder: null,
-        })
+      if (name) add(name, { path: under(place.dir, entry.name), folder: null })
     } else if (entry.kind === 'directory' && SKILL_NAME.test(entry.name)) {
       const folder = under(place.dir, entry.name)
-      candidates.set(entry.name, { path: `${folder}/${SKILL_FILE}`, folder })
+      add(entry.name, { path: `${folder}/${SKILL_FILE}`, folder })
     }
   }
   const found: Loaded[] = []
-  for (const [name, { path, folder }] of [...candidates].toSorted(([a], [b]) =>
-    a.localeCompare(b),
-  )) {
+  for (const [name, tried] of [...candidates].toSorted(([a], [b]) => a.localeCompare(b))) {
     if (found.length >= MAX_SKILLS) break
-    try {
-      const text = decode(await place.files.readBytes(path, MAX_SKILL_BYTES))
-      found.push({
-        name,
-        when: whenToUse(text),
-        source: place.source,
-        text,
-        folder: folder === null ? null : under(place.shown, name),
-        files: place.files,
-        root: folder ?? '',
-      })
-    } catch {
-      // No SKILL.md, too large, or gone meanwhile: not a skill to offer.
+    for (const { path, folder } of tried) {
+      try {
+        const text = decode(await place.files.readBytes(path, MAX_SKILL_BYTES))
+        found.push({
+          name,
+          when: whenToUse(text),
+          source: place.source,
+          text,
+          folder: folder === null ? null : under(place.shown, name),
+          files: place.files,
+          root: folder ?? '',
+          own: place.own,
+        })
+        break
+      } catch {
+        // No SKILL.md, too large, or gone meanwhile: not a skill to offer.
+      }
     }
   }
   return found
@@ -227,11 +259,18 @@ export class SkillSet {
     const paths: string[] = []
     let more = false
     if (!skill || skill.folder === null) return { paths, more }
+    let listed = 0
     const walk = async (dir: string, depth: number) => {
+      if (listed++ >= MAX_SKILL_DIRS) {
+        more = true
+        return
+      }
       const entries = await skill.files
         .list(dir === '.' ? skill.root : `${skill.root}/${dir}`)
         .catch(() => [])
       for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
+        // Enough to tell there is more: nothing further is looked at.
+        if (more && paths.length >= MAX_SKILL_FILES) return
         const path = under(dir, entry.name)
         if (entry.kind === 'directory') {
           if (depth < MAX_SKILL_FILE_DEPTH) await walk(path, depth + 1)
@@ -246,22 +285,38 @@ export class SkillSet {
     return { paths, more }
   }
 
-  /** A file beside a skill, as text; `null` when there is none there to read. */
-  async read(name: string, file: string): Promise<string | null> {
+  /**
+   * A file beside a skill, as text; `'binary'` when it is not text, `null` when there is
+   * none there to read.
+   */
+  async read(name: string, file: string): Promise<{ text: string } | 'binary' | null> {
     const skill = this.found.get(name)
     const path = inside(file)
     if (!skill || skill.folder === null || !path) return null
     try {
-      return decode(await skill.files.readBytes(`${skill.root}/${path}`, MAX_SKILL_BYTES))
+      const data = await skill.files.readBytes(`${skill.root}/${path}`, MAX_SKILL_BYTES)
+      return data.subarray(0, 8192).includes(0) ? 'binary' : { text: decode(data) }
     } catch {
       return null
     }
+  }
+
+  /**
+   * The skill that replaces the built-in review guidance: `review`, when it comes from a
+   * folder of Ariadne's own. One in a folder shared between tools was written for their
+   * way of reviewing, and stays an ordinary skill.
+   */
+  review(): (Skill & { text: string; folder: string | null }) | null {
+    return this.found.get(REVIEW_SKILL)?.own ? this.get(REVIEW_SKILL) : null
   }
 }
 
 export async function loadSkills(input: {
   repo: SkillFiles | null
-  /** The user's own folders for every project; the earlier wins a name. */
+  /**
+   * The user's own folders for every project; the earlier wins a name. The first is
+   * Ariadne's own, the rest are shared between tools.
+   */
   localDirs: readonly string[]
 }): Promise<SkillSet> {
   const places: Place[] = [
@@ -271,17 +326,25 @@ export async function loadSkills(input: {
           dir,
           shown: dir,
           source: 'repo' as const,
+          own: dir === REPO_SKILLS_DIRS[0],
         }))
       : []),
-    ...input.localDirs.map((dir) => ({
+    ...input.localDirs.map((dir, index) => ({
       files: directoryFiles(dir),
       dir: '.',
       shown: dir,
       source: 'local' as const,
+      own: index === 0,
     })),
   ]
   const all = new Map<string, Loaded>()
   for (const skills of await Promise.all(places.map(fromPlace)))
-    for (const skill of skills) if (!all.has(skill.name)) all.set(skill.name, skill)
+    for (const skill of skills) {
+      const known = all.get(skill.name)
+      // The review guidance is Ariadne's own to replace: its `review` is not lost to one
+      // an earlier shared folder holds.
+      if (!known || (skill.name === REVIEW_SKILL && skill.own && !known.own))
+        all.set(skill.name, skill)
+    }
   return new SkillSet(new Map([...all].toSorted(([a], [b]) => a.localeCompare(b))))
 }

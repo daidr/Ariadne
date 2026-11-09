@@ -51,6 +51,8 @@ const sandbox = createSandbox({
   hide: [config.home, ...browserProfiles(), ...sandboxSettings.hide],
   // What the server runs later, outside the sandbox: its own code, the plugins it loads,
   // and the user's git config.
+  // Skills are read, and their scripts run, by every thread; none of them changes them.
+  show: () => skillsDirs,
   readOnly: () => [
     resolve(import.meta.dir, '../../..'),
     ...pluginPaths(),

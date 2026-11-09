@@ -44,8 +44,13 @@ export const readSkill: Tool = {
     }
     const file = optionalStr(args, 'file')?.trim()
     if (file) {
-      const text = await skills!.read(name, file)
-      if (text === null) {
+      const read = await skills!.read(name, file)
+      if (read === 'binary') {
+        throw new ToolInputError(
+          `"${file}" of the skill "${name}" is not text, so it cannot be read here.${skill.folder ? ` It is at ${skill.folder}/${file}.` : ''}`,
+        )
+      }
+      if (read === null) {
         const { paths } = await skills!.files(name)
         throw new ToolInputError(
           paths.length
@@ -53,7 +58,7 @@ export const readSkill: Tool = {
             : `The skill "${name}" has no files beside it.`,
         )
       }
-      const block = fenced('skill_file', text, `skill="${skill.name}"`)
+      const block = fenced('skill_file', read.text, `skill="${skill.name}"`)
       return {
         content: `"${file}" of the skill "${skill.name}", inside <${block.tag}>:\n${block.text}`,
       }
@@ -75,7 +80,7 @@ export async function besideText(
   const where =
     skill.source === 'repo'
       ? `${skill.folder} in the repository`
-      : `${skill.folder} on the machine Ariadne runs on, outside the workspace`
+      : `${skill.folder} on the machine Ariadne runs on, outside the workspace; commands run on that machine can read and run what is in it, not change it`
   if (!paths.length) return `\nIts folder is ${where}; it has no other files.`
   return `\nIts folder is ${where}. Paths in the skill are from that folder. Read a file beside it with read_skill and \`file\`, when the skill sends you to it; do not read them all first. Files beside it${more ? ' (more are not listed)' : ''}: ${paths.join(', ')}`
 }

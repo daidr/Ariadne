@@ -372,5 +372,5 @@ How you work:
 - Keep your todo list short and current with update_todo.
 
 ${skill}
-${referencesSection(input.references ?? [])}${userInstructionsSection(input.userInstructions ?? {})}${memorySection(input.memories ?? [])}${instructionsSection(input.instructions ?? null)}${skillsSection((input.skills ?? []).filter((s) => s.name !== 'review'))}${shared(input.locale)}`
+${referencesSection(input.references ?? [])}${userInstructionsSection(input.userInstructions ?? {})}${memorySection(input.memories ?? [])}${instructionsSection(input.instructions ?? null)}${skillsSection((input.skills ?? []).filter((s) => !input.reviewSkill || s.name !== 'review'))}${shared(input.locale)}`
 }

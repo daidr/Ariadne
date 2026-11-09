@@ -6,7 +6,7 @@ import type {
   SourceView,
   Workspace,
 } from '@ariadne/plugin-sdk'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -191,8 +191,8 @@ describe('skills', () => {
       paths: ['references/hosts.md'],
       more: true,
     })
-    expect(await skills.read('deploy', 'references/hosts.md')).toBe('a.example')
-    expect(await skills.read('release', './scripts\\tag.sh')).toBe('git tag')
+    expect(await skills.read('deploy', 'references/hosts.md')).toEqual({ text: 'a.example' })
+    expect(await skills.read('release', './scripts\\tag.sh')).toEqual({ text: 'git tag' })
     // Nothing outside the folder, and nothing for a name that is not there.
     expect(await skills.read('release', '../release.md')).toBeNull()
     expect(await skills.read('release', join(home, 'release.md'))).toBeNull()
@@ -208,6 +208,83 @@ describe('skills', () => {
     await expect(readSkill.run({ name: 'deploy', file: '../x' }, ctx)).rejects.toThrow(
       'Its files: references/hosts.md',
     )
+  })
+
+  test('links inside a skill folder reach nothing outside it', async () => {
+    const outside = join(home, 'outside')
+    const skillsDir = join(home, 'skills')
+    await mkdir(join(outside, 'secrets'), { recursive: true })
+    await writeFile(join(outside, 'secrets', 'key.txt'), 'secret')
+    await mkdir(join(outside, 'linked', 'docs'), { recursive: true })
+    await writeFile(join(outside, 'linked', 'SKILL.md'), '链接进来的做法')
+    await writeFile(join(outside, 'linked', 'docs', 'a.md'), 'inside')
+    await mkdir(join(skillsDir, 'leak', 'sub'), { recursive: true })
+    await writeFile(join(skillsDir, 'leak', 'SKILL.md'), '有链接的做法')
+    await writeFile(join(skillsDir, 'leak', 'real.md'), 'real')
+    await writeFile(join(skillsDir, 'leak', 'blob.bin'), new Uint8Array([1, 0, 2]))
+    await symlink(join(outside, 'secrets', 'key.txt'), join(skillsDir, 'leak', 'key.txt'))
+    await symlink(join(outside, 'secrets'), join(skillsDir, 'leak', 'dir'))
+    await symlink('/', join(skillsDir, 'leak', 'sub', 'rootfs'))
+    await symlink(join(skillsDir, 'leak', 'real.md'), join(skillsDir, 'leak', 'alias.md'))
+    // A skill itself may be a link to a folder elsewhere.
+    await symlink(join(outside, 'linked'), join(skillsDir, 'linked'))
+    const skills = await loadSkills({ repo: null, localDirs: [skillsDir] })
+    expect(skills.list().map((s) => s.name)).toEqual(['leak', 'linked'])
+    expect(await skills.files('leak')).toEqual({
+      paths: ['alias.md', 'blob.bin', 'real.md'],
+      more: false,
+    })
+    expect(await skills.read('leak', 'key.txt')).toBeNull()
+    expect(await skills.read('leak', 'dir/key.txt')).toBeNull()
+    expect(await skills.read('leak', 'sub/rootfs/etc/hostname')).toBeNull()
+    expect(await skills.read('leak', 'alias.md')).toEqual({ text: 'real' })
+    expect(await skills.read('leak', 'blob.bin')).toBe('binary')
+    expect(await skills.files('linked')).toEqual({ paths: ['docs/a.md'], more: false })
+    expect(await skills.read('linked', 'docs/a.md')).toEqual({ text: 'inside' })
+    const ctx = { skills: () => skills } as unknown as ToolContext
+    await expect(readSkill.run({ name: 'leak', file: 'blob.bin' }, ctx)).rejects.toThrow(
+      'is not text',
+    )
+  })
+
+  test('a folder without SKILL.md leaves the file of its name the skill', async () => {
+    await writeFile(join(home, 'plain.md'), '单文件的做法')
+    await mkdir(join(home, 'plain'))
+    await writeFile(join(home, 'plain', 'notes.txt'), 'notes')
+    const skills = await loadSkills({ repo: null, localDirs: [home] })
+    expect(skills.list()).toEqual([{ name: 'plain', when: '单文件的做法', source: 'local' }])
+    expect(skills.get('plain')?.folder).toBeNull()
+  })
+
+  test('listing the files beside a skill stops at its limits', async () => {
+    const files: Record<string, string> = { '.ariadne/skills/big/SKILL.md': '很大的做法' }
+    for (let i = 0; i < 200; i++) files[`.ariadne/skills/big/d${i}/f.md`] = 'x'
+    const repo = memoryFiles(files)
+    let lists = 0
+    const counted = { ...repo, list: (path: string) => (lists++, repo.list(path)) }
+    const skills = await loadSkills({ repo: counted, localDirs: [] })
+    lists = 0
+    const { paths, more } = await skills.files('big')
+    expect(more).toBe(true)
+    expect(paths.length).toBeLessThanOrEqual(60)
+    expect(lists).toBeLessThanOrEqual(30)
+  })
+
+  test("only a review skill in Ariadne's own folders replaces the built-in guidance", async () => {
+    const own = join(home, 'own')
+    const shared = join(home, 'shared')
+    await mkdir(own)
+    await mkdir(shared)
+    await writeFile(join(shared, 'review.md'), '别处写的审法')
+    const repo = memoryFiles({ '.agents/skills/review/SKILL.md': '仓库共用目录的审法' })
+    const others = await loadSkills({ repo, localDirs: [own, shared] })
+    expect(others.review()).toBeNull()
+    expect(others.get('review')?.text).toBe('仓库共用目录的审法')
+    // Ariadne's own is not lost to a shared folder read before it.
+    await writeFile(join(own, 'review.md'), '自己的审法')
+    const mine = await loadSkills({ repo, localDirs: [own, shared] })
+    expect(mine.review()?.text).toBe('自己的审法')
+    expect(mine.get('review')?.source).toBe('local')
   })
 
   test('one name is one skill: places are read in order, the earlier winning', async () => {
@@ -228,7 +305,8 @@ describe('skills', () => {
     expect(skills.list()).toEqual([
       { name: 'build', when: '仓库自己的构建', source: 'repo' },
       { name: 'lint', when: '自己的 lint', source: 'local' },
-      { name: 'review', when: '仓库共用目录的审法', source: 'repo' },
+      // The one exception: Ariadne's own review is not lost to a shared folder.
+      { name: 'review', when: '自己的审法', source: 'local' },
     ])
   })
 

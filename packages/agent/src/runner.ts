@@ -177,7 +177,7 @@ function systemPrompt(
     const node = author.nodeId
       ? (app.getPlan(project.id).nodes.find((n) => n.id === author.nodeId) ?? null)
       : null
-    const skill = skills.get('review')
+    const skill = skills.review()
     return reviewerPrompt({
       projectName: project.name,
       locale,
@@ -362,7 +362,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   let reviewBeside = ''
   const reloadSkills = async () => {
     skills = await conversationSkills(app, conversation, owner, workspaces, localSkills)
-    const review = reviewOf ? skills.get('review') : null
+    const review = reviewOf ? skills.review() : null
     reviewBeside = review ? await besideText(skills, review) : ''
   }
   const ctx: ToolContext = {
