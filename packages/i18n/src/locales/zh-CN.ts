@@ -782,6 +782,7 @@ export const zhCN = {
   'review.changesHeadline': '提了 {count} 个问题',
   'review.rounds': 'AI 审过 {count} 轮',
   'review.row': 'AI 审阅',
+  'review.ended': '审阅已结束',
   'review.underway': 'AI 审阅中 · 第 {round} 轮',
   'review.author': '被审的讨论串',
   'review.reviewer': 'AI 审阅',

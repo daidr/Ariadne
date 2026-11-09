@@ -74,7 +74,12 @@ async function save(id: string | null, text: string | null) {
         </template>
       </li>
     </ul>
-    <DouEmpty v-else-if="editing !== 'new'" size="sm" :description="t('memory.empty')" />
+    <DouEmpty v-else-if="editing !== 'new'" size="sm" :description="t('memory.empty')">
+      <DouButton size="sm" variant="outline" @click="start('new')">
+        <template #leading><PlusIcon /></template>
+        {{ t('memory.add') }}
+      </DouButton>
+    </DouEmpty>
     <DouText v-if="problem" tone="danger" size="sm" role="alert">{{ problem }}</DouText>
     <div v-if="editing === 'new'" class="memory-item">
       <DouTextarea
@@ -98,7 +103,7 @@ async function save(id: string | null, text: string | null) {
         </DouButton>
       </div>
     </div>
-    <div v-else class="memory-actions">
+    <div v-else-if="state.memories.length" class="memory-actions">
       <DouButton size="sm" variant="outline" @click="start('new')">
         <template #leading><PlusIcon /></template>
         {{ t('memory.add') }}
