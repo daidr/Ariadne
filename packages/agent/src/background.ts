@@ -42,11 +42,15 @@ export interface BackgroundCommand {
   id: string
   threadId: string
   command: string
+  /** Where it was started, relative to the workspace root. */
+  cwd: string
   startedAt: number
   /** The address it says it serves at, when it runs on this machine and named one. */
   url: string | null
   /** How it ended; `null` while it runs. */
   result: { exitCode: number; endedAt: number; stopped: boolean } | null
+  /** The user asked to try it themselves: it outlives the report that asks them to look. */
+  keep: boolean
 }
 
 interface Job extends BackgroundCommand {
@@ -58,6 +62,8 @@ interface Job extends BackgroundCommand {
   read: number
   controller: AbortController
   ended: Promise<void>
+  /** Left running when the thread reported, and the thread has not been told since. */
+  kept?: boolean
   /** Wakes whoever waits for more output or the end. */
   changed: Set<() => void>
 }
@@ -73,8 +79,8 @@ export interface CommandOutput {
 /**
  * Commands threads left running in the background, e.g. a dev server or a long build.
  * They outlive the turn that started them, and end when the thread is stopped, its work
- * is reported finished, its worktree goes, or the server stops. One that serves at an
- * address stays while the work waits to be looked at, until that ends.
+ * is reported finished, its worktree goes, or the server stops. One the user asked to
+ * try themselves stays while the work waits to be looked at, until that ends.
  */
 export class BackgroundCommands {
   private readonly jobs = new Map<string, Job>()
@@ -100,8 +106,11 @@ export class BackgroundCommands {
     threadId: string,
     command: string,
     exec: (options: Pick<ExecOptions, 'signal' | 'onOutput' | 'timeoutMs'>) => Promise<ExecResult>,
-    /** `local`: it runs on this machine, so an address it serves at can be opened from here. */
-    options: { local?: boolean } = {},
+    /**
+     * `local`: it runs on this machine, so an address it serves at can be opened from here.
+     * `keep`: the user asked to try it themselves.
+     */
+    options: { local?: boolean; keep?: boolean; cwd?: string } = {},
   ): BackgroundCommand {
     if (this.running(threadId) >= MAX_RUNNING) {
       throw new Error(
@@ -114,9 +123,11 @@ export class BackgroundCommands {
       id: `cmd-${++this.next}`,
       threadId,
       command,
+      cwd: options.cwd ?? '.',
       startedAt: Date.now(),
       url: null,
       result: null,
+      keep: !!options.keep,
       output: '',
       dropped: 0,
       read: 0,
@@ -215,16 +226,27 @@ export class BackgroundCommands {
   }
 
   /**
-   * Stop the thread's commands and forget them all, with what they printed. `keepServed`
-   * leaves the running ones that serve at an address: the user may open it while reviewing.
+   * Stop the thread's commands and forget them all, with what they printed. `keepAsked`
+   * leaves the running ones the user asked to try themselves: they open it while reviewing.
    */
-  async stopThread(threadId: string, options: { keepServed?: boolean } = {}): Promise<void> {
-    const jobs = [...this.jobs.values()].filter(
-      (job) => job.threadId === threadId && !(options.keepServed && job.url && !job.result),
-    )
+  async stopThread(threadId: string, options: { keepAsked?: boolean } = {}): Promise<void> {
+    const own = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+    const kept = (job: Job) => !!options.keepAsked && job.keep && !job.result
+    for (const job of own) job.kept = kept(job)
+    const jobs = own.filter((job) => !kept(job))
     await this.end(jobs)
     for (const job of jobs) this.jobs.delete(job.id)
     if (jobs.length) this.onChange(threadId)
+  }
+
+  /**
+   * The commands that were left running over a report and still run, once: the thread is
+   * told of them when it works again, so it uses them instead of starting them anew.
+   */
+  takeKept(threadId: string): BackgroundCommand[] {
+    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId && job.kept)
+    for (const job of jobs) job.kept = false
+    return jobs.filter((job) => !job.result).map(view)
   }
 
   async stopAll(): Promise<void> {
@@ -261,7 +283,9 @@ const view = (job: Job): BackgroundCommand => ({
   id: job.id,
   threadId: job.threadId,
   command: job.command,
+  cwd: job.cwd,
   startedAt: job.startedAt,
   url: job.url,
   result: job.result,
+  keep: job.keep,
 })

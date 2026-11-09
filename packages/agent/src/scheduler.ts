@@ -100,11 +100,11 @@ export class Scheduler {
           this.cancel(event.data.threadId)
           void this.options.workspaces?.stopThread(event.data.threadId)
         }
-        // Its work is finished: what it left running in the background ends. What serves
-        // at an address stays while the user looks at the work, so they can open it.
+        // Its work is finished: what it left running in the background ends. What the
+        // user asked to try themselves stays while they look at the work.
         if (event.type === 'thread.reported' && FINAL_REPORTS.has(event.data.report)) {
           void this.options.workspaces?.background.stopThread(event.data.threadId, {
-            keepServed: event.data.report === 'ready',
+            keepAsked: event.data.report === 'ready',
           })
         }
         if (LOOKED_AT.has(event.type)) {
