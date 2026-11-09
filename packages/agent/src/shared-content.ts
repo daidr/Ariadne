@@ -102,32 +102,66 @@ const later = (a: string[], b: string[]) => {
  */
 function documentCursor(doc: Y.Doc, events: SharedEvent[]) {
   const map = doc.getMap('document')
-  const spots: { block: string; cell?: string; text: Y.Text; index: number }[] = []
+  type Spot = { block: string; cell?: string; text: Y.Text; index: number }
+  const spots: Spot[] = []
+  /** Where a table cell is in its table: its row's place, then its column's. */
+  const cellPlace = (block: string, cell: string): string[] => {
+    const stored = map.get(block)
+    if (!(stored instanceof Y.Map)) return []
+    const [row = '', column = ''] = cell.split(':')
+    const order = (field: string, id: string) => {
+      const entry = (stored.get(field) as Y.Map<unknown> | undefined)?.get(id)
+      return entry instanceof Y.Map ? String(entry.get('order') ?? '') : ''
+    }
+    return [order('rows', row), order('columns', column)]
+  }
+  /** The end of a block's words: of a table, of its last cell with any. */
   const endOfBlock = (block: string) => {
     const stored = map.get(block)
-    const text = stored instanceof Y.Map ? stored.get('text') : null
+    if (!(stored instanceof Y.Map)) return
+    const cells = stored.get('cells')
+    if (cells instanceof Y.Map) {
+      let last: Spot | null = null
+      for (const [cell, text] of cells.entries()) {
+        if (!(text instanceof Y.Text) || !text.length) continue
+        if (!last || later(cellPlace(block, cell), cellPlace(block, last.cell!))) {
+          last = { block, cell, text, index: text.length }
+        }
+      }
+      if (last) return void spots.push(last)
+    }
+    const text = stored.get('text')
     if (text instanceof Y.Text) spots.push({ block, text, index: text.length })
   }
   for (const event of events) {
     const [block, field, cell] = event.path
-    if (event.target instanceof Y.Text && typeof block === 'string') {
-      const index = endOf(event.delta as never)
-      if (field === 'text') spots.push({ block, text: event.target, index })
-      else if (field === 'cells' && typeof cell === 'string') {
-        spots.push({ block, cell, text: event.target, index })
-      }
-    } else if (!event.path.length) {
+    if (!event.path.length) {
       for (const [id, change] of event.changes.keys) if (change.action !== 'delete') endOfBlock(id)
-    } else if (event.path.length === 1 && typeof block === 'string' && event.keys.has('text')) {
+    } else if (typeof block !== 'string') {
+      continue
+    } else if (event.target instanceof Y.Text && field === 'text') {
+      spots.push({ block, text: event.target, index: endOf(event.delta as never) })
+    } else if (event.target instanceof Y.Text && field === 'cells' && typeof cell === 'string') {
+      spots.push({ block, cell, text: event.target, index: endOf(event.delta as never) })
+    } else if (field === 'cells' || field === 'rows' || field === 'columns') {
+      // Cells put in whole, or rows added: the table's last words.
+      endOfBlock(block)
+    } else if (event.path.length === 1 && event.keys.has('text')) {
       endOfBlock(block)
     }
   }
-  let last: (typeof spots)[number] | null = null
+  // The furthest down: by the block's place, then inside a table by the cell's. A table's
+  // own text is empty and above its cells.
+  const placeIn = (spot: Spot) => (spot.cell ? ['1', ...cellPlace(spot.block, spot.cell)] : ['0'])
+  let last: Spot | null = null
   let lastPlace: string[] = []
   for (const spot of spots) {
     if (!map.has(spot.block)) continue
     const place = placeOf(map, spot.block)
-    if (last && !later(place, lastPlace) && spot.block !== last.block) continue
+    if (last) {
+      const same = spot.block === last.block
+      if (same ? later(placeIn(last), placeIn(spot)) : !later(place, lastPlace)) continue
+    }
     last = spot
     lastPlace = place
   }

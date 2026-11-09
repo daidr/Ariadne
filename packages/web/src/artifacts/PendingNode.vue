@@ -44,6 +44,11 @@ defineProps<NodeViewProps<PendingNodeData>>()
   pointer-events: none;
 }
 
+/*
+ * The ports show only while a connector is being drawn, as on the whiteboard's own shapes.
+ * A node type of one's own has no public way to ask for that (daidr/dou-ui#413), so these
+ * rules follow the editor's inner state classes; replace them when it has one.
+ */
 .pending-node-ports .dou-flow-port {
   opacity: 0;
 }

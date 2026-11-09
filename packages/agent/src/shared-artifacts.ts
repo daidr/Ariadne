@@ -55,6 +55,8 @@ interface Live extends LiveWrite {
   last: string
   /** Takes the writing back, leaving what others did meanwhile. */
   undo: Y.UndoManager
+  /** Whether someone else changed the artifact while this was being written. */
+  others: boolean
 }
 
 /** The color of an agent's cursor and outlines: the theme's own, in either mode. */
@@ -172,10 +174,15 @@ export class SharedArtifacts {
     input: { reason: string; title?: string; base?: string; writer?: Writer },
   ): ArtifactView {
     const room = this.room(artifactId)
+    // Another's half-written change would be saved as part of this one: it is taken back.
+    if (room.live && room.live.by !== by) room.live.cancel()
     // What the agent wrote piece by piece is its own already: the rest goes on top.
-    const live = room.live?.by === by ? room.live : null
+    const live = room.live
     if (by !== 'user' && !live) for (const listener of this.writeListeners) listener(artifactId)
-    if (!live || room.pending !== by) this.saveVersion(room)
+    if (live) {
+      this.saveOthers(room, live)
+      this.endLive(room)
+    } else this.saveVersion(room)
     // `null`: only the title changes.
     if (next !== null) {
       const base = live ? live.last : input.base
@@ -183,7 +190,8 @@ export class SharedArtifacts {
         this.bridge(room).update(room.doc, next, base),
       )
     }
-    if (live) this.endLive(room)
+    // What it wrote piece by piece is part of this version, whatever this last step adds.
+    if (live && live.last !== live.base) room.pending = by
     const saved = this.saveVersion(room, {
       reason: input.reason,
       title: input.title,
@@ -202,8 +210,10 @@ export class SharedArtifacts {
     const room = this.rooms.get(artifactId)
     if (!room?.sockets.size || room.live) return null
     for (const listener of this.writeListeners) listener(artifactId)
-    // What the user was changing is theirs: saved before the agent's first piece.
+    // What the user was changing is theirs: saved before the agent's first piece. The
+    // state kept for a restart is the one before it too: nothing half written is stored.
     this.saveVersion(room)
+    this.saveState(room)
     const origin: Origin = { agent: by }
     // The version as stored, which is what the agent read; the room holds the same.
     const { content: base, version } = this.app.getArtifact(artifactId)
@@ -218,6 +228,7 @@ export class SharedArtifacts {
         // One step, however long the writing takes.
         captureTimeout: Number.MAX_SAFE_INTEGER,
       }),
+      others: false,
       write: (next) => {
         if (room.live !== live || next === live.last) return
         try {
@@ -232,10 +243,10 @@ export class SharedArtifacts {
       cancel: () => {
         if (room.live !== live) return
         while (live.undo.undoStack.length) live.undo.undo()
-        // Nothing of the agent's is left to save.
-        if (room.pending === by) room.pending = null
         this.endLive(room)
         this.setPresence(room, null)
+        // Nothing of the agent's is left; what others changed meanwhile waits as theirs.
+        if (live.others) this.waiting(room, 'user')
         if (!room.sockets.size) this.close(room)
       },
     }
@@ -252,6 +263,9 @@ export class SharedArtifacts {
   /** Save what waits as a version now, e.g. before the server stops. */
   flush(): void {
     for (const room of this.rooms.values()) {
+      // Half a change is not a version: its call never got to run.
+      room.live?.cancel()
+      if (!this.rooms.has(room.artifactId)) continue
       this.saveVersion(room)
       this.saveState(room)
     }
@@ -302,6 +316,30 @@ export class SharedArtifacts {
       // While the writing goes on the cursor stays, however long the model thinks.
       if (!room.live) room.awareness.setLocalState(null)
     }, LINGER_MS)
+  }
+
+  /**
+   * What others changed while the agent was writing, saved as their version: the agent's
+   * writing is taken out for the moment it takes, so the version holds theirs alone.
+   */
+  private saveOthers(room: Room, live: Live) {
+    if (!live.others) return
+    live.others = false
+    let steps = 0
+    while (live.undo.undoStack.length) {
+      live.undo.undo()
+      steps++
+    }
+    room.pending = 'user'
+    this.saveVersion(room)
+    while (steps-- > 0) live.undo.redo()
+  }
+
+  /** `author` has changes in the room that are not a version yet. */
+  private waiting(room: Room, author: string) {
+    room.pending = author
+    this.later(room, 'stateTimer', this.stateDelayMs, () => this.saveState(room))
+    this.later(room, 'versionTimer', this.versionDelayMs, () => this.saveVersion(room))
   }
 
   private endLive(room: Room) {
@@ -430,12 +468,15 @@ export class SharedArtifacts {
         : typeof origin === 'object' && 'agent' in origin
           ? origin.agent
           : 'user'
-    // Another author's changes start a version of their own.
-    if (room.pending && room.pending !== author) this.saveVersion(room)
-    room.pending = author
-    this.later(room, 'stateTimer', this.stateDelayMs, () => this.saveState(room))
-    // What an agent is still writing is saved when it is whole.
-    if (!live) this.later(room, 'versionTimer', this.versionDelayMs, () => this.saveVersion(room))
+    if (room.live) {
+      // Half a change is neither a version nor a state to come back to: both wait for it
+      // to end, when what others did meanwhile is saved as theirs.
+      if (!live) room.live.others = true
+    } else {
+      // Another author's changes start a version of their own.
+      if (room.pending && room.pending !== author) this.saveVersion(room)
+      this.waiting(room, author)
+    }
     if (author === 'user') {
       for (const listener of this.userListeners) {
         listener({ artifactId: room.artifactId, projectId: room.projectId })

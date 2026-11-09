@@ -1,4 +1,3 @@
-import { PENDING } from '@ariadne/core'
 import { defineNodeType } from '@dou-ui/flow'
 import PendingNode from './PendingNode.vue'
 
@@ -9,7 +8,7 @@ export interface PendingNodeData {
 }
 
 export const pendingNode = defineNodeType<PendingNodeData>({
-  type: PENDING,
+  type: 'pending',
   component: PendingNode,
   ports: 'sides',
   frame: false,

@@ -115,6 +115,24 @@ function page(artifactId: string) {
 const reads = (artifactId: string) => shared.content(artifactId).trimEnd()
 const stored = (artifactId: string) => app.getArtifact(artifactId).content.trimEnd()
 
+const versions = (artifactId: string) =>
+  app
+    .listArtifactVersions(artifactId)
+    .toSorted((a, b) => a.version - b.version)
+    .map((version) => ({
+      author: version.author,
+      content: app.getArtifact(artifactId, version.version).content.trimEnd(),
+    }))
+
+/** The user on a page types at the end of the document's title. */
+function typeInTitle(doc: Y.Doc, text: string) {
+  const title = [...(doc.getMap('document').values() as Iterable<Y.Map<unknown>>)].find(
+    (block) => block.get('type') === 'heading',
+  )!
+  const words = title.get('text') as Y.Text
+  words.insert(words.length, text)
+}
+
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** The model writing a call: its arguments come in pieces, slower than they are shown. */
@@ -219,7 +237,30 @@ describe('documents written where the user watches', () => {
     expect(reads(artifactId)).toContain('## 减法清单\n\n去掉\n\n<pending>要拍板的问题')
     const [writer] = viewer.writers()
     expect(writer?.user).toMatchObject({ name: '写方案' })
-    expect(writer?.cursor).toBeTruthy()
+    // The shape the editor's own cursors have among themselves, which is not public yet:
+    // when a dou-ui upgrade changes it this fails, instead of the cursor quietly going.
+    // Remove with daidr/dou-ui#409.
+    const blocks = viewer.doc.getMap('document') as Y.Map<Y.Map<unknown>>
+    const cursor = writer!.cursor as unknown as Record<'anchor' | 'head', Record<string, unknown>>
+    expect(Object.keys(cursor).toSorted()).toEqual(['anchor', 'head'])
+    expect(Object.keys(cursor.anchor).toSorted()).toEqual(['block', 'position'])
+    expect(cursor.head).toEqual(cursor.anchor)
+    const block = blocks.get(cursor.anchor.block as string)!
+    expect(Object.keys(block.toJSON()).toSorted()).toEqual([
+      'order',
+      'parent',
+      'props',
+      'text',
+      'type',
+    ])
+    expect(block.get('type')).toBe('paragraph')
+    const at = Y.createAbsolutePositionFromRelativePosition(
+      Y.createRelativePositionFromJSON(cursor.anchor.position),
+      viewer.doc,
+    )!
+    expect(at.type).toBe(block.get('text'))
+    expect(at.type.toString()).toBe('去掉')
+    expect(at.index).toBe(2)
     // Nothing is saved until the call runs.
     expect(app.getArtifact(artifactId).version).toBe(1)
 
@@ -243,15 +284,109 @@ describe('documents written where the user watches', () => {
     )
     expect(reads(artifactId)).toContain('改写的第一段，还没')
     // The user adds to the title while the agent writes.
-    const title = [...(viewer.doc.getMap('document').values() as Iterable<Y.Map<unknown>>)].find(
-      (block) => block.get('type') === 'heading',
-    )!
-    ;(title.get('text') as Y.Text).insert(2, '（草稿）')
+    typeInTitle(viewer.doc, '（草稿）')
     await settle()
     live.reset()
     await settle()
     expect(reads(artifactId)).toBe(outline.replace('# 方案', '# 方案（草稿）'))
     expect(viewer.writers()).toHaveLength(0)
+    // Nothing was saved of the half the agent wrote; the user's words are a version of theirs.
+    expect(versions(artifactId)).toHaveLength(1)
+    shared.save(artifactId)
+    expect(versions(artifactId).slice(1)).toEqual([
+      { author: 'user', content: outline.replace('# 方案', '# 方案（草稿）') },
+    ])
+    viewer.leave()
+  })
+
+  test("what the user types while the agent writes is a version of theirs, without the agent's half", async () => {
+    const viewer = page(artifactId)
+    await settle()
+    const args = {
+      artifactId,
+      edits: [{ old: '第一段。', new: '改写的第一段，还没写完，终于写完了。' }],
+      reason: '改写',
+    }
+    await written('update_document', args, '还没')
+    typeInTitle(viewer.doc, '（草稿）')
+    await settle()
+    expect(versions(artifactId)).toHaveLength(1)
+    await written('update_document', args, '终于')
+    await ok('update_document', args)
+    const titled = outline.replace('# 方案', '# 方案（草稿）')
+    expect(versions(artifactId).slice(1)).toEqual([
+      { author: 'user', content: titled },
+      {
+        author: ctx.conversationId,
+        content: titled.replace('第一段。', '改写的第一段，还没写完，终于写完了。'),
+      },
+    ])
+    expect(reads(artifactId)).toBe(stored(artifactId))
+    viewer.leave()
+  })
+
+  test('half a change is never the state a restart comes back to', async () => {
+    const quick = new SharedArtifacts(app, { versionDelayMs: 10_000, stateDelayMs: 5 })
+    const before = shared
+    shared = quick
+    ctx = { ...ctx, shared: quick }
+    live = liveCalls(new Map(artifactTools.map((tool) => [tool.spec.name, tool])), ctx)
+    try {
+      const viewer = page(artifactId)
+      await settle()
+      await written(
+        'update_document',
+        { artifactId, edits: [{ old: '第一段。', new: '改写的第一段，还没写完' }], reason: 'x' },
+        '还没',
+      )
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(reads(artifactId)).toContain('改写的第一段，还没')
+      const kept = new Y.Doc()
+      Y.applyUpdate(kept, app.readSharedState(artifactId)!.state)
+      expect(JSON.stringify(kept.getMap('document').toJSON())).not.toContain('改写')
+      // Stopping in the middle takes the half back instead of saving it.
+      quick.flush()
+      expect(versions(artifactId)).toHaveLength(1)
+      expect(reads(artifactId)).toBe(outline)
+      viewer.leave()
+    } finally {
+      quick.dispose()
+      shared = before
+    }
+  })
+
+  test('in a table the cursor is in the cell being written', async () => {
+    const viewer = page(artifactId)
+    await settle()
+    const args = {
+      artifactId,
+      edits: [
+        {
+          old: '<pending>减法清单</pending>',
+          new: '| 项 | 理由 |\n| --- | --- |\n| 手动暂停 | 没人用 |\n| 排序菜单 | 只有一种排法 |',
+        },
+      ],
+      reason: '写减法清单',
+    }
+    await written('update_document', args, '只有一种')
+    const cursor = viewer.writers()[0]!.cursor as unknown as { anchor: Record<string, unknown> }
+    // Remove with daidr/dou-ui#409, like the shape of the cursor above.
+    expect(Object.keys(cursor.anchor).toSorted()).toEqual(['block', 'cell', 'position'])
+    const table = (viewer.doc.getMap('document') as Y.Map<Y.Map<unknown>>).get(
+      cursor.anchor.block as string,
+    )!
+    expect(table.get('type')).toBe('table')
+    expect(Object.keys(table.toJSON())).toEqual(
+      expect.arrayContaining(['cells', 'columns', 'rows', 'text']),
+    )
+    const cell = (table.get('cells') as Y.Map<Y.Text>).get(cursor.anchor.cell as string)!
+    expect(cell.toString()).toBe('只有一种')
+    const [row, column] = (cursor.anchor.cell as string).split(':')
+    expect((table.get('rows') as Y.Map<Y.Map<unknown>>).get(row!)!.get('order')).toBeTypeOf(
+      'string',
+    )
+    expect((table.get('columns') as Y.Map<unknown>).has(column!)).toBe(true)
+    live.reset()
     viewer.leave()
   })
 
