@@ -397,8 +397,6 @@ export const api = {
     request<{ memory: MemoryView }>('PUT', `/api/projects/${projectId}/memory/${memoryId}`, {
       text,
     }),
-  stopThread: (threadId: string, reason: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/stop`, { reason }),
   resumeThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/resume`),
   reviewThread: (threadId: string) =>
