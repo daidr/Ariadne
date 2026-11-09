@@ -6,6 +6,7 @@ import {
   MAX_CHECK_COMMAND,
   MAX_REVIEW_ROUNDS,
   parseProjectSettings,
+  parseRoutines,
   storedProjectSettings,
   type ProjectDetected,
 } from './project-settings'
@@ -134,7 +135,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 52
+export const PROJECTION_VERSION = 53
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -647,6 +648,8 @@ function progressOf(items: string | null): ThreadView['progress'] {
 
 /** How long a finished thread stays in sight with nothing happening in it. */
 export const ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/** How long one whose work landed stays first: it was finished just now, not "earlier". */
+export const ARCHIVE_LANDED_AFTER_MS = 24 * 60 * 60 * 1000
 
 function toThread(row: ThreadRow, now: number): ThreadView {
   const merged = row.merged ? (JSON.parse(row.merged) as ThreadView['merged']) : null
@@ -705,7 +708,8 @@ function toThread(row: ThreadRow, now: number): ThreadView {
       // landing (a later report) has not landed.
       ((row.landed_at !== null &&
         row.landed_at >= (row.reported_at ?? 0) &&
-        (row.user_at ?? 0) <= row.landed_at) ||
+        (row.user_at ?? 0) <= row.landed_at &&
+        now - row.landed_at >= ARCHIVE_LANDED_AFTER_MS) ||
         now - activeAt >= ARCHIVE_AFTER_MS),
     changes: row.changes ? (JSON.parse(row.changes) as ChangeTotals) : null,
     pullRequest,
@@ -1545,6 +1549,39 @@ export class Ariadne {
     if (JSON.stringify(settings) === JSON.stringify(project.settings)) return project
     this.store.append([{ type: 'project.settings.set', projectId, data: { settings } }])
     return this.getProject(projectId)
+  }
+
+  /**
+   * Replace the project's routines, checked like the rest of its settings. `change` is the
+   * one an agent added or removed: its conversation gets a line saying so.
+   */
+  setRoutines(
+    projectId: string,
+    routines: unknown,
+    change?: { by: string; action: 'added' | 'removed'; prompt: string },
+  ): ProjectView {
+    const { settings } = this.getProject(projectId)
+    const next = { ...settings, routines: parseRoutines(routines) }
+    if (JSON.stringify(next) === JSON.stringify(settings)) return this.getProject(projectId)
+    this.store.append([
+      {
+        type: 'project.settings.set',
+        projectId,
+        data: { settings: next, ...(change ? { routine: change } : {}) },
+      },
+    ])
+    return this.getProject(projectId)
+  }
+
+  /**
+   * Keep the way the user last merged in this project: the next merge starts from it, and
+   * the autopilot merges the same way.
+   */
+  rememberMergeMethod(projectId: string, method: MergeMethod): void {
+    const { settings } = this.getProject(projectId)
+    if (settings.autopilot.method === method) return
+    const next = { ...settings, autopilot: { ...settings.autopilot, method } }
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings: next } }])
   }
 
   /** Pause the project's autopilot, or let it go on. */

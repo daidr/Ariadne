@@ -76,6 +76,7 @@ import {
   undoNotice,
 } from '../store'
 import WorkspaceTag from './WorkspaceTag.vue'
+import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewActions from './ReviewActions.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -473,6 +474,7 @@ const markdown = { linkTarget: '_blank', sanitizeUrl } as const
 async function submit(value: string) {
   const id = conversationId.value
   if (!id || !canSubmit.value) return
+  offerNotifications()
   draft.value = ''
   const files = attachments.take()
   const sent = await sendMessage(id, value, {
@@ -890,6 +892,18 @@ watch(
           </DouText>
           <ReviewNotice v-else-if="item.notice.kind === 'review'" :notice="item.notice" />
           <RecapNotice v-else-if="item.notice.kind === 'recap'" :notice="item.notice" />
+          <DouText
+            v-else-if="item.notice.kind === 'routine-change'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{
+              t(item.notice.action === 'added' ? 'notice.routineAdded' : 'notice.routineRemoved', {
+                prompt: item.notice.prompt,
+              })
+            }}
+          </DouText>
           <DouText
             v-else-if="item.notice.kind === 'compaction-failed'"
             tone="warning"

@@ -118,7 +118,7 @@ describe('thread changes', () => {
 
     const before = await git(dir, 'rev-parse', 'main')
     await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
-    expect(app.getThread(thread.id)).toMatchObject({ stage: 'done', archived: true })
+    expect(app.getThread(thread.id)).toMatchObject({ stage: 'done', archived: false })
     // Its worktree went once the work had landed.
     await workspaces.removeWorktree(project.id, thread.id, 'merged')
     expect(app.getThread(thread.id).workspace?.removed).toBe(true)

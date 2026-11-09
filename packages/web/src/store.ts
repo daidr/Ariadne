@@ -40,6 +40,7 @@ import {
   type StreamStatus,
 } from './api'
 import { t, tm } from './i18n'
+import { modelLabels } from './model-label'
 
 /** What the middle column shows. */
 export type MainView =
@@ -112,7 +113,7 @@ export const emptyConversation = (): ConversationState => ({
   seq: null,
 })
 
-export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot'
+export type ProjectSettingsTab = 'source' | 'instructions' | 'workspace' | 'autopilot' | 'usage'
 
 /** Open the open project's settings, on `tab`; the first-run steps open them on the source. */
 export function openProjectSettings(tab: ProjectSettingsTab = 'source') {
@@ -332,6 +333,7 @@ async function loadParts(parts: ReadonlySet<Part>) {
     state.threads[threadId] = apply(state.threads[threadId] ?? emptyConversation())
   }
   if (plan) state.plan = reuse(toRaw(state.plan), plan.plan)
+  settleSide()
   if (artifacts) state.artifacts = reuse(toRaw(state.artifacts), artifacts.artifacts)
   if (memory) state.memories = reuse(toRaw(state.memories), memory.memories)
 }
@@ -541,12 +543,28 @@ const SIDE_KEY = (projectId: string) => `ariadne.side.${projectId}`
 
 /** How the user left the project's right side, in this browser. */
 function readSide(projectId: string): SideLayout {
+  let stored: SideLayout | null = null
   try {
     const raw = localStorage.getItem(SIDE_KEY(projectId))
-    return (raw && side.parseLayout(JSON.parse(raw))) || side.defaultLayout()
+    stored = (raw && side.parseLayout(JSON.parse(raw))) || null
   } catch {
-    return side.defaultLayout()
+    // Not readable: the project opens with its lists.
   }
+  sideUntouched = !stored
+  return stored ?? side.defaultLayout()
+}
+
+/** Whether the project's right side is still as it came, never arranged by the user. */
+let sideUntouched = true
+
+/**
+ * Until the user arranges the right side, the tab in front is the one with something on
+ * it: the plan, or the threads while there are some and no plan yet.
+ */
+function settleSide() {
+  if (!sideUntouched || !state.plan || !state.detail) return
+  const front = !state.plan.nodes.length && state.detail.threads.length ? 'threads' : 'plan'
+  if (side.activeOf(side.focusedGroup(state.side)) !== front) state.side = side.defaultLayout(front)
 }
 
 /** Show another project's right side: nothing of the last one's threads stays. */
@@ -561,6 +579,7 @@ function showSide(layout: SideLayout) {
 /** Show the right side as `next`, remembered for the project; closed threads let go. */
 export function setSide(next: SideLayout) {
   if (next === state.side) return
+  sideUntouched = false
   state.side = next
   syncThreads()
   const keys = new Set(side.groupsOf(next.root).flatMap(side.tabsOf) as string[])
@@ -704,6 +723,7 @@ function forgetProject(id: string) {
     return
   }
   state.currentId = null
+  sideUntouched = true
   showSide(side.defaultLayout())
   state.detail = null
   state.plan = null
@@ -1109,10 +1129,7 @@ export function applyModelSettings(settings: ModelSettings) {
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
   state.showCost = settings.showCost
-  state.models = settings.models.map((model) => ({
-    id: model.id,
-    label: `${settings.providers.find((p) => p.id === model.provider)?.name ?? model.provider} / ${model.model}`,
-  }))
+  state.models = modelLabels(settings.models, settings.providers)
 }
 
 /** Give a thread another model, or back the default with `null`. */

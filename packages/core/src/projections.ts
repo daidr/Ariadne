@@ -688,6 +688,13 @@ export const noticesProjection: Projection = {
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break
+      case 'project.settings.set': {
+        // A routine runs on its own later: where an agent set one up or took one away, it shows.
+        const { routine } = event.data
+        if (routine)
+          add(routine.by, 'routine-change', { action: routine.action, prompt: routine.prompt })
+        break
+      }
       case 'plan.issue_linked':
       case 'plan.issue_unlinked': {
         // What a thread reads follows from these links; an agent's link is shown where it

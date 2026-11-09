@@ -23,13 +23,12 @@ export type PaneKey =
   | 'plan'
   | 'threads'
   | 'artifacts'
-  | 'memory'
   | `thread:${string}`
   | `artifact:${string}`
   | `changes:${string}`
   | `turn:${string}`
 
-export const LISTS = ['plan', 'threads', 'artifacts', 'memory'] as const satisfies PaneKey[]
+export const LISTS = ['plan', 'threads', 'artifacts'] as const satisfies PaneKey[]
 
 export type SplitDirection = 'horizontal' | 'vertical'
 
@@ -74,9 +73,9 @@ export const tabsOf = (group: DockGroup) => group.tabs as PaneKey[]
 /** The tab in front of a group. */
 export const activeOf = (group: DockGroup) => (group.active ?? group.tabs[0]) as PaneKey
 
-/** What a project starts with: its lists in one group, the plan in front. */
-export function defaultLayout(): SideLayout {
-  return { root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: 'plan' } }
+/** What a project starts with: its lists in one group, the plan in front unless told otherwise. */
+export function defaultLayout(front: 'plan' | 'threads' = 'plan'): SideLayout {
+  return { root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: front } }
 }
 
 /** Every group, left to right and top to bottom. */
@@ -164,7 +163,7 @@ export function close(layout: SideLayout, key: PaneKey): SideLayout {
 
 /**
  * Close the other tabs of the group but its lists: they never close, so the project's
- * plan, threads, artifacts and memory are always somewhere on the side.
+ * plan, threads and artifacts are always somewhere on the side.
  */
 export function closeOthers(layout: SideLayout, key: PaneKey): SideLayout {
   const target = groupWith(layout, key)

@@ -30,6 +30,22 @@ describe('projects', () => {
     expect(app.listProjects().map((p) => p.id)).toEqual([project.id])
   })
 
+  test('keeps the way the user last merged, and the routines set for it', () => {
+    const project = app.createProject('P')
+    expect(app.getProject(project.id).settings.autopilot.method).toBe('squash')
+    app.rememberMergeMethod(project.id, 'merge')
+    expect(app.getProject(project.id).settings.autopilot).toEqual({
+      enabled: false,
+      method: 'merge',
+    })
+    const routine = { id: 'rtn_1', prompt: '看看新 issue', days: [1], time: '09:00' }
+    expect(app.setRoutines(project.id, [routine]).settings.routines).toEqual([
+      { ...routine, enabled: true },
+    ])
+    expect(app.getProject(project.id).settings.autopilot.method).toBe('merge')
+    expect(() => app.setRoutines(project.id, [{ ...routine, time: '9am' }])).toThrow()
+  })
+
   test('rejects an empty name', () => {
     expect(() => app.createProject('   ')).toThrow(DomainError)
   })
@@ -215,7 +231,7 @@ describe('thread stages', () => {
     timed.close()
   })
 
-  test('merged work is archived until the user writes to the thread again', () => {
+  test('merged work is archived a day later, until the user writes to the thread again', () => {
     let tick = 1000
     const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })
     const project = timed.createProject('P')
@@ -230,7 +246,12 @@ describe('thread stages', () => {
       sha: 'a',
       head: 'b',
     }
-    expect(timed.recordMerge(thread.id, merge)).toMatchObject({ stage: 'done', archived: true })
+    // It stays with the finished ones for a day, then moves out of sight.
+    expect(timed.recordMerge(thread.id, merge)).toMatchObject({ stage: 'done', archived: false })
+    tick += 24 * 60 * 60 * 1000 - 100
+    expect(timed.getThread(thread.id).archived).toBe(false)
+    tick += 100
+    expect(timed.getThread(thread.id)).toMatchObject({ stage: 'done', archived: true })
     // Work it does after that, asked by the coordinator, has not landed.
     timed.postMessage(project.id, {
       conversationId: thread.id,

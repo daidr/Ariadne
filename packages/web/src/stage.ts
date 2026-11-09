@@ -117,16 +117,7 @@ export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived'>> = {
   done: 'done',
 }
 
-export type ThreadSort = 'active' | 'title' | 'created'
-
-/** Threads in the order the list shows them within a group: the newest first, or by title. */
-export function sortThreads(threads: ThreadView[], sort: ThreadSort, locale: string) {
-  const collator = new Intl.Collator(locale, { numeric: true })
-  return threads.toSorted((a, b) =>
-    sort === 'title'
-      ? collator.compare(a.title, b.title)
-      : sort === 'created'
-        ? b.createdAt - a.createdAt
-        : b.activeAt - a.activeAt,
-  )
+/** Threads in the order the list shows them within a group: the last active first. */
+export function sortThreads(threads: ThreadView[]) {
+  return threads.toSorted((a, b) => b.activeAt - a.activeAt)
 }

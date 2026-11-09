@@ -259,6 +259,8 @@ export type NoticeView = {
       undone: boolean
     }
   | { kind: 'compaction-failed'; detail: string }
+  /** An agent added or removed one of the project's routines. */
+  | { kind: 'routine-change'; action: 'added' | 'removed'; prompt: string }
   /**
    * What happened while the user was away since `since`, in the coordinator's conversation
    * where they came back; see `user.returned`. A project keeps its latest one only.

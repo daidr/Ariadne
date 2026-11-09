@@ -218,7 +218,8 @@ const upToDate = computed(
 const base = computed(() => changes.value?.base ?? thread.value?.workspace?.base ?? '')
 
 const mergeOpen = ref(false)
-const method = ref<MergeMethod>('squash')
+// The way this project was last merged; the autopilot uses the same.
+const method = ref<MergeMethod>(state.detail?.project.settings.autopilot.method ?? 'squash')
 const message = ref('')
 const merging = ref(false)
 const result = ref<{ tone: 'warning' | 'neutral'; text: string } | null>(null)
@@ -230,6 +231,7 @@ const busy = computed(() => {
 })
 watch(mergeOpen, (open) => {
   if (!open) return
+  method.value = state.detail?.project.settings.autopilot.method ?? method.value
   if (!message.value) message.value = thread.value?.title ?? ''
   void flushComments(props.threadId)
 })

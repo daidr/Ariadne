@@ -256,7 +256,7 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
   return out
 }
 
-function parseRoutines(raw: unknown): Routine[] {
+export function parseRoutines(raw: unknown): Routine[] {
   if (!Array.isArray(raw) || raw.length > MAX_ROUTINES) throw bad('routines')
   const ids = new Set<string>()
   return raw.map((item, i) => {

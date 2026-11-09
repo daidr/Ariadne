@@ -73,7 +73,8 @@ export interface CommandOutput {
 /**
  * Commands threads left running in the background, e.g. a dev server or a long build.
  * They outlive the turn that started them, and end when the thread is stopped, its work
- * is reported finished, its worktree goes, or the server stops.
+ * is reported finished, its worktree goes, or the server stops. One that serves at an
+ * address stays while the work waits to be looked at, until that ends.
  */
 export class BackgroundCommands {
   private readonly jobs = new Map<string, Job>()
@@ -213,9 +214,14 @@ export class BackgroundCommands {
     return view(job)
   }
 
-  /** Stop the thread's commands and forget them all, with what they printed. */
-  async stopThread(threadId: string): Promise<void> {
-    const jobs = [...this.jobs.values()].filter((job) => job.threadId === threadId)
+  /**
+   * Stop the thread's commands and forget them all, with what they printed. `keepServed`
+   * leaves the running ones that serve at an address: the user may open it while reviewing.
+   */
+  async stopThread(threadId: string, options: { keepServed?: boolean } = {}): Promise<void> {
+    const jobs = [...this.jobs.values()].filter(
+      (job) => job.threadId === threadId && !(options.keepServed && job.url && !job.result),
+    )
     await this.end(jobs)
     for (const job of jobs) this.jobs.delete(job.id)
     if (jobs.length) this.onChange(threadId)

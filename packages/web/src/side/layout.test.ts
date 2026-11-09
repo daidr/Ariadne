@@ -25,24 +25,24 @@ const shape = (node: DockNode): unknown =>
 describe('side layout', () => {
   test('starts with the lists in one group, the plan in front', () => {
     const layout = defaultLayout()
-    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'memory']])
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts']])
     expect(focusedGroup(layout).active).toBe('plan')
   })
 
   test('opens a thread after the tab in front, and brings an open one forward', () => {
     let layout = open(defaultLayout(), threadKey('a'))
-    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts', 'memory']])
+    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts']])
     expect(focusedThread(layout)).toBe('a')
-    layout = open(layout, 'memory')
+    layout = open(layout, 'artifacts')
     layout = open(layout, threadKey('a'))
-    expect(tabs(layout)[0]).toHaveLength(5)
+    expect(tabs(layout)[0]).toHaveLength(4)
     expect(focusedThread(layout)).toBe('a')
   })
 
   test('replace takes the place of the thread in front, not of a list', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     layout = open(layout, threadKey('b'), { replace: true })
-    expect(tabs(layout)).toEqual([['plan', 'thread:b', 'threads', 'artifacts', 'memory']])
+    expect(tabs(layout)).toEqual([['plan', 'thread:b', 'threads', 'artifacts']])
     layout = open(layout, 'threads')
     layout = open(layout, threadKey('c'), { replace: true })
     expect(tabs(layout)[0]).toContain('thread:b')
@@ -53,7 +53,7 @@ describe('side layout', () => {
     let layout = open(defaultLayout(), threadKey('a'), { beside: 'horizontal' })
     expect(shape(layout.root)).toEqual([
       'horizontal',
-      ['plan', 'threads', 'artifacts', 'memory'],
+      ['plan', 'threads', 'artifacts'],
       ['thread:a'],
     ])
     expect(focusedThread(layout)).toBe('a')
@@ -62,54 +62,50 @@ describe('side layout', () => {
     layout = open(layout, 'plan', { beside: 'vertical' })
     expect(shape(layout.root)).toEqual([
       'horizontal',
-      ['threads', 'artifacts', 'memory'],
+      ['threads', 'artifacts'],
       ['vertical', ['thread:a'], ['plan']],
     ])
   })
 
   test('splits a tab out, and an emptied group gives its room back', () => {
     let layout = split(defaultLayout(), 'threads', 'vertical')
-    expect(shape(layout.root)).toEqual(['vertical', ['plan', 'artifacts', 'memory'], ['threads']])
+    expect(shape(layout.root)).toEqual(['vertical', ['plan', 'artifacts'], ['threads']])
     expect(focusedGroup(layout).tabs).toEqual(['threads'])
     // The last tab of a group cannot split off: nothing would stay behind.
     expect(split(layout, 'threads', 'horizontal')).toBe(layout)
     layout = close(layout, 'threads')
-    expect(shape(layout.root)).toEqual(['plan', 'artifacts', 'memory'])
-    expect(focusedGroup(layout).tabs).toEqual(['plan', 'artifacts', 'memory'])
+    expect(shape(layout.root)).toEqual(['plan', 'artifacts'])
+    expect(focusedGroup(layout).tabs).toEqual(['plan', 'artifacts'])
   })
 
   test('closing the tab in front brings its neighbour forward', () => {
-    let layout = open(defaultLayout(), 'artifacts')
+    let layout = open(defaultLayout(), 'threads')
+    layout = close(layout, 'threads')
+    expect(focusedGroup(layout).active).toBe('artifacts')
     layout = close(layout, 'artifacts')
-    expect(focusedGroup(layout).active).toBe('memory')
-    layout = close(layout, 'memory')
-    expect(focusedGroup(layout).active).toBe('threads')
+    expect(focusedGroup(layout).active).toBe('plan')
   })
 
   test('closing the other tabs closes threads only, and the side never ends up empty', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     layout = open(layout, threadKey('b'))
     layout = closeOthers(layout, threadKey('a'))
-    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts', 'memory']])
-    for (const key of ['plan', 'threads', 'artifacts', 'memory', 'thread:a'] as const) {
+    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts']])
+    for (const key of ['plan', 'threads', 'artifacts', 'thread:a'] as const) {
       layout = close(layout, key)
     }
-    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'memory']])
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts']])
   })
 
   test('moves a tab to another group', () => {
     let layout = split(defaultLayout(), 'threads', 'horizontal')
     const [left, right] = groupsOf(layout.root)
     layout = move(layout, 'plan', right!.id)
-    expect(tabs(layout)).toEqual([
-      ['artifacts', 'memory'],
-      ['threads', 'plan'],
-    ])
+    expect(tabs(layout)).toEqual([['artifacts'], ['threads', 'plan']])
     expect(focusedGroup(layout).active).toBe('plan')
     layout = move(layout, 'artifacts', right!.id)
-    layout = move(layout, 'memory', right!.id)
     // The left group emptied and went.
-    expect(tabs(layout)).toEqual([['threads', 'plan', 'artifacts', 'memory']])
+    expect(tabs(layout)).toEqual([['threads', 'plan', 'artifacts']])
     expect(groupsOf(layout.root).some((g) => g.id === left!.id)).toBe(false)
   })
 
@@ -122,7 +118,7 @@ describe('side layout', () => {
   test('prunes tabs of threads that are gone', () => {
     let layout = open(defaultLayout(), threadKey('a'), { beside: 'horizontal' })
     layout = prune(layout, (key) => key !== 'thread:a')
-    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts', 'memory'])
+    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts'])
   })
 
   test('reads back what it stored, and turns down what it cannot use', () => {
@@ -172,6 +168,6 @@ describe('side layout', () => {
     let layout = open(defaultLayout(), 'artifact:art_1')
     layout = open(layout, threadKey('a'))
     layout = closeOthers(layout, 'plan')
-    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts', 'memory'])
+    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts'])
   })
 })

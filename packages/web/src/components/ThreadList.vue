@@ -9,7 +9,7 @@ import { activeThreadId, openThread, state } from '../store'
 import { dragThread } from '../side/dock'
 import ReviewActions from './ReviewActions.vue'
 import ThreadRow from './ThreadRow.vue'
-import { openGroups, threadSort } from './thread-list'
+import { openGroups } from './thread-list'
 
 /** How many threads a group shows before "show more". */
 const LIMIT = 6
@@ -31,8 +31,6 @@ const groups = computed(() =>
       group,
       threads: sortThreads(
         threads.value.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
-        threadSort.value,
-        locale.value,
       ),
     }))
     .filter((entry) => entry.threads.length),
