@@ -10,7 +10,7 @@ import { CheckIcon, ChevronLeftIcon, PencilIcon, RotateCcwIcon, SaveIcon } from 
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
-import { openMain, report, state } from '../store'
+import { backMain, report, state } from '../store'
 import { authorName } from './author'
 import CommentList from './CommentList.vue'
 import { kindIcon } from './kinds'
@@ -234,7 +234,7 @@ const time = (at: number) =>
 <template>
   <div class="artifact">
     <div class="artifact-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'artifacts' })">
+      <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('artifact.back') }}
       </DouButton>

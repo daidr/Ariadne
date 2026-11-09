@@ -4,7 +4,7 @@ import { DouButton, DouDropdown, DouEmpty, DouInput, DouSegmentedControl, DouTex
 import { ChevronLeftIcon, PlusIcon, SearchIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
-import { openMain, state } from '../store'
+import { backMain, openMain, state } from '../store'
 import { createItems } from './create'
 import ArtifactCard from './ArtifactCard.vue'
 import { ARTIFACT_KINDS } from './kinds'
@@ -54,7 +54,7 @@ const shown = computed(() => {
 <template>
   <div class="overview">
     <div class="overview-header">
-      <DouButton variant="ghost" size="sm" @click="openMain({ kind: 'conversation' })">
+      <DouButton variant="ghost" size="sm" @click="backMain">
         <template #leading><ChevronLeftIcon /></template>
         {{ t('artifact.back') }}
       </DouButton>

@@ -59,12 +59,15 @@ async function add() {
 
 const nameOf = (plugin: PluginRecord) =>
   lt(plugin.name ?? undefined) ?? plugin.id ?? plugin.path ?? ''
+// A source and its link cards share a name (github, github): each kind is listed once.
 const provides = (plugin: PluginRecord) => [
-  ...plugin.provides.models,
-  ...plugin.provides.contexts,
-  ...plugin.provides.dashboards,
-  ...plugin.provides.searches,
-  ...plugin.provides.links,
+  ...new Set([
+    ...plugin.provides.models,
+    ...plugin.provides.contexts,
+    ...plugin.provides.dashboards,
+    ...plugin.provides.searches,
+    ...plugin.provides.links,
+  ]),
 ]
 </script>
 

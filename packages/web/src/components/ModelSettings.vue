@@ -200,6 +200,9 @@ function load(settings: ModelSettings) {
   threadFallback.value = settings.roles.thread.fallback ?? ''
   coordinatorFallback.value = settings.roles.coordinator.fallback ?? ''
   triageFallback.value = settings.roles.triage.fallback ?? ''
+  // Before anything is set up, open where setting up starts.
+  if (!providers.value.length) modelPart.value = 'providers'
+  else if (!models.value.length) modelPart.value = 'models'
 }
 
 export type SettingsTab =

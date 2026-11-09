@@ -249,6 +249,8 @@ function bring(group: DockGroup, key: PaneKey) {
 }
 
 .pane-list {
+  box-sizing: border-box;
+  height: 100%;
   padding: 8px 8px 8px 16px;
 }
 

@@ -140,6 +140,10 @@ watchEffect(() => {
           <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
             <PlanMain />
           </div>
+          <!-- Before there is a project, the side has nothing to show. -->
+          <div v-else-if="!state.currentId" class="pane">
+            <ConversationPanel />
+          </div>
           <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
             <template #start>
               <div class="pane">

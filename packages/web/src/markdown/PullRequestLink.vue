@@ -54,7 +54,13 @@ const tones: Record<State, TagTone> = {
 
 <template>
   <DouPopover trigger="hover" placement="top" :width="380" :show-delay="300" @update:open="load">
-    <DouLink :href="href" target="_blank" rel="noopener noreferrer" variant="soft">
+    <DouLink
+      :href="href"
+      target="_blank"
+      rel="noopener noreferrer"
+      variant="soft"
+      class="inline-ref"
+    >
       <template #leading><component :is="state ? icons[state] : GitPullRequestIcon" /></template>
       <component :is="children" v-if="children" />
       <template v-else>{{ label }}</template>
@@ -98,6 +104,10 @@ const tones: Record<State, TagTone> = {
 </template>
 
 <style scoped>
+/* Kept apart from the words around it, as MessageLink does. */
+.inline-ref {
+  margin-inline: 0.25em;
+}
 .pr-card {
   display: flex;
   flex-direction: column;

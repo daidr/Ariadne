@@ -17,12 +17,23 @@ import {
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import { createProject, deleteProject, exportProject, openMain, openProject, state } from '../store'
 
 const name = ref('')
+// Opened from the button here or from the getting-started steps: the name is typed next.
+const nameInput = useTemplateRef<{ focus: () => void }>('nameInput')
+watch(
+  () => state.creatingProject,
+  async (creating) => {
+    if (!creating) return
+    await nextTick()
+    nameInput.value?.focus()
+  },
+  { immediate: true },
+)
 const dialog = useDialog()
 
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
@@ -99,7 +110,7 @@ async function submit() {
       </DouButton>
     </div>
     <form v-if="state.creatingProject" class="projects-new" @submit.prevent="submit">
-      <DouInput v-model="name" size="sm" :placeholder="t('project.create.name')" autofocus />
+      <DouInput ref="nameInput" v-model="name" size="sm" :placeholder="t('project.create.name')" />
       <DouButton size="sm" tone="primary" native-type="submit">
         {{ t('project.create.submit') }}
       </DouButton>
