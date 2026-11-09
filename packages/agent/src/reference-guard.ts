@@ -18,6 +18,7 @@ const CREDENTIALS = [
   '.npmrc',
   '.pypirc',
   '.git-credentials',
+  '.config/git/credentials',
   '.password-store',
   '.config/gh',
   '.config/glab-cli',
@@ -32,8 +33,36 @@ const inside = (path: string, dir: string) => {
   return rel === '' || (!rel.startsWith('..') && !/^([\\/]|[A-Za-z]:)/.test(rel))
 }
 
-/** The parts of a path as typed, either separator, `~` and drive letters left in. */
-const partsOf = (path: string) => path.split(/[\\/]+/).filter(Boolean)
+/**
+ * The parts of a path on another machine once `.` and `..` are worked out, either
+ * separator, `~` left in and a drive letter dropped; `null` when it climbs out of where
+ * it starts, so where it leads cannot be told from its spelling.
+ */
+function partsOf(path: string): string[] | null {
+  const typed = path.replaceAll('\\', '/')
+  const rooted = typed.startsWith('/')
+  const parts: string[] = []
+  for (const part of typed.split('/')) {
+    if (!part || part === '.') continue
+    if (part !== '..') parts.push(part)
+    // Above the root is the root; above `~`, a drive or wherever a relative path starts
+    // is somewhere its spelling does not say.
+    else if (parts.length && parts.at(-1) !== '~' && !/^[A-Za-z]:$/.test(parts.at(-1)!)) parts.pop()
+    else if (!rooted || parts.length) return null
+  }
+  if (/^[A-Za-z]:$/.test(parts[0] ?? '')) parts.shift()
+  return parts
+}
+
+/** The directories on the way to a credential path: each holds one. */
+const HOLDERS = [
+  ...new Set(
+    CREDENTIALS.flatMap((name) => {
+      const parts = name.split('/')
+      return parts.slice(1).map((_, at) => parts.slice(0, at + 1).join('/'))
+    }),
+  ),
+]
 
 /**
  * Why a conversation may not ask for this path on the server's machine, or `null` when
@@ -62,20 +91,24 @@ export function localRefusal(
 }
 
 /**
- * The same for a path on another machine, by its spelling alone: its root, a home
- * directory, or a path through one of the credential directories.
+ * The same for a path on another machine, by its spelling alone, links there not
+ * followed: its root, a home directory, a path through one of the credential directories,
+ * or a directory that ends where one of them begins (`~/.config`).
  */
 export function remoteRefusal(path: string): string | null {
-  const parts = partsOf(path.trim())
-  const bare = parts.filter((part) => part !== '.')
+  const bare = partsOf(path.trim())
+  if (!bare) {
+    return `${path} climbs out of where it starts with "..": spell the directory out`
+  }
+  const spelled = `/${bare.join('/')}/`
   if (
     !bare.length ||
     (bare.length === 1 && ['~', 'root', 'home', 'Users'].includes(bare[0]!)) ||
-    (bare.length === 2 && (bare[0] === 'home' || bare[0] === 'Users'))
+    (bare.length === 2 && (bare[0] === 'home' || bare[0] === 'Users')) ||
+    HOLDERS.some((name) => spelled.endsWith(`/${name}/`))
   ) {
     return `${path} is too wide: ask for the one directory or file the task needs`
   }
-  const spelled = `/${bare.join('/')}/`
   if (CREDENTIALS.some((name) => spelled.includes(`/${name}/`))) {
     return `${path} is kept out of reach: credentials are never read this way`
   }

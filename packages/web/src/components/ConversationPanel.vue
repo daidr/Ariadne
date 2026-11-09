@@ -173,6 +173,9 @@ const conversationId = computed(() =>
 /** The source the user allowed this thread alone on the card of that ask, while it has it. */
 const ownReference = (attentionId: string) =>
   thread.value?.references.find((reference) => reference.attentionId === attentionId) ?? null
+/** What became of the source of that ask once the user took it from the thread. */
+const endedReference = (attentionId: string) =>
+  thread.value?.endedReferences.findLast((ended) => ended.attentionId === attentionId) ?? null
 const thread = computed(() =>
   props.threadId
     ? (state.detail?.threads.find((item) => item.id === props.threadId) ?? null)
@@ -996,6 +999,15 @@ watch(
                       >{{ t('reference.own.keep') }}</DouLink
                     >
                   </span>
+                </template>
+                <template v-else-if="endedReference(message.ask.attentionId)" #after>
+                  <DouText variant="tertiary" size="sm">{{
+                    t(
+                      endedReference(message.ask.attentionId)!.kept
+                        ? 'reference.own.kept'
+                        : 'reference.own.revoked',
+                    )
+                  }}</DouText>
                 </template>
               </AskBlock>
               <LineComments

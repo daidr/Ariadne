@@ -430,7 +430,15 @@ export interface EventMap {
     auto?: true
   }
   /** The sources this thread alone reads, whole; see `ThreadReference`. */
-  'thread.references.set': { threadId: string; references: ThreadReference[] }
+  'thread.references.set': {
+    threadId: string
+    references: ThreadReference[]
+    /**
+     * The one the user took from the thread with this: `now` is the name the project has
+     * it under when they kept it for the project, `null` when they took it back.
+     */
+    ended?: { attentionId: string; name: string; now: string | null }
+  }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
   /**

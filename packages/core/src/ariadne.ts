@@ -521,6 +521,7 @@ interface ThreadRow {
   changes: string | null
   pull_request: string | null
   reference_sources: string
+  reference_ended: string
   check_failures: number
   stopped_reason: string | null
   stopped_by: string | null
@@ -725,6 +726,7 @@ function toThread(row: ThreadRow, now: number): ThreadView {
         ? null
         : { reason: row.stopped_reason, by: row.stopped_by ?? 'user', at: row.stopped_at ?? 0 },
     references: JSON.parse(row.reference_sources) as ThreadReference[],
+    endedReferences: JSON.parse(row.reference_ended) as ThreadView['endedReferences'],
     model: row.model,
     branchSlug: row.branch_slug,
     usage: usageOf(row),
@@ -3316,13 +3318,17 @@ export class Ariadne {
   /** Take back a source a thread alone reads. */
   removeThreadReference(threadId: string, referenceId: string): ThreadView {
     const thread = this.getThread(threadId)
-    const references = thread.references.filter((reference) => reference.id !== referenceId)
-    if (references.length === thread.references.length) return thread
+    const gone = thread.references.find((reference) => reference.id === referenceId)
+    if (!gone) return thread
     this.store.append([
       {
         type: 'thread.references.set',
         projectId: thread.projectId,
-        data: { threadId, references },
+        data: {
+          threadId,
+          references: thread.references.filter((reference) => reference !== gone),
+          ended: { attentionId: gone.attentionId, name: gone.name, now: null },
+        },
       },
     ])
     return this.getThread(threadId)
@@ -3330,7 +3336,8 @@ export class Ariadne {
 
   /**
    * Keep a source a thread alone reads for the whole project: it becomes one of the
-   * project's references under the same name, and the thread reads it as before.
+   * project's references, under the same name unless the project has that name or the
+   * source already. The thread is told the name to read it by from now on.
    */
   keepThreadReference(threadId: string, referenceId: string): ProjectReference {
     const thread = this.getThread(threadId)
@@ -3374,6 +3381,7 @@ export class Ariadne {
         data: {
           threadId,
           references: thread.references.filter((ref) => ref.id !== referenceId),
+          ended: { attentionId: kept.attentionId, name: kept.name, now: reference.name },
         },
       },
     ])

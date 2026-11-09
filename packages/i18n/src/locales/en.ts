@@ -159,6 +159,8 @@ export const en: Record<MessageKey, string> = {
   'reference.ask.no.note': 'It is not read; the work goes on without it',
   'reference.own.revoke': 'Take back',
   'reference.own.keep': 'Add to project',
+  'reference.own.revoked': 'Taken back',
+  'reference.own.kept': 'Added to project',
   'repo.pushPublic.question':
     'A thread wants to push its branch to the public repository {repo} and open a pull request. What is pushed is public at once and cannot be taken back. Threads asking at the same time share this card.',
   'repo.pushPublic.push': 'Allow pushing',

@@ -156,6 +156,8 @@ export const zhCN = {
   'reference.ask.no.note': '不读它，继续做别的',
   'reference.own.revoke': '收回',
   'reference.own.keep': '加入项目',
+  'reference.own.revoked': '已收回',
+  'reference.own.kept': '已加入项目',
   'repo.pushPublic.question': '把分支推送到公开仓库 {repo} 并开 PR？推上去会立即公开，无法撤回。',
   'repo.pushPublic.push': '允许推送',
   'repo.pushPublic.pushConsequence': '本项目之后的推送不再询问',

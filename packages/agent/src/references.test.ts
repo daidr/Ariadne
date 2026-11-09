@@ -7,6 +7,7 @@ import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
 import { call, fakeModel, say } from './test-model'
 import { localRefusal, remoteRefusal } from './reference-guard'
+import { describeNote } from './transcript'
 import { referenceSecrets, WorkspaceManager } from './workspaces'
 
 let app: Ariadne
@@ -125,6 +126,9 @@ const toolResults = (conversationId: string) =>
   app
     .listTranscript(conversationId)
     .flatMap((e) => (e.kind === 'tool' ? [[e.name, !!e.isError, e.content] as const] : []))
+
+const notes = (conversationId: string) =>
+  app.listTranscript(conversationId).flatMap((e) => (e.kind === 'note' ? [e.note] : []))
 
 const LIB = {
   'README.md': '# lib\n组件库\n',
@@ -471,13 +475,16 @@ describe('a thread asks to read a source', () => {
     })
   }
 
-  async function start(keep: 'thread' | 'project') {
+  async function start(keep: 'thread' | 'project', full = false) {
     const workspaces = new WorkspaceManager(
       app,
       await diskHost({ '/main': { 'a.ts': '' }, '/logs': LOGS }),
     )
     const project = app.createProject('P')
     app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/main' } })
+    for (let n = 0; n < (full ? MAX_REFERENCES : 0); n++) {
+      app.addProjectReference(project.id, { kind: 'disk', settings: { path: `/r${n}` } }, `/r${n}`)
+    }
     const thread = app.createThread(project.id, { title: 'T' })
     const model = asking(keep)
     app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '查 502' })
@@ -531,11 +538,40 @@ describe('a thread asks to read a source', () => {
     expect(workspaces.references(project.id, 'zh-CN')).toEqual([])
     expect(workspaces.references(project.id, 'zh-CN', other.id)).toEqual([])
 
-    // Taken back, it is gone for the thread too.
+    // Taken back, it is gone for the thread too; the thread is told, and the card says so.
     app.removeThreadReference(thread.id, own!.id)
     await expect(workspaces.referenceView(project.id, 'logs', thread.id)).rejects.toMatchObject({
       code: 'error.noReference',
     })
+    expect(app.getThread(thread.id).endedReferences).toEqual([
+      { attentionId: card.id, kept: false },
+    ])
+    const note = notes(thread.id).at(-1)!
+    expect(note).toEqual({ type: 'reference-ended', name: 'logs', now: null })
+    expect(describeNote(note, () => '')).toContain('you can no longer read it')
+  })
+
+  test('a full project: the thread is recommended, and picking the project asks again', async () => {
+    const { project, thread, card } = await start('project', true)
+    expect(card.block).toMatchObject({ type: 'choice', recommended: 1 })
+    app.answerAttention(card.id, { type: 'choice', choice: 0 })
+    await scheduler!.idle()
+    expect(
+      toolResults(thread.id)
+        .map((result) => result[2])
+        .join('\n'),
+    ).toContain('nothing was added')
+    expect(app.getThread(thread.id).references).toEqual([])
+    expect(app.getProject(project.id).references).toHaveLength(MAX_REFERENCES)
+    // That answer is spent: asking again (here after the nudge to report) is a new card.
+    const [again] = app.listOpenAttentions(project.id)
+    expect(again).toBeDefined()
+    expect(again!.id).not.toBe(card.id)
+    app.answerAttention(again!.id, { type: 'choice', choice: 1 })
+    await scheduler!.idle()
+    expect(app.getThread(thread.id).references).toMatchObject([
+      { settings: { path: '/logs' }, attentionId: again!.id },
+    ])
   })
 
   test('the user may pick the project instead, and everyone reads it', async () => {
@@ -579,6 +615,11 @@ describe('a thread asks to read a source', () => {
     expect(kept).toMatchObject({ id: own!.id, name: 'logs-2', settings: { path: '/logs' } })
     expect(app.getThread(thread.id).references).toEqual([])
     expect(app.getProject(project.id).references.map((ref) => ref.name)).toEqual(['logs', 'logs-2'])
+    // The thread hears the new name, and its card says where the source went.
+    expect(app.getThread(thread.id).endedReferences).toEqual([{ attentionId: card.id, kept: true }])
+    const note = notes(thread.id).at(-1)!
+    expect(note).toEqual({ type: 'reference-ended', name: 'logs', now: 'logs-2' })
+    expect(describeNote(note, () => '')).toContain('read it with source "logs-2" from now on')
   })
 
   test('a place kept out of reach is refused before any card', async () => {
@@ -639,5 +680,19 @@ describe('what a conversation may not ask for', () => {
     expect(remoteRefusal('/root')).toContain('too wide')
     expect(remoteRefusal('~/.ssh')).toContain('out of reach')
     expect(remoteRefusal('/home/deploy/.aws/cli')).toContain('out of reach')
+    expect(remoteRefusal('C:\\Users\\deploy')).toContain('too wide')
+    // A directory that holds one of them.
+    expect(remoteRefusal('/home/deploy/.config')).toContain('too wide')
+    expect(remoteRefusal('~/.local/share/')).toContain('too wide')
+    expect(remoteRefusal('~/.config/app')).toBeNull()
+    // Spelled around it: judged by where it leads, or refused when that cannot be told.
+    expect(remoteRefusal('/home/deploy/proj/..')).toContain('too wide')
+    expect(remoteRefusal('/root/x/..')).toContain('too wide')
+    expect(remoteRefusal('/srv/../root')).toContain('too wide')
+    expect(remoteRefusal('/srv/app/../../home/deploy/.ssh')).toContain('out of reach')
+    expect(remoteRefusal('/srv/app/./logs/../logs')).toBeNull()
+    expect(remoteRefusal('~/..')).toContain('"..')
+    expect(remoteRefusal('~/../other/code')).toContain('"..')
+    expect(remoteRefusal('../code')).toContain('"..')
   })
 })

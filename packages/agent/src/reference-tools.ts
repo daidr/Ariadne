@@ -180,17 +180,19 @@ export function addReferenceTool(kinds: ReferenceKind[], role: 'coordinator' | '
       )
       if (approval.state === 'approved') {
         const forThread = thread && approval.choice === KEEP_THREAD
-        if (!forThread && full) {
-          return {
-            content: `The user picked the project, which already has ${MAX_REFERENCES} reference sources, the most it takes. Tell them in one line: they can remove one in the project's settings, or pick this thread only when you ask again.`,
-            isError: true,
-          }
-        }
+        // Used up whatever comes of it: an answer that cannot be followed must not stand
+        // in the way of asking again.
         ctx.app.useApproval(ctx.projectId, {
           threadId: ctx.conversationId,
           attentionId: approval.attentionId,
           what: 'reference',
         })
+        if (!forThread && full) {
+          return {
+            content: `The user picked the project, which already has ${MAX_REFERENCES} reference sources, the most it takes, so nothing was added. Tell them in one line: they can remove one in the project's settings, or have it for this thread only. Call this again once they say which; they are asked on a new card.`,
+            isError: true,
+          }
+        }
         const added = forThread
           ? ctx.app.addThreadReference(
               ctx.conversationId,
