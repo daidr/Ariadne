@@ -1,7 +1,17 @@
 import type { ContextProvider } from '@ariadne/plugin-sdk'
-import { realPath } from '@ariadne/sandbox'
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, resolve } from 'node:path'
+
+/** A path made absolute, `~/` expanded and symbolic links followed where it exists. */
+function realPath(path: string): string {
+  const full = resolve(path.startsWith('~/') ? join(homedir(), path.slice(2)) : path)
+  try {
+    return realpathSync(full)
+  } catch {
+    return full
+  }
+}
 
 /**
  * Where credentials usually live under a home directory. A conversation never gets one of
@@ -66,17 +76,17 @@ const HOLDERS = [
 
 /**
  * Why a conversation may not ask for this path on the server's machine, or `null` when
- * it may: a path in a protected place (what the sandbox hides, where credentials live), or
+ * it may: a path in a protected place (Ariadne's own data, where credentials live), or
  * so wide that it holds one, as the home directory and the root do.
  */
 export function localRefusal(
   path: string,
-  hidden: readonly string[],
+  own: readonly string[],
   home = homedir(),
 ): string | null {
   const real = realPath(path)
   const protectedPaths = [
-    ...hidden.map(realPath),
+    ...own.map(realPath),
     ...CREDENTIALS.map((name) => realPath(join(home, name))),
   ]
   if (protectedPaths.some((kept) => inside(real, kept))) {
@@ -123,13 +133,13 @@ export function remoteRefusal(path: string): string | null {
 export function referenceRefusal(
   provider: Pick<ContextProvider<never>, 'settings' | 'remote'>,
   settings: Record<string, unknown>,
-  hidden: readonly string[],
+  own: readonly string[],
 ): string | null {
   for (const [name, field] of Object.entries(provider.settings.properties)) {
     if (field.type !== 'string' || !field.directory) continue
     const path = settings[name]
     if (typeof path !== 'string' || !path.trim()) continue
-    const refusal = provider.remote ? remoteRefusal(path) : localRefusal(path, hidden)
+    const refusal = provider.remote ? remoteRefusal(path) : localRefusal(path, own)
     if (refusal) return refusal
   }
   return null

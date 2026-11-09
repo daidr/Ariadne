@@ -323,7 +323,8 @@ const timeline = computed(() =>
       notice: null,
     })),
     ...view.value.notices
-      .filter((notice) => !(notice.kind === 'worktree-removed' && notice.reason === 'merged'))
+      // Only a removal the user made is worth a line: the others follow from what they see.
+      .filter((notice) => notice.kind !== 'worktree-removed' || notice.reason === 'user')
       // A newer recap takes the place of the one before it.
       .filter((notice) => notice.kind !== 'recap' || notice.id === recap.value)
       .map((notice) => ({
@@ -857,13 +858,7 @@ watch(
             size="sm"
             class="notice-text"
           >
-            {{
-              t(
-                item.notice.reason === 'merged'
-                  ? 'notice.worktreeRemovedMerged'
-                  : 'notice.worktreeRemovedUser',
-              )
-            }}
+            {{ t('notice.worktreeRemovedUser') }}
           </DouText>
           <ArtifactNotice
             v-else-if="

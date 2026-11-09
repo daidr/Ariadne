@@ -11,7 +11,7 @@
 
 在 Windows 10/11 上，用 PowerShell 启动 `bun run start`。
 
-- [ ] **启动提示**：终端打印“Windows 上暂时没有工作区沙箱…”，设置里的沙箱状态也这样写。
+- [ ] **写时复制**：仓库放在 Dev Drive（ReFS）上、`~/.ariadne` 在 C 盘时，新讨论串的 worktree 建在仓库旁边的 `.ariadne-worktrees\\` 下；设置的“工作区”页这个项目写“写时复制，仅占用改动部分”，开三个讨论串后卷的已用空间基本不变（Windows 11 24H2 及以上）。仓库在 NTFS 盘上时，worktree 在 `~/.ariadne` 下，“工作区”页提示 Dev Drive。检测用的是 PowerShell 的 `(Get-Volume -DriveLetter D).FileSystemType`，看它不弹窗口、返回 `ReFS`。
 - [ ] **不弹窗口**：让讨论串跑几条命令（`git status`、`bun --version`、一条 `Start-Sleep 3`），整个过程中不弹出黑色控制台窗口。合并、看改动、拉 PR 状态时也不弹。
 - [ ] **默认 shell**：装了 PowerShell 7 时用 `pwsh`，没装时用 Windows 自带的 `powershell`；在讨论串里让它运行 `$PSVersionTable.PSVersion`，看追踪里的命令结果。中文输出不乱码。
 - [ ] **bash**：项目设置里把 shell 换成 Git Bash 的 `bash.exe`，`echo 你好 && ls` 能跑，输出不乱码。
@@ -63,21 +63,13 @@
 
 先在终端里把对应的程序登录好（`claude`、`codex login`，ACP agent 按它自己的说明）。在设置里分别加 Claude Code、Codex 和一个 ACP agent 的提供方，模型名可以填 `default`。
 
-- [ ] **Claude Code**：用它跑一个要读写文件、跑命令的讨论串；追踪里每个工具调用都在，命令走沙箱；讨论串里回复一次之后再说一句，追踪里第二回合的输入只多了这一句（同一个进程接着做）。用量和“估算花费”有数。
+- [ ] **Claude Code**：用它跑一个要读写文件、跑命令的讨论串；追踪里每个工具调用都在；讨论串里回复一次之后再说一句，追踪里第二回合的输入只多了这一句（同一个进程接着做）。用量和“估算花费”有数。
 - [ ] **Codex**：同上；它不会自己跑命令（追踪里看不到它绕开工具的动作），思考深度改成“高”之后它照常工作。
 - [ ] **步数**：Claude Code 对会改东西的工具是一个一个调用的，一次回复里的几个调用会拆成几步。看一下长任务里步数离上限和循环检测有多近。
-- [ ] **ACP agent**：同上；它要用自己需要权限的工具时被拒绝，Ariadne 的工具照常放行（工作目录在 `~/.ariadne/` 下也不会误放行）。不请求权限的自带工具关不掉，只受沙箱约束。不支持 HTTP 的 MCP 的 agent 也能调到工具（走 `mcp-stdio.ts` 转发）。
+- [ ] **ACP agent**：同上；它要用自己需要权限的工具时被拒绝，Ariadne 的工具照常放行（工作目录在 `~/.ariadne/` 下也不会误放行）。不请求权限的自带工具关不掉。不支持 HTTP 的 MCP 的 agent 也能调到工具（走 `mcp-stdio.ts` 转发）。
 - [ ] **停下与重启**：回合进行中点停止，`ps` 里那个 agent 进程没了；服务重启之后再发消息，开了新进程，它能接着之前的对话说。
 - [ ] **没登录**：退出登录后发消息，讨论串以失败结束，原因里写着要登录，不会反复重试。
 - [ ] **Windows**：`claude`、`codex` 是 `.cmd` 包装时能不能启动（没在 Windows 上试过）。
-
-## 做法文件与沙箱
-
-在 `~/.ariadne/skills/<名字>/` 里放一个带 `SKILL.md` 和脚本的做法文件，让讨论串按它工作并运行那个脚本。
-
-- [ ] **Linux（bwrap）**：脚本能读、能执行；往这个文件夹里写会失败；`cat ~/.ariadne/config.json` 仍然读不到。
-- [ ] **macOS**：同上。
-- [ ] **工作区在主目录**：项目的本地目录设成 `~` 时，以上三点照样成立。
 
 ## 花费估算
 

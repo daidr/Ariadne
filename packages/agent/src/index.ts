@@ -67,15 +67,6 @@ export {
   type TurnSettings,
 } from './limits'
 export {
-  browserProfiles,
-  createSandbox,
-  detectSandbox,
-  noSandbox,
-  type Sandbox,
-  type SandboxKind,
-  type SandboxStatus,
-} from '@ariadne/sandbox'
-export {
   MCP_TOOL_MARKS,
   McpHub,
   type McpServerConfig,

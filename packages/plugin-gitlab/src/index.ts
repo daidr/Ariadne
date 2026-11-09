@@ -3,7 +3,6 @@ import { hostedClone } from '@ariadne/plugin-local/hosted'
 import {
   definePlugin,
   type Capabilities,
-  type CommandSandbox,
   type ContextProvider,
   type LinkProvider,
   type RepoCapability,
@@ -30,8 +29,6 @@ export interface GitLabProviderOptions {
   gitBase?: string
   fetch?: typeof fetch
   env?: Record<string, string | undefined>
-  /** What thread commands run in; they see their worktree and the clone behind it. */
-  sandbox?: CommandSandbox
   /** For tests: how `glab` is run. */
   run?: typeof run
 }
@@ -239,7 +236,6 @@ export function connectRepository(
     user: 'oauth2',
     token: getToken,
     defaultBranch: getDefaultBranch,
-    ...(options.sandbox ? { sandbox: options.sandbox } : {}),
   })
 
   const repo: RepoCapability = {
@@ -475,7 +471,6 @@ export default definePlugin({
     ctx.registerContextProvider(
       gitlabProvider({
         dataDir: ctx.dataDir,
-        sandbox: ctx.sandbox,
         instances,
       }) as ContextProvider<never>,
     )

@@ -3,7 +3,6 @@ import { hostedClone } from '@ariadne/plugin-local/hosted'
 import {
   definePlugin,
   type Capabilities,
-  type CommandSandbox,
   type ContextProvider,
   type LinkProvider,
   type RepoCapability,
@@ -29,8 +28,6 @@ export interface GitHubProviderOptions {
   gitBase?: string
   fetch?: typeof fetch
   env?: Record<string, string | undefined>
-  /** What thread commands run in; they see their worktree and the clone behind it. */
-  sandbox?: CommandSandbox
 }
 
 export { branchFor } from '@ariadne/plugin-local'
@@ -112,7 +109,6 @@ export function connectRepository(
     user: 'x-access-token',
     token: getToken,
     defaultBranch: getDefaultBranch,
-    ...(options.sandbox ? { sandbox: options.sandbox } : {}),
   })
   const { workspace } = clone
 
@@ -211,9 +207,7 @@ export function parsePullRequestUrl(
  * Pull request links in messages: `owner/name#12` with a card of its state, title, author
  * and size. Read with the same token as the repositories, so private ones show too.
  */
-export function githubLinks(
-  options: Omit<GitHubProviderOptions, 'dataDir' | 'sandbox'>,
-): LinkProvider {
+export function githubLinks(options: Omit<GitHubProviderOptions, 'dataDir'>): LinkProvider {
   const web = options.gitBase?.startsWith('https://') ? options.gitBase : 'https://github.com'
   const env = options.env ?? process.env
   let token: Promise<string | null> | null = null
@@ -271,7 +265,6 @@ export default definePlugin({
     ctx.registerContextProvider(
       githubProvider({
         dataDir: ctx.dataDir,
-        sandbox: ctx.sandbox,
         ...hosts,
       }) as ContextProvider<never>,
     )

@@ -38,7 +38,7 @@ const git = async (cwd: string, ...args: string[]) =>
 
 async function setup() {
   const dir = await repo()
-  const { workspace } = await localDirectoryProvider(join(base, 'data'), undefined, null).connect({
+  const { workspace } = await localDirectoryProvider(join(base, 'data'), null).connect({
     path: dir,
   })
   const capability = workspace as WorkspaceCapability

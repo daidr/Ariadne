@@ -219,27 +219,8 @@ export const en: Record<MessageKey, string> = {
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
   'project.source.clear': 'Remove',
-  'sandbox.missing.title': 'Thread commands are not isolated',
-  'sandbox.missing.body':
-    "No sandbox is available on this machine (Linux needs bubblewrap, or unshare with user namespaces; macOS uses the built-in sandbox-exec), so commands threads run can read Ariadne's token and settings and call Ariadne as you. Only give this project to models and repositories you trust.",
-  'sandbox.off.title': 'The workspace sandbox is off',
-  'sandbox.title': 'Sandbox',
-  'sandbox.isolate': 'Isolate thread commands',
-  'sandbox.hide': 'One path per line, hidden from thread commands',
-  'sandbox.hidePlaceholder': 'One path per line, hidden from thread commands',
-  'sandbox.restart': 'Takes effect after Ariadne restarts',
-  'sandbox.now.off': 'Off',
-  'sandbox.now.on': 'Isolated with {kind}',
-  'sandbox.now.none': 'No sandbox available on this machine',
-  'sandbox.now.windows': 'No sandbox on Windows yet',
-  'sandbox.off.body':
-    "The sandbox is turned off in the settings (sandbox.mode is off in config.json), so commands threads run can read Ariadne's token and settings and call Ariadne as you.",
-  'sandbox.remote':
-    "Thread commands run on {host} as the user SSH logs in as, outside this machine's sandbox; the connection forwards no agent, ports or X11, so commands cannot reach back to this machine.",
-  'sandbox.windows.body':
-    "There is no sandbox on Windows yet, so thread commands can read Ariadne's token and settings.",
-  'sandbox.weaker':
-    "macOS's sandbox only restricts files: thread commands cannot read Ariadne's token and settings, but they can see other processes, so isolation is weaker than on Linux.",
+  'source.remote':
+    'Thread commands run on {host} as the user SSH logs in as; the connection forwards no agent, ports or X11, so commands cannot reach back to this machine.',
   'notice.memoryAdded': 'Saved to project memory: {text}',
   'notice.memoryChanged': 'Changed a project memory entry: {previous} → {text}',
   'notice.memoryRemoved': 'Removed from project memory: {text}',
@@ -522,7 +503,6 @@ export const en: Record<MessageKey, string> = {
   'notice.mergedSquash': 'Changes squashed into one commit on {base} ({sha})',
   'notice.mergedMerge': 'Changes merged into {base} ({sha})',
   'notice.mergeConflict': 'Merging into {base} hit conflicts, handed to the thread: {files}',
-  'notice.worktreeRemovedMerged': 'The changes landed; the worktree was removed, the branch kept',
   'notice.worktreeRemovedUser': 'You removed the worktree; the branch was kept',
   'notice.feedbackSent': '{count} changes in {title} delivered, being worked on',
   'notice.feedbackDone': '{count} changes in {title} handled',
@@ -551,6 +531,9 @@ export const en: Record<MessageKey, string> = {
   'worktrees.removeConfirm': 'Remove the worktree of “{title}”? Its branch stays',
   'worktrees.merged': 'Merged',
   'worktrees.total': '{size} in all',
+  'worktrees.shared': 'Copy-on-write: only changes take room',
+  'worktrees.copied': 'Each thread takes a full checkout',
+  'worktrees.devDrive': 'On a Dev Drive only changes take room',
   'settings.models': 'Models',
   'settings.addModel': 'Add model',
   'settings.modelName': 'Model name',
@@ -727,7 +710,7 @@ export const en: Record<MessageKey, string> = {
   'project.mcpNone': 'None',
   'project.mcpUsed': 'MCP: {names}',
   'cli.daemon.usage':
-    'Usage:\n  ariadne-daemon [--listen host:port] [--hide path]... [--no-sandbox]\n  ariadne-daemon pair      make a new pairing code; the old one stops working at once\n  ariadne-daemon --stdio   talk to Ariadne on standard input and output instead of a port (Ariadne uses it when it connects through SSH)\n\nListens only on 127.0.0.1:{port} by default.',
+    'Usage:\n  ariadne-daemon [--listen host:port]\n  ariadne-daemon pair      make a new pairing code; the old one stops working at once\n  ariadne-daemon --stdio   talk to Ariadne on standard input and output instead of a port (Ariadne uses it when it connects through SSH)\n\nListens only on 127.0.0.1:{port} by default.',
   'cli.daemon.windows': 'The daemon does not run on Windows yet',
   'cli.daemon.noOpenssl': 'openssl is needed to make the certificate',
   'cli.daemon.certificateFailed': 'Could not make the certificate: {reason}',
@@ -736,17 +719,7 @@ export const en: Record<MessageKey, string> = {
   'cli.daemon.listenFailed': 'Could not listen on {address}: {reason}',
   'cli.daemon.started': 'ariadne-daemon is running: {address}',
   'cli.daemon.notLoopback': 'Not a loopback address: other machines can connect too',
-  'cli.daemon.sandboxOff':
-    "The sandbox is off: threads' commands can read the daemon's private key",
-  'cli.daemon.noSandbox':
-    "No sandbox is available on this machine: threads' commands can read the daemon's private key",
   'cli.daemon.paired': 'Paired. For a new pairing code, run ariadne-daemon pair',
-  'cli.server.sandboxOff':
-    "The workspace sandbox is off: threads' commands can read Ariadne's token and settings",
-  'cli.server.sandboxWindows':
-    "There is no workspace sandbox on Windows yet: threads' commands can read Ariadne's token and settings",
-  'cli.server.noSandbox':
-    "No workspace sandbox is available on this machine: threads' commands can read Ariadne's token and settings",
   'cli.server.pluginFailed': 'Could not load the plugin: {path}',
   'cli.server.leftovers': 'Ended {count} processes left running when Ariadne last stopped',
   'cli.server.otherServer': 'Another Ariadne is using this directory: its processes are left alone',

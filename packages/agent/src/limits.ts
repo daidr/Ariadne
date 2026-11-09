@@ -375,7 +375,7 @@ function ruleParts(command: string, depth = 0, quoted = false): RulePart[] {
  * The simple commands a command line is made of, each as written and trimmed: split at
  * `&&`, `||`, `;`, `|`, `&`, parentheses and line breaks outside quotes, not at a
  * redirection such as `2>&1`. Good enough to find `git push` inside `make && git push`;
- * the sandbox, not this, is what keeps a command in the workspace.
+ * it does not keep a command in the workspace.
  */
 export function commandParts(command: string): string[] {
   return simpleCommands(command).map((part) => part.raw)

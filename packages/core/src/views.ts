@@ -13,6 +13,7 @@ import type {
   ArtifactCommentAnchor,
   ArtifactFeedbackItem,
   BranchMerge,
+  WorktreeRemoval,
   IssueWriteAction,
   LinkedIssue,
   MergeMethod,
@@ -101,13 +102,16 @@ export interface ThreadView {
   lastArtifacts: ThreadArtifact[]
   /**
    * The thread's prepared workspace, once it has used one. `removed`: its worktree was
-   * removed since, and the branch is all that is left until it is used again.
+   * removed since, and the branch is all that is left until it is used again. `parked`:
+   * it was removed only to free room while the thread sat idle, so its changes are still
+   * there to look through and merge.
    */
   workspace: {
     label: string
     branch: string | null
     base: string | null
     removed: boolean
+    parked: boolean
   } | null
   /** The user's last merge of its branch, with the time it was made; `null` once undone. */
   merged: (BranchMerge & { at: number }) | null
@@ -354,7 +358,7 @@ export type NoticeView = {
       body: string
     }
   | { kind: 'merge-conflict'; base: string; files: string[]; pullRequest?: number }
-  | { kind: 'worktree-removed'; reason: 'merged' | 'user' }
+  | { kind: 'worktree-removed'; reason: WorktreeRemoval }
   /** The coordinator changed the plan without asking: what it did, to undo from here. */
   | { kind: 'plan-changed'; revisionId: string; reason: string; added: number; revert: boolean }
   /** The autopilot opened a thread on a plan node. */

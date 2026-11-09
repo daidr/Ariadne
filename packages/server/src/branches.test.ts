@@ -32,7 +32,7 @@ beforeEach(async () => {
     name: { 'zh-CN': '本地目录' },
     setup: (ctx) =>
       ctx.registerContextProvider(
-        localDirectoryProvider(join(base, 'data'), undefined, null) as ContextProvider<never>,
+        localDirectoryProvider(join(base, 'data'), null) as ContextProvider<never>,
       ),
   })
   workspaces = new WorkspaceManager(app, host)
@@ -197,6 +197,77 @@ describe('thread changes', () => {
     const again = await workspaces.forThread(project.id, thread.id)
     expect(existsSync(again.label)).toBe(true)
     expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })
+    await janitor.stop()
+  })
+
+  test('a finished thread left idle gives up its worktree, and can still be merged', async () => {
+    const { dir, thread, ws } = await setup()
+    let now = Date.now()
+    const janitor = new WorktreeJanitor(app, workspaces, {
+      delayMs: 0,
+      idleMs: 1000,
+      now: () => now,
+    })
+    await ws.exec('echo thread > README.md && git commit -qam readme')
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
+    // Just reported: kept.
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    // Changes not committed keep it, however long it sat.
+    now += 5000
+    await writeFile(join(ws.label, 'draft.txt'), 'draft\n')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+
+    await rm(join(ws.label, 'draft.txt'))
+    // So do staged changes,
+    await ws.exec('echo staged > staged.txt && git add staged.txt')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+    await ws.exec('git stash -q')
+    // ignored files that are not dependencies,
+    await writeFile(join(dir, '.git', 'info', 'exclude'), '.env\nnode_modules\n')
+    await ws.exec('echo SECRET=1 > .env && mkdir node_modules && echo x > node_modules/x')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+    await rm(join(ws.label, '.env'))
+    // and commits made off the branch.
+    await ws.exec('git checkout -q --detach && git commit -q --allow-empty -m loose')
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(true)
+    await ws.exec('git checkout -q -')
+
+    // Dependencies alone do not keep it, and what was stashed outlives it.
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(false)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: true })
+    expect(await git(dir, 'stash', 'list')).toContain('stash@{0}')
+
+    // The branch holds the work: it merges without a worktree, and is then no longer parked.
+    const merged = await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(merged.status).toBe(200)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: false })
+    await janitor.stop()
+  })
+
+  test('a parked thread merged outside Ariadne is no longer offered for merging', async () => {
+    const { dir, thread, ws } = await setup()
+    let now = Date.now()
+    const janitor = new WorktreeJanitor(app, workspaces, {
+      delayMs: 0,
+      idleMs: 1000,
+      now: () => now,
+    })
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
+    now += 5000
+    await janitor.check(thread.id)
+    expect(existsSync(ws.label)).toBe(false)
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: true })
+
+    await git(dir, 'merge', '-q', app.getThread(thread.id).workspace!.branch!)
+    await janitor.sweep()
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: false })
     await janitor.stop()
   })
 

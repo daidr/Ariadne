@@ -101,6 +101,38 @@ async function setup(origin = `git@example.com:team/app.git`) {
   return { upstream, seed, checkout, repo, workspace }
 }
 
+describe("a hosted repository's worktrees", () => {
+  test("a new one's files are cloned from another thread's, where clones work", async () => {
+    const { upstream } = await setup()
+    const cloned: string[] = []
+    const clone = hostedClone({
+      dataDir: join(base, 'data-clones'),
+      path: 'team/app',
+      remoteUrl: `file://${upstream}`,
+      user: 'x',
+      token: async () => null,
+      defaultBranch: async () => 'main',
+      clone: async (from, to) => {
+        cloned.push(from)
+        return (await run(['cp', '-a', from, to], { cwd: base })).exitCode === 0
+      },
+    })
+    const first = await clone.workspace.open({ threadId: 'thr_a' })
+    expect(await clone.workspace.branches!.sharesStorage!()).toBe(true)
+    // Nothing to clone from yet: git wrote the first one.
+    expect(cloned.filter((path) => path.endsWith('README.md'))).toEqual([])
+    await first.writeFile('README.md', '# changed by the first thread\n')
+    await first.writeFile('draft.md', 'not committed\n')
+    const second = await clone.workspace.open({ threadId: 'thr_b' })
+    expect(cloned.filter((path) => path.endsWith('NEW.md'))).toHaveLength(1)
+    // What the first thread changed stays its own.
+    expect(await second.readFile('README.md')).toBe('# app\n')
+    expect(await second.readFile('NEW.md')).toBe('new\n')
+    await expect(second.readFile('draft.md')).rejects.toThrow()
+    expect((await second.exec('git status --short')).stdout).toBe('')
+  })
+})
+
 describe("a hosted repository's view", () => {
   test('the coordinator reads the default branch as fetched, without a checkout', async () => {
     const { seed, upstream } = await setup()

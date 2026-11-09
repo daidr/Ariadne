@@ -1,4 +1,4 @@
-import { processes, type CommandSandbox } from '@ariadne/plugin-sdk'
+import { processes } from '@ariadne/plugin-sdk'
 
 /** What the agent last wrote to stderr is kept this long, to say why it failed. */
 const STDERR_KEPT = 4000
@@ -59,19 +59,17 @@ export function agentEnv(extra: Record<string, string> = {}): Record<string, str
 }
 
 export interface AgentProcessOptions {
-  /** The program and its arguments, before the sandbox wraps them. */
+  /** The program and its arguments. */
   argv: string[]
   cwd: string
   env: Record<string, string>
-  sandbox: CommandSandbox
   /** What it is, for the ledger of processes to kill after a crash. */
   label: string
 }
 
 /**
  * An agent program talking one JSON message per line on its stdin and stdout. It runs in
- * the sandbox threads' commands run in (Ariadne's home and the browsers' profiles are out
- * of its sight), in a process group of its own, so what it starts ends with it.
+ * a process group of its own, so what it starts ends with it.
  */
 export class AgentProcess {
   private proc: ReturnType<typeof Bun.spawn<'pipe', 'pipe', 'pipe'>> | null = null
@@ -90,9 +88,9 @@ export class AgentProcess {
   /** Start it: `onLine` gets every JSON value it prints, `onExit` once when it ends by itself. */
   start(onLine: (value: unknown) => void, onExit: (reason: string) => void): void {
     const [program = '', ...args] = this.options.argv
-    // A bare name is looked up in the PATH the agent gets, so the sandbox runs the same file.
+    // A bare name is looked up in the PATH the agent gets.
     const path = Bun.which(program, { PATH: this.options.env.PATH ?? '' }) ?? program
-    const argv = this.options.sandbox.wrap([path, ...args], { keep: [this.options.cwd] })
+    const argv = [path, ...args]
     let proc
     try {
       proc = Bun.spawn(argv, {

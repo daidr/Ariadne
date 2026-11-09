@@ -24,7 +24,7 @@ export default definePlugin({
   setup(ctx) {
     const bridge = new ToolBridge()
     const providers = ([claudeCode, codex, acp] as AgentKind<never>[]).map((agent) =>
-      agentProvider(agent, { dataDir: ctx.dataDir, sandbox: ctx.sandbox, bridge }),
+      agentProvider(agent, { dataDir: ctx.dataDir, bridge }),
     )
     for (const provider of providers) ctx.registerModelProvider(provider as ModelProvider<never>)
     return async () => {

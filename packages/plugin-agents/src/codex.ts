@@ -103,7 +103,6 @@ export const codex: AgentKind<CodexSettings> = {
       argv: argvOf(ctx.settings),
       cwd: ctx.cwd,
       env: agentEnv(),
-      sandbox: ctx.sandbox,
       label: 'agent',
     })
     const peer = new RpcPeer(proc, false, {

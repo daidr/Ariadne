@@ -84,7 +84,7 @@ export interface ContextProvider<Settings = Record<string, unknown>> {
   provides: CapabilityName[]
   /**
    * The source's workspaces are on another machine: threads' commands run there, as the
-   * user the source logs in as, and the host's sandbox does not apply to them.
+   * user the source logs in as.
    */
   remote?: boolean
   /**
@@ -440,34 +440,6 @@ export interface ModelSearch<Settings = Record<string, unknown>> {
 export type Dispose = () => void | Promise<void>
 
 /**
- * Where a thread's commands run. The host picks one when it starts: on Linux a mount and
- * process namespace (bubblewrap, or `unshare`), on macOS `sandbox-exec`. Inside it,
- * Ariadne's home directory (its token, settings and event log) and the browsers' profiles
- * are out of sight, except the paths a workspace keeps. On Linux the command also gets its
- * own process list, and whatever it leaves running ends with it; `sandbox-exec` only
- * restricts files, so on macOS the command sees the server's processes and can leave
- * processes behind.
- */
-export interface CommandSandbox {
-  /** What isolates commands, e.g. `bwrap`; `null` when they run as they are. */
-  readonly kind: string | null
-  /**
-   * The command line that runs `argv` in the sandbox. `keep` are the paths the command
-   * works in (its checkout, the git directory behind it); they stay visible even inside
-   * a hidden directory. `readOnly` paths can be read but not changed: anything the
-   * server later runs outside the sandbox reads, such as a git directory's `config` and
-   * `hooks`.
-   */
-  wrap(argv: string[], options: { keep: string[]; readOnly?: string[] }): string[]
-  /**
-   * The real paths threads must not see (Ariadne's home, the browsers' profiles, what the
-   * user added). Commands get them covered where the sandbox works; file tools refuse
-   * them everywhere, also where no sandbox runs.
-   */
-  readonly hidden?: readonly string[]
-}
-
-/**
  * Live data for dashboards. A dashboard names a source and its settings; refreshing it
  * fetches the data again and stores it as a new version, so every version stays a
  * snapshot that replays the same. Dashboards without a source keep the data they were
@@ -573,8 +545,6 @@ export interface LinkProvider {
 export interface PluginContext {
   /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
   dataDir: string
-  /** Run commands a thread asked for through this. */
-  sandbox: CommandSandbox
   registerContextProvider(provider: ContextProvider<never>): Dispose
   registerModelProvider(provider: ModelProvider<never>): Dispose
   registerDashboardSource(source: DashboardSource<never>): Dispose

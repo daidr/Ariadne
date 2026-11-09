@@ -12,7 +12,7 @@ const WRITE_EXIT_WAIT_MS = 1000
 const windows = process.platform === 'win32'
 
 export interface StdioOptions {
-  /** The whole command line, already wrapped in a sandbox if it runs in one. */
+  /** The whole command line. */
   argv: string[]
   cwd: string
   env: Record<string, string>

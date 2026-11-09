@@ -1,4 +1,3 @@
-import type { CommandSandbox } from '@ariadne/plugin-sdk'
 import { threadEnv } from '@ariadne/plugin-local'
 import { timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -149,19 +148,13 @@ export class Lockout {
   }
 }
 
-export interface ExecOptions {
-  sandbox: CommandSandbox
-  /** Paths commands may read but not change, such as the daemon's own code. */
-  readOnly?: string[]
-}
-
 /**
- * Runs each `exec` channel: bash reading a script from its input, in the sandbox, with the
+ * Runs each `exec` channel: bash reading a script from its input, with the
  * daemon's environment minus Ariadne's own variables. When the channel ends without bash
  * having exited (Ariadne closed it, or its session was lost), bash's input is closed, which
  * ends thread commands' process groups, and bash is killed a moment later.
  */
-export function execChannels(options: ExecOptions): (channel: Channel) => void {
+export function execChannels(): (channel: Channel) => void {
   return (channel) => {
     if (channel.kind !== EXEC) {
       channel.close({ error: `the daemon has no ${channel.kind} channels` })
@@ -169,17 +162,14 @@ export function execChannels(options: ExecOptions): (channel: Channel) => void {
     }
     let proc: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
     try {
-      proc = Bun.spawn(
-        options.sandbox.wrap(RUN_ARGV, { keep: [], readOnly: options.readOnly ?? [] }),
-        {
-          cwd: homedir(),
-          env: threadEnv(),
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          windowsHide: true,
-        },
-      )
+      proc = Bun.spawn(RUN_ARGV, {
+        cwd: homedir(),
+        env: threadEnv(),
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        windowsHide: true,
+      })
     } catch (error) {
       channel.close({ error: error instanceof Error ? error.message : String(error) })
       return
@@ -225,7 +215,7 @@ export function execChannels(options: ExecOptions): (channel: Channel) => void {
   }
 }
 
-export interface DaemonOptions extends ExecOptions {
+export interface DaemonOptions {
   home: string
   hostname: string
   port: number
@@ -235,7 +225,7 @@ export interface DaemonOptions extends ExecOptions {
 /** Serve relay sessions to Ariadne over TLS, each let in by the token. */
 export function serveDaemon(options: DaemonOptions) {
   const lockout = new Lockout()
-  const relay = new RelayServer({ onChannel: execChannels(options) })
+  const relay = new RelayServer({ onChannel: execChannels() })
   const authorized = (request: Request, address: string): Response | null => {
     if (lockout.blocked(address)) return new Response('too many failed attempts', { status: 429 })
     const header = request.headers.get('authorization') ?? ''
@@ -290,11 +280,11 @@ export function serveDaemon(options: DaemonOptions) {
  * Serve one relay session on this process's standard input and output, for Ariadne
  * connecting through ssh. Resolves when the input ends; the session's commands are ended.
  */
-export function serveStdio(options: ExecOptions): Promise<void> {
+export function serveStdio(): Promise<void> {
   return new Promise((resolve) => {
     // One client, and no coming back: a new ssh connection starts a new daemon.
     const relay = new RelayServer({
-      onChannel: execChannels(options),
+      onChannel: execChannels(),
       keepMs: 0,
       onSessionEnd: () => resolve(),
     })

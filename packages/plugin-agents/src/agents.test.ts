@@ -13,7 +13,6 @@ import { agentProvider, type AgentKind, type AgentProvider } from './sessions'
 
 const fake = (name: string) =>
   `${process.execPath} ${join(import.meta.dirname, 'fakes', `fake-${name}.ts`)}`
-const noSandbox = { kind: null, wrap: (argv: string[]) => argv }
 
 const TOOLS: ToolSpec[] = [
   {
@@ -42,7 +41,6 @@ afterEach(async () => {
 function provider(agent: AgentKind<never>) {
   const made = agentProvider(agent as AgentKind<unknown>, {
     dataDir: dir,
-    sandbox: noSandbox,
     bridge,
   })
   providers.push(made)

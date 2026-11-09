@@ -1,3 +1,4 @@
+import { WORKTREE_DIR } from '@ariadne/plugin-local'
 import { CURRENCIES, DomainError, type Currency } from '@ariadne/core'
 import {
   COMMAND_ACTIONS,
@@ -270,11 +271,6 @@ export interface UserConfig {
   concurrency: { slots: number; reserved: number }
   /** Secret settings of each project's context source (e.g. a token), by project id. */
   sourceSecrets: Record<string, Record<string, string>>
-  /**
-   * How thread commands are isolated, read at start. `off` runs them as they are; `hide`
-   * adds paths they must not see to Ariadne's home and the browsers' profiles.
-   */
-  sandbox: { mode: 'auto' | 'off'; hide: string[] }
   /** External tool servers; each project picks which of them it uses. */
   mcp: { servers: McpServerConfig[] }
   input: InputConfig
@@ -375,7 +371,6 @@ const defaults = (): UserConfig => ({
   },
   concurrency: { slots: 3, reserved: 1 },
   sourceSecrets: {},
-  sandbox: { mode: 'auto', hide: [] },
   mcp: { servers: [] },
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   instructions: '',
@@ -390,7 +385,6 @@ export function loadUserConfig(path: string): UserConfig {
   const config = defaults()
   if (!existsSync(path)) return config
   const stored = JSON.parse(readFileSync(path, 'utf8')) as Partial<UserConfig>
-  const sandbox = (stored.sandbox ?? {}) as Partial<UserConfig['sandbox']>
   return {
     ...config,
     ...stored,
@@ -425,12 +419,6 @@ export function loadUserConfig(path: string): UserConfig {
     limits: parseLimits(stored.limits, false),
     projectEnv: { ...stored.projectEnv },
     search: { apiKey: typeof stored.search?.apiKey === 'string' ? stored.search.apiKey : '' },
-    sandbox: {
-      mode: sandbox.mode === 'off' ? 'off' : 'auto',
-      hide: Array.isArray(sandbox.hide)
-        ? sandbox.hide.filter((p): p is string => typeof p === 'string' && p.trim() !== '')
-        : [],
-    },
   }
 }
 
@@ -936,7 +924,11 @@ export class SettingsStore {
     if (this.config.plugins.includes(path)) throw new DomainError('error.pluginExists', { path })
     // Plugin data directories hold the threads' worktrees and clones of repositories:
     // code there is written by threads or comes from the repository, not from the user.
-    if (insideDir(path, join(dirname(this.path), 'plugins'))) {
+    // So do worktrees kept beside a repository on another disk.
+    if (
+      insideDir(path, join(dirname(this.path), 'plugins')) ||
+      realPath(path).split(/[\\/]/).includes(WORKTREE_DIR)
+    ) {
       throw new DomainError('error.pluginInWorkspace')
     }
     try {
@@ -960,25 +952,6 @@ export class SettingsStore {
     await this.host.unloadPath(input)
     this.config = { ...this.config, plugins: this.config.plugins.filter((p) => p !== input) }
     this.save()
-  }
-
-  /**
-   * Change how thread commands are isolated: on (`auto`) or `off`, and the paths hidden
-   * from them besides Ariadne's own. Read on start: it takes effect after a restart.
-   */
-  updateSandbox(input: unknown): UserConfig['sandbox'] {
-    const body = (input ?? {}) as Partial<UserConfig['sandbox']>
-    if (body.mode !== 'auto' && body.mode !== 'off') throw new BadRequest('mode')
-    if (!Array.isArray(body.hide) || body.hide.length > 100) throw new BadRequest('hide')
-    const hide: string[] = []
-    for (const path of body.hide) {
-      if (typeof path !== 'string' || path.length > 1000) throw new BadRequest('hide')
-      const trimmed = path.trim()
-      if (trimmed && !hide.includes(trimmed)) hide.push(trimmed)
-    }
-    this.config = { ...this.config, sandbox: { mode: body.mode, hide } }
-    this.save()
-    return this.config.sandbox
   }
 
   /** Change how many turns run at once, plus those kept for answering the user. */

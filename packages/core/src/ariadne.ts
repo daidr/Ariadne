@@ -61,6 +61,7 @@ import type {
   TurnFile,
   ChangeTotals,
   TurnOutcome,
+  WorktreeRemoval,
 } from './events'
 import { MAX_REFERENCES, referenceName } from './events'
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
@@ -139,7 +140,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 57
+export const PROJECTION_VERSION = 58
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -522,6 +523,7 @@ interface ThreadRow {
   workspace_branch: string | null
   workspace_base: string | null
   workspace_removed: number
+  workspace_parked: number
   merged: string | null
   landed_at: number | null
   user_at: number | null
@@ -715,6 +717,7 @@ function toThread(row: ThreadRow, now: number): ThreadView {
             branch: row.workspace_branch,
             base: row.workspace_base,
             removed: row.workspace_removed === 1,
+            parked: row.workspace_parked === 1,
           },
     merged,
     archived:
@@ -3425,9 +3428,11 @@ export class Ariadne {
   }
 
   /** Record that the thread's worktree is gone; its branch stays. */
-  recordWorktreeRemoved(threadId: string, reason: 'merged' | 'user'): void {
+  recordWorktreeRemoved(threadId: string, reason: WorktreeRemoval): void {
     const thread = this.getThread(threadId)
-    if (!thread.workspace || thread.workspace.removed) return
+    if (!thread.workspace) return
+    // One parked while idle is recorded again when its work lands after all.
+    if (thread.workspace.removed && !(thread.workspace.parked && reason !== 'idle')) return
     this.store.append([
       { type: 'workspace.removed', projectId: thread.projectId, data: { threadId, reason } },
     ])

@@ -1,7 +1,6 @@
 import { certificate, Lockout, newToken, serveDaemon } from '@ariadne/daemon'
 import { CERT_NAME, pairingCode, parseAddress, parsePairingCode } from '@ariadne/daemon/protocol'
 import { branchFor, run } from '@ariadne/plugin-local'
-import { createSandbox, detectSandbox, noSandbox } from '@ariadne/sandbox'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -25,7 +24,6 @@ beforeAll(async () => {
     hostname: '127.0.0.1',
     port: 0,
     certificate: cert,
-    sandbox: noSandbox,
   })
   target = {
     host: '127.0.0.1',
@@ -253,36 +251,5 @@ describe('daemon source', () => {
     await expect(provider.connect({ address: 'box', pairing, path: 'rel' })).rejects.toThrow(
       'absolute',
     )
-  })
-})
-
-const sandboxKind = await detectSandbox()
-
-describe.skipIf(!sandboxKind)('daemon sandbox', () => {
-  test("thread commands cannot read the daemon's own directory", async () => {
-    const own = join(base, 'sandboxed')
-    await mkdir(own, { mode: 0o700 })
-    const cert = await certificate(own)
-    const sandboxed = serveDaemon({
-      home: own,
-      hostname: '127.0.0.1',
-      port: 0,
-      certificate: cert,
-      sandbox: createSandbox({ kind: sandboxKind, mode: 'auto', hide: [own] }),
-    })
-    try {
-      const shell = new DaemonShell({
-        host: '127.0.0.1',
-        port: sandboxed.port!,
-        token: newToken(own),
-        fingerprint: cert.fingerprint,
-      })
-      const result = await shell.run('cat "$1"/key.pem "$1"/token.sha256; ls -A "$1"', [own])
-      expect(result.stdout).toBe('')
-      expect(result.stderr).toContain('No such file')
-      await shell.dispose()
-    } finally {
-      await sandboxed.stop(true)
-    }
   })
 })

@@ -159,9 +159,10 @@ printf '%s\\0%s\\0%s\\0%s\\0' "$real" "$top" "$sub" "$HOME"
 /**
  * Give a thread its worktree: `$1` the repository, `$2` the worktree directory, `$3` its
  * branch, `$4` the ref a new branch starts from, `$5` the path inside the repository the
- * workspace is. The server's git there runs no hooks and no fsmonitor. A new worktree gets
- * the checkout's ignored dependency directories as copy-on-write clones when the
- * filesystem clones (`cp --reflink=always`, or `cp -c` on macOS); otherwise nothing.
+ * workspace is. The server's git there runs no hooks and no fsmonitor. When the filesystem
+ * clones (`cp --reflink=always`, or `cp -c` on macOS), a new worktree gets the checkout's
+ * ignored dependency directories as copy-on-write clones, and on Linux its tracked files
+ * too, so it takes room only for what the thread changes; otherwise it is a plain worktree.
  * Prints the real paths the workspace keeps: the root, then the git directory.
  */
 export const OPEN_WORKTREE = `
@@ -172,16 +173,43 @@ g() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$repo" "$@"; }
 clone() {
   if [ "$(uname)" = Darwin ]; then cp -c -R -- "$1" "$2"; else cp -a --reflink=always -- "$1" "$2"; fi
 }
-seed() {
-  local common probe entry
-  common=$(g rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+# Whether a file cloned from the repository into the worktree's place shares storage.
+shares() {
+  local common probe
+  common=$(g rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   probe=ariadne-clone-probe-$$-$RANDOM
-  printf probe > "$common/$probe" || return 0
-  if ! clone "$common/$probe" "$dir/.$probe" 2> /dev/null; then
-    rm -f -- "$common/$probe" "$dir/.$probe"
+  printf probe > "$common/$probe" || return 1
+  if clone "$common/$probe" "$1/.$probe" 2> /dev/null; then
+    rm -f -- "$common/$probe" "$1/.$probe"
     return 0
   fi
-  rm -f -- "$common/$probe" "$dir/.$probe"
+  rm -f -- "$common/$probe" "$1/.$probe"
+  return 1
+}
+# The files the worktree's commit tracks, cloned from the checkout; git then writes only
+# what is missing or different there. GNU cp only: it makes the directories on the way.
+tracked() {
+  local entry
+  : > "$1/ariadne-checkout-pending"
+  # Files and links only: a submodule's directory is git's to make. Each entry reads
+  # "<mode> <type> <object><tab><path>".
+  if [ -n "$shared" ]; then
+    git -C "$dir" ls-tree -r -z HEAD |
+      while IFS= read -r -d '' entry; do
+        case $entry in *' blob '*) printf '%s\\0' "\${entry#*$'\\t'}" ;; esac
+      done |
+      (cd -- "$repo" && xargs -0 cp -a --reflink=always --parents -t "$dir" -- 2> /dev/null)
+  fi
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$dir" reset -q
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$dir" reset -q --hard >&2 || {
+    # Nothing of the thread's is in it yet; the next open starts over.
+    g worktree remove --force --force "$dir" > /dev/null 2>&1
+    exit 5
+  }
+  rm -f -- "$1/ariadne-checkout-pending"
+}
+seed() {
+  local entry
   g ls-files --others --ignored --exclude-standard --directory -z | while IFS= read -r -d '' entry; do
     entry=\${entry%/}
     case "\${entry##*/}" in node_modules | vendor | .pnpm-store) ;; *) continue ;; esac
@@ -192,17 +220,30 @@ seed() {
     clone "$repo/$entry" "$dir/$entry" 2> /dev/null || rm -rf -- "$dir/$entry"
   done
 }
+plain=
+shared=
 if [ ! -e "$dir/.git" ]; then
   mkdir -p -- "$(dirname -- "$dir")" || exit 5
   # A worktree whose directory was deleted by hand is still registered; forget it first.
   g worktree prune
-  if g rev-parse --verify --quiet "refs/heads/$branch" > /dev/null; then
-    g worktree add "$dir" "$branch" >&2 || exit 5
-  else
-    g worktree add --no-track -b "$branch" "$dir" "$start" >&2 || exit 5
+  if shares "$(dirname -- "$dir")"; then
+    shared=1
+    [ "$(uname)" = Darwin ] || plain=--no-checkout
   fi
-  seed
+  if g rev-parse --verify --quiet "refs/heads/$branch" > /dev/null; then
+    g worktree add $plain "$dir" "$branch" >&2 || exit 5
+  else
+    g worktree add $plain --no-track -b "$branch" "$dir" "$start" >&2 || exit 5
+  fi
 fi
+# New without its files, or left so by a checkout that failed or was cut short: it has no
+# index before the checkout begins and the mark until it ends.
+own=$(git -C "$dir" rev-parse --absolute-git-dir 2> /dev/null) || exit 5
+if [ -e "$own/ariadne-checkout-pending" ] || [ ! -e "$own/index" ]; then
+  [ -n "$shared" ] || ! shares "$(dirname -- "$dir")" || shared=1
+  tracked "$own"
+fi
+[ -z "$shared" ] || seed
 root=$dir
 if [ -n "$sub" ]; then
   root=$dir/$sub

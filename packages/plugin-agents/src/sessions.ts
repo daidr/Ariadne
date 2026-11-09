@@ -1,6 +1,5 @@
 import type {
   ChatMessage,
-  CommandSandbox,
   Effort,
   FindContext,
   LocalizedText,
@@ -74,7 +73,6 @@ export interface DriverContext<Settings> {
   tools: AgentTools
   /** An empty directory of this session's own, for the agent to start in. */
   cwd: string
-  sandbox: CommandSandbox
   bridge: ToolBridge
   emit(event: AgentEvent): void
 }
@@ -206,14 +204,14 @@ export interface AgentProvider<Settings> extends ModelProvider<Settings> {
  * A model provider run by an agent program. The program keeps its own conversation, so a
  * session stays open per Ariadne conversation and each request hands it only what is new:
  * the results of the calls it waits on, or the messages that came after its answer. The
- * agent calls the conversation's tools, which Ariadne runs as usual (so they are traced,
- * sandboxed and confirmed like any model's); a step ends when it waits on calls, and its
+ * agent calls the conversation's tools, which Ariadne runs as usual (so they are traced
+ * and confirmed like any model's); a step ends when it waits on calls, and its
  * results go back to it with the next request. A request that does not go on from what the
  * session saw (history summarised, a restart, an edit) starts a new session with all of it.
  */
 export function agentProvider<Settings>(
   agent: AgentKind<Settings>,
-  options: { dataDir: string; sandbox: CommandSandbox; bridge: ToolBridge },
+  options: { dataDir: string; bridge: ToolBridge },
 ): AgentProvider<Settings> {
   const pool = new Map<string, Session>()
   const reaper = setInterval(() => {
@@ -266,7 +264,6 @@ export function agentProvider<Settings>(
       system,
       tools,
       cwd: dir,
-      sandbox: options.sandbox,
       bridge: options.bridge,
       emit: (event) => session.queue.push(event),
     })

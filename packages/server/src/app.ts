@@ -391,25 +391,6 @@ export function createHandler({
     return new Response(null, { status: 204 })
   })
 
-  // How thread commands are isolated, so the page can say when they are not; `configured`
-  // is what the settings say, which a restart puts in place.
-  add('GET', '/api/sandbox', () =>
-    json({
-      sandbox: host?.sandbox.status ?? {
-        kind: null,
-        mode: 'auto',
-        hidden: [],
-        platform: process.platform,
-      },
-      configured: settings?.current.sandbox ?? null,
-    }),
-  )
-  add('PUT', '/api/sandbox', async (request) => {
-    if (!settings)
-      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
-    return json({ configured: settings.updateSandbox(await readJson(request)) })
-  })
-
   // Plugins: the built-in ones and those loaded from a path, with why a path failed.
   add('GET', '/api/plugins', () => json({ plugins: host?.records() ?? [] }))
 
@@ -844,7 +825,11 @@ export function createHandler({
 
   // Threads' worktrees across projects, with the space they take.
   add('GET', '/api/worktrees', async () =>
-    json({ projects: workspaces ? await listWorktrees(app, workspaces) : [] }),
+    json({
+      projects: workspaces ? await listWorktrees(app, workspaces) : [],
+      // Where a Dev Drive is what makes worktrees share storage.
+      windows: process.platform === 'win32',
+    }),
   )
 
   // The user removes a thread's worktree, or one left from a thread Ariadne no longer

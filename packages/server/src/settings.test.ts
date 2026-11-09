@@ -54,14 +54,6 @@ describe('model settings', () => {
     expect(new SettingsStore(path, host).current.concurrency).toEqual({ slots: 5, reserved: 0 })
   })
 
-  test('sandbox settings are checked, trimmed and kept', () => {
-    const store = new SettingsStore(path, host)
-    expect(() => store.updateSandbox({ mode: 'strict', hide: [] })).toThrow()
-    expect(() => store.updateSandbox({ mode: 'auto', hide: [1] })).toThrow()
-    store.updateSandbox({ mode: 'off', hide: [' ~/.aws ', '', '~/.aws'] })
-    expect(new SettingsStore(path, host).current.sandbox).toEqual({ mode: 'off', hide: ['~/.aws'] })
-  })
-
   test('the send key and snippets are checked and kept', () => {
     const store = new SettingsStore(path, host)
     expect(store.current.input).toEqual({ submitOn: 'enter', snippets: [], keys: DEFAULT_KEYS })
@@ -562,6 +554,9 @@ test('plugins inside the plugin data folder, where worktrees live, are refused',
   const store = new SettingsStore(path, host)
   const inside = join(path, '..', 'plugins', 'local', 'worktrees', 'x')
   await expect(store.addPlugin(inside)).rejects.toMatchObject({ code: 'error.pluginInWorkspace' })
+  // So are worktrees kept beside a repository.
+  const beside = join(path, '..', 'code', '.ariadne-worktrees', 'abc', 'thr_x', 'plugin')
+  await expect(store.addPlugin(beside)).rejects.toMatchObject({ code: 'error.pluginInWorkspace' })
 })
 
 const stdio = (env: { name: string; value: string }[] = []) => ({

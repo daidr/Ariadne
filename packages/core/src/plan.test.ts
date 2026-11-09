@@ -672,6 +672,7 @@ describe('project source', () => {
       branch: 'ariadne/x',
       base: 'main',
       removed: false,
+      parked: false,
     })
     expect(app.events({ projectId }).filter((e) => e.type === 'workspace.opened')).toHaveLength(1)
     // A removed worktree comes back as a new record when it is opened again.
@@ -680,6 +681,11 @@ describe('project source', () => {
     app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x', base: 'main' })
     expect(app.getThread(thread.id).workspace?.removed).toBe(false)
     expect(app.events({ projectId }).filter((e) => e.type === 'workspace.opened')).toHaveLength(2)
+    // One removed only to make room is parked: its changes are still to be looked through.
+    app.recordWorktreeRemoved(thread.id, 'idle')
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: true, parked: true })
+    app.recordWorkspace(thread.id, { label: '/w/x', branch: 'ariadne/x', base: 'main' })
+    expect(app.getThread(thread.id).workspace).toMatchObject({ removed: false, parked: false })
   })
 })
 

@@ -1,7 +1,4 @@
 import { createTranslator, terminalLocale } from '@ariadne/i18n'
-import { browserProfiles, createSandbox, detectSandbox } from '@ariadne/sandbox'
-import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import {
   certificate,
@@ -22,8 +19,6 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     listen: { type: 'string', default: `127.0.0.1:${DEFAULT_PORT}` },
-    hide: { type: 'string', multiple: true, default: [] },
-    'no-sandbox': { type: 'boolean', default: false },
     stdio: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -40,21 +35,10 @@ if (process.platform === 'win32') {
 
 const home = daemonHome()
 
-const sandbox = createSandbox({
-  kind: values['no-sandbox'] ? null : await detectSandbox(),
-  mode: values['no-sandbox'] ? 'off' : 'auto',
-  // Ariadne's own home too, should it also run on this machine.
-  hide: [home, join(homedir(), '.ariadne'), ...browserProfiles(), ...values.hide],
-})
-// The daemon's own code: a thread that changed it would run as the daemon next time.
-const code = process.execPath.endsWith('/bun')
-  ? resolve(import.meta.dir, '../../..')
-  : dirname(process.execPath)
-
 if (values.stdio) {
   // Ariadne came in through ssh, which already decided who may connect: no token, no
   // certificate, and nothing but frames on standard output.
-  await serveStdio({ sandbox, readOnly: [code] })
+  await serveStdio()
   // Commands get a moment to end on their own before the process goes.
   setTimeout(() => process.exit(0), 2500)
 } else {
@@ -93,8 +77,6 @@ async function serve() {
       hostname: listen.host,
       port: listen.port,
       certificate: cert,
-      sandbox,
-      readOnly: [code],
     })
   } catch (error) {
     console.error(
@@ -108,9 +90,6 @@ async function serve() {
 
   console.info(t('cli.daemon.started', { address: `${listen.host}:${server.port}` }))
   if (!isLoopback(listen.host)) console.info(t('cli.daemon.notLoopback'))
-  if (!sandbox.kind) {
-    console.warn(t(values['no-sandbox'] ? 'cli.daemon.sandboxOff' : 'cli.daemon.noSandbox'))
-  }
   if (!hasToken(home)) printCode(newToken(home))
   else console.info(t('cli.daemon.paired'))
 }

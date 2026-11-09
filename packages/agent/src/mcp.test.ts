@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { McpHub, type McpServerConfig } from './mcp'
 import { canonicalJson, mcpCallPurpose, mcpToolName, mcpTools } from './mcp-tools'
-import { noSandbox } from '@ariadne/sandbox'
 import { Scheduler } from './scheduler'
 import { answered, call, fakeModel, say } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
@@ -42,7 +41,6 @@ beforeEach(() => {
   servers = [testServer()]
   hub = new McpHub({
     servers: () => servers,
-    sandbox: noSandbox,
     env: () => ({ PATH: process.env.PATH ?? '' }),
   })
   const project = app.createProject('P')
@@ -187,7 +185,6 @@ describe('external tools', () => {
   test('a server that does not answer holds a turn only a moment', async () => {
     const quick = new McpHub({
       servers: () => servers,
-      sandbox: noSandbox,
       env: () => ({ PATH: process.env.PATH ?? '' }),
       turnWaitMs: 50,
       setupTimeoutMs: 400,
@@ -286,25 +283,6 @@ describe('external tools', () => {
       await hub.dispose()
       server.stop(true)
     }
-  })
-
-  test('a local server runs in the sandbox, with nothing kept visible', async () => {
-    const wrapped: { argv: string[]; keep: string[] }[] = []
-    const recording = new McpHub({
-      servers: () => servers,
-      sandbox: {
-        kind: 'test',
-        wrap(argv, { keep }) {
-          wrapped.push({ argv, keep })
-          return argv
-        },
-      },
-      env: () => ({ PATH: process.env.PATH ?? '' }),
-    })
-    servers = [testServer({ cwd: '/tmp' })]
-    await mcpTools(recording, ['test'], 'thread')
-    await recording.dispose()
-    expect(wrapped).toEqual([{ argv: [process.execPath, SERVER], keep: [] }])
   })
 
   test('changed settings start the server again', async () => {

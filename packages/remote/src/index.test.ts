@@ -335,6 +335,26 @@ describe('remote directory', () => {
     expect(await again.readFile('kept.txt')).toBe('kept\n')
   })
 
+  test('a worktree left without its files by a checkout cut short is filled again', async () => {
+    const dir = await repo()
+    const { workspace } = await provider().connect({ host: 'box', path: dir })
+    const a = await workspace!.open({ threadId: 'thr_a' })
+    const own = (await a.exec('git rev-parse --absolute-git-dir')).stdout.trim()
+    const at = a.label.slice('localhost:'.length)
+    // As `worktree add --no-checkout` leaves it: no files, no index.
+    await rm(join(at, 'README.md'))
+    await rm(join(own, 'index'))
+    const again = await workspace!.open({ threadId: 'thr_a' })
+    expect(await again.readFile('README.md')).toBe('# repo\n')
+    expect((await again.exec('git status --short')).stdout).toBe('')
+    // Or stopped while git was writing them: the mark is still there.
+    await rm(join(at, 'README.md'))
+    await writeFile(join(own, 'ariadne-checkout-pending'), '')
+    const third = await workspace!.open({ threadId: 'thr_a' })
+    expect(await third.readFile('README.md')).toBe('# repo\n')
+    expect(existsSync(join(own, 'ariadne-checkout-pending'))).toBe(false)
+  })
+
   test('a subdirectory of a checkout stays the root inside the worktree', async () => {
     const dir = await repo()
     const { workspace } = await provider().connect({ host: 'box', path: join(dir, 'pkg') })

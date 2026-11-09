@@ -202,6 +202,7 @@ export const threadsProjection: Projection = {
       workspace_branch TEXT,
       workspace_base TEXT,
       workspace_removed INTEGER NOT NULL DEFAULT 0,
+      workspace_parked INTEGER NOT NULL DEFAULT 0,
       merged TEXT,
       -- When its work last landed (its branch or pull request was merged), and when the
       -- user last wrote to it: landed with nothing written since, it is archived.
@@ -361,15 +362,15 @@ export const threadsProjection: Projection = {
       case 'workspace.opened':
         db.run(
           `UPDATE threads SET workspace_label = ?, workspace_branch = ?, workspace_base = ?,
-             workspace_removed = 0, updated_at = ? WHERE id = ?`,
+             workspace_removed = 0, workspace_parked = 0, updated_at = ? WHERE id = ?`,
           [event.data.label, event.data.branch, event.data.base, event.at, event.data.threadId],
         )
         break
       case 'workspace.removed':
-        db.run('UPDATE threads SET workspace_removed = 1, updated_at = ? WHERE id = ?', [
-          event.at,
-          event.data.threadId,
-        ])
+        db.run(
+          'UPDATE threads SET workspace_removed = 1, workspace_parked = ?, updated_at = ? WHERE id = ?',
+          [event.data.reason === 'idle' ? 1 : 0, event.at, event.data.threadId],
+        )
         break
       case 'turn.changed':
         if (event.data.branch) {
@@ -381,11 +382,11 @@ export const threadsProjection: Projection = {
         break
       case 'branch.merged': {
         const { threadId, ...merge } = event.data
-        db.run('UPDATE threads SET merged = ?1, landed_at = ?2, updated_at = ?2 WHERE id = ?3', [
-          JSON.stringify({ ...merge, at: event.at }),
-          event.at,
-          threadId,
-        ])
+        // A worktree parked while idle is not coming back for this: the work has landed.
+        db.run(
+          'UPDATE threads SET merged = ?1, landed_at = ?2, updated_at = ?2, workspace_parked = 0 WHERE id = ?3',
+          [JSON.stringify({ ...merge, at: event.at }), event.at, threadId],
+        )
         break
       }
       case 'branch.merge_undone':
@@ -410,7 +411,7 @@ export const threadsProjection: Projection = {
       case 'pull_request.closed':
         // Merged or closed, its checks are no longer the thread's to fix.
         db.run(
-          `UPDATE threads SET check_failures = 0,
+          `UPDATE threads SET check_failures = 0, workspace_parked = 0,
              landed_at = CASE WHEN ?1 THEN ?2 ELSE landed_at END WHERE id = ?3`,
           [event.data.merged, event.at, event.data.threadId],
         )
