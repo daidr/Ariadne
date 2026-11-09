@@ -17,13 +17,14 @@ import type {
   Workspace,
 } from '@ariadne/plugin-sdk'
 import type { Locale } from '@ariadne/i18n'
-import type { ProjectSource } from '@ariadne/core'
+import type { ProjectReference, ProjectSource, ThreadReference } from '@ariadne/core'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
 import { commandVerdict, type CommandRule } from './limits'
 import { headAndTail } from './workspace-tools'
 import { BackgroundCommands } from './background'
+import { referenceRefusal } from './reference-guard'
 import type { ReferenceKind } from './reference-tools'
 
 /** How long setting up a new workspace may take, unless the user's limits say. */
@@ -72,6 +73,11 @@ export async function connectSource(
   }
   try {
     const capabilities = await provider.connect({ ...source.settings, ...own } as never)
+    if (capabilities.workspace?.viewOnly) {
+      throw new DomainError('error.workspace', {
+        detail: 'a single file can only be a reference source; threads work in a directory',
+      })
+    }
     if (!source.hosting || !hostingProvider) return capabilities
     const hosting = await hostingProvider.connect({
       ...source.hosting.settings,
@@ -392,22 +398,57 @@ export class WorkspaceManager {
    * The sources the project only reads, each with the name conversations call it by and
    * where it is in one line, like `describe`.
    */
-  references(projectId: string, locale: Locale): { name: string; line: string }[] {
-    return this.app.getProject(projectId).references.map((reference) => {
+  references(
+    projectId: string,
+    locale: Locale,
+    /** A thread also gets the sources it alone reads, marked as its own. */
+    threadId?: string,
+  ): { name: string; line: string; own?: true }[] {
+    const line = (reference: ProjectReference) => {
       const provider = this.host.contexts.get(reference.kind)
       const title = provider ? (provider.title[locale] ?? provider.title['zh-CN']) : reference.kind
       const summary = sourceSummary(provider?.summary, reference.settings)
       return { name: reference.name, line: summary ? `${title} ${summary}` : title }
-    })
+    }
+    return [
+      ...this.app.getProject(projectId).references.map(line),
+      ...this.threadReferences(threadId).map((reference) => ({
+        ...line(reference),
+        own: true as const,
+      })),
+    ]
+  }
+
+  /** The sources a thread alone reads; none for the coordinator or a thread that is gone. */
+  private threadReferences(threadId: string | undefined): ThreadReference[] {
+    if (!threadId) return []
+    try {
+      return this.app.getThread(threadId).references
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Why a conversation may not ask to read this source, or `null`: see `referenceRefusal`.
+   */
+  referenceRefusal(reference: { kind: string; settings: Record<string, unknown> }): string | null {
+    const provider = this.host.contexts.get(reference.kind)
+    if (!provider) return null
+    return referenceRefusal(provider, reference.settings, this.host.sandbox.hidden ?? [])
   }
 
   /**
    * A reference source by its name, read-only; throws a `DomainError` the model can read.
    * It is connected once per configuration, and again after a failure.
    */
-  async referenceView(projectId: string, name: string): Promise<SourceView> {
+  async referenceView(projectId: string, name: string, threadId?: string): Promise<SourceView> {
     const project = this.app.getProject(projectId)
-    const reference = project.references.find((known) => known.name === name)
+    // A thread's own come first: their names were told apart from the project's when they
+    // were allowed, and a reference the project took since must not take their place.
+    const reference =
+      this.threadReferences(threadId).find((known) => known.name === name) ??
+      project.references.find((known) => known.name === name)
     if (!reference) throw new DomainError('error.noReference', { name })
     const secrets = referenceSecrets(
       this.host.contexts,

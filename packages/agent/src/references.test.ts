@@ -6,6 +6,7 @@ import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
 import { call, fakeModel, say } from './test-model'
+import { localRefusal, remoteRefusal } from './reference-guard'
 import { referenceSecrets, WorkspaceManager } from './workspaces'
 
 let app: Ariadne
@@ -83,7 +84,7 @@ async function diskHost(disks: Record<string, Files>, written: string[] = []) {
     settings: {
       type: 'object',
       properties: {
-        path: { type: 'string', title: { 'zh-CN': '路径' } },
+        path: { type: 'string', title: { 'zh-CN': '路径' }, directory: true },
         token: { type: 'string', title: { 'zh-CN': '令牌' }, secret: true },
       },
       required: ['path'],
@@ -304,7 +305,7 @@ describe('reading a reference source', () => {
     expect(main).toHaveProperty(['src/button.ts'], 'changed')
   })
 
-  test('a project without references has no source parameter and no section', async () => {
+  test('a project without references has no section; a thread may still ask for one', async () => {
     const workspaces = new WorkspaceManager(app, await diskHost({ '/main': { 'a.ts': '' } }))
     const project = app.createProject('P')
     app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/main' } })
@@ -314,9 +315,11 @@ describe('reading a reference source', () => {
     await startScheduler(model, workspaces).idle()
     const request = model.requests.find((r) => system(r).includes('You are a thread'))!
     expect(system(request)).not.toContain('Reference sources:')
-    expect(JSON.stringify(request.tools.find((tool) => tool.name === 'read_file'))).not.toContain(
+    // What it asks for and is allowed, it reads in the same turn: the parameter is there.
+    expect(JSON.stringify(request.tools.find((tool) => tool.name === 'read_file'))).toContain(
       '"source"',
     )
+    expect(request.tools.map((tool) => tool.name)).toContain('add_reference')
   })
 
   test('one that cannot be reached fails the read that asked, and names itself', async () => {
@@ -398,7 +401,7 @@ describe('the coordinator adds a reference source', () => {
       content: '再加一次',
     })
     await startScheduler(again, workspaces).idle()
-    expect(toolResults(project.coordinatorId).at(-1)?.[2]).toContain('Already a reference source')
+    expect(toolResults(project.coordinatorId).at(-1)?.[2]).toContain('You can already read it')
     expect(app.listOpenAttentions(project.id)).toEqual([])
     expect(app.getProject(project.id).references).toHaveLength(1)
   })
@@ -436,5 +439,205 @@ describe('the coordinator adds a reference source', () => {
     await scheduler!.idle()
     expect(toolResults(project.coordinatorId).at(-1)?.[2]).toContain('declined')
     expect(app.getProject(project.id).references).toEqual([])
+  })
+})
+
+describe('a thread asks to read a source', () => {
+  const LOGS = { 'access.log': 'GET / 502\n' }
+
+  /** A thread that asks for `/logs` whenever it is its turn, and reads it once allowed. */
+  function asking(keep: 'thread' | 'project') {
+    return fakeModel((request, role) => {
+      if (role !== 'thread') return say('')
+      const last = request.messages.at(-1)
+      if (last?.role !== 'tool') {
+        return [
+          call('c1', 'add_reference', {
+            kind: 'disk',
+            settings: { path: '/logs' },
+            reason: '排查 502 要看访问日志',
+            keep,
+          }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      if (/^(Allowed|Added)/.test(String(last.content))) {
+        return [
+          call('c2', 'read_file', { source: 'logs', path: Object.keys(LOGS)[0] }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return say('')
+    })
+  }
+
+  async function start(keep: 'thread' | 'project') {
+    const workspaces = new WorkspaceManager(
+      app,
+      await diskHost({ '/main': { 'a.ts': '' }, '/logs': LOGS }),
+    )
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/main' } })
+    const thread = app.createThread(project.id, { title: 'T' })
+    const model = asking(keep)
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '查 502' })
+    await startScheduler(model, workspaces).idle()
+    const [card] = app.listOpenAttentions(project.id)
+    return { workspaces, project, thread, model, card: card! }
+  }
+
+  test('for itself alone: the card offers both, and only this thread reads it', async () => {
+    const { workspaces, project, thread, model, card } = await start('thread')
+    expect(card.block).toEqual({
+      type: 'choice',
+      question: '读取本地目录 /logs？\n排查 502 要看访问日志',
+      options: [
+        { label: '加入项目', consequence: '协调器和所有讨论串都能读' },
+        { label: '仅这个讨论串', consequence: '只有这个讨论串能读，结束后失效' },
+        { label: '不用', consequence: '不读它，继续做别的' },
+      ],
+      recommended: 1,
+    })
+    // In the thread's chat too, and nothing is readable before the answer.
+    expect(app.listMessages(thread.id).map((m) => m.ask?.attentionId ?? null)).toContain(card.id)
+    expect(app.getThread(thread.id).references).toEqual([])
+
+    app.answerAttention(card.id, { type: 'choice', choice: 1 })
+    await scheduler!.idle()
+    const [own] = app.getThread(thread.id).references
+    expect(own).toMatchObject({
+      name: 'logs',
+      kind: 'disk',
+      settings: { path: '/logs' },
+      attentionId: card.id,
+    })
+    expect(app.getProject(project.id).references).toEqual([])
+    // (A thread that ends a turn without reporting is told to, so it asks once more and
+    // hears that it can already read it.)
+    const results = toolResults(thread.id)
+    expect(results.map((result) => result[2]).join('\n')).toContain('Allowed for this thread only')
+    expect(results).toContainEqual(['read_file', false, '    1\tGET / 502\n    2\t'])
+    // Its next turn is told about it; the coordinator and other threads are not, and
+    // cannot read it by its name.
+    const told = model.requests.filter((r) => system(r).includes('You are a thread')).at(-1)!
+    expect(system(told)).toContain('logs: 本地目录 /logs (allowed for this thread only)')
+    const other = app.createThread(project.id, { title: 'Other' })
+    await expect(workspaces.referenceView(project.id, 'logs')).rejects.toMatchObject({
+      code: 'error.noReference',
+    })
+    await expect(workspaces.referenceView(project.id, 'logs', other.id)).rejects.toMatchObject({
+      code: 'error.noReference',
+    })
+    expect(workspaces.references(project.id, 'zh-CN')).toEqual([])
+    expect(workspaces.references(project.id, 'zh-CN', other.id)).toEqual([])
+
+    // Taken back, it is gone for the thread too.
+    app.removeThreadReference(thread.id, own!.id)
+    await expect(workspaces.referenceView(project.id, 'logs', thread.id)).rejects.toMatchObject({
+      code: 'error.noReference',
+    })
+  })
+
+  test('the user may pick the project instead, and everyone reads it', async () => {
+    const { workspaces, project, thread, card } = await start('thread')
+    app.answerAttention(card.id, { type: 'choice', choice: 0 })
+    await scheduler!.idle()
+    expect(app.getThread(thread.id).references).toEqual([])
+    expect(app.getProject(project.id).references).toMatchObject([{ name: 'logs', kind: 'disk' }])
+    const results = toolResults(thread.id)
+    expect(results.map((result) => result[2]).join('\n')).toContain(
+      'Added. Read it with source "logs"',
+    )
+    expect(results).toContainEqual(['read_file', false, '    1\tGET / 502\n    2\t'])
+    expect(await (await workspaces.referenceView(project.id, 'logs')).list('.')).toEqual([
+      { name: 'access.log', kind: 'file' },
+    ])
+  })
+
+  test('a no allows nothing, and the thread does not ask again by itself', async () => {
+    const { project, thread, card } = await start('project')
+    expect(card.block).toMatchObject({ type: 'choice', recommended: 0 })
+    app.answerAttention(card.id, { type: 'choice', choice: 2 })
+    await scheduler!.idle()
+    expect(toolResults(thread.id).at(-1)?.[2]).toContain('declined')
+    expect(app.listOpenAttentions(project.id)).toEqual([])
+    expect(app.getThread(thread.id).references).toEqual([])
+    expect(app.getProject(project.id).references).toEqual([])
+  })
+
+  test('one allowed for a thread can be kept for the project under its name', async () => {
+    const { workspaces, project, thread, card } = await start('thread')
+    app.answerAttention(card.id, { type: 'choice', choice: 1 })
+    await scheduler!.idle()
+    const [own] = app.getThread(thread.id).references
+    // The project took the name since: the thread's keeps its own, and is renamed when kept.
+    app.addProjectReference(project.id, { kind: 'disk', settings: { path: '/main' } }, '/x/logs')
+    expect(await (await workspaces.referenceView(project.id, 'logs', thread.id)).list('.')).toEqual(
+      [{ name: 'access.log', kind: 'file' }],
+    )
+    const kept = app.keepThreadReference(thread.id, own!.id)
+    expect(kept).toMatchObject({ id: own!.id, name: 'logs-2', settings: { path: '/logs' } })
+    expect(app.getThread(thread.id).references).toEqual([])
+    expect(app.getProject(project.id).references.map((ref) => ref.name)).toEqual(['logs', 'logs-2'])
+  })
+
+  test('a place kept out of reach is refused before any card', async () => {
+    const workspaces = new WorkspaceManager(app, await diskHost({ '/main': {} }))
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/main' } })
+    const thread = app.createThread(project.id, { title: 'T' })
+    const model = fakeModel((request, role) => {
+      if (role !== 'thread' || request.messages.at(-1)?.role === 'tool') return say('')
+      return [
+        call('c1', 'add_reference', {
+          kind: 'disk',
+          settings: { path: '/' },
+          reason: '看看',
+          keep: 'thread',
+        }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '开始' })
+    await startScheduler(model, workspaces).idle()
+    const result = toolResults(thread.id).find(([name]) => name === 'add_reference')!
+    expect(result.slice(0, 2)).toEqual(['add_reference', true])
+    expect(result[2]).toContain('too wide')
+    expect(app.listOpenAttentions(project.id)).toEqual([])
+    // It never got as far as connecting.
+    expect(connected.filter((settings) => settings.path === '/')).toEqual([])
+  })
+})
+
+describe('what a conversation may not ask for', () => {
+  const home = '/home/someone'
+  const hidden = ['/home/someone/.ariadne', '/home/someone/.config/google-chrome']
+
+  test('on this machine: protected places, and anything wide enough to hold one', () => {
+    expect(localRefusal('/home/someone/code/dou-ui', hidden, home)).toBeNull()
+    expect(localRefusal('/var/log/nginx', hidden, home)).toBeNull()
+    expect(localRefusal('/home/someone/.ssh', hidden, home)).toContain('out of reach')
+    expect(localRefusal('/home/someone/.ssh/config', hidden, home)).toContain('out of reach')
+    expect(localRefusal('/home/someone/.config/gh', hidden, home)).toContain('out of reach')
+    expect(localRefusal('/home/someone/.ariadne/worktrees/x', hidden, home)).toContain(
+      'out of reach',
+    )
+    expect(localRefusal('/home/someone', hidden, home)).toContain('too wide')
+    expect(localRefusal('/home/someone/.config', hidden, home)).toContain('too wide')
+    expect(localRefusal('/home', hidden, home)).toContain('too wide')
+    expect(localRefusal('/', hidden, home)).toContain('too wide')
+    // Spelled around it: still the same place.
+    expect(localRefusal('/var/../home/someone/.ssh', hidden, home)).toContain('out of reach')
+  })
+
+  test('on another machine, by its spelling', () => {
+    expect(remoteRefusal('/srv/app/logs')).toBeNull()
+    expect(remoteRefusal('~/code/app')).toBeNull()
+    expect(remoteRefusal('/')).toContain('too wide')
+    expect(remoteRefusal('~')).toContain('too wide')
+    expect(remoteRefusal('/home/deploy/')).toContain('too wide')
+    expect(remoteRefusal('/root')).toContain('too wide')
+    expect(remoteRefusal('~/.ssh')).toContain('out of reach')
+    expect(remoteRefusal('/home/deploy/.aws/cli')).toContain('out of reach')
   })
 })

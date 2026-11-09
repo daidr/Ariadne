@@ -6,6 +6,7 @@ import {
   shellArgv,
   FileTooLargeError,
   searchableView,
+  singleFileView,
   WorkspacePathError,
   type CommandSandbox,
   type ContextProvider,
@@ -18,7 +19,7 @@ import {
 import { createHash } from 'node:crypto'
 import { constants, existsSync, realpathSync } from 'node:fs'
 import { mkdir, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   branchChanges,
   branchMerged,
@@ -629,6 +630,23 @@ export function localWorkspaces(input: {
   }
 }
 
+/**
+ * One file on this machine, read-only: its directory is opened as a source is, and only
+ * the file is shown of it, so what the sandbox hides and links out of the directory stay
+ * out of reach the same way.
+ */
+export function localFile(path: string, sandbox?: CommandSandbox): WorkspaceCapability {
+  const directory = new LocalWorkspace('source', dirname(path), null, { sandbox, git: false })
+  return {
+    isolated: false,
+    viewOnly: true,
+    open: async () => {
+      throw new Error(`${path} is a file: it can be read, not worked in`)
+    },
+    view: async () => singleFileView(directory, basename(path)),
+  }
+}
+
 /** The "local directory" context source; checkouts go under `dataDir`. */
 export function localDirectoryProvider(
   dataDir: string,
@@ -659,6 +677,9 @@ export function localDirectoryProvider(
       const path = settings.path?.trim()
       if (!path || !isAbsolute(path)) throw new Error('the directory must be an absolute path')
       const info = await stat(path).catch(() => null)
+      // A single file is something to read, never to work in: a log, a dump.
+      // Where it really is, so a link to it reads like the file itself.
+      if (info?.isFile()) return { workspace: localFile(await realpath(path), sandbox) }
       if (!info?.isDirectory()) throw new Error(`${path} is not a directory`)
       const repoRoot = await gitRoot(path)
       return {

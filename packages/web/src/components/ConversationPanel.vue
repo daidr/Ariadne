@@ -70,6 +70,8 @@ import {
   sendMessage,
   state,
   resumeThread,
+  removeThreadReference,
+  keepThreadReference,
   setThreadModel,
   stopTurn,
   undoMerge,
@@ -169,6 +171,9 @@ const view = computed(() =>
 const conversationId = computed(() =>
   props.threadId ? props.threadId : (state.detail?.project.coordinatorId ?? null),
 )
+/** The source the user allowed this thread alone on the card of that ask, while it has it. */
+const ownReference = (attentionId: string) =>
+  thread.value?.references.find((reference) => reference.attentionId === attentionId) ?? null
 const thread = computed(() =>
   props.threadId
     ? (state.detail?.threads.find((item) => item.id === props.threadId) ?? null)
@@ -970,7 +975,27 @@ watch(
                 :block="message.ask.block"
                 :answer="message.ask.answer"
                 :withdrawn="message.ask.withdrawn"
-              />
+              >
+                <!-- A source allowed for this thread alone can be taken back or kept. -->
+                <template v-if="ownReference(message.ask.attentionId)" #after>
+                  <span class="own-reference">
+                    <DouLink
+                      underline="hover"
+                      @click="
+                        removeThreadReference(threadId!, ownReference(message.ask.attentionId)!.id)
+                      "
+                      >{{ t('reference.own.revoke') }}</DouLink
+                    >
+                    <DouLink
+                      underline="hover"
+                      @click="
+                        keepThreadReference(threadId!, ownReference(message.ask.attentionId)!.id)
+                      "
+                      >{{ t('reference.own.keep') }}</DouLink
+                    >
+                  </span>
+                </template>
+              </AskBlock>
               <LineComments
                 v-else-if="part.type === 'comments'"
                 :comments="message.comments"
@@ -1231,6 +1256,26 @@ watch(
 .edit-original-markdown {
   font-size: var(--dou-font-size-sm);
   white-space: normal;
+}
+
+/* Shown while the pointer is on the card, like a message's own actions. */
+.own-reference {
+  display: inline-flex;
+  gap: 12px;
+  font-size: var(--dou-font-size-sm);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ask-block:hover .own-reference,
+.own-reference:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .own-reference {
+    opacity: 1;
+  }
 }
 
 .conversation {

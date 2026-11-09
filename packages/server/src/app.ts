@@ -716,6 +716,18 @@ export function createHandler({
     json({ thread: app.resumeThread(threadId, 'user') }),
   )
 
+  // A source the user allowed one thread to read: taken back, or kept for the project.
+  add('DELETE', '/api/threads/:threadId/references/:referenceId', (_request, params) => {
+    const { threadId = '', referenceId = '' } = params
+    return json({ thread: app.removeThreadReference(threadId, referenceId) })
+  })
+
+  add('POST', '/api/threads/:threadId/references/:referenceId/keep', (_request, params) => {
+    const { threadId = '', referenceId = '' } = params
+    app.keepThreadReference(threadId, referenceId)
+    return json({ thread: app.getThread(threadId) })
+  })
+
   add('POST', '/api/threads/:threadId/reviewed', (_request, { threadId = '' }) =>
     json({ thread: app.reviewThread(threadId) }),
   )

@@ -5,7 +5,16 @@ import {
   type SourceView,
 } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -211,6 +220,31 @@ describe('local directory', () => {
     await expect(ws.writeFile('/etc/passwd', 'x')).rejects.toThrow(WorkspacePathError)
     await ws.writeFile('deep/er/file.txt', 'ok')
     expect(await ws.readFile('deep/er/file.txt')).toBe('ok')
+  })
+
+  test('a single file is read by its name alone, and nothing beside it', async () => {
+    const dir = join(base, 'logs')
+    await mkdir(dir)
+    await writeFile(join(dir, 'app.log'), 'boot\nfailed: 502\n')
+    await writeFile(join(dir, 'secret.env'), 'TOKEN=1\n')
+    await symlink(join(dir, 'secret.env'), join(dir, 'link.log'))
+    const provider = localDirectoryProvider(join(base, 'data'))
+    const { workspace } = await provider.connect({ path: join(dir, 'app.log') })
+    // Nothing to work in: a project cannot take it as its source.
+    expect(workspace!.viewOnly).toBe(true)
+    await expect(workspace!.open({ threadId: 't' })).rejects.toThrow('is a file')
+    const view = await workspace!.view!()
+    expect(await view.list('.')).toEqual([{ name: 'app.log', kind: 'file' }])
+    expect(new TextDecoder().decode(await view.readBytes('app.log', 1000))).toContain('502')
+    expect(new TextDecoder().decode(await view.readBytes('./app.log', 1000))).toContain('502')
+    for (const path of ['secret.env', '../logs/secret.env', 'app.log/../secret.env', 'sub']) {
+      await expect(view.readBytes(path, 1000)).rejects.toThrow()
+    }
+    await expect(view.list('sub')).rejects.toThrow()
+    await expect(view.list('..')).rejects.toThrow()
+    // Searching goes file by file through the same two doors.
+    expect(view.files).toBeUndefined()
+    expect(view.search).toBeUndefined()
   })
 
   test('refuses relative or missing directories', async () => {

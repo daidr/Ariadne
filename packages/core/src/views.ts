@@ -21,6 +21,7 @@ import type {
   PlanNodeKind,
   PlanOp,
   ProjectReference,
+  ThreadReference,
   ProjectSource,
   Author,
   MessageKind,
@@ -123,6 +124,8 @@ export interface ThreadView {
   pullRequest: ThreadPullRequest | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
   stopped: { reason: string; by: string; at: number } | null
+  /** The sources it alone reads, each allowed by the user on a card of this thread. */
+  references: ThreadReference[]
   /** The model setting it was given; `null` uses the default for threads. */
   model: string | null
   /** The readable part of its branch name the coordinator gave it, e.g. `fix-export`. */

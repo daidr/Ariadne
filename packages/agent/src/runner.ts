@@ -150,7 +150,7 @@ function systemPrompt(
   source: { line: string; readable: boolean } | null,
   userInstructions: string,
   skills: SkillSet,
-  references: { name: string; line: string }[],
+  references: { name: string; line: string; own?: true }[],
 ): string {
   if (conversation.role === 'coordinator') {
     const project = app.getProject(conversation.projectId)
@@ -286,7 +286,10 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   // The coordinator looks at the source only when its provider offers a view.
   const hasSource = !isThread && !!(await workspaces?.viewable(conversation.projectId))
   // Sources the project only reads: the looking tools take one by name.
-  const hasReferences = !!workspaces && project.references.length > 0
+  // A thread also has the ones the user allowed it alone.
+  const ownReferences =
+    isThread && !reviewOf ? app.getThread(conversation.id).references.length > 0 : false
+  const hasReferences = !!workspaces && (project.references.length > 0 || ownReferences)
   // The project's switches turn built-in tools off; the user's limits and shell show in
   // run_command's description.
   const off = switchedOff(project.settings.tools)
@@ -299,9 +302,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       : toolsFor(conversation.role, {
           workspace: isThread ? hasWorkspace : hasSource,
           references: hasReferences,
-          ...(!isThread && workspaces
-            ? { referenceKinds: workspaces.referenceKinds(options.locale) }
-            : {}),
+          ...(workspaces ? { referenceKinds: workspaces.referenceKinds(options.locale) } : {}),
           repo: hasRepo,
           tracker: hasTracker,
           models: options.models ?? [],
@@ -378,12 +379,20 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     },
     reference: (name) => {
       if (!workspaces) return Promise.reject(new DomainError('error.noReference', { name }))
-      return workspaces.referenceView(conversation.projectId, name)
+      return workspaces.referenceView(
+        conversation.projectId,
+        name,
+        isThread ? conversation.id : undefined,
+      )
     },
     ...(workspaces
       ? {
-          checkReference: (reference) =>
-            workspaces.checkReference(conversation.projectId, reference),
+          // What a conversation asks for is held to more than what the user adds by hand.
+          checkReference: async (reference) => {
+            const refusal = workspaces.referenceRefusal(reference)
+            if (refusal) throw new DomainError('error.workspace', { detail: refusal })
+            return workspaces.checkReference(conversation.projectId, reference)
+          },
         }
       : {}),
     repo: () => {
@@ -474,7 +483,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         line ? { line, readable: hasSource } : null,
         settings.instructions,
         skills,
-        workspaces?.references(conversation.projectId, options.locale) ?? [],
+        workspaces?.references(
+          conversation.projectId,
+          options.locale,
+          isThread ? conversation.id : undefined,
+        ) ?? [],
       )
     }
     const specs = tools.map((tool) => tool.spec)

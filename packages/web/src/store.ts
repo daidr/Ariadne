@@ -1315,6 +1315,26 @@ export async function resumeThread(threadId: string) {
   await api.resumeThread(threadId).catch(report)
 }
 
+/** Take back a source the user allowed one thread to read. */
+export async function removeThreadReference(threadId: string, referenceId: string) {
+  try {
+    await api.removeThreadReference(threadId, referenceId)
+    await refreshCurrent()
+  } catch (error) {
+    report(error)
+  }
+}
+
+/** Keep such a source for the whole project. */
+export async function keepThreadReference(threadId: string, referenceId: string) {
+  try {
+    await api.keepThreadReference(threadId, referenceId)
+    await refreshCurrent()
+  } catch (error) {
+    report(error)
+  }
+}
+
 /** The user is through with what the thread put up for review. */
 export async function reviewThread(threadId: string) {
   await api.reviewThread(threadId).catch(report)

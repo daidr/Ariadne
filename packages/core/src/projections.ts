@@ -201,6 +201,8 @@ export const threadsProjection: Projection = {
       -- turn that changed something.
       changes TEXT,
       pull_request TEXT,
+      -- The sources it alone reads (JSON ThreadReference[]).
+      reference_sources TEXT NOT NULL DEFAULT '[]',
       check_failures INTEGER NOT NULL DEFAULT 0,
       stopped_reason TEXT,
       stopped_by TEXT,
@@ -275,6 +277,13 @@ export const threadsProjection: Projection = {
           'UPDATE threads SET reviewing = 0, review_delivered = 1, updated_at = ? WHERE id = ?',
           [event.at, event.data.threadId],
         )
+        break
+      case 'thread.references.set':
+        db.run('UPDATE threads SET reference_sources = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(event.data.references),
+          event.at,
+          event.data.threadId,
+        ])
         break
       case 'thread.model_set':
         db.run('UPDATE threads SET model = ?, updated_at = ? WHERE id = ?', [

@@ -19,6 +19,7 @@ export {
   listFiles,
   MAX_MATCH_LINES,
   searchableView,
+  singleFileView,
   searchByReading,
   searchLines,
   viewPath,

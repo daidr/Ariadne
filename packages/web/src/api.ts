@@ -424,6 +424,13 @@ export const api = {
     }),
   resumeThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/resume`),
+  removeThreadReference: (threadId: string, referenceId: string) =>
+    request<{ thread: ThreadView }>('DELETE', `/api/threads/${threadId}/references/${referenceId}`),
+  keepThreadReference: (threadId: string, referenceId: string) =>
+    request<{ thread: ThreadView }>(
+      'POST',
+      `/api/threads/${threadId}/references/${referenceId}/keep`,
+    ),
   reviewThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/reviewed`),
   undoNotice: (projectId: string, noticeId: string) =>
