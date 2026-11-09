@@ -215,7 +215,7 @@ export const en: Record<MessageKey, string> = {
   'start.modelHint': 'Add a model service in settings and pick the default model',
   'start.project': 'Create a project',
   'start.projectHint': 'A project serves one goal, with its own coordinator, plan and artifacts',
-  'start.source': 'Choose a working directory (optional)',
+  'start.source': 'Choose a project source (optional)',
   'start.sourceHint':
     'Set a local folder, repository or remote directory on the right so threads can edit files and run commands',
   'start.chooseSource': 'Choose a directory',
@@ -337,7 +337,7 @@ export const en: Record<MessageKey, string> = {
   'settings.tab.plugins': 'Local plugins',
   'plugins.failed': 'Failed to load',
   'plugins.provides': 'Provides: {kinds}',
-  'plugins.nothing': 'Registers no protocol or context source',
+  'plugins.nothing': 'Registers no protocol or project source',
   'plugins.add': 'Load',
   'plugins.placeholder':
     'Absolute path of the plugin folder or entry file, e.g. ~/ariadne-plugins/my-plugin',
@@ -345,7 +345,7 @@ export const en: Record<MessageKey, string> = {
     "Plugins run in the same process as Ariadne and can read everything the server holds, tokens included. Only load code you trust. Restart Ariadne after changing a plugin's code.",
   'plugins.remove': 'Remove',
   'plugins.removeConfirm':
-    'Remove the plugin "{name}"? The protocols and context sources it provides stop working at once.',
+    'Remove the plugin "{name}"? The protocols and project sources it provides stop working at once.',
   'project.create.name': 'Project name',
   'project.create.submit': 'Create',
   'project.delete': 'Delete project',
@@ -400,7 +400,7 @@ export const en: Record<MessageKey, string> = {
     'The project memory is full ({max} entries); remove some you no longer need first',
   'error.artifactInvalid': 'The artifact content is not valid: {reason}',
   'error.blockInvalid': 'The interface block is not valid: {reason}',
-  'error.noSource': 'The project has no working directory yet',
+  'error.noSource': 'The project has no source yet',
   'error.noRepo':
     'The project source is not a hosted repository, so there are no branches, pull requests or checks',
   'error.workspace': 'Could not prepare the workspace: {detail}',

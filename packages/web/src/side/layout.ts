@@ -74,9 +74,9 @@ export const tabsOf = (group: DockGroup) => group.tabs as PaneKey[]
 /** The tab in front of a group. */
 export const activeOf = (group: DockGroup) => (group.active ?? group.tabs[0]) as PaneKey
 
-/** What a project starts with: its lists in one group, the plan in front. */
-export function defaultLayout(): SideLayout {
-  return { root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: 'plan' } }
+/** What a project starts with: its lists in one group, the plan in front unless told otherwise. */
+export function defaultLayout(front: 'plan' | 'threads' = 'plan'): SideLayout {
+  return { root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: front } }
 }
 
 /** Every group, left to right and top to bottom. */
