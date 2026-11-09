@@ -181,6 +181,10 @@ export const zhCN = {
   'plan.removeSelectedThreads':
     '删除选中的 {count} 个节点？上面共有 {threads} 个讨论串会暂停。可以在修改记录里撤销。',
   'plugins.removeAffects': '这些模型提供方正在用它：{names}。移除后它们会无法使用。',
+  'project.references.title': '参考',
+  'project.references.add': '添加',
+  'project.references.confirm': '添加',
+  'project.references.remove': '移除',
   'project.source.hosting': '代码托管',
   'project.source.hostingNone': '不用',
   'project.source.clear': '移除',

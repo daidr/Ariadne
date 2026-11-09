@@ -189,14 +189,14 @@ describe('command rules', () => {
       expect([command, commandVerdict(command, rules).action]).toEqual([command, 'allow'])
     }
     // Something on the line runs text, or the phrase is run after all.
-    const run = [
+    const ran = [
       'echo "git push" | sh',
       'echo git push | xargs -I{} bash -c {}',
       'echo "$(git push)"',
       'git commit -m x && git push',
       'git rebase --exec "git push" main',
     ]
-    for (const command of run) {
+    for (const command of ran) {
       expect([command, commandVerdict(command, rules).action]).toEqual([command, 'ask'])
     }
     expect(commandVerdict('echo "rm -rf /x"', rules).action).toBe('deny')

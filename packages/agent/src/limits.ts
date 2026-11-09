@@ -323,8 +323,7 @@ function rulePart(command: SimpleCommand): RulePart {
   }
   const name = program.toLowerCase()
   const text =
-    TEXT_PROGRAMS.has(name) ||
-    (name === 'git' && GIT_TEXT.has(gitForm(words).split(' ')[1] ?? ''))
+    TEXT_PROGRAMS.has(name) || (name === 'git' && GIT_TEXT.has(gitForm(words).split(' ')[1] ?? ''))
   const runner = SHELL_PROGRAMS.has(name) || TEXT_RUNNERS.has(name) || name === 'cmd'
   if (SHELL_PROGRAMS.has(name)) {
     const at = words.findIndex((word, i) => i > 0 && /^-[a-z]*c[a-z]*$|^-com/i.test(word))

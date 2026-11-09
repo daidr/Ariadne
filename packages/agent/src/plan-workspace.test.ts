@@ -305,9 +305,7 @@ describe('the coordinator and the project source', () => {
     expect(system(request)).toContain('本地目录 D:\\devFolder\\story-verse')
     expect(system(request)).toContain('Never tell the user the project is empty')
     const names = toolNames(request)
-    expect(names).toEqual(
-      expect.arrayContaining(['list_dir', 'read_file', 'search', 'find_files']),
-    )
+    expect(names).toEqual(expect.arrayContaining(['list_dir', 'read_file', 'search', 'find_files']))
     for (const name of ['write_file', 'edit_file', 'run_command']) {
       expect(names).not.toContain(name)
     }

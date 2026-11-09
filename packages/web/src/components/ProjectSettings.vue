@@ -26,6 +26,7 @@ import { nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
 import { openSettingsKey } from '../open-settings'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
+import ReferenceSources from './ReferenceSources.vue'
 import SourceForm from './SourceForm.vue'
 import SourceNotes from './SourceNotes.vue'
 import MemoryList from './MemoryList.vue'
@@ -232,6 +233,7 @@ async function save() {
         <div class="project-stack">
           <SourceForm ref="source" />
           <SourceNotes />
+          <ReferenceSources />
         </div>
       </DouTabPanel>
       <DouTabPanel value="instructions" :label="t('projectSettings.tab.instructions')">

@@ -577,6 +577,24 @@ export const api = {
     ),
   setSource: (projectId: string, source: SourceInput | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  addReference: (
+    projectId: string,
+    reference: { kind: string; settings: Record<string, unknown> },
+  ) =>
+    request<{ project: ProjectView }>('POST', `/api/projects/${projectId}/references`, {
+      reference,
+    }),
+  removeReference: (projectId: string, referenceId: string) =>
+    request<{ project: ProjectView }>(
+      'DELETE',
+      `/api/projects/${projectId}/references/${referenceId}`,
+    ),
+  /** The reference sources that cannot be read right now, with why. */
+  referenceStatus: (projectId: string) =>
+    request<{ failed: { id: string; error: string }[] }>(
+      'GET',
+      `/api/projects/${projectId}/references/status`,
+    ),
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
   getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),

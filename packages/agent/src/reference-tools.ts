@@ -51,7 +51,8 @@ export function addReferenceTool(kinds: ReferenceKind[]): Tool {
     },
     async run(args, ctx) {
       const kind = kinds.find((known) => known.kind === args.kind)
-      if (!kind) throw new ToolInputError(`"kind" must be one of: ${kinds.map((k) => k.kind).join(', ')}.`)
+      if (!kind)
+        throw new ToolInputError(`"kind" must be one of: ${kinds.map((k) => k.kind).join(', ')}.`)
       const given = (
         args.settings && typeof args.settings === 'object' && !Array.isArray(args.settings)
           ? args.settings
@@ -106,7 +107,11 @@ export function addReferenceTool(kinds: ReferenceKind[]): Tool {
           attentionId: approval.attentionId,
           what: 'reference',
         })
-        const added = ctx.app.addProjectReference(ctx.projectId, { kind: kind.kind, settings }, where)
+        const added = ctx.app.addProjectReference(
+          ctx.projectId,
+          { kind: kind.kind, settings },
+          where,
+        )
         return {
           content: `Added. Read it with source "${added.name}" in list_dir, read_file, search and find_files; threads can too, from their next turn.`,
         }

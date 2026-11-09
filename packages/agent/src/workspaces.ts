@@ -17,7 +17,7 @@ import type {
   Workspace,
 } from '@ariadne/plugin-sdk'
 import type { Locale } from '@ariadne/i18n'
-import type { ProjectReference, ProjectSource } from '@ariadne/core'
+import type { ProjectSource } from '@ariadne/core'
 import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
@@ -116,6 +116,14 @@ export function referenceSecrets(
   return picked
 }
 
+/** What went wrong with a source, as a `DomainError` the user or the model can read. */
+const unreadable = (error: unknown) =>
+  error instanceof DomainError
+    ? error
+    : new DomainError('error.workspace', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+
 /**
  * Connect a source that is only read. What comes back hands out its view, fresh each time
  * (a hosted repository fetches when its view is asked for). Throws a `DomainError` the
@@ -128,17 +136,11 @@ export async function connectReference(
 ): Promise<() => Promise<SourceView>> {
   const provider = contexts.get(reference.kind)
   if (!provider) throw new DomainError('error.notFound', { what: reference.kind })
-  const failed = (error: unknown) =>
-    error instanceof DomainError
-      ? error
-      : new DomainError('error.workspace', {
-          detail: error instanceof Error ? error.message : String(error),
-        })
   let workspace: Partial<Capabilities>['workspace']
   try {
     workspace = (await provider.connect({ ...reference.settings, ...secrets } as never)).workspace
   } catch (error) {
-    throw failed(error)
+    throw unreadable(error)
   }
   const view = workspace?.view
   if (!workspace || !view) {
@@ -146,7 +148,7 @@ export async function connectReference(
       detail: 'this kind of source cannot be read without working in it',
     })
   }
-  return () => view.call(workspace).catch((error: unknown) => Promise.reject(failed(error)))
+  return () => view.call(workspace).catch((error: unknown) => Promise.reject(unreadable(error)))
 }
 
 /**

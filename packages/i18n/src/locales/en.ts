@@ -188,6 +188,10 @@ export const en: Record<MessageKey, string> = {
     'Remove the {count} selected nodes? Their {threads} threads will stop. You can undo this from the history.',
   'plugins.removeAffects':
     'These model providers use it: {names}. They stop working once it is removed.',
+  'project.references.title': 'References',
+  'project.references.add': 'Add',
+  'project.references.confirm': 'Add',
+  'project.references.remove': 'Remove',
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
   'project.source.clear': 'Remove',

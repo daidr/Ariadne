@@ -74,10 +74,7 @@ export class GitTreeView implements SourceView {
     return { files: result.stdout.split('\0').filter(Boolean), partial: false }
   }
 
-  async search(
-    pattern: string,
-    path: string,
-  ): Promise<{ lines: string[]; error: string | null }> {
+  async search(pattern: string, path: string): Promise<{ lines: string[]; error: string | null }> {
     const under = treePath(path)
     const result = await this.git(
       [

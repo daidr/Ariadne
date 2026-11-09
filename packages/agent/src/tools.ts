@@ -815,8 +815,7 @@ export function toolsFor(
 ): Tool[] {
   // The coordinator may add a reference in the middle of a turn, and reads it at once.
   const canAdd = role === 'coordinator' && !!source.referenceKinds?.length
-  const looking = (tools: Tool[]) =>
-    source.references || canAdd ? withReferences(tools) : tools
+  const looking = (tools: Tool[]) => (source.references || canAdd ? withReferences(tools) : tools)
   const searches = canSearch(source.search)
   const web = [
     fetchUrlTool(source.web, searches),

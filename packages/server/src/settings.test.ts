@@ -428,6 +428,95 @@ describe('project sources', () => {
     expect(readFileSync(path, 'utf8')).not.toContain('tok-1')
     app.close()
   })
+
+  test("a reference's token is kept under its own id, and falls back to the project's", async () => {
+    const { Ariadne } = await import('@ariadne/core')
+    const { createHandler } = await import('./app')
+    const connected: { repository: string; token?: string }[] = []
+    await host.load({
+      id: 'fake-repo',
+      name: { 'zh-CN': '假仓库' },
+      setup: (ctx) =>
+        ctx.registerContextProvider({
+          kind: 'fake-repo',
+          title: { 'zh-CN': '假仓库' },
+          settings: {
+            type: 'object',
+            properties: {
+              repository: { type: 'string', title: { 'zh-CN': '仓库' } },
+              token: { type: 'string', secret: true, title: { 'zh-CN': '令牌' } },
+            },
+            required: ['repository'],
+          },
+          summary: 'example.com/{repository}',
+          provides: ['workspace', 'repo'],
+          async connect(settings: { repository: string; token?: string }) {
+            connected.push(settings)
+            return {
+              workspace: {
+                view: async () => ({
+                  ref: 'origin/main',
+                  list: async () => {
+                    if (settings.repository === 'gone/gone') throw new Error('404 not found')
+                    return []
+                  },
+                  readBytes: async () => new Uint8Array(),
+                }),
+              },
+            }
+          },
+        } as never),
+    })
+    const app = new Ariadne({ path: ':memory:' })
+    const store = new SettingsStore(path, host)
+    const handle = createHandler({ app, token: 't', settings: store, host })
+    const projectId = app.createProject('P').id
+    const send = (method: string, where: string, body?: unknown) =>
+      handle(
+        new Request(`http://127.0.0.1/api/projects/${projectId}/${where}`, {
+          method,
+          headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      )
+    const add = (settings: unknown) =>
+      send('POST', 'references', { reference: { kind: 'fake-repo', settings } })
+    await send('PUT', 'source', {
+      source: { kind: 'fake-repo', settings: { repository: 'a/app', token: 'tok-main' } },
+    })
+
+    // No token typed: the project's own, of the same kind, is used.
+    expect((await add({ repository: 'a/lib' })).status).toBe(200)
+    expect(connected.at(-1)).toEqual({ repository: 'a/lib', token: 'tok-main' })
+    expect((await add({ repository: 'b/design', token: 'tok-b' })).status).toBe(200)
+    expect(connected.at(-1)).toEqual({ repository: 'b/design', token: 'tok-b' })
+    const [lib, design] = app.getProject(projectId).references
+    expect([lib?.name, design?.name]).toEqual(['lib', 'design'])
+    expect(design?.settings).toEqual({ repository: 'b/design' })
+    expect(JSON.stringify(app.events({ projectId }))).not.toContain('tok-b')
+    expect(store.sourceSecrets(projectId)).toEqual({
+      token: 'tok-main',
+      [`reference.${design!.id}.token`]: 'tok-b',
+    })
+    // What the page is told has been set leaves the references' out.
+    expect(store.sourceSecretsSet(projectId)).toEqual(['token'])
+
+    // One that cannot be read is not added.
+    const refused = await add({ repository: 'gone/gone' })
+    expect(refused.status).toBe(400)
+    expect(app.getProject(projectId).references).toHaveLength(2)
+
+    // Saving the project's own source keeps the references' tokens.
+    await send('PUT', 'source', {
+      source: { kind: 'fake-repo', settings: { repository: 'a/app', token: 'tok-new' } },
+    })
+    expect(store.sourceSecrets(projectId)[`reference.${design!.id}.token`]).toBe('tok-b')
+
+    expect((await send('DELETE', `references/${design!.id}`)).status).toBe(200)
+    expect(app.getProject(projectId).references.map((r) => r.name)).toEqual(['lib'])
+    expect(readFileSync(path, 'utf8')).not.toContain('tok-b')
+    app.close()
+  })
 })
 
 function writePlugin(): string {
