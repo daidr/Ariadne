@@ -253,6 +253,18 @@ export type NoticeView = {
       undone: boolean
     }
   | { kind: 'compaction-failed'; detail: string }
+  /**
+   * What happened while the user was away since `since`, in the coordinator's conversation
+   * where they came back; see `user.returned`. A project keeps its latest one only.
+   */
+  | {
+      kind: 'recap'
+      since: number
+      done: string[]
+      merged: string[]
+      waiting: string[]
+      asks: string[]
+    }
   | { kind: 'model-retry'; attempt: number; delayMs: number; detail: string }
   /** The main model's retries ran out; the turn went on with the fallback. */
   | { kind: 'model-fallback'; from: string; to: string; detail: string }
