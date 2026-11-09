@@ -299,6 +299,7 @@ export const en: Record<MessageKey, string> = {
   'message.fromAutopilot': 'From the autopilot',
   'conversation.working': 'Working…',
   'conversation.coordinatorWorking': 'The coordinator is working…',
+  'conversation.replying': 'Replying…',
   'conversation.escAgain': 'Press Esc again to stop',
   'conversation.continue': 'Continue',
   'conversation.silent': 'This turn ended without a report',

@@ -250,7 +250,9 @@ export class ReplyDrafts {
     let startedAt = 0
     let over = false
     const current = () => this.drafts.get(key)?.id === id
+    // Only its own timer: a draft that took its place has one of its own.
     const clear = () => {
+      if (!current()) return
       clearTimeout(this.timers.get(key))
       this.timers.delete(key)
     }

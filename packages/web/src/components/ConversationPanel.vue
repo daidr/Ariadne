@@ -190,11 +190,13 @@ const fallback = computed(() => {
 // What it is doing, shown above the input: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
-const activity = computed(
-  () =>
-    view.value.conversation?.turn?.activity ??
-    thread.value?.doing ??
-    t(props.threadId ? 'conversation.working' : 'conversation.coordinatorWorking'),
+const activity = computed(() =>
+  // Once the reply shows, the line before the last tool calls is no longer what it does.
+  writing.value
+    ? t('conversation.replying')
+    : (view.value.conversation?.turn?.activity ??
+      thread.value?.doing ??
+      t(props.threadId ? 'conversation.working' : 'conversation.coordinatorWorking')),
 )
 const now = ref(Date.now())
 const clock = setInterval(() => (now.value = Date.now()), 1000)
@@ -899,7 +901,13 @@ watch(
               />
             </template>
             <template #markdown-image="{ src, alt, title }">
-              <MessageImage :src="src" :alt="alt" :title="title" />
+              <!-- A workspace path becomes a stored file only once posted: none while written. -->
+              <MessageImage
+                v-if="message.id !== writing?.id || /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(src ?? '')"
+                :src="src"
+                :alt="alt"
+                :title="title"
+              />
             </template>
             <template #part="{ part }">
               <DouChatAttachments
