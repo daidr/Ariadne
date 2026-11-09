@@ -250,3 +250,44 @@ describe('files offered after @', () => {
     expect(await walkFiles(view, 2)).toEqual(['a.ts', 'src/b.ts'])
   })
 })
+
+describe('what a thread changed so far', () => {
+  test('goes with a turn that changed something, against where the branch left the base', async () => {
+    const diffs: [string, string][] = []
+    let calls = 0
+    const branches = {
+      snapshot: async () => `tree${++calls}`,
+      changes: async () => ({ from: 'base1' }),
+      diff: async (from: string, to: string) => {
+        diffs.push([from, to])
+        return from === 'base1'
+          ? [
+              { path: 'a', previousPath: null, status: 'modified' as const, added: 3, removed: 1 },
+              { path: 'b', previousPath: null, status: 'added' as const, added: 5, removed: 0 },
+              {
+                path: 'c.png',
+                previousPath: null,
+                status: 'added' as const,
+                added: null,
+                removed: null,
+              },
+            ]
+          : [{ path: 'a', previousPath: null, status: 'modified' as const, added: 1, removed: 0 }]
+      },
+    }
+    const workspaces = { branches: async () => branches } as unknown as WorkspaceManager
+    const recorded: unknown[][] = []
+    const fakeApp = {
+      getThread: () => ({ workspace: { branch: 'ariadne/x', base: 'main' } }),
+      recordTurnChanges: (...args: unknown[]) => recorded.push(args),
+    } as never
+    const changes = turnChanges(workspaces, 'p', 't')
+    await changes.begin()
+    await changes.record(fakeApp, 'turn')
+    expect(diffs).toEqual([
+      ['tree1', 'tree2'],
+      ['base1', 'tree2'],
+    ])
+    expect(recorded[0]?.[2]).toMatchObject({ branch: { files: 3, added: 8, removed: 1 } })
+  })
+})

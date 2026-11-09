@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChangeTotals from './ChangeTotals.vue'
 import type { ThreadView } from '@ariadne/core'
 import { DouProgress, DouRelativeTime, DouShimmer, DouText } from 'dou-ui'
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
@@ -62,6 +63,12 @@ const prTone = computed(() =>
         }}</span>
       </DouText>
       <ReviewMark :thread="thread" />
+      <ChangeTotals
+        v-if="thread.changes && !nested"
+        :totals="thread.changes"
+        :thread-id="thread.id"
+        class="row-mark row-trim"
+      />
       <DouText
         v-if="thread.progress && thread.stage !== 'done' && !nested"
         size="sm"

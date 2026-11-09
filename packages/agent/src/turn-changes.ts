@@ -1,4 +1,5 @@
-import type { Ariadne } from '@ariadne/core'
+import type { Ariadne, ChangeTotals } from '@ariadne/core'
+import type { BranchCapability } from '@ariadne/plugin-sdk'
 import type { WorkspaceManager } from './workspaces'
 
 /** How long a stopped turn waits for its changes; past it they are not shown. */
@@ -55,12 +56,42 @@ export function turnChanges(workspaces: WorkspaceManager, projectId: string, thr
         const to = await snapshot()
         if (!to || to === from) return
         const files = await branches.diff(from, to)
+        const branch = await branchTotals(app, branches, threadId, to)
         // The turn ended without waiting for it.
         if (late()) return
-        app.recordTurnChanges(threadId, turnId, { from, to, files })
+        app.recordTurnChanges(threadId, turnId, { from, to, files, ...(branch ? { branch } : {}) })
       } catch {
         // A diff that cannot be read leaves the turn as it is.
       }
     },
+  }
+}
+
+/**
+ * The workspace as a turn left it (`to`, a tree), against where the thread's branch left
+ * its base: everything the thread changed so far, committed or not. `null` when it cannot
+ * be told.
+ */
+async function branchTotals(
+  app: Ariadne,
+  branches: BranchCapability,
+  threadId: string,
+  to: string,
+): Promise<ChangeTotals | null> {
+  try {
+    const workspace = app.getThread(threadId).workspace
+    if (!workspace?.branch || !workspace.base || !branches.diff) return null
+    const changes = await branches.changes({ threadId, branch: workspace.branch }, workspace.base)
+    if (!changes) return null
+    const files = await branches.diff(changes.from, to)
+    let added = 0
+    let removed = 0
+    for (const file of files) {
+      added += file.added ?? 0
+      removed += file.removed ?? 0
+    }
+    return { files: files.length, added, removed }
+  } catch {
+    return null
   }
 }

@@ -1,4 +1,4 @@
-import type { LineComment } from '@ariadne/core'
+import type { LineComment, SentLineComment } from '@ariadne/core'
 import type {
   CodeDiffGutter,
   CodeDiffGutterMarker,
@@ -11,6 +11,7 @@ import { computed, h, ref, watch, type ComputedRef } from 'vue'
 import { commentAuthor } from '../artifacts/comment-threads'
 import { t } from '../i18n'
 import { state } from '../store'
+import { anchorLine, quoteFound } from '../review/review-comments'
 import LineCommentWidget from './LineCommentWidget.vue'
 
 /** A comment written on a line and not sent yet. */
@@ -116,13 +117,16 @@ const spotKey = (spot: CommentSpot) => `${spot.side}:${spot.line}`
 
 /**
  * Comments on the lines of a file in the diff, on either side: a press beside a line
- * starts one under it, and the line's comments show there until they are sent. A plus
+ * starts one under it, and the line's comments show there, those not sent yet and those
+ * sent, which stay to say what the thread was told. A sent comment follows the line it
+ * quotes as the file changes; one whose line no longer reads that way says so. A plus
  * shows beside the line under the pointer; it does not keep unchanged lines unfolded.
  */
 export function useLineComments(
   threadId: () => string,
   path: () => string | null,
   texts: () => { original: string; modified: string } | null,
+  sent: () => readonly SentLineComment[] = () => [],
 ): { gutter: ComputedRef<CodeDiffGutter>; widgets: ComputedRef<CodeDiffWidget[]> } {
   const drafting = ref<CommentSpot | null>(null)
   const linesOf = (side: CodeDiffSide) => (texts()?.[side] ?? '').split('\n')
@@ -143,19 +147,34 @@ export function useLineComments(
   // A file shown elsewhere drops the comment being started.
   watch(path, () => (drafting.value = null))
 
+  // The sent comments of this file, where they read now.
+  const placedSent = computed(() => {
+    if (!texts()) return []
+    return sent()
+      .filter((comment) => comment.path === path())
+      .flatMap((comment) => {
+        const side = sideOf(comment)
+        const lines = linesOf(side)
+        const line = anchorLine(lines, comment)
+        if (line === null) return []
+        return [{ comment, spot: { side, line }, moved: !quoteFound(lines, comment) }]
+      })
+  })
+
   const gutter = computed<CodeDiffGutter>(() => {
-    const commented = new Set(
+    const drafted = new Set(
       forFile().map((comment) => spotKey({ side: sideOf(comment), line: comment.line })),
     )
+    const sentAt = new Set(placedSent.value.map(({ spot }) => spotKey(spot)))
     // Commented lines get a mark; every other line shows a plus under the pointer.
-    const markers: CodeDiffGutterMarker[] = [...commented].map((key) => {
+    const markers: CodeDiffGutterMarker[] = [...new Set([...drafted, ...sentAt])].map((key) => {
       const [side, line] = key.split(':') as [CodeDiffSide, string]
       return {
         side,
         line: Number(line),
         icon: MessageIcon,
-        class: 'line-comment-mark',
-        title: t('changes.commented'),
+        class: drafted.has(key) ? 'line-comment-mark' : 'line-comment-sent-mark',
+        title: t(drafted.has(key) ? 'changes.commented' : 'changes.commentSent'),
       }
     })
     return {
@@ -173,29 +192,64 @@ export function useLineComments(
   })
 
   const widgets = computed<CodeDiffWidget[]>(() => {
-    const bySpot = new Map<string, { spot: CommentSpot; comments: DraftComment[] }>()
+    type Entry = {
+      spot: CommentSpot
+      drafts: DraftComment[]
+      sent: SentLineComment[]
+      moved: boolean
+    }
+    const bySpot = new Map<string, Entry>()
+    const entry = (spot: CommentSpot) => {
+      const found = bySpot.get(spotKey(spot)) ?? { spot, drafts: [], sent: [], moved: false }
+      bySpot.set(spotKey(spot), found)
+      return found
+    }
+    for (const { comment, spot, moved } of placedSent.value) {
+      const found = entry(spot)
+      found.sent.push(comment)
+      found.moved ||= moved
+    }
     for (const comment of forFile()) {
-      const spot = { side: sideOf(comment), line: comment.line }
-      const entry = bySpot.get(spotKey(spot)) ?? { spot, comments: [] }
-      entry.comments.push(comment)
-      bySpot.set(spotKey(spot), entry)
+      entry({ side: sideOf(comment), line: comment.line }).drafts.push(comment)
     }
-    if (drafting.value && !bySpot.has(spotKey(drafting.value))) {
-      bySpot.set(spotKey(drafting.value), { spot: drafting.value, comments: [] })
-    }
-    return [...bySpot.values()].map(({ spot, comments }) => ({
-      id: `line-${spotKey(spot)}`,
-      side: spot.side,
-      line: spot.line,
-      height: 120,
-      label: t('changes.commentOn', { line: spot.line }),
-      render: () =>
-        h(LineCommentWidget, {
-          thread: comments.length ? lineThread(path() ?? '', spot, comments) : null,
-          onAction: (action: CommentAction) => act(spot, action),
-          onCancel: () => (drafting.value = null),
-        }),
-    }))
+    if (drafting.value) entry(drafting.value)
+    return [...bySpot.values()].map(({ spot, drafts, sent: told, moved }) => {
+      const starting =
+        !drafts.length && !!drafting.value && spotKey(drafting.value) === spotKey(spot)
+      return {
+        id: `line-${spotKey(spot)}`,
+        side: spot.side,
+        line: spot.line,
+        height: 100 * (drafts.length + told.length) + (starting ? 120 : 20),
+        label: t('changes.commentOn', { line: spot.line }),
+        render: () =>
+          h(LineCommentWidget, {
+            sent: told.length ? sentThread(path() ?? '', spot, told) : null,
+            moved,
+            thread: drafts.length ? lineThread(path() ?? '', spot, drafts) : null,
+            writing: starting,
+            onAction: (action: CommentAction) => act(spot, action),
+            onCancel: () => (drafting.value = null),
+          }),
+      }
+    })
   })
   return { gutter, widgets }
+}
+
+/** A line's sent comments as one read-only comment card. */
+function sentThread(
+  path: string,
+  spot: CommentSpot,
+  comments: readonly SentLineComment[],
+): CommentThread {
+  return {
+    id: `sent:${path}:${spotKey(spot)}`,
+    comments: comments.map((comment) => ({
+      id: comment.id,
+      author: commentAuthor('user'),
+      body: comment.body,
+      createdAt: new Date(comment.sentAt).toISOString(),
+    })),
+  }
 }

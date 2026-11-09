@@ -86,6 +86,8 @@ import LineComments from './LineComments.vue'
 import LiveCommand from './LiveCommand.vue'
 import BackgroundCommand from './BackgroundCommand.vue'
 import WaitStatus from './WaitStatus.vue'
+import ChangeTotals from './ChangeTotals.vue'
+import { mergeOffered } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
@@ -340,6 +342,31 @@ const timeline = computed(() =>
   ].toSorted((a, b) => a.at - b.at),
 )
 
+// Its review offers "go merge", which opens the changes: no second way there beside it.
+const mergeAsked = computed(() => thread.value?.stage === 'review' && mergeOffered(thread.value))
+
+type TurnChangesNotice = Extract<NoticeView, { kind: 'turn-changes' }>
+/**
+ * What a turn changed goes under the reply it ended with, beside what it says; one with
+ * no reply of its own stays a line of the log.
+ */
+const shown = computed(() => {
+  const changes = new Map<string, TurnChangesNotice>()
+  const items: typeof timeline.value = []
+  let reply: string | null = null
+  for (const item of timeline.value) {
+    if (item.message) {
+      const agent = item.message.author !== 'user' && item.message.kind !== 'relay'
+      reply = agent ? item.message.id : null
+    } else if (item.notice?.kind === 'turn-changes' && reply && !changes.has(reply)) {
+      changes.set(reply, item.notice)
+      continue
+    }
+    items.push(item)
+  }
+  return { items, changes }
+})
+
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
   if (notice.action === 'comment') return t('notice.issueComment', { issue })
@@ -419,6 +446,7 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
     ...(message.comments.length ? [{ type: 'comments' }] : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
+    ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
   ]
 }
 
@@ -628,15 +656,24 @@ watch(
         </DouTag>
         <PullRequestTag :thread="thread" refreshable />
         <ReviewMark :thread="thread" />
-        <DouButton
-          v-if="thread.workspace?.branch && thread.workspace.base"
-          variant="ghost"
-          size="sm"
-          @click="openView({ kind: 'changes', threadId: thread.id })"
-        >
-          <template #leading><FileDiffIcon /></template>
-          {{ t('changes.open') }}
-        </DouButton>
+        <!-- Under review, "go merge" opens the same changes. -->
+        <template v-if="thread.workspace?.branch && thread.workspace.base && !mergeAsked">
+          <ChangeTotals
+            v-if="thread.changes"
+            :totals="thread.changes"
+            :thread-id="thread.id"
+            button
+          />
+          <DouButton
+            v-else
+            variant="ghost"
+            size="sm"
+            @click="openView({ kind: 'changes', threadId: thread.id })"
+          >
+            <template #leading><FileDiffIcon /></template>
+            {{ t('changes.open') }}
+          </DouButton>
+        </template>
         <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
         <template v-if="reviewed">
           <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
@@ -708,7 +745,7 @@ watch(
       <div v-if="view.loadingEarlier" class="earlier" role="status">
         <DouSpinner size="sm" />
       </div>
-      <template v-for="item in timeline" :key="item.id">
+      <template v-for="item in shown.items" :key="item.id">
         <div v-if="item.notice" class="notice">
           <template v-if="item.notice.kind === 'memory'">
             <DouText variant="tertiary" size="sm" class="notice-text">
@@ -944,6 +981,11 @@ watch(
                 v-else-if="part.type === 'block'"
                 :block="message.blocks[part.index as number]!"
               />
+              <TurnChanges
+                v-else-if="part.type === 'changes' && shown.changes.has(message.id)"
+                :notice="shown.changes.get(message.id)!"
+                class="turn-changes"
+              />
             </template>
             <template v-if="message.editedAt" #actions>
               <!-- Why it changed and what it said before, for whoever wants to check. -->
@@ -1142,6 +1184,12 @@ watch(
   align-items: center;
   gap: 8px;
   padding: 4px 0;
+}
+
+/* Under the reply's text, lined up with it: the button's own padding sits outside. */
+.turn-changes {
+  align-self: flex-start;
+  margin-inline-start: -8px;
 }
 
 .notice-text {

@@ -161,6 +161,9 @@ export const threadsProjection: Projection = {
       workspace_base TEXT,
       workspace_removed INTEGER NOT NULL DEFAULT 0,
       merged TEXT,
+      -- What its workspace changes against the base (JSON ChangeTotals), as of its last
+      -- turn that changed something.
+      changes TEXT,
       pull_request TEXT,
       check_failures INTEGER NOT NULL DEFAULT 0,
       stopped_reason TEXT,
@@ -292,6 +295,14 @@ export const threadsProjection: Projection = {
           event.at,
           event.data.threadId,
         ])
+        break
+      case 'turn.changed':
+        if (event.data.branch) {
+          db.run('UPDATE threads SET changes = ? WHERE id = ?', [
+            JSON.stringify(event.data.branch),
+            event.data.conversationId,
+          ])
+        }
         break
       case 'branch.merged': {
         const { threadId, ...merge } = event.data
