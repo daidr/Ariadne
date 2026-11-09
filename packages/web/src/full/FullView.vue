@@ -68,11 +68,6 @@ const label = computed(() => {
 .full-view {
   --dou-dialog-padding: 0;
 }
-
-/* Without a header the body still keeps 8px on top (dou-ui#397); drop it once fixed there. */
-.full-view .dou-dialog__body {
-  padding-top: 0;
-}
 </style>
 
 <style scoped>
