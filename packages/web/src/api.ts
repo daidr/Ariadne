@@ -28,6 +28,7 @@ import type {
   TraceTurn,
   MemoryView,
   NoticeView,
+  ProjectDetected,
   ProjectSettings,
   StoredFile,
 } from '@ariadne/core'
@@ -300,6 +301,8 @@ export type ToolGroup = 'fetch' | 'search' | 'commands' | 'issueWrites'
 
 export interface ProjectSettingsView {
   settings: ProjectSettings
+  /** What Ariadne found out about the repository, shown where the user wrote nothing. */
+  detected: ProjectDetected
   /** Names of the project's command environment variables; values stay on the server. */
   env: string[]
   /** The built-in tool groups a project can switch off. */

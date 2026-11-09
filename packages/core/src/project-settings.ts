@@ -39,14 +39,24 @@ export interface ProjectSettings {
   /** Tokens (read and written) one thread, and the whole project, may use; `null` is no cap. */
   budget: { thread: number | null; project: number | null }
   workspace: {
-    /** Run in a thread's workspace once it is new, e.g. `bun install`; `''` is none. */
+    /**
+     * What is left to Ariadne. `setup`: a new workspace gets its dependencies installed by
+     * the lockfiles in it (`installCommands`), and nothing when it has none it knows.
+     * `check`: the check after edits is the one the first thread to work in the repository
+     * noted. Either is off once the user wrote their own, or emptied the field.
+     */
+    auto: { setup: boolean; check: boolean }
+    /**
+     * The user's own, in place of the install by lockfile: run in a thread's workspace
+     * once it is new; `''` runs nothing. Not read while `auto.setup`.
+     */
     setup: string
     /** What threads' commands, the setup script and the check run in. */
     shell: ShellChoice
     /**
      * Run after a thread's edit_file or write_file, e.g. a type check or a linter; `{file}`
      * stands for the files changed. Its failure is told to the model with the edit's
-     * result. `''` is none.
+     * result. `''` is none. The user's own; not read while `auto.check`.
      */
     check: string
     /** Threads' branches start with it, e.g. `ariadne/`. */
@@ -118,7 +128,13 @@ export const defaultProjectSettings = (): ProjectSettings => ({
   instructions: '',
   tools: [],
   budget: { thread: null, project: null },
-  workspace: { setup: '', shell: 'auto', check: '', branchPrefix: DEFAULT_BRANCH_PREFIX },
+  workspace: {
+    auto: { setup: true, check: true },
+    setup: '',
+    shell: 'auto',
+    check: '',
+    branchPrefix: DEFAULT_BRANCH_PREFIX,
+  },
   routines: [],
   review: { enabled: true },
   autopilot: { enabled: false, method: 'squash' },
@@ -207,10 +223,17 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     if (typeof prefix !== 'string' || !validBranchPrefix(prefix.trim())) {
       throw bad('workspace.branchPrefix')
     }
+    // Left out, a field with words in it is the user's own and an empty one is Ariadne's.
+    const auto = (workspace.auto ?? {}) as Record<string, unknown>
+    const autoSetup = auto.setup ?? !setup.trim()
+    const autoCheck = auto.check ?? !check.trim()
+    if (typeof autoSetup !== 'boolean') throw bad('workspace.auto.setup')
+    if (typeof autoCheck !== 'boolean') throw bad('workspace.auto.check')
     out.workspace = {
-      setup: setup.trim(),
+      auto: { setup: autoSetup, check: autoCheck },
+      setup: autoSetup ? '' : setup.trim(),
       shell: shell as ShellChoice,
-      check: check.trim(),
+      check: autoCheck ? '' : check.trim(),
       branchPrefix: prefix.trim(),
     }
   }
@@ -260,7 +283,76 @@ function parseRoutines(raw: unknown): Routine[] {
 }
 
 /** Stored settings read back; a project that never set any has the defaults. */
-export const storedProjectSettings = (raw: string | null): ProjectSettings =>
-  raw
-    ? { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) }
-    : defaultProjectSettings()
+export function storedProjectSettings(raw: string | null): ProjectSettings {
+  if (!raw) return defaultProjectSettings()
+  const settings = { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) }
+  const { workspace } = settings
+  // Settings saved before `auto`: a script or a check the user wrote stays theirs.
+  settings.workspace = {
+    ...workspace,
+    auto: workspace.auto ?? { setup: !workspace.setup, check: !workspace.check },
+  }
+  return settings
+}
+
+/**
+ * What Ariadne found out about a project's repository by itself, shown in the settings in
+ * place of what the user would otherwise have to write. A new source starts it over.
+ */
+export interface ProjectDetected {
+  /**
+   * The install commands the lockfiles of the last new workspace called for, one a line;
+   * `null` before any workspace was opened, `''` when it had no lockfile Ariadne knows.
+   */
+  setup: string | null
+  /** The check after edits a thread noted, and which; `null` until one did. */
+  check: { command: string; threadId: string } | null
+}
+
+/** The check run after a thread's edits: the user's own, else the one a thread noted. */
+export function checkCommand(project: {
+  settings: ProjectSettings
+  detected: ProjectDetected
+}): string {
+  const { auto, check } = project.settings.workspace
+  return auto.check ? (project.detected.check?.command ?? '') : check
+}
+
+/**
+ * The dependency managers a new workspace is set up for, by the lockfile each leaves at
+ * the root of a repository. Installs keep to the lockfile, so the workspace stays clean.
+ */
+const INSTALLS: { files: string[]; command: string; js?: string }[] = [
+  { files: ['bun.lock', 'bun.lockb'], command: 'bun install --frozen-lockfile', js: 'bun' },
+  { files: ['pnpm-lock.yaml'], command: 'pnpm install --frozen-lockfile', js: 'pnpm' },
+  { files: ['yarn.lock'], command: 'yarn install --frozen-lockfile', js: 'yarn' },
+  { files: ['package-lock.json', 'npm-shrinkwrap.json'], command: 'npm ci', js: 'npm' },
+  { files: ['uv.lock'], command: 'uv sync --locked' },
+  { files: ['poetry.lock'], command: 'poetry install --no-interaction' },
+  { files: ['Cargo.lock'], command: 'cargo fetch --locked' },
+  { files: ['go.sum'], command: 'go mod download' },
+  { files: ['Gemfile.lock'], command: 'bundle install' },
+  { files: ['composer.lock'], command: 'composer install --no-interaction' },
+]
+
+/**
+ * The commands that install a repository's dependencies, from the names of the files at
+ * its root; none when it has no lockfile listed above. With lockfiles of several
+ * JavaScript package managers, `packageManager` (package.json's field) picks one, and
+ * without it none is run: guessing would rewrite the other's lockfile.
+ */
+export function installCommands(files: readonly string[], packageManager?: string): string[] {
+  const names = new Set(files)
+  const found = INSTALLS.filter((install) => install.files.some((file) => names.has(file)))
+  const js = found.filter((install) => install.js)
+  const wanted = packageManager?.trim().split('@')[0]
+  const chosen = js.length > 1 ? js.filter((install) => install.js === wanted) : js
+  return found
+    .filter((install) => !install.js || chosen.includes(install))
+    .map((install) =>
+      // Yarn 2 and later name the flag differently, and say so with their own config file.
+      install.js === 'yarn' && names.has('.yarnrc.yml')
+        ? 'yarn install --immutable'
+        : install.command,
+    )
+}

@@ -1,6 +1,6 @@
 import type { LocalizedMessage } from '@ariadne/i18n'
 import type { PlanPreview } from './plan'
-import type { ProjectSettings } from './project-settings'
+import type { ProjectDetected, ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
@@ -54,6 +54,8 @@ export interface ProjectView {
   /** The external tool servers (MCP) its conversations may use, by the ids in the settings. */
   mcp: string[]
   settings: ProjectSettings
+  /** What Ariadne found out about the repository itself, in place of settings left to it. */
+  detected: ProjectDetected
   /** The user paused the autopilot (`settings.autopilot`); it merges and starts nothing. */
   autopilotPaused: boolean
   /** Tokens every conversation of the project has used, summaries included. */

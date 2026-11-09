@@ -442,6 +442,7 @@ export function createHandler({
   add('GET', '/api/projects/:projectId/settings', (_request, { projectId = '' }) =>
     json({
       settings: app.getProject(projectId).settings,
+      detected: app.getProject(projectId).detected,
       env: settings?.projectEnvNames(projectId) ?? [],
       tools: TOOL_SWITCH_NAMES,
     }),
@@ -462,6 +463,7 @@ export function createHandler({
     return json({
       project,
       settings: project.settings,
+      detected: project.detected,
       env,
       tools: TOOL_SWITCH_NAMES,
     })

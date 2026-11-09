@@ -1,8 +1,16 @@
-import { DomainError, SHELLS, threadBranch, type Ariadne, type ShellChoice } from '@ariadne/core'
+import {
+  DomainError,
+  installCommands,
+  SHELLS,
+  threadBranch,
+  type Ariadne,
+  type ShellChoice,
+} from '@ariadne/core'
 import { defaultShell } from '@ariadne/plugin-sdk'
 import type {
   BranchCapability,
   Capabilities,
+  ExecResult,
   RepoCapability,
   SourceView,
   TrackerCapability,
@@ -88,6 +96,34 @@ export function sourceSummary(
   return typeof value === 'string' ? value : null
 }
 
+const outputOf = (result: ExecResult) =>
+  [result.stdout, result.stderr].filter((part) => part.trim()).join('\n')
+
+/** Told to the thread whose new workspace is in a project with no check after edits yet. */
+const CHECK_HINT =
+  '[Ariadne: this project has no check after edits yet. Once you know how the repository checks its code, note one with note_check.]'
+
+/**
+ * The install commands the lockfiles at the root of `workspace` call for; none when it
+ * has none Ariadne knows, or cannot be listed.
+ */
+async function lockfileInstalls(workspace: Workspace): Promise<string[]> {
+  const entries = await workspace.list('.').catch(() => [])
+  const files = entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name)
+  let manager: string | undefined
+  if (files.includes('package.json')) {
+    try {
+      const field = (
+        JSON.parse(await workspace.readFile('package.json')) as { packageManager?: unknown }
+      ).packageManager
+      if (typeof field === 'string') manager = field
+    } catch {
+      // Not readable as JSON: the lockfiles alone decide.
+    }
+  }
+  return installCommands(files, manager)
+}
+
 /**
  * Opens each thread's workspace from its project's context source, once, and keeps it
  * for later turns. A source that changes gets connected again.
@@ -99,7 +135,7 @@ export class WorkspaceManager {
   >()
   private readonly open = new Map<string, { key: string; workspace: Promise<Workspace> }>()
   private readonly queues = new Map<string, Promise<void>>()
-  /** What the setup script of a thread's new workspace did, until its model is told. */
+  /** What setting up a thread's new workspace did, until its model is told. */
   private readonly setups = new Map<string, string>()
   /** Stops the setup script running in a thread's new workspace. */
   private readonly setupStops = new Map<string, AbortController>()
@@ -307,7 +343,20 @@ export class WorkspaceManager {
         branch,
         ...(known ? { base: known.base } : {}),
       })
-      if (fresh && setup.setup) await this.runSetup(projectId, threadId, opened, setup.setup)
+      if (fresh) {
+        const notes: string[] = []
+        if (setup.auto.setup) {
+          const commands = await lockfileInstalls(opened)
+          this.app.recordDetectedSetup(projectId, commands.join('\n'))
+          if (commands.length) notes.push(await this.install(projectId, threadId, opened, commands))
+        } else if (setup.setup) {
+          notes.push(await this.runSetup(projectId, threadId, opened, setup.setup))
+        }
+        if (this.app.canNoteCheck(threadId) && !this.app.getProject(projectId).detected.check) {
+          notes.push(CHECK_HINT)
+        }
+        if (notes.length) this.setups.set(threadId, notes.join('\n\n'))
+      }
       return opened
     })
     this.open.set(threadId, { key, workspace })
@@ -328,18 +377,57 @@ export class WorkspaceManager {
     }
   }
 
+  /** Run the user's setup script in a new workspace; what the model is told of it. */
   private async runSetup(
     projectId: string,
     threadId: string,
     workspace: Workspace,
     script: string,
-  ): Promise<void> {
+  ): Promise<string> {
+    const result = await this.setupExec(projectId, threadId, workspace, script)
+    const output = headAndTail(outputOf(result), MAX_SETUP_OUTPUT, 'the rest is not kept')
+    return `[Ariadne: your workspace is new, so the project's setup script ran in it first, as the user set it: ${result.exitCode === 0 ? 'it succeeded' : `it failed (exit code ${result.exitCode}); what the work needs may be missing`}.]\n${output || '(no output)'}`
+  }
+
+  /**
+   * Install a new workspace's dependencies with the commands its lockfiles called for, one
+   * after the other up to the first that fails; what the model is told of it.
+   */
+  private async install(
+    projectId: string,
+    threadId: string,
+    workspace: Workspace,
+    commands: string[],
+  ): Promise<string> {
+    const ran: string[] = []
+    for (const command of commands) {
+      const result = await this.setupExec(projectId, threadId, workspace, command)
+      if (result.exitCode === 0) {
+        ran.push(command)
+        continue
+      }
+      const output = headAndTail(outputOf(result), MAX_SETUP_OUTPUT, 'the rest is not kept')
+      const before = ran.length
+        ? ` (after ${ran.map((done) => `\`${done}\``).join(', ')} succeeded)`
+        : ''
+      return `[Ariadne: your workspace is new, so its dependencies were being installed by its lockfiles, and \`${command}\` failed (exit code ${result.exitCode})${before}; what the work needs may be missing.]\n${output || '(no output)'}`
+    }
+    return `[Ariadne: your workspace is new, so its dependencies were installed first, by its lockfiles: ${ran.map((done) => `\`${done}\``).join(', ')}.]`
+  }
+
+  /** Run one command of a new workspace's setup; the thread's stop ends it. */
+  private async setupExec(
+    projectId: string,
+    threadId: string,
+    workspace: Workspace,
+    command: string,
+  ): Promise<ExecResult> {
     const env = this.env(projectId)
     const { argv } = this.shell(projectId)
     const stop = new AbortController()
     this.setupStops.set(threadId, stop)
     const result = await workspace
-      .exec(script, {
+      .exec(command, {
         ...(argv ? { shell: argv } : {}),
         timeoutMs: this.options.setupTimeoutMs?.(projectId) ?? 600_000,
         signal: stop.signal,
@@ -354,21 +442,13 @@ export class WorkspaceManager {
         if (this.setupStops.get(threadId) === stop) this.setupStops.delete(threadId)
       })
     // Stopped half way: the workspace is not set up, so it is not handed out; the next
-    // turn opens it again and the script runs from the start.
+    // turn opens it again and the setup runs from the start.
     if (stop.signal.aborted) {
       throw new DomainError('error.workspace', {
-        detail: "the project's setup script was stopped before it finished",
+        detail: "the workspace's setup was stopped before it finished",
       })
     }
-    const output = headAndTail(
-      [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
-      MAX_SETUP_OUTPUT,
-      'the rest is not kept',
-    )
-    this.setups.set(
-      threadId,
-      `[Ariadne: your workspace is new, so the project's setup script ran in it first, as the user set it: ${result.exitCode === 0 ? 'it succeeded' : `it failed (exit code ${result.exitCode}); what the work needs may be missing`}.]\n${output || '(no output)'}`,
-    )
+    return result
   }
 
   /** The project's threads' branches and worktrees; `null` when they are not git worktrees. */
