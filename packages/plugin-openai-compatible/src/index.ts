@@ -366,6 +366,14 @@ async function* readStream(
         if (piece.function?.name) call.name += piece.function.name
         if (piece.function?.arguments) call.arguments += piece.function.arguments
         calls.set(piece.index, call)
+        if (piece.function?.arguments && call.name) {
+          yield {
+            type: 'tool-input',
+            call: [...calls.keys()].indexOf(piece.index),
+            name: call.name,
+            arguments: call.arguments,
+          }
+        }
       }
       if (choice.finish_reason) reason = choice.finish_reason
     }

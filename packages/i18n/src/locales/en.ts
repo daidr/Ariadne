@@ -127,6 +127,7 @@ export const en: Record<MessageKey, string> = {
   'view.changesOf': 'Changes of {title}',
   'artifact.by.user': 'You',
   'artifact.by.coordinator': 'Coordinator',
+  'artifact.pending': 'To come',
   'artifact.updated': '{who} · {time}',
   'project.source.kind': 'Kind',
   'pr.state.merged': 'Merged',

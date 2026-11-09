@@ -180,6 +180,12 @@ export type ModelStreamPart =
    * then not the answer, and is no longer shown as it is written.
    */
   | { type: 'calling' }
+  /**
+   * The arguments of a tool call as far as they are written: `call` counts the calls of
+   * this response from 0, and `arguments` is the JSON text so far, cut wherever the
+   * service is in it. For showing a long call at work before it comes whole as `tool-call`.
+   */
+  | { type: 'tool-input'; call: number; name: string; arguments: string }
   | ({ type: 'tool-call' } & ToolCall)
   /**
    * One whole block of reasoning; it comes before the answer it led to. `startedAt` is

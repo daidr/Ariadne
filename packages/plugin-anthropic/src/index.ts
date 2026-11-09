@@ -448,7 +448,15 @@ async function* readStream(
               thought.signature = (thought.signature ?? '') + (event.delta.signature ?? '')
           } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
             const block = blocks.get(event.index)
-            if (block) block.json += event.delta.partial_json ?? ''
+            if (block) {
+              block.json += event.delta.partial_json ?? ''
+              yield {
+                type: 'tool-input',
+                call: [...blocks.keys()].indexOf(event.index),
+                name: block.name,
+                arguments: block.json,
+              }
+            }
           }
           break
         case 'content_block_stop': {
