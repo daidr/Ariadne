@@ -1158,6 +1158,11 @@ watch(
   padding: 4px 0;
 }
 
+/* A recap with nothing left to tell draws nothing, and leaves no gap either. */
+.notice:empty {
+  display: none;
+}
+
 /* Under the reply's text, lined up with it: the button's own padding sits outside. */
 .turn-changes {
   align-self: flex-start;

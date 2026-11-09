@@ -39,7 +39,10 @@ const asks = computed(() =>
   ),
 )
 const merged = computed(() => threadsOf(props.notice.merged))
-const done = computed(() => threadsOf(props.notice.done))
+// One called back to work since is no longer finished.
+const done = computed(() =>
+  threadsOf(props.notice.done).filter((thread) => thread.stage === 'done'),
+)
 
 function span(ms: number): string {
   const minutes = Math.round(ms / 60_000)
