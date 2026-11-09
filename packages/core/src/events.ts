@@ -659,6 +659,17 @@ export interface EventMap {
     answeredAt: number
   }
   /**
+   * A web search a conversation's `web_search` call had a model's own service run: a
+   * request beside the turn's steps, whose tokens count toward the conversation's.
+   */
+  'search.answered': {
+    conversationId: string
+    turnId: string
+    /** The model asked, as the user sees it named. */
+    model: string
+    usage: TokenUsage | null
+  }
+  /**
    * A piece of model input seen for the first time in the project, stored once by its
    * hash; steps name the pieces they were sent, so the trace can show every request whole.
    */

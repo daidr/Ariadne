@@ -50,6 +50,13 @@
 - [ ] **录样本**：`bun run record:provider <模型 id> <名字>` 录一遍，提交。
 - [ ] **思考和签名**：打开思考的模型跑带工具的讨论串，几步之后不报签名错误。
 
+## 联网搜索
+
+- [ ] **Anthropic 自带搜索**：只配一个官方地址的 Anthropic 模型，让讨论串查一件最近的事；追踪里 `web_search` 的结果有一段说明和“Pages”列表，用量比这一步的请求多出搜索那一次。
+- [ ] **OpenAI 自带搜索**：只配官方地址的 OpenAI 模型，同上（走的是 `responses` 端点）。
+- [ ] **搜索 Key**：只配 DeepSeek 时，「设置 → 模型」底部出现“联网搜索”，没填 Key 时模型没有 `web_search`、问到要搜索时会让你去填；填上 Tavily 的 Key 之后能搜到结果。
+- [ ] **中转地址**：Anthropic 或 OpenAI 协议配成中转地址时不走自带搜索，表现和 DeepSeek 一样。
+
 ## 外部 agent
 
 先在终端里把对应的程序登录好（`claude`、`codex login`，ACP agent 按它自己的说明）。在设置里分别加 Claude Code、Codex 和一个 ACP agent 的提供方，模型名可以填 `default`。

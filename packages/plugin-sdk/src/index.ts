@@ -276,6 +276,64 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
    * trace shows it as the request the service got.
    */
   requestBody?(settings: Settings, request: ModelRequest): unknown
+  /**
+   * The service's own web search, when it has one: agents then search with the key they
+   * already talk to the model with, and no search service needs setting up.
+   */
+  search?: ModelSearch<Settings>
+}
+
+/** What a model's own web search is asked. */
+export interface ModelSearchRequest {
+  model: string
+  query: string
+  /** How many sources to name at most. */
+  limit: number
+  /** Headers the user added to every request, sent after the provider's own. */
+  headers?: Record<string, string>
+  signal?: AbortSignal
+}
+
+/**
+ * What a model found on the web: what the pages say about the query, in its words, and
+ * the pages it read, best first. A source's `snippet` is the passage it quoted, `''` when
+ * it quoted none.
+ */
+export interface ModelSearchAnswer {
+  text: string
+  sources: SearchResult[]
+  /** Tokens the search took, as a response's `usage` part counts them. */
+  usage?: { input: number; output: number; cached?: number; cacheWrite?: number }
+}
+
+/**
+ * What a model is asked when it searches for an agent: the agent reads the answer as a
+ * tool result and decides itself what to make of it.
+ */
+export const searchAsk = (query: string) =>
+  `Search the web for the query below, once or twice, and report what the pages say that bears on it: the facts, with names, numbers, versions and dates, each cited to its page. At most 300 words, in the language of the query. No advice and no questions back; where the results do not answer it, say so.\n\nQuery: ${query}`
+
+/** Whether `baseUrl` is on `host`: a service's own address, not a relay's. */
+export function onHost(baseUrl: string, host: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === host
+  } catch {
+    return false
+  }
+}
+
+/** A model service that searches the web itself: one request, searched and read there. */
+export interface ModelSearch<Settings = Record<string, unknown>> {
+  /**
+   * Whether the service these settings point at searches: answered from the settings
+   * alone, without asking it. A relay under another address is taken not to.
+   */
+  available(settings: Settings): boolean
+  /**
+   * Search now. Ariadne gives up after a while and aborts `signal`. A thrown error's
+   * message is not shown to the model: it may quote the request.
+   */
+  run(settings: Settings, request: ModelSearchRequest): Promise<ModelSearchAnswer>
 }
 
 /** Undo a registration. */
@@ -345,9 +403,11 @@ export interface SearchResult {
 }
 
 /**
- * Web search for threads and the coordinator. Ariadne ships none: a plugin brings the
- * service, and keeps its credentials (say, an API key from the environment or its own
- * file) to itself. Without one, agents have no search tool, only `fetch_url`.
+ * A web search service for threads and the coordinator. A plugin that brings one keeps
+ * its credentials (say, an API key from the environment or its own file) to itself, and
+ * agents search with it before anything else. Without one they search with the model
+ * service's own search (`ModelProvider.search`), then with the service the user gave a
+ * key for in the settings; with none of these there is no search tool, only `fetch_url`.
  */
 export interface SearchProvider {
   kind: string

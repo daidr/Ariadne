@@ -26,7 +26,12 @@ export interface SchedulerOptions {
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
   /** Documents and whiteboards edited together. */
   shared?: SharedArtifacts
+  /** The plugins' web search services. */
   searchProviders?: ReadonlyMap<string, SearchProvider>
+  /** Every model the user set up; those whose service searches the web may be asked to. */
+  searchModels?: () => ResolvedModel[]
+  /** The search service the user saved a key for, when there is one. */
+  searchService?: () => SearchProvider | null
   /** The user's external tool servers. */
   mcp?: McpHub
   workspaces?: WorkspaceManager
@@ -232,6 +237,8 @@ export class Scheduler {
           : {}),
         ...(this.options.shared ? { shared: this.options.shared } : {}),
         ...(this.options.searchProviders ? { searchProviders: this.options.searchProviders } : {}),
+        ...(this.options.searchModels ? { searchModels: this.options.searchModels() } : {}),
+        ...(this.options.searchService ? { searchService: this.options.searchService() } : {}),
         ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
         ...(this.options.settings
           ? { settings: this.options.settings(conversation.projectId) }

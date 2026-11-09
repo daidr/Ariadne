@@ -135,6 +135,8 @@ const scheduler = new Scheduler({
   reservedSlots: settings.current.concurrency.reserved,
   dashboardSources: host.dashboards,
   searchProviders: host.searches,
+  searchModels: () => settings.searchModels(),
+  searchService: () => settings.searchService(),
   mcp,
   shared,
 })
