@@ -168,6 +168,7 @@ export class WorkspaceManager {
       id: command.id,
       command: command.command,
       startedAt: command.startedAt,
+      url: command.url,
       result: command.result,
     }))
     this.app.background.set({ projectId, conversationId: threadId, commands })

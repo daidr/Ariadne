@@ -183,6 +183,10 @@ export const threadsProjection: Projection = {
       workspace_base TEXT,
       workspace_removed INTEGER NOT NULL DEFAULT 0,
       merged TEXT,
+      -- When its work last landed (its branch or pull request was merged), and when the
+      -- user last wrote to it: landed with nothing written since, it is archived.
+      landed_at INTEGER,
+      user_at INTEGER,
       -- What its workspace changes against the base (JSON ChangeTotals), as of its last
       -- turn that changed something.
       changes TEXT,
@@ -328,13 +332,21 @@ export const threadsProjection: Projection = {
         break
       case 'branch.merged': {
         const { threadId, ...merge } = event.data
-        db.run('UPDATE threads SET merged = ?, updated_at = ? WHERE id = ?', [
+        db.run('UPDATE threads SET merged = ?1, landed_at = ?2, updated_at = ?2 WHERE id = ?3', [
           JSON.stringify({ ...merge, at: event.at }),
           event.at,
           threadId,
         ])
         break
       }
+      case 'branch.merge_undone':
+        // The commit taken back is not the autopilot's to merge again on its own.
+        db.run(
+          `UPDATE threads SET merged = NULL, landed_at = NULL, autopilot_held = ?, updated_at = ?
+           WHERE id = ?`,
+          [event.data.head, event.at, event.data.threadId],
+        )
+        break
       case 'pull_request.synced': {
         const { threadId, ...pullRequest } = event.data
         // Passing checks end a run of failures.
@@ -348,7 +360,11 @@ export const threadsProjection: Projection = {
       }
       case 'pull_request.closed':
         // Merged or closed, its checks are no longer the thread's to fix.
-        db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.threadId])
+        db.run(
+          `UPDATE threads SET check_failures = 0,
+             landed_at = CASE WHEN ?1 THEN ?2 ELSE landed_at END WHERE id = ?3`,
+          [event.data.merged, event.at, event.data.threadId],
+        )
         break
       case 'autopilot.held':
         db.run('UPDATE threads SET autopilot_held = ? WHERE id = ?', [
@@ -366,7 +382,10 @@ export const threadsProjection: Projection = {
         // The user stepping in gives the thread fresh tries (a stopped one is resumed by
         // its own event, appended with the message).
         if (event.data.author === 'user') {
-          db.run('UPDATE threads SET check_failures = 0 WHERE id = ?', [event.data.conversationId])
+          db.run('UPDATE threads SET check_failures = 0, user_at = ? WHERE id = ?', [
+            event.at,
+            event.data.conversationId,
+          ])
         }
         break
       case 'thread.stopped':
@@ -710,6 +729,13 @@ export const noticesProjection: Projection = {
           sha: event.data.sha,
           ...(event.data.auto ? { auto: true } : {}),
         })
+        break
+      case 'branch.merge_undone':
+        db.run(
+          `UPDATE notices SET undone = 1, changed_seq = ?
+           WHERE conversation_id = ? AND kind = 'merged' AND json_extract(payload, '$.sha') = ?`,
+          [event.seq, event.data.threadId, event.data.sha],
+        )
         break
       case 'pull_request.closed': {
         // Merged by hand on the host it shows on the pull request; the autopilot's own says so.
@@ -1537,6 +1563,17 @@ export const transcriptProjection: Projection = {
       case 'branch.merged': {
         // The thread learns it next time it works; the coordinator moves the plan on now.
         const payload = { type: 'branch-merged', ...event.data }
+        addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, false)
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (coordinator) {
+          addEntry(db, event, { conversationId: coordinator, kind: 'note', payload }, true)
+        }
+        break
+      }
+      case 'branch.merge_undone': {
+        // Both hear of it like the merge: the thread next time it works, the coordinator now.
+        const { head: _head, ...undone } = event.data
+        const payload = { type: 'merge-undone', ...undone }
         addEntry(db, event, { conversationId: event.data.threadId, kind: 'note', payload }, false)
         const coordinator = coordinatorOf(db, event.projectId)
         if (coordinator) {

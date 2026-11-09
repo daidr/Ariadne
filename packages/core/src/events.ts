@@ -397,6 +397,17 @@ export interface EventMap {
   /** The user merged the thread's branch into its base; the base now ends with `sha`. */
   'branch.merged': { threadId: string } & BranchMerge
   /**
+   * The user took that merge back: the base is where it was before `sha`, and the thread's
+   * changes wait to be merged again.
+   */
+  'branch.merge_undone': {
+    threadId: string
+    branch: string
+    base: string
+    sha: string
+    head: string
+  }
+  /**
    * Merging the thread's branch (by the user or the autopilot) stopped at these files,
    * changed on both sides.
    * Nothing was merged; the thread gets to bring the base in and resolve them.

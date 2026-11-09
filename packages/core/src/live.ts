@@ -127,6 +127,8 @@ export interface BackgroundView {
   id: string
   command: string
   startedAt: number
+  /** The address on this machine it says it serves at, e.g. a dev server's. */
+  url: string | null
   /** How it ended; `null` while it runs. */
   result: { exitCode: number; endedAt: number; stopped: boolean } | null
 }

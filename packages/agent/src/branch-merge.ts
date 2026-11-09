@@ -103,6 +103,32 @@ export async function mergeThread(
   return { outcome, thread }
 }
 
+/**
+ * The user takes the thread's last merge back. The base returns to where it was, the
+ * thread's changes wait to be merged again, and the coordinator hears of it.
+ */
+export async function undoMerge(
+  app: Ariadne,
+  workspaces: WorkspaceManager,
+  threadId: string,
+): Promise<ThreadView> {
+  const thread = app.getThread(threadId)
+  if (!thread.merged) throw new DomainError('error.undoMerge.none')
+  const branches = await workspaces.branches(thread.projectId)
+  if (!branches?.undoMerge) throw new DomainError('error.merge.unsupported')
+  try {
+    const { branch, base, sha } = thread.merged
+    await branches.undoMerge({ branch, base, sha })
+  } catch (error) {
+    throw workError(error)
+  }
+  const undone = app.recordMergeUndone(threadId)
+  if (!undone.workspace?.removed) return undone
+  // Its worktree went with the merge; the changes are there to look at and merge again.
+  await workspaces.forThread(thread.projectId, threadId).catch(() => {})
+  return app.getThread(threadId)
+}
+
 /** The worktrees of every project's threads, with the space each takes. */
 export async function listWorktrees(app: Ariadne, workspaces: WorkspaceManager) {
   const projects = []

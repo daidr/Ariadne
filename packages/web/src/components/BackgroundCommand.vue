@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BackgroundView } from '@ariadne/core'
-import { DouButton, DouCodeBlock, DouPopover, DouStatusDot, DouText } from 'dou-ui'
+import { DouButton, DouCodeBlock, DouLink, DouPopover, DouStatusDot, DouText } from 'dou-ui'
 import { SquareStopIcon } from '@dou-ui/icons'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
@@ -10,14 +10,18 @@ import { elapsedText, firstLine } from './command-text'
 
 /**
  * A command the thread left running in the background (a dev server, a watcher), in its
- * status line: what it is and for how long. Opened, it shows the end of its output, read
- * again every second while open, and can be stopped.
+ * status line: what it is and for how long, and the address it serves at when it named one
+ * (a dev server), to open the thread's work in the browser. Opened, it shows the end of its
+ * output, read again every second while open, and can be stopped.
  */
 const props = defineProps<{ threadId: string; command: BackgroundView }>()
 
 const now = ref(Date.now())
 const clock = setInterval(() => (now.value = Date.now()), 1000)
 const elapsed = computed(() => elapsedText(now.value - props.command.startedAt))
+
+// The address without its scheme and a bare trailing slash: `localhost:5173`.
+const served = computed(() => props.command.url?.replace(/^https?:\/\//, '').replace(/\/$/, ''))
 
 const open = ref(false)
 const tail = ref('')
@@ -64,40 +68,57 @@ watch(tail, async () => {
 </script>
 
 <template>
-  <DouPopover v-model:open="open" trigger="click" placement="top-start" :width="560">
-    <DouText
-      variant="secondary"
-      size="sm"
-      class="background-trigger"
-      role="button"
-      tabindex="0"
-      :aria-expanded="open"
-      @keydown.enter.prevent="open = !open"
-    >
-      <DouStatusDot tone="success" />
-      <span class="background-text">
-        {{ t('command.background', { command: firstLine(command.command) }) }}
-      </span>
-      <span class="background-time">{{ elapsed }}</span>
-    </DouText>
-    <template #content>
-      <div class="background-head">
-        <DouText size="sm" class="background-command" :title="command.command">
-          $ {{ command.command }}
-        </DouText>
-        <DouButton variant="ghost" size="sm" :loading="stopping" @click="stop">
-          <template #leading><SquareStopIcon /></template>
-          {{ t('command.stop') }}
-        </DouButton>
-      </div>
-      <div ref="box" class="background-output" @scroll="onScroll">
-        <DouCodeBlock :code="tail || t('command.noOutput')" wrap streaming />
-      </div>
-    </template>
-  </DouPopover>
+  <span class="background">
+    <DouPopover v-model:open="open" trigger="click" placement="top-start" :width="560">
+      <DouText
+        variant="secondary"
+        size="sm"
+        class="background-trigger"
+        role="button"
+        tabindex="0"
+        :aria-expanded="open"
+        @keydown.enter.prevent="open = !open"
+      >
+        <DouStatusDot tone="success" />
+        <span class="background-text">
+          {{ t('command.background', { command: firstLine(command.command) }) }}
+        </span>
+        <span class="background-time">{{ elapsed }}</span>
+      </DouText>
+      <template #content>
+        <div class="background-head">
+          <DouText size="sm" class="background-command" :title="command.command">
+            $ {{ command.command }}
+          </DouText>
+          <DouButton variant="ghost" size="sm" :loading="stopping" @click="stop">
+            <template #leading><SquareStopIcon /></template>
+            {{ t('command.stop') }}
+          </DouButton>
+        </div>
+        <div ref="box" class="background-output" @scroll="onScroll">
+          <DouCodeBlock :code="tail || t('command.noOutput')" wrap streaming />
+        </div>
+      </template>
+    </DouPopover>
+    <DouLink v-if="command.url" :href="command.url" external class="background-url">
+      {{ served }}
+    </DouLink>
+  </span>
 </template>
 
 <style scoped>
+.background {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.background-url {
+  flex: none;
+  font-size: var(--dou-font-size-sm);
+}
+
 .background-trigger {
   display: flex;
   align-items: center;
