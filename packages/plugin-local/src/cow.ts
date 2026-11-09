@@ -1,7 +1,18 @@
 import type { ExecResult } from '@ariadne/plugin-sdk'
 import { constants, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { copyFile, cp, lstat, mkdir, readlink, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
+import { release } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
 /**
@@ -34,6 +45,8 @@ function clonesBlocks(drive: string): Promise<boolean> {
   let known = blockCloning.get(drive)
   if (!known) {
     known = (async () => {
+      // Block cloning on copy came with Windows 11 24H2 (build 26100).
+      if (Number(release().split('.')[2]) < 26100) return false
       try {
         const proc = Bun.spawn(
           [
@@ -174,10 +187,54 @@ export type CloneGit = (cwd: string, args: string[], whole?: boolean) => Promise
  * cloned.
  */
 export async function checkoutCloned(
-  from: string,
+  from: string | null,
   worktree: string,
   git: CloneGit,
   clone: Cloner = platformCloner,
+): Promise<number> {
+  const pending = await pendingMark(worktree)
+  if (pending) await writeFile(pending, '')
+  const cloned = from ? await cloneTracked(from, worktree, git, clone) : 0
+  // Fill the index and compare it with the files; then write what differs.
+  await git(worktree, ['reset', '-q'])
+  const result = await git(worktree, ['reset', '-q', '--hard'])
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || `git reset exited ${result.exitCode}`)
+  }
+  if (pending) await rm(pending, { force: true })
+  return cloned
+}
+
+/** The worktree's own git directory, read from its `.git` file; `null` when it has none. */
+async function gitDirOf(worktree: string): Promise<string | null> {
+  const text = await readFile(join(worktree, '.git'), 'utf8').catch(() => '')
+  const dir = /^gitdir: (.+)$/m.exec(text)?.[1]?.trim()
+  return dir ? resolve(worktree, dir) : null
+}
+
+/** The file that says a worktree's files are still being put in place. */
+async function pendingMark(worktree: string): Promise<string | null> {
+  const dir = await gitDirOf(worktree)
+  return dir && join(dir, 'ariadne-checkout-pending')
+}
+
+/**
+ * Whether a worktree added with `--no-checkout` never got its files: the checkout failed
+ * or the server stopped in the middle. It has no index before the checkout begins and the
+ * mark until it ends. Used as it is, its commit's files would all read as deleted.
+ */
+export async function checkoutPending(worktree: string): Promise<boolean> {
+  const dir = await gitDirOf(worktree)
+  return (
+    !!dir && (existsSync(join(dir, 'ariadne-checkout-pending')) || !existsSync(join(dir, 'index')))
+  )
+}
+
+async function cloneTracked(
+  from: string,
+  worktree: string,
+  git: CloneGit,
+  clone: Cloner,
 ): Promise<number> {
   const listed = await git(worktree, ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], true)
   const paths = listed.exitCode === 0 ? listed.stdout.split('\0').filter(Boolean) : []
@@ -205,11 +262,5 @@ export async function checkoutCloned(
     }
   }
   await Promise.all(Array.from({ length: CLONES_AT_ONCE }, work))
-  // Fill the index and compare it with the files; then write what differs.
-  await git(worktree, ['reset', '-q'])
-  const result = await git(worktree, ['reset', '-q', '--hard'])
-  if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || `git reset exited ${result.exitCode}`)
-  }
   return cloned
 }

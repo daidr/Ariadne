@@ -190,14 +190,23 @@ shares() {
 # what is missing or different there. GNU cp only: it makes the directories on the way.
 tracked() {
   local entry
-  # Files and links only: a submodule's directory is git's to make.
-  git -C "$dir" ls-tree -r -z --format='%(objecttype) %(path)' HEAD |
-    while IFS= read -r -d '' entry; do
-      case $entry in 'blob '*) printf '%s\\0' "\${entry#blob }" ;; esac
-    done |
-    (cd -- "$repo" && xargs -0 cp -a --reflink=always --parents -t "$dir" -- 2> /dev/null)
+  : > "$1/ariadne-checkout-pending"
+  # Files and links only: a submodule's directory is git's to make. Each entry reads
+  # "<mode> <type> <object><tab><path>".
+  if [ -n "$shared" ]; then
+    git -C "$dir" ls-tree -r -z HEAD |
+      while IFS= read -r -d '' entry; do
+        case $entry in *' blob '*) printf '%s\\0' "\${entry#*$'\\t'}" ;; esac
+      done |
+      (cd -- "$repo" && xargs -0 cp -a --reflink=always --parents -t "$dir" -- 2> /dev/null)
+  fi
   git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$dir" reset -q
-  git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$dir" reset -q --hard >&2 || exit 5
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false -C "$dir" reset -q --hard >&2 || {
+    # Nothing of the thread's is in it yet; the next open starts over.
+    g worktree remove --force --force "$dir" > /dev/null 2>&1
+    exit 5
+  }
+  rm -f -- "$1/ariadne-checkout-pending"
 }
 seed() {
   local entry
@@ -211,12 +220,12 @@ seed() {
     clone "$repo/$entry" "$dir/$entry" 2> /dev/null || rm -rf -- "$dir/$entry"
   done
 }
+plain=
+shared=
 if [ ! -e "$dir/.git" ]; then
   mkdir -p -- "$(dirname -- "$dir")" || exit 5
   # A worktree whose directory was deleted by hand is still registered; forget it first.
   g worktree prune
-  plain=
-  shared=
   if shares "$(dirname -- "$dir")"; then
     shared=1
     [ "$(uname)" = Darwin ] || plain=--no-checkout
@@ -226,9 +235,15 @@ if [ ! -e "$dir/.git" ]; then
   else
     g worktree add $plain --no-track -b "$branch" "$dir" "$start" >&2 || exit 5
   fi
-  [ -z "$plain" ] || tracked
-  [ -z "$shared" ] || seed
 fi
+# New without its files, or left so by a checkout that failed or was cut short: it has no
+# index before the checkout begins and the mark until it ends.
+own=$(git -C "$dir" rev-parse --absolute-git-dir 2> /dev/null) || exit 5
+if [ -e "$own/ariadne-checkout-pending" ] || [ ! -e "$own/index" ]; then
+  [ -n "$shared" ] || ! shares "$(dirname -- "$dir")" || shared=1
+  tracked "$own"
+fi
+[ -z "$shared" ] || seed
 root=$dir
 if [ -n "$sub" ]; then
   root=$dir/$sub

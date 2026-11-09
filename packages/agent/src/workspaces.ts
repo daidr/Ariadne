@@ -773,7 +773,7 @@ export class WorkspaceManager {
       const open = this.open.get(threadId)
       this.open.delete(threadId)
       if (open) await open.workspace.then((workspace) => workspace.dispose()).catch(() => {})
-      const removed = await branches.remove(threadId)
+      const removed = await branches.remove(threadId, { spare: reason === 'idle' })
       if (!removed) return 'dirty'
       if (known) this.app.recordWorktreeRemoved(threadId, reason)
       return 'removed'

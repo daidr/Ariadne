@@ -333,6 +333,39 @@ describe('local directory', () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  test('a cloned checkout that fails or is cut short is not used as it was left', async () => {
+    const dir = await repo()
+    let broken = true
+    const clone = async (from: string, to: string) => {
+      // The probe goes through; the files do not, as on a disk that filled up.
+      if (broken && !from.includes('ariadne-clone-probe')) throw new Error('disk full')
+      return (await run(['cp', '-a', from, to], { cwd: base })).exitCode === 0
+    }
+    const { workspace } = await localDirectoryProvider(join(base, 'data'), clone).connect({
+      path: dir,
+    })
+    await expect(workspace!.open({ threadId: 'thr_a' })).rejects.toThrow('disk full')
+    expect((await run(['git', 'worktree', 'list'], { cwd: dir })).stdout).not.toContain('thr_a')
+    broken = false
+    const ws = await workspace!.open({ threadId: 'thr_a' })
+    expect(await ws.readFile('README.md')).toBe('# repo\n')
+    expect((await ws.exec('git status --short')).stdout).toBe('')
+
+    // The server stopped between adding the worktree and filling it: no index yet.
+    const own = (await ws.exec('git rev-parse --absolute-git-dir')).stdout.trim()
+    await rm(join(ws.label, 'README.md'))
+    await rm(join(own, 'index'))
+    const again = await workspace!.open({ threadId: 'thr_a' })
+    expect(await again.readFile('README.md')).toBe('# repo\n')
+    expect((await again.exec('git status --short')).stdout).toBe('')
+    // Or while git was writing the files: the mark is still there.
+    await rm(join(ws.label, 'README.md'))
+    await writeFile(join(own, 'ariadne-checkout-pending'), '')
+    const third = await workspace!.open({ threadId: 'thr_a' })
+    expect(await third.readFile('README.md')).toBe('# repo\n')
+    expect(existsSync(join(own, 'ariadne-checkout-pending'))).toBe(false)
+  })
+
   test("a new worktree's files are clones of the checkout's, and only the commit's", async () => {
     const dir = await repo()
     await run(['mkdir', '-p', join(dir, 'src')], { cwd: base })

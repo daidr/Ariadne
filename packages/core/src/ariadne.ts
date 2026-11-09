@@ -3430,7 +3430,9 @@ export class Ariadne {
   /** Record that the thread's worktree is gone; its branch stays. */
   recordWorktreeRemoved(threadId: string, reason: WorktreeRemoval): void {
     const thread = this.getThread(threadId)
-    if (!thread.workspace || thread.workspace.removed) return
+    if (!thread.workspace) return
+    // One parked while idle is recorded again when its work lands after all.
+    if (thread.workspace.removed && !(thread.workspace.parked && reason !== 'idle')) return
     this.store.append([
       { type: 'workspace.removed', projectId: thread.projectId, data: { threadId, reason } },
     ])

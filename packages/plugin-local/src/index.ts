@@ -33,7 +33,14 @@ import {
   type GitRun,
   type Identity,
 } from './branches'
-import { canClone, checkoutCloned, platformCloner, seedWorktree, type Cloner } from './cow'
+import {
+  canClone,
+  checkoutCloned,
+  checkoutPending,
+  platformCloner,
+  seedWorktree,
+  type Cloner,
+} from './cow'
 
 export * from './branches'
 
@@ -573,7 +580,8 @@ export function localWorkspaces(input: {
       const branch = named ?? branchFor(threadId)
       const base = recorded === undefined ? await currentBranch(repoRoot) : recorded
       let dir = dirOf(threadId)
-      if (!existsSync(join(dir, '.git'))) {
+      const fresh = !existsSync(join(dir, '.git'))
+      if (fresh) {
         const shared = await cloneRoot()
         if (shared) dir = join(shared, threadId)
         await mkdir(dirname(dir), { recursive: true })
@@ -591,10 +599,17 @@ export function localWorkspaces(input: {
         if (result.exitCode !== 0) {
           throw new Error(result.stderr.trim() || `git worktree add exited ${result.exitCode}`)
         }
-        if (clone && shared) {
-          await checkoutCloned(repoRoot, dir, cloneGit(['file']), clone)
-          await seedWorktree(repoRoot, dir, git, clone)
+      }
+      // New, or left without its files by a checkout that failed or was cut short.
+      if (await checkoutPending(dir)) {
+        try {
+          await checkoutCloned(repoRoot, dir, cloneGit(['file']), clone ?? (async () => false))
+        } catch (error) {
+          // Nothing of the thread's is in it yet; the next open starts over.
+          await git(repoRoot, 'worktree', 'remove', '--force', '--force', dir)
+          throw error
         }
+        if (clone) await seedWorktree(repoRoot, dir, git, clone)
       }
       // A subdirectory of the repository stays the workspace root inside the worktree.
       const sub = relative(await realpath(repoRoot), await realpath(input.path))

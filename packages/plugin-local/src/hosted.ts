@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { branchChanges, branchMerged, fileVersions, removeWorktree, type GitRun } from './branches'
-import { canClone, checkoutCloned, platformCloner, type Cloner } from './cow'
+import { canClone, checkoutCloned, checkoutPending, platformCloner, type Cloner } from './cow'
 import { branchFor, cloneGit, LocalWorkspace, run, serverGitEnv, worktreesIn } from './index'
 import { GitTreeView } from './tree'
 
@@ -220,7 +220,21 @@ export function hostedClone(input: {
                 ),
             'git worktree add',
           )
-          if (clone && from) await checkoutCloned(from, dir, cloneGit(['file']), clone)
+        }
+        // New, or left without its files by a checkout that failed or was cut short.
+        if (await checkoutPending(dir)) {
+          try {
+            await checkoutCloned(
+              clone && (await clones()) ? await sibling(threadId) : null,
+              dir,
+              cloneGit(['file']),
+              clone ?? (async () => false),
+            )
+          } catch (error) {
+            // Nothing of the thread's is in it yet; the next open starts over.
+            await git(bare, 'worktree', 'remove', '--force', '--force', dir)
+            throw error
+          }
         }
         return new LocalWorkspace(threadId, dir, branch, { base })
       }),

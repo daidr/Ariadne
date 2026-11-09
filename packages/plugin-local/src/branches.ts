@@ -8,6 +8,8 @@ import {
   type MergeMethod,
   type MergeOutcome,
 } from '@ariadne/plugin-sdk'
+import { basename } from 'node:path'
+import { SEED_DIRS } from './cow'
 
 /**
  * Runs git on the repository's machine, in the repository unless `cwd` names another
@@ -413,20 +415,44 @@ async function checkoutOf(git: GitRun, ref: string): Promise<string | null> {
 }
 
 /**
+ * Whether a worktree holds what its branch does not, beyond the changes git itself refuses
+ * to remove: its HEAD is off any branch (commits made there are on none, as in a rebase or
+ * a bisect), a merge, cherry-pick or revert is under way, or it has ignored files other
+ * than dependency directories (an `.env`, a build, local data). Unsure counts as yes.
+ */
+async function holdsMore(git: GitRun, dir: string): Promise<boolean> {
+  const at = { cwd: dir }
+  if ((await git(['symbolic-ref', '-q', 'HEAD'], at)).exitCode !== 0) return true
+  for (const ref of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+    if ((await git(['rev-parse', '-q', '--verify', ref], at)).exitCode === 0) return true
+  }
+  const ignored = await git(
+    ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
+    { ...at, whole: true },
+  )
+  if (ignored.exitCode !== 0) return true
+  return ignored.stdout
+    .split('\0')
+    .some((entry) => entry && !(entry.endsWith('/') && SEED_DIRS.has(basename(entry))))
+}
+
+/**
  * Remove a worktree with `git worktree remove`, keeping its branch. One with changes not
  * committed (untracked files included; ignored ones such as `node_modules` go) stays and
- * gives `false`, unless `discard` drops them too. A directory already gone is just forgotten.
+ * gives `false`, unless `discard` drops them too; `spare` keeps one that `holdsMore` as well. A directory
+ * already gone is just forgotten.
  */
 export async function removeWorktree(
   git: GitRun,
   dir: string,
   exists: (dir: string) => Promise<boolean>,
-  options: { discard?: boolean } = {},
+  options: { discard?: boolean; spare?: boolean } = {},
 ): Promise<boolean> {
   if (!(await exists(dir))) {
     await git(['worktree', 'prune'])
     return true
   }
+  if (options.spare && !options.discard && (await holdsMore(git, dir))) return false
   // Twice: a locked worktree goes as well.
   const force = options.discard ? ['--force', '--force'] : []
   const result = await git(['worktree', 'remove', ...force, dir])

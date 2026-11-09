@@ -72,7 +72,7 @@ async function remove(projectId: string, threadId: string) {
           </DouText>
           <DouText v-else-if="project.shared === false && windows" size="sm" variant="tertiary">
             {{ t('worktrees.copied') }}
-            <DouLink :href="DEV_DRIVE" external>Dev Drive</DouLink>
+            <DouLink :href="DEV_DRIVE" external>{{ t('worktrees.devDrive') }}</DouLink>
           </DouText>
         </div>
         <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>

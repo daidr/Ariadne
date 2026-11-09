@@ -292,8 +292,11 @@ export interface BranchCapability {
   /**
    * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
    * stays (`false`), unless `discard` says to drop them, as when its project is deleted.
+   * With `spare` it also stays when removing it would lose what git does not count as a
+   * change: ignored files other than dependency directories, commits made off its branch,
+   * a merge or rebase under way.
    */
-  remove(threadId: string, options?: { discard?: boolean }): Promise<boolean>
+  remove(threadId: string, options?: { discard?: boolean; spare?: boolean }): Promise<boolean>
   worktrees(): Promise<WorktreeInfo[]>
   /**
    * Whether a new worktree's files share storage with the checkout they come from
