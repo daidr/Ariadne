@@ -49,12 +49,7 @@ const prTone = computed(() =>
     <span class="row-head">
       <!-- A review that ended says nothing of its verdict: no green check for it. -->
       <DouTooltip v-if="nested && thread.stage === 'done'" :content="t('review.ended')">
-        <DouText
-          variant="tertiary"
-          class="row-reviewed"
-          role="img"
-          :aria-label="t('review.ended')"
-        >
+        <DouText variant="tertiary" class="row-reviewed" role="img" :aria-label="t('review.ended')">
           <ScanSearchIcon aria-hidden="true" />
         </DouText>
       </DouTooltip>
