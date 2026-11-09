@@ -1259,6 +1259,11 @@ export async function undoNotice(noticeId: string) {
   await api.undoNotice(projectId, noticeId).catch(report)
 }
 
+/** Take the thread's last merge back. */
+export async function undoMerge(threadId: string) {
+  await api.undoMerge(threadId).catch(report)
+}
+
 /** Let a thread the coordinator stopped go on. */
 export async function resumeThread(threadId: string) {
   await api.resumeThread(threadId).catch(report)

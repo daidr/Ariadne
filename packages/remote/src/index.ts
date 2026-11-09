@@ -18,6 +18,7 @@ import {
   fileVersions,
   gitIdentity,
   mergeBranch,
+  undoMerge,
   removeWorktree,
   treeDiff,
   dropSnapshots,
@@ -330,6 +331,7 @@ export function remoteWorkspaces(
         : {
             merge: (request: Parameters<NonNullable<BranchCapability['merge']>>[0]) =>
               mergeBranch(git, identity, request),
+            undoMerge: (request: { base: string; sha: string }) => undoMerge(git, request),
           }),
       async remove(threadId, options) {
         const removed = await removeWorktree(git, dirOf(threadId), exists, options)

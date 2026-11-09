@@ -2,7 +2,7 @@ import type { ThreadView } from '@ariadne/core'
 import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
 import { locale } from './i18n'
-import { groupOf, sortThreads, threadGroups } from './stage'
+import { groupOfThread, sortThreads, threadGroups } from './stage'
 import { activeThreadId, openThread, state } from './store'
 import { threadSort } from './components/thread-list'
 
@@ -80,7 +80,7 @@ export function threadOrder(): string[] {
   const nested = (thread: ThreadView) => !!thread.reviewOf && ids.has(thread.reviewOf)
   return threadGroups.flatMap((group) =>
     sortThreads(
-      threads.filter((thread) => groupOf[thread.stage] === group && !nested(thread)),
+      threads.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
       threadSort.value,
       locale.value,
     ).flatMap((thread) => {

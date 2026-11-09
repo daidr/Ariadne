@@ -215,6 +215,101 @@ describe('thread stages', () => {
     timed.close()
   })
 
+  test('merged work is archived until the user writes to the thread again', () => {
+    let tick = 1000
+    const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })
+    const project = timed.createProject('P')
+    const thread = timed.createThread(project.id, { title: '改代码' })
+    timed.startThread(thread.id)
+    timed.reportThread(thread.id, { kind: 'ready', summary: '可以审阅', headline: '可以审阅' })
+    expect(timed.getThread(thread.id).archived).toBe(false)
+    const merge = {
+      branch: 'ariadne/x',
+      base: 'main',
+      method: 'squash' as const,
+      sha: 'a',
+      head: 'b',
+    }
+    expect(timed.recordMerge(thread.id, merge)).toMatchObject({ stage: 'done', archived: true })
+    // Writing to it brings it back, and it stays once it is done again.
+    timed.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'user',
+      content: '再看一下',
+    })
+    expect(timed.getThread(thread.id).archived).toBe(false)
+    const turnId = timed.startTurn(thread.id, 'model')
+    timed.recordStep(thread.id, turnId, {
+      reasoning: [],
+      text: '',
+      toolCalls: [],
+      sawSeq: timed.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    timed.reportThread(thread.id, { kind: 'done', summary: '看过了', headline: '看过了' })
+    timed.finishTurn(thread.id, turnId, 'completed')
+    expect(timed.getThread(thread.id)).toMatchObject({ stage: 'done', archived: false })
+    timed.close()
+  })
+
+  test('a finished thread is archived after a week with nothing happening', () => {
+    let now = 1000
+    const timed = new Ariadne({ path: ':memory:', now: () => now })
+    const project = timed.createProject('P')
+    const waiting = timed.createThread(project.id, { title: '等审阅' })
+    const thread = timed.createThread(project.id, { title: '调研' })
+    timed.startThread(waiting.id)
+    timed.reportThread(waiting.id, { kind: 'ready', summary: '可以审阅', headline: '可以审阅' })
+    timed.startThread(thread.id)
+    timed.reportThread(thread.id, { kind: 'done', summary: '查完了', headline: '查完了' })
+    now += 7 * 24 * 60 * 60 * 1000 - 1
+    expect(timed.getThread(thread.id).archived).toBe(false)
+    now += 1
+    expect(timed.getThread(thread.id).archived).toBe(true)
+    // Only finished ones: what still waits on the user stays in sight however old.
+    expect(timed.getThread(waiting.id)).toMatchObject({ stage: 'review', archived: false })
+    timed.close()
+  })
+
+  test('a merge taken back puts the changes up for review again', () => {
+    let tick = 1000
+    const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })
+    const project = timed.createProject('P')
+    const thread = timed.createThread(project.id, { title: '改代码' })
+    timed.startThread(thread.id)
+    timed.reportThread(thread.id, { kind: 'ready', summary: '可以审阅', headline: '可以审阅' })
+    expect(() => timed.recordMergeUndone(thread.id)).toThrow()
+    const merge = {
+      branch: 'ariadne/x',
+      base: 'main',
+      method: 'squash' as const,
+      sha: 'a',
+      head: 'b',
+    }
+    timed.recordMerge(thread.id, merge)
+    const merged = () => timed.listNotices(thread.id).filter((n) => n.kind === 'merged')
+    expect(merged()).toMatchObject([{ sha: 'a' }])
+    expect(merged()[0]).not.toHaveProperty('undone')
+
+    expect(timed.recordMergeUndone(thread.id)).toMatchObject({
+      stage: 'review',
+      merged: null,
+      archived: false,
+      // The autopilot does not merge the commit the user took back.
+      autopilotHeld: 'b',
+    })
+    expect(merged()).toMatchObject([{ sha: 'a', undone: true }])
+    expect(timed.getProject(project.id).needsMe).toBe(1)
+    // The coordinator is told, and woken to bring the plan back in line.
+    const notes = timed
+      .listTranscript(project.coordinatorId)
+      .flatMap((entry) => (entry.kind === 'note' ? [entry.note] : []))
+    expect(notes.at(-1)).toMatchObject({ type: 'merge-undone', threadId: thread.id, sha: 'a' })
+    timed.close()
+  })
+
   test('the user can be through with a review without merging', () => {
     let tick = 1000
     const timed = new Ariadne({ path: ':memory:', now: () => (tick += 10) })

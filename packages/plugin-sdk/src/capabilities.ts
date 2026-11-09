@@ -26,6 +26,11 @@ export interface Workspace {
    */
   base: string | null
   /**
+   * On the machine Ariadne runs on: what a command serves on `localhost` there is reached
+   * from the user's browser.
+   */
+  local?: boolean
+  /**
    * Paths are relative to the workspace root. Implementations refuse paths that leave it,
    * including through symbolic links, with a `WorkspacePathError`.
    */
@@ -250,6 +255,12 @@ export interface BranchCapability {
     message: string
   }): Promise<MergeOutcome>
   /**
+   * Take back a merge made with `merge`, which left `base` at `sha`: the base goes back to
+   * where it was before. Refused (`MergeRefused`) once commits came after it or it was
+   * pushed, where moving the base back would lose or contradict them.
+   */
+  undoMerge?(input: { base: string; sha: string }): Promise<void>
+  /**
    * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
    * stays (`false`), unless `discard` says to drop them, as when its project is deleted.
    */
@@ -431,7 +442,7 @@ export class FileTooLargeError extends Error {
 }
 
 /**
- * Why a merge did not happen, for reasons the user can act on:
+ * Why a merge, or taking one back, did not happen, for reasons the user can act on:
  * - `checkout`: the base is checked out and the files there stand in the way (changes not
  *   committed to the same files).
  * - `base-moved`: the base got new commits while merging; trying again takes them in.
@@ -440,10 +451,20 @@ export class FileTooLargeError extends Error {
  * - `identity`: git has no `user.name` or `user.email` to write the commit with.
  * - `git-version`: git is too old to merge without a working tree (2.38 or later).
  * - `no-base`: the base branch is gone.
+ * - `undo-moved`: the base got commits after the merge to take back.
+ * - `undo-pushed`: a remote branch already has the merge to take back.
  */
 export class MergeRefused extends Error {
   constructor(
-    readonly reason: 'checkout' | 'base-moved' | 'filters' | 'identity' | 'git-version' | 'no-base',
+    readonly reason:
+      | 'checkout'
+      | 'base-moved'
+      | 'filters'
+      | 'identity'
+      | 'git-version'
+      | 'no-base'
+      | 'undo-moved'
+      | 'undo-pushed',
     readonly detail: string,
   ) {
     super(`merge refused (${reason}): ${detail}`)

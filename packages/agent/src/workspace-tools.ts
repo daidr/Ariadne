@@ -620,8 +620,11 @@ const runCommand: Tool = {
         if (!ctx.background) {
           return { content: 'Commands cannot run in the background here.', isError: true }
         }
-        const started = ctx.background.start(ctx.conversationId, command, (options) =>
-          workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+        const started = ctx.background.start(
+          ctx.conversationId,
+          command,
+          (options) => workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+          { local: workspace.local },
         )
         const first = await ctx.background.read(
           ctx.conversationId,

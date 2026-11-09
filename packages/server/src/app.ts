@@ -10,6 +10,7 @@ import {
   MAX_LINKS,
   mentionFiles,
   mergeThread,
+  undoMerge,
   refreshDashboard,
   SharedArtifacts,
   syncThreadPullRequest,
@@ -665,6 +666,12 @@ export function createHandler({
     if (method !== 'squash' && method !== 'merge') throw new BadRequest('method')
     const message = typeof body.message === 'string' ? body.message : ''
     return json(await mergeThread(app, workspaces, threadId, { method, message }))
+  })
+
+  // The user takes the thread's last merge back.
+  add('POST', '/api/threads/:threadId/merge/undo', async (_request, { threadId = '' }) => {
+    if (!workspaces) throw new DomainError('error.merge.unsupported')
+    return json({ thread: await undoMerge(app, workspaces, threadId) })
   })
 
   // Threads' worktrees across projects, with the space they take.

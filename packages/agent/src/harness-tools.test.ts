@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { BackgroundCommands } from './background'
+import { BackgroundCommands, servedUrl } from './background'
 import { applyEdit } from './edit-match'
 import { globToRegExp } from './glob'
 import { commandParts, commandVerdict, DEFAULT_LIMITS } from './limits'
@@ -361,6 +361,32 @@ describe('file tools', () => {
 })
 
 describe('background commands', () => {
+  test('the address a server prints is found once it is whole', () => {
+    expect(servedUrl('  \x1b[32m➜\x1b[39m  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n')).toBe(
+      'http://localhost:5173/',
+    )
+    expect(servedUrl('Listening on http://0.0.0.0:3000 (press Ctrl+C)\n')).toBe(
+      'http://localhost:3000',
+    )
+    expect(servedUrl('open http://127.0.0.1:8080/docs/.\n')).toBe('http://127.0.0.1:8080/docs/')
+    // Still arriving: the port may not be all there yet.
+    expect(servedUrl('Local: http://localhost:51')).toBeNull()
+    expect(servedUrl('fetching https://example.com:443/x \n')).toBeNull()
+  })
+
+  test('a server started on this machine shows its address', async () => {
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws)
+    await tool('run_command').run(
+      { command: 'echo "Local: http://localhost:4321/"; sleep 30', background: true },
+      ctx,
+    )
+    expect(ctx.background!.list(ctx.conversationId)).toMatchObject([
+      { url: 'http://localhost:4321/' },
+    ])
+    await ctx.background!.stopThread(ctx.conversationId)
+  })
+
   test('run on, show their output, and stop', async () => {
     const ws = new LocalWorkspace('w', dir, null)
     const ctx = context(ws)

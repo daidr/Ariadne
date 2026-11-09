@@ -322,6 +322,50 @@ export async function mergeBranch(
   return { kind: 'merged', sha: result, head }
 }
 
+/**
+ * Take back the merge that left the local branch `base` at `sha`: the base goes back to
+ * the commit it was on before, and a checkout of it gets its files back, keeping changes
+ * not committed there (and refusing when they are to the same files). Only while the
+ * merge is the base's newest commit and no remote branch has it: later commits would be
+ * lost, and a pushed merge would come back with the next pull.
+ */
+export async function undoMerge(git: GitRun, input: { base: string; sha: string }): Promise<void> {
+  const baseRef = `refs/heads/${input.base}`
+  const baseSha = await sha(git, baseRef)
+  if (!baseSha) throw new MergeRefused('no-base', `${input.base} does not exist`)
+  const before = await sha(git, `${input.sha}^1`)
+  if (baseSha !== input.sha || !before) {
+    throw new MergeRefused('undo-moved', `${input.base} is at ${baseSha.slice(0, 12)}`)
+  }
+  const pushed = await git([
+    'for-each-ref',
+    '--count=1',
+    '--format=%(refname:short)',
+    '--contains',
+    input.sha,
+    'refs/remotes',
+  ])
+  if (pushed.exitCode !== 0) fail(pushed, 'git for-each-ref')
+  if (pushed.stdout.trim()) throw new MergeRefused('undo-pushed', pushed.stdout.trim())
+
+  const checkout = await checkoutOf(git, baseRef)
+  if (!checkout) {
+    const moved = await git(['update-ref', baseRef, before, input.sha])
+    if (moved.exitCode !== 0) throw new MergeRefused('undo-moved', moved.stderr.trim())
+    return
+  }
+  // A commit made in the checkout meanwhile.
+  if ((await sha(git, 'HEAD', checkout)) !== input.sha) {
+    throw new MergeRefused('undo-moved', `${input.base} moved in ${checkout}`)
+  }
+  const tree = (await git(['rev-parse', `${before}^{tree}`])).stdout.trim()
+  if (await usesFilters(git, tree)) {
+    throw new MergeRefused('filters', 'the repository uses .gitattributes filters')
+  }
+  const moved = await git(['reset', '--keep', '-q', before], { cwd: checkout })
+  if (moved.exitCode !== 0) throw new MergeRefused('checkout', moved.stderr.trim())
+}
+
 /** Whether any `.gitattributes` in `tree` sets a filter. */
 async function usesFilters(git: GitRun, tree: string): Promise<boolean> {
   const found = await git([

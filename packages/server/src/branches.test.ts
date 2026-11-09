@@ -110,6 +110,46 @@ describe('thread changes', () => {
     expect(app.listNotices(thread.id).map((n) => n.kind)).toEqual(['merged'])
   })
 
+  test('the user takes a merge back: the changes wait again, with their worktree', async () => {
+    const { dir, project, thread } = await setup()
+    app.reportThread(thread.id, { kind: 'ready', summary: '加好了', headline: '加好了' })
+    const none = await call(`/api/threads/${thread.id}/merge/undo`, { method: 'POST' })
+    expect((await none.json()).error.key).toBe('error.undoMerge.none')
+
+    const before = await git(dir, 'rev-parse', 'main')
+    await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(app.getThread(thread.id)).toMatchObject({ stage: 'done', archived: true })
+    // Its worktree went once the work had landed.
+    await workspaces.removeWorktree(project.id, thread.id, 'merged')
+    expect(app.getThread(thread.id).workspace?.removed).toBe(true)
+
+    const undone = await call(`/api/threads/${thread.id}/merge/undo`, { method: 'POST' })
+    expect((await undone.json()).thread).toMatchObject({
+      stage: 'review',
+      merged: null,
+      archived: false,
+      workspace: { removed: false },
+    })
+    expect(await git(dir, 'rev-parse', 'main')).toBe(before)
+    expect(existsSync(join(dir, 'a.txt'))).toBe(false)
+    expect(app.listNotices(thread.id).filter((n) => n.kind === 'merged')).toMatchObject([
+      { undone: true },
+    ])
+    const coordinator = app.listTranscript(project.coordinatorId)
+    expect(coordinator.at(-1)).toMatchObject({ kind: 'note', note: { type: 'merge-undone' } })
+    // It merges again.
+    const again = await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect((await again.json()).outcome.kind).toBe('merged')
+
+    // Once the base moved on, it is refused and nothing changes.
+    await writeFile(join(dir, 'user.txt'), 'user\n')
+    await git(dir, 'add', '.')
+    await git(dir, 'commit', '-qm', 'user')
+    const late = await call(`/api/threads/${thread.id}/merge/undo`, { method: 'POST' })
+    expect((await late.json()).error.key).toBe('error.merge.undo-moved')
+    expect(app.getThread(thread.id).merged).not.toBeNull()
+  })
+
   test('a conflict merges nothing and wakes the thread to resolve it', async () => {
     const { dir, thread, ws } = await setup()
     await ws.exec('echo thread > README.md && git commit -qam readme')
