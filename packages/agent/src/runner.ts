@@ -14,6 +14,7 @@ import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, reviewerPrompt, threadPrompt, type ThreadContext } from './prompts'
+import { besideText } from './review-tools'
 import { loadSkills, SkillSet, type SkillFiles } from './skills'
 import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
@@ -85,8 +86,8 @@ export interface TurnOptions {
   settings?: TurnSettings
   /** The model a research runs on; the conversation's own without it. */
   researchModel?: ResolvedModel | null
-  /** The user's own skills for every project (`<home>/skills`); none without it. */
-  skillsDir?: string | null
+  /** The user's own skill folders for every project, the earlier winning a name. */
+  skillsDirs?: readonly string[]
 }
 
 function threadContext(
@@ -151,6 +152,8 @@ function systemPrompt(
   userInstructions: string,
   skills: SkillSet,
   references: { name: string; line: string }[],
+  /** What the review skill has beside it, when it is a folder: told to a reviewer. */
+  reviewBeside: string,
 ): string {
   if (conversation.role === 'coordinator') {
     const project = app.getProject(conversation.projectId)
@@ -188,8 +191,11 @@ function systemPrompt(
         : null,
       memories: app.listMemories(project.id),
       instructions: recordedInstructions(app, conversation.id),
-      userInstructions: { global: userInstructions, project: project.settings.instructions },
-      reviewSkill: skill ? { source: skill.source, text: skill.text } : null,
+      userInstructions: {
+        global: userInstructions,
+        project: project.settings.instructions,
+      },
+      reviewSkill: skill ? { source: skill.source, text: skill.text, beside: reviewBeside } : null,
       skills: skills.list(),
       maxRounds: MAX_REVIEW_ROUNDS,
       references,
@@ -220,7 +226,7 @@ export async function conversationSkills(
   conversation: ConversationView,
   owner: string,
   workspaces: WorkspaceManager | undefined,
-  localDir: string | null,
+  localDirs: readonly string[],
 ): Promise<SkillSet> {
   let repo: SkillFiles | null = null
   if (workspaces?.available(conversation.projectId)) {
@@ -232,7 +238,7 @@ export async function conversationSkills(
       repo = await workspaces.view(conversation.projectId).catch(() => null)
     }
   }
-  return loadSkills({ repo, localDir })
+  return loadSkills({ repo, localDirs })
 }
 
 async function runTool(tool: Tool | undefined, call: ToolCallRecord, turnCtx: ToolContext) {
@@ -351,10 +357,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     app.finishTurn(conversationId, turnId, ...args)
   }
   const byName = new Map(tools.map((tool) => [tool.spec.name, tool]))
-  const localSkills = options.skillsDir ?? null
+  const localSkills = options.skillsDirs ?? []
   let skills = SkillSet.empty()
+  let reviewBeside = ''
   const reloadSkills = async () => {
     skills = await conversationSkills(app, conversation, owner, workspaces, localSkills)
+    const review = reviewOf ? skills.get('review') : null
+    reviewBeside = review ? await besideText(skills, review) : ''
   }
   const ctx: ToolContext = {
     app,
@@ -475,6 +484,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         settings.instructions,
         skills,
         workspaces?.references(conversation.projectId, options.locale) ?? [],
+        reviewBeside,
       )
     }
     const specs = tools.map((tool) => tool.spec)

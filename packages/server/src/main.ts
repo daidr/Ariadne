@@ -35,6 +35,8 @@ const config = loadConfig()
 const app = new Ariadne({ path: config.databasePath })
 
 const configPath = join(config.home, 'config.json')
+// The user's own skills for every project: Ariadne's first, then the folder shared between tools.
+const skillsDirs = [join(config.home, 'skills'), join(homedir(), '.agents', 'skills')]
 
 // Thread commands must not see the token or the settings, nor a browser that holds the token.
 const userConfig = loadUserConfig(configPath)
@@ -130,7 +132,7 @@ const scheduler = new Scheduler({
   models: () => settings.modelChoices(),
   settings: (projectId) => settings.turnSettings(projectId),
   researchModel: () => settings.resolveModel('research'),
-  skillsDir: join(config.home, 'skills'),
+  skillsDirs,
   locale: () => settings.current.locale,
   slots: settings.current.concurrency.slots,
   reservedSlots: settings.current.concurrency.reserved,
@@ -197,7 +199,7 @@ const handle = createHandler({
   workspaces,
   mcp,
   data: dataStore,
-  skillsDir: join(config.home, 'skills'),
+  skillsDirs,
   shared,
   feedback,
 })

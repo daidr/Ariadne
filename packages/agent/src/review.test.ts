@@ -6,16 +6,17 @@ import type {
   SourceView,
   Workspace,
 } from '@ariadne/plugin-sdk'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { PluginHost } from './plugins'
 import { reviewerPrompt, skillsSection } from './prompts'
-import { numberedDiff } from './review-tools'
+import { numberedDiff, readSkill } from './review-tools'
 import { Scheduler } from './scheduler'
 import { loadSkills, skillName, whenToUse } from './skills'
 import { call, fakeModel, say } from './test-model'
+import type { ToolContext } from './tool-helpers'
 import { mentionsText } from './transcript'
 import { WorkspaceManager } from './workspaces'
 
@@ -150,14 +151,85 @@ describe('skills', () => {
       '.ariadne/skills/bad name.md': 'x',
       'README.md': 'hi',
     })
-    const skills = await loadSkills({ repo, localDir: home })
+    const skills = await loadSkills({ repo, localDirs: [home] })
     expect(skills.list()).toEqual([
       { name: 'release', when: '发版的时候', source: 'local' },
       { name: 'review', when: '审 PR 的时候', source: 'repo' },
     ])
     expect(skills.get('review')?.text).toContain('只看 bug')
     // Nowhere to read from is no skills, not an error.
-    expect((await loadSkills({ repo: null, localDir: join(home, 'none') })).list()).toEqual([])
+    expect((await loadSkills({ repo: null, localDirs: [join(home, 'none')] })).list()).toEqual([])
+  })
+
+  test('a skill may be a folder with SKILL.md and files beside it', async () => {
+    await mkdir(join(home, 'release', 'scripts'), { recursive: true })
+    await writeFile(
+      join(home, 'release', 'SKILL.md'),
+      '---\nname: release\ndescription: >\n  发版的时候，\n  按步骤来\nlicense: x\n---\n见 scripts/tag.sh',
+    )
+    await writeFile(join(home, 'release', 'scripts', 'tag.sh'), 'git tag')
+    // A folder without SKILL.md is not a skill; a folder wins a file of its name.
+    await mkdir(join(home, 'notes'))
+    await writeFile(join(home, 'release.md'), '旧的单文件')
+    const repo = memoryFiles({
+      '.agents/skills/deploy/SKILL.md': '部署的时候\n看 references/hosts.md',
+      '.agents/skills/deploy/references/hosts.md': 'a.example',
+      '.agents/skills/deploy/references/deep/a/b/c.md': 'too deep',
+    })
+    const skills = await loadSkills({ repo, localDirs: [home] })
+    expect(skills.list()).toEqual([
+      { name: 'deploy', when: '部署的时候', source: 'repo' },
+      { name: 'release', when: '发版的时候， 按步骤来', source: 'local' },
+    ])
+    expect(skills.get('release')?.folder).toBe(join(home, 'release'))
+    expect(skills.get('deploy')?.folder).toBe('.agents/skills/deploy')
+    expect(await skills.files('release')).toEqual({
+      paths: ['scripts/tag.sh'],
+      more: false,
+    })
+    expect(await skills.files('deploy')).toEqual({
+      paths: ['references/hosts.md'],
+      more: true,
+    })
+    expect(await skills.read('deploy', 'references/hosts.md')).toBe('a.example')
+    expect(await skills.read('release', './scripts\\tag.sh')).toBe('git tag')
+    // Nothing outside the folder, and nothing for a name that is not there.
+    expect(await skills.read('release', '../release.md')).toBeNull()
+    expect(await skills.read('release', join(home, 'release.md'))).toBeNull()
+    expect(await skills.read('release', 'none.md')).toBeNull()
+
+    const ctx = { skills: () => skills } as unknown as ToolContext
+    const whole = await readSkill.run({ name: 'deploy' }, ctx)
+    expect(whole.content).toContain('看 references/hosts.md')
+    expect(whole.content).toContain('.agents/skills/deploy in the repository')
+    expect(whole.content).toContain('(more are not listed): references/hosts.md')
+    const file = await readSkill.run({ name: 'deploy', file: 'references/hosts.md' }, ctx)
+    expect(file.content).toContain('a.example')
+    await expect(readSkill.run({ name: 'deploy', file: '../x' }, ctx)).rejects.toThrow(
+      'Its files: references/hosts.md',
+    )
+  })
+
+  test('one name is one skill: places are read in order, the earlier winning', async () => {
+    const shared = join(home, 'shared')
+    const own = join(home, 'own')
+    await mkdir(join(shared, 'review'), { recursive: true })
+    await mkdir(own)
+    await writeFile(join(shared, 'review', 'SKILL.md'), '共用目录的审法')
+    await writeFile(join(shared, 'lint.md'), '共用目录的 lint')
+    await writeFile(join(own, 'lint.md'), '自己的 lint')
+    await writeFile(join(own, 'review.md'), '自己的审法')
+    const repo = memoryFiles({
+      '.agents/skills/review/SKILL.md': '仓库共用目录的审法',
+      '.agents/skills/build.md': '仓库共用目录的构建',
+      '.ariadne/skills/build.md': '仓库自己的构建',
+    })
+    const skills = await loadSkills({ repo, localDirs: [own, shared] })
+    expect(skills.list()).toEqual([
+      { name: 'build', when: '仓库自己的构建', source: 'repo' },
+      { name: 'lint', when: '自己的 lint', source: 'local' },
+      { name: 'review', when: '仓库共用目录的审法', source: 'repo' },
+    ])
   })
 
   test('the prompt lists names and when to use them, not the text', () => {
@@ -291,7 +363,7 @@ describe('pre-delivery review', () => {
       resolveModel: () => model,
       locale: () => 'zh-CN',
       workspaces,
-      skillsDir: home,
+      skillsDirs: [home],
     })
     scheduler.start()
     await scheduler.idle()
