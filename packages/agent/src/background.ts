@@ -18,13 +18,21 @@ const URL_SEARCH = 20_000
 const SERVED =
   /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]):\d{2,5}(?:\/[^\s'"<>)\]]*)?(?=[\s'"<>)\],])/
 
+const SERVING = /\b(?:local|listening|running|ready|serving|started|available)\b/i
+
 /**
  * The address on this machine a command says it serves at, e.g. a dev server's
  * `http://localhost:5173/`; an address it listens on for every interface is reached
  * through `localhost`. Only one followed by more output counts, so it is not cut short.
  */
 export function servedUrl(output: string): string | null {
-  const found = SERVED.exec(screenText(output))?.[0]
+  const lines = screenText(output).split(/(?<=\n)/)
+  // A line that says it serves there beats one that merely names an address (a proxy
+  // target, a failed request).
+  const found = (
+    lines.find((line) => SERVING.test(line) && SERVED.test(line)) ??
+    lines.find((line) => SERVED.test(line))
+  )?.match(SERVED)?.[0]
   if (!found) return null
   return found.replace(/\/\/(?:0\.0\.0\.0|\[::\])(?=:)/, '//localhost').replace(/[.,;:]+$/, '')
 }

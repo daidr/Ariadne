@@ -114,7 +114,8 @@ export async function undoMerge(
   const branches = await workspaces.branches(thread.projectId)
   if (!branches?.undoMerge) throw new DomainError('error.merge.unsupported')
   try {
-    await branches.undoMerge({ base: thread.merged.base, sha: thread.merged.sha })
+    const { branch, base, sha } = thread.merged
+    await branches.undoMerge({ branch, base, sha })
   } catch (error) {
     throw workError(error)
   }

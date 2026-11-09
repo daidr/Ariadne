@@ -322,14 +322,21 @@ export async function mergeBranch(
   return { kind: 'merged', sha: result, head }
 }
 
+const short = (ref: string) => ref.replace(/^refs\/(?:heads|remotes)\//, '')
+
 /**
  * Take back the merge that left the local branch `base` at `sha`: the base goes back to
  * the commit it was on before, and a checkout of it gets its files back, keeping changes
  * not committed there (and refusing when they are to the same files). Only while the
- * merge is the base's newest commit and no remote branch has it: later commits would be
- * lost, and a pushed merge would come back with the next pull.
+ * merge is the base's newest commit and no other branch has it: later commits would be
+ * lost, a pushed merge would come back with the next pull, and a branch started from the
+ * merge (a thread opened after it) would bring it back when it is merged. The merged
+ * branch itself may have it, from bringing the base in.
  */
-export async function undoMerge(git: GitRun, input: { base: string; sha: string }): Promise<void> {
+export async function undoMerge(
+  git: GitRun,
+  input: { branch: string; base: string; sha: string },
+): Promise<void> {
   const baseRef = `refs/heads/${input.base}`
   const baseSha = await sha(git, baseRef)
   if (!baseSha) throw new MergeRefused('no-base', `${input.base} does not exist`)
@@ -337,16 +344,21 @@ export async function undoMerge(git: GitRun, input: { base: string; sha: string 
   if (baseSha !== input.sha || !before) {
     throw new MergeRefused('undo-moved', `${input.base} is at ${baseSha.slice(0, 12)}`)
   }
-  const pushed = await git([
+  const holding = await git([
     'for-each-ref',
-    '--count=1',
-    '--format=%(refname:short)',
+    '--format=%(refname)',
     '--contains',
     input.sha,
     'refs/remotes',
+    'refs/heads',
   ])
-  if (pushed.exitCode !== 0) fail(pushed, 'git for-each-ref')
-  if (pushed.stdout.trim()) throw new MergeRefused('undo-pushed', pushed.stdout.trim())
+  if (holding.exitCode !== 0) fail(holding, 'git for-each-ref')
+  const refs = holding.stdout.split('\n').filter(Boolean)
+  const pushed = refs.find((ref) => ref.startsWith('refs/remotes/'))
+  if (pushed) throw new MergeRefused('undo-pushed', short(pushed))
+  const own = [baseRef, `refs/heads/${input.branch}`]
+  const branched = refs.find((ref) => !own.includes(ref))
+  if (branched) throw new MergeRefused('undo-branched', short(branched))
 
   const checkout = await checkoutOf(git, baseRef)
   if (!checkout) {

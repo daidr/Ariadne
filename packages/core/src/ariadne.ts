@@ -701,7 +701,11 @@ function toThread(row: ThreadRow, now: number): ThreadView {
     merged,
     archived:
       stage === 'done' &&
-      ((row.landed_at !== null && (row.user_at ?? 0) <= row.landed_at) ||
+      // Landed after its last report and nothing written to it since: what it did after
+      // landing (a later report) has not landed.
+      ((row.landed_at !== null &&
+        row.landed_at >= (row.reported_at ?? 0) &&
+        (row.user_at ?? 0) <= row.landed_at) ||
         now - activeAt >= ARCHIVE_AFTER_MS),
     changes: row.changes ? (JSON.parse(row.changes) as ChangeTotals) : null,
     pullRequest,

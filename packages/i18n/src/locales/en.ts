@@ -449,6 +449,8 @@ export const en: Record<MessageKey, string> = {
   'error.merge.undo-moved':
     'The base branch got new commits after the merge; it cannot be undone here',
   'error.merge.undo-pushed': 'The merge was already pushed ({detail}); it cannot be undone here',
+  'error.merge.undo-branched':
+    'The branch {detail} was started after this merge and has it; it cannot be undone here',
   'error.undoMerge.none': 'This thread has no merge to undo',
   'error.worktreeDirty': 'The worktree has changes not committed; it was kept',
   'changes.skipMerge': "Don't merge",

@@ -1263,7 +1263,6 @@ watch(
   margin-inline-end: -8px;
 }
 
-/* A long branch name is cut, not pushed to a line of its own. */
 .conversation-list {
   --dou-chat-list-gap: 8px;
   flex: 1;

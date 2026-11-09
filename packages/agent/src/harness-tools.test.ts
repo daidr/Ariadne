@@ -369,6 +369,10 @@ describe('background commands', () => {
       'http://localhost:3000',
     )
     expect(servedUrl('open http://127.0.0.1:8080/docs/.\n')).toBe('http://127.0.0.1:8080/docs/')
+    // The line that says it serves wins over an address merely named before it.
+    expect(
+      servedUrl('proxy /api -> http://localhost:8787\n  Local:   http://localhost:5173/\n'),
+    ).toBe('http://localhost:5173/')
     // Still arriving: the port may not be all there yet.
     expect(servedUrl('Local: http://localhost:51')).toBeNull()
     expect(servedUrl('fetching https://example.com:443/x \n')).toBeNull()

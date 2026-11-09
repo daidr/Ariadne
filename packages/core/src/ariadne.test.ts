@@ -231,6 +231,26 @@ describe('thread stages', () => {
       head: 'b',
     }
     expect(timed.recordMerge(thread.id, merge)).toMatchObject({ stage: 'done', archived: true })
+    // Work it does after that, asked by the coordinator, has not landed.
+    timed.postMessage(project.id, {
+      conversationId: thread.id,
+      kind: 'relay',
+      author: 'coordinator',
+      content: '再补一点',
+    })
+    const more = timed.startTurn(thread.id, 'model')
+    timed.recordStep(thread.id, more, {
+      reasoning: [],
+      text: '',
+      toolCalls: [],
+      sawSeq: timed.lastSeq(),
+      usage: null,
+      input: STEP_INPUT,
+      timing: TIMING,
+    })
+    timed.reportThread(thread.id, { kind: 'done', summary: '补好了', headline: '补好了' })
+    timed.finishTurn(thread.id, more, 'completed')
+    expect(timed.getThread(thread.id)).toMatchObject({ stage: 'done', archived: false })
     // Writing to it brings it back, and it stays once it is done again.
     timed.postMessage(project.id, {
       conversationId: thread.id,

@@ -424,6 +424,8 @@ export const zhCN = {
   'error.merge.no-base': '基线分支不存在了：{detail}',
   'error.merge.undo-moved': '合并之后基线分支又有了新提交，不能在这里撤销',
   'error.merge.undo-pushed': '这次合并已经推送到远端（{detail}），不能在这里撤销',
+  'error.merge.undo-branched':
+    '分支 {detail} 是在这次合并之后开出来的，带着这次合并，不能在这里撤销',
   'error.undoMerge.none': '这个讨论串没有可以撤销的合并',
   'error.worktreeDirty': '工作区里有没提交的改动，没有移除',
   'changes.skipMerge': '不合并',

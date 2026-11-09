@@ -256,10 +256,11 @@ export interface BranchCapability {
   }): Promise<MergeOutcome>
   /**
    * Take back a merge made with `merge`, which left `base` at `sha`: the base goes back to
-   * where it was before. Refused (`MergeRefused`) once commits came after it or it was
-   * pushed, where moving the base back would lose or contradict them.
+   * where it was before. Refused (`MergeRefused`) once commits came after it, it was pushed,
+   * or another branch than `branch` (the merged one) was started from it: moving the base
+   * back would lose them, or bring the merge back with them.
    */
-  undoMerge?(input: { base: string; sha: string }): Promise<void>
+  undoMerge?(input: { branch: string; base: string; sha: string }): Promise<void>
   /**
    * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
    * stays (`false`), unless `discard` says to drop them, as when its project is deleted.
@@ -453,6 +454,7 @@ export class FileTooLargeError extends Error {
  * - `no-base`: the base branch is gone.
  * - `undo-moved`: the base got commits after the merge to take back.
  * - `undo-pushed`: a remote branch already has the merge to take back.
+ * - `undo-branched`: another local branch was started from the merge to take back.
  */
 export class MergeRefused extends Error {
   constructor(
@@ -464,7 +466,8 @@ export class MergeRefused extends Error {
       | 'git-version'
       | 'no-base'
       | 'undo-moved'
-      | 'undo-pushed',
+      | 'undo-pushed'
+      | 'undo-branched',
     readonly detail: string,
   ) {
     super(`merge refused (${reason}): ${detail}`)
