@@ -50,7 +50,7 @@ function jump(id: string) {
   >
     <DouButton variant="ghost" size="sm" :aria-label="t('artifact.comments')">
       <template #leading><MessageIcon /></template>
-      <template v-if="count">{{ count }}</template>
+      <template v-if="count" #default>{{ count }}</template>
     </DouButton>
     <template #content>
       <div class="comment-list">
