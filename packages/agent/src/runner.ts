@@ -15,7 +15,7 @@ import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
 import { coordinatorPrompt, reviewerPrompt, threadPrompt, type ThreadContext } from './prompts'
 import { loadSkills, SkillSet, type SkillFiles } from './skills'
-import { MAX_REVIEW_ROUNDS } from '@ariadne/core'
+import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
   reviewTools,
   switchedOff,
@@ -36,7 +36,7 @@ import {
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import { repoTools } from './repo-tools'
 import { runCommandSpec, workspaceTools } from './workspace-tools'
-import { DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
+import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
@@ -306,6 +306,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             keyed: options.searchService ?? null,
           },
           research: true,
+          noteCheck: isThread && app.canNoteCheck(conversationId),
         }))
   )
     .filter((tool) => !off.has(tool.spec.name))
@@ -385,7 +386,16 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       shell: shell?.argv ?? null,
       shellName,
       env: settings.env,
-      check: project.settings.workspace.check,
+      // Read anew each time: a check noted in this turn holds for its later edits. One a
+      // thread noted runs only while the project's threads run commands and the user's
+      // command rules let it run unasked.
+      get check() {
+        const now = app.getProject(conversation.projectId)
+        const check = checkCommand(now)
+        if (!now.settings.workspace.auto.check || !check) return check
+        if (now.settings.tools.includes('commands')) return ''
+        return commandVerdict(check, settings.commandRules).action === 'allow' ? check : ''
+      },
     },
     ...(workspaces ? { background: workspaces.background } : {}),
   }

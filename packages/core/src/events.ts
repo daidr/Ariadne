@@ -343,6 +343,13 @@ export interface EventMap {
   /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
   'project.settings.set': { settings: ProjectSettings }
   /**
+   * The install commands the lockfiles of a new workspace called for, one a line; `''`
+   * when it had none Ariadne knows. Kept to show the user what runs.
+   */
+  'project.setup.detected': { setup: string }
+  /** A thread noted the check to run after edits, for a project whose user set none. */
+  'project.check.noted': { command: string; threadId: string }
+  /**
    * The user paused the project's autopilot, or let it go on. Paused, nothing is merged or
    * started on its own; threads at work go on.
    */

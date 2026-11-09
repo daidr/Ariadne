@@ -12,7 +12,7 @@ import type {
   ReviewReply,
   TokenUsage,
 } from './events'
-import { MAX_REVIEW_ROUNDS, type ProjectSettings } from './project-settings'
+import { MAX_REVIEW_ROUNDS, type ProjectDetected, type ProjectSettings } from './project-settings'
 import { applyOps, edgesOf, emptyGraph, type PlanGraph } from './plan'
 import { searchProjection } from './search'
 import type { Projection } from './store'
@@ -57,6 +57,8 @@ export const projectsProjection: Projection = {
       slots INTEGER,
       mcp TEXT NOT NULL DEFAULT '[]',
       settings TEXT,
+      -- What Ariadne found out about the repository itself (JSON, ProjectDetected).
+      detected TEXT,
       -- The user paused its autopilot; and when it last went on (switched on or resumed).
       autopilot_paused INTEGER NOT NULL DEFAULT 0,
       autopilot_since INTEGER,
@@ -124,8 +126,28 @@ export const projectsProjection: Projection = {
           [event.data.paused ? 1 : 0, event.at, event.projectId],
         )
         break
+      case 'project.setup.detected':
+      case 'project.check.noted': {
+        const before = db
+          .query<{ detected: string | null }, [string]>(
+            'SELECT detected FROM projects WHERE id = ?',
+          )
+          .get(event.projectId)?.detected
+        const detected: ProjectDetected = before
+          ? (JSON.parse(before) as ProjectDetected)
+          : { setup: null, check: null }
+        if (event.type === 'project.setup.detected') detected.setup = event.data.setup
+        else detected.check = { command: event.data.command, threadId: event.data.threadId }
+        db.run('UPDATE projects SET detected = ?, updated_at = ? WHERE id = ?', [
+          JSON.stringify(detected),
+          event.at,
+          event.projectId,
+        ])
+        break
+      }
       case 'project.source.set':
-        db.run('UPDATE projects SET source = ?, updated_at = ? WHERE id = ?', [
+        // Another source is another repository: what was found out about the old one goes.
+        db.run('UPDATE projects SET source = ?, detected = NULL, updated_at = ? WHERE id = ?', [
           event.data.source ? JSON.stringify(event.data.source) : null,
           event.at,
           event.projectId,

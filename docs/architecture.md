@@ -70,7 +70,7 @@
 - 讨论串的文件工具：
   - `edit_file` 可以一次给多处修改（`edits`，按顺序应用，有一处失败就都不改）。`old` 原样找不到时，按行比较、忽略空白（缩进、行尾空格、换行符）再找一次，唯一时照改，结果里说明是按空白宽松匹配的行号；还找不到就给出文件里最接近的几行（带行号）和第一处不同，模型不用再整篇重读。
   - `write_file` 覆盖已有文件前看它是否在讨论串上次读或写之后被改过（用户、命令或别的工具），改过就拒绝，让它先重读。记的是内存里的哈希，重启后不记得，就不拦。只读子调研里读到的不算讨论串读过。
-  - 项目设置里的「改动后检查」（默认空）：每次 `edit_file`、`write_file` 之后在工作区里用项目的 shell 跑一次，`{file}` 换成改动的文件（按该 shell 的规则加引号）。通过只附一行，失败把退出码和输出（最多约 6000 字）附在这次修改的结果后面；修改本身照样算成功。
+  - 项目设置里的「改动后检查」：用户没写时由讨论串记下。项目还没有检查命令时，讨论串多一个 `note_check` 工具，新工作区打开时也提醒一句；第一个弄清仓库怎么检查代码的讨论串记下一条快的命令（类型检查或 lint，不是测试和构建），记之前先跑一次，命令本身不对当场能改。记下后别的讨论串不再有这个工具，只有记的那个讨论串能改自己记的；项目关掉了「命令」工具组时没有这个工具，记过的检查也不跑；用户的命令规则要询问或禁止的命令不能记，记下后规则变了也不再跑。用户在设置里改过或清空了输入框，就以用户的为准。每次 `edit_file`、`write_file` 之后在工作区里用项目的 shell 跑一次，`{file}` 换成改动的文件（按该 shell 的规则加引号）。通过只附一行，失败把退出码和输出（最多约 6000 字）附在这次修改的结果后面；修改本身照样算成功。
   - `find_files` 按 glob 找文件（`**`、`{a,b}`、`[abc]`，不带 `/` 的模式匹配任意深度的文件名）。git 签出用 `git ls-files --cached --others --exclude-standard`，所以被忽略的文件不列；不是签出时用 `rg --files`，再没有就逐层列目录（跳过 `.git`、`node_modules` 和根目录 `.gitignore` 里的普通名字）。
   - `search` 和 `find_files` 不经过 shell：有 ripgrep 用 ripgrep，没有时 git 签出用 `git grep`，否则 `grep`，都没有（Windows 上不是签出又没装 ripgrep）就由服务端逐个文件读。程序直接起进程（工作区的 `execFile`），Windows 上也一样；本地以外的工作区（SSH、daemon）是 POSIX，参数按 bash 加引号。
 - `run_command` 可以放到后台（`background`）：立刻返回句柄（`cmd-1`）和头两秒的输出，用 `read_command_output` 读之后新来的输出（可等最多 60 秒）、`stop_command` 结束它和它起的进程。后台命令跨回合保留，每个讨论串同时最多 4 个，最长 8 小时；讨论串被停下、汇报 ready/done/failed/blocked、worktree 被移除、项目被删除或服务停止时一起结束，讨论串结束后它的后台命令连同输出一起丢掉。输出只在内存里保留最新的 200 万字；SSH 和 daemon 工作区收集输出时也边收边裁，不会随命令运行越积越多。服务异常退出（崩溃、被强杀）时没人收尾：Linux 的 bwrap 带 `--die-with-parent` 会一起结束，macOS 和 Windows 上后台命令（比如开发服务器）会一直留着，要手动结束。
@@ -143,6 +143,12 @@
 - GitLab 仓库：和 GitHub 一样（共享 clone、worktree、推送都是同一份代码，`@ariadne/plugin-local` 的 `hostedClone`），目录先按实例（主机和端口，再加实例地址里的路径）再按项目的完整路径分层（`~/.ariadne/plugins/gitlab/repos/<主机>/<group>/<sub>/<project>.git`），不同实例上同路径的项目各有各的 clone。支持子组和自建实例：实例地址可以带路径（比如 `https://example.com/gitlab`），留空时用 GitLab.com 或仓库地址里的实例。
 - SSH 远程目录：见下文“SSH 远程工作区”。
 - 文件工具的路径都相对工作区根目录，越出根目录（包括经符号链接）的路径会被拒绝。命令在工作区里用项目设置的 shell 执行，默认「自动」：Linux、macOS 和远端用 bash，Windows 本地有 PowerShell 7（`pwsh`）就用它，没有用系统自带的 PowerShell 5.1。交给 PowerShell 的命令用 `-EncodedCommand` 传，不会被拆引号，输出设成 UTF-8。命令有超时，输出过长时只保留末尾。
+- 新工作区自动装依赖：用户没写安装脚本时，按工作区根目录的 lockfile 装（`installCommands`）：`bun.lock`、`pnpm-lock.yaml`、`yarn.lock`、`package-lock.json`、`uv.lock`、`Cargo.lock`、`go.sum`、`composer.lock`，只收装法不改 lockfile、也不多装东西的（如 `bun install --frozen-lockfile`、`npm ci`），所以工作区保持干净。认不出的不装；同时有几种 JS 包管理器的 lockfile 时看 `package.json` 的 `packageManager`，没写就不装 JS 依赖。
+  - 只在讨论串自己的工作区里装（`isolated`）：所有讨论串共用的目录（不是 git 仓库的本地目录、远端目录）是用户自己的，不动。
+  - 安装命令是 Ariadne 选的，所以要过用户的命令规则：规则要询问或禁止的不跑，并告诉讨论串没装和原因。
+  - 工作区带着 `node_modules`（本地 worktree 会把来源的写时复制过来）时不跑 `npm ci`，它会先把目录删掉。
+  - 几条命令共用一个时限（和安装脚本一样）。装了什么、失败的输出附在打开工作区的那次工具结果里。
+  - 认出的命令记在项目上（`project.setup.detected`），设置里显示；还没开过工作区时，打开项目设置会先从来源的只读视图认一次。换了项目来源就清掉重认。
 - 新工作区的安装脚本跟着讨论串的回合：回合被停下（用户点停止、讨论串被停下）时安装脚本也结束，工作区这次不交出去，下一回合重新跑。
 - 工作区里的命令不需要审批；推送、部署这类影响工作区外、又无法撤销的操作，讨论串要先问用户。
 
@@ -405,7 +411,7 @@ SSH 和 daemon 来源可以再选一个代码托管（GitHub 或 GitLab，`Conte
 - 上限：命令默认/最长超时（120/600 秒）、命令输出上限（30k 字符）、压缩时机（上下文的 60%）、模型重试次数（4）、重复调用几次后停下（4）。
 - 预算：项目设置里每个讨论串和整个项目的 token 上限（输入加输出），默认不限。用到上限时回合不开始或在下一步前停下，错误 `error.budgetThread` / `error.budgetProject` 进「需要我」。
 - 模型请求参数：提供方可加请求头（值只存在服务端）、额外请求字段（不能覆盖 model、messages、tools、stream、system）和无响应超时（每次尝试单独计时，超时算可重试的错误）；模型可设单次最多输出。
-- 工作区：项目的命令环境变量（值存在 config.json 的 `projectEnv`，页面只拿到名字）、新工作区的安装脚本（新建工作区后先跑一次，结果附在第一个工具结果里）、改动后检查、命令用的 shell（默认自动）、分支前缀。分支名由 create_thread 的 `branch` 参数生成可读的 `<前缀><slug>-<id 末 6 位>`，没有时是 `<前缀><id 末 12 位>`。
+- 工作区：项目的命令环境变量（值存在 config.json 的 `projectEnv`，页面只拿到名字）、新工作区的安装脚本（新建工作区后先跑一次，结果附在第一个工具结果里）、改动后检查（这两项没写时输入框里显示 Ariadne 自己认出的值，原样保存仍归 Ariadne 管，改过或清空就以用户的为准，`workspace.auto`）、命令用的 shell（默认自动）、分支前缀。分支名由 create_thread 的 `branch` 参数生成可读的 `<前缀><slug>-<id 末 6 位>`，没有时是 `<前缀><id 末 12 位>`。
 - 交付前审阅：项目设置 `review.enabled`，默认开，见“交付前审阅”。
 - 托管推进：项目设置 `autopilot`（`enabled` 默认关、`method` 默认 `squash`、`threads` 默认 3），暂停是单独的 `project.autopilot.paused`，见“托管推进”。
 - 工具开关：项目可关掉 fetch_url、web_search、run_command（连同读后台输出和结束后台命令）、issue 写入、只读子调研几组内置工具。

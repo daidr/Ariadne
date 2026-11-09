@@ -23,7 +23,7 @@ import {
 } from './tool-helpers'
 import { canSearch, fetchUrlTool, webSearchTool, type SearchRoutes } from './web-tools'
 import type { WebAccess } from './web'
-import { sourceTools, workspaceTools } from './workspace-tools'
+import { noteCheck, sourceTools, workspaceTools } from './workspace-tools'
 import { researchTool } from './research'
 import { waitTool } from './wait-tool'
 import { readSkill, reviewerTools } from './review-tools'
@@ -706,6 +706,8 @@ export function toolsFor(
     web?: WebAccess
     /** Whether a research can be handed questions. */
     research?: boolean
+    /** A thread that may note the project's check after edits (`Ariadne.canNoteCheck`). */
+    noteCheck?: boolean
   },
 ): Tool[] {
   const searches = canSearch(source.search)
@@ -726,6 +728,7 @@ export function toolsFor(
     ...threadTools,
     ...web,
     ...(source.workspace ? workspaceTools : []),
+    ...(source.workspace && source.noteCheck ? [noteCheck] : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
     ...(source.research ? [researchTool] : []),
