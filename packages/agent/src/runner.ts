@@ -1,3 +1,4 @@
+import type { SharedArtifacts } from './shared-artifacts'
 import {
   askTitle,
   DomainError,
@@ -67,6 +68,8 @@ export interface TurnOptions {
   /** First wait before a model request is retried; it doubles each time. */
   retryBaseMs?: number
   dashboardSources?: ReadonlyMap<string, DashboardSource<never>>
+  /** Documents and whiteboards edited together. */
+  shared?: SharedArtifacts
   /** The plugins' web search services; without any, agents get no search tool. */
   searchProviders?: ReadonlyMap<string, SearchProvider>
   /** The models the user set up; the coordinator may give one to each thread it opens. */
@@ -360,6 +363,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     skills: () => skills,
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
+    ...(options.shared ? { shared: options.shared } : {}),
     ...(options.searchProviders ? { searchProviders: options.searchProviders } : {}),
     models: options.models ?? [],
     limits,

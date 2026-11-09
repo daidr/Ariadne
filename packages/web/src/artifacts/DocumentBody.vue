@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import type { ArtifactCommentThreadView } from '@ariadne/core'
 import { DouEditor, editorKit, type EditorDocument, type PartialBlock } from '@dou-ui/editor'
+import { collaboration } from '@dou-ui/editor/collaboration'
 import { blocksToMarkdown, markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
+import type { SharedArtifact } from './shared'
 
 /**
- * A Markdown document in the block editor. Comments are kept apart from the Markdown, by
- * the text they quote, and marked on that text again whenever the document is loaded.
+ * A Markdown document in the block editor. The newest version is edited together through
+ * `shared`, where the comments' marks travel with the text; an older one is shown
+ * read-only from `content`, its comments marked again on the text they quote.
  */
 const props = defineProps<{
   content: string
@@ -18,6 +21,7 @@ const props = defineProps<{
   label?: string
   /** `undefined` turns comments off, as for an older version. */
   comments?: ArtifactCommentThreadView[]
+  shared?: SharedArtifact
 }>()
 const emit = defineEmits<{
   draft: [content: string | null]
@@ -25,15 +29,23 @@ const emit = defineEmits<{
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
 
-const extensions = [editorKit()]
+const me = commentAuthor('user')
+const extensions = props.shared
+  ? [
+      editorKit(),
+      collaboration({
+        map: props.shared.doc.getMap('document'),
+        awareness: props.shared.awareness,
+        user: { name: me.name },
+      }),
+    ]
+  : [editorKit()]
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 /** Markdown of the document as loaded, written the way saving would write it. */
 const baseline = ref('')
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
 const editor = useTemplateRef<InstanceType<typeof DouEditor>>('editor')
-
-const me = commentAuthor('user')
 
 /** The threads as the editor shows them; changes here show at once, before the server. */
 const threads = ref<CommentThread[]>([])
@@ -44,6 +56,8 @@ watch(
 )
 
 function load() {
+  // Edited together, the document comes from the room, marks and all.
+  if (props.shared) return
   const read = markdownToBlocks(props.content, extensions) as PartialBlock[]
   baseline.value = blocksToMarkdown(read as never, extensions)
   doc.value = { version: 1, blocks: anchorQuotes(read, props.comments ?? []).blocks }
@@ -52,14 +66,17 @@ function load() {
 watch(() => props.content, load, { immediate: true })
 
 const current = computed(() => blocksToMarkdown(doc.value.blocks as never, extensions))
-const dirty = computed(() => current.value !== baseline.value)
-watch(current, (markdown) => emit('draft', markdown === baseline.value ? null : markdown))
+const dirty = computed(() => !props.shared && current.value !== baseline.value)
+watch(current, (markdown) => {
+  if (!props.shared) emit('draft', markdown === baseline.value ? null : markdown)
+})
+const ready = computed(() => !props.shared || props.shared.ready.value)
 
 // A thread started elsewhere (an agent's) is marked once nothing unsaved would be lost.
 watch(
   () => props.comments,
   (comments) => {
-    if (dirty.value || !comments) return
+    if (props.shared || dirty.value || !comments) return
     const marked = anchoredIds(doc.value.blocks)
     const missing = comments.some((c) => !marked.has(c.id) && c.quote)
     if (missing && anchorQuotes(doc.value.blocks, comments).found.size > marked.size) {
@@ -95,6 +112,7 @@ defineExpose({ quotes, anchored })
 <template>
   <div class="document">
     <DouEditor
+      v-if="ready"
       ref="editor"
       :key="generation"
       v-model="doc"

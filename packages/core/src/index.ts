@@ -1,6 +1,7 @@
 export {
   Ariadne,
   MAX_MEMORIES,
+  MAX_FEEDBACK_IMAGES,
   MAX_MEMORY,
   LINE_COMMENT_LIMITS,
   MAX_MENTIONS,
@@ -31,6 +32,7 @@ export {
   emptyContent,
   MAX_ARTIFACT_JSON,
   previewOf,
+  WHITEBOARD_CONTAINERS,
   WHITEBOARD_NODE_TYPES,
   type DashboardContent,
   type DashboardWidgetContent,
@@ -112,6 +114,8 @@ export {
 } from './live'
 export { defaultProjections, dropProjectionTables, MAX_CHECK_ATTEMPTS } from './projections'
 export { SEARCH_LIMITS, searchTerms } from './search'
+export { lineDiff } from './text-diff'
 export { needsUser, threadStage, type StageFacts, type ThreadStage } from './stage'
 export { EventStore, type EventListener, type Projection } from './store'
 export type * from './views'
+export type { SharedState } from './shared-state'

@@ -1343,7 +1343,7 @@ describe('deleting a project', () => {
     const doc = app.createArtifact(project.id, {
       kind: 'document',
       title: 'Doc',
-      author: 'user',
+      author: a.id,
       content: '# Hello',
     })
     app.reviseArtifact(doc.id, { content: '# Bye', author: 'user', reason: 'r' })
@@ -1354,6 +1354,10 @@ describe('deleting a project', () => {
       quote: 'Bye',
       body: '?',
     })
+    app.sendArtifactFeedback(doc.id, {
+      items: [{ kind: 'edit', diff: '- # Hello\n+ # Bye' }],
+    })
+    app.writeSharedState(doc.id, { version: 2, state: new Uint8Array([0]) })
     const file = app.saveFile(project.id, { mime: 'image/png', data: png })
     const turnId = app.startTurn(a.id, 'model')
     app.recordStep(a.id, turnId, {

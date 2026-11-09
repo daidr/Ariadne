@@ -66,6 +66,17 @@ type FixedKind = 'drawing' | 'image' | 'node'
 const isFixed = (kind: string): kind is FixedKind =>
   kind === 'drawing' || kind === 'image' || kind === 'node'
 
+/** What the model leaves where it is: the user's kinds, and anything inside a frame. */
+const fixedNode = (node: WhiteboardNode) => isFixed(kindOf(node)) || typeof node.parent === 'string'
+
+/** Whether `inner` lies in the frame `outer`, however deep. */
+function within(nodes: Map<string, WhiteboardNode>, inner: WhiteboardNode, outer: string): boolean {
+  for (let at = inner.parent; typeof at === 'string'; at = nodes.get(at)?.parent) {
+    if (at === outer) return true
+  }
+  return false
+}
+
 function kindOf(node: WhiteboardNode): ItemKind | FixedKind {
   if (node.type === 'shape') {
     const shape = node.data?.shape
@@ -293,7 +304,7 @@ export function mergeBoard(board: WhiteboardContent, changes: BoardChanges): Whi
         // Longer text made the box taller: what stood below it moves down as much.
         const was = boxOf(existing)
         for (const other of nodes) {
-          if (other === existing || isFixed(kindOf(other))) continue
+          if (other === existing || fixedNode(other)) continue
           const b = boxOf(other)
           if (b.y >= was.y + was.height && b.x < was.x + was.width && was.x < b.x + b.width) {
             other.y += grew
@@ -372,8 +383,8 @@ function relayout(
   direction: Direction,
   loose = 1,
 ): void {
-  const movable = nodes.filter((n) => !isFixed(kindOf(n)))
-  const fixed = nodes.filter((n) => isFixed(kindOf(n))).map(boxOf)
+  const movable = nodes.filter((n) => !fixedNode(n))
+  const fixed = nodes.filter(fixedNode).map(boxOf)
   const ids = new Set(movable.map((n) => n.id))
   const inside = edges.filter((e) => ids.has(e.source.node) && ids.has(e.target.node))
   const layout = layoutBoard(
@@ -559,13 +570,17 @@ function spread(board: WhiteboardContent): void {
 export function boardSummary(board: WhiteboardContent) {
   return {
     items: board.nodes.map((node) => {
-      const kind = kindOf(node)
+      const kind = node.type === 'option' || node.type === 'group' ? node.type : kindOf(node)
       const { x, y } = node
       const box = boxOf(node)
       const data = node.data ?? {}
       return {
         id: node.id,
         kind,
+        ...(typeof node.parent === 'string' ? { in: node.parent } : {}),
+        ...(kind === 'option' && typeof data.title === 'string' ? { title: data.title } : {}),
+        ...(kind === 'option' && typeof data.note === 'string' ? { note: data.note } : {}),
+        ...(kind === 'option' && data.chosen === true ? { chosen: true } : {}),
         ...(typeof data.text === 'string' && data.text ? { text: data.text } : {}),
         ...(kind === 'node' && typeof data.label === 'string' ? { text: data.label } : {}),
         ...(typeof data.tone === 'string' ? { tone: data.tone } : {}),
@@ -639,9 +654,17 @@ export function boardProblems(board: WhiteboardContent): string[] {
 function allProblems(board: WhiteboardContent): string[] {
   const nodes = board.nodes.filter((n) => kindOf(n) !== 'drawing')
   const box = new Map(nodes.map((n) => [n.id, boxOf(n)]))
+  const byId = new Map(board.nodes.map((n) => [n.id, n]))
+  // A frame holds what is in it, and marks on a screenshot in a frame are meant to be there.
+  const together = (a: WhiteboardNode, b: WhiteboardNode) =>
+    within(byId, a, b.id) ||
+    within(byId, b, a.id) ||
+    (a.type === 'image' && typeof a.parent === 'string') ||
+    (b.type === 'image' && typeof b.parent === 'string')
   const out: string[] = []
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
+      if (together(nodes[i]!, nodes[j]!)) continue
       if (hits(box.get(nodes[i]!.id)!, box.get(nodes[j]!.id)!)) {
         out.push(`items "${nodes[i]!.id}" and "${nodes[j]!.id}" overlap`)
       }
@@ -664,6 +687,7 @@ function allProblems(board: WhiteboardContent): string[] {
     const run = [anchorOf(from, edge.source.port), ...points, anchorOf(to, edge.target.port)]
     for (const node of nodes) {
       if (node.id === edge.source.node || node.id === edge.target.node) continue
+      if (within(byId, node, edge.source.node) || within(byId, node, edge.target.node)) continue
       const b = box.get(node.id)!
       // A few px in, so a line grazing a corner doesn't count.
       const inner = { x: b.x + 4, y: b.y + 4, width: b.width - 8, height: b.height - 8 }

@@ -11,11 +11,13 @@ import {
   mentionFiles,
   mergeThread,
   refreshDashboard,
+  SharedArtifacts,
   syncThreadPullRequest,
   threadChanges,
   threadFile,
   TOOL_SWITCH_NAMES,
   traceRequest,
+  type ArtifactFeedback,
   type McpHub,
   type PluginHost,
   type Scheduler,
@@ -33,6 +35,7 @@ import {
   type ProjectSource,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
+import type { Server } from 'bun'
 import { browseLocal, NothingToBrowse } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
 import type { DataStore } from './data'
@@ -90,6 +93,16 @@ export interface HandlerOptions {
   skillsDir?: string
   /** List prices of models, to fill in a model's price on request. */
   prices?: PriceCatalog
+  /** Documents and whiteboards edited together; left out, they are saved whole. */
+  shared?: SharedArtifacts
+  /** The user's feedback in artifacts, sent to the agent in rounds. */
+  feedback?: ArtifactFeedback
+}
+
+/** What a socket joined to an artifact's room carries. */
+export interface SharedSocketData {
+  artifactId: string
+  link?: { message(data: Uint8Array): void; close(): void }
 }
 
 type Params = Record<string, string>
@@ -137,7 +150,22 @@ function commentAction(body: Record<string, unknown>): ArtifactCommentAction {
   }
   const threadId = text('threadId')
   switch (body.type) {
-    case 'create':
+    case 'create': {
+      // On a whiteboard, the item or connector instead of a quote.
+      if (body.anchor !== undefined) {
+        const anchor = body.anchor as { node?: unknown; edge?: unknown } | null
+        const node = typeof anchor?.node === 'string' && anchor.node ? anchor.node : null
+        const edge = typeof anchor?.edge === 'string' && anchor.edge ? anchor.edge : null
+        if (!node === !edge) throw new BadRequest('anchor')
+        return {
+          type: 'create',
+          threadId,
+          commentId: text('commentId'),
+          quote: '',
+          anchor: node ? { node } : { edge: edge! },
+          body: text('body'),
+        }
+      }
       return {
         type: 'create',
         threadId,
@@ -145,6 +173,7 @@ function commentAction(body: Record<string, unknown>): ArtifactCommentAction {
         quote: text('quote'),
         body: text('body'),
       }
+    }
     case 'reply':
       return { type: 'reply', threadId, commentId: text('commentId'), body: text('body') }
     case 'edit':
@@ -160,11 +189,42 @@ function commentAction(body: Record<string, unknown>): ArtifactCommentAction {
   }
 }
 
+/** Where a page joins the room of a document or whiteboard edited together. */
+const SHARED_PATH = /^\/api\/artifacts\/(art_[\w-]+)\/live$/
+
+/**
+ * A page asks to join the room of a document or whiteboard: the socket is opened, and the
+ * answer is `undefined`, or the refusal. Anything else is not for this and gets `null`.
+ */
+export function joinShared(
+  request: Request,
+  server: Server<SharedSocketData>,
+  { app, token }: { app: Ariadne; token: string },
+): Response | undefined | null {
+  const url = new URL(request.url)
+  const live = SHARED_PATH.exec(url.pathname)
+  if (!live || request.method !== 'GET') return null
+  const given = bearer(request, url)
+  if (!given || !sameToken(given, token)) return errorResponse({ key: 'error.unauthorized' }, 401)
+  try {
+    const artifact = app.getArtifact(live[1]!)
+    if (!SharedArtifacts.shared(artifact.kind)) {
+      return errorResponse({ key: 'error.notFound', params: { what: url.pathname } }, 404)
+    }
+    if (server.upgrade(request, { data: { artifactId: artifact.id } })) return undefined
+    throw new BadRequest('upgrade')
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
 function bearer(request: Request, url: URL): string | null {
   const header = request.headers.get('authorization')
   if (header?.startsWith('Bearer ')) return header.slice(7)
-  // EventSource cannot set headers, so the event stream may pass the token in the query.
-  if (url.pathname === '/api/events') return url.searchParams.get('token')
+  // EventSource and WebSocket cannot set headers, so these may pass the token in the query.
+  if (url.pathname === '/api/events' || SHARED_PATH.test(url.pathname)) {
+    return url.searchParams.get('token')
+  }
   return null
 }
 
@@ -181,6 +241,8 @@ export function createHandler({
   data: dataStore,
   skillsDir,
   prices = new PriceCatalog(),
+  shared,
+  feedback,
 }: HandlerOptions) {
   const routes: Route[] = []
   const add = (method: string, pathname: string, handle: Route['handle']) =>
@@ -748,20 +810,43 @@ export function createHandler({
     return json({ comments: app.commentOnArtifact(artifactId, 'user', commentAction(body)) })
   })
 
-  // The user saves an edit. `baseVersion` is the version they started from.
+  // The page saw the user stop for a moment, or leave: what they did goes to the agent now,
+  // with pictures of the whiteboard options they marked (files added before).
+  add('POST', '/api/artifacts/:artifactId/feedback', async (request, { artifactId = '' }) => {
+    app.getArtifact(artifactId)
+    const body = await readJson(request)
+    const images = body.images ?? []
+    if (!Array.isArray(images) || !images.every((id) => typeof id === 'string')) {
+      throw new BadRequest('images')
+    }
+    return json({ feedback: feedback?.send(artifactId, images as string[]) ?? null })
+  })
+
+  // The user saves an edit. `baseVersion` is the version they started from. A document or
+  // whiteboard edited together takes it into its room (a restored version, a new title).
   add('PUT', '/api/artifacts/:artifactId', async (request, { artifactId = '' }) => {
     const body = await readJson(request)
+    const current = app.getArtifact(artifactId)
+    const together = shared && SharedArtifacts.shared(current.kind) ? shared : null
+    // Edited together, `null` keeps what the room holds: a rename.
     const content = body.content
-    if (typeof content !== 'string') throw new BadRequest('content')
+    if (typeof content !== 'string' && !(together && content === null)) {
+      throw new BadRequest('content')
+    }
     if (!Number.isInteger(body.baseVersion)) throw new BadRequest('baseVersion')
-    const artifact = app.reviseArtifact(artifactId, {
-      content,
-      author: 'user',
-      reason: typeof body.reason === 'string' ? body.reason : '',
-      baseVersion: body.baseVersion as number,
-      ...(typeof body.title === 'string' ? { title: body.title } : {}),
-      ...(isStringRecord(body.quotes) ? { quotes: body.quotes } : {}),
-    })
+    const artifact = together
+      ? together.write(artifactId, 'user', content as string | null, {
+          reason: typeof body.reason === 'string' ? body.reason : '',
+          ...(typeof body.title === 'string' ? { title: body.title } : {}),
+        })
+      : app.reviseArtifact(artifactId, {
+          content: content as string,
+          author: 'user',
+          reason: typeof body.reason === 'string' ? body.reason : '',
+          baseVersion: body.baseVersion as number,
+          ...(typeof body.title === 'string' ? { title: body.title } : {}),
+          ...(isStringRecord(body.quotes) ? { quotes: body.quotes } : {}),
+        })
     return json({
       artifact,
       versions: app.listArtifactVersions(artifactId),

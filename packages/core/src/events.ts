@@ -237,13 +237,48 @@ export type ArtifactKind = 'document' | 'whiteboard' | 'dashboard'
  * after anyone rewrites the Markdown around it. Times are the event's.
  */
 export type ArtifactCommentAction =
-  | { type: 'create'; threadId: string; commentId: string; quote: string; body: string }
+  | {
+      type: 'create'
+      threadId: string
+      commentId: string
+      /** A document's commented text; empty on a whiteboard. */
+      quote: string
+      body: string
+      /** On a whiteboard: the item or connector the thread is about. */
+      anchor?: ArtifactCommentAnchor
+    }
   | { type: 'reply'; threadId: string; commentId: string; body: string }
   | { type: 'edit'; threadId: string; commentId: string; body: string }
   | { type: 'delete'; threadId: string; commentId: string }
   | { type: 'resolve'; threadId: string }
   | { type: 'reopen'; threadId: string }
   | { type: 'remove'; threadId: string }
+
+/** What a whiteboard's comment thread is about: one item, or one connector. */
+export type ArtifactCommentAnchor = { node: string } | { edge: string }
+
+/**
+ * One thing the user did in an artifact since the last round of feedback, as the agent
+ * reads it. `where` says in words where on a whiteboard it is, e.g. which option and
+ * which part of its screenshot.
+ */
+export type ArtifactFeedbackItem =
+  /** A document's changed lines (- removed, + added), cut to a bounded length. */
+  | { kind: 'edit'; diff: string }
+  /** The options picked on a whiteboard now, by id and title; empty when none is. */
+  | { kind: 'choice'; chosen: { id: string; title: string }[] }
+  | {
+      kind: 'comment'
+      threadId: string
+      action: 'create' | 'reply'
+      body: string
+      /** The document's text or, on a whiteboard, where the item is. */
+      where: string
+    }
+  /** Something the user put on a whiteboard: a drawing, a shape, a note, an image. */
+  | { kind: 'mark'; nodeId: string; type: string; text: string; where: string }
+  /** Other changes to a whiteboard, in words: moved, removed, retitled. */
+  | { kind: 'board'; changes: string[] }
 
 /** How the checks of a commit stand, all together. */
 export type ChecksState = 'none' | 'pending' | 'success' | 'failure'
@@ -764,6 +799,27 @@ export interface EventMap {
     action: ArtifactCommentAction
     /** For the user's new comment or reply: the conversation woken to answer it. */
     notify: string | null
+  }
+  /**
+   * What the user did in an artifact since the last round, sent on its own once they
+   * stopped for a moment or left it; it wakes `notify`. `images` are pictures of the
+   * whiteboard options the user marked, with their marks.
+   */
+  'artifact.feedback': {
+    artifactId: string
+    round: number
+    /** The version the artifact had when it was sent. */
+    version: number
+    notify: string
+    items: ArtifactFeedbackItem[]
+    images: Attachment[]
+  }
+  /** The agent finished a round of the user's feedback; `summary` is what it did, for the user. */
+  'artifact.feedback_done': {
+    artifactId: string
+    round: number
+    by: string
+    summary: string
   }
 }
 

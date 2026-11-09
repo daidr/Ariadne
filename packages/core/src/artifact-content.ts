@@ -67,10 +67,22 @@ export interface DashboardContent {
 }
 
 /**
- * The node types the web's whiteboard registers: `whiteboardKit()`'s, and the plain
- * `default` node from `flowKit()`. Grouping is turned off there, so no `group` nodes.
+ * The node types the web's whiteboard registers: `whiteboardKit()`'s, `flowKit()`'s plain
+ * `default` node and `group`, and Ariadne's `option`: a frame holding one option the
+ * user can pick, with what shows it inside (`data: { title, note?, chosen? }`).
  */
-export const WHITEBOARD_NODE_TYPES = ['shape', 'sticky', 'text', 'ink', 'image', 'default'] as const
+export const WHITEBOARD_NODE_TYPES = [
+  'shape',
+  'sticky',
+  'text',
+  'ink',
+  'image',
+  'default',
+  'group',
+  'option',
+] as const
+/** Node types that hold others: a node inside names one in `parent`. */
+export const WHITEBOARD_CONTAINERS = ['group', 'option'] as const
 /** The dashboard widget types the web registers. */
 export const DASHBOARD_WIDGET_TYPES = ['stat', 'text', 'table', 'chart', 'pivot'] as const
 
@@ -123,7 +135,21 @@ function checkWhiteboard(value: unknown): void {
     if (!isNumber(node.x) || !isNumber(node.y)) invalid(`node "${node.id}" needs numeric x and y`)
     if (node.data !== undefined && !isObject(node.data))
       invalid(`node "${node.id}" data is not an object`)
+    if (node.type === 'option' && typeof node.data?.title !== 'string') {
+      invalid(`option "${node.id}" needs data.title`)
+    }
   })
+  const containers = new Set(
+    value.nodes
+      .filter((node) => (WHITEBOARD_CONTAINERS as readonly unknown[]).includes(node.type))
+      .map((node) => node.id),
+  )
+  for (const node of value.nodes) {
+    if (node.parent === undefined) continue
+    if (typeof node.parent !== 'string' || !containers.has(node.parent)) {
+      invalid(`node "${node.id}" sits in "${String(node.parent)}", which is not a group or option`)
+    }
+  }
   const edgeIds = new Set<string>()
   value.edges.forEach((edge: unknown, i) => {
     if (!isObject(edge) || typeof edge.id !== 'string' || !edge.id) invalid(`edges[${i}] has no id`)

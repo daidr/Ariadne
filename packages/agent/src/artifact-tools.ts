@@ -1,4 +1,7 @@
 import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import { SharedArtifacts } from './shared-artifacts'
+import { anchorWhere } from './artifact-feedback'
+import { OPTION_SCHEMA, placeOptions } from './whiteboard-options'
 import { plainText } from './markdown-code'
 import { boardFromItems, boardProblems, boardSummary, mergeBoard } from './whiteboard'
 import { dashboardFromWidgets, mergeDashboard } from './dashboard'
@@ -62,6 +65,57 @@ function stringsOf(args: Record<string, unknown>, key: string): string[] {
   return value as string[]
 }
 
+/** Whether the artifact is written through its room, where people may be editing it now. */
+function sharedIn(
+  ctx: ToolContext,
+  artifact: ArtifactView,
+): ctx is ToolContext & { shared: SharedArtifacts } {
+  return !!ctx.shared && SharedArtifacts.shared(artifact.kind)
+}
+
+/**
+ * The artifact as an agent reads it to change it: its newest version, with what the user
+ * is changing in its room saved first so the version holds it.
+ */
+function toChange(ctx: ToolContext, artifactId: string, kind?: ArtifactKind): ArtifactView {
+  const artifact = ownArtifact(ctx, artifactId, kind)
+  if (!sharedIn(ctx, artifact)) return artifact
+  ctx.shared.save(artifactId)
+  return ctx.app.getArtifact(artifactId)
+}
+
+/**
+ * Save the agent's new content. Edited together, it goes into the room as the changes
+ * from the version the agent read (`baseVersion`) to its content, so what others changed
+ * since, there or elsewhere, stays. Otherwise the version must be the one read.
+ */
+function save(
+  ctx: ToolContext,
+  artifact: ArtifactView,
+  content: string,
+  input: { reason: string; title?: string | undefined; baseVersion?: number },
+): ArtifactView {
+  const title = input.title ? { title: input.title } : {}
+  if (!sharedIn(ctx, artifact)) {
+    return ctx.app.reviseArtifact(artifact.id, {
+      content,
+      reason: input.reason,
+      author: ctx.conversationId,
+      ...title,
+      ...(input.baseVersion !== undefined ? { baseVersion: input.baseVersion } : {}),
+    })
+  }
+  const base =
+    input.baseVersion === undefined
+      ? undefined
+      : ctx.app.getArtifact(artifact.id, input.baseVersion).content
+  return ctx.shared.write(artifact.id, ctx.conversationId, content, {
+    reason: input.reason,
+    ...title,
+    ...(base === undefined ? {} : { base }),
+  })
+}
+
 const NODE_ID = {
   type: 'string',
   description: 'The plan node the artifact belongs to, if any.',
@@ -100,7 +154,7 @@ const updateDocument: Tool = {
   spec: {
     name: 'update_document',
     description:
-      "Save a new version of a document with its full Markdown content. baseVersion is the version you read: if anyone saved since, the call fails and you read it again, so the user's edits are never lost. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text.",
+      'Save a new version of a document with its full Markdown content. The user may be editing it at the same time: baseVersion is the version you read, and only what you changed from it is written, so their edits since stay. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text.',
     parameters: {
       type: 'object',
       properties: {
@@ -115,15 +169,10 @@ const updateDocument: Tool = {
   },
   run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    ownArtifact(ctx, artifactId, 'document')
-    const baseVersion = baseVersionOf(args)
-    const title = optionalStr(args, 'title')
-    const artifact = ctx.app.reviseArtifact(artifactId, {
-      content: str(args, 'content'),
+    const artifact = save(ctx, ownArtifact(ctx, artifactId, 'document'), str(args, 'content'), {
       reason: str(args, 'reason'),
-      author: ctx.conversationId,
-      ...(title ? { title } : {}),
-      baseVersion,
+      title: optionalStr(args, 'title'),
+      baseVersion: baseVersionOf(args),
     })
     return json({ artifactId, version: artifact.version })
   },
@@ -196,11 +245,28 @@ function directionOf(args: Record<string, unknown>): 'right' | 'down' | undefine
   return value
 }
 
+const OPTIONS =
+  "Options for the user to compare and pick from, side by side: each a frame with its title, its screenshots one under another and a few lines. The user marks on them, comments and picks one; that comes back to you as feedback by itself. A new version of an option (revises) goes under the one it revises, so the user's marks on it stay. An option given again by id is redrawn in place." as const
+
+const PICK = {
+  type: 'string',
+  enum: ['one', 'many'],
+  description: 'Whether the user picks one option (the default) or any number.',
+} as const
+
+function pickOf(args: Record<string, unknown>): 'one' | 'many' | undefined {
+  const value = args.pick
+  if (value === undefined || value === null) return undefined
+  if (value !== 'one' && value !== 'many')
+    throw new ToolInputError('"pick" must be "one" or "many"')
+  return value
+}
+
 const createWhiteboard: Tool = {
   spec: {
     name: 'create_whiteboard',
     description:
-      'Create a whiteboard in the project: shapes, sticky notes and text joined by arrows, for a sketch of an architecture, a flow, a mind map or options side by side. The user can move things, draw and add their own. Items are laid out for you in ranks along the connectors, sized to their text, with room for connector labels; items not connected to anything are set in rows. Give x and y only to sketch a picture the layout cannot (a comparison side by side, a ring); the picture is then stretched until nothing overlaps. Keep a board to about 15 items and give connectors only where the arrow says something. The result lists problems the board still has (overlaps, labels on items, connectors through items, text cut off); fix them with update_whiteboard.',
+      'Create a whiteboard in the project: shapes, sticky notes and text joined by arrows, for a sketch of an architecture, a flow or a mind map; or options (with screenshots) for the user to mark, comment on and pick from. The user can move things, draw and add their own. Items are laid out for you in ranks along the connectors, sized to their text, with room for connector labels; items not connected to anything are set in rows. Give x and y only to sketch a picture the layout cannot (a comparison side by side, a ring); the picture is then stretched until nothing overlaps. Keep a board to about 15 items and give connectors only where the arrow says something. The result lists problems the board still has (overlaps, labels on items, connectors through items, text cut off); fix them with update_whiteboard.',
     parameters: {
       type: 'object',
       properties: {
@@ -208,17 +274,19 @@ const createWhiteboard: Tool = {
         items: { type: 'array', items: NEW_ITEM_SCHEMA },
         connectors: { type: 'array', items: CONNECTOR_SCHEMA },
         direction: DIRECTION,
+        options: { type: 'array', items: OPTION_SCHEMA, description: OPTIONS },
+        pick: PICK,
         nodeId: NODE_ID,
       },
-      required: ['title', 'items'],
+      required: ['title'],
     },
   },
-  run(args, ctx) {
-    const board = boardFromItems(
-      arrayOf(args, 'items'),
-      arrayOf(args, 'connectors'),
-      directionOf(args),
-    )
+  async run(args, ctx) {
+    const options = arrayOf(args, 'options')
+    const items = arrayOf(args, 'items')
+    if (!options.length && !items.length) throw new ToolInputError('Give "items" or "options".')
+    let board = boardFromItems(items, arrayOf(args, 'connectors'), directionOf(args))
+    if (options.length) board = await placeOptions(ctx, board, options, pickOf(args))
     const artifact = ctx.app.createArtifact(ctx.projectId, {
       kind: 'whiteboard',
       title: str(args, 'title'),
@@ -234,7 +302,7 @@ const updateWhiteboard: Tool = {
   spec: {
     name: 'update_whiteboard',
     description:
-      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed next to what it connects from. Everything else on the board stays, including the user's drawings and images. With relayout, every item but the user's drawings and images is laid out again, as on a new board; use it after adding several items, not to undo where the user moved things. The result lists problems the board still has; read_artifact lists them too, also after the user changed the board. baseVersion is the version you read; if anyone saved since, read it again.",
+      "Change a whiteboard. Items and connectors are matched by id: a known id changes only the fields you give (an item keeps its place unless you give x and y), a new id is added and placed next to what it connects from. Everything else on the board stays, including the user's drawings, images and what they put in options; the user may be changing the board at the same time, and their changes and yours are merged. With relayout, every item but the user's drawings and images is laid out again, as on a new board; use it after adding several items, not to undo where the user moved things. The result lists problems the board still has; read_artifact lists them too, also after the user changed the board.",
     parameters: {
       type: 'object',
       properties: {
@@ -248,15 +316,18 @@ const updateWhiteboard: Tool = {
         removeConnectors: { type: 'array', items: { type: 'string' } },
         relayout: { type: 'boolean' },
         direction: DIRECTION,
+        options: { type: 'array', items: OPTION_SCHEMA, description: OPTIONS },
+        pick: PICK,
       },
-      required: ['artifactId', 'baseVersion', 'reason'],
+      required: ['artifactId', 'reason'],
     },
   },
-  run(args, ctx) {
+  async run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    const current = ownArtifact(ctx, artifactId, 'whiteboard')
-    const baseVersion = baseVersionOf(args)
-    const board = mergeBoard(JSON.parse(current.content) as WhiteboardContent, {
+    const now = toChange(ctx, artifactId, 'whiteboard')
+    const shared = sharedIn(ctx, now)
+    if (!shared) baseVersionOf(args)
+    let board = mergeBoard(JSON.parse(now.content) as WhiteboardContent, {
       items: arrayOf(args, 'items'),
       connectors: arrayOf(args, 'connectors'),
       removeItems: stringsOf(args, 'removeItems'),
@@ -264,13 +335,13 @@ const updateWhiteboard: Tool = {
       relayout: args.relayout === true,
       direction: directionOf(args),
     })
-    const title = optionalStr(args, 'title')
-    const artifact = ctx.app.reviseArtifact(artifactId, {
-      content: JSON.stringify(board),
+    const options = arrayOf(args, 'options')
+    if (options.length) board = await placeOptions(ctx, board, options, pickOf(args))
+    const artifact = save(ctx, now, JSON.stringify(board), {
       reason: str(args, 'reason'),
-      author: ctx.conversationId,
-      ...(title ? { title } : {}),
-      baseVersion,
+      title: optionalStr(args, 'title'),
+      // Edited together, the changes from the version read go in; others' since stay.
+      baseVersion: shared ? now.version : baseVersionOf(args),
     })
     return json({ artifactId, version: artifact.version, ...problemsOf(board) })
   },
@@ -511,7 +582,15 @@ const readArtifact: Tool = {
   },
   run(args, ctx) {
     const version = optionalInt(args, 'version')
-    const artifact = ctx.app.getArtifact(str(args, 'artifactId'), version ?? undefined)
+    const artifactId = str(args, 'artifactId')
+    // What the user is changing right now is saved first, so the newest version has it.
+    if (version === null && ctx.shared) {
+      const newest = ctx.app.getArtifact(artifactId)
+      if (newest.projectId === ctx.projectId && SharedArtifacts.shared(newest.kind)) {
+        ctx.shared.save(artifactId)
+      }
+    }
+    const artifact = ctx.app.getArtifact(artifactId, version ?? undefined)
     if (artifact.projectId !== ctx.projectId) {
       return { content: `No artifact ${artifact.id} in this project.`, isError: true }
     }
@@ -522,20 +601,43 @@ const readArtifact: Tool = {
       version: artifact.version,
       updatedBy: artifact.updatedBy,
     }
+    const newest = version === null || version === ctx.app.getArtifact(artifact.id).version
     if (artifact.kind === 'whiteboard') {
       const content = JSON.parse(artifact.content) as WhiteboardContent
-      return json({ ...head, ...boardSummary(content), ...problemsOf(content) })
+      return json({
+        ...head,
+        ...boardSummary(content),
+        ...problemsOf(content),
+        ...(newest
+          ? { ...commentsOf(ctx, artifact.id, content), ...roundsOf(ctx, artifact.id) }
+          : {}),
+      })
     }
     if (artifact.kind === 'dashboard') {
       const content = JSON.parse(artifact.content) as DashboardContent
       return json({ ...head, content, ...dashboardProblemsOf(content) })
     }
     // Comments are on the newest text; an older version is read without them.
-    if (version !== null && version !== ctx.app.getArtifact(artifact.id).version) {
-      return json({ ...head, content: artifact.content })
-    }
-    return json({ ...head, content: artifact.content, ...commentsOf(ctx, artifact.id) })
+    if (!newest) return json({ ...head, content: artifact.content })
+    return json({
+      ...head,
+      content: artifact.content,
+      ...commentsOf(ctx, artifact.id),
+      ...roundsOf(ctx, artifact.id),
+    })
   },
+}
+
+const clamp = (n: number) => Math.min(1, Math.max(0, n))
+
+/** A point of an item as fractions of its size, kept within it; `null` when not given. */
+function pointOf(value: unknown): { x: number; y: number } | null {
+  if (value === undefined || value === null) return null
+  const { x, y } = value as { x?: unknown; y?: unknown }
+  if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x + y)) {
+    throw new ToolInputError('"at" must be { x, y }, fractions of the item\'s width and height')
+  }
+  return { x: clamp(x), y: clamp(y) }
 }
 
 /** Who wrote a comment, as the model reads it: the user, you, the coordinator or a thread. */
@@ -550,15 +652,33 @@ function commenter(ctx: ToolContext, author: string): string {
   }
 }
 
-/** The open comment threads on a document, and how many were resolved. */
-function commentsOf(ctx: ToolContext, artifactId: string) {
+/** The feedback rounds on an artifact not finished yet, for finish_feedback_round. */
+function roundsOf(ctx: ToolContext, artifactId: string) {
+  const open = ctx.app
+    .listArtifactFeedback(artifactId)
+    .filter((round) => round.doneAt === null)
+    .map((round) => round.round)
+  return open.length ? { openFeedbackRounds: open.toReversed() } : {}
+}
+
+/**
+ * The open comment threads on a document or whiteboard, and how many were resolved: on a
+ * document by the text they quote, on a whiteboard by the item and where it is.
+ */
+function commentsOf(ctx: ToolContext, artifactId: string, board?: WhiteboardContent) {
   const threads = ctx.app.listArtifactComments(artifactId)
   const open = threads.filter((thread) => !thread.resolved)
   if (!threads.length) return {}
+  const on = (thread: (typeof threads)[number]) => {
+    const { anchor } = thread
+    if (!board || !anchor) return {}
+    if ('edge' in anchor) return { on: anchor.edge }
+    return { on: anchor.node, where: anchorWhere(board, anchor, thread.id) }
+  }
   return {
     comments: open.map((thread) => ({
       commentThread: thread.id,
-      quote: thread.quote,
+      ...(board ? on(thread) : { quote: thread.quote }),
       comments: thread.comments.map((c) => ({ by: commenter(ctx, c.author), body: c.body })),
     })),
     resolvedComments: threads.length - open.length,
@@ -569,13 +689,21 @@ const commentArtifact: Tool = {
   spec: {
     name: 'comment_artifact',
     description:
-      "Comment on a document's text, as the user does in the document: reply in a comment thread (commentThread), or start one on a short passage of its text (quote, as the reader sees it, without Markdown marks). Keep comments short. Answer the user's comments here, not in a chat message.",
+      "Comment on a document or whiteboard, as the user does there: reply in a comment thread (commentThread), or start one on a short passage of a document's text (quote, as the reader sees it, without Markdown marks) or on a whiteboard's item or option (on, its id; at pins it to a point of it, such as a spot on a screenshot). Keep comments short. Answer the user's comments here, not in a chat message.",
     parameters: {
       type: 'object',
       properties: {
         artifactId: { type: 'string' },
         commentThread: { type: 'string', description: 'The comment thread to reply in.' },
         quote: { type: 'string', description: 'The text a new comment thread is about.' },
+        on: { type: 'string', description: 'The whiteboard item a new comment thread is about.' },
+        at: {
+          type: 'object',
+          description:
+            'The point of that item it is pinned to, as fractions of its width and height: { x: 0.8, y: 0.1 } is near the top right.',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+        },
         body: { type: 'string', description: 'Plain text.' },
       },
       required: ['artifactId', 'body'],
@@ -583,7 +711,8 @@ const commentArtifact: Tool = {
   },
   run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    const artifact = ownArtifact(ctx, artifactId, 'document')
+    const artifact = toChange(ctx, artifactId)
+    if (artifact.kind === 'dashboard') throw new ToolInputError('Dashboards have no comments.')
     const threadId = optionalStr(args, 'commentThread')
     const body = str(args, 'body')
     const commentId = `cmt_${crypto.randomUUID()}`
@@ -595,6 +724,36 @@ const commentArtifact: Tool = {
         body,
       })
       return json({ commentThread: threadId })
+    }
+    if (artifact.kind === 'whiteboard') {
+      const on = optionalStr(args, 'on')?.trim()
+      if (!on) throw new ToolInputError('Give commentThread to reply, or on to start one.')
+      const board = JSON.parse(artifact.content) as WhiteboardContent
+      const node = board.nodes.find((n) => n.id === on)
+      const edge = node ? undefined : board.edges.find((e) => e.id === on)
+      if (!node && !edge) {
+        throw new ToolInputError(`There is no item or connector "${on}" on the board.`)
+      }
+      const at = pointOf(args.at)
+      if (at && !node) throw new ToolInputError('"at" pins a comment to an item, not a connector.')
+      const created = `cth_${crypto.randomUUID()}`
+      ctx.app.commentOnArtifact(artifactId, ctx.conversationId, {
+        type: 'create',
+        threadId: created,
+        commentId,
+        quote: '',
+        anchor: node ? { node: on } : { edge: on },
+        body,
+      })
+      // The board shows the thread where its item names it, pinned to the point if given.
+      const item = (node ?? edge)! as Record<string, unknown>
+      item.comments = [...(Array.isArray(item.comments) ? item.comments : []), created]
+      if (at) item.commentPins = { ...(item.commentPins as object | undefined), [created]: at }
+      save(ctx, artifact, JSON.stringify(board), {
+        reason: '',
+        baseVersion: artifact.version,
+      })
+      return json({ commentThread: created })
     }
     const quote = optionalStr(args, 'quote')?.trim()
     if (!quote) throw new ToolInputError('Give commentThread to reply, or quote to start one.')
@@ -620,7 +779,7 @@ const resolveArtifactComment: Tool = {
   spec: {
     name: 'resolve_artifact_comment',
     description:
-      "Mark a document's comment thread resolved once it is settled, for example after you made the change it asked for. The user can reopen it.",
+      "Mark a document's or whiteboard's comment thread resolved once it is settled, for example after you made the change it asked for. The user can reopen it.",
     parameters: {
       type: 'object',
       properties: { artifactId: { type: 'string' }, commentThread: { type: 'string' } },
@@ -629,10 +788,43 @@ const resolveArtifactComment: Tool = {
   },
   run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    ownArtifact(ctx, artifactId, 'document')
+    ownArtifact(ctx, artifactId)
     const threadId = str(args, 'commentThread')
     ctx.app.commentOnArtifact(artifactId, ctx.conversationId, { type: 'resolve', threadId })
     return json({ commentThread: threadId, resolved: true })
+  },
+}
+
+const finishFeedbackRound: Tool = {
+  spec: {
+    name: 'finish_feedback_round',
+    description:
+      "Say you dealt with a round of the user's feedback on a document or whiteboard (what they changed, marked, picked and commented, sent to you by itself): once you made the changes it asks for, answered its comments and resolved the settled ones. The user sees your summary where the round was.",
+    parameters: {
+      type: 'object',
+      properties: {
+        artifactId: { type: 'string' },
+        round: { type: 'integer' },
+        summary: {
+          type: 'string',
+          description: 'What you did, in one short line, in their language.',
+        },
+      },
+      required: ['artifactId', 'round', 'summary'],
+    },
+  },
+  run(args, ctx) {
+    const artifactId = str(args, 'artifactId')
+    ownArtifact(ctx, artifactId)
+    const round = optionalInt(args, 'round')
+    if (round === null) throw new ToolInputError('"round" is required')
+    const done = ctx.app.finishArtifactFeedback(
+      artifactId,
+      round,
+      ctx.conversationId,
+      str(args, 'summary'),
+    )
+    return json({ artifactId, round: done.round, done: true })
   },
 }
 
@@ -671,4 +863,5 @@ export const artifactTools: Tool[] = [
   listArtifacts,
   commentArtifact,
   resolveArtifactComment,
+  finishFeedbackRound,
 ]

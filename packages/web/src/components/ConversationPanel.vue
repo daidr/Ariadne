@@ -89,6 +89,7 @@ import WaitStatus from './WaitStatus.vue'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
+import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
 import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
@@ -836,6 +837,10 @@ watch(
             v-else-if="
               item.notice.kind === 'artifact-edited' || item.notice.kind === 'artifact-comment'
             "
+            :notice="item.notice"
+          />
+          <ArtifactFeedbackNotice
+            v-else-if="item.notice.kind === 'artifact-feedback'"
             :notice="item.notice"
           />
           <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />

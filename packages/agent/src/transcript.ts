@@ -87,6 +87,8 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
         : `<artifact_edited_by_user artifact="${note.artifactId}" title="${note.title}" version="${note.version}">The user saved their own edit; take it as what they want, and read_artifact before you change it again.</artifact_edited_by_user>`
     case 'artifact-comment':
       return `<artifact_comment artifact="${note.artifactId}" title="${note.title}" comment_thread="${note.threadId}" kind="${note.action === 'create' ? 'new' : 'reply'}">\nOn the text: ${note.quote}\nThe user wrote: ${note.body}\nAnswer with comment_artifact in that comment thread: a reply, a question back, or what you changed (change the document first if they ask for it; once you change the commented text, resolve the comment, since it no longer finds its text). resolve_artifact_comment once it is settled. Do not answer it in a chat message.\n</artifact_comment>`
+    case 'artifact-feedback':
+      return describeFeedback(note)
     case 'checks-failed': {
       const attempt = note.attempt ?? 1
       const head = `<checks_failed pull_request="${note.number}" commit="${note.headSha.slice(0, 12)}" attempt="${attempt}">\nChecks of your pull request failed: ${note.failed.join(', ') || '(unnamed)'}.`
@@ -368,7 +370,13 @@ export function toChatMessages(
         break
       }
       case 'note': {
-        const chat: ModelMessage = { role: 'user', content: describeNote(entry.note, titleOf) }
+        const note = entry.note
+        const pictures = note.type === 'artifact-feedback' ? viewable(note.images, options) : null
+        const chat: ModelMessage = {
+          role: 'user',
+          content: describeNote(note, titleOf) + (pictures?.notes ?? ''),
+          ...(pictures?.shown.length ? { images: pictures.shown } : {}),
+        }
         if (open) held.push(chat)
         else out.push(chat)
         break
@@ -377,6 +385,30 @@ export function toChatMessages(
   }
   closeStep()
   return keepNewestImages(out)
+}
+
+/** A round of the user's feedback on an artifact, item by item. */
+function describeFeedback(note: Extract<TranscriptNote, { type: 'artifact-feedback' }>): string {
+  const lines = note.items.map((item) => {
+    switch (item.kind) {
+      case 'edit':
+        return `- They edited the text (- removed, + added):\n${item.diff}`
+      case 'choice':
+        return item.chosen.length
+          ? `- They picked: ${item.chosen.map((c) => `"${c.title}" (${c.id})`).join(', ')}`
+          : '- They picked no option now.'
+      case 'comment':
+        return `- ${item.action === 'create' ? 'New comment' : 'Reply'} in comment_thread ${item.threadId}, ${item.where}: ${item.body}`
+      case 'mark':
+        return `- They put a ${item.type} (${item.nodeId}) ${item.where}${item.text ? `: ${item.text}` : ''}`
+      case 'board':
+        return `- ${item.changes.join('\n- ')}`
+    }
+  })
+  const pictures = note.images.length
+    ? `\nPictures of the options they marked, with their marks, are shown below.`
+    : ''
+  return `<artifact_feedback artifact="${note.artifactId}" title="${note.title}" kind="${note.kind}" round="${note.round}">\nThe user worked in the ${note.kind} while you could see it; this is what they did since the last round, sent once they stopped. Take it as what they want.\n${lines.join('\n')}${pictures}\nAnswer comments with comment_artifact in their comment thread, not in chat, and resolve_artifact_comment once settled. Change the ${note.kind} where they ask for it; on a whiteboard add a new version of an option next to the one they marked rather than drawing over their marks. When you are done with this round, call finish_feedback_round with one line on what you did.\n</artifact_feedback>`
 }
 
 /** The images the model may look at, and words for the others. */
