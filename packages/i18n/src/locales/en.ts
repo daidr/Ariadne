@@ -860,4 +860,12 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.autopilotMethod': 'Merge method',
   'projectSettings.autopilotStarts': 'Starts right away: {titles}',
   'projectSettings.autopilotStartsNone': 'Nothing is ready to start yet',
+  'recap.title': 'Away {time}: {parts}',
+  'recap.join': ', ',
+  'recap.done': '{count} finished',
+  'recap.merged': '{count} merged',
+  'recap.waiting': '{count} waiting on you',
+  'recap.minutes': '{count} min',
+  'recap.hours': '{count} h',
+  'recap.days': '{count} d',
 }

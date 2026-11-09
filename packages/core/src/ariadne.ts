@@ -140,6 +140,9 @@ export const PROJECTION_VERSION = 50
  */
 export const MILESTONE_GATE = 'milestone'
 
+/** How long the user is gone from a project before coming back counts as a return. */
+export const AWAY_MS = 10 * 60_000
+
 /** How many messages a conversation shows at first, and loads each time it is scrolled up. */
 export const MESSAGE_PAGE = 40
 
@@ -2763,6 +2766,94 @@ export class Ariadne {
     if (!unseen) return
     const projectId = this.projectOfMessage(upTo)
     this.store.append([{ type: 'message.read', projectId, data: { conversationId, upTo } }])
+  }
+
+  /**
+   * The user is back at the project after `awayMs` without touching it. Away for long
+   * enough, with threads that finished, were merged or came to need them meanwhile, it is
+   * recorded, and the coordinator's conversation shows it as a recap; otherwise nothing
+   * is. Read from the log and the projections alone: no model is asked.
+   */
+  noteReturn(projectId: string, awayMs: number): void {
+    const project = this.projectRow(projectId)
+    if (!Number.isFinite(awayMs) || awayMs < AWAY_MS) return
+    const now = this.now()
+    // What an earlier recap told is not told again.
+    const told =
+      this.db
+        .query<{ at: number }, [string]>(
+          `SELECT created_at AS at FROM notices WHERE conversation_id = ? AND kind = 'recap'
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(project.coordinator_id)?.at ?? 0
+    const since = Math.max(now - awayMs, told)
+    if (now - since < AWAY_MS) return
+
+    const threads = this.listThreads(projectId)
+    const byId = new Map(threads.map((thread) => [thread.id, thread]))
+    const reported = new Set<string>()
+    const landed = new Set<string>()
+    const rows = this.db
+      .query<{ type: string; data: string }, [string, number]>(
+        `SELECT type, data FROM events WHERE project_id = ? AND seq >= ?
+           AND type IN ('thread.reported', 'branch.merged', 'pull_request.closed')
+         ORDER BY seq`,
+      )
+      .all(projectId, this.firstSeqAfter(since))
+    for (const row of rows) {
+      const data = JSON.parse(row.data) as { threadId: string; report?: string; merged?: boolean }
+      if (row.type === 'thread.reported') {
+        if (data.report === 'done') reported.add(data.threadId)
+      } else if (row.type === 'branch.merged' || data.merged) {
+        landed.add(data.threadId)
+      }
+    }
+
+    // What waits on the user now and did not when they left.
+    const waiting = new Set<string>()
+    const asks: string[] = []
+    for (const item of this.needsMeOf(projectId, threads)) {
+      if (item.kind === 'thread') {
+        if (Math.max(item.thread.activeAt, item.thread.updatedAt) > since) {
+          waiting.add(item.thread.id)
+        }
+      } else if (item.attention.createdAt > since) {
+        const askers = [item.thread, ...item.joined].flatMap((thread) => thread ?? [])
+        for (const thread of askers) waiting.add(thread.id)
+        if (!askers.length) asks.push(item.attention.id)
+      }
+    }
+    // Each thread is told once, by what matters most of it: a review's own thread never.
+    const tells = (id: string) => !!byId.get(id) && !byId.get(id)!.reviewOf && !waiting.has(id)
+    const merged = [...landed].filter(tells)
+    const done = [...reported].filter(
+      (id) => tells(id) && !landed.has(id) && byId.get(id)!.stage === 'done',
+    )
+    if (!done.length && !merged.length && !waiting.size && !asks.length) return
+    this.store.append([
+      {
+        type: 'user.returned',
+        projectId,
+        data: { since, done, merged, waiting: [...waiting], asks },
+      },
+    ])
+  }
+
+  /** The first event written after `at`; one past the newest when there is none. */
+  private firstSeqAfter(at: number): number {
+    const first = this.db.query<{ seq: number; at: number }, [number]>(
+      'SELECT seq, at FROM events WHERE seq >= ? ORDER BY seq LIMIT 1',
+    )
+    // Events are written in the order of their times, so the log is searched by halves.
+    let low = 1
+    let high = this.store.lastSeq() + 1
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      const event = first.get(middle)
+      if (!event || event.at > at) high = middle
+      else low = event.seq + 1
+    }
+    return low
   }
 
   // ---- memory ----

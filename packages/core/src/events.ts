@@ -508,6 +508,20 @@ export interface EventMap {
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }
+  /**
+   * The user came back to the project after being away since `since`, and this is what
+   * came of the work meanwhile, by thread: `done` finished, `merged` had their changes
+   * merged, `waiting` cannot go on without the user; `asks` are open questions that are no
+   * thread's (the coordinator's, the system's), by attention. Written only when one of
+   * them holds something. The model is not told.
+   */
+  'user.returned': {
+    since: number
+    done: string[]
+    merged: string[]
+    waiting: string[]
+    asks: string[]
+  }
   'todo.updated': { conversationId: string; items: TodoItem[] }
   /**
    * A standing preference or fact of the project ("write in Chinese", "the API lives in
