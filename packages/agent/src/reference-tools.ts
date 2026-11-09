@@ -20,6 +20,17 @@ export function referencePurpose(kind: string, settings: Record<string, unknown>
 }
 
 /**
+ * What the card shows of the source: where it is, and every other setting as given (an
+ * instance's address, a host), so nothing the user agrees to is out of sight.
+ */
+function cardDetail(title: string, where: string, settings: Record<string, unknown>): string {
+  const more = Object.entries(settings)
+    .filter(([, value]) => typeof value !== 'string' || !where.includes(value))
+    .map(([name, value]) => `${name}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+  return [`${title} ${where}`, ...more].join('\n')
+}
+
+/**
  * The coordinator adds a source the project only reads, when the user asks for one in
  * words. It is connected first, so a card is never shown for one that cannot be read; the
  * user's yes on the card is what adds it. Secrets are never the model's to give: a source
@@ -95,7 +106,7 @@ export function addReferenceTool(kinds: ReferenceKind[]): Tool {
         () =>
           confirmBlock({
             title: t('reference.add.question'),
-            detail: `${kind.title} ${where}`,
+            detail: cardDetail(kind.title, where, settings),
             description: t('reference.add.note'),
             approveText: t('reference.add.yes'),
             denyText: t('reference.add.no'),

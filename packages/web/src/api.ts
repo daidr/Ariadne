@@ -591,7 +591,7 @@ export const api = {
     ),
   /** The reference sources that cannot be read right now, with why. */
   referenceStatus: (projectId: string) =>
-    request<{ failed: { id: string; error: string }[] }>(
+    request<{ failed: { id: string; error: LocalizedMessage }[] }>(
       'GET',
       `/api/projects/${projectId}/references/status`,
     ),

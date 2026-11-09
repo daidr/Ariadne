@@ -191,6 +191,9 @@ describe('command rules', () => {
     // Something on the line runs text, or the phrase is run after all.
     const ran = [
       'echo "git push" | sh',
+      'echo "git push" | timeout 5 sh',
+      'echo "git push" | nice -n 5 bash',
+      'echo "git push" | busybox sh',
       'echo git push | xargs -I{} bash -c {}',
       'echo "$(git push)"',
       'git commit -m x && git push',

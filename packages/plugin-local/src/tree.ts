@@ -74,7 +74,11 @@ export class GitTreeView implements SourceView {
     return { files: result.stdout.split('\0').filter(Boolean), partial: false }
   }
 
-  async search(pattern: string, path: string): Promise<{ lines: string[]; error: string | null }> {
+  async search(
+    pattern: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ lines: string[]; error: string | null }> {
     const under = treePath(path)
     const result = await this.git(
       [
@@ -83,12 +87,15 @@ export class GitTreeView implements SourceView {
         '-I',
         '-E',
         '--no-color',
+        // As the workspace's search: no more per file than is kept, and not for ever.
+        '--max-count',
+        String(MAX_FILE_MATCHES),
         '-e',
         pattern,
         this.rev,
         ...(under ? ['--', under] : []),
       ],
-      { whole: true },
+      { whole: true, timeoutMs: 30_000, ...(options?.signal ? { signal: options.signal } : {}) },
     )
     // 1 is "nothing matched".
     if (result.exitCode !== 0 && result.exitCode !== 1) {

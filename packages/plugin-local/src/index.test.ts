@@ -82,6 +82,26 @@ describe('local directory', () => {
     for (const path of ['.git/config', './.git/config', 'sub/../.git/HEAD', '.GIT/config']) {
       await expect(view.readBytes(path, 1000)).rejects.toBeInstanceOf(WorkspacePathError)
     }
+    // Finding and searching run programs on the path: it stays inside the same way.
+    await writeFile(join(base, 'outside.txt'), 'OUTSIDE\n')
+    await symlink(join(base, 'outside.txt'), join(dir, 'link.txt'))
+    for (const path of [
+      '..',
+      '../outside.txt',
+      join(base, 'outside.txt'),
+      '/etc/hostname',
+      '.git/config',
+      '.GIT',
+      'sub/../.git',
+      'link.txt',
+    ]) {
+      await expect(view.search!('.', path)).rejects.toBeInstanceOf(WorkspacePathError)
+      await expect(view.files!(path)).rejects.toBeInstanceOf(WorkspacePathError)
+    }
+    // A link met on the way is not followed out either.
+    expect((await view.search!('OUTSIDE', '.')).lines).toEqual([])
+    expect((await view.files!('.')).files).not.toContain('link.txt')
+
     // Looking makes no worktree and no branch.
     expect(existsSync(join(base, 'data', 'worktrees'))).toBe(false)
     const branches = await run(['git', 'branch', '--list'], { cwd: dir })

@@ -3118,6 +3118,11 @@ export class Ariadne {
     if (references.length >= MAX_REFERENCES) {
       throw new DomainError('error.tooManyReferences', { max: MAX_REFERENCES })
     }
+    const same = (settings: Record<string, unknown>) =>
+      JSON.stringify(Object.entries(settings).toSorted()) ===
+      JSON.stringify(Object.entries(source.settings).toSorted())
+    const already = references.find((ref) => ref.kind === source.kind && same(ref.settings))
+    if (already) throw new DomainError('error.referenceExists', { name: already.name })
     const reference: ProjectReference = {
       id: newId('ref'),
       name: referenceName(

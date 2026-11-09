@@ -131,6 +131,8 @@ const LIB = {
   'src/input.ts': 'export const Input = 2\n',
 }
 
+const more = (n: number | string) => ({ kind: 'disk', settings: { path: `/more/${n}` } })
+
 describe('reference names', () => {
   test('come from where the source is, and stay apart', () => {
     expect(referenceName('daidr/dou-ui', [])).toBe('dou-ui')
@@ -149,14 +151,18 @@ describe('reference names', () => {
     )
     app.addProjectReference(project.id, { kind: 'disk', settings: { path: '/x/lib' } }, '/x/lib')
     expect(app.getProject(project.id).references.map((ref) => ref.name)).toEqual(['lib', 'lib-2'])
+    // The same source is not added twice.
+    expect(() =>
+      app.addProjectReference(project.id, { kind: 'disk', settings: { path: '/lib' } }, '/lib'),
+    ).toThrow('error.referenceExists')
     app.removeProjectReference(project.id, first.id)
     expect(app.getProject(project.id).references.map((ref) => ref.name)).toEqual(['lib-2'])
     for (let n = 1; n < MAX_REFERENCES; n++) {
-      app.addProjectReference(project.id, { kind: 'disk', settings: {} }, `/more/${n}`)
+      app.addProjectReference(project.id, more(n), `/more/${n}`)
     }
-    expect(() =>
-      app.addProjectReference(project.id, { kind: 'disk', settings: {} }, '/one/too/many'),
-    ).toThrow('error.tooManyReferences')
+    expect(() => app.addProjectReference(project.id, more('x'), '/one/too/many')).toThrow(
+      'error.tooManyReferences',
+    )
     // The project's own source is untouched by any of it.
     expect(app.getProject(project.id).source).toBeNull()
   })
@@ -172,18 +178,47 @@ describe('reference secrets', () => {
   }
 
   test('its own win, else the main source of the same kind lends its', () => {
-    expect(referenceSecrets(source, { id: 'ref_1', kind: 'forge' }, secrets)).toEqual({
-      token: 'own',
-    })
-    expect(referenceSecrets(source, { id: 'ref_9', kind: 'forge' }, secrets)).toEqual({
+    const none = new Map<string, ContextProvider<never>>()
+    const of = (id: string | undefined, kind: string) =>
+      referenceSecrets(none, source, { ...(id ? { id } : {}), kind, settings: {} }, secrets)
+    expect(of('ref_1', 'forge')).toEqual({ token: 'own' })
+    expect(of('ref_9', 'forge')).toEqual({ token: 'main' })
+    expect(of('ref_9', 'host')).toEqual({ token: 'hosting' })
+    // Another kind gets none of them.
+    expect(of('ref_9', 'disk')).toEqual({})
+    expect(referenceSecrets(none, null, { kind: 'forge', settings: {} }, secrets)).toEqual({})
+  })
+
+  test('a token is lent only to the place it was given for', () => {
+    // A kind whose settings choose the host the token is sent to.
+    const contexts = new Map<string, ContextProvider<never>>([
+      [
+        'forge',
+        {
+          secretsFor: (settings: { instance?: string; repository?: string }) => {
+            if (!settings.repository) throw new Error('no repository')
+            return settings.instance ?? 'https://forge.example'
+          },
+        } as unknown as ContextProvider<never>,
+      ],
+    ])
+    const main = {
+      kind: 'forge',
+      settings: { repository: 'me/app', instance: 'https://corp.example' },
+    }
+    const lent = (settings: Record<string, unknown>, id?: string) =>
+      referenceSecrets(contexts, main, { ...(id ? { id } : {}), kind: 'forge', settings }, secrets)
+    expect(lent({ repository: 'me/lib', instance: 'https://corp.example' })).toEqual({
       token: 'main',
     })
-    expect(referenceSecrets(source, { id: 'ref_9', kind: 'host' }, secrets)).toEqual({
-      token: 'hosting',
+    expect(lent({ repository: 'x/y', instance: 'https://evil.example' })).toEqual({})
+    expect(lent({ repository: 'x/y' })).toEqual({})
+    // Settings that cannot be read borrow nothing.
+    expect(lent({ instance: 'https://corp.example' })).toEqual({})
+    // Its own token still goes with it, wherever it points.
+    expect(lent({ repository: 'x/y', instance: 'https://other.example' }, 'ref_1')).toEqual({
+      token: 'own',
     })
-    // Another kind gets none of them.
-    expect(referenceSecrets(source, { id: 'ref_9', kind: 'disk' }, secrets)).toEqual({})
-    expect(referenceSecrets(null, { kind: 'forge' }, secrets)).toEqual({})
   })
 
   test("a reference of the main source's kind connects with the main source's token", async () => {

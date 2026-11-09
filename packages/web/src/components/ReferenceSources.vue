@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouButton, DouForm, DouFormItem, DouSelect, DouText } from 'dou-ui'
+import { DouButton, DouForm, DouFormItem, DouPopover, DouSelect, DouText } from 'dou-ui'
 import {
   AlertTriangleIcon,
   FolderGitIcon,
@@ -10,7 +10,8 @@ import {
 } from '@dou-ui/icons'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api, type SourceKind } from '../api'
-import { lt, t } from '../i18n'
+import type { LocalizedMessage } from '@ariadne/i18n'
+import { lt, t, tm } from '../i18n'
 import { addReference, removeReference, state } from '../store'
 import SettingsFields from './SettingsFields.vue'
 
@@ -26,7 +27,7 @@ const problem = ref<string | null>(null)
 const kind = ref<string | null>(null)
 const drafts = reactive<Record<string, Record<string, unknown>>>({})
 /** Why a reference cannot be read right now, by its id. */
-const failed = ref<Record<string, string>>({})
+const failed = ref<Record<string, LocalizedMessage>>({})
 
 const project = computed(() => state.detail?.project ?? null)
 const references = computed(() => project.value?.references ?? [])
@@ -95,6 +96,18 @@ function browse(_key: string, typed: string) {
     .then((result) => result.listing)
 }
 
+/** Why a reference cannot be read, in the language shown now. */
+const failureOf = (id: string) => (failed.value[id] ? tm(failed.value[id]) : undefined)
+
+/** Every required setting of the kind is filled in: only then can it be added. */
+const ready = computed(() => {
+  const draft = drafts[kind.value ?? ''] ?? {}
+  return (current.value?.settings.required ?? []).every((name) => {
+    const value = draft[name]
+    return typeof value === 'string' ? !!value.trim() : value !== undefined && value !== null
+  })
+})
+
 function start() {
   problem.value = null
   adding.value = true
@@ -118,7 +131,7 @@ async function add() {
       <AlertTriangleIcon
         v-if="failed[reference.id]"
         class="reference-icon reference-failed"
-        :title="failed[reference.id]"
+        :title="failureOf(reference.id)"
       />
       <ServerIcon v-else-if="kindOf(reference)?.remote" class="reference-icon" />
       <FolderGitIcon
@@ -131,20 +144,31 @@ async function add() {
         size="sm"
         variant="secondary"
         class="reference-where"
-        :title="failed[reference.id] ?? summaryOf(reference)"
+        :title="failureOf(reference.id) ?? summaryOf(reference)"
       >
         {{ summaryOf(reference) }}
       </DouText>
-      <DouButton
-        variant="ghost"
-        size="sm"
-        class="reference-remove"
-        :aria-label="t('project.references.remove')"
-        :title="t('project.references.remove')"
-        @click="removeReference(reference.id)"
+      <!-- Its own token goes with it, so removing asks once; one button, hence a popover. -->
+      <DouPopover
+        :title="t('project.references.removeAsk', { name: reference.name })"
+        :width="280"
+        placement="bottom-end"
       >
-        <TrashIcon />
-      </DouButton>
+        <DouButton
+          variant="ghost"
+          size="sm"
+          class="reference-remove"
+          :aria-label="t('project.references.remove')"
+          :title="t('project.references.remove')"
+        >
+          <TrashIcon />
+        </DouButton>
+        <template #content="{ close }">
+          <DouButton size="sm" tone="danger" @click="(close(), removeReference(reference.id))">
+            {{ t('project.references.remove') }}
+          </DouButton>
+        </template>
+      </DouPopover>
     </div>
     <DouForm v-if="adding" layout="vertical" size="sm" class="reference-form">
       <DouFormItem :label="t('project.source.kind')">
@@ -167,7 +191,7 @@ async function add() {
         {{ problem }}
       </DouText>
       <div class="reference-actions">
-        <DouButton size="sm" tone="primary" :loading="saving" @click="add">
+        <DouButton size="sm" tone="primary" :loading="saving" :disabled="!ready" @click="add">
           {{ t('project.references.confirm') }}
         </DouButton>
         <DouButton size="sm" variant="ghost" @click="adding = false">
@@ -226,7 +250,8 @@ async function add() {
 }
 
 .reference:hover .reference-remove,
-.reference-remove:focus-visible {
+.reference-remove:focus-visible,
+.reference-remove[aria-expanded='true'] {
   opacity: 1;
 }
 

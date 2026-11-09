@@ -93,12 +93,14 @@ export const referenceSecretPrefix = (referenceId: string) => `${REFERENCE_SECRE
 
 /**
  * The secret settings a reference source connects with: its own, and for those it has
- * none of, the main source's (or its hosting's) when that is of the same kind, so one
- * token reads two repositories of the same host without being typed twice.
+ * none of, the main source's (or its hosting's) when that is of the same kind and sends
+ * them to the same place, so one token reads two repositories of the same host without
+ * being typed twice, and never reaches a host it was not given for.
  */
 export function referenceSecrets(
+  contexts: Map<string, ContextProvider<never>>,
   source: ProjectSource | null,
-  reference: { id?: string; kind: string },
+  reference: { id?: string; kind: string; settings: Record<string, unknown> },
   secrets: Record<string, unknown>,
 ): Record<string, unknown> {
   const picked: Record<string, unknown> = {}
@@ -110,8 +112,18 @@ export function referenceSecrets(
       if (strict || !name.includes('.')) picked[name] = value
     }
   }
-  if (source?.hosting?.kind === reference.kind) take(HOSTING_SECRET, true)
-  if (source?.kind === reference.kind) take('', false)
+  const lends = (other: { kind: string; settings: Record<string, unknown> } | null | undefined) => {
+    if (other?.kind !== reference.kind) return false
+    const goes = contexts.get(reference.kind)?.secretsFor
+    if (!goes) return true
+    try {
+      return goes(reference.settings as never) === goes(other.settings as never)
+    } catch {
+      return false
+    }
+  }
+  if (lends(source?.hosting)) take(HOSTING_SECRET, true)
+  if (lends(source)) take('', false)
   if (reference.id) take(referenceSecretPrefix(reference.id), true)
   return picked
 }
@@ -385,7 +397,12 @@ export class WorkspaceManager {
     const project = this.app.getProject(projectId)
     const reference = project.references.find((known) => known.name === name)
     if (!reference) throw new DomainError('error.noReference', { name })
-    const secrets = referenceSecrets(project.source, reference, this.secrets(projectId))
+    const secrets = referenceSecrets(
+      this.host.contexts,
+      project.source,
+      reference,
+      this.secrets(projectId),
+    )
     const key = JSON.stringify([reference.kind, reference.settings, secrets])
     const id = `${projectId}:${reference.id}`
     let known = this.referenceViews.get(id)
@@ -422,7 +439,7 @@ export class WorkspaceManager {
   ): Promise<{ where: string }> {
     const project = this.app.getProject(projectId)
     const connected = await connectReference(this.host.contexts, reference, {
-      ...referenceSecrets(project.source, reference, this.secrets(projectId)),
+      ...referenceSecrets(this.host.contexts, project.source, reference, this.secrets(projectId)),
       ...secrets,
     })
     try {

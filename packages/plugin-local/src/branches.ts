@@ -15,7 +15,14 @@ import {
  */
 export type GitRun = (
   args: string[],
-  options?: { cwd?: string; whole?: boolean; env?: Record<string, string> },
+  options?: {
+    cwd?: string
+    whole?: boolean
+    env?: Record<string, string>
+    /** Ends git when it fires or the time is up; a runner may not take them. */
+    signal?: AbortSignal
+    timeoutMs?: number
+  },
 ) => Promise<ExecResult>
 
 /** Files larger than this are not shown side by side. */

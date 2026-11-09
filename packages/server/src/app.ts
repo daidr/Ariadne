@@ -37,7 +37,7 @@ import {
   type Ariadne,
   type ProjectSource,
 } from '@ariadne/core'
-import { createTranslator } from '@ariadne/i18n'
+import { createTranslator, type LocalizedMessage } from '@ariadne/i18n'
 import type { Server } from 'bun'
 import { browseLocal, NothingToBrowse } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
@@ -606,7 +606,12 @@ export function createHandler({
     let where = part.kind
     if (host) {
       const connected = await connectReference(host.contexts, reference, {
-        ...referenceSecrets(project.source, reference, settings?.sourceSecrets(projectId) ?? {}),
+        ...referenceSecrets(
+          host.contexts,
+          project.source,
+          reference,
+          settings?.sourceSecrets(projectId) ?? {},
+        ),
         ...split.secrets,
       })
       try {
@@ -637,7 +642,6 @@ export function createHandler({
   // given a few seconds, so a slow one does not hold the page.
   add('GET', '/api/projects/:projectId/references/status', async (_request, { projectId = '' }) => {
     const { references } = app.getProject(projectId)
-    const locale = settings?.current.locale ?? 'zh-CN'
     const failures = await Promise.all(
       references.map(async (reference) => {
         if (!workspaces) return null
@@ -650,12 +654,13 @@ export function createHandler({
           .then((view) => view.list('.'))
           .then(
             () => null,
-            (error: unknown) =>
+            (error: unknown): LocalizedMessage =>
               error instanceof DomainError
-                ? createTranslator(locale)(error.code, error.params)
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+                ? { key: error.code, params: error.params }
+                : {
+                    key: 'error.workspace',
+                    params: { detail: error instanceof Error ? error.message : String(error) },
+                  },
           )
         try {
           return await Promise.race([read, late])

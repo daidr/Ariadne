@@ -532,7 +532,8 @@ export function localWorkspaces(input: {
   // The coordinator reads the directory as the user has it, changes not committed and all,
   // without git's own directory and what the sandbox hides.
   const source = new LocalWorkspace('source', input.path, null, { sandbox, git: false })
-  const view = async () => searchableView(source)
+  const inside = (path: string) => source.resolve(path)
+  const view = async () => searchableView(source, { check: inside, checkFound: inside })
   if (!repoRoot) {
     return {
       isolated: false,

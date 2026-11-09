@@ -1,5 +1,5 @@
 import type { ExecOptions, ExecResult, SourceView, Workspace } from './capabilities'
-import { readOnlyView } from './capabilities'
+import { readOnlyView, WorkspacePathError } from './capabilities'
 
 /** Quote one argument for a POSIX shell. */
 const posixQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
@@ -247,18 +247,73 @@ export async function searchByReading(
   return { lines, error: null }
 }
 
+/** The parts of a path as typed, either separator. */
+const partsOf = (path: string) => path.split(/[\\/]/).filter(Boolean)
+
+/**
+ * A view's path by its spelling alone: relative, never climbing, and not through git's own
+ * directory, which may hold credentials in a remote's address.
+ */
+export function viewPath(path: string): string {
+  const parts = partsOf(path || '.')
+  if (/^([\\/]|[A-Za-z]:)/.test(path) || parts.includes('..')) throw new WorkspacePathError(path)
+  if (parts.some((part) => part.toLowerCase() === '.git')) {
+    throw new WorkspacePathError(path, 'is kept out of reach')
+  }
+  return path || '.'
+}
+
+/** How a view checks paths beyond their spelling. */
+export interface ViewChecks {
+  /** Refuses a path to look under that the workspace keeps out of reach: links, hidden paths. */
+  check?: (path: string) => Promise<unknown>
+  /** The same for each file found, where asking is cheap enough to do for every one. */
+  checkFound?: (path: string) => Promise<unknown>
+  ref?: string
+}
+
 /**
  * A workspace to look at without changing it, searched with the machine's own programs:
- * what a source that is a directory hands out as its view.
+ * what a source that is a directory hands out as its view. Finding and searching run
+ * programs on the path, so it is checked first as reading checks it, by its spelling and
+ * by the workspace's own resolving; what they found is checked too.
  */
-export function searchableView(workspace: Workspace, ref?: string): SourceView {
+export function searchableView(workspace: Workspace, checks: ViewChecks = {}): SourceView {
+  const inside = async (path: string) => {
+    await checks.check?.(viewPath(path))
+    return path || '.'
+  }
+  const shown = async (file: string) => {
+    try {
+      viewPath(file)
+      await checks.checkFound?.(file)
+      return true
+    } catch {
+      return false
+    }
+  }
   return readOnlyView(
     {
       readBytes: (path, maxBytes) => workspace.readBytes(path, maxBytes),
       list: (path) => workspace.list(path),
-      files: (path, options) => listFiles(workspace, path, options?.signal),
-      search: (pattern, path, options) => searchLines(workspace, pattern, path, options?.signal),
+      async files(path, options) {
+        const found = await listFiles(workspace, await inside(path), options?.signal)
+        const kept = await Promise.all(found.files.map(shown))
+        return { ...found, files: found.files.filter((_, at) => kept[at]) }
+      },
+      async search(pattern, path, options) {
+        const found = await searchLines(workspace, pattern, await inside(path), options?.signal)
+        const seen = new Map<string, Promise<boolean>>()
+        const kept = await Promise.all(
+          found.lines.map((line) => {
+            const file = line.slice(0, line.indexOf(':'))
+            if (!seen.has(file)) seen.set(file, shown(file))
+            return seen.get(file)!
+          }),
+        )
+        return { ...found, lines: found.lines.filter((_, at) => kept[at]) }
+      },
     },
-    ref,
+    checks.ref,
   )
 }

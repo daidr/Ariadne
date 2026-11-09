@@ -324,7 +324,14 @@ function rulePart(command: SimpleCommand): RulePart {
   const name = program.toLowerCase()
   const text =
     TEXT_PROGRAMS.has(name) || (name === 'git' && GIT_TEXT.has(gitForm(words).split(' ')[1] ?? ''))
-  const runner = SHELL_PROGRAMS.has(name) || TEXT_RUNNERS.has(name) || name === 'cmd'
+  // Any word may be the program that runs text, behind a word that is not known to wrap
+  // one (`timeout 5 sh`, `busybox sh`): on the side of asking, as `loose` is.
+  // A later `.` is the directory, not the shell's `source`.
+  const runner = words.some((word, at) => {
+    const runs = programOf(word).toLowerCase()
+    if (at > 0 && runs === '.') return false
+    return SHELL_PROGRAMS.has(runs) || TEXT_RUNNERS.has(runs) || runs === 'cmd'
+  })
   if (SHELL_PROGRAMS.has(name)) {
     const at = words.findIndex((word, i) => i > 0 && /^-[a-z]*c[a-z]*$|^-com/i.test(word))
     if (at > 0 && words.length > at + 1) nested.push(words.slice(at + 1).join(' '))

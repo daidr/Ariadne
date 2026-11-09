@@ -161,12 +161,12 @@
 项目的来源只有一个，讨论串在它上面建工作区、改代码、开 PR。项目另外可以带至多 8 个参考来源（`ProjectView.references`，`project.references.set`），只读，种类和项目来源相同：
 
 - 参考来源不建工作区，也不挂进文件系统：读的是插件已有的只读视图（`workspace.view()`），托管仓库是默认分支的最新提交，本地和远端目录是目录里现在的文件。命令看不到参考来源。
-- 协调器、讨论串和审阅讨论串的 `list_dir`、`read_file`、`search`、`find_files` 多一个可选的 `source` 参数，填参考来源的名字就读它，不填读自己的工作区（协调器是项目来源的只读视图）。名字只在 `WorkspaceManager.referenceView` 一处认。提示词里列出每个参考来源的名字和位置。
+- 协调器、讨论串和审阅讨论串的 `list_dir`、`read_file`、`search`、`find_files` 多一个可选的 `source` 参数，填参考来源的名字就读它，不填读自己的工作区（协调器是项目来源的只读视图）。名字只在 `WorkspaceManager.referenceView` 一处认。`search`、`find_files` 的路径和读文件走同一套检查（不出根目录、不进 `.git`、不跟着链接出去），找到的文件也再查一遍。提示词里列出每个参考来源的名字和位置。
 - 只读视图可以自带 `files` 和 `search`（本地目录用 ripgrep，托管仓库的 clone 用 `git ls-tree` 和 `git grep`，远端目录在远端跑）；没有的视图靠逐个目录读文件来找。
 - 名字从位置的最后一段取（`referenceName`），重名时加序号，用户不用起名。
-- 密钥存在 config.json 的 `sourceSecrets` 里，键是 `reference.<id>.<字段>`；没填、种类又和项目来源相同时用项目来源的。
+- 密钥存在 config.json 的 `sourceSecrets` 里，键是 `reference.<id>.<字段>`；没填、种类和项目来源相同、令牌发往的地方也相同（插件的 `secretsFor`，GitLab 是实例地址）时才用项目来源的。
 - 添加有两处：项目设置的“项目来源”页；协调器的 `add_reference` 工具，先连一次确认读得到，再在对话里出一张确认卡片（同时进“需要我”），用户点“添加”才加上，同一回合就能读。连不上的不出卡片。
-- 页面打开时问一次哪些参考来源现在读不到（`GET /api/projects/:id/references/status`，每个最多等 5 秒），读不到的那一行换成警告图标。
+- 页面打开时问一次哪些参考来源现在读不到（`GET /api/projects/:id/references/status`，每个最多等 5 秒），读不到的那一行换成警告图标；原因以 key 和参数返回，由页面翻译。
 
 ### 交付前审阅
 

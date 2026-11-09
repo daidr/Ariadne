@@ -191,6 +191,7 @@ export const en: Record<MessageKey, string> = {
   'project.references.title': 'References',
   'project.references.add': 'Add',
   'project.references.confirm': 'Add',
+  'project.references.removeAsk': 'Remove the reference source {name}?',
   'project.references.remove': 'Remove',
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
@@ -414,6 +415,7 @@ export const en: Record<MessageKey, string> = {
   'error.blockInvalid': 'The interface block is not valid: {reason}',
   'error.noSource': 'The project has no source yet',
   'error.tooManyReferences': 'A project takes at most {max} reference sources',
+  'error.referenceExists': 'Already a reference source: {name}',
   'error.noReference': 'There is no reference source called {name}',
   'error.referenceUnreadable': 'The reference source {name} cannot be read: {detail}',
   'error.noRepo':

@@ -501,6 +501,9 @@ describe('project sources', () => {
     // What the page is told has been set leaves the references' out.
     expect(store.sourceSecretsSet(projectId)).toEqual(['token'])
 
+    // The same one again is refused, not added under a second name.
+    expect((await add({ repository: 'a/lib' })).status).toBe(400)
+    expect(app.getProject(projectId).references).toHaveLength(2)
     // One that cannot be read is not added.
     const refused = await add({ repository: 'gone/gone' })
     expect(refused.status).toBe(400)
