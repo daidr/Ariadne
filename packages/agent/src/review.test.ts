@@ -142,7 +142,7 @@ describe('skills', () => {
     expect(skillName('a b.md')).toBeNull()
   })
 
-  test("the repository's skills and the user's are listed, the repository's winning", async () => {
+  test("the repository's skills and the user's are listed, same names side by side", async () => {
     await writeFile(join(home, 'review.md'), '本机的审法\n')
     await writeFile(join(home, 'release.md'), '发版的时候\n步骤…')
     await writeFile(join(home, 'skip.txt'), 'not a skill')
@@ -154,9 +154,21 @@ describe('skills', () => {
     const skills = await loadSkills({ repo, localDirs: [home] })
     expect(skills.list()).toEqual([
       { name: 'release', when: '发版的时候', source: 'local' },
-      { name: 'review', when: '审 PR 的时候', source: 'repo' },
+      { name: 'review@repo', when: '审 PR 的时候', source: 'repo' },
+      { name: 'review@user', when: '本机的审法', source: 'local' },
     ])
-    expect(skills.get('review')?.text).toContain('只看 bug')
+    expect(skills.get('review@repo')?.text).toContain('只看 bug')
+    expect(skills.get('review@user')?.text).toContain('本机的审法')
+    // The bare name is not one skill any more: the tool says which there are.
+    expect(skills.get('review')).toBeNull()
+    expect(skills.named('review')).toEqual(['review@repo', 'review@user'])
+    const ctx = { skills: () => skills } as unknown as ToolContext
+    await expect(readSkill.run({ name: 'review' }, ctx)).rejects.toThrow(
+      'There are 2 skills named "review": review@repo, review@user',
+    )
+    expect((await readSkill.run({ name: 'review@user' }, ctx)).content).toContain('本机的审法')
+    // Ariadne's own review replaces the built-in guidance, the repository's first.
+    expect(skills.review()?.name).toBe('review@repo')
     // Nowhere to read from is no skills, not an error.
     expect((await loadSkills({ repo: null, localDirs: [join(home, 'none')] })).list()).toEqual([])
   })
@@ -279,35 +291,51 @@ describe('skills', () => {
     const repo = memoryFiles({ '.agents/skills/review/SKILL.md': '仓库共用目录的审法' })
     const others = await loadSkills({ repo, localDirs: [own, shared] })
     expect(others.review()).toBeNull()
-    expect(others.get('review')?.text).toBe('仓库共用目录的审法')
-    // Ariadne's own is not lost to a shared folder read before it.
+    expect(others.list().map((skill) => skill.name)).toEqual([
+      'review@repo-agents',
+      'review@user-agents',
+    ])
+    // Ariadne's own replaces it, whatever the shared folders hold.
     await writeFile(join(own, 'review.md'), '自己的审法')
     const mine = await loadSkills({ repo, localDirs: [own, shared] })
     expect(mine.review()?.text).toBe('自己的审法')
-    expect(mine.get('review')?.source).toBe('local')
+    expect(mine.review()?.name).toBe('review@user')
   })
 
-  test('one name is one skill: places are read in order, the earlier winning', async () => {
+  test('skills of one name from different places are all kept, told apart by the place', async () => {
     const shared = join(home, 'shared')
     const own = join(home, 'own')
-    await mkdir(join(shared, 'review'), { recursive: true })
+    await mkdir(join(shared, 'lint'), { recursive: true })
     await mkdir(own)
-    await writeFile(join(shared, 'review', 'SKILL.md'), '共用目录的审法')
-    await writeFile(join(shared, 'lint.md'), '共用目录的 lint')
+    await writeFile(join(shared, 'lint', 'SKILL.md'), '共用目录的 lint')
+    await writeFile(join(shared, 'lint', 'rules.md'), 'shared rules')
     await writeFile(join(own, 'lint.md'), '自己的 lint')
-    await writeFile(join(own, 'review.md'), '自己的审法')
+    await writeFile(join(own, 'only.md'), '只有一处')
     const repo = memoryFiles({
-      '.agents/skills/review/SKILL.md': '仓库共用目录的审法',
       '.agents/skills/build.md': '仓库共用目录的构建',
       '.ariadne/skills/build.md': '仓库自己的构建',
     })
     const skills = await loadSkills({ repo, localDirs: [own, shared] })
     expect(skills.list()).toEqual([
-      { name: 'build', when: '仓库自己的构建', source: 'repo' },
-      { name: 'lint', when: '自己的 lint', source: 'local' },
-      // The one exception: Ariadne's own review is not lost to a shared folder.
-      { name: 'review', when: '自己的审法', source: 'local' },
+      { name: 'build@repo', when: '仓库自己的构建', source: 'repo' },
+      { name: 'build@repo-agents', when: '仓库共用目录的构建', source: 'repo' },
+      { name: 'lint@user', when: '自己的 lint', source: 'local' },
+      { name: 'lint@user-agents', when: '共用目录的 lint', source: 'local' },
+      { name: 'only', when: '只有一处', source: 'local' },
     ])
+    // Files beside a skill are read by the name it is called by.
+    expect(await skills.read('lint@user-agents', 'rules.md')).toEqual({ text: 'shared rules' })
+    expect(skills.get('lint@user-agents')?.folder).toBe(join(shared, 'lint'))
+    // A message may name either.
+    const project = app.createProject('P')
+    expect(() =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: '/lint@user-agents',
+        mentions: [{ kind: 'skill', name: 'lint@user-agents' }],
+      }),
+    ).not.toThrow()
   })
 
   test('the prompt lists names and when to use them, not the text', () => {

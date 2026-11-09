@@ -5,13 +5,16 @@ import { isAbsolute, join, sep } from 'node:path'
 /**
  * Skills: ways of working written down in Markdown, one per skill: a file `<name>.md`,
  * or a folder `<name>/` holding `SKILL.md` and whatever files it works with. They are
- * read from the repository (`.ariadne/skills/`, then `.agents/skills/`) and from the
+ * read from the repository (`.ariadne/skills/` and `.agents/skills/`) and from the
  * user's own folders for every project. A skill's first line, or the `description:` of
  * its front matter, says when to use it. Models see only names and those lines, and read
  * a whole skill, and the files beside it, when their work fits it.
  */
 export interface Skill {
-  /** The file's name without `.md`, or the folder's. */
+  /**
+   * What it is called by: the file's name without `.md`, or the folder's; with `@` and
+   * the place it is from when another place has a skill of that name.
+   */
   name: string
   /** When to use it: the file's first line. */
   when: string
@@ -20,8 +23,8 @@ export interface Skill {
 }
 
 /**
- * Where a repository keeps its skills, from the root of its checkout; the earlier wins
- * a name. The second is the folder shared between tools.
+ * Where a repository keeps its skills, from the root of its checkout: Ariadne's own
+ * folder, and the one shared between tools.
  */
 export const REPO_SKILLS_DIRS = ['.ariadne/skills', '.agents/skills'] as const
 /** The skill that replaces the built-in review guidance. */
@@ -104,6 +107,10 @@ interface Loaded extends Skill {
   root: string
   /** From a folder of Ariadne's own, not the one shared between tools. */
   own: boolean
+  /** Its name without the place. */
+  plain: string
+  /** The place it is from, as written after `@`. */
+  place: string
 }
 
 /** One place skills are read from; `shown` is its path as the model is told it. */
@@ -113,6 +120,8 @@ interface Place {
   shown: string
   source: Skill['source']
   own: boolean
+  /** What tells its skills from others of the same name, after `@`. */
+  key: string
 }
 
 /**
@@ -210,6 +219,8 @@ async function fromPlace(place: Place): Promise<Loaded[]> {
           files: place.files,
           root: folder ?? '',
           own: place.own,
+          plain: name,
+          place: place.key,
         })
         break
       } catch {
@@ -232,8 +243,8 @@ function inside(file: string): string | null {
 }
 
 /**
- * The skills a conversation can use, read once. One name is one skill: the repository's
- * win over the user's own, and within either the earlier place wins.
+ * The skills a conversation can use, read once. Skills of the same name from different
+ * places are all kept, each called by its name with `@` and its place.
  */
 export class SkillSet {
   constructor(private readonly found: Map<string, Loaded>) {}
@@ -244,6 +255,11 @@ export class SkillSet {
 
   list(): Skill[] {
     return [...this.found.values()].map(({ name, when, source }) => ({ name, when, source }))
+  }
+
+  /** What the skills of one plain name are called by; several when places share it. */
+  named(plain: string): string[] {
+    return [...this.found.values()].filter((s) => s.plain === plain).map((s) => s.name)
   }
 
   get(name: string): (Skill & { text: string; folder: string | null }) | null {
@@ -307,15 +323,16 @@ export class SkillSet {
    * way of reviewing, and stays an ordinary skill.
    */
   review(): (Skill & { text: string; folder: string | null }) | null {
-    return this.found.get(REVIEW_SKILL)?.own ? this.get(REVIEW_SKILL) : null
+    const own = [...this.found.values()].find((s) => s.plain === REVIEW_SKILL && s.own)
+    return own ? this.get(own.name) : null
   }
 }
 
 export async function loadSkills(input: {
   repo: SkillFiles | null
   /**
-   * The user's own folders for every project; the earlier wins a name. The first is
-   * Ariadne's own, the rest are shared between tools.
+   * The user's own folders for every project. The first is Ariadne's own, the rest are
+   * shared between tools.
    */
   localDirs: readonly string[]
 }): Promise<SkillSet> {
@@ -327,6 +344,7 @@ export async function loadSkills(input: {
           shown: dir,
           source: 'repo' as const,
           own: dir === REPO_SKILLS_DIRS[0],
+          key: dir === REPO_SKILLS_DIRS[0] ? 'repo' : 'repo-agents',
         }))
       : []),
     ...input.localDirs.map((dir, index) => ({
@@ -335,16 +353,19 @@ export async function loadSkills(input: {
       shown: dir,
       source: 'local' as const,
       own: index === 0,
+      key: index === 0 ? 'user' : index === 1 ? 'user-agents' : `user-${index + 1}`,
     })),
   ]
-  const all = new Map<string, Loaded>()
-  for (const skills of await Promise.all(places.map(fromPlace)))
-    for (const skill of skills) {
-      const known = all.get(skill.name)
-      // The review guidance is Ariadne's own to replace: its `review` is not lost to one
-      // an earlier shared folder holds.
-      if (!known || (skill.name === REVIEW_SKILL && skill.own && !known.own))
-        all.set(skill.name, skill)
-    }
-  return new SkillSet(new Map([...all].toSorted(([a], [b]) => a.localeCompare(b))))
+  // Every place's skills, in the order of the places; a name more than one place has is
+  // told apart by the place.
+  const all = (await Promise.all(places.map(fromPlace))).flat()
+  const count = new Map<string, number>()
+  for (const skill of all) count.set(skill.plain, (count.get(skill.plain) ?? 0) + 1)
+  for (const skill of all)
+    if (count.get(skill.plain)! > 1) skill.name = `${skill.plain}@${skill.place}`
+  const order = new Map(all.map((skill, index) => [skill, index]))
+  const sorted = all.toSorted(
+    (a, b) => a.plain.localeCompare(b.plain) || order.get(a)! - order.get(b)!,
+  )
+  return new SkillSet(new Map(sorted.map((skill) => [skill.name, skill])))
 }

@@ -86,7 +86,7 @@ export interface TurnOptions {
   settings?: TurnSettings
   /** The model a research runs on; the conversation's own without it. */
   researchModel?: ResolvedModel | null
-  /** The user's own skill folders for every project, the earlier winning a name. */
+  /** The user's own skill folders for every project: Ariadne's own first, then shared ones. */
   skillsDirs?: readonly string[]
 }
 
@@ -195,7 +195,9 @@ function systemPrompt(
         global: userInstructions,
         project: project.settings.instructions,
       },
-      reviewSkill: skill ? { source: skill.source, text: skill.text, beside: reviewBeside } : null,
+      reviewSkill: skill
+        ? { source: skill.source, text: skill.text, beside: reviewBeside, name: skill.name }
+        : null,
       skills: skills.list(),
       maxRounds: MAX_REVIEW_ROUNDS,
       references,

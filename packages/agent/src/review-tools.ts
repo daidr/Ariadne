@@ -16,7 +16,10 @@ export const readSkill: Tool = {
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'As the list names it.' },
+        name: {
+          type: 'string',
+          description: 'As the list names it, with its @ part when it has one.',
+        },
         file: {
           type: 'string',
           description:
@@ -31,6 +34,12 @@ export const readSkill: Tool = {
     const skills = ctx.skills?.()
     const skill = skills?.get(name) ?? null
     if (!skill) {
+      const same = skills?.named(name) ?? []
+      if (same.length > 1) {
+        throw new ToolInputError(
+          `There are ${same.length} skills named "${name}": ${same.join(', ')}. Read the one you mean by its full name.`,
+        )
+      }
       const names =
         ctx
           .skills?.()

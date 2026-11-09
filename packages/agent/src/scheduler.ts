@@ -41,7 +41,7 @@ export interface SchedulerOptions {
   settings?: (projectId: string) => TurnSettings
   /** The model researches run on; `null` for the asking conversation's own. */
   researchModel?: () => ResolvedModel | null
-  /** The user's own skill folders for every project, the earlier winning a name. */
+  /** The user's own skill folders for every project: Ariadne's own first, then shared ones. */
   skillsDirs?: readonly string[]
 }
 

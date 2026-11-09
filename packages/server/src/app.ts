@@ -98,7 +98,7 @@ export interface HandlerOptions {
   mcp?: McpHub
   /** The data directory: its size, and backups of the database. */
   data?: DataStore
-  /** The user's own skill folders for every project, the earlier winning a name. */
+  /** The user's own skill folders for every project: Ariadne's own first, then shared ones. */
   skillsDirs?: readonly string[]
   /** List prices of models, to fill in a model's price on request. */
   prices?: PriceCatalog
