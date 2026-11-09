@@ -190,7 +190,10 @@ const editor = useTemplateRef<{
   getNodeRect: (id: string) => { x: number; y: number; width: number; height: number } | null
 }>('editor')
 const viewport = ref({ x: 0, y: 0, zoom: 1 })
-const READABLE = props.compact ? 0.45 : 0.6
+// In the side pane the whole graph is shown down to FIT; one too large even for that goes
+// back to a size its words can be read at.
+const READABLE = props.compact ? 0.75 : 0.6
+const FIT = props.compact ? 0.45 : READABLE
 const PAD = 24
 function focusIds(): string[] {
   const plan = props.plan
@@ -223,7 +226,7 @@ function frame() {
   if (!box) return
   let zoom = zoomFor(box)
   let centred = true
-  if (zoom < READABLE) {
+  if (zoom < FIT) {
     const focus = boxOf(focusIds())
     if (focus) box = focus
     else centred = false

@@ -2,7 +2,7 @@
 import type { ThreadView } from '@ariadne/core'
 import { DouButton, DouDropdown, DouDropdownItem, DouInput, DouPopover } from 'dou-ui'
 import { ListTreeIcon, MoreHorizontalIcon, PauseIcon } from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { openMain, stopThread } from '../store'
 
@@ -15,6 +15,15 @@ const props = defineProps<{ thread?: ThreadView | null; label: string }>()
 // The user stops a thread with a reason, the same way the coordinator does.
 const stopOpen = ref(false)
 const stopReason = ref('')
+// In a tab group the thread changes under the menu: a reason written for one thread is
+// never left open over another.
+watch(
+  () => props.thread?.id,
+  () => {
+    stopOpen.value = false
+    stopReason.value = ''
+  },
+)
 // Pausing the whole thread is rarer than stopping a turn: it sits in the menu.
 const canPause = computed(() => {
   const current = props.thread

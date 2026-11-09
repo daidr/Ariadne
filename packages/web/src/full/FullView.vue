@@ -54,7 +54,9 @@ const label = computed(() => {
             </div>
             <ConversationPanel
               :thread-id="threadId"
-              :merging="full.view.kind === 'changes' && full.view.threadId === threadId"
+              :merging="
+                full.view.kind === 'changes' && !full.view.turn && full.view.threadId === threadId
+              "
               class="full-conversation"
             />
           </div>
