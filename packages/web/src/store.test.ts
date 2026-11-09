@@ -8,6 +8,7 @@ import {
   merge,
   openedViewOf,
   openMain,
+  openThread,
   openView,
   partsOf,
   setSide,
@@ -181,5 +182,20 @@ describe('artifacts and changes', () => {
     expect(state.full?.view).toEqual({ kind: 'artifact', id: 'art_1' })
     expect(tabs()).toContain('changes:th_1')
     closeFull()
+  })
+
+  test('a thread opened over a full-screen view shows beside it, not behind it', async () => {
+    setSide(side.defaultLayout())
+    await openView({ kind: 'changes', threadId: 'th_1' }, { from: 'th_2' })
+    await openThread('th_1')
+    expect(state.full).toEqual({
+      view: { kind: 'changes', threadId: 'th_1' },
+      threadId: 'th_1',
+      fromSide: false,
+    })
+    expect(tabs()).not.toContain(side.threadKey('th_1'))
+    closeFull()
+    await openThread('th_1')
+    expect(tabs()).toContain(side.threadKey('th_1'))
   })
 })

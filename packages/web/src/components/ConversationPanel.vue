@@ -946,6 +946,7 @@ watch(
             :data-message-id="message.id"
             :highlighted="focused === message.id"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
+            actions-visible="hover"
           >
             <template #markdown-link="{ node, href, external, children }">
               <MessageLink
