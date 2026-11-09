@@ -1,12 +1,18 @@
 import { Ariadne, confirmBlock } from '@ariadne/core'
-import type { SearchProvider } from '@ariadne/plugin-sdk'
+import {
+  ModelSearchRefused,
+  type ModelSearchAnswer,
+  type SearchProvider,
+} from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import type { ResolvedModel } from './model'
 import { Scheduler } from './scheduler'
+import { keyedSearch } from './search-service'
 import { call, fakeModel, say } from './test-model'
 import { toolsFor, type ToolContext } from './tools'
 import { MAX_IMAGES, toChatMessages } from './transcript'
 import { fetchPage, htmlToText, isPrivateAddress, type WebAccess } from './web'
-import { PAGE_CHARS } from './web-tools'
+import { forgetRefusedSearches, PAGE_CHARS, searchingModels } from './web-tools'
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -56,6 +62,43 @@ function tool(name: string, options: Parameters<typeof toolsFor>[1]) {
   if (!found) throw new Error(`no ${name}`)
   return found
 }
+
+/** A model whose service searches the web itself (or, with `null`, has no search). */
+function searchingModel(
+  label: string,
+  run: ((query: string) => Promise<ModelSearchAnswer>) | null,
+  asked: string[] = [],
+): ResolvedModel {
+  return {
+    provider: {
+      kind: 'demo',
+      title: { 'zh-CN': '演示' },
+      settings: { type: 'object', properties: {} },
+      // oxlint-disable-next-line require-yield
+      async *stream() {
+        throw new Error('not asked')
+      },
+      ...(run
+        ? {
+            search: {
+              available: (settings: { relay?: boolean }) => !settings.relay,
+              run: (_settings: unknown, request: { query: string; model: string }) => {
+                asked.push(`${label}:${request.model}:${request.query}`)
+                return run(request.query)
+              },
+            },
+          }
+        : {}),
+    } as ResolvedModel['provider'],
+    settings: {},
+    model: 'm',
+    label,
+    price: { currency: 'USD', input: 1, output: 2 },
+  }
+}
+
+const toolsWith = (search: Parameters<typeof toolsFor>[1]['search']) =>
+  toolsFor('thread', { workspace: false, repo: false, ...(search ? { search } : {}) })
 
 describe('reading the web', () => {
   test('only public addresses count as the web', () => {
@@ -173,7 +216,7 @@ describe('reading the web', () => {
     const search = tool('web_search', {
       workspace: false,
       repo: false,
-      search: new Map([['demo', provider]]),
+      search: { services: new Map([['demo', provider]]) },
     })
     const result = await search.run(
       { query: 'bun sqlite', limit: 3 },
@@ -194,11 +237,162 @@ describe('reading the web', () => {
     const search = tool('web_search', {
       workspace: false,
       repo: false,
-      search: new Map([['demo', provider]]),
+      search: { services: new Map([['demo', provider]]) },
     })
     const result = await search.run({ query: 'q' }, context(project.id, project.coordinatorId))
     expect(result.isError).toBe(true)
     expect(result.content).not.toContain('sk-secret')
+  })
+
+  test('without a search service, the model service searches and its tokens are counted', async () => {
+    const asked: string[] = []
+    const model = searchingModel(
+      'main / m',
+      async () => ({
+        text: 'Bun 1.3 shipped in October.',
+        sources: [
+          { title: 'Bun 1.3', url: 'https://bun.sh/blog/1.3', snippet: 'Bun 1.3 is\nhere' },
+          { title: '', url: 'https://example.com/other', snippet: '' },
+        ],
+        usage: { input: 9000, output: 1000 },
+      }),
+      asked,
+    )
+    const project = app.createProject('P')
+    const turnId = app.startTurn(project.coordinatorId, 'main / m')
+    const search = tool('web_search', {
+      workspace: false,
+      repo: false,
+      search: { models: [model] },
+    })
+    const result = await search.run(
+      { query: 'bun release' },
+      { ...context(project.id, project.coordinatorId), turnId },
+    )
+    expect(asked).toEqual(['main / m:m:bun release'])
+    expect(result.content).toMatch(
+      /^<search_results_[0-9a-f]{12} query="bun release" searched-by="main \/ m">/,
+    )
+    expect(result.content).toContain('Bun 1.3 shipped in October.\n\nPages:\n1. Bun 1.3')
+    expect(result.content).toContain('   https://bun.sh/blog/1.3\n   Bun 1.3 is here')
+    expect(result.content).toContain('2. https://example.com/other\n   https://example.com/other')
+    expect(app.getConversation(project.coordinatorId).usage).toMatchObject({
+      input: 9000,
+      output: 1000,
+    })
+  })
+
+  test('a model service that fails to search hands over to the next, then to the saved key', async () => {
+    const asked: string[] = []
+    const down = (label: string) =>
+      searchingModel(label, () => Promise.reject(new Error('HTTP 400 key=sk-secret')), asked)
+    const keyed: SearchProvider = {
+      kind: 'keyed',
+      title: { 'zh-CN': '演示' },
+      search: async () => [{ title: 'Hit', url: 'https://example.com', snippet: 'found' }],
+    }
+    const project = app.createProject('P')
+    const routes = { models: [down('a'), down('b'), down('c')], keyed }
+    const result = await tool('web_search', { workspace: false, repo: false, search: routes }).run(
+      { query: 'q' },
+      context(project.id, project.coordinatorId),
+    )
+    // Two models at most, then the service with the key.
+    expect(asked).toEqual(['a:m:q', 'b:m:q'])
+    expect(result.isError).toBeUndefined()
+    expect(result.content).toContain('1. Hit\n   https://example.com\n   found')
+
+    const alone = await tool('web_search', {
+      workspace: false,
+      repo: false,
+      search: { models: [down('a')] },
+    }).run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(alone.isError).toBe(true)
+    expect(alone.content).not.toContain('sk-secret')
+  })
+
+  test('a search service a plugin brought is asked before any model', async () => {
+    const asked: string[] = []
+    const model = searchingModel('main', async () => ({ text: 'x', sources: [] }), asked)
+    const plugin: SearchProvider = {
+      kind: 'demo',
+      title: { 'zh-CN': '演示' },
+      search: async () => [{ title: 'Plugin hit', url: 'https://example.com', snippet: '' }],
+    }
+    const project = app.createProject('P')
+    const result = await tool('web_search', {
+      workspace: false,
+      repo: false,
+      search: { services: new Map([['demo', plugin]]), models: [model] },
+    }).run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(asked).toEqual([])
+    expect(result.content).toContain('1. Plugin hit\n   https://example.com')
+  })
+
+  test('only models whose service searches count, each once', () => {
+    const relay = { ...searchingModel('relay', async () => ({ text: '', sources: [] })) }
+    relay.settings = { relay: true }
+    const own = searchingModel('own', async () => ({ text: '', sources: [] }))
+    expect(
+      searchingModels([searchingModel('none', null), relay, null, own, own]).map((m) => m.label),
+    ).toEqual(['own'])
+  })
+
+  test('a model whose service turns search down is no longer counted, until settings are saved', async () => {
+    const off = searchingModel('off', () => Promise.reject(new ModelSearchRefused(400)))
+    const busy = {
+      ...searchingModel('busy', () => Promise.reject(new Error('HTTP 429'))),
+      model: 'other',
+    }
+    const project = app.createProject('P')
+    const result = await toolsWith({ models: [off, busy] })
+      .find((t) => t.spec.name === 'web_search')!
+      .run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(result.isError).toBe(true)
+    expect(searchingModels([off, busy]).map((m) => m.label)).toEqual(['busy'])
+    // Nothing else searches: the tool goes, and fetch_url says what a search waits for.
+    expect(toolsWith({ models: searchingModels([off]) }).map((t) => t.spec.name)).not.toContain(
+      'web_search',
+    )
+    forgetRefusedSearches()
+    expect(searchingModels([off, busy]).map((m) => m.label)).toEqual(['off', 'busy'])
+  })
+
+  test('where nothing searches, fetch_url says what a search waits for', () => {
+    const without = toolsWith({ models: [], keyed: null })
+    expect(without.map((t) => t.spec.name)).not.toContain('web_search')
+    expect(without.find((t) => t.spec.name === 'fetch_url')!.spec.description).toContain(
+      'search key',
+    )
+    const withKey = toolsWith({ keyed: keyedSearch('tvly-x') })
+    expect(withKey.map((t) => t.spec.name)).toContain('web_search')
+    expect(withKey.find((t) => t.spec.name === 'fetch_url')!.spec.description).not.toContain(
+      'search key',
+    )
+  })
+
+  test('the keyed search service sends the key as a header and reads the hits', async () => {
+    let sent: { url: string; headers: Headers; body: unknown } | null = null
+    const service = keyedSearch('tvly-secret', (async (url: string, init: RequestInit) => {
+      sent = { url, headers: new Headers(init.headers), body: JSON.parse(String(init.body)) }
+      return Response.json({
+        results: [
+          { title: 'A', url: 'https://a.example', content: 'about a', score: 0.9 },
+          { title: 'no address' },
+        ],
+      })
+    }) as unknown as typeof fetch)
+    expect(await service.search('what is a', { limit: 5 })).toEqual([
+      { title: 'A', url: 'https://a.example', snippet: 'about a' },
+    ])
+    expect(sent!.url).toBe('https://api.tavily.com/search')
+    expect(sent!.headers.get('authorization')).toBe('Bearer tvly-secret')
+    expect(sent!.body).toEqual({ query: 'what is a', max_results: 5 })
+    const refused = keyedSearch(
+      'bad',
+      (async () => new Response('no', { status: 401 })) as unknown as typeof fetch,
+    )
+    await expect(refused.search('q', { limit: 1 })).rejects.toThrow('HTTP 401')
   })
 })
 

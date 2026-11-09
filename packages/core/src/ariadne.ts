@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto'
 import { DomainError } from './errors'
 import {
   branchSlug,
+  MAX_CHECK_COMMAND,
   MAX_REVIEW_ROUNDS,
   parseProjectSettings,
   storedProjectSettings,
+  type ProjectDetected,
 } from './project-settings'
 import {
   parseAnswer,
@@ -132,7 +134,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 50
+export const PROJECTION_VERSION = 52
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -340,6 +342,7 @@ interface ProjectRow {
   slots: number | null
   mcp: string
   settings: string | null
+  detected: string | null
   autopilot_paused: number
   autopilot_since: number | null
   created_at: number
@@ -3012,6 +3015,51 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
+  /**
+   * Record the install commands a new workspace's lockfiles called for (one a line, `''`
+   * for none), when they are not the ones known: the settings show them.
+   */
+  recordDetectedSetup(projectId: string, setup: string): void {
+    if (this.getProject(projectId).detected.setup === setup) return
+    this.store.append([{ type: 'project.setup.detected', projectId, data: { setup } }])
+  }
+
+  /**
+   * Whether `threadId` may note the project's check after edits: the user left it to
+   * Ariadne, and no other thread noted one. The thread that did may correct its own. Not
+   * in a project whose threads run no commands: a check is a command of the thread's choosing.
+   */
+  canNoteCheck(threadId: string): boolean {
+    const thread = this.getThread(threadId)
+    if (thread.reviewOf) return false
+    const project = this.getProject(thread.projectId)
+    if (!project.settings.workspace.auto.check) return false
+    if (project.settings.tools.includes('commands')) return false
+    return !project.detected.check || project.detected.check.threadId === threadId
+  }
+
+  /** A thread notes the check to run after edits; `''` when the repository has none fit. */
+  noteCheck(threadId: string, command: string): ProjectView {
+    const thread = this.getThread(threadId)
+    const project = this.getProject(thread.projectId)
+    if (!this.canNoteCheck(threadId)) {
+      throw new DomainError('error.invalidBody', { reason: 'check' })
+    }
+    const noted = command.trim()
+    if (noted.length > MAX_CHECK_COMMAND) {
+      throw new DomainError('error.invalidBody', { reason: 'command' })
+    }
+    if (project.detected.check?.command === noted) return project
+    this.store.append([
+      {
+        type: 'project.check.noted',
+        projectId: thread.projectId,
+        data: { command: noted, threadId },
+      },
+    ])
+    return this.getProject(thread.projectId)
+  }
+
   /** Record that a thread's workspace is ready, so the user can see where it works. */
   recordWorkspace(
     threadId: string,
@@ -3940,6 +3988,18 @@ export class Ariadne {
     ])
   }
 
+  /** The tokens of a web search a model's own service ran for a call of this turn. */
+  recordSearch(
+    conversationId: string,
+    turnId: string,
+    search: { model: string; usage: TokenUsage | null },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    this.store.append([
+      { type: 'search.answered', projectId, data: { ...search, conversationId, turnId } },
+    ])
+  }
+
   /** The steps of one research of a conversation, up to `upTo`, oldest first. */
   researchSteps(conversationId: string, toolCallId: string, upTo: number): AnyStoredEvent[] {
     const conversation = this.getConversation(conversationId)
@@ -4281,6 +4341,9 @@ export class Ariadne {
       slots: row.slots,
       mcp: JSON.parse(row.mcp) as string[],
       settings: storedProjectSettings(row.settings),
+      detected: row.detected
+        ? (JSON.parse(row.detected) as ProjectDetected)
+        : { setup: null, check: null },
       autopilotPaused: row.autopilot_paused === 1,
       usage: this.projectUsage(row.id),
     }

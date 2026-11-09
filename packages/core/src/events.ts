@@ -343,6 +343,13 @@ export interface EventMap {
   /** The project's own settings, whole: instructions, workspace setup, tools, budget. */
   'project.settings.set': { settings: ProjectSettings }
   /**
+   * The install commands the lockfiles of a new workspace called for, one a line; `''`
+   * when it had none Ariadne knows. Kept to show the user what runs.
+   */
+  'project.setup.detected': { setup: string }
+  /** A thread noted the check to run after edits, for a project whose user set none. */
+  'project.check.noted': { command: string; threadId: string }
+  /**
    * The user paused the project's autopilot, or let it go on. Paused, nothing is merged or
    * started on its own; threads at work go on.
    */
@@ -682,6 +689,17 @@ export interface EventMap {
     timing: CallTiming
     /** When the response was whole; its calls ran from then until the event. */
     answeredAt: number
+  }
+  /**
+   * A web search a conversation's `web_search` call had a model's own service run: a
+   * request beside the turn's steps, whose tokens count toward the conversation's.
+   */
+  'search.answered': {
+    conversationId: string
+    turnId: string
+    /** The model asked, as the user sees it named. */
+    model: string
+    usage: TokenUsage | null
   }
   /**
    * A piece of model input seen for the first time in the project, stored once by its
