@@ -30,6 +30,8 @@ import ReviewActions from '../components/ReviewActions.vue'
 import { startedAhead } from './layout'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
+import ChangeTotals from '../components/ChangeTotals.vue'
+import { branchChanges } from '../review/merge-offered'
 import StageIcon from '../components/StageIcon.vue'
 import ThreadHeadline from '../components/ThreadHeadline.vue'
 import ReportArtifacts from '../components/ReportArtifacts.vue'
@@ -49,6 +51,8 @@ const reportArtifacts = (threadId: string) => {
 }
 
 /** Whether the thread has a branch whose changes can be shown. */
+const changesOf = (threadId: string) =>
+  branchChanges(state.detail?.threads.find((thread) => thread.id === threadId))
 const hasBranch = (threadId: string) => {
   const workspace = state.detail?.threads.find((thread) => thread.id === threadId)?.workspace
   return !!workspace?.branch && !!workspace.base
@@ -337,8 +341,15 @@ const removeQuestion = computed(() => {
           >
             <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" compact />
             <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
+            <ChangeTotals
+              v-if="hasBranch(thread.id) && changesOf(thread.id)"
+              :totals="changesOf(thread.id)!"
+              :thread-id="thread.id"
+              button
+              size="xs"
+            />
             <DouButton
-              v-if="hasBranch(thread.id)"
+              v-else-if="hasBranch(thread.id)"
               size="xs"
               variant="ghost"
               :aria-label="t('changes.open')"

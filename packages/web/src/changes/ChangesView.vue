@@ -16,31 +16,25 @@ import {
   type TreeNodeData,
 } from 'dou-ui'
 import {
+  ChevronDownIcon,
   fileIconOf,
   GitMergeIcon,
   MessageIcon,
   ScanSearchIcon,
   RotateCwIcon,
-  SendIcon,
 } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { t, tm } from '../i18n'
-import {
-  closeView,
-  openThread,
-  report,
-  reviewThread,
-  sendLineComments,
-  state,
-  type TurnChangesRef,
-} from '../store'
+import { closeView, openView, report, reviewThread, state, type TurnChangesRef } from '../store'
 import PullRequestTag from '../components/PullRequestTag.vue'
 import ViewActions from '../full/ViewActions.vue'
-import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
+import ChangedFiles from './ChangedFiles.vue'
+import { fileTree, folderKeys, lineTotals, mostChanged, type FileNode } from './files'
+import { draftsChanged, flushComments } from './comment-sender'
 import { languageOf } from './languages'
-import { draftsOf, sendable, useLineComments } from './line-comments'
-import type { ReviewRoundView } from '@ariadne/core'
+import { draftsOf, useLineComments } from './line-comments'
+import type { ReviewRoundView, SentLineComment } from '@ariadne/core'
 import ReviewMark from '../review/ReviewMark.vue'
 import { reviewNotes, useReviewComments } from '../review/review-comments'
 
@@ -66,6 +60,46 @@ const view = computed(() => ({
 const thread = computed(
   () => state.detail?.threads.find((item) => item.id === props.threadId) ?? null,
 )
+
+// Too narrow for the file list beside the diff (a tab on the side): the list folds into
+// the file's name above the diff.
+const root = ref<HTMLElement | null>(null)
+const narrow = ref(false)
+let resized: ResizeObserver | null = null
+onMounted(() => {
+  resized = new ResizeObserver(([entry]) => {
+    narrow.value = (entry?.contentRect.width ?? Infinity) < NARROW_PX
+  })
+  if (root.value) resized.observe(root.value)
+})
+onBeforeUnmount(() => resized?.disconnect())
+const filesOpen = ref(false)
+
+// One turn's changes or the whole branch's, from one to the other in place.
+const scope = computed(() => (props.turn ? 'turn' : 'branch'))
+const scopeOptions = computed(() => [
+  { value: 'turn', label: t('changes.scopeTurn') },
+  { value: 'branch', label: t('changes.scopeBranch') },
+])
+const turnRef = ref<TurnChangesRef | null>(null)
+watch(
+  () => props.turn,
+  (turn) => {
+    if (turn) turnRef.value = turn
+  },
+  { immediate: true },
+)
+function switchScope(value: unknown) {
+  if (value === scope.value) return
+  const next =
+    value === 'turn' && turnRef.value
+      ? { kind: 'changes' as const, threadId: props.threadId, turn: turnRef.value }
+      : { kind: 'changes' as const, threadId: props.threadId }
+  const before = view.value
+  // Full screen keeps the thread beside it; a tab gives its place to the other.
+  void openView(next, props.place === 'full' ? { full: true, from: state.full?.threadId } : {})
+  if (props.place === 'side') closeView(before)
+}
 const changes = ref<BranchChanges | null>(null)
 const mergeable = ref(false)
 // Handed to the user for review, it can also end without a merge here: they let it go, or
@@ -90,10 +124,13 @@ const totals = computed(() => lineTotals(changes.value?.files ?? []))
 function pickFile(files: ChangedFile[]) {
   const has = (path: string | null | undefined) => !!path && files.some((f) => f.path === path)
   if (has(props.path) && !opened.value) selected.value = props.path!
-  else if (!has(selected.value)) selected.value = orderedFiles(tree.value)[0]?.path ?? null
+  else if (!has(selected.value)) selected.value = mostChanged(files)?.path ?? null
   opened.value = true
 }
 const opened = ref(false)
+
+/** Below this width, a tab on the side, the file list folds into the file's name. */
+const NARROW_PX = 720
 
 async function load() {
   if (props.turn) {
@@ -167,23 +204,6 @@ watch(
   { immediate: true },
 )
 
-const STATUS_TONE = {
-  added: 'success',
-  deleted: 'danger',
-  renamed: 'primary',
-  copied: 'primary',
-  modified: 'warning',
-  type: 'warning',
-} as const
-const STATUS_LETTER = {
-  added: 'A',
-  deleted: 'D',
-  renamed: 'R',
-  copied: 'C',
-  modified: 'M',
-  type: 'T',
-}
-
 function select(node: TreeNodeData) {
   const { file: changed } = node as FileNode
   if (changed) selected.value = changed.path
@@ -200,8 +220,16 @@ const method = ref<MergeMethod>('squash')
 const message = ref('')
 const merging = ref(false)
 const result = ref<{ tone: 'warning' | 'neutral'; text: string } | null>(null)
+// Comments waiting go first; a thread still at work, on them or anything else, would keep
+// changing what was merged.
+const busy = computed(() => {
+  const stage = thread.value?.stage
+  return stage === 'working' || stage === 'queued' || drafts.value.length > 0
+})
 watch(mergeOpen, (open) => {
-  if (open && !message.value) message.value = thread.value?.title ?? ''
+  if (!open) return
+  if (!message.value) message.value = thread.value?.title ?? ''
+  void flushComments(props.threadId)
 })
 
 async function merge() {
@@ -237,7 +265,22 @@ async function merge() {
   }
 }
 
-// Comments on lines of either version, sent to the thread together.
+// What the user sent the thread about its lines, kept to show on them.
+const sent = ref<SentLineComment[]>([])
+watch(
+  () => [props.threadId, thread.value?.activeAt] as const,
+  async ([id]) => {
+    try {
+      const { comments } = await api.getLineComments(id)
+      if (props.threadId === id) sent.value = comments
+    } catch (error) {
+      report(error)
+    }
+  },
+  { immediate: true },
+)
+
+// Comments on lines of either version, sent to the thread a moment after.
 const lineComments = useLineComments(
   () => props.threadId,
   () => file.value?.path ?? null,
@@ -245,6 +288,8 @@ const lineComments = useLineComments(
     versions.value && !versions.value.skipped
       ? { original: versions.value.before ?? '', modified: versions.value.after ?? '' }
       : null,
+  // As with the reviewer's: what was sent is about the branch, not one turn of it.
+  () => (props.turn ? [] : sent.value),
 )
 // The reviewer's comments on the branch, with what the author did about each.
 const reviews = ref<ReviewRoundView[]>([])
@@ -274,22 +319,20 @@ const reviewComments = useReviewComments(
 const reviewCount = (path: string) => notes.value.filter((n) => n.comment.path === path).length
 const gutters = computed(() => [lineComments.gutter.value, reviewComments.gutter.value])
 const widgets = computed(() => [...lineComments.widgets.value, ...reviewComments.widgets.value])
-// Side by side at first; the toolbar switches to one column.
-const diffMode = ref<'split' | 'inline'>('split')
+// Side by side where there is room, else one column, until the toolbar switches it. A file
+// only one side has (added or deleted) is one column: the other would be empty.
+const diffMode = ref<'split' | 'inline' | 'auto'>('auto')
+const oneSided = computed(
+  () => !!versions.value && (!versions.value.before || !versions.value.after),
+)
 const drafts = computed(() => draftsOf(props.threadId))
-const commentCount = (path: string) => drafts.value.filter((c) => c.path === path).length
-const sending = ref(false)
-async function sendComments() {
-  sending.value = true
-  try {
-    const outgoing = drafts.value
-    const ids = outgoing.map((draft) => draft.id)
-    if ((await sendLineComments(props.threadId, sendable(outgoing), ids)) && props.place === 'side')
-      openThread(props.threadId)
-  } finally {
-    sending.value = false
-  }
-}
+const commentCount = (path: string) =>
+  drafts.value.filter((c) => c.path === path).length +
+  sent.value.filter((c) => c.path === path).length
+// Comments go to the thread on their own once the user stops writing them; leaving sends
+// what waits at once.
+watch(drafts, () => draftsChanged(props.threadId), { deep: true })
+onBeforeUnmount(() => void flushComments(props.threadId))
 
 const methodOptions = computed(() => [
   { value: 'squash', label: t('changes.method.squash') },
@@ -298,12 +341,11 @@ const methodOptions = computed(() => [
 </script>
 
 <template>
-  <div class="changes" :class="`is-${place}`">
+  <div ref="root" class="changes" :class="[`is-${place}`, { 'is-narrow': narrow }]">
     <div class="changes-header">
       <div class="changes-title">
         <DouText weight="medium" truncate>{{ thread?.title }}</DouText>
         <DouText v-if="turn" variant="tertiary" size="sm" class="changes-meta">
-          {{ t('changes.turn') }} ·
           {{ t('changes.files', { count: turn.total.files }) }}
           <span class="changes-added">+{{ turn.total.added }}</span>
           <span class="changes-removed">−{{ turn.total.removed }}</span>
@@ -316,17 +358,15 @@ const methodOptions = computed(() => [
           <span class="changes-removed">−{{ totals.removed }}</span>
         </DouText>
       </div>
-      <ReviewMark v-if="thread && !turn" :thread="thread" />
-      <DouButton
-        v-if="drafts.length"
+      <DouSegmentedControl
+        v-if="turnRef"
+        :model-value="scope"
+        :options="scopeOptions"
         size="sm"
-        variant="outline"
-        :loading="sending"
-        @click="sendComments"
-      >
-        <template #leading><SendIcon /></template>
-        {{ t('changes.sendComments', { count: drafts.length }) }}
-      </DouButton>
+        class="changes-scope"
+        @update:model-value="switchScope"
+      />
+      <ReviewMark v-if="thread && !turn" :thread="thread" />
       <DouButton
         v-if="!turn"
         variant="ghost"
@@ -359,6 +399,7 @@ const methodOptions = computed(() => [
         </DouButton>
         <template #content>
           <form class="merge-form" @submit.prevent="merge">
+            <DouAlert v-if="busy" tone="warning" size="sm">{{ t('changes.mergeBusy') }}</DouAlert>
             <DouSegmentedControl v-model="method" :options="methodOptions" size="sm" block />
             <DouTextarea
               v-model="message"
@@ -397,59 +438,47 @@ const methodOptions = computed(() => [
       />
     </div>
     <div v-else class="changes-body">
-      <div class="changes-files">
-        <DouTree
+      <div v-if="!narrow" class="changes-files">
+        <ChangedFiles
           v-model:expanded="expanded"
+          :tree="tree"
           :selected="selected"
-          :data="tree"
-          selectable
-          expand-on-click
-          size="sm"
-          :aria-label="t('changes.files', { count: changes.files.length })"
+          :count="changes.files.length"
+          :review-count="reviewCount"
+          :comment-count="commentCount"
           @select="select"
-        >
-          <template #node="{ node }">
-            <span class="file-row" :title="(node as FileNode).file?.path ?? node.label">
-              <component
-                :is="fileIconOf((node as FileNode).label.split('.').at(-1) ?? '')"
-                v-if="(node as FileNode).file"
-                class="file-icon"
-              />
-              <span class="file-name">{{ node.label }}</span>
-              <template v-if="(node as FileNode).file">
-                <DouText
-                  v-if="reviewCount((node as FileNode).file!.path)"
-                  size="sm"
-                  variant="tertiary"
-                  class="file-comments"
-                  :title="t('review.commented')"
-                >
-                  <ScanSearchIcon />{{ reviewCount((node as FileNode).file!.path) }}
-                </DouText>
-                <DouText
-                  v-if="commentCount((node as FileNode).file!.path)"
-                  size="sm"
-                  variant="tertiary"
-                  class="file-comments"
-                  :title="t('changes.commented')"
-                >
-                  <MessageIcon />{{ commentCount((node as FileNode).file!.path) }}
-                </DouText>
-                <DouText
-                  size="sm"
-                  :tone="STATUS_TONE[(node as FileNode).file!.status]"
-                  class="file-status"
-                >
-                  {{ STATUS_LETTER[(node as FileNode).file!.status] }}
-                </DouText>
-              </template>
-            </span>
-          </template>
-        </DouTree>
+        />
       </div>
       <div class="changes-diff">
         <div v-if="file" class="diff-head">
-          <DouText size="sm" weight="medium" truncate>{{ file.path }}</DouText>
+          <DouPopover
+            v-if="narrow"
+            v-model:open="filesOpen"
+            trigger="click"
+            placement="bottom-start"
+            :width="320"
+          >
+            <DouButton variant="ghost" size="sm" class="diff-file">
+              <span class="diff-file-path">{{ file.path }}</span>
+              <DouText variant="tertiary" size="sm" class="diff-file-count">
+                {{ changes.files.length }}
+              </DouText>
+              <template #trailing><ChevronDownIcon /></template>
+            </DouButton>
+            <template #content>
+              <ChangedFiles
+                v-model:expanded="expanded"
+                :tree="tree"
+                :selected="selected"
+                :count="changes.files.length"
+                :review-count="reviewCount"
+                :comment-count="commentCount"
+                class="diff-file-tree"
+                @select="(node) => ((filesOpen = false), select(node))"
+              />
+            </template>
+          </DouPopover>
+          <DouText v-else size="sm" weight="medium" truncate>{{ file.path }}</DouText>
           <DouText v-if="file.previousPath" variant="tertiary" size="sm" truncate>
             {{ t('changes.renamed', { path: file.previousPath }) }}
           </DouText>
@@ -469,7 +498,9 @@ const methodOptions = computed(() => [
           :language="languageOf(file?.path ?? '')"
           :gutters="gutters"
           :widgets="widgets"
-          v-model:mode="diffMode"
+          :mode="oneSided ? 'inline' : diffMode"
+          wrap
+          @update:mode="(mode: 'split' | 'inline') => (diffMode = mode)"
         />
       </div>
     </div>
@@ -546,38 +577,37 @@ const methodOptions = computed(() => [
   border-right: 1px solid var(--dou-color-border-subtle);
 }
 
-.file-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  width: 100%;
-}
-
-.file-icon {
-  flex: none;
-  color: var(--dou-color-text-tertiary);
-}
-
-.file-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-status {
-  flex: none;
-  font-family: var(--dou-font-family-mono, monospace);
-}
-
 .changes-diff {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+.diff-file {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: -8px;
+}
+
+.diff-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-count {
+  margin-left: 6px;
+}
+
+.diff-file-tree {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.changes-scope {
+  flex: none;
 }
 
 .diff-head {
@@ -600,20 +630,9 @@ const methodOptions = computed(() => [
   color: var(--dou-color-primary);
 }
 
+.diff :deep(.line-comment-sent-mark),
 .diff :deep(.review-comment-mark) {
   color: var(--dou-color-text-tertiary);
-}
-
-.file-comments {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-}
-
-.file-comments svg {
-  width: 12px;
-  height: 12px;
 }
 
 .merge-form {

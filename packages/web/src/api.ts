@@ -20,6 +20,7 @@ import type {
   PlanView,
   ProjectView,
   ReviewRoundView,
+  SentLineComment,
   SearchResult,
   ThreadView,
   TodoView,
@@ -503,6 +504,14 @@ export const api = {
       ...(extras.mentions?.length ? { mentions: extras.mentions } : {}),
       ...(extras.comments?.length ? { comments: extras.comments } : {}),
     }),
+  /** Line comments sent as the page closes, in a request that outlives it. */
+  postCommentsLeaving: (projectId: string, conversationId: string, comments: LineComment[]) =>
+    void fetch(`/api/projects/${projectId}/messages`, {
+      method: 'POST',
+      keepalive: true,
+      headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ conversationId, content: '', comments }),
+    }).catch(() => {}),
   mentionFiles: (projectId: string, conversationId: string, query: string) =>
     request<{ files: string[] }>(
       'GET',
@@ -579,6 +588,8 @@ export const api = {
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
   getReviews: (threadId: string) =>
     request<{ rounds: ReviewRoundView[] }>('GET', `/api/threads/${threadId}/reviews`),
+  getLineComments: (threadId: string) =>
+    request<{ comments: SentLineComment[] }>('GET', `/api/threads/${threadId}/line-comments`),
   getSkills: (conversationId: string) =>
     request<{ skills: SkillView[] }>('GET', `/api/conversations/${conversationId}/skills`),
   getChanges: (threadId: string) =>

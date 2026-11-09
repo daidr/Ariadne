@@ -70,3 +70,17 @@ export function lineTotals(files: ChangedFile[]): { added: number; removed: numb
   }
   return { added, removed }
 }
+
+/** The file most changed, in lines; ties go to the first. Opened first, as most worth a look. */
+export function mostChanged(files: ChangedFile[]): ChangedFile | null {
+  let best: ChangedFile | null = null
+  let most = -1
+  for (const file of files) {
+    const lines = (file.added ?? 0) + (file.removed ?? 0)
+    if (lines > most) {
+      best = file
+      most = lines
+    }
+  }
+  return best
+}

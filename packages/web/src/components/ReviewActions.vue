@@ -6,6 +6,7 @@ import { t } from '../i18n'
 import { writeToThread } from '../shortcuts'
 import { reviewThread, state } from '../store'
 import { useOpenView } from '../opened-from'
+import { mergeOffered } from '../review/merge-offered'
 
 const openView = useOpenView()
 
@@ -18,11 +19,9 @@ const props = defineProps<{ threadId: string; compact?: boolean }>()
 
 // Changes on a branch Ariadne merges itself: looking through them ends in merging, so that
 // is the way out offered, rather than a "seen it" that reads like a yes to merge.
-const mergeable = computed(() => {
-  const thread = state.detail?.threads.find((item) => item.id === props.threadId)
-  const workspace = thread?.workspace
-  return !!workspace?.branch && !!workspace.base && !workspace.removed && !thread?.pullRequest
-})
+const mergeable = computed(() =>
+  mergeOffered(state.detail?.threads.find((item) => item.id === props.threadId)),
+)
 function done() {
   if (mergeable.value) openView({ kind: 'changes', threadId: props.threadId })
   else void reviewThread(props.threadId)

@@ -53,6 +53,7 @@ import type {
   TokenUsage,
   ToolCallRecord,
   TurnFile,
+  ChangeTotals,
   TurnOutcome,
 } from './events'
 import { checkArtifactContent, MAX_ARTIFACT_JSON } from './artifact-content'
@@ -116,6 +117,7 @@ import type {
   PlanView,
   ProjectView,
   ReviewRoundView,
+  SentLineComment,
   SearchHit,
   SearchResult,
   ThreadArtifact,
@@ -130,7 +132,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 47
+export const PROJECTION_VERSION = 49
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -501,6 +503,7 @@ interface ThreadRow {
   workspace_base: string | null
   workspace_removed: number
   merged: string | null
+  changes: string | null
   pull_request: string | null
   check_failures: number
   stopped_reason: string | null
@@ -677,6 +680,7 @@ function toThread(row: ThreadRow): ThreadView {
             removed: row.workspace_removed === 1,
           },
     merged,
+    changes: row.changes ? (JSON.parse(row.changes) as ChangeTotals) : null,
     pullRequest,
     stopped:
       row.stopped_reason === null
@@ -2168,6 +2172,25 @@ export class Ariadne {
     return round
   }
 
+  /** The line comments the user sent a thread, oldest first, with when each went. */
+  listLineComments(threadId: string): SentLineComment[] {
+    this.getThread(threadId)
+    const rows = this.db
+      .query<{ id: string; comments: string; created_at: number }, [string]>(
+        `SELECT id, comments, created_at FROM messages
+         WHERE conversation_id = ? AND author = 'user' AND comments IS NOT NULL ORDER BY id`,
+      )
+      .all(threadId)
+    return rows.flatMap((row) =>
+      (JSON.parse(row.comments) as LineComment[]).map((comment, index) => ({
+        ...comment,
+        id: `${row.id}:${index}`,
+        messageId: row.id,
+        sentAt: row.created_at,
+      })),
+    )
+  }
+
   /** The review rounds of a thread's changes, oldest first; a reviewer gives its author's. */
   listReviews(threadId: string): ReviewRoundView[] {
     const thread = this.getThread(threadId)
@@ -2635,10 +2658,11 @@ export class Ariadne {
   recordTurnChanges(
     conversationId: string,
     turnId: string,
-    input: { from: string; to: string; files: TurnFile[] },
+    input: { from: string; to: string; files: TurnFile[]; branch?: ChangeTotals },
   ): void {
     if (!input.files.length) return
     const projectId = this.runningTurn(conversationId, turnId)
+    const startedAt = this.getConversation(conversationId).turn?.startedAt
     const sum = (key: 'added' | 'removed') =>
       input.files.reduce((total, file) => total + (file[key] ?? 0), 0)
     this.store.append([
@@ -2652,6 +2676,8 @@ export class Ariadne {
           to: input.to,
           files: input.files.slice(0, MAX_TURN_FILES),
           total: { files: input.files.length, added: sum('added'), removed: sum('removed') },
+          ...(startedAt ? { startedAt } : {}),
+          ...(input.branch ? { branch: input.branch } : {}),
         },
       },
     ])

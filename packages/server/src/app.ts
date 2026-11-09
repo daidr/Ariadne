@@ -1109,6 +1109,11 @@ export function createHandler({
     json({ rounds: app.listReviews(threadId) }),
   )
 
+  // The line comments the user sent a thread about its changes.
+  add('GET', '/api/threads/:threadId/line-comments', (_request, { threadId = '' }) =>
+    json({ comments: app.listLineComments(threadId) }),
+  )
+
   // Skills offered after `/` in a conversation's input: what that conversation can read.
   add('GET', '/api/conversations/:conversationId/skills', async (_request, params) => {
     const conversation = app.getConversation(params.conversationId ?? '')

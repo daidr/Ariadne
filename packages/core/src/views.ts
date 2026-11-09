@@ -8,6 +8,7 @@ import type {
   LineComment,
   MessageMention,
   TurnFile,
+  ChangeTotals,
   ArtifactKind,
   ArtifactCommentAnchor,
   ArtifactFeedbackItem,
@@ -102,6 +103,11 @@ export interface ThreadView {
   } | null
   /** The user's last merge of its branch, with the time it was made. */
   merged: (BranchMerge & { at: number }) | null
+  /**
+   * What its workspace changes against the base, committed or not, as of its last turn
+   * that changed something; `null` before one did.
+   */
+  changes: ChangeTotals | null
   /** The pull request of the thread's branch, once it opened one. */
   pullRequest: ThreadPullRequest | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
@@ -134,6 +140,13 @@ export interface ThreadView {
    * was none to name), so it does not try it again; `null` when it did not.
    */
   autopilotHeld: string | null
+}
+
+/** A line comment the user sent a thread, from the message it went in. */
+export interface SentLineComment extends LineComment {
+  id: string
+  messageId: string
+  sentAt: number
 }
 
 /** One round of a pre-delivery review, with what the author did about each comment. */
@@ -325,6 +338,8 @@ export type NoticeView = {
       to: string
       files: TurnFile[]
       total: { files: number; added: number; removed: number }
+      /** When the turn started; missing on older notices. */
+      startedAt?: number
     }
 )
 

@@ -128,6 +128,8 @@ describe('a thread turn', () => {
       added: 2,
       removed: 1,
     })
+    // When the turn started, so the changes go under a reply of this turn only.
+    expect(notice?.kind === 'turn-changes' && notice.startedAt).toBeGreaterThan(0)
     // The command was shown while it ran, and gone once it ended; none of it is in the log.
     expect(updates[0]?.command).toMatchObject({ command: 'bun run build', cwd: '.' })
     expect(updates.at(-1)).toEqual({
@@ -248,5 +250,46 @@ describe('files offered after @', () => {
     const view = { list: async (path: string) => tree[path] ?? [] }
     expect(await walkFiles(view)).toEqual(['a.ts', 'src/b.ts', 'src/c.ts'])
     expect(await walkFiles(view, 2)).toEqual(['a.ts', 'src/b.ts'])
+  })
+})
+
+describe('what a thread changed so far', () => {
+  test('goes with a turn that changed something, against where the branch left the base', async () => {
+    const diffs: [string, string][] = []
+    let calls = 0
+    const branches = {
+      snapshot: async () => `tree${++calls}`,
+      changes: async () => ({ from: 'base1' }),
+      diff: async (from: string, to: string) => {
+        diffs.push([from, to])
+        return from === 'base1'
+          ? [
+              { path: 'a', previousPath: null, status: 'modified' as const, added: 3, removed: 1 },
+              { path: 'b', previousPath: null, status: 'added' as const, added: 5, removed: 0 },
+              {
+                path: 'c.png',
+                previousPath: null,
+                status: 'added' as const,
+                added: null,
+                removed: null,
+              },
+            ]
+          : [{ path: 'a', previousPath: null, status: 'modified' as const, added: 1, removed: 0 }]
+      },
+    }
+    const workspaces = { branches: async () => branches } as unknown as WorkspaceManager
+    const recorded: unknown[][] = []
+    const fakeApp = {
+      getThread: () => ({ workspace: { branch: 'ariadne/x', base: 'main' } }),
+      recordTurnChanges: (...args: unknown[]) => recorded.push(args),
+    } as never
+    const changes = turnChanges(workspaces, 'p', 't')
+    await changes.begin()
+    await changes.record(fakeApp, 'turn')
+    expect(diffs).toEqual([
+      ['tree1', 'tree2'],
+      ['base1', 'tree2'],
+    ])
+    expect(recorded[0]?.[2]).toMatchObject({ branch: { files: 3, added: 8, removed: 1 } })
   })
 })

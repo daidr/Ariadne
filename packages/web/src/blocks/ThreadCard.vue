@@ -2,10 +2,12 @@
 import { DouChatArtifact } from 'dou-ui'
 import { MessagesIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
+import ChangeTotals from '../components/ChangeTotals.vue'
 import ReviewActions from '../components/ReviewActions.vue'
 import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
+import { branchChanges } from '../review/merge-offered'
 import { questionOf, statusLine } from '../stage'
 import { activeThreadId, openThreadFrom, state } from '../store'
 import { dragThread } from '../side/dock'
@@ -50,6 +52,12 @@ const headline = computed(() => {
   >
     <template #icon><MessagesIcon /></template>
     <template #actions>
+      <ChangeTotals
+        v-if="branchChanges(thread)"
+        :totals="branchChanges(thread)!"
+        :thread-id="thread.id"
+        button
+      />
       <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
       <ReviewMark :thread="thread" />
       <StageIcon v-if="!running" :stage="thread.stage" />

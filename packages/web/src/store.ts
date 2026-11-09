@@ -1149,12 +1149,20 @@ function onLive(update: LiveUpdate) {
  * go once it is sent.
  */
 export async function sendLineComments(
+  projectId: string,
   threadId: string,
   comments: LineComment[],
   ids: readonly string[],
 ): Promise<boolean> {
   if (!comments.length) return false
-  const sent = await sendMessage(threadId, '', { comments })
+  // The thread's own project, which need not be the one open now.
+  const sent = await api
+    .postMessage(projectId, threadId, '', { comments })
+    .then(() => true)
+    .catch((error: unknown) => {
+      report(error)
+      return false
+    })
   if (sent) {
     // Only those sent: one written while they went stays a draft.
     const left = (state.lineComments[threadId] ?? []).filter(

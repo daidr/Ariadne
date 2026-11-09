@@ -1,4 +1,4 @@
-import type { ReviewComment, ReviewReply, ReviewRoundView } from '@ariadne/core'
+import type { LineComment, ReviewComment, ReviewReply, ReviewRoundView } from '@ariadne/core'
 import type { CodeDiffGutter, CodeDiffWidget } from '@dou-ui/code'
 import { ScanSearchIcon } from '@dou-ui/icons'
 import type { CommentAuthor, CommentThread } from 'dou-ui'
@@ -32,7 +32,7 @@ export function reviewNotes(rounds: readonly ReviewRoundView[]): ReviewNote[] {
  * as quoted, else the nearest line that does, else the line it was written on. A fixed
  * line usually reads differently, so the comment stays near where it was.
  */
-export function anchorLine(lines: readonly string[], comment: ReviewComment): number | null {
+export function anchorLine(lines: readonly string[], comment: LineComment): number | null {
   const quote = comment.quote.trim()
   const at = comment.line - 1
   if (quote && lines[at]?.trim() !== quote) {
@@ -45,6 +45,12 @@ export function anchorLine(lines: readonly string[], comment: ReviewComment): nu
   }
   if (!lines.length) return null
   return Math.min(comment.line, lines.length)
+}
+
+/** Whether a line of the file still reads as the comment quoted; one without a quote does. */
+export function quoteFound(lines: readonly string[], comment: LineComment): boolean {
+  const quote = comment.quote.trim()
+  return !quote || lines.some((line) => line.trim() === quote)
 }
 
 const iso = (at: number | null) => new Date(at ?? 0).toISOString()
@@ -93,11 +99,12 @@ export function useReviewComments(
   const placed = computed(() => {
     const file = path()
     const lines = (text() ?? '').split('\n')
-    const byLine = new Map<number, ReviewNote[]>()
+    const byLine = new Map<number, { note: ReviewNote; moved: boolean }[]>()
     for (const note of notes()) {
       if (note.comment.path !== file) continue
       const line = anchorLine(lines, note.comment)
-      if (line !== null) byLine.set(line, [...(byLine.get(line) ?? []), note])
+      const moved = !quoteFound(lines, note.comment)
+      if (line !== null) byLine.set(line, [...(byLine.get(line) ?? []), { note, moved }])
     }
     return byLine
   })
@@ -125,12 +132,16 @@ export function useReviewComments(
       label: t('review.commentOn', { line }),
       render: () =>
         h(ReviewCommentWidget, {
-          threads: list.map((note) => ({
+          threads: list.map(({ note, moved }) => ({
             thread: noteThread(note, authorOf()),
-            label: t('review.commentLabel', {
-              round: note.round.round,
-              kind: t(`review.kind.${note.comment.kind}`),
-            }),
+            label: [
+              t('review.commentLabel', {
+                round: note.round.round,
+                kind: t(`review.kind.${note.comment.kind}`),
+              }),
+              // The line reads differently now, usually because it was fixed.
+              ...(moved ? [t('changes.lineChanged')] : []),
+            ].join(' · '),
           })),
         }),
     })),

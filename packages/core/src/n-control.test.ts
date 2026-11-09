@@ -78,6 +78,32 @@ describe('line comments', () => {
     expect(app.listTranscript(thread.id).some((entry) => entry.kind === 'message')).toBe(true)
   })
 
+  test('stay listed for the thread, oldest first, each with its message', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    const send = (body: string) =>
+      app.postMessage(project.id, {
+        conversationId: thread.id,
+        author: 'user',
+        content: '',
+        comments: [
+          { path: 'a.ts', line: 1, quote: 'x', body },
+          { path: 'b.ts', line: 2, quote: 'y', body: `${body}!`, side: 'original' },
+        ],
+      })
+    const first = send('一')
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '没有批注' })
+    const second = send('二')
+    const listed = app.listLineComments(thread.id)
+    expect(listed.map((c) => [c.messageId, c.body, c.side])).toEqual([
+      [first.id, '一', undefined],
+      [first.id, '一!', 'original'],
+      [second.id, '二', undefined],
+      [second.id, '二!', 'original'],
+    ])
+    expect(new Set(listed.map((c) => c.id)).size).toBe(4)
+  })
+
   test('are refused when malformed or sent to the coordinator', () => {
     const project = app.createProject('P')
     const thread = app.createThread(project.id, { title: 't' })
@@ -121,6 +147,32 @@ describe('turn changes', () => {
       total: { files: 205, added: 410, removed: 204 },
     })
     expect(notices[0]!.kind === 'turn-changes' && notices[0]!.files).toHaveLength(200)
+  })
+
+  test('keep what the thread changed so far on the thread, from the newest turn that says', () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    const file = {
+      path: 'a',
+      previousPath: null,
+      status: 'modified' as const,
+      added: 1,
+      removed: 0,
+    }
+    expect(app.getThread(thread.id).changes).toBeNull()
+    const first = app.startTurn(thread.id, 'm')
+    app.recordTurnChanges(thread.id, first, {
+      from: 'a',
+      to: 'b',
+      files: [file],
+      branch: { files: 2, added: 9, removed: 3 },
+    })
+    app.finishTurn(thread.id, first, 'completed')
+    // A turn whose branch could not be read leaves what was known.
+    const second = app.startTurn(thread.id, 'm')
+    app.recordTurnChanges(thread.id, second, { from: 'b', to: 'c', files: [file] })
+    app.finishTurn(thread.id, second, 'completed')
+    expect(app.getThread(thread.id).changes).toEqual({ files: 2, added: 9, removed: 3 })
   })
 })
 

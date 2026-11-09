@@ -113,6 +113,13 @@ export type ReviewVerdict = 'pass' | 'changes'
 
 export type TurnFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
 
+/** Files changed, and lines added and removed over them. */
+export interface ChangeTotals {
+  files: number
+  added: number
+  removed: number
+}
+
 /** One file a turn changed in its thread's workspace. */
 export interface TurnFile {
   path: string
@@ -685,6 +692,14 @@ export interface EventMap {
     to: string
     files: TurnFile[]
     total: { files: number; added: number; removed: number }
+    /** When the turn started: its replies are those posted since. Missing on older events. */
+    startedAt?: number
+    /**
+     * The whole workspace as the turn left it, against where its branch left the base:
+     * what the thread has changed so far, committed or not. Missing where it could not
+     * be read.
+     */
+    branch?: ChangeTotals
   }
   'turn.finished': {
     conversationId: string
