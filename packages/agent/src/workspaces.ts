@@ -115,7 +115,10 @@ const heldNote = (held: string[]) =>
  * The install commands the lockfiles at the root of a workspace, or of the source as it
  * is, call for; none when it has none Ariadne knows, or cannot be listed.
  */
-async function lockfileInstalls(root: Pick<Workspace, 'list' | 'readBytes'>): Promise<string[]> {
+async function lockfileInstalls(
+  root: Pick<Workspace, 'list' | 'readBytes'>,
+  opened = true,
+): Promise<string[]> {
   const entries = await root.list('.').catch(() => [])
   const files = entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name)
   let manager: string | undefined
@@ -130,9 +133,9 @@ async function lockfileInstalls(root: Pick<Workspace, 'list' | 'readBytes'>): Pr
   }
   // `npm ci` starts by deleting node_modules: one that came with the workspace (a local
   // worktree gets the source's, copied on write) is kept as it is.
-  const seeded = entries.some(
-    (entry) => entry.kind === 'directory' && entry.name === 'node_modules',
-  )
+  // Only in a workspace that was opened: whether the source's comes along depends on where.
+  const seeded =
+    opened && entries.some((entry) => entry.kind === 'directory' && entry.name === 'node_modules')
   return installCommands(files, manager).filter((command) => !(seeded && command === 'npm ci'))
 }
 
@@ -229,7 +232,7 @@ export class WorkspaceManager {
     const key = this.sourceKey(projectId)
     const { workspace } = await this.connect(projectId, key)
     if (!workspace?.isolated || !workspace.view) return
-    const commands = await lockfileInstalls(await workspace.view())
+    const commands = await lockfileInstalls(await workspace.view(), false)
     // The source may have changed while it was read.
     if (this.sourceKey(projectId) !== key) return
     this.app.recordDetectedSetup(projectId, this.installs(projectId, commands).run.join('\n'))
