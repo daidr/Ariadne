@@ -190,7 +190,7 @@ const editor = useTemplateRef<{
   getNodeRect: (id: string) => { x: number; y: number; width: number; height: number } | null
 }>('editor')
 const viewport = ref({ x: 0, y: 0, zoom: 1 })
-const READABLE = props.compact ? 0.75 : 0.6
+const READABLE = props.compact ? 0.45 : 0.6
 const PAD = 24
 function focusIds(): string[] {
   const plan = props.plan
@@ -328,6 +328,7 @@ watch(selected, (id) => {
     :can-connect="canConnect"
     direction="vertical"
     :searchable="!compact"
+    :bordered="!compact"
     edge-type="bezier"
     :aria-label="t('plan.title')"
     class="plan-graph"

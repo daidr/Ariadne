@@ -52,7 +52,11 @@ const label = computed(() => {
               <StageIcon :stage="thread.stage" />
               <DouText size="sm" weight="medium" truncate>{{ thread.title }}</DouText>
             </div>
-            <ConversationPanel :thread-id="threadId" class="full-conversation" />
+            <ConversationPanel
+              :thread-id="threadId"
+              :merging="full.view.kind === 'changes' && full.view.threadId === threadId"
+              class="full-conversation"
+            />
           </div>
         </template>
       </DouSplitter>

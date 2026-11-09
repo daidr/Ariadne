@@ -192,9 +192,9 @@ async function save() {
   <DouDialog
     v-model:open="state.projectSettingsOpen"
     :title="t('projectSettings.title', { name: state.detail?.project.name ?? '' })"
-    :width="680"
+    :width="760"
   >
-    <DouTabs v-if="settings" v-model="tab" placement="start" :height="460">
+    <DouTabs v-if="settings" v-model="tab" placement="start" :height="560">
       <DouTabPanel value="source" :label="t('projectSettings.tab.source')">
         <SourceForm ref="source" />
       </DouTabPanel>
