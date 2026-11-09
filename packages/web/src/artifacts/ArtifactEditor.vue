@@ -56,11 +56,17 @@ const versionOptions = computed(() =>
 
 /** What the editor starts from: the version shown, or edits carried over from elsewhere. */
 const bodyContent = ref('')
+/**
+ * The version carried edits were made on, when someone saved a newer one meanwhile: saving
+ * them names it, so the server turns them down as a conflict instead of writing over it.
+ */
+const draftBase = ref<number | null>(null)
 
 function show(next: ArtifactView) {
   artifact.value = next
   bodyContent.value = next.content
   draft.value = null
+  draftBase.value = null
 }
 
 /** The body reports no draft once it is back where it started, which may be carried edits. */
@@ -75,7 +81,7 @@ watch(draft, (content) => {
   // Looking at an older version keeps them.
   if (viewingOld.value) return
   if (content === null) unsavedEdits.delete(props.id)
-  else unsavedEdits.set(props.id, { version: latest.value, content })
+  else unsavedEdits.set(props.id, { version: draftBase.value ?? latest.value, content })
 })
 
 async function load(version?: number) {
@@ -86,9 +92,10 @@ async function load(version?: number) {
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
     const carried = unsavedEdits.get(props.id)
-    if (version === undefined && carried?.version === latest.value) {
+    if (version === undefined && carried) {
       bodyContent.value = carried.content
       draft.value = carried.content
+      if (carried.version !== latest.value) draftBase.value = carried.version
     }
     conflict.value = null
   } catch (error) {
@@ -196,7 +203,8 @@ async function save(
   try {
     const detail = await api.saveArtifact(props.id, {
       content: input.content ?? draft.value ?? current.content,
-      baseVersion: latest.value,
+      // Content given here is the newest version's own (a rename, a restore), not the edits.
+      baseVersion: input.content === undefined ? (draftBase.value ?? latest.value) : latest.value,
       reason: input.reason ?? t('artifact.saveReason'),
       ...(input.title ? { title: input.title } : {}),
       ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
@@ -241,6 +249,7 @@ async function rename() {
   }
   // A rename carries no unsaved edits with it: those stay a draft until saved.
   const kept = draft.value
+  const keptBase = draftBase.value
   if (
     await save({
       content: artifact.value?.content,
@@ -249,7 +258,10 @@ async function rename() {
     })
   ) {
     renaming.value = false
+    // The editor goes on showing the edits, not the version just saved.
+    if (kept !== null) bodyContent.value = kept
     draft.value = kept
+    draftBase.value = keptBase
   }
 }
 

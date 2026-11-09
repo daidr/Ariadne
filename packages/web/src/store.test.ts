@@ -172,4 +172,14 @@ describe('artifacts and changes', () => {
     closeView({ kind: 'changes', threadId: 'th_1' })
     expect(state.full).toBeNull()
   })
+
+  test('a tab taken full screen goes back to the side when something else takes its place', async () => {
+    setSide(side.defaultLayout())
+    await openView({ kind: 'changes', threadId: 'th_1' })
+    fullScreenPane('changes:th_1')
+    await openView({ kind: 'artifact', id: 'art_1' }, { from: 'th_1' })
+    expect(state.full?.view).toEqual({ kind: 'artifact', id: 'art_1' })
+    expect(tabs()).toContain('changes:th_1')
+    closeFull()
+  })
 })

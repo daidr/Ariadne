@@ -743,12 +743,19 @@ export interface OpenViewOptions {
 export async function openView(view: OpenedView, options: OpenViewOptions = {}) {
   const from = options.from ?? null
   if (from || options.full) {
+    // One taken from the right side goes back there rather than being lost.
+    const before = state.full
+    if (before?.fromSide && !sameOpened(before.view, view)) await openInPane(before.view)
     setFull({ view, threadId: from, fromSide: false })
     return
   }
+  await openInPane(view)
+}
+
+function openInPane(view: OpenedView) {
   const key = paneKeyOf(view)
   if (view.kind === 'changes') state.paneParams[key] = { turn: view.turn, path: view.path }
-  await openPane(key)
+  return openPane(key)
 }
 
 /** Take a tab on the right side full screen; closing it puts it back. */

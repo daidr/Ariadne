@@ -13,12 +13,17 @@ const saved = ref<SandboxConfig | null>(null)
 const isolate = ref(true)
 const hide = ref('')
 const error = ref<string | null>(null)
+/** Loaded: before that, or when loading failed, saving would send the defaults over it. */
+const loaded = ref(false)
+/** What runs when nothing was ever set. */
+const DEFAULT: SandboxConfig = { mode: 'auto', hide: [] }
 
 onMounted(async () => {
   try {
     const result = await api.getSandbox()
     status.value = result.sandbox
     saved.value = result.configured
+    loaded.value = true
     if (result.configured) apply(result.configured)
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -37,9 +42,10 @@ const draft = computed<SandboxConfig>(() => ({
     .map((line) => line.trim())
     .filter(Boolean),
 }))
-const same = (a: SandboxConfig | null, b: SandboxConfig) =>
-  !!a && a.mode === b.mode && a.hide.join('\n') === b.hide.join('\n')
-const dirty = computed(() => !same(saved.value, draft.value))
+const same = (a: SandboxConfig, b: SandboxConfig) =>
+  a.mode === b.mode && a.hide.join('\n') === b.hide.join('\n')
+// Never set is the same as the defaults: nothing to save until the user changes them.
+const dirty = computed(() => loaded.value && !same(saved.value ?? DEFAULT, draft.value))
 // The setting is read when Ariadne starts: once it differs from what runs, say so.
 const savedNow = ref(false)
 const pending = computed(
