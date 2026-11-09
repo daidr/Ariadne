@@ -10,6 +10,10 @@ export interface ServerConfig {
   token: string
   /** Built web assets to serve, when present. */
   webDist: string | null
+  /** Open the page in the user's browser once the server runs. */
+  open: boolean
+  /** Nothing was here before: no page can be open on it yet. */
+  firstRun: boolean
 }
 
 /** Read the token from `<home>/token`, creating it on first run (owner-only permissions). */
@@ -28,6 +32,7 @@ export function loadToken(home: string): string {
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): ServerConfig {
   const home = env.ARIADNE_HOME ?? join(homedir(), '.ariadne')
+  const firstRun = !existsSync(join(home, 'token'))
   mkdirSync(home, { recursive: true, mode: 0o700 })
   // A path, not a URL pathname: those are percent-encoded and break on non-ASCII directories.
   const webDist = join(import.meta.dir, '../../web/dist')
@@ -39,5 +44,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: Number(env.ARIADNE_PORT ?? 7428),
     token: env.ARIADNE_TOKEN ?? loadToken(home),
     webDist: existsSync(webDist) ? webDist : null,
+    // `bun run start` asks for it; the server on its own (development, tests) does not.
+    open: env.ARIADNE_OPEN === '1',
+    firstRun,
   }
 }

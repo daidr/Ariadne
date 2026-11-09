@@ -79,6 +79,19 @@ export interface ToolContext {
   research?: Researcher | undefined
   /** The skills the conversation can read, as loaded last. */
   skills?: () => SkillSet
+  /** The user's instructions for every project, which the coordinator may add a line to. */
+  everywhere?: EverywhereMemory
+}
+
+/**
+ * The user's instructions for every project, as far as an agent may change them: one line
+ * at a time. They live in the user's settings, outside any project.
+ */
+export interface EverywhereMemory {
+  /** Add a line; `false` when it is there already. */
+  add(line: string): boolean
+  /** Take a line out, by its exact words; `false` when it is not there. */
+  remove(line: string): boolean
 }
 
 /** A model the user set up, as the coordinator picks among them for a thread. */

@@ -13,6 +13,7 @@ import {
   onHost,
   searchAsk,
   searchHttpError,
+  refusalText,
   type SearchResult,
   type ModelStreamPart,
   type ReasoningBlock,
@@ -351,6 +352,33 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
   },
   requestBody,
   search: { available: (settings) => onHost(settings.baseUrl, 'api.anthropic.com'), run: search },
+  async models(settings, options = {}) {
+    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/v1/models?limit=1000`, {
+      headers: {
+        ...options.headers,
+        'anthropic-version': API_VERSION,
+        'x-api-key': settings.apiKey,
+      },
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+    if (!response.ok) throw new Error(await refusalText(response))
+    const body = (await response.json()) as { data?: { id?: unknown }[] }
+    return (body.data ?? []).flatMap((model) => (typeof model.id === 'string' ? [model.id] : []))
+  },
+  find({ env }) {
+    const apiKey = env.ANTHROPIC_API_KEY?.trim()
+    if (!apiKey) return []
+    return [
+      {
+        id: 'ANTHROPIC_API_KEY',
+        from: { env: 'ANTHROPIC_API_KEY' },
+        settings: {
+          baseUrl: env.ANTHROPIC_BASE_URL?.trim() || 'https://api.anthropic.com',
+          apiKey,
+        },
+      },
+    ]
+  },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
     let response: Response
     try {

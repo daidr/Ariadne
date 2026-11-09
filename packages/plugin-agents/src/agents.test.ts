@@ -1,5 +1,5 @@
 import type { ChatMessage, ModelStreamPart, ToolSpec } from '@ariadne/plugin-sdk'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -444,4 +444,45 @@ test('command lines split like a shell does', () => {
     'e f',
   ])
   expect(splitCommand('  ')).toEqual([])
+})
+
+const looking = (home: string, programs: string[], env: Record<string, string> = {}) => ({
+  env,
+  home,
+  which: (program: string) => (programs.includes(program) ? `/bin/${program}` : null),
+})
+
+describe('found on this machine', () => {
+  test('Claude Code counts once it is installed and signed in', () => {
+    const made = provider(claudeCode as AgentKind<never>)
+    expect(made.find!(looking(dir, ['claude']))).toEqual([])
+    expect(made.find!(looking(dir, [], { CLAUDE_CODE_OAUTH_TOKEN: 't' }))).toEqual([])
+    const found = [{ id: 'claude-code', from: { program: 'claude' }, settings: {} }]
+    expect(made.find!(looking(dir, ['claude'], { CLAUDE_CODE_OAUTH_TOKEN: 't' }))).toEqual(found)
+    mkdirSync(join(dir, 'elsewhere'))
+    writeFileSync(join(dir, 'elsewhere', '.credentials.json'), '{}')
+    expect(
+      made.find!(looking(dir, ['claude'], { CLAUDE_CONFIG_DIR: join(dir, 'elsewhere') })),
+    ).toEqual(found)
+  })
+
+  test('Codex counts once it is installed and signed in', () => {
+    const made = provider(codex as AgentKind<never>)
+    expect(made.find!(looking(dir, ['codex']))).toEqual([])
+    mkdirSync(join(dir, '.codex'))
+    writeFileSync(join(dir, '.codex', 'auth.json'), '{}')
+    expect(made.find!(looking(dir, ['codex']))).toEqual([
+      { id: 'codex', from: { program: 'codex' }, settings: {} },
+    ])
+    expect(made.find!(looking(dir, []))).toEqual([])
+  })
+
+  test('an agent program is checked by whether its command is there', async () => {
+    const made = provider(claudeCode as AgentKind<never>)
+    expect(await made.check!({ command: `${process.execPath} --x` } as never)).toBeNull()
+    expect(await made.check!({ command: 'no-such-program-here --x' } as never)).toBe(
+      'command not found: no-such-program-here',
+    )
+    expect((await made.models!({} as never))[0]).toBe('default')
+  })
 })

@@ -1653,3 +1653,49 @@ describe('thread reports', () => {
     expect(app.getThread(thread.id).lastReport).toBeNull()
   })
 })
+
+describe('a project started from the first screen', () => {
+  test('takes its directory, its first message and a name in one go', () => {
+    const source = { kind: 'local-directory', settings: { path: '/srv/weekly' } }
+    const project = app.createProject('weekly', { source, message: '加上导出' })
+    expect(project).toMatchObject({ name: 'weekly', unnamed: false, source })
+    expect(app.listMessages(project.coordinatorId).map((m) => [m.author, m.content])).toEqual([
+      ['user', '加上导出'],
+    ])
+  })
+
+  test('with no name given, the first words stand in until someone names it', () => {
+    const long = app.createProject(null, { message: `  ${'很长的一句话'.repeat(10)}\n第二行` })
+    expect(long.unnamed).toBe(true)
+    expect(long.name).toBe(`${'很长的一句话'.repeat(10).slice(0, 24)}…`)
+    expect(app.createProject('  ', { message: '短句' })).toMatchObject({
+      name: '短句',
+      unnamed: true,
+    })
+    expect(app.listProjects().find((p) => p.id === long.id)?.unnamed).toBe(true)
+
+    expect(app.renameProject(long.id, '周报')).toMatchObject({ name: '周报', unnamed: false })
+    // Replayed from the events alone, it is the same.
+    app.rebuildProjections()
+    expect(app.getProject(long.id)).toMatchObject({ name: '周报', unnamed: false })
+  })
+
+  test('what is remembered for every project shows where it was said, and settles once', () => {
+    const project = app.createProject('P')
+    app.noteEverywhere(project.id, {
+      conversationId: project.coordinatorId,
+      action: 'saved',
+      text: '用中文',
+    })
+    const [notice] = app.listNotices(project.coordinatorId)
+    expect(notice).toMatchObject({ kind: 'memory-everywhere', action: 'saved', text: '用中文' })
+    expect(app.everywhereNotice(project.id, notice!.id)).toEqual({
+      action: 'saved',
+      text: '用中文',
+      undone: false,
+    })
+    app.settleNotice(project.id, notice!.id)
+    expect(app.everywhereNotice(project.id, notice!.id)?.undone).toBe(true)
+    expect(app.listNotices(project.coordinatorId)[0]).toMatchObject({ undone: true })
+  })
+})

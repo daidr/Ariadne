@@ -53,7 +53,8 @@ import {
   sameToken,
   toErrorResponse,
 } from './http'
-import { PriceCatalog } from './prices'
+import { checkModel, suggestModel, type ModelCheck } from './model-check'
+import { ModelCatalog, type ModelInfo } from './prices'
 import { ThreadSync } from './thread-sync'
 
 /** A directory listing gives up after this long. */
@@ -100,8 +101,10 @@ export interface HandlerOptions {
   data?: DataStore
   /** The user's own skills for every project. */
   skillsDir?: string
-  /** List prices of models, to fill in a model's price on request. */
-  prices?: PriceCatalog
+  /** What is publicly known of models, to fill in a model's settings. */
+  prices?: ModelCatalog
+  /** Asks a model set up whether it answers; swapped in tests. */
+  check?: ModelCheck
   /** Documents and whiteboards edited together; left out, they are saved whole. */
   shared?: SharedArtifacts
   /** The user's feedback in artifacts, sent to the agent in rounds. */
@@ -237,6 +240,19 @@ function bearer(request: Request, url: URL): string | null {
   return null
 }
 
+/** A service's models, those the catalog knows to work with tools first, newest first. */
+function inOrder(listed: string[], info: ReadonlyMap<string, ModelInfo>): string[] {
+  const known = (name: string) => {
+    const facts = info.get(name)
+    return !!facts && facts.tools !== false
+  }
+  const released = (name: string) => info.get(name)?.released ?? ''
+  return [
+    ...listed.filter(known).toSorted((a, b) => released(b).localeCompare(released(a))),
+    ...listed.filter((name) => !known(name)),
+  ]
+}
+
 /** Build the request handler. Kept separate from `Bun.serve` so tests can call it directly. */
 export function createHandler({
   app,
@@ -249,7 +265,8 @@ export function createHandler({
   mcp,
   data: dataStore,
   skillsDir,
-  prices = new PriceCatalog(),
+  prices = new ModelCatalog(),
+  check = checkModel,
   shared,
   feedback,
 }: HandlerOptions) {
@@ -259,9 +276,20 @@ export function createHandler({
 
   add('GET', '/api/projects', () => json({ projects: app.listProjects(), lastSeq: app.lastSeq() }))
 
+  // A new project. From the first screen it comes with where its files are and what the
+  // user said first, and takes its name from one of them.
   add('POST', '/api/projects', async (request) => {
     const body = await readJson(request)
-    return json({ project: app.createProject(requireString(body, 'name')) }, 201)
+    const name = typeof body.name === 'string' ? body.name : null
+    const message = typeof body.message === 'string' ? body.message : ''
+    if (body.source === undefined || body.source === null) {
+      return json({ project: app.createProject(name, { message }) }, 201)
+    }
+    // Connected before anything is created, so a mistyped path leaves no project behind.
+    const { source, secrets } = await readSource(body.source, null)
+    const project = app.createProject(name, { source, message })
+    settings?.saveSourceSecrets(project.id, secrets)
+    return json({ project }, 201)
   })
 
   // With `since` (a `sync.cursor` given before), only the threads changed after it.
@@ -274,6 +302,11 @@ export function createHandler({
       url.searchParams.get('since'),
     )
     return json({ ...detail, threads, sync, hasTracker: !!workspaces?.hasTracker(projectId) })
+  })
+
+  add('PUT', '/api/projects/:projectId', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    return json({ project: app.renameProject(projectId, requireString(body, 'name')) })
   })
 
   // Delete a project with everything Ariadne keeps for it. Its turns end first, then its
@@ -342,7 +375,15 @@ export function createHandler({
   })
   // The user takes back an agent's change to the memory.
   add('POST', '/api/projects/:projectId/notices/:noticeId/undo', (_request, params) => {
-    app.undoMemoryNotice(params.projectId ?? '', params.noticeId ?? '')
+    const { projectId = '', noticeId = '' } = params
+    // One for every project lives in the settings: the line goes, or comes back.
+    const everywhere = app.everywhereNotice(projectId, noticeId)
+    if (!everywhere) app.undoMemoryNotice(projectId, noticeId)
+    else if (settings && !everywhere.undone) {
+      if (everywhere.action === 'saved') settings.removeInstruction(everywhere.text)
+      else settings.addInstruction(everywhere.text)
+      app.settleNotice(projectId, noticeId)
+    }
     return new Response(null, { status: 204 })
   })
   add('DELETE', '/api/projects/:projectId/memory/:memoryId', (_request, params) => {
@@ -552,7 +593,21 @@ export function createHandler({
       settings?.saveSourceSecrets(projectId, {})
       return json({ project: app.setProjectSource(projectId, null) })
     }
-    const input = (body.source ?? {}) as Record<string, unknown>
+    const { source, secrets } = await readSource(body.source, { id: projectId, previous })
+    settings?.saveSourceSecrets(projectId, secrets)
+    return json({ project: app.setProjectSource(projectId, source) })
+  })
+
+  /**
+   * A source as the form sent it, checked and connected to once, so a typo or a missing
+   * permission shows up before it is saved. Its secrets come apart from the rest; those
+   * left empty are the ones stored for `project`, when it has the same kind of source.
+   */
+  async function readSource(
+    raw: unknown,
+    project: { id: string; previous: ProjectSource | null } | null,
+  ): Promise<{ source: ProjectSource; secrets: Record<string, string> }> {
+    const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
     const part = readSourcePart(input, 'source')
     const hosting =
       input.hosting === undefined || input.hosting === null
@@ -565,6 +620,8 @@ export function createHandler({
       if (!host.contexts.get(hosting.kind)?.hosting) throw new BadRequest('hosting.kind')
       if (!host.contexts.get(part.kind)?.remote) throw new BadRequest('hosting')
     }
+    const projectId = project?.id ?? ''
+    const previous = project?.previous ?? null
     const split = settings
       ? settings.splitSourceSettings(projectId, part.kind, part.settings, previous?.kind ?? null)
       : { settings: part.settings, secrets: {} }
@@ -588,11 +645,9 @@ export function createHandler({
         : {}),
     }
     const secrets = { ...split.secrets, ...hostingSplit?.secrets }
-    // Connected before it is saved, so a typo or a missing permission shows up here.
     if (host) await connectSource(host.contexts, source, secrets)
-    settings?.saveSourceSecrets(projectId, secrets)
-    return json({ project: app.setProjectSource(projectId, source) })
-  })
+    return { source, secrets }
+  }
 
   // A source the project only reads. Connected and listed before it is saved, like the
   // project's own; its secrets go to the user's config under the reference's id.
@@ -1102,17 +1157,63 @@ export function createHandler({
   add('PUT', '/api/settings/models', async (request) => {
     if (!settings)
       return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
-    settings.updateModels(await readJson(request))
-    return json(settings.publicModels())
+    const changed = settings.updateModels(await readJson(request))
+    // What was saved stays saved; a model that does not answer is told with it, so a wrong
+    // key or name shows up now and not in the first conversation.
+    const asked = await Promise.all(
+      changed.map(async (model) => {
+        const resolved = settings.resolveSaved(model)
+        const problem = resolved ? await check(resolved) : null
+        return problem ? [{ model: model.id, provider: model.provider, problem }] : []
+      }),
+    )
+    return json({ ...settings.publicModels(), problems: asked.flat() })
   })
 
-  // A model's list price from the public catalog: only a suggestion for the form.
-  add('GET', '/api/settings/model-price', async (_request, _params, url) => {
+  /** What the catalog knows of `models`; nothing when it cannot be read. */
+  const describe = (models: string[], hint: string): Promise<Map<string, ModelInfo>> =>
+    prices.describe(models, hint).catch(() => new Map<string, ModelInfo>())
+
+  // The models a provider in the form can use, each with what the catalog knows of it, so
+  // picking one fills its settings in. `models: null` for a provider that cannot list them.
+  add('POST', '/api/settings/model-list', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    const body = await readJson(request)
+    const draft = settings.draftProvider(body.provider)
+    if (!draft.provider.models) return json({ models: null })
+    let listed: string[]
+    try {
+      listed = await draft.provider.models(draft.settings as never, {
+        headers: draft.headers,
+        signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS),
+      })
+    } catch (error) {
+      return errorResponse(
+        {
+          key: 'error.modelCheck',
+          params: { detail: error instanceof Error ? error.message : String(error) },
+        },
+        502,
+      )
+    }
+    const info = await describe(listed, draft.hint)
+    return json({
+      models: inOrder(listed, info).map((id) => ({
+        id,
+        ...(info.has(id) ? { info: info.get(id) } : {}),
+      })),
+    })
+  })
+
+  // What the public catalog knows of one model, by the name typed: a suggestion for the form.
+  add('GET', '/api/settings/model-info', async (_request, _params, url) => {
     const model = (url.searchParams.get('model') ?? '').trim().slice(0, 200)
     if (!model) throw new BadRequest('model')
-    let match
+    let info
     try {
-      match = await prices.lookup(model, (url.searchParams.get('hint') ?? '').slice(0, 500))
+      const hint = (url.searchParams.get('hint') ?? '').slice(0, 500)
+      info = (await prices.describe([model], hint)).get(model)
     } catch (error) {
       return errorResponse(
         {
@@ -1122,8 +1223,51 @@ export function createHandler({
         502,
       )
     }
-    if (!match) return errorResponse({ key: 'error.priceUnknown', params: { model } }, 404)
-    return json(match)
+    if (!info) return errorResponse({ key: 'error.priceUnknown', params: { model } }, 404)
+    return json({ info })
+  })
+
+  // What is already on this machine to talk to a model with; secrets stay here.
+  add('GET', '/api/settings/found', () =>
+    json({
+      found: (settings?.foundSetups() ?? []).map(({ id, kind, title, from }) => ({
+        id,
+        kind,
+        title,
+        from,
+      })),
+    }),
+  )
+
+  // Use one of them: it is asked for its models, and the one to start with is set up.
+  add('POST', '/api/settings/found/use', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    const id = requireString(await readJson(request), 'id')
+    const setup = settings.foundSetups().find((found) => found.id === id)
+    if (!setup) throw new DomainError('error.notFound', { what: id })
+    const { provider, settings: talksWith, hint } = settings.foundProvider(setup)
+    let listed: string[]
+    try {
+      listed =
+        (await provider.models?.(talksWith as never, {
+          signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS),
+        })) ?? []
+    } catch (error) {
+      throw new DomainError('error.modelCheck', {
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+    const info = await describe(listed, hint)
+    const model = suggestModel(listed, info)
+    if (!model) throw new DomainError('error.modelCheck', { detail: 'no models' })
+    const saved = settings.useFound(setup, model, info.get(model))
+    const resolved = settings.resolveSaved(saved)
+    const problem = resolved ? await check(resolved) : null
+    return json({
+      ...settings.publicModels(),
+      problems: problem ? [{ model: saved.id, provider: saved.provider, problem }] : [],
+    })
   })
 
   // External tool servers: what is set up, secrets left out, and how each stands.

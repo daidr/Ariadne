@@ -1,53 +1,35 @@
 <script setup lang="ts">
-import {
-  DouBadge,
-  DouButton,
-  DouContextMenu,
-  DouEmpty,
-  DouInput,
-  DouMenu,
-  DouText,
-  useDialog,
-} from 'dou-ui'
+import { DouBadge, DouButton, DouContextMenu, DouEmpty, DouMenu, DouText, useDialog } from 'dou-ui'
 import {
   DownloadIcon,
   FolderIcon,
   ListTreeIcon,
+  PencilIcon,
   PlusIcon,
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import {
-  createProject,
   deleteProject,
   exportProject,
   openMain,
   openProject,
+  renameProject,
+  report,
   state,
   openProjectSettings,
 } from '../store'
 
-const name = ref('')
-// Opened from the button here or from the getting-started steps: the name is typed next.
-const nameInput = useTemplateRef<{ focus: () => void }>('nameInput')
-watch(
-  () => state.creatingProject,
-  async (creating) => {
-    if (!creating) return
-    await nextTick()
-    nameInput.value?.focus()
-  },
-  { immediate: true },
-)
 const dialog = useDialog()
 
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
 const target = ref<string>()
 const actions = [
   { key: 'settings', label: t('projectSettings.open'), icon: SettingsIcon },
+  { key: 'rename', label: t('project.rename'), icon: PencilIcon },
   { key: 'trace', label: t('trace.coordinator'), icon: ListTreeIcon },
   { key: 'export', label: t('project.export'), icon: DownloadIcon },
   { key: 'delete', label: t('project.delete'), icon: TrashIcon, tone: 'danger' as const },
@@ -69,9 +51,21 @@ async function openSettings(id: string) {
 
 function act(key: unknown, id: string) {
   if (key === 'settings') void openSettings(id)
+  else if (key === 'rename') void rename(id)
   else if (key === 'trace') void openTrace(id)
   else if (key === 'export') void exportProject(id)
   else if (key === 'delete') void confirmDelete(id)
+}
+
+async function rename(id: string) {
+  const project = state.projects.find((p) => p.id === id)
+  if (!project) return
+  const name = await dialog.prompt({
+    title: t('project.rename'),
+    defaultValue: project.name,
+    validate: (value) => !!value.trim(),
+  })
+  if (name?.trim() && name.trim() !== project.name) await renameProject(id, name).catch(report)
 }
 
 async function confirmDelete(id: string) {
@@ -95,13 +89,6 @@ async function confirmDelete(id: string) {
 const items = computed(() =>
   state.projects.map((project) => ({ key: project.id, label: project.name, icon: FolderIcon })),
 )
-
-async function submit() {
-  if (!name.value.trim()) return
-  await createProject(name.value)
-  name.value = ''
-  state.creatingProject = false
-}
 </script>
 
 <template>
@@ -112,17 +99,12 @@ async function submit() {
         variant="ghost"
         size="sm"
         :aria-label="t('nav.newProject')"
-        @click="state.creatingProject = !state.creatingProject"
+        :title="t('nav.newProject')"
+        @click="state.starting = true"
       >
         <PlusIcon />
       </DouButton>
     </div>
-    <form v-if="state.creatingProject" class="projects-new" @submit.prevent="submit">
-      <DouInput ref="nameInput" v-model="name" size="sm" :placeholder="t('project.create.name')" />
-      <DouButton size="sm" tone="primary" native-type="submit">
-        {{ t('project.create.submit') }}
-      </DouButton>
-    </form>
     <DouContextMenu
       v-if="items.length"
       v-model:target="target"
@@ -132,7 +114,7 @@ async function submit() {
     >
       <div>
         <DouMenu
-          :model-value="state.currentId ?? undefined"
+          :model-value="state.starting ? undefined : (state.currentId ?? undefined)"
           :items="items"
           @select="(key) => openProject(String(key))"
           @item-contextmenu="(item) => (target = String(item.key))"
@@ -149,7 +131,7 @@ async function submit() {
         </DouMenu>
       </div>
     </DouContextMenu>
-    <DouEmpty v-else-if="!state.creatingProject" size="sm" :description="t('nav.noProjects')" />
+    <DouEmpty v-else size="sm" :description="t('nav.noProjects')" />
   </div>
 </template>
 
@@ -165,11 +147,6 @@ async function submit() {
   padding-inline-start: 8px;
   align-items: center;
   justify-content: space-between;
-}
-
-.projects-new {
-  display: flex;
-  gap: 8px;
 }
 
 .projects-label {

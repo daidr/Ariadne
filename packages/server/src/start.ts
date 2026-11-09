@@ -54,5 +54,7 @@ if (import.meta.main) {
       process.exit(1)
     }
   }
+  // The page opens by itself; ARIADNE_OPEN=0 leaves it to the link printed.
+  process.env.ARIADNE_OPEN ??= '1'
   await import('./main')
 }

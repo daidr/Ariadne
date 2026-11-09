@@ -34,6 +34,7 @@ export {
   ToolInputError,
   type ModelChoice,
   type Tool,
+  type EverywhereMemory,
   type ToolContext,
 } from './tools'
 export { shellQuote } from './workspace-tools'

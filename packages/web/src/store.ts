@@ -165,8 +165,8 @@ interface State {
   threadDefault: string | null
   /** Usage shows the estimated cost too. */
   showCost: boolean
-  /** The new-project form is open. */
-  creatingProject: boolean
+  /** The user is starting a new project: the first screen shows in place of the open one. */
+  starting: boolean
   /** The message to scroll to; the conversation showing it clears it once there. */
   focus: MessageFocus | null
   /** The project search is open. */
@@ -212,7 +212,7 @@ export const state = reactive<State>({
   models: [],
   threadDefault: null,
   showCost: false,
-  creatingProject: false,
+  starting: false,
   focus: null,
   searchOpen: false,
   projectSettingsOpen: false,
@@ -528,6 +528,7 @@ export async function openMessage(conversationId: string, messageId: string) {
 }
 
 export async function openProject(id: string) {
+  state.starting = false
   state.currentId = id
   showSide(readSide(id))
   state.detail = null
@@ -692,14 +693,30 @@ export function splitPane(key: PaneKey, direction: SplitDirection) {
   setSide(side.split(state.side, key, direction))
 }
 
-export async function createProject(name: string) {
+/**
+ * Start a project from the first screen: what the user said, and where its files are when
+ * they chose. Whether it was created; a failure is reported and what was typed stays.
+ */
+export async function startProject(input: {
+  message: string
+  name?: string
+  source?: SourceInput
+}): Promise<boolean> {
   try {
-    const { project } = await api.createProject(name)
+    const { project } = await api.createProject(input)
     await refreshProjects()
     await openProject(project.id)
+    return true
   } catch (error) {
     report(error)
+    return false
   }
+}
+
+export async function renameProject(id: string, name: string) {
+  await api.renameProject(id, name)
+  await refreshProjects()
+  if (state.currentId === id) await refreshCurrent(['detail'])
 }
 
 /** Delete a project; the dialog asking first stays open on a failure, which is reported. */

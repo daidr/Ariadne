@@ -40,7 +40,7 @@ import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings 
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
-import { withImages } from './tool-helpers'
+import { withImages, type EverywhereMemory } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
@@ -87,6 +87,8 @@ export interface TurnOptions {
   researchModel?: ResolvedModel | null
   /** The user's own skills for every project (`<home>/skills`); none without it. */
   skillsDir?: string | null
+  /** The user's instructions for every project, for the coordinator to add a line to. */
+  everywhere?: EverywhereMemory
 }
 
 function threadContext(
@@ -156,6 +158,7 @@ function systemPrompt(
     const project = app.getProject(conversation.projectId)
     return coordinatorPrompt({
       projectName: project.name,
+      unnamed: project.unnamed,
       locale,
       memories: app.listMemories(conversation.projectId),
       models,
@@ -317,6 +320,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           },
           research: true,
           noteCheck: isThread && app.canNoteCheck(conversationId),
+          unnamed: project.unnamed,
         }))
   )
     .filter((tool) => !off.has(tool.spec.name))
@@ -397,6 +401,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     branches: async () => (workspaces ? workspaces.branches(conversation.projectId) : null),
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     skills: () => skills,
+    ...(options.everywhere ? { everywhere: options.everywhere } : {}),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.shared ? { shared: options.shared } : {}),
     models: options.models ?? [],

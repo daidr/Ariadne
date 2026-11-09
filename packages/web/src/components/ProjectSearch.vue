@@ -144,7 +144,7 @@ const actions = computed(() => {
   return new Map<string, Action>([
     [
       'newProject',
-      { label: t('nav.newProject'), icon: PlusIcon, run: () => (state.creatingProject = true) },
+      { label: t('nav.newProject'), icon: PlusIcon, run: () => (state.starting = true) },
     ],
     ...own,
     ['settings', { label: t('settings.open'), icon: SettingsIcon, run: () => openSettings() }],

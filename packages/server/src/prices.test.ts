@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { PriceCatalog } from './prices'
+import { ModelCatalog } from './prices'
 
 const catalog = {
   openrouter: {
@@ -20,7 +20,7 @@ function counting() {
     calls++
     return Response.json(catalog)
   }) as unknown as typeof fetch
-  return { catalog: new PriceCatalog(fetcher), calls: () => calls }
+  return { catalog: new ModelCatalog(fetcher), calls: () => calls }
 }
 
 test('finds a model’s list price, the maker’s first, the hinted service when given', async () => {
@@ -40,7 +40,7 @@ test('finds a model’s list price, the maker’s first, the hinted service when
 })
 
 test('a catalog that cannot be read says so', async () => {
-  const prices = new PriceCatalog(
+  const prices = new ModelCatalog(
     (async () => new Response('no', { status: 503 })) as unknown as typeof fetch,
   )
   await expect(prices.lookup('x')).rejects.toThrow('503')
