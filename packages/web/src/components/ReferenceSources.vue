@@ -187,7 +187,7 @@ async function add() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 24px;
+  margin-top: 12px;
 }
 
 .reference {
