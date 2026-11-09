@@ -947,6 +947,35 @@ export async function setSource(source: SourceInput | null): Promise<string | nu
   }
 }
 
+/** Add a source the open project only reads; the reason when it was refused. */
+export async function addReference(reference: {
+  kind: string
+  settings: Record<string, unknown>
+}): Promise<string | null> {
+  const project = state.detail?.project
+  if (!project) return null
+  try {
+    await api.addReference(project.id, reference)
+    await refreshCurrent()
+    return null
+  } catch (error) {
+    if (error instanceof ApiError) return tm(error.localized)
+    report(error)
+    return null
+  }
+}
+
+export async function removeReference(referenceId: string) {
+  const project = state.detail?.project
+  if (!project) return
+  try {
+    await api.removeReference(project.id, referenceId)
+    await refreshCurrent()
+  } catch (error) {
+    report(error)
+  }
+}
+
 export async function dismissProposal(proposalId: string) {
   const project = state.detail?.project
   if (!project) return
@@ -1274,6 +1303,11 @@ export async function undoNotice(noticeId: string) {
   const projectId = state.currentId
   if (!projectId) return
   await api.undoNotice(projectId, noticeId).catch(report)
+}
+
+/** Take the thread's last merge back. */
+export async function undoMerge(threadId: string) {
+  await api.undoMerge(threadId).catch(report)
 }
 
 /** Let a thread the coordinator stopped go on. */

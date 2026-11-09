@@ -250,6 +250,82 @@ describe('thread branches', () => {
     ).toEqual({ kind: 'conflict', files: ['中文.md'] })
   })
 
+  test('a merge is taken back: the base and its checkout return, changes there are kept', async () => {
+    const { dir, branches, thread } = await setup()
+    await thread.exec('echo a > a.txt && git add . && git commit -qm a')
+    const before = await git(dir, 'rev-parse', 'main')
+    const squash = () =>
+      branches.merge!({
+        threadId: 'thr_a',
+        branch: branchFor('thr_a'),
+        base: 'main',
+        method: 'squash',
+        message: 'a',
+      }) as Promise<{ sha: string }>
+    const { sha } = await squash()
+    // What the user was doing in the checkout stays as it is.
+    await writeFile(join(dir, 'README.md'), '# mine\n')
+    await branches.undoMerge!({ branch: branchFor('thr_a'), base: 'main', sha })
+    expect(await git(dir, 'rev-parse', 'main')).toBe(before)
+    expect(existsSync(join(dir, 'a.txt'))).toBe(false)
+    expect(await readFile(join(dir, 'README.md'), 'utf8')).toBe('# mine\n')
+    await git(dir, 'checkout', '-q', 'README.md')
+    // The branch still has the work, and merges again.
+    expect(
+      (await branches.changes({ threadId: 'thr_a', branch: branchFor('thr_a') }, 'main'))?.files,
+    ).toMatchObject([{ path: 'a.txt' }])
+    const again = await squash()
+
+    // Not checked out anywhere, only the branch moves.
+    await git(dir, 'switch', '-q', '--detach')
+    await branches.undoMerge!({ branch: branchFor('thr_a'), base: 'main', sha: again.sha })
+    expect(await git(dir, 'rev-parse', 'main')).toBe(before)
+  })
+
+  test('a merge is not taken back once commits came after it, it was pushed, or files are in the way', async () => {
+    const { dir, branches, thread } = await setup()
+    await thread.exec('echo a > a.txt && git add . && git commit -qm a')
+    const squash = async () =>
+      (
+        (await branches.merge!({
+          threadId: 'thr_a',
+          branch: branchFor('thr_a'),
+          base: 'main',
+          method: 'squash',
+          message: 'a',
+        })) as { sha: string }
+      ).sha
+    let sha = await squash()
+    const undo = () => branches.undoMerge!({ branch: branchFor('thr_a'), base: 'main', sha })
+
+    // The user changed the same file since: taking the merge back would lose that.
+    await writeFile(join(dir, 'a.txt'), 'mine\n')
+    await expect(undo()).rejects.toMatchObject({ reason: 'checkout' })
+    await git(dir, 'checkout', '-q', 'a.txt')
+
+    // A remote branch has it.
+    await git(dir, 'update-ref', 'refs/remotes/origin/main', sha)
+    await expect(undo()).rejects.toMatchObject({ reason: 'undo-pushed', detail: 'origin/main' })
+    await git(dir, 'update-ref', '-d', 'refs/remotes/origin/main')
+
+    // A thread opened after the merge has it on its branch, and would bring it back.
+    await git(dir, 'branch', 'ariadne/later', 'main')
+    await expect(undo()).rejects.toMatchObject({ reason: 'undo-branched', detail: 'ariadne/later' })
+    await git(dir, 'branch', '-D', 'ariadne/later')
+    // The merged branch itself may have it, from bringing the base in.
+    await thread.exec('git merge -q main && echo b > b.txt && git add . && git commit -qm b')
+    await undo()
+    expect(existsSync(join(dir, 'a.txt'))).toBe(false)
+
+    sha = await squash()
+    await writeFile(join(dir, 'user.txt'), 'user\n')
+    await git(dir, 'add', '.')
+    await git(dir, 'commit', '-qm', 'user')
+    await expect(undo()).rejects.toMatchObject({ reason: 'undo-moved' })
+    expect(await git(dir, 'log', '-1', '--format=%s')).toBe('user')
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('a\n')
+  })
+
   test('a commit made in the checkout meanwhile is reported as the base moving', async () => {
     const { dir, thread } = await setup()
     await thread.exec('echo a > a.txt && git add . && git commit -qm a')

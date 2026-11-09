@@ -41,7 +41,8 @@ export function useMentions(
     const self = conversationId()
     return [
       ...(state.detail?.threads ?? [])
-        .filter((thread) => thread.id !== self)
+        // Archived threads are out of the way here too; the thread list still has them.
+        .filter((thread) => thread.id !== self && !thread.archived)
         .map((thread) => ({
           option: {
             value: unique(thread.title, thread.id),

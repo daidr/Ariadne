@@ -13,6 +13,8 @@ const props = defineProps<{
   secretsSet: string[]
   /** Lists directories for `directory` settings; without it they are only typed. */
   browse?: ((key: string, typed: string) => Promise<DirectoryListing | null>) | undefined
+  /** Without the fields' descriptions, where they are written for another use of the kind. */
+  bare?: boolean
 }>()
 const emit = defineEmits<{ clearSecret: [key: string] }>()
 
@@ -29,7 +31,9 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
       :help="
         field.type === 'string' && field.secret && isSet(key)
           ? t('settings.secretSet')
-          : lt(field.description)
+          : bare
+            ? undefined
+            : lt(field.description)
       "
     >
       <DirectoryInput

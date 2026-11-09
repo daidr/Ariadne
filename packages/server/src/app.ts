@@ -1,6 +1,7 @@
 import {
   buildTrace,
   compactAt,
+  connectReference,
   connectSource,
   conversationSkills,
   DEFAULT_CONTEXT_TOKENS,
@@ -10,8 +11,11 @@ import {
   MAX_LINKS,
   mentionFiles,
   mergeThread,
+  referenceSecrets,
+  undoMerge,
   refreshDashboard,
   SharedArtifacts,
+  sourceSummary,
   syncThreadPullRequest,
   threadChanges,
   threadFile,
@@ -34,7 +38,7 @@ import {
   type Ariadne,
   type ProjectSource,
 } from '@ariadne/core'
-import { createTranslator } from '@ariadne/i18n'
+import { createTranslator, type LocalizedMessage } from '@ariadne/i18n'
 import type { Server } from 'bun'
 import { browseLocal, NothingToBrowse } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
@@ -56,6 +60,8 @@ import { ThreadSync } from './thread-sync'
 const BROWSE_TIMEOUT_MS = 15_000
 /** How long opening a project's settings waits for its source to say what it installs. */
 const DETECT_WAIT_MS = 1500
+/** How long the page waits to hear whether a reference source can be read. */
+const REFERENCE_STATUS_MS = 5000
 
 /** How long a listing may take: a remote machine may be slow to reach. */
 const browseOptions = () => ({ signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS) })
@@ -588,6 +594,89 @@ export function createHandler({
     return json({ project: app.setProjectSource(projectId, source) })
   })
 
+  // A source the project only reads. Connected and listed before it is saved, like the
+  // project's own; its secrets go to the user's config under the reference's id.
+  add('POST', '/api/projects/:projectId/references', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const part = readSourcePart((body.reference ?? {}) as Record<string, unknown>, 'source')
+    const project = app.getProject(projectId)
+    const split = settings
+      ? settings.splitSourceSettings(projectId, part.kind, part.settings, null)
+      : { settings: part.settings, secrets: {} }
+    const reference = { kind: part.kind, settings: split.settings }
+    let where = part.kind
+    if (host) {
+      const connected = await connectReference(host.contexts, reference, {
+        ...referenceSecrets(
+          host.contexts,
+          project.source,
+          reference,
+          settings?.sourceSecrets(projectId) ?? {},
+        ),
+        ...split.secrets,
+      })
+      try {
+        await (await connected()).list('.')
+      } catch (error) {
+        if (error instanceof DomainError) throw error
+        throw new DomainError('error.workspace', {
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+      where = sourceSummary(host.contexts.get(part.kind)?.summary, reference.settings) ?? where
+    }
+    const added = app.addProjectReference(projectId, reference, where)
+    if (Object.keys(split.secrets).length) {
+      settings?.saveReferenceSecrets(projectId, added.id, split.secrets)
+    }
+    return json({ project: app.getProject(projectId) })
+  })
+
+  add('DELETE', '/api/projects/:projectId/references/:referenceId', (_request, params) => {
+    const { projectId = '', referenceId = '' } = params
+    const project = app.removeProjectReference(projectId, referenceId)
+    settings?.saveReferenceSecrets(projectId, referenceId, {})
+    return json({ project })
+  })
+
+  // Which of the project's reference sources cannot be read right now, and why; each is
+  // given a few seconds, so a slow one does not hold the page.
+  add('GET', '/api/projects/:projectId/references/status', async (_request, { projectId = '' }) => {
+    const { references } = app.getProject(projectId)
+    const failures = await Promise.all(
+      references.map(async (reference) => {
+        if (!workspaces) return null
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const late = new Promise<null>((done) => {
+          timer = setTimeout(() => done(null), REFERENCE_STATUS_MS)
+        })
+        const read = workspaces
+          .referenceView(projectId, reference.name)
+          .then((view) => view.list('.'))
+          .then(
+            () => null,
+            (error: unknown): LocalizedMessage =>
+              error instanceof DomainError
+                ? { key: error.code, params: error.params }
+                : {
+                    key: 'error.workspace',
+                    params: { detail: error instanceof Error ? error.message : String(error) },
+                  },
+          )
+        try {
+          return await Promise.race([read, late])
+        } finally {
+          clearTimeout(timer)
+        }
+      }),
+    )
+    return json({
+      failed: references.flatMap((reference, at) =>
+        failures[at] ? [{ id: reference.id, error: failures[at] }] : [],
+      ),
+    })
+  })
+
   /** A source's kind and its settings as typed, with the required ones there. */
   function readSourcePart(
     input: Record<string, unknown>,
@@ -678,6 +767,12 @@ export function createHandler({
     if (method !== 'squash' && method !== 'merge') throw new BadRequest('method')
     const message = typeof body.message === 'string' ? body.message : ''
     return json(await mergeThread(app, workspaces, threadId, { method, message }))
+  })
+
+  // The user takes the thread's last merge back.
+  add('POST', '/api/threads/:threadId/merge/undo', async (_request, { threadId = '' }) => {
+    if (!workspaces) throw new DomainError('error.merge.unsupported')
+    return json({ thread: await undoMerge(app, workspaces, threadId) })
   })
 
   // Threads' worktrees across projects, with the space they take.

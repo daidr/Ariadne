@@ -89,10 +89,22 @@ export function questionOf(threadId: string, needsMe: NeedsMeItem[] | undefined)
 }
 
 /** How the thread list groups threads, in the order the groups are shown. */
-export const threadGroups = ['review', 'waiting', 'working', 'paused', 'idle', 'done'] as const
+export const threadGroups = [
+  'review',
+  'waiting',
+  'working',
+  'paused',
+  'idle',
+  'done',
+  'archived',
+] as const
 export type ThreadGroup = (typeof threadGroups)[number]
 
-export const groupOf: Record<ThreadStage, ThreadGroup> = {
+/** The group a thread is listed in: archived ones go last, whatever they ended as. */
+export const groupOfThread = (thread: ThreadView): ThreadGroup =>
+  thread.archived ? 'archived' : groupOf[thread.stage]
+
+export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived'>> = {
   review: 'review',
   answer: 'waiting',
   blocked: 'waiting',

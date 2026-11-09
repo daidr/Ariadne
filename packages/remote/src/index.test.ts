@@ -295,9 +295,29 @@ describe('remote directory', () => {
     await writeFile(join(dir, 'draft.md'), 'not committed\n')
     const { workspace } = await provider().connect({ host: 'box', path: dir })
     const view = await workspace!.view!()
-    expect(Object.keys(view).toSorted()).toEqual(['list', 'readBytes'])
+    expect(Object.keys(view).toSorted()).toEqual(['files', 'list', 'readBytes', 'search'])
     expect((await view.list('.')).map((e) => e.name)).toEqual(['draft.md', 'pkg', 'README.md'])
     expect(await textOf(view, 'pkg/index.ts')).toBe('export {}\n')
+    expect((await view.files!('.')).files.toSorted()).toEqual([
+      'README.md',
+      'draft.md',
+      'pkg/index.ts',
+    ])
+    expect((await view.search!('not commit', '.')).lines).toEqual(['draft.md:1:not committed'])
+    await expect(view.files!('.git')).rejects.toThrow(WorkspacePathError)
+    // Finding and searching stay inside as reading does, however the path is written.
+    await writeFile(join(base, 'outside.txt'), 'OUTSIDE\n')
+    await symlink(join(base, 'outside.txt'), join(dir, 'link.txt'))
+    for (const path of [
+      '..',
+      '../outside.txt',
+      join(base, 'outside.txt'),
+      '.git/config',
+      'link.txt',
+    ]) {
+      await expect(view.search!('.', path)).rejects.toThrow(WorkspacePathError)
+      await expect(view.files!(path)).rejects.toThrow(WorkspacePathError)
+    }
     await expect(view.readBytes('../x', 10)).rejects.toThrow(WorkspacePathError)
     await expect(view.readBytes('.git/config', 1000)).rejects.toThrow(WorkspacePathError)
     await expect(view.list('.git')).rejects.toThrow(WorkspacePathError)

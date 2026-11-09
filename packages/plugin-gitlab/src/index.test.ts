@@ -202,6 +202,16 @@ function check(result: { exitCode: number; stderr: string }) {
 }
 
 describe('gitlab settings', () => {
+  test('a token belongs to its instance, however the project is written', () => {
+    const goes = gitlabProvider({ dataDir: '/nowhere' }).secretsFor!
+    const corp = goes({ repository: 'me/app', instance: 'https://gitlab.corp.example' })
+    expect(goes({ repository: 'https://gitlab.corp.example/me/lib.git' })).toBe(corp)
+    expect(goes({ repository: 'me/lib', instance: 'https://gitlab.corp.example/' })).toBe(corp)
+    expect(goes({ repository: 'x/y', instance: 'https://evil.example' })).not.toBe(corp)
+    expect(goes({ repository: 'x/y' })).toBe('https://gitlab.com')
+    expect(() => goes({})).toThrow()
+  })
+
   test('reads the project from a path or a URL, with subgroups and self-managed instances', () => {
     expect(parseRepository('acme/app')).toEqual({
       instance: 'https://gitlab.com',

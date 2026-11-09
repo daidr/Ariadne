@@ -20,6 +20,7 @@ import type {
   PlanAuthor,
   PlanNodeKind,
   PlanOp,
+  ProjectReference,
   ProjectSource,
   Author,
   MessageKind,
@@ -46,6 +47,8 @@ export interface ProjectView {
   needsMe: number
   /** Where threads work; `null` until the user picks a directory. */
   source: ProjectSource | null
+  /** Sources its conversations read and never change, beside the one threads work in. */
+  references: ProjectReference[]
   /**
    * How many turns of this project may run at once, within the shared total; `null`
    * leaves it to the total. A turn answering the user may still take a reserved slot.
@@ -103,8 +106,14 @@ export interface ThreadView {
     base: string | null
     removed: boolean
   } | null
-  /** The user's last merge of its branch, with the time it was made. */
+  /** The user's last merge of its branch, with the time it was made; `null` once undone. */
   merged: (BranchMerge & { at: number }) | null
+  /**
+   * Finished and out of the way: its work was merged and the user has not written to it
+   * since, or it has been done with nothing happening for a week. Writing to it brings it
+   * back.
+   */
+  archived: boolean
   /**
    * What its workspace changes against the base, committed or not, as of its last turn
    * that changed something; `null` before one did.
@@ -290,7 +299,10 @@ export type NoticeView = {
       text: string
       url: string | null
     }
-  /** `auto`: the autopilot merged it; `pullRequest`: through that pull request. */
+  /**
+   * `auto`: the autopilot merged it; `pullRequest`: through that pull request; `undone`:
+   * the user took it back since.
+   */
   | {
       kind: 'merged'
       base: string
@@ -298,6 +310,7 @@ export type NoticeView = {
       sha: string
       auto?: boolean
       pullRequest?: number
+      undone?: boolean
     }
   /** The autopilot left changes that passed the review for the user to merge. */
   | { kind: 'autopilot-held'; reason: AutopilotHold; detail: string }
@@ -565,6 +578,7 @@ export type TranscriptNote =
       auto?: { method: MergeMethod; base: string; sha: string | null }
     }
   | ({ type: 'branch-merged'; threadId: string } & BranchMerge)
+  | { type: 'merge-undone'; threadId: string; branch: string; base: string; sha: string }
   | {
       type: 'merge-conflict'
       threadId: string

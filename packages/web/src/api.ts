@@ -324,6 +324,7 @@ export interface BackupInfo {
   name: string
   size: number
   createdAt: number
+  auto: boolean
 }
 
 export interface DataUsage {
@@ -577,6 +578,24 @@ export const api = {
     ),
   setSource: (projectId: string, source: SourceInput | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  addReference: (
+    projectId: string,
+    reference: { kind: string; settings: Record<string, unknown> },
+  ) =>
+    request<{ project: ProjectView }>('POST', `/api/projects/${projectId}/references`, {
+      reference,
+    }),
+  removeReference: (projectId: string, referenceId: string) =>
+    request<{ project: ProjectView }>(
+      'DELETE',
+      `/api/projects/${projectId}/references/${referenceId}`,
+    ),
+  /** The reference sources that cannot be read right now, with why. */
+  referenceStatus: (projectId: string) =>
+    request<{ failed: { id: string; error: LocalizedMessage }[] }>(
+      'GET',
+      `/api/projects/${projectId}/references/status`,
+    ),
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
   getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
@@ -649,6 +668,8 @@ export const api = {
       `/api/threads/${threadId}/merge`,
       input,
     ),
+  undoMerge: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/merge/undo`),
   listWorktrees: () => request<{ projects: ProjectWorktrees[] }>('GET', '/api/worktrees'),
   removeWorktree: (projectId: string, threadId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),

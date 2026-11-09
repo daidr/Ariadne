@@ -38,6 +38,13 @@ export interface ToolContext {
   repo(): Promise<RepoCapability>
   /** The project's source as it is, read-only: what the coordinator looks at. */
   source?: () => Promise<SourceView>
+  /** A source the project only reads, by its name; see `withReferences`. */
+  reference?: (name: string) => Promise<SourceView>
+  /** Whether a source to add as a reference can be read; where it is, in one line. */
+  checkReference?: (reference: {
+    kind: string
+    settings: Record<string, unknown>
+  }) => Promise<{ where: string }>
   /** The project's threads' branches, read without their worktrees. */
   branches?: () => Promise<BranchCapability | null>
   /** The project's issue tracker, when its source has one. */

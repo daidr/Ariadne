@@ -52,6 +52,23 @@ export interface CommandRule {
   action: CommandAction
 }
 
+/**
+ * The rules a fresh install starts with, the user's to change or remove like any other:
+ * commands whose effect leaves the machine and cannot be taken back, and that a thread's
+ * own work never needs. Pushing is Ariadne's or the user's, publishing a package takes its
+ * version for good, and merging or releasing with `gh` goes around the review.
+ */
+export const DEFAULT_COMMAND_RULES: readonly CommandRule[] = [
+  'git push*',
+  'npm publish*',
+  'pnpm publish*',
+  'yarn publish*',
+  'bun publish*',
+  'cargo publish*',
+  'gh pr merge*',
+  'gh release create*',
+].map((pattern) => ({ pattern, action: 'ask' }))
+
 function globTest(pattern: string, text: string): boolean {
   const source = pattern
     .trim()
@@ -71,6 +88,29 @@ interface SimpleCommand {
 const WRAPPERS = new Set(['command', 'exec', 'nohup', 'time', 'builtin', 'nice'])
 /** Shells whose `-c` (or PowerShell's `-Command`) takes a command line to read too. */
 const SHELL_PROGRAMS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'pwsh', 'powershell'])
+/**
+ * Programs whose arguments are text they print or look for, never a command they run. A
+ * phrase inside them (`rg "git push"`, `echo npm publish`) is no reason to ask.
+ */
+const TEXT_PROGRAMS = new Set([
+  'echo',
+  'printf',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'ack',
+  'findstr',
+  'select-string',
+  'sls',
+  'write-output',
+  'write-host',
+])
+/** git's subcommands that take a message or a pattern and run nothing of it. */
+const GIT_TEXT = new Set(['commit', 'tag', 'log', 'grep', 'notes', 'stash'])
+/** Programs that run text they are handed, also through a pipe (`echo … | sh`). */
+const TEXT_RUNNERS = new Set(['eval', 'source', '.', 'xargs', 'iex', 'invoke-expression'])
 /** git's options before its subcommand that take the next word as their value. */
 const GIT_VALUED = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'])
 
@@ -238,6 +278,15 @@ interface RulePart {
   forms: string[]
   loose: { text: string; offset: number }[]
   nested: string[]
+  /**
+   * The part's program only takes text (`TEXT_PROGRAMS`, `GIT_TEXT`): `ask` rules look at
+   * what it runs and not at what its words mention.
+   */
+  text?: boolean
+  /** Read out of the words of such a part: it runs nothing. */
+  quoted?: boolean
+  /** The part runs text it is handed: a shell, `eval`, `xargs`. */
+  runner?: boolean
 }
 
 function rulePart(command: SimpleCommand): RulePart {
@@ -273,6 +322,16 @@ function rulePart(command: SimpleCommand): RulePart {
     if (rest[0] === 'git') loose.push({ text: gitForm(rest), offset })
   }
   const name = program.toLowerCase()
+  const text =
+    TEXT_PROGRAMS.has(name) || (name === 'git' && GIT_TEXT.has(gitForm(words).split(' ')[1] ?? ''))
+  // Any word may be the program that runs text, behind a word that is not known to wrap
+  // one (`timeout 5 sh`, `busybox sh`): on the side of asking, as `loose` is.
+  // A later `.` is the directory, not the shell's `source`.
+  const runner = words.some((word, at) => {
+    const runs = programOf(word).toLowerCase()
+    if (at > 0 && runs === '.') return false
+    return SHELL_PROGRAMS.has(runs) || TEXT_RUNNERS.has(runs) || runs === 'cmd'
+  })
   if (SHELL_PROGRAMS.has(name)) {
     const at = words.findIndex((word, i) => i > 0 && /^-[a-z]*c[a-z]*$|^-com/i.test(word))
     if (at > 0 && words.length > at + 1) nested.push(words.slice(at + 1).join(' '))
@@ -286,7 +345,7 @@ function rulePart(command: SimpleCommand): RulePart {
     const at = words.findIndex((word) => /^\/[ck]$/i.test(word))
     if (at > 0 && words.length > at + 1) nested.push(words.slice(at + 1).join(' '))
   }
-  return { forms: found, loose, nested }
+  return { forms: found, loose, nested, ...(text ? { text } : {}), ...(runner ? { runner } : {}) }
 }
 
 /**
@@ -294,15 +353,19 @@ function rulePart(command: SimpleCommand): RulePart {
  * them. PowerShell takes a backquote for an escape (``g`i`t`` is `git`), so a line with
  * backquotes is read once more without them.
  */
-function ruleParts(command: string, depth = 0): RulePart[] {
+function ruleParts(command: string, depth = 0, quoted = false): RulePart[] {
   const lines =
     command.includes('`') && depth === 0 ? [command, command.replaceAll('`', '')] : [command]
   return lines.flatMap((line) =>
     simpleCommands(line).flatMap((simple) => {
-      const part = rulePart(simple)
+      const own = rulePart(simple)
+      // What a text-only part quotes is text all the way down.
+      const part = quoted ? { ...own, quoted } : own
       return [
         part,
-        ...(depth < 4 ? part.nested.flatMap((inner) => ruleParts(inner, depth + 1)) : []),
+        ...(depth < 4
+          ? part.nested.flatMap((inner) => ruleParts(inner, depth + 1, quoted || !!own.text))
+          : []),
       ]
     }),
   )
@@ -329,7 +392,9 @@ const spelled = (pattern: string) => pattern.trim().split('*')[0]!.length
  * `timeout 10 git push`. Otherwise an `ask` that matches any way of reading it asks. The
  * whole line counts as a part too. The command is denied when any part is, asked about
  * when any part is, and else allowed. No rule that matches allows it. This errs towards
- * asking: `echo git push` matches `git push*` too.
+ * asking, with one exception: text a command only prints or looks for (a commit message, a
+ * search pattern, `echo`) is not asked about, unless the line also has something that
+ * runs text (a shell, `eval`, `xargs`). `deny` rules make no such exception.
  */
 export function commandVerdict(
   command: string,
@@ -339,8 +404,10 @@ export function commandVerdict(
   const parts = [whole, ...ruleParts(command)]
   const matching = (action: CommandAction, texts: string[]) =>
     rules.find((r) => r.action === action && texts.some((text) => globTest(r.pattern, text)))
+  const runsText = parts.some((part) => part.runner)
   const verdicts = parts.map((part) => {
     const every = [...part.forms, ...part.loose.map((loose) => loose.text)]
+    const mentioned = (!!part.text || !!part.quoted) && !runsText
     const deny = matching('deny', every)
     if (deny) return { action: 'deny' as const, pattern: deny.pattern }
     // The allow that spells out most of the command, should several match.
@@ -350,12 +417,13 @@ export function commandVerdict(
     if (allow) {
       const reach = spelled(allow.pattern)
       const beyond = part.loose.filter((loose) => loose.offset >= reach).map((loose) => loose.text)
-      const ask = matching('ask', beyond)
+      const ask = mentioned ? undefined : matching('ask', beyond)
       return ask
         ? { action: 'ask' as const, pattern: ask.pattern }
         : { action: 'allow' as const, pattern: allow.pattern }
     }
-    const ask = matching('ask', every)
+    // A part read out of quoted text runs nothing itself; one that quotes runs its own form.
+    const ask = matching('ask', mentioned ? (part.quoted ? [] : part.forms) : every)
     return ask ? { action: 'ask' as const, pattern: ask.pattern } : null
   })
   for (const action of ['deny', 'ask', 'allow'] as const) {

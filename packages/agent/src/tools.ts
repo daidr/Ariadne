@@ -26,7 +26,14 @@ import {
 } from './tool-helpers'
 import { canSearch, fetchUrlTool, webSearchTool, type SearchRoutes } from './web-tools'
 import type { WebAccess } from './web'
-import { noteCheck, sourceTools, workspaceTools } from './workspace-tools'
+import {
+  noteCheck,
+  readWorkspaceTools,
+  sourceTools,
+  withReferences,
+  workspaceTools,
+} from './workspace-tools'
+import { addReferenceTool, type ReferenceKind } from './reference-tools'
 import { researchTool } from './research'
 import { waitTool } from './wait-tool'
 import { readSkill, reviewerTools } from './review-tools'
@@ -753,7 +760,8 @@ export const threadTools: Tool[] = [
 ]
 
 /** A thread that reviews another's changes: it reads, and gives its verdict. */
-export const reviewTools = (): Tool[] => reviewerTools(updateTodo)
+export const reviewTools = (references = false): Tool[] =>
+  references ? withReferences(reviewerTools(updateTodo)) : reviewerTools(updateTodo)
 
 /**
  * A thread's tools: the workspace tools only when its project has a directory to work in,
@@ -799,8 +807,15 @@ export function toolsFor(
     research?: boolean
     /** A thread that may note the project's check after edits (`Ariadne.canNoteCheck`). */
     noteCheck?: boolean
+    /** Whether the project has sources it only reads; the looking tools then take one. */
+    references?: boolean
+    /** The kinds of source the coordinator may add as a reference, when it may. */
+    referenceKinds?: ReferenceKind[]
   },
 ): Tool[] {
+  // The coordinator may add a reference in the middle of a turn, and reads it at once.
+  const canAdd = role === 'coordinator' && !!source.referenceKinds?.length
+  const looking = (tools: Tool[]) => (source.references || canAdd ? withReferences(tools) : tools)
   const searches = canSearch(source.search)
   const web = [
     fetchUrlTool(source.web, searches),
@@ -810,7 +825,9 @@ export function toolsFor(
     return [
       ...coordinatorTools(source.models),
       ...web,
-      ...(source.workspace ? sourceTools : []),
+      // With references alone there are still files to look at.
+      ...(source.workspace || source.references || canAdd ? looking(sourceTools) : []),
+      ...(source.referenceKinds?.length ? [addReferenceTool(source.referenceKinds)] : []),
       ...(source.tracker ? issueReadTools : []),
       ...(source.research ? [researchTool] : []),
     ]
@@ -818,7 +835,11 @@ export function toolsFor(
   return [
     ...threadTools,
     ...web,
-    ...(source.workspace ? workspaceTools : []),
+    ...(source.workspace
+      ? looking(workspaceTools)
+      : source.references
+        ? looking(readWorkspaceTools)
+        : []),
     ...(source.workspace && source.noteCheck ? [noteCheck] : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),

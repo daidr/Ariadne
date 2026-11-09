@@ -26,6 +26,11 @@ export interface Workspace {
    */
   base: string | null
   /**
+   * On the machine Ariadne runs on: what a command serves on `localhost` there is reached
+   * from the user's browser.
+   */
+  local?: boolean
+  /**
    * Paths are relative to the workspace root. Implementations refuse paths that leave it,
    * including through symbolic links, with a `WorkspacePathError`.
    */
@@ -79,6 +84,25 @@ export interface SourceView {
   /** Larger than `maxBytes` is refused with a `FileTooLargeError`, without reading it all. */
   readBytes(path: string, maxBytes: number): Promise<Uint8Array>
   list(path: string): Promise<{ name: string; kind: 'file' | 'directory' }[]>
+  /**
+   * Every file under `path`, relative to the root, without what git ignores: what finding
+   * files by name goes through. `partial` when the listing stopped short. A view without
+   * it is listed directory by directory, which is slow on another machine.
+   */
+  files?(
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ files: string[]; partial: boolean }>
+  /**
+   * Lines under `path` matching the regular expression `pattern`, as `file:line:text`;
+   * `error` when the pattern or the search failed. A view without it is searched by
+   * reading file after file.
+   */
+  search?(
+    pattern: string,
+    path: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ lines: string[]; error: string | null }>
 }
 
 /**
@@ -86,13 +110,17 @@ export interface SourceView {
  * whatever object stands behind it.
  */
 export function readOnlyView(
-  files: Pick<SourceView, 'readBytes' | 'list'>,
+  files: Pick<SourceView, 'readBytes' | 'list' | 'files' | 'search'>,
   ref?: string,
 ): SourceView {
   return {
     ...(ref ? { ref } : {}),
     readBytes: async (path, maxBytes) => files.readBytes(path, maxBytes),
     list: async (path) => files.list(path),
+    ...(files.files ? { files: async (path, options) => files.files!(path, options) } : {}),
+    ...(files.search
+      ? { search: async (pattern, path, options) => files.search!(pattern, path, options) }
+      : {}),
   }
 }
 
@@ -249,6 +277,13 @@ export interface BranchCapability {
     method: MergeMethod
     message: string
   }): Promise<MergeOutcome>
+  /**
+   * Take back a merge made with `merge`, which left `base` at `sha`: the base goes back to
+   * where it was before. Refused (`MergeRefused`) once commits came after it, it was pushed,
+   * or another branch than `branch` (the merged one) was started from it: moving the base
+   * back would lose them, or bring the merge back with them.
+   */
+  undoMerge?(input: { branch: string; base: string; sha: string }): Promise<void>
   /**
    * Remove the thread's worktree, keeping its branch. A worktree with changes not committed
    * stays (`false`), unless `discard` says to drop them, as when its project is deleted.
@@ -431,7 +466,7 @@ export class FileTooLargeError extends Error {
 }
 
 /**
- * Why a merge did not happen, for reasons the user can act on:
+ * Why a merge, or taking one back, did not happen, for reasons the user can act on:
  * - `checkout`: the base is checked out and the files there stand in the way (changes not
  *   committed to the same files).
  * - `base-moved`: the base got new commits while merging; trying again takes them in.
@@ -440,10 +475,22 @@ export class FileTooLargeError extends Error {
  * - `identity`: git has no `user.name` or `user.email` to write the commit with.
  * - `git-version`: git is too old to merge without a working tree (2.38 or later).
  * - `no-base`: the base branch is gone.
+ * - `undo-moved`: the base got commits after the merge to take back.
+ * - `undo-pushed`: a remote branch already has the merge to take back.
+ * - `undo-branched`: another local branch was started from the merge to take back.
  */
 export class MergeRefused extends Error {
   constructor(
-    readonly reason: 'checkout' | 'base-moved' | 'filters' | 'identity' | 'git-version' | 'no-base',
+    readonly reason:
+      | 'checkout'
+      | 'base-moved'
+      | 'filters'
+      | 'identity'
+      | 'git-version'
+      | 'no-base'
+      | 'undo-moved'
+      | 'undo-pushed'
+      | 'undo-branched',
     readonly detail: string,
   ) {
     super(`merge refused (${reason}): ${detail}`)

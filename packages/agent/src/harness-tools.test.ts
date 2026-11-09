@@ -5,10 +5,10 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { BackgroundCommands } from './background'
+import { BackgroundCommands, servedUrl } from './background'
 import { applyEdit } from './edit-match'
 import { globToRegExp } from './glob'
-import { commandParts, commandVerdict, DEFAULT_LIMITS } from './limits'
+import { commandParts, commandVerdict, DEFAULT_COMMAND_RULES, DEFAULT_LIMITS } from './limits'
 import { PluginHost } from './plugins'
 import { Scheduler } from './scheduler'
 import { buildTrace, traceRequest } from './trace'
@@ -174,6 +174,70 @@ describe('command rules', () => {
         { pattern: 'timeout*', action: 'allow' },
       ]).action,
     ).toBe('deny')
+  })
+
+  test('text a command only prints or looks for is not asked about, but still denied', () => {
+    const mentioned = [
+      'git commit -m "docs: explain the git push flow"',
+      'git log --grep "git push"',
+      'rg -n "git push" docs',
+      'cat notes.md | grep "git push"',
+      'echo git push',
+      'printf "%s\\n" "git push"',
+    ]
+    for (const command of mentioned) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'allow'])
+    }
+    // Something on the line runs text, or the phrase is run after all.
+    const ran = [
+      'echo "git push" | sh',
+      'echo "git push" | timeout 5 sh',
+      'echo "git push" | nice -n 5 bash',
+      'echo "git push" | busybox sh',
+      'echo git push | xargs -I{} bash -c {}',
+      'echo "$(git push)"',
+      'git commit -m x && git push',
+      'git rebase --exec "git push" main',
+    ]
+    for (const command of ran) {
+      expect([command, commandVerdict(command, rules).action]).toEqual([command, 'ask'])
+    }
+    expect(commandVerdict('echo "rm -rf /x"', rules).action).toBe('deny')
+  })
+
+  test('the default rules ask before pushing, publishing, merging and releasing', () => {
+    const asked = [
+      'git push',
+      'git -C . push origin +main',
+      'cd pkg && bun publish --access public',
+      'sudo npm publish',
+      'npx npm publish',
+      'pnpm publish --no-git-checks',
+      'yarn publish',
+      'cargo publish',
+      'gh pr merge 12 --squash',
+      'gh release create v1.0.0',
+    ]
+    for (const command of asked) {
+      expect([command, commandVerdict(command, DEFAULT_COMMAND_RULES).action]).toEqual([
+        command,
+        'ask',
+      ])
+    }
+    const free = [
+      'git stash push -m wip',
+      'git commit -m "ci: npm publish with provenance"',
+      'gh pr view 12',
+      'gh release list',
+      'bun test',
+      'rg "gh pr merge" .',
+    ]
+    for (const command of free) {
+      expect([command, commandVerdict(command, DEFAULT_COMMAND_RULES).action]).toEqual([
+        command,
+        'allow',
+      ])
+    }
   })
 
   test('an allow on one part does not lift an ask on another', () => {
@@ -361,6 +425,36 @@ describe('file tools', () => {
 })
 
 describe('background commands', () => {
+  test('the address a server prints is found once it is whole', () => {
+    expect(servedUrl('  \x1b[32m➜\x1b[39m  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n')).toBe(
+      'http://localhost:5173/',
+    )
+    expect(servedUrl('Listening on http://0.0.0.0:3000 (press Ctrl+C)\n')).toBe(
+      'http://localhost:3000',
+    )
+    expect(servedUrl('open http://127.0.0.1:8080/docs/.\n')).toBe('http://127.0.0.1:8080/docs/')
+    // The line that says it serves wins over an address merely named before it.
+    expect(
+      servedUrl('proxy /api -> http://localhost:8787\n  Local:   http://localhost:5173/\n'),
+    ).toBe('http://localhost:5173/')
+    // Still arriving: the port may not be all there yet.
+    expect(servedUrl('Local: http://localhost:51')).toBeNull()
+    expect(servedUrl('fetching https://example.com:443/x \n')).toBeNull()
+  })
+
+  test('a server started on this machine shows its address', async () => {
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws)
+    await tool('run_command').run(
+      { command: 'echo "Local: http://localhost:4321/"; sleep 30', background: true },
+      ctx,
+    )
+    expect(ctx.background!.list(ctx.conversationId)).toMatchObject([
+      { url: 'http://localhost:4321/' },
+    ])
+    await ctx.background!.stopThread(ctx.conversationId)
+  })
+
   test('run on, show their output, and stop', async () => {
     const ws = new LocalWorkspace('w', dir, null)
     const ctx = context(ws)
@@ -378,6 +472,31 @@ describe('background commands', () => {
     expect((await tool('read_command_output').run({ handle: 'cmd-9' }, ctx)).content).toContain(
       'cmd-1 (ended)',
     )
+  })
+
+  test('started again, the same command replaces the one still running', async () => {
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws)
+    const command = 'echo "Local: http://localhost:4321/"; sleep 30'
+    await tool('run_command').run({ command, background: true, keepForUser: true }, ctx)
+    await tool('run_command').run({ command: 'sleep 30', background: true }, ctx)
+    // The same words somewhere else are another command.
+    await mkdir(join(dir, 'docs'), { recursive: true })
+    await tool('run_command').run({ command, background: true, cwd: 'docs' }, ctx)
+    // Another spelling of the same directory is the same one.
+    const again = await tool('run_command').run({ command, background: true, cwd: './' }, ctx)
+    expect(again.content).toContain('cmd-4 runs in the background')
+    expect(again.content).toContain('[cmd-1 ran the same command and was ended first]')
+    expect(
+      ctx
+        .background!.list(ctx.conversationId)
+        .filter((c) => !c.result)
+        .map((c) => c.id),
+    ).toEqual(['cmd-2', 'cmd-3', 'cmd-4'])
+    // What the user asked to try is still theirs to try after the restart.
+    await ctx.background!.stopThread(ctx.conversationId, { keepAsked: true })
+    expect(ctx.background!.list(ctx.conversationId).map((c) => c.id)).toEqual(['cmd-4'])
+    await ctx.background!.stopThread(ctx.conversationId)
   })
 
   test('one that ends says how; another thread cannot read it', async () => {

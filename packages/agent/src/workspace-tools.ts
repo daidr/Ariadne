@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import {
   checkCommand,
   confirmBlock,
@@ -13,7 +14,14 @@ import { applyEdit } from './edit-match'
 import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
 import { changedSince, noteFile } from './file-state'
-import { findFiles, MAX_FOUND, MAX_MATCH_LINES, searchLines } from './workspace-search'
+import {
+  findFiles,
+  findViewFiles,
+  MAX_FOUND,
+  MAX_MATCH_LINES,
+  searchLines,
+  searchView,
+} from './workspace-search'
 import {
   optionalBool,
   optionalInt,
@@ -125,6 +133,8 @@ async function readText(
   files: Readable,
   ctx: ToolContext,
   tooLarge: string,
+  /** The file is the thread's own, to change: what it read is noted for its next edit. */
+  own = true,
 ): Promise<ToolResult> {
   const path = str(args, 'path')
   const image = await readImage(path, files, ctx)
@@ -145,7 +155,7 @@ async function readText(
     return { content: `${path} is a binary file, not text; it is not shown.`, isError: true }
   }
   const whole = new TextDecoder().decode(data)
-  if (ctx.role === 'thread' && !ctx.sub) noteFile(ctx.conversationId, path, whole)
+  if (own && ctx.role === 'thread' && !ctx.sub) noteFile(ctx.conversationId, path, whole)
   const lines = whole.split('\n')
   const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
   const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
@@ -437,31 +447,66 @@ const editFile = workspaceTool(
   },
 )
 
+const searchParameters = {
+  type: 'object',
+  properties: {
+    pattern: { type: 'string' },
+    path: { type: 'string', description: 'Directory or file to search, default ".".' },
+  },
+  required: ['pattern'],
+}
+
+/** What a search found, as the model reads it. */
+function matches(found: { lines: string[]; error: string | null }): ToolResult {
+  if (found.error) return { content: found.error, isError: true }
+  if (!found.lines.length) return { content: 'No matches.' }
+  const more = found.lines.length >= MAX_MATCH_LINES ? '\n[more matches; narrow the search]' : ''
+  return { content: found.lines.join('\n') + more }
+}
+
+const findParameters = {
+  type: 'object',
+  properties: {
+    pattern: { type: 'string' },
+    path: { type: 'string', description: 'Directory to look in, default ".".' },
+  },
+  required: ['pattern'],
+}
+
+/** The files a glob found, as the model reads them. */
+function foundFiles({
+  found,
+  total,
+  partial,
+}: {
+  found: string[]
+  total: number
+  partial: boolean
+}): ToolResult {
+  if (!found.length)
+    return { content: partial ? 'No files found in the part looked at.' : 'No files found.' }
+  const notes = [
+    ...(total > found.length ? [`${total - found.length} more; narrow the pattern`] : []),
+    ...(partial ? ['the directory is large and was only looked at in part'] : []),
+  ]
+  return { content: found.join('\n') + (notes.length ? `\n[${notes.join('; ')}]` : '') }
+}
+
 const search = workspaceTool(
   {
     name: 'search',
     description: `Search the workspace's files for a regular expression; prints matching lines as file:line:text, at most ${MAX_MATCH_LINES}. Files git ignores are left out.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string' },
-        path: { type: 'string', description: 'Directory or file to search, default ".".' },
-      },
-      required: ['pattern'],
-    },
+    parameters: searchParameters,
   },
-  async (args, workspace, ctx) => {
-    const found = await searchLines(
-      workspace,
-      str(args, 'pattern'),
-      optionalStr(args, 'path') || '.',
-      ctx.signal,
-    )
-    if (found.error) return { content: found.error, isError: true }
-    if (!found.lines.length) return { content: 'No matches.' }
-    const more = found.lines.length >= MAX_MATCH_LINES ? '\n[more matches; narrow the search]' : ''
-    return { content: found.lines.join('\n') + more }
-  },
+  async (args, workspace, ctx) =>
+    matches(
+      await searchLines(
+        workspace,
+        str(args, 'pattern'),
+        optionalStr(args, 'path') || '.',
+        ctx.signal,
+      ),
+    ),
   { readOnly: true },
 )
 
@@ -469,30 +514,17 @@ const findFilesTool = workspaceTool(
   {
     name: 'find_files',
     description: `Find files of the workspace by a glob pattern, e.g. "**/*.test.ts" or "src/**/index.{ts,vue}"; a pattern without "/" matches file names at any depth. Files git ignores are left out. Lists at most ${MAX_FOUND} paths, sorted.`,
-    parameters: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string' },
-        path: { type: 'string', description: 'Directory to look in, default ".".' },
-      },
-      required: ['pattern'],
-    },
+    parameters: findParameters,
   },
-  async (args, workspace, ctx) => {
-    const { found, total, partial } = await findFiles(
-      workspace,
-      str(args, 'pattern'),
-      optionalStr(args, 'path') || '.',
-      ctx.signal,
-    )
-    if (!found.length)
-      return { content: partial ? 'No files found in the part looked at.' : 'No files found.' }
-    const notes = [
-      ...(total > found.length ? [`${total - found.length} more; narrow the pattern`] : []),
-      ...(partial ? ['the directory is large and was only looked at in part'] : []),
-    ]
-    return { content: found.join('\n') + (notes.length ? `\n[${notes.join('; ')}]` : '') }
-  },
+  async (args, workspace, ctx) =>
+    foundFiles(
+      await findFiles(
+        workspace,
+        str(args, 'pattern'),
+        optionalStr(args, 'path') || '.',
+        ctx.signal,
+      ),
+    ),
   { readOnly: true },
 )
 
@@ -568,7 +600,7 @@ export const outputName = () =>
 export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
   return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when your work is reported finished or you are stopped.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when you report or are stopped. Only when the user said they want to try the result themselves, start it with "keepForUser": it then stays up after you report ready, until they are done looking. Otherwise show what changed with your report.`,
     parameters: {
       type: 'object',
       properties: {
@@ -579,6 +611,10 @@ export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'):
           description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}. Not for background commands.`,
         },
         background: { type: 'boolean', description: 'Run it in the background.' },
+        keepForUser: {
+          type: 'boolean',
+          description: 'With background, and only when the user asked to try it themselves.',
+        },
       },
       required: ['command'],
     },
@@ -667,6 +703,10 @@ function execOptions(ctx: ToolContext, cwd: string | undefined) {
   }
 }
 
+/** One spelling for a directory in the workspace, so `docs`, `./docs/` and `docs/.` compare equal. */
+const sameDir = (cwd: string | undefined) =>
+  posix.normalize(`${cwd || '.'}/`).replace(/\/+$/, '') || '.'
+
 /** A background command's state and what it printed since the last look, as the model reads it. */
 function outputText(read: CommandOutput, max: number, how: 'started' | 'read' | 'stopped'): string {
   const { command, text, missed } = read
@@ -703,8 +743,30 @@ const runCommand: Tool = {
         if (!ctx.background) {
           return { content: 'Commands cannot run in the background here.', isError: true }
         }
-        const started = ctx.background.start(ctx.conversationId, command, (options) =>
-          workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+        // Started again, e.g. a dev server after more changes: the one before makes way,
+        // so they do not pile up or fight over a port.
+        const replaced: string[] = []
+        const where = sameDir(cwd)
+        // What the user asked to try stays theirs to try after a restart.
+        let keep = optionalBool(args, 'keepForUser')
+        for (const old of ctx.background.list(ctx.conversationId)) {
+          if (old.result || old.command !== command || old.cwd !== where) continue
+          const ended = await ctx.background.stop(ctx.conversationId, old.id)
+          // Still going after the wait: a second copy would fight it over its port.
+          if (!ended?.result) {
+            return {
+              content: `${old.id} runs the same command and has not ended yet after being told to stop. Check it with read_command_output, then start this again.`,
+              isError: true,
+            }
+          }
+          replaced.push(old.id)
+          keep ||= old.keep
+        }
+        const started = ctx.background.start(
+          ctx.conversationId,
+          command,
+          (options) => workspace.exec(command, { ...execOptions(ctx, cwd), ...options }),
+          { local: workspace.local, keep, cwd: where },
         )
         const first = await ctx.background.read(
           ctx.conversationId,
@@ -712,8 +774,11 @@ const runCommand: Tool = {
           FIRST_OUTPUT_MS,
           ctx.signal,
         )
+        const note = replaced.length
+          ? `\n[${replaced.join(', ')} ran the same command and was ended first]`
+          : ''
         return {
-          content: first ? outputText(first, limits.commandOutput, 'started') : started.id,
+          content: (first ? outputText(first, limits.commandOutput, 'started') : started.id) + note,
           isError: !!first?.command.result && first.command.result.exitCode !== 0,
         }
       }
@@ -864,4 +929,91 @@ export const sourceTools: Tool[] = [
       ),
     { open: openSource, readOnly: true },
   ),
+  workspaceTool(
+    {
+      name: 'search',
+      description: `Search the files of the project's source (read-only) for a regular expression; prints matching lines as file:line:text, at most ${MAX_MATCH_LINES}.`,
+      parameters: searchParameters,
+    },
+    async (args, view, ctx) => fromRef(view, await searchIn(view, args, ctx)),
+    { open: openSource, readOnly: true },
+  ),
+  workspaceTool(
+    {
+      name: 'find_files',
+      description: `Find files of the project's source (read-only) by a glob pattern, e.g. "**/*.test.ts" or "src/**/index.{ts,vue}"; a pattern without "/" matches file names at any depth. Lists at most ${MAX_FOUND} paths, sorted.`,
+      parameters: findParameters,
+    },
+    async (args, view, ctx) => fromRef(view, await findIn(view, args, ctx)),
+    { open: openSource, readOnly: true },
+  ),
 ]
+
+async function searchIn(view: SourceView, args: Record<string, unknown>, ctx: ToolContext) {
+  return matches(
+    await searchView(view, str(args, 'pattern'), optionalStr(args, 'path') || '.', ctx.signal),
+  )
+}
+
+async function findIn(view: SourceView, args: Record<string, unknown>, ctx: ToolContext) {
+  return foundFiles(
+    await findViewFiles(view, str(args, 'pattern'), optionalStr(args, 'path') || '.', ctx.signal),
+  )
+}
+
+/** How each looking tool reads a reference source rather than the conversation's own files. */
+const REFERENCE_READS: Record<
+  string,
+  (args: Record<string, unknown>, view: SourceView, ctx: ToolContext) => Promise<ToolResult>
+> = {
+  list_dir: (args, view) => listEntries(args, view),
+  read_file: (args, view, ctx) =>
+    readText(args, view, ctx, 'Read the part you need with "offset" and "limit".', false),
+  search: (args, view, ctx) => searchIn(view, args, ctx),
+  find_files: (args, view, ctx) => findIn(view, args, ctx),
+}
+
+/** The looking tools a project with reference sources can point at one of them. */
+export const REFERENCE_TOOLS = Object.keys(REFERENCE_READS)
+
+/**
+ * The same tools for a project with reference sources: the looking ones take a `source`,
+ * the name of the reference to read in place of the conversation's own files. Nothing
+ * that writes or runs takes one, which is what keeps a reference read-only.
+ */
+export function withReferences(tools: Tool[]): Tool[] {
+  return tools.map((tool) => {
+    const read = REFERENCE_READS[tool.spec.name]
+    if (!read) return tool
+    const parameters = tool.spec.parameters as { properties?: Record<string, unknown> }
+    return {
+      ...tool,
+      spec: {
+        ...tool.spec,
+        parameters: {
+          ...parameters,
+          properties: {
+            ...parameters.properties,
+            source: {
+              type: 'string',
+              description:
+                'The name of a reference source to read instead (see "Reference sources"), with paths relative to its root. Leave out for your own files.',
+            },
+          },
+        },
+      },
+      async run(args, ctx) {
+        const name = optionalStr(args, 'source')
+        if (!name) return tool.run(args, ctx)
+        if (!ctx.reference) throw new DomainError('error.noReference', { name })
+        const view = await ctx.reference(name)
+        try {
+          return fromRef(view, await read(args, view, ctx))
+        } catch (error) {
+          if (error instanceof ToolInputError || error instanceof DomainError) throw error
+          return { content: error instanceof Error ? error.message : String(error), isError: true }
+        }
+      },
+    }
+  })
+}
