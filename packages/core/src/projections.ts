@@ -65,6 +65,8 @@ export const projectsProjection: Projection = {
       -- or resumed).
       autopilot_paused INTEGER NOT NULL DEFAULT 0,
       autopilot_since INTEGER,
+      -- Its name is only the start of the user's first words, until someone names it.
+      unnamed INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -76,12 +78,20 @@ export const projectsProjection: Projection = {
     switch (event.type) {
       case 'project.created':
         db.run(
-          'INSERT INTO projects (id, name, coordinator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-          [event.projectId, event.data.name, event.data.coordinatorId, event.at, event.at],
+          `INSERT INTO projects (id, name, coordinator_id, unnamed, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            event.projectId,
+            event.data.name,
+            event.data.coordinatorId,
+            event.data.unnamed ? 1 : 0,
+            event.at,
+            event.at,
+          ],
         )
         break
       case 'project.renamed':
-        db.run('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?', [
+        db.run('UPDATE projects SET name = ?, unnamed = 0, updated_at = ? WHERE id = ?', [
           event.data.name,
           event.at,
           event.projectId,
@@ -695,6 +705,12 @@ export const noticesProjection: Projection = {
         }
         break
       }
+      case 'memory.everywhere':
+        add(event.data.conversationId, 'memory-everywhere', {
+          action: event.data.action,
+          text: event.data.text,
+        })
+        break
       case 'conversation.compaction_failed':
         add(event.data.conversationId, 'compaction-failed', { detail: event.data.detail })
         break

@@ -13,6 +13,7 @@ import {
   onHost,
   searchAsk,
   searchHttpError,
+  refusalText,
   type SearchResult,
   type ModelStreamPart,
   withExtraBody,
@@ -143,11 +144,18 @@ function finishReason(reason: string | null): 'stop' | 'length' | 'tool-calls' {
 }
 
 /** The body of a chat completion request; the key goes in a header. */
-export function requestBody(_settings: OpenAICompatibleSettings, request: ModelRequest) {
-  return withExtraBody(baseBody(request), request.extraBody)
+export function requestBody(settings: OpenAICompatibleSettings, request: ModelRequest) {
+  return withExtraBody(baseBody(settings, request), request.extraBody)
 }
 
-function baseBody(request: ModelRequest) {
+/**
+ * The service the protocol comes from renamed the output limit, and its newer models only
+ * take the new name; the services that copied the protocol know the old one.
+ */
+const limitField = (settings: OpenAICompatibleSettings) =>
+  onHost(settings.baseUrl ?? '', 'api.openai.com') ? 'max_completion_tokens' : 'max_tokens'
+
+function baseBody(settings: OpenAICompatibleSettings, request: ModelRequest) {
   return {
     model: request.model,
     messages: toWire(request.messages),
@@ -164,7 +172,7 @@ function baseBody(request: ModelRequest) {
         }
       : {}),
     ...(request.effort ? { reasoning_effort: request.effort } : {}),
-    ...(request.maxTokens ? { max_tokens: request.maxTokens } : {}),
+    ...(request.maxTokens ? { [limitField(settings)]: request.maxTokens } : {}),
     stream: true,
     stream_options: { include_usage: true },
   }
@@ -260,6 +268,31 @@ const search: ModelSearch<OpenAICompatibleSettings>['run'] = async (settings, re
   return readSearch((await response.json()) as SearchResponse, request.limit)
 }
 
+/**
+ * Where a key in the environment belongs: the variable services' own tools read it from,
+ * the variable that moves the address when there is one, and the service's address.
+ */
+const KEYS = [
+  {
+    key: 'OPENAI_API_KEY',
+    name: 'OpenAI',
+    address: 'OPENAI_BASE_URL',
+    baseUrl: 'https://api.openai.com/v1',
+  },
+  {
+    key: 'DEEPSEEK_API_KEY',
+    name: 'DeepSeek',
+    address: null,
+    baseUrl: 'https://api.deepseek.com/v1',
+  },
+  {
+    key: 'OPENROUTER_API_KEY',
+    name: 'OpenRouter',
+    address: null,
+    baseUrl: 'https://openrouter.ai/api/v1',
+  },
+]
+
 export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> = {
   kind: 'openai-compatible',
   title: { 'zh-CN': 'OpenAI 兼容接口', en: 'OpenAI-compatible API' },
@@ -280,6 +313,39 @@ export const openAICompatibleProvider: ModelProvider<OpenAICompatibleSettings> =
   // Only the service the protocol comes from searches this way; the others each have
   // their own, or none.
   search: { available: (settings) => onHost(settings.baseUrl, 'api.openai.com'), run: search },
+  async models(settings, options = {}) {
+    const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/models`, {
+      headers: {
+        ...options.headers,
+        ...(settings.apiKey ? { authorization: `Bearer ${settings.apiKey}` } : {}),
+      },
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+    if (!response.ok) throw new Error(await refusalText(response))
+    const body = (await response.json()) as { data?: { id?: unknown; created?: unknown }[] }
+    return (body.data ?? [])
+      .flatMap((model) =>
+        typeof model.id === 'string'
+          ? [{ id: model.id, created: typeof model.created === 'number' ? model.created : 0 }]
+          : [],
+      )
+      .toSorted((a, b) => b.created - a.created)
+      .map((model) => model.id)
+  },
+  find({ env }) {
+    return KEYS.flatMap(({ key, name, address, baseUrl }) => {
+      const apiKey = env[key]?.trim()
+      if (!apiKey) return []
+      return [
+        {
+          id: key,
+          name,
+          from: { env: key },
+          settings: { baseUrl: (address && env[address]?.trim()) || baseUrl, apiKey },
+        },
+      ]
+    })
+  },
   async *stream(settings, request): AsyncGenerator<ModelStreamPart> {
     let response: Response
     try {

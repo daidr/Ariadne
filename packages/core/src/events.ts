@@ -366,7 +366,11 @@ export type AutopilotHold = 'moved' | 'no-pull-request' | 'refused' | 'failed'
 
 /** Every durable fact Ariadne records. Payloads are plain JSON. */
 export interface EventMap {
-  'project.created': { name: string; coordinatorId: string }
+  /**
+   * `unnamed` when the user started it by just saying what they want: `name` is then only
+   * the start of those words, until the coordinator or the user names the project.
+   */
+  'project.created': { name: string; coordinatorId: string; unnamed?: true }
   'project.renamed': { name: string }
   /**
    * The project was deleted with everything it held; this is all the log keeps of it.
@@ -598,6 +602,12 @@ export interface EventMap {
     undoes?: string
   }
   'memory.removed': { memoryId: string; author: string; undoes?: string }
+  /**
+   * An agent added a line to, or took one from, the user's instructions for every project.
+   * Those live in the user's settings, not in a project; this is the trace it leaves in
+   * the conversation, where the user can take the change back.
+   */
+  'memory.everywhere': { conversationId: string; action: 'saved' | 'removed'; text: string }
   /**
    * A conversation's older history was summarised: the model sees `summary` in place of
    * every transcript entry it had read up to `upTo` (a position in the model's order).

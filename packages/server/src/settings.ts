@@ -24,7 +24,15 @@ import {
   type TurnSettings,
 } from '@ariadne/agent'
 import type { Locale } from '@ariadne/i18n'
-import { EFFORTS, type Effort, type SearchProvider, type SettingsSchema } from '@ariadne/plugin-sdk'
+import {
+  EFFORTS,
+  type Effort,
+  type FoundFrom,
+  type LocalizedText,
+  type ModelProvider,
+  type SearchProvider,
+  type SettingsSchema,
+} from '@ariadne/plugin-sdk'
 import {
   chmodSync,
   existsSync,
@@ -36,6 +44,33 @@ import {
 import { homedir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { BadRequest } from './http'
+import type { ModelInfo } from './prices'
+
+/** A setup found on this machine that is not among the providers yet. */
+export interface FoundSetup {
+  /** The kind and the kind's own id for it, e.g. `anthropic:ANTHROPIC_API_KEY`. */
+  id: string
+  kind: string
+  /** The service's name when the setup has one, else its kind's title. */
+  title: LocalizedText
+  from: FoundFrom
+  /** As found, secrets included: it never leaves the server. */
+  settings: Record<string, unknown>
+}
+
+/** What a provider talks to its service with, to tell whether that changed. */
+const talksWith = (p: ModelProviderConfig) => JSON.stringify([p.kind, p.settings, p.request])
+
+/** What a model's settings take from the catalog. */
+function infoFields(info: ModelInfo | undefined): Partial<ModelConfig> {
+  if (!info) return {}
+  return {
+    ...(info.contextTokens ? { contextTokens: info.contextTokens } : {}),
+    ...(info.images === false ? { images: false as const } : {}),
+    ...(info.maxTokens ? { maxTokens: info.maxTokens } : {}),
+    ...(info.price ? { price: info.price } : {}),
+  }
+}
 
 export interface ModelProviderConfig {
   id: string
@@ -474,7 +509,7 @@ export class SettingsStore {
    * Replace the model settings. An empty secret keeps the value already stored; `null`
    * clears it.
    */
-  updateModels(input: unknown): void {
+  updateModels(input: unknown): ModelConfig[] {
     const body = (input ?? {}) as Partial<ModelsConfig>
     if (!Array.isArray(body.providers)) throw new BadRequest('providers')
     const providers = body.providers.map((raw, index): ModelProviderConfig => {
@@ -484,14 +519,8 @@ export class SettingsStore {
       if (typeof provider.kind !== 'string' || !this.host.models.has(provider.kind)) {
         throw new BadRequest(`providers[${index}].kind`)
       }
-      const settings = { ...provider.settings }
       const before = this.config.models.providers.find((p) => p.id === provider.id)
-      for (const key of secretKeys(this.host.models.get(provider.kind)?.settings)) {
-        if (settings[key] === null) delete settings[key]
-        else if (!settings[key] && before?.kind === provider.kind && before.settings[key]) {
-          settings[key] = before.settings[key]
-        }
-      }
+      const settings = this.withStoredSecrets(provider.kind, provider.settings, before)
       const extras = provider as Record<string, unknown>
       const headers = secretPairs(
         extras.headers,
@@ -580,6 +609,7 @@ export class SettingsStore {
       if (fallback !== null && !ids.has(fallback)) throw new BadRequest(`roles.${key}.fallback`)
       return { model, effort, fallback }
     }
+    const old = this.config.models
     this.config = {
       ...this.config,
       models: {
@@ -592,6 +622,216 @@ export class SettingsStore {
     // A model whose service turned search down gets asked again: the key or model may differ.
     forgetRefusedSearches()
     this.save()
+    // What is new is worth asking once: each model added, and a provider whose address
+    // or key changed through the first of the models it already had.
+    const sameProvider = (p: ModelProviderConfig) =>
+      old.providers.some((before) => before.id === p.id && talksWith(before) === talksWith(p))
+    const changed = new Set(providers.filter((p) => !sameProvider(p)).map((p) => p.id))
+    return models.filter((model) => {
+      if (!old.models.some((m) => m.provider === model.provider && m.model === model.model)) {
+        changed.delete(model.provider)
+        return true
+      }
+      return changed.delete(model.provider)
+    })
+  }
+
+  /**
+   * A provider's settings as typed in the form, with the secrets left empty taken from
+   * what is stored for it (`null` clears one).
+   */
+  private withStoredSecrets(
+    kind: string,
+    typed: Record<string, unknown> | undefined,
+    before: ModelProviderConfig | undefined,
+  ): Record<string, unknown> {
+    const settings = { ...typed }
+    for (const key of secretKeys(this.host.models.get(kind)?.settings)) {
+      if (settings[key] === null) delete settings[key]
+      else if (!settings[key] && before?.kind === kind && before.settings[key]) {
+        settings[key] = before.settings[key]
+      }
+    }
+    return settings
+  }
+
+  /**
+   * A provider as the form holds it, not saved yet, ready to be asked for its models: its
+   * settings with the stored secrets and the defaults, and the headers stored for it.
+   */
+  draftProvider(input: unknown): {
+    provider: ModelProvider<never>
+    settings: Record<string, unknown>
+    headers: Record<string, string>
+    /** Its kind and address, to tell services apart in the catalog. */
+    hint: string
+  } {
+    const draft = (input ?? {}) as Partial<ModelProviderConfig>
+    const provider = typeof draft.kind === 'string' ? this.host.models.get(draft.kind) : undefined
+    if (!provider) throw new BadRequest('provider.kind')
+    const before = this.config.models.providers.find((p) => p.id === draft.id)
+    const typed =
+      draft.settings && typeof draft.settings === 'object' && !Array.isArray(draft.settings)
+        ? draft.settings
+        : {}
+    const settings = this.effective(provider, this.withStoredSecrets(provider.kind, typed, before))
+    for (const key of provider.settings.required ?? []) {
+      if (settings[key] === undefined) throw new BadRequest(`provider.settings.${key}`)
+    }
+    return {
+      provider,
+      settings,
+      headers: before?.kind === provider.kind ? { ...before.request?.headers } : {},
+      hint: this.hintOf(provider.kind, settings),
+    }
+  }
+
+  /** Stored settings over the provider's defaults, empty values left out. */
+  private effective(
+    provider: ModelProvider<never>,
+    stored: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const settings: Record<string, unknown> = {}
+    for (const [key, field] of Object.entries(provider.settings.properties)) {
+      if (field.default !== undefined) settings[key] = field.default
+    }
+    for (const [key, value] of Object.entries(stored)) {
+      if (value !== '' && value !== null && value !== undefined) settings[key] = value
+    }
+    return settings
+  }
+
+  /** A provider's kind and what is not secret of its settings, in words the catalog may know. */
+  private hintOf(kind: string, settings: Record<string, unknown>): string {
+    const secrets = secretKeys(this.host.models.get(kind)?.settings)
+    return [
+      kind,
+      ...Object.entries(settings).flatMap(([key, value]) =>
+        typeof value === 'string' && !secrets.includes(key) ? [value] : [],
+      ),
+    ].join(' ')
+  }
+
+  /**
+   * Setups found on this machine (a key in the environment, a program signed in) that no
+   * provider uses yet, for the first run to offer.
+   */
+  foundSetups(
+    context = {
+      env: process.env,
+      home: homedir(),
+      which: (program: string) => Bun.which(program),
+    },
+  ): FoundSetup[] {
+    const used = this.config.models.providers
+    return [...this.host.models.values()].flatMap((provider) => {
+      let found
+      try {
+        found = provider.find?.(context) ?? []
+      } catch {
+        // A plugin that cannot look finds nothing.
+        return []
+      }
+      return found
+        .map((setup) => ({
+          id: `${provider.kind}:${setup.id}`,
+          kind: provider.kind,
+          title: setup.name ? { 'zh-CN': setup.name, en: setup.name } : provider.title,
+          from: setup.from,
+          settings: { ...(setup.settings as Record<string, unknown>) },
+        }))
+        .filter(
+          (setup) =>
+            !used.some(
+              (p) =>
+                p.kind === setup.kind &&
+                Object.entries(setup.settings).every(([key, value]) => p.settings[key] === value),
+            ),
+        )
+    })
+  }
+
+  /** A found setup as a provider would talk with it, to ask it for its models. */
+  foundProvider(setup: FoundSetup) {
+    const provider = this.host.models.get(setup.kind)
+    if (!provider) throw new BadRequest('id')
+    return {
+      provider,
+      settings: this.effective(provider, setup.settings),
+      hint: this.hintOf(setup.kind, setup.settings),
+    }
+  }
+
+  /**
+   * Take a found setup into use with `model`: it becomes a provider with that one model,
+   * which every role without a model of its own then uses. A key from the environment is
+   * copied into the settings, so Ariadne works the same however it is started next.
+   */
+  useFound(setup: FoundSetup, model: string, info?: ModelInfo): ModelConfig {
+    const stamp = Date.now().toString(36)
+    const title = setup.title[this.config.locale] ?? setup.kind
+    const taken = this.config.models.providers.some((p) => p.name === title)
+    const provider: ModelProviderConfig = {
+      id: `p_${stamp}`,
+      kind: setup.kind,
+      name: taken && 'env' in setup.from ? `${title} (${setup.from.env})` : title,
+      settings: setup.settings,
+    }
+    const entry: ModelConfig = {
+      id: `m_${stamp}`,
+      provider: provider.id,
+      model,
+      ...infoFields(info),
+    }
+    const { models } = this.config
+    this.config = {
+      ...this.config,
+      models: {
+        ...models,
+        providers: [...models.providers, provider],
+        models: [...models.models, entry],
+        roles: {
+          ...models.roles,
+          thread: { ...models.roles.thread, model: models.roles.thread.model ?? entry.id },
+        },
+      },
+    }
+    forgetRefusedSearches()
+    this.save()
+    return entry
+  }
+
+  /** A saved model as a turn would talk to it, to check that it answers. */
+  resolveSaved(model: ModelConfig): ResolvedModel | null {
+    return this.resolveConfig('thread', model)
+  }
+
+  /**
+   * Add a line to the user's instructions for every project, as an agent remembers a
+   * preference of theirs everywhere; `false` when it is there already.
+   */
+  addInstruction(line: string): boolean {
+    const text = line.replace(/[\s\u0085]+/g, ' ').trim()
+    if (!text) throw new BadRequest('text')
+    const { instructions } = this.config
+    if (instructions.split('\n').some((existing) => existing.trim() === text)) return false
+    const next = instructions ? `${instructions}\n${text}` : text
+    if (next.length > MAX_INSTRUCTIONS) throw new DomainError('error.instructionsFull')
+    this.config = { ...this.config, instructions: next }
+    this.save()
+    return true
+  }
+
+  /** Take a line out of the user's instructions for every project; `false` when it is not there. */
+  removeInstruction(line: string): boolean {
+    const text = line.replace(/[\s\u0085]+/g, ' ').trim()
+    const lines = this.config.instructions.split('\n')
+    const at = lines.findIndex((existing) => existing.replace(/\s+/g, ' ').trim() === text)
+    if (at === -1 || !text) return false
+    lines.splice(at, 1)
+    this.config = { ...this.config, instructions: lines.join('\n').trim() }
+    this.save()
+    return true
   }
 
   /**
@@ -1005,13 +1245,7 @@ export class SettingsStore {
     if (!config) return null
     const provider = this.host.models.get(config.kind)
     if (!provider) throw new DomainError('error.modelUnknown', { provider: config.kind })
-    const settings: Record<string, unknown> = {}
-    for (const [key, field] of Object.entries(provider.settings.properties)) {
-      if (field.default !== undefined) settings[key] = field.default
-    }
-    for (const [key, value] of Object.entries(config.settings)) {
-      if (value !== '' && value !== null && value !== undefined) settings[key] = value
-    }
+    const settings = this.effective(provider, config.settings)
     const request: ModelRequestOptions = {
       ...config.request,
       ...(chosen.maxTokens ? { maxTokens: chosen.maxTokens } : {}),

@@ -137,7 +137,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 55
+export const PROJECTION_VERSION = 56
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -349,6 +349,7 @@ interface ProjectRow {
   detected: string | null
   autopilot_paused: number
   autopilot_since: number | null
+  unnamed: number
   created_at: number
   updated_at: number
 }
@@ -759,12 +760,28 @@ interface NoticeRow {
   created_at: number
 }
 
+/** The longest name a project gets from the user's first words. */
+const MAX_FIRST_WORDS = 24
+
+/** The start of what the user said, as a project's name until someone gives it one. */
+function firstWords(message: string): string {
+  const line =
+    message
+      .split('\n')
+      .find((part) => part.trim())
+      ?.trim() ?? ''
+  const letters = [...line.replace(/\s+/g, ' ')]
+  return letters.length > MAX_FIRST_WORDS
+    ? `${letters.slice(0, MAX_FIRST_WORDS).join('').trimEnd()}…`
+    : letters.join('')
+}
+
 function toNotice(row: NoticeRow): NoticeView {
   const base = { id: row.id, conversationId: row.conversation_id, createdAt: row.created_at }
   const payload = JSON.parse(row.payload)
   return (
-    row.kind === 'memory'
-      ? { ...base, kind: 'memory', ...payload, undone: row.undone === 1 }
+    row.kind === 'memory' || row.kind === 'memory-everywhere'
+      ? { ...base, kind: row.kind, ...payload, undone: row.undone === 1 }
       : row.kind === 'merged' && row.undone === 1
         ? { ...base, kind: 'merged', ...payload, undone: true }
         : { ...base, kind: row.kind, ...payload }
@@ -1475,13 +1492,37 @@ export class Ariadne {
 
   // ---- commands ----
 
-  createProject(name: string): ProjectView {
-    const trimmed = name.trim()
+  /**
+   * Create a project. With `start`, the user began by saying what they want: the project
+   * gets its source and their first message with it, all or nothing. Without a `name` it
+   * is called after the start of those words until someone names it.
+   */
+  createProject(
+    name: string | null,
+    start: { source?: ProjectSource | null; message?: string } = {},
+  ): ProjectView {
+    const message = start.message?.trim() ?? ''
+    const trimmed = name?.trim() || firstWords(message)
     if (!trimmed) throw new DomainError('error.invalidBody', { reason: 'name' })
     const projectId = newId('prj')
-    this.store.append([
-      { type: 'project.created', projectId, data: { name: trimmed, coordinatorId: newId('crd') } },
-    ])
+    const coordinatorId = newId('crd')
+    this.store.transaction(() => {
+      this.store.append([
+        {
+          type: 'project.created',
+          projectId,
+          data: { name: trimmed, coordinatorId, ...(name?.trim() ? {} : { unnamed: true }) },
+        },
+      ])
+      if (start.source) this.setProjectSource(projectId, start.source)
+      if (message) {
+        this.postMessage(projectId, {
+          conversationId: coordinatorId,
+          author: 'user',
+          content: message,
+        })
+      }
+    })
     return this.getProject(projectId)
   }
 
@@ -3011,6 +3052,42 @@ export class Ariadne {
   }
 
   /**
+   * An agent changed the user's instructions for every project (they live in the user's
+   * settings): the conversation shows it, and the user can take it back there.
+   */
+  noteEverywhere(
+    projectId: string,
+    change: { conversationId: string; action: 'saved' | 'removed'; text: string },
+  ): void {
+    this.assertConversationIn(projectId, change.conversationId)
+    this.store.append([{ type: 'memory.everywhere', projectId, data: change }])
+  }
+
+  /**
+   * The change to the user's instructions a notice stands for, to take it back: `null`
+   * when the notice is not one of those. Settled with `settleNotice`.
+   */
+  everywhereNotice(
+    projectId: string,
+    noticeId: string,
+  ): { action: 'saved' | 'removed'; text: string; undone: boolean } | null {
+    const row = this.db
+      .query<{ kind: string; payload: string; undone: number }, [string, string]>(
+        'SELECT kind, payload, undone FROM notices WHERE id = ? AND project_id = ?',
+      )
+      .get(noticeId, projectId)
+    if (!row) throw new DomainError('error.notFound', { what: noticeId })
+    if (row.kind !== 'memory-everywhere') return null
+    const change = JSON.parse(row.payload) as { action: 'saved' | 'removed'; text: string }
+    return { ...change, undone: row.undone === 1 }
+  }
+
+  /** Mark a notice as undone, once what it stands for was taken back. */
+  settleNotice(projectId: string, noticeId: string): void {
+    this.markUndone(projectId, noticeId)
+  }
+
+  /**
    * What happened in a conversation besides its messages, oldest first; with `range`, only
    * from `from` (inclusive) to `to` (exclusive), in ms.
    */
@@ -4450,6 +4527,7 @@ export class Ariadne {
     return {
       id: row.id,
       name: row.name,
+      unnamed: row.unnamed === 1,
       coordinatorId: row.coordinator_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

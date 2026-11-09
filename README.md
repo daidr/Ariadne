@@ -19,9 +19,11 @@ bun run check    # 格式、lint、类型检查和测试
 
 测试换掉了外部服务和操作系统的部分，发布前在真实环境里按 [真实环境检查清单](./docs/real-env-checklist.md) 过一遍。模型接口的回放样本用 `bun run record:provider` 录制，见清单里的 DeepSeek 一节。
 
-本地服务第一次启动时会在 `~/.ariadne/token` 生成访问令牌，并在终端打印带令牌的链接，`bun run start` 之后直接打开它。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。
+`bun run start` 之后会自动在浏览器里打开页面（已经有页面开着时不再开新的；没有图形界面的机器上不开，终端里照常打印带令牌的链接）。本地服务第一次启动时在 `~/.ariadne/token` 生成访问令牌。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。
 
-打开页面后，在右上角的“设置”里添加一个模型提供方（OpenAI 兼容接口、Anthropic 接口，或本机已登录的 Claude Code、Codex 和 ACP agent），填好地址和 API Key（外部 agent 只要命令），再添加一个模型，就可以和协调器对话了。设置保存在 `~/.ariadne/config.json`。
+第一次打开时先接上一个模型：本机已经登录的 Claude Code、Codex，或环境变量里的 Key（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`OPENROUTER_API_KEY`）会被列出来，点“用它”即可；也可以手动添加（OpenAI 兼容接口、Anthropic 接口，或 ACP agent），填好地址和 API Key 后模型列表会自动拉取，上下文、输出上限和价格按公开的模型目录填好，保存时会验证能不能连上。设置保存在 `~/.ariadne/config.json`。
+
+之后首屏就是一个输入框：写下想做的事，可以顺手选一个目录，发出去就建好了项目。项目名取目录名；没选目录时由协调器按第一句话起一个，右键项目可以随时重命名。
 
 要让讨论串读写代码、运行命令，在顶栏的“项目设置”里给项目来源选一个本机目录、GitHub 仓库、GitLab 仓库、SSH 远程目录或远程 daemon。
 
@@ -37,15 +39,16 @@ bun run check    # 格式、lint、类型检查和测试
 
 协调器和讨论串写的长内容放在“产物”里：文档、画板和仪表盘快照。右侧“产物”页的“全部产物”打开项目的产物总览，可以筛选、搜索，也可以自己新建；每种产物都能直接编辑，每次保存是一个新版本。
 
-| 环境变量                 | 作用                                        | 默认值                   |
-| ------------------------ | ------------------------------------------- | ------------------------ |
-| `ARIADNE_HOME`           | 数据库与令牌所在的目录                      | `~/.ariadne`             |
-| `ARIADNE_PORT`           | 本地服务的端口                              | `7428`                   |
-| `ARIADNE_TOKEN`          | 指定访问令牌，不读文件                      | —                        |
-| `ARIADNE_GITHUB_API_URL` | GitHub REST API 的地址（GitHub Enterprise） | `https://api.github.com` |
-| `ARIADNE_GITHUB_GIT_URL` | 克隆仓库用的地址前缀                        | `https://github.com`     |
-| `ARIADNE_REPO_POLL_MS`   | 检查 PR 状态的间隔（毫秒）                  | `60000`                  |
-| `ARIADNE_DAEMON_HOME`    | daemon 的证书和令牌哈希所在的目录（远端）   | `~/.ariadne-daemon`      |
+| 环境变量                 | 作用                                         | 默认值                   |
+| ------------------------ | -------------------------------------------- | ------------------------ |
+| `ARIADNE_HOME`           | 数据库与令牌所在的目录                       | `~/.ariadne`             |
+| `ARIADNE_PORT`           | 本地服务的端口                               | `7428`                   |
+| `ARIADNE_TOKEN`          | 指定访问令牌，不读文件                       | —                        |
+| `ARIADNE_OPEN`           | 设为 `0` 时 `bun run start` 不自动打开浏览器 | `1`                      |
+| `ARIADNE_GITHUB_API_URL` | GitHub REST API 的地址（GitHub Enterprise）  | `https://api.github.com` |
+| `ARIADNE_GITHUB_GIT_URL` | 克隆仓库用的地址前缀                         | `https://github.com`     |
+| `ARIADNE_REPO_POLL_MS`   | 检查 PR 状态的间隔（毫秒）                   | `60000`                  |
+| `ARIADNE_DAEMON_HOME`    | daemon 的证书和令牌哈希所在的目录（远端）    | `~/.ariadne-daemon`      |
 
 ## 包
 

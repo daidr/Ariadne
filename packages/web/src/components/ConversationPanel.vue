@@ -52,7 +52,6 @@ import {
 import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
 import { clockText, t, tm } from '../i18n'
-import GettingStarted from './GettingStarted.vue'
 import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
 import { todoPlan } from './todo'
@@ -245,10 +244,6 @@ watch(
   ],
   ([finished]) => (todoOpen.value = !finished),
   { immediate: true },
-)
-// Set up enough to talk: a model, a project, and its working directory.
-const started = computed(
-  () => state.modelReady !== false && !!state.detail && !!state.detail.project.source,
 )
 // New input is waiting for a free slot.
 const queued = computed(() => !working.value && (view.value.conversation?.pendingSeq ?? 0) > 0)
@@ -443,7 +438,12 @@ const titleOf = (notice: NoticeView) =>
     ? (state.detail?.threads.find((item) => item.id === notice.threadId)?.title ?? notice.title)
     : ''
 
-function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' }>) {
+function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' | 'memory-everywhere' }>) {
+  if (notice.kind === 'memory-everywhere') {
+    return t(notice.action === 'saved' ? 'notice.everywhereAdded' : 'notice.everywhereRemoved', {
+      text: notice.text,
+    })
+  }
   if (notice.action === 'removed') return t('notice.memoryRemoved', { text: notice.text })
   if (notice.previous === null) return t('notice.memoryAdded', { text: notice.text })
   return t('notice.memoryChanged', { previous: notice.previous, text: notice.text })
@@ -720,7 +720,9 @@ watch(
       </div>
       <template v-for="item in shown.items" :key="item.id">
         <div v-if="item.notice" class="notice">
-          <template v-if="item.notice.kind === 'memory'">
+          <template
+            v-if="item.notice.kind === 'memory' || item.notice.kind === 'memory-everywhere'"
+          >
             <DouText variant="tertiary" size="sm" class="notice-text">
               {{ memoryNotice(item.notice) }}
             </DouText>
@@ -1026,7 +1028,11 @@ watch(
     </DouChatList>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="props.threadId" :title="thread?.title" :description="t('thread.empty')" />
-      <GettingStarted v-else-if="!started" @open-settings="openSettings()" />
+      <DouEmpty v-else-if="state.modelReady === false" :description="t('error.noModel')">
+        <DouButton size="sm" tone="primary" @click="openSettings()">
+          {{ t('conversation.openSettings') }}
+        </DouButton>
+      </DouEmpty>
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
