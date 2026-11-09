@@ -12,6 +12,7 @@ import {
   type ModelSearchRequest,
   onHost,
   searchAsk,
+  searchHttpError,
   type SearchResult,
   type ModelStreamPart,
   type ReasoningBlock,
@@ -288,6 +289,13 @@ export function readSearch(response: SearchResponse, limit: number) {
   for (const page of found) if (!sources.has(page.url)) sources.set(page.url, page)
   if (!sources.size && failed) throw new Error(`web search failed: ${failed}`)
   if (response.stop_reason === 'refusal') throw new Error('the model declined to search')
+  // Cut off or paused before it wrote anything: pages alone are not an answer.
+  if (
+    !text.trim() &&
+    (response.stop_reason === 'max_tokens' || response.stop_reason === 'pause_turn')
+  ) {
+    throw new Error(`the search ended early: ${response.stop_reason}`)
+  }
   const usage = response.usage
   return {
     text: text.trim(),
@@ -322,7 +330,7 @@ const search: ModelSearch<AnthropicSettings>['run'] = async (settings, request) 
     body: JSON.stringify(searchBody(request)),
     ...(request.signal ? { signal: request.signal } : {}),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) throw searchHttpError(response.status)
   return readSearch((await response.json()) as SearchResponse, request.limit)
 }
 

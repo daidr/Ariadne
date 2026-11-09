@@ -1,4 +1,4 @@
-import type { ModelStreamPart } from '@ariadne/plugin-sdk'
+import { ModelSearchRefused, type ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
 import { anthropicProvider, requestBody, toWire } from './index'
 
@@ -459,5 +459,21 @@ describe("the service's own web search", () => {
     await expect(askSearch()).rejects.toThrow('max_uses_exceeded')
     reply = () => Response.json({ error: { message: 'bad key sk-secret' } }, { status: 401 })
     await expect(askSearch()).rejects.toThrow(/^HTTP 401$/)
+    // Turned down outright, as when search is off for the organisation: not worth asking again.
+    await expect(askSearch()).rejects.toBeInstanceOf(ModelSearchRefused)
+    reply = () => Response.json({ error: { message: 'overloaded' } }, { status: 529 })
+    await expect(askSearch()).rejects.not.toBeInstanceOf(ModelSearchRefused)
+    reply = () =>
+      Response.json({
+        stop_reason: 'max_tokens',
+        content: [
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 't',
+            content: [{ url: 'https://a.example' }],
+          },
+        ],
+      })
+    await expect(askSearch()).rejects.toThrow('ended early')
   })
 })

@@ -30,7 +30,11 @@ function clear() {
 
 async function save(): Promise<boolean> {
   const key = apiKey.value.trim()
-  if (!search.value || (!key && !cleared.value)) return true
+  if (!search.value || (!key && !cleared.value)) {
+    // The models were saved just before: whether a key is needed may have changed.
+    search.value = await api.getSearchSettings().catch(() => search.value)
+    return true
+  }
   error.value = null
   try {
     search.value = await api.saveSearchSettings({ apiKey: key || null })

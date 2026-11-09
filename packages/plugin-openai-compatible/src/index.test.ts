@@ -1,6 +1,6 @@
 import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterAll, describe, expect, test } from 'vitest'
-import { openAICompatibleProvider, requestBody, toWire } from './index'
+import { openAICompatibleProvider, readSearch, requestBody, toWire } from './index'
 
 let lastBody: Record<string, unknown> | null = null
 let lastAuth: string | null = null
@@ -396,5 +396,13 @@ describe("the service's own web search", () => {
     } finally {
       await search.stop(true)
     }
+  })
+
+  test('an answer cut off before any text is an error, not a list of pages', () => {
+    const output = [
+      { type: 'web_search_call', action: { sources: [{ url: 'https://a.example' }] } },
+    ]
+    expect(() => readSearch({ status: 'incomplete', output }, 5)).toThrow('ended early')
+    expect(readSearch({ status: 'completed', output }, 5).sources).toHaveLength(1)
   })
 })

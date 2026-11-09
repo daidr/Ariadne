@@ -1,5 +1,9 @@
 import { Ariadne, confirmBlock } from '@ariadne/core'
-import type { ModelSearchAnswer, SearchProvider } from '@ariadne/plugin-sdk'
+import {
+  ModelSearchRefused,
+  type ModelSearchAnswer,
+  type SearchProvider,
+} from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import type { ResolvedModel } from './model'
 import { Scheduler } from './scheduler'
@@ -8,7 +12,7 @@ import { call, fakeModel, say } from './test-model'
 import { toolsFor, type ToolContext } from './tools'
 import { MAX_IMAGES, toChatMessages } from './transcript'
 import { fetchPage, htmlToText, isPrivateAddress, type WebAccess } from './web'
-import { PAGE_CHARS, searchingModels } from './web-tools'
+import { forgetRefusedSearches, PAGE_CHARS, searchingModels } from './web-tools'
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -332,6 +336,26 @@ describe('reading the web', () => {
     expect(
       searchingModels([searchingModel('none', null), relay, null, own, own]).map((m) => m.label),
     ).toEqual(['own'])
+  })
+
+  test('a model whose service turns search down is no longer counted, until settings are saved', async () => {
+    const off = searchingModel('off', () => Promise.reject(new ModelSearchRefused(400)))
+    const busy = {
+      ...searchingModel('busy', () => Promise.reject(new Error('HTTP 429'))),
+      model: 'other',
+    }
+    const project = app.createProject('P')
+    const result = await toolsWith({ models: [off, busy] })
+      .find((t) => t.spec.name === 'web_search')!
+      .run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(result.isError).toBe(true)
+    expect(searchingModels([off, busy]).map((m) => m.label)).toEqual(['busy'])
+    // Nothing else searches: the tool goes, and fetch_url says what a search waits for.
+    expect(toolsWith({ models: searchingModels([off]) }).map((t) => t.spec.name)).not.toContain(
+      'web_search',
+    )
+    forgetRefusedSearches()
+    expect(searchingModels([off, busy]).map((m) => m.label)).toEqual(['off', 'busy'])
   })
 
   test('where nothing searches, fetch_url says what a search waits for', () => {

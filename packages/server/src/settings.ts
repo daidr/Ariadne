@@ -3,6 +3,7 @@ import {
   COMMAND_ACTIONS,
   compactAt,
   DEFAULT_LIMITS,
+  forgetRefusedSearches,
   keyedSearch,
   LIMIT_RANGES,
   MCP_TOOL_MARKS,
@@ -579,6 +580,8 @@ export class SettingsStore {
         showCost: body.showCost === true,
       },
     }
+    // A model whose service turned search down gets asked again: the key or model may differ.
+    forgetRefusedSearches()
     this.save()
   }
 

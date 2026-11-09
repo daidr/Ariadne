@@ -322,6 +322,24 @@ export function onHost(baseUrl: string, host: string): boolean {
   }
 }
 
+/**
+ * The service turned the search itself down (a 4xx other than a timeout or rate limit):
+ * search is off for the account, or this model has none. Asking again will not help, so
+ * Ariadne stops counting the model among those that search until its settings are saved again.
+ */
+export class ModelSearchRefused extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'ModelSearchRefused'
+  }
+}
+
+/** The error for a search request the service answered with `status`. */
+export const searchHttpError = (status: number): Error =>
+  status >= 400 && status < 500 && status !== 408 && status !== 429
+    ? new ModelSearchRefused(status)
+    : new Error(`HTTP ${status}`)
+
 /** A model service that searches the web itself: one request, searched and read there. */
 export interface ModelSearch<Settings = Record<string, unknown>> {
   /**

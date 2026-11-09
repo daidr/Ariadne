@@ -1,5 +1,5 @@
 import { MAX_MODEL_IMAGE_BYTES, MODEL_IMAGE_TYPES } from '@ariadne/core'
-import type { SearchProvider, SearchResult } from '@ariadne/plugin-sdk'
+import { ModelSearchRefused, type SearchProvider, type SearchResult } from '@ariadne/plugin-sdk'
 import { withCost, type ResolvedModel } from './model'
 import { fenced } from './prompts'
 import { optionalInt, optionalStr, str, ToolInputError, type Tool } from './tool-helpers'
@@ -144,11 +144,23 @@ export interface SearchRoutes {
 export const canSearch = (routes: SearchRoutes | undefined) =>
   !!(routes?.services?.size || routes?.models?.length || routes?.keyed)
 
+/**
+ * Models whose service turned a search down outright, by what they are asked with: they
+ * are not counted among those that search until the model settings are saved again.
+ */
+const refused = new Set<string>()
+const refusalKey = (model: ResolvedModel) =>
+  JSON.stringify([model.provider.kind, model.settings, model.model])
+
+/** Count every model again: the settings changed, so a refusal may no longer hold. */
+export const forgetRefusedSearches = () => refused.clear()
+
 /** The models among `candidates` whose service searches itself, each once, in that order. */
 export function searchingModels(candidates: (ResolvedModel | null | undefined)[]): ResolvedModel[] {
   const seen = new Set<string>()
   return candidates.filter((model): model is ResolvedModel => {
     if (!model?.provider.search?.available(model.settings as never)) return false
+    if (refused.has(refusalKey(model))) return false
     if (seen.has(model.label)) return false
     seen.add(model.label)
     return true
@@ -250,6 +262,7 @@ export function webSearchTool(routes: SearchRoutes): Tool {
             return { content: block.text }
           } catch (error) {
             failed(error)
+            if (error instanceof ModelSearchRefused) refused.add(refusalKey(model))
           }
         }
         if (routes.keyed) {

@@ -12,6 +12,7 @@ import {
   type ModelSearchRequest,
   onHost,
   searchAsk,
+  searchHttpError,
   type SearchResult,
   type ModelStreamPart,
   withExtraBody,
@@ -169,8 +170,8 @@ function baseBody(request: ModelRequest) {
   }
 }
 
-/** Room for the answer, and for the thinking some models do first. */
-const SEARCH_MAX_TOKENS = 4096
+/** Room for the answer, and for the thinking some models do first, which counts here too. */
+const SEARCH_MAX_TOKENS = 8192
 
 /**
  * The body of a search request. Search is not part of chat completions: it goes to the
@@ -187,6 +188,7 @@ export function searchBody(request: Pick<ModelSearchRequest, 'model' | 'query'>)
 }
 
 interface SearchResponse {
+  status?: string
   output?: {
     type: string
     action?: { sources?: { url?: string }[] }
@@ -223,6 +225,8 @@ export function readSearch(response: SearchResponse, limit: number) {
       }
     }
   }
+  // The room ran out on thinking before it wrote anything: pages alone are not an answer.
+  if (!text.trim() && response.status === 'incomplete') throw new Error('the search ended early')
   for (const url of read) if (!sources.has(url)) sources.set(url, { title: '', url, snippet: '' })
   const usage = response.usage
   const cached = usage?.input_tokens_details?.cached_tokens
@@ -252,7 +256,7 @@ const search: ModelSearch<OpenAICompatibleSettings>['run'] = async (settings, re
     body: JSON.stringify(searchBody(request)),
     ...(request.signal ? { signal: request.signal } : {}),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) throw searchHttpError(response.status)
   return readSearch((await response.json()) as SearchResponse, request.limit)
 }
 
