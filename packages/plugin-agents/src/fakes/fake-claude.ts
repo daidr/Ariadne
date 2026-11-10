@@ -10,7 +10,8 @@ const mcpFile = flag('--mcp-config')
 const url: string | undefined = mcpFile
   ? JSON.parse(readFileSync(mcpFile, 'utf8')).mcpServers.ariadne.url
   : undefined
-const system = readFileSync(flag('--system-prompt-file')!, 'utf8')
+const systemFile = flag('--system-prompt-file')
+const system = systemFile ? readFileSync(systemFile, 'utf8') : ''
 if (url) {
   await mcpCall(url, 'initialize', { protocolVersion: '2025-06-18', capabilities: {} })
   await mcpCall(url, 'tools/list', {})
@@ -18,6 +19,28 @@ if (url) {
 let turn = 0
 let cost = 0
 for await (const message of lines()) {
+  if (message.type === 'control_request') {
+    write({
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: message.request_id,
+        response: {
+          models: [
+            {
+              value: 'default',
+              displayName: 'Default (recommended)',
+              resolvedModel: 'claude-big-2',
+            },
+            { value: 'big', displayName: 'Big 2', resolvedModel: 'claude-big-2' },
+            { value: 'small', displayName: 'Small 1', resolvedModel: 'claude-small-1' },
+            { value: 'claude-big-1', displayName: 'Big 1', resolvedModel: 'claude-big-1' },
+          ],
+        },
+      },
+    })
+    continue
+  }
   turn++
   const text: string = message.message.content.find((c: any) => c.type === 'text').text
   const images = message.message.content.filter((c: any) => c.type === 'image').length

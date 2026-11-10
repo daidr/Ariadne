@@ -9,6 +9,8 @@ const MAX_LINE_BYTES = 32 * 1024 * 1024
 
 const windows = process.platform === 'win32'
 
+const noop = () => {}
+
 /** The agent's program could not be started, or ended. */
 export class AgentProcessError extends Error {}
 
@@ -250,5 +252,34 @@ export class AgentProcess {
       }
     }
     this.release()
+  }
+}
+
+/**
+ * Start `proc` for one short exchange, `talk` (each line it prints, then what to ask it), and
+ * end it after, whatever came of it. It fails when the program exits first, or when `signal`
+ * aborts.
+ */
+export async function exchange<T>(
+  proc: AgentProcess,
+  signal: AbortSignal | undefined,
+  talk: { onLine: (value: unknown) => void; run: () => Promise<T> },
+): Promise<T> {
+  if (signal?.aborted) throw new AgentProcessError('it took too long')
+  let fail: (error: Error) => void = noop
+  const ended = new Promise<never>((_, reject) => {
+    fail = reject
+  })
+  ended.catch(() => {})
+  const onAbort = () => fail(new AgentProcessError('it took too long'))
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    proc.start(talk.onLine, (reason) => fail(new AgentProcessError(reason)))
+    const result = talk.run()
+    result.catch(() => {})
+    return await Promise.race([result, ended])
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+    await proc.close()
   }
 }

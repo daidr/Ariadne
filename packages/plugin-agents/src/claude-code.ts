@@ -1,8 +1,8 @@
-import type { ModelRequest } from '@ariadne/plugin-sdk'
+import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SERVER_NAME } from './bridge'
-import { agentEnv, AgentProcess, splitCommand } from './process'
+import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
 import { busyText } from './rpc'
 import type { AgentKind, AgentUsage, DriverContext } from './sessions'
 
@@ -11,6 +11,9 @@ const noop = () => {}
 export interface ClaudeCodeSettings {
   command?: string
 }
+
+/** The id of the request that asks it for its models. */
+const LIST_REQUEST = 'ariadne-models'
 
 /** How long it may wait on one tool call: as long as the user takes to approve it. */
 const TOOL_TIMEOUT_MS = String(24 * 60 * 60 * 1000)
@@ -76,6 +79,45 @@ const tokens = (usage: ApiUsage): AgentUsage => {
 
 const FIELDS = ['input', 'output', 'cached', 'cacheWrite', 'reasoning'] as const
 
+/** A model as the program describes it when it starts. */
+interface OfferedModel {
+  value?: unknown
+  displayName?: unknown
+  resolvedModel?: unknown
+}
+
+const trimmed = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+/**
+ * Its models as entries. `default` is named after the model it stands for, as the alias of
+ * that model says (its own title only says it is the default).
+ */
+export function claudeModels(offered: OfferedModel[]): ListedModel[] {
+  const titleOf = (model: OfferedModel) => {
+    if (trimmed(model.value) !== 'default') return trimmed(model.displayName)
+    const same = offered.find(
+      (other) =>
+        other !== model &&
+        trimmed(other.resolvedModel) &&
+        trimmed(other.resolvedModel) === trimmed(model.resolvedModel),
+    )
+    return same ? trimmed(same.displayName) : ''
+  }
+  return offered.flatMap((model) => {
+    const id = trimmed(model.value)
+    if (!id) return []
+    const title = titleOf(model)
+    const resolves = trimmed(model.resolvedModel)
+    return [
+      {
+        id,
+        ...(title && title !== id ? { title } : {}),
+        ...(resolves && resolves !== id ? { resolves } : {}),
+      },
+    ]
+  })
+}
+
 /**
  * The Claude Code program in print mode, talking JSON lines both ways: it keeps one
  * conversation while it runs, takes each new message on stdin and prints what it does.
@@ -109,6 +151,49 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
         default: 'claude',
       },
     },
+  },
+  // It says what it can use as it starts, before any model is asked anything.
+  listModels(settings, { cwd, signal }) {
+    const proc = new AgentProcess({
+      argv: argvOf(settings, 'default'),
+      cwd,
+      env: agentEnv(),
+      label: 'agent',
+    })
+    let answer: (models: ListedModel[]) => void = noop
+    let refuse: (error: Error) => void = noop
+    const answered = new Promise<ListedModel[]>((resolve, reject) => {
+      answer = resolve
+      refuse = reject
+    })
+    return exchange(proc, signal, {
+      onLine(value) {
+        const line = value as {
+          type?: string
+          response?: {
+            subtype?: string
+            request_id?: string
+            error?: string
+            response?: { models?: unknown }
+          }
+        }
+        if (line.type !== 'control_response' || line.response?.request_id !== LIST_REQUEST) return
+        if (line.response.subtype === 'error') {
+          refuse(new AgentProcessError(line.response.error ?? 'it would not say'))
+          return
+        }
+        const models = line.response.response?.models
+        answer(Array.isArray(models) ? claudeModels(models as OfferedModel[]) : [])
+      },
+      run() {
+        proc.send({
+          type: 'control_request',
+          request_id: LIST_REQUEST,
+          request: { subtype: 'initialize' },
+        })
+        return answered
+      },
+    })
   },
   describe(settings, request: ModelRequest) {
     return {

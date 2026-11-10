@@ -180,6 +180,50 @@ describe('the model form', () => {
     expect((await list({ kind: 'none' })).status).toBe(400)
   })
 
+  test('an agent program’s models keep its order, aliases described as what they stand for', async () => {
+    await host.load({
+      id: 'agentish',
+      name: { 'zh-CN': '代理' },
+      setup: (ctx) =>
+        ctx.registerModelProvider({
+          kind: 'agentish',
+          title: { 'zh-CN': '代理程序' },
+          program: true,
+          settings: { type: 'object', properties: {} },
+          models: async () => [
+            { id: 'default', title: 'Big 2', resolves: 'big-2' },
+            'big-1',
+            { id: 'big', title: 'Big 2', resolves: 'big-2' },
+            'big',
+          ],
+          find: () => [{ id: 'agentish', from: { program: 'agentish' }, settings: {} }],
+          async *stream(): AsyncGenerator<ModelStreamPart> {},
+        } as never),
+    })
+    const listed = await call('/api/settings/model-list', {
+      method: 'POST',
+      body: { provider: { kind: 'agentish', settings: {} } },
+    })
+    const body = (await listed.json()) as {
+      models: { id: string; title?: string; info?: { contextTokens?: number } }[]
+    }
+    expect(body.models.map(({ id, title }) => ({ id, title }))).toEqual([
+      { id: 'default', title: 'Big 2' },
+      { id: 'big-1', title: undefined },
+      { id: 'big', title: 'Big 2' },
+    ])
+    expect(body.models[0]?.info?.contextTokens).toBe(400_000)
+    expect(body.models[1]?.info?.contextTokens).toBe(200_000)
+
+    // Taken into use, it starts on what the program itself is set to.
+    const used = await call('/api/settings/found/use', {
+      method: 'POST',
+      body: { id: 'agentish:agentish' },
+    })
+    const saved = (await used.json()) as { models: { model: string; contextTokens?: number }[] }
+    expect(saved.models[0]).toMatchObject({ model: 'default', contextTokens: 400_000 })
+  })
+
   test('a catalog that cannot be read still lists the models', async () => {
     handle = createHandler({
       app,

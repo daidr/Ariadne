@@ -88,6 +88,18 @@ for await (const message of lines()) {
     case 'initialize':
       write({ id: message.id, result: { userAgent: 'fake' } })
       break
+    case 'model/list': {
+      const pages = [
+        [{ id: 'm1', model: 'gpt-big', displayName: 'GPT Big', isDefault: true }],
+        [{ id: 'm2', model: 'gpt-small', displayName: 'gpt-small' }],
+      ]
+      const page = message.params.cursor ? 1 : 0
+      write({
+        id: message.id,
+        result: { data: pages[page], nextCursor: page === 0 ? 'next' : null },
+      })
+      break
+    }
     case 'thread/start':
       tools = message.params.dynamicTools.map((t: any) => t.name)
       system = message.params.baseInstructions

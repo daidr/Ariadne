@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { acp, forOwnTools } from './acp'
+import { acp, acpModels, forOwnTools } from './acp'
 import { ToolBridge } from './bridge'
 import { claudeCode } from './claude-code'
 import { codex } from './codex'
@@ -482,6 +482,64 @@ describe('found on this machine', () => {
       'zh-CN': '找不到命令 no-such-program-here',
       en: 'command not found: no-such-program-here',
     })
-    expect((await made.models!({} as never))[0]).toBe('default')
+  })
+
+  test('Claude Code says which models its account can use', async () => {
+    const made = provider(claudeCode as AgentKind<never>)
+    expect(await made.models!({ command: fake('claude') } as never)).toEqual([
+      { id: 'default', title: 'Big 2', resolves: 'claude-big-2' },
+      { id: 'big', title: 'Big 2', resolves: 'claude-big-2' },
+      { id: 'small', title: 'Small 1', resolves: 'claude-small-1' },
+      { id: 'claude-big-1', title: 'Big 1' },
+    ])
+  })
+
+  test('Codex lists its models page by page', async () => {
+    const made = provider(codex as AgentKind<never>)
+    expect(await made.models!({ command: fake('codex') } as never)).toEqual([
+      { id: 'default' },
+      { id: 'gpt-big', title: 'GPT Big' },
+      { id: 'gpt-small' },
+    ])
+  })
+
+  test('an ACP agent lists the models of a session it opens', async () => {
+    const made = provider(acp as AgentKind<never>)
+    expect(await made.models!({ command: fake('acp') } as never)).toEqual([
+      { id: 'default' },
+      { id: 'fast' },
+    ])
+    expect(
+      acpModels({
+        currentModelId: 'pro',
+        availableModels: [{ modelId: 'pro', name: 'Pro' }, { modelId: 'lite' }],
+      }),
+    ).toEqual([
+      { id: 'default', title: 'Pro', resolves: 'pro' },
+      { id: 'pro', title: 'Pro' },
+      { id: 'lite' },
+    ])
+  })
+
+  test('the fixed models are offered when the program cannot say', async () => {
+    const made = provider(claudeCode as AgentKind<never>)
+    const crashing = `${process.execPath} -e process.exit(3)`
+    expect(await made.models!({ command: crashing } as never)).toEqual([
+      'default',
+      'sonnet',
+      'opus',
+      'haiku',
+    ])
+    expect(await made.models!({ command: 'no-such-program-here' } as never)).toEqual([
+      'default',
+      'sonnet',
+      'opus',
+      'haiku',
+    ])
+    const silent = `${process.execPath} -e setInterval(()=>{},1000)`
+    expect(
+      await made.models!({ command: silent } as never, { signal: AbortSignal.timeout(300) }),
+    ).toEqual(['default', 'sonnet', 'opus', 'haiku'])
+    expect(await provider(acp as AgentKind<never>).models!({} as never)).toEqual(['default'])
   })
 })

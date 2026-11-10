@@ -368,6 +368,8 @@ export interface ModelInfo {
 /** A model a provider lists, with what the catalog knows of it. */
 export interface ListedModel {
   id: string
+  /** What the service calls it, when that says more than the name. */
+  title?: string
   info?: ModelInfo
 }
 
