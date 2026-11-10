@@ -522,6 +522,8 @@ export const zhCN = {
     '讨论串和协调器把需要大量查阅的问题交给只读子调研，可以用便宜的模型',
   'settings.sameAsAsking': '和提问的一方相同',
   'settings.effort': '思考深度',
+  'settings.threadEffort': '讨论串思考深度',
+  'settings.coordinatorEffort': '协调器思考深度',
   'settings.effort.default': '默认',
   'settings.effort.low': '低',
   'settings.effort.medium': '中',

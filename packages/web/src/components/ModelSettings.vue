@@ -92,14 +92,6 @@ const models = ref<DraftModel[]>([])
 const threadModel = ref<string | null>(null)
 const threadEffort = ref<Effort | ''>('')
 const coordinatorEffort = ref<Effort | ''>('')
-// The one model's effort, for threads and the coordinator alike.
-const soleEffort = computed({
-  get: () => threadEffort.value,
-  set: (effort) => {
-    threadEffort.value = effort
-    coordinatorEffort.value = effort
-  },
-})
 // `''` stands for "the threads'", which the select cannot hold as `null`.
 const coordinatorModel = ref<string>('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
@@ -140,8 +132,8 @@ const modelOptions = computed(() =>
     providers.value,
   ).map(({ id, label }) => ({ value: id, label })),
 )
-// With one model there is nothing to divide: the roles all use it, and only how hard it
-// thinks is left to choose.
+// With one model there is no model to choose per role: both use it, and only how hard
+// threads and the coordinator each think is left to choose.
 const several = computed(() => modelOptions.value.length > 1)
 const coordinatorOptions = computed(() => [
   { value: '', label: t('settings.sameAsThreads') },
@@ -551,8 +543,7 @@ async function saveModels(): Promise<boolean> {
         },
         coordinator: {
           model: keep(coordinatorModel.value || null),
-          // With one model the page shows one depth: both think that hard.
-          effort: (several.value ? coordinatorEffort.value : threadEffort.value) || null,
+          effort: coordinatorEffort.value || null,
           fallback: keep(fallback.value || null),
         },
         triage: {
@@ -812,13 +803,14 @@ async function saveModels(): Promise<boolean> {
           <section v-if="modelOptions.length || concurrency" class="settings-section">
             <DouText weight="medium">{{ t('settings.part.roles') }}</DouText>
             <DouForm layout="vertical" size="sm">
-              <DouFormItem
-                v-if="modelOptions.length === 1"
-                :label="t('settings.effort')"
-                class="settings-effort"
-              >
-                <DouSelect v-model="soleEffort" :options="effortOptions" />
-              </DouFormItem>
+              <div v-if="modelOptions.length === 1" class="settings-row">
+                <DouFormItem :label="t('settings.threadEffort')" class="settings-grow">
+                  <DouSelect v-model="threadEffort" :options="effortOptions" />
+                </DouFormItem>
+                <DouFormItem :label="t('settings.coordinatorEffort')" class="settings-grow">
+                  <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                </DouFormItem>
+              </div>
               <template v-else-if="several">
                 <div class="settings-row">
                   <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
