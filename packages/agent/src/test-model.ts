@@ -7,20 +7,38 @@ export type Script = (
   role: string,
 ) => ModelStreamPart[] | Promise<ModelStreamPart[]>
 
-export function fakeModel(script: Script): ResolvedModel & { requests: ModelRequest[] } {
+export function fakeModel(
+  script: Script,
+): ResolvedModel & { requests: ModelRequest[]; sent: ModelRequest[] } {
   const requests: ModelRequest[] = []
+  /** Every request, those that ended a turn after `say` too. */
+  const sent: ModelRequest[] = []
   const provider: ModelProvider<never> = {
     kind: 'fake',
     title: { 'zh-CN': '假模型' },
     settings: { type: 'object', properties: {} },
     async *stream(_settings, request) {
+      sent.push(request)
+      // What `say` sent is the turn's last step: it ends without a script, and is not one of
+      // the `requests` the script answered.
+      const last = request.messages.at(-1)
+      const step = request.messages.findLast((m: ChatMessage) => m.role === 'assistant')
+      if (
+        last?.role === 'tool' &&
+        step?.role === 'assistant' &&
+        step.toolCalls?.length &&
+        step.toolCalls.every((c) => c.id.startsWith(SAY))
+      ) {
+        yield { type: 'finish', reason: 'stop' }
+        return
+      }
       requests.push(request)
       const system = request.messages[0]?.content ?? ''
       const role = system.includes('You are the coordinator') ? 'coordinator' : 'thread'
       for (const part of await script(request, role)) yield part
     },
   }
-  return { provider, settings: {}, model: 'fake-1', label: 'fake / fake-1', requests }
+  return { provider, settings: {}, model: 'fake-1', label: 'fake / fake-1', requests, sent }
 }
 
 export const call = (id: string, name: string, args: unknown): ModelStreamPart => ({
@@ -29,11 +47,26 @@ export const call = (id: string, name: string, args: unknown): ModelStreamPart =
   name,
   arguments: JSON.stringify(args),
 })
-export const say = (text: string): ModelStreamPart[] => [
-  { type: 'text', text },
+/** Plain text as the answer, for calls whose text is what they return (summaries, research). */
+export const plain = (body: string): ModelStreamPart[] => [
+  { type: 'text', text: body },
   { type: 'usage', input: 10, output: 5 },
   { type: 'finish', reason: 'stop' },
 ]
+const SAY = 'say_'
+let said = 0
+/** Send `text` to the user and end the turn; nothing at all for empty text. */
+export const say = (text: string): ModelStreamPart[] =>
+  text.trim()
+    ? [
+        call(`${SAY}${++said}`, 'send_message', { text }),
+        { type: 'usage', input: 10, output: 5 },
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    : [
+        { type: 'usage', input: 10, output: 5 },
+        { type: 'finish', reason: 'stop' },
+      ]
 /** The last user input, without the message id the coordinator reads after it. */
 export const lastUser = (request: ModelRequest) =>
   (request.messages.filter((m: ChatMessage) => m.role === 'user').at(-1)?.content ?? '').replace(

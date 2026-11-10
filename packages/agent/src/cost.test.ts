@@ -34,7 +34,6 @@ test('a conversation sums its requests’ cost by currency; a reported cost wins
     ...fakeModel(() => {
       step++
       return [
-        { type: 'text', text: `回复 ${step}` },
         step === 1
           ? { type: 'usage', input: 1_000_000, output: 0 }
           : { type: 'usage', input: 10, output: 1, costUsd: 0.25 },

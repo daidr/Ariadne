@@ -1,10 +1,4 @@
-import type {
-  CallTiming,
-  DraftHandle,
-  ReasoningRecord,
-  TokenUsage,
-  ToolCallRecord,
-} from '@ariadne/core'
+import type { CallTiming, ReasoningRecord, TokenUsage, ToolCallRecord } from '@ariadne/core'
 import { MAX_RETRY_AFTER_MS, type ModelRequest, type ModelStreamPart } from '@ariadne/plugin-sdk'
 import { usageOf } from './compaction'
 import type { Limits } from './limits'
@@ -32,10 +26,8 @@ export class TurnError extends Error {
  * sees it; what a failed attempt streamed is dropped. A request with no output for
  * `timeoutSeconds` is given up and counts as such an error. `null` when aborted.
  *
- * The text is handed to `draft` as it comes, until a tool call begins: then a draft the user
- * has seen is held for the caller to post, and one not shown yet is dropped. A failed attempt
- * takes its draft back. The arguments of
- * tool calls are handed to `live` as they come, for the tools that show their work.
+ * The arguments of tool calls are handed to `live` as they come, for the tools that show
+ * their work (send_message shows the message as it is written).
  */
 export async function requestStep(
   model: ResolvedModel,
@@ -44,7 +36,6 @@ export async function requestStep(
   baseDelayMs: number,
   limits: Limits,
   timeoutSeconds?: number,
-  draft?: DraftHandle,
   live?: LiveCalls,
 ): Promise<{
   text: string
@@ -70,7 +61,6 @@ export async function requestStep(
     const forward = () => attemptController.abort(request.signal.reason)
     request.signal.addEventListener('abort', forward, { once: true })
     let silent = false
-    let calling = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const wait = () => {
       if (!timeoutSeconds) return
@@ -92,14 +82,9 @@ export async function requestStep(
         if (part.type === 'text' || part.type === 'reasoning' || part.type === 'tool-call') {
           last = part.type
         }
-        if ((part.type === 'calling' || part.type === 'tool-call') && !calling) {
-          calling = true
-          draft?.hold()
-        }
         if (part.type === 'tool-input') live?.input(part.call, part.name, part.arguments)
         if (part.type === 'text') {
           text += part.text
-          if (!calling) draft?.text(part.text)
         } else if (part.type === 'reasoning') {
           const { type: _, startedAt: __, ...block } = part
           reasoning.push(block)
@@ -119,7 +104,6 @@ export async function requestStep(
       clearTimeout(timer)
       request.signal.removeEventListener('abort', forward)
     }
-    if (request.signal.aborted || silent || failure || cut) draft?.withdraw()
     // What was shown of calls that will not run is taken back.
     if (request.signal.aborted || silent || failure || cut) live?.reset()
     if (request.signal.aborted) return null

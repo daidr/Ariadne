@@ -1,5 +1,5 @@
 import { Ariadne } from '@ariadne/core'
-import { Scheduler, type ResolvedModel } from '@ariadne/agent'
+import { Scheduler, UNSENT_HINT, type ResolvedModel } from '@ariadne/agent'
 import { agentProvider, claudeCode, ToolBridge, type AgentKind } from '@ariadne/plugin-agents'
 import type { ModelProvider } from '@ariadne/plugin-sdk'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -41,11 +41,13 @@ test('a coordinator runs on an agent program across steps and turns', async () =
     rmSync(dir, { recursive: true, force: true })
   }
 
+  const again = 'CALL send_message {"text":"二"}'
   const project = app.createProject('P')
   app.postMessage(project.id, {
     conversationId: project.coordinatorId,
     author: 'user',
-    content: 'CALL update_todo {"items":[{"label":"读需求","status":"doing"}]}',
+    content:
+      'CALL update_todo {"items":[{"label":"读需求","status":"doing"}]}\nCALL send_message {"text":"一"}',
   })
   await scheduler.idle()
   expect(app.getTodo(project.coordinatorId).items).toEqual([{ label: '读需求', status: 'doing' }])
@@ -53,17 +55,24 @@ test('a coordinator runs on an agent program across steps and turns', async () =
   app.postMessage(project.id, {
     conversationId: project.coordinatorId,
     author: 'user',
-    content: 'again',
+    content: again,
   })
   await scheduler.idle()
+  // It speaks through send_message; what it writes after is its steps' text alone.
   const replies = app
     .listMessages(project.coordinatorId)
     .filter((m) => m.author === 'coordinator')
     .map((m) => m.content)
-  expect(replies).toHaveLength(2)
-  expect(replies[0]).toMatch(/^turn 1: /)
-  // Same program, second turn: it was handed only the new message ("again" and its id).
-  expect(replies[1]).toMatch(/^turn 2: {2}len 57 /)
+  expect(replies).toEqual(['一', '二'])
+  const ends = app
+    .listTranscript(project.coordinatorId)
+    .flatMap((e) => (e.kind === 'step' && !e.toolCalls.length ? [e.text] : []))
+  expect(ends).toHaveLength(2)
+  expect(ends[0]).toMatch(/^turn 1: /)
+  // Same program, second turn: it was handed only what came after its last step: that its
+  // text there went unsent, and the new message with its id.
+  const handed = UNSENT_HINT.length + 2 + again.length + 52
+  expect(ends[1]).toMatch(new RegExp(`^turn 2: .* len ${handed} `))
   expect(provider.sessions()).toBe(1)
   // Its usage and the cost it reported are the conversation's.
   expect(app.getConversation(project.coordinatorId).usage.input).toBeGreaterThan(0)

@@ -50,7 +50,7 @@ export {
   type WorkspaceManagerOptions,
 } from './workspaces'
 export { repositoryOf, withHosting } from './hosting'
-export { CUT_HINT, describeNote, toChatMessages } from './transcript'
+export { CUT_HINT, describeNote, toChatMessages, UNSENT_HINT } from './transcript'
 export { buildTrace, traceRequest, type RecordedCall } from './trace'
 export { compactAt, DEFAULT_CONTEXT_TOKENS } from './compaction'
 export {

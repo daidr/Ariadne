@@ -213,9 +213,8 @@ const fallback = computed(() => {
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
 const activity = computed(() =>
-  // Once the reply shows, the line before the last tool calls is no longer what it does;
-  // text held while tools run is not being written.
-  writing.value && !state.writing[writing.value.conversationId]?.held
+  // Once the reply shows, the line before the last tool calls is no longer what it does.
+  writing.value
     ? t('conversation.replying')
     : (view.value.conversation?.turn?.activity ??
       thread.value?.doing ??
@@ -466,8 +465,8 @@ function memoryNotice(notice: Extract<NoticeView, { kind: 'memory' | 'memory-eve
 /** The files sent with it, the text, then tables, charts and steps, then what it asks. */
 function partsOf(message: MessageView): ChatMessageProps['parts'] {
   // Still being written while it is the draft, not yet a message of the log.
-  const reply = state.writing[message.conversationId]
-  const streaming = message.id === writing.value?.id && !reply?.posted && !reply?.held
+  const streaming =
+    message.id === writing.value?.id && !state.writing[message.conversationId]?.posted
   return [
     ...(message.attachments.length ? [{ type: 'attachments' }] : []),
     ...(message.content ? [{ type: 'text' as const, text: message.content, streaming }] : []),

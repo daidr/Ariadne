@@ -502,6 +502,7 @@ describe('pre-delivery review', () => {
       'read_file',
       'read_skill',
       'search',
+      'send_message',
       'submit_review',
       'update_todo',
     ])

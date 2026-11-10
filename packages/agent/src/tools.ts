@@ -1,6 +1,8 @@
 import {
   DomainError,
   MAX_CITES,
+  newId,
+  type DraftHandle,
   MAX_ROUTINES,
   nextRun,
   reviewReplies,
@@ -122,6 +124,74 @@ const listMessages: Tool = {
           edited: !!m.editedAt,
         })),
     )
+  },
+}
+
+/** The messages being written by the calls of a conversation's step, in call order. */
+const writing = new Map<string, DraftHandle[]>()
+
+export const sendMessage: Tool = {
+  spec: {
+    name: 'send_message',
+    description:
+      'Send the user a message in your conversation. This is the only way they read what you write: text outside it is not shown. Send to answer, to hand over finished work, or to raise a blocker; never for progress (that is your todo list). Markdown. Images in the workspace show when linked with a path.',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string', description: "The message, in the user's language." } },
+      required: ['text'],
+    },
+  },
+  // The user watches the message being written, in the place it lands once sent.
+  live(ctx) {
+    let draft: DraftHandle | null = null
+    return {
+      input(args) {
+        const text = typeof args.text === 'string' ? args.text : ''
+        if (!text.trim()) return
+        if (!draft) {
+          draft = ctx.app.drafts.start({
+            projectId: ctx.projectId,
+            conversationId: ctx.conversationId,
+            messageId: newId('msg'),
+          })
+          const queue = writing.get(ctx.conversationId) ?? []
+          queue.push(draft)
+          writing.set(ctx.conversationId, queue)
+        }
+        draft.write(text)
+      },
+      cancel() {
+        if (!draft) return
+        draft.withdraw()
+        const queue = writing.get(ctx.conversationId)
+        if (queue?.includes(draft)) queue.splice(queue.indexOf(draft), 1)
+        if (queue && !queue.length) writing.delete(ctx.conversationId)
+      },
+    }
+  },
+  async run(args, ctx) {
+    const text = str(args, 'text').trim()
+    const queue = writing.get(ctx.conversationId)
+    const draft = queue?.shift()
+    if (queue && !queue.length) writing.delete(ctx.conversationId)
+    if (!text) {
+      draft?.withdraw()
+      throw new ToolInputError('"text" is empty')
+    }
+    try {
+      const message = ctx.app.postMessage(ctx.projectId, {
+        conversationId: ctx.conversationId,
+        author: ctx.role,
+        content: await withImages(ctx, text),
+        ...(draft ? { messageId: draft.messageId } : {}),
+      })
+      draft?.write(text)
+      draft?.posted()
+      return { content: `Sent (${message.id}).` }
+    } finally {
+      // One that failed to send is not left on the page.
+      draft?.withdraw()
+    }
   },
 }
 
@@ -833,6 +903,7 @@ const routineTool: Tool = {
 
 /** The coordinator's tools; `models` are those it may give a thread. */
 export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
+  sendMessage,
   updateTodo,
   postUi,
   withdrawAsk,
@@ -854,6 +925,7 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
 ]
 
 export const threadTools: Tool[] = [
+  sendMessage,
   updateTodo,
   postUi,
   withdrawAsk,
@@ -867,8 +939,10 @@ export const threadTools: Tool[] = [
 ]
 
 /** A thread that reviews another's changes: it reads, and gives its verdict. */
-export const reviewTools = (references = false): Tool[] =>
-  references ? withReferences(reviewerTools(updateTodo)) : reviewerTools(updateTodo)
+export const reviewTools = (references = false): Tool[] => [
+  sendMessage,
+  ...(references ? withReferences(reviewerTools(updateTodo)) : reviewerTools(updateTodo)),
+]
 
 /**
  * A thread's tools: the workspace tools only when its project has a directory to work in,

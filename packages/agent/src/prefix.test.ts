@@ -2,7 +2,7 @@ import { Ariadne } from '@ariadne/core'
 import type { ChatMessage } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Scheduler } from './scheduler'
-import { answered, call, fakeModel, lastUser, say } from './test-model'
+import { answered, call, fakeModel, lastUser, say, plain } from './test-model'
 
 let app: Ariadne
 let scheduler: Scheduler | null = null
@@ -74,7 +74,7 @@ describe('the prompt a conversation sends', () => {
 
   test('after a summary too, while the todo list keeps changing', async () => {
     const model = fakeModel((request) => {
-      if (request.messages[0]?.content.startsWith('You summarise')) return say('- 几份需求')
+      if (request.messages[0]?.content.startsWith('You summarise')) return plain('- 几份需求')
       if (answered(request)) return say('记下了')
       const n = /第 (\d+) 份/.exec(lastUser(request))?.[1] ?? '?'
       return [

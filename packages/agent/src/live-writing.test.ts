@@ -641,7 +641,6 @@ describe('a model response', () => {
       0,
       DEFAULT_LIMITS,
       undefined,
-      undefined,
       calls,
     )
     expect(answer?.toolCalls).toHaveLength(1)

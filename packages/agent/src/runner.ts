@@ -2,7 +2,6 @@ import type { SharedArtifacts } from './shared-artifacts'
 import {
   askTitle,
   DomainError,
-  newId,
   type Ariadne,
   type Attachment,
   type ConversationView,
@@ -19,6 +18,7 @@ import { loadSkills, SkillSet, type SkillFiles } from './skills'
 import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
   reviewTools,
+  sendMessage,
   switchedOff,
   toolsFor,
   ToolInputError,
@@ -41,7 +41,7 @@ import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings 
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
-import { withImages, type EverywhereMemory } from './tool-helpers'
+import type { EverywhereMemory } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
@@ -352,7 +352,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           signal,
         )
       : []
-  const tools = [...builtIn, ...external]
+  // Sending is how a conversation speaks to the user: every set of tools has it.
+  const speaking = builtIn.some((tool) => tool.spec.name === 'send_message') ? [] : [sendMessage]
+  const tools = [...speaking, ...builtIn, ...external]
   // What the turn changes in the thread's workspace, shown under its reply.
   const changes =
     isThread && hasWorkspace && workspaces && !reviewOf
@@ -529,6 +531,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let instructionsStale = true
     // Steps in a row whose output hit the length limit.
     let cuts = 0
+    // Whether the turn sent the user anything, and was told its text outside a call is not sent.
+    let sent = false
+    let unsentHinted = false
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
@@ -639,12 +644,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       let answer: Awaited<ReturnType<typeof requestStep>>
       // Calls that show their work while written; what never ran is taken back.
       live.reset()
-      // The reply as it is written, shown until the step turns out to call tools that work.
-      const draft = app.drafts.start({
-        projectId: conversation.projectId,
-        conversationId,
-        messageId: newId('msg'),
-      })
       try {
         answer = await requestStep(
           model,
@@ -661,11 +660,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           options.retryBaseMs ?? 1000,
           limits,
           model.request?.timeoutSeconds,
-          draft,
           live,
         )
       } catch (error) {
-        draft.withdraw()
         live.reset()
         // The main model keeps being turned away: the turn goes on with the fallback, from
         // this step on. The request is built again for it (its context, images, thinking).
@@ -708,34 +705,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       cuts = cut ? cuts + 1 : 0
       if (cuts >= MAX_CUTS) throw new TurnError({ key: 'error.truncated', params: { count: cuts } })
 
-      // Text the user read before calls that only tick off the todo list is the answer: it is
-      // posted now, before them. Before calls that work it is what the model does, and goes
-      // (text beside tool calls is not the reply).
-      const answerFirst =
-        toolCalls.length > 0 && toolCalls.every((call) => ANSWER_BEFORE.has(call.name))
-      const seen = answerFirst ? draft.shown?.trim() : ''
-      if (seen) {
-        app.postMessage(conversation.projectId, {
-          conversationId,
-          author: conversation.role,
-          content: await withImages(ctx, seen),
-          messageId: draft.messageId,
-        })
-        draft.posted()
-      } else if (toolCalls.length) draft.withdraw()
-
+      if (toolCalls.some((call) => SENDS.has(call.name))) sent = true
       if (!toolCalls.length) {
         if (cut) continue
-        if (text.trim()) {
-          const content = await withImages(ctx, text.trim())
-          app.postMessage(conversation.projectId, {
-            conversationId,
-            author: conversation.role,
-            content,
-            messageId: draft.messageId,
-          })
-          draft.posted()
-        } else draft.withdraw()
+        // Text outside send_message reaches no one. A turn that wrote some and sent nothing
+        // may have meant it for the user: it is told once (see UNSENT_HINT) and goes on.
+        if (text.trim() && !sent && !unsentHinted) {
+          unsentHinted = true
+          continue
+        }
         await finish('completed')
         return
       }
@@ -983,8 +961,8 @@ const LOOKS = new Set([
 ])
 /** Calls that hand work to a thread: after one, the coordinator may look again for the next. */
 const HANDS_OVER = new Set(['create_thread', 'message_thread'])
-/** Calls a model makes after it has answered: the text before them is the reply. */
-const ANSWER_BEFORE = new Set(['update_todo'])
+/** Calls that put a message in front of the user. */
+const SENDS = new Set(['send_message', 'post_ui'])
 /** The coordinator's look in a turn that is reminded the work is a thread's. */
 export const COORDINATOR_LOOK_HINT = 6
 /** Looks in a turn past which the coordinator is turned away. */

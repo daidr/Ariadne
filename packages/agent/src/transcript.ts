@@ -45,6 +45,9 @@ export const clearedResult = (length: number) =>
 /** Told after a step whose output hit the length limit, once its results are in. */
 export const CUT_HINT =
   '<output_cut_off>Your reply above hit the output length limit and was cut off; anything unfinished in it, such as a tool call whose arguments were not complete, was dropped, and the user has not seen it. Go on from where it stopped, in smaller pieces: keep replies shorter and write a large file in parts (write_file for the first part, then edit_file to add the rest).</output_cut_off>'
+/** After text the model wrote outside a call when it ended: only send_message reaches the user. */
+export const UNSENT_HINT =
+  '<not_sent>The text above was not sent: the user only sees what you send with send_message. If it was meant for them, send it now; otherwise end the turn without text.</not_sent>'
 
 /** A moment as the model reads it: the server's local date and time, to the minute. */
 const two = (n: number) => String(n).padStart(2, '0')
@@ -350,6 +353,8 @@ export function toChatMessages(
           open = { ids: entry.toolCalls.map((call) => call.id), cut: !!entry.cut }
         } else if (entry.cut) {
           out.push({ role: 'user', content: CUT_HINT })
+        } else if (entry.text.trim()) {
+          out.push({ role: 'user', content: UNSENT_HINT })
         }
         break
       case 'tool':
