@@ -101,6 +101,23 @@ export function codexModels(listed: CodexModel[]): ListedModel[] {
   })
 }
 
+/**
+ * The first version that takes `environments` on `thread/start`. An older one ignores it,
+ * and then the tools of its own that it still offers run on this machine.
+ */
+const OLDEST = [0, 135, 0]
+
+/** Its version as the user agent from `initialize` says, when it is older than OLDEST. */
+export function tooOld(userAgent: unknown): string | null {
+  const found = /\/(\d+)\.(\d+)\.(\d+)/.exec(typeof userAgent === 'string' ? userAgent : '')
+  if (!found) return null
+  const version = found.slice(1).map(Number)
+  for (let i = 0; i < OLDEST.length; i++) {
+    if (version[i]! !== OLDEST[i]!) return version[i]! < OLDEST[i]! ? version.join('.') : null
+  }
+  return null
+}
+
 const CLIENT = { name: 'ariadne', title: 'Ariadne', version: '1.0.0' }
 
 const dataUrl = (image: { mime: string; data: string }) => `data:${image.mime};base64,${image.data}`
@@ -286,10 +303,16 @@ export const codex: AgentKind<CodexSettings> = {
           },
         )
         try {
-          await peer.request('initialize', {
+          const init = await peer.request<{ userAgent?: string }>('initialize', {
             clientInfo: CLIENT,
             capabilities: { experimentalApi: true },
           })
+          const old = tooOld(init?.userAgent)
+          if (old) {
+            throw new AgentProcessError(
+              `codex ${old} is too old: ${OLDEST.join('.')} or later is needed, update it first`,
+            )
+          }
           peer.notify('initialized')
           const result = await peer.request<{ thread?: { id?: string } }>('thread/start', {
             ...(ctx.model && ctx.model !== 'default' ? { model: ctx.model } : {}),
