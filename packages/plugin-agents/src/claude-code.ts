@@ -285,7 +285,7 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
         const event = line.event
         if (event.type === 'message_start') writing = event.message?.id ?? null
         else if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-          ctx.emit({ type: 'calling' })
+          ctx.emit({ type: 'alive' })
         } else if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
           if (event.delta.text) {
             if (writing) streamed.add(writing)

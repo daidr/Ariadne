@@ -143,29 +143,25 @@ export const sendMessage: Tool = {
   },
   // The user watches the message being written, in the place it lands once sent.
   live(ctx) {
-    let draft: DraftHandle | null = null
+    // Taken in the order the calls begin, which is the order they run in.
+    const draft = ctx.app.drafts.start({
+      projectId: ctx.projectId,
+      conversationId: ctx.conversationId,
+      messageId: newId('msg'),
+    })
+    const queue = writing.get(ctx.conversationId) ?? []
+    queue.push(draft)
+    writing.set(ctx.conversationId, queue)
     return {
       input(args) {
         const text = typeof args.text === 'string' ? args.text : ''
-        if (!text.trim()) return
-        if (!draft) {
-          draft = ctx.app.drafts.start({
-            projectId: ctx.projectId,
-            conversationId: ctx.conversationId,
-            messageId: newId('msg'),
-          })
-          const queue = writing.get(ctx.conversationId) ?? []
-          queue.push(draft)
-          writing.set(ctx.conversationId, queue)
-        }
-        draft.write(text)
+        if (text.trim()) draft.write(text)
       },
       cancel() {
-        if (!draft) return
         draft.withdraw()
-        const queue = writing.get(ctx.conversationId)
-        if (queue?.includes(draft)) queue.splice(queue.indexOf(draft), 1)
-        if (queue && !queue.length) writing.delete(ctx.conversationId)
+        const left = writing.get(ctx.conversationId)
+        if (left?.includes(draft)) left.splice(left.indexOf(draft), 1)
+        if (left && !left.length) writing.delete(ctx.conversationId)
       },
     }
   },

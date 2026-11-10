@@ -67,14 +67,16 @@ test('a coordinator runs on an agent program across steps and turns', async () =
   const ends = app
     .listTranscript(project.coordinatorId)
     .flatMap((e) => (e.kind === 'step' && !e.toolCalls.length ? [e.text] : []))
-  expect(ends).toHaveLength(2)
+  // Each turn ends in text, which is not sent: it is told so once a turn, and goes on.
+  expect(ends).toHaveLength(4)
   expect(ends[0]).toMatch(/^turn 1: /)
-  // Same program, second turn: it was handed only what came after its last step: that its
+  expect(ends[1]).toMatch(new RegExp(`^turn 2: .* len ${UNSENT_HINT.length} `))
+  // Same program, next turn: it was handed only what came after its last step: that its
   // text there went unsent, and the new message with its id.
   const handed = UNSENT_HINT.length + 2 + again.length + 52
-  expect(ends[1]).toMatch(new RegExp(`^turn 2: .* len ${handed} `))
+  expect(ends[2]).toMatch(new RegExp(`^turn 3: .* len ${handed} `))
   expect(provider.sessions()).toBe(1)
   // Its usage and the cost it reported are the conversation's.
   expect(app.getConversation(project.coordinatorId).usage.input).toBeGreaterThan(0)
-  expect(app.getConversation(project.coordinatorId).usage.cost.USD).toBeCloseTo(0.02)
+  expect(app.getConversation(project.coordinatorId).usage.cost.USD).toBeCloseTo(0.04)
 })

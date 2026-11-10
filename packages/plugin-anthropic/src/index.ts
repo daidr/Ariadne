@@ -485,7 +485,6 @@ async function* readStream(
               startedAt: Date.now(),
             })
           } else if (event.content_block?.type === 'tool_use') {
-            yield { type: 'calling' }
             blocks.set(event.index, {
               id: event.content_block.id ?? `toolu_${event.index}`,
               name: event.content_block.name ?? '',

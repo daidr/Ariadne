@@ -220,6 +220,35 @@ describe('a coordinator turn', () => {
     ).toBe('谢谢')
   })
 
+  test('text written after a sent message is not lost silently either', async () => {
+    const model = fakeModel((request) => {
+      const steps = request.messages.filter((m) => m.role === 'tool').length
+      if (steps === 0) {
+        return [
+          call('c1', 'send_message', { text: '先看了一下。' }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      if (lastUser(request).includes('<not_sent>') && !answered(request)) return say('结论是没有。')
+      return [
+        { type: 'text', text: '结论是没有。' },
+        { type: 'finish', reason: 'stop' },
+      ]
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '先看了一下。',
+      '结论是没有。',
+    ])
+  })
+
   test('a failed attempt takes its message draft back before the retry', async () => {
     const shown: (string | null)[] = []
     app.drafts.subscribe((update) => shown.push(update.draft?.text ?? null))

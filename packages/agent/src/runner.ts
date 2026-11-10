@@ -531,8 +531,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let instructionsStale = true
     // Steps in a row whose output hit the length limit.
     let cuts = 0
-    // Whether the turn sent the user anything, and was told its text outside a call is not sent.
-    let sent = false
+    // Whether the turn was told its text outside a call is not sent.
     let unsentHinted = false
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
@@ -705,12 +704,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       cuts = cut ? cuts + 1 : 0
       if (cuts >= MAX_CUTS) throw new TurnError({ key: 'error.truncated', params: { count: cuts } })
 
-      if (toolCalls.some((call) => SENDS.has(call.name))) sent = true
       if (!toolCalls.length) {
         if (cut) continue
-        // Text outside send_message reaches no one. A turn that wrote some and sent nothing
-        // may have meant it for the user: it is told once (see UNSENT_HINT) and goes on.
-        if (text.trim() && !sent && !unsentHinted) {
+        // Text outside send_message reaches no one. It may have been meant for the user: the
+        // model is told once a turn (see UNSENT_HINT) and goes on.
+        if (text.trim() && !unsentHinted) {
           unsentHinted = true
           continue
         }
@@ -961,8 +959,6 @@ const LOOKS = new Set([
 ])
 /** Calls that hand work to a thread: after one, the coordinator may look again for the next. */
 const HANDS_OVER = new Set(['create_thread', 'message_thread'])
-/** Calls that put a message in front of the user. */
-const SENDS = new Set(['send_message', 'post_ui'])
 /** The coordinator's look in a turn that is reminded the work is a thread's. */
 export const COORDINATOR_LOOK_HINT = 6
 /** Looks in a turn past which the coordinator is turned away. */
