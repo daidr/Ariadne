@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Ariadne } from '@ariadne/core'
+import type { Ariadne, ReportKind } from '@ariadne/core'
 import type { BrowserLocator } from './browser'
 import { LoopbackProxy, type Tunnel } from './browser-proxy'
 
@@ -717,19 +717,29 @@ export class BrowserPage {
     this.child.kill()
     await this.child.exited.catch(() => {})
     this.proxy?.stop()
-    await rm(this.profile, { recursive: true, force: true }).catch(() => {})
+    // On Windows its helper processes may hold the profile a moment longer.
+    const remove = () => rm(this.profile, { recursive: true, force: true })
+    await remove().catch(async () => {
+      await Bun.sleep(1000)
+      await remove().catch(() => {})
+    })
   }
 }
+
+interface Held {
+  page: Promise<BrowserPage>
+  timer: ReturnType<typeof setTimeout>
+}
+
+/** Reports after which a thread's work is over for now; `progress` and `waiting` are not. */
+const ENDING_REPORTS = new Set<ReportKind>(['done', 'failed', 'ready', 'blocked'])
 
 /**
  * The browsers of conversations, one each, started on first use and closed when it goes
  * idle, when the conversation is done with it, or when the server stops.
  */
 export class BrowserPages {
-  private readonly pages = new Map<
-    string,
-    { page: Promise<BrowserPage>; timer: ReturnType<typeof setTimeout> }
-  >()
+  private readonly pages = new Map<string, Held>()
 
   constructor(
     readonly locator: BrowserLocator,
@@ -757,11 +767,15 @@ export class BrowserPages {
         (await this.locator.download(signal ?? new AbortController().signal))
       return BrowserPage.open(executable, options)
     })()
-    this.pages.set(conversationId, { page: opening, timer: this.idle(conversationId) })
+    const entry = { page: opening } as Held
+    entry.timer = this.idle(conversationId, entry)
+    this.pages.set(conversationId, entry)
     try {
       return await opening
     } catch (error) {
-      this.pages.delete(conversationId)
+      // Only this attempt's entry and timer: a later one may already be in its place.
+      clearTimeout(entry.timer)
+      if (this.pages.get(conversationId) === entry) this.pages.delete(conversationId)
       throw error
     }
   }
@@ -770,8 +784,10 @@ export class BrowserPages {
     return this.pages.has(conversationId)
   }
 
-  private idle(conversationId: string): ReturnType<typeof setTimeout> {
-    const timer = setTimeout(() => void this.close(conversationId), this.idleMs)
+  private idle(conversationId: string, entry: Held): ReturnType<typeof setTimeout> {
+    const timer = setTimeout(() => {
+      if (this.pages.get(conversationId) === entry) void this.close(conversationId)
+    }, this.idleMs)
     timer.unref?.()
     return timer
   }
@@ -780,7 +796,7 @@ export class BrowserPages {
     const held = this.pages.get(conversationId)
     if (!held) return
     clearTimeout(held.timer)
-    held.timer = this.idle(conversationId)
+    held.timer = this.idle(conversationId, held)
   }
 
   async close(conversationId: string): Promise<boolean> {
@@ -793,11 +809,14 @@ export class BrowserPages {
     return true
   }
 
-  /** Closes a thread's browser once it reports or is stopped: its work is over for now. */
+  /** Closes a thread's browser once it is stopped or reports its work over for now. */
   follow(app: Pick<Ariadne, 'subscribe'>): () => void {
     return app.subscribe((events) => {
       for (const event of events) {
-        if (event.type === 'thread.reported' || event.type === 'thread.stopped') {
+        if (
+          event.type === 'thread.stopped' ||
+          (event.type === 'thread.reported' && ENDING_REPORTS.has(event.data.report))
+        ) {
           void this.close(event.data.threadId)
         }
       }

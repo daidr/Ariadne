@@ -3,10 +3,10 @@ import { LocalWorkspace } from '@ariadne/plugin-local'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { installedBrowser, testingPlatform } from './browser'
-import { BrowserPages } from './browser-page'
-import { isLoopback, LoopbackProxy } from './browser-proxy'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { browserLocator, installedBrowser, testingPlatform } from './browser'
+import { BrowserPage, BrowserPages } from './browser-page'
+import { isLoopback, LoopbackProxy, route } from './browser-proxy'
 import {
   reactTool,
   renameThreadTool,
@@ -60,6 +60,14 @@ function context(
 // Async whatever the tool is, so a refusal is a rejection to expect.
 const run = async (tool: Tool, args: Record<string, unknown>, ctx: ToolContext) =>
   tool.run(args, ctx)
+
+const fakePage = () => ({ closed: false, close: async () => {} }) as unknown as BrowserPage
+type Listener = (events: { type: string; data: Record<string, unknown> }[]) => void
+const ignore: Listener = () => {}
+const fakeResolve = async (name: string) =>
+  ({ 'dev.test': ['127.0.0.1'], 'mixed.test': ['10.0.0.2', '::1'], 'far.test': ['10.0.0.3'] })[
+    name
+  ] ?? []
 
 describe('reactions', () => {
   test('an agent reacts to a message of its own conversation, and takes it back', async () => {
@@ -343,8 +351,36 @@ describe('browser', () => {
   })
 
   test('the proxy sends localhost through the tunnel and the rest straight', async () => {
-    expect(['localhost', 'app.localhost', '127.0.0.1', '[::1]'].every(isLoopback)).toBe(true)
-    expect(['example.com', '10.0.0.1', 'localhost.example'].some(isLoopback)).toBe(false)
+    expect(
+      [
+        'localhost',
+        'LOCALHOST.',
+        'app.localhost',
+        '127.0.0.1',
+        '127.1.2.3',
+        '0.0.0.0',
+        '[::1]',
+        '::',
+        '0:0:0:0:0:0:0:1',
+        '::ffff:127.0.0.1',
+        '::ffff:7f00:1',
+        '[::ffff:0.0.0.0]',
+      ].every(isLoopback),
+    ).toBe(true)
+    expect(
+      ['example.com', '10.0.0.1', 'localhost.example', '::2', '::ffff:10.0.0.1', '1::1'].some(
+        isLoopback,
+      ),
+    ).toBe(false)
+    // A name is judged by what it resolves to, and then used as that address.
+    expect(await route('dev.test.', fakeResolve)).toEqual({ tunnel: true })
+    expect(await route('mixed.test', fakeResolve)).toEqual({ tunnel: true })
+    expect(await route('far.test', fakeResolve)).toEqual({ tunnel: false, address: '10.0.0.3' })
+    expect(await route('[2001:db8::1]', fakeResolve)).toEqual({
+      tunnel: false,
+      address: '2001:db8::1',
+    })
+    await expect(route('nowhere.test', fakeResolve)).rejects.toThrow('did not resolve')
     const server = Bun.listen({
       hostname: '127.0.0.1',
       port: 0,
@@ -399,6 +435,103 @@ describe('browser', () => {
     } finally {
       proxy.stop()
       server.stop(true)
+    }
+  })
+
+  test.skipIf(testingPlatform() !== 'linux64' || !Bun.which('zip'))(
+    'one caller giving up does not call off the download another still waits for',
+    async () => {
+      const work = await mkdtemp(join(tmpdir(), 'ariadne-download-'))
+      const folder = join(work, 'src', 'chrome-headless-shell-linux64')
+      await Bun.write(join(folder, 'chrome-headless-shell'), '#!/bin/sh\n')
+      const zipped = Bun.spawnSync(['zip', '-qr', join(work, 'shell.zip'), '.'], {
+        cwd: join(work, 'src'),
+        windowsHide: true,
+      })
+      expect(zipped.exitCode).toBe(0)
+      let downloads = 0
+      const server: Bun.Server<undefined> = Bun.serve({
+        port: 0,
+        async fetch(request): Promise<Response> {
+          if (new URL(request.url).pathname === '/versions.json') {
+            const url: string = `http://127.0.0.1:${server.port}/shell.zip`
+            return Response.json({
+              channels: {
+                Stable: { downloads: { 'chrome-headless-shell': [{ platform: 'linux64', url }] } },
+              },
+            })
+          }
+          downloads++
+          await Bun.sleep(200)
+          return new Response(Bun.file(join(work, 'shell.zip')))
+        },
+      })
+      try {
+        const locator = browserLocator(
+          join(work, 'browser'),
+          `http://127.0.0.1:${server.port}/versions.json`,
+        )
+        const first = new AbortController()
+        const a = locator.download(first.signal)
+        const b = locator.download(new AbortController().signal)
+        first.abort(new Error('stopped'))
+        await expect(a).rejects.toThrow('stopped')
+        expect(await b).toBe(
+          join(work, 'browser', 'chrome-headless-shell-linux64', 'chrome-headless-shell'),
+        )
+        expect(downloads).toBe(1)
+      } finally {
+        server.stop(true)
+        await rm(work, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test('a failed open leaves no timer to close the page opened after it', async () => {
+    let fail = true
+    const closed: string[] = []
+    const fake = { closed: false, close: async () => void closed.push('page') }
+    const open = vi.spyOn(BrowserPage, 'open').mockImplementation(async () => {
+      if (fail) throw new Error('no start')
+      return fake as unknown as BrowserPage
+    })
+    const pages = new BrowserPages({ installed: () => '/bin/chrome', download: async () => '' }, 60)
+    try {
+      await expect(pages.page('thr_a')).rejects.toThrow('no start')
+      expect(pages.has('thr_a')).toBe(false)
+      await new Promise((done) => setTimeout(done, 30))
+      fail = false
+      expect(await pages.page('thr_a')).toBe(fake)
+      // The first attempt's timer would have fired by now.
+      await new Promise((done) => setTimeout(done, 40))
+      expect(pages.has('thr_a')).toBe(true)
+      expect(closed).toEqual([])
+    } finally {
+      open.mockRestore()
+      await pages.closeAll()
+    }
+  })
+
+  test('progress keeps the browser open; ending reports and stopping close it', async () => {
+    const open = vi.spyOn(BrowserPage, 'open').mockImplementation(async () => fakePage())
+    let listener: Listener = ignore
+    const pages = new BrowserPages({ installed: () => '/bin/chrome', download: async () => '' })
+    pages.follow({
+      subscribe: (fn: typeof listener) => ((listener = fn), () => {}),
+    } as never)
+    try {
+      await pages.page('thr_a')
+      await pages.page('thr_b')
+      listener([{ type: 'thread.reported', data: { threadId: 'thr_a', report: 'progress' } }])
+      listener([{ type: 'thread.reported', data: { threadId: 'thr_a', report: 'waiting' } }])
+      listener([{ type: 'thread.reported', data: { threadId: 'thr_b', report: 'done' } }])
+      await Promise.resolve()
+      expect([pages.has('thr_a'), pages.has('thr_b')]).toEqual([true, false])
+      listener([{ type: 'thread.stopped', data: { threadId: 'thr_a' } }])
+      expect(pages.has('thr_a')).toBe(false)
+    } finally {
+      open.mockRestore()
+      await pages.closeAll()
     }
   })
 

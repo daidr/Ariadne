@@ -73,7 +73,8 @@ const VERSIONS =
  * headless shell into `dir` the first time it is needed, once even when asked twice.
  */
 export function browserLocator(dir: string, versions = VERSIONS): BrowserLocator {
-  let downloading: Promise<string> | null = null
+  // One download for everyone who asks; it is called off only when all of them gave up.
+  let downloading: { done: Promise<string>; stop: AbortController; waiting: number } | null = null
   const shellPath = (platform: string) =>
     join(
       dir,
@@ -89,15 +90,34 @@ export function browserLocator(dir: string, versions = VERSIONS): BrowserLocator
       }
       const path = shellPath(platform)
       if (existsSync(path)) return Promise.resolve(path)
-      downloading ??= fetchShell(dir, platform, versions, signal)
-        .then(() => {
-          if (!existsSync(path)) throw new Error('the download did not hold the browser')
-          return path
-        })
-        .finally(() => {
-          downloading = null
-        })
-      return downloading
+      if (signal.aborted) return Promise.reject(signal.reason)
+      if (!downloading) {
+        const stop = new AbortController()
+        const entry = {
+          stop,
+          waiting: 0,
+          done: fetchShell(dir, platform, versions, stop.signal)
+            .then(() => {
+              if (!existsSync(path)) throw new Error('the download did not hold the browser')
+              return path
+            })
+            .finally(() => {
+              if (downloading === entry) downloading = null
+            }),
+        }
+        downloading = entry
+      }
+      const shared = downloading
+      shared.waiting++
+      const gaveUp = Promise.withResolvers<never>()
+      const leave = () => {
+        gaveUp.reject(signal.reason)
+        if (--shared.waiting === 0) shared.stop.abort(signal.reason)
+      }
+      signal.addEventListener('abort', leave, { once: true })
+      return Promise.race([shared.done, gaveUp.promise]).finally(() =>
+        signal.removeEventListener('abort', leave),
+      )
     },
   }
 }
@@ -123,10 +143,17 @@ async function fetchShell(
   try {
     const zip = join(work, 'shell.zip')
     await Bun.write(zip, response)
-    // Windows 10 and later ship bsdtar, which reads zip; elsewhere unzip is at hand.
+    // Windows 10 and later ship bsdtar, which reads zip (named in full: a GNU tar from Git
+    // may come first on PATH and cannot); elsewhere unzip is at hand.
     const argv =
       process.platform === 'win32'
-        ? ['tar', '-xf', zip, '-C', work]
+        ? [
+            join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'),
+            '-xf',
+            zip,
+            '-C',
+            work,
+          ]
         : ['unzip', '-q', '-o', zip, '-d', work]
     const unpack = Bun.spawn(argv, { stdout: 'ignore', stderr: 'pipe', windowsHide: true })
     if ((await unpack.exited) !== 0) {

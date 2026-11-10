@@ -130,6 +130,7 @@ describe('daemon shell', () => {
     })
     const shell = new DaemonShell(target)
     try {
+      expect(await shell.tcp()).toBe(true)
       const pipe = await shell.connect(echo.port)
       const got = Promise.withResolvers<string>()
       pipe.onData = (bytes) => got.resolve(new TextDecoder().decode(bytes))

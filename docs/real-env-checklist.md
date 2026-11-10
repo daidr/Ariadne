@@ -87,5 +87,5 @@
 
 - [ ] **本机浏览器**：装了 Chrome 或 Edge 的 Windows 和 macOS 上，让讨论串用 `browser` 打开一个页面并截图；追踪里看到截图，`~/.ariadne/browser` 下没有下载内容。
 - [ ] **自动下载**：在没有 Chrome、Edge、Chromium 的机器（或临时改名浏览器）上用一次，第一次调用会下载 Chrome for Testing 的 headless shell 到 `~/.ariadne/browser`，之后直接用；Windows 上用系统自带的 `tar` 解压，Linux 和 macOS 用 `unzip`。
-- [ ] **SSH 端口**：SSH 项目（远端没装 `ariadne-daemon`）里，让讨论串在远端后台起一个开发服务器，再用 `browser` 打开 `http://localhost:<端口>`，页面能打开，热更新的 WebSocket 能连上。这条路径用的是 `ssh -W` 加 `ClearAllForwardings=yes`，要确认它没有被拦下。
+- [ ] **SSH 端口**：SSH 项目（远端没装 `ariadne-daemon`）里，让讨论串在远端后台起一个开发服务器，再用 `browser` 打开 `http://localhost:<端口>`，页面能打开，热更新的 WebSocket 能连上。这条路径用的是 `ssh -W localhost:<端口>` 加 `ClearAllForwardings=yes`，要确认它没有被拦下；再试一个只监听 `::1` 的服务器（比如 Vite 在部分系统上的默认值）。远端装的是旧版 `ariadne-daemon` 时也应走这条路径。
 - [ ] **daemon 端口**：daemon 项目里做同样的事，走 relay 的 `tcp` 通道。

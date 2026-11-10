@@ -113,14 +113,16 @@ export class SshShell implements RemoteShell {
 
   /**
    * A connection to `port` on the machine's loopback: a channel of the daemon's session, or
-   * `ssh -W` over the shared connection.
+   * `ssh -W` over the shared connection (also when the daemon predates `tcp` channels).
    */
   async connect(port: number): Promise<BytePipe> {
     const relay = await this.daemon()
-    if (relay) return relay.connect(port)
+    if (relay && (await relay.tcp())) return relay.connect(port)
     const at = this.argv.indexOf('--')
+    // `localhost`, not 127.0.0.1: sshd tries each address it resolves to, so a server
+    // listening only on ::1 is reached too.
     const proc = Bun.spawn(
-      [...this.argv.slice(0, at), '-W', `127.0.0.1:${port}`, ...this.argv.slice(at)],
+      [...this.argv.slice(0, at), '-W', `localhost:${port}`, ...this.argv.slice(at)],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true, env: threadEnv() },
     )
     const stderr = new Response(proc.stderr).text()
