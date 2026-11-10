@@ -530,6 +530,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     const todoWatched = !reviewOf && tools.some((t) => t.spec.name === 'update_todo')
     let workSteps = 0
     let sinceTodo = 0
+    // A list carried over from an earlier turn, all done, is not this turn's list.
+    let todoThisTurn = false
     const todoHinted = { missing: false, stale: false }
     // The coordinator reads the source's instruction file once a turn: its source changes
     // under it only by the user's hand or a merge.
@@ -711,16 +713,18 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         return
       }
       workSteps += 1
-      sinceTodo = toolCalls.some((call) => call.name === 'update_todo') ? 0 : sinceTodo + 1
+      const wroteTodo = toolCalls.some((call) => call.name === 'update_todo')
+      sinceTodo = wroteTodo ? 0 : sinceTodo + 1
+      if (wroteTodo) todoThisTurn = true
       const todoHint = () => {
         const items = app.getTodo(conversationId).items
-        if (!items.length) {
+        const finished = items.every((item) => item.status === 'done')
+        if (!items.length || (finished && !todoThisTurn)) {
           if (todoHinted.missing || workSteps < TODO_MISSING_AFTER) return null
           todoHinted.missing = true
-          return TODO_MISSING_HINT
+          return items.length ? TODO_FINISHED_HINT : TODO_MISSING_HINT
         }
-        if (todoHinted.stale || sinceTodo < TODO_STALE_AFTER) return null
-        if (items.every((item) => item.status === 'done')) return null
+        if (todoHinted.stale || sinceTodo < TODO_STALE_AFTER || finished) return null
         todoHinted.stale = true
         return TODO_STALE_HINT
       }
@@ -931,6 +935,8 @@ export const TODO_MISSING_AFTER = 3
 export const TODO_STALE_AFTER = 15
 export const TODO_MISSING_HINT =
   '[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go.]'
+export const TODO_FINISHED_HINT =
+  '[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go.]'
 export const TODO_STALE_HINT =
   '[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]'
 

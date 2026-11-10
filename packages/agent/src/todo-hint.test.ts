@@ -1,7 +1,13 @@
 import { Ariadne } from '@ariadne/core'
 import type { ModelRequest } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { TODO_MISSING_AFTER, TODO_MISSING_HINT, TODO_STALE_AFTER, TODO_STALE_HINT } from './runner'
+import {
+  TODO_FINISHED_HINT,
+  TODO_MISSING_AFTER,
+  TODO_MISSING_HINT,
+  TODO_STALE_AFTER,
+  TODO_STALE_HINT,
+} from './runner'
 import { Scheduler } from './scheduler'
 import { call, fakeModel, lastUser, say } from './test-model'
 
@@ -83,6 +89,45 @@ describe('the todo list reminder', () => {
   })
 })
 
+describe('the todo list of an earlier turn', () => {
+  test('all done, it does not count for the next turn, which is reminded', async () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: '调研' })
+    const seen: string[][] = []
+    let round = 0
+    const model = fakeModel((request, role) => {
+      if (role !== 'thread') return say('')
+      // The turn's own results: the ones after the latest user input.
+      const at = request.messages.findLastIndex((m) => m.role === 'user')
+      const results = toolResults({ ...request, messages: request.messages.slice(at) })
+      if (round === 0) {
+        if (results.length) return say('')
+        return [todo(0, 'done'), { type: 'finish', reason: 'tool-calls' }]
+      }
+      seen.push(results)
+      if (results.length >= TODO_MISSING_AFTER + 3) return say('')
+      return [look(results.length), { type: 'finish', reason: 'tool-calls' }]
+    })
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '开始吧' })
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => model,
+      locale: () => 'zh-CN',
+      retryBaseMs: 1,
+    })
+    scheduler.start()
+    await scheduler.idle()
+    round = 1
+    app.postMessage(project.id, { conversationId: thread.id, author: 'user', content: '再加一个' })
+    await scheduler.idle()
+    const results = seen.at(-1)!
+    const hinted = results.map((r) => r.includes(TODO_FINISHED_HINT))
+    expect(hinted.indexOf(true)).toBe(TODO_MISSING_AFTER - 1)
+    expect(hinted.filter(Boolean)).toHaveLength(1)
+    expect(results.some((r) => r.includes(TODO_STALE_HINT))).toBe(false)
+  })
+})
+
 describe('the project source set later', () => {
   test('wakes the coordinator, which hears of it', async () => {
     const seen: string[] = []
@@ -111,6 +156,21 @@ describe('the project source set later', () => {
     expect(seen).toHaveLength(2)
     expect(seen[1]).toContain('<project_source_changed>')
     expect(seen[1]).toContain('go on with that now')
+  })
+
+  test('saved again unchanged, it is no news', async () => {
+    const project = app.createProject('P')
+    app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/srv/app', x: 1 } })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '帮我看看这个仓库',
+    })
+    const before = app.listTranscript(project.coordinatorId).length
+    app.setProjectSource(project.id, { kind: 'disk', settings: { x: 1, path: '/srv/app' } })
+    expect(app.listTranscript(project.coordinatorId)).toHaveLength(before)
+    app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/srv/other', x: 1 } })
+    expect(app.listTranscript(project.coordinatorId)).toHaveLength(before + 1)
   })
 
   test('set with the project, before anything was said, is not a note', async () => {
