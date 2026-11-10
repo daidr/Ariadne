@@ -203,6 +203,17 @@ const finishError = (detail: string, retryable: boolean, busy = false): ModelStr
   ...(busy ? { busy: true } : {}),
 })
 
+/**
+ * Said after the instructions of a conversation with tools. The program tells the model about
+ * the machine it runs on (its directory, shell, platform, sandbox), and some cannot be made
+ * to stop; that is not where the work is when the workspace is another machine.
+ */
+export const PLACE_NOTE =
+  "You run through a helper program on the user's own computer. Anything it says about its working directory, shell, operating system or sandbox describes that program, not your workspace: the workspace is wherever your tools run, as described above, and it may be another machine. Read, change and run things only with the tools you were given."
+
+const withPlace = (system: string, tools: readonly unknown[]) =>
+  tools.length ? (system ? `${system}\n\n${PLACE_NOTE}` : PLACE_NOTE) : system
+
 /** A provider made of an agent program, and what to call to end its sessions. */
 export interface AgentProvider<Settings> extends ModelProvider<Settings> {
   dispose(): Promise<void>
@@ -397,7 +408,7 @@ export function agentProvider<Settings>(
     },
     async *stream(settings, request) {
       const first = request.messages[0]
-      const system = first?.role === 'system' ? first.content : ''
+      const system = withPlace(first?.role === 'system' ? first.content : '', request.tools)
       const rest = first?.role === 'system' ? request.messages.slice(1) : request.messages
       const fps = rest.map(fingerprint)
       const config = hash([

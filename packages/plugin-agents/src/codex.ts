@@ -28,6 +28,16 @@ const OWN_TOOLS = [
   'tool_suggest',
   'skill_search',
   'memories',
+  'goals',
+]
+
+const LOCAL_CONTEXT = [
+  'include_environment_context=false',
+  'include_permissions_instructions=false',
+  'include_apps_instructions=false',
+  'skills.include_instructions=false',
+  'skills.bundled.enabled=false',
+  'project_doc_max_bytes=0',
 ]
 
 function argvOf(settings: CodexSettings): string[] {
@@ -40,6 +50,10 @@ function argvOf(settings: CodexSettings): string[] {
     '-c',
     'mcp_servers={}',
     ...OWN_TOOLS.flatMap((feature) => ['-c', `features.${feature}=false`]),
+    // What it would tell the model about the machine it runs on (its directory, shell and
+    // sandbox, its skills and the instructions files there): that is not where the work is.
+    // The workspace, local or remote, is as the conversation's own instructions describe it.
+    ...LOCAL_CONTEXT.flatMap((setting) => ['-c', setting]),
   ]
 }
 
@@ -85,6 +99,23 @@ export function codexModels(listed: CodexModel[]): ListedModel[] {
     const efforts = effortsOf(entry)
     return [{ id, ...(title && title !== id ? { title } : {}), ...(efforts ? { efforts } : {}) }]
   })
+}
+
+/**
+ * The first version that takes `environments` on `thread/start`. An older one ignores it,
+ * and then the tools of its own that it still offers run on this machine.
+ */
+const OLDEST = [0, 135, 0]
+
+/** Its version as the user agent from `initialize` says, when it is older than OLDEST. */
+export function tooOld(userAgent: unknown): string | null {
+  const found = /\/(\d+)\.(\d+)\.(\d+)/.exec(typeof userAgent === 'string' ? userAgent : '')
+  if (!found) return null
+  const version = found.slice(1).map(Number)
+  for (let i = 0; i < OLDEST.length; i++) {
+    if (version[i]! !== OLDEST[i]!) return version[i]! < OLDEST[i]! ? version.join('.') : null
+  }
+  return null
 }
 
 const CLIENT = { name: 'ariadne', title: 'Ariadne', version: '1.0.0' }
@@ -272,18 +303,30 @@ export const codex: AgentKind<CodexSettings> = {
           },
         )
         try {
-          await peer.request('initialize', {
+          const init = await peer.request<{ userAgent?: string }>('initialize', {
             clientInfo: CLIENT,
             capabilities: { experimentalApi: true },
           })
+          const old = tooOld(init?.userAgent)
+          if (old) {
+            throw new AgentProcessError(
+              `codex ${old} is too old: ${OLDEST.join('.')} or later is needed, update it first`,
+            )
+          }
           peer.notify('initialized')
           const result = await peer.request<{ thread?: { id?: string } }>('thread/start', {
             ...(ctx.model && ctx.model !== 'default' ? { model: ctx.model } : {}),
             cwd: ctx.cwd,
             approvalPolicy: 'untrusted',
+            // What it asks to approve comes here to be declined, never to a reviewer of its own.
+            approvalsReviewer: 'user',
             sandbox: 'read-only',
             baseInstructions: ctx.system,
             ephemeral: true,
+            // No environment of its own: whatever own tool it still offers (a command, a
+            // patch, an image to view) has nowhere to run on this machine. The work happens
+            // where the conversation's tools run, which may be another machine.
+            environments: [],
             dynamicTools: ctx.tools.specs.map((tool) => ({
               type: 'function',
               name: tool.name,

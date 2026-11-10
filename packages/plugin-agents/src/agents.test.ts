@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { acp, acpModels, forOwnTools } from './acp'
 import { ToolBridge } from './bridge'
 import { claudeCode, claudeModels } from './claude-code'
-import { codex } from './codex'
+import { codex, tooOld } from './codex'
 import { fingerprint, renderHistory } from './history'
 import { splitCommand } from './process'
 import { agentProvider, type AgentKind, type AgentProvider } from './sessions'
@@ -284,6 +284,24 @@ describe('codex', () => {
       },
     )
     expect(result.text).toContain('approval decline effort low')
+  })
+
+  test('a version that would ignore having no environment is refused', () => {
+    expect(tooOld('ariadne/0.120.3 (Mac OS 15.1; arm64) (ariadne; 1.0.0)')).toBe('0.120.3')
+    expect(tooOld('ariadne/0.135.0 (Ubuntu 24.4.0; x86_64) linux (ariadne; 1.0.0)')).toBeNull()
+    expect(tooOld('ariadne/1.2.0 (Ubuntu 24.4.0; x86_64)')).toBeNull()
+    expect(tooOld('fake')).toBeNull()
+  })
+
+  test('has no environment of its own and is not told about this machine', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const result = await step(made, { command: fake('codex') }, [
+      system(),
+      { role: 'user', content: 'hi' },
+    ])
+    // Its own command, patch and image tools have nowhere to run; the work is where the
+    // conversation's tools run, which may be another machine.
+    expect(result.text).toContain('environments [] machine context off place note true')
   })
 })
 
