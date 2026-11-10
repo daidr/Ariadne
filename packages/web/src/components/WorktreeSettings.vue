@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouEmpty, DouLink, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
-import { TrashIcon } from '@dou-ui/icons'
+import {
+  DouAlert,
+  DouButton,
+  DouEmpty,
+  DouLink,
+  DouPopconfirm,
+  DouSpinner,
+  DouText,
+  DouTooltip,
+} from 'dou-ui'
+import { InfoIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type ProjectWorktrees } from '../api'
 import { formatBytes } from '../bytes'
@@ -14,6 +23,8 @@ const removing = ref<string | null>(null)
 // On Windows a Dev Drive is what lets worktrees share storage; elsewhere there is nothing to do.
 const windows = ref(false)
 const DEV_DRIVE = 'https://learn.microsoft.com/windows/dev-drive/'
+// The hint around the words "Dev Drive", which alone are the link.
+const copied = computed(() => t('worktrees.copied', { link: '\n' }).split('\n'))
 
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -67,13 +78,24 @@ async function remove(projectId: string, threadId: string) {
       <section v-for="project in projects" :key="project.id" class="worktrees-project">
         <div class="worktrees-head">
           <DouText weight="medium" size="sm">{{ project.name }}</DouText>
-          <DouText v-if="project.shared" size="sm" variant="tertiary">
-            {{ t('worktrees.shared') }}
-          </DouText>
-          <DouText v-else-if="project.shared === false && windows" size="sm" variant="tertiary">
-            {{ t('worktrees.copied') }}
-            <DouLink :href="DEV_DRIVE" external>{{ t('worktrees.devDrive') }}</DouLink>
-          </DouText>
+          <DouTooltip v-if="project.shared" :content="t('worktrees.shared')">
+            <DouButton variant="ghost" size="sm" :aria-label="t('worktrees.shared')">
+              <template #leading><InfoIcon /></template>
+            </DouButton>
+          </DouTooltip>
+          <DouTooltip v-else-if="project.shared === false && windows">
+            <DouButton variant="ghost" size="sm" :aria-label="copied.join('Dev Drive')">
+              <template #leading><InfoIcon /></template>
+            </DouButton>
+            <template #content>
+              {{ copied[0] }}
+              <!-- A link takes the page's text color, which a tooltip's surface inverts. -->
+              <DouLink :href="DEV_DRIVE" external style="--dou-link-tone: currentColor">
+                Dev Drive
+              </DouLink>
+              {{ copied[1] }}
+            </template>
+          </DouTooltip>
         </div>
         <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>
         <ul class="worktrees-list">
@@ -150,8 +172,8 @@ async function remove(projectId: string, threadId: string) {
 .worktrees-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
 }
 
 .worktrees-list {

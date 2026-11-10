@@ -532,8 +532,8 @@ export const en: Record<MessageKey, string> = {
   'worktrees.merged': 'Merged',
   'worktrees.total': '{size} in all',
   'worktrees.shared': 'Copy-on-write: only changes take room',
-  'worktrees.copied': 'Each thread takes a full checkout',
-  'worktrees.devDrive': 'On a Dev Drive only changes take room',
+  'worktrees.copied':
+    'Each thread takes a full checkout; with the repository on a {link}, only changes take room',
   'settings.models': 'Models',
   'settings.addModel': 'Add model',
   'settings.modelName': 'Model name',
