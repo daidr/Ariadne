@@ -114,6 +114,7 @@ export function summaryRequest(
     },
     // Images are named in words: the summary is text, and a request full of them is costly.
     ...toChatMessages(folded, titleOf, {
+      messageIds: role === 'coordinator',
       ...(readText ? { readText } : {}),
       ...(keepReasoning ? { keepReasoning } : {}),
     }),

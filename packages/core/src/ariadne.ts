@@ -34,6 +34,7 @@ import type {
   Attachment,
   BranchMerge,
   Author,
+  CitedMessage,
   IssueWrite,
   LineComment,
   LinkedIssue,
@@ -115,6 +116,7 @@ import type {
   ConversationRole,
   ConversationView,
   MessagePage,
+  MessageRelay,
   MessageView,
   NeedsMeItem,
   PlanNodeStatus,
@@ -140,7 +142,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 59
+export const PROJECTION_VERSION = 60
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -174,6 +176,8 @@ const TURN_EVENT_TYPES = [
 export const MAX_ATTACHMENTS = 10
 /** Things one message can point at with `@`. */
 export const MAX_MENTIONS = 20
+/** The user's messages one relay passes along at most. */
+export const MAX_CITES = 8
 /** Line comments one message can carry, and how long each may be. */
 export const LINE_COMMENT_LIMITS = { comments: 100, body: 4000, quote: 500, path: 1000 }
 /** Files a turn's changes keep by name; the rest are counted. */
@@ -593,6 +597,8 @@ interface MessageRow {
   attachments: string | null
   mentions: string | null
   comments: string | null
+  cites: string | null
+  relayed_to: string | null
   ask_id: string | null
   ask_block: string | null
   ask_answer: string | null
@@ -824,6 +830,8 @@ function toMessage(row: MessageRow): MessageView {
     attachments: row.attachments ? (JSON.parse(row.attachments) as Attachment[]) : [],
     mentions: row.mentions ? (JSON.parse(row.mentions) as MessageMention[]) : [],
     comments: row.comments ? (JSON.parse(row.comments) as LineComment[]) : [],
+    cites: row.cites ? (JSON.parse(row.cites) as CitedMessage[]) : [],
+    relayedTo: row.relayed_to ? (JSON.parse(row.relayed_to) as MessageRelay[]) : [],
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
@@ -2700,6 +2708,8 @@ export class Ariadne {
       mentions?: unknown[]
       /** The user's comments on lines of a thread's changes. */
       comments?: unknown[]
+      /** On a relay: ids of the user's messages it passes along, copied as they read now. */
+      cites?: string[]
       /** The id its draft was shown under while the model wrote it. */
       messageId?: string
     },
@@ -2724,6 +2734,10 @@ export class Ariadne {
     if (kind === 'relay' && input.author !== 'coordinator') {
       throw new DomainError('error.invalidBody', { reason: 'kind' })
     }
+    if (input.cites?.length && kind !== 'relay') {
+      throw new DomainError('error.invalidBody', { reason: 'cites' })
+    }
+    const cites = this.citesOf(projectId, input.cites ?? [])
     const parsed: UiBlock[] = (input.blocks ?? []).map((block, i) =>
       parseBlock(block, `blocks[${i}]`),
     )
@@ -2753,7 +2767,13 @@ export class Ariadne {
         })
       }
     })
-    if (!input.content.trim() && !parsed.length && !attachments.length && !comments.length) {
+    if (
+      !input.content.trim() &&
+      !parsed.length &&
+      !attachments.length &&
+      !comments.length &&
+      !cites.length
+    ) {
       throw new DomainError('error.invalidBody', { reason: 'content' })
     }
     const messageId = input.messageId ?? newId('msg')
@@ -2776,6 +2796,7 @@ export class Ariadne {
           ...(attachments.length ? { attachments } : {}),
           ...(mentions.length ? { mentions } : {}),
           ...(comments.length ? { comments } : {}),
+          ...(cites.length ? { cites } : {}),
         },
       },
       ...asks.map((block) =>
@@ -2787,6 +2808,44 @@ export class Ariadne {
       ),
     ])
     return this.getMessage(messageId)
+  }
+
+  /**
+   * The user's own messages of this project a relay passes along, copied as they read now
+   * so the thread gets their words exactly; each once, in the order given.
+   */
+  private citesOf(projectId: string, ids: string[]): CitedMessage[] {
+    const unique = [...new Set(ids)]
+    if (unique.length > MAX_CITES) {
+      throw new DomainError('error.invalidBody', { reason: 'cites' })
+    }
+    return unique.map((id) => {
+      const row = this.db
+        .query<
+          {
+            conversation_id: string
+            author: Author
+            content: string
+            created_at: number
+            attachments: string | null
+            mentions: string | null
+          },
+          [string, string]
+        >(
+          `SELECT conversation_id, author, content, created_at, attachments, mentions
+           FROM messages WHERE id = ? AND project_id = ?`,
+        )
+        .get(id, projectId)
+      if (!row || row.author !== 'user') throw new DomainError('error.notFound', { what: id })
+      return {
+        messageId: id,
+        conversationId: row.conversation_id,
+        content: row.content,
+        at: row.created_at,
+        ...(row.attachments ? { attachments: JSON.parse(row.attachments) as Attachment[] } : {}),
+        ...(row.mentions ? { mentions: JSON.parse(row.mentions) as MessageMention[] } : {}),
+      }
+    })
   }
 
   /**

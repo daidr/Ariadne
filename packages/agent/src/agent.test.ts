@@ -1150,7 +1150,7 @@ describe('transcript to model messages', () => {
         {
           seq: 2,
           kind: 'note',
-          note: { type: 'user-in-thread', threadId: 't', content: '插一句' },
+          note: { type: 'user-in-thread', threadId: 't', messageId: 'msg_1', content: '插一句' },
         },
         { seq: 3, kind: 'tool', toolCallId: 'a', name: 'x', content: 'ok', isError: false },
       ],

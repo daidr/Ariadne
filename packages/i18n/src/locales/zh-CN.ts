@@ -284,6 +284,8 @@ export const zhCN = {
   'block.blank': '未填',
   'block.withdrawn': '已撤回：{reason}',
   'message.fromCoordinator': '协调器的消息',
+  'message.relayedTo': '已发送到讨论串',
+  'message.relayedToMany': '已发送到 {count} 个讨论串',
   'message.fromAutopilot': '托管推进的消息',
   'conversation.working': '工作中…',
   'conversation.coordinatorWorking': '协调器工作中…',

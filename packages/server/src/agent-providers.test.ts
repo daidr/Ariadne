@@ -62,8 +62,8 @@ test('a coordinator runs on an agent program across steps and turns', async () =
     .map((m) => m.content)
   expect(replies).toHaveLength(2)
   expect(replies[0]).toMatch(/^turn 1: /)
-  // Same program, second turn: it was handed only the new message.
-  expect(replies[1]).toMatch(/^turn 2: {2}len 5 /)
+  // Same program, second turn: it was handed only the new message ("again" and its id).
+  expect(replies[1]).toMatch(/^turn 2: {2}len 57 /)
   expect(provider.sessions()).toBe(1)
   // Its usage and the cost it reported are the conversation's.
   expect(app.getConversation(project.coordinatorId).usage.input).toBeGreaterThan(0)

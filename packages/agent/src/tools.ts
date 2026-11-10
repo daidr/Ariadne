@@ -1,5 +1,6 @@
 import {
   DomainError,
+  MAX_CITES,
   MAX_ROUTINES,
   nextRun,
   reviewReplies,
@@ -351,6 +352,28 @@ const report: Tool = {
   },
 }
 
+/** The user's messages a relay passes along, by id. */
+const USER_MESSAGES = {
+  type: 'array',
+  items: { type: 'string' },
+  maxItems: MAX_CITES,
+  description:
+    'Ids of the user\'s messages to pass along as they wrote them (from [message msg_…] or message="msg_…"), with their images and files. The thread reads the user\'s own words and the user sees where their message went. Pass the messages a request comes from instead of retelling them; your text then adds only what the thread needs besides.',
+}
+
+/** The ids given for `userMessages`, checked as the model wrote them. */
+function userMessagesArg(args: Record<string, unknown>): string[] {
+  const value = args.userMessages
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.some((id) => typeof id !== 'string')) {
+    throw new ToolInputError('"userMessages" must be a list of message ids')
+  }
+  if (value.length > MAX_CITES) {
+    throw new ToolInputError(`"userMessages" takes at most ${MAX_CITES} ids`)
+  }
+  return value as string[]
+}
+
 const CREATE_THREAD_DESCRIPTION =
   'Open a thread for one piece of work and hand it a brief. The thread starts as soon as a slot is free. Brief it like a capable peer: the goal, what is known and where to start looking, the scope, and how it will be checked as done (the checks to run, what to show the user).'
 
@@ -366,6 +389,7 @@ function createThread(models: ModelChoice[]): Tool {
         properties: {
           title: { type: 'string', description: 'Three to six words, the goal first.' },
           brief: { type: 'string' },
+          userMessages: USER_MESSAGES,
           nodeId: {
             type: 'string',
             description:
@@ -401,6 +425,7 @@ function createThread(models: ModelChoice[]): Tool {
       }
       const title = str(args, 'title')
       const brief = str(args, 'brief')
+      const cites = userMessagesArg(args)
       // A thread never exists without its brief, which is all it has to go on.
       const thread = ctx.app.transaction(() => {
         const created = ctx.app.createThread(ctx.projectId, {
@@ -414,6 +439,7 @@ function createThread(models: ModelChoice[]): Tool {
           author: 'coordinator',
           kind: 'relay',
           content: brief,
+          cites,
         })
         return created
       })
@@ -426,11 +452,19 @@ const messageThread: Tool = {
   spec: {
     name: 'message_thread',
     description:
-      'Send a message into a thread: steer it, pass along what the user decided, or ask it to fix one of its messages. The thread works on it in its next turn.',
+      "Send a message into a thread: steer it, pass along the user's messages or what they decided, or ask it to fix one of its messages. The thread works on it in its next turn.",
     parameters: {
       type: 'object',
-      properties: { threadId: { type: 'string' }, content: { type: 'string' } },
-      required: ['threadId', 'content'],
+      properties: {
+        threadId: { type: 'string' },
+        content: {
+          type: 'string',
+          description:
+            'Your own words to the thread; may be left out when userMessages say it all.',
+        },
+        userMessages: USER_MESSAGES,
+      },
+      required: ['threadId'],
     },
   },
   run(args, ctx) {
@@ -439,11 +473,17 @@ const messageThread: Tool = {
     if (ctx.app.getThread(threadId).projectId !== ctx.projectId) {
       throw new DomainError('error.notFound', { what: threadId })
     }
+    const cites = userMessagesArg(args)
+    const content = typeof args.content === 'string' ? args.content : ''
+    if (!content.trim() && !cites.length) {
+      throw new ToolInputError('Pass "content", "userMessages" or both')
+    }
     ctx.app.postMessage(ctx.projectId, {
       conversationId: threadId,
       author: 'coordinator',
       kind: 'relay',
-      content: str(args, 'content'),
+      content,
+      cites,
     })
     return { content: 'Sent.' }
   },

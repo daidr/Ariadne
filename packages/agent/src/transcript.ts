@@ -7,6 +7,7 @@ import {
   type Attachment,
   type LineComment,
   type MessageMention,
+  type MessageView,
   type ReasoningRecord,
   type ReviewComment,
   type ReviewReply,
@@ -69,7 +70,7 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
     case 'answer':
       return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
-      return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}">\n${note.content}\n</user_wrote_in_thread>`
+      return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}" message="${note.messageId}">\n${note.content}\n</user_wrote_in_thread>`
     case 'wait-over': {
       const at = localTime(note.until)
       if (note.how === 'cancelled') {
@@ -274,6 +275,11 @@ export interface ChatOptions {
   keepReasoning?: (call: string) => boolean
   /** Read the long tool results up to here as cleared, as if a clearing said so. */
   clearUpTo?: number
+  /**
+   * Whether the user's messages carry their ids: the coordinator passes them on to threads
+   * by id.
+   */
+  messageIds?: boolean
 }
 
 /** Whether a result is long enough to be cleared, see `CLEARABLE_CHARS`. */
@@ -355,10 +361,7 @@ export function toChatMessages(
         const { message } = entry
         let chat: ModelMessage
         if (message.kind === 'relay') {
-          chat = {
-            role: 'user',
-            content: `<message_from_coordinator>\n${message.content}\n</message_from_coordinator>`,
-          }
+          chat = relayMessage(message, titleOf, options)
         } else {
           const files = attachedFiles(message.attachments, options)
           chat = {
@@ -369,6 +372,7 @@ export function toChatMessages(
               mentionsText(message.mentions),
               files.text,
               openAsksHint(entry.openAsks ?? []),
+              options.messageIds && message.author === 'user' ? `[message ${message.id}]` : '',
             ]
               .filter(Boolean)
               .join('\n\n'),
@@ -395,6 +399,43 @@ export function toChatMessages(
   }
   closeStep()
   return keepNewestImages(out)
+}
+
+/**
+ * What the coordinator sent a thread: the user's messages it passed along, in their own
+ * words with what came with them, then the coordinator's own note.
+ */
+function relayMessage(
+  message: MessageView,
+  titleOf: (threadId: string) => string,
+  options: ChatOptions,
+): ModelMessage {
+  const images: Attachment[] = []
+  const cited = message.cites.map((cite) => {
+    const files = attachedFiles(cite.attachments ?? [], options)
+    images.push(...files.images)
+    const where =
+      cite.conversationId === message.conversationId
+        ? 'in this thread'
+        : cite.conversationId.startsWith('thr_')
+          ? `in the thread "${titleOf(cite.conversationId)}"`
+          : 'to the coordinator'
+    const body = [cite.content, mentionsText(cite.mentions ?? []), files.text]
+      .filter(Boolean)
+      .join('\n\n')
+    return `<user_message wrote="${where}" at="${localTime(cite.at)}">\n${body}\n</user_message>`
+  })
+  const intro = cited.length
+    ? `The coordinator passed along the user's own words, exactly as they wrote them; treat them as the user speaking to you.\n${cited.join('\n')}\n`
+    : ''
+  const note = message.content.trim()
+    ? `<message_from_coordinator>\n${message.content}\n</message_from_coordinator>`
+    : ''
+  return {
+    role: 'user',
+    content: [intro, note].filter(Boolean).join('\n').trim(),
+    ...(images.length ? { images } : {}),
+  }
 }
 
 /** A round of the user's feedback on an artifact, item by item. */

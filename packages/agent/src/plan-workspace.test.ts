@@ -673,6 +673,74 @@ describe('triage', () => {
   })
 })
 
+describe("passing the user's messages along", () => {
+  test("the coordinator hands a thread the user's own words by id, and the thread reads them", async () => {
+    const project = app.createProject('P')
+    const there = app.createThread(project.id, { title: '写后端' })
+    const asked = app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '加个导出接口，记得用 CSV',
+    })
+    const threadInput: string[] = []
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') {
+        threadInput.push(request.messages.at(-1)!.content)
+        return say('好的')
+      }
+      if (request.messages.at(-1)?.role === 'tool') return say('交给了写后端')
+      // The coordinator reads which message it is.
+      expect(request.messages.at(-1)?.content).toBe(
+        `加个导出接口，记得用 CSV\n\n[message ${asked.id}]`,
+      )
+      return [
+        call('c1', 'message_thread', { threadId: there.id, userMessages: [asked.id] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    await startScheduler(model).idle()
+
+    const [relay] = app.listMessages(there.id)
+    expect(relay).toMatchObject({ kind: 'relay', content: '', cites: [{ messageId: asked.id }] })
+    expect(threadInput[0]).toContain('<user_message wrote="to the coordinator"')
+    expect(threadInput[0]).toContain('加个导出接口，记得用 CSV')
+    expect(threadInput[0]).not.toContain('<message_from_coordinator>')
+    expect(app.listMessages(project.coordinatorId)[0]!.relayedTo).toEqual([
+      { threadId: there.id, messageId: relay!.id },
+    ])
+  })
+
+  test("message_thread needs words or messages to send, and only ids of the user's messages", async () => {
+    const project = app.createProject('P')
+    const there = app.createThread(project.id, { title: '写后端' })
+    const results: string[] = []
+    const model = fakeModel((request, role) => {
+      if (role === 'thread') return say('')
+      const last = request.messages.at(-1)
+      if (last?.role === 'tool') {
+        results.push(...request.messages.filter((m) => m.role === 'tool').map((m) => m.content))
+        return say('')
+      }
+      return [
+        call('c1', 'message_thread', { threadId: there.id }),
+        call('c2', 'message_thread', { threadId: there.id, userMessages: 'msg_x' }),
+        call('c3', 'message_thread', { threadId: there.id, userMessages: ['msg_missing'] }),
+        { type: 'finish', reason: 'tool-calls' },
+      ]
+    })
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '开始',
+    })
+    await startScheduler(model).idle()
+    expect(results).toHaveLength(3)
+    expect(results[0]).toContain('Pass "content", "userMessages" or both')
+    expect(results[1]).toContain('"userMessages" must be a list of message ids')
+    expect(app.listMessages(there.id)).toEqual([])
+  })
+})
+
 describe('plan confirmation card', () => {
   test('a long reason or a large batch still makes a valid card, counting what it leaves out', () => {
     const changes = Array.from({ length: 2000 }, (_, i) => ({
