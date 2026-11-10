@@ -133,11 +133,13 @@ describe('a coordinator turn', () => {
     ])
   })
 
-  test('the reply shows as it is written; text beside a tool call is taken back', async () => {
+  test('the reply shows as it is written; text beside a tool call stays until the reply', async () => {
     const shown: (string | null)[] = []
     app.drafts.subscribe((update) =>
       shown.push(
-        update.draft ? `${update.draft.posted ? 'posted ' : ''}${update.draft.text}` : null,
+        update.draft
+          ? `${update.draft.posted ? 'posted ' : update.draft.held ? 'held ' : ''}${update.draft.text}`
+          : null,
       ),
     )
     const model = fakeModel((request) => {
@@ -169,10 +171,117 @@ describe('a coordinator turn', () => {
     expect(reply.content).toBe('现在没有在跑的 thread。\n\n要我开一个吗？')
     expect(shown).toEqual([
       '先看看有哪些 thread，再看计划图\n然后决定',
-      null,
+      'held 先看看有哪些 thread，再看计划图\n然后决定',
       '现在没有在跑的 thread。\n\n要我开一个吗？',
       'posted 现在没有在跑的 thread。\n\n要我开一个吗？',
     ])
+    expect(app.drafts.list()).toEqual([])
+  })
+
+  test('a reply the user saw stays when a tool call follows it', async () => {
+    const shown: (string | null)[] = []
+    const ids: string[] = []
+    app.drafts.subscribe((update) => {
+      shown.push(
+        update.draft ? `${update.draft.posted ? 'posted ' : ''}${update.draft.text}` : null,
+      )
+      if (update.draft) ids.push(update.draft.messageId)
+    })
+    // The answer, then the todo ticked off, then a turn that ends with nothing more to say.
+    const model = fakeModel((request) => {
+      if (!answered(request)) {
+        return [
+          { type: 'text', text: '没有在跑的 thread。\n\n' },
+          { type: 'text', text: '要我开一个吗？' },
+          { type: 'calling' },
+          { type: 'text', text: '不该出现' },
+          call('c1', 'update_todo', { items: [{ label: '看进度', status: 'done' }] }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return say('')
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+
+    const messages = app.listMessages(project.coordinatorId)
+    expect(messages.map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。\n\n要我开一个吗？',
+    ])
+    expect(shown).not.toContain(null)
+    expect(shown.at(-1)).toBe('posted 没有在跑的 thread。\n\n要我开一个吗？')
+    expect(new Set(ids)).toEqual(new Set([messages.at(-1)!.id]))
+    expect(app.drafts.list()).toEqual([])
+  })
+
+  test('text held beside tool calls gives way to the reply that follows', async () => {
+    const model = fakeModel((request) => {
+      const steps = request.messages.filter((m) => m.role === 'tool').length
+      if (steps === 0) {
+        return [
+          { type: 'text', text: '先看看有哪些 thread\n再看计划图' },
+          call('c1', 'list_threads', {}),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      if (steps === 1) {
+        // A step whose line never shows leaves the held text where it is.
+        return [
+          { type: 'text', text: '再看计划图' },
+          call('c2', 'read_plan', {}),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return say('没有在跑的 thread。')
+    })
+    const shown: (string | null)[] = []
+    app.drafts.subscribe((update) => shown.push(update.draft?.text ?? null))
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+
+    expect(shown.slice(0, -1)).not.toContain(null)
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。',
+    ])
+    expect(app.drafts.list()).toEqual([])
+  })
+
+  test('a stopped turn takes back the text it held', async () => {
+    let running: ReturnType<typeof startScheduler>
+    let project: ReturnType<Ariadne['createProject']>
+    const model = fakeModel((request) => {
+      if (!answered(request)) {
+        return [
+          { type: 'text', text: '第一行\n第二行' },
+          call('c1', 'list_threads', {}),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      expect(app.drafts.list()).toHaveLength(1)
+      running.cancel(project.coordinatorId)
+      return say('')
+    })
+    project = app.createProject('P')
+    running = startScheduler(model)
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await running.idle()
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual(['看看进度'])
     expect(app.drafts.list()).toEqual([])
   })
 

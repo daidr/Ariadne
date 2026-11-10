@@ -74,4 +74,52 @@ describe('reply drafts', () => {
     expect(seen.at(-1)).toBeNull()
     expect(drafts.list()).toEqual([])
   })
+
+  test('a shown draft is held when a tool call begins, until later text shows', () => {
+    vi.useFakeTimers()
+    const drafts = new ReplyDrafts(() => 1)
+    const seen = watch(drafts)
+    const first = drafts.start({ projectId: 'p', conversationId: 'c', messageId: 'msg_1' })
+    first.text('答案是这样。\n\n')
+    first.text('- 第一点')
+    first.hold()
+    first.text('不再变长')
+    expect(seen.at(-1)).toEqual({
+      messageId: 'msg_1',
+      text: '答案是这样。\n\n- 第一点',
+      startedAt: 1,
+      held: true,
+    })
+    expect(first.shown).toBe('答案是这样。\n\n- 第一点')
+    // The next step starts: what the user read stays while it writes one short line.
+    const second = drafts.start({ projectId: 'p', conversationId: 'c', messageId: 'msg_2' })
+    second.text('再看看')
+    second.hold()
+    expect(second.shown).toBeNull()
+    expect(first.shown).not.toBeNull()
+    const third = drafts.start({ projectId: 'p', conversationId: 'c', messageId: 'msg_3' })
+    third.text('新的回答\n第二行')
+    expect(seen.at(-1)).toEqual({ messageId: 'msg_3', text: '新的回答\n第二行', startedAt: 1 })
+    expect(first.shown).toBeNull()
+    // The one it took the place of changes nothing any more.
+    first.posted()
+    first.withdraw()
+    expect(drafts.list().map((update) => update.draft?.messageId)).toEqual(['msg_3'])
+  })
+
+  test('a held draft can be posted, and a stopped turn drops it', () => {
+    const drafts = new ReplyDrafts(() => 1)
+    const seen = watch(drafts)
+    const held = drafts.start({ projectId: 'p', conversationId: 'c', messageId: 'msg_1' })
+    held.text('第一行\n第二行')
+    held.hold()
+    held.posted()
+    expect(seen.at(-1)).toMatchObject({ messageId: 'msg_1', posted: true })
+    const again = drafts.start({ projectId: 'p', conversationId: 'c', messageId: 'msg_2' })
+    again.text('第一行\n第二行')
+    again.hold()
+    drafts.drop('c')
+    expect(seen.at(-1)).toBeNull()
+    expect(drafts.list()).toEqual([])
+  })
 })

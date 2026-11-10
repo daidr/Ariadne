@@ -32,8 +32,9 @@ export class TurnError extends Error {
  * sees it; what a failed attempt streamed is dropped. A request with no output for
  * `timeoutSeconds` is given up and counts as such an error. `null` when aborted.
  *
- * The text is handed to `draft` as it comes, until a tool call begins: then it is not the
- * answer, and the draft is taken back, as it is when an attempt fails. The arguments of
+ * The text is handed to `draft` as it comes, until a tool call begins: then a draft the user
+ * has seen is held for the caller to post, and one not shown yet is dropped. A failed attempt
+ * takes its draft back. The arguments of
  * tool calls are handed to `live` as they come, for the tools that show their work.
  */
 export async function requestStep(
@@ -93,7 +94,7 @@ export async function requestStep(
         }
         if ((part.type === 'calling' || part.type === 'tool-call') && !calling) {
           calling = true
-          draft?.withdraw()
+          draft?.hold()
         }
         if (part.type === 'tool-input') live?.input(part.call, part.name, part.arguments)
         if (part.type === 'text') {

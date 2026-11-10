@@ -175,6 +175,8 @@ export interface ReplyDraft {
   startedAt: number
   /** It was posted as `messageId`; the message itself follows in the log. */
   posted?: boolean
+  /** Its step went on to call tools: it no longer grows, and stays until later text takes its place. */
+  held?: boolean
 }
 
 /** A conversation's reply draft grew, was posted, or was taken back (`null`). */
@@ -189,8 +191,16 @@ export interface DraftHandle {
   readonly messageId: string
   /** More of the step's text. */
   text(piece: string): void
-  /** It is not the reply after all (a tool call began, or the attempt failed): forget it. */
+  /** The attempt failed, or the turn moves on without it: forget it. */
   withdraw(): void
+  /**
+   * A tool call began. A draft the user has seen stays as it is, so text they read does not
+   * go away under them: until the next text that shows takes its place, or the turn posts it
+   * or ends. One not shown yet is forgotten.
+   */
+  hold(): void
+  /** What the user sees of it now, or null while nothing shows. */
+  readonly shown: string | null
   /** It was posted as `messageId`; calls after this change nothing. */
   posted(): void
 }
@@ -251,6 +261,7 @@ export class ReplyDrafts {
     let text = ''
     let startedAt = 0
     let over = false
+    let held = false
     const current = () => this.drafts.get(key)?.id === id
     // Only its own timer: a draft that took its place has one of its own.
     const clear = () => {
@@ -269,24 +280,27 @@ export class ReplyDrafts {
         messageId: input.messageId,
         text,
         startedAt,
-        ...(posted ? { posted: true } : {}),
+        ...(posted ? { posted: true } : held ? { held: true } : {}),
       }
       const update = { projectId: input.projectId, conversationId: key, draft }
       if (posted) this.drafts.delete(key)
       else this.drafts.set(key, { id, update })
       this.emit(update)
     }
-    // A draft of an earlier step still shown is gone with this one.
-    this.drop(key)
+    // A draft of an earlier step still being written is gone with this one; a held one stays
+    // until this one shows.
+    if (!this.drafts.get(key)?.update.draft?.held) this.drop(key)
     return {
       messageId: input.messageId,
       text: (piece) => {
-        if (over || !piece) return
+        if (over || held || !piece) return
         if (!text) startedAt = this.now()
         text += piece
         if (!draftShows(text)) return
         if (!current()) {
-          // Shown from its first lines at once, then as it grows.
+          // Shown from its first lines at once, then as it grows; a held one goes for it.
+          clearTimeout(this.timers.get(key))
+          this.timers.delete(key)
           this.drafts.set(key, { id, update: { ...input, draft: null } })
           set(false)
           return
@@ -303,7 +317,22 @@ export class ReplyDrafts {
       withdraw: () => {
         if (over) return
         text = ''
+        held = false
         drop()
+      },
+      hold: () => {
+        if (over || held) return
+        if (!current()) {
+          text = ''
+          return
+        }
+        held = true
+        clear()
+        // All of what it says, marked as held.
+        set(false)
+      },
+      get shown() {
+        return !over && current() ? text : null
       },
       posted: () => {
         if (over) return
