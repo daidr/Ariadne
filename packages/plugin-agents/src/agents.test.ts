@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { acp, acpModels, forOwnTools } from './acp'
 import { ToolBridge } from './bridge'
-import { claudeCode } from './claude-code'
+import { claudeCode, claudeModels } from './claude-code'
 import { codex } from './codex'
 import { fingerprint, renderHistory } from './history'
 import { splitCommand } from './process'
@@ -487,10 +487,20 @@ describe('found on this machine', () => {
   test('Claude Code says which models its account can use', async () => {
     const made = provider(claudeCode as AgentKind<never>)
     expect(await made.models!({ command: fake('claude') } as never)).toEqual([
-      { id: 'default', title: 'Big 2', resolves: 'claude-big-2' },
-      { id: 'big', title: 'Big 2', resolves: 'claude-big-2' },
-      { id: 'small', title: 'Small 1', resolves: 'claude-small-1' },
-      { id: 'claude-big-1', title: 'Big 1' },
+      { id: 'default', title: 'Big 2', resolves: 'claude-big-2', efforts: ['low', 'high'] },
+      {
+        id: 'big',
+        title: 'Big 2',
+        resolves: 'claude-big-2',
+        efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      { id: 'small', title: 'Small 1', resolves: 'claude-small-1', efforts: [] },
+      // Left out by a version that tells them: it takes none.
+      { id: 'claude-big-1', title: 'Big 1', efforts: [] },
+    ])
+    // An older version tells none of them: nothing is known.
+    expect(claudeModels([{ value: 'opus', displayName: 'Opus' }])).toEqual([
+      { id: 'opus', title: 'Opus' },
     ])
   })
 
@@ -498,7 +508,7 @@ describe('found on this machine', () => {
     const made = provider(codex as AgentKind<never>)
     expect(await made.models!({ command: fake('codex') } as never)).toEqual([
       { id: 'default' },
-      { id: 'gpt-big', title: 'GPT Big' },
+      { id: 'gpt-big', title: 'GPT Big', efforts: ['low', 'high', 'xhigh'] },
       { id: 'gpt-small' },
     ])
   })

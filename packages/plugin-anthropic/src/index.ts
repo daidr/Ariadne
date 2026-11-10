@@ -1,5 +1,7 @@
 import {
   definePlugin,
+  EFFORTS,
+  type ListedModel,
   httpErrorPart,
   incompletePart,
   readServerSentEvents,
@@ -19,6 +21,31 @@ import {
   type ReasoningBlock,
   withExtraBody,
 } from '@ariadne/plugin-sdk'
+
+/** A model as the service lists it. */
+interface ServiceModel {
+  id?: unknown
+  display_name?: unknown
+  capabilities?: {
+    effort?: { supported?: unknown } & Record<string, { supported?: unknown } | unknown>
+  }
+}
+
+/** A listed model with its name and, when the service says, the efforts it takes. */
+export function listed(model: ServiceModel): ListedModel {
+  const id = String(model.id)
+  const title = typeof model.display_name === 'string' ? model.display_name.trim() : ''
+  const effort = model.capabilities?.effort
+  const levels =
+    effort && typeof effort === 'object'
+      ? EFFORTS.filter(
+          (level) => (effort[level] as { supported?: unknown } | undefined)?.supported === true,
+        )
+      : []
+  // Levels it names; none at all when it says effort cannot be set; else nothing is known.
+  const efforts = levels.length ? levels : effort?.supported === false ? [] : undefined
+  return { id, ...(title && title !== id ? { title } : {}), ...(efforts ? { efforts } : {}) }
+}
 
 export interface AnthropicSettings {
   baseUrl: string
@@ -362,8 +389,10 @@ export const anthropicProvider: ModelProvider<AnthropicSettings> = {
       ...(options.signal ? { signal: options.signal } : {}),
     })
     if (!response.ok) throw new Error(await refusalText(response))
-    const body = (await response.json()) as { data?: { id?: unknown }[] }
-    return (body.data ?? []).flatMap((model) => (typeof model.id === 'string' ? [model.id] : []))
+    const body = (await response.json()) as { data?: ServiceModel[] }
+    return (body.data ?? []).flatMap((model) =>
+      typeof model.id === 'string' ? [listed(model)] : [],
+    )
   },
   find({ env }) {
     const apiKey = env.ANTHROPIC_API_KEY?.trim()

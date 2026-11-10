@@ -27,6 +27,7 @@ import {
 import type { Locale } from '@ariadne/i18n'
 import {
   EFFORTS,
+  effortWithin,
   type Effort,
   type FoundFrom,
   type LocalizedText,
@@ -70,6 +71,7 @@ function infoFields(info: ModelInfo | undefined): Partial<ModelConfig> {
     ...(info.images === false ? { images: false as const } : {}),
     ...(info.maxTokens ? { maxTokens: info.maxTokens } : {}),
     ...(info.price ? { price: info.price } : {}),
+    ...(info.efforts ? { efforts: info.efforts } : {}),
   }
 }
 
@@ -104,6 +106,11 @@ export interface ModelConfig {
   maxTokens?: number
   /** What it costs per million tokens, for estimates; none without. */
   price?: ModelPrice
+  /**
+   * The efforts it accepts, least first, as its service or the catalog said when it was
+   * picked; empty when how hard it thinks cannot be set. The common ones without.
+   */
+  efforts?: Effort[]
 }
 
 /** The most a price per million tokens may be: more is a typo. */
@@ -576,6 +583,14 @@ export class SettingsStore {
         throw new BadRequest(`${at}.maxTokens`)
       }
       const price = parsePrice(entry.price, `${at}.price`)
+      const efforts = entry.efforts
+      if (
+        efforts !== undefined &&
+        efforts !== null &&
+        !(Array.isArray(efforts) && efforts.every((e) => EFFORTS.includes(e)))
+      ) {
+        throw new BadRequest(`${at}.efforts`)
+      }
       return {
         id: entry.id,
         provider: entry.provider as string,
@@ -585,6 +600,7 @@ export class SettingsStore {
         ...(note ? { note } : {}),
         ...(entry.images === false ? { images: false as const } : {}),
         ...(typeof most === 'number' ? { maxTokens: most } : {}),
+        ...(Array.isArray(efforts) ? { efforts: EFFORTS.filter((e) => efforts.includes(e)) } : {}),
       }
     })
     const roles = (body.roles ?? {}) as Partial<Record<Role, Partial<RoleConfig>>>
@@ -1213,7 +1229,9 @@ export class SettingsStore {
 
   /** A model setting as a conversation of `role` talks to it. */
   private resolveConfig(role: Role, chosen: ModelConfig): ResolvedModel | null {
-    const effort = this.effortFor(role)
+    // As near to the role's as the model accepts.
+    const wanted = this.effortFor(role)
+    const effort = wanted ? effortWithin(wanted, chosen.efforts) : null
     const config = this.config.models.providers.find((p) => p.id === chosen.provider)
     if (!config) return null
     const provider = this.host.models.get(config.kind)

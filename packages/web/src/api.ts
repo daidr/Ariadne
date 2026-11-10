@@ -353,6 +353,8 @@ export interface ModelEntry {
   maxTokens?: number
   /** What it costs per million tokens, for estimates. */
   price?: ModelPrice
+  /** The efforts it accepts, least first; empty when none. The common ones without. */
+  efforts?: Effort[]
 }
 
 /** What the public catalog knows of a model, each only where it says. */
@@ -363,6 +365,7 @@ export interface ModelInfo {
   price?: ModelPrice
   tools?: boolean
   released?: string
+  efforts?: Effort[]
 }
 
 /** A model a provider lists, with what the catalog knows of it. */
@@ -412,7 +415,7 @@ export interface ModelSettingsInput {
   showCost: boolean
 }
 
-export type Effort = 'low' | 'medium' | 'high'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export interface RoleInput {
   model: string | null

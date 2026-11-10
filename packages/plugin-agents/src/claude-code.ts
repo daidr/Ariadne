@@ -1,4 +1,4 @@
-import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
+import { EFFORTS, type ListedModel, type ModelRequest } from '@ariadne/plugin-sdk'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SERVER_NAME } from './bridge'
@@ -84,6 +84,19 @@ interface OfferedModel {
   value?: unknown
   displayName?: unknown
   resolvedModel?: unknown
+  supportsEffort?: unknown
+  supportedEffortLevels?: unknown
+}
+
+/**
+ * The efforts it says a model takes, least first. A version that tells them (`reports`)
+ * leaves them out for a model that takes none; an older one tells nothing.
+ */
+function effortsOf(model: OfferedModel, reports: boolean): ListedModel['efforts'] {
+  const levels = model.supportedEffortLevels
+  if (model.supportsEffort === false || (reports && !Array.isArray(levels))) return []
+  if (!Array.isArray(levels)) return undefined
+  return EFFORTS.filter((effort) => levels.includes(effort))
 }
 
 const trimmed = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -103,16 +116,19 @@ export function claudeModels(offered: OfferedModel[]): ListedModel[] {
     )
     return same ? trimmed(same.displayName) : ''
   }
+  const reports = offered.some((model) => Array.isArray(model.supportedEffortLevels))
   return offered.flatMap((model) => {
     const id = trimmed(model.value)
     if (!id) return []
     const title = titleOf(model)
     const resolves = trimmed(model.resolvedModel)
+    const efforts = effortsOf(model, reports)
     return [
       {
         id,
         ...(title && title !== id ? { title } : {}),
         ...(resolves && resolves !== id ? { resolves } : {}),
+        ...(efforts ? { efforts } : {}),
       },
     ]
   })

@@ -555,6 +555,8 @@ export const en: Record<MessageKey, string> = {
   'settings.effort.low': 'Low',
   'settings.effort.medium': 'Medium',
   'settings.effort.high': 'High',
+  'settings.effort.xhigh': 'Extra high',
+  'settings.effort.max': 'Max',
   'settings.notify': 'Browser notifications',
   'settings.notifyDenied': 'The browser blocked notifications; allow them in its site settings',
   'settings.notifyUnsupported': 'This browser does not support notifications',
