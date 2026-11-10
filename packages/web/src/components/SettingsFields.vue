@@ -52,12 +52,7 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
         @update:model-value="(value) => (values[key] = value)"
       >
         <template v-if="field.secret && isSet(key)" #suffix>
-          <DouButton
-            class="clear-secret"
-            size="xs"
-            variant="ghost"
-            @click="emit('clearSecret', String(key))"
-          >
+          <DouButton size="xs" variant="ghost" @click="emit('clearSecret', String(key))">
             {{ t('settings.clearSecret') }}
           </DouButton>
         </template>
@@ -82,10 +77,3 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
     </DouFormItem>
   </template>
 </template>
-
-<style scoped>
-/* Sits inside the input's edge, the same distance from it on three sides. */
-.clear-secret {
-  margin-inline-end: calc(2px - var(--dou-input-padding-x));
-}
-</style>

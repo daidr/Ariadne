@@ -89,10 +89,7 @@ async function remove(projectId: string, threadId: string) {
             </DouButton>
             <template #content>
               {{ copied[0] }}
-              <!-- A link takes the page's text color, which a tooltip's surface inverts. -->
-              <DouLink :href="DEV_DRIVE" external style="--dou-link-tone: currentColor">
-                Dev Drive
-              </DouLink>
+              <DouLink :href="DEV_DRIVE" external>Dev Drive</DouLink>
               {{ copied[1] }}
             </template>
           </DouTooltip>
