@@ -1749,6 +1749,27 @@ export const transcriptProjection: Projection = {
         )
         break
       }
+      case 'project.source.set': {
+        // Set along with the project, before anything was said, it is in the instructions
+        // from the first turn. Set later, the coordinator hears it, and a new source wakes
+        // it: the user may have been asked for it and should not have to say so.
+        const coordinator = coordinatorOf(db, event.projectId)
+        if (!coordinator) break
+        const begun = db
+          .query<{ one: number }, [string]>(
+            "SELECT 1 AS one FROM transcript WHERE conversation_id = ? AND kind = 'message' LIMIT 1",
+          )
+          .get(coordinator)
+        if (!begun) break
+        const set = event.data.source !== null
+        addEntry(
+          db,
+          event,
+          { conversationId: coordinator, kind: 'note', payload: { type: 'source-changed', set } },
+          set,
+        )
+        break
+      }
       case 'plan.revised': {
         const coordinator = coordinatorOf(db, event.projectId)
         if (!coordinator || event.data.author !== 'user') break

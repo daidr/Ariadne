@@ -103,6 +103,10 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return note.removed
         ? `<instructions_changed path="${note.path}">${note.path} was removed from your workspace; its conventions no longer apply.</instructions_changed>`
         : `<instructions_changed path="${note.path}">${note.path} in your workspace changed; your instructions now hold its new version.</instructions_changed>`
+    case 'source-changed':
+      return note.set
+        ? '<project_source_changed>\nThe user set the project\'s source; "Project source" in your instructions now says what and where it is, and new threads work in it. If something you said or asked earlier waited on it, go on with that now; otherwise end the turn with no text.\n</project_source_changed>'
+        : "<project_source_changed>\nThe user removed the project's source: there are no files to look at, and new threads get no workspace.\n</project_source_changed>"
     case 'reference-ended':
       return note.now === null
         ? `<reference_ended source="${note.name}">The user took back source "${note.name}": you can no longer read it. Go on without it, and do not ask for it again unless they bring it up.</reference_ended>`

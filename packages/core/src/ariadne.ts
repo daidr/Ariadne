@@ -140,7 +140,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 58
+export const PROJECTION_VERSION = 59
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -3202,6 +3202,9 @@ export class Ariadne {
 
   setProjectSource(projectId: string, source: ProjectSource | null): ProjectView {
     this.projectRow(projectId)
+    // Saving the source it already has (say, only its secrets changed) is no change: the
+    // coordinator is not told, and what was found out about it stays.
+    if (sameValue(this.getProject(projectId).source, source)) return this.getProject(projectId)
     this.store.append([{ type: 'project.source.set', projectId, data: { source } }])
     return this.getProject(projectId)
   }
@@ -4701,3 +4704,19 @@ export class Ariadne {
 }
 
 export type { AnyStoredEvent }
+
+/** Equal as JSON values, whatever order their keys were written in. */
+function sameValue(a: unknown, b: unknown): boolean {
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === 'object'
+        ? Object.fromEntries(
+            Object.entries(value)
+              .filter(([, v]) => v !== undefined)
+              .toSorted(([x], [y]) => (x < y ? -1 : 1))
+              .map(([k, v]) => [k, canonical(v)]),
+          )
+        : value
+  return JSON.stringify(canonical(a ?? null)) === JSON.stringify(canonical(b ?? null))
+}
