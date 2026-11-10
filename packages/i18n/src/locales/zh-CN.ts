@@ -530,6 +530,8 @@ export const zhCN = {
   'settings.effort.low': '低',
   'settings.effort.medium': '中',
   'settings.effort.high': '高',
+  'settings.effort.xhigh': '更高',
+  'settings.effort.max': '最高',
   'settings.notify': '浏览器通知',
   'settings.notifyDenied': '浏览器拒绝了通知，要在浏览器的网站设置里允许',
   'settings.notifyUnsupported': '这个浏览器不支持通知',

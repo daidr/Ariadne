@@ -30,7 +30,7 @@ const catalog = {
         release_date: '2025-01-01',
       },
       'big-2-mini': { tool_call: true, release_date: '2026-06-01' },
-      'talk-only': { tool_call: false, release_date: '2026-07-01' },
+      'talk-only': { tool_call: false, release_date: '2026-07-01', reasoning: false },
     },
   },
   reseller: { models: { 'x/big-2': { cost: { input: 3, output: 9 } } } },
@@ -127,6 +127,8 @@ describe('the model catalog', () => {
     expect(info.get('big-1')?.maxTokens).toBeUndefined()
     expect(info.get('big-2-mini')).toEqual({ tools: true, released: '2026-06-01' })
     expect(info.has('unknown')).toBe(false)
+    // A model that does not reason has no effort to set.
+    expect((await prices().describe(['talk-only'])).get('talk-only')?.efforts).toEqual([])
     // The service the address names goes first; what it leaves out comes from the others.
     const hinted = (await prices().describe(['big-2'], 'other https://reseller.test')).get('big-2')
     expect(hinted).toMatchObject({ price: { input: 3, output: 9 }, contextTokens: 400_000 })
@@ -191,7 +193,8 @@ describe('the model form', () => {
           program: true,
           settings: { type: 'object', properties: {} },
           models: async () => [
-            { id: 'default', title: 'Big 2', resolves: 'big-2' },
+            { id: 'default', title: 'Big 2', resolves: 'big-2', efforts: ['low', 'max'] },
+            { id: 'quiet', efforts: [] },
             'big-1',
             { id: 'big', title: 'Big 2', resolves: 'big-2' },
             'big',
@@ -205,15 +208,24 @@ describe('the model form', () => {
       body: { provider: { kind: 'agentish', settings: {} } },
     })
     const body = (await listed.json()) as {
-      models: { id: string; title?: string; info?: { contextTokens?: number } }[]
+      models: {
+        id: string
+        title?: string
+        info?: { contextTokens?: number; efforts?: string[] }
+      }[]
     }
     expect(body.models.map(({ id, title }) => ({ id, title }))).toEqual([
       { id: 'default', title: 'Big 2' },
+      { id: 'quiet', title: undefined },
       { id: 'big-1', title: undefined },
       { id: 'big', title: 'Big 2' },
     ])
+    // What the service says it accepts goes with what the catalog knows.
+    expect(body.models[0]?.info).toMatchObject({ contextTokens: 400_000, efforts: ['low', 'max'] })
+    expect(body.models[1]?.info).toEqual({ efforts: [] })
     expect(body.models[0]?.info?.contextTokens).toBe(400_000)
-    expect(body.models[1]?.info?.contextTokens).toBe(200_000)
+    expect(body.models[2]?.info?.contextTokens).toBe(200_000)
+    expect(body.models[2]?.info?.efforts).toBeUndefined()
 
     // Taken into use, it starts on what the program itself is set to.
     const used = await call('/api/settings/found/use', {
@@ -221,7 +233,11 @@ describe('the model form', () => {
       body: { id: 'agentish:agentish' },
     })
     const saved = (await used.json()) as { models: { model: string; contextTokens?: number }[] }
-    expect(saved.models[0]).toMatchObject({ model: 'default', contextTokens: 400_000 })
+    expect(saved.models[0]).toMatchObject({
+      model: 'default',
+      contextTokens: 400_000,
+      efforts: ['low', 'max'],
+    })
   })
 
   test('a catalog that cannot be read still lists the models', async () => {

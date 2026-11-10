@@ -862,7 +862,7 @@ export interface TraceRequest {
   purpose: 'step' | 'summary' | 'research'
   provider: string | null
   model: string | null
-  effort: 'low' | 'medium' | 'high' | null
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
   startedAt: number
   firstOutputAt: number | null
   finishedAt: number
@@ -915,7 +915,7 @@ export interface TraceRequestDetail {
   messages: TraceMessage[]
   /** The tool definitions it was offered. */
   tools: { name: string; description: string; parameters: Record<string, unknown> }[]
-  effort: 'low' | 'medium' | 'high' | null
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
   /** What it went with besides the messages: provider kind, model and settings without secrets. */
   call: { provider: string; model: string; settings: Record<string, unknown> } | null
   /** The body the provider sent, when its plugin can say; credentials are not in it. */

@@ -1183,15 +1183,22 @@ export function createHandler({
   const describe = (models: string[], hint: string): Promise<Map<string, ModelInfo>> =>
     prices.describe(models, hint).catch(() => new Map<string, ModelInfo>())
 
-  /** What the catalog knows of listed models, an alias by the model it stands for. */
+  /**
+   * What the catalog knows of listed models, an alias by the model it stands for, and with
+   * what the service says of them: `known` from the catalog alone, to order them by.
+   */
   const describeListed = async (listed: ListedModel[], hint: string) => {
     const looked = await describe([...new Set(listed.map((m) => m.resolves ?? m.id))], hint)
+    const known = new Map<string, ModelInfo>()
     const info = new Map<string, ModelInfo>()
     for (const m of listed) {
       const facts = looked.get(m.resolves ?? m.id)
-      if (facts) info.set(m.id, facts)
+      if (facts) known.set(m.id, facts)
+      // The service knows better than the catalog what its models accept.
+      if (facts || m.efforts)
+        info.set(m.id, { ...facts, ...(m.efforts ? { efforts: m.efforts } : {}) })
     }
-    return info
+    return { known, info }
   }
 
   // The models a provider in the form can use, each with what the catalog knows of it, so
@@ -1219,12 +1226,12 @@ export function createHandler({
         502,
       )
     }
-    const info = await describeListed(listed, draft.hint)
+    const { known, info } = await describeListed(listed, draft.hint)
     const titles = new Map(listed.flatMap((m) => (m.title ? [[m.id, m.title] as const] : [])))
     const ids = listed.map((m) => m.id)
     // An agent program lists its models in its own order, `default` first.
     return json({
-      models: (draft.provider.program ? ids : inOrder(ids, info)).map((id) => ({
+      models: (draft.provider.program ? ids : inOrder(ids, known)).map((id) => ({
         id,
         ...(titles.has(id) ? { title: titles.get(id) } : {}),
         ...(info.has(id) ? { info: info.get(id) } : {}),
@@ -1285,10 +1292,10 @@ export function createHandler({
         detail: error instanceof Error ? error.message : String(error),
       })
     }
-    const info = await describeListed(listed, hint)
+    const { known, info } = await describeListed(listed, hint)
     const ids = listed.map((m) => m.id)
     // An agent program starts on what it is itself set to.
-    const model = provider.program && ids.includes('default') ? 'default' : suggestModel(ids, info)
+    const model = provider.program && ids.includes('default') ? 'default' : suggestModel(ids, known)
     if (!model) throw new DomainError('error.modelNone')
     const saved = settings.useFound(setup, model, info.get(model))
     const resolved = settings.resolveSaved(saved)

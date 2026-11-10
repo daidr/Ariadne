@@ -26,6 +26,9 @@ import {
   type Concurrency,
   type Currency,
   type Effort,
+  COMMON_EFFORTS,
+  EFFORTS,
+  effortWithin,
   type ListedModel,
   type ModelInfo,
   type ModelKind,
@@ -84,6 +87,8 @@ interface DraftModel {
   described: string
   /** What the catalog last filled in, untouched since; `null` for the user's own values. */
   filled: string | null
+  /** The efforts it accepts, as its service or the catalog said; `null` when unknown. */
+  efforts: Effort[] | null
 }
 
 const kinds = ref<ModelKind[]>([])
@@ -148,13 +153,38 @@ const fallbackOptions = computed(() => [
   { value: '', label: t('settings.fallbackNone') },
   ...modelOptions.value,
 ])
-const effortOptions = computed(() => [
+/** The efforts the model `id` accepts, as its service or the catalog said; `null` unknown. */
+const toldOf = (id: string | null): readonly Effort[] | null =>
+  models.value.find((model) => model.id === id)?.efforts ?? null
+// The coordinator's model is the threads' unless it has its own.
+const threadTold = computed(() => toldOf(threadModel.value ?? models.value[0]?.id ?? null))
+const coordinatorTold = computed(() =>
+  coordinatorModel.value ? toldOf(coordinatorModel.value) : threadTold.value,
+)
+/**
+ * What may be picked: what the model accepts, the common ones when unknown, and then also
+ * what is picked already (it may well take it; the server asks the nearest it does).
+ */
+const effortOptionsOf = (told: readonly Effort[] | null, picked: Effort | '') => [
   { value: '', label: t('settings.effort.default') },
-  ...(['low', 'medium', 'high'] as const).map((effort) => ({
-    value: effort,
-    label: t(`settings.effort.${effort}`),
-  })),
-])
+  ...EFFORTS.filter(
+    (effort) => (told ?? COMMON_EFFORTS).includes(effort) || (!told && effort === picked),
+  ).map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
+]
+const threadEffortOptions = computed(() => effortOptionsOf(threadTold.value, threadEffort.value))
+const coordinatorEffortOptions = computed(() =>
+  effortOptionsOf(coordinatorTold.value, coordinatorEffort.value),
+)
+// A model known not to take what was picked: the nearest it does.
+watch([threadTold, threadEffort], ([told, effort]) => {
+  if (told && effort && !told.includes(effort))
+    threadEffort.value = effortWithin(effort, told) ?? ''
+})
+watch([coordinatorTold, coordinatorEffort], ([told, effort]) => {
+  if (told && effort && !told.includes(effort)) {
+    coordinatorEffort.value = effortWithin(effort, told) ?? ''
+  }
+})
 
 function load(settings: ModelSettings) {
   applyModelSettings(settings)
@@ -191,6 +221,7 @@ function load(settings: ModelSettings) {
     lookError: null,
     described: model.model,
     filled: null,
+    efforts: model.efforts ?? null,
   }))
   showCost.value = settings.showCost
   threadModel.value = settings.roles.thread.model
@@ -200,6 +231,24 @@ function load(settings: ModelSettings) {
   researchModel.value = settings.roles.research.model ?? ''
   fallback.value = settings.roles.thread.fallback ?? settings.roles.coordinator.fallback ?? ''
   hiddenRoles.value = { triage: settings.roles.triage, research: settings.roles.research }
+  learnEfforts()
+}
+
+/**
+ * Models saved before their efforts were known learn them from what their provider lists,
+ * so the effort offered is what each takes.
+ */
+function learnEfforts() {
+  for (const provider of providers.value) {
+    const untold = modelsOf(provider).filter((model) => model.efforts === null)
+    if (!untold.length) continue
+    void listed(provider).then((all) => {
+      for (const model of untold) {
+        const efforts = all.find((entry) => entry.id === model.model.trim())?.info?.efforts
+        if (efforts && model.efforts === null) model.efforts = efforts
+      }
+    })
+  }
 }
 
 /** Some model has a price, so usage can show what it cost. */
@@ -305,6 +354,7 @@ function addModel(provider: string) {
     lookError: null,
     described: '',
     filled: null,
+    efforts: null,
   })
   presetModel(models.value.at(-1)!)
   threadModel.value ??= id
@@ -387,6 +437,7 @@ const filledOf = (model: DraftModel) =>
   ])
 
 function fill(model: DraftModel, info: ModelInfo | null) {
+  model.efforts = info?.efforts ?? null
   model.contextK = info?.contextTokens ? Math.floor(info.contextTokens / 1000) : null
   model.images = info?.images !== false
   model.maxTokens = info?.maxTokens ?? null
@@ -403,6 +454,7 @@ function fill(model: DraftModel, info: ModelInfo | null) {
  * another model's; what the user typed in themselves stays.
  */
 function unknown(model: DraftModel) {
+  model.efforts = null
   if (model.filled !== null && model.filled === filledOf(model)) fill(model, null)
   model.filled = null
 }
@@ -528,6 +580,7 @@ async function saveModels(): Promise<boolean> {
         ...(model.images ? {} : { images: false as const }),
         ...(model.note.trim() ? { note: model.note.trim() } : {}),
         ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}),
+        ...(model.efforts ? { efforts: model.efforts } : {}),
         ...(model.priceInput !== null && model.priceOutput !== null
           ? {
               price: {
@@ -809,12 +862,15 @@ async function saveModels(): Promise<boolean> {
           <section v-if="modelOptions.length || concurrency" class="settings-section">
             <DouText weight="medium">{{ t('settings.part.roles') }}</DouText>
             <DouForm layout="vertical" size="sm">
-              <div v-if="modelOptions.length === 1" class="settings-row">
+              <div
+                v-if="modelOptions.length === 1 && threadTold?.length !== 0"
+                class="settings-row"
+              >
                 <DouFormItem :label="t('settings.threadEffort')" class="settings-grow">
-                  <DouSelect v-model="threadEffort" :options="effortOptions" />
+                  <DouSelect v-model="threadEffort" :options="threadEffortOptions" />
                 </DouFormItem>
                 <DouFormItem :label="t('settings.coordinatorEffort')" class="settings-grow">
-                  <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                  <DouSelect v-model="coordinatorEffort" :options="coordinatorEffortOptions" />
                 </DouFormItem>
               </div>
               <template v-else-if="several">
@@ -822,16 +878,24 @@ async function saveModels(): Promise<boolean> {
                   <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
                     <DouSelect v-model="threadModel" :options="modelOptions" />
                   </DouFormItem>
-                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                    <DouSelect v-model="threadEffort" :options="effortOptions" />
+                  <DouFormItem
+                    v-if="threadTold?.length !== 0"
+                    :label="t('settings.effort')"
+                    class="settings-effort"
+                  >
+                    <DouSelect v-model="threadEffort" :options="threadEffortOptions" />
                   </DouFormItem>
                 </div>
                 <div class="settings-row">
                   <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
                     <DouSelect v-model="coordinatorModel" :options="coordinatorOptions" />
                   </DouFormItem>
-                  <DouFormItem :label="t('settings.effort')" class="settings-effort">
-                    <DouSelect v-model="coordinatorEffort" :options="effortOptions" />
+                  <DouFormItem
+                    v-if="coordinatorTold?.length !== 0"
+                    :label="t('settings.effort')"
+                    class="settings-effort"
+                  >
+                    <DouSelect v-model="coordinatorEffort" :options="coordinatorEffortOptions" />
                   </DouFormItem>
                 </div>
                 <div class="settings-row">

@@ -90,7 +90,20 @@ for await (const message of lines()) {
       break
     case 'model/list': {
       const pages = [
-        [{ id: 'm1', model: 'gpt-big', displayName: 'GPT Big', isDefault: true }],
+        [
+          {
+            id: 'm1',
+            model: 'gpt-big',
+            displayName: 'GPT Big',
+            isDefault: true,
+            supportedReasoningEfforts: [
+              { reasoningEffort: 'minimal', description: '' },
+              { reasoningEffort: 'low', description: '' },
+              { reasoningEffort: 'high', description: '' },
+              { reasoningEffort: 'xhigh', description: '' },
+            ],
+          },
+        ],
         [{ id: 'm2', model: 'gpt-small', displayName: 'gpt-small' }],
       ]
       const page = message.params.cursor ? 1 : 0

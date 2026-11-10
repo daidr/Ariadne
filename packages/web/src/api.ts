@@ -353,6 +353,8 @@ export interface ModelEntry {
   maxTokens?: number
   /** What it costs per million tokens, for estimates. */
   price?: ModelPrice
+  /** The efforts it accepts, least first; empty when none. The common ones without. */
+  efforts?: Effort[]
 }
 
 /** What the public catalog knows of a model, each only where it says. */
@@ -363,6 +365,7 @@ export interface ModelInfo {
   price?: ModelPrice
   tools?: boolean
   released?: string
+  efforts?: Effort[]
 }
 
 /** A model a provider lists, with what the catalog knows of it. */
@@ -412,7 +415,26 @@ export interface ModelSettingsInput {
   showCost: boolean
 }
 
-export type Effort = 'low' | 'medium' | 'high'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Every effort, least first. */
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/** What a model is taken to accept when nobody says which efforts it does. */
+export const COMMON_EFFORTS: readonly Effort[] = ['low', 'medium', 'high']
+
+/**
+ * The effort a model that accepts `efforts` (the common ones when unknown) thinks at when
+ * `wanted` is asked: the nearest it accepts at or below it, else the least it accepts;
+ * `null` when it accepts none. The server picks the same way.
+ */
+export function effortWithin(wanted: Effort, efforts?: readonly Effort[] | null): Effort | null {
+  const accepted = efforts ?? COMMON_EFFORTS
+  if (accepted.includes(wanted)) return wanted
+  const rank = EFFORTS.indexOf(wanted)
+  const ranked = EFFORTS.filter((e) => accepted.includes(e))
+  return ranked.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? ranked[0] ?? null
+}
 
 export interface RoleInput {
   model: string | null

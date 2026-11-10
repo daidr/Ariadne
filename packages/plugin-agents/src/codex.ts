@@ -1,4 +1,4 @@
-import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
+import { EFFORTS, type ListedModel, type ModelRequest } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
@@ -59,6 +59,19 @@ interface CodexModel {
   id?: unknown
   model?: unknown
   displayName?: unknown
+  supportedReasoningEfforts?: unknown
+}
+
+/** The efforts it lists for a model that Ariadne has too (not its `none` or `minimal`). */
+function effortsOf(entry: CodexModel): ListedModel['efforts'] {
+  const listed = entry.supportedReasoningEfforts
+  if (!Array.isArray(listed)) return undefined
+  const names = listed.map((item: unknown) =>
+    typeof item === 'string'
+      ? item
+      : trimmed((item as { reasoningEffort?: unknown } | null)?.reasoningEffort),
+  )
+  return EFFORTS.filter((effort) => names.includes(effort))
 }
 
 const trimmed = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
@@ -69,7 +82,8 @@ export function codexModels(listed: CodexModel[]): ListedModel[] {
     const id = trimmed(entry.model) || trimmed(entry.id)
     if (!id) return []
     const title = trimmed(entry.displayName)
-    return [{ id, ...(title && title !== id ? { title } : {}) }]
+    const efforts = effortsOf(entry)
+    return [{ id, ...(title && title !== id ? { title } : {}), ...(efforts ? { efforts } : {}) }]
   })
 }
 

@@ -8,7 +8,26 @@ const server = Bun.serve({
     const url = new URL(request.url)
     seen = { path: url.pathname + url.search, key: request.headers.get('x-api-key') }
     return request.headers.get('x-api-key') === 'sk-1'
-      ? Response.json({ data: [{ id: 'claude-new' }, { id: 'claude-old' }, {}] })
+      ? Response.json({
+          data: [
+            {
+              id: 'claude-new',
+              display_name: 'Claude New',
+              capabilities: {
+                effort: {
+                  supported: true,
+                  low: { supported: true },
+                  high: { supported: true },
+                  max: { supported: true },
+                  xhigh: { supported: false },
+                },
+              },
+            },
+            { id: 'claude-old', capabilities: { effort: { supported: false } } },
+            { id: 'claude-older' },
+            {},
+          ],
+        })
       : Response.json({ error: { message: 'invalid x-api-key' } }, { status: 401 })
   },
 })
@@ -18,7 +37,11 @@ const context = (env: Record<string, string>) => ({ env, home: '/nowhere', which
 
 test('lists the models the key can use', async () => {
   const baseUrl = `http://127.0.0.1:${server.port}/`
-  expect(await provider.models!({ baseUrl, apiKey: 'sk-1' })).toEqual(['claude-new', 'claude-old'])
+  expect(await provider.models!({ baseUrl, apiKey: 'sk-1' })).toEqual([
+    { id: 'claude-new', title: 'Claude New', efforts: ['low', 'high', 'max'] },
+    { id: 'claude-old', efforts: [] },
+    { id: 'claude-older' },
+  ])
   expect(seen).toEqual({ path: '/v1/models?limit=1000', key: 'sk-1' })
   await expect(provider.models!({ baseUrl, apiKey: 'bad' })).rejects.toThrow('invalid x-api-key')
 })

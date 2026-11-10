@@ -323,7 +323,36 @@ describe('model settings', () => {
     // A role must name a model that is set up, and a known effort.
     const role = (thread: unknown) => ({ ...settings, roles: { ...settings.roles, thread } })
     expect(() => store.updateModels(role({ model: 'nope', effort: null }))).toThrow()
-    expect(() => store.updateModels(role({ model: 'm1', effort: 'max' }))).toThrow()
+    expect(() => store.updateModels(role({ model: 'm1', effort: 'huge' }))).toThrow()
+  })
+
+  test('a role thinks as near to its effort as its model accepts', () => {
+    const store = new SettingsStore(path, host)
+    const settings = provider({ baseUrl: '', apiKey: 'k' })
+    const withModels = (efforts: unknown, effort: string) =>
+      store.updateModels({
+        ...settings,
+        models: [{ id: 'm1', provider: 'p1', model: 'some-model', efforts }],
+        roles: { thread: { model: 'm1', effort }, coordinator: { model: null, effort: null } },
+      })
+    withModels(['low', 'medium', 'high', 'xhigh', 'max'], 'max')
+    expect(store.resolveModel('thread')?.effort).toBe('max')
+    expect(store.publicModels().models[0]?.efforts).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ])
+    // Unknown: the common ones; above them, the highest of them.
+    withModels(undefined, 'xhigh')
+    expect(store.resolveModel('thread')?.effort).toBe('high')
+    withModels(['medium', 'high'], 'low')
+    expect(store.resolveModel('thread')?.effort).toBe('medium')
+    // A model whose thinking cannot be set is asked nothing.
+    withModels([], 'high')
+    expect(store.resolveModel('thread')?.effort).toBeUndefined()
+    expect(() => withModels(['huge'], 'high')).toThrow()
   })
 
   test('a model’s price reaches the turn, is checked, and the cost switch is kept', () => {

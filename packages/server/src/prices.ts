@@ -1,4 +1,5 @@
 import type { ModelPrice } from '@ariadne/agent'
+import type { Effort } from '@ariadne/plugin-sdk'
 
 /**
  * The public catalog of models: their list prices (US dollars per million tokens), how
@@ -29,6 +30,7 @@ interface CatalogModel {
   limit?: { context?: number; output?: number }
   modalities?: { input?: string[] }
   tool_call?: boolean
+  reasoning?: boolean
   release_date?: string
 }
 type Catalog = Record<string, { id?: string; models?: Record<string, CatalogModel> }>
@@ -54,6 +56,11 @@ export interface ModelInfo {
   tools?: boolean
   /** The day it came out, `YYYY-MM-DD`. */
   released?: string
+  /**
+   * The efforts it accepts, least first: empty when how hard it thinks cannot be set.
+   * Left out when unknown, and the common ones are offered.
+   */
+  efforts?: Effort[]
 }
 
 const priced = (model: CatalogModel) =>
@@ -115,6 +122,7 @@ export class ModelCatalog {
       )
       const price = first((m) => (priced(m) ? priceOf(m) : undefined))
       const tools = first((m) => (typeof m.tool_call === 'boolean' ? m.tool_call : undefined))
+      const reasoning = first((m) => (typeof m.reasoning === 'boolean' ? m.reasoning : undefined))
       const released = first((m) =>
         typeof m.release_date === 'string' && /^\d{4}-\d{2}/.test(m.release_date)
           ? m.release_date
@@ -128,6 +136,8 @@ export class ModelCatalog {
         ...(price ? { price } : {}),
         ...(tools !== undefined ? { tools } : {}),
         ...(released ? { released } : {}),
+        // A model that does not reason has no effort to set; the catalog says no more.
+        ...(reasoning === false ? { efforts: [] } : {}),
       })
     }
     return out

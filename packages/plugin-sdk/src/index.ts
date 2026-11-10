@@ -230,9 +230,26 @@ export type ModelStreamPart =
     }
 
 /** How hard a model thinks before it answers. Without it the request asks nothing of it. */
-export type Effort = 'low' | 'medium' | 'high'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high']
+/** Every effort, least first. */
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/** What a model is taken to accept when nobody says which efforts it does. */
+export const COMMON_EFFORTS: readonly Effort[] = ['low', 'medium', 'high']
+
+/**
+ * The effort a model that accepts `efforts` (the common ones when unknown) thinks at when
+ * `wanted` is asked: the nearest it accepts at or below it, else the least it accepts.
+ * `null` when it accepts none: it is asked nothing.
+ */
+export function effortWithin(wanted: Effort, efforts?: readonly Effort[]): Effort | null {
+  const accepted = efforts ?? COMMON_EFFORTS
+  if (accepted.includes(wanted)) return wanted
+  const rank = EFFORTS.indexOf(wanted)
+  const ranked = EFFORTS.filter((e) => accepted.includes(e))
+  return ranked.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? ranked[0] ?? null
+}
 
 /** What the agent loop asks of a model provider for one response. */
 export interface ModelRequest {
@@ -291,6 +308,8 @@ export interface ListedModel {
    * public catalog is looked up by it.
    */
   resolves?: string
+  /** The efforts it accepts, least first; empty when how hard it thinks cannot be set. */
+  efforts?: Effort[]
 }
 
 /** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */
