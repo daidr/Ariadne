@@ -26,9 +26,6 @@ import {
   type Concurrency,
   type Currency,
   type Effort,
-  COMMON_EFFORTS,
-  EFFORTS,
-  effortWithin,
   type ListedModel,
   type ModelInfo,
   type ModelKind,
@@ -36,6 +33,7 @@ import {
   type ModelSettings,
 } from '../api'
 import { applyModelSettings } from '../store'
+import { effortsOf, effortWithin } from '../effort'
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
@@ -161,28 +159,23 @@ const threadTold = computed(() => toldOf(threadModel.value ?? models.value[0]?.i
 const coordinatorTold = computed(() =>
   coordinatorModel.value ? toldOf(coordinatorModel.value) : threadTold.value,
 )
-/**
- * What may be picked: what the model accepts, the common ones when unknown, and then also
- * what is picked already (it may well take it; the server asks the nearest it does).
- */
-const effortOptionsOf = (told: readonly Effort[] | null, picked: Effort | '') => [
+/** What may be picked: what the model accepts, the common ones when nobody said. */
+const effortOptionsOf = (told: readonly Effort[] | null) => [
   { value: '', label: t('settings.effort.default') },
-  ...EFFORTS.filter(
-    (effort) => (told ?? COMMON_EFFORTS).includes(effort) || (!told && effort === picked),
-  ).map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
+  ...effortsOf(told).map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
 ]
-const threadEffortOptions = computed(() => effortOptionsOf(threadTold.value, threadEffort.value))
-const coordinatorEffortOptions = computed(() =>
-  effortOptionsOf(coordinatorTold.value, coordinatorEffort.value),
-)
-// A model known not to take what was picked: the nearest it does.
+const threadEffortOptions = computed(() => effortOptionsOf(threadTold.value))
+const coordinatorEffortOptions = computed(() => effortOptionsOf(coordinatorTold.value))
+// A model that does not take what was picked: the nearest it does, as the server asks.
 watch([threadTold, threadEffort], ([told, effort]) => {
-  if (told && effort && !told.includes(effort))
-    threadEffort.value = effortWithin(effort, told) ?? ''
+  const accepted = effortsOf(told)
+  if (effort && !accepted.includes(effort))
+    threadEffort.value = effortWithin(effort, accepted) ?? ''
 })
 watch([coordinatorTold, coordinatorEffort], ([told, effort]) => {
-  if (told && effort && !told.includes(effort)) {
-    coordinatorEffort.value = effortWithin(effort, told) ?? ''
+  const accepted = effortsOf(told)
+  if (effort && !accepted.includes(effort)) {
+    coordinatorEffort.value = effortWithin(effort, accepted) ?? ''
   }
 })
 
@@ -231,24 +224,6 @@ function load(settings: ModelSettings) {
   researchModel.value = settings.roles.research.model ?? ''
   fallback.value = settings.roles.thread.fallback ?? settings.roles.coordinator.fallback ?? ''
   hiddenRoles.value = { triage: settings.roles.triage, research: settings.roles.research }
-  learnEfforts()
-}
-
-/**
- * Models saved before their efforts were known learn them from what their provider lists,
- * so the effort offered is what each takes.
- */
-function learnEfforts() {
-  for (const provider of providers.value) {
-    const untold = modelsOf(provider).filter((model) => model.efforts === null)
-    if (!untold.length) continue
-    void listed(provider).then((all) => {
-      for (const model of untold) {
-        const efforts = all.find((entry) => entry.id === model.model.trim())?.info?.efforts
-        if (efforts && model.efforts === null) model.efforts = efforts
-      }
-    })
-  }
 }
 
 /** Some model has a price, so usage can show what it cost. */
