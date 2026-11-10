@@ -12,6 +12,7 @@ const notify = (method: string, params: unknown) => write({ method, params })
 
 let tools: string[] = []
 let system = ''
+let environments = 'unset'
 let turn = 0
 let total = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }
 
@@ -62,7 +63,7 @@ async function runTurn(id: number, params: any) {
     turnId,
     item: { type: 'reasoning', id: 'r', summary: ['thinking'], content: [] },
   })
-  const answer = `turn ${turn}: ${results.join(' | ')} len ${text.length} images ${images} system ${system.length} approval ${approval.decision} effort ${params.effort ?? '-'}`
+  const answer = `turn ${turn}: ${results.join(' | ')} len ${text.length} images ${images} system ${system.length} approval ${approval.decision} effort ${params.effort ?? '-'} environments ${environments} machine context ${process.argv.includes('include_environment_context=false') ? 'off' : 'on'} place note ${system.includes('helper program')}`
   for (const delta of [answer.slice(0, 6), answer.slice(6)]) {
     notify('item/agentMessage/delta', { threadId: 'th', turnId, itemId: 'm', delta })
   }
@@ -116,6 +117,7 @@ for await (const message of lines()) {
     case 'thread/start':
       tools = message.params.dynamicTools.map((t: any) => t.name)
       system = message.params.baseInstructions
+      environments = JSON.stringify(message.params.environments ?? 'unset')
       write({ id: message.id, result: { thread: { id: 'th' } } })
       break
     case 'turn/start':

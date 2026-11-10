@@ -28,6 +28,16 @@ const OWN_TOOLS = [
   'tool_suggest',
   'skill_search',
   'memories',
+  'goals',
+]
+
+const LOCAL_CONTEXT = [
+  'include_environment_context=false',
+  'include_permissions_instructions=false',
+  'include_apps_instructions=false',
+  'skills.include_instructions=false',
+  'skills.bundled.enabled=false',
+  'project_doc_max_bytes=0',
 ]
 
 function argvOf(settings: CodexSettings): string[] {
@@ -40,6 +50,10 @@ function argvOf(settings: CodexSettings): string[] {
     '-c',
     'mcp_servers={}',
     ...OWN_TOOLS.flatMap((feature) => ['-c', `features.${feature}=false`]),
+    // What it would tell the model about the machine it runs on (its directory, shell and
+    // sandbox, its skills and the instructions files there): that is not where the work is.
+    // The workspace, local or remote, is as the conversation's own instructions describe it.
+    ...LOCAL_CONTEXT.flatMap((setting) => ['-c', setting]),
   ]
 }
 
@@ -281,9 +295,15 @@ export const codex: AgentKind<CodexSettings> = {
             ...(ctx.model && ctx.model !== 'default' ? { model: ctx.model } : {}),
             cwd: ctx.cwd,
             approvalPolicy: 'untrusted',
+            // What it asks to approve comes here to be declined, never to a reviewer of its own.
+            approvalsReviewer: 'user',
             sandbox: 'read-only',
             baseInstructions: ctx.system,
             ephemeral: true,
+            // No environment of its own: whatever own tool it still offers (a command, a
+            // patch, an image to view) has nowhere to run on this machine. The work happens
+            // where the conversation's tools run, which may be another machine.
+            environments: [],
             dynamicTools: ctx.tools.specs.map((tool) => ({
               type: 'function',
               name: tool.name,

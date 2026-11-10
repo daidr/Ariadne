@@ -285,6 +285,17 @@ describe('codex', () => {
     )
     expect(result.text).toContain('approval decline effort low')
   })
+
+  test('has no environment of its own and is not told about this machine', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const result = await step(made, { command: fake('codex') }, [
+      system(),
+      { role: 'user', content: 'hi' },
+    ])
+    // Its own command, patch and image tools have nowhere to run; the work is where the
+    // conversation's tools run, which may be another machine.
+    expect(result.text).toContain('environments [] machine context off place note true')
+  })
 })
 
 describe('acp', () => {
