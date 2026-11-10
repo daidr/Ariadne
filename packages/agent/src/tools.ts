@@ -55,7 +55,7 @@ const updateTodo: Tool = {
   spec: {
     name: 'update_todo',
     description:
-      'Replace your live todo list. The user sees it as a checklist in your conversation, in the order you give, instead of progress messages. List your steps in order and keep finished ones as done; keep it current: what you are doing, what comes next, and what you are waiting on (say on what in "detail"). Labels are short phrases in the user\'s language.',
+      'Replace your live todo list. The user sees it as a checklist in your conversation, in the order you give, instead of progress messages. List your steps in order and keep finished ones as done. A first list can be rough: replace it whenever the plan changes. Keep it current: what you are doing, what comes next, and what you are waiting on (say on what in "detail"). Labels are short phrases in the user\'s language.',
     parameters: {
       type: 'object',
       properties: {

@@ -974,9 +974,9 @@ export const TODO_MISSING_AFTER = 3
 /** Steps in a row without update_todo, while steps are open, before a reminder. */
 export const TODO_STALE_AFTER = 15
 export const TODO_MISSING_HINT =
-  '[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go.]'
+  '[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]'
 export const TODO_FINISHED_HINT =
-  '[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go.]'
+  '[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]'
 export const TODO_STALE_HINT =
   '[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]'
 
