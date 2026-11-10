@@ -5,6 +5,8 @@ import {
   DomainError,
   MAX_CHECK_COMMAND,
   MAX_MODEL_IMAGE_BYTES,
+  MAX_SETUP_SCRIPT,
+  setupCommand,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
@@ -226,6 +228,11 @@ async function checkAfterEdit(
 ): Promise<string> {
   const check = ctx.commands?.check?.trim()
   if (!check) return ''
+  // Before the dependencies are in, the check would fail for want of them, not of the edit.
+  const setup = ctx.setupRunning?.()
+  if (setup) {
+    return `\n[The project's check after edits did not run: ${setup}, the setup of your new workspace, still runs.]`
+  }
   const { command, result } = await runCheck(ctx, workspace, check, paths)
   if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
   return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${checkOutput(result)}`
@@ -316,14 +323,93 @@ export const noteCheck = workspaceTool(
         '"files" must name a file to try the command on, since it has {file}',
       )
     }
+    // Tried on a workspace whose dependencies are in, or it fails for want of them.
+    const setup = (await ctx.setupDone?.(ctx.signal)) ?? null
+    if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
     const { command: ran, result } = await runCheck(ctx, workspace, command, files)
     if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
     ctx.app.noteCheck(ctx.conversationId, command)
     return {
       content:
-        result.exitCode === 0
+        (setup ? `${setup}\n\n` : '') +
+        (result.exitCode === 0
           ? `Noted. It passed just now: ${ran}`
-          : `Noted. It failed just now (exit code ${result.exitCode}): ${ran}\n${checkOutput(result)}\nIf the command itself is wrong (not found, bad arguments), note the corrected one now; if it found real problems in the code, it works.`,
+          : `Noted. It failed just now (exit code ${result.exitCode}): ${ran}\n${checkOutput(result)}\nIf the command itself is wrong (not found, bad arguments), note the corrected one now; if it found real problems in the code, it works.`),
+    }
+  },
+)
+
+/**
+ * For a project whose user set no setup for new workspaces: the first thread to install
+ * what the repository's work needs does it with this, and once it succeeded, every later
+ * thread's new workspace runs the same first. Nothing is guessed from the files.
+ */
+export const noteSetup = workspaceTool(
+  {
+    name: 'note_setup',
+    description:
+      "Install what work in this repository needs (its dependencies, generated code) in your workspace, and note how, so every later thread's new workspace is set up the same way first. Find out how the repository itself says to (README, CONTRIBUTING, AGENTS.md or CLAUDE.md, CI config, the package manager and version it names); never guess from a lockfile's name. The command runs now in your workspace, and is noted only once it succeeded: call again with a corrected one if it failed. Pass an empty command when the repository needs nothing installed. The user sees what you noted in the project settings.",
+    parameters: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+  },
+  async (args, workspace, ctx) => {
+    if (typeof args.command !== 'string') throw new ToolInputError('"command" must be a string')
+    const command = args.command.trim()
+    if (command.length > MAX_SETUP_SCRIPT) {
+      throw new ToolInputError(`"command" must be at most ${MAX_SETUP_SCRIPT} characters`)
+    }
+    if (!ctx.app.canNoteSetup(ctx.conversationId)) {
+      const current = setupCommand(ctx.app.getProject(ctx.projectId))
+      return {
+        content: current
+          ? `The project already has its setup for new workspaces: ${current}`
+          : 'The setup for new workspaces of this project is not yours to note.',
+        isError: true,
+      }
+    }
+    if (!command) {
+      ctx.app.noteSetup(ctx.conversationId, '')
+      return { content: 'Noted: new workspaces of this project need nothing installed.' }
+    }
+    if (commandVerdict(command, ctx.commands?.rules ?? []).action !== 'allow') {
+      return {
+        content:
+          "The user's command rules do not let this command run unasked, so it cannot set up new workspaces. Install with run_command, which asks the user where the rules say so, and note none.",
+        isError: true,
+      }
+    }
+    // Not side by side with the setup already running in this workspace: both would write
+    // the same directories.
+    await ctx.setupDone?.(ctx.signal)
+    if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
+    const limits = ctx.limits ?? DEFAULT_LIMITS
+    const live = ctx.app.live.start({
+      projectId: ctx.projectId,
+      conversationId: ctx.conversationId,
+      command,
+      cwd: '.',
+    })
+    try {
+      const result = await workspace.exec(command, {
+        timeoutMs: limits.commandTimeoutMax * 1000,
+        signal: ctx.signal,
+        onOutput: (chunk) => live.output(chunk),
+        ...execOptions(ctx, undefined),
+      })
+      if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
+      if (result.exitCode !== 0) {
+        return {
+          content: `It failed (exit code ${result.exitCode}), so nothing was noted. Fix the command and call again.\n${checkOutput(result)}`,
+          isError: true,
+        }
+      }
+      ctx.app.noteSetup(ctx.conversationId, command)
+      return { content: `Done, and noted: later threads' new workspaces run it first.` }
+    } finally {
+      live.end()
     }
   },
 )
@@ -738,6 +824,11 @@ const runCommand: Tool = {
     const gate = commandGate(command, cwd || '.', ctx)
     if (gate) return gate
     const workspace = await ctx.workspace()
+    // The new workspace's setup comes first: a command now would find it half done.
+    const setup = (await ctx.setupDone?.(ctx.signal)) ?? null
+    if (ctx.signal.aborted) return { content: 'Stopped before it ran.', isError: true }
+    const told = (result: ToolResult): ToolResult =>
+      setup ? { ...result, content: `${setup}\n\n${result.content}` } : result
     try {
       if (background) {
         if (!ctx.background) {
@@ -777,10 +868,10 @@ const runCommand: Tool = {
         const note = replaced.length
           ? `\n[${replaced.join(', ')} ran the same command and was ended first]`
           : ''
-        return {
+        return told({
           content: (first ? outputText(first, limits.commandOutput, 'started') : started.id) + note,
           isError: !!first?.command.result && first.command.result.exitCode !== 0,
-        }
+        })
       }
     } catch (error) {
       if (error instanceof ToolInputError || error instanceof DomainError) throw error
@@ -801,10 +892,10 @@ const runCommand: Tool = {
         onOutput: (chunk) => live.output(chunk),
         ...execOptions(ctx, cwd),
       })
-      return {
+      return told({
         content: await commandResult(result, workspace, outputName(), limits.commandOutput),
         isError: result.exitCode !== 0,
-      }
+      })
     } catch (error) {
       if (error instanceof ToolInputError || error instanceof DomainError) throw error
       return { content: error instanceof Error ? error.message : String(error), isError: true }

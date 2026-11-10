@@ -146,7 +146,7 @@ export const projectsProjection: Projection = {
           [event.data.paused ? 1 : 0, event.at, event.seq, event.projectId],
         )
         break
-      case 'project.setup.detected':
+      case 'project.setup.noted':
       case 'project.check.noted': {
         const before = db
           .query<{ detected: string | null }, [string]>(
@@ -156,8 +156,9 @@ export const projectsProjection: Projection = {
         const detected: ProjectDetected = before
           ? (JSON.parse(before) as ProjectDetected)
           : { setup: null, check: null }
-        if (event.type === 'project.setup.detected') detected.setup = event.data.setup
-        else detected.check = { command: event.data.command, threadId: event.data.threadId }
+        const noted = { command: event.data.command, threadId: event.data.threadId }
+        if (event.type === 'project.setup.noted') detected.setup = noted
+        else detected.check = noted
         db.run('UPDATE projects SET detected = ?, updated_at = ? WHERE id = ?', [
           JSON.stringify(detected),
           event.at,

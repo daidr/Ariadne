@@ -421,10 +421,10 @@ export interface EventMap {
     routine?: { by: string; action: 'added' | 'removed'; prompt: string }
   }
   /**
-   * The install commands the lockfiles of a new workspace called for, one a line; `''`
-   * when it had none Ariadne knows. Kept to show the user what runs.
+   * A thread noted what sets up a new workspace of a project whose user set none, once it
+   * had run it; `''` when the repository needs nothing installed.
    */
-  'project.setup.detected': { setup: string }
+  'project.setup.noted': { command: string; threadId: string }
   /** A thread noted the check to run after edits, for a project whose user set none. */
   'project.check.noted': { command: string; threadId: string }
   /**

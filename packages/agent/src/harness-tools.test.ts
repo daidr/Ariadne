@@ -1,4 +1,4 @@
-import { Ariadne, DomainError } from '@ariadne/core'
+import { Ariadne } from '@ariadne/core'
 import { LocalWorkspace, run } from '@ariadne/plugin-local'
 import { defaultShell, shellArgv, type ContextProvider, type Workspace } from '@ariadne/plugin-sdk'
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
@@ -555,7 +555,7 @@ async function slowSetupHost(calls: { setup: number }) {
 }
 
 describe('setup script', () => {
-  test("stops with the thread's turn, and runs again next time", async () => {
+  test('runs in the background; stopped, it is told of and not run again', async () => {
     const calls = { setup: 0 }
     const workspaces = new WorkspaceManager(app, await slowSetupHost(calls))
     const project = app.createProject('P')
@@ -566,18 +566,22 @@ describe('setup script', () => {
       TOOL_SWITCH_NAMES,
     )
     const thread = app.createThread(project.id, { title: 'x' })
+    // Handed out while the setup still runs.
+    await workspaces.forThread(project.id, thread.id)
+    expect(calls.setup).toBe(1)
+    const [running] = workspaces.background.list(thread.id)
+    expect(running).toMatchObject({ command: 'bun install', result: null })
+    expect(workspaces.takeSetup(thread.id)).toContain(`in the background as ${running!.id}`)
+    // A command waits for it, until its turn is stopped.
     const turn = new AbortController()
-    const opening = workspaces.forThread(project.id, thread.id, turn.signal)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    const waiting = workspaces.setupDone(thread.id, turn.signal)
     turn.abort('cancelled')
-    await expect(opening).rejects.toThrow(DomainError)
-    expect(app.getThread(thread.id).workspace).toBeNull()
-    // Another thread's setup is not stopped by it.
-    const next = workspaces.forThread(project.id, thread.id)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(calls.setup).toBe(2)
+    expect(await waiting).toBeNull()
     await workspaces.stopThread(thread.id)
-    await expect(next).rejects.toThrow(DomainError)
+    expect(workspaces.takeSetup(thread.id)).toContain('was stopped before it finished')
+    await workspaces.forThread(project.id, thread.id)
+    expect(calls.setup).toBe(1)
+    expect(await workspaces.setupDone(thread.id, new AbortController().signal)).toBeNull()
   })
 })
 

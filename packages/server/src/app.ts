@@ -59,8 +59,6 @@ import { ThreadSync } from './thread-sync'
 
 /** A directory listing gives up after this long. */
 const BROWSE_TIMEOUT_MS = 15_000
-/** How long opening a project's settings waits for its source to say what it installs. */
-const DETECT_WAIT_MS = 1500
 /** How long the page waits to hear whether a reference source can be read. */
 const REFERENCE_STATUS_MS = 5000
 
@@ -490,12 +488,6 @@ export function createHandler({
   // values never leave the server).
   add('GET', '/api/projects/:projectId/settings', async (_request, { projectId = '' }) => {
     app.getProject(projectId)
-    // Before any workspace was opened, what a new one would install is read from the
-    // source, so the user sees it here first; a source slow to answer is not waited for.
-    await Promise.race([
-      workspaces?.detectSetup(projectId).catch(() => {}),
-      new Promise((done) => setTimeout(done, DETECT_WAIT_MS)),
-    ])
     return json({
       settings: app.getProject(projectId).settings,
       detected: app.getProject(projectId).detected,

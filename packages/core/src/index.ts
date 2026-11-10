@@ -80,7 +80,7 @@ export {
   MAX_ROUTINE_PROMPT,
   MERGE_METHODS,
   checkCommand,
-  installCommands,
+  setupCommand,
   type ProjectDetected,
   type Routine,
   type ProjectSettings,

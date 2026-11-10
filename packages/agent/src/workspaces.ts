@@ -1,6 +1,6 @@
 import {
   DomainError,
-  installCommands,
+  setupCommand,
   SHELLS,
   threadBranch,
   type Ariadne,
@@ -11,7 +11,6 @@ import { defaultShell } from '@ariadne/plugin-sdk'
 import type {
   BranchCapability,
   Capabilities,
-  ExecResult,
   RepoCapability,
   SourceView,
   TrackerCapability,
@@ -23,22 +22,19 @@ import type { ContextProvider } from '@ariadne/plugin-sdk'
 import { withHosting } from './hosting'
 import type { PluginHost } from './plugins'
 import { commandVerdict, type CommandRule } from './limits'
-import { headAndTail } from './workspace-tools'
 import { BackgroundCommands } from './background'
 import { referenceRefusal } from './reference-guard'
 import type { ReferenceKind } from './reference-tools'
 
 /** How long setting up a new workspace may take, unless the user's limits say. */
 const SETUP_TIMEOUT_MS = 600_000
-/** What the model reads at most of the setup script's output. */
-const MAX_SETUP_OUTPUT = 8000
 
 export interface WorkspaceManagerOptions {
   /** The environment variables the user gave the project's commands; they may be secret. */
   env?: (projectId: string) => Record<string, string>
-  /** The user's rules for thread commands: an install Ariadne chose keeps to them too. */
+  /** The user's rules for thread commands: a setup a thread noted keeps to them too. */
   commandRules?: (projectId: string) => readonly CommandRule[]
-  /** How long the project's setup script may run. */
+  /** How long a new workspace's setup may run. */
   setupTimeoutMs?: (projectId: string) => number
 }
 
@@ -186,43 +182,22 @@ export function sourceSummary(
   return typeof value === 'string' ? value : null
 }
 
-const outputOf = (result: ExecResult) =>
-  [result.stdout, result.stderr].filter((part) => part.trim()).join('\n')
-
 /** Told to the thread whose new workspace is in a project with no check after edits yet. */
 const CHECK_HINT =
   '[Ariadne: this project has no check after edits yet. Once you know how the repository checks its code, note one with note_check.]'
 
-const heldNote = (held: string[]) =>
-  `[Ariadne: your workspace is new, and its dependencies were not installed: the user's command rules do not let ${held.map((command) => `\`${command}\``).join(', ')} run unasked. When the work needs them, run it with run_command, which asks the user where the rules say so.]`
+/** Told to the thread whose new workspace is in a project with no setup for new workspaces yet. */
+const SETUP_HINT =
+  "[Ariadne: nothing was installed in your new workspace: this project has no setup for new workspaces yet. When the work needs its dependencies, install them with note_setup, the way the repository says to: later threads' new workspaces then run the same first.]"
 
-/**
- * The install commands the lockfiles at the root of a workspace, or of the source as it
- * is, call for; none when it has none Ariadne knows, or cannot be listed.
- */
-async function lockfileInstalls(
-  root: Pick<Workspace, 'list' | 'readBytes'>,
-  opened = true,
-): Promise<string[]> {
-  const entries = await root.list('.').catch(() => [])
-  const files = entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name)
-  let manager: string | undefined
-  if (files.includes('package.json')) {
-    try {
-      const text = new TextDecoder().decode(await root.readBytes('package.json', 1024 * 1024))
-      const field = (JSON.parse(text) as { packageManager?: unknown }).packageManager
-      if (typeof field === 'string') manager = field
-    } catch {
-      // Not readable as JSON: the lockfiles alone decide.
-    }
-  }
-  // `npm ci` starts by deleting node_modules: one that came with the workspace (a local
-  // worktree gets the source's, copied on write) is kept as it is.
-  // Only in a workspace that was opened: whether the source's comes along depends on where.
-  const seeded =
-    opened && entries.some((entry) => entry.kind === 'directory' && entry.name === 'node_modules')
-  return installCommands(files, manager).filter((command) => !(seeded && command === 'npm ci'))
-}
+const heldNote = (command: string) =>
+  `[Ariadne: your workspace is new, and its setup did not run: the user's command rules do not let \`${command.split('\n')[0]}\` run unasked. When the work needs it, run it with run_command, which asks the user where the rules say so.]`
+
+const startedNote = (id: string, own: boolean) =>
+  `[Ariadne: your workspace is new, so ${own ? "the project's setup script, as the user set it," : 'the setup noted for this project'} runs in it now, in the background as ${id}. run_command waits for it to end before running anything; read files and edit meanwhile, or read_command_output ${id} to look at it.]`
+
+const endedNote = (id: string, result: { exitCode: number; stopped: boolean }) =>
+  `[Ariadne: ${id}, the setup of your new workspace, ${result.stopped ? 'was stopped before it finished' : `failed (exit code ${result.exitCode})`}; what the work needs may be missing. It does not run again by itself: read_command_output ${id} shows what it printed, and run_command what the work needs.]`
 
 /**
  * Opens each thread's workspace from its project's context source, once, and keeps it
@@ -250,10 +225,12 @@ export class WorkspaceManager {
   private readonly queues = new Map<string, Promise<void>>()
   /** What setting up a thread's new workspace did, until its model is told. */
   private readonly setups = new Map<string, string>()
-  /** Threads whose new workspace was opened, until they are told the project wants a check. */
+  /** Threads whose new workspace was opened, until they are told what the project lacks. */
   private readonly hinted = new Set<string>()
-  /** Stops the setup script running in a thread's new workspace. */
-  private readonly setupStops = new Map<string, AbortController>()
+  /** Threads whose new workspace got no setup, as the project has none yet. */
+  private readonly unset = new Set<string>()
+  /** The background command setting up each thread's new workspace, until it is waited for. */
+  private readonly setupJobs = new Map<string, string>()
   /** Commands threads left running in the background; the user sees them in the status line. */
   readonly background = new BackgroundCommands((threadId) => {
     let projectId: string
@@ -290,10 +267,11 @@ export class WorkspaceManager {
    * in the workspace opened just now, and what it left running when it last reported.
    */
   takeSetup(threadId: string): string | null {
-    const notes = [this.setups.get(threadId) ?? '']
+    const notes = [this.setups.get(threadId) ?? '', this.setupEnded(threadId) ?? '']
     this.setups.delete(threadId)
     // Asked only now: the call that opened the workspace may have noted the check itself.
     if (this.hinted.delete(threadId) && this.checkWanted(threadId)) notes.push(CHECK_HINT)
+    if (this.unset.delete(threadId) && this.setupWanted(threadId)) notes.push(SETUP_HINT)
     // Back at work after a report: what it left serving is still there to use.
     const kept = this.background.takeKept(threadId)
     if (kept.length) notes.push(keptNote(kept))
@@ -309,35 +287,52 @@ export class WorkspaceManager {
     }
   }
 
-  /**
-   * The install commands among `commands` the user's command rules let run unasked
-   * (`run`), and the others (`held`), which are not run for the thread.
-   */
-  private installs(projectId: string, commands: string[]): { run: string[]; held: string[] } {
-    const rules = this.options.commandRules?.(projectId) ?? []
-    const allowed = (command: string) => commandVerdict(command, rules).action === 'allow'
-    return {
-      run: commands.filter(allowed),
-      held: commands.filter((command) => !allowed(command)),
+  private setupWanted(threadId: string): boolean {
+    try {
+      const { projectId } = this.app.getThread(threadId)
+      return this.app.canNoteSetup(threadId) && !this.app.getProject(projectId).detected.setup
+    } catch {
+      return false
     }
   }
 
+  /** The background command still setting up the thread's new workspace; `null` when none runs. */
+  setupRunning(threadId: string): string | null {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return null
+    const job = this.background.list(threadId).find((command) => command.id === id)
+    return job && !job.result ? id : null
+  }
+
   /**
-   * Find out what a new workspace of the project would install, before any was opened, so
-   * the settings can show it: read from the source as it is. Nothing when it is known
-   * already, the user wrote their own, or the source cannot be looked at.
+   * How the setup of the thread's new workspace ended, once, when it ended badly and no
+   * command has waited on it yet; `null` while it runs or when it went well.
    */
-  async detectSetup(projectId: string): Promise<void> {
-    const project = this.app.getProject(projectId)
-    if (!project.source || !project.settings.workspace.auto.setup) return
-    if (project.detected.setup !== null) return
-    const key = this.sourceKey(projectId)
-    const { workspace } = await this.connect(projectId, key)
-    if (!workspace?.isolated || !workspace.view) return
-    const commands = await lockfileInstalls(await workspace.view(), false)
-    // The source may have changed while it was read.
-    if (this.sourceKey(projectId) !== key) return
-    this.app.recordDetectedSetup(projectId, this.installs(projectId, commands).run.join('\n'))
+  private setupEnded(threadId: string): string | null {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return null
+    const job = this.background.list(threadId).find((command) => command.id === id)
+    if (job && !job.result) return null
+    this.setupJobs.delete(threadId)
+    if (!job?.result || (job.result.exitCode === 0 && !job.result.stopped)) return null
+    return endedNote(id, job.result)
+  }
+
+  /**
+   * Wait while the setup of the thread's new workspace runs, unless `signal` aborts first;
+   * how it ended when the thread should hear it (it failed, or was stopped), once.
+   */
+  async setupDone(threadId: string, signal: AbortSignal): Promise<string | null> {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return null
+    const job = await this.background.wait(threadId, id, signal)
+    if (!job?.result) {
+      // Forgotten (the thread was stopped, its worktree went): there is nothing to wait for.
+      if (!job) this.setupJobs.delete(threadId)
+      return null
+    }
+    this.setupJobs.delete(threadId)
+    return job.result.exitCode === 0 && !job.result.stopped ? null : endedNote(id, job.result)
   }
 
   /** Whether the project's threads can get a workspace at all. */
@@ -590,21 +585,13 @@ export class WorkspaceManager {
   }
 
   /**
-   * The thread's workspace; throws a `DomainError` the model can read. A new workspace's
-   * setup script stops when `signal` aborts (the thread's turn was stopped), and runs again
-   * the next time the workspace is asked for.
+   * The thread's workspace; throws a `DomainError` the model can read. A new one is handed
+   * out at once, its setup running in the background (`setupDone` waits for it).
    */
-  async forThread(projectId: string, threadId: string, signal?: AbortSignal): Promise<Workspace> {
+  async forThread(projectId: string, threadId: string): Promise<Workspace> {
     const key = this.sourceKey(projectId)
-    const stopSetup = () => this.setupStops.get(threadId)?.abort('stopped')
-    if (signal?.aborted) stopSetup()
-    signal?.addEventListener('abort', stopSetup, { once: true })
-    try {
-      // Not while its worktree is being removed: it would be used, then deleted under it.
-      return await this.serial(threadId, () => this.openFor(projectId, threadId, key))
-    } finally {
-      signal?.removeEventListener('abort', stopSetup)
-    }
+    // Not while its worktree is being removed: it would be used, then deleted under it.
+    return await this.serial(threadId, () => this.openFor(projectId, threadId, key))
   }
 
   /**
@@ -612,8 +599,22 @@ export class WorkspaceManager {
    * its new workspace.
    */
   async stopThread(threadId: string): Promise<void> {
-    this.setupStops.get(threadId)?.abort('stopped')
+    this.noteSetupGone(threadId)
     await this.background.stopThread(threadId)
+  }
+
+  /**
+   * The thread's background commands are about to be forgotten: one still setting up its
+   * new workspace is told of as stopped with the next tool result, and not run again.
+   */
+  private noteSetupGone(threadId: string): void {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return
+    this.setupJobs.delete(threadId)
+    const job = this.background.list(threadId).find((command) => command.id === id)
+    if (job && !job.result) {
+      this.setups.set(threadId, endedNote(id, { exitCode: -1, stopped: true }))
+    }
   }
 
   private async openFor(projectId: string, threadId: string, key: string): Promise<Workspace> {
@@ -622,9 +623,10 @@ export class WorkspaceManager {
     // A workspace opened before keeps the base it started from, and its branch.
     const thread = this.app.getThread(threadId)
     const known = thread.workspace
-    const { workspace: setup } = this.app.getProject(projectId).settings
+    const project = this.app.getProject(projectId)
+    const { workspace: setup } = project.settings
     const branch = known?.branch ?? threadBranch(setup.branchPrefix, threadId, thread.branchSlug)
-    // A new directory has nothing installed yet: the project's setup script runs first.
+    // A new directory has nothing installed yet: the project's setup starts in it.
     const fresh = !known || known.removed
     const workspace = this.connect(projectId, key).then(async (capabilities) => {
       if (!capabilities.workspace) throw new DomainError('error.noSource')
@@ -634,17 +636,15 @@ export class WorkspaceManager {
         ...(known ? { base: known.base } : {}),
       })
       if (fresh) {
-        const notes: string[] = []
-        if (!setup.auto.setup) {
-          if (setup.setup) notes.push(await this.runSetup(projectId, threadId, opened, setup.setup))
-        } else if (capabilities.workspace.isolated) {
-          // Only in a directory of the thread's own: a shared one is the user's, as it is.
-          const { run, held } = this.installs(projectId, await lockfileInstalls(opened))
-          this.app.recordDetectedSetup(projectId, run.join('\n'))
-          if (run.length) notes.push(await this.install(projectId, threadId, opened, run))
-          if (held.length) notes.push(heldNote(held))
+        const own = !setup.auto.setup
+        // A noted one only in a directory of the thread's own: a shared one is the user's,
+        // as it is. The user's own runs where they set it.
+        const command = own || capabilities.workspace.isolated ? setupCommand(project) : ''
+        const note = command ? this.startSetup(projectId, threadId, opened, command, own) : null
+        if (note) this.setups.set(threadId, note)
+        if (!own && capabilities.workspace.isolated && !project.detected.setup) {
+          this.unset.add(threadId)
         }
-        if (notes.length) this.setups.set(threadId, notes.join('\n\n'))
         this.hinted.add(threadId)
       }
       return opened
@@ -667,82 +667,37 @@ export class WorkspaceManager {
     }
   }
 
-  /** Run the user's setup script in a new workspace; what the model is told of it. */
-  private async runSetup(
-    projectId: string,
-    threadId: string,
-    workspace: Workspace,
-    script: string,
-  ): Promise<string> {
-    const result = await this.setupExec(projectId, threadId, workspace, script)
-    const output = headAndTail(outputOf(result), MAX_SETUP_OUTPUT, 'the rest is not kept')
-    return `[Ariadne: your workspace is new, so the project's setup script ran in it first, as the user set it: ${result.exitCode === 0 ? 'it succeeded' : `it failed (exit code ${result.exitCode}); what the work needs may be missing`}.]\n${output || '(no output)'}`
-  }
-
   /**
-   * Install a new workspace's dependencies with the commands its lockfiles called for, one
-   * after the other up to the first that fails; what the model is told of it.
+   * Start the setup of a new workspace in the background, where the user sees it running
+   * and can stop it; what the model is told of it.
    */
-  private async install(
-    projectId: string,
-    threadId: string,
-    workspace: Workspace,
-    commands: string[],
-  ): Promise<string> {
-    const ran: string[] = []
-    // One time limit for all of them, as for a setup script.
-    const until = Date.now() + (this.options.setupTimeoutMs?.(projectId) ?? SETUP_TIMEOUT_MS)
-    for (const command of commands) {
-      const left = Math.max(1000, until - Date.now())
-      const result = await this.setupExec(projectId, threadId, workspace, command, left)
-      if (result.exitCode === 0) {
-        ran.push(command)
-        continue
-      }
-      const output = headAndTail(outputOf(result), MAX_SETUP_OUTPUT, 'the rest is not kept')
-      const before = ran.length
-        ? ` (after ${ran.map((done) => `\`${done}\``).join(', ')} succeeded)`
-        : ''
-      return `[Ariadne: your workspace is new, so its dependencies were being installed by its lockfiles, and \`${command}\` failed (exit code ${result.exitCode})${before}; what the work needs may be missing.]\n${output || '(no output)'}`
-    }
-    return `[Ariadne: your workspace is new, so its dependencies were installed first, by its lockfiles: ${ran.map((done) => `\`${done}\``).join(', ')}.]`
-  }
-
-  /** Run one command of a new workspace's setup; the thread's stop ends it. */
-  private async setupExec(
+  private startSetup(
     projectId: string,
     threadId: string,
     workspace: Workspace,
     command: string,
-    timeoutMs = this.options.setupTimeoutMs?.(projectId) ?? SETUP_TIMEOUT_MS,
-  ): Promise<ExecResult> {
+    own: boolean,
+  ): string {
+    // The user's own script is theirs to run; one a thread noted keeps to their rules.
+    const rules = this.options.commandRules?.(projectId) ?? []
+    if (!own && commandVerdict(command, rules).action !== 'allow') return heldNote(command)
     const env = this.env(projectId)
     const { argv } = this.shell(projectId)
-    const stop = new AbortController()
-    this.setupStops.set(threadId, stop)
-    const result = await workspace
-      .exec(command, {
-        ...(argv ? { shell: argv } : {}),
-        timeoutMs,
-        signal: stop.signal,
-        ...(Object.keys(env).length ? { env } : {}),
-      })
-      .catch((error: unknown) => ({
-        exitCode: -1,
-        stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
-      }))
-      .finally(() => {
-        if (this.setupStops.get(threadId) === stop) this.setupStops.delete(threadId)
-      })
-    // Stopped half way: the workspace is not set up, so it is not handed out; the next
-    // turn opens it again and the setup runs from the start.
-    if (stop.signal.aborted) {
-      throw new DomainError('error.workspace', {
-        detail: "the workspace's setup was stopped before it finished",
-      })
-    }
-    return result
+    const timeoutMs = this.options.setupTimeoutMs?.(projectId) ?? SETUP_TIMEOUT_MS
+    const started = this.background.start(
+      threadId,
+      command,
+      (options) =>
+        workspace.exec(command, {
+          ...(argv ? { shell: argv } : {}),
+          ...(Object.keys(env).length ? { env } : {}),
+          ...options,
+          timeoutMs,
+        }),
+      { cwd: '.' },
+    )
+    this.setupJobs.set(threadId, started.id)
+    return startedNote(started.id, own)
   }
 
   /** The project's threads' branches and worktrees; `null` when they are not git worktrees. */
@@ -769,6 +724,7 @@ export class WorkspaceManager {
       if (known && this.app.getConversation(threadId).turn) return 'busy'
       // What the user asked to keep running to try is not ended to make room.
       if (reason === 'idle' && this.background.running(threadId)) return 'busy'
+      this.noteSetupGone(threadId)
       await this.background.stopThread(threadId)
       const open = this.open.get(threadId)
       this.open.delete(threadId)
@@ -826,7 +782,6 @@ export class WorkspaceManager {
   }
 
   async dispose(): Promise<void> {
-    for (const stop of this.setupStops.values()) stop.abort('stopped')
     await this.background.stopAll()
     const all = [...this.open.values()]
     this.open.clear()

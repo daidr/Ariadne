@@ -29,6 +29,7 @@ import { canSearch, fetchUrlTool, webSearchTool, type SearchRoutes } from './web
 import type { WebAccess } from './web'
 import {
   noteCheck,
+  noteSetup,
   readWorkspaceTools,
   sourceTools,
   withReferences,
@@ -913,6 +914,8 @@ export function toolsFor(
     research?: boolean
     /** A thread that may note the project's check after edits (`Ariadne.canNoteCheck`). */
     noteCheck?: boolean
+    /** A thread that may note what sets up new workspaces (`Ariadne.canNoteSetup`). */
+    noteSetup?: boolean
     /** Whether the project has sources it only reads; the looking tools then take one. */
     references?: boolean
     /** The kinds of source the conversation may ask to read as a reference, when it may. */
@@ -953,6 +956,7 @@ export function toolsFor(
         : []),
     ...(source.referenceKinds?.length ? [addReferenceTool(source.referenceKinds, 'thread')] : []),
     ...(source.workspace && source.noteCheck ? [noteCheck] : []),
+    ...(source.workspace && source.noteSetup ? [noteSetup] : []),
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
     ...(source.research ? [researchTool] : []),

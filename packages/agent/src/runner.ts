@@ -330,6 +330,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           },
           research: true,
           noteCheck: isThread && app.canNoteCheck(conversationId),
+          noteSetup: isThread && app.canNoteSetup(conversationId),
           unnamed: project.unnamed,
         }))
   )
@@ -385,7 +386,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
       }
-      const workspace = await workspaces.forThread(conversation.projectId, owner, signal)
+      const workspace = await workspaces.forThread(conversation.projectId, owner)
       await changes?.begin()
       return workspace
     },
@@ -443,7 +444,13 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         return commandVerdict(check, settings.commandRules).action === 'allow' ? check : ''
       },
     },
-    ...(workspaces ? { background: workspaces.background } : {}),
+    ...(workspaces
+      ? {
+          background: workspaces.background,
+          setupDone: (stop: AbortSignal) => workspaces.setupDone(owner, stop),
+          setupRunning: () => workspaces.setupRunning(owner),
+        }
+      : {}),
   }
   // A research looks with the conversation's own looking tools, in a context of its own.
   if (byName.has('research')) {

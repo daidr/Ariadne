@@ -287,7 +287,7 @@ describe('project settings', () => {
     expect(app.getInstructions(project.coordinatorId)?.content).toBe('提交前跑 bun run check')
   })
 
-  test('a new workspace gets a readable branch and runs the setup script once', async () => {
+  test('a new workspace gets a readable branch, and run_command waits for its setup script', async () => {
     const { host, ran, opened } = await memoryHost({})
     const workspaces = new WorkspaceManager(app, host, () => ({}), { env: () => ({ CI: '1' }) })
     const project = app.createProject('P')
@@ -313,8 +313,8 @@ describe('project settings', () => {
       ['ls', undefined],
     ])
     const results = toolResults(thread.id)
-    expect(results[0]!.text).toContain("the project's setup script ran in it first")
-    expect(results[1]!.text).not.toContain('setup script')
+    expect(results[0]!.text).toContain("the project's setup script, as the user set it, runs")
+    expect(results[1]!.text).not.toContain('setup')
   })
 })
 
