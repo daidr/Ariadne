@@ -43,4 +43,12 @@ describe('a relay in the thread panel', () => {
     ])
     expect(shown.map((m) => relayIdOf(m.id))).toEqual(['msg_r', 'msg_r'])
   })
+
+  test("passing back only what was written in this thread, it is the coordinator's message", () => {
+    const back = {
+      ...base,
+      cites: [{ messageId: 'msg_3', conversationId: 'thr_a', content: '三', at: 3 }],
+    }
+    expect(shownAs(back)).toEqual([back])
+  })
 })

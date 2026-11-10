@@ -621,7 +621,9 @@ export const messagesProjection: Projection = {
           ],
         )
         // The user's message shows where it went.
+        // Passed back to where it was written, it went nowhere new.
         for (const cited of event.data.cites ?? []) {
+          if (cited.conversationId === event.data.conversationId) continue
           const relay = { threadId: event.data.conversationId, messageId: event.data.messageId }
           db.run(
             `UPDATE messages SET relayed_to = json_insert(coalesce(relayed_to, '[]'), '$[#]', json(?)),

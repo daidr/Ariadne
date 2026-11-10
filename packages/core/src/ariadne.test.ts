@@ -670,6 +670,30 @@ describe('messages', () => {
       ],
     ])
 
+    // Passed back to the thread it was written in, it went nowhere new.
+    const inThread = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'user',
+      content: '顺便做深色模式',
+    })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '这条转给了 o',
+      cites: [inThread.id],
+    })
+    const sentOn = app.postMessage(project.id, {
+      conversationId: other.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '',
+      cites: [inThread.id],
+    })
+    expect(app.listMessages(thread.id).find((m) => m.id === inThread.id)?.relayedTo).toEqual([
+      { threadId: other.id, messageId: sentOn.id },
+    ])
+
     // Only the user's messages, only of this project, only on a relay.
     const own = app.postMessage(project.id, {
       conversationId: thread.id,

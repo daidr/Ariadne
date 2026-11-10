@@ -402,6 +402,14 @@ export function toChatMessages(
 }
 
 /**
+ * Text set inside a relay's tags with the tags themselves made harmless: only Ariadne opens
+ * a <user_message>, so the coordinator's words cannot pass for the user's, nor the user's
+ * close theirs early.
+ */
+const defang = (text: string) =>
+  text.replace(/<(\/?)(user_message|message_from_coordinator)/gi, '‹$1$2')
+
+/**
  * What the coordinator sent a thread: the user's messages it passed along, in their own
  * words with what came with them, then the coordinator's own note.
  */
@@ -420,7 +428,7 @@ function relayMessage(
         : cite.conversationId.startsWith('thr_')
           ? `in the thread "${titleOf(cite.conversationId)}"`
           : 'to the coordinator'
-    const body = [cite.content, mentionsText(cite.mentions ?? []), files.text]
+    const body = [defang(cite.content), mentionsText(cite.mentions ?? []), files.text]
       .filter(Boolean)
       .join('\n\n')
     return `<user_message wrote="${where}" at="${localTime(cite.at)}">\n${body}\n</user_message>`
@@ -429,7 +437,7 @@ function relayMessage(
     ? `The coordinator passed along the user's own words, exactly as they wrote them; treat them as the user speaking to you.\n${cited.join('\n')}\n`
     : ''
   const note = message.content.trim()
-    ? `<message_from_coordinator>\n${message.content}\n</message_from_coordinator>`
+    ? `<message_from_coordinator>\n${defang(message.content)}\n</message_from_coordinator>`
     : ''
   return {
     role: 'user',

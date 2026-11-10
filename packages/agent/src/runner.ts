@@ -1027,16 +1027,12 @@ function lastHandled(transcript: TranscriptEntry[]): number {
   return seen
 }
 
-/**
- * Whether the user's own words reached the conversation after `since`: their message, their
- * answer, or their message the coordinator passed along as it was.
- */
+/** Whether the user's own words reached the conversation after `since`. */
 function userSpokeSince(transcript: TranscriptEntry[], since: number): boolean {
   return transcript.some(
     (entry) =>
       entry.seq > since &&
-      ((entry.kind === 'message' &&
-        (entry.message.author === 'user' || entry.message.cites.length > 0)) ||
+      ((entry.kind === 'message' && entry.message.author === 'user') ||
         (entry.kind === 'note' &&
           (entry.note.type === 'user-in-thread' || entry.note.type === 'answer'))),
   )
