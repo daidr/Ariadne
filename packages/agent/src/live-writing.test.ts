@@ -522,7 +522,7 @@ describe('whiteboards and dashboards', () => {
     expect([...widgets.keys()].toSorted()).toEqual(['merged', 'total'])
     expect(viewer.writers()[0]).toMatchObject({
       user: { name: '写方案' },
-      dashboard: { widget: 'merged', action: 'settings' },
+      dashboard: { widget: 'merged', action: 'focus' },
     })
     // The data sets written whole come along, so the widgets reading them show.
     expect(half.data).toEqual(args.data)

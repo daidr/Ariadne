@@ -289,7 +289,7 @@ const dashboardBridge: SharedBridge = {
         for (const [key, change] of event.changes.keys) if (change.action !== 'delete') widget = key
       }
     }
-    return widget ? { dashboard: { widget, action: 'settings' } } : null
+    return widget ? { dashboard: { widget, action: 'focus' } } : null
   },
 }
 
