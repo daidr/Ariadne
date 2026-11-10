@@ -11,7 +11,7 @@
 
 在 Windows 10/11 上，用 PowerShell 启动 `bun run start`。
 
-- [ ] **写时复制**：仓库放在 Dev Drive（ReFS）上、`~/.ariadne` 在 C 盘时，新讨论串的 worktree 建在仓库旁边的 `.ariadne-worktrees\\` 下；设置的“工作区”页这个项目写“写时复制，仅占用改动部分”，开三个讨论串后卷的已用空间基本不变（Windows 11 24H2 及以上）。仓库在 NTFS 盘上时，worktree 在 `~/.ariadne` 下，“工作区”页提示 Dev Drive。检测用的是 PowerShell 的 `(Get-Volume -DriveLetter D).FileSystemType`，看它不弹窗口、返回 `ReFS`。
+- [ ] **写时复制**：仓库放在 Dev Drive（ReFS）上、`~/.ariadne` 在 C 盘时，新讨论串的 worktree 建在仓库旁边的 `.ariadne-worktrees\\` 下；设置的“工作区”页这个项目名旁的图标提示“写时复制，仅占用改动部分”，开三个讨论串后卷的已用空间基本不变（Windows 11 24H2 及以上）。仓库在 NTFS 盘上时，worktree 在 `~/.ariadne` 下，“工作区”页项目名旁的图标提示 Dev Drive。检测用的是 PowerShell 的 `(Get-Volume -DriveLetter D).FileSystemType`，看它不弹窗口、返回 `ReFS`。
 - [ ] **不弹窗口**：让讨论串跑几条命令（`git status`、`bun --version`、一条 `Start-Sleep 3`），整个过程中不弹出黑色控制台窗口。合并、看改动、拉 PR 状态时也不弹。
 - [ ] **默认 shell**：装了 PowerShell 7 时用 `pwsh`，没装时用 Windows 自带的 `powershell`；在讨论串里让它运行 `$PSVersionTable.PSVersion`，看追踪里的命令结果。中文输出不乱码。
 - [ ] **bash**：项目设置里把 shell 换成 Git Bash 的 `bash.exe`，`echo 你好 && ls` 能跑，输出不乱码。
