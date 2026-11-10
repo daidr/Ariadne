@@ -133,7 +133,7 @@ describe('a coordinator turn', () => {
     ])
   })
 
-  test('the reply shows as it is written; text beside a tool call stays until the reply', async () => {
+  test('the reply shows as it is written; text beside a working tool call is taken back', async () => {
     const shown: (string | null)[] = []
     app.drafts.subscribe((update) =>
       shown.push(
@@ -172,6 +172,7 @@ describe('a coordinator turn', () => {
     expect(shown).toEqual([
       '先看看有哪些 thread，再看计划图\n然后决定',
       'held 先看看有哪些 thread，再看计划图\n然后决定',
+      null,
       '现在没有在跑的 thread。\n\n要我开一个吗？',
       'posted 现在没有在跑的 thread。\n\n要我开一个吗？',
     ])
@@ -220,7 +221,7 @@ describe('a coordinator turn', () => {
     expect(app.drafts.list()).toEqual([])
   })
 
-  test('text held beside tool calls gives way to the reply that follows', async () => {
+  test('lines on what the model does never become the reply', async () => {
     const model = fakeModel((request) => {
       const steps = request.messages.filter((m) => m.role === 'tool').length
       if (steps === 0) {
@@ -231,17 +232,14 @@ describe('a coordinator turn', () => {
         ]
       }
       if (steps === 1) {
-        // A step whose line never shows leaves the held text where it is.
         return [
           { type: 'text', text: '再看计划图' },
           call('c2', 'read_plan', {}),
           { type: 'finish', reason: 'tool-calls' },
         ]
       }
-      return say('没有在跑的 thread。')
+      return say('')
     })
-    const shown: (string | null)[] = []
-    app.drafts.subscribe((update) => shown.push(update.draft?.text ?? null))
     const project = app.createProject('P')
     app.postMessage(project.id, {
       conversationId: project.coordinatorId,
@@ -249,40 +247,58 @@ describe('a coordinator turn', () => {
       content: '看看进度',
     })
     await startScheduler(model).idle()
-
-    expect(shown.slice(0, -1)).not.toContain(null)
-    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
-      '看看进度',
-      '没有在跑的 thread。',
-    ])
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual(['看看进度'])
     expect(app.drafts.list()).toEqual([])
   })
 
-  test('a stopped turn takes back the text it held', async () => {
-    let running: ReturnType<typeof startScheduler>
-    let project: ReturnType<Ariadne['createProject']>
+  test('the answer stays when a short line follows the ticked-off todo', async () => {
     const model = fakeModel((request) => {
       if (!answered(request)) {
         return [
-          { type: 'text', text: '第一行\n第二行' },
-          call('c1', 'list_threads', {}),
+          { type: 'text', text: '没有在跑的 thread。\n\n要我开一个吗？' },
+          call('c1', 'update_todo', { items: [{ label: '看进度', status: 'done' }] }),
           { type: 'finish', reason: 'tool-calls' },
         ]
       }
-      expect(app.drafts.list()).toHaveLength(1)
-      running.cancel(project.coordinatorId)
-      return say('')
+      return say('待办已更新。')
     })
-    project = app.createProject('P')
-    running = startScheduler(model)
+    const project = app.createProject('P')
     app.postMessage(project.id, {
       conversationId: project.coordinatorId,
       author: 'user',
       content: '看看进度',
     })
-    await running.idle()
-    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual(['看看进度'])
-    expect(app.drafts.list()).toEqual([])
+    await startScheduler(model).idle()
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。\n\n要我开一个吗？',
+      '待办已更新。',
+    ])
+  })
+
+  test('the answer stays when the turn fails after it', async () => {
+    const model = fakeModel((request) => {
+      if (!answered(request)) {
+        return [
+          { type: 'text', text: '没有在跑的 thread。\n\n要我开一个吗？' },
+          call('c1', 'update_todo', { items: [{ label: '看进度', status: 'done' }] }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return [{ type: 'finish', reason: 'error', error: 'HTTP 401: bad key' }]
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+    expect(app.getConversation(project.coordinatorId).lastOutcome).toBe('failed')
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。\n\n要我开一个吗？',
+    ])
   })
 
   test('a posted reply keeps the id of its draft', async () => {

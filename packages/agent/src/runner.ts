@@ -6,7 +6,6 @@ import {
   type Ariadne,
   type Attachment,
   type ConversationView,
-  type DraftHandle,
   type ToolCallRecord,
   type TranscriptEntry,
   type TurnOutcome,
@@ -530,8 +529,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let instructionsStale = true
     // Steps in a row whose output hit the length limit.
     let cuts = 0
-    // The draft of an earlier step that called tools, still shown: the reply if none follows.
-    let held: DraftHandle | null = null
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
@@ -642,7 +639,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       let answer: Awaited<ReturnType<typeof requestStep>>
       // Calls that show their work while written; what never ran is taken back.
       live.reset()
-      // The reply as it is written, shown until later text takes its place (see `held`).
+      // The reply as it is written, shown until the step turns out to call tools that work.
       const draft = app.drafts.start({
         projectId: conversation.projectId,
         conversationId,
@@ -711,9 +708,21 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       cuts = cut ? cuts + 1 : 0
       if (cuts >= MAX_CUTS) throw new TurnError({ key: 'error.truncated', params: { count: cuts } })
 
-      // Text the user read before the step's tool calls stays shown while they run. It is
-      // often the answer itself, with the todo list ticked off after it.
-      if (toolCalls.length && draft.shown) held = draft
+      // Text the user read before calls that only tick off the todo list is the answer: it is
+      // posted now, before them. Before calls that work it is what the model does, and goes
+      // (text beside tool calls is not the reply).
+      const answerFirst =
+        toolCalls.length > 0 && toolCalls.every((call) => ANSWER_BEFORE.has(call.name))
+      const seen = answerFirst ? draft.shown?.trim() : ''
+      if (seen) {
+        app.postMessage(conversation.projectId, {
+          conversationId,
+          author: conversation.role,
+          content: await withImages(ctx, seen),
+          messageId: draft.messageId,
+        })
+        draft.posted()
+      } else if (toolCalls.length) draft.withdraw()
 
       if (!toolCalls.length) {
         if (cut) continue
@@ -726,20 +735,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             messageId: draft.messageId,
           })
           draft.posted()
-        } else {
-          draft.withdraw()
-          // No reply after all: the text the user read last is it.
-          const seen = held?.shown?.trim()
-          if (held && seen) {
-            app.postMessage(conversation.projectId, {
-              conversationId,
-              author: conversation.role,
-              content: await withImages(ctx, seen),
-              messageId: held.messageId,
-            })
-            held.posted()
-          }
-        }
+        } else draft.withdraw()
         await finish('completed')
         return
       }
@@ -987,6 +983,8 @@ const LOOKS = new Set([
 ])
 /** Calls that hand work to a thread: after one, the coordinator may look again for the next. */
 const HANDS_OVER = new Set(['create_thread', 'message_thread'])
+/** Calls a model makes after it has answered: the text before them is the reply. */
+const ANSWER_BEFORE = new Set(['update_todo'])
 /** The coordinator's look in a turn that is reminded the work is a thread's. */
 export const COORDINATOR_LOOK_HINT = 6
 /** Looks in a turn past which the coordinator is turned away. */

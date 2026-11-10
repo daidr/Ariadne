@@ -175,7 +175,7 @@ export interface ReplyDraft {
   startedAt: number
   /** It was posted as `messageId`; the message itself follows in the log. */
   posted?: boolean
-  /** Its step went on to call tools: it no longer grows, and stays until later text takes its place. */
+  /** Its step went on to call tools: it no longer grows while they are written. */
   held?: boolean
 }
 
@@ -194,9 +194,8 @@ export interface DraftHandle {
   /** The attempt failed, or the turn moves on without it: forget it. */
   withdraw(): void
   /**
-   * A tool call began. A draft the user has seen stays as it is, so text they read does not
-   * go away under them: until the next text that shows takes its place, or the turn posts it
-   * or ends. One not shown yet is forgotten.
+   * A tool call began. A draft the user has seen stays as it is until the step is over and
+   * the caller posts or withdraws it; one not shown yet is forgotten.
    */
   hold(): void
   /** What the user sees of it now, or null while nothing shows. */
@@ -287,9 +286,8 @@ export class ReplyDrafts {
       else this.drafts.set(key, { id, update })
       this.emit(update)
     }
-    // A draft of an earlier step still being written is gone with this one; a held one stays
-    // until this one shows.
-    if (!this.drafts.get(key)?.update.draft?.held) this.drop(key)
+    // A draft of an earlier step still shown is gone with this one.
+    this.drop(key)
     return {
       messageId: input.messageId,
       text: (piece) => {
@@ -298,9 +296,7 @@ export class ReplyDrafts {
         text += piece
         if (!draftShows(text)) return
         if (!current()) {
-          // Shown from its first lines at once, then as it grows; a held one goes for it.
-          clearTimeout(this.timers.get(key))
-          this.timers.delete(key)
+          // Shown from its first lines at once, then as it grows.
           this.drafts.set(key, { id, update: { ...input, draft: null } })
           set(false)
           return
