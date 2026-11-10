@@ -51,6 +51,8 @@ import {
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
+import { relayIdOf, shownAs } from '../relays'
+import RelayedTo from './RelayedTo.vue'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
@@ -302,6 +304,8 @@ const writing = computed<MessageView | null>(() => {
     attachments: [],
     mentions: [],
     comments: [],
+    cites: [],
+    relayedTo: [],
     createdAt: reply.startedAt,
     editedAt: null,
     editReason: null,
@@ -316,7 +320,7 @@ const recap = computed(() => view.value.notices.findLast((notice) => notice.kind
 // unsaid: the merge's own line says what happened.
 const timeline = computed(() =>
   [
-    ...view.value.messages.map((message) => ({
+    ...view.value.messages.flatMap(shownAs).map((message) => ({
       id: message.id,
       at: message.createdAt,
       message,
@@ -470,6 +474,7 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
     ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
+    ...(message.relayedTo.length ? [{ type: 'relayed' }] : []),
   ]
 }
 
@@ -941,7 +946,7 @@ watch(
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
             :data-message-id="message.id"
-            :highlighted="focused === message.id"
+            :highlighted="!!focused && focused === relayIdOf(message.id)"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
             actions-visible="hover"
           >
@@ -1014,6 +1019,7 @@ watch(
                 v-else-if="part.type === 'block'"
                 :block="message.blocks[part.index as number]!"
               />
+              <RelayedTo v-else-if="part.type === 'relayed'" :relays="message.relayedTo" />
               <TurnChanges
                 v-else-if="part.type === 'changes' && shown.changes.has(message.id)"
                 :notice="shown.changes.get(message.id)!"

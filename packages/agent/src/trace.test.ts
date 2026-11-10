@@ -314,7 +314,8 @@ describe('the trace', () => {
       resolveModel: () => current,
       locale: () => 'zh-CN',
       retryBaseMs: 1,
-      compactAt: 600,
+      // Room for the first three messages: the summary looked at is the other model's.
+      compactAt: 700,
     })
     scheduler.start()
     const project = app.createProject('P')

@@ -34,8 +34,12 @@ export const say = (text: string): ModelStreamPart[] => [
   { type: 'usage', input: 10, output: 5 },
   { type: 'finish', reason: 'stop' },
 ]
+/** The last user input, without the message id the coordinator reads after it. */
 export const lastUser = (request: ModelRequest) =>
-  request.messages.filter((m: ChatMessage) => m.role === 'user').at(-1)?.content ?? ''
+  (request.messages.filter((m: ChatMessage) => m.role === 'user').at(-1)?.content ?? '').replace(
+    /\n\n\[message msg_[\w-]+\]$/,
+    '',
+  )
 export const answered = (request: ModelRequest) => request.messages.at(-1)?.role === 'tool'
 /** Told to report after a turn that ended without one: scripts that act on new input skip it. */
 export const reminded = (request: ModelRequest) => lastUser(request).includes('<report_missing>')

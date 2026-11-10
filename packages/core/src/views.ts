@@ -4,6 +4,7 @@ import type { ProjectDetected, ProjectSettings } from './project-settings'
 import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
+  CitedMessage,
   Currency,
   LineComment,
   MessageMention,
@@ -227,6 +228,13 @@ export interface MessageAsk {
   withdrawn: string | null
 }
 
+/** A relay that passed a user's message to a thread. */
+export interface MessageRelay {
+  threadId: string
+  /** The relay, in the thread's conversation. */
+  messageId: string
+}
+
 export interface MessageView {
   id: string
   conversationId: string
@@ -243,6 +251,10 @@ export interface MessageView {
   mentions: MessageMention[]
   /** The user's comments on lines of the thread's changes. */
   comments: LineComment[]
+  /** On a relay: the user's messages it passes along, as they read when sent. */
+  cites: CitedMessage[]
+  /** On a user's message: the relays that passed it to threads, oldest first. */
+  relayedTo: MessageRelay[]
   createdAt: number
   editedAt: number | null
   editReason: string | null
@@ -545,7 +557,7 @@ export type TranscriptNote =
       /** The answer as the model reads it, e.g. `choice: …` or `approved`. */
       answer: string
     }
-  | { type: 'user-in-thread'; threadId: string; content: string }
+  | { type: 'user-in-thread'; threadId: string; messageId: string; content: string }
   /** The agent's wait came due, the user woke it early, or the user called it off. */
   | { type: 'wait-over'; how: 'due' | 'now' | 'cancelled'; until: number; note: string }
   | { type: 'routine'; routineId: string; prompt: string; dueAt: number }

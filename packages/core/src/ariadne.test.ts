@@ -626,6 +626,108 @@ describe('messages', () => {
     ).toThrow(DomainError)
   })
 
+  test("a relay passes the user's own messages along, and they show where they went", () => {
+    const project = app.createProject('P')
+    const thread = app.createThread(project.id, { title: 't' })
+    const other = app.createThread(project.id, { title: 'o' })
+    const asked = app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '加个导出按钮',
+    })
+    const since = app.lastSeq()
+    const relay = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '',
+      cites: [asked.id, asked.id],
+    })
+    // Copied as it read, once.
+    expect(relay.cites).toEqual([
+      {
+        messageId: asked.id,
+        conversationId: project.coordinatorId,
+        content: '加个导出按钮',
+        at: asked.createdAt,
+      },
+    ])
+    const second = app.postMessage(project.id, {
+      conversationId: other.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '一起看看',
+      cites: [asked.id],
+    })
+    const page = app.pageMessages(project.coordinatorId, { since })
+    expect(page.messages.map((m) => [m.id, m.relayedTo])).toEqual([
+      [
+        asked.id,
+        [
+          { threadId: thread.id, messageId: relay.id },
+          { threadId: other.id, messageId: second.id },
+        ],
+      ],
+    ])
+
+    // Passed back to the thread it was written in, it went nowhere new.
+    const inThread = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'user',
+      content: '顺便做深色模式',
+    })
+    app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '这条转给了 o',
+      cites: [inThread.id],
+    })
+    const sentOn = app.postMessage(project.id, {
+      conversationId: other.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '',
+      cites: [inThread.id],
+    })
+    expect(app.listMessages(thread.id).find((m) => m.id === inThread.id)?.relayedTo).toEqual([
+      { threadId: other.id, messageId: sentOn.id },
+    ])
+
+    // Only the user's messages, only of this project, only on a relay.
+    const own = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: 'x',
+    })
+    const elsewhere = app.createProject('Q')
+    const theirs = app.postMessage(elsewhere.id, {
+      conversationId: elsewhere.coordinatorId,
+      author: 'user',
+      content: 'q',
+    })
+    for (const cites of [[own.id], [theirs.id], ['msg_missing']]) {
+      expect(() =>
+        app.postMessage(project.id, {
+          conversationId: thread.id,
+          author: 'coordinator',
+          kind: 'relay',
+          content: 'x',
+          cites,
+        }),
+      ).toThrow(DomainError)
+    }
+    expect(() =>
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'coordinator',
+        content: 'x',
+        cites: [asked.id],
+      }),
+    ).toThrow(DomainError)
+  })
+
   test('rejects a conversation from another project', () => {
     const a = app.createProject('A')
     const b = app.createProject('B')

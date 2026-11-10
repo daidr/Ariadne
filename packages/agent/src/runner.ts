@@ -458,6 +458,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const chatFor = (seesImages: boolean) => ({
     readText,
     images: seesImages,
+    messageIds: !isThread,
     keepReasoning: writtenBy(app, conversation.projectId, JSON.parse(callOf(model, null))),
   })
   let chat = chatFor(images)

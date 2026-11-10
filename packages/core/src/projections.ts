@@ -585,6 +585,10 @@ export const messagesProjection: Projection = {
       attachments TEXT,
       mentions TEXT,
       comments TEXT,
+      -- On a relay: the user's messages it passes along. On a user's message: the relays
+      -- that passed it to threads.
+      cites TEXT,
+      relayed_to TEXT,
       -- The event that last changed the row, for pages that fetch only changes.
       changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
@@ -598,8 +602,8 @@ export const messagesProjection: Projection = {
       case 'message.posted':
         db.run(
           `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
-             attachments, mentions, comments, created_at, changed_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             attachments, mentions, comments, cites, created_at, changed_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -611,10 +615,22 @@ export const messagesProjection: Projection = {
             event.data.attachments?.length ? JSON.stringify(event.data.attachments) : null,
             event.data.mentions?.length ? JSON.stringify(event.data.mentions) : null,
             event.data.comments?.length ? JSON.stringify(event.data.comments) : null,
+            event.data.cites?.length ? JSON.stringify(event.data.cites) : null,
             event.at,
             event.seq,
           ],
         )
+        // The user's message shows where it went.
+        // Passed back to where it was written, it went nowhere new.
+        for (const cited of event.data.cites ?? []) {
+          if (cited.conversationId === event.data.conversationId) continue
+          const relay = { threadId: event.data.conversationId, messageId: event.data.messageId }
+          db.run(
+            `UPDATE messages SET relayed_to = json_insert(coalesce(relayed_to, '[]'), '$[#]', json(?)),
+               changed_seq = ? WHERE id = ?`,
+            [JSON.stringify(relay), event.seq, cited.messageId],
+          )
+        }
         break
       case 'message.edited':
         db.run(
@@ -1402,7 +1418,7 @@ export const transcriptProjection: Projection = {
             {
               conversationId: coordinator,
               kind: 'note',
-              payload: { type: 'user-in-thread', threadId: conversationId, content },
+              payload: { type: 'user-in-thread', threadId: conversationId, messageId, content },
             },
             true,
           )

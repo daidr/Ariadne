@@ -294,6 +294,8 @@ export const en: Record<MessageKey, string> = {
   'block.blank': 'Left blank',
   'block.withdrawn': 'Withdrawn: {reason}',
   'message.fromCoordinator': 'From the coordinator',
+  'message.relayedTo': 'Sent to a thread',
+  'message.relayedToMany': 'Sent to {count} threads',
   'message.fromAutopilot': 'From the autopilot',
   'conversation.working': 'Working…',
   'conversation.coordinatorWorking': 'The coordinator is working…',

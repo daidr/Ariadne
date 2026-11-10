@@ -14,6 +14,21 @@ export type Author = 'user' | 'coordinator' | 'thread'
  */
 export type MessageKind = 'chat' | 'relay'
 
+/**
+ * A message of the user's that the coordinator passed to a thread with a relay, copied as
+ * it read when sent: the thread reads the user's own words, not a retelling of them.
+ */
+export interface CitedMessage {
+  messageId: string
+  /** Where the user wrote it: the coordinator id or a thread id. */
+  conversationId: string
+  content: string
+  /** When the user sent it. */
+  at: number
+  attachments?: Attachment[]
+  mentions?: MessageMention[]
+}
+
 /** What a thread reports about its own work. */
 export type ReportKind = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'done'
 
@@ -596,6 +611,8 @@ export interface EventMap {
     mentions?: MessageMention[]
     /** The user's comments on lines of the thread's changes. */
     comments?: LineComment[]
+    /** On a relay: the user's messages it passes along, as they read when sent. */
+    cites?: CitedMessage[]
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }
