@@ -1,6 +1,8 @@
 import { Ariadne } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
 import {
+  browserLocator,
+  BrowserPages,
   ArtifactFeedback,
   Autopilot,
   McpHub,
@@ -91,6 +93,9 @@ const watcher = new RepoWatcher(app, workspaces, Number(process.env.ARIADNE_REPO
 // agent that wrote them in rounds.
 const shared = new SharedArtifacts(app)
 const feedback = new ArtifactFeedback(app, shared)
+// Threads' headless browsers: the machine's Chrome or Edge, or one fetched on first use.
+const browser = new BrowserPages(browserLocator(join(config.home, 'browser')))
+browser.follow(app)
 const scheduler = new Scheduler({
   app,
   workspaces,
@@ -115,6 +120,7 @@ const scheduler = new Scheduler({
   searchService: () => settings.searchService(),
   mcp,
   shared,
+  browser,
   everywhere: {
     add: (line) => settings.addInstruction(line),
     remove: (line) => settings.removeInstruction(line),
@@ -203,6 +209,7 @@ async function shutdown() {
   await janitor.stop()
   await autopilot.stop()
   timers.stop()
+  await browser.closeAll()
   backups.stop()
   feedback.stop()
   await scheduler.stop()

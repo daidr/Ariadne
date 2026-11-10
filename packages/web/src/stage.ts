@@ -95,6 +95,7 @@ export const threadGroups = [
   'working',
   'paused',
   'idle',
+  'aside',
   'done',
   'archived',
 ] as const
@@ -102,9 +103,23 @@ export type ThreadGroup = (typeof threadGroups)[number]
 
 /** The group a thread is listed in: archived ones go last, whatever they ended as. */
 export const groupOfThread = (thread: ThreadView): ThreadGroup =>
-  thread.archived ? 'archived' : groupOf[thread.stage]
+  thread.archived
+    ? 'archived'
+    : // Set aside, it is out of the way until its day, unless it is at work or asks something.
+      thread.aside && !thread.aside.due && ASIDE_STAGES.has(thread.stage)
+      ? 'aside'
+      : groupOf[thread.stage]
 
-export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived'>> = {
+const ASIDE_STAGES = new Set<ThreadStage>([
+  'idle',
+  'done',
+  'blocked',
+  'stopped',
+  'halted',
+  'silent',
+])
+
+export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived' | 'aside'>> = {
   review: 'review',
   answer: 'waiting',
   blocked: 'waiting',

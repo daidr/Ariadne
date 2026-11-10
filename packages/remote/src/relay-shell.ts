@@ -1,4 +1,4 @@
-import type { ExecResult } from '@ariadne/plugin-sdk'
+import type { BytePipe, ExecResult } from '@ariadne/plugin-sdk'
 import { RelayClient, type Channel, type RelayClientOptions } from '@ariadne/relay'
 import {
   CONNECTION_FAILED,
@@ -11,6 +11,7 @@ import {
 
 /** The channel kind and streams a daemon runs commands with; see the daemon's protocol. */
 const EXEC = 'exec'
+const TCP = 'tcp'
 const STDIN = 0
 const STDOUT = 1
 
@@ -109,6 +110,54 @@ export class RelayShell implements RemoteShell {
       options.signal?.removeEventListener('abort', end)
       this.scheduleIdle()
     }
+  }
+
+  /**
+   * Whether the daemon opens `tcp` channels: one from before them refuses the kind, a newer
+   * one refuses the missing port. Asked once.
+   */
+  tcp(): Promise<boolean> {
+    this.tcpProbe ??= (async () => {
+      const channel = await this.client.open(TCP, {})
+      const end = await new Promise<{ error?: string }>((resolve) => {
+        channel.onClose = resolve
+      })
+      return !/has no tcp channels/.test(end.error ?? '')
+    })().catch(() => {
+      this.tcpProbe = null
+      return false
+    })
+    return this.tcpProbe
+  }
+
+  private tcpProbe: Promise<boolean> | null = null
+
+  /** A `tcp` channel: the daemon connects to `port` on its loopback and passes bytes. */
+  async connect(port: number): Promise<BytePipe> {
+    if (this.idle) clearTimeout(this.idle)
+    this.idle = null
+    let channel: Channel
+    try {
+      channel = await this.client.open(TCP, { port })
+    } catch (error) {
+      this.scheduleIdle()
+      throw error
+    }
+    const pipe: BytePipe = {
+      write: (bytes) => channel.write(bytes, 0),
+      onData: () => {},
+      onClose: () => {},
+      close: () => {
+        if (!channel.closed) channel.close()
+        this.scheduleIdle()
+      },
+    }
+    channel.onData = (_stream, bytes) => pipe.onData(bytes)
+    channel.onClose = (end) => {
+      this.scheduleIdle()
+      pipe.onClose(end.error)
+    }
+    return pipe
   }
 
   async dispose(): Promise<void> {

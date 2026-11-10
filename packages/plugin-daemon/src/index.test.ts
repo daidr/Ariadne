@@ -120,6 +120,35 @@ describe('daemon shell', () => {
     await shell.dispose()
   })
 
+  test('a port on the machine is reached through a tcp channel, bytes both ways', async () => {
+    const echo = Bun.listen({
+      hostname: '127.0.0.1',
+      port: 0,
+      socket: {
+        data: (socket, data) => void socket.write(`echo:${new TextDecoder().decode(data)}`),
+      },
+    })
+    const shell = new DaemonShell(target)
+    try {
+      expect(await shell.tcp()).toBe(true)
+      const pipe = await shell.connect(echo.port)
+      const got = Promise.withResolvers<string>()
+      pipe.onData = (bytes) => got.resolve(new TextDecoder().decode(bytes))
+      expect(await pipe.write(new TextEncoder().encode('hi'))).toBe(true)
+      expect(await got.promise).toBe('echo:hi')
+      pipe.close()
+      expect(await pipe.write(new TextEncoder().encode('late'))).toBe(false)
+      // Nothing listens there: the channel closes with why.
+      const nobody = await shell.connect(1)
+      const refused = Promise.withResolvers<string | undefined>()
+      nobody.onClose = refused.resolve
+      expect(await refused.promise).toMatch(/port 1/)
+    } finally {
+      echo.stop(true)
+      await shell.dispose()
+    }
+  })
+
   test('a held call ends when it times out, with what it started', async () => {
     const shell = new DaemonShell(target)
     const marker = join(base, 'still-running')

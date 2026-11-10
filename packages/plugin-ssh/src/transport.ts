@@ -1,4 +1,4 @@
-import type { ExecResult } from '@ariadne/plugin-sdk'
+import type { BytePipe, ExecResult } from '@ariadne/plugin-sdk'
 import { threadEnv } from '@ariadne/plugin-local'
 import { StreamLink, type Link } from '@ariadne/relay'
 import {
@@ -109,6 +109,52 @@ export class SshShell implements RemoteShell {
     const relay = await this.daemon()
     if (relay) return relay.run(script, args, options)
     return this.plain(script, args, options)
+  }
+
+  /**
+   * A connection to `port` on the machine's loopback: a channel of the daemon's session, or
+   * `ssh -W` over the shared connection (also when the daemon predates `tcp` channels).
+   */
+  async connect(port: number): Promise<BytePipe> {
+    const relay = await this.daemon()
+    if (relay && (await relay.tcp())) return relay.connect(port)
+    const at = this.argv.indexOf('--')
+    // `localhost`, not 127.0.0.1: sshd tries each address it resolves to, so a server
+    // listening only on ::1 is reached too.
+    const proc = Bun.spawn(
+      [...this.argv.slice(0, at), '-W', `localhost:${port}`, ...this.argv.slice(at)],
+      { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true, env: threadEnv() },
+    )
+    const stderr = new Response(proc.stderr).text()
+    let closed = false
+    const pipe: BytePipe = {
+      async write(bytes) {
+        if (closed) return false
+        try {
+          proc.stdin.write(bytes)
+          await proc.stdin.flush()
+          return true
+        } catch {
+          return false
+        }
+      },
+      onData: () => {},
+      onClose: () => {},
+      close() {
+        if (closed) return
+        closed = true
+        void Promise.resolve(proc.stdin.end()).catch(() => {})
+        setTimeout(() => proc.kill(), 2000).unref?.()
+      },
+    }
+    void (async () => {
+      for await (const chunk of proc.stdout) pipe.onData(chunk)
+      const code = await proc.exited
+      closed = true
+      const last = (await stderr).trim().split('\n').at(-1)
+      pipe.onClose(code === 0 ? undefined : last || `ssh exited with code ${code}`)
+    })()
+    return pipe
   }
 
   async dispose(): Promise<void> {

@@ -42,6 +42,7 @@ import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 import type { EverywhereMemory } from './tool-helpers'
+import type { BrowserPages } from './browser-page'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
@@ -91,6 +92,8 @@ export interface TurnOptions {
   skillsDirs?: readonly string[]
   /** The user's instructions for every project, for the coordinator to add a line to. */
   everywhere?: EverywhereMemory
+  /** The conversations' headless browsers; without them there is no browser tool. */
+  browser?: BrowserPages
 }
 
 function threadContext(
@@ -332,6 +335,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           noteCheck: isThread && app.canNoteCheck(conversationId),
           noteSetup: isThread && app.canNoteSetup(conversationId),
           unnamed: project.unnamed,
+          browser: !!options.browser,
+          remote,
         }))
   )
     .filter((tool) => !off.has(tool.spec.name))
@@ -426,6 +431,17 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     userSpoke: () => userSpokeSince(app.listTranscript(conversationId), handledBefore),
     skills: () => skills,
     ...(options.everywhere ? { everywhere: options.everywhere } : {}),
+    ...(options.browser ? { browser: options.browser } : {}),
+    // The browser reaches a remote workspace's own localhost through the workspace.
+    ...(options.browser && remote
+      ? {
+          tunnel: async (port: number) => {
+            const workspace = await ctx.workspace()
+            if (!workspace.connect) throw new Error('the workspace cannot reach its ports')
+            return workspace.connect(port)
+          },
+        }
+      : {}),
     ...(options.dashboardSources ? { dashboardSources: options.dashboardSources } : {}),
     ...(options.shared ? { shared: options.shared } : {}),
     models: options.models ?? [],
@@ -467,7 +483,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const chatFor = (seesImages: boolean) => ({
     readText,
     images: seesImages,
-    messageIds: !isThread,
     keepReasoning: writtenBy(app, conversation.projectId, JSON.parse(callOf(model, null))),
   })
   let chat = chatFor(images)

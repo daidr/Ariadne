@@ -7,6 +7,7 @@ import {
   type BranchCapability,
   type DirectoryListing,
   type ExecOptions,
+  type BytePipe,
   type ExecResult,
   type GitObjects,
   type Workspace,
@@ -132,6 +133,13 @@ export class RemoteWorkspace implements Workspace {
 
   get label(): string {
     return `${this.shell.host}:${this.root}`
+  }
+
+  connect(port: number): Promise<BytePipe> {
+    if (!this.shell.connect) {
+      return Promise.reject(new Error(`${this.shell.via} cannot reach ports on the machine`))
+    }
+    return this.shell.connect(port)
   }
 
   async readFile(path: string): Promise<string> {

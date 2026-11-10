@@ -60,6 +60,15 @@ export const searchProjection: Projection = {
           body: '',
         })
         break
+      case 'thread.renamed': {
+        const doc = db
+          .query<{ id: number }, [string]>('SELECT id FROM search_docs WHERE ref_id = ?')
+          .get(event.data.threadId)
+        if (doc) {
+          db.run('UPDATE search_text SET title = ? WHERE rowid = ?', [event.data.title, doc.id])
+        }
+        break
+      }
       case 'thread.reported':
         change(db, event.data.threadId, { body: event.data.headline, at: event.at })
         break

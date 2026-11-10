@@ -1,5 +1,5 @@
 import type { SharedArtifacts } from './shared-artifacts'
-import type { Ariadne, Attachment } from '@ariadne/core'
+import { DomainError, type Ariadne, type Attachment } from '@ariadne/core'
 import type { Locale } from '@ariadne/i18n'
 import type {
   BranchCapability,
@@ -10,6 +10,8 @@ import type {
   TrackerCapability,
   Workspace,
 } from '@ariadne/plugin-sdk'
+import type { BrowserPages } from './browser-page'
+import type { Tunnel } from './browser-proxy'
 import { keepMessageImages } from './message-images'
 import type { BackgroundCommands } from './background'
 import type { CommandRule, Limits } from './limits'
@@ -89,6 +91,10 @@ export interface ToolContext {
   skills?: () => SkillSet
   /** The user's instructions for every project, which the coordinator may add a line to. */
   everywhere?: EverywhereMemory
+  /** The conversations' headless browsers. */
+  browser?: BrowserPages
+  /** For a workspace on another machine: reaches a port on that machine's loopback. */
+  tunnel?: Tunnel
 }
 
 /**
@@ -177,6 +183,14 @@ export function optionalBool(args: Record<string, unknown>, key: string): boolea
   if (value === undefined || value === null) return false
   if (typeof value !== 'boolean') throw new ToolInputError(`"${key}" must be true or false`)
   return value
+}
+
+/** A thread of the calling conversation's project, or not found. */
+export function ownThread(ctx: ToolContext, threadId: string) {
+  const thread = ctx.app.getThread(threadId)
+  if (thread.projectId !== ctx.projectId)
+    throw new DomainError('error.notFound', { what: threadId })
+  return thread
 }
 
 export const json = (value: unknown): ToolResult => ({ content: JSON.stringify(value) })

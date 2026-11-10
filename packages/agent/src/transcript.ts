@@ -278,11 +278,6 @@ export interface ChatOptions {
   keepReasoning?: (call: string) => boolean
   /** Read the long tool results up to here as cleared, as if a clearing said so. */
   clearUpTo?: number
-  /**
-   * Whether the user's messages carry their ids: the coordinator passes them on to threads
-   * by id.
-   */
-  messageIds?: boolean
 }
 
 /** Whether a result is long enough to be cleared, see `CLEARABLE_CHARS`. */
@@ -377,7 +372,8 @@ export function toChatMessages(
               mentionsText(message.mentions),
               files.text,
               openAsksHint(entry.openAsks ?? []),
-              options.messageIds && message.author === 'user' ? `[message ${message.id}]` : '',
+              // By id the coordinator passes them on, and an agent reacts or answers to one.
+              message.author === 'user' ? `[message ${message.id}]` : '',
             ]
               .filter(Boolean)
               .join('\n\n'),
@@ -446,7 +442,7 @@ function relayMessage(
     : ''
   return {
     role: 'user',
-    content: [intro, note].filter(Boolean).join('\n').trim(),
+    content: [intro, note, `[message ${message.id}]`].filter(Boolean).join('\n').trim(),
     ...(images.length ? { images } : {}),
   }
 }

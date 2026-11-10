@@ -18,6 +18,8 @@ const relay = (message: Partial<MessageView>): TranscriptEntry => ({
     comments: [],
     cites: [],
     relayedTo: [],
+    replyTo: null,
+    reactions: [],
     createdAt: 0,
     editedAt: null,
     editReason: null,

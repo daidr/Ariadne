@@ -257,6 +257,7 @@ export function blockLines(
     }
     if (block.type === 'chart')
       return `${block.kind} chart${block.title ? ` "${block.title}"` : ''}: ${block.rows.length} points`
+    if (block.type === 'connector') return `suggested service "${block.name}"`
     return `steps${block.title ? ` "${block.title}"` : ''}: ${block.items.map((item) => `${item.title} [${item.status}]`).join(', ')}`
   })
   const { ask } = message

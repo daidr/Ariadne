@@ -772,6 +772,12 @@ export function createHandler({
     json({ thread: app.reviewThread(threadId) }),
   )
 
+  // The user takes up a thread that was set aside.
+  add('DELETE', '/api/threads/:threadId/aside', (_request, { threadId = '' }) => {
+    app.endAside(threadId, 'user')
+    return json({ thread: app.getThread(threadId) })
+  })
+
   // Read the thread's pull request and checks again now, instead of waiting for the poll.
   add(
     'POST',

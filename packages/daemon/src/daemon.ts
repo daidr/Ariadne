@@ -8,6 +8,7 @@ import {
   CERT_NAME,
   derOf,
   EXEC,
+  TCP,
   fingerprintOf,
   PROTOCOL,
   RUN_ARGV,
@@ -156,6 +157,10 @@ export class Lockout {
  */
 export function execChannels(): (channel: Channel) => void {
   return (channel) => {
+    if (channel.kind === TCP) {
+      tcpChannel(channel)
+      return
+    }
     if (channel.kind !== EXEC) {
       channel.close({ error: `the daemon has no ${channel.kind} channels` })
       return
@@ -213,6 +218,57 @@ export function execChannels(): (channel: Channel) => void {
       channel.close({ code })
     })()
   }
+}
+
+/** A `tcp` channel: a connection to `port` on this machine's loopback, bytes both ways. */
+function tcpChannel(channel: Channel): void {
+  const port = channel.params.port
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    channel.close({ error: 'a tcp channel needs a port' })
+    return
+  }
+  // What is sent before the connection is up waits for it.
+  const queue: Uint8Array[] = []
+  let socket: Bun.Socket | null = null
+  let pending: Uint8Array | null = null
+  const flush = () => {
+    if (!socket) return
+    while (pending || queue.length) {
+      const bytes = pending ?? queue.shift()!
+      const sent = socket.write(bytes)
+      pending = sent < bytes.length ? bytes.subarray(sent) : null
+      if (pending) return
+    }
+  }
+  channel.onData = (_stream, bytes) => {
+    queue.push(bytes.slice())
+    flush()
+  }
+  channel.onClose = () => socket?.end()
+  const handlers = {
+    data(_socket: Bun.Socket, data: Uint8Array) {
+      // Bun reuses its buffer once this returns.
+      void channel.write(data.slice(), 0)
+    },
+    drain: flush,
+    close() {
+      channel.close({ code: 0 })
+    },
+    error(_socket: Bun.Socket, error: Error) {
+      channel.close({ error: error.message })
+    },
+  }
+  // A server listens on one of the two loopbacks; `localhost` may name either.
+  void Bun.connect({ hostname: '127.0.0.1', port, socket: handlers })
+    .catch(() => Bun.connect({ hostname: '::1', port, socket: handlers }))
+    .then((opened) => {
+      socket = opened
+      if (channel.closed) opened.end()
+      else flush()
+    })
+    .catch((error: unknown) =>
+      channel.close({ error: `nothing listens on port ${port}: ${String(error)}` }),
+    )
 }
 
 export interface DaemonOptions {

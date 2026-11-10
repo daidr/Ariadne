@@ -30,6 +30,12 @@ export const CERT_NAME = 'ariadne-daemon'
 export const RUN_ARGV = ['bash', '--norc', '--noprofile', '-s']
 
 export const EXEC = 'exec'
+/**
+ * A connection to a port on the daemon's loopback (params `{ port }`), so Ariadne's headless
+ * browser reaches a server a command started there. Bytes go both ways on stream 0; the
+ * daemon closes the channel when the connection ends. A daemon without it refuses it.
+ */
+export const TCP = 'tcp'
 export const STDIN = 0
 export const STDOUT = 1
 export const STDERR = 2

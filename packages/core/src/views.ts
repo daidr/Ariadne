@@ -5,6 +5,8 @@ import type { AskBlock, BlockAnswer, ShowBlock } from './blocks'
 import type {
   Attachment,
   CitedMessage,
+  QuotedMessage,
+  Reaction,
   Currency,
   LineComment,
   MessageMention,
@@ -129,6 +131,11 @@ export interface ThreadView {
   changes: ChangeTotals | null
   /** The pull request of the thread's branch, once it opened one. */
   pullRequest: ThreadPullRequest | null
+  /**
+   * Set aside until `until`; `due` once that day came, when it waits on the user under
+   * "needs me". See `thread.set_aside`.
+   */
+  aside: { until: number; reason: string; by: string; due: boolean } | null
   /** Why and by whom it is held, while it is; see `thread.stopped`. */
   stopped: { reason: string; by: string; at: number } | null
   /** The sources it alone reads, each allowed by the user on a card of this thread. */
@@ -255,6 +262,10 @@ export interface MessageView {
   cites: CitedMessage[]
   /** On a user's message: the relays that passed it to threads, oldest first. */
   relayedTo: MessageRelay[]
+  /** The earlier message it answers, as that read when this was sent. */
+  replyTo: QuotedMessage | null
+  /** Emojis the agents put on it, in the order they were put. */
+  reactions: Reaction[]
   createdAt: number
   editedAt: number | null
   editReason: string | null

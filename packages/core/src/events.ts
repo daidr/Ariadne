@@ -29,6 +29,23 @@ export interface CitedMessage {
   mentions?: MessageMention[]
 }
 
+/**
+ * The message another one answers, as it read when the answer was sent: shown above the
+ * answer. A relay is quoted by the user's words it passed along, as the thread shows it.
+ */
+export interface QuotedMessage {
+  messageId: string
+  author: Author
+  /** The start of its text, on one line. */
+  text: string
+}
+
+/** An emoji an agent put on a message. */
+export interface Reaction {
+  emoji: string
+  by: Author
+}
+
 /** What a thread reports about its own work. */
 export type ReportKind = 'progress' | 'waiting' | 'ready' | 'blocked' | 'failed' | 'done'
 
@@ -462,6 +479,21 @@ export interface EventMap {
   }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
+  /** The thread was given a new title: by itself, or by the coordinator (`by` is its id). */
+  'thread.renamed': { threadId: string; title: string; by: string }
+  /**
+   * The thread is set aside until `until` (epoch ms): nothing is expected of it until then,
+   * when it comes back to the user under "needs me". `by` is the thread itself, or the
+   * coordinator's id. Setting it aside again moves the day.
+   */
+  'thread.set_aside': { threadId: string; until: number; reason: string; by: string }
+  /** The day a thread was set aside to came: it waits on the user under "needs me". */
+  'thread.aside_due': { threadId: string }
+  /**
+   * Taken up again before or after its day: by the user (`user`), or by the agent that set
+   * it aside (its id). The user writing to the thread takes it up too, without this event.
+   */
+  'thread.aside_ended': { threadId: string; by: string }
   /**
    * A thread's workspace was prepared, e.g. a git worktree on its own branch. `base` is the
    * branch that one started from, which its changes are compared and merged against.
@@ -613,6 +645,19 @@ export interface EventMap {
     comments?: LineComment[]
     /** On a relay: the user's messages it passes along, as they read when sent. */
     cites?: CitedMessage[]
+    /** The earlier message of the conversation it answers, as that read when sent. */
+    replyTo?: QuotedMessage
+  }
+  /**
+   * An agent reacted to a message of its own conversation with an emoji, or took that
+   * reaction back (`removed`).
+   */
+  'message.reacted': {
+    messageId: string
+    conversationId: string
+    by: Author
+    emoji: string
+    removed?: true
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }

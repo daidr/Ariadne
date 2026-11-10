@@ -1346,6 +1346,11 @@ export async function keepThreadReference(threadId: string, referenceId: string)
   }
 }
 
+/** The user takes up a thread that was set aside. */
+export async function endAside(threadId: string) {
+  await api.endAside(threadId).catch(report)
+}
+
 /** The user is through with what the thread put up for review. */
 export async function reviewThread(threadId: string) {
   await api.reviewThread(threadId).catch(report)
