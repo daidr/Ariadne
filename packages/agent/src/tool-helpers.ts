@@ -81,6 +81,8 @@ export interface ToolContext {
    * hear of how it ended, once, when that is not plain success.
    */
   setupDone?: (signal: AbortSignal) => Promise<string | null>
+  /** The background command still setting up the thread's new workspace; `null` when none runs. */
+  setupRunning?: () => string | null
   /** Asks a cheaper model, in a context of its own, to look into something read-only. */
   research?: Researcher | undefined
   /** The skills the conversation can read, as loaded last. */

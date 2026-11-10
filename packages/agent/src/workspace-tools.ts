@@ -228,6 +228,11 @@ async function checkAfterEdit(
 ): Promise<string> {
   const check = ctx.commands?.check?.trim()
   if (!check) return ''
+  // Before the dependencies are in, the check would fail for want of them, not of the edit.
+  const setup = ctx.setupRunning?.()
+  if (setup) {
+    return `\n[The project's check after edits did not run: ${setup}, the setup of your new workspace, still runs.]`
+  }
   const { command, result } = await runCheck(ctx, workspace, check, paths)
   if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
   return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${checkOutput(result)}`
@@ -318,14 +323,18 @@ export const noteCheck = workspaceTool(
         '"files" must name a file to try the command on, since it has {file}',
       )
     }
+    // Tried on a workspace whose dependencies are in, or it fails for want of them.
+    const setup = (await ctx.setupDone?.(ctx.signal)) ?? null
+    if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
     const { command: ran, result } = await runCheck(ctx, workspace, command, files)
     if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
     ctx.app.noteCheck(ctx.conversationId, command)
     return {
       content:
-        result.exitCode === 0
+        (setup ? `${setup}\n\n` : '') +
+        (result.exitCode === 0
           ? `Noted. It passed just now: ${ran}`
-          : `Noted. It failed just now (exit code ${result.exitCode}): ${ran}\n${checkOutput(result)}\nIf the command itself is wrong (not found, bad arguments), note the corrected one now; if it found real problems in the code, it works.`,
+          : `Noted. It failed just now (exit code ${result.exitCode}): ${ran}\n${checkOutput(result)}\nIf the command itself is wrong (not found, bad arguments), note the corrected one now; if it found real problems in the code, it works.`),
     }
   },
 )
@@ -372,6 +381,10 @@ export const noteSetup = workspaceTool(
         isError: true,
       }
     }
+    // Not side by side with the setup already running in this workspace: both would write
+    // the same directories.
+    await ctx.setupDone?.(ctx.signal)
+    if (ctx.signal.aborted) return { content: 'Stopped; nothing was noted.', isError: true }
     const limits = ctx.limits ?? DEFAULT_LIMITS
     const live = ctx.app.live.start({
       projectId: ctx.projectId,

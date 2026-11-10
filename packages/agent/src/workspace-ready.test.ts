@@ -239,6 +239,55 @@ describe('the setup of new workspaces', () => {
     expect(ran).toEqual(['make deps', 'ls', 'pwd'])
   })
 
+  test('the check after edits waits for the setup: skipped while it runs', async () => {
+    const ended = Promise.withResolvers<Partial<ExecResult>>()
+    const { workspaces, ran } = await memoryHost({}, (command) =>
+      command === 'make deps' ? ended.promise : {},
+    )
+    const { id } = project()
+    const first = app.createThread(id, { title: '一' })
+    app.noteSetup(first.id, 'make deps')
+    app.noteCheck(first.id, 'tsc --noEmit')
+    const thread = app.createThread(id, { title: '二' })
+    brief(id, thread.id)
+    const running = start(
+      steps([
+        ['write_file', { path: 'a.ts', content: '' }],
+        ['run_command', { command: 'ls' }],
+        ['write_file', { path: 'b.ts', content: '' }],
+      ]),
+      workspaces,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(toolResults(thread.id)[0]!.text).toContain(
+      'check after edits did not run: cmd-1, the setup of your new workspace, still runs',
+    )
+    ended.resolve({})
+    await running.idle()
+    expect(ran).toEqual(['make deps', 'ls', 'tsc --noEmit'])
+    expect(toolResults(thread.id)[2]!.text).toContain('check after edits passed')
+  })
+
+  test('a setup that failed is told with the next tool result, whatever it is', async () => {
+    const { workspaces } = await memoryHost({ 'a.ts': '' }, (command) =>
+      command === 'make deps' ? { exitCode: 2 } : {},
+    )
+    const { id } = project()
+    app.noteSetup(app.createThread(id, { title: '一' }).id, 'make deps')
+    const thread = app.createThread(id, { title: '二' })
+    brief(id, thread.id)
+    await start(
+      steps([
+        ['read_file', { path: 'a.ts' }],
+        ['read_file', { path: 'a.ts' }],
+        ['read_file', { path: 'a.ts' }],
+      ]),
+      workspaces,
+    ).idle()
+    const told = toolResults(thread.id).filter((r) => r.text.includes('failed (exit code 2)'))
+    expect(told).toHaveLength(1)
+  })
+
   test('a directory all threads share is left as it is', async () => {
     const { workspaces, ran } = await memoryHost({}, undefined, { shared: true })
     const { id } = project()

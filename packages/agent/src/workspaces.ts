@@ -267,7 +267,7 @@ export class WorkspaceManager {
    * in the workspace opened just now, and what it left running when it last reported.
    */
   takeSetup(threadId: string): string | null {
-    const notes = [this.setups.get(threadId) ?? '']
+    const notes = [this.setups.get(threadId) ?? '', this.setupEnded(threadId) ?? '']
     this.setups.delete(threadId)
     // Asked only now: the call that opened the workspace may have noted the check itself.
     if (this.hinted.delete(threadId) && this.checkWanted(threadId)) notes.push(CHECK_HINT)
@@ -294,6 +294,28 @@ export class WorkspaceManager {
     } catch {
       return false
     }
+  }
+
+  /** The background command still setting up the thread's new workspace; `null` when none runs. */
+  setupRunning(threadId: string): string | null {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return null
+    const job = this.background.list(threadId).find((command) => command.id === id)
+    return job && !job.result ? id : null
+  }
+
+  /**
+   * How the setup of the thread's new workspace ended, once, when it ended badly and no
+   * command has waited on it yet; `null` while it runs or when it went well.
+   */
+  private setupEnded(threadId: string): string | null {
+    const id = this.setupJobs.get(threadId)
+    if (!id) return null
+    const job = this.background.list(threadId).find((command) => command.id === id)
+    if (job && !job.result) return null
+    this.setupJobs.delete(threadId)
+    if (!job?.result || (job.result.exitCode === 0 && !job.result.stopped)) return null
+    return endedNote(id, job.result)
   }
 
   /**

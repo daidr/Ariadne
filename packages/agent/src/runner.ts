@@ -448,6 +448,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? {
           background: workspaces.background,
           setupDone: (stop: AbortSignal) => workspaces.setupDone(owner, stop),
+          setupRunning: () => workspaces.setupRunning(owner),
         }
       : {}),
   }
