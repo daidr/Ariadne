@@ -280,6 +280,19 @@ export function withExtraBody<T extends Record<string, unknown>>(
   return { ...body, ...added }
 }
 
+/** A model a provider lists, with what it says of it besides the name. */
+export interface ListedModel {
+  /** The name to ask for it by. */
+  id: string
+  /** What the service calls it, when that says more than the name (`Opus 5.5` for `opus`). */
+  title?: string
+  /**
+   * The model the name stands for, when it is an alias (`claude-opus-5-5` for `opus`): the
+   * public catalog is looked up by it.
+   */
+  resolves?: string
+}
+
 /** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */
 export interface ModelProvider<Settings = Record<string, unknown>> {
   kind: string
@@ -307,14 +320,15 @@ export interface ModelProvider<Settings = Record<string, unknown>> {
    */
   search?: ModelSearch<Settings>
   /**
-   * The names of the models the account behind `settings` can use, for the settings form
-   * to offer, newest first where the service says. Throws with the reason when the service cannot be asked (a wrong address or
-   * key): the form shows it. Without it, model names are only typed.
+   * The models the account behind `settings` can use, for the settings form to offer,
+   * newest first where the service says: names, or entries saying more of them. Throws with
+   * the reason when the service cannot be asked (a wrong address or key): the form shows it.
+   * Without it, model names are only typed.
    */
   models?(
     settings: Settings,
     options?: { headers?: Record<string, string>; signal?: AbortSignal },
-  ): Promise<string[]>
+  ): Promise<(string | ListedModel)[]>
   /**
    * Whether the setup can work at all, without asking a model: the reason when it cannot
    * (the program is not installed), in the user's languages, `null` when it can. Checked when the settings are

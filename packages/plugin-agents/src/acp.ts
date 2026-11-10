@@ -1,7 +1,7 @@
-import type { ModelRequest } from '@ariadne/plugin-sdk'
+import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
 import { fileURLToPath } from 'node:url'
 import { SERVER_NAME } from './bridge'
-import { agentEnv, AgentProcess, AgentProcessError, splitCommand } from './process'
+import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
 import { busyText, RpcError, RpcPeer, Unhandled } from './rpc'
 import type { AgentKind, DriverContext } from './sessions'
 
@@ -56,6 +56,39 @@ export function forOwnTools(toolCall: unknown, tools: readonly string[]): boolea
   )
 }
 
+/** The models a session says it can switch between. */
+interface SessionModels {
+  currentModelId?: unknown
+  availableModels?: { modelId?: unknown; name?: unknown }[]
+}
+
+const trimmed = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+/** A session's models as entries, `default` first: the one it starts on. */
+export function acpModels(models: SessionModels | undefined): ListedModel[] {
+  const available = (models?.availableModels ?? []).flatMap((model) => {
+    const id = trimmed(model.modelId)
+    if (!id) return []
+    const title = trimmed(model.name)
+    return [{ id, ...(title && title !== id ? { title } : {}) }]
+  })
+  const current = available.find((model) => model.id === trimmed(models?.currentModelId))
+  const first: ListedModel =
+    current && current.id !== 'default'
+      ? { id: 'default', title: current.title ?? current.id, resolves: current.id }
+      : { id: 'default' }
+  return [first, ...available.filter((model) => model.id !== 'default')]
+}
+
+const CLIENT = {
+  protocolVersion: PROTOCOL_VERSION,
+  clientCapabilities: {
+    fs: { readTextFile: false, writeTextFile: false },
+    terminal: false,
+  },
+  clientInfo: { name: 'ariadne', title: 'Ariadne', version: '1.0.0' },
+}
+
 /**
  * Any agent that speaks the Agent Client Protocol: JSON-RPC on its stdin and stdout. It
  * gets no file system or terminal from Ariadne, the conversation's tools as a tool server,
@@ -78,6 +111,29 @@ export const acp: AgentKind<AcpSettings> = {
       },
     },
     required: ['command'],
+  },
+  // The protocol lists models only with a session: one is opened to read them, and closed.
+  listModels(settings, { cwd, signal }) {
+    const argv = splitCommand(settings.command ?? '')
+    if (!argv.length) return Promise.resolve([])
+    const proc = new AgentProcess({ argv, cwd, env: agentEnv(), label: 'agent' })
+    const peer = new RpcPeer(proc, true, {
+      request: async (method) => {
+        throw new Unhandled(`${method} is not supported`)
+      },
+      notification: () => {},
+    })
+    return exchange(proc, signal, {
+      onLine: (line) => peer.take(line),
+      async run() {
+        await peer.request('initialize', CLIENT)
+        const session = await peer.request<{ models?: SessionModels } | undefined>('session/new', {
+          cwd,
+          mcpServers: [],
+        })
+        return acpModels(session?.models)
+      },
+    })
   },
   describe(settings, request: ModelRequest) {
     return {
@@ -163,14 +219,7 @@ export const acp: AgentKind<AcpSettings> = {
               promptCapabilities?: { image?: boolean }
               mcpCapabilities?: { http?: boolean }
             }
-          }>('initialize', {
-            protocolVersion: PROTOCOL_VERSION,
-            clientCapabilities: {
-              fs: { readTextFile: false, writeTextFile: false },
-              terminal: false,
-            },
-            clientInfo: { name: 'ariadne', title: 'Ariadne', version: '1.0.0' },
-          })
+          }>('initialize', CLIENT)
           images = !!init?.agentCapabilities?.promptCapabilities?.image
           const mcpServers = []
           if (ctx.tools.specs.length) {

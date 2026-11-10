@@ -5,6 +5,7 @@ import type {
   LocalizedText,
   ModelProvider,
   ModelRequest,
+  ListedModel,
   ModelStreamPart,
   SettingsSchema,
   ToolSpec,
@@ -96,6 +97,15 @@ export interface AgentKind<Settings> {
    * when they are the same for every account.
    */
   models?: string[]
+  /**
+   * Ask the program which models the account it is signed in with can use, `default` among
+   * them; run in `cwd`, a directory of its own. Without it, or when it cannot say, the
+   * fixed `models` are offered.
+   */
+  listModels?(
+    settings: Settings,
+    context: { cwd: string; signal?: AbortSignal },
+  ): Promise<ListedModel[]>
   /**
    * Whether the program is on this machine and signed in, as far as files and the
    * environment tell: it is then offered on first run.
@@ -342,7 +352,26 @@ export function agentProvider<Settings>(
     title: agent.title,
     settings: agent.settings,
     program: true,
-    models: async () => ['default', ...(agent.models ?? [])],
+    async models(settings, asked = {}) {
+      const fixed = ['default', ...(agent.models ?? [])]
+      if (!agent.listModels) return fixed
+      const cwd = join(options.dataDir, 'sessions', randomUUID())
+      mkdirSync(cwd, { recursive: true, mode: 0o700 })
+      try {
+        const listed = await agent.listModels(settings, {
+          cwd,
+          ...(asked.signal ? { signal: asked.signal } : {}),
+        })
+        if (listed.length) {
+          return listed.some((m) => m.id === 'default') ? listed : [{ id: 'default' }, ...listed]
+        }
+      } catch {
+        // Not signed in, not installed, too old to say: what it surely takes is offered.
+      } finally {
+        rmSync(cwd, { recursive: true, force: true })
+      }
+      return fixed
+    },
     async check(settings) {
       const [program] = splitCommand(String((settings as { command?: unknown }).command ?? ''))
       return !program || Bun.which(program)

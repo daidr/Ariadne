@@ -40,7 +40,7 @@ import {
 } from '@ariadne/core'
 import { createTranslator, type LocalizedMessage } from '@ariadne/i18n'
 import type { Server } from 'bun'
-import { browseLocal, NothingToBrowse } from '@ariadne/plugin-sdk'
+import { browseLocal, NothingToBrowse, type ListedModel } from '@ariadne/plugin-sdk'
 import { eventStream } from './events-stream'
 import type { DataStore } from './data'
 import type { SettingsStore } from './settings'
@@ -238,6 +238,17 @@ function bearer(request: Request, url: URL): string | null {
     return url.searchParams.get('token')
   }
   return null
+}
+
+/** What a provider listed, each name once, as entries. */
+function entries(listed: (string | ListedModel)[]): ListedModel[] {
+  const seen = new Set<string>()
+  return listed.flatMap((item) => {
+    const entry = typeof item === 'string' ? { id: item } : item
+    if (!entry.id || seen.has(entry.id)) return []
+    seen.add(entry.id)
+    return [entry]
+  })
 }
 
 /** A service's models, those the catalog knows to work with tools first, newest first. */
@@ -1172,6 +1183,17 @@ export function createHandler({
   const describe = (models: string[], hint: string): Promise<Map<string, ModelInfo>> =>
     prices.describe(models, hint).catch(() => new Map<string, ModelInfo>())
 
+  /** What the catalog knows of listed models, an alias by the model it stands for. */
+  const describeListed = async (listed: ListedModel[], hint: string) => {
+    const looked = await describe([...new Set(listed.map((m) => m.resolves ?? m.id))], hint)
+    const info = new Map<string, ModelInfo>()
+    for (const m of listed) {
+      const facts = looked.get(m.resolves ?? m.id)
+      if (facts) info.set(m.id, facts)
+    }
+    return info
+  }
+
   // The models a provider in the form can use, each with what the catalog knows of it, so
   // picking one fills its settings in. `models: null` for a provider that cannot list them.
   add('POST', '/api/settings/model-list', async (request) => {
@@ -1180,12 +1202,14 @@ export function createHandler({
     const body = await readJson(request)
     const draft = settings.draftProvider(body.provider)
     if (!draft.provider.models) return json({ models: null })
-    let listed: string[]
+    let listed: ListedModel[]
     try {
-      listed = await draft.provider.models(draft.settings as never, {
-        headers: draft.headers,
-        signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS),
-      })
+      listed = entries(
+        await draft.provider.models(draft.settings as never, {
+          headers: draft.headers,
+          signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS),
+        }),
+      )
     } catch (error) {
       return errorResponse(
         {
@@ -1195,10 +1219,14 @@ export function createHandler({
         502,
       )
     }
-    const info = await describe(listed, draft.hint)
+    const info = await describeListed(listed, draft.hint)
+    const titles = new Map(listed.flatMap((m) => (m.title ? [[m.id, m.title] as const] : [])))
+    const ids = listed.map((m) => m.id)
+    // An agent program lists its models in its own order, `default` first.
     return json({
-      models: inOrder(listed, info).map((id) => ({
+      models: (draft.provider.program ? ids : inOrder(ids, info)).map((id) => ({
         id,
+        ...(titles.has(id) ? { title: titles.get(id) } : {}),
         ...(info.has(id) ? { info: info.get(id) } : {}),
       })),
     })
@@ -1245,19 +1273,22 @@ export function createHandler({
     const setup = settings.foundSetups().find((found) => found.id === id)
     if (!setup) throw new DomainError('error.notFound', { what: id })
     const { provider, settings: talksWith, hint } = settings.foundProvider(setup)
-    let listed: string[]
+    let listed: ListedModel[]
     try {
-      listed =
+      listed = entries(
         (await provider.models?.(talksWith as never, {
           signal: AbortSignal.timeout(BROWSE_TIMEOUT_MS),
-        })) ?? []
+        })) ?? [],
+      )
     } catch (error) {
       throw new DomainError('error.modelCheck', {
         detail: error instanceof Error ? error.message : String(error),
       })
     }
-    const info = await describe(listed, hint)
-    const model = suggestModel(listed, info)
+    const info = await describeListed(listed, hint)
+    const ids = listed.map((m) => m.id)
+    // An agent program starts on what it is itself set to.
+    const model = provider.program && ids.includes('default') ? 'default' : suggestModel(ids, info)
     if (!model) throw new DomainError('error.modelNone')
     const saved = settings.useFound(setup, model, info.get(model))
     const resolved = settings.resolveSaved(saved)

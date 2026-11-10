@@ -1,7 +1,7 @@
-import type { ModelRequest } from '@ariadne/plugin-sdk'
+import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { agentEnv, AgentProcess, AgentProcessError, splitCommand } from './process'
+import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
 import { busyText, RpcPeer, Unhandled } from './rpc'
 import type { AgentKind, AgentUsage, DriverContext } from './sessions'
 
@@ -51,6 +51,30 @@ interface Breakdown {
   reasoningOutputTokens?: number
 }
 
+/** Pages of its model list read at most, in case it never stops paging. */
+const MAX_PAGES = 10
+
+/** A model as its model list has it. */
+interface CodexModel {
+  id?: unknown
+  model?: unknown
+  displayName?: unknown
+}
+
+const trimmed = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+/** Its models as entries, the name it is asked for by and what it calls it. */
+export function codexModels(listed: CodexModel[]): ListedModel[] {
+  return listed.flatMap((entry) => {
+    const id = trimmed(entry.model) || trimmed(entry.id)
+    if (!id) return []
+    const title = trimmed(entry.displayName)
+    return [{ id, ...(title && title !== id ? { title } : {}) }]
+  })
+}
+
+const CLIENT = { name: 'ariadne', title: 'Ariadne', version: '1.0.0' }
+
 const dataUrl = (image: { mime: string; data: string }) => `data:${image.mime};base64,${image.data}`
 
 /**
@@ -80,6 +104,33 @@ export const codex: AgentKind<CodexSettings> = {
         default: 'codex',
       },
     },
+  },
+  // `default` stays unnamed: what it stands for is in the user's own configuration.
+  listModels(settings, { cwd, signal }) {
+    const proc = new AgentProcess({ argv: argvOf(settings), cwd, env: agentEnv(), label: 'agent' })
+    const peer = new RpcPeer(proc, false, {
+      request: async (method) => {
+        throw new Unhandled(`${method} is not supported`)
+      },
+      notification: () => {},
+    })
+    return exchange(proc, signal, {
+      onLine: (line) => peer.take(line),
+      async run() {
+        await peer.request('initialize', { clientInfo: CLIENT })
+        peer.notify('initialized')
+        const models: ListedModel[] = [{ id: 'default' }]
+        let cursor: string | null = null
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const result: { data?: CodexModel[]; nextCursor?: string | null } | undefined =
+            await peer.request('model/list', cursor ? { cursor } : {})
+          models.push(...codexModels(result?.data ?? []))
+          cursor = result?.nextCursor || null
+          if (!cursor) break
+        }
+        return models
+      },
+    })
   },
   describe(settings, request: ModelRequest) {
     return {
@@ -208,7 +259,7 @@ export const codex: AgentKind<CodexSettings> = {
         )
         try {
           await peer.request('initialize', {
-            clientInfo: { name: 'ariadne', title: 'Ariadne', version: '1.0.0' },
+            clientInfo: CLIENT,
             capabilities: { experimentalApi: true },
           })
           peer.notify('initialized')

@@ -16,6 +16,7 @@ import {
   DouTabs,
   DouText,
   DouTextarea,
+  type AutocompleteOption,
 } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, ref, watch } from 'vue'
@@ -357,14 +358,19 @@ function listed(provider: DraftProvider): Promise<ListedModel[]> {
   return asked
 }
 
-/** The provider's models for what is typed; all of them once a whole name stands there. */
-async function suggest(provider: DraftProvider, typed: string) {
+/**
+ * The provider's models for what is typed, by name or by what the service calls them; all
+ * of them once a whole name stands there.
+ */
+async function suggest(provider: DraftProvider, typed: string): Promise<AutocompleteOption[]> {
   const all = await listed(provider)
   const text = typed.trim().toLowerCase()
   const whole = all.some((model) => model.id.toLowerCase() === text)
+  const matches = (model: ListedModel) =>
+    model.id.toLowerCase().includes(text) || !!model.title?.toLowerCase().includes(text)
   return all
-    .filter((model) => whole || !text || model.id.toLowerCase().includes(text))
-    .map((model) => model.id)
+    .filter((model) => whole || !text || matches(model))
+    .map((model) => ({ value: model.id, ...(model.title ? { description: model.title } : {}) }))
 }
 
 /** The settings a catalog entry fills in, to tell later whether the user changed them. */
