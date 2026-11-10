@@ -610,6 +610,8 @@ export type TranscriptNote =
   /** Its last turn ended without a report. */
   | { type: 'report-missing' }
   | { type: 'instructions-changed'; path: string; removed: boolean }
+  /** The user set the project's source (`set`) or took it away, after the conversation began. */
+  | { type: 'source-changed'; set: boolean }
   /** The user took back a source this thread alone read (`now` null), or gave it to the project. */
   | { type: 'reference-ended'; name: string; now: string | null }
   | {

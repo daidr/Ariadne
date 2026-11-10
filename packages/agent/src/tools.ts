@@ -352,7 +352,7 @@ const report: Tool = {
 }
 
 const CREATE_THREAD_DESCRIPTION =
-  'Open a thread for one piece of work and hand it a brief. The thread starts as soon as a slot is free. Brief it like a capable peer: the goal, what is known, the scope, and when it is done.'
+  'Open a thread for one piece of work and hand it a brief. The thread starts as soon as a slot is free. Brief it like a capable peer: the goal, what is known and where to start looking, the scope, and how it will be checked as done (the checks to run, what to show the user).'
 
 /** `models` are offered as a choice when there is more than one. */
 function createThread(models: ModelChoice[]): Tool {

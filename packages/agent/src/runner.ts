@@ -525,6 +525,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
     const recent: string[] = []
+    // The user follows the work by the todo list: a turn that works on without one, or
+    // leaves it standing for long, is reminded once each (a reviewer's rounds are short).
+    const todoWatched = !reviewOf && tools.some((t) => t.spec.name === 'update_todo')
+    let workSteps = 0
+    let sinceTodo = 0
+    const todoHinted = { missing: false, stale: false }
     // The coordinator reads the source's instruction file once a turn: its source changes
     // under it only by the user's hand or a merge.
     if (!isThread && hasSource && workspaces) {
@@ -704,6 +710,20 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         await finish('completed')
         return
       }
+      workSteps += 1
+      sinceTodo = toolCalls.some((call) => call.name === 'update_todo') ? 0 : sinceTodo + 1
+      const todoHint = () => {
+        const items = app.getTodo(conversationId).items
+        if (!items.length) {
+          if (todoHinted.missing || workSteps < TODO_MISSING_AFTER) return null
+          todoHinted.missing = true
+          return TODO_MISSING_HINT
+        }
+        if (todoHinted.stale || sinceTodo < TODO_STALE_AFTER) return null
+        if (items.every((item) => item.status === 'done')) return null
+        todoHinted.stale = true
+        return TODO_STALE_HINT
+      }
       // The same calls with the same results again: the model is not getting anywhere.
       // It is told once, with the last result of the step before the turn is stopped.
       const results: { content: string; isError: boolean }[] = []
@@ -726,6 +746,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           if (recent.length > REPEAT_WINDOW) recent.shift()
           count = recent.filter((seen) => seen === step).length
           if (count === limits.loopRepeats - 1) content = `${content}\n\n${REPEAT_HINT}`
+          const hint = todoWatched ? todoHint() : null
+          if (hint) content = `${content}\n\n${hint}`
         }
         app.recordToolResult(conversationId, turnId, {
           toolCallId: call.id,
@@ -902,6 +924,15 @@ export function overBudget(
   }
   return null
 }
+
+/** Steps with tool calls a turn may take with an empty todo list before it is reminded. */
+export const TODO_MISSING_AFTER = 3
+/** Steps in a row without update_todo, while steps are open, before a reminder. */
+export const TODO_STALE_AFTER = 15
+export const TODO_MISSING_HINT =
+  '[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go.]'
+export const TODO_STALE_HINT =
+  '[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]'
 
 const REPEAT_HINT =
   '[Ariadne: this exact call has returned this exact result several times in this turn. Doing it again will stop the turn. Try something else, or answer with what you have. If you are waiting for something (checks, a reply), end the turn: you will be woken.]'
