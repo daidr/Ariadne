@@ -534,6 +534,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     // A list carried over from an earlier turn, all done, is not this turn's list.
     let todoThisTurn = false
     const todoHinted = { missing: false, stale: false }
+    // The coordinator looks only as far as briefing a thread takes: past a few looks in a
+    // turn without handing anything to a thread, it is reminded, and later turned away.
+    let looks = 0
     // The coordinator reads the source's instruction file once a turn: its source changes
     // under it only by the user's hand or a merge.
     if (!isThread && hasSource && workspaces) {
@@ -769,6 +772,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       const workspaceBefore = isThread
         ? JSON.stringify(app.getThread(conversationId).workspace)
         : ''
+      if (toolCalls.some((call) => HANDS_OVER.has(call.name))) looks = 0
       // Calls that only look run at the same time; the rest one by one, in order. Results
       // are recorded in the model's order either way.
       for (const group of callGroups(toolCalls, byName)) {
@@ -776,7 +780,21 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         const settled = await Promise.allSettled(
           group.map(async (index) => {
             const startedAt = Date.now()
-            const result = await runTool(byName.get(toolCalls[index]!.name), toolCalls[index]!, ctx)
+            const call = toolCalls[index]!
+            const look = !isThread && LOOKS.has(call.name) ? ++looks : 0
+            if (look > COORDINATOR_LOOK_LIMIT) {
+              return {
+                result: { content: LOOK_REFUSED, isError: true },
+                ran: { startedAt, finishedAt: startedAt },
+              }
+            }
+            const result = await runTool(byName.get(call.name), call, ctx)
+            if (look === COORDINATOR_LOOK_HINT) {
+              return {
+                result: { ...result, content: `${result.content}\n\n${LOOK_HINT}` },
+                ran: { startedAt, finishedAt: Date.now() },
+              }
+            }
             return { result, ran: { startedAt, finishedAt: Date.now() } }
           }),
         )
@@ -929,6 +947,27 @@ export function overBudget(
   }
   return null
 }
+
+/** What the coordinator reads and searches with, the project's and the web's. */
+const LOOKS = new Set([
+  'list_dir',
+  'read_file',
+  'search',
+  'find_files',
+  'research',
+  'fetch_url',
+  'web_search',
+])
+/** Calls that hand work to a thread: after one, the coordinator may look again for the next. */
+const HANDS_OVER = new Set(['create_thread', 'message_thread'])
+/** The coordinator's look in a turn that is reminded the work is a thread's. */
+export const COORDINATOR_LOOK_HINT = 6
+/** Looks in a turn past which the coordinator is turned away. */
+export const COORDINATOR_LOOK_LIMIT = 12
+export const LOOK_HINT =
+  "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
+export const LOOK_REFUSED =
+  '[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]'
 
 /** Steps with tool calls a turn may take with an empty todo list before it is reminded. */
 export const TODO_MISSING_AFTER = 3
