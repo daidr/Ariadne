@@ -368,7 +368,11 @@ export function agentProvider<Settings>(
       } catch {
         // Not signed in, not installed, too old to say: what it surely takes is offered.
       } finally {
-        rmSync(cwd, { recursive: true, force: true })
+        try {
+          rmSync(cwd, { recursive: true, force: true })
+        } catch {
+          // Still held by the program on its way out (Windows): left for later.
+        }
       }
       return fixed
     },
