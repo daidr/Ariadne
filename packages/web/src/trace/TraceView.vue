@@ -258,6 +258,7 @@ function pick(key: string) {
         <div class="trace-table">
           <DouTable
             ref="table"
+            class="trace-rows"
             v-model:current="current"
             v-model:expanded="expanded"
             :data="rows"
@@ -345,6 +346,11 @@ function pick(key: string) {
 .trace-inspector {
   height: 100%;
   min-height: 0;
+}
+
+/* The table's own body is the one that scrolls: its max height is this height, not none. */
+.trace-rows {
+  height: 100%;
 }
 
 .trace-event--turn {
