@@ -40,15 +40,15 @@ export interface ProjectSettings {
   budget: { thread: number | null; project: number | null }
   workspace: {
     /**
-     * What is left to Ariadne. `setup`: a new workspace gets its dependencies installed by
-     * the lockfiles in it (`installCommands`), and nothing when it has none it knows.
+     * What is left to Ariadne. `setup`: a new workspace is set up with the command the
+     * first thread to install the repository's dependencies noted, and nothing before.
      * `check`: the check after edits is the one the first thread to work in the repository
      * noted. Either is off once the user wrote their own, or emptied the field.
      */
     auto: { setup: boolean; check: boolean }
     /**
-     * The user's own, in place of the install by lockfile: run in a thread's workspace
-     * once it is new; `''` runs nothing. Not read while `auto.setup`.
+     * The user's own, in place of the one a thread noted: run in a thread's workspace once
+     * it is new; `''` runs nothing. Not read while `auto.setup`.
      */
     setup: string
     /** What threads' commands, the setup script and the check run in. */
@@ -301,10 +301,10 @@ export function storedProjectSettings(raw: string | null): ProjectSettings {
  */
 export interface ProjectDetected {
   /**
-   * The install commands the lockfiles of the last new workspace called for, one a line;
-   * `null` before any workspace was opened, `''` when it had no lockfile Ariadne knows.
+   * The setup of a new workspace a thread noted once it had installed what the work needs,
+   * and which; `null` until one did, `''` as its command when the repository needs none.
    */
-  setup: string | null
+  setup: { command: string; threadId: string } | null
   /** The check after edits a thread noted, and which; `null` until one did. */
   check: { command: string; threadId: string } | null
 }
@@ -318,40 +318,11 @@ export function checkCommand(project: {
   return auto.check ? (project.detected.check?.command ?? '') : check
 }
 
-/**
- * The dependency managers a new workspace is set up for, by the lockfile each leaves at
- * the root of a repository. Only those with an install that keeps to the lockfile and
- * installs nothing else, so the workspace stays clean; the others are left to the thread.
- */
-const INSTALLS: { files: string[]; command: string; js?: string }[] = [
-  { files: ['bun.lock', 'bun.lockb'], command: 'bun install --frozen-lockfile', js: 'bun' },
-  { files: ['pnpm-lock.yaml'], command: 'pnpm install --frozen-lockfile', js: 'pnpm' },
-  { files: ['yarn.lock'], command: 'yarn install --frozen-lockfile', js: 'yarn' },
-  { files: ['package-lock.json', 'npm-shrinkwrap.json'], command: 'npm ci', js: 'npm' },
-  { files: ['uv.lock'], command: 'uv sync --locked' },
-  { files: ['Cargo.lock'], command: 'cargo fetch --locked' },
-  { files: ['go.sum'], command: 'go mod download' },
-  { files: ['composer.lock'], command: 'composer install --no-interaction' },
-]
-
-/**
- * The commands that install a repository's dependencies, from the names of the files at
- * its root; none when it has no lockfile listed above. With lockfiles of several
- * JavaScript package managers, `packageManager` (package.json's field) picks one, and
- * without it none is run: guessing would rewrite the other's lockfile.
- */
-export function installCommands(files: readonly string[], packageManager?: string): string[] {
-  const names = new Set(files)
-  const found = INSTALLS.filter((install) => install.files.some((file) => names.has(file)))
-  const js = found.filter((install) => install.js)
-  const wanted = packageManager?.trim().split('@')[0]
-  const chosen = js.length > 1 ? js.filter((install) => install.js === wanted) : js
-  return found
-    .filter((install) => !install.js || chosen.includes(install))
-    .map((install) =>
-      // Yarn 2 and later name the flag differently, and say so with their own config file.
-      install.js === 'yarn' && names.has('.yarnrc.yml')
-        ? 'yarn install --immutable'
-        : install.command,
-    )
+/** What sets up a thread's new workspace: the user's own, else the one a thread noted. */
+export function setupCommand(project: {
+  settings: ProjectSettings
+  detected: ProjectDetected
+}): string {
+  const { auto, setup } = project.settings.workspace
+  return auto.setup ? (project.detected.setup?.command ?? '') : setup
 }

@@ -4,6 +4,7 @@ import { DomainError } from './errors'
 import {
   branchSlug,
   MAX_CHECK_COMMAND,
+  MAX_SETUP_SCRIPT,
   MAX_REVIEW_ROUNDS,
   parseProjectSettings,
   parseRoutines,
@@ -142,7 +143,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 60
+export const PROJECTION_VERSION = 61
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -3269,12 +3270,39 @@ export class Ariadne {
   }
 
   /**
-   * Record the install commands a new workspace's lockfiles called for (one a line, `''`
-   * for none), when they are not the ones known: the settings show them.
+   * Whether `threadId` may note what sets up the project's new workspaces: the user left it
+   * to Ariadne, and no other thread noted it. The thread that did may correct its own. Not
+   * in a project whose threads run no commands.
    */
-  recordDetectedSetup(projectId: string, setup: string): void {
-    if (this.getProject(projectId).detected.setup === setup) return
-    this.store.append([{ type: 'project.setup.detected', projectId, data: { setup } }])
+  canNoteSetup(threadId: string): boolean {
+    const thread = this.getThread(threadId)
+    if (thread.reviewOf) return false
+    const project = this.getProject(thread.projectId)
+    if (!project.settings.workspace.auto.setup) return false
+    if (project.settings.tools.includes('commands')) return false
+    return !project.detected.setup || project.detected.setup.threadId === threadId
+  }
+
+  /** A thread notes the setup of new workspaces; `''` when the repository needs none. */
+  noteSetup(threadId: string, command: string): ProjectView {
+    const thread = this.getThread(threadId)
+    const project = this.getProject(thread.projectId)
+    if (!this.canNoteSetup(threadId)) {
+      throw new DomainError('error.invalidBody', { reason: 'setup' })
+    }
+    const noted = command.trim()
+    if (noted.length > MAX_SETUP_SCRIPT) {
+      throw new DomainError('error.invalidBody', { reason: 'command' })
+    }
+    if (project.detected.setup?.command === noted) return project
+    this.store.append([
+      {
+        type: 'project.setup.noted',
+        projectId: thread.projectId,
+        data: { command: noted, threadId },
+      },
+    ])
+    return this.getProject(thread.projectId)
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Ariadne, installCommands, parseProjectSettings } from '@ariadne/core'
+import { Ariadne, parseProjectSettings } from '@ariadne/core'
 import type { ContextProvider, ExecResult, ModelRequest, Workspace } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { DEFAULT_LIMITS, type CommandRule, type TurnSettings } from './limits'
@@ -33,7 +33,7 @@ const toolResults = (conversationId: string) =>
 /** A source whose workspaces live in memory; `exec` answers each command run in them. */
 async function memoryHost(
   files: Record<string, string>,
-  exec: (command: string) => Partial<ExecResult> = () => ({}),
+  exec: (command: string) => Partial<ExecResult> | Promise<Partial<ExecResult>> = () => ({}),
   options: { shared?: boolean; rules?: CommandRule[] } = {},
 ) {
   const ran: string[] = []
@@ -59,7 +59,7 @@ async function memoryHost(
       ),
     exec: async (command) => {
       ran.push(command)
-      return { exitCode: 0, stdout: '', stderr: '', ...exec(command) }
+      return { exitCode: 0, stdout: '', stderr: '', ...(await exec(command)) }
     },
     dispose: async () => {},
   })
@@ -137,141 +137,164 @@ const steps = (calls: [string, Record<string, unknown>][], seen: ModelRequest[] 
     return next ? [call(`t${seen.length}`, next[0], next[1])] : say('')
   })
 
-describe('install commands by lockfile', () => {
-  test('one for each dependency manager whose lockfile is there', () => {
-    expect(installCommands(['package.json', 'bun.lock'])).toEqual(['bun install --frozen-lockfile'])
-    expect(installCommands(['pnpm-lock.yaml'])).toEqual(['pnpm install --frozen-lockfile'])
-    expect(installCommands(['package-lock.json'])).toEqual(['npm ci'])
-    expect(installCommands(['yarn.lock'])).toEqual(['yarn install --frozen-lockfile'])
-    expect(installCommands(['yarn.lock', '.yarnrc.yml'])).toEqual(['yarn install --immutable'])
-    expect(installCommands(['poetry.lock', 'Gemfile.lock'])).toEqual([])
-    expect(installCommands(['bun.lock', 'Cargo.lock', 'uv.lock'])).toEqual([
-      'bun install --frozen-lockfile',
-      'uv sync --locked',
-      'cargo fetch --locked',
-    ])
-  })
-
-  test('none without a lockfile it knows', () => {
-    expect(installCommands(['package.json', 'Makefile', 'requirements.txt'])).toEqual([])
-  })
-
-  test('lockfiles of several package managers: package.json says which, or none runs', () => {
-    const both = ['package.json', 'yarn.lock', 'package-lock.json', 'go.sum']
-    expect(installCommands(both)).toEqual(['go mod download'])
-    expect(installCommands(both, 'yarn@1.22.22')).toEqual([
-      'yarn install --frozen-lockfile',
-      'go mod download',
-    ])
-  })
-})
-
-describe('a new workspace', () => {
-  test('gets its dependencies installed by its lockfile, once, and the thread is told', async () => {
-    const { workspaces, ran } = await memoryHost({ 'bun.lock': '', 'package.json': '{}' })
+describe('the setup of new workspaces', () => {
+  test('nothing is guessed: the first thread is told, and notes what it ran', async () => {
+    const { workspaces, ran } = await memoryHost({ 'pnpm-lock.yaml': '', 'package.json': '{}' })
     const { id } = project()
     const thread = app.createThread(id, { title: '修导出' })
+    const seen: ModelRequest[] = []
     brief(id, thread.id)
     await start(
-      steps([
-        ['list_dir', {}],
-        ['run_command', { command: 'ls' }],
-      ]),
+      steps(
+        [
+          ['list_dir', {}],
+          ['note_setup', { command: 'pnpm install --frozen-lockfile' }],
+        ],
+        seen,
+      ),
       workspaces,
     ).idle()
-    expect(ran).toEqual(['bun install --frozen-lockfile', 'ls'])
+    expect(toolNames(seen[0]!)).toContain('note_setup')
     const results = toolResults(thread.id)
-    expect(results[0]!.text).toContain(
-      'its dependencies were installed first, by its lockfiles: `bun install --frozen-lockfile`',
-    )
-    expect(results[1]!.text).not.toContain('dependencies')
-    expect(app.getProject(id).detected.setup).toBe('bun install --frozen-lockfile')
-  })
-
-  test('with no lockfile it knows, nothing is installed', async () => {
-    const { workspaces, ran } = await memoryHost({ 'README.md': '' })
-    const { id } = project()
-    const thread = app.createThread(id, { title: '调研' })
-    brief(id, thread.id)
-    await start(steps([['list_dir', {}]]), workspaces).idle()
-    expect(ran).toEqual([])
-    expect(app.getProject(id).detected.setup).toBe('')
-    expect(toolResults(thread.id)[0]!.text).not.toContain('dependencies')
-  })
-
-  test('a failed install is told with its output, and the work goes on', async () => {
-    const { workspaces } = await memoryHost({ 'package-lock.json': '' }, (command) =>
-      command === 'npm ci' ? { exitCode: 1, stderr: 'npm: lock out of sync' } : {},
-    )
-    const { id } = project()
-    const thread = app.createThread(id, { title: '修导出' })
-    brief(id, thread.id)
-    await start(steps([['list_dir', {}]]), workspaces).idle()
-    const [first] = toolResults(thread.id)
-    expect(first!.error).toBe(false)
-    expect(first!.text).toContain('`npm ci` failed (exit code 1)')
-    expect(first!.text).toContain('npm: lock out of sync')
-  })
-
-  test('a directory all threads share is left as it is', async () => {
-    const { workspaces, ran } = await memoryHost({ 'package-lock.json': '' }, undefined, {
-      shared: true,
+    expect(results[0]!.text).toContain('this project has no setup for new workspaces yet')
+    expect(results[1]!.text).toContain('Done, and noted')
+    expect(ran).toEqual(['pnpm install --frozen-lockfile'])
+    expect(app.getProject(id).detected.setup).toEqual({
+      command: 'pnpm install --frozen-lockfile',
+      threadId: thread.id,
     })
-    const { id } = project()
-    for (const title of ['一', '二']) brief(id, app.createThread(id, { title }).id)
-    await start(steps([['list_dir', {}]]), workspaces).idle()
-    expect(ran).toEqual([])
-    expect(app.getProject(id).detected.setup).toBeNull()
-    await workspaces.detectSetup(id)
-    expect(app.getProject(id).detected.setup).toBeNull()
   })
 
-  test("an install the user's command rules would not let run unasked is not run", async () => {
-    const { workspaces, ran } = await memoryHost(
-      { 'package-lock.json': '', 'Cargo.lock': '' },
-      undefined,
-      { rules: [{ pattern: 'npm *', action: 'deny' }] },
+  test('one that fails is not noted', async () => {
+    const { workspaces } = await memoryHost({}, (command) =>
+      command === 'pnpm install' ? { exitCode: 1, stderr: 'ERR_PNPM_BAD_PM_VERSION' } : {},
     )
     const { id } = project()
     const thread = app.createThread(id, { title: '一' })
     brief(id, thread.id)
-    await start(steps([['list_dir', {}]]), workspaces).idle()
-    expect(ran).toEqual(['cargo fetch --locked'])
-    const [first] = toolResults(thread.id)
-    expect(first!.text).toContain('its dependencies were not installed')
-    expect(first!.text).toContain('`npm ci`')
-    expect(app.getProject(id).detected.setup).toBe('cargo fetch --locked')
+    await start(
+      steps([
+        ['note_setup', { command: 'pnpm install' }],
+        ['note_setup', { command: 'corepack pnpm install' }],
+      ]),
+      workspaces,
+    ).idle()
+    const results = toolResults(thread.id)
+    expect(results[0]!.error).toBe(true)
+    expect(results[0]!.text).toContain('ERR_PNPM_BAD_PM_VERSION')
+    expect(app.getProject(id).detected.setup?.command).toBe('corepack pnpm install')
   })
 
-  test('npm leaves alone the node_modules that came with the workspace', async () => {
-    const { workspaces, ran } = await memoryHost({ 'package-lock.json': '', 'node_modules/': '' })
+  test('later threads run it in the background, and run_command waits for it', async () => {
+    const ended = Promise.withResolvers<Partial<ExecResult>>()
+    const { workspaces, ran } = await memoryHost({}, (command) =>
+      command === 'make deps' ? ended.promise : {},
+    )
     const { id } = project()
-    brief(id, app.createThread(id, { title: '一' }).id)
+    const first = app.createThread(id, { title: '一' })
+    app.noteSetup(first.id, 'make deps')
+    const thread = app.createThread(id, { title: '二' })
+    const seen: ModelRequest[] = []
+    brief(id, thread.id)
+    const running = start(
+      steps(
+        [
+          ['read_file', { path: 'README.md' }],
+          ['run_command', { command: 'ls' }],
+        ],
+        seen,
+      ),
+      workspaces,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // Reading went on while it ran; the command waits.
+    expect(ran).toEqual(['make deps'])
+    expect(toolResults(thread.id)[0]!.text).toContain('runs in it now, in the background as cmd-')
+    ran.push('(make deps ended)')
+    ended.resolve({})
+    await running.idle()
+    expect(ran).toEqual(['make deps', '(make deps ended)', 'ls'])
+    expect(toolNames(seen[0]!)).not.toContain('note_setup')
+    expect(toolResults(thread.id)[1]!.text).not.toContain('setup')
+  })
+
+  test('a failed setup is told with the command that waited for it, and not run again', async () => {
+    const { workspaces, ran } = await memoryHost({}, (command) =>
+      command === 'make deps' ? { exitCode: 2 } : {},
+    )
+    const { id } = project()
+    app.noteSetup(app.createThread(id, { title: '一' }).id, 'make deps')
+    const thread = app.createThread(id, { title: '二' })
+    brief(id, thread.id)
+    await start(
+      steps([
+        ['run_command', { command: 'ls' }],
+        ['run_command', { command: 'pwd' }],
+      ]),
+      workspaces,
+    ).idle()
+    const results = toolResults(thread.id)
+    expect(results[0]!.text).toContain('the setup of your new workspace, failed (exit code 2)')
+    expect(results[1]!.text).not.toContain('setup')
+    expect(ran).toEqual(['make deps', 'ls', 'pwd'])
+  })
+
+  test('a directory all threads share is left as it is', async () => {
+    const { workspaces, ran } = await memoryHost({}, undefined, { shared: true })
+    const { id } = project()
+    app.noteSetup(app.createThread(id, { title: '一' }).id, 'npm ci')
+    const thread = app.createThread(id, { title: '二' })
+    brief(id, thread.id)
     await start(steps([['list_dir', {}]]), workspaces).idle()
     expect(ran).toEqual([])
+    expect(toolResults(thread.id)[0]!.text).not.toContain('setup')
   })
 
-  test('what it would install is known from the source before any is opened', async () => {
-    const { workspaces, ran } = await memoryHost({
-      'pnpm-lock.yaml': '',
-      'yarn.lock': '',
-      'package.json': '{"packageManager":"pnpm@9.1.0"}',
+  test("the user's command rules: not noted unasked, and not run once they ask", async () => {
+    const { workspaces, ran } = await memoryHost({}, undefined, {
+      rules: [{ pattern: 'npm *', action: 'ask' }],
     })
     const { id } = project()
-    await workspaces.detectSetup(id)
-    expect(app.getProject(id).detected.setup).toBe('pnpm install --frozen-lockfile')
+    const first = app.createThread(id, { title: '一' })
+    brief(id, first.id)
+    const running = start(steps([['note_setup', { command: 'npm ci' }]]), workspaces, {
+      commandRules: [{ pattern: 'npm *', action: 'ask' }],
+    })
+    await running.idle()
+    expect(toolResults(first.id)[0]!.error).toBe(true)
+    expect(app.getProject(id).detected.setup).toBeNull()
+    // Noted before the rule came: it is held, and the thread is told.
+    app.noteSetup(first.id, 'npm ci')
+    const second = app.createThread(id, { title: '二' })
+    await workspaces.forThread(id, second.id)
     expect(ran).toEqual([])
+    expect(workspaces.takeSetup(second.id)).toContain('its setup did not run')
   })
 
-  test("the user's own script runs in place of the install, and an emptied one runs nothing", async () => {
-    const { workspaces, ran } = await memoryHost({ 'bun.lock': '' })
+  test('a project whose threads run no commands has no setup to note', async () => {
+    const { workspaces } = await memoryHost({})
+    const { id } = project()
+    app.setProjectSettings(id, { tools: ['commands'] }, TOOL_SWITCH_NAMES)
+    const thread = app.createThread(id, { title: '一' })
+    const seen: ModelRequest[] = []
+    brief(id, thread.id)
+    await start(steps([['list_dir', {}]], seen), workspaces).idle()
+    expect(toolNames(seen[0]!)).not.toContain('note_setup')
+    expect(toolResults(thread.id)[0]!.text).not.toContain('no setup for new workspaces')
+  })
+
+  test("the user's own script runs in place of a noted one, and an emptied one runs nothing", async () => {
+    const { workspaces, ran } = await memoryHost({})
     const { id } = project()
     app.setProjectSettings(id, { workspace: { setup: 'make deps' } }, TOOL_SWITCH_NAMES)
     const first = app.createThread(id, { title: '一' })
+    const seen: ModelRequest[] = []
     brief(id, first.id)
-    const running = start(steps([['list_dir', {}]]), workspaces)
+    const running = start(steps([['run_command', { command: 'ls' }]], seen), workspaces)
     await running.idle()
-    expect(ran).toEqual(['make deps'])
+    expect(ran).toEqual(['make deps', 'ls'])
+    expect(toolNames(seen[0]!)).not.toContain('note_setup')
+    expect(() => app.noteSetup(first.id, 'npm ci')).toThrow()
     app.setProjectSettings(
       id,
       { workspace: { setup: '', auto: { setup: false, check: true } } },
@@ -280,7 +303,8 @@ describe('a new workspace', () => {
     const second = app.createThread(id, { title: '二' })
     brief(id, second.id)
     await running.idle()
-    expect(ran).toEqual(['make deps'])
+    expect(ran).toEqual(['make deps', 'ls', 'ls'])
+    expect(toolResults(second.id)[0]!.text).not.toContain('setup')
   })
 })
 
@@ -423,7 +447,7 @@ describe('the check after edits', () => {
   test('another source starts over what was found out', async () => {
     const { id } = project()
     const thread = app.createThread(id, { title: '一' })
-    app.recordDetectedSetup(id, 'npm ci')
+    app.noteSetup(thread.id, 'npm ci')
     app.noteCheck(thread.id, 'tsc --noEmit')
     app.setProjectSource(id, { kind: 'memory', settings: { path: '/other' } })
     expect(app.getProject(id).detected).toEqual({ setup: null, check: null })

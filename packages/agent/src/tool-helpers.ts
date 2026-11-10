@@ -76,6 +76,11 @@ export interface ToolContext {
   }
   /** Commands threads left running in the background. */
   background?: BackgroundCommands
+  /**
+   * Waits while the setup of the thread's new workspace still runs; what the model should
+   * hear of how it ended, once, when that is not plain success.
+   */
+  setupDone?: (signal: AbortSignal) => Promise<string | null>
   /** Asks a cheaper model, in a context of its own, to look into something read-only. */
   research?: Researcher | undefined
   /** The skills the conversation can read, as loaded last. */

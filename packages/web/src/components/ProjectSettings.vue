@@ -152,7 +152,10 @@ watch(
       hostedMerge.value = view.hostedMerge
       loadedRoutines = JSON.stringify(view.settings.routines)
       const { auto } = view.settings.workspace
-      found = { setup: view.detected.setup ?? '', check: view.detected.check?.command ?? '' }
+      found = {
+        setup: view.detected.setup?.command ?? '',
+        check: view.detected.check?.command ?? '',
+      }
       setup.value = auto.setup ? found.setup : view.settings.workspace.setup
       check.value = auto.check ? found.check : view.settings.workspace.check
       env.value = storedPairs(view.env)

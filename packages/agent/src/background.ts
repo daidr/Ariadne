@@ -217,6 +217,23 @@ export class BackgroundCommands {
     return { command: view(job), tail: screenText(job.output.slice(-chars * 2)).slice(-chars) }
   }
 
+  /** Wait until the command ends, or `signal` aborts; `null` when there is no such command. */
+  async wait(threadId: string, id: string, signal?: AbortSignal) {
+    const job = this.own(threadId, id)
+    if (!job) return null
+    if (!job.result && !signal?.aborted) {
+      await new Promise<void>((done) => {
+        const finish = () => {
+          signal?.removeEventListener('abort', finish)
+          done()
+        }
+        void job.ended.then(finish)
+        signal?.addEventListener('abort', finish, { once: true })
+      })
+    }
+    return view(job)
+  }
+
   /** Stop the command and wait a moment for it to end. `null` when there is no such command. */
   async stop(threadId: string, id: string): Promise<BackgroundCommand | null> {
     const job = this.own(threadId, id)
