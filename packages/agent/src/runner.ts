@@ -2,7 +2,6 @@ import type { SharedArtifacts } from './shared-artifacts'
 import {
   askTitle,
   DomainError,
-  newId,
   type Ariadne,
   type Attachment,
   type ConversationView,
@@ -19,6 +18,7 @@ import { loadSkills, SkillSet, type SkillFiles } from './skills'
 import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
 import {
   reviewTools,
+  sendMessage,
   switchedOff,
   toolsFor,
   ToolInputError,
@@ -41,7 +41,7 @@ import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings 
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
-import { withImages, type EverywhereMemory } from './tool-helpers'
+import type { EverywhereMemory } from './tool-helpers'
 import { STOPPED_CHANGES_MS, turnChanges } from './turn-changes'
 import { callOf, withCost, type ResolvedModel } from './model'
 import { researchTools } from './research'
@@ -352,7 +352,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           signal,
         )
       : []
-  const tools = [...builtIn, ...external]
+  // Sending is how a conversation speaks to the user: every set of tools has it.
+  const speaking = builtIn.some((tool) => tool.spec.name === 'send_message') ? [] : [sendMessage]
+  const tools = [...speaking, ...builtIn, ...external]
   // What the turn changes in the thread's workspace, shown under its reply.
   const changes =
     isThread && hasWorkspace && workspaces && !reviewOf
@@ -529,6 +531,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     let instructionsStale = true
     // Steps in a row whose output hit the length limit.
     let cuts = 0
+    // Whether the turn was told its text outside a call is not sent.
+    let unsentHinted = false
     // A turn has no step limit: it ends when the model answers, the user stops it, or it
     // goes in circles (see `MAX_REPEATS`). Only the latest steps count, so a long turn may
     // read an unchanged file again now and then.
@@ -639,12 +643,6 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       let answer: Awaited<ReturnType<typeof requestStep>>
       // Calls that show their work while written; what never ran is taken back.
       live.reset()
-      // The reply as it is written, shown until the step turns out to call tools.
-      const draft = app.drafts.start({
-        projectId: conversation.projectId,
-        conversationId,
-        messageId: newId('msg'),
-      })
       try {
         answer = await requestStep(
           model,
@@ -661,11 +659,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           options.retryBaseMs ?? 1000,
           limits,
           model.request?.timeoutSeconds,
-          draft,
           live,
         )
       } catch (error) {
-        draft.withdraw()
         live.reset()
         // The main model keeps being turned away: the turn goes on with the fallback, from
         // this step on. The request is built again for it (its context, images, thinking).
@@ -710,16 +706,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
 
       if (!toolCalls.length) {
         if (cut) continue
-        if (text.trim()) {
-          const content = await withImages(ctx, text.trim())
-          app.postMessage(conversation.projectId, {
-            conversationId,
-            author: conversation.role,
-            content,
-            messageId: draft.messageId,
-          })
-          draft.posted()
-        } else draft.withdraw()
+        // Text outside send_message reaches no one. It may have been meant for the user: the
+        // model is told once a turn (see UNSENT_HINT) and goes on.
+        if (text.trim() && !unsentHinted) {
+          unsentHinted = true
+          continue
+        }
         await finish('completed')
         return
       }

@@ -108,7 +108,6 @@ export {
   LiveCommands,
   BackgroundCommandsList,
   ReplyDrafts,
-  draftShows,
   screenText,
   type BackgroundUpdate,
   type BackgroundView,

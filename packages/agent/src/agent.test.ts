@@ -1,8 +1,9 @@
 import { Ariadne, type ConversationView, type TranscriptEntry } from '@ariadne/core'
+import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { compactionCut } from './compaction'
 import { MAX_CUTS, MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
-import { answered, call, fakeModel, lastUser, reminded, say } from './test-model'
+import { answered, call, fakeModel, lastUser, reminded, say, plain } from './test-model'
 import { Scheduler } from './scheduler'
 import { CUT_HINT, toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
@@ -133,27 +134,60 @@ describe('a coordinator turn', () => {
     ])
   })
 
-  test('the reply shows as it is written; text beside a tool call is taken back', async () => {
+  test('a message shows as send_message writes it, and keeps its id once sent', async () => {
     const shown: (string | null)[] = []
-    app.drafts.subscribe((update) =>
+    const ids: string[] = []
+    app.drafts.subscribe((update) => {
       shown.push(
         update.draft ? `${update.draft.posted ? 'posted ' : ''}${update.draft.text}` : null,
-      ),
-    )
-    const model = fakeModel((request) => {
-      if (!answered(request)) {
-        return [
-          { type: 'text', text: '先看看有哪些 thread，' },
-          { type: 'text', text: '再看计划图\n然后决定' },
-          { type: 'calling' },
-          { type: 'text', text: '不该出现' },
-          call('c1', 'list_threads', {}),
-          { type: 'finish', reason: 'tool-calls' },
-        ]
+      )
+      if (update.draft) ids.push(update.draft.messageId)
+    })
+    const model = fakeModel(async (request) => {
+      if (answered(request)) return say('')
+      const args = JSON.stringify({ text: '现在没有在跑的 thread。\n\n要我开一个吗？' })
+      const parts: ModelStreamPart[] = [{ type: 'text', text: '先看看有哪些 thread' }]
+      for (const end of [20, 40, args.length]) {
+        parts.push({
+          type: 'tool-input',
+          call: 0,
+          name: 'send_message',
+          arguments: args.slice(0, end),
+        })
       }
+      parts.push(
+        { type: 'tool-call', id: 'c1', name: 'send_message', arguments: args },
+        { type: 'finish', reason: 'tool-calls' },
+      )
+      return parts
+    })
+    const project = app.createProject('P')
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '看看进度',
+    })
+    await startScheduler(model).idle()
+
+    const messages = app.listMessages(project.coordinatorId)
+    // Text outside the call is not a message.
+    expect(messages.map((m) => m.content)).toEqual([
+      '看看进度',
+      '现在没有在跑的 thread。\n\n要我开一个吗？',
+    ])
+    expect(shown[0]).toMatch(/^现在/)
+    expect(shown.at(-1)).toBe('posted 现在没有在跑的 thread。\n\n要我开一个吗？')
+    expect(new Set(ids)).toEqual(new Set([messages.at(-1)!.id]))
+    expect(app.drafts.list()).toEqual([])
+  })
+
+  test('text outside send_message is not sent; the model is told once a turn', async () => {
+    let turn = 1
+    const model = fakeModel((request) => {
+      if (answered(request)) return say('')
+      if (turn === 1 && lastUser(request).includes('<not_sent>')) return say('没有在跑的 thread。')
       return [
-        { type: 'text', text: '现在没有' },
-        { type: 'text', text: '在跑的 thread。\n\n要我开一个吗？' },
+        { type: 'text', text: '没有在跑的 thread。' },
         { type: 'finish', reason: 'stop' },
       ]
     })
@@ -164,46 +198,71 @@ describe('a coordinator turn', () => {
       content: '看看进度',
     })
     await startScheduler(model).idle()
-
-    const reply = app.listMessages(project.coordinatorId).at(-1)!
-    expect(reply.content).toBe('现在没有在跑的 thread。\n\n要我开一个吗？')
-    expect(shown).toEqual([
-      '先看看有哪些 thread，再看计划图\n然后决定',
-      null,
-      '现在没有在跑的 thread。\n\n要我开一个吗？',
-      'posted 现在没有在跑的 thread。\n\n要我开一个吗？',
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '没有在跑的 thread。',
     ])
-    expect(app.drafts.list()).toEqual([])
+    // Told, it may still have nothing to send: the turn ends after one more step.
+    turn = 2
+    app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'user',
+      content: '谢谢',
+    })
+    const before = model.requests.length
+    await startScheduler(model).idle()
+    expect(model.requests.length - before).toBe(2)
+    expect(
+      app
+        .listMessages(project.coordinatorId)
+        .map((m) => m.content)
+        .at(-1),
+    ).toBe('谢谢')
   })
 
-  test('a posted reply keeps the id of its draft', async () => {
-    const ids: string[] = []
-    app.drafts.subscribe((update) => update.draft && ids.push(update.draft.messageId))
-    const model = fakeModel(() => say('第一段。\n\n第二段。'))
+  test('text written after a sent message is not lost silently either', async () => {
+    const model = fakeModel((request) => {
+      const steps = request.messages.filter((m) => m.role === 'tool').length
+      if (steps === 0) {
+        return [
+          call('c1', 'send_message', { text: '先看了一下。' }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      if (lastUser(request).includes('<not_sent>') && !answered(request)) return say('结论是没有。')
+      return [
+        { type: 'text', text: '结论是没有。' },
+        { type: 'finish', reason: 'stop' },
+      ]
+    })
     const project = app.createProject('P')
     app.postMessage(project.id, {
       conversationId: project.coordinatorId,
       author: 'user',
-      content: '你好',
+      content: '看看进度',
     })
     await startScheduler(model).idle()
-    const reply = app.listMessages(project.coordinatorId).at(-1)!
-    expect(new Set(ids)).toEqual(new Set([reply.id]))
+    expect(app.listMessages(project.coordinatorId).map((m) => m.content)).toEqual([
+      '看看进度',
+      '先看了一下。',
+      '结论是没有。',
+    ])
   })
 
-  test('a failed attempt takes its draft back before the retry', async () => {
+  test('a failed attempt takes its message draft back before the retry', async () => {
     const shown: (string | null)[] = []
     app.drafts.subscribe((update) => shown.push(update.draft?.text ?? null))
     let attempt = 0
-    const model = fakeModel(() => {
+    const model = fakeModel((request) => {
+      if (answered(request)) return say('')
       attempt++
       if (attempt === 1) {
         return [
-          { type: 'text', text: '写到一半\n断了' },
+          { type: 'tool-input', call: 0, name: 'send_message', arguments: '{"text":"写到一半' },
           { type: 'finish', reason: 'error', error: 'reset', retryable: true },
         ]
       }
-      return say('完整的回答\n第二行')
+      return say('完整的回答')
     })
     const project = app.createProject('P')
     app.postMessage(project.id, {
@@ -212,8 +271,9 @@ describe('a coordinator turn', () => {
       content: '你好',
     })
     await startScheduler(model).idle()
-    expect(shown.slice(0, 3)).toEqual(['写到一半\n断了', null, '完整的回答\n第二行'])
-    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('完整的回答\n第二行')
+    expect(shown.slice(0, 2)).toEqual(['写到一半', null])
+    expect(app.listMessages(project.coordinatorId).at(-1)?.content).toBe('完整的回答')
+    expect(app.drafts.list()).toEqual([])
   })
 
   test('a thread report wakes the coordinator; a progress report does not', async () => {
@@ -404,7 +464,7 @@ describe('history compaction', () => {
   test('a long conversation reads a summary in place of its older history', async () => {
     const model = fakeModel((request) => {
       if (request.messages[0]?.content.startsWith('You summarise')) {
-        return say('- 用户在整理三份需求：甲、乙、丙')
+        return plain('- 用户在整理三份需求：甲、乙、丙')
       }
       if (!answered(request) && lastUser(request).includes('第 2 份')) {
         return [call('c1', 'update_todo', { items: [{ label: '整理', status: 'doing' }] })]
@@ -455,7 +515,7 @@ describe('history compaction', () => {
     // in play it wants reasoning back on every earlier assistant message, notes included.
     const model = fakeModel((request) => {
       if (request.messages[0]?.content.startsWith('You summarise')) {
-        return [thought('想想怎么概括'), ...say('- 用户在整理需求')]
+        return [thought('想想怎么概括'), ...plain('- 用户在整理需求')]
       }
       if (!answered(request) && lastUser(request).includes('第 2 份')) {
         return [
@@ -511,9 +571,10 @@ describe('history compaction', () => {
       })
       await running.idle()
     }
-    // The first turn has nothing to fold; the next two try once each, over two steps.
-    expect(summaries).toBe(2)
+    // Each turn grows past the limit by its sending step and tries once, over its steps.
+    expect(summaries).toBe(3)
     expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).toEqual([
+      'compaction-failed',
       'compaction-failed',
       'compaction-failed',
     ])
@@ -1199,6 +1260,7 @@ describe('transcript to model messages', () => {
     expect(messages.map((m) => [m.role, m.content.slice(0, 4)])).toEqual([
       ['user', '开始'],
       ['assistant', '我去安排'],
+      ['user', '<not'],
       ['user', '<thr'],
     ])
   })

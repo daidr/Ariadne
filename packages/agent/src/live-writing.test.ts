@@ -626,7 +626,6 @@ describe('a model response', () => {
     const answer = await requestStep(
       model([
         [
-          { type: 'calling' },
           { type: 'tool-input', call: 0, name: 'update_document', arguments: '{"artifactId":' },
           { type: 'finish', reason: 'error', retryable: true, error: 'cut' },
         ],
@@ -640,7 +639,6 @@ describe('a model response', () => {
       () => {},
       0,
       DEFAULT_LIMITS,
-      undefined,
       undefined,
       calls,
     )

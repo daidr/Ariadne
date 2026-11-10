@@ -12,7 +12,7 @@ import { commandParts, commandVerdict, DEFAULT_COMMAND_RULES, DEFAULT_LIMITS } f
 import { PluginHost } from './plugins'
 import { Scheduler } from './scheduler'
 import { buildTrace, traceRequest } from './trace'
-import { call, fakeModel, reminded, say } from './test-model'
+import { call, fakeModel, reminded, say, plain } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
 import { TOOL_SWITCH_NAMES } from './tools'
 import { workspaceTools } from './workspace-tools'
@@ -608,7 +608,7 @@ describe('research', () => {
     app.setProjectSource(project.id, { kind: 'dir', settings: {} })
     const thread = app.createThread(project.id, { title: '调研' })
     const researcher = fakeModel((request) => {
-      if (request.messages.at(-1)?.role === 'tool') return say('README 只有标题。')
+      if (request.messages.at(-1)?.role === 'tool') return plain('README 只有标题。')
       return [
         call('r1', 'read_file', { path: 'README.md' }),
         { type: 'finish', reason: 'tool-calls' },
@@ -680,6 +680,11 @@ describe('a silent request', () => {
     model.provider = {
       ...model.provider,
       async *stream(_settings, request) {
+        // After the message went, the turn ends.
+        if (request.messages.at(-1)?.role === 'tool') {
+          yield { type: 'finish', reason: 'stop' }
+          return
+        }
         attempts++
         // Thinking for 1.6 seconds, with a sign of life every 0.2: longer than the timeout.
         for (let i = 0; i < 8; i++) {

@@ -184,12 +184,12 @@ export interface DraftUpdate {
   draft: ReplyDraft | null
 }
 
-/** One step's reply draft, for the turn that writes it. */
+/** One message being written, for the call that sends it. */
 export interface DraftHandle {
   readonly messageId: string
-  /** More of the step's text. */
-  text(piece: string): void
-  /** It is not the reply after all (a tool call began, or the attempt failed): forget it. */
+  /** All of the message as far as it is written. */
+  write(text: string): void
+  /** It will not be sent after all (the call failed or never ran): forget it. */
   withdraw(): void
   /** It was posted as `messageId`; calls after this change nothing. */
   posted(): void
@@ -197,22 +197,9 @@ export interface DraftHandle {
 
 /** Drafts reach watchers at most this often. */
 const DRAFT_INTERVAL_MS = 100
-/** A single line shorter than this is held back: it may be what the model does next. */
-const DRAFT_HOLD = 120
-
 /**
- * Whether text is shown while it is written. The model starts a step that calls tools with
- * one short line on what it does now, which goes to the status line, never to the chat: so
- * text shows once it is more than that, a second line or a long first one.
- */
-export function draftShows(text: string): boolean {
-  const body = text.trimStart()
-  return body.length >= DRAFT_HOLD || /\n\s*\S/.test(body.trimEnd())
-}
-
-/**
- * The replies models are writing now, by conversation. Kept in memory only: the reply is
- * logged whole once posted, and text beside tool calls goes to the trace with its step.
+ * The messages models are writing now with send_message, by conversation. Kept in memory
+ * only: the message is logged whole once sent.
  */
 export class ReplyDrafts {
   private readonly drafts = new Map<string, { id: number; update: DraftUpdate }>()
@@ -244,7 +231,7 @@ export class ReplyDrafts {
     this.emit({ projectId: entry.update.projectId, conversationId, draft: null })
   }
 
-  /** A step starts writing in a conversation; it takes the place of a draft still there. */
+  /** A message starts being written in a conversation; it takes the place of a draft still there. */
   start(input: { projectId: string; conversationId: string; messageId: string }): DraftHandle {
     const id = this.next++
     const key = input.conversationId
@@ -276,15 +263,14 @@ export class ReplyDrafts {
       else this.drafts.set(key, { id, update })
       this.emit(update)
     }
-    // A draft of an earlier step still shown is gone with this one.
+    // A draft still shown is gone with this one.
     this.drop(key)
     return {
       messageId: input.messageId,
-      text: (piece) => {
-        if (over || !piece) return
+      write: (whole) => {
+        if (over || !whole || whole === text) return
         if (!text) startedAt = this.now()
-        text += piece
-        if (!draftShows(text)) return
+        text = whole
         if (!current()) {
           // Shown from its first lines at once, then as it grows.
           this.drafts.set(key, { id, update: { ...input, draft: null } })

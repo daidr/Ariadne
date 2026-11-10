@@ -2,7 +2,7 @@ import { Ariadne } from '@ariadne/core'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
-import { answered, call, fakeModel, lastUser, say } from './test-model'
+import { answered, call, fakeModel, lastUser, say, plain } from './test-model'
 import type { ModelChoice } from './tools'
 import { buildTrace, traceRequest } from './trace'
 
@@ -52,7 +52,7 @@ const isSummary = (r: { messages: { content: string }[] }) =>
 describe('the trace', () => {
   test('rebuilds every request exactly as the model was sent it', async () => {
     const model = fakeModel((request) => {
-      if (request.messages[0]?.content.startsWith('You summarise')) return say('- 三份需求')
+      if (request.messages[0]?.content.startsWith('You summarise')) return plain('- 三份需求')
       if (!answered(request) && lastUser(request).includes('第 2 份')) {
         return [call('c1', 'update_todo', { items: [{ label: '整理', status: 'doing' }] })]
       }
@@ -84,10 +84,10 @@ describe('the trace', () => {
 
     const made = calls(project.coordinatorId)
     expect(made.some((e) => e.type === 'conversation.compacted')).toBe(true)
-    expect(made).toHaveLength(model.requests.length)
+    expect(made).toHaveLength(model.sent.length)
     for (const [index, event] of made.entries()) {
       const input = traceInput(app, project.coordinatorId, event.seq)
-      const sent = model.requests[index]!
+      const sent = model.sent[index]!
       expect(input.messages).toEqual(sent.messages)
       expect(input.tools).toEqual(sent.tools)
     }
@@ -147,12 +147,12 @@ describe('the trace', () => {
     expect(answer).toMatchObject({
       kind: 'request',
       number: 2,
-      finish: 'stop',
-      text: '好了',
-      toolCalls: [],
+      finish: 'tool-calls',
+      toolCalls: [{ name: 'send_message', arguments: '{"text":"好了"}' }],
     })
+    expect(turn!.items[2]).toMatchObject({ kind: 'request', number: 3, finish: 'stop' })
     // Numbers go on over turns.
-    expect(turns[1]!.items.map((item) => item.kind === 'request' && item.number)).toEqual([3, 4])
+    expect(turns[1]!.items.map((item) => item.kind === 'request' && item.number)).toEqual([4, 5, 6])
     // The second call adds the first one's step and result to what that one read.
     if (answer?.kind !== 'request') throw new Error('expected a request')
     const input = traceInput(app, project.coordinatorId, answer.seq)
@@ -166,12 +166,12 @@ describe('the trace', () => {
     expect(newest.turns.map((t) => t.seq)).toEqual([turns[1]!.seq])
     const older = buildTrace(app, project.coordinatorId, { before: turns[1]!.seq, turns: 1 })
     expect(older).toMatchObject({ more: false, turns: [{ seq: turns[0]!.seq }] })
-    expect(newest.turns[0]!.items[0]).toMatchObject({ number: 3 })
+    expect(newest.turns[0]!.items[0]).toMatchObject({ number: 4 })
   })
 
   test('right after a summary, the system prompt is compared with the step before', async () => {
     const model = fakeModel((request) =>
-      request.messages[0]?.content.startsWith('You summarise') ? say('- 前情') : say('收到'),
+      request.messages[0]?.content.startsWith('You summarise') ? plain('- 前情') : say('收到'),
     )
     const project = app.createProject('P')
     const running = start(model, { compactAt: 600 })
@@ -194,7 +194,7 @@ describe('the trace', () => {
   test('a turn that made no step does not make everything after it new', async () => {
     const model = fakeModel((request) => {
       if (lastUser(request) === '坏') throw new Error('boom')
-      return say('收到')
+      return say('')
     })
     const project = app.createProject('P')
     const running = start(model)
@@ -216,9 +216,9 @@ describe('the trace', () => {
     ])
     const last = calls(project.coordinatorId).at(-1)!
     const input = traceInput(app, project.coordinatorId, last.seq)
-    // Since the first step read: its answer, the failed turn's message and this one's.
+    // Since the first step read: its step, the failed turn's message and this one's.
     expect(input.messages.slice(input.newFrom).map((m) => m.content)).toEqual([
-      '收到',
+      '',
       expect.stringContaining('坏'),
       expect.stringContaining('二'),
     ])
@@ -305,7 +305,7 @@ describe('the trace', () => {
   test('reasoning goes back only to the model that wrote it', async () => {
     const thinker = fakeModel(() => [{ type: 'reasoning', text: '我先想想' }, ...say('好')])
     const other = fakeModel((request) =>
-      request.messages[0]?.content.startsWith('You summarise') ? say('- 概要') : say('嗯'),
+      request.messages[0]?.content.startsWith('You summarise') ? plain('- 概要') : say('嗯'),
     )
     other.model = 'fake-2'
     let current: ResolvedModel = thinker
@@ -342,7 +342,7 @@ describe('the trace', () => {
     for (const message of assistants) expect(message).not.toHaveProperty('reasoning')
     // The trace rebuilds the request the other model was sent, without the reasoning too.
     const step = calls(project.coordinatorId).at(-1)!
-    const { signal: _, ...request } = sent
+    const { signal: _, ...request } = other.sent.findLast((r) => !isSummary(r))!
     expect(traceRequest(app, project.coordinatorId, step.seq).request).toEqual(request)
 
     // Neither does the other model's summary of that history read it.
@@ -446,7 +446,7 @@ describe('models per role', () => {
     expect(threads.map((t) => [t.title, t.model])).toEqual([['调研', 'small']])
     const results = app
       .listTranscript(project.coordinatorId)
-      .filter((e) => e.kind === 'tool')
+      .filter((e) => e.kind === 'tool' && e.name === 'create_thread')
       .map((e) => e.kind === 'tool' && e.isError)
     expect(results).toEqual([false, true])
   })

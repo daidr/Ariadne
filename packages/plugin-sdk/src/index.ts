@@ -177,11 +177,6 @@ export type ModelStreamPart =
   | { type: 'alive' }
   | { type: 'text'; text: string }
   /**
-   * A tool call has begun; it comes whole as `tool-call` once written. The text so far is
-   * then not the answer, and is no longer shown as it is written.
-   */
-  | { type: 'calling' }
-  /**
    * The arguments of a tool call as far as they are written: `call` counts the calls of
    * this response from 0, and `arguments` is the JSON text so far, cut wherever the
    * service is in it. For showing a long call at work before it comes whole as `tool-call`.
