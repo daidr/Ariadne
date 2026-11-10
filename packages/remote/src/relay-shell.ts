@@ -112,7 +112,6 @@ export class RelayShell implements RemoteShell {
     }
   }
 
-  /** A `tcp` channel: the daemon connects to `port` on its loopback and passes bytes. */
   /**
    * Whether the daemon opens `tcp` channels: one from before them refuses the kind, a newer
    * one refuses the missing port. Asked once.
@@ -133,6 +132,7 @@ export class RelayShell implements RemoteShell {
 
   private tcpProbe: Promise<boolean> | null = null
 
+  /** A `tcp` channel: the daemon connects to `port` on its loopback and passes bytes. */
   async connect(port: number): Promise<BytePipe> {
     if (this.idle) clearTimeout(this.idle)
     this.idle = null
