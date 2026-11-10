@@ -547,6 +547,8 @@ export const en: Record<MessageKey, string> = {
     'Threads and the coordinator hand questions that take a lot of reading to a read-only sub-research; a cheaper model will do',
   'settings.sameAsAsking': 'Same as the one asking',
   'settings.effort': 'Thinking',
+  'settings.threadEffort': 'Threads thinking',
+  'settings.coordinatorEffort': 'Coordinator thinking',
   'settings.effort.default': 'Default',
   'settings.effort.low': 'Low',
   'settings.effort.medium': 'Medium',
