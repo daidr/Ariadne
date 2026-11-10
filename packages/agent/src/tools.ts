@@ -1,6 +1,8 @@
 import {
   DomainError,
+  MAX_ATTACHMENTS,
   MAX_CITES,
+  MAX_FILE_BYTES,
   newId,
   type DraftHandle,
   MAX_ROUTINES,
@@ -20,6 +22,8 @@ import { blockLines, postUi, withdrawAsk } from './ui-tools'
 import {
   json,
   optionalInt,
+  optionalStr,
+  ownThread,
   str,
   ToolInputError,
   withImages,
@@ -40,6 +44,15 @@ import {
 import { addReferenceTool, type ReferenceKind } from './reference-tools'
 import { researchTool } from './research'
 import { waitTool } from './wait-tool'
+import { imageType } from './message-images'
+import { browserTool } from './browser-tool'
+import {
+  reactTool,
+  renameThreadTool,
+  searchMessagesTool,
+  setAsideTool,
+  suggestConnectorTool,
+} from './message-tools'
 import { readSkill, reviewerTools } from './review-tools'
 
 export {
@@ -137,7 +150,19 @@ export const sendMessage: Tool = {
       'Send the user a message in your conversation. This is the only way they read what you write: text outside it is not shown. Send to answer, to hand over finished work, or to raise a blocker; never for progress (that is your todo list). Markdown. Images in the workspace show when linked with a path.',
     parameters: {
       type: 'object',
-      properties: { text: { type: 'string', description: "The message, in the user's language." } },
+      properties: {
+        text: { type: 'string', description: "The message, in the user's language." },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: `Images or text files to send with it, at most ${MAX_ATTACHMENTS}: workspace paths, or ids of files a tool gave you (fil_…). The user can open and download them.`,
+        },
+        replyTo: {
+          type: 'string',
+          description:
+            'Id of an earlier message of this conversation it answers; the user sees it quoted above. Only when it is not plainly the latest one.',
+        },
+      },
       required: ['text'],
     },
   },
@@ -175,12 +200,26 @@ export const sendMessage: Tool = {
       throw new ToolInputError('"text" is empty')
     }
     try {
-      const message = ctx.app.postMessage(ctx.projectId, {
-        conversationId: ctx.conversationId,
-        author: ctx.role,
-        content: await withImages(ctx, text),
-        ...(draft ? { messageId: draft.messageId } : {}),
-      })
+      const attachments = await sentFiles(args.files, ctx)
+      const replyTo = optionalStr(args, 'replyTo')?.trim()
+      let message
+      try {
+        message = ctx.app.postMessage(ctx.projectId, {
+          conversationId: ctx.conversationId,
+          author: ctx.role,
+          content: await withImages(ctx, text),
+          ...(attachments.length ? { attachments } : {}),
+          ...(replyTo ? { replyTo } : {}),
+          ...(draft ? { messageId: draft.messageId } : {}),
+        })
+      } catch (error) {
+        if (replyTo && error instanceof DomainError && error.code === 'error.notFound') {
+          throw new ToolInputError(
+            `No message ${replyTo} in this conversation to answer; leave "replyTo" out, or take an id from list_messages.`,
+          )
+        }
+        throw error
+      }
       draft?.write(text)
       draft?.posted()
       return { content: `Sent (${message.id}).` }
@@ -189,6 +228,62 @@ export const sendMessage: Tool = {
       draft?.withdraw()
     }
   },
+}
+
+/**
+ * The files a message sends, kept in the project's files: a workspace path is read through
+ * the workspace (so nothing outside it), an id must be a file of this project.
+ */
+async function sentFiles(
+  value: unknown,
+  ctx: ToolContext,
+): Promise<{ fileId: string; name: string }[]> {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new ToolInputError('"files" must be an array of workspace paths or file ids')
+  }
+  const given = [...new Set((value as string[]).map((item) => item.trim()))]
+  if (given.length > MAX_ATTACHMENTS) {
+    throw new ToolInputError(`A message carries at most ${MAX_ATTACHMENTS} files`)
+  }
+  const out: { fileId: string; name: string }[] = []
+  for (const item of given) {
+    if (/^fil_[\w-]+$/.test(item)) {
+      // Files a tool kept have no name of their own: named by their type.
+      const info = ctx.app.fileInfo(ctx.projectId, item)
+      if (!info) throw new ToolInputError(`No file ${item} in this project`)
+      const ext = info.mime === 'text/plain' ? 'txt' : (info.mime.split('/')[1] ?? 'png')
+      out.push({
+        fileId: item,
+        name: `${info.mime === 'text/plain' ? 'file' : 'image'}.${ext === 'jpeg' ? 'jpg' : ext}`,
+      })
+      continue
+    }
+    const path = item.replace(/^\.\/+/, '')
+    let data: Uint8Array
+    try {
+      data = await (await ctx.workspace()).readBytes(path, MAX_FILE_BYTES)
+    } catch (error) {
+      throw new ToolInputError(
+        `Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    const image = imageType(path)
+    const mime = image && image.magic(data) ? image.mime : 'text/plain'
+    let file
+    try {
+      file = ctx.app.saveFile(ctx.projectId, { mime, data }, { text: !image })
+    } catch (error) {
+      if (error instanceof DomainError) {
+        throw new ToolInputError(
+          `${path} cannot be sent: only images (png, jpg, gif, webp) and text files up to their size limit can.`,
+        )
+      }
+      throw error
+    }
+    out.push({ fileId: file.id, name: path.split('/').pop() || path })
+  }
+  return out
 }
 
 const editMessage: Tool = {
@@ -557,13 +652,6 @@ const messageThread: Tool = {
 }
 
 /** A thread of this project, or not found: never another project's. */
-function ownThread(ctx: ToolContext, threadId: string) {
-  const thread = ctx.app.getThread(threadId)
-  if (thread.projectId !== ctx.projectId)
-    throw new DomainError('error.notFound', { what: threadId })
-  return thread
-}
-
 const stopThread: Tool = {
   spec: {
     name: 'stop_thread',
@@ -911,6 +999,11 @@ export const coordinatorTools = (models: ModelChoice[] = []): Tool[] => [
   readThread,
   listMessages,
   editMessage,
+  reactTool,
+  renameThreadTool('coordinator'),
+  setAsideTool('coordinator'),
+  searchMessagesTool,
+  suggestConnectorTool,
   waitTool,
   remember,
   forget,
@@ -928,6 +1021,11 @@ export const threadTools: Tool[] = [
   report,
   listMessages,
   editMessage,
+  reactTool,
+  renameThreadTool('thread'),
+  setAsideTool('thread'),
+  searchMessagesTool,
+  suggestConnectorTool,
   waitTool,
   readPlan,
   readSkill,
@@ -992,6 +1090,10 @@ export function toolsFor(
     referenceKinds?: ReferenceKind[]
     /** The project has no name of its own yet: the coordinator gives it one. */
     unnamed?: boolean
+    /** A headless browser can be had: threads get the browser tool. */
+    browser?: boolean
+    /** The thread's workspace is on another machine than Ariadne. */
+    remote?: boolean
   },
 ): Tool[] {
   // A reference may be added in the middle of a turn, and is read at once.
@@ -1030,5 +1132,6 @@ export function toolsFor(
     ...(source.workspace && source.repo ? repoTools : []),
     ...(source.tracker ? [...issueReadTools, ...issueWriteTools] : []),
     ...(source.research ? [researchTool] : []),
+    ...(source.browser ? [browserTool(!!source.remote)] : []),
   ]
 }

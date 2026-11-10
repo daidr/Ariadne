@@ -49,7 +49,22 @@ export interface Workspace {
    * there resolves with exit code 127. Without it, callers quote `argv` for `bash -c`.
    */
   execFile?(argv: string[], options?: Omit<ExecOptions, 'shell'>): Promise<ExecResult>
+  /**
+   * For a workspace on another machine: a connection to `port` on that machine's own
+   * loopback, e.g. a server a command started there, for the headless browser to reach.
+   */
+  connect?(port: number): Promise<BytePipe>
   dispose(): Promise<void>
+}
+
+/** A two-way byte stream, such as a TCP connection carried over another link. */
+export interface BytePipe {
+  /** Resolves `false` once the pipe is closed and the bytes went nowhere. */
+  write(bytes: Uint8Array): Promise<boolean>
+  onData: (bytes: Uint8Array) => void
+  /** The other end closed, or the link was lost; `error` says why when it failed. */
+  onClose: (error?: string) => void
+  close(): void
 }
 
 export interface ExecOptions {

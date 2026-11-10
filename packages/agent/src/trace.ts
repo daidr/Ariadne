@@ -392,7 +392,6 @@ function requestOf(
       ...toChatMessages(transcript, titleOf, {
         readText,
         images: input.images,
-        messageIds: app.getConversation(conversationId).role === 'coordinator',
         ...(call ? { keepReasoning: writtenBy(app, event.projectId, call) } : {}),
       }),
     ],

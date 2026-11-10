@@ -8,6 +8,7 @@ import type {
   IssueWriteAction,
   PlanNodeFields,
   PlanOp,
+  Reaction,
   ReviewComment,
   ReviewReply,
   TokenUsage,
@@ -235,6 +236,11 @@ export const threadsProjection: Projection = {
       -- not try that commit again.
       autopilot_held TEXT,
       auto INTEGER NOT NULL DEFAULT 0,
+      -- Set aside until this time, why and by whom; due once that time came.
+      aside_until INTEGER,
+      aside_reason TEXT,
+      aside_by TEXT,
+      aside_due INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`)
@@ -431,13 +437,41 @@ export const threadsProjection: Projection = {
         break
       case 'message.posted':
         // The user stepping in gives the thread fresh tries (a stopped one is resumed by
-        // its own event, appended with the message).
+        // its own event, appended with the message), and takes it up if it was set aside.
         if (event.data.author === 'user') {
-          db.run('UPDATE threads SET check_failures = 0, user_at = ? WHERE id = ?', [
-            event.at,
-            event.data.conversationId,
-          ])
+          db.run(
+            `UPDATE threads SET check_failures = 0, user_at = ?, aside_until = NULL,
+               aside_reason = NULL, aside_by = NULL, aside_due = 0 WHERE id = ?`,
+            [event.at, event.data.conversationId],
+          )
         }
+        break
+      case 'thread.renamed':
+        db.run('UPDATE threads SET title = ?, updated_at = ? WHERE id = ?', [
+          event.data.title,
+          event.at,
+          event.data.threadId,
+        ])
+        break
+      case 'thread.set_aside':
+        db.run(
+          `UPDATE threads SET aside_until = ?, aside_reason = ?, aside_by = ?, aside_due = 0,
+             updated_at = ? WHERE id = ?`,
+          [event.data.until, event.data.reason, event.data.by, event.at, event.data.threadId],
+        )
+        break
+      case 'thread.aside_due':
+        db.run(
+          'UPDATE threads SET aside_due = 1, updated_at = ? WHERE id = ? AND aside_until IS NOT NULL',
+          [event.at, event.data.threadId],
+        )
+        break
+      case 'thread.aside_ended':
+        db.run(
+          `UPDATE threads SET aside_until = NULL, aside_reason = NULL, aside_by = NULL,
+             aside_due = 0, updated_at = ? WHERE id = ?`,
+          [event.at, event.data.threadId],
+        )
         break
       case 'thread.stopped':
         db.run(
@@ -590,6 +624,9 @@ export const messagesProjection: Projection = {
       -- that passed it to threads.
       cites TEXT,
       relayed_to TEXT,
+      -- The message it answers (JSON QuotedMessage), and the agents' emojis (JSON Reaction[]).
+      reply_to TEXT,
+      reactions TEXT,
       -- The event that last changed the row, for pages that fetch only changes.
       changed_seq INTEGER NOT NULL DEFAULT 0
     )`)
@@ -603,8 +640,8 @@ export const messagesProjection: Projection = {
       case 'message.posted':
         db.run(
           `INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
-             attachments, mentions, comments, cites, created_at, changed_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             attachments, mentions, comments, cites, reply_to, created_at, changed_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             event.data.messageId,
             event.projectId,
@@ -617,6 +654,7 @@ export const messagesProjection: Projection = {
             event.data.mentions?.length ? JSON.stringify(event.data.mentions) : null,
             event.data.comments?.length ? JSON.stringify(event.data.comments) : null,
             event.data.cites?.length ? JSON.stringify(event.data.cites) : null,
+            event.data.replyTo ? JSON.stringify(event.data.replyTo) : null,
             event.at,
             event.seq,
           ],
@@ -642,6 +680,25 @@ export const messagesProjection: Projection = {
           [event.data.content, event.at, event.data.reason, event.seq, event.data.messageId],
         )
         break
+      case 'message.reacted': {
+        const row = db
+          .query<{ reactions: string | null }, [string]>(
+            'SELECT reactions FROM messages WHERE id = ?',
+          )
+          .get(event.data.messageId)
+        if (!row) break
+        const { emoji, by } = event.data
+        const kept = (row.reactions ? (JSON.parse(row.reactions) as Reaction[]) : []).filter(
+          (r) => !(r.emoji === emoji && r.by === by),
+        )
+        if (!event.data.removed) kept.push({ emoji, by })
+        db.run('UPDATE messages SET reactions = ?, changed_seq = ? WHERE id = ?', [
+          kept.length ? JSON.stringify(kept) : null,
+          event.seq,
+          event.data.messageId,
+        ])
+        break
+      }
       case 'message.read':
         // Ids are time ordered, so `id <= upTo` is every message the user has seen.
         db.run(

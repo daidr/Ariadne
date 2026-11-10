@@ -1,4 +1,4 @@
-import type { ExecResult } from '@ariadne/plugin-sdk'
+import type { BytePipe, ExecResult } from '@ariadne/plugin-sdk'
 import { threadEnv } from '@ariadne/plugin-local'
 
 /** Quote one argument for a POSIX shell. */
@@ -100,6 +100,8 @@ export interface RemoteShell {
   /** Names the machine for labels, e.g. `dev@box`. */
   readonly host: string
   run(script: string, args: string[], options?: ShellRun): Promise<ExecResult>
+  /** A connection to `port` on the machine's loopback; see `Workspace.connect`. */
+  connect?(port: number): Promise<BytePipe>
   dispose(): Promise<void>
 }
 

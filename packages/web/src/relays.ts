@@ -25,6 +25,9 @@ export function shownAs(message: MessageView): MessageView[] {
     comments: [],
     cites: [],
     relayedTo: [],
+    replyTo: null,
+    // A reaction to the relay is to what it passed along: it goes on the first bubble.
+    reactions: index ? [] : message.reactions,
     createdAt: message.createdAt,
     editedAt: null,
     editReason: null,

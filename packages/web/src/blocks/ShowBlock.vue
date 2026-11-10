@@ -11,6 +11,7 @@ import {
 } from '@dou-ui/chart'
 import '@dou-ui/chart/style.css'
 import { computed } from 'vue'
+import ConnectorCard from './ConnectorCard.vue'
 import ThreadCard from './ThreadCard.vue'
 
 /** A table, chart, steps or thread entry an agent put in a message; checked on the server. */
@@ -38,6 +39,7 @@ const nameOf = (key: string) =>
 
 <template>
   <ThreadCard v-if="block.type === 'thread'" :thread-id="block.threadId" />
+  <ConnectorCard v-else-if="block.type === 'connector'" :block="block" />
   <div v-else class="show-block">
     <DouText v-if="block.title" weight="medium" size="sm">{{ block.title }}</DouText>
     <DouTable

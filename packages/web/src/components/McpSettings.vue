@@ -26,6 +26,9 @@ import {
 } from '../api'
 import { t, tm } from '../i18n'
 import DirectoryInput from './DirectoryInput.vue'
+import type { ConnectorBlock } from '@ariadne/core'
+import { sameServer, serverIdFor, suggestedServer } from '../open-settings'
+import { state } from '../store'
 
 const browseLocal = (typed: string) => api.browseLocal(typed).then((result) => result.listing)
 
@@ -134,13 +137,57 @@ function load(settings: McpSettings) {
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
 
+/** A server an agent suggested, added as a draft; turned on for its project once saved. */
+let suggested: { id: string; projectId: string } | null = null
+
 onMounted(async () => {
   try {
     load(await api.getMcpSettings())
   } catch (cause) {
     error.value = message(cause)
   }
+  const pending = suggestedServer.value
+  suggestedServer.value = null
+  if (pending) suggest(pending.block, pending.projectId)
 })
+
+function suggest(block: ConnectorBlock, projectId: string) {
+  const existing = servers.value.find((server) => sameServer(block, inputOf(server)))
+  if (existing) {
+    suggested = { id: existing.id, projectId }
+    return
+  }
+  const id = serverIdFor(block.name, new Set(servers.value.map((server) => server.id)))
+  const secrets = block.secrets.map((name) => ({ name, value: '', stored: false }))
+  servers.value.push({
+    key: nextKey++,
+    id,
+    name: block.name,
+    transport: block.transport,
+    command: block.command ?? '',
+    args: [...block.args],
+    cwd: '',
+    url: block.url ?? '',
+    env: block.transport === 'stdio' ? secrets : [],
+    headers: block.transport === 'http' ? secrets : [],
+    tools: {},
+  })
+  suggested = { id, projectId }
+}
+
+/** The suggested server, saved, goes on for the project it was suggested in. */
+async function turnOnSuggested() {
+  const pending = suggested
+  if (!pending || !savedIds.value.has(pending.id)) return
+  suggested = null
+  const project =
+    state.detail?.project.id === pending.projectId
+      ? state.detail.project
+      : await api.getProject(pending.projectId).then((detail) => detail.project)
+  if (project.mcp.includes(pending.id)) return
+  // The project's page follows the change from the server, as with any other.
+  await api.setProjectMcp(project.id, [...project.mcp, pending.id])
+}
 
 function add() {
   const taken = new Set(servers.value.map((s) => s.id))
@@ -178,10 +225,14 @@ async function check(id: string) {
 /** Save the servers, then connect those not connected yet. `false` when it was refused. */
 async function save(): Promise<boolean> {
   // Saved with the rest of the settings: nothing is sent unless the servers changed.
-  if (!dirty.value) return true
+  if (!dirty.value) {
+    await turnOnSuggested().catch((cause) => (error.value = message(cause)))
+    return true
+  }
   error.value = null
   try {
     load(await api.saveMcpSettings(servers.value.map(inputOf)))
+    await turnOnSuggested()
   } catch (cause) {
     error.value = message(cause)
     return false

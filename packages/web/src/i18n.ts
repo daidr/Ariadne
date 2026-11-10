@@ -77,6 +77,11 @@ export function duration(ms: number): string {
   return t('time.min', { m: Math.floor(ms / 60_000), s: Math.round((ms % 60_000) / 1000) })
 }
 
+/** A day, as short as it reads: `11月14日`, `Nov 14`. */
+export function dayText(at: number): string {
+  return new Date(at).toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
+}
+
 /** A coming moment, as short as it can be: `14:30` today, else with its date (`11/6 14:30`). */
 export function clockText(at: number, now = Date.now()): string {
   const date = new Date(at)

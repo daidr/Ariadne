@@ -7,6 +7,7 @@ import { DomainError } from '@ariadne/core'
 import type { TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import type { EverywhereMemory } from './tool-helpers'
+import type { BrowserPages } from './browser-page'
 import type { ModelChoice } from './tools'
 import type { WorkspaceManager } from './workspaces'
 
@@ -46,6 +47,8 @@ export interface SchedulerOptions {
   skillsDirs?: readonly string[]
   /** The user's instructions for every project, for the coordinator to add a line to. */
   everywhere?: EverywhereMemory
+  /** The conversations' headless browsers; without them there is no browser tool. */
+  browser?: BrowserPages
 }
 
 /** Reports after which a thread's background commands have nothing more to do. */
@@ -259,6 +262,7 @@ export class Scheduler {
         ...(this.options.researchModel ? { researchModel: this.options.researchModel() } : {}),
         ...(this.options.skillsDirs ? { skillsDirs: this.options.skillsDirs } : {}),
         ...(this.options.everywhere ? { everywhere: this.options.everywhere } : {}),
+        ...(this.options.browser ? { browser: this.options.browser } : {}),
       })
     })()
       .catch((error) => console.error('turn crashed', error))

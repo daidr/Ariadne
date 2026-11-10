@@ -3,13 +3,14 @@ import ChangeTotals from './ChangeTotals.vue'
 import type { ThreadView } from '@ariadne/core'
 import { DouProgress, DouRelativeTime, DouShimmer, DouText, DouTooltip } from 'dou-ui'
 import {
+  AlarmClockIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
   GitPullRequestIcon,
   ScanSearchIcon,
 } from '@dou-ui/icons'
 import { computed } from 'vue'
-import { t } from '../i18n'
+import { dayText, t } from '../i18n'
 import { checksTone, questionOf, statusLine } from '../stage'
 import { state } from '../store'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -99,6 +100,17 @@ const prTone = computed(() =>
         />
         <span class="row-trim">{{ unfinished.done }}/{{ unfinished.total }}</span>
       </DouText>
+      <DouTooltip
+        v-if="thread.aside && !thread.aside.due"
+        :content="thread.aside.reason || undefined"
+      >
+        <DouText size="sm" variant="tertiary" class="row-mark">
+          <AlarmClockIcon aria-hidden="true" />
+          <span class="row-trim">{{
+            t('aside.until', { date: dayText(thread.aside.until) })
+          }}</span>
+        </DouText>
+      </DouTooltip>
       <DouText size="sm" variant="tertiary" class="row-time row-trim">
         <DouRelativeTime :value="thread.activeAt" short />
       </DouText>

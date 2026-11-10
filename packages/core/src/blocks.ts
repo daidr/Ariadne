@@ -124,12 +124,31 @@ export interface ThreadBlock {
   threadId: string
 }
 
+/**
+ * An external service (an MCP server) an agent suggests the user add: the card opens the
+ * settings with it filled in. Secret values are never part of it, only their names.
+ */
+export interface ConnectorBlock {
+  type: 'connector'
+  name: string
+  /** Why it helps, in a sentence. */
+  why: string | null
+  transport: 'stdio' | 'http'
+  /** stdio: the program and its arguments. */
+  command: string | null
+  args: string[]
+  /** http: where it listens. */
+  url: string | null
+  /** Names of the environment variables (stdio) or headers (http) the user fills in. */
+  secrets: string[]
+}
+
 export type AskBlock = ChoiceBlock | ConfirmBlock | FormBlock
-export type ShowBlock = TableBlock | ChartBlock | StepsBlock | ThreadBlock
+export type ShowBlock = TableBlock | ChartBlock | StepsBlock | ThreadBlock | ConnectorBlock
 export type UiBlock = AskBlock | ShowBlock
 
 export const ASK_BLOCK_TYPES = ['choice', 'confirm', 'form'] as const
-export const SHOW_BLOCK_TYPES = ['table', 'chart', 'steps', 'thread'] as const
+export const SHOW_BLOCK_TYPES = ['table', 'chart', 'steps', 'thread', 'connector'] as const
 export const BLOCK_TYPES = [...ASK_BLOCK_TYPES, ...SHOW_BLOCK_TYPES] as const
 
 /** How the user answered an ask block; its `type` is the block's. */
@@ -438,6 +457,43 @@ function parseThread(value: Record<string, unknown>, at: string): ThreadBlock {
   return { type: 'thread', threadId: text(value.threadId, `${at}.threadId`, BLOCK_LIMITS.label) }
 }
 
+/** Names of secrets: what a shell or a header takes, never their values. */
+const SECRET_NAME = /^[A-Za-z_][\w-]{0,63}$/
+
+function parseConnector(value: Record<string, unknown>, at: string): ConnectorBlock {
+  only(value, ['type', 'name', 'why', 'transport', 'command', 'args', 'url', 'secrets'], at)
+  const transport = oneOf(value.transport, ['stdio', 'http'] as const, `${at}.transport`)
+  const strings = (raw: unknown, where: string, max: number) => {
+    if (raw === undefined || raw === null) return []
+    if (!Array.isArray(raw) || raw.length > max)
+      invalid(`${where} must be a list of at most ${max}`)
+    return raw.map((item, i) => text(item, `${where}[${i}]`, 500))
+  }
+  const secrets = strings(value.secrets, `${at}.secrets`, 10)
+  secrets.forEach((name, i) => {
+    if (!SECRET_NAME.test(name)) invalid(`${at}.secrets[${i}] must be a variable or header name`)
+  })
+  const block: ConnectorBlock = {
+    type: 'connector',
+    name: text(value.name, `${at}.name`, BLOCK_LIMITS.label),
+    why: optionalText(value.why, `${at}.why`, 300),
+    transport,
+    command: null,
+    args: [],
+    url: null,
+    secrets,
+  }
+  if (transport === 'stdio') {
+    block.command = text(value.command, `${at}.command`, 500)
+    block.args = strings(value.args, `${at}.args`, 30)
+  } else {
+    const url = text(value.url, `${at}.url`, 2000)
+    if (!/^https?:\/\/[^\s]+$/i.test(url)) invalid(`${at}.url must be an http(s) address`)
+    block.url = url
+  }
+  return block
+}
+
 /**
  * Check a block as an agent wrote it and fill in what it left out. Throws `blockInvalid`
  * with a reason the model can act on.
@@ -460,6 +516,8 @@ export function parseBlock(value: unknown, at = 'block'): UiBlock {
       return parseSteps(value, at)
     case 'thread':
       return parseThread(value, at)
+    case 'connector':
+      return parseConnector(value, at)
   }
 }
 

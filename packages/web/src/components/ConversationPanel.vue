@@ -53,6 +53,8 @@ import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
+import MessageQuote from './MessageQuote.vue'
+import MessageReactions from './MessageReactions.vue'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
@@ -306,6 +308,8 @@ const writing = computed<MessageView | null>(() => {
     comments: [],
     cites: [],
     relayedTo: [],
+    replyTo: null,
+    reactions: [],
     createdAt: reply.startedAt,
     editedAt: null,
     editReason: null,
@@ -467,14 +471,20 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
   // Still being written while it is the draft, not yet a message of the log.
   const streaming =
     message.id === writing.value?.id && !state.writing[message.conversationId]?.posted
+  // The user's files lead, as they were sent before the words; an agent's follow its text.
+  const files = message.attachments.length ? [{ type: 'attachments' }] : []
+  const own = message.author === 'user'
   return [
-    ...(message.attachments.length ? [{ type: 'attachments' }] : []),
+    ...(message.replyTo ? [{ type: 'quote' }] : []),
+    ...(own ? files : []),
     ...(message.content ? [{ type: 'text' as const, text: message.content, streaming }] : []),
+    ...(own ? [] : files),
     ...(message.comments.length ? [{ type: 'comments' }] : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
     ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
     ...(message.relayedTo.length ? [{ type: 'relayed' }] : []),
+    ...(message.reactions.length ? [{ type: 'reactions' }] : []),
   ]
 }
 
@@ -968,8 +978,17 @@ watch(
               />
             </template>
             <template #part="{ part }">
+              <MessageQuote
+                v-if="part.type === 'quote' && message.replyTo"
+                :quote="message.replyTo"
+                :conversation-id="message.conversationId"
+              />
+              <MessageReactions
+                v-else-if="part.type === 'reactions'"
+                :reactions="message.reactions"
+              />
               <DouChatAttachments
-                v-if="part.type === 'attachments'"
+                v-else-if="part.type === 'attachments'"
                 :model-value="shownAttachments(message.attachments)"
                 :removable="false"
                 @open="(file) => openAttachment(message, file)"

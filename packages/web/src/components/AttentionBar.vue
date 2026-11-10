@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import type { NeedsMeItem, ThreadView } from '@ariadne/core'
 import { threadLine } from '../stage'
-import { openMain, openThread, openThreadFrom, retryTurn, state } from '../store'
+import { endAside, openMain, openThread, openThreadFrom, retryTurn, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -23,6 +23,11 @@ function openAsker(threadId: string | null) {
 
 /** The line the thread list shows for it; its stage when its report said nothing. */
 function headline(thread: ThreadView): string {
+  if (thread.aside?.due) {
+    return thread.aside.reason
+      ? t('aside.dueReason', { reason: thread.aside.reason })
+      : t('aside.due')
+  }
   return threadLine(thread) ?? t(`thread.stage.${thread.stage}`)
 }
 
@@ -100,6 +105,15 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
               >
                 <template #leading><PlayIcon /></template>
                 {{ t('conversation.continue') }}
+              </DouButton>
+              <!-- Back from being set aside: seen, and it goes. -->
+              <DouButton
+                v-else-if="item.thread.aside?.due"
+                size="sm"
+                variant="ghost"
+                @click="endAside(item.thread.id)"
+              >
+                {{ t('aside.done') }}
               </DouButton>
               <DouButton
                 v-else

@@ -482,7 +482,7 @@ describe('attachments', () => {
     )
   })
 
-  test('only the user attaches, and only files of the project', () => {
+  test('only files of the project are attached, by the user or an agent', () => {
     const project = app.createProject('P')
     const other = app.createProject('Q')
     const theirs = app.saveFile(other.id, { mime: 'image/png', data: PNG })
@@ -495,7 +495,7 @@ describe('attachments', () => {
       })
     expect(() => send('user', theirs.id)).toThrow(/notFound/)
     const mine = app.saveFile(project.id, { mime: 'image/png', data: PNG })
-    expect(() => send('coordinator', mine.id)).toThrow()
+    expect(send('coordinator', mine.id).attachments).toHaveLength(1)
     expect(send('user', mine.id).attachments).toEqual([
       { fileId: mine.id, name: 'a.png', mime: 'image/png', size: PNG.byteLength },
     ])

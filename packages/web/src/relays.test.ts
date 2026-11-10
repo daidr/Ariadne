@@ -15,6 +15,8 @@ const base: MessageView = {
   comments: [],
   cites: [],
   relayedTo: [],
+  replyTo: null,
+  reactions: [],
   createdAt: 10,
   editedAt: null,
   editReason: null,

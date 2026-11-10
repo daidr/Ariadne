@@ -82,3 +82,10 @@
 - [ ] **回合中途退出**：讨论串正在请求模型时按 Ctrl+C 停掉服务再启动；那个回合显示为被中断，讨论串接着做，不会卡在“工作中”。
 - [ ] **审阅中途退出**：审阅讨论串交出结论前停掉服务再启动；审阅接着做完，或者在“需要我”里看到它没有结论就结束了，不会一直显示审阅中。
 - [ ] **两个服务**：同一个 `ARIADNE_HOME` 启动第二个服务时，第二个提示“另一个 Ariadne 还在用这个目录”，第一个的后台命令不受影响。第二个服务的进程只记在内存里：它之后崩溃的话，留下的进程不会在下次启动时清理。
+
+## 浏览器工具
+
+- [ ] **本机浏览器**：装了 Chrome 或 Edge 的 Windows 和 macOS 上，让讨论串用 `browser` 打开一个页面并截图；追踪里看到截图，`~/.ariadne/browser` 下没有下载内容。
+- [ ] **自动下载**：在没有 Chrome、Edge、Chromium 的机器（或临时改名浏览器）上用一次，第一次调用会下载 Chrome for Testing 的 headless shell 到 `~/.ariadne/browser`，之后直接用；Windows 上用系统自带的 `tar` 解压，Linux 和 macOS 用 `unzip`。
+- [ ] **SSH 端口**：SSH 项目（远端没装 `ariadne-daemon`）里，让讨论串在远端后台起一个开发服务器，再用 `browser` 打开 `http://localhost:<端口>`，页面能打开，热更新的 WebSocket 能连上。这条路径用的是 `ssh -W` 加 `ClearAllForwardings=yes`，要确认它没有被拦下。
+- [ ] **daemon 端口**：daemon 项目里做同样的事，走 relay 的 `tcp` 通道。

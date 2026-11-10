@@ -36,6 +36,8 @@ import type {
   BranchMerge,
   Author,
   CitedMessage,
+  QuotedMessage,
+  Reaction,
   IssueWrite,
   LineComment,
   LinkedIssue,
@@ -143,7 +145,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 61
+export const PROJECTION_VERSION = 62
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -545,6 +547,10 @@ interface ThreadRow {
   review_of: string | null
   autopilot_held: string | null
   auto: number
+  aside_until: number | null
+  aside_reason: string | null
+  aside_by: string | null
+  aside_due: number
   reviewer_id: string | null
   review_rounds: number
   reviewing: number
@@ -600,6 +606,8 @@ interface MessageRow {
   comments: string | null
   cites: string | null
   relayed_to: string | null
+  reply_to: string | null
+  reactions: string | null
   ask_id: string | null
   ask_block: string | null
   ask_answer: string | null
@@ -738,6 +746,15 @@ function toThread(row: ThreadRow, now: number): ThreadView {
         now - activeAt >= ARCHIVE_AFTER_MS),
     changes: row.changes ? (JSON.parse(row.changes) as ChangeTotals) : null,
     pullRequest,
+    aside:
+      row.aside_until === null
+        ? null
+        : {
+            until: row.aside_until,
+            reason: row.aside_reason ?? '',
+            by: row.aside_by ?? '',
+            due: row.aside_due === 1,
+          },
     stopped:
       row.stopped_reason === null
         ? null
@@ -781,6 +798,21 @@ interface NoticeRow {
   payload: string
   undone: number
   created_at: number
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+/** The longest title a thread may be given. */
+const MAX_THREAD_TITLE = 80
+/** How much of a message an answer quotes above itself, in characters. */
+const MAX_QUOTE = 120
+/** Emojis one agent may put on one message. */
+export const MAX_REACTIONS = 3
+
+/** One emoji, as a person would pick it: a single pictograph, maybe with modifiers or joined. */
+export function isEmoji(text: string): boolean {
+  if (!text || text.length > 32) return false
+  const graphemes = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)]
+  return graphemes.length === 1 && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(text)
 }
 
 /** The longest name a project gets from the user's first words. */
@@ -833,6 +865,8 @@ function toMessage(row: MessageRow): MessageView {
     comments: row.comments ? (JSON.parse(row.comments) as LineComment[]) : [],
     cites: row.cites ? (JSON.parse(row.cites) as CitedMessage[]) : [],
     relayedTo: row.relayed_to ? (JSON.parse(row.relayed_to) as MessageRelay[]) : [],
+    replyTo: row.reply_to ? (JSON.parse(row.reply_to) as QuotedMessage) : null,
+    reactions: row.reactions ? (JSON.parse(row.reactions) as Reaction[]) : [],
     createdAt: row.created_at,
     editedAt: row.edited_at,
     editReason: row.edit_reason,
@@ -1045,7 +1079,13 @@ export class Ariadne {
       })),
       ...threads
         // A reviewing thread that stalls hands its author's changes to the user instead.
-        .filter((thread) => needsUser(thread.stage) && !asked.has(thread.id) && !thread.reviewOf)
+        // One set aside comes back once its day came, whatever it waits on.
+        .filter(
+          (thread) =>
+            (needsUser(thread.stage) || !!thread.aside?.due) &&
+            !asked.has(thread.id) &&
+            !thread.reviewOf,
+        )
         .map((thread): NeedsMeItem => ({ kind: 'thread', thread })),
     ]
   }
@@ -2193,6 +2233,71 @@ export class Ariadne {
     return this.getThread(threadId)
   }
 
+  /** A new title for the thread, from itself or the coordinator (`by` is its id). */
+  renameThread(threadId: string, title: string, by: string): ThreadView {
+    const thread = this.getThread(threadId)
+    const clean = title.replace(/\s+/g, ' ').trim()
+    if (!clean || [...clean].length > MAX_THREAD_TITLE) {
+      throw new DomainError('error.invalidBody', { reason: 'title' })
+    }
+    if (clean === thread.title) return thread
+    this.store.append([
+      { type: 'thread.renamed', projectId: thread.projectId, data: { threadId, title: clean, by } },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /**
+   * Set the thread aside for `days`; it comes back to the user under "needs me" then.
+   * Setting it aside again moves the day. `by` is the thread itself or the coordinator.
+   */
+  setAside(threadId: string, input: { days: number; reason: string; by: string }): ThreadView {
+    const thread = this.getThread(threadId)
+    const reason = input.reason.replace(/\s+/g, ' ').trim().slice(0, 200)
+    if (!Number.isInteger(input.days) || input.days < 1) {
+      throw new DomainError('error.invalidBody', { reason: 'days' })
+    }
+    const until = this.now() + input.days * DAY_MS
+    this.store.append([
+      {
+        type: 'thread.set_aside',
+        projectId: thread.projectId,
+        data: { threadId, until, reason, by: input.by },
+      },
+    ])
+    return this.getThread(threadId)
+  }
+
+  /** Take a thread set aside up again, before or after its day. `false` when it was not. */
+  endAside(threadId: string, by: string): boolean {
+    const thread = this.getThread(threadId)
+    if (!thread.aside) return false
+    this.store.append([
+      { type: 'thread.aside_ended', projectId: thread.projectId, data: { threadId, by } },
+    ])
+    return true
+  }
+
+  /** Threads set aside whose day has not been marked come yet, soonest first. */
+  listAsides(): { threadId: string; until: number }[] {
+    return this.db
+      .query<{ id: string; aside_until: number }, []>(
+        `SELECT id, aside_until FROM threads WHERE aside_until IS NOT NULL AND aside_due = 0
+         ORDER BY aside_until`,
+      )
+      .all()
+      .map((row) => ({ threadId: row.id, until: row.aside_until }))
+  }
+
+  /** The day the thread was set aside to came: it goes under "needs me". */
+  asideDue(threadId: string): void {
+    const thread = this.getThread(threadId)
+    if (!thread.aside || thread.aside.due) return
+    this.store.append([
+      { type: 'thread.aside_due', projectId: thread.projectId, data: { threadId } },
+    ])
+  }
+
   /** The user is through with what the thread put up for review; it counts as done. */
   reviewThread(threadId: string): ThreadView {
     const thread = this.getThread(threadId)
@@ -2703,8 +2808,10 @@ export class Ariadne {
       content: string
       kind?: MessageKind
       blocks?: unknown[]
-      /** Files of this project the user sends with it, as uploaded. */
+      /** Files of this project sent with it: the user's uploads, or files an agent kept. */
       attachments?: { fileId: string; name: string }[]
+      /** An earlier message of the same conversation it answers, by id. */
+      replyTo?: string
       /** What the user pointed at with `@`; threads and artifacts are titled from the project. */
       mentions?: unknown[]
       /** The user's comments on lines of a thread's changes. */
@@ -2717,9 +2824,8 @@ export class Ariadne {
   ): MessageView {
     this.assertConversationIn(projectId, input.conversationId)
     const attachments = this.attachmentsOf(projectId, input.attachments ?? [])
-    if (attachments.length && input.author !== 'user') {
-      throw new DomainError('error.invalidBody', { reason: 'attachments' })
-    }
+    const replyTo =
+      input.replyTo === undefined ? null : this.quoteOf(input.conversationId, input.replyTo)
     const mentions = this.mentionsOf(projectId, input.mentions ?? [])
     const comments = lineComments(input.comments ?? [])
     if ((mentions.length || comments.length) && input.author !== 'user') {
@@ -2798,6 +2904,7 @@ export class Ariadne {
           ...(mentions.length ? { mentions } : {}),
           ...(comments.length ? { comments } : {}),
           ...(cites.length ? { cites } : {}),
+          ...(replyTo ? { replyTo } : {}),
         },
       },
       ...asks.map((block) =>
@@ -2807,6 +2914,75 @@ export class Ariadne {
           messageId,
         }),
       ),
+    ])
+    return this.getMessage(messageId)
+  }
+
+  /**
+   * A message of the conversation, as an answer quotes it: a relay by the user's words it
+   * passed along (that is what the thread shows of it), the rest by their own text.
+   */
+  private quoteOf(conversationId: string, messageId: string): QuotedMessage {
+    const row = this.db
+      .query<
+        { author: Author; kind: MessageKind; content: string; cites: string | null },
+        [string, string]
+      >('SELECT author, kind, content, cites FROM messages WHERE id = ? AND conversation_id = ?')
+      .get(messageId, conversationId)
+    if (!row) throw new DomainError('error.notFound', { what: messageId })
+    const cites = row.cites ? (JSON.parse(row.cites) as CitedMessage[]) : []
+    const relayed = row.kind === 'relay' && cites.length
+    const text = (relayed ? cites.map((cite) => cite.content).join(' ') : row.content)
+      .replace(/\s+/g, ' ')
+      .trim()
+    const letters = [...text]
+    return {
+      messageId,
+      author: relayed ? 'user' : row.author,
+      text:
+        letters.length > MAX_QUOTE ? `${letters.slice(0, MAX_QUOTE).join('').trimEnd()}…` : text,
+    }
+  }
+
+  /**
+   * An agent puts an emoji on a message of its own conversation, or takes it back. Its
+   * own messages are left alone: reacting is how it answers without a message.
+   */
+  react(
+    messageId: string,
+    reactor: { author: Author; conversationId: string },
+    emoji: string,
+    remove = false,
+  ): MessageView {
+    const message = this.getMessage(messageId)
+    if (reactor.author === 'user' || message.conversationId !== reactor.conversationId) {
+      throw new DomainError('error.notFound', { what: messageId })
+    }
+    if (message.author === reactor.author && message.kind !== 'relay') {
+      throw new DomainError('error.invalidBody', { reason: 'messageId' })
+    }
+    const clean = emoji.trim()
+    if (!isEmoji(clean)) throw new DomainError('error.invalidBody', { reason: 'emoji' })
+    const has = message.reactions.some((r) => r.emoji === clean && r.by === reactor.author)
+    if (has !== remove) return message
+    if (
+      !remove &&
+      message.reactions.filter((r) => r.by === reactor.author).length >= MAX_REACTIONS
+    ) {
+      throw new DomainError('error.invalidBody', { reason: 'reactions' })
+    }
+    this.store.append([
+      {
+        type: 'message.reacted',
+        projectId: this.projectOfMessage(messageId),
+        data: {
+          messageId,
+          conversationId: message.conversationId,
+          by: reactor.author,
+          emoji: clean,
+          ...(remove ? { removed: true as const } : {}),
+        },
+      },
     ])
     return this.getMessage(messageId)
   }
@@ -4014,6 +4190,11 @@ export class Ariadne {
     return saveFile(this.db, projectId, input, this.now(), options)
   }
 
+  /** A file of the project, without its bytes; `null` when it has no such file. */
+  fileInfo(projectId: string, fileId: string): { mime: string; size: number } | null {
+    return fileInfo(this.db, projectId, fileId)
+  }
+
   getFile(fileId: string): { mime: string; data: Uint8Array } {
     const file = readFile(this.db, fileId)
     if (!file) throw new DomainError('error.notFound', { what: fileId })
@@ -4726,7 +4907,8 @@ export class Ariadne {
     return row ? toMessage(row) : null
   }
 
-  private getMessage(messageId: string): MessageView {
+  /** One message, by id. */
+  getMessage(messageId: string): MessageView {
     const row = this.db
       .query<MessageRow, [string]>(`${MESSAGE_SELECT} WHERE m.id = ?`)
       .get(messageId)

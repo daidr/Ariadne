@@ -16,11 +16,13 @@ const CHANGES = new Set<AnyStoredEvent['type']>([
   'project.created',
   'project.deleted',
   'project.settings.set',
+  'thread.set_aside',
+  'thread.aside_ended',
 ])
 
 /**
  * Wakes conversations whose wait came due, and the coordinator of a project whose routine
- * came due. What is due lives in the log (waits) and the project settings (routines), so a
+ * came due; brings threads set aside back to the user on their day. What is due lives in the log (waits) and the project settings (routines), so a
  * restart picks it up again: a wait that came due while the server was down ends at once;
  * a routine's run missed that way is not made up, the next one comes on time.
  */
@@ -83,6 +85,16 @@ export class Timers {
           console.error('wait failed to end', error)
         }
       } else next = Math.min(next, wait.until)
+    }
+    // A thread set aside comes back to the user on its day.
+    for (const aside of this.app.listAsides()) {
+      if (aside.until <= now) {
+        try {
+          this.app.asideDue(aside.threadId)
+        } catch (error) {
+          console.error('set-aside thread failed to come back', error)
+        }
+      } else next = Math.min(next, aside.until)
     }
     for (const project of this.app.listProjects()) {
       for (const routine of project.settings.routines) {
