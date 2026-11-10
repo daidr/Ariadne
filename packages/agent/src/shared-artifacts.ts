@@ -7,7 +7,7 @@ import * as Y from 'yjs'
 import { bridges, sharedKinds, type SharedEvent, type SharedKind } from './shared-content'
 
 /**
- * Documents and whiteboards people and agents edit at the same time. Each one open
+ * Documents, whiteboards and dashboards people and agents edit at the same time. Each one open
  * somewhere is a room: a Yjs document on the server that the pages join over a WebSocket
  * (the y-websocket protocol: sync and awareness) and that agents write into directly.
  * Its state is kept in the database as it changes, and saved as a version of the artifact

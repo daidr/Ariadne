@@ -116,7 +116,7 @@ async function settled<T>(ctx: ToolContext, artifactId: string, run: () => T | P
 }
 
 /**
- * Shows a call that changes a document or whiteboard while it is written: once the
+ * Shows a call that changes an artifact edited together while it is written: once the
  * artifact is named and the change has begun, `next` gives the content as far as the
  * arguments go (`null` or a throw: nothing to show for this piece).
  */
@@ -589,6 +589,7 @@ const refreshDashboardTool: Tool = {
         author: ctx.conversationId,
         reason: createTranslator(ctx.locale)('artifact.dashboard.refreshed'),
         signal: ctx.signal,
+        ...(ctx.shared ? { shared: ctx.shared } : {}),
       },
     )
     // the fetched data may have changed shape, so the widgets are checked against it again
@@ -666,41 +667,76 @@ const updateDashboard: Tool = {
       required: ['artifactId', 'baseVersion', 'reason'],
     },
   },
-  async run(args, ctx) {
+  run(args, ctx) {
     const artifactId = str(args, 'artifactId')
-    const current = ownArtifact(ctx, artifactId, 'dashboard')
-    const baseVersion = baseVersionOf(args)
-    const data = args.data
-    if (data !== undefined && (typeof data !== 'object' || Array.isArray(data) || data === null)) {
-      throw new ToolInputError('"data" must be an object of named data sources')
-    }
-    const live =
-      args.source === undefined || args.source === null
-        ? null
-        : await fetchSource(args.source, ctx, current.projectId)
-    const fetched = live || data ? { ...(data as Record<string, unknown>), ...live?.data } : null
-    const content = mergeDashboard(
-      JSON.parse(current.content) as DashboardContent,
-      {
-        widgets: arrayOf(args, 'widgets'),
-        removeWidgets: stringsOf(args, 'removeWidgets'),
-        ...(fetched ? { data: fetched } : {}),
-        removeData: stringsOf(args, 'removeData'),
-      },
-      Date.now(),
-    )
-    if (live) content.source = live.source
-    else if (args.source === null) delete content.source
-    const title = optionalStr(args, 'title')
-    const artifact = ctx.app.reviseArtifact(artifactId, {
-      content: JSON.stringify(content),
-      reason: str(args, 'reason'),
-      author: ctx.conversationId,
-      ...(title ? { title } : {}),
-      baseVersion,
+    return settled(ctx, artifactId, async () => {
+      const data = args.data
+      if (
+        data !== undefined &&
+        (typeof data !== 'object' || Array.isArray(data) || data === null)
+      ) {
+        throw new ToolInputError('"data" must be an object of named data sources')
+      }
+      const baseVersion = baseVersionOf(args)
+      const first = ownArtifact(ctx, artifactId, 'dashboard')
+      const live =
+        args.source === undefined || args.source === null
+          ? null
+          : await fetchSource(args.source, ctx, first.projectId)
+      // Read once the data is in: what the user changed meanwhile is part of it.
+      const now = toChange(ctx, artifactId, 'dashboard')
+      const shared = sharedIn(ctx, now)
+      const fetched = live || data ? { ...(data as Record<string, unknown>), ...live?.data } : null
+      const content = mergeDashboard(
+        JSON.parse(now.content) as DashboardContent,
+        {
+          widgets: arrayOf(args, 'widgets'),
+          removeWidgets: stringsOf(args, 'removeWidgets'),
+          ...(fetched ? { data: fetched } : {}),
+          removeData: stringsOf(args, 'removeData'),
+        },
+        Date.now(),
+      )
+      if (live) content.source = live.source
+      else if (args.source === null) delete content.source
+      const artifact = save(ctx, now, JSON.stringify(content), {
+        reason: str(args, 'reason'),
+        title: optionalStr(args, 'title'),
+        // Edited together, the changes from the version read go in; others' since stay.
+        baseVersion: shared ? now.version : baseVersion,
+      })
+      return json({ artifactId, version: artifact.version, ...dashboardProblemsOf(content) })
     })
-    return json({ artifactId, version: artifact.version, ...dashboardProblemsOf(content) })
   },
+  // The widgets show one by one as each is written, with the data sets written whole so
+  // far; what is taken away and a source's data come at the end.
+  live: (ctx) =>
+    showWriting(
+      ctx,
+      'dashboard',
+      (args) => Array.isArray(args.widgets),
+      (args, open, base) => {
+        const widgets = (args.widgets as unknown[]).filter(
+          (item, index): item is Record<string, unknown> =>
+            typeof item === 'object' && item !== null && !isOpen(open, 'widgets', index),
+        )
+        if (!widgets.length) return null
+        const given =
+          typeof args.data === 'object' && args.data !== null && !Array.isArray(args.data)
+            ? (args.data as Record<string, unknown>)
+            : {}
+        const data = Object.fromEntries(
+          Object.entries(given).filter(([name]) => !isOpen(open, 'data', name)),
+        )
+        const content = JSON.parse(base) as DashboardContent
+        const changes = { widgets, removeWidgets: [], removeData: [] }
+        return JSON.stringify(
+          Object.keys(data).length
+            ? mergeDashboard(content, { ...changes, data }, Date.now())
+            : mergeDashboard(content, changes, content.takenAt ?? 0),
+        )
+      },
+    ),
 }
 
 // ---- any kind ----

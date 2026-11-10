@@ -2,7 +2,7 @@
 import type { ArtifactCommentThreadView } from '@ariadne/core'
 import { DouEditor, editorKit, type EditorDocument, type PartialBlock } from '@dou-ui/editor'
 import { collaboration } from '@dou-ui/editor/collaboration'
-import { blocksToMarkdown, markdownToBlocks } from '@dou-ui/editor/markdown'
+import { markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
@@ -25,7 +25,6 @@ const props = defineProps<{
   shared?: SharedArtifact
 }>()
 const emit = defineEmits<{
-  draft: [content: string | null]
   comment: [action: CommentAction, quote: string]
 }>()
 const active = defineModel<string | null>('activeComment', { default: null })
@@ -43,8 +42,6 @@ const extensions = props.shared
     ]
   : [editorKit(), pendingDocumentBlock]
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
-/** Markdown of the document as loaded, written the way saving would write it. */
-const baseline = ref('')
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
 const editor = useTemplateRef<InstanceType<typeof DouEditor>>('editor')
@@ -61,24 +58,18 @@ function load() {
   // Edited together, the document comes from the room, marks and all.
   if (props.shared) return
   const read = markdownToBlocks(props.content, extensions) as PartialBlock[]
-  baseline.value = blocksToMarkdown(read as never, extensions)
   doc.value = { version: 1, blocks: anchorQuotes(read, props.comments ?? []).blocks }
   generation.value++
 }
 watch(() => props.content, load, { immediate: true })
 
-const current = computed(() => blocksToMarkdown(doc.value.blocks as never, extensions))
-const dirty = computed(() => !props.shared && current.value !== baseline.value)
-watch(current, (markdown) => {
-  if (!props.shared) emit('draft', markdown === baseline.value ? null : markdown)
-})
 const ready = computed(() => !props.shared || props.shared.ready.value)
 
-// A thread started elsewhere (an agent's) is marked once nothing unsaved would be lost.
+// A thread started elsewhere (an agent's) is marked on the text it quotes.
 watch(
   () => props.comments,
   (comments) => {
-    if (props.shared || dirty.value || !comments) return
+    if (props.shared || !comments) return
     const marked = anchoredIds(doc.value.blocks)
     const missing = comments.some((c) => !marked.has(c.id) && c.quote)
     if (missing && anchorQuotes(doc.value.blocks, comments).found.size > marked.size) {

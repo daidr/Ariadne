@@ -42,7 +42,6 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
       :title="count ? undefined : t('attention.title')"
     >
       <template #leading><BellIcon /></template>
-      <!-- No label slot at all when empty: an empty one would keep the button from turning square. -->
       <template v-if="count" #default>
         {{ t('attention.title') }}
         <DouBadge :value="count" tone="warning" />

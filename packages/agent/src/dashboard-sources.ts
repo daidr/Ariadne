@@ -1,5 +1,6 @@
 import { DomainError, type Ariadne, type DashboardContent } from '@ariadne/core'
 import type { DashboardSource } from '@ariadne/plugin-sdk'
+import type { SharedArtifacts } from './shared-artifacts'
 
 /** Live data is fetched by a plugin; past this it is too big to keep as a snapshot. */
 const MAX_FETCHED_JSON = 2 * 1024 * 1024
@@ -106,7 +107,14 @@ export async function refreshDashboard(
   app: Ariadne,
   sources: ReadonlyMap<string, DashboardSource<never>>,
   artifactId: string,
-  input: { author: string; reason: string; signal?: AbortSignal; now?: number },
+  input: {
+    author: string
+    reason: string
+    signal?: AbortSignal
+    now?: number
+    /** Where it is edited together: the new data goes into its room, the layout there kept. */
+    shared?: SharedArtifacts
+  },
 ) {
   const current = app.getArtifact(artifactId)
   if (current.kind !== 'dashboard') {
@@ -129,11 +137,16 @@ export async function refreshDashboard(
   } catch (error) {
     throw new DomainError('error.dashboardFetch', { detail: (error as Error).message })
   }
-  const next: DashboardContent = {
-    ...content,
-    data: { ...content.data, ...fetched },
-    takenAt: input.now ?? Date.now(),
+  const takenAt = input.now ?? Date.now()
+  if (input.shared) {
+    // The layout as it is in the room now, which the user may have changed while it fetched.
+    const now = JSON.parse(input.shared.content(artifactId)) as DashboardContent
+    const next = { ...now, data: { ...now.data, ...fetched }, takenAt }
+    return input.shared.write(artifactId, input.author, JSON.stringify(next), {
+      reason: input.reason,
+    })
   }
+  const next: DashboardContent = { ...content, data: { ...content.data, ...fetched }, takenAt }
   return app.reviseArtifact(artifactId, {
     content: JSON.stringify(next),
     author: input.author,

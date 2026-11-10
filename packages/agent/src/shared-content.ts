@@ -1,6 +1,11 @@
-import { pendingBlock, type WhiteboardContent } from '@ariadne/core'
+import { pendingBlock, type DashboardContent, type WhiteboardContent } from '@ariadne/core'
+import {
+  fillMap as fillDashboard,
+  readMap as readDashboard,
+  updateMap as updateDashboard,
+} from '@dou-ui/dashboard/collaboration'
 import { blockElement, defineEditorExtension, editorKit, textBlock } from '@dou-ui/editor'
-import { fillMap, readMap, updateMap } from '@dou-ui/editor/collaboration'
+import { cursorAt, fillMap, readMap, updateMap } from '@dou-ui/editor/collaboration'
 import { blocksToMarkdown, markdownToBlocks, type DOMParserLike } from '@dou-ui/editor/markdown'
 import { fillMaps, readMaps, updateMaps } from '@dou-ui/flow/collaboration'
 import { Window } from 'happy-dom'
@@ -9,10 +14,11 @@ import * as Y from 'yjs'
 /**
  * How each kind edited together lives in a Yjs document, in the places the dou-ui
  * components' `collaboration` read it from: a document's blocks in the `document` map, a
- * whiteboard's nodes and edges in the `nodes` and `edges` maps. The pages use the same
- * names (see the web's shared editing).
+ * whiteboard's nodes and edges in the `nodes` and `edges` maps, a dashboard's widgets in
+ * the `widgets` map with the rest of its snapshot (data, source, when taken) beside them in
+ * `snapshot`. The pages use the same names (see the web's shared editing).
  */
-export const sharedKinds = ['document', 'whiteboard'] as const
+export const sharedKinds = ['document', 'whiteboard', 'dashboard'] as const
 export type SharedKind = (typeof sharedKinds)[number]
 
 /** A change to one of the shared types, as Yjs reports it. */
@@ -97,8 +103,7 @@ const later = (a: string[], b: string[]) => {
 
 /**
  * The cursor after a change to a document: at the end of what was written last, furthest
- * down. The editor has no way yet for a writer without an editor to show its cursor
- * (daidr/dou-ui#409), so this writes the `cursor` field its editors share among themselves.
+ * down, in the awareness `editor` field the editors show others' cursors from.
  */
 function documentCursor(doc: Y.Doc, events: SharedEvent[]) {
   const map = doc.getMap('document')
@@ -166,11 +171,9 @@ function documentCursor(doc: Y.Doc, events: SharedEvent[]) {
     lastPlace = place
   }
   if (!last) return null
-  const position = Y.relativePositionToJSON(
-    Y.createRelativePositionFromTypeIndex(last.text, Math.min(last.index, last.text.length)),
-  )
-  const place = { block: last.block, ...(last.cell ? { cell: last.cell } : {}), position }
-  return { cursor: { anchor: place, head: place } }
+  const head = { block: last.block, offset: last.index, ...(last.cell ? { cell: last.cell } : {}) }
+  const editor = cursorAt(map, head, { extensions })
+  return editor ? { editor } : null
 }
 
 const documentBridge: SharedBridge = {
@@ -236,7 +239,62 @@ const whiteboardBridge: SharedBridge = {
   },
 }
 
+/** A dashboard's snapshot without its widgets: each field a value of the `snapshot` map. */
+type Snapshot = Omit<DashboardContent, 'dashboard'>
+
+const dashboardMaps = (doc: Y.Doc) => ({
+  widgets: doc.getMap('widgets'),
+  snapshot: doc.getMap('snapshot'),
+})
+
+/** Write the fields of the snapshot that changed; the data is not edited on the page. */
+function writeSnapshot(map: Y.Map<unknown>, next: Snapshot) {
+  for (const key of map.keys()) if (!(key in next)) map.delete(key)
+  for (const [key, value] of Object.entries(next)) {
+    if (JSON.stringify(map.get(key)) !== JSON.stringify(value)) map.set(key, value)
+  }
+}
+
+const dashboardBridge: SharedBridge = {
+  seed(doc, content) {
+    const { dashboard, ...snapshot } = JSON.parse(content) as DashboardContent
+    const maps = dashboardMaps(doc)
+    fillDashboard(maps.widgets, dashboard as never)
+    writeSnapshot(maps.snapshot, snapshot)
+  },
+  read(doc) {
+    const maps = dashboardMaps(doc)
+    const snapshot = maps.snapshot.toJSON() as Snapshot
+    const dashboard = readDashboard(maps.widgets) as DashboardContent['dashboard']
+    return JSON.stringify({ ...snapshot, version: 1, dashboard } satisfies DashboardContent)
+  },
+  update(doc, content, base) {
+    const { dashboard, ...snapshot } = JSON.parse(content) as DashboardContent
+    const maps = dashboardMaps(doc)
+    updateDashboard(
+      maps.widgets,
+      dashboard as never,
+      base === undefined ? {} : { base: (JSON.parse(base) as DashboardContent).dashboard as never },
+    )
+    writeSnapshot(maps.snapshot, snapshot)
+  },
+  parts: (doc) => Object.values(dashboardMaps(doc)),
+  // The widget written last, outlined under the writer's name (`DashboardPresence`).
+  presence(doc, events) {
+    let widget: string | null = null
+    for (const event of events) {
+      const [id] = event.path
+      if (typeof id === 'string') widget = id
+      else if (event.target === doc.getMap('widgets')) {
+        for (const [key, change] of event.changes.keys) if (change.action !== 'delete') widget = key
+      }
+    }
+    return widget ? { dashboard: { widget, action: 'settings' } } : null
+  },
+}
+
 export const bridges: Record<SharedKind, SharedBridge> = {
   document: documentBridge,
   whiteboard: whiteboardBridge,
+  dashboard: dashboardBridge,
 }
