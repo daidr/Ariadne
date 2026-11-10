@@ -800,12 +800,6 @@ export function backMain() {
   state.planWide = view.kind === 'plan'
 }
 
-/**
- * Edits to artifacts not saved yet, by artifact, with the version they were made on: kept
- * while the page is open, so an artifact shown anew elsewhere still has them.
- */
-export const unsavedEdits = new Map<string, { version: number; content: string }>()
-
 /** The tab a view opens in on the right side. */
 export function paneKeyOf(view: OpenedView): PaneKey {
   if (view.kind === 'artifact') return side.artifactKey(view.id)

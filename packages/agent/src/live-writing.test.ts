@@ -1,5 +1,6 @@
 import { Ariadne, DomainError, type DashboardContent, type WhiteboardContent } from '@ariadne/core'
 import type { ModelProvider, ModelStreamPart } from '@ariadne/plugin-sdk'
+import type { EditorPresence } from '@dou-ui/editor/collaboration'
 import * as decoding from 'lib0/decoding'
 import * as encoding from 'lib0/encoding'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -237,22 +238,12 @@ describe('documents written where the user watches', () => {
     expect(reads(artifactId)).toContain('## 减法清单\n\n去掉\n\n<pending>要拍板的问题')
     const [writer] = viewer.writers()
     expect(writer?.user).toMatchObject({ name: '写方案' })
-    // The shape the editor's own cursors have among themselves, which is not public yet:
-    // when a dou-ui upgrade changes it this fails, instead of the cursor quietly going.
-    // Remove with daidr/dou-ui#409.
+    // The cursor the editors show, in the awareness `editor` field (`EditorPresence`).
     const blocks = viewer.doc.getMap('document') as Y.Map<Y.Map<unknown>>
-    const cursor = writer!.cursor as unknown as Record<'anchor' | 'head', Record<string, unknown>>
-    expect(Object.keys(cursor).toSorted()).toEqual(['anchor', 'head'])
-    expect(Object.keys(cursor.anchor).toSorted()).toEqual(['block', 'position'])
+    const cursor = writer!.editor as unknown as EditorPresence
     expect(cursor.head).toEqual(cursor.anchor)
-    const block = blocks.get(cursor.anchor.block as string)!
-    expect(Object.keys(block.toJSON()).toSorted()).toEqual([
-      'order',
-      'parent',
-      'props',
-      'text',
-      'type',
-    ])
+    expect(cursor.anchor.cell).toBeUndefined()
+    const block = blocks.get(cursor.anchor.block)!
     expect(block.get('type')).toBe('paragraph')
     const at = Y.createAbsolutePositionFromRelativePosition(
       Y.createRelativePositionFromJSON(cursor.anchor.position),
@@ -369,19 +360,12 @@ describe('documents written where the user watches', () => {
       reason: '写减法清单',
     }
     await written('update_document', args, '只有一种')
-    const cursor = viewer.writers()[0]!.cursor as unknown as { anchor: Record<string, unknown> }
-    // Remove with daidr/dou-ui#409, like the shape of the cursor above.
-    expect(Object.keys(cursor.anchor).toSorted()).toEqual(['block', 'cell', 'position'])
-    const table = (viewer.doc.getMap('document') as Y.Map<Y.Map<unknown>>).get(
-      cursor.anchor.block as string,
-    )!
+    const cursor = viewer.writers()[0]!.editor as unknown as EditorPresence
+    const table = (viewer.doc.getMap('document') as Y.Map<Y.Map<unknown>>).get(cursor.anchor.block)!
     expect(table.get('type')).toBe('table')
-    expect(Object.keys(table.toJSON())).toEqual(
-      expect.arrayContaining(['cells', 'columns', 'rows', 'text']),
-    )
-    const cell = (table.get('cells') as Y.Map<Y.Text>).get(cursor.anchor.cell as string)!
+    const cell = (table.get('cells') as Y.Map<Y.Text>).get(cursor.anchor.cell!)!
     expect(cell.toString()).toBe('只有一种')
-    const [row, column] = (cursor.anchor.cell as string).split(':')
+    const [row, column] = cursor.anchor.cell!.split(':')
     expect((table.get('rows') as Y.Map<Y.Map<unknown>>).get(row!)!.get('order')).toBeTypeOf(
       'string',
     )
@@ -511,6 +495,110 @@ describe('whiteboards and dashboards', () => {
       title: '趋势',
       place,
     })
+  })
+
+  test("widgets show one by one as written, outlined under the writer's name", async () => {
+    const { artifactId } = await ok('create_dashboard', {
+      title: '周报',
+      widgets: [{ id: 'total', type: 'stat', props: { value: 3 } }],
+    })
+    const viewer = page(artifactId)
+    await settle()
+    const args = {
+      artifactId,
+      baseVersion: 1,
+      reason: '补上合并和说明',
+      data: { days: [{ day: '周一', merged: 2 }] },
+      widgets: [
+        { id: 'merged', type: 'stat', title: '合并', props: { value: 5 } },
+        { id: 'note', type: 'text', props: { text: '本周合并变多' } },
+      ],
+    }
+    await written('update_dashboard', args, '"value":5}},')
+    const half = JSON.parse(shared.content(artifactId)) as DashboardContent
+    expect(half.dashboard.widgets.map((w) => w.id)).toEqual(['total', 'merged'])
+    // The page sees it in its own copy of the room, with the writer on the widget.
+    const widgets = viewer.doc.getMap('widgets')
+    expect([...widgets.keys()].toSorted()).toEqual(['merged', 'total'])
+    expect(viewer.writers()[0]).toMatchObject({
+      user: { name: '写方案' },
+      dashboard: { widget: 'merged', action: 'focus' },
+    })
+    // The data sets written whole come along, so the widgets reading them show.
+    expect(half.data).toEqual(args.data)
+    expect(app.getArtifact(artifactId).version).toBe(1)
+
+    await ok('update_dashboard', args)
+    const after = JSON.parse(app.getArtifact(artifactId).content) as DashboardContent
+    expect(after.dashboard.widgets.map((w) => w.id)).toEqual(['total', 'merged', 'note'])
+    expect(after.data).toEqual(args.data)
+    expect(viewer.doc.getMap('snapshot').get('data')).toEqual(args.data)
+    expect(app.getArtifact(artifactId).version).toBe(2)
+    viewer.leave()
+  })
+
+  test("the user's layout changes in the room stay through the agent's change", async () => {
+    const { artifactId } = await ok('create_dashboard', {
+      title: '周报',
+      widgets: [
+        { id: 'total', type: 'stat', props: { value: 3 } },
+        { id: 'note', type: 'text', props: { text: '说明' } },
+      ],
+    })
+    const viewer = page(artifactId)
+    await settle()
+    // The user gives the first widget a title of their own on the page.
+    const total = viewer.doc.getMap('widgets').get('total') as Y.Map<unknown>
+    total.set('title', '总数')
+    await settle()
+    await ok('update_dashboard', {
+      artifactId,
+      baseVersion: 1,
+      reason: '改说明',
+      widgets: [{ id: 'note', props: { text: '新的说明' } }],
+    })
+    const after = JSON.parse(app.getArtifact(artifactId).content) as DashboardContent
+    expect(after.dashboard.widgets).toMatchObject([
+      { id: 'total', title: '总数' },
+      { id: 'note', props: { text: '新的说明' } },
+    ])
+    expect(versions(artifactId).map((v) => v.author)).toEqual([
+      ctx.conversationId,
+      'user',
+      ctx.conversationId,
+    ])
+    viewer.leave()
+  })
+
+  test('a refresh with the dashboard open brings the data into the room, the layout kept', async () => {
+    let n = 0
+    ctx.dashboardSources = new Map([
+      [
+        'counter',
+        {
+          kind: 'counter',
+          title: { 'zh-CN': '计数' },
+          description: 'Counts calls',
+          settings: { type: 'object', properties: {} },
+          fetch: async () => ({ totals: { n: ++n } }),
+        },
+      ],
+    ]) as ToolContext['dashboardSources']
+    const { artifactId } = await ok('create_dashboard', {
+      title: '计数',
+      widgets: [{ id: 'n', type: 'stat', props: { source: 'totals', field: 'n' } }],
+      source: { kind: 'counter' },
+    })
+    const viewer = page(artifactId)
+    await settle()
+    ;(viewer.doc.getMap('widgets').get('n') as Y.Map<unknown>).set('title', '次数')
+    await settle()
+    await ok('refresh_dashboard', { artifactId })
+    expect(viewer.doc.getMap('snapshot').get('data')).toEqual({ totals: { n: 2 } })
+    const after = JSON.parse(app.getArtifact(artifactId).content) as DashboardContent
+    expect(after.data).toEqual({ totals: { n: 2 } })
+    expect(after.dashboard.widgets[0]).toMatchObject({ id: 'n', title: '次数' })
+    viewer.leave()
   })
 })
 

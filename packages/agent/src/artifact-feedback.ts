@@ -4,11 +4,12 @@ import {
   type ArtifactCommentAnchor,
   type ArtifactFeedbackItem,
   type ArtifactFeedbackView,
+  type ArtifactKind,
   type WhiteboardContent,
   type WhiteboardNode,
 } from '@ariadne/core'
 import * as Y from 'yjs'
-import { SharedArtifacts } from './shared-artifacts'
+import type { SharedArtifacts } from './shared-artifacts'
 import { bridges } from './shared-content'
 
 /**
@@ -34,7 +35,11 @@ export class ArtifactFeedback {
   }
 
   start(): void {
-    this.stops.push(this.shared.onUserChange(({ artifactId }) => this.touched(artifactId)))
+    this.stops.push(
+      this.shared.onUserChange(({ artifactId }) => {
+        if (followed(this.app.getArtifact(artifactId).kind)) this.touched(artifactId)
+      }),
+    )
     this.stops.push(
       this.app.subscribe((events) => {
         for (const event of events) {
@@ -72,7 +77,7 @@ export class ArtifactFeedback {
   private recover() {
     for (const project of this.app.listProjects()) {
       for (const artifact of this.app.listArtifacts(project.id)) {
-        if (!SharedArtifacts.shared(artifact.kind)) continue
+        if (!followed(artifact.kind)) continue
         try {
           const items = this.itemsOf(artifact.id)
           if (items.length) this.app.sendArtifactFeedback(artifact.id, { items })
@@ -90,7 +95,7 @@ export class ArtifactFeedback {
   private settle(projectId: string, conversationId: string, started: number) {
     try {
       for (const artifact of this.app.listArtifacts(projectId)) {
-        if (!SharedArtifacts.shared(artifact.kind)) continue
+        if (!followed(artifact.kind)) continue
         for (const round of this.app.listArtifactFeedback(artifact.id)) {
           if (round.doneAt !== null || round.notify !== conversationId) continue
           if (round.createdAt > started) continue
@@ -189,6 +194,12 @@ export class ArtifactFeedback {
     return { content: this.app.getArtifact(artifactId, version).content, at }
   }
 }
+
+/**
+ * The kinds whose changes go back to the agent. A dashboard's layout is the user's own to
+ * arrange, and its comments are off.
+ */
+const followed = (kind: ArtifactKind) => kind === 'document' || kind === 'whiteboard'
 
 /** A document's Markdown as its room writes it. */
 function normalized(markdown: string): string {

@@ -9,6 +9,7 @@ import {
   type DashboardSources,
 } from '@dou-ui/dashboard'
 import { chartWidget } from '@dou-ui/dashboard/chart'
+import { collaboration } from '@dou-ui/dashboard/collaboration'
 import { pivotWidget } from '@dou-ui/dashboard/pivot'
 import { statWidget, tableWidget, textWidget } from '@dou-ui/dashboard/widgets'
 import '@dou-ui/dashboard/style.css'
@@ -18,76 +19,79 @@ import { DouButton, DouSwitch, DouText } from 'dou-ui'
 import { RotateCwIcon } from '@dou-ui/icons'
 import { api } from '../api'
 import { report } from '../store'
-import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { locale, t } from '../i18n'
+import { commentAuthor } from './comment-threads'
 import { pendingWidget } from './pending-widget'
+import type { SharedArtifact } from './shared'
 
 /**
  * A dashboard snapshot. The data was copied in when it was taken, so each source just
- * hands back its stored value and nothing is fetched.
+ * hands back its stored value and nothing is fetched. The newest version is edited
+ * together through `shared`: its widgets in the `widgets` map, the rest of the snapshot
+ * (data, source, when taken) in `snapshot`; an older one is shown read-only from `content`.
  */
 const props = defineProps<{
   content: string
   readonly: boolean
   label?: string
   artifactId?: string
-}>()
-const emit = defineEmits<{
-  draft: [content: string | null]
-  /** The user finished arranging the layout: what changed can be saved. */
-  settled: []
+  shared?: SharedArtifact
 }>()
 
 const own = [statWidget(), textWidget(), tableWidget(), chartWidget(), pivotWidget()]
 // An agent's placeholders are shown, not offered among the widgets to add.
 const widgets = [...own, pendingWidget()]
 const offered = own.map((widget) => widget.type)
-const snapshot = shallowRef<DashboardContent>({
-  version: 1,
-  dashboard: { version: 1, widgets: [] },
-  data: {},
-})
+const together = props.shared
+  ? collaboration({
+      widgets: props.shared.doc.getMap('widgets'),
+      awareness: props.shared.awareness,
+      user: { name: commentAuthor('user').name },
+    })
+  : undefined
+const snapshot = shallowRef<Omit<DashboardContent, 'dashboard'>>({ version: 1, data: {} })
 const doc = shallowRef<DashboardDocument>({ version: 1, widgets: [] })
 const sources = shallowRef<DashboardSources>({})
 const editing = ref(false)
 const dashboard = ref<DashboardExpose | null>(null)
-const generation = ref(0)
-/** The snapshot as loaded, so undoing back to it clears the draft. */
-let baseline = ''
 
-watch(
-  () => props.content,
-  (content) => {
-    const value = JSON.parse(content) as DashboardContent
-    snapshot.value = value
-    doc.value = migrateDocument(value.dashboard)
-    baseline = JSON.stringify({ ...value, dashboard: doc.value })
-    // Defined once per load: a new function per render would count as a new source.
+/** Take in the snapshot; the sources change only with the data, not with each look at it. */
+function take(next: Omit<DashboardContent, 'dashboard'>) {
+  const data = JSON.stringify(next.data)
+  if (data !== JSON.stringify(snapshot.value.data)) {
     sources.value = Object.fromEntries(
-      Object.entries(value.data).map(([name, data]) => [name, () => data]),
+      Object.entries(next.data).map(([name, value]) => [name, () => value]),
     )
-    generation.value++
-  },
-  { immediate: true },
-)
+  }
+  snapshot.value = next
+}
+
+if (props.shared) {
+  // The room holds it: its data comes in as it is written (a refresh, an agent's change).
+  const map = props.shared.doc.getMap('snapshot')
+  const read = () => take({ version: 1, data: {}, ...map.toJSON() })
+  map.observe(read)
+  watch(props.shared.ready, (ready) => ready && read(), { immediate: true })
+  onScopeDispose(() => map.unobserve(read))
+} else {
+  watch(
+    () => props.content,
+    (content) => {
+      const { dashboard: layout, ...rest } = JSON.parse(content) as DashboardContent
+      take(rest)
+      doc.value = migrateDocument(layout)
+    },
+    { immediate: true },
+  )
+}
 watch(
   () => props.readonly,
   (readonly) => {
     if (readonly) editing.value = false
   },
 )
-
-// Leaving the layout editing is the user's "done": the last change is reported first.
-watch(editing, (on) => {
-  if (!on) void nextTick(() => nextTick(() => emit('settled')))
-})
-
-function changed() {
-  void nextTick(() => {
-    const current = JSON.stringify({ ...snapshot.value, dashboard: doc.value })
-    emit('draft', current === baseline ? null : current)
-  })
-}
+const ready = computed(() => !props.shared || props.shared.ready.value)
 
 // A live dashboard fetches again on request; the new data comes back as a new version.
 const live = computed(() => !!snapshot.value.source)
@@ -148,14 +152,14 @@ const takenAt = computed(() =>
       />
       <div class="dashboard-grid">
         <DouDashboard
+          v-if="ready"
           ref="dashboard"
-          :key="generation"
           v-model="doc"
           :widgets="widgets"
           :sources="sources"
+          :collaboration="together"
           :editable="editing"
           :label="label"
-          @change="changed"
         />
       </div>
     </div>

@@ -19,8 +19,8 @@ import {
   type EffectScope,
 } from 'vue'
 import { api, ApiError } from '../api'
-import { locale, t, tm } from '../i18n'
-import { report, state, unsavedEdits } from '../store'
+import { locale, t } from '../i18n'
+import { report, state } from '../store'
 import ViewActions from '../full/ViewActions.vue'
 import { authorName } from './author'
 import CommentList from './CommentList.vue'
@@ -50,18 +50,13 @@ const body = ref<{
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
-/** Content edited and not saved yet; `null` when nothing changed. */
-const draft = ref<string | null>(null)
 const saving = ref(false)
-const conflict = ref<string | null>(null)
 const renaming = ref(false)
 const title = ref('')
 const titleInput = ref<InstanceType<typeof DouInput> | null>(null)
 
+/** The newest version is edited together: changes go out as they are made. */
 const viewingOld = computed(() => !!artifact.value && artifact.value.version !== latest.value)
-/** Documents and whiteboards are edited together: changes go out as they are made. */
-const together = computed(() => artifact.value?.kind !== 'dashboard')
-const dirty = computed(() => !viewingOld.value && !together.value && draft.value !== null)
 
 const versionOptions = computed(() =>
   versions.value.map((v) => ({
@@ -70,35 +65,13 @@ const versionOptions = computed(() =>
   })),
 )
 
-/** What the editor starts from: the version shown, or edits carried over from elsewhere. */
+/** What the editor starts from: the version shown. */
 const bodyContent = ref('')
-/**
- * The version carried edits were made on, when someone saved a newer one meanwhile: saving
- * them names it, so the server turns them down as a conflict instead of writing over it.
- */
-const draftBase = ref<number | null>(null)
 
 function show(next: ArtifactView) {
   artifact.value = next
   bodyContent.value = next.content
-  draft.value = null
-  draftBase.value = null
 }
-
-/** The body reports no draft once it is back where it started, which may be carried edits. */
-function onDraft(content: string | null) {
-  const carried = bodyContent.value !== artifact.value?.content ? bodyContent.value : null
-  draft.value = content ?? carried
-}
-
-// Unsaved edits outlive this editor: taking the artifact full screen or back to the side
-// shows it anew, with the edits still there.
-watch(draft, (content) => {
-  // Looking at an older version keeps them.
-  if (viewingOld.value) return
-  if (content === null) unsavedEdits.delete(props.id)
-  else unsavedEdits.set(props.id, { version: draftBase.value ?? latest.value, content })
-})
 
 async function load(version?: number) {
   try {
@@ -107,13 +80,6 @@ async function load(version?: number) {
     comments.value = detail.comments
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
-    const carried = unsavedEdits.get(props.id)
-    if (version === undefined && carried) {
-      bodyContent.value = carried.content
-      draft.value = carried.content
-      if (carried.version !== latest.value) draftBase.value = carried.version
-    }
-    conflict.value = null
   } catch (error) {
     report(error)
   }
@@ -127,11 +93,11 @@ watch(
   },
   { immediate: true },
 )
-// Someone else saved (an agent, or this user in another tab): reload unless edits are open.
+// A new version was saved (from the room, or a restore): its number and the list follow.
 watch(
   () => state.artifacts.find((a) => a.id === props.id)?.version,
   (version) => {
-    if (version && version !== latest.value && !dirty.value && !viewingOld.value) void load()
+    if (version && version !== latest.value && !viewingOld.value) void load()
   },
 )
 // Someone commented (an agent answering): take the comments in, leaving edits open.
@@ -153,7 +119,7 @@ watch(
 const shared = shallowRef<SharedArtifact | null>(null)
 let room: { id: string; scope: EffectScope } | null = null
 watch(
-  () => (artifact.value && together.value && !viewingOld.value ? artifact.value.id : null),
+  () => (artifact.value && !viewingOld.value ? artifact.value.id : null),
   (id) => {
     if (room?.id === id) return
     leave()
@@ -235,9 +201,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', closing)
 })
 
-/** Comments go to the newest version of a document or whiteboard. */
+/** Comments go to the newest version of a document or whiteboard; a dashboard has none. */
 const commentProps = computed(() =>
-  artifact.value && together.value && !viewingOld.value
+  artifact.value && artifact.value.kind !== 'dashboard' && !viewingOld.value
     ? {
         comments: comments.value,
         activeComment: activeComment.value,
@@ -315,37 +281,17 @@ async function comment(
   }
 }
 
-/**
- * A dashboard's layout is saved when the user is done arranging it, or leaves with changes;
- * documents and whiteboards are written as they are edited.
- */
-function autosave() {
-  if (dirty.value && !saving.value) void save()
-}
-onBeforeUnmount(() => {
-  if (!dirty.value) return
-  // The editor shown next (full screen, or the tab opened again) starts from what is
-  // saved, not from these edits a second time.
-  unsavedEdits.delete(props.id)
-  if (!saving.value) void save()
-})
-
 async function save(
   input: { content?: string; title?: string; reason?: string } = {},
 ): Promise<boolean> {
   const current = artifact.value
   if (!current) return false
   saving.value = true
-  conflict.value = null
   try {
     const detail = await api.saveArtifact(props.id, {
-      // Edited together, the room holds the content: a rename leaves it as it is there.
-      content:
-        together.value && input.content === undefined
-          ? null
-          : (input.content ?? draft.value ?? current.content),
-      // Content given here is the newest version's own (a rename, a restore), not the edits.
-      baseVersion: input.content === undefined ? (draftBase.value ?? latest.value) : latest.value,
+      // The room holds the content: a rename leaves it as it is there.
+      content: input.content ?? null,
+      baseVersion: latest.value,
       reason: input.reason ?? t('artifact.saveReason'),
       ...(input.title ? { title: input.title } : {}),
       ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
@@ -353,21 +299,11 @@ async function save(
     versions.value = detail.versions
     comments.value = detail.comments
     latest.value = detail.artifact.version
-    // The edits are saved; said here too, as nothing watches the draft once the editor is gone.
-    if (input.content === undefined) unsavedEdits.delete(props.id)
     show(detail.artifact)
     return true
   } catch (error) {
-    if (error instanceof ApiError && error.status === 409) {
-      // Someone saved meanwhile: theirs is shown, and the user is told theirs was not kept.
-      const lost = tm(error.localized)
-      unsavedEdits.delete(props.id)
-      draft.value = null
-      await load()
-      conflict.value = lost
-    }
     // The reason is written for the agent; the user gets a plain line.
-    else if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
+    if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
       state.error = t('artifact.invalidSave')
     } else report(error)
     return false
@@ -397,22 +333,7 @@ async function rename() {
     renaming.value = false
     return
   }
-  // A rename carries no unsaved edits with it: those stay a draft until saved.
-  const kept = draft.value
-  const keptBase = draftBase.value
-  if (
-    await save({
-      ...(together.value ? {} : { content: artifact.value?.content }),
-      title: next,
-      reason: t('artifact.renameReason'),
-    })
-  ) {
-    renaming.value = false
-    // The editor goes on showing the edits, not the version just saved.
-    if (kept !== null) bodyContent.value = kept
-    draft.value = kept
-    draftBase.value = keptBase
-  }
+  if (await save({ title: next, reason: t('artifact.renameReason') })) renaming.value = false
 }
 
 const time = (at: number) =>
@@ -492,13 +413,10 @@ const time = (at: number) =>
     <DouAlert v-if="viewingOld" tone="neutral" class="artifact-alert">
       {{ t('artifact.viewing', { version: artifact?.version ?? 0 }) }}
     </DouAlert>
-    <DouAlert v-else-if="conflict && !together" tone="warning" class="artifact-alert">
-      {{ conflict }}
-    </DouAlert>
     <div class="artifact-body">
       <component
         :is="bodies[artifact.kind]"
-        v-if="artifact && (!together || viewingOld || shared)"
+        v-if="artifact && (viewingOld || shared)"
         :key="`${artifact.id}:${viewingOld ? artifact.version : 'live'}`"
         ref="body"
         v-bind="commentProps"
@@ -508,8 +426,6 @@ const time = (at: number) =>
         :artifact-id="artifact.id"
         :readonly="viewingOld"
         :label="artifact.title"
-        @draft="onDraft"
-        @settled="autosave"
       />
     </div>
   </div>

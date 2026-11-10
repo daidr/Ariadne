@@ -469,6 +469,7 @@ export function createHandler({
     const artifact = await refreshDashboard(app, host?.dashboards ?? new Map(), artifactId, {
       author: 'user',
       signal: request.signal,
+      ...(shared ? { shared } : {}),
       reason: createTranslator(settings?.current.locale ?? 'zh-CN')('artifact.dashboard.refreshed'),
     })
     return json({ artifact })
@@ -994,8 +995,8 @@ export function createHandler({
     return json({ feedback: feedback?.send(artifactId, images as string[]) ?? null })
   })
 
-  // The user saves an edit. `baseVersion` is the version they started from. A document or
-  // whiteboard edited together takes it into its room (a restored version, a new title).
+  // The user saves an edit. `baseVersion` is the version they started from. An artifact
+  // edited together takes it into its room (a restored version, a new title).
   add('PUT', '/api/artifacts/:artifactId', async (request, { artifactId = '' }) => {
     const body = await readJson(request)
     const current = app.getArtifact(artifactId)
