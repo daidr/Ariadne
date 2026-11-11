@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHandler } from './app'
 import { SettingsStore } from './settings'
+import { directoryAssets } from './web-assets'
 
 const token = 'test-token'
 let app: Ariadne
@@ -803,7 +804,7 @@ describe('the built page', () => {
     mkdirSync(join(dist, 'assets'))
     await Bun.write(join(dist, 'index.html'), '<!doctype html>')
     await Bun.write(join(dist, 'assets', 'index-abc123.js'), 'export {}')
-    handle = createHandler({ app, token, webDist: dist })
+    handle = createHandler({ app, token, web: directoryAssets(dist) })
     const asset = await call('/assets/index-abc123.js', {}, false)
     expect(asset.headers.get('cache-control')).toContain('immutable')
     for (const path of ['/', '/index.html', '/some/route']) {

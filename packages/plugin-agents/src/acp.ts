@@ -1,6 +1,8 @@
 import type { ListedModel, ModelRequest } from '@ariadne/plugin-sdk'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { SERVER_NAME } from './bridge'
+import { STDIO_COMMAND } from './mcp-stdio'
 import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
 import { busyText, RpcError, RpcPeer, Unhandled } from './rpc'
 import type { AgentKind, DriverContext } from './sessions'
@@ -15,6 +17,14 @@ export interface AcpSettings {
 const PROTOCOL_VERSION = 1
 /** The small program that hands a tool server over stdio to the bridge's address. */
 const STDIO_SHIM = fileURLToPath(new URL('./mcp-stdio.ts', import.meta.url))
+
+/**
+ * How this program runs that shim: the file beside this one from the repository; the
+ * release program carries no such file and runs itself with an argument instead.
+ */
+function stdioArgs(url: string): string[] {
+  return existsSync(STDIO_SHIM) ? [STDIO_SHIM, url] : [STDIO_COMMAND, url]
+}
 
 interface PermissionOption {
   optionId: string
@@ -231,7 +241,7 @@ export const acp: AgentKind<AcpSettings> = {
                 : {
                     name: SERVER_NAME,
                     command: process.execPath,
-                    args: [STDIO_SHIM, tools.url],
+                    args: stdioArgs(tools.url),
                     env: [],
                   },
             )

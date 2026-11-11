@@ -89,3 +89,10 @@
 - [ ] **自动下载**：在没有 Chrome、Edge、Chromium 的机器（或临时改名浏览器）上用一次，第一次调用会下载 Chrome for Testing 的 headless shell 到 `~/.ariadne/browser`，之后直接用；Windows 上用系统自带的 `tar` 解压，Linux 和 macOS 用 `unzip`。
 - [ ] **SSH 端口**：SSH 项目（远端没装 `ariadne-daemon`）里，让讨论串在远端后台起一个开发服务器，再用 `browser` 打开 `http://localhost:<端口>`，页面能打开，热更新的 WebSocket 能连上。这条路径用的是 `ssh -W localhost:<端口>` 加 `ClearAllForwardings=yes`，要确认它没有被拦下；再试一个只监听 `::1` 的服务器（比如 Vite 在部分系统上的默认值）。远端装的是旧版 `ariadne-daemon` 时也应走这条路径。
 - [ ] **daemon 端口**：daemon 项目里做同样的事，走 relay 的 `tcp` 通道。
+
+## 发版程序
+
+- [ ] **UPX 压缩**：装好 `upx` 后在 Linux、Windows 上各跑一次 `bun run release`，压缩完的 `ariadne self-check` 打印 `ok`，程序体积明显变小。
+- [ ] **压缩后的程序**：直接运行压缩后的程序，页面自动打开，能建项目、跑一个讨论串、打开文档（文档的协同编辑走 WebSocket）。
+- [ ] **ACP 的工具桥**：用发版程序跑一个只支持本地 MCP 程序的 ACP agent，追踪里 Ariadne 的工具调用照常（程序用 `ariadne mcp-stdio <地址>` 启动自己做桥）。
+- [ ] **macOS**：`darwin-arm64` 程序在 Mac 上能启动（没有签名时第一次要在“隐私与安全性”里放行）。

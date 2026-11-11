@@ -1,15 +1,14 @@
 /**
  * For agents that start their tool servers only as local programs: this one passes each
  * line of its stdin to the tool bridge at the address it is given and prints the answers,
- * one per line. Run as `bun mcp-stdio.ts <address>`.
+ * one per line. Run as `bun mcp-stdio.ts <address>`, or `ariadne mcp-stdio <address>` from
+ * the release program.
  */
-const url = process.argv[2]
-if (!url) {
-  console.error('usage: mcp-stdio <address>')
-  process.exit(2)
-}
 
-async function forward(line: string) {
+/** The argument the release program takes to run as this bridge instead of the server. */
+export const STDIO_COMMAND = 'mcp-stdio'
+
+async function forward(url: string, line: string) {
   let parsed: { id?: unknown } | null = null
   try {
     parsed = JSON.parse(line)
@@ -60,7 +59,12 @@ async function forward(line: string) {
   }
 }
 
-async function main() {
+/** Pass stdin to the tool bridge at `url` until stdin ends. */
+export async function stdioBridge(url: string | undefined) {
+  if (!url) {
+    console.error(`usage: ${STDIO_COMMAND} <address>`)
+    process.exit(2)
+  }
   const decoder = new TextDecoder()
   let pending = ''
   for await (const chunk of Bun.stdin.stream()) {
@@ -70,10 +74,10 @@ async function main() {
       const line = pending.slice(0, newline).trim()
       pending = pending.slice(newline + 1)
       // Calls run side by side: one held open does not hold up a ping.
-      if (line) void forward(line)
+      if (line) void forward(url, line)
       newline = pending.indexOf('\n')
     }
   }
 }
 
-void main()
+if (import.meta.main) void stdioBridge(process.argv[2])
