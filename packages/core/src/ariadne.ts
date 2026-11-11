@@ -2969,7 +2969,12 @@ export class Ariadne {
    * reads it the next time it works; it is not woken for it.
    */
   reactAsUser(messageId: string, emoji: string, remove = false): MessageView {
-    return this.putReaction(this.getMessage(messageId), 'user', emoji, remove)
+    const message = this.getMessage(messageId)
+    // Not on their own words, nor on a relay, which a thread shows as those words.
+    if (message.author === 'user' || message.kind === 'relay') {
+      throw new DomainError('error.invalidBody', { reason: 'messageId' })
+    }
+    return this.putReaction(message, 'user', emoji, remove)
   }
 
   private putReaction(

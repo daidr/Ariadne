@@ -166,22 +166,30 @@ describe('the user reacts', () => {
     expect(describeNote(notes[1]!, () => '')).toContain('<user_reaction_removed message=')
   })
 
-  test('alongside the agent, one emoji each; no text, at most three of their own', () => {
+  test('not on their own words; no text, at most three of their own', () => {
     const { project, thread } = setup()
-    const asked = app.postMessage(project.id, {
+    const own = app.postMessage(project.id, {
       conversationId: thread.id,
       author: 'user',
       content: '开始吧',
     })
-    app.react(asked.id, { author: 'thread', conversationId: thread.id }, '👀')
-    app.reactAsUser(asked.id, '👀')
-    expect(app.getMessage(asked.id).reactions).toEqual([
-      { emoji: '👀', by: 'thread' },
-      { emoji: '👀', by: 'user' },
-    ])
+    app.react(own.id, { author: 'thread', conversationId: thread.id }, '👀')
+    expect(() => app.reactAsUser(own.id, '👀')).toThrow()
+    expect(app.getMessage(own.id).reactions).toEqual([{ emoji: '👀', by: 'thread' }])
+    const relay = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'coordinator',
+      kind: 'relay',
+      content: '用户想先跑测试',
+    })
+    expect(() => app.reactAsUser(relay.id, '👍')).toThrow()
+    const asked = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'thread',
+      content: '要先跑测试吗？',
+    })
     expect(() => app.reactAsUser(asked.id, 'ok')).toThrow()
-    app.reactAsUser(asked.id, '👍')
-    app.reactAsUser(asked.id, '🎉')
+    for (const emoji of ['👀', '👍', '🎉']) app.reactAsUser(asked.id, emoji)
     expect(() => app.reactAsUser(asked.id, '🚀')).toThrow()
     expect(() => app.reactAsUser('msg_nope', '👍')).toThrow()
   })
