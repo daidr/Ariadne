@@ -14,6 +14,7 @@ export {
   type ServerSentEvent,
 } from './sse'
 export { defaultShell, shellArgv } from './shell'
+export { globToRegExp } from './glob'
 export {
   execArgv,
   listFiles,
@@ -22,6 +23,7 @@ export {
   singleFileView,
   searchByReading,
   searchLines,
+  searchFilter,
   viewPath,
   walk,
   type ViewChecks,

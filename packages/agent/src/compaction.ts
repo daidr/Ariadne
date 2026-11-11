@@ -13,12 +13,19 @@ import {
 export const DEFAULT_CONTEXT_TOKENS = 128_000
 
 /**
+ * The most of a model's context a conversation works in. A larger context (1M) is room to
+ * spare, not a size to fill: every step reads the whole input again, so it is summarised
+ * at the same size as on a 400k model, some 240k tokens by default.
+ */
+export const WORKING_CONTEXT_TOKENS = 400_000
+
+/**
  * Older history is summarised when the input reaches `share` of the model's context (the
  * user's limit, 0.6 unless set), so the summary request (the folded part plus the ask)
- * still fits in it.
+ * still fits in it; of at most `WORKING_CONTEXT_TOKENS`.
  */
 export const compactAt = (contextTokens = DEFAULT_CONTEXT_TOKENS, share = 0.6) =>
-  Math.floor(contextTokens * share)
+  Math.floor(Math.min(contextTokens, WORKING_CONTEXT_TOKENS) * share)
 
 /** What an image costs the model, about: a large screenshot reads as some 1600 tokens. */
 export const IMAGE_TOKENS = 1600

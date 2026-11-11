@@ -37,6 +37,7 @@ import {
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import { repoTools } from './repo-tools'
 import { runCommandSpec, workspaceTools } from './workspace-tools'
+import { forgetReads } from './file-state'
 import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
@@ -366,6 +367,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? turnChanges(workspaces, conversation.projectId, conversationId)
       : null
   const finish = async (...args: TurnEnd) => {
+    // A stopped turn may not have kept every result it got.
+    if (signal.aborted) forgetReads(conversationId)
     // However the turn ended, nothing it was writing stays shown.
     app.drafts.drop(conversationId)
     // A stopped turn waits for its changes only briefly, so it does not stay working.
@@ -389,6 +392,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     locale: options.locale,
     signal,
     turnId,
+    keepsResults: () => !model.provider.program,
     workspace: async () => {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
@@ -607,6 +611,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             (size * after) / estimate < threshold * CLEARED_ENOUGH
           if (enough) {
             app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
+            forgetReads(conversationId)
             changed = true
           }
         }
@@ -626,6 +631,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             const summary = await summarise(model, withImageData(request, loadImage), signal)
             if (signal.aborted) break
             if (summary.ok) {
+              forgetReads(conversationId)
               app.compactConversation(conversationId, turnId, {
                 summary: summary.text,
                 upTo: cut,

@@ -116,8 +116,17 @@ export interface SourceView {
   search?(
     pattern: string,
     path: string,
-    options?: { signal?: AbortSignal },
+    options?: SearchOptions,
   ): Promise<{ lines: string[]; error: string | null }>
+}
+
+/** How a search narrows what it looks at. */
+export interface SearchOptions {
+  signal?: AbortSignal
+  /** Only files whose path matches this glob (see `globToRegExp`). */
+  glob?: string
+  /** Letters match in either case. */
+  ignoreCase?: boolean
 }
 
 /**

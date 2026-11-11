@@ -34,6 +34,12 @@ export interface ToolContext {
    * what the conversation saw.
    */
   sub?: boolean
+  /**
+   * The model reads its history as Ariadne keeps it, so a result it got before is still in
+   * front of it until Ariadne clears it. Not so for an agent program, which keeps (and cuts)
+   * its own.
+   */
+  keepsResults?: () => boolean
   /** The thread's workspace, opened on first use. */
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */

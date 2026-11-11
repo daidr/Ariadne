@@ -1,7 +1,9 @@
 import {
   FileTooLargeError,
   MAX_MATCH_LINES,
+  searchFilter,
   WorkspacePathError,
+  type SearchOptions,
   type SourceView,
 } from '@ariadne/plugin-sdk'
 import type { GitRun } from './branches'
@@ -77,15 +79,17 @@ export class GitTreeView implements SourceView {
   async search(
     pattern: string,
     path: string,
-    options?: { signal?: AbortSignal },
+    options?: SearchOptions,
   ): Promise<{ lines: string[]; error: string | null }> {
     const under = treePath(path)
+    const keep = searchFilter(options?.glob)
     const result = await this.git(
       [
         'grep',
         '-n',
         '-I',
         '-E',
+        ...(options?.ignoreCase ? ['-i'] : []),
         '--no-color',
         // As the workspace's search: no more per file than is kept, and not for ever.
         '--max-count',
@@ -108,6 +112,7 @@ export class GitTreeView implements SourceView {
     for (const raw of result.stdout.split('\n')) {
       if (!raw) continue
       const line = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
+      if (!keep(line)) continue
       const file = line.slice(0, line.indexOf(':'))
       const seen = perFile.get(file) ?? 0
       if (seen >= MAX_FILE_MATCHES) continue

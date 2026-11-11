@@ -296,7 +296,7 @@ describe('reading a reference source', () => {
     expect(results[2]).toEqual([
       'search',
       false,
-      'src/button.ts:1:export const Button = 1\nsrc/input.ts:1:export const Input = 2',
+      'src/button.ts\n  1: export const Button = 1\nsrc/input.ts\n  1: export const Input = 2',
     ])
     expect(results[3]).toEqual(['find_files', false, 'src/button.ts\nsrc/input.ts'])
     expect(results[4]?.slice(0, 2)).toEqual(['read_file', true])

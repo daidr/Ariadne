@@ -15,7 +15,8 @@ import { buildTrace, traceRequest } from './trace'
 import { call, fakeModel, reminded, say, plain } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
 import { TOOL_SWITCH_NAMES } from './tools'
-import { workspaceTools } from './workspace-tools'
+import { forgetReads } from './file-state'
+import { plainOutput, workspaceTools } from './workspace-tools'
 import { WorkspaceManager } from './workspaces'
 
 describe('edit matching', () => {
@@ -376,6 +377,109 @@ describe('file tools', () => {
     expect(failed.content).toContain('no ok in a.txt')
   })
 
+  test('a check that fails as it did after the previous edit says so in a line', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\n')
+    await writeFile(join(dir, 'errors.log'), 'old error elsewhere\n')
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws, {
+      commands: {
+        rules: [],
+        shell: ['bash', '-c'],
+        shellName: 'bash',
+        env: {},
+        check: 'cat errors.log; exit 1',
+      },
+      keepsResults: () => true,
+    })
+    const edit = tool('edit_file')
+    const first = await edit.run({ path: 'a.txt', old: 'one', new: 'two' }, ctx)
+    expect(first.content).toContain('old error elsewhere')
+    const second = await edit.run({ path: 'a.txt', old: 'two', new: 'three' }, ctx)
+    expect(second.content).toContain('with the same output as after your previous edit')
+    expect(second.content).not.toContain('old error elsewhere')
+    // Once its results are cleared, the model is shown the output again.
+    forgetReads(ctx.conversationId)
+    const third = await edit.run({ path: 'a.txt', old: 'three', new: 'four' }, ctx)
+    expect(third.content).toContain('old error elsewhere')
+    // An agent program cuts its own history: it always gets the output.
+    const program = { ...ctx, conversationId: `${ctx.conversationId}-p`, keepsResults: () => false }
+    await edit.run({ path: 'a.txt', old: 'four', new: 'five' }, program)
+    const again = await edit.run({ path: 'a.txt', old: 'five', new: 'six' }, program)
+    expect(again.content).toContain('old error elsewhere')
+  })
+
+  test('a loose match shows the lines it wrote', async () => {
+    await writeFile(join(dir, 'a.ts'), 'function f() {\n\tif (x) {\n\t\treturn 1\n\t}\n}\n')
+    const ws = new LocalWorkspace('w', dir, null)
+    const done = await tool('edit_file').run(
+      { path: 'a.ts', old: '  if (x) {\n    return 1', new: '\tif (y) {\n\t\treturn 2' },
+      context(ws),
+    )
+    expect(done.content).toBe(
+      'Replaced one occurrence. (matched with other whitespace; the lines now read:)\n    2\t\tif (y) {\n    3\t\t\treturn 2',
+    )
+  })
+
+  test('read_file hands back a line for lines the model still has, unchanged', async () => {
+    await writeFile(join(dir, 'a.ts'), 'const a = 1\n')
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws, { keepsResults: () => true })
+    const read = tool('read_file')
+    expect((await read.run({ path: 'a.ts' }, ctx)).content).toBe('    1\tconst a = 1\n    2\t')
+    expect((await read.run({ path: 'a.ts' }, ctx)).content).toContain(
+      'is unchanged since you read it',
+    )
+    // Another range is read as asked.
+    expect((await read.run({ path: 'a.ts', limit: 1 }, ctx)).content).toBe(
+      '    1\tconst a = 1\n[lines 1-1 of 2; read on with offset 2]',
+    )
+    await writeFile(join(dir, 'a.ts'), 'const a = 2\n')
+    expect((await read.run({ path: 'a.ts' }, ctx)).content).toBe('    1\tconst a = 2\n    2\t')
+    // After a clearing the model no longer has it.
+    forgetReads(ctx.conversationId)
+    expect((await read.run({ path: 'a.ts' }, ctx)).content).toBe('    1\tconst a = 2\n    2\t')
+    // An agent program keeps its own history: always the text.
+    const program = context(ws, { keepsResults: () => false })
+    await read.run({ path: 'a.ts' }, program)
+    expect((await read.run({ path: 'a.ts' }, program)).content).toBe('    1\tconst a = 2\n    2\t')
+  })
+
+  test('command output loses colour codes and redrawn progress', async () => {
+    expect(
+      plainOutput(
+        '\x1b[32m✓\x1b[0m ok\r\nload 10%\rload 100%\n\x1b]8;;https://x\x07link\x1b]8;;\x07\n',
+      ),
+    ).toBe('✓ ok\nload 100%\nlink\n')
+    const ws = new LocalWorkspace('w', dir, null)
+    const ran = await tool('run_command').run(
+      { command: "printf '\\033[31mred\\033[0m\\n50%%\\r100%%\\n'" },
+      context(ws),
+    )
+    expect(ran.content).toBe('exit code 0\n--- stdout ---\nred\n100%\n')
+  })
+
+  test('search finds hidden files, narrows by glob and case, and cuts long lines', async () => {
+    const git = (...args: string[]) => run(['git', ...args], { cwd: dir })
+    await git('init', '-q')
+    await mkdir(join(dir, '.github'))
+    await mkdir(join(dir, 'src'))
+    await writeFile(join(dir, '.github', 'ci.yml'), 'run: bun test\n')
+    await writeFile(join(dir, 'src', 'a.vue'), '    <Test />\n')
+    await writeFile(join(dir, 'src', 'a.ts'), `const t = '${'x'.repeat(400)} test'\n`)
+    const ctx = context(new LocalWorkspace('w', dir, null))
+    const search = tool('search')
+    const all = (await search.run({ pattern: 'test' }, ctx)).content
+    expect(all).toContain('.github/ci.yml\n  1: run: bun test')
+    expect(all).toContain('[… 117 characters cut]')
+    expect(all).not.toContain('a.vue')
+    expect(
+      (await search.run({ pattern: 'test', glob: '*.vue', ignoreCase: true }, ctx)).content,
+    ).toBe('src/a.vue\n  1: <Test />')
+    expect((await search.run({ pattern: 'test', glob: 'src/**/*.ts' }, ctx)).content).toMatch(
+      /^src\/a\.ts\n {2}1: /,
+    )
+  })
+
   test('find_files and search leave out what git ignores', async () => {
     const git = (...args: string[]) => run(['git', ...args], { cwd: dir })
     await git('init', '-q')
@@ -392,10 +496,7 @@ describe('file tools', () => {
     expect(found.content).toBe('src/a.ts\nsrc/deep/b.ts')
     expect((await tool('find_files').run({ pattern: '*.rs' }, ctx)).content).toBe('No files found.')
     const hits = await tool('search').run({ pattern: 'need+le' }, ctx)
-    expect(hits.content.split('\n').toSorted()).toEqual([
-      'src/a.ts:1:export const needle = 1',
-      'src/deep/b.ts:1:needle',
-    ])
+    expect(hits.content).toBe('src/a.ts\n  1: export const needle = 1\nsrc/deep/b.ts\n  1: needle')
     expect((await tool('search').run({ pattern: 'nothing-here' }, ctx)).content).toBe('No matches.')
   })
 

@@ -1,6 +1,5 @@
-import type { SourceView, Workspace } from '@ariadne/plugin-sdk'
-import { listFiles, searchByReading, walk } from '@ariadne/plugin-sdk'
-import { globToRegExp } from './glob'
+import type { SearchOptions, SourceView, Workspace } from '@ariadne/plugin-sdk'
+import { globToRegExp, listFiles, searchByReading, walk } from '@ariadne/plugin-sdk'
 
 export { execArgv, MAX_MATCH_LINES, searchLines } from '@ariadne/plugin-sdk'
 
@@ -48,9 +47,9 @@ export function searchView(
   view: SourceView,
   pattern: string,
   path: string,
-  signal?: AbortSignal,
+  options: SearchOptions = {},
 ): Promise<{ lines: string[]; error: string | null }> {
   return view.search
-    ? view.search(pattern, path, signal ? { signal } : {})
-    : searchByReading(view, pattern, path, signal)
+    ? view.search(pattern, path, options)
+    : searchByReading(view, pattern, path, options)
 }

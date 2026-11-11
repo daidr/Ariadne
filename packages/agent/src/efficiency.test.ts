@@ -1,6 +1,7 @@
 import { Ariadne } from '@ariadne/core'
 import type { ChatMessage, ModelRequest } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { compactAt } from './compaction'
 import { callGroups, runTurn, type ResolvedModel } from './runner'
 import { call, fakeModel, say } from './test-model'
 import type { Tool } from './tools'
@@ -137,6 +138,15 @@ describe('command output', () => {
     )
     expect(text.split('\n')[0]).toBe('x'.repeat(50))
     expect(text.endsWith('\n' + 'z'.repeat(50))).toBe(true)
+  })
+})
+
+describe('when to summarise', () => {
+  test('a large context is summarised at the size of a 400k one', () => {
+    expect(compactAt(128_000)).toBe(76_800)
+    expect(compactAt(200_000)).toBe(120_000)
+    expect(compactAt(1_000_000)).toBe(240_000)
+    expect(compactAt(1_000_000, 0.9)).toBe(360_000)
   })
 })
 
