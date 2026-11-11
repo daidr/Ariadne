@@ -54,7 +54,6 @@ import { api } from '../api'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
 import MessageQuote from './MessageQuote.vue'
-import MessageReactions from './MessageReactions.vue'
 import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
@@ -486,7 +485,6 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
     ...(message.ask ? [{ type: 'ask' }] : []),
     ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
     ...(message.relayedTo.length ? [{ type: 'relayed' }] : []),
-    ...(!reactable(message) && message.reactions.length ? [{ type: 'reactions' }] : []),
   ]
 }
 
@@ -968,7 +966,8 @@ watch(
             :data-message-id="message.id"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
-            :reactions="reactable(message) ? shownReactions(message.reactions) : undefined"
+            :reactions="shownReactions(message.reactions)"
+            :reactable="reactable(message)"
             actions-visible="hover"
             @react="(emoji, item) => react(message.id, emoji, !!item?.reacted)"
           >
@@ -1008,10 +1007,6 @@ watch(
                 v-if="part.type === 'quote' && message.replyTo"
                 :quote="message.replyTo"
                 :conversation-id="message.conversationId"
-              />
-              <MessageReactions
-                v-else-if="part.type === 'reactions'"
-                :reactions="message.reactions"
               />
               <DouChatAttachments
                 v-else-if="part.type === 'attachments'"
