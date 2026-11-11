@@ -25,7 +25,7 @@ bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
 bun run release --no-upx                       # 不压缩
 ```
 
-先构建页面，再把服务端和全部页面文件编译成一个程序，最后用 [UPX](https://upx.github.io) 压缩，产物在 `dist/release/ariadne-<平台>`。可选平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64`。`PATH` 里没有 `upx` 时直接报错，不想压缩就加 `--no-upx`；macOS 的程序不压缩（UPX 打包后在新版 macOS 上起不来）。当前平台的程序压缩后会运行一次 `ariadne self-check`，确认还能读到页面。
+先构建页面，再把服务端和全部页面文件编译成一个程序，最后用 [UPX](https://upx.github.io) 压缩，产物在 `dist/release/ariadne-<平台>`。可选平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64`。`PATH` 里没有 `upx` 时直接报错，不想压缩就加 `--no-upx`；macOS 的程序不压缩（UPX 打包后在新版 macOS 上起不来）。当前平台的程序压缩后会运行一次 `ariadne self-check`，确认还能读到页面；为其他平台交叉构建的程序跑不了这一步，要拿到对应的机器上自己运行一次。
 
 这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
 

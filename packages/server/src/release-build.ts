@@ -107,9 +107,13 @@ function size(path: string): string {
   return `${(statSync(path).size / 1024 / 1024).toFixed(1)} MB`
 }
 
+/** Whether UPX packs this platform's program: never macOS, which would no longer start it. */
+const packs = (target: Target) => !target.startsWith('darwin')
+
 export async function release({ targets, upx }: ReleaseOptions) {
-  const upxPath = upx ? Bun.which('upx') : null
-  if (upx && !upxPath) {
+  const needsUpx = upx && targets.some(packs)
+  const upxPath = needsUpx ? Bun.which('upx') : null
+  if (needsUpx && !upxPath) {
     throw new Error('upx is not on PATH: install it (https://upx.github.io), or pass --no-upx')
   }
 
@@ -139,8 +143,7 @@ export async function release({ targets, upx }: ReleaseOptions) {
       '--outfile',
       outfile,
     ])
-    if (upxPath && target.startsWith('darwin')) {
-      // UPX cannot pack programs for current macOS: they would no longer start.
+    if (upx && !packs(target)) {
       console.info(`${target}: not compressed, UPX does not support macOS`)
     } else if (upxPath) {
       console.info(`compressing ${target}`)
@@ -148,6 +151,7 @@ export async function release({ targets, upx }: ReleaseOptions) {
     }
     // Only this machine's program can be run here: it must still find its pages.
     if (target === host) await run([outfile, 'self-check'])
+    else console.info(`${target}: built for another platform, self-check not run`)
     console.info(`${relative(root, outfile)}  ${size(outfile)}`)
   }
   rmSync(entry)
