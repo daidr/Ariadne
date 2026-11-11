@@ -1,4 +1,10 @@
-import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import {
+  PENDING,
+  type ArtifactKind,
+  type ArtifactView,
+  type DashboardContent,
+  type WhiteboardContent,
+} from '@ariadne/core'
 import { SharedArtifacts, type LiveWrite, type Writer } from './shared-artifacts'
 import { applyDocumentEdits, editsSoFar, rewriteSoFar } from './document-writing'
 import { isOpen } from './partial-json'
@@ -200,6 +206,18 @@ const NODE_ID = {
   description: 'The plan node the artifact belongs to, if any.',
 } as const
 
+/**
+ * What a new artifact that still has placeholders asks of the model first: the user sees the
+ * parts being written only while they have it open, so they need its link before, not after.
+ */
+function toFill(artifact: { id: string; title: string }, pending: boolean) {
+  if (!pending) return {}
+  const title = artifact.title.replace(/[[\]]/g, '')
+  return {
+    next: `Unless the user already knows about it, send them its link now, [${title}](artifact:${artifact.id}), in a line, before you fill in the placeholders: they watch your writing land only while they have it open.`,
+  }
+}
+
 // ---- documents ----
 
 const PENDING_HINT =
@@ -208,7 +226,7 @@ const PENDING_HINT =
 const createDocument: Tool = {
   spec: {
     name: 'create_document',
-    description: `Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; say in one line that it exists. For a long document, create it as its outline first (the title, the headings you are sure of, and a placeholder for each part), then write the parts one at a time with update_document edits: the user watches it fill in instead of waiting for all of it. ${PENDING_HINT}`,
+    description: `Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; send the user its link once it is created. For a long document, create it as its outline first (the title, the headings you are sure of, and a placeholder for each part), then write the parts one at a time with update_document edits: the user watches it fill in instead of waiting for all of it. ${PENDING_HINT}`,
     parameters: {
       type: 'object',
       properties: {
@@ -227,7 +245,11 @@ const createDocument: Tool = {
       nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
-    return json({ artifactId: artifact.id, version: artifact.version })
+    return json({
+      artifactId: artifact.id,
+      version: artifact.version,
+      ...toFill(artifact, /^[ \t]*<pending>/m.test(str(args, 'content'))),
+    })
   },
 }
 
@@ -408,7 +430,15 @@ const createWhiteboard: Tool = {
       nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
-    return json({ artifactId: artifact.id, version: artifact.version, ...problemsOf(board) })
+    return json({
+      artifactId: artifact.id,
+      version: artifact.version,
+      ...problemsOf(board),
+      ...toFill(
+        artifact,
+        items.some((item) => item.kind === PENDING),
+      ),
+    })
   },
 }
 
@@ -639,6 +669,10 @@ const createDashboard: Tool = {
       artifactId: artifact.id,
       version: artifact.version,
       ...dashboardProblemsOf(content),
+      ...toFill(
+        artifact,
+        arrayOf(args, 'widgets').some((widget) => widget.type === PENDING),
+      ),
     })
   },
 }
