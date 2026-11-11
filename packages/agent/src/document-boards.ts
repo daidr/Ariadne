@@ -11,8 +11,11 @@ import { boardFromItems, boardProblems, boardSummary, mergeBoard, userDrawn } fr
  *
  * A fence the model gives back as it read it keeps the board it stood for untouched,
  * with whatever the user drew and moved. A changed fence is taken as the whole board:
- * matched to the one it stood for by its place among the boards, its items and
- * connectors are merged by id, and what it leaves out goes. A new fence is a new board.
+ * matched to the board it shares the most item and connector ids with (or, sharing none,
+ * to one left over at its place among the boards), its items and connectors are merged
+ * by id, and what it leaves out goes. A new fence is a new board. A `whiteboard` code
+ * block that was in the document as it is (an example, not a board) stays a code block;
+ * a `dou-whiteboard` fence is taken only as it was, never as the model wrote it.
  */
 
 const STORED = 'dou-whiteboard'
@@ -264,6 +267,22 @@ export interface Written {
   problems: string[]
 }
 
+/** The item and connector ids a fence names; none when it does not hold together. */
+function idsIn(body: string): Set<string> {
+  try {
+    const value = parseLoose(body)
+    const list = (key: string) =>
+      Array.isArray(value[key]) ? (value[key] as { id?: unknown }[]) : []
+    return new Set(
+      [...list('items'), ...list('connectors')].flatMap((e) =>
+        typeof e?.id === 'string' ? [e.id] : [],
+      ),
+    )
+  } catch {
+    return new Set<string>()
+  }
+}
+
 /**
  * The document to store from what the model wrote, `base` being the stored document it
  * read. `live`: the model is still writing, so a board not finished yet shows as a
@@ -272,17 +291,35 @@ export interface Written {
 export function documentFromView(view: string, base: string, live = false): Written {
   if (!view.includes(WRITTEN)) return { content: view, problems: [] }
   const before: { raw: string; seen: string; stored: Stored }[] = []
+  // Code blocks marked `whiteboard` that are not boards (an example the user wrote).
+  const plain = new Set<string>()
+  // dou-ui's own fences as they were, boards or not.
+  const raw = new Set<string>()
   for (const part of partsOf(base)) {
-    if (part.type !== 'fence' || part.lang !== STORED || !part.closed) continue
+    if (part.type !== 'fence' || !part.closed) continue
+    if (part.lang === WRITTEN) plain.add(part.body)
+    if (part.lang !== STORED) continue
+    raw.add(part.raw)
     const stored = readStored(part.body)
     if (stored) before.push({ raw: part.raw, seen: written(stored.board), stored })
   }
   const parts = partsOf(view)
+  const out = parts.map((part) => (part.type === 'text' ? part.text : part.raw))
+  // Boards are written as items and connectors; dou-ui's own form only as it was read.
+  for (const [at, part] of parts.entries()) {
+    if (part.type !== 'fence' || part.lang !== STORED) continue
+    if (part.closed && raw.has(part.raw)) continue
+    if (!live) {
+      throw new ToolInputError(
+        'Write a whiteboard as a ```whiteboard fence of items and connectors, not ```dou-whiteboard.',
+      )
+    }
+    out[at] = WRITING
+  }
   const fences = parts.flatMap((part, at) =>
     part.type === 'fence' && part.lang === WRITTEN ? [{ part, at }] : [],
   )
-  // Fences as read keep their boards; between two of those, the changed ones stand for
-  // the boards there, in order.
+  // Fences as read keep their boards, in order.
   const match = new Map<number, number>()
   const exact = new Set<number>()
   let from = 0
@@ -293,26 +330,58 @@ export function documentFromView(view: string, base: string, live = false): Writ
     exact.add(i)
     from = found + 1
   }
-  let lastBoard = -1
+  // A code block that was there as it is stays a code block.
+  const kept = new Set<number>()
+  for (const [i, { part }] of fences.entries()) {
+    if (!exact.has(i) && part.closed && plain.has(part.body)) kept.add(i)
+  }
+  // A changed fence stands for the board it shares the most ids with; one that shares
+  // none, for a board left over between its neighbours, in order.
+  const taken = new Set(match.values())
+  const shared = fences.flatMap(({ part }, i) => {
+    if (match.has(i) || kept.has(i) || !part.closed) return []
+    const mine = idsIn(part.body)
+    return before.flatMap((b, k) => {
+      const theirs = [...b.stored.board.nodes, ...b.stored.board.edges]
+      const common = theirs.filter((e) => mine.has(e.id)).length
+      return common ? [{ i, k, common }] : []
+    })
+  })
+  for (const { i, k } of shared.toSorted((a, b) => b.common - a.common)) {
+    if (match.has(i) || taken.has(k)) continue
+    match.set(i, k)
+    taken.add(k)
+  }
   for (let i = 0; i < fences.length; i++) {
-    if (exact.has(i)) {
-      lastBoard = match.get(i)!
-      continue
-    }
-    let next = before.length
-    for (let j = i + 1; j < fences.length; j++) {
-      if (exact.has(j)) {
-        next = match.get(j)!
+    if (match.has(i) || kept.has(i)) continue
+    let low = -1
+    for (let j = i - 1; j >= 0; j--) {
+      if (match.has(j)) {
+        low = match.get(j)!
         break
       }
     }
-    if (lastBoard + 1 < next) match.set(i, ++lastBoard)
+    let high = before.length
+    for (let j = i + 1; j < fences.length; j++) {
+      if (match.has(j)) {
+        high = match.get(j)!
+        break
+      }
+    }
+    for (let k = low + 1; k < high; k++) {
+      if (taken.has(k)) continue
+      match.set(i, k)
+      taken.add(k)
+      break
+    }
   }
 
   const problems: string[] = []
-  const out = parts.map((part) => (part.type === 'text' ? part.text : part.raw))
+  // Numbered as read_artifact numbers them: the boards, not the code blocks.
+  let n = 0
   for (const [i, { part, at }] of fences.entries()) {
-    const n = i + 1
+    if (kept.has(i)) continue
+    n++
     const old = match.has(i) ? before[match.get(i)!]! : undefined
     if (exact.has(i)) {
       out[at] = old!.raw

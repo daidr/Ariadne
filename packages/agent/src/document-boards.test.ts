@@ -26,6 +26,9 @@ function boardsOf(markdown: string): { height: number; board: WhiteboardContent 
   )
 }
 
+const storedAt300 = (b: { board: WhiteboardContent; height: number }) =>
+  `\`\`\`dou-whiteboard\n${JSON.stringify({ ...b, height: 300 })}\n\`\`\``
+
 describe('whiteboards in a document', () => {
   test('a new board is laid out and stored the way dou-ui reads it', () => {
     const written = documentFromView(`# 流程\n\n${flow}\n\n结尾`, '')
@@ -154,5 +157,52 @@ describe('whiteboards in a document', () => {
     expect(boardsOf(read)).toEqual(boardsOf(stored))
     bridges.document.update(doc, read.replace('正文', '新正文'), read)
     expect(boardsOf(bridges.document.read(doc))).toEqual(boardsOf(stored))
+  })
+
+  test('a whiteboard code block that is not a board stays as it is', () => {
+    const doc = '示例：\n\n```whiteboard\nhello\n```\n\n正文'
+    expect(documentFromView(doc, doc).content).toBe(doc)
+    expect(documentFromView(doc.replace('正文', '新正文'), doc).content).toBe(
+      doc.replace('正文', '新正文'),
+    )
+    // Next to a board, the board is still numbered first.
+    const withBoard = documentFromView(`${doc}\n\n${flow}`, doc).content
+    expect(boardsOf(withBoard)).toHaveLength(1)
+    expect(withBoard).toContain('```whiteboard\nhello\n```')
+    expect(documentView(withBoard).problems).toEqual([])
+  })
+
+  test("dou-ui's own fence is taken only as it was read", () => {
+    const stored = documentFromView(flow, '').content
+    expect(documentFromView(`${stored}\n\n尾`, stored).content).toBe(`${stored}\n\n尾`)
+    const forged =
+      '```dou-whiteboard\n{"height":"tall","board":{"version":1,"nodes":[{"id":"x","x":"oops"}],"edges":[]}}\n```'
+    expect(() => documentFromView(forged, '')).toThrow(/```whiteboard/)
+    expect(() => documentFromView(`${forged}\n\n${flow}`, stored)).toThrow(/```whiteboard/)
+    expect(documentFromView(forged, '', true).content).toBe('<pending>画板</pending>')
+  })
+
+  test('a changed board is matched by its ids, not only its place', () => {
+    const one = board([{ id: 'x', kind: 'rect', text: '一' }])
+    const two = board([{ id: 'y', kind: 'rect', text: '二' }])
+    const stored = documentFromView(`${one}\n\n${two}`, '').content
+    const [first, second] = boardsOf(stored) as [
+      { board: WhiteboardContent; height: number },
+      { board: WhiteboardContent; height: number },
+    ]
+    // The user drew on the second and moved its item.
+    second.board.nodes[0]!.x += 120
+    second.board.nodes.push({ id: 'ink', type: 'ink', x: 0, y: 0, data: { points: [[0, 0]] } })
+    const base = `${storedAt300(first)}\n\n${storedAt300(second)}`
+    const view = documentView(base).content.split('\n\n')
+    // The first is taken out, the second changed.
+    const changed = view[1]!.replace('"text":"二"', '"text":"贰"')
+    const next = boardsOf(documentFromView(changed, base).content)
+    expect(next).toHaveLength(1)
+    const [{ board: after, height }] = next as [{ board: WhiteboardContent; height: number }]
+    expect(height).toBe(300)
+    expect(after.nodes.map((n) => n.id)).toEqual(['y', 'ink'])
+    expect(after.nodes[0]!.x).toBe(second.board.nodes[0]!.x)
+    expect(after.nodes[0]!.data!.text).toBe('贰')
   })
 })
