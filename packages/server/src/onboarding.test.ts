@@ -449,6 +449,42 @@ describe('the first screen', () => {
     expect(app.listProjects()).toHaveLength(before)
   })
 
+  test('a project is made with the sources it only reads, all connected first', async () => {
+    const { default: local } = await import('@ariadne/plugin-local')
+    await host.load(local)
+    const repo = join(dir, 'shop')
+    const docs = join(dir, 'shop-docs')
+    mkdirSync(repo)
+    mkdirSync(docs)
+    const created = await call('/api/projects', {
+      method: 'POST',
+      body: {
+        name: 'shop',
+        source: { kind: 'local-directory', settings: { path: repo } },
+        references: [{ kind: 'local-directory', settings: { path: docs } }],
+      },
+    })
+    expect(created.status).toBe(201)
+    const { project } = (await created.json()) as {
+      project: { id: string; coordinatorId: string; references: { name: string }[] }
+    }
+    expect(project.references).toMatchObject([{ name: 'shop-docs' }])
+    expect(app.pageMessages(project.coordinatorId).messages).toEqual([])
+
+    // One reference that cannot be read leaves no project behind.
+    const before = app.listProjects().length
+    const refused = await call('/api/projects', {
+      method: 'POST',
+      body: {
+        name: 'shop-2',
+        source: { kind: 'local-directory', settings: { path: repo } },
+        references: [{ kind: 'local-directory', settings: { path: join(dir, 'nope') } }],
+      },
+    })
+    expect(refused.status).toBeGreaterThanOrEqual(400)
+    expect(app.listProjects()).toHaveLength(before)
+  })
+
   test('without a directory the first words name it until it is renamed', async () => {
     const created = await call('/api/projects', {
       method: 'POST',

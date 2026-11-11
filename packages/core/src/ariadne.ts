@@ -1558,13 +1558,17 @@ export class Ariadne {
   // ---- commands ----
 
   /**
-   * Create a project. With `start`, the user began by saying what they want: the project
-   * gets its source and their first message with it, all or nothing. Without a `name` it
-   * is called after the start of those words until someone names it.
+   * Create a project, with its source, the sources it only reads (each named by `where`,
+   * as `addProjectReference` takes it) and a first message, all or nothing. Without a
+   * `name` it is called after the start of that message until someone names it.
    */
   createProject(
     name: string | null,
-    start: { source?: ProjectSource | null; message?: string } = {},
+    start: {
+      source?: ProjectSource | null
+      message?: string
+      references?: { source: { kind: string; settings: Record<string, unknown> }; where: string }[]
+    } = {},
   ): ProjectView {
     const message = start.message?.trim() ?? ''
     const trimmed = name?.trim() || firstWords(message)
@@ -1580,6 +1584,9 @@ export class Ariadne {
         },
       ])
       if (start.source) this.setProjectSource(projectId, start.source)
+      for (const reference of start.references ?? []) {
+        this.addProjectReference(projectId, reference.source, reference.where)
+      }
       if (message) {
         this.postMessage(projectId, {
           conversationId: coordinatorId,

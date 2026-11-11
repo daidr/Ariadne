@@ -286,19 +286,33 @@ export function createHandler({
 
   add('GET', '/api/projects', () => json({ projects: app.listProjects(), lastSeq: app.lastSeq() }))
 
-  // A new project. From the first screen it comes with where its files are and what the
-  // user said first, and takes its name from one of them.
+  // A new project, with where its files are and the sources it only reads. Each of them is
+  // connected before anything is created, so a mistyped path leaves no project behind.
   add('POST', '/api/projects', async (request) => {
     const body = await readJson(request)
     const name = typeof body.name === 'string' ? body.name : null
     const message = typeof body.message === 'string' ? body.message : ''
-    if (body.source === undefined || body.source === null) {
-      return json({ project: app.createProject(name, { message }) }, 201)
+    const rawReferences = body.references ?? []
+    if (!Array.isArray(rawReferences)) throw new BadRequest('references')
+    const read =
+      body.source === undefined || body.source === null ? null : await readSource(body.source, null)
+    const references = []
+    for (const [index, raw] of rawReferences.entries()) {
+      const part = readSourcePart((raw ?? {}) as Record<string, unknown>, `references[${index}]`)
+      references.push(await checkReference('', read?.source ?? null, read?.secrets ?? {}, part))
     }
-    // Connected before anything is created, so a mistyped path leaves no project behind.
-    const { source, secrets } = await readSource(body.source, null)
-    const project = app.createProject(name, { source, message })
-    settings?.saveSourceSecrets(project.id, secrets)
+    const project = app.createProject(name, {
+      source: read?.source ?? null,
+      message,
+      references: references.map(({ reference, where }) => ({ source: reference, where })),
+    })
+    if (read) settings?.saveSourceSecrets(project.id, read.secrets)
+    for (const [index, { secrets }] of references.entries()) {
+      const added = project.references[index]
+      if (added && Object.keys(secrets).length) {
+        settings?.saveReferenceSecrets(project.id, added.id, secrets)
+      }
+    }
     return json({ project }, 201)
   })
 
@@ -637,10 +651,16 @@ export function createHandler({
 
   // A source the project only reads. Connected and listed before it is saved, like the
   // project's own; its secrets go to the user's config under the reference's id.
-  add('POST', '/api/projects/:projectId/references', async (request, { projectId = '' }) => {
-    const body = await readJson(request)
-    const part = readSourcePart((body.reference ?? {}) as Record<string, unknown>, 'source')
-    const project = app.getProject(projectId)
+  /**
+   * A source a project would only read, connected and listed to know it can be: its
+   * settings without secrets, those secrets, and the line that names where it is.
+   */
+  async function checkReference(
+    projectId: string,
+    source: ProjectSource | null,
+    sourceSecrets: Record<string, string>,
+    part: { kind: string; settings: Record<string, unknown> },
+  ) {
     const split = settings
       ? settings.splitSourceSettings(projectId, part.kind, part.settings, null)
       : { settings: part.settings, secrets: {} }
@@ -648,12 +668,7 @@ export function createHandler({
     let where = part.kind
     if (host) {
       const connected = await connectReference(host.contexts, reference, {
-        ...referenceSecrets(
-          host.contexts,
-          project.source,
-          reference,
-          settings?.sourceSecrets(projectId) ?? {},
-        ),
+        ...referenceSecrets(host.contexts, source, reference, sourceSecrets),
         ...split.secrets,
       })
       try {
@@ -666,9 +681,24 @@ export function createHandler({
       }
       where = sourceSummary(host.contexts.get(part.kind)?.summary, reference.settings) ?? where
     }
+    return { reference, secrets: split.secrets, where }
+  }
+
+  // A source the project only reads. Connected and listed before it is saved, like the
+  // project's own; its secrets go to the user's config under the reference's id.
+  add('POST', '/api/projects/:projectId/references', async (request, { projectId = '' }) => {
+    const body = await readJson(request)
+    const part = readSourcePart((body.reference ?? {}) as Record<string, unknown>, 'source')
+    const project = app.getProject(projectId)
+    const { reference, secrets, where } = await checkReference(
+      projectId,
+      project.source,
+      settings?.sourceSecrets(projectId) ?? {},
+      part,
+    )
     const added = app.addProjectReference(projectId, reference, where)
-    if (Object.keys(split.secrets).length) {
-      settings?.saveReferenceSecrets(projectId, added.id, split.secrets)
+    if (Object.keys(secrets).length) {
+      settings?.saveReferenceSecrets(projectId, added.id, secrets)
     }
     return json({ project: app.getProject(projectId) })
   })
@@ -721,7 +751,7 @@ export function createHandler({
   /** A source's kind and its settings as typed, with the required ones there. */
   function readSourcePart(
     input: Record<string, unknown>,
-    what: 'source' | 'hosting',
+    what: string,
   ): { kind: string; settings: Record<string, unknown> } {
     const kind = requireString(input, 'kind')
     const provider = host?.contexts.get(kind)
