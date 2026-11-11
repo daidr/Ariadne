@@ -29,6 +29,17 @@ bun run release --no-upx                       # 不压缩
 
 这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
 
+`ariadne --version` 打印版本号，版本号来自根目录 `package.json`。
+
+### 发布 alpha 版本
+
+由 `.github/workflows/release.yml` 自动完成：
+
+1. master 每有新提交，就把上次发版之后的提交整理进 release PR（分支 `release/alpha`）。PR 里把 `package.json` 的版本号改成下一个 alpha，并在 `CHANGELOG.md` 顶部加上这一版的提交列表。这个分支每次都从 master 重新生成，不要在上面手动提交。
+2. 合入 release PR 后，构建全部平台的程序，在 Linux、Windows、macOS 上各运行一次 `--version` 和 `self-check`，都通过后发布 `v<版本号>` 预发布版本，附上程序和这一版的更新日志。
+
+需要在仓库的 Settings → Actions → General 里勾选 “Allow GitHub Actions to create and approve pull requests”，否则开不了 release PR。正式版本另走流程，还没有做。
+
 测试换掉了外部服务和操作系统的部分，发布前在真实环境里按 [真实环境检查清单](./docs/real-env-checklist.md) 过一遍。模型接口的回放样本用 `bun run record:provider` 录制，见清单里的 DeepSeek 一节。
 
 `bun run start` 之后会自动在浏览器里打开页面（已经有页面开着时不再开新的；没有图形界面的机器上不开，终端里照常打印带令牌的链接）。本地服务第一次启动时在 `~/.ariadne/token` 生成访问令牌。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。

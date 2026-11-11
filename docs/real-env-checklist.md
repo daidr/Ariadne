@@ -92,7 +92,8 @@
 
 ## 发版程序
 
-- [ ] **UPX 压缩**：装好 `upx` 后在 Linux、Windows 上各跑一次 `bun run release`，压缩完的 `ariadne self-check` 打印 `ok`，程序体积明显变小。
+- [ ] **UPX 压缩**：Windows 上压缩后的程序能启动（发版流程的 Windows 自检会先跑一次 `self-check`）。
 - [ ] **压缩后的程序**：直接运行压缩后的程序，页面自动打开，能建项目、跑一个讨论串、打开文档（文档的协同编辑走 WebSocket）。
 - [ ] **ACP 的工具桥**：用发版程序跑一个只支持本地 MCP 程序的 ACP agent，追踪里 Ariadne 的工具调用照常（程序用 `ariadne mcp-stdio <地址>` 启动自己做桥）。
 - [ ] **macOS**：`darwin-arm64` 程序在 Mac 上能启动（没有签名时第一次要在“隐私与安全性”里放行）。
+- [ ] **发版流程**：master 合入一个 PR 后出现 release PR，版本号和更新日志正确；再合入一个 PR，release PR 被重写，更新日志里有两条提交。合入 release PR 后 Actions 里三个系统的自检都通过，Releases 里出现 alpha 预发布版本，附带五个程序。
