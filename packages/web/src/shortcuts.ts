@@ -58,6 +58,24 @@ export async function writeToThread(threadId: string) {
 }
 
 /**
+ * The caret in the coordinator's input, once its panel is on screen; the input itself may
+ * come a little after the panel, while the project loads.
+ */
+export async function focusCoordinator() {
+  for (let frame = 0; frame < 60; frame++) {
+    await new Promise(requestAnimationFrame)
+    const panel = panels.get('coordinator')
+    if (!panel) continue
+    const before = document.activeElement
+    panel.focus()
+    if (document.activeElement !== before && document.activeElement !== document.body) {
+      lastPanel.value = 'coordinator'
+      return
+    }
+  }
+}
+
+/**
  * The conversation focus is in, else the one last used, else the thread in front on the
  * right, else the coordinator's.
  */

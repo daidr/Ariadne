@@ -149,7 +149,7 @@ watchEffect(() => {
           <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
             <PlanMain />
           </div>
-          <!-- Before there is a project, and while a new one is begun: say what you want. -->
+          <!-- Before there is a project, and while a new one is made. -->
           <div v-else-if="!state.currentId || state.starting" class="pane">
             <StartScreen />
           </div>

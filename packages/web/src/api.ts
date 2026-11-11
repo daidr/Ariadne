@@ -475,11 +475,14 @@ export const api = {
     ),
   listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
   /**
-   * A new project, begun by saying what is wanted: with where its files are and the first
-   * message. Without a name it is called after the message until someone names it.
+   * A new project, with where its files are and the sources it only reads; each is
+   * connected first, and the project is made only when all of them can be.
    */
-  createProject: (input: { name?: string; source?: SourceInput; message?: string }) =>
-    request<{ project: ProjectView }>('POST', '/api/projects', input),
+  createProject: (input: {
+    name: string
+    source?: SourceInput
+    references?: { kind: string; settings: Record<string, unknown> }[]
+  }) => request<{ project: ProjectView }>('POST', '/api/projects', input),
   renameProject: (id: string, name: string) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${id}`, { name }),
   deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),

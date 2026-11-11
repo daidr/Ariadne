@@ -165,7 +165,7 @@ interface State {
   threadDefault: string | null
   /** Usage shows the estimated cost too. */
   showCost: boolean
-  /** The user is starting a new project: the first screen shows in place of the open one. */
+  /** The user is making a new project: its form shows in place of the open one. */
   starting: boolean
   /** The message to scroll to; the conversation showing it clears it once there. */
   focus: MessageFocus | null
@@ -694,22 +694,21 @@ export function splitPane(key: PaneKey, direction: SplitDirection) {
 }
 
 /**
- * Start a project from the first screen: what the user said, and where its files are when
- * they chose. Whether it was created; a failure is reported and what was typed stays.
+ * Create a project and open it. The refusal's reason when it was refused (a source that
+ * cannot be reached), to show beside what was typed; `null` once it is open.
  */
-export async function startProject(input: {
-  message: string
-  name?: string
-  source?: SourceInput
-}): Promise<boolean> {
+export async function startProject(
+  input: Parameters<typeof api.createProject>[0],
+): Promise<string | null> {
   try {
     const { project } = await api.createProject(input)
     await refreshProjects()
     await openProject(project.id)
-    return true
+    return null
   } catch (error) {
+    if (error instanceof ApiError) return tm(error.localized)
     report(error)
-    return false
+    return String(error)
   }
 }
 

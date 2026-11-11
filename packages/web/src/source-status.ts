@@ -39,7 +39,7 @@ const remote = computed(() => !!storedKind.value?.remote)
  * One line for a source: the provider's summary filled in (e.g. `host:path`), or else its
  * first plain setting, e.g. the path or the repository.
  */
-function summaryOf(of: SourceKind | null, settings: Record<string, unknown>): string | null {
+export function summaryOf(of: SourceKind | null, settings: Record<string, unknown>): string | null {
   const template = of?.summary
   if (template) {
     return template.replace(/\{(\w+)\}/g, (_, key: string) => String(settings[key] ?? ''))
@@ -47,6 +47,30 @@ function summaryOf(of: SourceKind | null, settings: Record<string, unknown>): st
   const value = Object.values(settings).find((v) => typeof v === 'string' && v)
   return typeof value === 'string' ? value : null
 }
+/**
+ * What a project on this source is called unless named otherwise: the last part of its
+ * directory, or of its first required plain setting (a repository's own name).
+ */
+export function nameFrom(of: SourceKind | null, settings: Record<string, unknown>): string {
+  const fields = Object.entries(of?.settings.properties ?? {})
+  const key =
+    fields.find(([, field]) => field.type === 'string' && field.directory)?.[0] ??
+    fields.find(
+      ([name, field]) =>
+        field.type === 'string' && !field.secret && of?.settings.required?.includes(name),
+    )?.[0]
+  const value = key ? settings[key] : undefined
+  if (typeof value !== 'string') return ''
+  return (
+    value
+      .trim()
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/:]/)
+      .pop()
+      ?.replace(/\.git$/, '') ?? ''
+  )
+}
+
 const summary = computed(() => {
   const own = summaryOf(storedKind.value, source.value?.settings ?? {})
   const hosting = source.value?.hosting
