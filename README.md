@@ -17,6 +17,18 @@ bun run dev      # 开发用：同时启动本地服务和前端开发服务器�
 bun run check    # 格式、lint、类型检查和测试
 ```
 
+### 发版构建
+
+```sh
+bun run release                                # 当前平台
+bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
+bun run release --no-upx                       # 不压缩
+```
+
+先构建页面，再把服务端和全部页面文件编译成一个程序，最后用 [UPX](https://upx.github.io) 压缩，产物在 `dist/release/ariadne-<平台>`。可选平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64`。`PATH` 里没有 `upx` 时直接报错，不想压缩就加 `--no-upx`；macOS 的程序不压缩（UPX 打包后在新版 macOS 上起不来）。当前平台的程序压缩后会运行一次 `ariadne self-check`，确认还能读到页面；为其他平台交叉构建的程序跑不了这一步，要拿到对应的机器上自己运行一次。
+
+这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
+
 测试换掉了外部服务和操作系统的部分，发布前在真实环境里按 [真实环境检查清单](./docs/real-env-checklist.md) 过一遍。模型接口的回放样本用 `bun run record:provider` 录制，见清单里的 DeepSeek 一节。
 
 `bun run start` 之后会自动在浏览器里打开页面（已经有页面开着时不再开新的；没有图形界面的机器上不开，终端里照常打印带令牌的链接）。本地服务第一次启动时在 `~/.ariadne/token` 生成访问令牌。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。

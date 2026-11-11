@@ -178,7 +178,7 @@ const server = Bun.serve<SharedSocketData>({
 const handle = createHandler({
   app,
   token: config.token,
-  webDist: config.webDist,
+  web: config.web,
   scheduler,
   settings,
   host,
@@ -192,7 +192,7 @@ const handle = createHandler({
 
 const pageUrl = `http://${server.hostname}:${server.port}/#token=${config.token}`
 console.info(t('cli.server.started', { url: pageUrl }))
-if (config.open && config.webDist) {
+if (config.open && config.web) {
   // A page left open from before comes back within moments; only without one is a new
   // one opened. On the first run there is none to wait for.
   const open = () => {

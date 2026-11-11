@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { directoryAssets, embeddedWeb, type WebAssets } from './web-assets'
 
 export interface ServerConfig {
   home: string
@@ -9,7 +10,7 @@ export interface ServerConfig {
   port: number
   token: string
   /** Built web assets to serve, when present. */
-  webDist: string | null
+  web: WebAssets | null
   /** Open the page in the user's browser once the server runs. */
   open: boolean
   /** Nothing was here before: no page can be open on it yet. */
@@ -37,6 +38,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   mkdirSync(home, { recursive: true, mode: 0o700 })
   // A path, not a URL pathname: those are percent-encoded and break on non-ASCII directories.
   const webDist = join(import.meta.dir, '../../web/dist')
+  // The release program carries its pages; otherwise they are the ones built in the repository.
+  const web = embeddedWeb() ?? (existsSync(webDist) ? directoryAssets(webDist) : null)
   return {
     home,
     databasePath: join(home, 'ariadne.sqlite'),
@@ -44,7 +47,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     hostname: '127.0.0.1',
     port: Number(env.ARIADNE_PORT ?? 7428),
     token: env.ARIADNE_TOKEN ?? loadToken(home),
-    webDist: existsSync(webDist) ? webDist : null,
+    web,
     // `bun run start` asks for it; the server on its own (development, tests) does not.
     open: env.ARIADNE_OPEN === '1',
     firstRun,

@@ -56,6 +56,7 @@ import {
 import { checkModel, suggestModel, type ModelCheck } from './model-check'
 import { ModelCatalog, type ModelInfo } from './prices'
 import { ThreadSync } from './thread-sync'
+import type { WebAssets } from './web-assets'
 
 /** A directory listing gives up after this long. */
 const BROWSE_TIMEOUT_MS = 15_000
@@ -84,8 +85,8 @@ async function browsing<T>(list: () => Promise<T>): Promise<T | null> {
 export interface HandlerOptions {
   app: Ariadne
   token: string
-  /** Serve the built web app from here for non-API paths. */
-  webDist?: string | null
+  /** The built web app, served for non-API paths. */
+  web?: WebAssets | null
   /** Agents and settings; left out in tests that only exercise the domain API. */
   scheduler?: Scheduler
   settings?: SettingsStore
@@ -266,7 +267,7 @@ function inOrder(listed: string[], info: ReadonlyMap<string, ModelInfo>): string
 export function createHandler({
   app,
   token,
-  webDist,
+  web,
   scheduler,
   settings,
   host,
@@ -1496,12 +1497,11 @@ export function createHandler({
   })
 
   async function serveStatic(url: URL): Promise<Response> {
-    if (!webDist)
-      return errorResponse({ key: 'error.notFound', params: { what: url.pathname } }, 404)
+    if (!web) return errorResponse({ key: 'error.notFound', params: { what: url.pathname } }, 404)
     const path = url.pathname === '/' ? '/index.html' : url.pathname
-    const file = Bun.file(`${webDist}${path}`)
+    const file = await web.get(path)
     // Unknown paths fall back to the app shell, so client-side routes work on reload.
-    if (!path.includes('..') && (await file.exists())) {
+    if (file) {
       // Built assets carry a hash of their content in the name: the browser keeps them.
       const headers: Record<string, string> = path.startsWith('/assets/')
         ? { 'cache-control': 'public, max-age=31536000, immutable' }
@@ -1509,7 +1509,7 @@ export function createHandler({
       return new Response(file, { headers })
     }
     // The shell names the assets of this build, so it is asked for again every time.
-    return new Response(Bun.file(`${webDist}/index.html`), {
+    return new Response(await web.get('/index.html'), {
       headers: { 'cache-control': 'no-cache' },
     })
   }
