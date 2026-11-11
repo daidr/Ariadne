@@ -181,7 +181,7 @@ export async function searchLines(
   searchOptions: SearchOptions = {},
 ): Promise<{ lines: string[]; error: string | null; more?: boolean }> {
   const { signal, ignoreCase } = searchOptions
-  const glob = searchOptions.glob?.trim() || undefined
+  const glob = searchOptions.glob?.trim().replace(/^\.\//, '') || undefined
   const options = { timeoutMs: 30_000, ...(signal ? { signal } : {}) }
   const caseless = ignoreCase ? ['-i'] : []
   const atRoot = path === '.' || path === '' || path === './'
@@ -230,7 +230,7 @@ export async function searchLines(
         '--',
         // From the root, git narrows by the glob itself, unless it has braces git lacks.
         glob && atRoot && !glob.includes('{')
-          ? `:(glob)${glob.includes('/') ? glob.replace(/^\.\//, '') : `**/${glob}`}`
+          ? `:(glob)${glob.includes('/') ? glob : `**/${glob}`}`
           : path,
       ],
       options,
