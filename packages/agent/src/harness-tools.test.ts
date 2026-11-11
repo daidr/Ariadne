@@ -16,7 +16,7 @@ import { call, fakeModel, reminded, say, plain } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
 import { TOOL_SWITCH_NAMES } from './tools'
 import { forgetReads } from './file-state'
-import { plainOutput, workspaceTools } from './workspace-tools'
+import { applyPatch, plainOutput, workspaceTools } from './workspace-tools'
 import { WorkspaceManager } from './workspaces'
 
 describe('edit matching', () => {
@@ -303,6 +303,63 @@ function context(workspace: Workspace, extra: Partial<ToolContext> = {}): ToolCo
 }
 
 describe('file tools', () => {
+  test('apply_patch changes several files at once, or none', async () => {
+    await writeFile(join(dir, 'a.ts'), 'const a = 1\nconst b = 2\n')
+    await writeFile(join(dir, 'gone.ts'), 'x\n')
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws)
+    const failed = await applyPatch.run(
+      {
+        input:
+          '*** Begin Patch\n*** Add File: b.ts\n+new\n*** Update File: a.ts\n-const c = 3\n+const c = 4\n*** End Patch',
+      },
+      ctx,
+    )
+    expect(failed.isError).toBe(true)
+    expect(failed.content).toContain('Nothing was changed.')
+    await expect(readFile(join(dir, 'b.ts'), 'utf8')).rejects.toThrow()
+    const done = await applyPatch.run(
+      {
+        input:
+          '*** Begin Patch\n*** Add File: sub/b.ts\n+new\n*** Update File: a.ts\n*** Move to: c.ts\n const a = 1\n-const b = 2\n+const b = 3\n*** Delete File: gone.ts\n*** End Patch',
+      },
+      ctx,
+    )
+    expect(done.isError).toBeFalsy()
+    expect(done.content).toBe('Done:\nA sub/b.ts\nR a.ts -> c.ts\nD gone.ts')
+    expect(await readFile(join(dir, 'sub/b.ts'), 'utf8')).toBe('new\n')
+    expect(await readFile(join(dir, 'c.ts'), 'utf8')).toBe('const a = 1\nconst b = 3\n')
+    await expect(readFile(join(dir, 'a.ts'), 'utf8')).rejects.toThrow()
+    await expect(readFile(join(dir, 'gone.ts'), 'utf8')).rejects.toThrow()
+    const outside = await applyPatch.run(
+      { input: '*** Begin Patch\n*** Delete File: ../x\n*** End Patch' },
+      ctx,
+    )
+    expect(outside.isError).toBe(true)
+    // A move out of the workspace is refused before anything is written.
+    await writeFile(join(dir, 'd.ts'), 'one\n')
+    const moved = await applyPatch.run(
+      {
+        input:
+          '*** Begin Patch\n*** Add File: e.ts\n+e\n*** Update File: d.ts\n*** Move to: ../d.ts\n-one\n+two\n*** End Patch',
+      },
+      ctx,
+    )
+    expect(moved.content).toContain('Nothing was changed.')
+    await expect(readFile(join(dir, 'e.ts'), 'utf8')).rejects.toThrow()
+    // A delete that fails part way says what was already done, as a result of the call.
+    const busy = Object.assign(Object.create(ws) as Workspace, {
+      exec: async () => ({ exitCode: 1, stdout: '', stderr: 'busy' }),
+    })
+    const stuck = await applyPatch.run(
+      { input: '*** Begin Patch\n*** Add File: f.ts\n+f\n*** Delete File: d.ts\n*** End Patch' },
+      { ...ctx, workspace: async () => busy },
+    )
+    expect(stuck.isError).toBe(true)
+    expect(stuck.content).toContain('d.ts could not be deleted: busy')
+    expect(stuck.content).toContain('Already done: wrote f.ts')
+  })
+
   test('edit_file makes several edits at once, or none', async () => {
     await writeFile(join(dir, 'a.ts'), 'const a = 1\nconst b = 2\n')
     const ws = new LocalWorkspace('w', dir, null)
@@ -442,6 +499,28 @@ describe('file tools', () => {
     const program = context(ws, { keepsResults: () => false })
     await read.run({ path: 'a.ts' }, program)
     expect((await read.run({ path: 'a.ts' }, program)).content).toBe('    1\tconst a = 2\n    2\t')
+  })
+
+  test('a command still running after its wait goes on in the background', async () => {
+    const ws = new LocalWorkspace('w', dir, null)
+    const ctx = context(ws)
+    const ran = await tool('run_command').run(
+      { command: 'echo started; sleep 2; echo finished', timeoutSeconds: 1 },
+      ctx,
+    )
+    expect(ran.isError).toBeFalsy()
+    expect(ran.content).toContain('It still ran after 1 seconds, so it goes on in the background')
+    expect(ran.content).toContain('cmd-')
+    expect(ran.content).toContain('started')
+    const id = /cmd-\d+/.exec(ran.content)![0]
+    const read = workspaceTools.find((t) => t.spec.name === 'read_command_output')!
+    let seen = ''
+    for (let i = 0; i < 4 && !seen.includes('ended'); i++) {
+      seen += (await read.run({ handle: id, waitSeconds: 5 }, ctx)).content
+    }
+    expect(seen).toContain('ended with exit code 0')
+    expect(seen).toContain('finished')
+    expect(seen).not.toContain('started')
   })
 
   test('command output loses colour codes and redrawn progress', async () => {
@@ -683,6 +762,64 @@ describe('setup script', () => {
     await workspaces.forThread(project.id, thread.id)
     expect(calls.setup).toBe(1)
     expect(await workspaces.setupDone(thread.id, new AbortController().signal)).toBeNull()
+  })
+})
+
+describe('editing tools by model', () => {
+  test('GPT-family models edit with apply_patch, the others with edit_file and write_file', async () => {
+    const provider: ContextProvider<never> = {
+      kind: 'dir',
+      title: { 'zh-CN': '目录' },
+      settings: { type: 'object', properties: {} },
+      provides: ['workspace'],
+      connect: async () => ({
+        workspace: { isolated: false, open: async () => new LocalWorkspace('w', dir, null) },
+      }),
+    }
+    const host = new PluginHost('/tmp/ariadne-test-plugins')
+    await host.load({
+      id: 'dir',
+      name: { 'zh-CN': '目录' },
+      setup: (ctx) => ctx.registerContextProvider(provider),
+    })
+    const workspaces = new WorkspaceManager(app, host)
+    const toolsOf = async (name: string) => {
+      const project = app.createProject(name)
+      app.setProjectSource(project.id, { kind: 'dir', settings: {} })
+      const thread = app.createThread(project.id, { title: '改文件' })
+      const model = {
+        ...fakeModel((_request, role) => (role === 'coordinator' ? say('') : say('好'))),
+        model: name,
+      }
+      app.postMessage(project.id, {
+        conversationId: thread.id,
+        kind: 'relay',
+        author: 'coordinator',
+        content: '改一下',
+      })
+      const scheduler = new Scheduler({
+        app,
+        workspaces,
+        resolveModel: () => model,
+        locale: () => 'zh-CN',
+        retryBaseMs: 1,
+      })
+      scheduler.start()
+      await scheduler.idle()
+      await scheduler.stop()
+      const request = model.sent.find(
+        (r) => !r.messages[0]?.content.includes('You are the coordinator'),
+      )!
+      return request.tools.map((t) => t.name)
+    }
+    const gpt = await toolsOf('gpt-5.5')
+    expect(gpt).toContain('apply_patch')
+    expect(gpt).not.toContain('edit_file')
+    expect(gpt).not.toContain('write_file')
+    const other = await toolsOf('claude-sonnet-5-5')
+    expect(other).toContain('edit_file')
+    expect(other).toContain('write_file')
+    expect(other).not.toContain('apply_patch')
   })
 })
 

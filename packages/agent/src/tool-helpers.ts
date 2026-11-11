@@ -40,6 +40,8 @@ export interface ToolContext {
    * its own.
    */
   keepsResults?: () => boolean
+  /** Whether the thread's workspace is open now, so `workspace` would not create one. */
+  workspaceOpen?: () => boolean
   /** The thread's workspace, opened on first use. */
   workspace(): Promise<Workspace>
   /** The project's hosted repository, when its source is one. */

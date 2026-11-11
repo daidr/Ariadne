@@ -145,7 +145,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 64
+export const PROJECTION_VERSION = 65
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -1378,6 +1378,8 @@ export class Ariadne {
       reasoning: ReasoningRecord[]
       /** The todo list and open questions now, kept beside the notes. */
       state: string
+      /** How much of the user's words is kept beside the notes, in tokens. */
+      userTokens?: number
     },
   ): void {
     const projectId = this.runningTurn(conversationId, turnId)
@@ -1397,6 +1399,7 @@ export class Ariadne {
         .filter((block) => !block.redacted && block.text)
         .map((block) => ({ text: block.text })),
       state: compaction.state,
+      ...(compaction.userTokens ? { userTokens: compaction.userTokens } : {}),
     }
     this.store.append([...pieces, { type: 'conversation.compacted', projectId, data }])
   }

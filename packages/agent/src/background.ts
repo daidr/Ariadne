@@ -112,13 +112,57 @@ export class BackgroundCommands {
      */
     options: { local?: boolean; keep?: boolean; cwd?: string } = {},
   ): BackgroundCommand {
-    if (this.running(threadId) >= MAX_RUNNING) {
+    this.room(threadId)
+    const controller = new AbortController()
+    const { job, append } = this.track(threadId, command, controller, options)
+    job.ended = this.settle(
+      job,
+      exec({ signal: controller.signal, onOutput: append, timeoutMs: BACKGROUND_TIMEOUT_MS }),
+      append,
+    )
+    return view(job)
+  }
+
+  /** Whether the thread may have one more command running in the background. */
+  hasRoom(threadId: string): boolean {
+    return this.running(threadId) < MAX_RUNNING
+  }
+
+  /**
+   * Take over a command that already runs, e.g. one a turn waited on for longer than it
+   * would: from now on it is the thread's background command, stopped by `controller`.
+   * `output` is what it printed so far; what comes after goes to the `append` returned.
+   * Throws when the thread already has `MAX_RUNNING` commands running.
+   */
+  adopt(
+    threadId: string,
+    command: string,
+    running: { ended: Promise<ExecResult>; controller: AbortController; output: string },
+    options: { local?: boolean; cwd?: string } = {},
+  ): { command: BackgroundCommand; append: (chunk: string) => void } {
+    this.room(threadId)
+    const { job, append } = this.track(threadId, command, running.controller, options)
+    append(running.output)
+    job.ended = this.settle(job, running.ended, append)
+    return { command: view(job), append }
+  }
+
+  private room(threadId: string): void {
+    if (!this.hasRoom(threadId)) {
       throw new Error(
         `${MAX_RUNNING} commands of yours already run in the background; stop one first (stop_command)`,
       )
     }
+  }
+
+  /** A new job for `command`, kept from now on, and how its output is added to it. */
+  private track(
+    threadId: string,
+    command: string,
+    controller: AbortController,
+    options: { local?: boolean; keep?: boolean; cwd?: string },
+  ): { job: Job; append: (chunk: string) => void } {
     this.forgetOld(threadId)
-    const controller = new AbortController()
     const job: Job = {
       id: `cmd-${++this.next}`,
       threadId,
@@ -136,11 +180,8 @@ export class BackgroundCommands {
       changed: new Set(),
     }
     let seeking = !!options.local
-    const wake = () => {
-      for (const done of job.changed) done()
-      job.changed.clear()
-    }
     const append = (chunk: string) => {
+      if (!chunk) return
       job.output += chunk
       // Cut once well past the bound, not on every piece: a chatty command sends many.
       if (job.output.length > KEPT_OUTPUT * 1.25) {
@@ -153,13 +194,20 @@ export class BackgroundCommands {
         seeking = !job.url && job.output.length < URL_SEARCH
         if (job.url) this.onChange(threadId)
       }
-      wake()
+      wakeJob(job)
     }
-    job.ended = exec({
-      signal: controller.signal,
-      onOutput: append,
-      timeoutMs: BACKGROUND_TIMEOUT_MS,
-    })
+    this.jobs.set(job.id, job)
+    this.onChange(threadId)
+    return { job, append }
+  }
+
+  /** Record how the job's command ended, once it does. */
+  private settle(
+    job: Job,
+    ended: Promise<ExecResult>,
+    append: (chunk: string) => void,
+  ): Promise<void> {
+    return ended
       .then(
         (result) => result.exitCode,
         (error: unknown) => {
@@ -168,13 +216,10 @@ export class BackgroundCommands {
         },
       )
       .then((exitCode) => {
-        job.result = { exitCode, endedAt: Date.now(), stopped: controller.signal.aborted }
-        wake()
-        this.onChange(threadId)
+        job.result = { exitCode, endedAt: Date.now(), stopped: job.controller.signal.aborted }
+        wakeJob(job)
+        this.onChange(job.threadId)
       })
-    this.jobs.set(job.id, job)
-    this.onChange(threadId)
-    return view(job)
   }
 
   /**
@@ -294,6 +339,12 @@ export class BackgroundCommands {
       this.jobs.delete(job.id)
     }
   }
+}
+
+/** Wakes whoever waits for more of the job's output or its end. */
+function wakeJob(job: Job): void {
+  for (const done of job.changed) done()
+  job.changed.clear()
 }
 
 const view = (job: Job): BackgroundCommand => ({

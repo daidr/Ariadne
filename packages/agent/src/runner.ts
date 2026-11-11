@@ -34,13 +34,20 @@ import {
   summarise,
   summaryRequest,
 } from './compaction'
-import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
+import {
+  attachedText,
+  keptUserTokens,
+  toChatMessages,
+  withImageData,
+  writtenBy,
+} from './transcript'
 import { repoTools } from './repo-tools'
-import { runCommandSpec, workspaceTools } from './workspace-tools'
+import { editsByPatch } from './apply-patch'
+import { applyPatch, runCommandSpec, workspaceTools } from './workspace-tools'
 import { forgetReads } from './file-state'
 import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
-import { mcpTools } from './mcp-tools'
+import { mcpTools, offeredMcpTools } from './mcp-tools'
 import type { WorkspaceManager } from './workspaces'
 import type { EverywhereMemory } from './tool-helpers'
 import type { BrowserPages } from './browser-page'
@@ -311,6 +318,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
   const off = switchedOff(project.settings.tools)
   const shell = isThread && workspaces ? workspaces.shell(conversation.projectId) : null
   const shellName = shell?.name ?? 'bash'
+  // An agent program has an apply_patch of its own, which a tool of the same name would clash with.
+  const patching = !model.provider.program && editsByPatch(model.model)
   const builtIn = (
     options.tools ??
     (reviewOf
@@ -341,21 +350,28 @@ export async function runTurn(options: TurnOptions): Promise<void> {
         }))
   )
     .filter((tool) => !off.has(tool.spec.name))
-    .map((tool) =>
+    .flatMap((tool) =>
       tool.spec.name === 'run_command'
-        ? { ...tool, spec: runCommandSpec(limits, shellName) }
-        : tool,
+        ? [{ ...tool, spec: runCommandSpec(limits, shellName) }]
+        : // Models trained on patches edit files with one; the others replace text.
+          patching && tool.spec.name === 'edit_file'
+          ? [applyPatch]
+          : patching && tool.spec.name === 'write_file'
+            ? []
+            : [tool],
     )
   // The project's external tools, as their servers list them now; one that cannot be
   // reached brings none, and the turn goes on without it.
   const external =
     options.mcp && !options.tools
-      ? await mcpTools(
-          options.mcp,
-          app.getProject(conversation.projectId).mcp,
-          // A reviewer changes nothing: like the coordinator, it gets the read-only ones.
-          reviewOf ? 'coordinator' : conversation.role,
-          signal,
+      ? offeredMcpTools(
+          await mcpTools(
+            options.mcp,
+            app.getProject(conversation.projectId).mcp,
+            // A reviewer changes nothing: like the coordinator, it gets the read-only ones.
+            reviewOf ? 'coordinator' : conversation.role,
+            signal,
+          ),
         )
       : []
   // Sending is how a conversation speaks to the user: every set of tools has it.
@@ -393,6 +409,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     signal,
     turnId,
     keepsResults: () => !model.provider.program,
+    // A reviewer's workspace is its author's, and it changes nothing there.
+    workspaceOpen: () => {
+      if (!isThread || reviewOf || !hasWorkspace) return false
+      const known = app.getThread(owner).workspace
+      return !!known && !known.removed
+    },
     workspace: async () => {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
@@ -544,7 +566,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     // What can change the workspace's files, and so its instruction file: its own writing
     // tools, and the external ones, which may do anything.
     const changesFiles = new Set([
-      ...[...workspaceTools, ...repoTools].filter((tool) => !tool.readOnly).map((t) => t.spec.name),
+      ...[...workspaceTools, applyPatch, ...repoTools]
+        .filter((tool) => !tool.readOnly)
+        .map((t) => t.spec.name),
       ...external.map((tool) => tool.spec.name),
     ])
     let instructionsStale = true
@@ -620,6 +644,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           const read = reader.read()
           const cut = compactionCut(read, threshold / 4)
           if (cut !== null) {
+            const userTokens = keptUserTokens(threshold)
             const request = summaryRequest(
               read,
               cut,
@@ -627,6 +652,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               conversation.role,
               readText,
               chat.keepReasoning,
+              userTokens,
             )
             const summary = await summarise(model, withImageData(request, loadImage), signal)
             if (signal.aborted) break
@@ -641,6 +667,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
                 timing: summary.timing,
                 reasoning: summary.reasoning,
                 state: state(),
+                userTokens,
               })
               changed = true
             } else {

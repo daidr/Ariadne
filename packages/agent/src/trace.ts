@@ -358,7 +358,15 @@ function requestOf(
     const call = parseCall(app.getPrompt(event.projectId, event.data.call))
     const keep = call ? writtenBy(app, event.projectId, call) : undefined
     return {
-      messages: summaryRequest(transcript, event.data.upTo, titleOf, role, readText, keep),
+      messages: summaryRequest(
+        transcript,
+        event.data.upTo,
+        titleOf,
+        role,
+        readText,
+        keep,
+        event.data.userTokens,
+      ),
       tools: [],
     }
   }

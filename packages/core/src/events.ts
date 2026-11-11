@@ -721,6 +721,8 @@ export interface EventMap {
      * provider's cache) until the next summary: later changes are calls in the history.
      */
     state: string
+    /** How much of the user's own words, in tokens, is kept word for word beside the notes. */
+    userTokens?: number
   }
   /** The user settled a notice without anything else to record, e.g. undid a stale one. */
   'notice.dismissed': { noticeId: string }
