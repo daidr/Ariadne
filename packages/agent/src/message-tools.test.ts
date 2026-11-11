@@ -18,6 +18,7 @@ import { Timers } from './timers'
 import type { Tool, ToolContext } from './tool-helpers'
 import { ToolInputError } from './tool-helpers'
 import { sendMessage } from './tools'
+import { describeNote } from './transcript'
 
 let app: Ariadne
 let dir: string
@@ -124,6 +125,65 @@ describe('reactions', () => {
     await expect(run(reactTool, { messageId: asked.id, emoji: '🚀' }, ctx)).rejects.toThrow(
       /remove one first/,
     )
+  })
+})
+
+describe('the user reacts', () => {
+  test('to an agent message: the agent reads it next turn, without being woken', () => {
+    const { project, thread } = setup()
+    const answer = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'thread',
+      content: '导出放在报表页右上角',
+    })
+    const before = app.listPendingConversations().map((c) => c.id)
+    app.reactAsUser(answer.id, '👍')
+    app.reactAsUser(answer.id, '👍')
+    expect(app.getMessage(answer.id).reactions).toEqual([{ emoji: '👍', by: 'user' }])
+    app.reactAsUser(answer.id, '👍', true)
+    expect(app.getMessage(answer.id).reactions).toEqual([])
+    expect(app.listPendingConversations().map((c) => c.id)).toEqual(before)
+    const notes = app
+      .listTranscript(thread.id)
+      .flatMap((entry) => (entry.kind === 'note' ? [entry.note] : []))
+    expect(notes).toEqual([
+      {
+        type: 'user-reacted',
+        messageId: answer.id,
+        emoji: '👍',
+        quote: '导出放在报表页右上角',
+        removed: false,
+      },
+      {
+        type: 'user-reacted',
+        messageId: answer.id,
+        emoji: '👍',
+        quote: '导出放在报表页右上角',
+        removed: true,
+      },
+    ])
+    expect(describeNote(notes[0]!, () => '')).toContain('<user_reacted message=')
+    expect(describeNote(notes[1]!, () => '')).toContain('<user_reaction_removed message=')
+  })
+
+  test('alongside the agent, one emoji each; no text, at most three of their own', () => {
+    const { project, thread } = setup()
+    const asked = app.postMessage(project.id, {
+      conversationId: thread.id,
+      author: 'user',
+      content: '开始吧',
+    })
+    app.react(asked.id, { author: 'thread', conversationId: thread.id }, '👀')
+    app.reactAsUser(asked.id, '👀')
+    expect(app.getMessage(asked.id).reactions).toEqual([
+      { emoji: '👀', by: 'thread' },
+      { emoji: '👀', by: 'user' },
+    ])
+    expect(() => app.reactAsUser(asked.id, 'ok')).toThrow()
+    app.reactAsUser(asked.id, '👍')
+    app.reactAsUser(asked.id, '🎉')
+    expect(() => app.reactAsUser(asked.id, '🚀')).toThrow()
+    expect(() => app.reactAsUser('msg_nope', '👍')).toThrow()
   })
 })
 

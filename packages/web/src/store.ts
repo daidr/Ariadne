@@ -771,6 +771,11 @@ export async function stopTurn(conversationId: string) {
   await api.stopTurn(conversationId).catch(report)
 }
 
+/** The user's emoji on a message, or theirs taken back. */
+export async function react(messageId: string, emoji: string, remove: boolean) {
+  await api.react(messageId, emoji, remove).catch(report)
+}
+
 export async function retryTurn(conversationId: string) {
   await api.retryTurn(conversationId).catch(report)
 }

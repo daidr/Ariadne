@@ -145,7 +145,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 62
+export const PROJECTION_VERSION = 63
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -2961,30 +2961,47 @@ export class Ariadne {
     if (message.author === reactor.author && message.kind !== 'relay') {
       throw new DomainError('error.invalidBody', { reason: 'messageId' })
     }
+    return this.putReaction(message, reactor.author, emoji, remove)
+  }
+
+  /**
+   * The user puts an emoji on a message, or takes theirs back. The conversation's agent
+   * reads it the next time it works; it is not woken for it.
+   */
+  reactAsUser(messageId: string, emoji: string, remove = false): MessageView {
+    return this.putReaction(this.getMessage(messageId), 'user', emoji, remove)
+  }
+
+  private putReaction(
+    message: MessageView,
+    by: Author,
+    emoji: string,
+    remove: boolean,
+  ): MessageView {
     const clean = emoji.trim()
     if (!isEmoji(clean)) throw new DomainError('error.invalidBody', { reason: 'emoji' })
-    const has = message.reactions.some((r) => r.emoji === clean && r.by === reactor.author)
+    const has = message.reactions.some((r) => r.emoji === clean && r.by === by)
     if (has !== remove) return message
-    if (
-      !remove &&
-      message.reactions.filter((r) => r.by === reactor.author).length >= MAX_REACTIONS
-    ) {
+    if (!remove && message.reactions.filter((r) => r.by === by).length >= MAX_REACTIONS) {
       throw new DomainError('error.invalidBody', { reason: 'reactions' })
     }
     this.store.append([
       {
         type: 'message.reacted',
-        projectId: this.projectOfMessage(messageId),
+        projectId: this.projectOfMessage(message.id),
         data: {
-          messageId,
+          messageId: message.id,
           conversationId: message.conversationId,
-          by: reactor.author,
+          by,
           emoji: clean,
           ...(remove ? { removed: true as const } : {}),
+          ...(by === 'user'
+            ? { quote: this.quoteOf(message.conversationId, message.id).text }
+            : {}),
         },
       },
     ])
-    return this.getMessage(messageId)
+    return this.getMessage(message.id)
   }
 
   /**

@@ -291,6 +291,7 @@ export const zhCN = {
   'message.quote.user': '你',
   'message.quote.coordinator': '协调器',
   'message.quote.thread': '讨论串',
+  'message.reactWith': '回应 {emoji}',
   'aside.until': '{date} 提醒',
   'aside.due': '放一放到期了',
   'aside.dueReason': '放一放到期：{reason}',

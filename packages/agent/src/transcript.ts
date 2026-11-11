@@ -74,6 +74,10 @@ export function describeNote(note: TranscriptNote, titleOf: (threadId: string) =
       return `<user_answer attention="${note.attentionId}">\nquestion: ${note.question}\n${note.answer}\n</user_answer>`
     case 'user-in-thread':
       return `<user_wrote_in_thread thread="${note.threadId}" title="${titleOf(note.threadId)}" message="${note.messageId}">\n${note.content}\n</user_wrote_in_thread>`
+    case 'user-reacted':
+      return note.removed
+        ? `<user_reaction_removed message="${note.messageId}" emoji="${note.emoji}">On: ${note.quote}</user_reaction_removed>`
+        : `<user_reacted message="${note.messageId}" emoji="${note.emoji}">On: ${note.quote}\nThe user answered that message with an emoji, not words. Take it into account; it needs no reply of its own.</user_reacted>`
     case 'wait-over': {
       const at = localTime(note.until)
       if (note.how === 'cancelled') {

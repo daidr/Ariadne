@@ -54,7 +54,7 @@ import { api } from '../api'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
 import MessageQuote from './MessageQuote.vue'
-import MessageReactions from './MessageReactions.vue'
+import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
@@ -69,6 +69,7 @@ import {
   type OpenedView,
   openThread,
   openThreadFrom,
+  react,
   retryTurn,
   sendMessage,
   state,
@@ -484,8 +485,15 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
     ...(message.ask ? [{ type: 'ask' }] : []),
     ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
     ...(message.relayedTo.length ? [{ type: 'relayed' }] : []),
-    ...(message.reactions.length ? [{ type: 'reactions' }] : []),
   ]
+}
+
+/**
+ * Whether the user can put emojis on it: a message of the log, not the one still being
+ * written nor a later bubble of a relay (its emojis go on the first).
+ */
+function reactable(message: MessageView): boolean {
+  return message.id !== writing.value?.id && relayIdOf(message.id) === message.id
 }
 
 function sender(message: MessageView) {
@@ -958,8 +966,27 @@ watch(
             :data-message-id="message.id"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
             :class="{ 'conversation-edited': highlighted.has(message.id) }"
+            :reactions="reactable(message) ? shownReactions(message.reactions) : undefined"
             actions-visible="hover"
+            @react="(emoji, item) => react(message.id, emoji, !!item?.reacted)"
           >
+            <template
+              v-if="reactable(message) && sender(message) === 'assistant'"
+              #reaction-picker="{ react: pick }"
+            >
+              <div class="reaction-picker">
+                <DouButton
+                  v-for="emoji in commonEmojis"
+                  :key="emoji"
+                  variant="ghost"
+                  size="sm"
+                  :aria-label="t('message.reactWith', { emoji })"
+                  @click="pick(emoji)"
+                >
+                  {{ emoji }}
+                </DouButton>
+              </div>
+            </template>
             <template #markdown-link="{ node, href, external, children }">
               <MessageLink
                 :href="href"
@@ -982,10 +1009,6 @@ watch(
                 v-if="part.type === 'quote' && message.replyTo"
                 :quote="message.replyTo"
                 :conversation-id="message.conversationId"
-              />
-              <MessageReactions
-                v-else-if="part.type === 'reactions'"
-                :reactions="message.reactions"
               />
               <DouChatAttachments
                 v-else-if="part.type === 'attachments'"
@@ -1361,9 +1384,14 @@ watch(
 }
 
 .conversation-list {
-  --dou-chat-list-gap: 8px;
   flex: 1;
   min-height: 0;
+}
+
+.reaction-picker {
+  display: flex;
+  gap: 2px;
+  margin: -4px;
 }
 
 .conversation-empty {

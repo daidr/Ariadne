@@ -126,7 +126,8 @@ defineExpose({ quotes, anchored })
 .document {
   height: 100%;
   overflow-y: auto;
-  padding: 32px 24px 96px;
+  /* Room on the left for the block handle with its "+", which floats outside the text. */
+  padding: 32px 48px 96px;
   box-sizing: border-box;
 }
 

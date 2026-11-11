@@ -301,6 +301,7 @@ export const en: Record<MessageKey, string> = {
   'message.quote.user': 'You',
   'message.quote.coordinator': 'Coordinator',
   'message.quote.thread': 'Thread',
+  'message.reactWith': 'React with {emoji}',
   'aside.until': 'Reminder {date}',
   'aside.due': 'Set aside until now',
   'aside.dueReason': 'Set aside until now: {reason}',

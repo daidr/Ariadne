@@ -40,7 +40,7 @@ export interface QuotedMessage {
   text: string
 }
 
-/** An emoji an agent put on a message. */
+/** An emoji an agent or the user put on a message. */
 export interface Reaction {
   emoji: string
   by: Author
@@ -649,8 +649,9 @@ export interface EventMap {
     replyTo?: QuotedMessage
   }
   /**
-   * An agent reacted to a message of its own conversation with an emoji, or took that
-   * reaction back (`removed`).
+   * An agent or the user reacted to a message of the conversation with an emoji, or took
+   * that reaction back (`removed`). The user's carries the start of the message's text,
+   * for the agent to read which message it was.
    */
   'message.reacted': {
     messageId: string
@@ -658,6 +659,7 @@ export interface EventMap {
     by: Author
     emoji: string
     removed?: true
+    quote?: string
   }
   'message.edited': { messageId: string; content: string; reason: string }
   'message.read': { conversationId: string; upTo: string }

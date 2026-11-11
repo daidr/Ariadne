@@ -624,7 +624,7 @@ export const messagesProjection: Projection = {
       -- that passed it to threads.
       cites TEXT,
       relayed_to TEXT,
-      -- The message it answers (JSON QuotedMessage), and the agents' emojis (JSON Reaction[]).
+      -- The message it answers (JSON QuotedMessage), and the emojis on it (JSON Reaction[]).
       reply_to TEXT,
       reactions TEXT,
       -- The event that last changed the row, for pages that fetch only changes.
@@ -1724,6 +1724,28 @@ export const transcriptProjection: Projection = {
           true,
         )
         break
+      case 'message.reacted': {
+        // The user's emoji: the conversation's agent reads it next turn, without being woken.
+        const { by, messageId, emoji, quote, removed } = event.data
+        if (by !== 'user') break
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.conversationId,
+            kind: 'note',
+            payload: {
+              type: 'user-reacted',
+              messageId,
+              emoji,
+              quote: quote ?? '',
+              removed: !!removed,
+            },
+          },
+          false,
+        )
+        break
+      }
       case 'artifact.revised': {
         // The user changed it: the agent told learns what changed, next turn.
         const { notify, artifactId, title, version, diff } = event.data

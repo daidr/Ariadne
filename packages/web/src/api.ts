@@ -539,6 +539,11 @@ export const api = {
       `/api/threads/${threadId}/commands/${commandId}/stop`,
     ),
   retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
+  react: (messageId: string, emoji: string, remove: boolean) =>
+    request<{ message: MessageView }>('POST', `/api/messages/${messageId}/reactions`, {
+      emoji,
+      remove,
+    }),
   getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
   saveConcurrency: (input: Concurrency) =>
     request<Concurrency>('PUT', '/api/settings/concurrency', input),
