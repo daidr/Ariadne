@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DouButton, DouForm, DouFormItem, DouInput, DouSelect, DouText } from 'dou-ui'
 import { FolderGitIcon, FolderOpenIcon, PlusIcon, ServerIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
 import { api, type SourceKind } from '../api'
 import { lt, t } from '../i18n'
 import { nameFrom, summaryOf } from '../source-status'
@@ -31,6 +31,7 @@ const referenceDrafts = reactive<Record<string, Record<string, unknown>>>({})
 const creating = ref(false)
 const problem = ref<string | null>(null)
 
+const root = useTemplateRef<HTMLElement>('root')
 onMounted(async () => {
   try {
     kinds.value = (await api.sourceKinds()).kinds
@@ -38,7 +39,23 @@ onMounted(async () => {
   } catch {
     // Without them the project starts with no source; its settings take one later.
   }
+  // The caret in the first field to type in: the source's own, else the name.
+  await nextTick()
+  root.value?.querySelector<HTMLInputElement>('input')?.focus()
 })
+
+/** Enter in a field adds the reference being written, else creates the project. */
+function onEnter(event: KeyboardEvent) {
+  // A suggestion list that is open has taken it already, to pick an entry.
+  if (event.defaultPrevented || event.isComposing) return
+  if (!(event.target instanceof HTMLInputElement)) return
+  event.preventDefault()
+  if (adding.value !== null) {
+    if (referenceReady.value) addReference()
+    return
+  }
+  void create()
+}
 
 const kindOf = (of: string) => kinds.value.find((k) => k.kind === of) ?? null
 const current = computed(() => kindOf(kind.value))
@@ -139,88 +156,90 @@ defineExpose({ create, ready, creating })
 </script>
 
 <template>
-  <DouForm layout="vertical" size="sm" class="new-project" @submit.prevent="create">
-    <DouFormItem :label="t('newProject.source')">
-      <DouSelect
-        :model-value="kind"
-        :options="kindOptions"
-        @update:model-value="(value) => (kind = String(value ?? ''))"
-      />
-    </DouFormItem>
-    <SettingsFields
-      v-if="current"
-      :key="current.kind"
-      :schema="current.settings"
-      :values="draftOf(drafts, current.kind)"
-      :secrets-set="[]"
-      bare
-      :browse="
-        current.browse
-          ? (_key, typed) => browse(current!.kind, draftOf(drafts, current!.kind), typed)
-          : undefined
-      "
-    />
-    <DouFormItem :label="t('newProject.name')" required>
-      <DouInput :model-value="name" @update:model-value="rename" />
-    </DouFormItem>
-    <div class="new-project-references">
-      <DouText weight="medium" size="sm">{{ t('project.references.title') }}</DouText>
-      <div v-for="(reference, index) in references" :key="index" class="new-project-reference">
-        <component :is="iconOf(reference.kind)" class="new-project-icon" />
-        <DouText size="sm" class="new-project-where">
-          {{ summaryOf(kindOf(reference.kind), reference.settings) ?? reference.kind }}
-        </DouText>
-        <DouButton
-          variant="ghost"
-          size="sm"
-          class="new-project-remove"
-          :aria-label="t('project.references.remove')"
-          :title="t('project.references.remove')"
-          @click="references.splice(index, 1)"
-        >
-          <TrashIcon />
-        </DouButton>
-      </div>
-      <div v-if="adding" class="new-project-adding">
-        <DouFormItem :label="t('project.source.kind')">
-          <DouSelect
-            :model-value="adding"
-            :options="referenceOptions"
-            @update:model-value="(value) => (adding = String(value))"
-          />
-        </DouFormItem>
-        <SettingsFields
-          v-if="addingKind"
-          :key="addingKind.kind"
-          :schema="addingKind.settings"
-          :values="draftOf(referenceDrafts, addingKind.kind)"
-          :secrets-set="[]"
-          bare
-          :browse="
-            addingKind.browse
-              ? (_key, typed) =>
-                  browse(addingKind!.kind, draftOf(referenceDrafts, addingKind!.kind), typed)
-              : undefined
-          "
+  <div ref="root" @keydown.enter="onEnter">
+    <DouForm layout="vertical" size="sm" class="new-project" @submit.prevent>
+      <DouFormItem :label="t('newProject.source')">
+        <DouSelect
+          :model-value="kind"
+          :options="kindOptions"
+          @update:model-value="(value) => (kind = String(value ?? ''))"
         />
-        <div class="new-project-actions">
-          <DouButton size="sm" tone="primary" :disabled="!referenceReady" @click="addReference">
-            {{ t('project.references.confirm') }}
-          </DouButton>
-          <DouButton size="sm" variant="ghost" @click="adding = null">
-            {{ t('settings.cancel') }}
+      </DouFormItem>
+      <SettingsFields
+        v-if="current"
+        :key="current.kind"
+        :schema="current.settings"
+        :values="draftOf(drafts, current.kind)"
+        :secrets-set="[]"
+        bare
+        :browse="
+          current.browse
+            ? (_key, typed) => browse(current!.kind, draftOf(drafts, current!.kind), typed)
+            : undefined
+        "
+      />
+      <DouFormItem :label="t('newProject.name')" required>
+        <DouInput :model-value="name" @update:model-value="rename" />
+      </DouFormItem>
+      <div class="new-project-references">
+        <DouText weight="medium" size="sm">{{ t('project.references.title') }}</DouText>
+        <div v-for="(reference, index) in references" :key="index" class="new-project-reference">
+          <component :is="iconOf(reference.kind)" class="new-project-icon" />
+          <DouText size="sm" class="new-project-where">
+            {{ summaryOf(kindOf(reference.kind), reference.settings) ?? reference.kind }}
+          </DouText>
+          <DouButton
+            variant="ghost"
+            size="sm"
+            class="new-project-remove"
+            :aria-label="t('project.references.remove')"
+            :title="t('project.references.remove')"
+            @click="references.splice(index, 1)"
+          >
+            <TrashIcon />
           </DouButton>
         </div>
+        <div v-if="adding" class="new-project-adding">
+          <DouFormItem :label="t('project.source.kind')">
+            <DouSelect
+              :model-value="adding"
+              :options="referenceOptions"
+              @update:model-value="(value) => (adding = String(value))"
+            />
+          </DouFormItem>
+          <SettingsFields
+            v-if="addingKind"
+            :key="addingKind.kind"
+            :schema="addingKind.settings"
+            :values="draftOf(referenceDrafts, addingKind.kind)"
+            :secrets-set="[]"
+            bare
+            :browse="
+              addingKind.browse
+                ? (_key, typed) =>
+                    browse(addingKind!.kind, draftOf(referenceDrafts, addingKind!.kind), typed)
+                : undefined
+            "
+          />
+          <div class="new-project-actions">
+            <DouButton size="sm" tone="primary" :disabled="!referenceReady" @click="addReference">
+              {{ t('project.references.confirm') }}
+            </DouButton>
+            <DouButton size="sm" variant="ghost" @click="adding = null">
+              {{ t('settings.cancel') }}
+            </DouButton>
+          </div>
+        </div>
+        <DouButton v-else variant="ghost" size="sm" class="new-project-add" @click="startAdding">
+          <template #leading><PlusIcon /></template>
+          {{ t('project.references.add') }}
+        </DouButton>
       </div>
-      <DouButton v-else variant="ghost" size="sm" class="new-project-add" @click="startAdding">
-        <template #leading><PlusIcon /></template>
-        {{ t('project.references.add') }}
-      </DouButton>
-    </div>
-    <DouText v-if="problem" tone="danger" size="sm" role="alert" class="new-project-problem">
-      {{ problem }}
-    </DouText>
-  </DouForm>
+      <DouText v-if="problem" tone="danger" size="sm" role="alert" class="new-project-problem">
+        {{ problem }}
+      </DouText>
+    </DouForm>
+  </div>
 </template>
 
 <style scoped>
