@@ -135,6 +135,7 @@ describe('external tools', () => {
     const written = new Map<string, string>()
     const ctx: ToolContext = {
       ...ctxFor(),
+      workspaceOpen: () => true,
       workspace: async () =>
         ({
           writeFile: async (path: string, text: string) => void written.set(path, text),

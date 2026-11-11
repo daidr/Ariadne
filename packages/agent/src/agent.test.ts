@@ -497,7 +497,12 @@ describe('history compaction', () => {
     // What the user wrote before the cut stays word for word, beside the notes and only there.
     const folded = last.messages[1]!.content as string
     expect(folded).toContain('<user_message')
-    expect(folded).toContain(`第 1 份需求：${'很长的描述。'.repeat(80)}`)
+    // A threshold this small keeps only the beginning and end of each, and the notes are
+    // asked to say what they asked.
+    expect(folded).toContain('第 2 份需求')
+    expect(folded).toContain('1 earlier messages of the user')
+    const ask = model.sent.find((r) => r.messages[0]?.content.startsWith('You summarise'))!
+    expect(ask.messages.at(-1)?.content).toContain('"From the user"')
     expect(JSON.stringify(last.messages.slice(2))).not.toContain('第 1 份需求')
     expect(lastUser(last)).toContain('第 4 份需求')
     // A step is never kept without its results, nor a result without its step.

@@ -1,6 +1,14 @@
 import type { MessageView, TranscriptEntry } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { foldedUserWords, KEPT_USER_TOKENS, toChatMessages } from './transcript'
+import { summaryRequest } from './compaction'
+import {
+  foldedUserWords,
+  KEPT_USER_TOKENS,
+  keptUserTokens,
+  shownUserWords,
+  textTokens,
+  toChatMessages,
+} from './transcript'
 
 const relay = (message: Partial<MessageView>): TranscriptEntry => ({
   seq: 1,
@@ -74,18 +82,50 @@ describe('the user words a summary keeps', () => {
       { ...relay({ id: 'msg_r2', cites: [cite], content: '</user_message>' }), seq: 3 },
       said(4, '之后的话'),
     ]
-    const words = foldedUserWords(entries, 3)
+    const words = shownUserWords(foldedUserWords(entries, 3))
     expect(words).toHaveLength(2)
     expect(words[0]).toContain('先看一下')
     expect(words[1]).toContain('加导出')
     expect(words.join('')).not.toContain('之后的话')
   })
 
-  test('the newest are kept when they do not all fit', () => {
-    const long = 'x'.repeat(KEPT_USER_TOKENS)
-    const entries = [1, 2, 3, 4].map((n) => said(n, `${n}${long}`))
-    const words = foldedUserWords(entries, 4)
-    expect(words[0]).toMatch(/^\[2 earlier messages/)
-    expect(words.slice(1).map((w) => w.split('\n')[1]![0])).toEqual(['3', '4'])
+  test('a long paste keeps its beginning and end and crowds out nothing', () => {
+    const entries = [
+      said(1, '需求：做导出，必须支持 CSV'),
+      said(2, '另外不要改 API'),
+      said(3, `日志开头${'中'.repeat(80_000)}日志结尾`),
+    ]
+    const words = foldedUserWords(entries, 3, 20_000)
+    expect(words.map((w) => w.kept)).toEqual(['whole', 'whole', 'cut'])
+    const shown = shownUserWords(words).join('\n')
+    expect(shown).toContain('必须支持 CSV')
+    expect(shown).toContain('不要改 API')
+    expect(shown).toContain('日志开头')
+    expect(shown).toContain('日志结尾')
+    expect(textTokens(shown)).toBeLessThan(20_000)
+  })
+
+  test('the newest are kept when they do not all fit, and the summary is told which are not', () => {
+    const entries = [1, 2, 3, 4, 5, 6].map((n) => said(n, `${n}${'中'.repeat(4000)}`))
+    const words = foldedUserWords(entries, 6, 20_000)
+    expect(words.map((w) => w.kept)).toEqual(['none', 'none', 'whole', 'whole', 'whole', 'whole'])
+    const shown = shownUserWords(words)
+    expect(shown[0]).toMatch(/^\[2 earlier messages/)
+    const ask = summaryRequest(entries, 6, () => '', 'coordinator', undefined, undefined, 20_000)
+    expect(ask.at(-1)!.content).toContain('"From the user"')
+    expect(ask.at(-1)!.content.match(/the one at/g)).toHaveLength(2)
+  })
+
+  test('the words kept scale with the threshold, CJK counted a token a character', () => {
+    expect(keptUserTokens(76_800)).toBe(9600)
+    expect(keptUserTokens(240_000)).toBe(KEPT_USER_TOKENS)
+    expect(textTokens('中文')).toBe(2)
+    expect(textTokens('abcde')).toBe(2)
+    // Filled with long Chinese messages, what is kept stays within its share of the
+    // threshold, so the history after a summary is not over the threshold again.
+    const threshold = 76_800
+    const entries = Array.from({ length: 30 }, (_, n) => said(n + 1, '长'.repeat(3000)))
+    const shown = shownUserWords(foldedUserWords(entries, 30, keptUserTokens(threshold)))
+    expect(textTokens(shown.join('\n'))).toBeLessThan(threshold / 8 + 500)
   })
 })

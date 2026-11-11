@@ -519,6 +519,8 @@ export type TranscriptEntry =
       call: string
       /** The todo list and open questions when it was written, shown with the notes. */
       state: string
+      /** How much of the user's words it keeps beside it, in tokens. */
+      userTokens?: number
     }
   | {
       seq: number

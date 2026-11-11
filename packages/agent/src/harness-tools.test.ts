@@ -336,6 +336,28 @@ describe('file tools', () => {
       ctx,
     )
     expect(outside.isError).toBe(true)
+    // A move out of the workspace is refused before anything is written.
+    await writeFile(join(dir, 'd.ts'), 'one\n')
+    const moved = await applyPatch.run(
+      {
+        input:
+          '*** Begin Patch\n*** Add File: e.ts\n+e\n*** Update File: d.ts\n*** Move to: ../d.ts\n-one\n+two\n*** End Patch',
+      },
+      ctx,
+    )
+    expect(moved.content).toContain('Nothing was changed.')
+    await expect(readFile(join(dir, 'e.ts'), 'utf8')).rejects.toThrow()
+    // A delete that fails part way says what was already done, as a result of the call.
+    const busy = Object.assign(Object.create(ws) as Workspace, {
+      exec: async () => ({ exitCode: 1, stdout: '', stderr: 'busy' }),
+    })
+    const stuck = await applyPatch.run(
+      { input: '*** Begin Patch\n*** Add File: f.ts\n+f\n*** Delete File: d.ts\n*** End Patch' },
+      { ...ctx, workspace: async () => busy },
+    )
+    expect(stuck.isError).toBe(true)
+    expect(stuck.content).toContain('d.ts could not be deleted: busy')
+    expect(stuck.content).toContain('Already done: wrote f.ts')
   })
 
   test('edit_file makes several edits at once, or none', async () => {

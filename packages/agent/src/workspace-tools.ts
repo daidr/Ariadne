@@ -17,7 +17,7 @@ import {
 } from '@ariadne/plugin-sdk'
 import { BACKGROUND_TIMEOUT_MS, type CommandOutput } from './background'
 import { createHash } from 'node:crypto'
-import { applyHunks, parsePatch, PatchError, type PatchOp } from './apply-patch'
+import { applyHunks, parsePatch, PatchError } from './apply-patch'
 import { applyEdit } from './edit-match'
 import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
@@ -304,7 +304,7 @@ export const noteCheck = workspaceTool(
   {
     name: 'note_check',
     description:
-      'Note the check Ariadne runs after every edit_file and write_file in this project, for all its threads; its failures come back with the edit. The project has none yet, and you are the first thread that can tell: look at how the repository checks its code (package scripts, AGENTS.md or CLAUDE.md, CI config), then note one quick command, a type check or a linter, never the tests or a build. `{file}` in it stands for the files just changed; use it when the tool can check single files, so the check stays fast. The command is run once now on `files` and you get its result: call again with a corrected command if it did not run as meant. Pass an empty command when the repository has nothing fit. The user sees what you noted in the project settings.',
+      'Note the check Ariadne runs after every file edit in this project, for all its threads; its failures come back with the edit. The project has none yet, and you are the first thread that can tell: look at how the repository checks its code (package scripts, AGENTS.md or CLAUDE.md, CI config), then note one quick command, a type check or a linter, never the tests or a build. `{file}` in it stands for the files just changed; use it when the tool can check single files, so the check stays fast. The command is run once now on `files` and you get its result: call again with a corrected command if it did not run as meant. Pass an empty command when the repository has nothing fit. The user sees what you noted in the project settings.',
     parameters: {
       type: 'object',
       properties: {
@@ -591,15 +591,20 @@ const editFile = workspaceTool(
   },
 )
 
-/** A path a patch may delete: inside the workspace, not git's own files. */
-function deletable(path: string): string {
-  const clean = posix.normalize(path.replace(/\\/g, '/'))
+/**
+ * A path a patch may write or delete, as one spelling: inside the workspace, not git's own
+ * files. Checked before anything is written, so a bad path changes nothing.
+ */
+function patchPath(path: string): string {
+  const clean = posix.normalize(path.replace(/\\/g, '/')).replace(/^\.\//, '')
   if (
+    !clean ||
+    clean === '.' ||
     clean.startsWith('/') ||
     /^[A-Za-z]:/.test(clean) ||
-    clean.split('/').some((p) => p === '..' || p === '.git')
+    clean.split('/').some((part) => part === '..' || part === '.git')
   ) {
-    throw new PatchError(`${path}: only a file inside your workspace can be deleted`)
+    throw new PatchError(`${path}: a patch changes only files inside your workspace`)
   }
   return clean
 }
@@ -607,26 +612,26 @@ function deletable(path: string): string {
 /** Delete a file of the workspace with the workspace's own shell. */
 async function deleteFile(workspace: Workspace, ctx: ToolContext, path: string): Promise<void> {
   const shell = ctx.commands?.shellName ?? 'bash'
-  const quoted = quoteFor(shell, path)
   const command =
     shell === 'pwsh' || shell === 'powershell'
-      ? `Remove-Item -LiteralPath ${quoted} -Force`
+      ? `Remove-Item -LiteralPath ${quoteFor(shell, path)} -Force`
       : shell === 'cmd'
-        ? `del /f /q ${quoted}`
-        : `rm -f -- ${quoted}`
+        ? // del takes / for a switch.
+          `del /f /q ${quoteFor(shell, path.replaceAll('/', '\\'))}`
+        : `rm -f -- ${quoteFor(shell, path)}`
   const result = await workspace.exec(command, {
     signal: ctx.signal,
     ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
   })
   if (result.exitCode !== 0) {
-    throw new PatchError(`${path} could not be deleted: ${(result.stderr || result.stdout).trim()}`)
+    throw new Error(`${path} could not be deleted: ${(result.stderr || result.stdout).trim()}`)
   }
 }
 
 /**
  * Edit files with a patch, in place of write_file and edit_file, for the models trained on
- * this format. Every change is worked out before any file is written: a hunk that does not
- * fit changes nothing.
+ * this format. Every change and path is worked out before any file is written: a hunk that
+ * does not fit changes nothing.
  */
 export const applyPatch = workspaceTool(
   {
@@ -652,43 +657,39 @@ Give about three lines of context around each change; the file's lines are found
   },
   async (args, workspace, ctx) => {
     const input = str(args, 'input')
-    let ops: PatchOp[]
-    const writes: { path: string; text: string }[] = []
-    const deletes: string[] = []
+    // By path, in one spelling: what is written last, or null for a file deleted.
+    const after = new Map<string, string | null>()
     const done: string[] = []
+    const textOf = async (path: string) =>
+      after.has(path) ? after.get(path)! : currentText(workspace, path)
     try {
-      ops = parsePatch(input)
-      for (const op of ops) {
+      for (const op of parsePatch(input)) {
+        const path = patchPath(op.path)
         if (op.kind === 'add') {
-          const before = await currentText(workspace, op.path)
-          if (before !== null && changedSince(ctx.conversationId, op.path, before)) {
+          const before = await textOf(path)
+          if (before !== null && changedSince(ctx.conversationId, path, before)) {
             throw new PatchError(
               `${op.path} changed since you last read or wrote it; read it again and update it instead`,
             )
           }
-          writes.push({ path: op.path, text: op.text })
-          done.push(`${before === null ? 'A' : 'M'} ${op.path}`)
+          after.set(path, op.text)
+          done.push(`${before === null ? 'A' : 'M'} ${path}`)
         } else if (op.kind === 'delete') {
-          const path = deletable(op.path)
-          if ((await currentText(workspace, op.path)) === null) {
+          if ((await textOf(path)) === null) {
             throw new PatchError(`${op.path}: there is no such file to delete`)
           }
-          deletes.push(path)
-          done.push(`D ${op.path}`)
+          after.set(path, null)
+          done.push(`D ${path}`)
         } else {
-          const pending = writes.find((write) => write.path === op.path)
-          const before = pending ? pending.text : await currentText(workspace, op.path)
+          const before = await textOf(path)
           if (before === null) throw new PatchError(`${op.path}: there is no such file to update`)
           const text = applyHunks(before, op.hunks, op.path)
-          if (op.moveTo && op.moveTo !== op.path) {
-            deletes.push(deletable(op.path))
-            writes.push({ path: op.moveTo, text })
-            done.push(`R ${op.path} -> ${op.moveTo}`)
-          } else {
-            if (pending) pending.text = text
-            else writes.push({ path: op.path, text })
-            done.push(`M ${op.path}`)
-          }
+          const target = op.moveTo ? patchPath(op.moveTo) : path
+          if (target !== path) {
+            after.set(path, null)
+            done.push(`R ${path} -> ${target}`)
+          } else done.push(`M ${path}`)
+          after.set(target, text)
         }
       }
     } catch (error) {
@@ -697,17 +698,31 @@ Give about three lines of context around each change; the file's lines are found
       }
       throw error
     }
-    for (const write of writes) {
-      await workspace.writeFile(write.path, write.text)
-      noteFile(ctx.conversationId, write.path, write.text)
-    }
-    for (const path of deletes) {
-      if (!writes.some((write) => posix.normalize(write.path) === path))
+    // Writes first, then deletes: a failure part way says what was already done.
+    const made: string[] = []
+    const written: string[] = []
+    try {
+      for (const [path, text] of after) {
+        if (text === null) continue
+        await workspace.writeFile(path, text)
+        noteFile(ctx.conversationId, path, text)
+        written.push(path)
+        made.push(`wrote ${path}`)
+      }
+      for (const [path, text] of after) {
+        if (text !== null) continue
         await deleteFile(workspace, ctx, path)
+        made.push(`deleted ${path}`)
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return {
+        content: `The patch stopped part way: ${reason}. ${made.length ? `Already done: ${made.join(', ')}.` : 'Nothing was changed.'} Look at the files and finish the change.`,
+        isError: true,
+      }
     }
-    const changed = writes.map((write) => write.path)
     return {
-      content: `Done:\n${done.join('\n')}${changed.length ? await checkAfterEdit(ctx, workspace, changed) : ''}`,
+      content: `Done:\n${done.join('\n')}${written.length ? await checkAfterEdit(ctx, workspace, written) : ''}`,
     }
   },
 )
@@ -1186,6 +1201,8 @@ const runCommand: Tool = {
           content: `It still ran after ${seconds} seconds, so it goes on in the background: ${so}\n[Read on with read_command_output (waitSeconds lets you wait for it), or end it with stop_command.]`,
         })
       }
+      // No room left meanwhile: it ends at the wait it was given, as it would have.
+      if (result === null) controller.abort('timed out')
       const ended = result ?? (await running)
       return told({
         content: await commandResult(ended, workspace, outputName(), limits.commandOutput),

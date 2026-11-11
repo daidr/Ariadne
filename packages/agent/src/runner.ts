@@ -34,7 +34,13 @@ import {
   summarise,
   summaryRequest,
 } from './compaction'
-import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
+import {
+  attachedText,
+  keptUserTokens,
+  toChatMessages,
+  withImageData,
+  writtenBy,
+} from './transcript'
 import { repoTools } from './repo-tools'
 import { editsByPatch } from './apply-patch'
 import { applyPatch, runCommandSpec, workspaceTools } from './workspace-tools'
@@ -403,6 +409,12 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     signal,
     turnId,
     keepsResults: () => !model.provider.program,
+    // A reviewer's workspace is its author's, and it changes nothing there.
+    workspaceOpen: () => {
+      if (!isThread || reviewOf || !hasWorkspace) return false
+      const known = app.getThread(owner).workspace
+      return !!known && !known.removed
+    },
     workspace: async () => {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
@@ -554,7 +566,9 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     // What can change the workspace's files, and so its instruction file: its own writing
     // tools, and the external ones, which may do anything.
     const changesFiles = new Set([
-      ...[...workspaceTools, ...repoTools].filter((tool) => !tool.readOnly).map((t) => t.spec.name),
+      ...[...workspaceTools, applyPatch, ...repoTools]
+        .filter((tool) => !tool.readOnly)
+        .map((t) => t.spec.name),
       ...external.map((tool) => tool.spec.name),
     ])
     let instructionsStale = true
@@ -630,6 +644,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           const read = reader.read()
           const cut = compactionCut(read, threshold / 4)
           if (cut !== null) {
+            const userTokens = keptUserTokens(threshold)
             const request = summaryRequest(
               read,
               cut,
@@ -637,6 +652,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
               conversation.role,
               readText,
               chat.keepReasoning,
+              userTokens,
             )
             const summary = await summarise(model, withImageData(request, loadImage), signal)
             if (signal.aborted) break
@@ -651,6 +667,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
                 timing: summary.timing,
                 reasoning: summary.reasoning,
                 state: state(),
+                userTokens,
               })
               changed = true
             } else {

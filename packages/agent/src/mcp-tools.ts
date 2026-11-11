@@ -115,7 +115,8 @@ async function outputOf(
 async function shortened(text: string, ctx: ToolContext): Promise<string> {
   if (text.length <= MAX_OUTPUT) return text
   let where = 'the rest is not kept'
-  if (ctx.role === 'thread') {
+  // Only into a workspace already open: a thread that only looks things up gets none for it.
+  if (ctx.role === 'thread' && ctx.workspaceOpen?.()) {
     const path = `${OUTPUT_DIR}/${outputName()}.mcp.txt`
     try {
       const workspace = await ctx.workspace()

@@ -176,6 +176,8 @@ export function visibleHistory(entries: TranscriptEntry[]): {
   state: string | null
   /** Where the newest summary cut (in the model's order); `-1` when none. */
   upTo: number
+  /** How much of the user's words the newest summary keeps beside it. */
+  userTokens: number | null
   /** Long tool results up to here (in the model's order) were cleared; `-1` when none. */
   clearedUpTo: number
   entries: TranscriptEntry[]
@@ -194,6 +196,7 @@ export function visibleHistory(entries: TranscriptEntry[]): {
       call: null,
       state: null,
       upTo: -1,
+      userTokens: null,
       clearedUpTo,
       entries: rest,
     }
@@ -205,6 +208,7 @@ export function visibleHistory(entries: TranscriptEntry[]): {
     call: latest.call,
     state: latest.state,
     upTo,
+    userTokens: latest.userTokens ?? null,
     clearedUpTo,
     entries: rest.filter((entry) => orderKey(entry) > upTo),
   }
@@ -234,16 +238,50 @@ export const summaryMessages = (
   },
 ]
 
-/** How much of the user's own words a summary keeps beside it, in tokens. */
+/** How much of the user's own words a summary keeps beside it at most, in tokens. */
 export const KEPT_USER_TOKENS = 20_000
 
 /**
- * The user's own messages up to `upTo` (in the model's order), word for word, newest kept
- * first within `KEPT_USER_TOKENS`: a summary blurs what they asked, and it is what the work
- * is judged by. Through every later summary they stay, as long as they fit.
+ * The share of the compaction threshold the user's words may take: with the newest part
+ * kept in full (a quarter) and the instructions and tools, the history after a summary
+ * stays well under the threshold, so it is not summarised again at the next step.
  */
-export function foldedUserWords(transcript: TranscriptEntry[], upTo: number): string[] {
-  const words: { at: number; text: string }[] = []
+const USER_WORDS_SHARE = 1 / 8
+
+/** How much of the user's words a summary keeps, for a conversation compacted at `threshold`. */
+export const keptUserTokens = (threshold: number) =>
+  Math.floor(Math.min(KEPT_USER_TOKENS, threshold * USER_WORDS_SHARE))
+
+/** Characters of scripts written without spaces count about a token each. */
+const DENSE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu
+
+/** About how many tokens `text` takes, CJK counted a token a character. */
+export function textTokens(text: string): number {
+  const dense = text.match(DENSE)?.length ?? 0
+  return Math.ceil(dense + (text.length - dense) / 2.5)
+}
+
+/** One message of the user's that a summary folded, and how it is kept beside it. */
+export interface FoldedWords {
+  at: number
+  text: string
+  /** Kept whole, its beginning and end only, or not at all. */
+  kept: 'whole' | 'cut' | 'none'
+}
+
+/**
+ * The user's own messages up to `upTo` (in the model's order), word for word, newest kept
+ * first within `budget` tokens: a summary blurs what they asked, and it is what the work is
+ * judged by. One message takes at most a quarter of the budget (a pasted log keeps its
+ * beginning and end), so a long one does not crowd out the rest. The summary is told which
+ * ones are not kept whole and notes what they asked.
+ */
+export function foldedUserWords(
+  transcript: TranscriptEntry[],
+  upTo: number,
+  budget: number = KEPT_USER_TOKENS,
+): FoldedWords[] {
+  const words: FoldedWords[] = []
   const seen = new Set<string>()
   for (const entry of inModelOrder(transcript)) {
     if (entry.kind !== 'message' || orderKey(entry) > upTo) continue
@@ -252,28 +290,69 @@ export function foldedUserWords(transcript: TranscriptEntry[], upTo: number): st
       for (const cite of message.cites) {
         if (seen.has(cite.messageId)) continue
         seen.add(cite.messageId)
-        words.push({ at: cite.at, text: wordsOf(cite.content, cite.attachments ?? []) })
+        words.push({
+          at: cite.at,
+          text: wordsOf(cite.content, cite.attachments ?? []),
+          kept: 'whole',
+        })
       }
     } else if (message.author === 'user' && !seen.has(message.id)) {
       seen.add(message.id)
-      words.push({ at: message.createdAt, text: wordsOf(message.content, message.attachments) })
+      words.push({
+        at: message.createdAt,
+        text: wordsOf(message.content, message.attachments),
+        kept: 'whole',
+      })
     }
   }
-  const kept: string[] = []
-  let room = KEPT_USER_TOKENS * 2.5
+  const most = budget / 4
+  let room = budget
+  let full = false
   for (let index = words.length - 1; index >= 0; index--) {
-    const { at, text } = words[index]!
-    const shown = `<user_message at="${localTime(at)}">\n${defang(text)}\n</user_message>`
-    if (shown.length > room) {
-      kept.unshift(
-        `[${index + 1} earlier messages of the user's are left out; your notes cover them]`,
-      )
-      break
+    const word = words[index]!
+    if (full) {
+      word.kept = 'none'
+      continue
     }
-    room -= shown.length
-    kept.unshift(shown)
+    let tokens = textTokens(word.text)
+    if (tokens > most) {
+      const chars = Math.floor((word.text.length * most) / tokens)
+      word.text = headAndTail(word.text, chars)
+      word.kept = 'cut'
+      tokens = textTokens(word.text)
+    }
+    if (tokens > room) {
+      word.kept = 'none'
+      full = true
+      continue
+    }
+    room -= tokens
   }
-  return kept
+  return words
+}
+
+/** The folded words as they go beside the notes. */
+export function shownUserWords(words: FoldedWords[]): string[] {
+  const shown = words
+    .filter((word) => word.kept !== 'none')
+    .map(
+      (word) =>
+        `<user_message at="${localTime(word.at)}"${word.kept === 'cut' ? ' cut="its middle; your notes say what it asked"' : ''}>\n${defang(word.text)}\n</user_message>`,
+    )
+  const left = words.filter((word) => word.kept === 'none').length
+  return left
+    ? [
+        `[${left} earlier messages of the user's are not kept here; your notes say what they asked]`,
+        ...shown,
+      ]
+    : shown
+}
+
+/** `text` with its middle cut to keep about `chars` characters. */
+function headAndTail(text: string, chars: number): string {
+  const head = Math.floor(chars * 0.6)
+  const tail = chars - head
+  return `${text.slice(0, head)}\n[… ${text.length - head - tail} characters cut …]\n${text.slice(-tail)}`
 }
 
 const wordsOf = (content: string, attachments: Attachment[]) =>
@@ -360,7 +439,9 @@ export function toChatMessages(
         visible.summary,
         visible.state ?? undefined,
         keep(visible.call) ? visible.reasoning : [],
-        foldedUserWords(transcript, visible.upTo),
+        shownUserWords(
+          foldedUserWords(transcript, visible.upTo, visible.userTokens ?? KEPT_USER_TOKENS),
+        ),
       )
     : []
   const clearedUpTo = Math.max(visible.clearedUpTo, options.clearUpTo ?? -1)

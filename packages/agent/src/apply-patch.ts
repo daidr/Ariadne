@@ -1,5 +1,5 @@
 /**
- * The patch format GPT-family models are trained to edit files with (Codex's apply_patch):
+ * The patch format GPT-family models are trained to edit files with:
  *
  *   *** Begin Patch
  *   *** Add File: path        then the file's lines, each starting with +
@@ -187,6 +187,6 @@ export function applyHunks(text: string, hunks: Hunk[], path: string): string {
   return lines.length && endsWithNewline ? `${joined}${crlf ? '\r\n' : '\n'}` : joined
 }
 
-/** Whether a model takes apply_patch better than edit_file: the GPT and Codex families. */
+/** Whether a model takes apply_patch better than edit_file: the GPT families. */
 export const editsByPatch = (model: string) =>
   /(^|[/:.\s])(gpt-|o[1-9](-|$)|codex)/i.test(model) || /codex/i.test(model)

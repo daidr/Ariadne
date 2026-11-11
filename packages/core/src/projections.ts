@@ -1971,6 +1971,7 @@ export const transcriptProjection: Projection = {
               reasoning: event.data.reasoning,
               call: event.data.call,
               state: event.data.state,
+              ...(event.data.userTokens ? { userTokens: event.data.userTokens } : {}),
             },
           },
           false,
