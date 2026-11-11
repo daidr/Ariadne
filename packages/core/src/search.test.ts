@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { Ariadne } from './ariadne'
 import type { Author } from './events'
-import { snippetOf } from './search'
+import { previewOf } from './artifact-content'
+import { searchTextOf, snippetOf } from './search'
 
 let app: Ariadne
 let clock = 1_000
@@ -244,5 +245,28 @@ describe('snippets of Markdown', () => {
     expect(snippetOf('# 标题\n\n**会话分页**见 [设计](artifact:art_1)，`code`', ['分页'])).toBe(
       '标题 会话分页见 设计，code',
     )
+  })
+})
+
+describe('whiteboards in a document', () => {
+  const board = {
+    height: 320,
+    board: {
+      version: 1,
+      nodes: [{ id: 'a', type: 'shape', x: 0, y: 0, data: { shape: 'rect', text: '有库存？' } }],
+      edges: [],
+    },
+  }
+  const doc = `# 流程\n\n\`\`\`dou-whiteboard\n${JSON.stringify(board)}\n\`\`\`\n\n结尾`
+
+  test('search finds the words on the board, not its data', () => {
+    const text = searchTextOf('document', doc)
+    expect(text).toContain('有库存？')
+    expect(text).not.toContain('"nodes"')
+  })
+
+  test('the preview leaves the board out', () => {
+    const preview = previewOf('document', doc)
+    expect(preview.kind === 'document' && preview.lead).toBe('# 流程\n\n\n\n结尾')
   })
 })

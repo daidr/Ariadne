@@ -2,6 +2,9 @@ import { DomainError } from './errors'
 import type { ArtifactKind } from './events'
 import type { ArtifactPreview, PreviewTile } from './views'
 
+/** A whiteboard in a document's Markdown, as dou-ui writes it: `{ height, board }`. */
+export const DOCUMENT_BOARD = /^```dou-whiteboard\n(.*)\n```$/gm
+
 /**
  * What an artifact's content holds, by kind. A document is Markdown; the other kinds are
  * JSON in the formats of the dou-ui components that show them, so the web passes the
@@ -306,7 +309,10 @@ export function previewOf(kind: ArtifactKind, content: string): ArtifactPreview 
       : { kind: 'dashboard', widgets: 0, takenAt: null, titles: [], tiles: [] }
   }
   // A placeholder reads as its text in brackets, as the page shows it.
-  const shown = content.replace(/<pending>([\s\S]*?)<\/pending>/g, '\\[$1\\]')
+  // A whiteboard in it is left out: the list shows text, and its data is not that.
+  const shown = content
+    .replace(DOCUMENT_BOARD, '')
+    .replace(/<pending>([\s\S]*?)<\/pending>/g, '\\[$1\\]')
   // Markdown without its marks, on one line.
   const text = shown
     .replace(/\\([[\]])/g, '$1')

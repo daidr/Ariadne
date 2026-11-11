@@ -6,6 +6,7 @@ import {
 } from '@dou-ui/dashboard/collaboration'
 import { blockElement, defineEditorExtension, editorKit, textBlock } from '@dou-ui/editor'
 import { cursorAt, fillMap, readMap, updateMap } from '@dou-ui/editor/collaboration'
+import { whiteboardBlock } from '@dou-ui/editor/flow'
 import { blocksToMarkdown, markdownToBlocks, type DOMParserLike } from '@dou-ui/editor/markdown'
 import { fillMaps, readMaps, updateMaps } from '@dou-ui/flow/collaboration'
 import { Window } from 'happy-dom'
@@ -43,9 +44,13 @@ export interface SharedBridge {
   presence(doc: Y.Doc, events: SharedEvent[]): Record<string, unknown> | null
 }
 
-/** The blocks a document is written in: the editor's own and the placeholder. */
+/**
+ * The blocks a document is written in: the editor's own, whiteboards and the placeholder.
+ * The page's editor has the same, or a block one side does not know is lost on the way.
+ */
 export const documentExtensions = [
   editorKit(),
+  whiteboardBlock(),
   pendingBlock({ defineEditorExtension, textBlock, blockElement }),
 ]
 const extensions = documentExtensions

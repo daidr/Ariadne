@@ -2,12 +2,15 @@
 import type { ArtifactCommentThreadView } from '@ariadne/core'
 import { DouEditor, editorKit, type EditorDocument, type PartialBlock } from '@dou-ui/editor'
 import { collaboration } from '@dou-ui/editor/collaboration'
+import { whiteboardBlock } from '@dou-ui/editor/flow'
 import { markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
+import '@dou-ui/flow/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
+import { api } from '../api'
 import { pendingDocumentBlock } from './pending-block'
 import type { SharedArtifact } from './shared'
 
@@ -18,6 +21,7 @@ import type { SharedArtifact } from './shared'
  */
 const props = defineProps<{
   content: string
+  projectId: string
   readonly: boolean
   label?: string
   /** `undefined` turns comments off, as for an older version. */
@@ -30,17 +34,20 @@ const emit = defineEmits<{
 const active = defineModel<string | null>('activeComment', { default: null })
 
 const me = commentAuthor('user')
+// The same blocks as the server's (`documentExtensions`): a block one side does not know
+// is lost when the other writes the document. Images on a whiteboard are uploaded as files.
+const upload = async (file: File) => (await api.uploadFile(props.projectId, file)).file.url
+const blocks = [editorKit(), whiteboardBlock({ upload }), pendingDocumentBlock]
 const extensions = props.shared
   ? [
-      editorKit(),
-      pendingDocumentBlock,
+      ...blocks,
       collaboration({
         map: props.shared.doc.getMap('document'),
         awareness: props.shared.awareness,
         user: { name: me.name },
       }),
     ]
-  : [editorKit(), pendingDocumentBlock]
+  : blocks
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
