@@ -119,6 +119,26 @@ describe('projects and messages', () => {
     expect(body.messages).toMatchObject([{ author: 'user', content: '先调研一下' }])
   })
 
+  test('the user puts an emoji on a message and takes it back', async () => {
+    const project = app.createProject('P')
+    const answer = app.postMessage(project.id, {
+      conversationId: project.coordinatorId,
+      author: 'coordinator',
+      content: '好的',
+    })
+    const path = `/api/messages/${answer.id}/reactions`
+    const added = await call(path, { method: 'POST', body: { emoji: '👍' } })
+    expect(((await added.json()) as { message: { reactions: unknown } }).message.reactions).toEqual(
+      [{ emoji: '👍', by: 'user' }],
+    )
+    await call(path, { method: 'POST', body: { emoji: '👍', remove: true } })
+    expect(app.getMessage(answer.id).reactions).toEqual([])
+    expect((await call(path, { method: 'POST', body: { emoji: 'ok' } })).status).toBe(400)
+    expect((await call(path, { method: 'POST', body: { emoji: '👍', remove: 1 } })).status).toBe(
+      400,
+    )
+  })
+
   test('returns localized errors', async () => {
     const missing = await call('/api/projects/prj_missing')
     expect(missing.status).toBe(404)

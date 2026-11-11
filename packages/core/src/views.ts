@@ -569,6 +569,8 @@ export type TranscriptNote =
       answer: string
     }
   | { type: 'user-in-thread'; threadId: string; messageId: string; content: string }
+  /** The user put an emoji on a message of the conversation, or took it back. */
+  | { type: 'user-reacted'; messageId: string; emoji: string; quote: string; removed: boolean }
   /** The agent's wait came due, the user woke it early, or the user called it off. */
   | { type: 'wait-over'; how: 'due' | 'now' | 'cancelled'; until: number; note: string }
   | { type: 'routine'; routineId: string; prompt: string; dueAt: number }

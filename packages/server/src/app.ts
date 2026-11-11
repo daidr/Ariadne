@@ -1145,6 +1145,15 @@ export function createHandler({
     return json({ command: stopped })
   })
 
+  // The user's emoji on a message, or taking theirs back with `remove`.
+  add('POST', '/api/messages/:messageId/reactions', async (request, { messageId = '' }) => {
+    const body = await readJson(request)
+    const emoji = requireString(body, 'emoji')
+    if (body.remove !== undefined && typeof body.remove !== 'boolean')
+      throw new BadRequest('remove')
+    return json({ message: app.reactAsUser(messageId, emoji, body.remove === true) })
+  })
+
   add('POST', '/api/conversations/:conversationId/stop', (_request, { conversationId = '' }) => {
     app.getConversation(conversationId)
     return json({ stopped: scheduler?.cancel(conversationId) ?? false })

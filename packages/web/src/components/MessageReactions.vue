@@ -2,7 +2,7 @@
 import type { Reaction } from '@ariadne/core'
 import { DouTag } from 'dou-ui'
 
-/** The emojis an agent put on a message, under it. */
+/** The emojis an agent put on one of the user's messages, under it: shown, not answered. */
 defineProps<{ reactions: Reaction[] }>()
 </script>
 
