@@ -1,5 +1,6 @@
-import type { ExecOptions, ExecResult, SourceView, Workspace } from './capabilities'
+import type { ExecOptions, ExecResult, SearchOptions, SourceView, Workspace } from './capabilities'
 import { readOnlyView, WorkspacePathError } from './capabilities'
+import { globToRegExp } from './glob'
 
 /** Quote one argument for a POSIX shell. */
 const posixQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
@@ -139,17 +140,49 @@ export async function listFiles(
 export const MAX_MATCH_LINES = 300
 
 /**
+ * Which `file:line:text` lines a search keeps by its `glob`: every one without a glob. The
+ * programs that cannot narrow by a glob themselves are narrowed by this after.
+ */
+export function searchFilter(glob: string | undefined): (line: string) => boolean {
+  if (!glob?.trim()) return () => true
+  const match = globToRegExp(glob)
+  return (line) => match.test(line.slice(0, line.indexOf(':')))
+}
+
+/** Matching lines of one file a search keeps at most; ripgrep and grep stop there by themselves. */
+export const MAX_FILE_MATCHES = 50
+
+/** At most `MAX_FILE_MATCHES` lines of each file, and `MAX_MATCH_LINES` in all. */
+function capped(lines: string[]): string[] {
+  const perFile = new Map<string, number>()
+  const kept: string[] = []
+  for (const line of lines) {
+    const file = line.slice(0, line.indexOf(':'))
+    const seen = perFile.get(file) ?? 0
+    if (seen >= MAX_FILE_MATCHES) continue
+    perFile.set(file, seen + 1)
+    kept.push(line)
+    if (kept.length >= MAX_MATCH_LINES) break
+  }
+  return kept
+}
+
+/**
  * Lines of the workspace matching the regular expression `pattern` under `path`, as
  * `file:line:text`: by ripgrep when the machine has it, else by git where the workspace
  * is a checkout, else grep, else read file by file. None of them goes through a shell.
+ * Hidden files (`.github`, `.env.example`) are searched like any other, git's own
+ * directory never.
  */
 export async function searchLines(
   workspace: Workspace,
   pattern: string,
   path: string,
-  signal?: AbortSignal,
+  searchOptions: SearchOptions = {},
 ): Promise<{ lines: string[]; error: string | null }> {
+  const { signal, glob, ignoreCase } = searchOptions
   const options = { timeoutMs: 30_000, ...(signal ? { signal } : {}) }
+  const caseless = ignoreCase ? ['-i'] : []
   let result: ExecResult | null = null
   if (await hasRipgrep(workspace)) {
     result = await execArgv(
@@ -160,6 +193,13 @@ export async function searchLines(
         '--no-heading',
         '--color',
         'never',
+        '--hidden',
+        '-g',
+        '!.git',
+        // A glob of a file's name means the same to ripgrep; one with a directory is taken
+        // from the workspace's root below, which ripgrep would read from `path`.
+        ...(glob?.trim() && !glob.includes('/') ? ['-g', glob.trim()] : []),
+        ...caseless,
         '--max-count',
         '50',
         '-e',
@@ -172,7 +212,20 @@ export async function searchLines(
   } else if (await inGit(workspace)) {
     result = await execArgv(
       workspace,
-      ['git', 'grep', '-n', '-I', '-E', '--untracked', '--no-color', '-e', pattern, '--', path],
+      [
+        'git',
+        'grep',
+        '-n',
+        '-I',
+        '-E',
+        ...caseless,
+        '--untracked',
+        '--no-color',
+        '-e',
+        pattern,
+        '--',
+        path,
+      ],
       options,
     )
   } else {
@@ -181,6 +234,7 @@ export async function searchLines(
       [
         'grep',
         '-rnIE',
+        ...caseless,
         '--exclude-dir=.git',
         '--exclude-dir=node_modules',
         '-m',
@@ -203,11 +257,11 @@ export async function searchLines(
     const lines = result.stdout
       .split('\n')
       .filter(Boolean)
-      .slice(0, MAX_MATCH_LINES)
       .map((line) => line.replace(/^\.\//, ''))
-    return { lines, error: null }
+      .filter(searchFilter(glob))
+    return { lines: capped(lines), error: null }
   }
-  return searchByReading(workspace, pattern, path, signal)
+  return searchByReading(workspace, pattern, path, searchOptions)
 }
 
 /**
@@ -218,11 +272,12 @@ export async function searchByReading(
   workspace: Pick<SourceView, 'list' | 'readBytes'>,
   pattern: string,
   path: string,
-  signal?: AbortSignal,
+  { signal, glob, ignoreCase }: SearchOptions = {},
 ): Promise<{ lines: string[]; error: string | null }> {
   let regex: RegExp
+  const keep = searchFilter(glob)
   try {
-    regex = new RegExp(pattern)
+    regex = new RegExp(pattern, ignoreCase ? 'i' : '')
   } catch (error) {
     return { lines: [], error: error instanceof Error ? error.message : String(error) }
   }
@@ -230,6 +285,7 @@ export async function searchByReading(
   const { files } = await walk(workspace, path, signal)
   for (const file of files) {
     if (lines.length >= MAX_MATCH_LINES || signal?.aborted) break
+    if (!keep(`${file}:`)) continue
     let data: Uint8Array
     try {
       data = await workspace.readBytes(file, MAX_SEARCHED_BYTES)
@@ -302,7 +358,7 @@ export function searchableView(workspace: Workspace, checks: ViewChecks = {}): S
         return { ...found, files: found.files.filter((_, at) => kept[at]) }
       },
       async search(pattern, path, options) {
-        const found = await searchLines(workspace, pattern, await inside(path), options?.signal)
+        const found = await searchLines(workspace, pattern, await inside(path), options)
         const seen = new Map<string, Promise<boolean>>()
         const kept = await Promise.all(
           found.lines.map((line) => {

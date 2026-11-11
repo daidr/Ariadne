@@ -37,6 +37,7 @@ import {
 import { attachedText, toChatMessages, withImageData, writtenBy } from './transcript'
 import { repoTools } from './repo-tools'
 import { runCommandSpec, workspaceTools } from './workspace-tools'
+import { forgetReads } from './file-state'
 import { commandVerdict, DEFAULT_LIMITS, defaultTurnSettings, type TurnSettings } from './limits'
 import type { McpHub } from './mcp'
 import { mcpTools } from './mcp-tools'
@@ -366,6 +367,8 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       ? turnChanges(workspaces, conversation.projectId, conversationId)
       : null
   const finish = async (...args: TurnEnd) => {
+    // A stopped turn may not have kept every result it got.
+    if (signal.aborted) forgetReads(conversationId)
     // However the turn ended, nothing it was writing stays shown.
     app.drafts.drop(conversationId)
     // A stopped turn waits for its changes only briefly, so it does not stay working.
@@ -389,6 +392,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     locale: options.locale,
     signal,
     turnId,
+    keepsResults: () => !model.provider.program,
     workspace: async () => {
       if (!workspaces || conversation.role !== 'thread') {
         throw new DomainError('error.noSource')
@@ -590,7 +594,26 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // steps every call has its result, so any cut is whole.
       const estimate = estimateTokens([{ role: 'system', content: systemText }, ...history])
       const size = Math.max(lastInput, estimate)
-      if (size >= threshold) {
+      // Well before the summary is due, a model with a large context clears old tool
+      // results once it reads more than a working budget: every step reads all of it again,
+      // and results acted on long ago are mostly what makes it long.
+      const working = Math.min(threshold, WORKING_TOKENS)
+      if (size >= working && size < threshold) {
+        const upTo = compactionCut(transcript, working / 4)
+        if (upTo !== null && upTo > clearedUpTo(transcript)) {
+          const cleared = toChatMessages(transcript, titleOf, { ...chat, clearUpTo: upTo })
+          const after = estimateTokens([{ role: 'system', content: systemText }, ...cleared])
+          // The cache starts over after a clearing: only worth it when it frees enough.
+          if (after < estimate * (1 - MIN_WORKING_CLEARED_SHARE)) {
+            app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
+            forgetReads(conversationId)
+            sawSeq = app.lastSeq()
+            transcript = reader.read()
+            systemText = system()
+            history = toChatMessages(transcript, titleOf, chat)
+          }
+        }
+      } else if (size >= threshold) {
         const upTo = compactionCut(transcript, threshold / 4)
         let changed = false
         let enough = false
@@ -607,6 +630,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             (size * after) / estimate < threshold * CLEARED_ENOUGH
           if (enough) {
             app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
+            forgetReads(conversationId)
             changed = true
           }
         }
@@ -626,6 +650,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
             const summary = await summarise(model, withImageData(request, loadImage), signal)
             if (signal.aborted) break
             if (summary.ok) {
+              forgetReads(conversationId)
               app.compactConversation(conversationId, turnId, {
                 summary: summary.text,
                 upTo: cut,
@@ -1012,6 +1037,14 @@ function fingerprint(
 
 /** Steps in a row whose output may hit the length limit before the turn stops. */
 export const MAX_CUTS = 3
+/**
+ * What a conversation reads at most before old tool results are cleared, whatever its
+ * model's context: past this, rereading them on every step costs more than running a call
+ * again when one is needed after all.
+ */
+export const WORKING_TOKENS = 120_000
+/** A clearing at the working budget frees at least this share of the input, or waits. */
+const MIN_WORKING_CLEARED_SHARE = 0.3
 /** Clearing old tool results must free at least this share of the input to be worth it. */
 const MIN_CLEARED_SHARE = 0.15
 /**

@@ -232,8 +232,8 @@ describe('command rules', () => {
       },
     }).idle()
     expect(ran.map((r) => [r.options.shell, r.options.env, r.options.timeoutMs])).toEqual([
-      [['zsh', '-c'], { CI: '1' }, 30_000],
-      [['zsh', '-c'], { CI: '1' }, 90_000],
+      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, 30_000],
+      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, 90_000],
     ])
     const request = model.requests.find((r) => system(r).includes('You are a thread'))!
     const spec = request.tools.find((tool) => tool.name === 'run_command')!
@@ -310,7 +310,7 @@ describe('project settings', () => {
     expect(opened[0]?.branch).toBe(`work/fix-safari-export-${thread.id.slice(-6)}`)
     expect(ran.map((r) => [r.command, r.options.env])).toEqual([
       ['bun install', { CI: '1' }],
-      ['ls', undefined],
+      ['ls', { GIT_EDITOR: 'true' }],
     ])
     const results = toolResults(thread.id)
     expect(results[0]!.text).toContain("the project's setup script, as the user set it, runs")

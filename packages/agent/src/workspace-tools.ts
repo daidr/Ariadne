@@ -9,13 +9,18 @@ import {
   setupCommand,
 } from '@ariadne/core'
 import { createTranslator } from '@ariadne/i18n'
-import { FileTooLargeError, type SourceView, type Workspace } from '@ariadne/plugin-sdk'
+import {
+  FileTooLargeError,
+  type SearchOptions,
+  type SourceView,
+  type Workspace,
+} from '@ariadne/plugin-sdk'
 import type { CommandOutput } from './background'
 import { createHash } from 'node:crypto'
 import { applyEdit } from './edit-match'
 import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
-import { changedSince, noteFile } from './file-state'
+import { changedSince, noteCheckFailure, noteFile, noteRead } from './file-state'
 import {
   findFiles,
   findViewFiles,
@@ -161,6 +166,17 @@ async function readText(
   const lines = whole.split('\n')
   const offset = Math.max(1, optionalInt(args, 'offset') ?? 1)
   const limit = Math.max(1, optionalInt(args, 'limit') ?? DEFAULT_LINES)
+  // The same lines again, unchanged, while the model still has them: a line instead.
+  if (
+    own &&
+    !ctx.sub &&
+    ctx.keepsResults?.() &&
+    noteRead(ctx.conversationId, path, offset, limit, whole)
+  ) {
+    return {
+      content: `${path} is unchanged since you read it with the same offset and limit; that result, earlier in this conversation, is still current.`,
+    }
+  }
   const shown: string[] = []
   let size = 0
   for (const [i, line] of lines.slice(offset - 1, offset - 1 + limit).entries()) {
@@ -234,8 +250,16 @@ async function checkAfterEdit(
     return `\n[The project's check after edits did not run: ${setup}, the setup of your new workspace, still runs.]`
   }
   const { command, result } = await runCheck(ctx, workspace, check, paths)
-  if (result.exitCode === 0) return `\n[The project's check after edits passed: ${command}]`
-  return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${checkOutput(result)}`
+  if (result.exitCode === 0) {
+    noteCheckFailure(ctx.conversationId, null)
+    return `\n[The project's check after edits passed: ${command}]`
+  }
+  const output = checkOutput(result)
+  // Problems that were there before the edit, word for word: said once, not after each edit.
+  if (noteCheckFailure(ctx.conversationId, output)) {
+    return `\n[The project's check after edits failed (exit code ${result.exitCode}) with the same output as after your previous edit: ${command}]`
+  }
+  return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${output}`
 }
 
 /** Run a check after edits on `paths`, which `{file}` in it stands for. */
@@ -261,7 +285,10 @@ async function runCheck(ctx: ToolContext, workspace: Workspace, check: string, p
 
 const checkOutput = (result: { stdout: string; stderr: string }) =>
   headAndTail(
-    [result.stdout, result.stderr].filter((part) => part.trim()).join('\n'),
+    [result.stdout, result.stderr]
+      .map(plainOutput)
+      .filter((part) => part.trim())
+      .join('\n'),
     MAX_CHECK_OUTPUT,
     'run the check with run_command to see all of it',
   ) || '(no output)'
@@ -477,6 +504,28 @@ function editsOf(args: Record<string, unknown>): Edit[] {
   return [oneEdit(args, '')]
 }
 
+/** A replacement shown after a loose match at most, in lines. */
+const MAX_SHOWN_LINES = 20
+
+/**
+ * After a single replacement that matched with other whitespace, the lines it wrote as
+ * read_file numbers them, so the model sees the indentation without reading again. `null`
+ * when there was more than one replacement, whose places shift each other.
+ */
+function shownLines(edits: Edit[], looseAt: number, text: string): string | null {
+  const edit = edits[0]
+  if (edits.length !== 1 || !edit || edit.all || !edit.new || !looseAt) return null
+  const count = Math.min(
+    MAX_SHOWN_LINES,
+    Math.max(1, edit.new.replace(/\r?\n$/, '').split('\n').length),
+  )
+  return text
+    .split('\n')
+    .slice(looseAt - 1, looseAt - 1 + count)
+    .map((line, i) => `${String(looseAt + i).padStart(5)}\t${line.replace(/\r$/, '')}`)
+    .join('\n')
+}
+
 const editFile = workspaceTool(
   {
     name: 'edit_file',
@@ -511,6 +560,7 @@ const editFile = workspaceTool(
     let text = await workspace.readFile(path)
     const notes: string[] = []
     let replaced = 0
+    let looseAt = 0
     for (const [i, edit] of edits.entries()) {
       const outcome = applyEdit(text, edit.old, edit.new, edit.all)
       const which = edits.length > 1 ? `Edit ${i + 1} of ${edits.length}: ` : ''
@@ -521,6 +571,7 @@ const editFile = workspaceTool(
       text = outcome.text
       replaced += outcome.count
       if (outcome.loose.length) {
+        looseAt = outcome.loose[0]!.from
         const where = outcome.loose.map((r) => `${r.from}-${r.to}`).join(', ')
         notes.push(`${which}matched with other whitespace at lines ${where}`)
       }
@@ -528,7 +579,12 @@ const editFile = workspaceTool(
     await workspace.writeFile(path, text)
     noteFile(ctx.conversationId, path, text)
     const done = `Replaced ${replaced === 1 ? 'one occurrence' : `${replaced} occurrences`}.`
-    const loose = notes.length ? ` (${notes.join('; ')}; check the indentation)` : ''
+    const lines = shownLines(edits, looseAt, text)
+    const loose = lines
+      ? ` (matched with other whitespace; the lines now read:)\n${lines}`
+      : notes.length
+        ? ` (${notes.join('; ')}; check the indentation)`
+        : ''
     return { content: `${done}${loose}${await checkAfterEdit(ctx, workspace, [path])}` }
   },
 )
@@ -538,8 +594,53 @@ const searchParameters = {
   properties: {
     pattern: { type: 'string' },
     path: { type: 'string', description: 'Directory or file to search, default ".".' },
+    glob: {
+      type: 'string',
+      description: 'Only files matching this glob, e.g. "*.vue" or "src/**/*.ts".',
+    },
+    ignoreCase: { type: 'boolean' },
   },
   required: ['pattern'],
+}
+
+/** The search options a call asked for. */
+function searchOptions(args: Record<string, unknown>, ctx: ToolContext): SearchOptions {
+  const glob = optionalStr(args, 'glob')
+  return {
+    signal: ctx.signal,
+    ...(glob ? { glob } : {}),
+    ...(optionalBool(args, 'ignoreCase') ? { ignoreCase: true } : {}),
+  }
+}
+
+/** A matching line is shown up to this many characters, without its indentation. */
+const MAX_MATCH_CHARS = 300
+
+/**
+ * `file:line:text` lines as the model reads them: files sorted, each one's name once, then
+ * its lines by number, without their indentation and cut when long (minified code, data on
+ * one line).
+ */
+export function groupedMatches(lines: string[]): string {
+  const byFile = new Map<string, string[]>()
+  const other: string[] = []
+  for (const line of lines) {
+    const at = /^(.*?):(\d+):/.exec(line)
+    if (!at) {
+      other.push(line)
+      continue
+    }
+    const [head, file, number] = at
+    let text = line.slice(head.length).trim()
+    if (text.length > MAX_MATCH_CHARS) {
+      text = `${text.slice(0, MAX_MATCH_CHARS)} [… ${text.length - MAX_MATCH_CHARS} characters cut]`
+    }
+    const shown = byFile.get(file!) ?? []
+    shown.push(`  ${number}: ${text}`)
+    byFile.set(file!, shown)
+  }
+  const files = [...byFile.keys()].toSorted()
+  return [...files.flatMap((file) => [file, ...byFile.get(file)!]), ...other].join('\n')
 }
 
 /** What a search found, as the model reads it. */
@@ -547,7 +648,7 @@ function matches(found: { lines: string[]; error: string | null }): ToolResult {
   if (found.error) return { content: found.error, isError: true }
   if (!found.lines.length) return { content: 'No matches.' }
   const more = found.lines.length >= MAX_MATCH_LINES ? '\n[more matches; narrow the search]' : ''
-  return { content: found.lines.join('\n') + more }
+  return { content: groupedMatches(found.lines) + more }
 }
 
 const findParameters = {
@@ -581,7 +682,7 @@ function foundFiles({
 const search = workspaceTool(
   {
     name: 'search',
-    description: `Search the workspace's files for a regular expression; prints matching lines as file:line:text, at most ${MAX_MATCH_LINES}. Files git ignores are left out.`,
+    description: `Search the workspace's files for a regular expression: each file with matches, then its matching lines by number, at most ${MAX_MATCH_LINES} lines. Files git ignores are left out.`,
     parameters: searchParameters,
   },
   async (args, workspace, ctx) =>
@@ -590,7 +691,7 @@ const search = workspaceTool(
         workspace,
         str(args, 'pattern'),
         optionalStr(args, 'path') || '.',
-        ctx.signal,
+        searchOptions(args, ctx),
       ),
     ),
   { readOnly: true },
@@ -634,6 +735,29 @@ export function headAndTail(text: string, budget: number, where: string): string
   return `${text.slice(0, head)}[… ${tail - head} characters cut; ${where} …]\n${text.slice(tail)}`
 }
 
+/** Terminal control sequences: colours, cursor moves, window titles and links. */
+// oxlint-disable-next-line no-control-regex
+const CONTROL = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?<=>]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g
+
+/**
+ * A command's output as a terminal would leave it on screen: no colour codes, and of a line
+ * a progress bar redrew with `\r`, only what it showed last. Meant for a person's screen,
+ * they are noise to the model and cost it as much as the text.
+ */
+export function plainOutput(text: string): string {
+  let plain = text.replace(CONTROL, '')
+  if (plain.includes('\r')) {
+    plain = plain
+      .split('\n')
+      .map((line) => {
+        const parts = line.replace(/\r+$/, '').split('\r')
+        return parts.findLast((part) => part.length > 0) ?? ''
+      })
+      .join('\n')
+  }
+  return plain
+}
+
 /** How much of each stream fits: a short one is kept whole and the other gets the rest. */
 function budgets(stdout: number, stderr: number, max: number): [number, number] {
   if (stdout + stderr <= max) return [stdout, stderr]
@@ -654,7 +778,8 @@ export async function commandResult(
   name: string,
   max: number = MAX_COMMAND_CHARS,
 ): Promise<string> {
-  const { stdout, stderr } = result
+  const stdout = plainOutput(result.stdout)
+  const stderr = plainOutput(result.stderr)
   const [outBudget, errBudget] = budgets(stdout.length, stderr.length, max)
   let where = 'the whole output could not be kept'
   if (outBudget < stdout.length || errBudget < stderr.length) {
@@ -780,12 +905,19 @@ const FIRST_OUTPUT_MS = 2000
 /** The longest read_command_output waits for something new. */
 const MAX_WAIT_SECONDS = 60
 
+/**
+ * What a thread's commands run with unless the project says otherwise: git that would open
+ * an editor (a commit without -m) takes the message as it is, or fails at once, instead of
+ * waiting for an editor nobody sees until the command times out.
+ */
+const COMMAND_ENV: Readonly<Record<string, string>> = { GIT_EDITOR: 'true' }
+
 /** The options a thread's command runs with: where, in what, with which environment. */
 function execOptions(ctx: ToolContext, cwd: string | undefined) {
   return {
     ...(cwd ? { cwd } : {}),
     ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
-    ...(ctx.commands && Object.keys(ctx.commands.env).length ? { env: ctx.commands.env } : {}),
+    env: { ...COMMAND_ENV, ...ctx.commands?.env },
   }
 }
 
@@ -795,7 +927,8 @@ const sameDir = (cwd: string | undefined) =>
 
 /** A background command's state and what it printed since the last look, as the model reads it. */
 function outputText(read: CommandOutput, max: number, how: 'started' | 'read' | 'stopped'): string {
-  const { command, text, missed } = read
+  const { command, missed } = read
+  const text = plainOutput(read.text)
   const state = command.result
     ? command.result.stopped
       ? `${command.id} was stopped (exit code ${command.result.exitCode})`
@@ -1023,7 +1156,7 @@ export const sourceTools: Tool[] = [
   workspaceTool(
     {
       name: 'search',
-      description: `Search the files of the project's source (read-only) for a regular expression; prints matching lines as file:line:text, at most ${MAX_MATCH_LINES}.`,
+      description: `Search the files of the project's source (read-only) for a regular expression: each file with matches, then its matching lines by number, at most ${MAX_MATCH_LINES} lines.`,
       parameters: searchParameters,
     },
     async (args, view, ctx) => fromRef(view, await searchIn(view, args, ctx)),
@@ -1042,7 +1175,12 @@ export const sourceTools: Tool[] = [
 
 async function searchIn(view: SourceView, args: Record<string, unknown>, ctx: ToolContext) {
   return matches(
-    await searchView(view, str(args, 'pattern'), optionalStr(args, 'path') || '.', ctx.signal),
+    await searchView(
+      view,
+      str(args, 'pattern'),
+      optionalStr(args, 'path') || '.',
+      searchOptions(args, ctx),
+    ),
   )
 }
 
