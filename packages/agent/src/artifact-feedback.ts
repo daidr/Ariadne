@@ -1,3 +1,4 @@
+import { documentView } from './document-boards'
 import {
   lineDiff,
   type Ariadne,
@@ -156,7 +157,10 @@ export class ArtifactFeedback {
       const diff =
         since.content === artifact.content
           ? null
-          : lineDiff(normalized(since.content), normalized(artifact.content))
+          : lineDiff(
+              documentView(normalized(since.content)).content,
+              documentView(normalized(artifact.content)).content,
+            )
       if (diff) items.push({ kind: 'edit', diff })
     } else if (artifact.kind === 'whiteboard') {
       board = JSON.parse(artifact.content) as WhiteboardContent

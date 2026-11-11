@@ -1,6 +1,13 @@
-import type { ArtifactKind, ArtifactView, DashboardContent, WhiteboardContent } from '@ariadne/core'
+import {
+  PENDING,
+  type ArtifactKind,
+  type ArtifactView,
+  type DashboardContent,
+  type WhiteboardContent,
+} from '@ariadne/core'
 import { SharedArtifacts, type LiveWrite, type Writer } from './shared-artifacts'
 import { applyDocumentEdits, editsSoFar, rewriteSoFar } from './document-writing'
+import { boardSoFar, documentFromView, documentView } from './document-boards'
 import { isOpen } from './partial-json'
 import { anchorWhere } from './artifact-feedback'
 import { OPTION_SCHEMA, placeOptions } from './whiteboard-options'
@@ -200,15 +207,42 @@ const NODE_ID = {
   description: 'The plan node the artifact belongs to, if any.',
 } as const
 
+/**
+ * What a new artifact that still has placeholders asks of the model first: the user sees the
+ * parts being written only while they have it open, so they need its link before, not after.
+ */
+function toFill(artifact: { id: string; title: string }, pending: boolean) {
+  if (!pending) return {}
+  const title = artifact.title.replace(/[[\]]/g, '')
+  return {
+    next: `Unless the user already knows about it, send them its link now, [${title}](artifact:${artifact.id}), in a line, before you fill in the placeholders: they watch your writing land only while they have it open.`,
+  }
+}
+
 // ---- documents ----
 
 const PENDING_HINT =
   'A part you have not written yet can stand as a placeholder, on a line of its own: <pending>what will be here, in a few words</pending>. The user sees it in grey, as an outline of what is coming.'
 
+const BOARD_HINT =
+  'A picture that explains better than words (a flow, an architecture, a mind map) can stand in the document as a whiteboard: a ```whiteboard fence holding {"items": [...], "connectors": [...]}, the same items (rect, ellipse, diamond, sticky, text) and connectors as create_whiteboard, laid out for you; "direction" ("down" or "right") and "relayout": true as there. read_artifact shows each board in the document that way, one item or connector a line, and lists its problems. A fence written again as it was keeps the board as the user left it; a changed fence is the whole board: items and connectors are matched by id, what it leaves out is removed, and the user\'s drawings and images are kept by giving their ids. Keep such a board small, about 10 items.'
+
+/** A version of an artifact; the newest when there is no such version (saving says so). */
+function versionOr(ctx: ToolContext, now: ArtifactView, version: number): ArtifactView {
+  try {
+    return ctx.app.getArtifact(now.id, version)
+  } catch {
+    return now
+  }
+}
+
+/** What looks wrong on the boards in a document, for the model to fix; nothing when none. */
+const boardsProblems = (problems: string[]) => (problems.length ? { problems } : {})
+
 const createDocument: Tool = {
   spec: {
     name: 'create_document',
-    description: `Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; say in one line that it exists. For a long document, create it as its outline first (the title, the headings you are sure of, and a placeholder for each part), then write the parts one at a time with update_document edits: the user watches it fill in instead of waiting for all of it. ${PENDING_HINT}`,
+    description: `Create a document in the project, written in Markdown: a plan, spec, report or notes the user will read and may edit. Long results belong in a document rather than a message; send the user its link once it is created. For a long document, create it as its outline first (the title, the headings you are sure of, and a placeholder for each part), then write the parts one at a time with update_document edits: the user watches it fill in instead of waiting for all of it. ${PENDING_HINT} ${BOARD_HINT}`,
     parameters: {
       type: 'object',
       properties: {
@@ -220,21 +254,27 @@ const createDocument: Tool = {
     },
   },
   run(args, ctx) {
+    const written = documentFromView(str(args, 'content'), '')
     const artifact = ctx.app.createArtifact(ctx.projectId, {
       kind: 'document',
       title: str(args, 'title'),
-      content: str(args, 'content'),
+      content: written.content,
       nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
-    return json({ artifactId: artifact.id, version: artifact.version })
+    return json({
+      artifactId: artifact.id,
+      version: artifact.version,
+      ...boardsProblems(written.problems),
+      ...toFill(artifact, /^[ \t]*<pending>/m.test(str(args, 'content'))),
+    })
   },
 }
 
 const updateDocument: Tool = {
   spec: {
     name: 'update_document',
-    description: `Change a document. With edits, replace parts of it: each "old" is text of the document as read_artifact gives it (a placeholder line, a paragraph, a few lines; it must occur once) and "new" is what goes there; use this to write a part, fill a placeholder or fix a passage. With content, save its full Markdown again, for a change all over; baseVersion is then the version you read, and only what you changed from it is written. Either way the user may be editing it at the same time and their edits stay, and they see your change land as you write it. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text. ${PENDING_HINT}`,
+    description: `Change a document. With edits, replace parts of it: each "old" is text of the document as read_artifact gives it (a placeholder line, a paragraph, a few lines; it must occur once) and "new" is what goes there; use this to write a part, fill a placeholder or fix a passage. With content, save its full Markdown again, for a change all over; baseVersion is then the version you read, and only what you changed from it is written. Either way the user may be editing it at the same time and their edits stay, and they see your change land as you write it. Comments are tied to the text they quote: change a commented passage only when that is what its comment asks, then reply and resolve_artifact_comment, since the comment no longer finds its text. ${PENDING_HINT} ${BOARD_HINT}`,
     parameters: {
       type: 'object',
       properties: {
@@ -266,13 +306,21 @@ const updateDocument: Tool = {
       const now = edits
         ? toChange(ctx, artifactId, 'document')
         : ownArtifact(ctx, artifactId, 'document')
-      const content = edits ? applyDocumentEdits(now.content, args.edits) : str(args, 'content')
-      const artifact = save(ctx, now, content, {
+      const baseVersion = edits ? now.version : baseVersionOf(args)
+      // The boards are matched to the ones in the version the model read.
+      const read = baseVersion === now.version ? now : versionOr(ctx, now, baseVersion)
+      const written = documentFromView(
+        edits
+          ? applyDocumentEdits(documentView(now.content).content, args.edits)
+          : str(args, 'content'),
+        read.content,
+      )
+      const artifact = save(ctx, now, written.content, {
         reason: str(args, 'reason'),
         title: optionalStr(args, 'title'),
-        baseVersion: edits ? now.version : baseVersionOf(args),
+        baseVersion,
       })
-      return json({ artifactId, version: artifact.version })
+      return json({ artifactId, version: artifact.version, ...boardsProblems(written.problems) })
     })
   },
   live: (ctx) =>
@@ -281,8 +329,22 @@ const updateDocument: Tool = {
       'document',
       (args) => args.edits !== undefined || args.content !== undefined,
       (args, open, base) => {
-        if (typeof args.content !== 'string') return editsSoFar(base, args.edits, open)
-        return isOpen(open, 'content') ? rewriteSoFar(base, args.content) : args.content
+        const view = documentView(base).content
+        const edits = Array.isArray(args.edits)
+          ? args.edits.map((edit: unknown) => {
+              const { new: text } = (edit ?? {}) as { new?: unknown }
+              return typeof text === 'string'
+                ? { ...(edit as object), new: boardSoFar(text) }
+                : edit
+            })
+          : args.edits
+        const shown =
+          typeof args.content !== 'string'
+            ? editsSoFar(view, edits, open)
+            : isOpen(open, 'content')
+              ? rewriteSoFar(view, boardSoFar(args.content))
+              : args.content
+        return shown === null ? null : documentFromView(shown, base, true).content
       },
     ),
 }
@@ -408,7 +470,15 @@ const createWhiteboard: Tool = {
       nodeId: nodeIdOf(args),
       author: ctx.conversationId,
     })
-    return json({ artifactId: artifact.id, version: artifact.version, ...problemsOf(board) })
+    return json({
+      artifactId: artifact.id,
+      version: artifact.version,
+      ...problemsOf(board),
+      ...toFill(
+        artifact,
+        items.some((item) => item.kind === PENDING),
+      ),
+    })
   },
 }
 
@@ -639,6 +709,10 @@ const createDashboard: Tool = {
       artifactId: artifact.id,
       version: artifact.version,
       ...dashboardProblemsOf(content),
+      ...toFill(
+        artifact,
+        arrayOf(args, 'widgets').some((widget) => widget.type === PENDING),
+      ),
     })
   },
 }
@@ -746,7 +820,7 @@ const readArtifact: Tool = {
   spec: {
     name: 'read_artifact',
     description:
-      "Read an artifact of the project at its newest version or an older one: a document's Markdown, a whiteboard's items and connectors (drawings and images are listed without their pixels), or a dashboard's widgets and data.",
+      "Read an artifact of the project at its newest version or an older one: a document's Markdown (its whiteboards as ```whiteboard fences of items and connectors), a whiteboard's items and connectors (drawings and images are listed without their pixels), or a dashboard's widgets and data.",
     parameters: {
       type: 'object',
       properties: { artifactId: { type: 'string' }, version: { type: 'integer' } },
@@ -790,11 +864,12 @@ const readArtifact: Tool = {
       const content = JSON.parse(artifact.content) as DashboardContent
       return json({ ...head, content, ...dashboardProblemsOf(content) })
     }
+    const view = documentView(artifact.content)
+    const read = { ...head, content: view.content, ...boardsProblems(view.problems) }
     // Comments are on the newest text; an older version is read without them.
-    if (!newest) return json({ ...head, content: artifact.content })
+    if (!newest) return json(read)
     return json({
-      ...head,
-      content: artifact.content,
+      ...read,
       ...commentsOf(ctx, artifact.id),
       ...roundsOf(ctx, artifact.id),
     })

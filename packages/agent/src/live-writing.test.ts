@@ -423,6 +423,44 @@ describe('documents written where the user watches', () => {
   })
 })
 
+/** A create call's result, with what it asks the model to do next. */
+async function created(name: string, args: Record<string, unknown>) {
+  return JSON.parse((await run(name, args)).content) as { artifactId: string; next?: string }
+}
+
+describe('a new artifact with parts still to write', () => {
+  test('asks for its link to be sent before the placeholders are filled in', async () => {
+    const doc = await created('create_document', {
+      title: '方案 [草稿]',
+      content: '# 方案\n\n<pending>减法清单</pending>',
+    })
+    expect(doc.next).toContain(`[方案 草稿](artifact:${doc.artifactId})`)
+    const board = await created('create_whiteboard', {
+      title: '架构',
+      items: [{ id: 'api', kind: 'pending', text: '服务端' }],
+    })
+    expect(board.next).toContain(`(artifact:${board.artifactId})`)
+    const dashboard = await created('create_dashboard', {
+      title: '周报',
+      widgets: [{ id: 'trend', type: 'pending', props: { text: '等数据' } }],
+    })
+    expect(dashboard.next).toContain(`(artifact:${dashboard.artifactId})`)
+  })
+
+  test('says nothing more when the artifact is written whole', async () => {
+    const doc = await created('create_document', {
+      title: '笔记',
+      content: '# 笔记\n\n文中提到 <pending> 标签。',
+    })
+    expect(doc.next).toBeUndefined()
+    const dashboard = await created('create_dashboard', {
+      title: '周报',
+      widgets: [{ id: 'total', type: 'stat', props: { value: 3 } }],
+    })
+    expect(dashboard.next).toBeUndefined()
+  })
+})
+
 describe('whiteboards and dashboards', () => {
   test("items show one by one as written, outlined under the writer's name", async () => {
     const { artifactId } = await ok('create_whiteboard', {
