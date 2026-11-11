@@ -68,6 +68,9 @@ type FixedKind = 'drawing' | 'image' | 'node'
 const isFixed = (kind: string): kind is FixedKind =>
   kind === 'drawing' || kind === 'image' || kind === 'node'
 
+/** Whether the user drew the node in the editor: the model may move or remove it, not rewrite it. */
+export const userDrawn = (node: WhiteboardNode) => isFixed(kindOf(node))
+
 /** What the model leaves where it is: the user's kinds, and anything inside a frame. */
 const fixedNode = (node: WhiteboardNode) => isFixed(kindOf(node)) || typeof node.parent === 'string'
 

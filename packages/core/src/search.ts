@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite'
-import type { DashboardContent, WhiteboardContent } from './artifact-content'
+import { DOCUMENT_BOARD, type DashboardContent, type WhiteboardContent } from './artifact-content'
 import type { ArtifactKind } from './events'
 import type { Projection } from './store'
 import type { SearchHit } from './views'
@@ -149,13 +149,7 @@ function change(
 /** The words of an artifact a person would look for: its text, not its structure. */
 export function searchTextOf(kind: ArtifactKind, content: string): string {
   try {
-    if (kind === 'whiteboard') {
-      const board = JSON.parse(content) as WhiteboardContent
-      return board.nodes
-        .flatMap((node) => [node.data?.text, node.data?.label])
-        .filter((text): text is string => typeof text === 'string')
-        .join('\n')
-    }
+    if (kind === 'whiteboard') return boardWords(JSON.parse(content) as WhiteboardContent)
     if (kind === 'dashboard') {
       const value = JSON.parse(content) as DashboardContent
       return value.dashboard.widgets
@@ -166,7 +160,21 @@ export function searchTextOf(kind: ArtifactKind, content: string): string {
   } catch {
     return ''
   }
-  return content
+  // A whiteboard in a document is found by its words, not its data.
+  return content.replace(DOCUMENT_BOARD, (fence, body: string) => {
+    try {
+      return boardWords((JSON.parse(body) as { board: WhiteboardContent }).board)
+    } catch {
+      return fence
+    }
+  })
+}
+
+function boardWords(board: WhiteboardContent): string {
+  return board.nodes
+    .flatMap((node) => [node.data?.text, node.data?.label])
+    .filter((text): text is string => typeof text === 'string')
+    .join('\n')
 }
 
 /** At most this many words of a query count; the rest are dropped. */
