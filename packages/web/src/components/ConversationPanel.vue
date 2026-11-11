@@ -1464,6 +1464,11 @@ watch(
   padding: 12px 16px 16px;
 }
 
+/* Right under the list, messages run up to the composer's edge, with no band between. */
+.conversation-list + .conversation-input {
+  padding-top: 0;
+}
+
 .conversation-tools {
   display: flex;
   align-items: center;
