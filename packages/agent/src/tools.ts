@@ -147,7 +147,7 @@ export const sendMessage: Tool = {
   spec: {
     name: 'send_message',
     description:
-      'Send the user a message in your conversation. This is the only way they read what you write: text outside it is not shown. Send to answer, to hand over finished work, or to raise a blocker; never for progress (that is your todo list). Markdown. Images in the workspace show when linked with a path.',
+      'Send the user a message in your conversation. This is the only way they read what you write: text outside it is not shown. Send to answer, to hand over finished work, to raise a blocker, or to point the user at something they can watch while you work; never for step-by-step progress (that is your todo list). Markdown. Images in the workspace show when linked with a path.',
     parameters: {
       type: 'object',
       properties: {
