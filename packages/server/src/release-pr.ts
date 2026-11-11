@@ -30,11 +30,16 @@ export function nextAlpha(version: string): string {
   throw new Error(`not a version this workflow can follow: ${version}`)
 }
 
-/** The notes for a release: one line per commit, newest first, without earlier releases. */
-export function releaseNotes(subjects: string[]): string {
+/**
+ * The notes for a release: one line per commit, newest first, without release commits and
+ * without what an earlier release in `changelog` already listed.
+ */
+export function releaseNotes(subjects: string[], changelog = ''): string {
+  const listed = new Set(changelog.split('\n').map((line) => line.trim()))
   return subjects
     .filter((subject) => subject.trim() && !subject.startsWith(RELEASE_SUBJECT))
     .map((subject) => `- ${subject.trim()}`)
+    .filter((line) => !listed.has(line))
     .join('\n')
 }
 
@@ -93,10 +98,15 @@ function prepare() {
   const json = readFileSync(PACKAGE, 'utf8')
   const current = (JSON.parse(json) as { version?: string }).version
   if (!current) throw new Error('package.json has no version')
-  // The last commit that set the version: the last release, or where versions began.
-  const since = git('log', '-n1', '--format=%H', '-G"version":', '--', 'package.json')
+  // From the release before the last one: a release PR merged before it caught up with master
+  // leaves commits behind the last release that no notes listed yet. What the changelog
+  // already lists is left out.
+  const since = git('log', '-n2', '--format=%H', '-G"version":', '--', 'package.json')
+    .split('\n')
+    .at(-1)!
   const subjects = git('log', '--format=%s', `${since}..HEAD`).split('\n')
-  const notes = releaseNotes(subjects)
+  const changelog = existsSync(CHANGELOG) ? readFileSync(CHANGELOG, 'utf8') : ''
+  const notes = releaseNotes(subjects, changelog)
   if (!notes) {
     output({ changed: 'false', version: current })
     return
@@ -104,7 +114,6 @@ function prepare() {
   const version = nextAlpha(current)
   const date = new Date().toISOString().slice(0, 10)
   writeFileSync(PACKAGE, withVersion(json, version))
-  const changelog = existsSync(CHANGELOG) ? readFileSync(CHANGELOG, 'utf8') : ''
   writeFileSync(CHANGELOG, withRelease(changelog, version, date, notes))
   output({ changed: 'true', version, title: `${RELEASE_SUBJECT}${version}` })
 }

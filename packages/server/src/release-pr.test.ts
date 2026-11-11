@@ -15,6 +15,11 @@ describe('release PR', () => {
       releaseNotes(['新增导出 (#130)', '发布 0.1.0-alpha.1 (#129)', '修复登录 (#128)', '']),
     ).toBe('- 新增导出 (#130)\n- 修复登录 (#128)')
     expect(releaseNotes(['发布 0.1.0-alpha.1 (#129)'])).toBe('')
+    // Commits an earlier release already listed are not listed again.
+    const changelog = '# 更新日志\n\n## 0.1.0-alpha.1 (2026-11-11)\n\n- 修复登录 (#128)\n'
+    expect(releaseNotes(['新增导出 (#130)', '修复登录 (#128)'], changelog)).toBe(
+      '- 新增导出 (#130)',
+    )
   })
 
   test('the changelog grows from the top and each release reads back', () => {

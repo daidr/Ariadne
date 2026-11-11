@@ -10,15 +10,11 @@ on:
     branches: [master]
 
 permissions:
-  contents: write
-  pull-requests: write
-
-concurrency:
-  group: release
-  cancel-in-progress: false
+  contents: read
 
 env:
   UPX_VERSION: 5.0.2
+  UPX_SHA256: ddc2654063fe4dc80d95b420788494e4db078ebb01a650692d623b5a9906e61e
   RELEASE_BRANCH: release/alpha
 
 jobs:
@@ -41,6 +37,14 @@ jobs:
     needs: plan
     if: needs.plan.outputs.publish != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # A newer push replaces the PR anyway. Building and publishing are not in this group, so
+    # a waiting release run is never cancelled by a later push.
+    concurrency:
+      group: release-pr
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
         with:
@@ -80,12 +84,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - name: Install UPX
         run: |
-          curl -fsSL "https://github.com/upx/upx/releases/download/v$UPX_VERSION/upx-$UPX_VERSION-amd64_linux.tar.xz" | tar -xJ -C "$RUNNER_TEMP"
+          curl -fsSL -o "$RUNNER_TEMP/upx.tar.xz" "https://github.com/upx/upx/releases/download/v$UPX_VERSION/upx-$UPX_VERSION-amd64_linux.tar.xz"
+          echo "$UPX_SHA256  $RUNNER_TEMP/upx.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/upx.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/upx-$UPX_VERSION-amd64_linux" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile
       - run: bun run release --target all
@@ -99,10 +107,14 @@ jobs:
   verify:
     needs: build
     strategy:
+      # One system failing leaves the others running, to see every one that fails.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             program: ariadne-linux-x64
+          - os: ubuntu-24.04-arm
+            program: ariadne-linux-arm64
           - os: windows-latest
             program: ariadne-windows-x64.exe
           - os: macos-latest
@@ -121,6 +133,8 @@ jobs:
   publish:
     needs: [plan, verify]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
