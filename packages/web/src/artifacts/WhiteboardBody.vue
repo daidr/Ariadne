@@ -159,6 +159,7 @@ defineExpose({ markedPictures, markHeard })
       :comments="comments ? threads : undefined"
       :author="comments ? me : undefined"
       fit-view
+      :bordered="false"
       class="whiteboard-editor"
       @update:comments="(next: CommentThread[]) => (threads = next)"
       @comment-action="onComment"
