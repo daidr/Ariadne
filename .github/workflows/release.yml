@@ -1,0 +1,156 @@
+# 发版流程（alpha）：
+# - master 有新提交时，把从上次发版到现在的提交写进 release PR（分支 release/alpha），
+#   版本号是下一个 alpha。每次都从 master 重写这个分支。
+# - release PR 合入后，那个提交改了 package.json 的版本号：构建全部平台，
+#   在 Linux、Windows、macOS 上各运行一次自检，再发一个 alpha 预发布版本。
+name: release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+env:
+  UPX_VERSION: 5.0.2
+  UPX_SHA256: ddc2654063fe4dc80d95b420788494e4db078ebb01a650692d623b5a9906e61e
+  RELEASE_BRANCH: release/alpha
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - id: plan
+        run: bun packages/server/src/release-pr.ts plan
+
+  release-pr:
+    needs: plan
+    if: needs.plan.outputs.publish != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # A newer push replaces the PR anyway. Building and publishing are not in this group, so
+    # a waiting release run is never cancelled by a later push.
+    concurrency:
+      group: release-pr
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - id: prepare
+        run: bun packages/server/src/release-pr.ts prepare
+      - if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+        run: |
+          git config user.name daidr
+          git config user.email daidr@daidr.me
+          git checkout -B "$RELEASE_BRANCH"
+          git add package.json CHANGELOG.md
+          git commit -m "$TITLE"
+          git push --force origin "$RELEASE_BRANCH"
+          {
+            echo "合入后构建并发布 \`v$VERSION\`（预发布）。"
+            echo
+            bun packages/server/src/release-pr.ts notes "$VERSION"
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --base master --head "$RELEASE_BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install UPX
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/upx.tar.xz" "https://github.com/upx/upx/releases/download/v$UPX_VERSION/upx-$UPX_VERSION-amd64_linux.tar.xz"
+          echo "$UPX_SHA256  $RUNNER_TEMP/upx.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/upx.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/upx-$UPX_VERSION-amd64_linux" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
+      - run: bun run release --target all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: programs
+          path: dist/release/ariadne-*
+          if-no-files-found: error
+
+  # Programs built for another platform cannot check themselves on the build machine.
+  verify:
+    needs: build
+    strategy:
+      # One system failing leaves the others running, to see every one that fails.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            program: ariadne-linux-x64
+          - os: ubuntu-24.04-arm
+            program: ariadne-linux-arm64
+          - os: windows-latest
+            program: ariadne-windows-x64.exe
+          - os: macos-latest
+            program: ariadne-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: programs
+      - shell: bash
+        run: |
+          chmod +x "${{ matrix.program }}"
+          "./${{ matrix.program }}" --version
+          "./${{ matrix.program }}" self-check
+
+  publish:
+    needs: [plan, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: programs
+          path: programs
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          bun packages/server/src/release-pr.ts notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" programs/* \
+            --prerelease \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --target "$GITHUB_SHA"

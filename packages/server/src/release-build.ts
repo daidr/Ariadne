@@ -81,14 +81,19 @@ const spec = (path: string) => JSON.stringify(path.split(sep).join('/'))
  * The program's entry: every built file is imported as a file, so the compiler puts it in
  * the program, and the map from its address to where the program keeps it goes to the server.
  */
-export function entrySource(dir: string, files: string[], starter: string): string {
+export function entrySource(
+  dir: string,
+  files: string[],
+  starter: string,
+  version: string,
+): string {
   const lines = [`import { runRelease } from ${spec(starter)}`]
   files.forEach((file, i) => {
     lines.push(`import file${i} from ${spec(join(dir, file))} with { type: 'file' }`)
   })
   lines.push('', 'await runRelease({')
   files.forEach((file, i) => lines.push(`  ${JSON.stringify(file)}: file${i},`))
-  lines.push('})', '')
+  lines.push(`}, ${JSON.stringify(version)})`, '')
   return lines.join('\n')
 }
 
@@ -125,7 +130,10 @@ export async function release({ targets, upx }: ReleaseOptions) {
   rmSync(out, { recursive: true, force: true })
   mkdirSync(out, { recursive: true })
   const entry = join(out, 'entry.ts')
-  writeFileSync(entry, entrySource(dist, files, join(import.meta.dirname, 'release.ts')))
+  const { version = '0.0.0' } = (await Bun.file(join(root, 'package.json')).json()) as {
+    version?: string
+  }
+  writeFileSync(entry, entrySource(dist, files, join(import.meta.dirname, 'release.ts'), version))
 
   const host = hostTarget()
   for (const target of targets) {
@@ -147,7 +155,9 @@ export async function release({ targets, upx }: ReleaseOptions) {
       console.info(`${target}: not compressed, UPX does not support macOS`)
     } else if (upxPath) {
       console.info(`compressing ${target}`)
-      await run([upxPath, '--lzma', '-q', outfile])
+      // UPX's default method, not LZMA: about 15% bigger, but the program unpacks itself on
+      // every start, in half a second instead of two and a half.
+      await run([upxPath, '-q', outfile])
     }
     // Only this machine's program can be run here: it must still find its pages.
     if (target === host) await run([outfile, 'self-check'])

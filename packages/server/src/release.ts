@@ -6,11 +6,16 @@ import { embeddedAssets, embedWeb } from './web-assets'
  * the pages come from inside the program, and the page opens by itself like `bun run start`.
  *
  * - `ariadne mcp-stdio <address>`: the tool bridge for agents that only start local programs.
+ * - `ariadne --version`: the version it was built as.
  * - `ariadne self-check`: says whether the pages are in the program, for the build to check
  *   the compressed program still runs.
  */
-export async function runRelease(files: Readonly<Record<string, string>>) {
+export async function runRelease(files: Readonly<Record<string, string>>, version: string) {
   const [command, ...args] = process.argv.slice(2)
+  if (command === '--version' || command === 'version') {
+    console.info(version)
+    return
+  }
   const assets = embeddedAssets(files)
   if (command === STDIO_COMMAND) {
     await stdioBridge(args[0])
