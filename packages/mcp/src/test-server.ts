@@ -133,8 +133,10 @@ if (import.meta.main) {
   const answer = createServer((message) => process.stdout.write(`${JSON.stringify(message)}\n`))
   process.stderr.write('test server ready\n')
   let buffer = ''
+  // One decoder for the stream: a character may be split across chunks.
+  const decoder = new TextDecoder()
   for await (const chunk of Bun.stdin.stream()) {
-    buffer += new TextDecoder().decode(chunk)
+    buffer += decoder.decode(chunk, { stream: true })
     let newline = buffer.indexOf('\n')
     while (newline !== -1) {
       const line = buffer.slice(0, newline)

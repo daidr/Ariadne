@@ -494,7 +494,11 @@ describe('history compaction', () => {
     expect(last.messages[2]?.content).toContain('- [doing] 整理')
     // The summary is the model's own: it is in the trace, not in the chat.
     expect(app.listNotices(project.coordinatorId).map((n) => n.kind)).not.toContain('compacted')
-    expect(JSON.stringify(last.messages)).not.toContain('第 1 份需求')
+    // What the user wrote before the cut stays word for word, beside the notes and only there.
+    const folded = last.messages[1]!.content as string
+    expect(folded).toContain('<user_message')
+    expect(folded).toContain(`第 1 份需求：${'很长的描述。'.repeat(80)}`)
+    expect(JSON.stringify(last.messages.slice(2))).not.toContain('第 1 份需求')
     expect(lastUser(last)).toContain('第 4 份需求')
     // A step is never kept without its results, nor a result without its step.
     for (const [index, message] of last.messages.entries()) {

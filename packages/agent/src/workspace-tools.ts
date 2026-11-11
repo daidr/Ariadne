@@ -15,8 +15,9 @@ import {
   type SourceView,
   type Workspace,
 } from '@ariadne/plugin-sdk'
-import type { CommandOutput } from './background'
+import { BACKGROUND_TIMEOUT_MS, type CommandOutput } from './background'
 import { createHash } from 'node:crypto'
+import { applyHunks, parsePatch, PatchError, type PatchOp } from './apply-patch'
 import { applyEdit } from './edit-match'
 import { commandVerdict, DEFAULT_LIMITS, type Limits } from './limits'
 import { imageType } from './message-images'
@@ -590,6 +591,127 @@ const editFile = workspaceTool(
   },
 )
 
+/** A path a patch may delete: inside the workspace, not git's own files. */
+function deletable(path: string): string {
+  const clean = posix.normalize(path.replace(/\\/g, '/'))
+  if (
+    clean.startsWith('/') ||
+    /^[A-Za-z]:/.test(clean) ||
+    clean.split('/').some((p) => p === '..' || p === '.git')
+  ) {
+    throw new PatchError(`${path}: only a file inside your workspace can be deleted`)
+  }
+  return clean
+}
+
+/** Delete a file of the workspace with the workspace's own shell. */
+async function deleteFile(workspace: Workspace, ctx: ToolContext, path: string): Promise<void> {
+  const shell = ctx.commands?.shellName ?? 'bash'
+  const quoted = quoteFor(shell, path)
+  const command =
+    shell === 'pwsh' || shell === 'powershell'
+      ? `Remove-Item -LiteralPath ${quoted} -Force`
+      : shell === 'cmd'
+        ? `del /f /q ${quoted}`
+        : `rm -f -- ${quoted}`
+  const result = await workspace.exec(command, {
+    signal: ctx.signal,
+    ...(ctx.commands?.shell ? { shell: ctx.commands.shell } : {}),
+  })
+  if (result.exitCode !== 0) {
+    throw new PatchError(`${path} could not be deleted: ${(result.stderr || result.stdout).trim()}`)
+  }
+}
+
+/**
+ * Edit files with a patch, in place of write_file and edit_file, for the models trained on
+ * this format. Every change is worked out before any file is written: a hunk that does not
+ * fit changes nothing.
+ */
+export const applyPatch = workspaceTool(
+  {
+    name: 'apply_patch',
+    description: `Edit files of your workspace with a patch: add, update, move or delete files, several at once. Every hunk is checked before anything is written; if one does not fit, nothing changes. Format:
+*** Begin Patch
+*** Add File: path/new.ts
++every line of the new file, after a +
+*** Update File: path/old.ts
+*** Move to: path/renamed.ts   (optional)
+@@ a line to find first, such as the function the change is in (optional)
+ a line of context, kept
+-a line taken out
++a line put in
+*** Delete File: path/gone.ts
+*** End Patch
+Give about three lines of context around each change; the file's lines are found again even when they differ in spacing.`,
+    parameters: {
+      type: 'object',
+      properties: { input: { type: 'string', description: 'The whole patch.' } },
+      required: ['input'],
+    },
+  },
+  async (args, workspace, ctx) => {
+    const input = str(args, 'input')
+    let ops: PatchOp[]
+    const writes: { path: string; text: string }[] = []
+    const deletes: string[] = []
+    const done: string[] = []
+    try {
+      ops = parsePatch(input)
+      for (const op of ops) {
+        if (op.kind === 'add') {
+          const before = await currentText(workspace, op.path)
+          if (before !== null && changedSince(ctx.conversationId, op.path, before)) {
+            throw new PatchError(
+              `${op.path} changed since you last read or wrote it; read it again and update it instead`,
+            )
+          }
+          writes.push({ path: op.path, text: op.text })
+          done.push(`${before === null ? 'A' : 'M'} ${op.path}`)
+        } else if (op.kind === 'delete') {
+          const path = deletable(op.path)
+          if ((await currentText(workspace, op.path)) === null) {
+            throw new PatchError(`${op.path}: there is no such file to delete`)
+          }
+          deletes.push(path)
+          done.push(`D ${op.path}`)
+        } else {
+          const pending = writes.find((write) => write.path === op.path)
+          const before = pending ? pending.text : await currentText(workspace, op.path)
+          if (before === null) throw new PatchError(`${op.path}: there is no such file to update`)
+          const text = applyHunks(before, op.hunks, op.path)
+          if (op.moveTo && op.moveTo !== op.path) {
+            deletes.push(deletable(op.path))
+            writes.push({ path: op.moveTo, text })
+            done.push(`R ${op.path} -> ${op.moveTo}`)
+          } else {
+            if (pending) pending.text = text
+            else writes.push({ path: op.path, text })
+            done.push(`M ${op.path}`)
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof PatchError) {
+        return { content: `${error.message}. Nothing was changed.`, isError: true }
+      }
+      throw error
+    }
+    for (const write of writes) {
+      await workspace.writeFile(write.path, write.text)
+      noteFile(ctx.conversationId, write.path, write.text)
+    }
+    for (const path of deletes) {
+      if (!writes.some((write) => posix.normalize(write.path) === path))
+        await deleteFile(workspace, ctx, path)
+    }
+    const changed = writes.map((write) => write.path)
+    return {
+      content: `Done:\n${done.join('\n')}${changed.length ? await checkAfterEdit(ctx, workspace, changed) : ''}`,
+    }
+  },
+)
+
 const searchParameters = {
   type: 'object',
   properties: {
@@ -819,7 +941,7 @@ export const outputName = () =>
 export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'): Tool['spec'] {
   return {
     name: 'run_command',
-    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. With "background", the command keeps running (a dev server, a watcher, a long build) and you get a handle at once: read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when you report or are stopped. Only when the user said they want to try the result themselves, start it with "keepForUser": it then stays up after you report ready, until they are done looking. Otherwise show what changed with your report.`,
+    description: `Run a shell command in your workspace (${shell}), e.g. tests, a build, or git. It needs no approval inside the workspace, unless the user's rules ask for it: then the user is asked first, and the result says so. Anything that reaches outside the workspace and cannot be undone (pushing, deploying, deleting outside the workspace) must be confirmed by the user first (post_ui with a confirm block). Output beyond about ${Math.round(limits.commandOutput / 1000)}k characters is cut in the middle and kept whole in a file under ${OUTPUT_DIR}/, which the result names. A command still running after timeoutSeconds goes on in the background and you get a handle; with "background" it does so at once (a dev server, a watcher). Read what it printed with read_command_output, end it with stop_command. Background commands end by themselves when you report or are stopped. Only when the user said they want to try the result themselves, start it with "keepForUser": it then stays up after you report ready, until they are done looking. Otherwise show what changed with your report.`,
     parameters: {
       type: 'object',
       properties: {
@@ -827,7 +949,7 @@ export function runCommandSpec(limits: Limits = DEFAULT_LIMITS, shell = 'bash'):
         cwd: { type: 'string', description: 'Relative to the workspace root.' },
         timeoutSeconds: {
           type: 'integer',
-          description: `Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}. Not for background commands.`,
+          description: `How long to wait for it. Default ${limits.commandTimeout}, at most ${limits.commandTimeoutMax}.`,
         },
         background: { type: 'boolean', description: 'Run it in the background.' },
         keepForUser: {
@@ -961,7 +1083,7 @@ const runCommand: Tool = {
     const seconds = Math.min(limits.commandTimeoutMax, Math.max(1, asked))
     const cwd = optionalStr(args, 'cwd')
     const command = str(args, 'command')
-    const background = optionalBool(args, 'background')
+    const inBackground = optionalBool(args, 'background')
     const gate = commandGate(command, cwd || '.', ctx)
     if (gate) return gate
     const workspace = await ctx.workspace()
@@ -971,7 +1093,7 @@ const runCommand: Tool = {
     const told = (result: ToolResult): ToolResult =>
       setup ? { ...result, content: `${setup}\n\n${result.content}` } : result
     try {
-      if (background) {
+      if (inBackground) {
         if (!ctx.background) {
           return { content: 'Commands cannot run in the background here.', isError: true }
         }
@@ -1026,24 +1148,73 @@ const runCommand: Tool = {
       command,
       cwd: cwd || '.',
     })
+    // Still running when the wait is over, it goes on in the background instead of being
+    // ended: a long build or test run is not lost and run again.
+    const background = ctx.background
+    const canMove = !!background?.hasRoom(ctx.conversationId)
+    const controller = new AbortController()
+    const stop = () => controller.abort('stopped')
+    ctx.signal.addEventListener('abort', stop, { once: true })
+    let printed = ''
+    let moved: ((chunk: string) => void) | null = null
     try {
-      const result = await workspace.exec(command, {
-        timeoutMs: seconds * 1000,
-        signal: ctx.signal,
-        onOutput: (chunk) => live.output(chunk),
+      const running = workspace.exec(command, {
+        timeoutMs: canMove ? BACKGROUND_TIMEOUT_MS : seconds * 1000,
+        signal: controller.signal,
+        onOutput: (chunk) => {
+          if (moved) return moved(chunk)
+          live.output(chunk)
+          printed += chunk
+          if (printed.length > MAX_MOVED_OUTPUT * 1.25) printed = printed.slice(-MAX_MOVED_OUTPUT)
+        },
         ...execOptions(ctx, cwd),
       })
+      const result = canMove ? await waitFor(running, seconds * 1000) : await running
+      if (result === null && background?.hasRoom(ctx.conversationId)) {
+        ctx.signal.removeEventListener('abort', stop)
+        const adopted = background.adopt(
+          ctx.conversationId,
+          command,
+          { ended: running, controller, output: printed },
+          { local: workspace.local, cwd: sameDir(cwd) },
+        )
+        moved = adopted.append
+        // What it printed so far is read here, not again.
+        const read = await background.read(ctx.conversationId, adopted.command.id)
+        const so = read ? outputText(read, limits.commandOutput, 'started') : adopted.command.id
+        return told({
+          content: `It still ran after ${seconds} seconds, so it goes on in the background: ${so}\n[Read on with read_command_output (waitSeconds lets you wait for it), or end it with stop_command.]`,
+        })
+      }
+      const ended = result ?? (await running)
       return told({
-        content: await commandResult(result, workspace, outputName(), limits.commandOutput),
-        isError: result.exitCode !== 0,
+        content: await commandResult(ended, workspace, outputName(), limits.commandOutput),
+        isError: ended.exitCode !== 0,
       })
     } catch (error) {
       if (error instanceof ToolInputError || error instanceof DomainError) throw error
       return { content: error instanceof Error ? error.message : String(error), isError: true }
     } finally {
+      if (!moved) ctx.signal.removeEventListener('abort', stop)
       live.end()
     }
   },
+}
+
+/** What a command moved to the background keeps of what it printed while it was waited on. */
+const MAX_MOVED_OUTPUT = 2_000_000
+
+/** `running`'s result, or `null` when it is still running after `ms`. */
+async function waitFor<T>(running: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((done) => {
+    timer = setTimeout(() => done(null), ms)
+  })
+  try {
+    return await Promise.race([running, late])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Says which background commands there are, when the model named one that is not. */

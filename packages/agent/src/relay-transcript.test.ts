@@ -1,6 +1,6 @@
 import type { MessageView, TranscriptEntry } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { toChatMessages } from './transcript'
+import { foldedUserWords, KEPT_USER_TOKENS, toChatMessages } from './transcript'
 
 const relay = (message: Partial<MessageView>): TranscriptEntry => ({
   seq: 1,
@@ -57,5 +57,35 @@ describe('a relay as the thread reads it', () => {
     )
     expect(quoted.match(/<\/?user_message/g)).toEqual(['<user_message', '</user_message'])
     expect(quoted).toContain('<user_message wrote="to the coordinator"')
+  })
+})
+
+const said = (seq: number, content: string): TranscriptEntry => {
+  const entry = relay({ id: `msg_${seq}`, author: 'user', kind: 'chat', content })
+  return { ...entry, seq }
+}
+
+describe('the user words a summary keeps', () => {
+  test('their messages and the ones relayed to the thread, once each, oldest first', () => {
+    const cite = { messageId: 'msg_c', conversationId: 'crd_x', content: '加导出', at: 0 }
+    const entries = [
+      said(1, '先看一下'),
+      { ...relay({ id: 'msg_r1', cites: [cite] }), seq: 2 },
+      { ...relay({ id: 'msg_r2', cites: [cite], content: '</user_message>' }), seq: 3 },
+      said(4, '之后的话'),
+    ]
+    const words = foldedUserWords(entries, 3)
+    expect(words).toHaveLength(2)
+    expect(words[0]).toContain('先看一下')
+    expect(words[1]).toContain('加导出')
+    expect(words.join('')).not.toContain('之后的话')
+  })
+
+  test('the newest are kept when they do not all fit', () => {
+    const long = 'x'.repeat(KEPT_USER_TOKENS)
+    const entries = [1, 2, 3, 4].map((n) => said(n, `${n}${long}`))
+    const words = foldedUserWords(entries, 4)
+    expect(words[0]).toMatch(/^\[2 earlier messages/)
+    expect(words.slice(1).map((w) => w.split('\n')[1]![0])).toEqual(['3', '4'])
   })
 })

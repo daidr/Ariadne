@@ -7,6 +7,7 @@ import type {
   WorkspaceRequest,
 } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { BACKGROUND_TIMEOUT_MS } from './background'
 import { commandParts, commandVerdict, DEFAULT_LIMITS, type TurnSettings } from './limits'
 import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
@@ -232,8 +233,10 @@ describe('command rules', () => {
       },
     }).idle()
     expect(ran.map((r) => [r.options.shell, r.options.env, r.options.timeoutMs])).toEqual([
-      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, 30_000],
-      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, 90_000],
+      // Waited on for the user's limits (30s, and 90s at most); what still runs then goes on
+      // in the background, so the command itself may run as long as one there.
+      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, BACKGROUND_TIMEOUT_MS],
+      [['zsh', '-c'], { GIT_EDITOR: 'true', CI: '1' }, BACKGROUND_TIMEOUT_MS],
     ])
     const request = model.requests.find((r) => system(r).includes('You are a thread'))!
     const spec = request.tools.find((tool) => tool.name === 'run_command')!

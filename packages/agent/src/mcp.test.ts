@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { McpHub, type McpServerConfig } from './mcp'
-import { canonicalJson, mcpCallPurpose, mcpToolName, mcpTools } from './mcp-tools'
+import {
+  canonicalJson,
+  DIRECT_MCP_TOKENS,
+  mcpCallPurpose,
+  mcpToolName,
+  mcpTools,
+  offeredMcpTools,
+} from './mcp-tools'
 import { Scheduler } from './scheduler'
 import { answered, call, fakeModel, say } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
@@ -122,6 +129,58 @@ describe('external tools', () => {
     const picture = await byName(tools, 'picture').run({}, ctxFor())
     expect(picture.files).toHaveLength(1)
     expect(app.getFile(picture.files![0]!.fileId).mime).toBe('image/png')
+  })
+
+  test('a long output keeps its beginning and end, and a thread gets the whole in its workspace', async () => {
+    const written = new Map<string, string>()
+    const ctx: ToolContext = {
+      ...ctxFor(),
+      workspace: async () =>
+        ({
+          writeFile: async (path: string, text: string) => void written.set(path, text),
+        }) as never,
+    }
+    const long = `开头${'中'.repeat(80_000)}结尾`
+    const echo = byName(await mcpTools(hub, ['test'], 'thread'), 'echo')
+    const result = await echo.run({ text: long }, ctx)
+    expect(result.content.length).toBeLessThan(60_000)
+    expect(result.content).toContain('开头')
+    expect(result.content).toContain('结尾')
+    const path = [...written.keys()].find((p) => p.endsWith('.mcp.txt'))!
+    expect(result.content).toContain(`the whole output is in ${path}`)
+    expect(written.get(path)).toBe(long)
+    // Without a workspace the cut says so.
+    const plain = await echo.run({ text: long }, ctxFor())
+    expect(plain.content).toContain('the rest is not kept')
+  })
+
+  test('many tools are offered as a list, looked up and called by name', async () => {
+    const tools = await mcpTools(hub, ['test'], 'thread')
+    // A few servers' tools go as they are.
+    expect(offeredMcpTools(tools)).toBe(tools)
+    const echo = byName(tools, 'echo')
+    const many = Array.from({ length: 60 }, (_, n) => ({
+      ...echo,
+      spec: {
+        ...echo.spec,
+        name: `mcp__test__t${n}`,
+        description: `Tool ${n} does a thing. ${'More words about it. '.repeat(20)}`,
+      },
+    }))
+    expect(JSON.stringify(many.map((t) => t.spec)).length / 2.5).toBeGreaterThan(DIRECT_MCP_TOKENS)
+    const offered = offeredMcpTools([...tools, ...many])
+    expect(offered.map((t) => t.spec.name)).toEqual(['mcp_describe', 'mcp_call'])
+    const [describing, calling] = offered as [Tool, Tool]
+    expect(calling.spec.description).toContain('From "测试服务":\n- mcp__test__echo')
+    const looked = await describing.run({ names: ['mcp__test__echo', 'nope'] }, ctxFor())
+    expect(looked.content).toContain('"required":["text"]')
+    expect(looked.content).toContain('nope: no such tool.')
+    const called = await calling.run(
+      { name: 'mcp__test__echo', arguments: { text: '你好' } },
+      ctxFor(),
+    )
+    expect(called.content).toMatch(/tool="echo">\n你好\n/)
+    expect((await calling.run({ name: 'nope' }, ctxFor())).isError).toBe(true)
   })
 
   test('a tool to ask about waits for a yes to exactly that call, used once', async () => {
