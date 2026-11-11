@@ -389,6 +389,7 @@ describe('file tools', () => {
         env: {},
         check: 'cat errors.log; exit 1',
       },
+      keepsResults: () => true,
     })
     const edit = tool('edit_file')
     const first = await edit.run({ path: 'a.txt', old: 'one', new: 'two' }, ctx)
@@ -400,6 +401,11 @@ describe('file tools', () => {
     forgetReads(ctx.conversationId)
     const third = await edit.run({ path: 'a.txt', old: 'three', new: 'four' }, ctx)
     expect(third.content).toContain('old error elsewhere')
+    // An agent program cuts its own history: it always gets the output.
+    const program = { ...ctx, conversationId: `${ctx.conversationId}-p`, keepsResults: () => false }
+    await edit.run({ path: 'a.txt', old: 'four', new: 'five' }, program)
+    const again = await edit.run({ path: 'a.txt', old: 'five', new: 'six' }, program)
+    expect(again.content).toContain('old error elsewhere')
   })
 
   test('a loose match shows the lines it wrote', async () => {

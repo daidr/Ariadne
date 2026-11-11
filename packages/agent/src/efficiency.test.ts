@@ -1,7 +1,8 @@
 import { Ariadne } from '@ariadne/core'
 import type { ChatMessage, ModelRequest } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { callGroups, runTurn, WORKING_TOKENS, type ResolvedModel } from './runner'
+import { compactAt } from './compaction'
+import { callGroups, runTurn, type ResolvedModel } from './runner'
 import { call, fakeModel, say } from './test-model'
 import type { Tool } from './tools'
 import { clearedResult, CLEARABLE_CHARS } from './transcript'
@@ -140,6 +141,15 @@ describe('command output', () => {
   })
 })
 
+describe('when to summarise', () => {
+  test('a large context is summarised at the size of a 400k one', () => {
+    expect(compactAt(128_000)).toBe(76_800)
+    expect(compactAt(200_000)).toBe(120_000)
+    expect(compactAt(1_000_000)).toBe(240_000)
+    expect(compactAt(1_000_000, 0.9)).toBe(360_000)
+  })
+})
+
 describe('making room', () => {
   // Each result differs, or the same call coming back would read as going in circles.
   let n = 0
@@ -179,32 +189,6 @@ describe('making room', () => {
         JSON.stringify(before.messages).slice(1, -1),
       )
     }
-  })
-
-  test('a model with a large context clears old results at the working budget', async () => {
-    const huge: Tool = {
-      readOnly: true,
-      spec: { name: 'look', description: '', parameters: { type: 'object', properties: {} } },
-      run: () => ({ content: `${n++}:${'x'.repeat(25_000)}` }),
-    }
-    let summaries = 0
-    let steps = 0
-    const model = fakeModel((request) => {
-      if (!request.tools.length) {
-        summaries++
-        return say('摘要')
-      }
-      const done = steps++
-      if (done < 20) return [call(`c${done}`, 'look', {}), { type: 'finish', reason: 'tool-calls' }]
-      return say('好')
-    })
-    const project = await turn({ ...model, contextTokens: 1_000_000 }, [huge])
-    // Far below the summary's line, which is 600k here: only results were cleared.
-    expect(summaries).toBe(0)
-    expect(app.listTranscript(project.coordinatorId).some((e) => e.kind === 'cleared')).toBe(true)
-    // The size the runner goes by: characters over 2.5.
-    const largest = Math.max(...model.requests.map((r) => JSON.stringify(r.messages).length / 2.5))
-    expect(largest).toBeLessThan(WORKING_TOKENS + 15_000)
   })
 
   test('short results stay when older ones are cleared', async () => {

@@ -179,12 +179,17 @@ export async function searchLines(
   pattern: string,
   path: string,
   searchOptions: SearchOptions = {},
-): Promise<{ lines: string[]; error: string | null }> {
-  const { signal, glob, ignoreCase } = searchOptions
+): Promise<{ lines: string[]; error: string | null; more?: boolean }> {
+  const { signal, ignoreCase } = searchOptions
+  const glob = searchOptions.glob?.trim() || undefined
   const options = { timeoutMs: 30_000, ...(signal ? { signal } : {}) }
   const caseless = ignoreCase ? ['-i'] : []
+  const atRoot = path === '.' || path === '' || path === './'
   let result: ExecResult | null = null
   if (await hasRipgrep(workspace)) {
+    // In a checkout ripgrep leaves out what git ignores, so hidden files are worth
+    // searching (`.github`); elsewhere they are mostly caches and environments.
+    const checkout = await inGit(workspace)
     result = await execArgv(
       workspace,
       [
@@ -193,12 +198,11 @@ export async function searchLines(
         '--no-heading',
         '--color',
         'never',
-        '--hidden',
-        '-g',
-        '!.git',
-        // A glob of a file's name means the same to ripgrep; one with a directory is taken
-        // from the workspace's root below, which ripgrep would read from `path`.
-        ...(glob?.trim() && !glob.includes('/') ? ['-g', glob.trim()] : []),
+        ...(checkout ? ['--hidden', '-g', '!.git'] : []),
+        // A glob of a file's name means the same to ripgrep; one with a directory too when
+        // the search starts at the root, since ripgrep reads it from `path`. Otherwise it is
+        // matched below.
+        ...(glob && (atRoot || !glob.includes('/')) ? ['-g', glob] : []),
         ...caseless,
         '--max-count',
         '50',
@@ -224,7 +228,10 @@ export async function searchLines(
         '-e',
         pattern,
         '--',
-        path,
+        // From the root, git narrows by the glob itself, unless it has braces git lacks.
+        glob && atRoot && !glob.includes('{')
+          ? `:(glob)${glob.includes('/') ? glob.replace(/^\.\//, '') : `**/${glob}`}`
+          : path,
       ],
       options,
     )
@@ -259,7 +266,9 @@ export async function searchLines(
       .filter(Boolean)
       .map((line) => line.replace(/^\.\//, ''))
       .filter(searchFilter(glob))
-    return { lines: capped(lines), error: null }
+    // Output too long for the workspace was cut in the middle: matches may be missing.
+    const cut = /\n\[… \d+ characters cut …\]\n/.test(result.stdout)
+    return { lines: capped(lines), error: null, ...(cut ? { more: true } : {}) }
   }
   return searchByReading(workspace, pattern, path, searchOptions)
 }

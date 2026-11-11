@@ -594,26 +594,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // steps every call has its result, so any cut is whole.
       const estimate = estimateTokens([{ role: 'system', content: systemText }, ...history])
       const size = Math.max(lastInput, estimate)
-      // Well before the summary is due, a model with a large context clears old tool
-      // results once it reads more than a working budget: every step reads all of it again,
-      // and results acted on long ago are mostly what makes it long.
-      const working = Math.min(threshold, WORKING_TOKENS)
-      if (size >= working && size < threshold) {
-        const upTo = compactionCut(transcript, working / 4)
-        if (upTo !== null && upTo > clearedUpTo(transcript)) {
-          const cleared = toChatMessages(transcript, titleOf, { ...chat, clearUpTo: upTo })
-          const after = estimateTokens([{ role: 'system', content: systemText }, ...cleared])
-          // The cache starts over after a clearing: only worth it when it frees enough.
-          if (after < estimate * (1 - MIN_WORKING_CLEARED_SHARE)) {
-            app.clearToolResults(conversationId, turnId, { upTo, sawSeq })
-            forgetReads(conversationId)
-            sawSeq = app.lastSeq()
-            transcript = reader.read()
-            systemText = system()
-            history = toChatMessages(transcript, titleOf, chat)
-          }
-        }
-      } else if (size >= threshold) {
+      if (size >= threshold) {
         const upTo = compactionCut(transcript, threshold / 4)
         let changed = false
         let enough = false
@@ -1037,14 +1018,6 @@ function fingerprint(
 
 /** Steps in a row whose output may hit the length limit before the turn stops. */
 export const MAX_CUTS = 3
-/**
- * What a conversation reads at most before old tool results are cleared, whatever its
- * model's context: past this, rereading them on every step costs more than running a call
- * again when one is needed after all.
- */
-export const WORKING_TOKENS = 120_000
-/** A clearing at the working budget frees at least this share of the input, or waits. */
-const MIN_WORKING_CLEARED_SHARE = 0.3
 /** Clearing old tool results must free at least this share of the input to be worth it. */
 const MIN_CLEARED_SHARE = 0.15
 /**

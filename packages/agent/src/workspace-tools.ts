@@ -256,7 +256,8 @@ async function checkAfterEdit(
   }
   const output = checkOutput(result)
   // Problems that were there before the edit, word for word: said once, not after each edit.
-  if (noteCheckFailure(ctx.conversationId, output)) {
+  // Only for a model that still has the earlier output: an agent program cuts its own history.
+  if (ctx.keepsResults?.() && noteCheckFailure(ctx.conversationId, output)) {
     return `\n[The project's check after edits failed (exit code ${result.exitCode}) with the same output as after your previous edit: ${command}]`
   }
   return `\n[The project's check after edits failed (exit code ${result.exitCode}): ${command}]\n${output}`
@@ -644,10 +645,17 @@ export function groupedMatches(lines: string[]): string {
 }
 
 /** What a search found, as the model reads it. */
-function matches(found: { lines: string[]; error: string | null }): ToolResult {
+function matches(found: { lines: string[]; error: string | null; more?: boolean }): ToolResult {
   if (found.error) return { content: found.error, isError: true }
-  if (!found.lines.length) return { content: 'No matches.' }
-  const more = found.lines.length >= MAX_MATCH_LINES ? '\n[more matches; narrow the search]' : ''
+  if (!found.lines.length) {
+    return {
+      content: found.more
+        ? 'No matches in the part of the output kept; narrow the search.'
+        : 'No matches.',
+    }
+  }
+  const more =
+    found.lines.length >= MAX_MATCH_LINES || found.more ? '\n[more matches; narrow the search]' : ''
   return { content: groupedMatches(found.lines) + more }
 }
 
