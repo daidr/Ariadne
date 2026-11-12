@@ -161,11 +161,13 @@ describe('the prompt a conversation sends', () => {
         true,
       )
     }
-    // The memory went with the result of the call that saved it, once.
+    // The memory is told once, in a message of its own right after the call that saved it.
     const last = sent.at(-1)!.messages
-    const told = last.filter((m) => /<project_memory_[0-9a-f]{12}>/.test(m.content))
-    expect(told).toHaveLength(1)
-    expect(told[0]).toMatchObject({ role: 'tool' })
-    expect(told[0]!.content).toContain('回答用中文')
+    const at = last.findIndex((m) => /<project_memory_[0-9a-f]{12}>/.test(m.content))
+    expect(last.filter((m) => /<project_memory_[0-9a-f]{12}>/.test(m.content))).toHaveLength(1)
+    expect(last[at]).toMatchObject({ role: 'user' })
+    expect(last[at]!.content).toContain('回答用中文')
+    expect(last[at]!.content).toContain('replaces="nothing yet: it is new"')
+    expect(last[at - 1]).toMatchObject({ role: 'tool' })
   })
 })

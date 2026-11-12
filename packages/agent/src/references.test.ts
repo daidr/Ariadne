@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { PluginHost } from './plugins'
 import type { ResolvedModel } from './runner'
 import { Scheduler } from './scheduler'
-import { call, fakeModel, say } from './test-model'
+import { call, lastMessage, fakeModel, say } from './test-model'
 import { localRefusal, remoteRefusal } from './reference-guard'
 import { describeNote } from './transcript'
 import { referenceSecrets, WorkspaceManager } from './workspaces'
@@ -351,7 +351,7 @@ describe('the coordinator adds a reference source', () => {
     })
     const model = fakeModel((request, role) => {
       if (role !== 'coordinator') return say('')
-      const last = request.messages.at(-1)
+      const last = lastMessage(request)
       if (last?.role !== 'tool') return [add, { type: 'finish', reason: 'tool-calls' }]
       if (String(last.content).startsWith('Added')) {
         return [
@@ -394,7 +394,7 @@ describe('the coordinator adds a reference source', () => {
     // Asked for again, it is already there: no second card.
     const again = fakeModel((request, role) => {
       if (role !== 'coordinator') return say('')
-      return request.messages.at(-1)?.role === 'tool'
+      return lastMessage(request)?.role === 'tool'
         ? say('')
         : [add, { type: 'finish', reason: 'tool-calls' }]
     })
@@ -416,7 +416,7 @@ describe('the coordinator adds a reference source', () => {
     let path = '/typo'
     const model = fakeModel((request, role) => {
       if (role !== 'coordinator') return say('')
-      return request.messages.at(-1)?.role === 'tool'
+      return lastMessage(request)?.role === 'tool'
         ? say('')
         : [
             call('c1', 'add_reference', { kind: 'disk', settings: { path } }),
@@ -453,7 +453,7 @@ describe('a thread asks to read a source', () => {
   function asking(keep: 'thread' | 'project') {
     return fakeModel((request, role) => {
       if (role !== 'thread') return say('')
-      const last = request.messages.at(-1)
+      const last = lastMessage(request)
       if (last?.role !== 'tool') {
         return [
           call('c1', 'add_reference', {
@@ -630,7 +630,7 @@ describe('a thread asks to read a source', () => {
     app.setProjectSource(project.id, { kind: 'disk', settings: { path: '/main' } })
     const thread = app.createThread(project.id, { title: 'T' })
     const model = fakeModel((request, role) => {
-      if (role !== 'thread' || request.messages.at(-1)?.role === 'tool') return say('')
+      if (role !== 'thread' || lastMessage(request)?.role === 'tool') return say('')
       return [
         call('c1', 'add_reference', {
           kind: 'disk',

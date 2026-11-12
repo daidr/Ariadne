@@ -470,22 +470,34 @@ export function removedTools(transcript: TranscriptEntry[]): Set<string> {
 }
 
 /** What changed in the instructions or tools, as the model reads it where it happened. */
-export function promptUpdate(entry: PromptEntry): string {
-  const parts = entry.sections.map(([name, text]) =>
-    text.trim()
-      ? `<section name="${name}">\n${text.trim()}\n</section>`
-      : `<section name="${name}">(now empty: what it said no longer applies)</section>`,
-  )
+export function promptUpdate(entry: PromptEntry, before: Map<string, string>): string {
+  const parts = entry.sections.map(([name, text]) => {
+    const was = partOf(before.get(name) ?? '')
+    return text.trim()
+      ? `<section name="${name}" replaces="${was}">\n${text.trim()}\n</section>`
+      : `<section name="${name}" replaces="${was}">(now empty: what it said no longer applies)</section>`
+  })
   const removed = entry.removedTools?.length
     ? [`These tools are no longer offered; do not call them: ${entry.removedTools.join(', ')}.`]
     : []
-  // Named after its content, as the instructions' own blocks are: text in a tool result or
-  // a file cannot pass for one.
+  // Named after its content, as the instructions' own blocks are.
   const block = fenced('system_update', [...parts, ...removed].join('\n'))
   const how = parts.length
-    ? ` Each <section> inside <${block.tag}> replaces the part of your instructions with the same name; the rest stays as it was.`
+    ? ` Each <section> inside <${block.tag}> takes the place of the part of your instructions its "replaces" names; the rest stays as it was.`
     : ''
   return `Ariadne updated your instructions; this is part of them, not a message.${how}\n${block.text}`
+}
+
+/**
+ * The part of the instructions a change replaces, as the model can find it there: by the
+ * block it holds, or else by its first words.
+ */
+function partOf(text: string): string {
+  if (!text.trim()) return 'nothing yet: it is new'
+  const tag = /<([a-z]+(?:_[a-z]+)*)_[0-9a-f]{12}[\s>]/.exec(text)?.[1]
+  if (tag) return `the part with the block ${tag}_…`
+  const words = text.trim().split(/\s+/).slice(0, 8).join(' ').replace(/["<>]/g, '')
+  return `the part beginning ${words}…`
 }
 
 /** Whether a result is long enough to be cleared, see `CLEARABLE_CHARS`. */
@@ -515,7 +527,8 @@ export function toChatMessages(
   const clearedUpTo = Math.max(visible.clearedUpTo, options.clearUpTo ?? -1)
   let open: { ids: string[]; cut: boolean } | null = null
   let held: ModelMessage[] = []
-  let updates: string[] = []
+  // The instructions as the model has read them so far: the base, then each change.
+  const instructions = new Map(latestBase(transcript)?.sections ?? [])
   const results = new Map<string, Extract<TranscriptEntry, { kind: 'tool' }>>()
   for (const entry of entries) if (entry.kind === 'tool') results.set(entry.toolCallId, entry)
 
@@ -536,16 +549,11 @@ export function toChatMessages(
       out.push({
         role: 'tool',
         toolCallId: id,
-        content: (result?.content ?? unknownResult('missing result')) + images.notes,
+        content: asOutside(result?.content ?? unknownResult('missing result')) + images.notes,
         ...(result ? (result.isError ? { isError: true } : {}) : { isError: true }),
         ...(images.shown.length ? { images: images.shown } : {}),
       })
     }
-    const last = out.at(-1)
-    if (updates.length && last?.role === 'tool') {
-      out[out.length - 1] = { ...last, content: `${last.content}\n\n${updates.join('\n\n')}` }
-    } else if (updates.length) out.push({ role: 'user', content: updates.join('\n\n') })
-    updates = []
     if (open.cut) out.push({ role: 'user', content: CUT_HINT })
     open = null
     out.push(...held)
@@ -579,10 +587,13 @@ export function toChatMessages(
         // Changes of the instructions since the newest base, where they happened; an agent
         // program is given its instructions whole each time instead.
         if (entry.base || options.promptUpdates === false || orderKey(entry) < baseAt) break
-        // After a step, the change goes with its last result: it came from that step, and
-        // the step's results are new in this request anyway.
-        if (open) updates.push(promptUpdate(entry))
-        else out.push({ role: 'user', content: promptUpdate(entry) })
+        // A message of its own, never inside a tool result: what a tool returns is outside
+        // text, and text there could be written to look like one (see `asOutside`). After a
+        // step it comes after the step's results.
+        const chat: ModelMessage = { role: 'user', content: promptUpdate(entry, instructions) }
+        if (open) held.push(chat)
+        else out.push(chat)
+        for (const [name, text] of entry.sections) instructions.set(name, text)
         break
       }
       case 'message': {
@@ -636,7 +647,17 @@ export function toChatMessages(
  * close theirs early.
  */
 const defang = (text: string) =>
-  text.replace(/<(\/?)(user_message|message_from_coordinator)/gi, '‹$1$2')
+  asOutside(text).replace(/<(\/?)(user_message|message_from_coordinator)/gi, '‹$1$2')
+
+/**
+ * Text from outside Ariadne (a tool's result, a relayed message) with the name of its
+ * instruction changes broken up, however it is spelled: only Ariadne sends a
+ * <system_update_…>, as a message of its own.
+ */
+export const asOutside = (text: string) =>
+  text.replace(/system[\W_\p{Cf}]*update/giu, (found) =>
+    /^system update$/i.test(found) ? found : 'system update',
+  )
 
 /**
  * What the coordinator sent a thread: the user's messages it passed along, in their own

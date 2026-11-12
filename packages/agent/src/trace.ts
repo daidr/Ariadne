@@ -28,6 +28,8 @@ export interface RecordedCall {
   /** What the user added to the request in the model's settings. */
   maxTokens?: number
   extraBody?: Record<string, unknown>
+  /** An agent program ran the step: it read its instructions whole, not their changes. */
+  program?: boolean
 }
 
 /**
@@ -400,6 +402,7 @@ function requestOf(
       ...toChatMessages(transcript, titleOf, {
         readText,
         images: input.images,
+        ...(call?.program ? { promptUpdates: false } : {}),
         ...(call ? { keepReasoning: writtenBy(app, event.projectId, call) } : {}),
       }),
     ],

@@ -86,6 +86,8 @@ export function callOf(model: ResolvedModel, effort: Effort | null): string {
     model: model.model,
     effort,
     settings,
+    // An agent program is handed its instructions whole each time, see `promptUpdates`.
+    ...(model.provider.program ? { program: true } : {}),
     ...(maxTokens ? { maxTokens } : {}),
     ...(extraBody && Object.keys(extraBody).length ? { extraBody } : {}),
   })

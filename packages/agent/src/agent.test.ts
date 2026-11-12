@@ -3,7 +3,16 @@ import type { ModelStreamPart } from '@ariadne/plugin-sdk'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { compactionCut } from './compaction'
 import { MAX_CUTS, MAX_MODEL_RETRIES, type ResolvedModel } from './runner'
-import { answered, call, fakeModel, lastUser, reminded, say, plain } from './test-model'
+import {
+  answered,
+  call,
+  fakeModel,
+  lastMessage,
+  lastUser,
+  reminded,
+  say,
+  plain,
+} from './test-model'
 import { Scheduler } from './scheduler'
 import { CUT_HINT, toChatMessages, writtenBy } from './transcript'
 import { blockLines } from './ui-tools'
@@ -341,7 +350,7 @@ describe('routines', () => {
   test('the coordinator sets one up when the user asks, and removes it again', async () => {
     const results: string[] = []
     const model = fakeModel((request) => {
-      const last = request.messages.at(-1)
+      const last = lastMessage(request)
       if (last?.role === 'tool') {
         results.push(last.content)
         return say('好了。')
@@ -391,7 +400,7 @@ describe('routines', () => {
     const results: string[] = []
     const model = fakeModel((request, role) => {
       if (role === 'thread') return say('')
-      const last = request.messages.at(-1)
+      const last = lastMessage(request)
       if (last?.role === 'tool') {
         results.push(last.content)
         return say('')
@@ -424,7 +433,7 @@ describe('memory from untrusted input', () => {
     const results: string[] = []
     const model = fakeModel((request, role) => {
       if (role === 'thread') return say('')
-      const last = request.messages.at(-1)
+      const last = lastMessage(request)
       if (last?.role === 'tool') {
         results.push(last.content)
         return say('')
