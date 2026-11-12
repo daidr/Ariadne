@@ -122,4 +122,52 @@ describe('the prompt a conversation sends', () => {
     // The notes keep the todo list as it stood when they were written.
     expect(notes(steps.at(-1)!)?.content).toContain('<state_at_summary>')
   })
+
+  test('when its instructions change, which it reads at the end', async () => {
+    const model = fakeModel((request) => {
+      if (answered(request)) return say('记下了')
+      if (lastUser(request).includes('以后')) {
+        return [
+          call('m1', 'remember', { text: '回答用中文' }),
+          { type: 'finish', reason: 'tool-calls' },
+        ]
+      }
+      return say('好')
+    })
+    scheduler = new Scheduler({
+      app,
+      resolveModel: () => model,
+      locale: () => 'zh-CN',
+      retryBaseMs: 1,
+    })
+    scheduler.start()
+    const project = app.createProject('P')
+    for (const text of ['你好', '以后都用中文回答', '再说一句']) {
+      app.postMessage(project.id, {
+        conversationId: project.coordinatorId,
+        author: 'user',
+        content: text,
+      })
+      await scheduler.idle()
+    }
+    expect(app.listMemories(project.id)).toHaveLength(1)
+
+    const sent = model.requests
+    for (const [index, request] of sent.entries()) {
+      const previous = sent[index - 1]
+      if (!previous) continue
+      expect(JSON.stringify(request.tools)).toBe(JSON.stringify(previous.tools))
+      expect(same(request.messages.slice(0, previous.messages.length), previous.messages)).toBe(
+        true,
+      )
+    }
+    // The memory is told once, in a message of its own right after the call that saved it.
+    const last = sent.at(-1)!.messages
+    const at = last.findIndex((m) => /<project_memory_[0-9a-f]{12}>/.test(m.content))
+    expect(last.filter((m) => /<project_memory_[0-9a-f]{12}>/.test(m.content))).toHaveLength(1)
+    expect(last[at]).toMatchObject({ role: 'user' })
+    expect(last[at]!.content).toContain('回答用中文')
+    expect(last[at]!.content).toContain('replaces="nothing yet: it is new"')
+    expect(last[at - 1]).toMatchObject({ role: 'tool' })
+  })
 })

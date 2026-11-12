@@ -732,6 +732,20 @@ export interface EventMap {
    * the model's order). The log keeps them whole. Decided on the transcript as of `sawSeq`.
    */
   'conversation.results_cleared': { conversationId: string; upTo: number; sawSeq: number }
+  /**
+   * A conversation's instructions (system prompt) and tools as its requests carry them. A
+   * `base` one starts them over: the parts in order, and the tools (hash of their JSON, as
+   * in `StepInput.tools`). Any other names only the parts that changed since, with their
+   * new text, and the tools no longer offered: the model reads it at this point of the
+   * conversation, so the beginning of every request stays the same and its cache holds.
+   */
+  'conversation.prompt_updated': {
+    conversationId: string
+    base: boolean
+    sections: [name: string, text: string][]
+    tools?: string
+    removedTools?: string[]
+  }
   /** Summarising a conversation's history failed; the turn went on with all of it. */
   'conversation.compaction_failed': { conversationId: string; detail: string }
   /**

@@ -68,11 +68,17 @@ export const say = (text: string): ModelStreamPart[] =>
         { type: 'finish', reason: 'stop' },
       ]
 /** The last user input, without the message id the coordinator reads after it. */
+/** A change of the instructions Ariadne told the model, not a message of the conversation. */
+export const isPromptUpdate = (message: ChatMessage) =>
+  message.role === 'user' && message.content.startsWith('Ariadne updated your instructions')
+/** The newest message of the conversation, past the instruction changes told after it. */
+export const lastMessage = (request: ModelRequest) =>
+  request.messages.findLast((m: ChatMessage) => !isPromptUpdate(m))
 export const lastUser = (request: ModelRequest) =>
-  (request.messages.filter((m: ChatMessage) => m.role === 'user').at(-1)?.content ?? '').replace(
-    /\n\n\[message msg_[\w-]+\]$/,
-    '',
-  )
-export const answered = (request: ModelRequest) => request.messages.at(-1)?.role === 'tool'
+  (
+    request.messages.filter((m: ChatMessage) => m.role === 'user' && !isPromptUpdate(m)).at(-1)
+      ?.content ?? ''
+  ).replace(/\n\n\[message msg_[\w-]+\]$/, '')
+export const answered = (request: ModelRequest) => lastMessage(request)?.role === 'tool'
 /** Told to report after a turn that ended without one: scripts that act on new input skip it. */
 export const reminded = (request: ModelRequest) => lastUser(request).includes('<report_missing>')

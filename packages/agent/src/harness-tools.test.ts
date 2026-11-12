@@ -12,7 +12,7 @@ import { commandParts, commandVerdict, DEFAULT_COMMAND_RULES, DEFAULT_LIMITS } f
 import { PluginHost } from './plugins'
 import { Scheduler } from './scheduler'
 import { buildTrace, traceRequest } from './trace'
-import { call, fakeModel, reminded, say, plain } from './test-model'
+import { call, lastMessage, fakeModel, reminded, say, plain } from './test-model'
 import type { Tool, ToolContext } from './tool-helpers'
 import { TOOL_SWITCH_NAMES } from './tools'
 import { forgetReads } from './file-state'
@@ -846,7 +846,7 @@ describe('research', () => {
     app.setProjectSource(project.id, { kind: 'dir', settings: {} })
     const thread = app.createThread(project.id, { title: '调研' })
     const researcher = fakeModel((request) => {
-      if (request.messages.at(-1)?.role === 'tool') return plain('README 只有标题。')
+      if (lastMessage(request)?.role === 'tool') return plain('README 只有标题。')
       return [
         call('r1', 'read_file', { path: 'README.md' }),
         { type: 'finish', reason: 'tool-calls' },
@@ -854,7 +854,7 @@ describe('research', () => {
     })
     const model = fakeModel((request, role) => {
       if (role === 'coordinator' || reminded(request)) return say('')
-      if (request.messages.at(-1)?.role === 'tool') return say('好')
+      if (lastMessage(request)?.role === 'tool') return say('好')
       return [
         call('t1', 'research', { question: 'README 写了什么？' }),
         { type: 'finish', reason: 'tool-calls' },
@@ -919,7 +919,7 @@ describe('a silent request', () => {
       ...model.provider,
       async *stream(_settings, request) {
         // After the message went, the turn ends.
-        if (request.messages.at(-1)?.role === 'tool') {
+        if (lastMessage(request)?.role === 'tool') {
           yield { type: 'finish', reason: 'stop' }
           return
         }

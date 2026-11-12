@@ -136,7 +136,10 @@ export function summaryRequest(
       content: `You summarise the earlier part of a conversation so that the agent having it (the ${role} of an Ariadne project) can carry on from the summary alone. You have no tools; answer with the summary only.`,
     },
     // Images are named in words: the summary is text, and a request full of them is costly.
+    // Changed instructions are not part of what happened: the conversation starts over
+    // from its whole instructions after the summary.
     ...toChatMessages(folded, titleOf, {
+      promptUpdates: false,
       ...(readText ? { readText } : {}),
       ...(keepReasoning ? { keepReasoning } : {}),
     }),
