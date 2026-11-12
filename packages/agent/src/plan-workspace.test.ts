@@ -578,9 +578,12 @@ describe('repository instructions', () => {
     await startScheduler(model, workspaces).idle()
     const threadRequests = model.requests.filter((r) => system(r).includes('You are a thread'))
     // Not before the workspace was opened; then the file, then its new version.
-    expect(system(threadRequests[0]!)).not.toContain('repository_instructions')
-    expect(system(threadRequests[1]!)).toContain('用 bun 跑测试')
-    expect(system(threadRequests[2]!)).toContain('用 bun run check')
+    // Each version reaches the model after the step that found it; the head stays as it was.
+    const said = (request: (typeof threadRequests)[number]) => JSON.stringify(request.messages)
+    expect(said(threadRequests[0]!)).not.toContain('repository_instructions')
+    expect(said(threadRequests[1]!)).toContain('用 bun 跑测试')
+    expect(said(threadRequests[2]!)).toContain('用 bun run check')
+    expect(new Set(threadRequests.map(system)).size).toBe(1)
     expect(JSON.stringify(threadRequests[2]!.messages)).toContain('instructions_changed')
     expect(app.getInstructions(thread.id)?.content).toBe('用 bun run check')
     // The model follows it; the user is not told in the conversation.

@@ -527,7 +527,9 @@ describe('a thread asks to read a source', () => {
     // Its next turn is told about it; the coordinator and other threads are not, and
     // cannot read it by its name.
     const told = model.requests.filter((r) => system(r).includes('You are a thread')).at(-1)!
-    expect(system(told)).toContain('logs: 本地目录 /logs (allowed for this thread only)')
+    expect(JSON.stringify(told.messages)).toContain(
+      'logs: 本地目录 /logs (allowed for this thread only)',
+    )
     const other = app.createThread(project.id, { title: 'Other' })
     await expect(workspaces.referenceView(project.id, 'logs')).rejects.toMatchObject({
       code: 'error.noReference',

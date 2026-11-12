@@ -455,8 +455,10 @@ describe('memory from untrusted input', () => {
     })
     await scheduler!.idle()
     expect(app.listMemories(project.id)).toHaveLength(1)
-    const prompt = model.requests.at(-1)!.messages[0]!.content
-    expect(prompt).toMatch(/<project_memory_[0-9a-f]{12}>/)
+    // The memory reaches the model at the end of the conversation; the head stays as it was.
+    const request = model.requests.at(-1)!
+    expect(request.messages.at(-1)!.content).toMatch(/<project_memory_[0-9a-f]{12}>/)
+    expect(request.messages[0]!.content).toBe(model.requests[0]!.messages[0]!.content)
   })
 })
 

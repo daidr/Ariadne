@@ -1406,7 +1406,7 @@ function upstreamDone(
 /** Failed check runs in a row a thread fixes on its own before it must stop and report. */
 export const MAX_CHECK_ATTEMPTS = 3
 
-export type TranscriptKind = 'message' | 'note' | 'step' | 'tool' | 'summary' | 'cleared'
+export type TranscriptKind = 'message' | 'note' | 'step' | 'tool' | 'summary' | 'cleared' | 'prompt'
 
 /**
  * What each conversation's agent has seen, in order: the model's input is rebuilt from
@@ -2014,6 +2014,23 @@ export const transcriptProjection: Projection = {
         )
         break
       }
+      case 'conversation.prompt_updated':
+        addEntry(
+          db,
+          event,
+          {
+            conversationId: event.data.conversationId,
+            kind: 'prompt',
+            payload: {
+              base: event.data.base,
+              sections: event.data.sections,
+              ...(event.data.tools ? { tools: event.data.tools } : {}),
+              ...(event.data.removedTools?.length ? { removedTools: event.data.removedTools } : {}),
+            },
+          },
+          false,
+        )
+        break
       case 'conversation.results_cleared':
         addEntry(
           db,

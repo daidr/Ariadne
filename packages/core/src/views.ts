@@ -528,6 +528,18 @@ export type TranscriptEntry =
       /** Long tool results up to here (in the model's order) read as a placeholder. */
       upTo: number
     }
+  | {
+      seq: number
+      kind: 'prompt'
+      /** Starts the instructions and tools over; otherwise only what changed since. */
+      base: boolean
+      /** The parts of the instructions, in order on a base, else those that changed. */
+      sections: [name: string, text: string][]
+      /** On a base: hash of the tools' JSON the requests declare from here on. */
+      tools?: string
+      /** Tools offered before and no longer. */
+      removedTools?: string[]
+    }
 
 /** Facts written into a transcript by the system rather than by a person. */
 export type TranscriptNote =

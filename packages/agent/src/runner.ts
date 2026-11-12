@@ -12,7 +12,14 @@ import {
 import type { Locale, LocalizedMessage } from '@ariadne/i18n'
 import type { DashboardSource, SearchProvider } from '@ariadne/plugin-sdk'
 import { createHash } from 'node:crypto'
-import { coordinatorPrompt, reviewerPrompt, threadPrompt, type ThreadContext } from './prompts'
+import {
+  coordinatorSections,
+  joinSections,
+  reviewerSections,
+  threadSections,
+  type PromptSection,
+  type ThreadContext,
+} from './prompts'
 import { besideText } from './review-tools'
 import { loadSkills, SkillSet, type SkillFiles } from './skills'
 import { checkCommand, MAX_REVIEW_ROUNDS } from '@ariadne/core'
@@ -36,7 +43,10 @@ import {
 } from './compaction'
 import {
   attachedText,
+  currentSections,
   keptUserTokens,
+  latestBase,
+  removedTools,
   toChatMessages,
   withImageData,
   writtenBy,
@@ -168,10 +178,10 @@ function systemPrompt(
   references: { name: string; line: string; own?: true }[],
   /** What the review skill has beside it, when it is a folder: told to a reviewer. */
   reviewBeside: string,
-): string {
+): PromptSection[] {
   if (conversation.role === 'coordinator') {
     const project = app.getProject(conversation.projectId)
-    return coordinatorPrompt({
+    return coordinatorSections({
       projectName: project.name,
       unnamed: project.unnamed,
       locale,
@@ -193,7 +203,7 @@ function systemPrompt(
       ? (app.getPlan(project.id).nodes.find((n) => n.id === author.nodeId) ?? null)
       : null
     const skill = skills.review()
-    return reviewerPrompt({
+    return reviewerSections({
       projectName: project.name,
       locale,
       author: {
@@ -218,7 +228,7 @@ function systemPrompt(
       references,
     })
   }
-  return threadPrompt({
+  return threadSections({
     ...threadContext(
       app,
       conversation,
@@ -562,6 +572,70 @@ export async function runTurn(options: TurnOptions): Promise<void> {
     }
     const specs = tools.map((tool) => tool.spec)
     const toolsJson = JSON.stringify(specs)
+    /**
+     * The instructions and tools this step's request carries. They stay as the newest base
+     * recorded them, so the request begins the same as the one before and the provider's
+     * cache holds; what changed since is recorded here and told where it happened (see
+     * `promptUpdate`). They start over when the beginning changes anyway (a summary or
+     * cleared results), when a tool is added or changed (a request cannot declare one
+     * later), or when the changes told add up to more than starting over would cost. An
+     * agent program is given them whole each time: it keeps its own history.
+     */
+    const settlePrompt = () => {
+      const sections = system()
+      if (model.provider.program) {
+        return {
+          system: joinSections(sections),
+          tools: toolsJson,
+          specs,
+          chat: { ...chat, promptUpdates: false },
+        }
+      }
+      const read = reader.read()
+      const base = latestBase(read)
+      const baseTools = base?.tools ? app.getPrompt(conversation.projectId, base.tools) : null
+      const declared = new Map(
+        (baseTools ? (JSON.parse(baseTools) as typeof specs) : []).map((spec) => [
+          spec.name,
+          JSON.stringify(spec),
+        ]),
+      )
+      const removed = removedTools(read)
+      const startOver =
+        !base ||
+        !baseTools ||
+        read.some(
+          (entry) => (entry.kind === 'summary' || entry.kind === 'cleared') && entry.seq > base.seq,
+        ) ||
+        specs.some(
+          (spec) => declared.get(spec.name) !== JSON.stringify(spec) || removed.has(spec.name),
+        ) ||
+        updatesSince(read, base.seq) > MAX_PROMPT_UPDATES
+      if (startOver) {
+        app.updatePrompt(conversationId, turnId, { base: true, sections, tools: toolsJson })
+        return { system: joinSections(sections), tools: toolsJson, specs, chat }
+      }
+      const now = new Map(currentSections(read) ?? [])
+      const offered = new Set(specs.map((spec) => spec.name))
+      const changed: PromptSection[] = sections.filter(([name, text]) => now.get(name) !== text)
+      for (const [name, text] of now) {
+        if (text && !sections.some(([other]) => other === name)) changed.push([name, ''])
+      }
+      const gone = [...declared.keys()].filter((name) => !offered.has(name) && !removed.has(name))
+      if (changed.length || gone.length) {
+        app.updatePrompt(conversationId, turnId, {
+          base: false,
+          sections: changed,
+          ...(gone.length ? { removedTools: gone } : {}),
+        })
+      }
+      return {
+        system: joinSections(base.sections),
+        tools: baseTools,
+        specs: JSON.parse(baseTools) as typeof specs,
+        chat,
+      }
+    }
     const reader = transcriptReader(app, conversationId)
     // What can change the workspace's files, and so its instruction file: its own writing
     // tools, and the external ones, which may do anything.
@@ -610,10 +684,11 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       // Everything the request is built from is read in one go, so the input is exactly
       // the log up to `sawSeq` plus the pieces recorded with the step: the trace rebuilds
       // it from those.
+      let prompt = settlePrompt()
       let sawSeq = app.lastSeq()
       let transcript = reader.read()
-      let systemText = system()
-      let history = toChatMessages(transcript, titleOf, chat)
+      let systemText = prompt.system
+      let history = toChatMessages(transcript, titleOf, prompt.chat)
       // A long conversation makes room before it outgrows the model's context. Between
       // steps every call has its result, so any cut is whole.
       const estimate = estimateTokens([{ role: 'system', content: systemText }, ...history])
@@ -677,13 +752,15 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           }
         }
         if (changed) {
+          // The beginning changed anyway: the instructions start over from here as well.
+          prompt = settlePrompt()
           sawSeq = app.lastSeq()
           transcript = reader.read()
-          systemText = system()
-          history = toChatMessages(transcript, titleOf, chat)
+          systemText = prompt.system
+          history = toChatMessages(transcript, titleOf, prompt.chat)
         }
       }
-      const input = { system: systemText, tools: toolsJson }
+      const input = { system: systemText, tools: prompt.tools }
       const messages = withImageData(
         [{ role: 'system' as const, content: input.system }, ...history],
         loadImage,
@@ -697,7 +774,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
           {
             model: model.model,
             messages,
-            tools: specs,
+            tools: prompt.specs,
             ...(model.effort ? { effort: model.effort } : {}),
             ...requestExtras(model),
             conversation: conversationId,
@@ -1148,4 +1225,20 @@ function currentState(app: Ariadne, conversation: ConversationView): string {
 /** The scheduler aborts with `interrupted` on shutdown and `cancelled` when the user stops. */
 function abortOutcome(signal: AbortSignal): 'cancelled' | 'interrupted' {
   return signal.reason === 'interrupted' ? 'interrupted' : 'cancelled'
+}
+
+/**
+ * Past this many characters of changed instructions told since the newest base, they start
+ * over instead: each change stays in the conversation, and many outweigh one fresh start.
+ */
+const MAX_PROMPT_UPDATES = 40_000
+
+/** How much changed instructions the conversation was told since the base at `seq`. */
+function updatesSince(transcript: TranscriptEntry[], seq: number): number {
+  let size = 0
+  for (const entry of transcript) {
+    if (entry.kind !== 'prompt' || entry.base || entry.seq < seq) continue
+    for (const [, text] of entry.sections) size += text.length
+  }
+  return size
 }

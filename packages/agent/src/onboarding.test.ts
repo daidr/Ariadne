@@ -74,8 +74,15 @@ describe('a project started from one message', () => {
     })
     await scheduler!.idle()
     const later = model.requests.at(-1)!
-    expect(toolNames(later)).not.toContain('name_project')
-    expect(later.messages[0]?.content).toContain('周报 生成器')
+    // The tool stays declared so the head is unchanged; the model is told it is gone, and the
+    // new name, at the end.
+    expect(later.messages[0]?.content).toBe(first!.messages[0]?.content)
+    const updates = later.messages
+      .filter((m) => m.content.includes('<system_update_'))
+      .map((m) => m.content)
+      .join('\n')
+    expect(updates).toMatch(/no longer offered; do not call them: name_project/)
+    expect(updates).toContain('周报 生成器')
   })
 
   test('a project the user named has no naming tool', async () => {

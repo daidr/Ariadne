@@ -188,7 +188,9 @@ export function visibleHistory(entries: TranscriptEntry[]): {
     if (entry.kind === 'summary') latest = entry
     else if (entry.kind === 'cleared') clearedUpTo = Math.max(clearedUpTo, entry.upTo)
   }
-  const rest = entries.filter((entry) => entry.kind !== 'summary' && entry.kind !== 'cleared')
+  const rest = entries.filter(
+    (entry) => entry.kind !== 'summary' && entry.kind !== 'cleared' && !isBase(entry),
+  )
   if (!latest) {
     return {
       summary: null,
@@ -419,6 +421,71 @@ export interface ChatOptions {
   keepReasoning?: (call: string) => boolean
   /** Read the long tool results up to here as cleared, as if a clearing said so. */
   clearUpTo?: number
+  /**
+   * Whether changes of the instructions are told where they happened (the default), for a
+   * request whose instructions are the newest base's.
+   */
+  promptUpdates?: boolean
+}
+
+type PromptEntry = Extract<TranscriptEntry, { kind: 'prompt' }>
+
+const isBase = (entry: TranscriptEntry): entry is PromptEntry =>
+  entry.kind === 'prompt' && entry.base
+
+/** The newest base of a conversation's instructions and tools; `null` before the first. */
+export function latestBase(transcript: TranscriptEntry[]): PromptEntry | null {
+  let latest: PromptEntry | null = null
+  for (const entry of transcript)
+    if (isBase(entry) && (!latest || entry.seq > latest.seq)) latest = entry
+  return latest
+}
+
+/**
+ * The instructions as they stand now: the newest base with every change since applied, in
+ * the base's order (a part that was not in it goes last). `null` before the first base.
+ */
+export function currentSections(transcript: TranscriptEntry[]): PromptEntry['sections'] | null {
+  const base = latestBase(transcript)
+  if (!base) return null
+  const sections = new Map(base.sections)
+  for (const entry of inModelOrder(transcript)) {
+    if (entry.kind !== 'prompt' || entry.base || entry.seq < base.seq) continue
+    for (const [name, text] of entry.sections) sections.set(name, text)
+  }
+  return [...sections]
+}
+
+/** Tools offered since the newest base and then taken away, by name. */
+export function removedTools(transcript: TranscriptEntry[]): Set<string> {
+  const base = latestBase(transcript)
+  const removed = new Set<string>()
+  if (!base) return removed
+  for (const entry of transcript) {
+    if (entry.kind === 'prompt' && !entry.base && entry.seq > base.seq) {
+      for (const name of entry.removedTools ?? []) removed.add(name)
+    }
+  }
+  return removed
+}
+
+/** What changed in the instructions or tools, as the model reads it where it happened. */
+export function promptUpdate(entry: PromptEntry): string {
+  const parts = entry.sections.map(([name, text]) =>
+    text.trim()
+      ? `<section name="${name}">\n${text.trim()}\n</section>`
+      : `<section name="${name}">(now empty: what it said no longer applies)</section>`,
+  )
+  const removed = entry.removedTools?.length
+    ? [`These tools are no longer offered; do not call them: ${entry.removedTools.join(', ')}.`]
+    : []
+  // Named after its content, as the instructions' own blocks are: text in a tool result or
+  // a file cannot pass for one.
+  const block = fenced('system_update', [...parts, ...removed].join('\n'))
+  const how = parts.length
+    ? ` Each <section> inside <${block.tag}> replaces the part of your instructions with the same name; the rest stays as it was.`
+    : ''
+  return `Ariadne updated your instructions; this is part of them, not a message.${how}\n${block.text}`
 }
 
 /** Whether a result is long enough to be cleared, see `CLEARABLE_CHARS`. */
@@ -432,6 +499,7 @@ export function toChatMessages(
 ): ModelMessage[] {
   const visible = visibleHistory(transcript)
   const { entries } = visible
+  const baseAt = latestBase(transcript)?.seq ?? -1
   const keep = (call: string | null) =>
     !options.keepReasoning || (call !== null && options.keepReasoning(call))
   const out: ModelMessage[] = visible.summary
@@ -447,6 +515,7 @@ export function toChatMessages(
   const clearedUpTo = Math.max(visible.clearedUpTo, options.clearUpTo ?? -1)
   let open: { ids: string[]; cut: boolean } | null = null
   let held: ModelMessage[] = []
+  let updates: string[] = []
   const results = new Map<string, Extract<TranscriptEntry, { kind: 'tool' }>>()
   for (const entry of entries) if (entry.kind === 'tool') results.set(entry.toolCallId, entry)
 
@@ -472,6 +541,11 @@ export function toChatMessages(
         ...(images.shown.length ? { images: images.shown } : {}),
       })
     }
+    const last = out.at(-1)
+    if (updates.length && last?.role === 'tool') {
+      out[out.length - 1] = { ...last, content: `${last.content}\n\n${updates.join('\n\n')}` }
+    } else if (updates.length) out.push({ role: 'user', content: updates.join('\n\n') })
+    updates = []
     if (open.cut) out.push({ role: 'user', content: CUT_HINT })
     open = null
     out.push(...held)
@@ -501,6 +575,16 @@ export function toChatMessages(
       case 'cleared':
         // A result is emitted with its step, in call order; summaries are handled above.
         break
+      case 'prompt': {
+        // Changes of the instructions since the newest base, where they happened; an agent
+        // program is given its instructions whole each time instead.
+        if (entry.base || options.promptUpdates === false || orderKey(entry) < baseAt) break
+        // After a step, the change goes with its last result: it came from that step, and
+        // the step's results are new in this request anyway.
+        if (open) updates.push(promptUpdate(entry))
+        else out.push({ role: 'user', content: promptUpdate(entry) })
+        break
+      }
       case 'message': {
         const { message } = entry
         let chat: ModelMessage

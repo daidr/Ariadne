@@ -145,7 +145,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 65
+export const PROJECTION_VERSION = 66
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes
@@ -1323,6 +1323,9 @@ export class Ariadne {
         case 'cleared':
           entries.push({ seq: row.seq, kind: 'cleared', ...payload })
           break
+        case 'prompt':
+          entries.push({ seq: row.seq, kind: 'prompt', ...payload })
+          break
       }
     }
     return entries
@@ -1358,6 +1361,32 @@ export class Ariadne {
         data: { conversationId, upTo: clearing.upTo, sawSeq: clearing.sawSeq },
       },
     ])
+  }
+
+  /**
+   * Record a conversation's instructions and tools as its requests carry them from now on,
+   * during one of its turns: from scratch (`base`, with the tools' JSON), or what changed.
+   */
+  updatePrompt(
+    conversationId: string,
+    turnId: string,
+    update: {
+      base: boolean
+      sections: [name: string, text: string][]
+      tools?: string
+      removedTools?: string[]
+    },
+  ): void {
+    const projectId = this.runningTurn(conversationId, turnId)
+    const { pieces, keep } = this.promptKeeper(projectId)
+    const data = {
+      conversationId,
+      base: update.base,
+      sections: update.sections,
+      ...(update.tools ? { tools: keep(update.tools) } : {}),
+      ...(update.removedTools?.length ? { removedTools: update.removedTools } : {}),
+    }
+    this.store.append([...pieces, { type: 'conversation.prompt_updated', projectId, data }])
   }
 
   /**
