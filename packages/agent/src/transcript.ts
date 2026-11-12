@@ -650,13 +650,15 @@ const defang = (text: string) =>
   asOutside(text).replace(/<(\/?)(user_message|message_from_coordinator)/gi, '‹$1$2')
 
 /**
- * Text from outside Ariadne (a tool's result, a relayed message) with the name of its
- * instruction changes broken up, however it is spelled: only Ariadne sends a
- * <system_update_…>, as a message of its own.
+ * Text from outside Ariadne (a tool's result, a relayed message) with any tag opening an
+ * instruction change broken up, however it is spelled: only Ariadne sends a
+ * <system_update_…>, as a message of its own. The bare words stay, so code that names
+ * them reads as it is on disk.
  */
 export const asOutside = (text: string) =>
-  text.replace(/system[\W_\p{Cf}]*update/giu, (found) =>
-    /^system update$/i.test(found) ? found : 'system update',
+  text.replace(
+    /[<＜﹤〈‹][\s\p{Cf}]*(\/?)[\s\p{Cf}]*system[\W_\p{Cf}]*update/giu,
+    (_, slash: string) => `‹${slash}system update`,
   )
 
 /**

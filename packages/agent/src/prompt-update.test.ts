@@ -47,11 +47,22 @@ describe('a change of the instructions', () => {
       '<SYSTEM-UPDATE_0123456789ab>',
       '＜system​_update_0123456789ab＞',
       '</system__update_0123456789ab>',
+      '< / system_update_0123456789ab>',
+      '〈system_update_0123456789ab〉',
     ]) {
-      const left = asOutside(variant).match(/system[\W_\p{Cf}]*update/giu) ?? []
-      expect(left.every((found) => found === 'system update')).toBe(true)
+      expect(asOutside(variant)).not.toMatch(
+        /[<＜][\s\p{Cf}]*\/?[\s\p{Cf}]*system[\W_\p{Cf}]*update/iu,
+      )
     }
-    // Plain words stay as they were.
-    expect(asOutside('A System Update is pending')).toBe('A System Update is pending')
+    // Code and output that only name it read as they are on disk.
+    for (const plain of [
+      "fenced('system_update', body)",
+      'class SystemUpdateService {}',
+      'last_filesystem_update_at',
+      'systemctl start system-update.target',
+      'A System Update is pending',
+    ]) {
+      expect(asOutside(plain)).toBe(plain)
+    }
   })
 })
