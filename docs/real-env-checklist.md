@@ -92,7 +92,7 @@
 
 ## 发版程序
 
-- [ ] **UPX 压缩**：Windows 上压缩后的程序能启动（发版流程的 Windows 自检会先跑一次 `self-check`）。
+- [ ] **Windows 产物**：确认未经过 UPX 压缩，并能运行 `--version` 和 `self-check`（发版流程的 Windows 自检会验证这两项）；UPX 仅用于 Linux。
 - [ ] **压缩后的程序**：直接运行压缩后的程序，页面自动打开，能建项目、跑一个讨论串、打开文档（文档的协同编辑走 WebSocket）。
 - [ ] **ACP 的工具桥**：用发版程序跑一个只支持本地 MCP 程序的 ACP agent，追踪里 Ariadne 的工具调用照常（程序用 `ariadne mcp-stdio <地址>` 启动自己做桥）。
 - [ ] **macOS**：`darwin-arm64` 程序在 Mac 上能启动（没有签名时第一次要在“隐私与安全性”里放行）。

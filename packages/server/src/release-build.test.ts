@@ -2,9 +2,16 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { entrySource, hostTarget, listFiles, parseArgs, TARGETS } from './release-build'
+import { entrySource, hostTarget, listFiles, packs, parseArgs, TARGETS } from './release-build'
 
 describe('release build', () => {
+  test('UPX only packs Linux, including in mixed-platform builds', () => {
+    expect(TARGETS.filter(packs)).toEqual(['linux-x64', 'linux-arm64'])
+    expect(parseArgs(['--target', 'windows-x64']).targets.some(packs)).toBe(false)
+    const options = parseArgs(['--target', 'linux-x64,windows-x64', '--no-upx'])
+    expect(options.upx && options.targets.some(packs)).toBe(false)
+  })
+
   test('targets: this machine by default, a list, or all', () => {
     expect(parseArgs([])).toEqual({ targets: [hostTarget()], upx: true })
     expect(parseArgs(['--target', 'linux-x64,windows-x64', '--no-upx'])).toEqual({

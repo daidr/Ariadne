@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path'
 /**
  * `bun run release`: one program per platform with the pages inside, in `dist/release/`.
  * Builds the pages, writes an entry that names every built file, compiles it with Bun and
- * compresses the result with UPX.
+ * compresses Linux programs with UPX.
  *
  *   bun run release                      this machine's platform
  *   bun run release --target linux-x64,windows-x64
@@ -112,8 +112,8 @@ function size(path: string): string {
   return `${(statSync(path).size / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** Whether UPX packs this platform's program: never macOS, which would no longer start it. */
-const packs = (target: Target) => !target.startsWith('darwin')
+/** Only Linux: UPX-packed Bun programs can fail to start on Windows and macOS. */
+export const packs = (target: Target) => target.startsWith('linux')
 
 export async function release({ targets, upx }: ReleaseOptions) {
   const needsUpx = upx && targets.some(packs)
@@ -152,7 +152,7 @@ export async function release({ targets, upx }: ReleaseOptions) {
       outfile,
     ])
     if (upx && !packs(target)) {
-      console.info(`${target}: not compressed, UPX does not support macOS`)
+      console.info(`${target}: not compressed, UPX is disabled for this platform`)
     } else if (upxPath) {
       console.info(`compressing ${target}`)
       // UPX's default method, not LZMA: about 15% bigger, but the program unpacks itself on
