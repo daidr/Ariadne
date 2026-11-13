@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.2 (2026-11-13)
+
+- fix: disable UPX for Windows release binaries
+- Merge pull request #126 from daidr/release/alpha
+
 ## 0.1.0-alpha.1 (2026-11-12)
 
 - 系统指令和工具的变化追加到对话末尾，请求开头在一段对话里保持不变 (#132)
