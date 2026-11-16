@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.6 (2026-11-16)
+
+- fix: preserve Codex sessions and streamline conversation status
+- fix: secure files, bound caches and isolate coordinator scheduling
+- fix: prevent project badges from being clipped by long names
+- Merge pull request #136 from daidr/release/alpha
+
 ## 0.1.0-alpha.5 (2026-11-16)
 
 - feat: separate completion from merging and support external delivery
