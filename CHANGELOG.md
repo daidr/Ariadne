@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.3 (2026-11-16)
+
+- feat: add isolated dev sandbox and improve search settings
+- Merge pull request #133 from daidr/release/alpha
+
 ## 0.1.0-alpha.2 (2026-11-13)
 
 - fix: disable UPX for Windows release binaries
