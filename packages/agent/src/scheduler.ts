@@ -16,9 +16,9 @@ export interface SchedulerOptions {
   /** The model for a conversation; `null` when none is configured. Throwing fails the turn. */
   resolveModel(conversation: ConversationView): ResolvedModel | null
   locale(): Locale
-  /** Turns that may run at once. */
+  /** Worker turns that may run at once; coordinators have independent capacity. */
   slots?: number
-  /** Extra slots only a turn answering the user may take, so the user never waits in line. */
+  /** Extra worker slots reserved for turns answering the user. */
   reservedSlots?: number
   /** Input size, in tokens, at which a conversation's older history is summarised. */
   compactAt?: number
@@ -59,13 +59,14 @@ const LOOKED_AT = new Set<string>(['branch.merged', 'pull_request.closed', 'thre
 interface Running {
   controller: AbortController
   projectId: string
+  role: ConversationView['role']
   reserved: boolean
   done: Promise<void>
 }
 
 /**
- * Starts a turn for every conversation with unseen input, within the slot limits, and
- * keeps doing so as events arrive. One turn per conversation at a time.
+ * Workers share the slot limits; coordinators start independently as input arrives.
+ * Every conversation still runs at most one turn at a time.
  */
 export class Scheduler {
   private readonly running = new Map<string, Running>()
@@ -200,7 +201,11 @@ export class Scheduler {
     for (const conversation of app.listPendingConversations()) {
       if (this.stopped) return
       if (this.running.has(conversation.id) || this.held.has(conversation.projectId)) continue
-      const used = [...this.running.values()]
+      if (conversation.role === 'coordinator') {
+        this.launch(conversation, false)
+        continue
+      }
+      const used = [...this.running.values()].filter((running) => running.role !== 'coordinator')
       const general = used.filter((r) => !r.reserved).length
       const reserved = used.length - general
       const cap = capOf(conversation.projectId)
@@ -273,6 +278,7 @@ export class Scheduler {
     this.running.set(conversation.id, {
       controller,
       projectId: conversation.projectId,
+      role: conversation.role,
       reserved,
       done,
     })

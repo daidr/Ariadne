@@ -1,8 +1,9 @@
 import { Ariadne } from '@ariadne/core'
+import type { McpClient } from '@ariadne/mcp'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { McpHub, type McpServerConfig } from './mcp'
 import {
   canonicalJson,
@@ -353,6 +354,106 @@ describe('external tools', () => {
     const env = byName(await mcpTools(hub, ['test'], 'thread'), 'env')
     const result = await env.run({ name: 'SECRET_THING' }, ctxFor())
     expect(result.content).toContain('[secret]')
+  })
+
+  test('removed services release tool metadata; adding the same config does not revive it', async () => {
+    const config = servers[0]!
+    await hub.check(config.id)
+    expect(hub.status()[0]?.tools?.length).toBeGreaterThan(0)
+    servers = []
+    await hub.reconfigure()
+    servers = [config]
+    expect(hub.status()[0]).toMatchObject({ state: 'idle', tools: null, info: null })
+    await hub.check(config.id)
+    await hub.dispose()
+    expect(hub.status()[0]).toMatchObject({ state: 'idle', tools: null, info: null })
+  })
+
+  test('active services retain their current tools after the historical cache expires', async () => {
+    await hub.check(servers[0]!.id)
+    const original = hub.status()[0]!
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6 * 60_000)
+    try {
+      expect(hub.status()[0]).toMatchObject({
+        state: 'ready',
+        tools: original.tools,
+        info: original.info,
+      })
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  test.each(['delete', 'dispose'] as const)(
+    'late tool refresh cannot repopulate metadata after %s',
+    async (action) => {
+      const config = servers[0]!
+      await hub.check(config.id)
+      const connection = (
+        hub as unknown as {
+          connections: Map<string, { client: McpClient; ready: Promise<unknown> }>
+        }
+      ).connections.get(config.id)!
+      const tools = hub.status()[0]!.tools!
+      let finish!: (value: typeof tools) => void
+      vi.spyOn(connection.client, 'listTools').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          }),
+      )
+      // A tools/list_changed notification starts a refresh whose response arrives after teardown.
+      ;(connection.client as unknown as { receive(value: unknown): void }).receive({
+        method: 'notifications/tools/list_changed',
+      })
+      const refreshed = connection.ready
+      if (action === 'delete') {
+        servers = []
+        await hub.reconfigure()
+      } else await hub.dispose()
+      finish(tools)
+      await refreshed
+      servers = [config]
+      expect(hub.status()[0]).toMatchObject({ state: 'idle', tools: null, info: null })
+    },
+  )
+
+  test('historical tool catalogs are bounded and expire; current connections still provide their tools', async () => {
+    const { createServer } = await import('../../mcp/src/test-server')
+    const fetcher = (async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      const out: unknown[] = []
+      createServer((message) => out.push(message))(body)
+      if (!('id' in body)) return new Response(null, { status: 202 })
+      return Response.json(out[0])
+    }) as typeof fetch
+    await hub.dispose()
+    hub = new McpHub({ servers: () => servers, env: () => ({}), fetch: fetcher })
+    servers = []
+    for (let i = 0; i < 40; i++) {
+      const config = testServer({
+        id: 'http-' + i,
+        transport: 'http',
+        url: 'http://mcp.invalid',
+        command: undefined,
+        args: undefined,
+        env: undefined,
+      })
+      servers.push(config)
+      expect((await hub.check(config.id))?.state).toBe('ready')
+    }
+    // The cache is separate from configured live connections, whose tool lists must remain available.
+    const cache = (hub as unknown as { lastTools: { size: number } }).lastTools
+    expect(cache.size).toBe(32)
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 6 * 60_000)
+    try {
+      expect(
+        hub.status().every((status) => status.state === 'ready' && status.tools!.length > 0),
+      ).toBe(true)
+      expect(cache.size).toBe(0)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   test('a turn offers the tools and records what they return', async () => {

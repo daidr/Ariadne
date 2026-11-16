@@ -5,7 +5,8 @@ import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
 import { openThreadFrom, state } from '../store'
-import { askLinkSummary, linkSummary } from './link-summaries'
+import { linkSummary } from './link-summaries'
+import type { LinkSummary } from '@ariadne/plugin-sdk'
 import { fileSrc, innerLink } from './links'
 import PullRequestLink from './PullRequestLink.vue'
 import { useOpenView } from '../opened-from'
@@ -39,12 +40,22 @@ const artifact = computed(() =>
 const image = computed(() => (inner.value?.kind === 'file' ? fileSrc(inner.value.id) : null))
 const viewing = ref(false)
 
+const summary = ref<LinkSummary | null>(null)
 watch(
   () => (props.external && props.href?.startsWith('https://') ? props.href : null),
-  (url) => url && askLinkSummary(url),
+  (url, _before, cleanup) => {
+    summary.value = null
+    let current = true
+    cleanup(() => {
+      current = false
+    })
+    if (url)
+      void linkSummary(url).then((value) => {
+        if (current) summary.value = value
+      })
+  },
   { immediate: true },
 )
-const summary = computed(() => (props.href ? linkSummary(props.href) : null))
 
 function open(event?: MouseEvent) {
   if (thread.value) openThreadFrom(event, thread.value.id)

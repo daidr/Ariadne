@@ -56,6 +56,7 @@ import {
 import { checkModel, suggestModel, type ModelCheck } from './model-check'
 import { ModelCatalog, type ModelInfo } from './prices'
 import { ThreadSync } from './thread-sync'
+import { fileSessionCookie, fileSessionValid } from './file-auth'
 import type { WebAssets } from './web-assets'
 
 /** A directory listing gives up after this long. */
@@ -1532,7 +1533,11 @@ export function createHandler({
     const given = request.headers.get('last-event-id') ?? url.searchParams.get('afterSeq')
     const afterSeq = given === null ? app.lastSeq() : Number(given)
     if (!Number.isInteger(afterSeq) || afterSeq < 0) throw new BadRequest('afterSeq')
-    return eventStream(app, { afterSeq, projectId: url.searchParams.get('projectId') })
+    return eventStream(app, {
+      afterSeq,
+      projectId: url.searchParams.get('projectId'),
+      signal: request.signal,
+    })
   })
 
   async function serveStatic(url: URL): Promise<Response> {
@@ -1553,17 +1558,15 @@ export function createHandler({
     })
   }
 
-  /**
-   * A file by its address. An `<img>` cannot send the token, so the random id is what
-   * guards it; other sites may not embed it, and it never changes.
-   */
-  function serveFile(id: string): Response {
+  /** File bytes are private API data, authenticated before existence is checked. */
+  function serveFile(id: string, head = false): Response {
     try {
       const file = app.getFile(id)
-      return new Response(new Blob([file.data as Uint8Array<ArrayBuffer>]), {
+      return new Response(head ? null : new Blob([file.data as Uint8Array<ArrayBuffer>]), {
         headers: {
           'content-type': file.mime === 'text/plain' ? 'text/plain; charset=utf-8' : file.mime,
-          'cache-control': 'private, max-age=31536000, immutable',
+          'cache-control': 'private, no-store',
+          'content-length': String(file.data.byteLength),
           'cross-origin-resource-policy': 'same-origin',
           'x-content-type-options': 'nosniff',
           'content-security-policy': "default-src 'none'",
@@ -1576,22 +1579,31 @@ export function createHandler({
 
   return async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    if (url.pathname === '/api/health') return json({ ok: true })
+    if (url.pathname === '/api/health' && request.method === 'GET') return json({ ok: true })
     const file = /^\/api\/files\/(fil_[\w-]+)$/.exec(url.pathname)
-    if (file && request.method === 'GET') return serveFile(file[1]!)
     if (!url.pathname.startsWith('/api/')) return serveStatic(url)
 
     const given = bearer(request, url)
-    if (!given || !sameToken(given, token)) {
+    const authenticated = !!given && sameToken(given, token)
+    const fileRead = !!file && (request.method === 'GET' || request.method === 'HEAD')
+    const fileSession =
+      fileRead && !request.headers.has('authorization') && fileSessionValid(request, url, token)
+    if (!authenticated && !fileSession) {
       return errorResponse({ key: 'error.unauthorized' }, 401)
     }
+    if (fileRead) return serveFile(file[1]!, request.method === 'HEAD')
 
     for (const route of routes) {
       if (route.method !== request.method) continue
       const match = route.pattern.exec(url)
       if (!match) continue
       try {
-        return await route.handle(request, match.pathname.groups as Params, url)
+        const response = await route.handle(request, match.pathname.groups as Params, url)
+        // Native images in messages, documents and whiteboards cannot send bearer headers.
+        // Their cookie authorizes only GET/HEAD on /api/files/, never the rest of the API.
+        response.headers.append('set-cookie', fileSessionCookie(url, token))
+        response.headers.set('cache-control', 'no-store')
+        return response
       } catch (error) {
         return toErrorResponse(error)
       }

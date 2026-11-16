@@ -131,7 +131,12 @@ function queryString(values: Record<string, string | undefined>): string {
   return text ? `?${text}` : ''
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
   // A file goes as it is, with its own type; anything else as JSON.
   const raw = body instanceof Blob
@@ -139,6 +144,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const response = await fetch(path, {
     method,
     headers,
+    ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
   })
   if (response.status === 204) return undefined as T
@@ -237,7 +243,7 @@ export interface PluginRecord {
   }
 }
 
-/** How many turns run at once, plus those kept for answering the user. */
+/** Worker turns that run at once, plus reserved worker replies; coordinators are independent. */
 export interface Concurrency {
   slots: number
   reserved: number
@@ -788,10 +794,12 @@ export const api = {
     request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
   listArtifacts: (projectId: string) =>
     request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
-  getArtifact: (id: string, version?: number) =>
+  getArtifact: (id: string, version?: number, signal?: AbortSignal) =>
     request<ArtifactDetail>(
       'GET',
       `/api/artifacts/${id}${version === undefined ? '' : `?version=${version}`}`,
+      undefined,
+      signal,
     ),
   createArtifact: (projectId: string, input: { kind: ArtifactKind; title: string }) =>
     request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),
@@ -832,12 +840,14 @@ export const api = {
       `/api/artifacts/${id}/comments`,
       action,
     ),
-  summarizeLinks: (urls: string[]) =>
-    request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }),
-  previewLink: (url: string) =>
+  summarizeLinks: (urls: string[], signal?: AbortSignal) =>
+    request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }, signal),
+  previewLink: (url: string, signal?: AbortSignal) =>
     request<{ preview: LinkPreview | null }>(
       'GET',
       `/api/links/preview?url=${encodeURIComponent(url)}`,
+      undefined,
+      signal,
     ),
 }
 

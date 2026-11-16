@@ -41,8 +41,8 @@ export const fileUrl = (id: string) => `/api/files/${id}`
 /**
  * Files people add, such as images pasted on a whiteboard. They are kept beside the event
  * log, not in it, and are never dropped: a rebuild of the projections keeps them, and old
- * versions still point at them. The id is random so its address can be loaded without the
- * token (an `<img>` cannot send one) yet cannot be guessed.
+ * versions still point at them. Random ids identify files; the API separately authenticates
+ * every read, including native images loaded through a file-only session cookie.
  */
 export function setupFiles(db: Database): void {
   db.run(`CREATE TABLE IF NOT EXISTS files (

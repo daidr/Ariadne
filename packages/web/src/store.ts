@@ -41,6 +41,8 @@ import {
 } from './api'
 import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
+import { clearBoardThumbnails } from './artifacts/board-thumbnail'
+import { clearLinkCaches } from './markdown/link-summaries'
 
 /** What the middle column shows. */
 export type MainView =
@@ -528,6 +530,8 @@ export async function openMessage(conversationId: string, messageId: string) {
 }
 
 export async function openProject(id: string) {
+  clearBoardThumbnails()
+  clearLinkCaches()
   state.starting = false
   state.currentId = id
   showSide(readSide(id))
@@ -731,6 +735,8 @@ export async function deleteProject(id: string) {
 
 /** Let go of a project that is gone; if it was open, the next one opens. */
 function forgetProject(id: string) {
+  clearBoardThumbnails()
+  clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)
   if (state.currentId !== id) return
   const next = state.projects[0]?.id

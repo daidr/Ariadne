@@ -365,7 +365,7 @@ export const en: Record<MessageKey, string> = {
   'settings.sameAsInput': 'Same as input',
   'settings.priceFill': 'Update from models.dev',
   'settings.showCost': 'Show the estimated cost in usage',
-  'settings.slots': 'Turns at once',
+  'settings.slots': 'Concurrent worker threads',
   'settings.save': 'Save',
   'settings.cancel': 'Cancel',
   'settings.tab.models': 'Models',

@@ -314,18 +314,21 @@ describe('files', () => {
       }),
     )
 
-  test('an uploaded image loads by its address without the token, and only same-site', async () => {
+  test('an uploaded image requires authentication and stays same-origin and uncached', async () => {
     const project = app.createProject('P')
     const response = await upload(project.id, 'image/png')
     expect(response.status).toBe(201)
     const { file } = (await response.json()) as { file: { url: string } }
-    const served = await call(file.url, {}, false)
+    expect((await call(file.url, {}, false)).status).toBe(401)
+    const served = await call(file.url)
     expect(served.status).toBe(200)
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(png)
     expect(served.headers.get('content-type')).toBe('image/png')
     expect(served.headers.get('cross-origin-resource-policy')).toBe('same-origin')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
-    expect((await call('/api/files/fil_nothere', {}, false)).status).toBe(404)
+    expect(served.headers.get('cache-control')).toBe('private, no-store')
+    expect((await call('/api/files/fil_nothere', {}, false)).status).toBe(401)
+    expect((await call('/api/files/fil_nothere')).status).toBe(404)
   })
 
   test('a body sent without a length is refused once it grows too large', async () => {
@@ -386,7 +389,7 @@ describe('attachments', () => {
     expect(response.status).toBe(201)
     const { file } = (await response.json()) as { file: { id: string; url: string; mime: string } }
     expect(file.mime).toBe('text/plain')
-    const served = await call(file.url, {}, false)
+    const served = await call(file.url)
     expect(served.headers.get('content-type')).toBe('text/plain; charset=utf-8')
     expect((await sent('application/octet-stream', new Uint8Array([0, 1, 2]))).status).toBe(400)
 

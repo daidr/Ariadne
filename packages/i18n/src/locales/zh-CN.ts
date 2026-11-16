@@ -352,7 +352,7 @@ export const zhCN = {
   'settings.sameAsInput': '同输入',
   'settings.priceFill': '从 models.dev 更新',
   'settings.showCost': '用量里显示估算花费',
-  'settings.slots': '同时进行的回合',
+  'settings.slots': '同时工作的讨论串',
   'settings.save': '保存',
   'settings.cancel': '取消',
   'settings.tab.models': '模型',

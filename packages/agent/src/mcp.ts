@@ -1,3 +1,4 @@
+import { ExpiringCache } from '@ariadne/core/cache'
 import {
   HttpTransport,
   McpClient,
@@ -115,10 +116,10 @@ export class McpHub {
     string,
     { at: number; count: number; error: string; log: string | null }
   >()
-  private readonly lastTools = new Map<
+  private readonly lastTools = new ExpiringCache<
     string,
     { key: string; tools: McpToolInfo[]; info: ServerInfo | null }
-  >()
+  >(32, 5 * 60_000)
 
   constructor(private readonly options: McpHubOptions) {}
 
@@ -132,7 +133,11 @@ export class McpHub {
       const current = connection?.key === wireKey(config) ? connection : undefined
       const failure = this.failures.get(config.id)
       const last = this.lastTools.get(config.id)
-      const known = last?.key === wireKey(config) ? last : undefined
+      const known = current?.tools
+        ? { tools: current.tools, info: current.client.info }
+        : last?.key === wireKey(config)
+          ? last
+          : undefined
       const state: McpServerState = current
         ? current.tools
           ? 'ready'
@@ -163,6 +168,10 @@ export class McpHub {
       this.failures.delete(id)
     }
     for (const id of this.failures.keys()) if (!servers.has(id)) this.failures.delete(id)
+    for (const id of this.lastTools.keys()) {
+      const config = servers.get(id)
+      if (!config || this.lastTools.peek(id)?.key !== wireKey(config)) this.lastTools.delete(id)
+    }
     await Promise.all(stale.map(([, connection]) => connection.client.close().catch(() => {})))
   }
 
@@ -280,8 +289,10 @@ export class McpHub {
         await client.connect(signal)
         const tools = await client.listTools(signal)
         connection.tools = tools
-        this.lastTools.set(config.id, { key, tools, info: client.info })
-        this.failures.delete(config.id)
+        if (this.connections.get(config.id) === connection) {
+          this.lastTools.set(config.id, { key, tools, info: client.info })
+          this.failures.delete(config.id)
+        }
         return tools
       } finally {
         done()
@@ -302,8 +313,10 @@ export class McpHub {
     client.onToolsChanged(() => {
       if (this.connections.get(config.id) !== connection) return
       connection.ready = list().then((tools) => {
-        connection.tools = tools
-        this.lastTools.set(config.id, { key, tools, info: client.info })
+        if (this.connections.get(config.id) === connection) {
+          connection.tools = tools
+          this.lastTools.set(config.id, { key, tools, info: client.info })
+        }
         return tools
       })
       connection.ready.catch(() => {})
@@ -321,6 +334,8 @@ export class McpHub {
   async dispose(): Promise<void> {
     const all = [...this.connections.values()]
     this.connections.clear()
+    this.lastTools.clear()
+    this.failures.clear()
     await Promise.all(all.map((connection) => connection.client.close().catch(() => {})))
   }
 }
