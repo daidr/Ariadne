@@ -27,7 +27,13 @@ export function splitCommand(line: string): string[] {
     const char = line[i]!
     if (quote) {
       if (char === quote) quote = null
-      else if (char === '\\' && quote === '"' && i + 1 < line.length) word += line[++i]
+      else if (
+        char === '\\' &&
+        quote === '"' &&
+        i + 1 < line.length &&
+        (!windows || line[i + 1] === '"')
+      )
+        word += line[++i]
       else word += char
       continue
     }
@@ -225,12 +231,14 @@ export class AgentProcess {
     ])
     if (windows) {
       if (!exited) {
-        Bun.spawn(['taskkill', '/T', '/F', '/PID', String(proc.pid)], {
+        const killer = Bun.spawn(['taskkill', '/T', '/F', '/PID', String(proc.pid)], {
           stdout: 'ignore',
           stderr: 'ignore',
           stdin: 'ignore',
           windowsHide: true,
         })
+        await killer.exited
+        await proc.exited
       }
     } else {
       try {

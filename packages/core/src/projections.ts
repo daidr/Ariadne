@@ -1199,7 +1199,7 @@ export const conversationsProjection: Projection = {
              cached_tokens = cached_tokens + ?7, cache_write_tokens = cache_write_tokens + ?8,
              reasoning_tokens = reasoning_tokens + ?9,
              cost_usd = cost_usd + ?10, cost_cny = cost_cny + ?11,
-             context_tokens = CASE WHEN ?5 THEN ?2 ELSE context_tokens END,
+             context_tokens = CASE WHEN ?5 THEN ?12 ELSE context_tokens END,
              activity = coalesce(?6, activity)
            WHERE id = ?4`,
           [
@@ -1215,6 +1215,7 @@ export const conversationsProjection: Projection = {
             event.data.usage?.reasoning ?? 0,
             costIn(event.data.usage, 'USD'),
             costIn(event.data.usage, 'CNY'),
+            event.data.usage?.contextInput ?? event.data.usage?.input ?? 0,
           ],
         )
         break

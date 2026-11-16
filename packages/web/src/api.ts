@@ -556,10 +556,12 @@ export const api = {
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   wakeNow: (id: string) => request<void>('POST', `/api/conversations/${id}/wait/now`),
   cancelWait: (id: string) => request<void>('DELETE', `/api/conversations/${id}/wait`),
-  commandOutput: (threadId: string, commandId: string) =>
+  commandOutput: (threadId: string, commandId: string, signal?: AbortSignal) =>
     request<{ command: BackgroundView; tail: string }>(
       'GET',
       `/api/threads/${threadId}/commands/${commandId}`,
+      undefined,
+      signal,
     ),
   stopCommand: (threadId: string, commandId: string) =>
     request<{ command: BackgroundView }>(

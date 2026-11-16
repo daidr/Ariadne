@@ -145,7 +145,7 @@ import type {
  * Bump when a projection's tables or meaning change: on open, a database written with an
  * older version folds the whole log again. The log itself never changes.
  */
-export const PROJECTION_VERSION = 66
+export const PROJECTION_VERSION = 67
 
 /**
  * The purpose of the question the autopilot asks at a milestone, `<this>:<node id>`: a yes

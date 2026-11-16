@@ -811,7 +811,7 @@ export async function runTurn(options: TurnOptions): Promise<void> {
       }
       if (signal.aborted || !answer) break
       const { text, reasoning, toolCalls, usage, timing, cut } = answer
-      lastInput = usage?.input ?? 0
+      lastInput = usage?.contextInput ?? usage?.input ?? 0
       app.recordStep(conversationId, turnId, {
         text,
         reasoning,

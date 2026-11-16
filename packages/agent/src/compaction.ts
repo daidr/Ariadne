@@ -38,6 +38,7 @@ export function usageOf(part: Extract<ModelStreamPart, { type: 'usage' }>): Toke
   return {
     input: part.input,
     output: part.output,
+    ...(part.contextInput !== undefined ? { contextInput: part.contextInput } : {}),
     ...(part.cached ? { cached: part.cached } : {}),
     ...(part.cacheWrite ? { cacheWrite: part.cacheWrite } : {}),
     ...(part.reasoning ? { reasoning: part.reasoning } : {}),

@@ -199,6 +199,8 @@ export type ModelStreamPart =
       type: 'usage'
       input: number
       output: number
+      /** Input of the latest upstream inference, when usage sums multiple inferences. */
+      contextInput?: number
       cached?: number
       cacheWrite?: number
       reasoning?: number

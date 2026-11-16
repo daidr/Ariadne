@@ -1,5 +1,5 @@
 import type { ChatMessage, ModelStreamPart, ToolSpec } from '@ariadne/plugin-sdk'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -64,7 +64,7 @@ async function step(
     tools?: ToolSpec[]
     signal?: AbortSignal
     model?: string
-    effort?: 'low'
+    effort?: 'low' | 'medium'
   } = {},
 ): Promise<Step> {
   const out: Step = { text: '', calls: [], usage: null, reasoning: [], finish: null! }
@@ -273,6 +273,140 @@ describe('claude code', () => {
 })
 
 describe('codex', () => {
+  test('a malformed driver checkpoint rebuilds the complete history instead of sending only the new message', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const store = join(dir, 'fake-session.json')
+    const settings = { command: `${fake('codex')} --store ${store}` }
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'hello' }]
+    await turn(made, settings, messages)
+    await made.dispose()
+    const folder = join(dir, 'checkpoints', 'codex')
+    const path = join(folder, readdirSync(folder)[0]!)
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    saved.driver = {}
+    writeFileSync(path, JSON.stringify(saved))
+    messages.push({ role: 'user', content: 'again' })
+    const [reply] = await turn(provider(codex as AgentKind<never>), settings, messages)
+    expect(reply!.finish.reason).toBe('stop')
+    expect(reply!.text).toMatch(/^turn 1:/)
+    const log = readFileSync(`${store}.jsonl`, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    const injected = log.findLast((item) => item.method === 'thread/inject_items').params.items
+    expect(injected[0].role).toBe('user')
+    expect(injected[0].content[0].text).toBe('hello')
+  })
+  test('models without active effort updates keep the pending call and apply effort next turn', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const settings = { command: `${fake('codex')} --fallback-metadata` }
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'CALL lookup {"key":"a"}' }]
+    const first = await step(made, settings, messages, { effort: 'low' })
+    messages.push({ role: 'assistant', content: first.text, toolCalls: first.calls })
+    messages.push({ role: 'tool', toolCallId: first.calls[0]!.id, content: 'result' })
+    const second = await step(made, settings, messages, { effort: 'medium' })
+    expect(second.finish.reason).toBe('stop')
+    expect(second.text).toMatch(/^turn 1:/)
+    messages.push({ role: 'assistant', content: second.text }, { role: 'user', content: 'again' })
+    const next = await step(made, settings, messages, { effort: 'medium' })
+    expect(next.text).toMatch(/^turn 2:/)
+    expect(next.text).toContain('effort medium')
+  })
+  test('updates effort while the native turn waits on a tool result', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const settings = { command: fake('codex') }
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'CALL lookup {"key":"a"}' }]
+    const first = await step(made, settings, messages, { effort: 'low' })
+    messages.push({ role: 'assistant', content: first.text, toolCalls: first.calls })
+    messages.push({ role: 'tool', toolCallId: first.calls[0]!.id, content: 'result' })
+    const next = await step(made, settings, messages, { effort: 'medium' })
+    expect(next.text).toMatch(/^turn 1:/)
+    expect(next.text).toContain('effort medium')
+  })
+  test('resumes a completed native thread after the provider restarts without recounting old usage', async () => {
+    const store = join(dir, 'fake-session.json')
+    const settings = { command: `${fake('codex')} --store ${store}` }
+    const first = provider(codex as AgentKind<never>)
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'hello' }]
+    await turn(first, settings, messages)
+    expect(readdirSync(join(dir, 'checkpoints', 'codex'))).toHaveLength(1)
+    await first.dispose()
+    const next = provider(codex as AgentKind<never>)
+    messages.push({ role: 'user', content: 'again' })
+    const [reply] = await turn(next, settings, messages)
+    expect(reply!.text).toMatch(/^turn 2:/)
+    expect(reply!.usage).toMatchObject({ input: 100, cached: 80, contextInput: 100 })
+    const log = readFileSync(`${store}.jsonl`, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(log.filter((item) => item.method === 'thread/start')).toHaveLength(1)
+    expect(log.filter((item) => item.method === 'thread/resume')).toHaveLength(1)
+    expect(log.filter((item) => item.method === 'turn/start').at(-1).params.input[0].text).toBe(
+      'again',
+    )
+  })
+
+  test('changes effort in the same thread and restores the configured default when unset', async () => {
+    const made = provider(codex as AgentKind<never>)
+    const settings = { command: fake('codex') }
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'hello' }]
+    await turn(made, settings, messages, undefined, { effort: 'low' })
+    messages.push({ role: 'user', content: 'again' })
+    const [next] = await turn(made, settings, messages, undefined, { effort: 'medium' })
+    expect(next!.text).toMatch(/^turn 2:/)
+    expect(next!.text).toContain('effort medium')
+    messages.push({ role: 'user', content: 'default' })
+    const [last] = await turn(made, settings, messages)
+    expect(last!.text).toMatch(/^turn 3:/)
+    expect(last!.text).toContain('effort -')
+  })
+
+  test('replaces cleared tool results with native history rather than keeping stale context', async () => {
+    const store = join(dir, 'fake-session.json')
+    const settings = { command: `${fake('codex')} --store ${store}` }
+    const made = provider(codex as AgentKind<never>)
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'CALL lookup {"key":"a"}' }]
+    await turn(made, settings, messages, () => 'PRIVATE OLD RESULT')
+    const result = messages.find((message) => message.role === 'tool')!
+    result.content = '[cleared]'
+    messages.push({ role: 'user', content: 'continue' })
+    const [next] = await turn(made, settings, messages)
+    expect(next!.text).toMatch(/^turn 1:/)
+    const log = readFileSync(`${store}.jsonl`, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    const injected = log.findLast((item) => item.method === 'thread/inject_items').params.items
+    expect(injected.map((item: { type: string }) => item.type)).toEqual([
+      'message',
+      'function_call',
+      'function_call_output',
+      'message',
+    ])
+    expect(JSON.stringify(injected)).toContain('[cleared]')
+    expect(
+      JSON.stringify(
+        injected.find((item: { type: string }) => item.type === 'function_call_output'),
+      ),
+    ).not.toContain('PRIVATE OLD RESULT')
+    expect(JSON.stringify(injected)).not.toContain('<history>')
+  })
+
+  test('a missing persisted Codex thread falls back to native history', async () => {
+    const store = join(dir, 'fake-session.json')
+    const settings = { command: `${fake('codex')} --store ${store}` }
+    const made = provider(codex as AgentKind<never>)
+    const messages: ChatMessage[] = [system(), { role: 'user', content: 'hello' }]
+    await turn(made, settings, messages)
+    await made.dispose()
+    rmSync(store)
+    messages.push({ role: 'user', content: 'again' })
+    const [reply] = await turn(provider(codex as AgentKind<never>), settings, messages)
+    expect(reply!.finish.reason).toBe('stop')
+    expect(reply!.text).toMatch(/^turn 1:/)
+  })
+
   test('declines what it asks to approve and passes the effort', async () => {
     const made = provider(codex as AgentKind<never>)
     const result = await step(
@@ -288,7 +422,8 @@ describe('codex', () => {
 
   test('a version that would ignore having no environment is refused', () => {
     expect(tooOld('ariadne/0.120.3 (Mac OS 15.1; arm64) (ariadne; 1.0.0)')).toBe('0.120.3')
-    expect(tooOld('ariadne/0.135.0 (Ubuntu 24.4.0; x86_64) linux (ariadne; 1.0.0)')).toBeNull()
+    expect(tooOld('ariadne/0.135.0 (Ubuntu 24.4.0; x86_64) linux (ariadne; 1.0.0)')).toBe('0.135.0')
+    expect(tooOld('ariadne/0.167.1 (Windows; x86_64)')).toBeNull()
     expect(tooOld('ariadne/1.2.0 (Ubuntu 24.4.0; x86_64)')).toBeNull()
     expect(tooOld('fake')).toBeNull()
   })
@@ -457,9 +592,15 @@ test('command lines split like a shell does', () => {
     '--acp',
     'a b',
     'c d',
-    'e f',
+    ...(process.platform === 'win32' ? ['e\\', 'f'] : ['e f']),
   ])
   expect(splitCommand('  ')).toEqual([])
+  if (process.platform === 'win32') {
+    expect(splitCommand('"C:\\Program Files\\Codex\\codex.exe" app-server')).toEqual([
+      'C:\\Program Files\\Codex\\codex.exe',
+      'app-server',
+    ])
+  }
 })
 
 const looking = (home: string, programs: string[], env: Record<string, string> = {}) => ({

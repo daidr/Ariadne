@@ -1482,13 +1482,20 @@ describe('usage, models and step input', () => {
       app.finishTurn(conversationId, turnId, 'completed')
     }
     step(thread.id, { input: 1000, output: 100 })
-    step(thread.id, { input: 1500, output: 50, cached: 1200, cacheWrite: 200, reasoning: 30 })
+    step(thread.id, {
+      input: 1500,
+      contextInput: 800,
+      output: 50,
+      cached: 1200,
+      cacheWrite: 200,
+      reasoning: 30,
+    })
     // A provider that reports nothing leaves the last known size.
     step(thread.id, null)
     step(project.coordinatorId, { input: 200, output: 20 })
     expect(app.getConversation(thread.id)).toMatchObject({
       usage: { input: 2500, output: 150 },
-      contextTokens: 1500,
+      contextTokens: 800,
     })
     const parts = { cached: 1200, cacheWrite: 200, reasoning: 30, cost: { USD: 0, CNY: 0 } }
     expect(app.getThread(thread.id).usage).toEqual({ input: 2500, output: 150, ...parts })

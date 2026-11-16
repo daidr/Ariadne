@@ -28,6 +28,26 @@ export function fingerprint(message: ChatMessage): string {
   }
 }
 
+/** Codex keeps native history: any changed content must replace that history too. */
+export function nativeFingerprint(message: ChatMessage): string {
+  if (message.role === 'system') return 's'
+  return hash(
+    JSON.stringify(
+      message.role === 'assistant'
+        ? [message.role, message.content, message.toolCalls ?? []]
+        : message.role === 'tool'
+          ? [
+              message.role,
+              message.toolCallId,
+              message.content,
+              !!message.isError,
+              message.images ?? [],
+            ]
+          : [message.role, message.content, message.images ?? []],
+    ),
+  )
+}
+
 export const systemHash = (system: string) => hash(system)
 
 /** The system prompt changed under a running session: the agent hears the new one. */

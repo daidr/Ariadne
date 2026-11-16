@@ -19,7 +19,6 @@ import {
   DouPopover,
   DouShimmer,
   DouSpinner,
-  DouStatusDot,
   DouText,
   type ChatAttachment,
   type ChatInputOption,
@@ -30,7 +29,6 @@ import type { MessageView, NoticeView } from '@ariadne/core'
 import {
   ChevronDownIcon,
   CpuIcon,
-  FileDiffIcon,
   ListTreeIcon,
   MoreHorizontalIcon,
   PaperclipIcon,
@@ -89,10 +87,8 @@ import ReviewMark from '../review/ReviewMark.vue'
 import ReviewNotice from '../review/ReviewNotice.vue'
 import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
-import LiveCommand from './LiveCommand.vue'
-import BackgroundCommand from './BackgroundCommand.vue'
-import WaitStatus from './WaitStatus.vue'
-import ChangeTotals from './ChangeTotals.vue'
+import ConversationActivity from './ConversationActivity.vue'
+import ConversationBar from './ConversationBar.vue'
 import { branchChanges } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
@@ -206,13 +202,22 @@ const background = computed(() =>
     (command) => !command.result,
   ),
 )
+const createdArtifacts = computed(() =>
+  state.artifacts.filter((artifact) => artifact.createdBy === conversationId.value),
+)
+const capsuleChanges = computed(() => {
+  const owner = reviewed.value ?? thread.value
+  return owner?.workspace?.branch && owner.workspace.base
+    ? { threadId: owner.id, totals: branchChanges(owner) }
+    : null
+})
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
 // The main model kept failing: this turn goes on with the role's fallback.
 const fallback = computed(() => {
   const turn = view.value.conversation?.turn
   return turn?.fallback ? turn.model : null
 })
-// What it is doing, shown above the input: what the model said beside its latest tool
+// What it is doing, shown after the last message: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
 const activity = computed(() =>
@@ -694,37 +699,11 @@ watch(
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
           <PullRequestTag :thread="thread" refreshable />
           <ReviewMark :thread="thread" />
-          <template v-if="thread.workspace?.branch && thread.workspace.base">
-            <ChangeTotals
-              v-if="branchChanges(thread)"
-              :totals="branchChanges(thread)!"
-              :thread-id="thread.id"
-              button
-            />
-            <DouButton
-              v-else
-              variant="ghost"
-              size="sm"
-              @click="openView({ kind: 'changes', threadId: thread.id })"
-            >
-              <template #leading><FileDiffIcon /></template>
-              {{ t('changes.open') }}
-            </DouButton>
-          </template>
           <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
           <template v-if="reviewed">
             <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
               <template #leading><MessagesIcon /></template>
               {{ t('review.author') }}
-            </DouButton>
-            <DouButton
-              v-if="reviewed.workspace?.branch && reviewed.workspace.base"
-              variant="ghost"
-              size="sm"
-              @click="openView({ kind: 'changes', threadId: reviewed.id })"
-            >
-              <template #leading><FileDiffIcon /></template>
-              {{ t('changes.open') }}
             </DouButton>
           </template>
         </div>
@@ -735,7 +714,7 @@ watch(
     </div>
 
     <DouChatList
-      v-if="timeline.length || todo.length || working"
+      v-if="timeline.length || todo.length || working || queued || wait"
       ref="list"
       class="conversation-list"
       @top-reached="earlier"
@@ -1087,6 +1066,17 @@ watch(
           </DouChatMessage>
         </template>
       </template>
+      <ConversationActivity
+        :conversation-id="conversationId"
+        :working="working && !thread?.stopped"
+        :queued="queued && !thread?.stopped"
+        :live="live"
+        :activity="activity"
+        :elapsed="elapsed"
+        :fallback="fallback"
+        :esc-armed="escArmed"
+        :wait="wait"
+      />
       <!-- What it is doing, what comes next, what it waits on: in place of progress messages. -->
       <DouChatPlan
         v-if="todo.length"
@@ -1121,25 +1111,6 @@ watch(
         </DouButton>
       </template>
     </DouAlert>
-    <div v-else-if="working" class="conversation-status" role="status">
-      <LiveCommand v-if="live" :command="live" />
-      <DouText v-else variant="secondary" size="sm" class="conversation-activity">
-        <DouStatusDot tone="primary" ripple />
-        <DouShimmer class="conversation-activity-text">{{ activity }}</DouShimmer>
-        <span class="conversation-elapsed">{{ elapsed }}</span>
-      </DouText>
-      <div class="conversation-status-end">
-        <DouText v-if="escArmed" variant="tertiary" size="sm" role="status">
-          {{ t('conversation.escAgain') }}
-        </DouText>
-        <DouText v-if="fallback" variant="tertiary" size="sm" class="conversation-fallback">
-          {{ t('conversation.fallback', { model: fallback }) }}
-        </DouText>
-      </div>
-    </div>
-    <div v-else-if="queued" class="conversation-status" role="status">
-      <DouText variant="secondary" size="sm">{{ t('conversation.queued') }}</DouText>
-    </div>
     <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
       {{ tm(failure) }}
       <template #action>
@@ -1162,21 +1133,6 @@ watch(
       </template>
     </DouAlert>
 
-    <div v-if="background.length && conversationId" class="conversation-background">
-      <BackgroundCommand
-        v-for="command in background"
-        :key="command.id"
-        :thread-id="conversationId"
-        :command="command"
-      />
-    </div>
-    <WaitStatus
-      v-if="wait && conversationId"
-      :conversation-id="conversationId"
-      :wait="wait"
-      class="conversation-wait"
-    />
-
     <DouImagePreview
       v-model:open="preview.open"
       v-model:index="preview.index"
@@ -1188,6 +1144,14 @@ watch(
       data-message-input
       @keydown="onInputKeydown"
     >
+      <ConversationBar
+        v-if="conversationId"
+        :key="conversationId"
+        :conversation-id="conversationId"
+        :changes="capsuleChanges"
+        :artifacts="createdArtifacts"
+        :background="background"
+      />
       <DouChatInput
         ref="input"
         v-model="draft"
@@ -1395,66 +1359,18 @@ watch(
   margin: 0 16px;
 }
 
-.conversation-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0 16px;
-}
-
-.conversation-status-end {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-
-.conversation-fallback {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-background {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0 16px;
-}
-
-.conversation-wait {
-  margin: 0 16px;
-}
-
 .routine-prompt {
   display: block;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.conversation-activity {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.conversation-activity-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conversation-elapsed {
-  flex: none;
-  color: var(--dou-color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
 .conversation-input {
-  padding: 12px 16px 16px;
+  padding: 0 16px 16px;
+}
+
+.conversation-input :deep(.dou-chat-input:not(:focus-within)) {
+  box-shadow: none;
 }
 
 /* Right under the list, messages run up to the composer's edge, with no band between. */

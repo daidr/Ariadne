@@ -231,7 +231,7 @@ export const claudeCode: AgentKind<ClaudeCodeSettings> = {
     // Each message's usage as last seen: it is printed before the message is whole, so
     // only what grew is counted, and the turn's total in its result settles the rest.
     const seen = new Map<string, AgentUsage>()
-    let turn: Required<Omit<AgentUsage, 'costUsd'>> = {
+    let turn: Required<Omit<AgentUsage, 'costUsd' | 'contextInput'>> = {
       input: 0,
       output: 0,
       cached: 0,

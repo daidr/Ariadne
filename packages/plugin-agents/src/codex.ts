@@ -1,9 +1,16 @@
-import { EFFORTS, type ListedModel, type ModelRequest } from '@ariadne/plugin-sdk'
+import {
+  EFFORTS,
+  type ChatMessage,
+  type Effort,
+  type ListedModel,
+  type ModelRequest,
+} from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { agentEnv, AgentProcess, AgentProcessError, exchange, splitCommand } from './process'
-import { busyText, RpcPeer, Unhandled } from './rpc'
+import { busyText, RpcError, RpcPeer, Unhandled } from './rpc'
 import type { AgentKind, AgentUsage, DriverContext } from './sessions'
+import { nativeFingerprint } from './history'
 
 export interface CodexSettings {
   command?: string
@@ -49,6 +56,9 @@ function argvOf(settings: CodexSettings): string[] {
     // The user's own tool servers stay out of Ariadne's work.
     '-c',
     'mcp_servers={}',
+    // Allows turn/settings/update while a dynamic tool call is waiting on Ariadne.
+    '-c',
+    'features.step_model_switching=true',
     ...OWN_TOOLS.flatMap((feature) => ['-c', `features.${feature}=false`]),
     // What it would tell the model about the machine it runs on (its directory, shell and
     // sandbox, its skills and the instructions files there): that is not where the work is.
@@ -102,10 +112,9 @@ export function codexModels(listed: CodexModel[]): ListedModel[] {
 }
 
 /**
- * The first version that takes `environments` on `thread/start`. An older one ignores it,
- * and then the tools of its own that it still offers run on this machine.
+ * Minimum verified version for native history injection and environment-free threads.
  */
-const OLDEST = [0, 135, 0]
+const OLDEST = [0, 167, 1]
 
 /** Its version as the user agent from `initialize` says, when it is older than OLDEST. */
 export function tooOld(userAgent: unknown): string | null {
@@ -129,6 +138,9 @@ const dataUrl = (image: { mime: string; data: string }) => `data:${image.mime};b
  */
 export const codex: AgentKind<CodexSettings> = {
   kind: 'codex',
+  persistent: true,
+  mutableEffort: true,
+  fingerprint: nativeFingerprint,
   title: { 'zh-CN': 'Codex', en: 'Codex' },
   signedIn({ env, home, which }) {
     return (
@@ -193,6 +205,10 @@ export const codex: AgentKind<CodexSettings> = {
     let threadId = ''
     let started = false
     let total: Breakdown = {}
+    let defaultEffort: Effort | undefined
+    let currentEffort: Effort | null = null
+    let activeTurnId = ''
+    let supportsActiveUpdates = true
     // Answers whose text came in pieces, so their whole copy is not handed on again.
     const streamed = new Set<string>()
     const proc = new AgentProcess({
@@ -267,12 +283,15 @@ export const codex: AgentKind<CodexSettings> = {
               cached: grew('cachedInputTokens'),
               cacheWrite: grew('cacheWriteInputTokens'),
               reasoning: grew('reasoningOutputTokens'),
+              contextInput: (params.tokenUsage as { last?: Breakdown } | undefined)?.last
+                ?.inputTokens,
             }
             total = now
-            if (usage.input || usage.output) ctx.emit({ type: 'usage', usage })
+            if (started && (usage.input || usage.output)) ctx.emit({ type: 'usage', usage })
             return
           }
           case 'turn/completed': {
+            activeTurnId = ''
             const turn = (params.turn ?? {}) as {
               status?: string
               error?: { message?: string; additionalDetails?: string | null } | null
@@ -314,27 +333,47 @@ export const codex: AgentKind<CodexSettings> = {
             )
           }
           peer.notify('initialized')
-          const result = await peer.request<{ thread?: { id?: string } }>('thread/start', {
-            ...(ctx.model && ctx.model !== 'default' ? { model: ctx.model } : {}),
-            cwd: ctx.cwd,
-            approvalPolicy: 'untrusted',
-            // What it asks to approve comes here to be declined, never to a reviewer of its own.
-            approvalsReviewer: 'user',
-            sandbox: 'read-only',
-            baseInstructions: ctx.system,
-            ephemeral: true,
-            // No environment of its own: whatever own tool it still offers (a command, a
-            // patch, an image to view) has nowhere to run on this machine. The work happens
-            // where the conversation's tools run, which may be another machine.
-            environments: [],
-            dynamicTools: ctx.tools.specs.map((tool) => ({
-              type: 'function',
-              name: tool.name,
-              description: tool.description,
-              inputSchema: { type: 'object', ...tool.parameters },
-            })),
-          })
+          const saved = ctx.resume as
+            { threadId?: string; total?: Breakdown; defaultEffort?: Effort } | undefined
+          if (
+            saved &&
+            (typeof saved.threadId !== 'string' ||
+              !saved.threadId ||
+              !saved.total ||
+              typeof saved.total !== 'object' ||
+              Object.values(saved.total).some(
+                (value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0,
+              ))
+          ) {
+            throw new AgentProcessError('invalid Codex resume checkpoint')
+          }
+          total = saved?.total ?? {}
+          const result = await peer.request<{ thread?: { id?: string }; reasoningEffort?: Effort }>(
+            saved?.threadId ? 'thread/resume' : 'thread/start',
+            {
+              ...(saved?.threadId ? { threadId: saved.threadId, excludeTurns: true } : {}),
+              ...(ctx.model && ctx.model !== 'default' ? { model: ctx.model } : {}),
+              cwd: ctx.cwd,
+              approvalPolicy: 'untrusted',
+              // What it asks to approve comes here to be declined, never to a reviewer of its own.
+              approvalsReviewer: 'user',
+              sandbox: 'read-only',
+              baseInstructions: ctx.system,
+              ...(!saved?.threadId ? { ephemeral: !ctx.persistent } : {}),
+              // No environment of its own: whatever own tool it still offers (a command, a
+              // patch, an image to view) has nowhere to run on this machine. The work happens
+              // where the conversation's tools run, which may be another machine.
+              environments: [],
+              dynamicTools: ctx.tools.specs.map((tool) => ({
+                type: 'function',
+                name: tool.name,
+                description: tool.description,
+                inputSchema: { type: 'object', ...tool.parameters },
+              })),
+            },
+          )
           threadId = result?.thread?.id ?? ''
+          defaultEffort = saved ? saved.defaultEffort : result?.reasoningEffort
           if (!threadId) throw new AgentProcessError('codex started no thread')
           started = true
         } catch (error) {
@@ -345,17 +384,112 @@ export const codex: AgentKind<CodexSettings> = {
           )
         }
       },
-      async prompt(input) {
-        await peer.request('turn/start', {
+      async seed(messages: ChatMessage[]) {
+        const last = messages.at(-1)
+        const history = last?.role === 'user' ? messages.slice(0, -1) : messages
+        const items = history.flatMap((message): unknown[] => {
+          switch (message.role) {
+            case 'system':
+              return []
+            case 'user':
+              return [
+                {
+                  type: 'message',
+                  role: 'user',
+                  content: [
+                    { type: 'input_text', text: message.content },
+                    ...(message.images ?? []).map((image) => ({
+                      type: 'input_image',
+                      image_url: dataUrl(image),
+                    })),
+                  ],
+                },
+              ]
+            case 'assistant':
+              return [
+                ...(message.content
+                  ? [
+                      {
+                        type: 'message',
+                        role: 'assistant',
+                        content: [{ type: 'output_text', text: message.content }],
+                      },
+                    ]
+                  : []),
+                ...(message.toolCalls ?? []).map((call) => ({
+                  type: 'function_call',
+                  call_id: call.id,
+                  name: call.name,
+                  arguments: call.arguments,
+                })),
+              ]
+            case 'tool':
+              return [
+                {
+                  type: 'function_call_output',
+                  call_id: message.toolCallId,
+                  output: [
+                    { type: 'input_text', text: message.content },
+                    ...(message.images ?? []).map((image) => ({
+                      type: 'input_image',
+                      image_url: dataUrl(image),
+                    })),
+                  ],
+                },
+              ]
+          }
+        })
+        if (items.length) await peer.request('thread/inject_items', { threadId, items })
+        return last?.role === 'user'
+          ? { text: last.content, images: last.images ?? [] }
+          : {
+              text: 'Continue from the latest tool results. All recorded tool calls have already run.',
+              images: [],
+            }
+      },
+      async prompt(input, options) {
+        currentEffort = options?.effort ?? defaultEffort ?? null
+        const result = await peer.request<{ turn?: { id?: string } }>('turn/start', {
           threadId,
           input: [
             { type: 'text', text: input.text, text_elements: [] },
             ...input.images.map((image) => ({ type: 'image', url: dataUrl(image) })),
           ],
-          ...(ctx.effort ? { effort: ctx.effort } : {}),
+          effort: currentEffort,
         })
+        activeTurnId = result?.turn?.id ?? ''
       },
-      async close() {
+      async configure(options) {
+        const effort = options.effort ?? defaultEffort ?? null
+        if (activeTurnId && supportsActiveUpdates && effort !== currentEffort) {
+          try {
+            await peer.request('turn/settings/update', { threadId, turnId: activeTurnId, effort })
+            currentEffort = effort
+          } catch (error) {
+            if (
+              error instanceof RpcError &&
+              error.code === -32600 &&
+              (error.message.includes('only fallback metadata') ||
+                error.message.includes('does not support reasoning effort updates'))
+            ) {
+              // Such models can still take effort on the next turn/start. Keep this
+              // turn and its pending tool call intact instead of restarting history.
+              supportsActiveUpdates = false
+            } else throw error
+          }
+        }
+      },
+      checkpoint() {
+        return { threadId, total, defaultEffort }
+      },
+      async close(options) {
+        if (options?.discard && ctx.persistent && threadId && proc.running) {
+          // Completed obsolete threads need not remain in the user's active thread list.
+          await Promise.race([
+            peer.request('thread/archive', { threadId }).catch(() => {}),
+            Bun.sleep(500),
+          ])
+        }
         peer.end('closed')
         await proc.close()
       },

@@ -177,6 +177,8 @@ export interface ReasoningRecord {
  * the provider's cache, `reasoning` the part of `output` spent thinking (when known).
  */
 export interface TokenUsage {
+  /** Latest inference input; total input may sum several upstream requests. */
+  contextInput?: number
   input: number
   output: number
   cached?: number

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouButton, DouStatusDot, DouText } from 'dou-ui'
+import { DouButton, DouText } from 'dou-ui'
 import { AlarmClockIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { clockText, t } from '../i18n'

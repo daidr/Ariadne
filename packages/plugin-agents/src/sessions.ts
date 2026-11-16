@@ -15,6 +15,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ToolBridge, ToolOutput } from './bridge'
 import { splitCommand } from './process'
+import { Checkpoints, type Checkpoint } from './checkpoints'
 import {
   fingerprint,
   joinInput,
@@ -38,6 +39,7 @@ const MAX_SESSIONS = 16
 export interface AgentUsage {
   input: number
   output: number
+  contextInput?: number
   cached?: number
   cacheWrite?: number
   reasoning?: number
@@ -73,6 +75,8 @@ export interface DriverContext<Settings> {
   /** An empty directory of this session's own, for the agent to start in. */
   cwd: string
   bridge: ToolBridge
+  persistent?: boolean
+  resume?: unknown
   emit(event: AgentEvent): void
 }
 
@@ -81,8 +85,12 @@ export interface Driver {
   /** Start the program and its session; throws with a reason for the user. */
   start(): Promise<void>
   /** Begin a turn with this input. */
-  prompt(input: AgentInput): Promise<void>
-  close(): Promise<void>
+  prompt(input: AgentInput, options?: { effort?: Effort }): Promise<void>
+  /** Restore a fresh thread using native messages, returning the next turn's input. */
+  seed?(messages: ChatMessage[]): Promise<AgentInput>
+  configure?(options: { effort?: Effort }): Promise<void>
+  checkpoint?(): unknown
+  close(options?: { discard?: boolean }): Promise<void>
 }
 
 /** A kind of agent program, made into a model provider by `agentProvider`. */
@@ -90,6 +98,9 @@ export interface AgentKind<Settings> {
   kind: string
   title: LocalizedText
   settings: SettingsSchema
+  persistent?: boolean
+  mutableEffort?: boolean
+  fingerprint?(message: ChatMessage): string
   /**
    * The model names it takes besides `default` (whatever the program itself is set to),
    * when they are the same for every account.
@@ -175,7 +186,7 @@ class Session {
     readonly dir: string,
   ) {}
 
-  async close() {
+  async close(suspend = false) {
     if (this.closed) return
     this.closed = true
     for (const resolve of this.pending.values()) {
@@ -183,9 +194,9 @@ class Session {
     }
     this.pending.clear()
     try {
-      await this.driver?.close()
+      await this.driver?.close({ discard: !suspend })
     } finally {
-      rmSync(this.dir, { recursive: true, force: true })
+      rmSync(this.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
     }
   }
 }
@@ -233,12 +244,14 @@ export function agentProvider<Settings>(
   options: { dataDir: string; bridge: ToolBridge },
 ): AgentProvider<Settings> {
   const pool = new Map<string, Session>()
+  const checkpoints = agent.persistent ? new Checkpoints(options.dataDir, agent.kind) : null
+  const fp = agent.fingerprint ?? fingerprint
   const reaper = setInterval(() => {
     const now = Date.now()
     for (const [key, session] of pool) {
-      if (!session.busy && now - session.lastUsed > IDLE_MS) {
+      if (!session.busy && !session.pending.size && now - session.lastUsed > IDLE_MS) {
         pool.delete(key)
-        void session.close()
+        void session.close(true)
       }
     }
   }, 60_000)
@@ -246,6 +259,7 @@ export function agentProvider<Settings>(
 
   const drop = async (session: Session) => {
     if (session.key && pool.get(session.key) === session) pool.delete(session.key)
+    if (session.key) checkpoints?.remove(session.key)
     await session.close()
   }
 
@@ -254,6 +268,7 @@ export function agentProvider<Settings>(
     request: ModelRequest,
     system: string,
     config: string,
+    saved?: Checkpoint,
   ): Promise<Session> {
     const dir = join(options.dataDir, 'sessions', randomUUID())
     mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -284,9 +299,12 @@ export function agentProvider<Settings>(
       tools,
       cwd: dir,
       bridge: options.bridge,
+      persistent: !!checkpoints && !!request.conversation,
+      ...(saved ? { resume: saved.driver } : {}),
       emit: (event) => session.queue.push(event),
     })
     session.system = system
+    session.fps = saved?.fps ?? []
     try {
       await session.driver.start()
     } catch (error) {
@@ -296,9 +314,12 @@ export function agentProvider<Settings>(
     if (session.key) {
       if (pool.size >= MAX_SESSIONS) {
         const idle = [...pool.values()]
-          .filter((s) => !s.busy)
+          .filter((s) => !s.busy && !s.pending.size)
           .toSorted((a, b) => a.lastUsed - b.lastUsed)
-        if (idle[0]) await drop(idle[0])
+        if (idle[0]) {
+          pool.delete(idle[0].key!)
+          await idle[0].close(true)
+        }
       }
       pool.set(session.key, session)
     }
@@ -315,6 +336,7 @@ export function agentProvider<Settings>(
     rest: ChatMessage[],
     fps: string[],
     system: string,
+    effort?: Effort,
   ): (() => Promise<void>) | null {
     const seen = session.fps
     if (fps.length <= seen.length) return null
@@ -331,7 +353,7 @@ export function agentProvider<Settings>(
     if (!session.awaiting.length) {
       if (results.length || !inputs.length) return null
       const input = joinInput(inputs, prefix)
-      return () => session.driver.prompt(input)
+      return () => session.driver.prompt(input, { effort })
     }
     const byId = new Map(results.map((m) => [m.toolCallId, m]))
     if (results.length !== session.awaiting.length) return null
@@ -402,18 +424,24 @@ export function agentProvider<Settings>(
       clearInterval(reaper)
       const all = [...pool.values()]
       pool.clear()
-      await Promise.all(all.map((session) => session.close()))
+      await Promise.all(
+        all.map((session) => {
+          const suspend = !session.busy && !session.pending.size
+          if (!suspend && session.key) checkpoints?.remove(session.key)
+          return session.close(suspend)
+        }),
+      )
     },
     async *stream(settings, request) {
       const first = request.messages[0]
       const system = withPlace(first?.role === 'system' ? first.content : '', request.tools)
       const rest = first?.role === 'system' ? request.messages.slice(1) : request.messages
-      const fps = rest.map(fingerprint)
+      const fps = rest.map(fp)
       const config = hash([
         agent.kind,
         settings,
         request.model,
-        request.effort ?? null,
+        agent.mutableEffort ? null : (request.effort ?? null),
         request.tools,
       ])
       let session = request.conversation ? pool.get(request.conversation) : undefined
@@ -421,7 +449,7 @@ export function agentProvider<Settings>(
       if (session) {
         deliver =
           !session.busy && !session.closed && session.config === config
-            ? continuation(session, rest, fps, system)
+            ? continuation(session, rest, fps, system, request.effort)
             : null
         if (!deliver) {
           await drop(session)
@@ -429,21 +457,61 @@ export function agentProvider<Settings>(
         }
       }
       if (!session) {
+        const saved = request.conversation ? checkpoints?.read(request.conversation) : null
+        const compatible =
+          saved &&
+          saved.config === config &&
+          fps.length > saved.fps.length &&
+          saved.fps.every((value, index) => fps[index] === value) &&
+          rest.slice(saved.fps.length).every((message) => message.role === 'user')
         try {
-          session = await open(settings, request, system, config)
+          session = await open(
+            settings,
+            request,
+            compatible ? saved.system : system,
+            config,
+            compatible ? saved : undefined,
+          )
         } catch (error) {
-          yield finishError(error instanceof Error ? error.message : String(error), false)
-          return
+          if (request.conversation) checkpoints?.remove(request.conversation)
+          if (compatible) {
+            try {
+              session = await open(settings, request, system, config)
+            } catch (freshError) {
+              yield finishError(
+                freshError instanceof Error ? freshError.message : String(freshError),
+                false,
+              )
+              return
+            }
+          } else {
+            yield finishError(error instanceof Error ? error.message : String(error), false)
+            return
+          }
         }
-        const input = renderHistory(rest)
-        const opened = session
-        deliver = () => opened.driver.prompt(input)
+        deliver =
+          compatible && session.fps.length
+            ? continuation(session, rest, fps, system, request.effort)
+            : null
+        if (!deliver) {
+          let input: AgentInput
+          try {
+            input = session.driver.seed ? await session.driver.seed(rest) : renderHistory(rest)
+          } catch (error) {
+            await drop(session)
+            yield finishError(error instanceof Error ? error.message : String(error), false)
+            return
+          }
+          const opened = session
+          deliver = () => opened.driver.prompt(input, { effort: request.effort })
+        }
       }
+      if (session.key) checkpoints?.remove(session.key)
       session.fps = fps
       session.busy = true
       session.lastUsed = Date.now()
       const calls: { id: string; name: string; arguments: string }[] = []
-      const usage: Required<Omit<AgentUsage, 'costUsd'>> & { costUsd?: number } = {
+      const usage: Required<Omit<AgentUsage, 'costUsd' | 'contextInput'>> & { costUsd?: number } = {
         input: 0,
         output: 0,
         cached: 0,
@@ -451,6 +519,8 @@ export function agentProvider<Settings>(
         reasoning: 0,
       }
       let counted = false
+      let text = ''
+      let contextInput: number | undefined
       const usagePart = (): ModelStreamPart[] =>
         counted
           ? [
@@ -458,6 +528,7 @@ export function agentProvider<Settings>(
                 type: 'usage',
                 input: usage.input,
                 output: usage.output,
+                ...(contextInput !== undefined ? { contextInput } : {}),
                 ...(usage.cached ? { cached: usage.cached } : {}),
                 ...(usage.cacheWrite ? { cacheWrite: usage.cacheWrite } : {}),
                 ...(usage.reasoning ? { reasoning: usage.reasoning } : {}),
@@ -467,6 +538,7 @@ export function agentProvider<Settings>(
           : []
       try {
         try {
+          await session.driver.configure?.({ effort: request.effort })
           await deliver!()
         } catch (error) {
           await drop(session)
@@ -482,11 +554,11 @@ export function agentProvider<Settings>(
           if (event === 'timeout') {
             for (const call of calls) yield { type: 'tool-call', ...call }
             yield* usagePart()
-            yield { type: 'finish', reason: 'tool-calls' }
             session.awaiting = calls.map((call) => call.id)
-            session.fps.push(fingerprint({ role: 'assistant', content: '', toolCalls: calls }))
+            session.fps.push(fp({ role: 'assistant', content: text, toolCalls: calls }))
             // Nothing can come back to a session that is not kept.
             if (!session.key) await drop(session)
+            yield { type: 'finish', reason: 'tool-calls' }
             return
           }
           switch (event.type) {
@@ -495,6 +567,7 @@ export function agentProvider<Settings>(
               yield { type: 'alive' }
               break
             case 'text':
+              text += event.text
               if (event.text) yield { type: 'text', text: event.text }
               break
             case 'reasoning':
@@ -506,6 +579,7 @@ export function agentProvider<Settings>(
             case 'usage': {
               counted = true
               const u = event.usage
+              contextInput = u.contextInput ?? contextInput
               usage.input += u.input
               usage.output += u.output
               usage.cached += u.cached ?? 0
@@ -529,10 +603,23 @@ export function agentProvider<Settings>(
                 session.pending.delete(call.id)
               }
               yield* usagePart()
-              yield { type: 'finish', reason: 'stop' }
               session.awaiting = []
-              session.fps.push('a:')
+              session.fps.push(fp({ role: 'assistant', content: text }))
+              const driver = session.driver.checkpoint?.()
+              if (session.key && driver) {
+                try {
+                  checkpoints?.write(session.key, {
+                    config: session.config,
+                    system: session.system,
+                    fps: session.fps,
+                    driver,
+                  })
+                } catch {
+                  // Losing a resume checkpoint must not fail a successful model response.
+                }
+              }
               if (!session.key) await drop(session)
+              yield { type: 'finish', reason: 'stop' }
               return
           }
         }
