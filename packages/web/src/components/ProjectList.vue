@@ -121,8 +121,9 @@ const items = computed(() =>
         >
           <template #label="{ item }">
             <span class="projects-label">
-              <span>{{ item.label }}</span>
+              <span class="projects-name" :title="item.label">{{ item.label }}</span>
               <DouBadge
+                class="projects-count"
                 :value="state.projects.find((p) => p.id === item.key)?.needsMe ?? 0"
                 tone="warning"
               />
@@ -154,6 +155,19 @@ const items = computed(() =>
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  min-width: 0;
   gap: 8px;
+}
+
+.projects-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-count {
+  flex: none;
 }
 </style>
