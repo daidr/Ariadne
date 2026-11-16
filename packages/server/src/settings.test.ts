@@ -25,7 +25,8 @@ describe('model settings', () => {
   test('never hand secrets to the browser, and keep a secret left empty', () => {
     const store = new SettingsStore(path, host)
     store.updateModels(provider({ baseUrl: '', apiKey: 'secret-1' }))
-    expect(statSync(path).mode & 0o777).toBe(0o600)
+    // Windows reports emulated mode bits; chmod's POSIX owner-only bits apply elsewhere.
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600)
 
     const shown = store.publicModels()
     expect(JSON.stringify(shown)).not.toContain('secret-1')
@@ -571,7 +572,7 @@ describe('plugins from a path', () => {
 
   test('a path that fails to load is not remembered', async () => {
     const store = new SettingsStore(path, host)
-    await expect(store.addPlugin('/nowhere/plugin')).rejects.toMatchObject({
+    await expect(store.addPlugin(join(path, '..', 'missing-plugin'))).rejects.toMatchObject({
       code: 'error.pluginLoad',
     })
     expect(store.current.plugins).toEqual([])
@@ -654,20 +655,23 @@ describe('web search', () => {
   test('a key is asked for only when no model service searches the web itself', () => {
     const store = new SettingsStore(path, host)
     // Nothing set up yet: nothing to ask.
-    expect(store.publicSearch()).toEqual({ keySet: false, needed: false })
+    expect(store.publicSearch()).toMatchObject({ keySet: false, needed: false })
     store.updateModels(provider({ baseUrl: 'https://relay.example', apiKey: 'k' }))
     expect(store.searchModels()).toEqual([])
-    expect(store.publicSearch()).toEqual({ keySet: false, needed: true })
+    expect(store.publicSearch()).toMatchObject({ keySet: false, needed: true })
     store.updateModels(provider({ baseUrl: 'https://api.anthropic.com', apiKey: 'k' }))
     expect(store.searchModels().map((model) => model.label)).toEqual(['主力 / some-model'])
-    expect(store.publicSearch()).toEqual({ keySet: false, needed: false })
+    expect(store.publicSearch()).toMatchObject({ keySet: false, needed: false })
   })
 
   test('the key is kept out of what the page gets; empty keeps it, null clears it', () => {
     const store = new SettingsStore(path, host)
     expect(store.searchService()).toBeNull()
-    expect(store.updateSearch({ apiKey: ' tvly-secret ' })).toEqual({ keySet: true, needed: false })
-    expect(JSON.parse(readFileSync(path, 'utf8')).search).toEqual({ apiKey: 'tvly-secret' })
+    expect(store.updateSearch({ apiKey: ' tvly-secret ' })).toMatchObject({
+      keySet: true,
+      needed: false,
+    })
+    expect(JSON.parse(readFileSync(path, 'utf8')).search.services.tavily.apiKey).toBe('tvly-secret')
     const service = store.searchService()
     expect(service?.kind).toBe('tavily')
     store.updateSearch({ apiKey: '' })
@@ -679,5 +683,36 @@ describe('web search', () => {
     store.updateSearch({ apiKey: null })
     expect(store.searchService()).toBeNull()
     expect(store.publicSearch().keySet).toBe(false)
+  })
+
+  test('legacy Tavily settings migrate and each service keeps its own endpoint and key', () => {
+    writeFileSync(path, JSON.stringify({ search: { apiKey: 'tvly-legacy' } }))
+    const store = new SettingsStore(path, host)
+    expect(store.current.search.services.tavily.apiKey).toBe('tvly-legacy')
+    store.updateSearch({
+      provider: 'deepseek',
+      services: {
+        deepseek: { apiKey: 'sk-deepseek', baseUrl: 'http://127.0.0.1:1234/tools/' },
+      },
+    })
+    expect(store.searchService()?.kind).toBe('deepseek')
+    expect(JSON.stringify(store.publicSearch())).not.toContain('sk-deepseek')
+    expect(JSON.stringify(store.publicSearch())).not.toContain('tvly-legacy')
+    expect(new SettingsStore(path, host).current.search.services.deepseek.baseUrl).toBe(
+      'http://127.0.0.1:1234/tools',
+    )
+    store.updateSearch({ provider: 'tavily' })
+    expect(store.current.search.services.tavily.apiKey).toBe('tvly-legacy')
+    expect(store.searchService()?.kind).toBe('tavily')
+    for (const baseUrl of [
+      'file:///tmp/key',
+      'https://name:password@example.com',
+      'https://example.com?key=secret',
+      'https://example.com/#key',
+    ]) {
+      expect(() => store.updateSearch({ services: { tavily: { baseUrl } } })).toThrow()
+    }
+    expect(() => store.updateSearch({ provider: 'unknown' })).toThrow()
+    expect(store.current.search.services.tavily.baseUrl).toBe('')
   })
 })

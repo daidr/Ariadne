@@ -329,6 +329,35 @@ describe('reading the web', () => {
     expect(result.content).toContain('1. Plugin hit\n   https://example.com')
   })
 
+  test('an automatic plugin failure falls back, while an explicit choice stays with that service', async () => {
+    const plugin: SearchProvider = {
+      kind: 'down',
+      title: { 'zh-CN': 'down' },
+      search: async () => {
+        throw new Error('unavailable')
+      },
+    }
+    const keyed: SearchProvider = {
+      kind: 'backup',
+      title: { 'zh-CN': 'backup' },
+      search: async () => [{ title: 'Backup hit', url: 'https://example.com', snippet: '' }],
+    }
+    const project = app.createProject('P')
+    const search = tool('web_search', {
+      workspace: false,
+      repo: false,
+      search: { services: new Map([['down', plugin]]), keyed },
+    })
+    const result = await search.run({ query: 'q' }, context(project.id, project.coordinatorId))
+    expect(result.isError).toBeUndefined()
+    expect(result.content).toContain('Backup hit')
+    const explicit = await search.run(
+      { query: 'q', provider: 'down' },
+      context(project.id, project.coordinatorId),
+    )
+    expect(explicit.isError).toBe(true)
+  })
+
   test('only models whose service searches count, each once', () => {
     const relay = { ...searchingModel('relay', async () => ({ text: '', sources: [] })) }
     relay.settings = { relay: true }

@@ -297,8 +297,25 @@ export interface Limits {
 /** How the work is done everywhere: the user's instructions, command rules, limits. */
 /** Web search in the settings: whether a key is stored, and whether search waits for one. */
 export interface SearchSettings {
+  provider: 'tavily' | 'deepseek'
   keySet: boolean
   needed: boolean
+  models: string[]
+  plugins: LocalizedText[]
+  services: {
+    kind: 'tavily' | 'deepseek'
+    title: string
+    defaultBaseUrl: string
+    baseUrl: string
+    keySet: boolean
+  }[]
+}
+
+export interface SearchSettingsInput {
+  provider: SearchSettings['provider']
+  services: Partial<
+    Record<SearchSettings['provider'], { baseUrl?: string; apiKey?: string | null }>
+  >
 }
 
 export interface WorkSettings {
@@ -556,8 +573,10 @@ export const api = {
   getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
   getSearchSettings: () => request<SearchSettings>('GET', '/api/settings/search'),
   /** `null` clears the stored key. */
-  saveSearchSettings: (input: { apiKey: string | null }) =>
+  saveSearchSettings: (input: SearchSettingsInput) =>
     request<SearchSettings>('PUT', '/api/settings/search', input),
+  checkSearchSettings: (input: SearchSettingsInput) =>
+    request<{ ok: boolean; status: number | null }>('POST', '/api/settings/search/check', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   addPlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),

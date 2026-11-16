@@ -7,6 +7,10 @@ import {
   DEFAULT_LIMITS,
   forgetRefusedSearches,
   keyedSearch,
+  SEARCH_SERVICES,
+  SearchHttpError,
+  type SearchConfig,
+  type SearchServiceKind,
   LIMIT_RANGES,
   MCP_TOOL_MARKS,
   searchingModels,
@@ -292,11 +296,29 @@ export interface UserConfig {
    * The key of the search service agents use when no model service searches the web
    * itself; `''` for none.
    */
-  search: { apiKey: string }
+  search: SearchConfig
 }
 
 /** The longest a search key may be: more is not a key. */
 const MAX_SEARCH_KEY = 200
+
+function storedSearch(raw: unknown): SearchConfig {
+  const given = (raw ?? {}) as Partial<SearchConfig> & { apiKey?: unknown }
+  const service = (kind: SearchServiceKind) => ({
+    apiKey:
+      typeof given.services?.[kind]?.apiKey === 'string'
+        ? given.services[kind].apiKey
+        : kind === 'tavily' && typeof given.apiKey === 'string'
+          ? given.apiKey
+          : '',
+    baseUrl:
+      typeof given.services?.[kind]?.baseUrl === 'string' ? given.services[kind].baseUrl : '',
+  })
+  return {
+    provider: given.provider === 'deepseek' ? 'deepseek' : 'tavily',
+    services: { tavily: service('tavily'), deepseek: service('deepseek') },
+  }
+}
 
 export const MAX_INSTRUCTIONS = 16_000
 const MAX_COMMAND_RULES = 200
@@ -384,7 +406,13 @@ const defaults = (): UserConfig => ({
   commands: { rules: DEFAULT_COMMAND_RULES.map((rule) => ({ ...rule })) },
   limits: { ...DEFAULT_LIMITS },
   projectEnv: {},
-  search: { apiKey: '' },
+  search: {
+    provider: 'tavily',
+    services: {
+      tavily: { apiKey: '', baseUrl: '' },
+      deepseek: { apiKey: '', baseUrl: '' },
+    },
+  },
 })
 
 /** The settings stored at `path`, filled in with the defaults. */
@@ -425,7 +453,7 @@ export function loadUserConfig(path: string): UserConfig {
     },
     limits: parseLimits(stored.limits, false),
     projectEnv: { ...stored.projectEnv },
-    search: { apiKey: typeof stored.search?.apiKey === 'string' ? stored.search.apiKey : '' },
+    search: storedSearch(stored.search),
   }
 }
 
@@ -1042,37 +1070,106 @@ export class SettingsStore {
    * brought a search service. The key itself stays here.
    */
   publicSearch() {
-    const searches = this.host.searches.size > 0 || this.searchModels().length > 0
+    const models = this.searchModels().map((model) => model.label)
+    const plugins = [...this.host.searches.values()].map((service) => service.title)
+    const { provider, services } = this.config.search
     return {
-      keySet: !!this.config.search.apiKey,
-      needed: this.config.models.models.length > 0 && !searches,
+      provider,
+      keySet: !!services[provider].apiKey,
+      needed: this.config.models.models.length > 0 && !plugins.length && !models.length,
+      models,
+      plugins,
+      services: Object.entries(SEARCH_SERVICES).map(([kind, info]) => ({
+        kind,
+        title: info.title,
+        defaultBaseUrl: info.baseUrl,
+        baseUrl: services[kind as SearchServiceKind].baseUrl,
+        keySet: !!services[kind as SearchServiceKind].apiKey,
+      })),
     }
   }
 
-  /** Save the search key: `null` clears it, an empty one keeps what is stored. */
+  /** Save each service's endpoint and key: `null` clears a key, empty keeps it. */
   updateSearch(input: unknown) {
-    const { apiKey } = (input ?? {}) as { apiKey?: unknown }
-    if (apiKey !== undefined && apiKey !== null && typeof apiKey !== 'string') {
-      throw new BadRequest('apiKey')
-    }
-    const key = typeof apiKey === 'string' ? apiKey.trim() : apiKey
-    if (typeof key === 'string' && (key.length > MAX_SEARCH_KEY || /\s/.test(key))) {
-      throw new BadRequest('apiKey')
-    }
-    if (key === null || key) {
-      this.config = { ...this.config, search: { apiKey: key ?? '' } }
-      this.save()
-    }
+    this.config = { ...this.config, search: this.searchDraft(input) }
+    this.save()
     return this.publicSearch()
   }
 
-  private keyed: { apiKey: string; service: SearchProvider } | null = null
+  private searchDraft(input: unknown): SearchConfig {
+    const body = (input ?? {}) as { provider?: unknown; apiKey?: unknown; services?: unknown }
+    const provider = body.provider ?? this.config.search.provider
+    if (provider !== 'tavily' && provider !== 'deepseek') throw new BadRequest('provider')
+    if (
+      body.services !== undefined &&
+      (!body.services || typeof body.services !== 'object' || Array.isArray(body.services))
+    )
+      throw new BadRequest('services')
+    const services = structuredClone(this.config.search.services)
+    const edits = { ...(body.services as Record<string, unknown> | undefined) }
+    // Older clients write a Tavily key directly.
+    if (body.apiKey !== undefined) edits.tavily = { apiKey: body.apiKey }
+    for (const [kind, raw] of Object.entries(edits)) {
+      if (kind !== 'tavily' && kind !== 'deepseek') throw new BadRequest('provider')
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new BadRequest('services')
+      const { apiKey, baseUrl } = raw as { apiKey?: unknown; baseUrl?: unknown }
+      if (apiKey !== undefined && apiKey !== null && typeof apiKey !== 'string')
+        throw new BadRequest('apiKey')
+      const key = typeof apiKey === 'string' ? apiKey.trim() : apiKey
+      if (typeof key === 'string' && (key.length > MAX_SEARCH_KEY || /\s/.test(key)))
+        throw new BadRequest('apiKey')
+      if (key === null || key) services[kind].apiKey = key ?? ''
+      if (baseUrl !== undefined) {
+        if (typeof baseUrl !== 'string') throw new BadRequest('baseUrl')
+        const address = baseUrl.trim().replace(/\/+$/, '')
+        if (address) {
+          let url: URL
+          try {
+            url = new URL(address)
+          } catch {
+            throw new BadRequest('baseUrl')
+          }
+          if (
+            !['http:', 'https:'].includes(url.protocol) ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash
+          )
+            throw new BadRequest('baseUrl')
+        }
+        services[kind].baseUrl = address
+      }
+    }
+    return { provider, services }
+  }
+
+  /** Check a draft with one real search; neither its key nor endpoint is saved. */
+  async checkSearch(input: unknown) {
+    const draft = this.searchDraft(input)
+    const service = draft.services[draft.provider]
+    if (!service.apiKey) throw new BadRequest('apiKey')
+    try {
+      await keyedSearch(service.apiKey, fetch, {
+        provider: draft.provider,
+        baseUrl: service.baseUrl,
+      }).search('Ariadne', { limit: 1, signal: AbortSignal.timeout(10_000) })
+      return { ok: true, status: null }
+    } catch (error) {
+      return { ok: false, status: error instanceof SearchHttpError ? error.status : null }
+    }
+  }
+
+  private keyed: { signature: string; service: SearchProvider } | null = null
 
   /** The search service the saved key is for; `null` without a key. */
   searchService(): SearchProvider | null {
-    const { apiKey } = this.config.search
+    const { provider, services } = this.config.search
+    const { apiKey, baseUrl } = services[provider]
     if (!apiKey) return null
-    if (this.keyed?.apiKey !== apiKey) this.keyed = { apiKey, service: keyedSearch(apiKey) }
+    const signature = JSON.stringify([provider, apiKey, baseUrl])
+    if (this.keyed?.signature !== signature)
+      this.keyed = { signature, service: keyedSearch(apiKey, fetch, { provider, baseUrl }) }
     return this.keyed.service
   }
 

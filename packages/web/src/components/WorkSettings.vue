@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouEmpty, DouInput, DouSelect, DouTextarea } from 'dou-ui'
+import {
+  DouAlert,
+  DouButton,
+  DouEmpty,
+  DouFieldGroup,
+  DouInput,
+  DouSelect,
+  DouTextarea,
+} from 'dou-ui'
 import { PlusIcon, TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type CommandRule, type WorkSettings } from '../api'
@@ -74,27 +82,22 @@ defineExpose({ save })
         </DouButton>
       </div>
       <DouEmpty v-if="!rules.length" size="sm" :description="t('work.rule.empty')" />
-      <div v-for="(rule, at) in rules" :key="at" class="work-row">
-        <div class="work-action">
-          <DouSelect
-            v-model="rule.action"
-            size="sm"
-            :options="actionOptions"
-            :aria-label="t('work.rule.action')"
-          />
-        </div>
-        <div class="work-pattern">
-          <DouInput
-            v-model="rule.pattern"
-            size="sm"
-            :maxlength="500"
-            placeholder="git push*"
-            :aria-label="t('work.rule.pattern')"
-          />
-        </div>
+      <DouFieldGroup v-for="(rule, at) in rules" :key="at" class="work-rule" size="sm" block>
+        <DouSelect
+          v-model="rule.action"
+          class="work-action"
+          :options="actionOptions"
+          :aria-label="t('work.rule.action')"
+        />
+        <DouInput
+          v-model="rule.pattern"
+          class="work-pattern"
+          :maxlength="500"
+          placeholder="git push*"
+          :aria-label="t('work.rule.pattern')"
+        />
         <DouButton
-          size="sm"
-          variant="ghost"
+          variant="outline"
           tone="danger"
           :aria-label="t('settings.remove')"
           :title="t('settings.remove')"
@@ -102,7 +105,7 @@ defineExpose({ save })
         >
           <TrashIcon />
         </DouButton>
-      </div>
+      </DouFieldGroup>
     </template>
 
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
@@ -121,14 +124,8 @@ defineExpose({ save })
   justify-content: flex-end;
 }
 
-.work-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.work-action {
-  flex: none;
+.work-rule :deep(.work-action) {
+  flex: 0 0 96px;
   width: 96px;
 }
 

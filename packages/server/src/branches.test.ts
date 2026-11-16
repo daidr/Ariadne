@@ -9,9 +9,9 @@ import {
 } from '@ariadne/agent'
 import { fakeModel } from '../../agent/src/test-model'
 import { localDirectoryProvider, run } from '@ariadne/plugin-local'
-import type { ContextProvider } from '@ariadne/plugin-sdk'
+import type { ContextProvider, Workspace } from '@ariadne/plugin-sdk'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -40,8 +40,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await workspaces.dispose()
   app.close()
-  await rm(base, { recursive: true, force: true })
+  await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 
 function call(path: string, init: Omit<RequestInit, 'body'> & { body?: unknown } = {}) {
@@ -52,14 +53,19 @@ function call(path: string, init: Omit<RequestInit, 'body'> & { body?: unknown }
   return handle(new Request(`http://127.0.0.1${path}`, { ...init, headers, body }))
 }
 
-const git = async (cwd: string, ...args: string[]) =>
-  (await run(['git', ...args], { cwd })).stdout.trim()
+const git = async (cwd: string, ...args: string[]) => {
+  const result = await run(['git', ...args], { cwd })
+  if (result.exitCode) throw new Error(`git ${args[0]}: ${result.stderr}`)
+  return result.stdout.trim()
+}
 
 /** A project on a fresh repository, with a thread that committed `a.txt` on its branch. */
 async function setup() {
-  const dir = join(base, 'repo')
-  await run(['mkdir', '-p', dir], { cwd: base })
+  const dir = await mkdtemp(join(base, 'repo-'))
   await git(dir, 'init', '-q', '-b', 'main')
+  // The server ignores system/global git settings. Keep the fixture's commits and
+  // worktrees under the same line-ending policy, including Git for Windows.
+  await git(dir, 'config', 'core.autocrlf', 'false')
   await git(dir, 'config', 'user.email', 'test@example.com')
   await git(dir, 'config', 'user.name', 'test')
   await writeFile(join(dir, 'README.md'), '# repo\n')
@@ -70,11 +76,20 @@ async function setup() {
   const thread = app.createThread(project.id, { title: '加一个文件' })
   app.startThread(thread.id)
   const ws = await workspaces.forThread(project.id, thread.id)
-  await ws.exec('echo a > a.txt && git add . && git commit -qm a')
+  await commit(ws, 'a.txt', 'a\n')
   return { dir, project, thread, ws }
 }
 
-describe('thread changes', () => {
+async function commit(workspace: Workspace, path: string, content: string) {
+  await workspace.writeFile(path, content)
+  await git(workspace.label, 'add', '.')
+  await git(workspace.label, 'commit', '-qm', path)
+}
+
+// Real Git on Windows is slower than the in-memory tests this suite runs beside.
+const timeout = process.platform === 'win32' ? 30_000 : 5_000
+
+describe('thread changes', { timeout }, () => {
   test('the user sees the changes and squash-merges them; the coordinator hears of it', async () => {
     const { dir, project, thread } = await setup()
     expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })
@@ -152,7 +167,7 @@ describe('thread changes', () => {
 
   test('a conflict merges nothing and wakes the thread to resolve it', async () => {
     const { dir, thread, ws } = await setup()
-    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await commit(ws, 'README.md', 'thread\n')
     await writeFile(join(dir, 'README.md'), 'user\n')
     await git(dir, 'commit', '-qam', 'user')
     const response = await call(`/api/threads/${thread.id}/merge`, {
@@ -174,7 +189,7 @@ describe('thread changes', () => {
       call(`/api/threads/${thread.id}/merge`, { method: 'POST', body })
     expect((await merge({ method: 'rebase' })).status).toBe(400)
 
-    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await commit(ws, 'README.md', 'thread\n')
     await writeFile(join(dir, 'README.md'), 'not committed\n')
     const dirty = await (await merge({})).json()
     expect(dirty.error.key).toBe('error.merge.checkout')
@@ -208,7 +223,7 @@ describe('thread changes', () => {
       idleMs: 1000,
       now: () => now,
     })
-    await ws.exec('echo thread > README.md && git commit -qam readme')
+    await commit(ws, 'README.md', 'thread\n')
     app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
     // Just reported: kept.
     await janitor.check(thread.id)
@@ -222,21 +237,25 @@ describe('thread changes', () => {
 
     await rm(join(ws.label, 'draft.txt'))
     // So do staged changes,
-    await ws.exec('echo staged > staged.txt && git add staged.txt')
+    await ws.writeFile('staged.txt', 'staged\n')
+    await git(ws.label, 'add', 'staged.txt')
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
-    await ws.exec('git stash -q')
+    await git(ws.label, 'stash', '-q')
     // ignored files that are not dependencies,
     await writeFile(join(dir, '.git', 'info', 'exclude'), '.env\nnode_modules\n')
-    await ws.exec('echo SECRET=1 > .env && mkdir node_modules && echo x > node_modules/x')
+    await ws.writeFile('.env', 'SECRET=1\n')
+    await mkdir(join(ws.label, 'node_modules'))
+    await ws.writeFile('node_modules/x', 'x\n')
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
     await rm(join(ws.label, '.env'))
     // and commits made off the branch.
-    await ws.exec('git checkout -q --detach && git commit -q --allow-empty -m loose')
+    await git(ws.label, 'checkout', '-q', '--detach')
+    await git(ws.label, 'commit', '-q', '--allow-empty', '-m', 'loose')
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
-    await ws.exec('git checkout -q -')
+    await git(ws.label, 'checkout', '-q', '-')
 
     // Dependencies alone do not keep it, and what was stashed outlives it.
     await janitor.check(thread.id)
@@ -275,8 +294,8 @@ describe('thread changes', () => {
     const { project, thread } = await setup()
     const removing = workspaces.removeWorktree(project.id, thread.id, 'user')
     const reopened = workspaces.forThread(project.id, thread.id)
-    expect(await removing).toBe('removed')
-    const ws = await reopened
+    const [removed, ws] = await Promise.all([removing, reopened])
+    expect(removed).toBe('removed')
     expect(existsSync(ws.label)).toBe(true)
     expect(await workspaces.forThread(project.id, thread.id)).toBe(ws)
     expect(app.getThread(thread.id).workspace?.removed).toBe(false)
@@ -290,11 +309,11 @@ describe('thread changes', () => {
     const head = merged.outcome.head as string
     app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' }, head)
     expect(app.getThread(thread.id).stage).toBe('done')
-    await ws.exec('echo b > b.txt && git add . && git commit -qm b')
+    await commit(ws, 'b.txt', 'b\n')
     app.reportThread(
       thread.id,
       { kind: 'ready', summary: '又改了', headline: '又改了' },
-      await ws.exec('git rev-parse HEAD').then((r) => r.stdout.trim()),
+      await git(ws.label, 'rev-parse', 'HEAD'),
     )
     expect(app.getThread(thread.id).stage).toBe('review')
   })
@@ -326,7 +345,7 @@ describe('thread changes', () => {
     const { dir, thread, ws } = await setup()
     const janitor = new WorktreeJanitor(app, workspaces, { delayMs: 0 })
     await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
-    await ws.exec('echo b > b.txt && git add . && git commit -qm b')
+    await commit(ws, 'b.txt', 'b\n')
     app.reportThread(thread.id, { kind: 'done', summary: '完成', headline: '完成' })
     await janitor.check(thread.id)
     expect(existsSync(ws.label)).toBe(true)
@@ -344,12 +363,12 @@ describe('thread changes', () => {
       threadId: thread.id,
       thread: { id: thread.id },
     })
-    await ws.exec('echo wip > wip.txt')
+    await ws.writeFile('wip.txt', 'wip\n')
     const path = `/api/projects/${project.id}/worktrees/${thread.id}`
     expect((await (await call(path, { method: 'DELETE' })).json()).error.key).toBe(
       'error.worktreeDirty',
     )
-    await ws.exec('rm wip.txt')
+    await rm(join(ws.label, 'wip.txt'))
     expect((await call(path, { method: 'DELETE' })).status).toBe(204)
     expect(app.listNotices(thread.id).at(-1)).toMatchObject({
       kind: 'worktree-removed',
@@ -361,11 +380,11 @@ describe('thread changes', () => {
   })
 })
 
-describe('deleting a project', () => {
+describe('deleting a project', { timeout }, () => {
   test('ends its turns, removes its worktrees with their changes, and keeps the repository', async () => {
     const { dir, project, thread, ws } = await setup()
     const other = await setup()
-    await ws.exec('echo wip > wip.txt')
+    await ws.writeFile('wip.txt', 'wip\n')
     expect(existsSync(join(ws.label, 'wip.txt'))).toBe(true)
 
     // The thread is mid-turn: its model answers only once the turn is stopped.

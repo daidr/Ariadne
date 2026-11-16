@@ -1,73 +1,152 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouForm, DouFormItem, DouInput, DouText } from 'dou-ui'
-import { onMounted, ref } from 'vue'
-import { api, ApiError, type SearchSettings } from '../api'
-import { t, tm } from '../i18n'
+import { DouAlert, DouButton, DouForm, DouFormItem, DouInput, DouSelect, DouText } from 'dou-ui'
+import { computed, onMounted, ref, watch } from 'vue'
+import { api, ApiError, type SearchSettings, type SearchSettingsInput } from '../api'
+import { lt, t, tm } from '../i18n'
 
-/**
- * The key of the search service, asked for only where search waits for one: when a model
- * service searches the web itself (or a plugin brought a search service), nothing shows.
- * Saved with the rest of the settings.
- */
+/** A separate search API, used after the plugins and model services. */
 const search = ref<SearchSettings | null>(null)
-const apiKey = ref('')
-/** The stored key goes when the settings are saved. */
-const cleared = ref(false)
-const error = ref<string | null>(null)
-
-onMounted(async () => {
-  try {
-    search.value = await api.getSearchSettings()
-  } catch {
-    // Without it the section stays out of sight.
-  }
+const provider = ref<SearchSettings['provider']>('tavily')
+const drafts = ref<
+  Record<SearchSettings['provider'], { baseUrl: string; apiKey: string; cleared: boolean }>
+>({
+  tavily: { baseUrl: '', apiKey: '', cleared: false },
+  deepseek: { baseUrl: '', apiKey: '', cleared: false },
 })
+const error = ref<string | null>(null)
+const checking = ref(false)
+const checked = ref<{ ok: boolean; status: number | null } | null>(null)
+const active = computed(() => drafts.value[provider.value])
+const saved = computed(() => search.value?.services.find((item) => item.kind === provider.value))
+const options = computed(
+  () => search.value?.services.map((item) => ({ value: item.kind, label: item.title })) ?? [],
+)
+const sources = computed(() =>
+  [...(search.value?.plugins.map((title) => lt(title)) ?? []), ...(search.value?.models ?? [])]
+    .filter(Boolean)
+    .join('、'),
+)
 
-function clear() {
-  apiKey.value = ''
-  cleared.value = true
-}
-
-async function save(): Promise<boolean> {
-  const key = apiKey.value.trim()
-  if (!search.value || (!key && !cleared.value)) {
-    // The models were saved just before: whether a key is needed may have changed.
-    search.value = await api.getSearchSettings().catch(() => search.value)
-    return true
+function load(value: SearchSettings) {
+  search.value = value
+  provider.value = value.provider
+  for (const service of value.services) {
+    drafts.value[service.kind] = { baseUrl: service.baseUrl, apiKey: '', cleared: false }
   }
+}
+async function reload() {
   error.value = null
   try {
-    search.value = await api.saveSearchSettings({ apiKey: key || null })
-    apiKey.value = ''
-    cleared.value = false
+    load(await api.getSearchSettings())
+  } catch (cause) {
+    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+  }
+}
+onMounted(reload)
+watch(
+  [provider, drafts],
+  () => {
+    checked.value = null
+  },
+  { deep: true },
+)
+
+function input(onlyActive = false): SearchSettingsInput {
+  const services: SearchSettingsInput['services'] = {}
+  for (const kind of ['tavily', 'deepseek'] as const) {
+    if (onlyActive && kind !== provider.value) continue
+    const draft = drafts.value[kind]
+    services[kind] = {
+      baseUrl: draft.baseUrl,
+      apiKey: draft.apiKey.trim() || (draft.cleared ? null : ''),
+    }
+  }
+  return { provider: provider.value, services }
+}
+function clear() {
+  active.value.apiKey = ''
+  active.value.cleared = true
+}
+async function check() {
+  checking.value = true
+  error.value = null
+  checked.value = null
+  try {
+    checked.value = await api.checkSearchSettings(input(true))
+  } catch (cause) {
+    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+  } finally {
+    checking.value = false
+  }
+}
+async function save(): Promise<boolean> {
+  if (!search.value) return false
+  error.value = null
+  try {
+    // Models were saved just before this section, so the returned sources are current.
+    load(await api.saveSearchSettings(input()))
     return true
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
     return false
   }
 }
-
-defineExpose({ save })
+defineExpose({ save, checking })
 </script>
 
 <template>
-  <section v-if="search && (search.needed || search.keySet)" class="search">
+  <section class="search" :aria-label="t('settings.search')">
     <DouText weight="medium">{{ t('settings.search') }}</DouText>
-    <DouForm layout="vertical" size="sm">
-      <DouFormItem
-        :label="t('settings.searchKey')"
-        :help="search.keySet && !cleared ? t('settings.secretSet') : t('settings.searchKeyHelp')"
-      >
-        <DouInput v-model="apiKey" type="password" show-password placeholder="tvly-…">
-          <template v-if="search.keySet && !cleared" #suffix>
-            <DouButton size="xs" variant="ghost" @click="clear">
-              {{ t('settings.clearSecret') }}
-            </DouButton>
-          </template>
-        </DouInput>
-      </DouFormItem>
-    </DouForm>
+    <template v-if="search">
+      <DouText size="sm" variant="secondary">
+        {{ sources ? t('settings.searchSources', { sources }) : t('settings.searchNoSources') }}
+      </DouText>
+      <DouForm layout="vertical" size="sm" :disabled="checking">
+        <DouFormItem :label="t('settings.searchProvider')">
+          <DouSelect v-model="provider" :options="options" />
+        </DouFormItem>
+        <DouFormItem :label="t('settings.searchBaseUrl')" :help="t('settings.searchBaseUrlHelp')">
+          <DouInput
+            v-model="active.baseUrl"
+            :placeholder="saved?.defaultBaseUrl"
+            autocomplete="off"
+          />
+        </DouFormItem>
+        <DouFormItem
+          :label="t('settings.searchKey')"
+          :help="saved?.keySet && !active.cleared ? t('settings.secretSet') : undefined"
+        >
+          <DouInput v-model="active.apiKey" type="password" show-password autocomplete="off">
+            <template v-if="saved?.keySet && !active.cleared" #suffix>
+              <DouButton size="xs" variant="ghost" @click="clear">{{
+                t('settings.clearSecret')
+              }}</DouButton>
+            </template>
+          </DouInput>
+        </DouFormItem>
+      </DouForm>
+      <div class="search-check">
+        <DouButton
+          size="sm"
+          :loading="checking"
+          :disabled="checking || (!active.apiKey.trim() && (!saved?.keySet || active.cleared))"
+          @click="check"
+        >
+          {{ t('settings.searchCheck') }}
+        </DouButton>
+      </div>
+      <DouAlert v-if="checked" :tone="checked.ok ? 'success' : 'danger'">
+        {{
+          checked.ok
+            ? t('settings.searchCheckOk')
+            : checked.status
+              ? t('settings.searchCheckHttp', { status: checked.status })
+              : t('settings.searchCheckFailed')
+        }}
+      </DouAlert>
+    </template>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
+    <DouButton v-if="!search" size="sm" @click="reload">{{ t('settings.searchReload') }}</DouButton>
   </section>
 </template>
 
@@ -75,6 +154,12 @@ defineExpose({ save })
 .search {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+}
+.search-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 </style>

@@ -14,8 +14,15 @@
 bun install
 bun run start    # 启动本地服务（127.0.0.1:7428）和构建好的页面，页面有改动时先构建
 bun run dev      # 开发用：同时启动本地服务和前端开发服务器（localhost:5173）
+bun run dev:sandbox # 浏览器验收：临时 settings、数据库、示例仓库和模拟 AI 接口
 bun run check    # 格式、lint、类型检查和测试
 ```
+
+`dev:sandbox` 每次在系统临时目录创建独立的 `ARIADNE_HOME`，不读取或改写日常使用的 settings 和数据库。终端会打印带令牌的浏览器链接（默认 `http://127.0.0.1:5183`）、settings 路径和本机模拟 AI endpoint；后端默认端口为 `7438`，可用 `bun run dev:sandbox --port 7440 --web-port 5185` 调整，端口被占用时直接报错。前后端均支持热更新。
+
+沙箱预置待合并、待确认和已完成的讨论串，代码变更来自临时示例 Git 仓库，可以实际查看和合并。模型设置已接好本机 OpenAI 兼容接口，不需要真实 API Key：`mock` 流式回复，`mock-slow` 慢速流式回复（可测试中断），`mock-error` 返回请求失败（可测试错误与重试）。这些模型只按固定规则回复，不执行 AI 推理。按 Ctrl+C 停止前后端及模拟接口，临时数据保留便于排查，下次启动另建一套。
+
+沙箱的搜索配置也接到本机模拟接口，Key 为 `dev-only`：可以在设置中切换 Tavily / DeepSeek、测试连接；换成其他 Key 会返回 401。
 
 ### 发版构建
 
@@ -45,6 +52,8 @@ bun run release --no-upx                       # 不压缩
 `bun run start` 之后会自动在浏览器里打开页面（已经有页面开着时不再开新的；没有图形界面的机器上不开，终端里照常打印带令牌的链接）。本地服务第一次启动时在 `~/.ariadne/token` 生成访问令牌。开发时把链接里的 `#token=…` 接到 `http://localhost:5173/` 后面打开即可。
 
 第一次打开时先接上一个模型：本机已经登录的 Claude Code、Codex，或环境变量里的 Key（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`OPENROUTER_API_KEY`）会被列出来，点“用它”即可；也可以手动添加（OpenAI 兼容接口、Anthropic 接口，或 ACP agent），填好地址和 API Key 后模型列表会自动拉取，上下文、输出上限和价格按公开的模型目录填好，保存时会验证能不能连上。设置保存在 `~/.ariadne/config.json`。
+
+“设置 → 联网搜索”显示可用的插件和模型搜索来源，也可以配置 Tavily 或 DeepSeek Search API 作为备用；自动搜索按插件、模型、备用 API 的顺序尝试。两个服务的 Key 和地址分别保存，地址留空使用官方默认值（程序追加 `/search`）；原有 Tavily Key 自动迁移。测试连接只发送一次搜索，不保存草稿；保存搜索设置时，未改动的模型不会重新请求验证。DeepSeek 请求格式见 [官方文档](https://api-docs.deepseek.com/api/search/)。
 
 之后首屏就是一个输入框：写下想做的事，可以顺手选一个目录，发出去就建好了项目。项目名取目录名；没选目录时由协调器按第一句话起一个，右键项目可以随时重命名。
 

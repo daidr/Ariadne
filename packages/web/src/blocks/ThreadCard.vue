@@ -68,6 +68,31 @@ const headline = computed(() => {
 <style scoped>
 /* The card can be dragged onto the side; a swipe still scrolls the chat. */
 .thread-card {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
   touch-action: pan-y;
+}
+
+/* Opening the thread and reviewing its work have their own rows. */
+.thread-card :deep(.dou-chat-artifact__main) {
+  align-items: flex-start;
+}
+
+.thread-card :deep(.dou-chat-artifact__title) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.thread-card :deep(.dou-chat-artifact__actions) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  padding: 0 12px 10px;
+}
+
+.thread-card :deep(.review-actions) {
+  flex-shrink: 1;
+  flex-wrap: wrap;
 }
 </style>

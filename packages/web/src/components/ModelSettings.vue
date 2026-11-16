@@ -113,6 +113,38 @@ const saving = ref(false)
 const error = ref<string | null>(null)
 // The models just saved that did not answer when asked, shown where each is set up.
 const problems = ref<ModelProblem[]>([])
+let savedModelDraft = ''
+function modelDraft() {
+  return JSON.stringify([
+    providers.value.map((provider) => [
+      provider.id,
+      provider.kind,
+      provider.name,
+      provider.settings,
+      provider.headers,
+      provider.extraBody,
+      provider.timeoutSeconds,
+    ]),
+    models.value.map((model) => [
+      model.id,
+      model.provider,
+      model.model,
+      model.note,
+      model.images,
+      model.efforts,
+      filledOf(model),
+    ]),
+    threadModel.value,
+    threadEffort.value,
+    coordinatorModel.value,
+    coordinatorEffort.value,
+    researchModel.value,
+    fallback.value,
+    hiddenRoles.value,
+    showCost.value,
+    concurrency.value,
+  ])
+}
 const problemOf = (model: DraftModel) =>
   problems.value.find((problem) => problem.model === model.id)?.problem ?? null
 
@@ -231,7 +263,8 @@ const priced = computed(() =>
   models.value.some((model) => model.priceInput !== null && model.priceOutput !== null),
 )
 
-export type SettingsTab = 'models' | 'instructions' | 'commands' | 'input' | 'mcp' | 'data'
+export type SettingsTab =
+  'models' | 'search' | 'instructions' | 'commands' | 'input' | 'mcp' | 'data'
 type WorkPart = 'instructions' | 'commands'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
@@ -259,6 +292,7 @@ watch(open, async (isOpen) => {
     const [saved, slots] = await Promise.all([api.getModelSettings(), api.getConcurrency()])
     load(saved)
     concurrency.value = slots
+    savedModelDraft = modelDraft()
   } catch (cause) {
     error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
   }
@@ -492,7 +526,7 @@ async function saveAll() {
   try {
     const parts: [SettingsTab, (() => Promise<boolean>) | undefined][] = [
       ['models', saveModels],
-      ['models', search.value?.save],
+      ['search', search.value?.save],
       ['instructions', work.value.instructions?.save],
       ['commands', work.value.commands?.save],
       ['input', input.value?.save],
@@ -514,6 +548,8 @@ async function saveAll() {
 
 async function saveModels(): Promise<boolean> {
   if (!hiddenRoles.value) return true
+  // Saving another tab must not contact every model again when none was edited.
+  if (tab.value !== 'models' && modelDraft() === savedModelDraft) return true
   error.value = null
   try {
     // A name typed and saved at once has its settings filled in first.
@@ -595,6 +631,7 @@ async function saveModels(): Promise<boolean> {
     load(saved)
     problems.value = saved.problems
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
+    savedModelDraft = modelDraft()
     return true
   } catch (cause) {
     error.value =
@@ -895,9 +932,11 @@ async function saveModels(): Promise<boolean> {
               </DouFormItem>
             </DouForm>
           </section>
-          <SearchSettings v-if="open" ref="search" />
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
+      </DouTabPanel>
+      <DouTabPanel value="search" :label="t('settings.tab.search')">
+        <SearchSettings v-if="open" ref="search" />
       </DouTabPanel>
       <DouTabPanel
         v-for="part in WORK_PARTS"
@@ -923,7 +962,7 @@ async function saveModels(): Promise<boolean> {
     </DouTabs>
     <template #footer="{ close }">
       <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
-      <DouButton tone="primary" :loading="saving" @click="saveAll">
+      <DouButton tone="primary" :loading="saving" :disabled="search?.checking" @click="saveAll">
         {{ t('settings.save') }}
       </DouButton>
     </template>

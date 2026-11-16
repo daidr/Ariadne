@@ -1413,6 +1413,12 @@ export function createHandler({
     return json(settings.updateSearch(await readJson(request)))
   })
 
+  add('POST', '/api/settings/search/check', async (request) => {
+    if (!settings)
+      return errorResponse({ key: 'error.notFound', params: { what: 'settings' } }, 404)
+    return json(await settings.checkSearch(await readJson(request)))
+  })
+
   // Links in messages that a plugin knows, such as pull requests: what each names, and the
   // card shown when the user points at one.
   const links = new LinkResolver(host?.links ?? new Map())

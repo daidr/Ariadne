@@ -210,7 +210,8 @@ export function webSearchTool(routes: SearchRoutes): Tool {
     async run(args, ctx) {
       const query = str(args, 'query')
       const limit = Math.min(MAX_SEARCH_RESULTS, Math.max(1, optionalInt(args, 'limit') ?? 8))
-      const kind = optionalStr(args, 'provider') || kinds[0]
+      const chosen = optionalStr(args, 'provider')
+      const kind = chosen || kinds[0]
       if (kinds.length && !(kind && services.has(kind))) {
         throw new ToolInputError(`"provider" must be one of: ${kinds.join(', ')}`)
       }
@@ -232,7 +233,8 @@ export function webSearchTool(routes: SearchRoutes): Tool {
         } catch (error) {
           failed(error)
         }
-      } else {
+      }
+      if (!chosen) {
         for (const model of (routes.models ?? []).slice(0, MODEL_TRIES)) {
           const search = model.provider.search
           if (!search) continue
