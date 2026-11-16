@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.4 (2026-11-16)
+
+- ci: disable UPX for all release targets
+- Merge pull request #134 from daidr/release/alpha
+
 ## 0.1.0-alpha.3 (2026-11-16)
 
 - feat: add isolated dev sandbox and improve search settings
