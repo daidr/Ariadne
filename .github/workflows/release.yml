@@ -13,8 +13,6 @@ permissions:
   contents: read
 
 env:
-  UPX_VERSION: 5.0.2
-  UPX_SHA256: ddc2654063fe4dc80d95b420788494e4db078ebb01a650692d623b5a9906e61e
   RELEASE_BRANCH: release/alpha
 
 jobs:
@@ -89,14 +87,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - name: Install UPX
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/upx.tar.xz" "https://github.com/upx/upx/releases/download/v$UPX_VERSION/upx-$UPX_VERSION-amd64_linux.tar.xz"
-          echo "$UPX_SHA256  $RUNNER_TEMP/upx.tar.xz" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/upx.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/upx-$UPX_VERSION-amd64_linux" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile
-      - run: bun run release --target all
+      - run: bun run release --target all --no-upx
       - uses: actions/upload-artifact@v4
         with:
           name: programs

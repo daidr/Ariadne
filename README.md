@@ -45,6 +45,8 @@ bun run release --no-upx                       # 不压缩
 1. master 每有新提交，就把上次发版之后的提交整理进 release PR（分支 `release/alpha`）。PR 里把 `package.json` 的版本号改成下一个 alpha，并在 `CHANGELOG.md` 顶部加上这一版的提交列表。这个分支每次都从 master 重新生成，不要在上面手动提交。
 2. 合入 release PR 后，构建全部平台的程序，在 Linux、Windows、macOS 上各运行一次 `--version` 和 `self-check`，都通过后发布 `v<版本号>` 预发布版本，附上程序和这一版的更新日志。
 
+GitHub Actions 发版构建统一传入 `--no-upx`，所有平台均不使用 UPX，也不再下载安装 UPX。
+
 需要在仓库的 Settings → Actions → General 里勾选 “Allow GitHub Actions to create and approve pull requests”，否则开不了 release PR。正式版本另走流程，还没有做。
 
 测试换掉了外部服务和操作系统的部分，发布前在真实环境里按 [真实环境检查清单](./docs/real-env-checklist.md) 过一遍。模型接口的回放样本用 `bun run record:provider` 录制，见清单里的 DeepSeek 一节。
