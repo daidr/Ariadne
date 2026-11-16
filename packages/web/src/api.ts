@@ -478,6 +478,8 @@ export const api = {
     ),
   reviewThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/reviewed`),
+  completeThread: (threadId: string) =>
+    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/complete`),
   endAside: (threadId: string) =>
     request<{ thread: ThreadView }>('DELETE', `/api/threads/${threadId}/aside`),
   undoNotice: (projectId: string, noticeId: string) =>

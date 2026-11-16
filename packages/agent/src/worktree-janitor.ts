@@ -73,6 +73,10 @@ export class WorktreeJanitor {
   }
 
   private onEvent(event: AnyStoredEvent) {
+    if (event.type === 'project.settings.set') {
+      for (const thread of this.app.listThreads(event.projectId)) this.enqueue(thread.id)
+      return
+    }
     const threadId =
       event.type === 'branch.merged' ||
       event.type === 'pull_request.closed' ||
@@ -102,16 +106,23 @@ export class WorktreeJanitor {
     } catch {
       return
     }
+    const retention = this.app.getProject(thread.projectId).settings.workspace.retention
+    if (retention === 'keep') return
     // Parked while idle, then merged outside Ariadne: the work has landed after all.
     if (parked(thread)) {
       if (await this.landed(thread)) this.app.recordWorktreeRemoved(threadId, 'merged')
       return
     }
     if (!candidate(thread)) return
-    const reason = (await this.landed(thread)) ? 'merged' : this.idle(thread) ? 'idle' : null
+    const reason = (await this.landed(thread))
+      ? 'merged'
+      : retention === 'auto' && this.idle(thread)
+        ? 'idle'
+        : null
     if (!reason) return
     // It may have been woken while the branch was being checked.
     if (!candidate(this.app.getThread(threadId))) return
+    if (this.app.getProject(thread.projectId).settings.workspace.retention !== retention) return
     await this.workspaces.removeWorktree(thread.projectId, threadId, reason)
   }
 

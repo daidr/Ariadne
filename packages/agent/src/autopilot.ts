@@ -137,6 +137,7 @@ export class Autopilot {
       this.app.withdrawSystemAttention(projectId, attentionId, t('autopilot.gateGone'))
     }
     for (const thread of this.app.listThreads(projectId)) {
+      if (this.app.getProject(projectId).settings.delivery.mode === 'external') break
       const round = this.app.passedReview(thread.id)
       if (!round) continue
       // Each merge may take a while; the user may pause meanwhile.
@@ -176,6 +177,11 @@ export class Autopilot {
       const changes = await branches.changes({ threadId: thread.id, branch }, base)
       if (!changes) return hold('refused', t('autopilot.noBranch'))
       if (head && changes.head !== head) return hold('moved')
+      if (
+        !this.project(thread.projectId) ||
+        this.app.getProject(thread.projectId).settings.delivery.mode === 'external'
+      )
+        return
       const outcome = await branches.merge({
         threadId: thread.id,
         branch,
@@ -231,6 +237,11 @@ export class Autopilot {
     }
     const { method } = this.app.getProject(thread.projectId).settings.autopilot
     const base = thread.workspace?.base ?? (await repo.defaultBranch())
+    if (
+      !this.project(thread.projectId) ||
+      this.app.getProject(thread.projectId).settings.delivery.mode === 'external'
+    )
+      return
     const outcome = await repo.mergePullRequest(pr.number, { method, sha: pr.headSha })
     if (outcome.kind === 'merged') {
       await syncThreadPullRequest(this.app, repo, thread.id, undefined, {

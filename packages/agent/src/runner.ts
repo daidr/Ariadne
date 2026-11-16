@@ -156,6 +156,7 @@ function threadContext(
     userInstructions: { global: userInstructions, project: project.settings.instructions },
     skills: skills.list(),
     review: project.settings.review.enabled && hasWorkspace,
+    delivery: project.settings.delivery,
   }
 }
 
@@ -193,6 +194,7 @@ function systemPrompt(
       instructions: recordedInstructions(app, conversation.id),
       skills: skills.list(),
       autopilot: project.settings.autopilot.enabled ? { paused: project.autopilotPaused } : null,
+      delivery: project.settings.delivery,
     })
   }
   const thread = app.getThread(conversation.id)

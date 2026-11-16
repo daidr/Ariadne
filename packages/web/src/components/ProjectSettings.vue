@@ -72,6 +72,16 @@ const methodOptions = (['squash', 'merge'] as MergeMethod[]).map((method) => ({
   value: method,
   label: t(`changes.method.${method}`),
 }))
+const deliveryOptions = computed(() => [
+  { value: 'merge', label: t('projectSettings.deliveryMerge') },
+  { value: 'external', label: t('projectSettings.deliveryExternal') },
+])
+const retentionOptions = computed(() =>
+  (['auto', 'merged', 'keep'] as const).map((value) => ({
+    value,
+    label: t(`projectSettings.retention.${value}`),
+  })),
+)
 /** The routines as loaded: left alone, a save keeps what the coordinator set meanwhile. */
 let loadedRoutines = ''
 
@@ -254,6 +264,9 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="workspace" :label="t('projectSettings.tab.workspace')">
         <DouForm layout="vertical" size="sm">
+          <DouFormItem :label="t('projectSettings.retention')">
+            <DouSelect v-model="settings.workspace.retention" :options="retentionOptions" />
+          </DouFormItem>
           <DouFormItem :label="t('projectSettings.setup')">
             <DouTextarea
               v-model="setup"
@@ -295,6 +308,27 @@ async function save() {
       </DouTabPanel>
       <DouTabPanel value="autopilot" :label="t('projectSettings.tab.autopilot')">
         <DouForm layout="vertical" size="sm">
+          <DouFormItem
+            :label="t('projectSettings.delivery')"
+            :help="
+              settings.delivery.mode === 'external'
+                ? t('projectSettings.deliveryExternalHelp')
+                : undefined
+            "
+          >
+            <DouSelect v-model="settings.delivery.mode" :options="deliveryOptions" />
+          </DouFormItem>
+          <DouFormItem
+            v-if="settings.delivery.mode === 'external'"
+            :label="t('projectSettings.deliveryInstructions')"
+          >
+            <DouTextarea
+              v-model="settings.delivery.instructions"
+              :autosize="{ minRows: 3, maxRows: 8 }"
+              :maxlength="16000"
+              :placeholder="t('projectSettings.deliveryPlaceholder')"
+            />
+          </DouFormItem>
           <div class="project-switch">
             <span>{{ t('projectSettings.review') }}</span>
             <DouSwitch
@@ -303,7 +337,15 @@ async function save() {
               @update:model-value="setReview"
             />
           </div>
-          <DouFormItem :help="t('projectSettings.autopilotHelp')">
+          <DouFormItem
+            :help="
+              t(
+                settings.delivery.mode === 'external'
+                  ? 'projectSettings.autopilotExternalHelp'
+                  : 'projectSettings.autopilotHelp',
+              )
+            "
+          >
             <div class="project-switch">
               <span>{{ t('projectSettings.autopilot') }}</span>
               <DouSwitch
@@ -326,7 +368,7 @@ async function save() {
             }}
           </DouText>
           <DouFormItem
-            v-if="hostedMerge && settings.autopilot.enabled"
+            v-if="hostedMerge && settings.autopilot.enabled && settings.delivery.mode === 'merge'"
             :label="t('projectSettings.autopilotMethod')"
           >
             <DouSelect v-model="settings.autopilot.method" :options="methodOptions" />

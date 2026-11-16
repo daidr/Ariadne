@@ -223,6 +223,8 @@ const openPullRequest: Tool = {
     },
   },
   async run(args, ctx) {
+    if (ctx.app.getProject(ctx.projectId).settings.delivery.mode === 'external')
+      throw new DomainError('error.externalDelivery')
     const repo = await ctx.repo()
     const branch = await branchOf(ctx)
     const existing = await repo.pullRequestFor(branch)

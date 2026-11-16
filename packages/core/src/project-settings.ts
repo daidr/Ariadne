@@ -34,11 +34,15 @@ export const POSIX_SHELLS: ShellName[] = ['bash', 'zsh', 'sh']
 export interface ProjectSettings {
   /** Instructions for this project that are not in its repository, for every conversation. */
   instructions: string
+  /** How work is handed over; completion does not require merging its branch. */
+  delivery: { mode: 'merge' | 'external'; instructions: string }
   /** Groups of built-in tools its conversations do not get, e.g. `fetch` for fetch_url. */
   tools: string[]
   /** Tokens (read and written) one thread, and the whole project, may use; `null` is no cap. */
   budget: { thread: number | null; project: number | null }
   workspace: {
+    /** Automatic cleanup, only after integration, or only on an explicit user request. */
+    retention: 'auto' | 'merged' | 'keep'
     /**
      * What is left to Ariadne. `setup`: a new workspace is set up with the command the
      * first thread to install the repository's dependencies noted, and nothing before.
@@ -126,9 +130,11 @@ export const MAX_CHECK_COMMAND = 2000
 
 export const defaultProjectSettings = (): ProjectSettings => ({
   instructions: '',
+  delivery: { mode: 'merge', instructions: '' },
   tools: [],
   budget: { thread: null, project: null },
   workspace: {
+    retention: 'auto',
     auto: { setup: true, check: true },
     setup: '',
     shell: 'auto',
@@ -196,6 +202,15 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     if (body.instructions.length > MAX_PROJECT_INSTRUCTIONS) throw bad('instructions')
     out.instructions = body.instructions.trim()
   }
+  if (body.delivery !== undefined) {
+    const delivery = (body.delivery ?? {}) as Record<string, unknown>
+    const mode = delivery.mode ?? 'merge'
+    if (mode !== 'merge' && mode !== 'external') throw bad('delivery.mode')
+    const instructions = delivery.instructions ?? ''
+    if (typeof instructions !== 'string' || instructions.length > MAX_PROJECT_INSTRUCTIONS)
+      throw bad('delivery.instructions')
+    out.delivery = { mode, instructions: instructions.trim() }
+  }
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools) || body.tools.some((name) => !tools.includes(name))) {
       throw bad('tools')
@@ -211,6 +226,9 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
   }
   if (body.workspace !== undefined) {
     const workspace = (body.workspace ?? {}) as Record<string, unknown>
+    const retention = workspace.retention ?? 'auto'
+    if (retention !== 'auto' && retention !== 'merged' && retention !== 'keep')
+      throw bad('workspace.retention')
     const setup = workspace.setup ?? ''
     if (typeof setup !== 'string' || setup.length > MAX_SETUP_SCRIPT) throw bad('workspace.setup')
     const shell = workspace.shell ?? 'auto'
@@ -230,6 +248,7 @@ export function parseProjectSettings(input: unknown, tools: readonly string[]): 
     if (typeof autoSetup !== 'boolean') throw bad('workspace.auto.setup')
     if (typeof autoCheck !== 'boolean') throw bad('workspace.auto.check')
     out.workspace = {
+      retention,
       auto: { setup: autoSetup, check: autoCheck },
       setup: autoSetup ? '' : setup.trim(),
       shell: shell as ShellChoice,
@@ -285,10 +304,13 @@ export function parseRoutines(raw: unknown): Routine[] {
 /** Stored settings read back; a project that never set any has the defaults. */
 export function storedProjectSettings(raw: string | null): ProjectSettings {
   if (!raw) return defaultProjectSettings()
-  const settings = { ...defaultProjectSettings(), ...(JSON.parse(raw) as ProjectSettings) }
+  const defaults = defaultProjectSettings()
+  const settings = { ...defaults, ...(JSON.parse(raw) as ProjectSettings) }
+  settings.delivery = { ...defaults.delivery, ...settings.delivery }
   const { workspace } = settings
   // Settings saved before `auto`: a script or a check the user wrote stays theirs.
   settings.workspace = {
+    ...defaults.workspace,
     ...workspace,
     auto: workspace.auto ?? { setup: !workspace.setup, check: !workspace.check },
   }

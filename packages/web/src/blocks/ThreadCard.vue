@@ -30,44 +30,56 @@ const line = computed(() =>
 )
 // While it works the line shimmers, the way a running artifact card shows it is underway.
 const running = computed(() => thread.value?.stage === 'working' || !!line.value?.live)
+const changes = computed(() => branchChanges(thread.value))
+const hasActions = computed(
+  () =>
+    !!changes.value ||
+    thread.value?.stage === 'review' ||
+    (!!thread.value?.review && !thread.value.review.reviewing && thread.value.review.rounds > 0),
+)
 const headline = computed(() => {
   if (!thread.value) return undefined
   const progress = thread.value.stage === 'working' ? thread.value.progress : null
-  const text = line.value?.text ?? (running.value ? t('thread.stage.working') : null)
-  if (!text) return progress ? t('thread.progressShort', progress) : undefined
-  return progress ? `${text} · ${t('thread.progressShort', progress)}` : text
+  const status = t(`thread.stage.${thread.value.stage}`)
+  const text = line.value?.text
+  const description = text !== status ? text : undefined
+  if (!progress) return description
+  const count = t('thread.progressShort', progress)
+  return description ? `${description} · ${count}` : count
 })
 </script>
 
 <template>
-  <DouChatArtifact
-    v-if="thread"
-    :title="thread.title"
-    :description="headline"
-    :status="running ? 'running' : 'done'"
-    :active="activeThreadId === thread.id"
-    class="thread-card"
-    @open="open"
-    @pointerdown="(event: PointerEvent) => dragThread(event, thread!.id)"
-  >
-    <template #icon><MessagesIcon /></template>
-    <template #actions>
-      <ChangeTotals
-        v-if="branchChanges(thread)"
-        :totals="branchChanges(thread)!"
-        :thread-id="thread.id"
-        button
-      />
-      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
-      <ReviewMark :thread="thread" />
-      <StageIcon v-if="!running" :stage="thread.stage" />
-    </template>
-  </DouChatArtifact>
+  <div v-if="thread" class="thread-card">
+    <DouChatArtifact
+      :title="thread.title"
+      :description="headline"
+      :status="running && headline ? 'running' : 'done'"
+      :active="activeThreadId === thread.id"
+      class="thread-card__artifact"
+      @open="open"
+      @pointerdown="(event: PointerEvent) => dragThread(event, thread!.id)"
+    >
+      <template #icon><MessagesIcon /></template>
+      <template v-if="hasActions" #actions>
+        <ChangeTotals v-if="changes" :totals="changes" :thread-id="thread.id" button />
+        <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+        <ReviewMark :thread="thread" />
+      </template>
+    </DouChatArtifact>
+    <span class="thread-card__stage"><StageIcon :stage="thread.stage" /></span>
+  </div>
 </template>
 
 <style scoped>
 /* The card can be dragged onto the side; a swipe still scrolls the chat. */
 .thread-card {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+}
+
+.thread-card__artifact {
   flex-direction: column;
   align-items: stretch;
   width: 100%;
@@ -77,11 +89,29 @@ const headline = computed(() => {
 /* Opening the thread and reviewing its work have their own rows. */
 .thread-card :deep(.dou-chat-artifact__main) {
   align-items: flex-start;
+  padding-right: 40px;
+}
+
+/* Keep the discussion icon; its stage takes the former arrow's place. */
+.thread-card :deep(.dou-chat-artifact__arrow) {
+  display: none;
+}
+
+.thread-card__stage {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  pointer-events: none;
 }
 
 .thread-card :deep(.dou-chat-artifact__title) {
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.thread-card :deep(.dou-chat-artifact__description:empty) {
+  display: none;
 }
 
 .thread-card :deep(.dou-chat-artifact__actions) {

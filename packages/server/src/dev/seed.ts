@@ -115,12 +115,19 @@ export async function seedSandbox(home: string, baseUrl: string) {
       headline: '开发环境已就绪',
       summary: '可以发送消息验证真实接口链路。',
     })
+    const working = app.createThread(project.id, { title: '核查度量前端灰度残留' })
+    app.startThread(working.id)
+    app.updateTodo(project.id, working.id, [
+      { label: '读取度量契约与仓库说明', status: 'doing' },
+      { label: '核查前端灰度逻辑', status: 'next' },
+      { label: '整理核查结果', status: 'next' },
+    ])
     app.postMessage(project.id, {
       conversationId: project.coordinatorId,
       author: 'coordinator',
       content:
         '这里是开发沙箱。下面的讨论串可打开、查看变更和合并；发送消息可测试模拟 AI 的流式回复。',
-      blocks: [thread, research, done].map(({ id }) => ({ type: 'thread', threadId: id })),
+      blocks: [working, thread, research, done].map(({ id }) => ({ type: 'thread', threadId: id })),
     })
     // Consume the fixture reports before starting the real scheduler: the first live
     // request should answer the developer's message rather than echoing setup notices.

@@ -90,6 +90,65 @@ async function commit(workspace: Workspace, path: string, content: string) {
 const timeout = process.platform === 'win32' ? 30_000 : 5_000
 
 describe('thread changes', { timeout }, () => {
+  test('completing first preserves changes and allows a separate merge later', async () => {
+    const { project, thread, ws } = await setup()
+    app.reportThread(thread.id, { kind: 'ready', summary: '提交好了', headline: '提交好了' })
+    const completed = await call(`/api/threads/${thread.id}/complete`, { method: 'POST' })
+    expect(await completed.json()).toMatchObject({ thread: { stage: 'done', merged: null } })
+    expect(existsSync(ws.label)).toBe(true)
+    const changes = await (await call(`/api/threads/${thread.id}/changes`)).json()
+    expect(changes.changes.files).toHaveLength(1)
+    const merged = await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(await merged.json()).toMatchObject({ outcome: { kind: 'merged' } })
+    expect(app.getThread(thread.id).projectId).toBe(project.id)
+  })
+
+  test('external delivery shows its changes but refuses the built-in merge', async () => {
+    const { project, thread, dir } = await setup()
+    app.setProjectSettings(project.id, { delivery: { mode: 'external' } }, [])
+    const before = await git(dir, 'rev-parse', 'HEAD')
+    const changes = await (await call(`/api/threads/${thread.id}/changes`)).json()
+    expect(changes.mergeable).toBe(false)
+    expect(changes.changes.files).toHaveLength(1)
+    const refused = await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+    expect(await refused.json()).toMatchObject({ error: { key: 'error.externalDelivery' } })
+    expect(await git(dir, 'rev-parse', 'HEAD')).toBe(before)
+  })
+
+  test('retention keeps completed workspaces independently of completion and integration', async () => {
+    const { project, thread, ws, dir } = await setup()
+    const setRetention = (retention: 'keep' | 'merged' | 'auto') => {
+      const settings = app.getProject(project.id).settings
+      app.setProjectSettings(
+        project.id,
+        { ...settings, workspace: { ...settings.workspace, retention } },
+        [],
+      )
+    }
+    app.reportThread(thread.id, { kind: 'ready', summary: '好了', headline: '好了' })
+    app.completeThread(thread.id)
+    const janitor = new WorktreeJanitor(app, workspaces, {
+      delayMs: 0,
+      idleMs: 1,
+      now: () => Date.now() + 100_000,
+    })
+    try {
+      setRetention('merged')
+      await janitor.check(thread.id)
+      expect(existsSync(ws.label)).toBe(true)
+      setRetention('keep')
+      await call(`/api/threads/${thread.id}/merge`, { method: 'POST', body: {} })
+      await janitor.check(thread.id)
+      expect(existsSync(ws.label)).toBe(true)
+      setRetention('auto')
+      await janitor.check(thread.id)
+      expect(existsSync(ws.label)).toBe(false)
+      expect(await git(dir, 'branch', '--list', 'ariadne/*')).toContain(thread.id.slice(-12))
+    } finally {
+      await janitor.stop()
+    }
+  })
+
   test('the user sees the changes and squash-merges them; the coordinator hears of it', async () => {
     const { dir, project, thread } = await setup()
     expect(app.getThread(thread.id).workspace).toMatchObject({ base: 'main', removed: false })

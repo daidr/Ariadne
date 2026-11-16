@@ -93,7 +93,7 @@ import LiveCommand from './LiveCommand.vue'
 import BackgroundCommand from './BackgroundCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 import ChangeTotals from './ChangeTotals.vue'
-import { branchChanges, mergeOffered } from '../review/merge-offered'
+import { branchChanges } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
@@ -354,9 +354,6 @@ const timeline = computed(() =>
       : []),
   ].toSorted((a, b) => a.at - b.at),
 )
-
-// Its review offers "go merge", which opens the changes: no second way there beside it.
-const mergeAsked = computed(() => thread.value?.stage === 'review' && mergeOffered(thread.value))
 
 type TurnChangesNotice = Extract<NoticeView, { kind: 'turn-changes' }>
 /**
@@ -693,15 +690,11 @@ watch(
           <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
             {{ t('review.underway', { round: thread.review.rounds }) }}
           </DouShimmer>
-          <ReviewActions
-            v-if="thread.stage === 'review' && !(merging && mergeOffered(thread))"
-            :thread-id="thread.id"
-          />
+          <ReviewActions v-if="thread.stage === 'review' && !merging" :thread-id="thread.id" />
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
           <PullRequestTag :thread="thread" refreshable />
           <ReviewMark :thread="thread" />
-          <!-- Under review, "go merge" opens the same changes. -->
-          <template v-if="thread.workspace?.branch && thread.workspace.base && !mergeAsked">
+          <template v-if="thread.workspace?.branch && thread.workspace.base">
             <ChangeTotals
               v-if="branchChanges(thread)"
               :totals="branchChanges(thread)!"

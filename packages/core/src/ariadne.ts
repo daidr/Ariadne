@@ -1699,6 +1699,31 @@ export class Ariadne {
     return this.getProject(projectId)
   }
 
+  /** Update delivery alone, preserving the project's other settings and omitted fields. */
+  setProjectDelivery(
+    projectId: string,
+    input: { mode?: unknown; instructions?: unknown },
+  ): ProjectView {
+    const project = this.getProject(projectId)
+    if (input.mode !== undefined && input.mode !== 'merge' && input.mode !== 'external')
+      throw new DomainError('error.invalidBody', { reason: 'delivery.mode' })
+    if (input.instructions !== undefined && typeof input.instructions !== 'string')
+      throw new DomainError('error.invalidBody', { reason: 'delivery.instructions' })
+    const delivery = parseProjectSettings(
+      {
+        delivery: {
+          mode: input.mode ?? project.settings.delivery.mode,
+          instructions: input.instructions ?? project.settings.delivery.instructions,
+        },
+      },
+      [],
+    ).delivery
+    const settings = { ...project.settings, delivery }
+    if (JSON.stringify(settings) === JSON.stringify(project.settings)) return project
+    this.store.append([{ type: 'project.settings.set', projectId, data: { settings } }])
+    return this.getProject(projectId)
+  }
+
   /**
    * Replace the project's routines, checked like the rest of its settings. `change` is the
    * one an agent added or removed: its conversation gets a line saying so.
@@ -2337,14 +2362,19 @@ export class Ariadne {
     ])
   }
 
-  /** The user is through with what the thread put up for review; it counts as done. */
-  reviewThread(threadId: string): ThreadView {
+  /** Complete a delivery without merging or discarding its branch. */
+  completeThread(threadId: string): ThreadView {
     const thread = this.getThread(threadId)
     if (thread.stage !== 'review') throw new DomainError('error.threadNotInReview')
     this.store.append([
       { type: 'thread.reviewed', projectId: thread.projectId, data: { threadId } },
     ])
     return this.getThread(threadId)
+  }
+
+  /** Compatibility for clients that called completion "reviewed". */
+  reviewThread(threadId: string): ThreadView {
+    return this.completeThread(threadId)
   }
 
   /**
@@ -2388,12 +2418,21 @@ export class Ariadne {
       })
     }
     const { reviewing, round } = this.nextReviewRound(thread, report.kind, !!review.reviewable)
+    // An external handover needs no second confirmation after its configured steps.
+    // Failed/exhausted review rounds still go to the user, rather than being accepted.
+    const kind =
+      report.kind === 'ready' &&
+      !reviewing &&
+      round === 0 &&
+      this.getProject(projectId).settings.delivery.mode === 'external'
+        ? 'done'
+        : report.kind
     events.push({
       type: 'thread.reported',
       projectId,
       data: {
         threadId,
-        report: report.kind,
+        report: kind,
         summary,
         headline,
         artifacts,
@@ -2571,7 +2610,7 @@ export class Ariadne {
       throw new DomainError('error.invalidBody', { reason: 'comments' })
     }
     const { projectId } = reviewer
-    this.store.append([
+    const events: AnyNewEvent[] = [
       {
         type: 'review.submitted',
         projectId,
@@ -2595,7 +2634,26 @@ export class Ariadne {
           artifacts: [],
         },
       },
-    ])
+    ]
+    if (
+      input.verdict === 'pass' &&
+      this.getProject(projectId).settings.delivery.mode === 'external'
+    ) {
+      const author = this.getThread(authorId)
+      events.push({
+        type: 'thread.reported',
+        projectId,
+        data: {
+          threadId: authorId,
+          report: 'done',
+          summary: author.lastSummary ?? summary,
+          headline: author.lastHeadline ?? summary.slice(0, 60),
+          artifacts: author.lastArtifacts.map((artifact) => artifact.id),
+          ...(round.head ? { head: round.head } : {}),
+        },
+      })
+    }
+    this.store.append(events)
     return this.listReviews(authorId).at(-1)!
   }
 

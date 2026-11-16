@@ -173,6 +173,24 @@ describe('merging', () => {
     expect(app.listNeedsMe(projectId)).toEqual([])
   })
 
+  test('external delivery never auto-merges even when autopilot and AI review are enabled', async () => {
+    autopilotOn()
+    const { workspaces, merges } = localBranches({
+      head: 'h1',
+      outcome: () => ({ kind: 'merged', sha: 'm1', head: 'h1' }),
+    })
+    const thread = deliver('准备提票', 'h1')
+    pass(thread.id)
+    expect(app.getThread(thread.id).stage).toBe('review')
+    app.setProjectSettings(
+      projectId,
+      { delivery: { mode: 'external' }, autopilot: { enabled: true } },
+      [],
+    )
+    await pilot(workspaces).check(projectId)
+    expect(merges).toEqual([])
+  })
+
   test('paused, off, or comments left after the last round: the user merges', async () => {
     const { workspaces, merges } = localBranches({
       head: 'h1',

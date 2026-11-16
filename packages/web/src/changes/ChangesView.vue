@@ -26,7 +26,7 @@ import {
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { t, tm } from '../i18n'
-import { closeView, openView, report, reviewThread, state, type TurnChangesRef } from '../store'
+import { closeView, openView, report, completeThread, state, type TurnChangesRef } from '../store'
 import PullRequestTag from '../components/PullRequestTag.vue'
 import ViewActions from '../full/ViewActions.vue'
 import ChangedFiles from './ChangedFiles.vue'
@@ -103,10 +103,10 @@ function switchScope(value: unknown) {
 const changes = ref<BranchChanges | null>(null)
 const mergeable = ref(false)
 // Handed to the user for review, it can also end without a merge here: they let it go, or
-// took it in some other way. The review's way out is "go merge", so this is the other one.
+// took it in some other way. Completion accepts delivery independently of merging.
 const reviewing = computed(() => thread.value?.stage === 'review' && !props.turn)
 async function skipMerge() {
-  await reviewThread(props.threadId)
+  await completeThread(props.threadId)
   closeView(view.value)
 }
 const loading = ref(true)
@@ -387,7 +387,7 @@ const methodOptions = computed(() => [
         {{ t('changes.merged', { base }) }}
       </DouTag>
       <DouButton v-if="reviewing" size="sm" variant="ghost" @click="skipMerge">
-        {{ t('changes.skipMerge') }}
+        {{ t('thread.complete') }}
       </DouButton>
       <DouPopover
         v-if="mergeable && !upToDate && changes?.files.length"

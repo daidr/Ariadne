@@ -1359,3 +1359,7 @@ export async function endAside(threadId: string) {
 export async function reviewThread(threadId: string) {
   await api.reviewThread(threadId).catch(report)
 }
+
+export async function completeThread(threadId: string) {
+  await api.completeThread(threadId).catch(report)
+}

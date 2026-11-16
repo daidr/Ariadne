@@ -802,6 +802,9 @@ export function createHandler({
   add('POST', '/api/threads/:threadId/reviewed', (_request, { threadId = '' }) =>
     json({ thread: app.reviewThread(threadId) }),
   )
+  add('POST', '/api/threads/:threadId/complete', (_request, { threadId = '' }) =>
+    json({ thread: app.completeThread(threadId) }),
+  )
 
   // The user takes up a thread that was set aside.
   add('DELETE', '/api/threads/:threadId/aside', (_request, { threadId = '' }) => {

@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { DouButton, DouTooltip } from 'dou-ui'
-import { CheckIcon, GitMergeIcon, PencilIcon } from '@dou-ui/icons'
-import { computed } from 'vue'
+import { CheckIcon, PencilIcon } from '@dou-ui/icons'
 import { t } from '../i18n'
 import { writeToThread } from '../shortcuts'
-import { reviewThread, state } from '../store'
-import { useOpenView } from '../opened-from'
-import { mergeOffered } from '../review/merge-offered'
-
-const openView = useOpenView()
+import { completeThread } from '../store'
 
 /**
  * The two ways out of a review: the user is through with it, or wants more done, which
@@ -17,29 +12,17 @@ const openView = useOpenView()
  */
 const props = defineProps<{ threadId: string; compact?: boolean }>()
 
-// Changes on a branch Ariadne merges itself: looking through them ends in merging, so that
-// is the way out offered, rather than a "seen it" that reads like a yes to merge.
-const mergeable = computed(() =>
-  mergeOffered(state.detail?.threads.find((item) => item.id === props.threadId)),
-)
 function done() {
-  if (mergeable.value) openView({ kind: 'changes', threadId: props.threadId })
-  else void reviewThread(props.threadId)
+  void completeThread(props.threadId)
 }
 </script>
 
 <template>
   <span class="review-actions">
     <template v-if="compact">
-      <DouTooltip :content="t(mergeable ? 'thread.goMerge' : 'thread.reviewed')">
-        <DouButton
-          size="xs"
-          variant="ghost"
-          :aria-label="t(mergeable ? 'thread.goMerge' : 'thread.reviewed')"
-          @click="done"
-        >
-          <GitMergeIcon v-if="mergeable" />
-          <CheckIcon v-else />
+      <DouTooltip :content="t('thread.complete')">
+        <DouButton size="xs" variant="ghost" :aria-label="t('thread.complete')" @click="done">
+          <CheckIcon />
         </DouButton>
       </DouTooltip>
       <DouTooltip :content="t('thread.reviseAsk')">
@@ -56,10 +39,9 @@ function done() {
     <template v-else>
       <DouButton size="sm" variant="ghost" @click="done">
         <template #leading>
-          <GitMergeIcon v-if="mergeable" />
-          <CheckIcon v-else />
+          <CheckIcon />
         </template>
-        {{ t(mergeable ? 'thread.goMerge' : 'thread.reviewed') }}
+        {{ t('thread.complete') }}
       </DouButton>
       <DouButton size="sm" variant="ghost" @click="writeToThread(props.threadId)">
         <template #leading><PencilIcon /></template>

@@ -88,7 +88,12 @@ test('the sandbox has isolated settings and actual changes that can be merged', 
     expect(settings.models.roles.thread.model).toBe('mock')
     app = new Ariadne({ path: join(home, 'ariadne.sqlite') })
     const threads = app.listThreads(projectId)
-    expect(threads.map((item) => item.stage).toSorted()).toEqual(['done', 'review', 'review'])
+    expect(threads.map((item) => item.stage).toSorted()).toEqual([
+      'done',
+      'review',
+      'review',
+      'working',
+    ])
     const thread = threads.find((item) => item.workspace?.branch)!
     expect(thread.changes).toEqual({ files: 1, added: 3, removed: 0 })
     expect(app.getConversation(app.getProject(projectId).coordinatorId).pendingSeq).toBe(0)

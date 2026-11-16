@@ -37,7 +37,8 @@ export async function threadChanges(
         { threadId, branch: thread.workspace.branch },
         thread.workspace.base,
       ),
-      mergeable: !!branches.merge,
+      mergeable:
+        !!branches.merge && app.getProject(thread.projectId).settings.delivery.mode !== 'external',
     }
   } catch (error) {
     throw workError(error)
@@ -72,11 +73,15 @@ export async function mergeThread(
   input: { method: MergeMethod; message: string },
 ): Promise<{ outcome: MergeOutcome; thread: ThreadView }> {
   const thread = app.getThread(threadId)
+  if (app.getProject(thread.projectId).settings.delivery.mode === 'external')
+    throw new DomainError('error.externalDelivery')
   const { branch, base } = branchOf(thread)
   // What is merged is what was committed; a thread at work may be halfway through.
   if (app.getConversation(threadId).turn) throw new DomainError('error.merge.working')
   const branches = await workspaces.branches(thread.projectId)
   if (!branches?.merge) throw new DomainError('error.merge.unsupported')
+  if (app.getProject(thread.projectId).settings.delivery.mode === 'external')
+    throw new DomainError('error.externalDelivery')
   const message = input.message.trim() || thread.title
   let outcome: MergeOutcome
   try {
