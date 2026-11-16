@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.5 (2026-11-16)
+
+- feat: separate completion from merging and support external delivery
+- Merge pull request #135 from daidr/release/alpha
+
 ## 0.1.0-alpha.4 (2026-11-16)
 
 - ci: disable UPX for all release targets
