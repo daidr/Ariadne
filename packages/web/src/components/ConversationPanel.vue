@@ -1144,14 +1144,15 @@ watch(
       data-message-input
       @keydown="onInputKeydown"
     >
-      <ConversationBar
-        v-if="conversationId"
-        :key="conversationId"
-        :conversation-id="conversationId"
-        :changes="capsuleChanges"
-        :artifacts="createdArtifacts"
-        :background="background"
-      />
+      <div v-if="conversationId" class="conversation-capsules">
+        <ConversationBar
+          :key="conversationId"
+          :conversation-id="conversationId"
+          :changes="capsuleChanges"
+          :artifacts="createdArtifacts"
+          :background="background"
+        />
+      </div>
       <DouChatInput
         ref="input"
         v-model="draft"
@@ -1295,6 +1296,7 @@ watch(
 }
 
 .conversation {
+  --conversation-capsule-height: 44px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1343,6 +1345,16 @@ watch(
   min-height: 0;
 }
 
+/* Messages scroll behind the capsules, while the last message can clear them. */
+.conversation-list :deep(.dou-chat-list__content) {
+  padding-bottom: calc(var(--conversation-capsule-height) + 16px);
+}
+
+.conversation-list :deep(.dou-chat-list__scroll) {
+  bottom: calc(var(--conversation-capsule-height) + 12px);
+  z-index: 2;
+}
+
 .reaction-picker {
   display: flex;
   gap: 2px;
@@ -1356,7 +1368,7 @@ watch(
 }
 
 .conversation-alert {
-  margin: 0 16px;
+  margin: 0 16px var(--conversation-capsule-height);
 }
 
 .routine-prompt {
@@ -1366,16 +1378,58 @@ watch(
 }
 
 .conversation-input {
+  position: relative;
+  flex: none;
   padding: 0 16px 16px;
+}
+
+.conversation-capsules {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  z-index: 1;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-end;
+  box-sizing: border-box;
+  height: var(--conversation-capsule-height);
+  padding: 0 16px 4px;
+  pointer-events: none;
+}
+
+/* Two masked layers increase blur toward the composer without a solid top edge. */
+.conversation-capsules::before,
+.conversation-capsules::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -24px 0 0;
+  pointer-events: none;
+  backdrop-filter: blur(3px);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+}
+
+.conversation-capsules::after {
+  inset-block-start: 0;
+  backdrop-filter: blur(12px);
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--dou-color-bg-canvas) 90%, transparent)
+  );
+  mask-image: linear-gradient(to bottom, transparent, #000);
+}
+
+.conversation-capsules :deep(.conversation-bar) {
+  flex: 1;
+}
+
+.conversation-capsules :deep(button) {
+  pointer-events: auto;
 }
 
 .conversation-input :deep(.dou-chat-input:not(:focus-within)) {
   box-shadow: none;
-}
-
-/* Right under the list, messages run up to the composer's edge, with no band between. */
-.conversation-list + .conversation-input {
-  padding-top: 0;
 }
 
 .conversation-tools {

@@ -9,7 +9,7 @@ import { SharedArtifacts, type LiveWrite, type Writer } from './shared-artifacts
 import { applyDocumentEdits, editsSoFar, rewriteSoFar } from './document-writing'
 import { boardSoFar, documentFromView, documentView } from './document-boards'
 import { isOpen } from './partial-json'
-import { anchorWhere } from './artifact-feedback'
+import { anchorWhere, documentAnchorWhere } from './artifact-feedback'
 import { OPTION_SCHEMA, placeOptions } from './whiteboard-options'
 import { plainText } from './markdown-code'
 import { boardFromItems, boardProblems, boardSummary, mergeBoard } from './whiteboard'
@@ -926,7 +926,14 @@ function commentsOf(ctx: ToolContext, artifactId: string, board?: WhiteboardCont
   return {
     comments: open.map((thread) => ({
       commentThread: thread.id,
-      ...(board ? on(thread) : { quote: thread.quote }),
+      ...(thread.anchor?.block
+        ? {
+            on: 'node' in thread.anchor ? thread.anchor.node : thread.anchor.edge,
+            where: documentAnchorWhere(ctx.shared, artifactId, thread.anchor, thread.id),
+          }
+        : board
+          ? on(thread)
+          : { quote: thread.quote }),
       comments: thread.comments.map((c) => ({ by: commenter(ctx, c.author), body: c.body })),
     })),
     resolvedComments: threads.length - open.length,
@@ -937,7 +944,7 @@ const commentArtifact: Tool = {
   spec: {
     name: 'comment_artifact',
     description:
-      "Comment on a document or whiteboard, as the user does there: reply in a comment thread (commentThread), or start one on a short passage of a document's text (quote, as the reader sees it, without Markdown marks) or on a whiteboard's item or option (on, its id; at pins it to a point of it, such as a spot on a screenshot). Keep comments short. Answer the user's comments here, not in a chat message.",
+      "Comment on a document or whiteboard, as the user does there: reply in a comment thread (commentThread, including threads inside a document's whiteboard), or start one on a short passage of a document's text (quote, as the reader sees it, without Markdown marks) or on a whiteboard's item or option (on, its id; at pins it to a point of it, such as a spot on a screenshot). Keep comments short. Answer the user's comments here, not in a chat message.",
     parameters: {
       type: 'object',
       properties: {

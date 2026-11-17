@@ -62,7 +62,7 @@ function jump(id: string) {
             @click="jump(thread.id)"
           >
             <DouText size="sm" variant="secondary" class="comment-quote" truncate>
-              {{ thread.quote }}
+              {{ thread.quote || t('artifact.kind.whiteboard') }}
             </DouText>
             <DouText size="sm" truncate>
               {{
@@ -88,7 +88,7 @@ function jump(id: string) {
                 <template v-if="!thread.resolved && !marked.has(thread.id)">
                   {{ t('artifact.commentGone') }}
                 </template>
-                {{ thread.quote }}
+                {{ thread.quote || t('artifact.kind.whiteboard') }}
               </DouText>
             </template>
           </DouCommentThread>

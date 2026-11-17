@@ -165,16 +165,26 @@ function commentAction(body: Record<string, unknown>): ArtifactCommentAction {
     case 'create': {
       // On a whiteboard, the item or connector instead of a quote.
       if (body.anchor !== undefined) {
-        const anchor = body.anchor as { node?: unknown; edge?: unknown } | null
+        const anchor = body.anchor as { node?: unknown; edge?: unknown; block?: unknown } | null
         const node = typeof anchor?.node === 'string' && anchor.node ? anchor.node : null
         const edge = typeof anchor?.edge === 'string' && anchor.edge ? anchor.edge : null
         if (!node === !edge) throw new BadRequest('anchor')
+        if (
+          anchor?.block !== undefined &&
+          (typeof anchor.block !== 'string' || !anchor.block.trim())
+        )
+          throw new BadRequest('anchor.block')
+        if (body.quote !== undefined && typeof body.quote !== 'string')
+          throw new BadRequest('quote')
         return {
           type: 'create',
           threadId,
           commentId: text('commentId'),
-          quote: '',
-          anchor: node ? { node } : { edge: edge! },
+          quote: typeof body.quote === 'string' ? body.quote : '',
+          anchor: {
+            ...(node ? { node } : { edge: edge! }),
+            ...(typeof anchor?.block === 'string' ? { block: anchor.block } : {}),
+          },
           body: text('body'),
         }
       }

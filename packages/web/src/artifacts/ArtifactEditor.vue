@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   ArtifactCommentAction,
+  ArtifactCommentAnchor,
   ArtifactCommentThreadView,
   ArtifactVersionView,
   ArtifactView,
@@ -219,7 +220,8 @@ const MAX_QUOTE = 1000
 /** The editor's comment change, sent as the server takes it. */
 function toAction(
   action: CommentAction,
-  quote: string | { node: string } | { edge: string } | null,
+  quote: string | ArtifactCommentAnchor | null,
+  label = '',
 ): ArtifactCommentAction | null {
   switch (action.type) {
     case 'create': {
@@ -231,7 +233,7 @@ function toAction(
           type: 'create',
           threadId: action.thread.id,
           commentId: first.id,
-          quote: '',
+          quote: label.slice(0, MAX_QUOTE),
           body: first.body,
           anchor: quote,
         }
@@ -268,9 +270,10 @@ function toAction(
 
 async function comment(
   action: CommentAction,
-  quote: string | { node: string } | { edge: string } | null = '',
+  quote: string | ArtifactCommentAnchor | null = '',
+  label = '',
 ) {
-  const sent = toAction(action, quote)
+  const sent = toAction(action, quote, label)
   if (!sent) return
   if (sent.type === 'create' || sent.type === 'reply') touched()
   try {

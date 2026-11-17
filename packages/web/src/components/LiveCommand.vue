@@ -57,7 +57,8 @@ watch(
         {{ command.cwd === '.' ? '' : `${command.cwd} ` }}$ {{ command.command }}
       </DouText>
       <div ref="box" class="live-output" @scroll="onScroll">
-        <DouCodeBlock :code="command.tail || t('command.noOutput')" wrap streaming />
+        <DouCodeBlock v-if="command.tail" :code="command.tail" wrap streaming />
+        <DouText v-else variant="tertiary" size="sm">{{ t('command.noOutput') }}</DouText>
       </div>
     </template>
   </DouPopover>

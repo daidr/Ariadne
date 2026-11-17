@@ -1,4 +1,20 @@
-import type { InlineContent, PartialBlock } from '@dou-ui/editor'
+import type { CommentAnchor, InlineContent, PartialBlock } from '@dou-ui/editor'
+import type { ArtifactCommentAnchor } from '@ariadne/core'
+
+/** Native block anchors stay scoped even when different boards reuse a node id. */
+export function commentTarget(
+  anchor: CommentAnchor | null | undefined,
+): string | ArtifactCommentAnchor | null {
+  if (!anchor) return null
+  if (!anchor.type) return anchor.text
+  if (anchor.type !== 'whiteboard') return null
+  const target = anchor.target as { node?: unknown; edge?: unknown } | null
+  if (typeof target?.node === 'string' && target.node)
+    return { block: anchor.block, node: target.node }
+  if (typeof target?.edge === 'string' && target.edge)
+    return { block: anchor.block, edge: target.edge }
+  return null
+}
 
 type Text = Extract<InlineContent, { type: 'text' }>
 
@@ -55,12 +71,12 @@ function runsOf(blocks: PartialBlock[]): { runs: Run[]; text: string } {
  */
 export function anchorQuotes(
   source: readonly PartialBlock[],
-  threads: readonly { id: string; quote: string }[],
+  threads: readonly { id: string; quote: string; anchor?: ArtifactCommentAnchor | null }[],
 ): { blocks: PartialBlock[]; found: Set<string> } {
   const blocks = structuredClone(source) as PartialBlock[]
   const found = new Set<string>()
   for (const thread of threads) {
-    if (!thread.quote) continue
+    if (!thread.quote || thread.anchor?.block) continue
     const { runs, text } = runsOf(blocks)
     const from = text.indexOf(thread.quote)
     if (from < 0) continue

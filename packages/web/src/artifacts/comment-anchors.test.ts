@@ -2,12 +2,33 @@
 import { editorKit, type PartialBlock } from '@dou-ui/editor'
 import { blocksToMarkdown, markdownToBlocks } from '@dou-ui/editor/markdown'
 import { describe, expect, test } from 'vitest'
-import { anchoredIds, anchorQuotes } from './comment-anchors'
+import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 
 const extensions = [editorKit()]
 const read = (markdown: string) => markdownToBlocks(markdown, extensions) as PartialBlock[]
 
 describe('anchorQuotes', () => {
+  test('board targets retain their block and never become text highlights with the same label', () => {
+    const anchor = {
+      block: 'board-2',
+      type: 'whiteboard',
+      text: '审批',
+      from: 0,
+      to: 1,
+      target: { node: 'shared-id', at: { x: 0.5, y: 0.5 } },
+    }
+    expect(commentTarget(anchor)).toEqual({ block: 'board-2', node: 'shared-id' })
+    expect(commentTarget({ ...anchor, text: '', target: { edge: 'edge-1' } })).toEqual({
+      block: 'board-2',
+      edge: 'edge-1',
+    })
+    const { blocks, found } = anchorQuotes(read('审批\n'), [
+      { id: 'c1', quote: '审批', anchor: { block: 'board-2', node: 'shared-id' } },
+    ])
+    expect(found.size).toBe(0)
+    expect(anchoredIds(blocks).size).toBe(0)
+    expect(commentTarget({ block: 'text', text: '审批', from: 0, to: 2 })).toBe('审批')
+  })
   test('marks a quote across formatting, and leaves the Markdown as it was', () => {
     const markdown = '# 方案\n\n开业当天**全场八折**，送帆布袋。\n'
     const before = blocksToMarkdown(read(markdown) as never, extensions)

@@ -83,7 +83,10 @@ watch(tail, async () => {
       served
     }}</DouLink>
     <div ref="box" class="background-output" @scroll="onScroll">
-      <DouCodeBlock :code="tail || t('command.noOutput')" wrap streaming />
+      <DouCodeBlock v-if="tail" :code="tail" wrap streaming />
+      <DouText v-else variant="tertiary" size="sm" class="background-empty">{{
+        t('command.noOutput')
+      }}</DouText>
     </div>
   </div>
 </template>
@@ -126,5 +129,10 @@ watch(tail, async () => {
 .background-output {
   max-height: 240px;
   overflow: auto;
+}
+
+.background-empty {
+  display: block;
+  padding: 12px 0;
 }
 </style>

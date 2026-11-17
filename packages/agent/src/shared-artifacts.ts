@@ -4,7 +4,13 @@ import * as encoding from 'lib0/encoding'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import * as syncProtocol from 'y-protocols/sync'
 import * as Y from 'yjs'
-import { bridges, sharedKinds, type SharedEvent, type SharedKind } from './shared-content'
+import {
+  bridges,
+  documentBoard,
+  sharedKinds,
+  type SharedEvent,
+  type SharedKind,
+} from './shared-content'
 
 /**
  * Documents, whiteboards and dashboards people and agents edit at the same time. Each one open
@@ -159,6 +165,23 @@ export class SharedArtifacts {
   content(artifactId: string): string {
     const room = this.rooms.get(artifactId)
     return room ? read(room) : this.app.getArtifact(artifactId).content
+  }
+
+  /** A document comment's whiteboard, including edits still waiting to be saved. */
+  commentBoard(artifactId: string, blockId: string) {
+    const room = this.rooms.get(artifactId)
+    if (room) return room.kind === 'document' ? documentBoard(room.doc, blockId) : null
+    const artifact = this.app.getArtifact(artifactId)
+    const stored = this.app.readSharedState(artifactId)
+    if (artifact.kind !== 'document' || !stored || stored.version !== artifact.version) return null
+    // Reading comments must not retain an unwatched collaboration room.
+    const doc = new Y.Doc()
+    try {
+      Y.applyUpdate(doc, stored.state)
+      return documentBoard(doc, blockId)
+    } finally {
+      doc.destroy()
+    }
   }
 
   /**

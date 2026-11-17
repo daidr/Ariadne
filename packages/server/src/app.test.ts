@@ -44,6 +44,46 @@ describe('auth', () => {
   })
 })
 
+test('document whiteboard comments preserve block scope and reject malformed anchors', async () => {
+  const project = app.createProject('P')
+  const artifact = app.createArtifact(project.id, {
+    kind: 'document',
+    title: 'Doc',
+    author: 'user',
+    content: '# Plan',
+  })
+  const path = `/api/artifacts/${artifact.id}/comments`
+  const action = {
+    type: 'create',
+    threadId: 'board-comment',
+    commentId: 'comment-1',
+    body: '调整这里',
+    quote: '审批',
+  }
+  const response = await call(path, {
+    method: 'POST',
+    body: { ...action, anchor: { block: 'board-2', node: 'shared-id' } },
+  })
+  expect(response.status).toBe(200)
+  expect(app.listArtifactComments(artifact.id)[0]).toMatchObject({
+    quote: '审批',
+    anchor: { block: 'board-2', node: 'shared-id' },
+    comments: [{ body: '调整这里' }],
+  })
+  for (const anchor of [
+    { node: 'n' },
+    { block: '', node: 'n' },
+    { block: 5, node: 'n' },
+    { block: 'b', node: 'n', edge: 'e' },
+  ]) {
+    const invalid = await call(path, {
+      method: 'POST',
+      body: { ...action, threadId: 'bad', anchor },
+    })
+    expect(invalid.status).toBe(400)
+  }
+})
+
 describe('project detail', () => {
   test('sends only the threads changed since the cursor', async () => {
     const project = app.createProject('P')

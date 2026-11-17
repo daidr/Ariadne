@@ -4,9 +4,15 @@ import {
   readMap as readDashboard,
   updateMap as updateDashboard,
 } from '@dou-ui/dashboard/collaboration'
-import { blockElement, defineEditorExtension, editorKit, textBlock } from '@dou-ui/editor'
+import {
+  blockElement,
+  defineEditorExtension,
+  editorKit,
+  textBlock,
+  type PartialBlock,
+} from '@dou-ui/editor'
 import { cursorAt, fillMap, readMap, updateMap } from '@dou-ui/editor/collaboration'
-import { whiteboardBlock } from '@dou-ui/editor/flow'
+import { boardOf, whiteboardBlock } from '@dou-ui/editor/flow'
 import { blocksToMarkdown, markdownToBlocks, type DOMParserLike } from '@dou-ui/editor/markdown'
 import { fillMaps, readMaps, updateMaps } from '@dou-ui/flow/collaboration'
 import { Window } from 'happy-dom'
@@ -54,6 +60,28 @@ export const documentExtensions = [
   pendingBlock({ defineEditorExtension, textBlock, blockElement }),
 ]
 const extensions = documentExtensions
+
+/** Look up by native block id, never by node id (different boards can reuse it). */
+export function documentBoard(
+  doc: Y.Doc,
+  blockId: string,
+): { board: WhiteboardContent; index: number } | null {
+  let index = 0
+  let found: { board: WhiteboardContent; index: number } | null = null
+  const walk = (blocks: PartialBlock[]) => {
+    for (const block of blocks) {
+      if (block.type === 'whiteboard') {
+        index++
+        if (block.id === blockId) {
+          found = { board: boardOf(block.props?.board) as WhiteboardContent, index }
+        }
+      }
+      if (block.children) walk(block.children)
+    }
+  }
+  walk(readMap(doc.getMap('document'), { extensions }).blocks)
+  return found
+}
 
 /** The server has no browser: Markdown is read into blocks through happy-dom's HTML reader. */
 let reader: DOMParserLike | null = null

@@ -262,6 +262,7 @@ function bring(group: DockGroup, key: PaneKey) {
    the lists do theirs. */
 .side-dock {
   --dou-dock-group-padding-x: 0px;
+  --dou-dock-header-padding-x: 8px;
   --dou-dock-group-padding-bottom: 0px;
   --dou-dock-panel-gap: 0px;
 }

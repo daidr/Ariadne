@@ -342,8 +342,8 @@ export type ArtifactCommentAction =
   | { type: 'reopen'; threadId: string }
   | { type: 'remove'; threadId: string }
 
-/** What a whiteboard's comment thread is about: one item, or one connector. */
-export type ArtifactCommentAnchor = { node: string } | { edge: string }
+/** An item or connector; `block` scopes it to a whiteboard inside a document. */
+export type ArtifactCommentAnchor = ({ node: string } | { edge: string }) & { block?: string }
 
 /**
  * One thing the user did in an artifact since the last round of feedback, as the agent

@@ -4485,18 +4485,30 @@ export class Ariadne {
         .query<{ id: string }, [string]>('SELECT id FROM artifact_comments WHERE id = ?')
         .get(action.threadId)
       if (taken) throw invalid('threadId')
-      if (artifact.kind === 'whiteboard') {
+      if (artifact.kind === 'whiteboard' || action.anchor) {
         // A whiteboard's thread is about an item or a connector, named by its id.
         const anchor = action.anchor
         const id = anchor && ('node' in anchor ? anchor.node : anchor.edge)
         if (!anchor || typeof id !== 'string' || !id || id.length > 200) throw invalid('anchor')
+        if ('node' in anchor === 'edge' in anchor) throw invalid('anchor')
+        const block = anchor.block
+        if (
+          artifact.kind === 'document'
+            ? typeof block !== 'string' || !block.trim() || block.length > 200
+            : block !== undefined
+        )
+          throw invalid('anchor.block')
         checked = {
           type: 'create',
           threadId: action.threadId,
           commentId: action.commentId,
-          quote: '',
+          quote:
+            artifact.kind === 'document' ? action.quote.trim().slice(0, MAX_COMMENT_QUOTE) : '',
           body: commentText(action.body),
-          anchor: 'node' in anchor ? { node: id } : { edge: id },
+          anchor: {
+            ...('node' in anchor ? { node: id } : { edge: id }),
+            ...(block ? { block } : {}),
+          },
         }
       } else {
         const quote = action.quote.trim()

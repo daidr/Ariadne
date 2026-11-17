@@ -174,9 +174,11 @@ export class ArtifactFeedback {
           threadId: thread.id,
           action: i === 0 ? 'create' : 'reply',
           body: comment.body,
-          where: board
-            ? anchorWhere(board, thread.anchor, thread.id)
-            : `on the text "${thread.quote}"`,
+          where: thread.anchor?.block
+            ? documentAnchorWhere(this.shared, artifactId, thread.anchor, thread.id)
+            : board
+              ? anchorWhere(board, thread.anchor, thread.id)
+              : `on the text "${thread.quote}"`,
         })
       }
     }
@@ -303,6 +305,20 @@ function pointOn(board: WhiteboardContent, node: WhiteboardNode, x: number, y: n
  * Where a comment thread is on a whiteboard, in words: the item it is on, its option, and
  * for one pinned to a point of the item, that point on the screenshot there.
  */
+export function documentAnchorWhere(
+  shared: SharedArtifacts | undefined,
+  artifactId: string,
+  anchor: ArtifactCommentAnchor,
+  threadId: string,
+): string {
+  const item = 'node' in anchor ? `item ${anchor.node}` : `connector ${anchor.edge}`
+  if (!shared) return `in whiteboard block ${anchor.block}, on ${item}`
+  const found = anchor.block ? shared.commentBoard(artifactId, anchor.block) : null
+  return found
+    ? `in whiteboard ${found.index}, ${anchorWhere(found.board, anchor, threadId)}`
+    : `in whiteboard block ${anchor.block}, which is gone now (on ${item})`
+}
+
 export function anchorWhere(
   board: WhiteboardContent,
   anchor: ArtifactCommentAnchor | null,

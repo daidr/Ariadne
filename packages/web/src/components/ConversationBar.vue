@@ -25,7 +25,7 @@ function openArtifact(id: string) {
 <template>
   <div class="conversation-bar" data-conversation-bar>
     <DouButton
-      v-if="changes"
+      v-if="changes?.totals && changes.totals.files > 0"
       variant="outline"
       size="sm"
       class="conversation-pill"

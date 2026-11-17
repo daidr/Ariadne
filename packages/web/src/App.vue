@@ -185,6 +185,11 @@ body,
   margin: 0;
 }
 
+/* alpha.18's copy-button base rule otherwise overrides the code block's placement. */
+.dou-code-block > .dou-code-block__copy {
+  position: absolute;
+}
+
 .app {
   height: 100%;
 }
