@@ -1432,6 +1432,12 @@ watch(
   box-shadow: none;
 }
 
+/* Keep the composer's focus ring above the capsule backdrop at their shared edge. */
+.conversation-input :deep(.dou-chat-input) {
+  position: relative;
+  z-index: 2;
+}
+
 .conversation-tools {
   display: flex;
   align-items: center;

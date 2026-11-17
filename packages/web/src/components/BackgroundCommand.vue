@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { BackgroundView } from '@ariadne/core'
 import { DouButton, DouCodeBlock, DouLink, DouText } from 'dou-ui'
-import { SquareStopIcon } from '@dou-ui/icons'
+import { StopIcon } from '@dou-ui/icons'
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
@@ -74,9 +74,16 @@ watch(tail, async () => {
         >$ {{ command.command }}</DouText
       >
       <span class="background-time">{{ elapsed }}</span>
-      <DouButton variant="ghost" size="sm" :loading="stopping" @click="stop">
-        <template #leading><SquareStopIcon /></template>
-        {{ t('command.stop') }}
+      <DouButton
+        variant="ghost"
+        tone="danger"
+        size="sm"
+        :aria-label="t('command.stop')"
+        :title="t('command.stop')"
+        :loading="stopping"
+        @click="stop"
+      >
+        <StopIcon />
       </DouButton>
     </div>
     <DouLink v-if="command.url" :href="command.url" external class="background-url">{{

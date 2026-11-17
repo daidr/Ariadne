@@ -58,8 +58,8 @@ test('one task capsule opens details, switches output, and stops the selected ta
   await flushPromises()
   expect(firstSignal.aborted).toBe(true)
   expect(api.commandOutput).toHaveBeenLastCalledWith('thr-1', 'cmd-2', expect.any(AbortSignal))
-  const stop = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-    button.textContent?.includes('停止'),
+  const stop = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.getAttribute('aria-label') === '停止',
   )!
   stop.click()
   await flushPromises()
