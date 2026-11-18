@@ -1,17 +1,8 @@
 <script setup lang="ts">
-import {
-  DouAlert,
-  DouButton,
-  DouEmpty,
-  DouLink,
-  DouPopconfirm,
-  DouSpinner,
-  DouText,
-  DouTooltip,
-} from 'dou-ui'
-import { InfoIcon, TrashIcon } from '@dou-ui/icons'
+import { DouAlert, DouButton, DouEmpty, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
+import { TrashIcon } from '@dou-ui/icons'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { api, ApiError, type ProjectWorktrees } from '../api'
+import { api, ApiError, type ProjectWorktrees, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { t, tm } from '../i18n'
 import StageLabel from './StageLabel.vue'
@@ -20,19 +11,14 @@ import StageLabel from './StageLabel.vue'
 const projects = ref<ProjectWorktrees[] | null>(null)
 const error = ref<string | null>(null)
 const removing = ref<string | null>(null)
-const measuring = ref(false)
+const props = defineProps<{ storage: StorageSnapshot | null; measuring: boolean }>()
+const emit = defineEmits<{ changed: [] }>()
 let controller: AbortController | undefined
 let closed = false
 onBeforeUnmount(() => {
   closed = true
   controller?.abort()
 })
-// On Windows a Dev Drive is what lets worktrees share storage; elsewhere there is nothing to do.
-const windows = ref(false)
-const DEV_DRIVE = 'https://learn.microsoft.com/windows/dev-drive/'
-// The hint around the words "Dev Drive", which alone are the link.
-const copied = computed(() => t('worktrees.copied', { link: '\n' }).split('\n'))
-
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
 
@@ -41,16 +27,10 @@ async function load() {
   controller?.abort()
   controller = new AbortController()
   const { signal } = controller
-  measuring.value = false
   try {
     const listed = await api.listWorktrees(false, signal)
     if (signal.aborted) return
-    windows.value = listed.windows
     projects.value = listed.projects.filter((project) => project.worktrees.length || project.error)
-    if (projects.value.some((project) => project.worktrees.length)) {
-      measuring.value = true
-      void measureSizes(signal)
-    }
   } catch (cause) {
     if (signal.aborted) return
     error.value = message(cause)
@@ -59,43 +39,30 @@ async function load() {
 }
 onMounted(load)
 
-async function measureSizes(signal: AbortSignal) {
-  try {
-    const measured = await api.listWorktrees(true, signal)
-    if (!signal.aborted)
-      projects.value = measured.projects.filter(
-        (project) => project.worktrees.length || project.error,
-      )
-  } catch (cause) {
-    if (!signal.aborted) error.value = message(cause)
-  } finally {
-    if (!signal.aborted) measuring.value = false
-  }
-}
-
-const size = formatBytes
-
-// Worktrees that share storage with their checkout take only what changed, which the
-// size of their files does not tell: they are left out of the sizes.
 const total = computed(() =>
-  (projects.value ?? [])
-    .filter((project) => !project.shared)
-    .flatMap((project) => project.worktrees)
-    .reduce((sum, worktree) => sum + (worktree.bytes ?? 0), 0),
+  props.storage?.total == null || projects.value?.some((project) => project.error)
+    ? null
+    : t(props.storage.logical ? 'data.logicalSize' : 'data.allocatedSize', {
+        size: formatBytes(props.storage.total),
+      }),
 )
+
+function reclaimable(path: string) {
+  const bytes = props.storage?.worktrees[path]?.exclusive
+  return bytes
+    ? t('worktrees.reclaimable', { size: formatBytes(bytes) })
+    : t('worktrees.reclaimUnknown')
+}
 
 async function remove(projectId: string, threadId: string) {
   removing.value = threadId
   error.value = null
-  const interrupted = measuring.value
-  controller?.abort()
-  measuring.value = false
   try {
     await api.removeWorktree(projectId, threadId)
+    emit('changed')
     await load()
   } catch (cause) {
     error.value = message(cause)
-    if (interrupted) await load()
   } finally {
     removing.value = null
   }
@@ -103,33 +70,25 @@ async function remove(projectId: string, threadId: string) {
 </script>
 
 <template>
-  <div class="worktrees">
+  <section class="worktrees">
+    <div class="worktrees-heading">
+      <DouText weight="medium">{{ t('settings.tab.worktrees') }}</DouText>
+      <DouSpinner v-if="!projects || measuring" size="sm" />
+    </div>
     <DouAlert v-if="error" tone="danger" closable @close="error = null">{{ error }}</DouAlert>
-    <div v-if="!projects" class="worktrees-loading"><DouSpinner /></div>
-    <DouEmpty v-else-if="!projects.length" size="sm" :description="t('worktrees.empty')" />
-    <template v-else>
-      <DouSpinner v-if="measuring" size="sm" />
-      <DouText v-else-if="total" size="sm" variant="secondary">{{
-        t('worktrees.total', { size: size(total) })
-      }}</DouText>
+    <DouEmpty v-if="projects && !projects.length" size="sm" :description="t('worktrees.empty')" />
+    <template v-else-if="projects">
+      <DouText
+        v-if="total"
+        size="sm"
+        variant="secondary"
+        :title="storage?.logical ? undefined : t('data.allocatedHint')"
+      >
+        {{ total }}
+      </DouText>
       <section v-for="project in projects" :key="project.id" class="worktrees-project">
         <div class="worktrees-head">
           <DouText weight="medium" size="sm">{{ project.name }}</DouText>
-          <DouTooltip v-if="project.shared" :content="t('worktrees.shared')">
-            <DouButton variant="ghost" size="sm" :aria-label="t('worktrees.shared')">
-              <template #leading><InfoIcon /></template>
-            </DouButton>
-          </DouTooltip>
-          <DouTooltip v-else-if="project.shared === false && windows">
-            <DouButton variant="ghost" size="sm" :aria-label="copied.join('Dev Drive')">
-              <template #leading><InfoIcon /></template>
-            </DouButton>
-            <template #content>
-              {{ copied[0] }}
-              <DouLink :href="DEV_DRIVE" external>Dev Drive</DouLink>
-              {{ copied[1] }}
-            </template>
-          </DouTooltip>
         </div>
         <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>
         <ul class="worktrees-list">
@@ -149,12 +108,13 @@ async function remove(projectId: string, threadId: string) {
               </DouText>
             </div>
             <DouText
-              v-if="worktree.bytes !== null && !project.shared"
+              v-if="storage?.worktrees[worktree.path]?.bytes != null"
               size="sm"
               variant="secondary"
               class="worktree-size"
+              :title="reclaimable(worktree.path)"
             >
-              {{ size(worktree.bytes) }}
+              {{ formatBytes(storage.worktrees[worktree.path]!.bytes!) }}
             </DouText>
             <DouPopconfirm
               :title="
@@ -163,6 +123,7 @@ async function remove(projectId: string, threadId: string) {
                 })
               "
               tone="danger"
+              :description="reclaimable(worktree.path)"
               :confirm-text="t('worktrees.remove')"
               @confirm="remove(project.id, worktree.threadId)"
             >
@@ -181,7 +142,7 @@ async function remove(projectId: string, threadId: string) {
         </ul>
       </section>
     </template>
-  </div>
+  </section>
 </template>
 
 <style scoped>
@@ -191,10 +152,10 @@ async function remove(projectId: string, threadId: string) {
   gap: 12px;
 }
 
-.worktrees-loading {
-  display: grid;
-  place-items: center;
-  padding: 24px 0;
+.worktrees-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .worktrees-project {

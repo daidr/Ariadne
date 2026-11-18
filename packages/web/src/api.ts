@@ -158,13 +158,23 @@ export interface ProjectWorktrees {
   id: string
   name: string
   worktrees: (WorktreeInfo & { thread: ThreadView | null })[]
-  /**
-   * Whether worktrees share storage with the checkout they are cloned from, so each takes
-   * room only for what its thread changed; `null` when that cannot be told.
-   */
+  /** Whether the source supports cloning on the worktree volume, when probed. */
   shared: boolean | null
   /** Why they could not be listed, e.g. the remote machine was unreachable. */
   error: LocalizedMessage | null
+}
+
+export interface DirectorySize {
+  bytes: number | null
+  exclusive: number | null
+}
+
+export interface StorageSnapshot {
+  managed: number | null
+  total: number | null
+  worktrees: Record<string, DirectorySize>
+  logical: boolean
+  measuredAt: number
 }
 
 export interface ProjectDetail {
@@ -702,6 +712,13 @@ export const api = {
     request<DataUsage>(
       'GET',
       sizes ? '/api/settings/data' : '/api/settings/data?sizes=0',
+      undefined,
+      signal,
+    ),
+  getStorage: (cached: boolean, signal: AbortSignal) =>
+    request<{ storage: StorageSnapshot | null }>(
+      'GET',
+      cached ? '/api/settings/data?sizes=cached' : '/api/settings/data?sizes=storage',
       undefined,
       signal,
     ),

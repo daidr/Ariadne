@@ -113,6 +113,9 @@ func (api *API) registerWorkspaces() {
 		if removed == "dirty" {
 			return nil, 0, domainerr.New("error.worktreeDirty", nil)
 		}
+		if api.options.Data != nil {
+			api.options.Data.InvalidateUsage()
+		}
 		return nil, 204, nil
 	})
 }

@@ -41,6 +41,7 @@ type Options struct {
 	Home, DatabasePath string
 	Now                func() time.Time
 	Scan               func(context.Context, string) *int64
+	Measure            func(context.Context, string, []string) fsutil.StorageSizes
 	ScanTTL            time.Duration
 }
 type scan struct {
@@ -49,18 +50,20 @@ type scan struct {
 	generation uint64
 }
 type Store struct {
-	options       Options
-	backupMu      sync.Mutex
-	mu            sync.Mutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	closed        bool
-	pending       *scan
-	known         bool
-	bytes         *int64
-	expires       time.Time
-	generation    uint64
-	writingBackup string
+	options        Options
+	backupMu       sync.Mutex
+	mu             sync.Mutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	closed         bool
+	pending        *scan
+	known          bool
+	bytes          *int64
+	expires        time.Time
+	generation     uint64
+	writingBackup  string
+	storage        *storageScan
+	storagePending *storageScan
 }
 
 func New(options Options) (*Store, error) {
@@ -72,6 +75,9 @@ func New(options Options) (*Store, error) {
 	}
 	if options.Scan == nil {
 		options.Scan = fsutil.DiskUsage
+	}
+	if options.Measure == nil {
+		options.Measure = fsutil.MeasureStorage
 	}
 	if options.ScanTTL <= 0 {
 		options.ScanTTL = 30 * time.Second
@@ -206,6 +212,10 @@ func (store *Store) InvalidateUsage() {
 	store.generation++
 	store.bytes = nil
 	store.expires = time.Time{}
+	store.storage = nil
+	if store.storagePending != nil {
+		store.storagePending.cancel()
+	}
 }
 func (store *Store) Backup(ctx context.Context, auto bool, now time.Time) (BackupInfo, error) {
 	store.backupMu.Lock()
@@ -325,10 +335,15 @@ func (store *Store) Close() {
 	store.cancel()
 	store.bytes = nil
 	store.known = false
+	store.storage = nil
+	measuring := store.storagePending
 	work := store.pending
 	store.mu.Unlock()
 	if work != nil {
 		<-work.done
+	}
+	if measuring != nil {
+		<-measuring.done
 	}
 	store.backupMu.Lock()
 	store.backupMu.Unlock()

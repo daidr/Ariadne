@@ -11,13 +11,13 @@ import {
 } from 'dou-ui'
 import { DatabasePlusIcon, TrashIcon } from '@dou-ui/icons'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { api, ApiError, type DataUsage } from '../api'
+import { api, ApiError, type DataUsage, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { locale, t, tm } from '../i18n'
 
 // What Ariadne's data directory takes, and copies of the database made on request.
 const usage = ref<DataUsage | null>(null)
-const pluginBytes = ref<number | null>()
+defineProps<{ storage: StorageSnapshot | null; measuring: boolean }>()
 const error = ref<string | null>(null)
 const backingUp = ref(false)
 const removing = ref<string | null>(null)
@@ -35,16 +35,7 @@ async function load() {
     if (!signal.aborted) error.value = message(cause)
   }
 }
-onMounted(async () => {
-  await load()
-  if (!usage.value || signal.aborted) return
-  try {
-    pluginBytes.value = (await api.getDataUsage(true, signal)).plugins
-  } catch (cause) {
-    pluginBytes.value = null
-    if (!signal.aborted) error.value = message(cause)
-  }
-})
+onMounted(load)
 
 const time = (at: number) =>
   new Date(at).toLocaleString(locale.value, {
@@ -94,9 +85,23 @@ async function remove(name: string) {
         <DouDescriptionsItem :label="t('data.database')">
           {{ formatBytes(usage.database) }}
         </DouDescriptionsItem>
-        <DouDescriptionsItem v-if="pluginBytes !== null" :label="t('data.plugins')">
-          <DouSpinner v-if="pluginBytes === undefined" size="sm" />
-          <template v-else>{{ formatBytes(pluginBytes) }}</template>
+        <DouDescriptionsItem :label="t('data.plugins')">
+          <span
+            v-if="storage?.managed != null"
+            :title="
+              storage.logical
+                ? time(storage.measuredAt)
+                : `${t('data.allocatedHint')}\n${time(storage.measuredAt)}`
+            "
+          >
+            {{
+              t(storage.logical ? 'data.logicalSize' : 'data.allocatedSize', {
+                size: formatBytes(storage.managed),
+              })
+            }}
+          </span>
+          <DouSpinner v-else-if="measuring" size="sm" />
+          <template v-else>{{ t('data.sizeUnknown') }}</template>
         </DouDescriptionsItem>
       </DouDescriptions>
       <div class="data-head">

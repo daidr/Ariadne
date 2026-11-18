@@ -78,4 +78,17 @@ func TestDataSummaryDoesNotWaitForWorkspaceScan(t *testing.T) {
 		response.Code != http.StatusOK || usage.Plugins == nil || *usage.Plugins != 123 {
 		t.Fatalf("measurement failed: %d %s", response.Code, response.Body)
 	}
+
+	combined := get(ctx, "/api/settings/data?sizes=storage")
+	var result struct {
+		Storage *data.StorageSnapshot
+	}
+	if err := json.Unmarshal(combined.Body.Bytes(), &result); err != nil ||
+		combined.Code != http.StatusOK || result.Storage == nil || result.Storage.MeasuredAt == 0 {
+		t.Fatalf("combined measurement failed: %d %s", combined.Code, combined.Body)
+	}
+	cached := get(ctx, "/api/settings/data?sizes=cached")
+	if cached.Code != http.StatusOK || cached.Body.String() != combined.Body.String() {
+		t.Fatalf("cached measurement differed: %d %s", cached.Code, cached.Body)
+	}
 }

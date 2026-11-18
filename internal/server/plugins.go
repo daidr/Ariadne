@@ -29,6 +29,9 @@ func (api *API) registerPlugins() {
 		if err := host.AddPath(r.Context(), api.options.Settings, body["path"]); err != nil {
 			return nil, 0, err
 		}
+		if api.options.Data != nil {
+			api.options.Data.InvalidateUsage()
+		}
 		return view(), 200, nil
 	})
 	api.add("POST", "/api/plugins/remove", func(r *http.Request) (any, int, error) {
@@ -41,6 +44,9 @@ func (api *API) registerPlugins() {
 		}
 		if err := host.RemovePath(r.Context(), api.options.Settings, body["path"]); err != nil {
 			return nil, 0, err
+		}
+		if api.options.Data != nil {
+			api.options.Data.InvalidateUsage()
 		}
 		return view(), 200, nil
 	})

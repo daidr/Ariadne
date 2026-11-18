@@ -59,4 +59,4 @@ func DiskUsage(ctx context.Context, directory string) *int64 {
 	return &total
 }
 
-type fileIdentity struct{ device, file uint64 }
+type fileIdentity struct{ device, file, high uint64 }

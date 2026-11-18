@@ -5,7 +5,6 @@ import {
   DouContextMenu,
   DouEmpty,
   DouSortable,
-  DouSortableHandle,
   DouText,
   useDialog,
 } from 'dou-ui'
@@ -18,7 +17,7 @@ import {
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import {
@@ -34,6 +33,22 @@ import {
 } from '../store'
 
 const dialog = useDialog()
+const canReorder = computed(() => state.projects.length > 1)
+
+async function moveProject(event: KeyboardEvent, id: string, offset: number) {
+  if (!canReorder.value) return
+  const ids = state.projects.map((project) => project.id)
+  const index = ids.indexOf(id)
+  const to = index + offset
+  if (index < 0 || to < 0 || to >= ids.length) return
+
+  const row = event.currentTarget as HTMLButtonElement
+  ids.splice(index, 1)
+  ids.splice(to, 0, id)
+  reorderProjects(ids)
+  await nextTick()
+  row.focus({ preventScroll: true })
+}
 
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
 const target = ref<string>()
@@ -130,28 +145,27 @@ async function confirmDelete(id: string) {
         <DouSortable
           :model-value="state.projects"
           :item-label="(project) => project.name"
-          :disabled="state.projects.length < 2"
+          :disabled="!canReorder"
           handle
           @update:model-value="(projects) => reorderProjects(projects.map((project) => project.id))"
         >
           <template #default="{ item }">
-            <div class="projects-row" :data-project-id="item.id">
-              <button
-                type="button"
-                class="projects-open"
-                :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
-                @click="openProject(item.id)"
-              >
-                <FolderIcon class="projects-folder" aria-hidden="true" />
-                <span class="projects-name" :title="item.name">{{ item.name }}</span>
-                <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
-              </button>
-              <DouSortableHandle
-                v-if="state.projects.length > 1"
-                class="projects-handle"
-                :label="t('project.reorder', { name: item.name })"
-              />
-            </div>
+            <button
+              type="button"
+              class="projects-open"
+              :data-project-id="item.id"
+              :data-dou-sortable-handle="canReorder ? '' : undefined"
+              :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
+              :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
+              @click="openProject(item.id)"
+              @keydown.enter.space.stop
+              @keydown.alt.up.prevent="moveProject($event, item.id, -1)"
+              @keydown.alt.down.prevent="moveProject($event, item.id, 1)"
+            >
+              <FolderIcon class="projects-folder" aria-hidden="true" />
+              <span class="projects-name" :title="item.name">{{ item.name }}</span>
+              <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
+            </button>
           </template>
         </DouSortable>
       </nav>
@@ -174,10 +188,6 @@ async function confirmDelete(id: string) {
   justify-content: space-between;
 }
 
-.projects-row {
-  position: relative;
-}
-
 .projects-open {
   display: flex;
   align-items: center;
@@ -194,7 +204,11 @@ async function confirmDelete(id: string) {
   cursor: pointer;
 }
 
-.projects-row:hover .projects-open {
+.projects-open[data-dou-sortable-handle] {
+  cursor: grab;
+}
+
+.projects-open:hover {
   background: color-mix(in oklab, var(--dou-color-text) 6%, transparent);
   color: var(--dou-color-text);
 }
@@ -214,35 +228,6 @@ async function confirmDelete(id: string) {
   flex: none;
   width: 16px;
   height: 16px;
-}
-
-.projects-handle {
-  position: absolute;
-  inset-inline-start: 4px;
-  top: 50%;
-  translate: 0 -50%;
-  width: 28px;
-  height: 28px;
-  opacity: 0;
-}
-
-.projects-row:hover .projects-handle,
-.projects-row:focus-within .projects-handle {
-  opacity: 1;
-}
-
-.projects-row:has(.projects-handle):is(:hover, :focus-within) .projects-folder {
-  visibility: hidden;
-}
-
-@media (hover: none) {
-  .projects-handle {
-    opacity: 1;
-  }
-
-  .projects-row:has(.projects-handle) .projects-folder {
-    visibility: hidden;
-  }
 }
 
 .projects-name {
