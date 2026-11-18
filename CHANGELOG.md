@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.1.0-alpha.8 (2026-11-18)
+
+- fix: speed up workspace storage statistics
+- feat: let users reorder projects in the sidebar
+- fix: load data settings before worktree size scans
+- fix: improve thread handoffs and model settings
+- Merge pull request #138 from daidr/release/alpha
+
 ## 0.1.0-alpha.7 (2026-11-18)
 
 - fix: coalesce MCP refreshes and avoid stale scheduler dispatch
