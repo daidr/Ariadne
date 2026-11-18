@@ -231,9 +231,43 @@ export function report(error: unknown) {
   state.error = error instanceof ApiError ? tm(error.localized) : String(error)
 }
 
+const PROJECT_ORDER_KEY = 'ariadne.projectOrder'
+let projectOrder: string[] = []
+try {
+  const saved: unknown = JSON.parse(localStorage.getItem(PROJECT_ORDER_KEY) ?? 'null')
+  if (Array.isArray(saved)) projectOrder = saved.filter((id) => typeof id === 'string')
+} catch {
+  // The default creation order still works when storage is unavailable.
+}
+
+function orderProjects(projects: readonly ProjectView[]): ProjectView[] {
+  const remaining = new Map(projects.map((project) => [project.id, project]))
+  const ordered: ProjectView[] = []
+  for (const id of projectOrder) {
+    const project = remaining.get(id)
+    if (!project) continue
+    ordered.push(project)
+    remaining.delete(id)
+  }
+  const added = [...remaining.values()].toSorted(
+    (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+  )
+  return [...ordered, ...added]
+}
+
+export function reorderProjects(ids: string[]) {
+  projectOrder = ids
+  state.projects = orderProjects(state.projects)
+  try {
+    localStorage.setItem(PROJECT_ORDER_KEY, JSON.stringify(projectOrder))
+  } catch {
+    // The order still applies while the page is open.
+  }
+}
+
 async function refreshProjects() {
   const { projects, lastSeq } = await api.listProjects()
-  state.projects = reuse(toRaw(state.projects), projects)
+  state.projects = reuse(toRaw(state.projects), orderProjects(projects))
   return lastSeq
 }
 

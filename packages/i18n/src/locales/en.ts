@@ -15,6 +15,7 @@ export const en: Record<MessageKey, string> = {
   'newProject.noSource': 'None for now',
   'newProject.create': 'Create',
   'project.rename': 'Rename',
+  'project.reorder': 'Reorder {name}',
   'nav.noProjects': 'No projects yet',
   'attention.title': 'Needs me',
   'attention.empty': 'Nothing needs you right now',

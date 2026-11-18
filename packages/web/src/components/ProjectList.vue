@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { DouBadge, DouButton, DouContextMenu, DouEmpty, DouMenu, DouText, useDialog } from 'dou-ui'
+import {
+  DouBadge,
+  DouButton,
+  DouContextMenu,
+  DouEmpty,
+  DouSortable,
+  DouSortableHandle,
+  DouText,
+  useDialog,
+} from 'dou-ui'
 import {
   DownloadIcon,
   FolderIcon,
@@ -9,7 +18,7 @@ import {
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import {
@@ -18,6 +27,7 @@ import {
   openMain,
   openProject,
   renameProject,
+  reorderProjects,
   report,
   state,
   openProjectSettings,
@@ -27,6 +37,14 @@ const dialog = useDialog()
 
 /** The project the context menu was opened on; away from a project the page's own menu stays. */
 const target = ref<string>()
+function targetProject(event: MouseEvent) {
+  target.value =
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>('[data-project-id]')?.dataset.projectId
+      : undefined
+  return !!target.value
+}
+
 const actions = [
   { key: 'settings', label: t('projectSettings.open'), icon: SettingsIcon },
   { key: 'rename', label: t('project.rename'), icon: PencilIcon },
@@ -85,10 +103,6 @@ async function confirmDelete(id: string) {
     onConfirm: () => deleteProject(id),
   })
 }
-
-const items = computed(() =>
-  state.projects.map((project) => ({ key: project.id, label: project.name, icon: FolderIcon })),
-)
 </script>
 
 <template>
@@ -106,31 +120,41 @@ const items = computed(() =>
       </DouButton>
     </div>
     <DouContextMenu
-      v-if="items.length"
+      v-if="state.projects.length"
       v-model:target="target"
       :items="actions"
-      :before-open="() => !!target"
+      :before-open="targetProject"
       @select="(key) => target && act(key, target)"
     >
-      <div>
-        <DouMenu
-          :model-value="state.starting ? undefined : (state.currentId ?? undefined)"
-          :items="items"
-          @select="(key) => openProject(String(key))"
-          @item-contextmenu="(item) => (target = String(item.key))"
+      <nav :aria-label="t('nav.projects')">
+        <DouSortable
+          :model-value="state.projects"
+          :item-label="(project) => project.name"
+          :disabled="state.projects.length < 2"
+          handle
+          @update:model-value="(projects) => reorderProjects(projects.map((project) => project.id))"
         >
-          <template #label="{ item }">
-            <span class="projects-label">
-              <span class="projects-name" :title="item.label">{{ item.label }}</span>
-              <DouBadge
-                class="projects-count"
-                :value="state.projects.find((p) => p.id === item.key)?.needsMe ?? 0"
-                tone="warning"
+          <template #default="{ item }">
+            <div class="projects-row" :data-project-id="item.id">
+              <button
+                type="button"
+                class="projects-open"
+                :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
+                @click="openProject(item.id)"
+              >
+                <FolderIcon class="projects-folder" aria-hidden="true" />
+                <span class="projects-name" :title="item.name">{{ item.name }}</span>
+                <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
+              </button>
+              <DouSortableHandle
+                v-if="state.projects.length > 1"
+                class="projects-handle"
+                :label="t('project.reorder', { name: item.name })"
               />
-            </span>
+            </div>
           </template>
-        </DouMenu>
-      </div>
+        </DouSortable>
+      </nav>
     </DouContextMenu>
     <DouEmpty v-else size="sm" :description="t('nav.noProjects')" />
   </div>
@@ -150,13 +174,75 @@ const items = computed(() =>
   justify-content: space-between;
 }
 
-.projects-label {
+.projects-row {
+  position: relative;
+}
+
+.projects-open {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-width: 0;
   gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dou-radius-control);
+  background: transparent;
+  color: var(--dou-color-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.projects-row:hover .projects-open {
+  background: color-mix(in oklab, var(--dou-color-text) 6%, transparent);
+  color: var(--dou-color-text);
+}
+
+.projects-open[aria-current] {
+  background: color-mix(in oklab, var(--dou-color-text) 8%, transparent);
+  color: var(--dou-color-text);
+  font-weight: var(--dou-font-weight-medium);
+}
+
+.projects-open:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: -2px;
+}
+
+.projects-folder {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.projects-handle {
+  position: absolute;
+  inset-inline-start: 4px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 28px;
+  height: 28px;
+  opacity: 0;
+}
+
+.projects-row:hover .projects-handle,
+.projects-row:focus-within .projects-handle {
+  opacity: 1;
+}
+
+.projects-row:has(.projects-handle):is(:hover, :focus-within) .projects-folder {
+  visibility: hidden;
+}
+
+@media (hover: none) {
+  .projects-handle {
+    opacity: 1;
+  }
+
+  .projects-row:has(.projects-handle) .projects-folder {
+    visibility: hidden;
+  }
 }
 
 .projects-name {

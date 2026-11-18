@@ -14,6 +14,7 @@ export const zhCN = {
   'newProject.noSource': '暂不设置',
   'newProject.create': '创建',
   'project.rename': '重命名',
+  'project.reorder': '调整「{name}」的顺序',
   'nav.noProjects': '还没有项目',
   'attention.title': '需要我',
   'attention.empty': '没有需要你处理的事',
