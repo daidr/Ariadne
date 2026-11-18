@@ -1,5 +1,15 @@
 # 更新日志
 
+## 0.1.0-alpha.7 (2026-11-18)
+
+- fix: coalesce MCP refreshes and avoid stale scheduler dispatch
+- fix: finish closing detached MCP sessions on reconfigure
+- fix: accept workspace root aliases on Windows and macOS
+- feat: migrate the Ariadne backend to Go
+- fix: clarify agent writing and polish composer controls
+- feat: adopt dou-ui alpha.18 and refine conversation overlays
+- Merge pull request #137 from daidr/release/alpha
+
 ## 0.1.0-alpha.6 (2026-11-16)
 
 - fix: preserve Codex sessions and streamline conversation status
