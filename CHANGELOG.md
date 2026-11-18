@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.1.0-alpha.9 (2026-11-18)
+
+- fix: complete archived threads and improve agent reliability
+- fix: estimate reclaimable workspace space on ext4
+- Merge pull request #139 from daidr/release/alpha
+
 ## 0.1.0-alpha.8 (2026-11-18)
 
 - fix: speed up workspace storage statistics
