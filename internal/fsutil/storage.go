@@ -13,9 +13,12 @@ import (
 // DirectorySize reports per-file allocation, with a logical-length fallback on Windows.
 // Exclusive is a lower bound on releasable data blocks, when the filesystem
 // can identify them. It can exclude shared blocks released by a group deletion.
+// ReclaimableEstimate is the ext4 file allocation whose links are all in the
+// worktree. Open files can delay reclaiming it.
 type DirectorySize struct {
-	Bytes     *int64 `json:"bytes"`
-	Exclusive *int64 `json:"exclusive"`
+	Bytes               *int64 `json:"bytes"`
+	Exclusive           *int64 `json:"exclusive"`
+	ReclaimableEstimate *int64 `json:"reclaimableEstimate,omitempty"`
 }
 
 type StorageSizes struct {
@@ -30,10 +33,16 @@ type sizeCounter struct {
 	seen                      map[fileIdentity]struct{}
 	found, failed             bool
 	hasExclusive              bool
+	reclaim                   *reclaimEstimate
 }
 
 func (counter *sizeCounter) add(bytes, logical int64, id fileIdentity, exclusive *int64) {
 	if id != (fileIdentity{}) {
+		if counter.reclaim != nil {
+			if _, ok := counter.reclaim.links[id]; ok {
+				return
+			}
+		}
 		if counter.seen == nil {
 			counter.seen = make(map[fileIdentity]struct{})
 		}
@@ -65,6 +74,9 @@ func (counter *sizeCounter) size(logical bool) DirectorySize {
 	}
 	if counter.hasExclusive {
 		result.Exclusive = new(counter.exclusive)
+	}
+	if counter.reclaim != nil && counter.reclaim.measured && !counter.reclaim.incomplete {
+		result.ReclaimableEstimate = new(counter.reclaim.bytes())
 	}
 	return result
 }
@@ -107,7 +119,7 @@ func MeasureStorage(ctx context.Context, managed string, worktrees []string) Sto
 		resolved := clean(path)
 		aliases[path] = resolved
 		scopePaths[resolved] = struct{}{}
-		scan.worktrees[resolved] = &sizeCounter{}
+		scan.worktrees[resolved] = &sizeCounter{reclaim: &reclaimEstimate{}}
 	}
 	for path := range scopePaths {
 		if hasParentScope(path, scopePaths) {
@@ -231,6 +243,7 @@ func (scan *directoryScan) visitDirectory(ctx context.Context, path string, info
 	if handled {
 		return
 	}
+	markReclaimIncomplete(counts)
 
 	dir, err := os.Open(path)
 	if err != nil {

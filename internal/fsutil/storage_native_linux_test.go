@@ -42,6 +42,14 @@ func TestExt4BatchMatchesFileAllocation(t *testing.T) {
 	if previous == nil || size.Bytes == nil || *size.Bytes != *previous || *size.Bytes >= 64<<20 {
 		t.Fatalf("ext4 measurement differs from allocated blocks: %+v", size)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocated, _ := diskEntry(info)
+	if estimate := size.ReclaimableEstimate; estimate == nil || *estimate != allocated {
+		t.Fatalf("expected to reclaim %d bytes for a sparse file with both links inside the worktree, got %+v", allocated, size)
+	}
 }
 
 func TestExt4ParallelScanKeepsNestedWorktreeTotals(t *testing.T) {
@@ -67,7 +75,8 @@ func TestExt4ParallelScanKeepsNestedWorktreeTotals(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(right, "unique"), make([]byte, 128<<10), 0600); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := MeasureStorage(t.Context(), root, []string{parent, left, right})
+	paths := []string{parent, left, right}
+	snapshot := MeasureStorage(t.Context(), root, paths)
 	for _, path := range []string{parent, left, right} {
 		want := DiskUsage(t.Context(), path)
 		got := snapshot.Worktrees[path].Bytes
@@ -78,4 +87,21 @@ func TestExt4ParallelScanKeepsNestedWorktreeTotals(t *testing.T) {
 	if snapshot.Total == nil || *snapshot.Total != *snapshot.Worktrees[parent].Bytes {
 		t.Fatal("nested worktrees were double counted in the total")
 	}
+	assertEstimate := func(snapshot StorageSizes, path string, want int64) {
+		t.Helper()
+		got := snapshot.Worktrees[path].ReclaimableEstimate
+		if got == nil {
+			t.Fatalf("missing estimate for %s", filepath.Base(path))
+		}
+		if *got != want {
+			t.Fatalf("estimate for %s is %d, want %d", filepath.Base(path), *got, want)
+		}
+	}
+	assertEstimate(snapshot, left, 0)
+	assertEstimate(snapshot, right, 128<<10)
+	assertEstimate(snapshot, parent, 192<<10)
+	if err := os.Link(file, filepath.Join(root, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	assertEstimate(MeasureStorage(t.Context(), root, paths), parent, 128<<10)
 }

@@ -48,9 +48,12 @@ const total = computed(() =>
 )
 
 function reclaimable(path: string) {
-  const bytes = props.storage?.worktrees[path]?.exclusive
-  return bytes
-    ? t('worktrees.reclaimable', { size: formatBytes(bytes) })
+  const size = props.storage?.worktrees[path]
+  if (size?.reclaimableEstimate != null) {
+    return t('worktrees.reclaimEstimate', { size: formatBytes(size.reclaimableEstimate) })
+  }
+  return size?.exclusive
+    ? t('worktrees.reclaimable', { size: formatBytes(size.exclusive) })
     : t('worktrees.reclaimUnknown')
 }
 

@@ -565,6 +565,7 @@ export const en: Record<MessageKey, string> = {
   'worktrees.removeConfirm': 'Remove the worktree of “{title}”? Its branch stays',
   'worktrees.merged': 'Merged',
   'worktrees.reclaimable': 'Last measured reclaimable file data was at least {size}',
+  'worktrees.reclaimEstimate': 'About {size} of file data can be reclaimed',
   'worktrees.reclaimUnknown': 'Reclaimable space is unknown',
   'settings.models': 'Models',
   'settings.addModel': 'Add model',

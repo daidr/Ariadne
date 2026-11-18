@@ -60,14 +60,17 @@ type ext4Subdirectory struct {
 type ext4Link struct {
 	id    fileIdentity
 	bytes int64
+	nlink uint32
 }
 
 type ext4Batch struct {
-	job    ext4Job
-	bytes  int64
-	links  []ext4Link
-	dirs   []ext4Subdirectory
-	failed bool
+	job             ext4Job
+	bytes           int64
+	singleLinkBytes int64
+	links           []ext4Link
+	dirs            []ext4Subdirectory
+	failed          bool
+	foreignFile     bool
 }
 
 // Workers read metadata only. The caller applies batches and owns all counters,
@@ -80,7 +83,7 @@ func (scan *directoryScan) readExt4(ctx context.Context, device uint64, root ext
 	for range workers {
 		wait.Go(func() {
 			for job := range jobs {
-				results <- readExt4Batch(ctx, job)
+				results <- readExt4Batch(ctx, job, device)
 			}
 		})
 	}
@@ -112,15 +115,23 @@ func (scan *directoryScan) readExt4(ctx context.Context, device uint64, root ext
 		if batch.failed {
 			markFailed(batch.job.counts)
 		}
+		if batch.foreignFile {
+			markReclaimIncomplete(batch.job.counts)
+		}
 		for _, counter := range batch.job.counts {
 			counter.add(batch.bytes, 0, fileIdentity{}, nil)
+			if estimate := counter.reclaim; estimate != nil {
+				estimate.measured = true
+				estimate.singleLinkBytes += batch.singleLinkBytes
+			}
 			for _, link := range batch.links {
-				counter.add(link.bytes, 0, link.id, nil)
+				counter.addReclaimLink(link.id, link.bytes, link.nlink)
 			}
 		}
 		for _, child := range batch.dirs {
 			path := filepath.Join(batch.job.path, child.name)
 			if child.device != device {
+				markReclaimIncomplete(batch.job.counts)
 				otherVolumes = append(otherVolumes, ext4Job{path, batch.job.counts, batch.job.inWorktree})
 				continue
 			}
@@ -146,7 +157,7 @@ func (scan *directoryScan) readExt4(ctx context.Context, device uint64, root ext
 	}
 }
 
-func readExt4Batch(ctx context.Context, job ext4Job) ext4Batch {
+func readExt4Batch(ctx context.Context, job ext4Job, device uint64) ext4Batch {
 	batch := ext4Batch{job: job}
 	if ctx.Err() != nil {
 		batch.failed = true
@@ -179,16 +190,30 @@ func readExt4Batch(ctx context.Context, job ext4Job) ext4Batch {
 			continue
 		}
 		bytes := child.Blocks * 512
-		switch {
-		case child.Mode&unix.S_IFMT == unix.S_IFDIR:
+		mode := child.Mode & unix.S_IFMT
+		if mode == unix.S_IFDIR {
 			batch.dirs = append(batch.dirs, ext4Subdirectory{entry.Name(), uint64(child.Dev), bytes})
+			continue
+		}
+		var nlink uint32
+		if job.inWorktree {
+			if uint64(child.Dev) != device {
+				batch.foreignFile = true
+			} else if mode == unix.S_IFREG {
+				nlink = uint32(child.Nlink)
+			}
+		}
+		switch {
 		case child.Nlink > 1:
 			id := fileIdentity{device: uint64(child.Dev), file: uint64(child.Ino)}
-			batch.links = append(batch.links, ext4Link{id, bytes})
+			batch.links = append(batch.links, ext4Link{id, bytes, nlink})
 		case bytes > math.MaxInt64-batch.bytes:
 			batch.failed = true
 		default:
 			batch.bytes += bytes
+			if nlink == 1 {
+				batch.singleLinkBytes += bytes
+			}
 		}
 	}
 	return batch

@@ -538,6 +538,7 @@ export const zhCN = {
   'worktrees.removeConfirm': '移除「{title}」的工作区？分支会保留',
   'worktrees.merged': '已合并',
   'worktrees.reclaimable': '上次统计至少可释放 {size} 的文件数据',
+  'worktrees.reclaimEstimate': '预计可释放 {size} 的文件数据',
   'worktrees.reclaimUnknown': '可释放空间未知',
   'settings.models': '模型',
   'settings.addModel': '添加模型',

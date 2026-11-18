@@ -167,6 +167,7 @@ export interface ProjectWorktrees {
 export interface DirectorySize {
   bytes: number | null
   exclusive: number | null
+  reclaimableEstimate?: number
 }
 
 export interface StorageSnapshot {
