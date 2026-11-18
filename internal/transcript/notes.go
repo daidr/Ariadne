@@ -122,10 +122,11 @@ func DescribeNote(note map[string]any, titleOf func(string) string) string {
 			failed = "(unnamed)"
 		}
 		head := fmt.Sprintf("<checks_failed pull_request=\"%d\" commit=\"%s\" attempt=\"%d\">\nChecks of your pull request failed: %s.", int64(num(note["number"])), short(note["headSha"]), int64(attempt), failed)
+		delivery := " Judge whether these checks are required for the requested delivery. If delivery is already complete, report ready and note the CI results in the summary. If a required check is still running, wait for its result. If a required step cannot proceed, report blocked and tell the coordinator what is needed. Ask with post_ui only when the user has a specific action to take.\n</checks_failed>"
 		if attempt >= 3 {
-			return head + fmt.Sprintf(" This is failure %d in a row, so stop trying: do not push again. Report \"blocked\" with what fails, what you tried and what you suspect, so the user can decide. You will not be woken by further failures until the user writes to you.\n</checks_failed>", int64(attempt))
+			return head + fmt.Sprintf(" This is failure %d in a row. Stop automatic retries and summarize what you tried. Further failures will not wake this thread until the retry count resets.", int64(attempt)) + delivery
 		}
-		return head + " Others may still be running: repo_status lists them all. Read the failed logs with read_check_log, fix the cause in your workspace, commit and push_branch again; if the default branch moved on, sync_branch and merge it first. If the failure is not caused by your change, report it as blocked with what you found.\n</checks_failed>"
+		return head + " Use repo_status to see all checks and read_check_log to investigate. Fix failures caused by your changes in your workspace, then commit and push_branch again." + delivery
 	case "thread-resumed":
 		by := "coordinator"
 		if t("by") == "user" {

@@ -80,9 +80,6 @@ function reasonOf(
       }
       if (report === 'ready') return { threadId, title: t('notify.review'), body: summary }
       if (report === 'done') return { threadId, title: t('notify.done'), body: summary }
-      if (report === 'blocked' || report === 'failed') {
-        return { threadId, title: t('notify.blocked'), body: summary }
-      }
       return null
     }
     case 'review.submitted':

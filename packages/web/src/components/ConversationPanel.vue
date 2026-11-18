@@ -276,23 +276,6 @@ const cancelled = computed(
 // Its turn ended without a report, and it was told once already: the user decides.
 const silent = computed(() => thread.value?.stage === 'silent')
 
-// Messages edited after the user read them stay highlighted for this visit, even though
-// opening the conversation marks them read on the server.
-const highlighted = ref(new Set<string>())
-watch(
-  () => view.value.messages,
-  (messages) => {
-    for (const message of messages) {
-      if (message.editedSinceRead) highlighted.value.add(message.id)
-    }
-  },
-  { immediate: true },
-)
-watch(
-  () => [state.currentId, conversationId.value],
-  () => (highlighted.value = new Set()),
-)
-
 // The reply being written now, shown where its message will be: it keeps the message's id,
 // so the same bubble goes on once the message is posted and loaded.
 const writing = computed<MessageView | null>(() => {
@@ -672,7 +655,7 @@ watch(
   { immediate: true },
 )
 
-// Everything on screen counts as read; this also clears the "edited since read" highlight.
+// Everything on screen counts as read.
 watch(
   () => view.value.messages.at(-1)?.id,
   (last) => {
@@ -937,7 +920,6 @@ watch(
             :markdown="sender(message) === 'assistant' && markdown"
             :data-message-id="message.id"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
-            :class="{ 'conversation-edited': highlighted.has(message.id) }"
             :reactions="shownReactions(message.reactions)"
             :reactable="reactable(message)"
             actions-visible="hover"
@@ -1462,12 +1444,6 @@ watch(
 /* A folded message from the coordinator the search led to, marked like a chat message. */
 .relay.conversation-focused {
   outline: 1px solid var(--dou-color-primary);
-  outline-offset: 4px;
-  border-radius: var(--dou-radius-container);
-}
-
-.conversation-edited {
-  outline: 1px solid var(--dou-color-warning);
   outline-offset: 4px;
   border-radius: var(--dou-radius-container);
 }

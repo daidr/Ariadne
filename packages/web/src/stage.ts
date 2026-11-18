@@ -32,18 +32,14 @@ export function checksTone(state: 'none' | 'pending' | 'success' | 'failure' | u
   }
 }
 
-/**
- * Stages in which a thread's last report says what the user should do: review its work,
- * or unblock it. A question it asks speaks for itself.
- */
+/** Stages where the last report explains the review or what halted the work. */
 export function showsHeadline(stage: ThreadStage): boolean {
   return stage === 'review' || stage === 'blocked'
 }
 
 /**
- * The one line shown for a thread wherever it is listed: what its last report asks of the
- * user while it waits on them, or what it finished with. Once it works again, what it last
- * asked no longer holds.
+ * The one line shown for a thread wherever it is listed: its last result, or why it
+ * is waiting to continue.
  */
 export function threadLine(thread: ThreadView): string | null {
   if (!thread.lastHeadline) return null
@@ -101,14 +97,21 @@ export const threadGroups = [
 ] as const
 export type ThreadGroup = (typeof threadGroups)[number]
 
+/** Thread-level actions supplied by the server. Open questions have their own stage. */
+export function threadActionIds(items: NeedsMeItem[] | undefined): Set<string> {
+  return new Set((items ?? []).flatMap((item) => (item.kind === 'thread' ? [item.thread.id] : [])))
+}
+
 /** The group a thread is listed in: archived ones go last, whatever they ended as. */
-export const groupOfThread = (thread: ThreadView): ThreadGroup =>
+export const groupOfThread = (thread: ThreadView, actions: ReadonlySet<string>): ThreadGroup =>
   thread.archived
     ? 'archived'
     : // Set aside, it is out of the way until its day, unless it is at work or asks something.
       thread.aside && !thread.aside.due && ASIDE_STAGES.has(thread.stage)
       ? 'aside'
-      : groupOf[thread.stage]
+      : thread.stage === 'blocked' && actions.has(thread.id)
+        ? 'waiting'
+        : groupOf[thread.stage]
 
 const ASIDE_STAGES = new Set<ThreadStage>([
   'idle',
@@ -122,7 +125,7 @@ const ASIDE_STAGES = new Set<ThreadStage>([
 export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived' | 'aside'>> = {
   review: 'review',
   answer: 'waiting',
-  blocked: 'waiting',
+  blocked: 'idle',
   halted: 'waiting',
   silent: 'waiting',
   working: 'working',

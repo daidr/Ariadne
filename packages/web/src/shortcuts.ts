@@ -1,7 +1,7 @@
 import type { ThreadView } from '@ariadne/core'
 import { ref } from 'vue'
 import { useHotkey } from 'dou-ui'
-import { groupOfThread, sortThreads, threadGroups } from './stage'
+import { groupOfThread, sortThreads, threadActionIds, threadGroups } from './stage'
 import { activeThreadId, openThread, state } from './store'
 
 /** A conversation on screen: the coordinator's on the left, or a thread's by its id. */
@@ -92,11 +92,12 @@ function activePanel(): PanelHandle | null {
 export function threadOrder(): string[] {
   const threads = state.detail?.threads ?? []
   const ids = new Set(threads.map((thread) => thread.id))
+  const actions = threadActionIds(state.detail?.needsMe)
   // A reviewing thread comes right after its author, as the list shows it.
   const nested = (thread: ThreadView) => !!thread.reviewOf && ids.has(thread.reviewOf)
   return threadGroups.flatMap((group) =>
     sortThreads(
-      threads.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
+      threads.filter((thread) => groupOfThread(thread, actions) === group && !nested(thread)),
     ).flatMap((thread) => {
       const reviewer = thread.review?.reviewerId
       return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]

@@ -35,7 +35,7 @@ func noteCases() []map[string]any {
 	base := func(kind string) map[string]any {
 		return map[string]any{"type": kind, "threadId": "thr_a", "messageId": "msg_a", "title": "title", "summary": "summary", "headline": "headline", "report": "ready", "artifacts": []any{"art_a"}, "round": float64(2), "head": "0123456789abcdef", "sha": "fedcba9876543210", "branch": "work", "base": "integration", "method": "squash", "number": float64(12), "artifactId": "art_a", "version": float64(3), "quote": " quote `code` ", "body": "body\nsecond line", "attentionId": "att_a", "question": "question", "answer": "answer", "until": float64(60000), "dueAt": float64(120000), "note": "look again", "prompt": "scheduled work", "nodeTitle": "node", "path": "AGENTS.md", "name": "reference", "now": nil, "reason": "reason", "files": []any{"a.ts"}, "failed": []any{"test"}, "headSha": "abcdef0123456789", "tracker": "tracker", "action": "comment", "outcome": "made", "revisionId": "rev_a", "proposalId": "proposal_a", "staleBecause": "stale", "comments": []any{map[string]any{"kind": "bug", "path": "a.ts", "line": float64(2), "quote": "code", "body": "comment"}}}
 	}
-	for _, kind := range []string{"report", "review-requested", "review-comments", "answer", "user-in-thread", "user-reacted", "wait-over", "routine", "upstream-done", "artifact-edited", "artifact-comment", "checks-failed", "thread-resumed", "instructions-changed", "source-changed", "reference-ended", "thread-stopped-by-user", "report-missing", "thread-reviewed", "pull-request-closed", "thread-auto-started", "branch-merged", "merge-undone", "merge-conflict", "proposal-stale", "issue-write-shared", "plan-changed-by-user"} {
+	for _, kind := range []string{"report", "review-requested", "review-comments", "answer", "user-in-thread", "user-reacted", "wait-over", "routine", "upstream-done", "artifact-edited", "artifact-comment", "thread-resumed", "instructions-changed", "source-changed", "reference-ended", "thread-stopped-by-user", "report-missing", "thread-reviewed", "pull-request-closed", "thread-auto-started", "branch-merged", "merge-undone", "merge-conflict", "proposal-stale", "issue-write-shared", "plan-changed-by-user"} {
 		notes = append(notes, base(kind))
 	}
 	add := func(kind string, fields map[string]any) {
@@ -55,7 +55,6 @@ func noteCases() []map[string]any {
 	}
 	add("artifact-edited", map[string]any{"diff": "- before\n+ after"})
 	add("artifact-comment", map[string]any{"action": "create"})
-	add("checks-failed", map[string]any{"attempt": float64(3), "failed": []any{}})
 	add("thread-resumed", map[string]any{"by": "user"})
 	add("instructions-changed", map[string]any{"removed": true})
 	add("source-changed", map[string]any{"set": true})
@@ -72,6 +71,20 @@ func noteCases() []map[string]any {
 	add("artifact-feedback", map[string]any{"kind": "board", "images": []any{map[string]any{"fileId": "fil_a"}}, "items": []any{map[string]any{"kind": "edit", "diff": "diff"}, map[string]any{"kind": "choice", "chosen": []any{map[string]any{"id": "a", "title": "option"}}}, map[string]any{"kind": "choice", "chosen": []any{}}, map[string]any{"kind": "comment", "action": "create", "threadId": "comment_a", "where": "at node", "body": "comment"}, map[string]any{"kind": "mark", "type": "star", "nodeId": "node_a", "where": "at x", "text": "note"}, map[string]any{"kind": "board", "changes": []any{"moved", "changed"}}}})
 	return notes
 }
+func TestCheckFailureNoteUsesDeliveryRequirements(t *testing.T) {
+	for _, attempt := range []float64{1, 3} {
+		text := DescribeNote(map[string]any{"type": "checks-failed", "attempt": attempt, "failed": []any{"Stylelint"}}, func(string) string { return "" })
+		for _, want := range []string{"Stylelint", "If delivery is already complete, report ready", "If a required step cannot proceed, report blocked", "only when the user has a specific action"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("attempt %g missing %q in %s", attempt, want, text)
+			}
+		}
+		if strings.Contains(text, "Stop automatic retries") != (attempt == 3) {
+			t.Fatalf("retry guidance for attempt %g: %s", attempt, text)
+		}
+	}
+}
+
 func TestChatMessagesAndNotesMatchLegacy(t *testing.T) {
 	for _, variant := range []string{"tools", "summary", "images"} {
 		t.Run(variant, func(t *testing.T) {

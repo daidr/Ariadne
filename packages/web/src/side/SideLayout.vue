@@ -189,24 +189,18 @@ function bring(group: DockGroup, key: PaneKey) {
             <MaximizeIcon />
           </DouButton>
         </DouTooltip>
-        <DouTooltip
-          v-if="canSplit(group, 'right')"
-          :content="t('side.splitRight')"
-          placement="bottom"
-        >
-          <DouButton
-            size="sm"
-            variant="ghost"
-            :aria-label="t('side.splitRight')"
-            @click="splitPane(active as PaneKey, 'horizontal')"
-          >
-            <LayoutColumnsIcon />
-          </DouButton>
-        </DouTooltip>
         <ThreadTools
           :thread="threadAt(active as PaneKey)"
           :label="t(threadAt(active as PaneKey) ? 'thread.more' : 'side.more')"
         >
+          <DouDropdownItem
+            v-if="canSplit(group, 'right')"
+            value="split-right"
+            @click="splitPane(active as PaneKey, 'horizontal')"
+          >
+            <template #prefix><LayoutColumnsIcon /></template>
+            {{ t('side.splitRight') }}
+          </DouDropdownItem>
           <DouDropdownItem
             v-if="canSplit(group, 'bottom')"
             value="split-down"

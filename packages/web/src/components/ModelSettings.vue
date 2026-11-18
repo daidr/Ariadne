@@ -4,6 +4,7 @@ import {
   DouAutocomplete,
   DouButton,
   DouCard,
+  DouCascader,
   DouDialog,
   DouEmpty,
   DouForm,
@@ -17,9 +18,11 @@ import {
   DouText,
   DouTextarea,
   type AutocompleteOption,
+  type CascaderOption,
+  type CascaderValue,
 } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import {
   api,
   ApiError,
@@ -33,7 +36,7 @@ import {
   type ModelSettings,
 } from '../api'
 import { applyModelSettings } from '../store'
-import { effortsOf, effortWithin } from '../effort'
+import { EFFORTS, effortsOf, effortWithin } from '../effort'
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
@@ -41,6 +44,7 @@ import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
 import SearchSettings from './SearchSettings.vue'
 import SettingsFields from './SettingsFields.vue'
+import SettingsLabelHelp from './SettingsLabelHelp.vue'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 import { modelLabels } from '../model-label'
 
@@ -93,11 +97,11 @@ const kinds = ref<ModelKind[]>([])
 const providers = ref<DraftProvider[]>([])
 const models = ref<DraftModel[]>([])
 // Threads come first: they do the work. The coordinator may use another model, and think less.
-const threadModel = ref<string | null>(null)
+const threadModel = ref('')
 const threadEffort = ref<Effort | ''>('')
 const coordinatorEffort = ref<Effort | ''>('')
-// `''` stands for "the threads'", which the select cannot hold as `null`.
-const coordinatorModel = ref<string>('')
+// An empty value means the coordinator inherits the discussion thread's model.
+const coordinatorModel = ref('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
 const researchModel = ref<string>('')
 // What a turn goes on with when its model keeps being turned away, for every role; '' is none.
@@ -168,13 +172,7 @@ const modelOptions = computed(() =>
     providers.value,
   ).map(({ id, label }) => ({ value: id, label })),
 )
-// With one model there is no model to choose per role: both use it, and only how hard
-// threads and the coordinator each think is left to choose.
 const several = computed(() => modelOptions.value.length > 1)
-const coordinatorOptions = computed(() => [
-  { value: '', label: t('settings.sameAsThreads') },
-  ...modelOptions.value,
-])
 const researchOptions = computed(() => [
   { value: '', label: t('settings.sameAsAsking') },
   ...modelOptions.value,
@@ -184,20 +182,64 @@ const fallbackOptions = computed(() => [
   ...modelOptions.value,
 ])
 /** The efforts the model `id` accepts, as its service or the catalog said; `null` unknown. */
-const toldOf = (id: string | null): readonly Effort[] | null =>
+const toldOf = (id: string | undefined): readonly Effort[] | null =>
   models.value.find((model) => model.id === id)?.efforts ?? null
 // The coordinator's model is the threads' unless it has its own.
-const threadTold = computed(() => toldOf(threadModel.value ?? models.value[0]?.id ?? null))
-const coordinatorTold = computed(() =>
-  coordinatorModel.value ? toldOf(coordinatorModel.value) : threadTold.value,
+const threadTold = computed(() =>
+  toldOf(
+    (modelOptions.value.find((model) => model.value === threadModel.value) ?? modelOptions.value[0])
+      ?.value,
+  ),
 )
-/** What may be picked: what the model accepts, the common ones when nobody said. */
-const effortOptionsOf = (told: readonly Effort[] | null) => [
-  { value: '', label: t('settings.effort.default') },
-  ...effortsOf(told).map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
-]
-const threadEffortOptions = computed(() => effortOptionsOf(threadTold.value))
-const coordinatorEffortOptions = computed(() => effortOptionsOf(coordinatorTold.value))
+const coordinatorTold = computed(() =>
+  modelOptions.value.some((model) => model.value === coordinatorModel.value)
+    ? toldOf(coordinatorModel.value)
+    : threadTold.value,
+)
+function modelBranch(option: CascaderOption, told: readonly Effort[] | null): CascaderOption {
+  const efforts = effortsOf(told)
+  if (!efforts.length) return option
+  return {
+    ...option,
+    children: [
+      { value: '', label: t('settings.effort.default') },
+      ...efforts.map((effort) => ({ value: effort, label: t(`settings.effort.${effort}`) })),
+    ],
+  }
+}
+const threadOptions = computed(() =>
+  modelOptions.value.map((model) => modelBranch(model, toldOf(model.value))),
+)
+const coordinatorOptions = computed(() => [
+  modelBranch({ value: '', label: t('settings.sameAsThreads') }, threadTold.value),
+  ...threadOptions.value,
+])
+
+// Keep the cascader's path in sync with the separate fields stored in settings.
+function rolePath(
+  options: ComputedRef<CascaderOption[]>,
+  model: Ref<string>,
+  effort: Ref<Effort | ''>,
+) {
+  return computed({
+    get() {
+      const current =
+        options.value.find((option) => option.value === model.value) ?? options.value[0]
+      if (!current) return null
+      const depth =
+        current.children?.find((child) => child.value === effort.value) ?? current.children?.[0]
+      return depth ? [current.value, depth.value] : [current.value]
+    },
+    set(path: CascaderValue[] | CascaderValue[][] | null) {
+      const [id, depth] = path ?? []
+      if (typeof id !== 'string') return
+      model.value = id
+      effort.value = EFFORTS.find((value) => value === depth) ?? ''
+    },
+  })
+}
+const threadPath = rolePath(threadOptions, threadModel, threadEffort)
+const coordinatorPath = rolePath(coordinatorOptions, coordinatorModel, coordinatorEffort)
 // A model that does not take what was picked: the nearest it does, as the server asks.
 watch([threadTold, threadEffort], ([told, effort]) => {
   const accepted = effortsOf(told)
@@ -249,7 +291,7 @@ function load(settings: ModelSettings) {
     efforts: model.efforts ?? null,
   }))
   showCost.value = settings.showCost
-  threadModel.value = settings.roles.thread.model
+  threadModel.value = settings.roles.thread.model ?? ''
   threadEffort.value = settings.roles.thread.effort ?? ''
   coordinatorModel.value = settings.roles.coordinator.model ?? ''
   coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
@@ -366,12 +408,12 @@ function addModel(provider: string) {
     efforts: null,
   })
   presetModel(models.value.at(-1)!)
-  threadModel.value ??= id
+  if (!threadModel.value) threadModel.value = id
 }
 
 function removeModel(id: string) {
   models.value = models.value.filter((model) => model.id !== id)
-  if (threadModel.value === id) threadModel.value = models.value[0]?.id ?? null
+  if (threadModel.value === id) threadModel.value = models.value[0]?.id ?? ''
   if (coordinatorModel.value === id) coordinatorModel.value = ''
   if (researchModel.value === id) researchModel.value = ''
 }
@@ -874,59 +916,38 @@ async function saveModels(): Promise<boolean> {
           <section v-if="modelOptions.length || concurrency" class="settings-section">
             <DouText weight="medium">{{ t('settings.part.roles') }}</DouText>
             <DouForm layout="vertical" size="sm">
-              <div
-                v-if="modelOptions.length === 1 && threadTold?.length !== 0"
-                class="settings-row"
-              >
-                <DouFormItem :label="t('settings.threadEffort')" class="settings-grow">
-                  <DouSelect v-model="threadEffort" :options="threadEffortOptions" />
+              <div v-if="modelOptions.length" class="settings-role-fields">
+                <DouFormItem :label="t('settings.threadModel')">
+                  <DouCascader v-model="threadPath" :options="threadOptions" separator=" · " />
                 </DouFormItem>
-                <DouFormItem :label="t('settings.coordinatorEffort')" class="settings-grow">
-                  <DouSelect v-model="coordinatorEffort" :options="coordinatorEffortOptions" />
+                <DouFormItem :label="t('settings.coordinatorModel')">
+                  <DouCascader
+                    v-model="coordinatorPath"
+                    :options="coordinatorOptions"
+                    separator=" · "
+                  />
                 </DouFormItem>
-              </div>
-              <template v-else-if="several">
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.threadModel')" class="settings-grow">
-                    <DouSelect v-model="threadModel" :options="modelOptions" />
-                  </DouFormItem>
-                  <DouFormItem
-                    v-if="threadTold?.length !== 0"
-                    :label="t('settings.effort')"
-                    class="settings-effort"
-                  >
-                    <DouSelect v-model="threadEffort" :options="threadEffortOptions" />
-                  </DouFormItem>
-                </div>
-                <div class="settings-row">
-                  <DouFormItem :label="t('settings.coordinatorModel')" class="settings-grow">
-                    <DouSelect v-model="coordinatorModel" :options="coordinatorOptions" />
-                  </DouFormItem>
-                  <DouFormItem
-                    v-if="coordinatorTold?.length !== 0"
-                    :label="t('settings.effort')"
-                    class="settings-effort"
-                  >
-                    <DouSelect v-model="coordinatorEffort" :options="coordinatorEffortOptions" />
-                  </DouFormItem>
-                </div>
-                <div class="settings-row">
-                  <DouFormItem
-                    :label="t('settings.researchModel')"
-                    :help="t('settings.researchModelHelp')"
-                    class="settings-grow"
-                  >
+                <template v-if="several">
+                  <DouFormItem>
+                    <template #label>
+                      <SettingsLabelHelp
+                        :label="t('settings.researchModel')"
+                        :content="t('settings.researchModelHelp')"
+                      />
+                    </template>
                     <DouSelect v-model="researchModel" :options="researchOptions" />
                   </DouFormItem>
-                  <DouFormItem
-                    :label="t('settings.fallbackModel')"
-                    :help="t('settings.fallbackModelHelp')"
-                    class="settings-grow"
-                  >
+                  <DouFormItem>
+                    <template #label>
+                      <SettingsLabelHelp
+                        :label="t('settings.fallbackModel')"
+                        :content="t('settings.fallbackModelHelp')"
+                      />
+                    </template>
                     <DouSelect v-model="fallback" :options="fallbackOptions" />
                   </DouFormItem>
-                </div>
-              </template>
+                </template>
+              </div>
               <DouFormItem v-if="concurrency" :label="t('settings.slots')" class="settings-narrow">
                 <DouInputNumber v-model="concurrency.slots" :min="1" :max="16" :step="1" />
               </DouFormItem>
@@ -998,8 +1019,16 @@ async function saveModels(): Promise<boolean> {
   min-width: 0;
 }
 
-.settings-effort {
-  width: 120px;
+.settings-role-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 580px) {
+  .settings-role-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-currency {

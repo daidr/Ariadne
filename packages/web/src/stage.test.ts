@@ -16,7 +16,7 @@ const thread = (over: Partial<ThreadView>): ThreadView =>
 const ids = (sorted: ThreadView[]) => sorted.map((item) => item.id)
 
 describe('thread list', () => {
-  test('shows the headline only while it waits on the user or once done', () => {
+  test('shows the headline for a review, blocker or completed delivery', () => {
     const stages: ThreadStage[] = ['review', 'blocked', 'done', 'working', 'idle', 'answer']
     expect(stages.map((stage) => threadLine(thread({ stage, lastHeadline: '看一下' })))).toEqual([
       '看一下',
@@ -30,7 +30,7 @@ describe('thread list', () => {
 
   test('groups every stage', () => {
     expect(groupOf.answer).toBe('waiting')
-    expect(groupOf.blocked).toBe('waiting')
+    expect(groupOf.blocked).toBe('idle')
     expect(groupOf.queued).toBe('working')
     expect(groupOf.stopped).toBe('paused')
     expect(groupOf.halted).toBe('waiting')
@@ -39,8 +39,15 @@ describe('thread list', () => {
 
   test('archived threads are listed last, whatever they ended as', () => {
     expect(threadGroups.at(-1)).toBe('archived')
-    expect(groupOfThread({ stage: 'done', archived: true } as ThreadView)).toBe('archived')
-    expect(groupOfThread({ stage: 'done', archived: false } as ThreadView)).toBe('done')
+    const actions = new Set<string>()
+    expect(groupOfThread(thread({ stage: 'done', archived: true }), actions)).toBe('archived')
+    expect(groupOfThread(thread({ stage: 'done', archived: false }), actions)).toBe('done')
+  })
+
+  test('groups a blocked thread with user actions only when the server includes it', () => {
+    const blocked = thread({ stage: 'blocked' })
+    expect(groupOfThread(blocked, new Set())).toBe('idle')
+    expect(groupOfThread(blocked, new Set([blocked.id]))).toBe('waiting')
   })
 
   test('sorts by activity, title or creation without touching the list', () => {

@@ -4,7 +4,13 @@ import { DouButton, DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
 import { locale, t } from '../i18n'
-import { groupOfThread, sortThreads, threadGroups, type ThreadGroup } from '../stage'
+import {
+  groupOfThread,
+  sortThreads,
+  threadActionIds,
+  threadGroups,
+  type ThreadGroup,
+} from '../stage'
 import { activeThreadId, openThread, state } from '../store'
 import { dragThread } from '../side/dock'
 import ReviewActions from './ReviewActions.vue'
@@ -16,6 +22,7 @@ const LIMIT = 6
 
 const threads = computed(() => state.detail?.threads ?? [])
 const byId = computed(() => new Map(threads.value.map((thread) => [thread.id, thread])))
+const actions = computed(() => threadActionIds(state.detail?.needsMe))
 const showingAll = ref(new Set<ThreadGroup>())
 
 // A reviewing thread is listed under its author, wherever the author is.
@@ -30,7 +37,9 @@ const groups = computed(() =>
     .map((group) => ({
       group,
       threads: sortThreads(
-        threads.value.filter((thread) => groupOfThread(thread) === group && !nested(thread)),
+        threads.value.filter(
+          (thread) => groupOfThread(thread, actions.value) === group && !nested(thread),
+        ),
       ),
     }))
     .filter((entry) => entry.threads.length),

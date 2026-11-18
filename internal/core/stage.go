@@ -31,7 +31,7 @@ func ThreadStage(facts StageFacts) string {
 	if facts.TurnPending {
 		return "queued"
 	}
-	if facts.TurnFailed || facts.ChecksGaveUp {
+	if facts.TurnFailed || (facts.ChecksGaveUp && facts.LastReport != "done") {
 		return "blocked"
 	}
 	if facts.TurnCancelled && !facts.Reviewer {
@@ -64,10 +64,14 @@ func ThreadStage(facts StageFacts) string {
 	return "working"
 }
 
-func NeedsUser(stage string) bool {
+func (facts StageFacts) needsUser(stage string) bool {
 	switch stage {
-	case "answer", "review", "blocked", "halted", "silent":
+	case "answer", "review", "halted", "silent":
 		return true
+	case "blocked":
+		// A failed turn can be retried by the user. A status report or CI
+		// failure needs an explicit attention card to ask for their help.
+		return facts.TurnFailed
 	}
 	return false
 }

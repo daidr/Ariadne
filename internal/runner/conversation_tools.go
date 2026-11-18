@@ -147,7 +147,7 @@ func (turn *turn) coordinatorTools() []tool {
 				return "Resumed.", err
 			}),
 		specification("read_thread", "Read a thread's latest messages, checklist and status.",
-			args{"threadId": field("string"), "limit": field("integer")}, []string{"threadId"}, func(ctx context.Context, input args) (string, error) {
+			args{"threadId": threadIDField(), "limit": field("integer")}, []string{"threadId"}, func(ctx context.Context, input args) (string, error) {
 				thread, err := turn.ownThread(ctx, text(input, "threadId"))
 				if err != nil {
 					return "", err
@@ -157,7 +157,7 @@ func (turn *turn) coordinatorTools() []tool {
 					return "", err
 				}
 				messages, err := turn.recentMessages(ctx, thread.ID, input)
-				return reply(args{"title": thread.Title, "stage": thread.Stage, "lastSummary": thread.LastSummary, "todo": todo["items"], "messages": messages}, err)
+				return reply(args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "lastSummary": thread.LastSummary, "todo": todo["items"], "messages": messages}, err)
 			}),
 		specification("name_project", "Give the project a short name in the user's language.",
 			args{"name": field("string")}, []string{"name"}, func(ctx context.Context, input args) (string, error) {

@@ -53,6 +53,12 @@ func (turn *turn) readSkill(ctx context.Context, input args) (string, error) {
 func field(kind string) args { return args{"type": kind} }
 func arrayOf(item args) args { return args{"type": "array", "items": item} }
 
+const threadIDHelp = "Use the threadId returned by create_thread or list_threads."
+
+func threadIDField() args {
+	return args{"type": "string", "minLength": 1, "description": threadIDHelp}
+}
+
 func text(input args, name string) string {
 	value, _ := input[name].(string)
 	return textutil.Trim(value)
@@ -140,11 +146,11 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs, turn.threadManagementTools(true)...)
 		specs = append(specs, turn.coordinatorTools()...)
 		specs = append(specs,
-			specification("create_thread", "Create a discussion thread and give it a brief. It starts working on the brief in a separate conversation.",
+			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
 				args{"title": field("string"), "brief": field("string"), "nodeId": field("string"), "branch": field("string"), "model": field("string"), "userMessages": arrayOf(field("string"))}, []string{"title", "brief"}, turn.createThread),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
-				args{"threadId": field("string"), "content": field("string"), "userMessages": arrayOf(field("string"))}, []string{"threadId"}, turn.messageThread),
-			specification("list_threads", "List discussion threads in the current project.",
+				args{"threadId": threadIDField(), "content": field("string"), "userMessages": arrayOf(field("string"))}, []string{"threadId"}, turn.messageThread),
+			specification("list_threads", "List discussion threads in the current project with their threadId, title and stage.",
 				args{}, nil, func(ctx context.Context, _ args) (string, error) {
 					threads, err := turn.Repository.ListThreads(ctx, conversation.ProjectID)
 					var result []args
@@ -301,12 +307,16 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 
 func (turn *turn) messageThread(ctx context.Context, input args) (string, error) {
 	id := text(input, "threadId")
-	thread, err := turn.Repository.GetThread(ctx, id)
-	if err != nil {
-		return "", err
+	if id == "" || id == "undefined" || id == "null" {
+		return "", errors.New("message_thread requires a real threadId. " + threadIDHelp)
 	}
-	if thread.ProjectID != turn.conversation.ProjectID {
-		return "", domainerr.NotFound(id)
+	thread, err := turn.ownThread(ctx, id)
+	if err != nil {
+		var missing *domainerr.Error
+		if errors.As(err, &missing) && missing.Key == "error.notFound" {
+			return "", fmt.Errorf("No discussion thread %q in this project. Call list_threads to find its threadId.", id)
+		}
+		return "", err
 	}
 	cites, err := stringsOf(input["userMessages"])
 	if err != nil {

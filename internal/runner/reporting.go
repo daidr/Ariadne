@@ -14,6 +14,8 @@ import (
 
 var reportKinds = []string{"progress", "waiting", "ready", "blocked", "failed", "done"}
 
+const reportGuide = "Use ready for checked changes ready for review or when the configured external delivery is complete. If the requested delivery ends at a target branch or ticket update, report ready once those requirements are met and note any unrelated CI failures in the summary. Use done for results with no change review needed, waiting for an outstanding external result, and blocked only when a required step cannot proceed. When the user must provide information, approval or an action before work can continue, use post_ui to ask for that specific thing."
+
 func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 	if author, ok := thread.ReviewOf.(string); ok && author != "" {
 		return []tool{
@@ -29,7 +31,7 @@ func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 				}),
 		}
 	}
-	return []tool{specification("report", "Report the thread's result to the coordinator. Use ready for committed changes ready for review or delivery, and done for work with no changes to merge.",
+	return []tool{specification("report", "Report the thread's result to the coordinator. "+reportGuide,
 		args{"kind": args{"type": "string", "enum": reportKinds}, "summary": field("string"), "headline": field("string"),
 			"artifacts": arrayOf(field("string")), "reviewReplies": arrayOf(args{"type": "object", "properties": args{"comment": field("integer"), "outcome": field("string"), "note": field("string")}})},
 		[]string{"kind", "summary", "headline"}, turn.report)}

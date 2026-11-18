@@ -28,13 +28,7 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
     <DouFormItem
       :label="lt(field.title)"
       :required="schema.required?.includes(String(key))"
-      :help="
-        field.type === 'string' && field.secret && isSet(key)
-          ? t('settings.secretSet')
-          : bare
-            ? undefined
-            : lt(field.description)
-      "
+      :help="bare ? undefined : lt(field.description)"
     >
       <DirectoryInput
         v-if="field.type === 'string' && field.directory && browse"
@@ -48,7 +42,7 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
         :model-value="asString(values[key])"
         :type="field.secret ? 'password' : 'text'"
         :show-password="field.secret"
-        :placeholder="field.default"
+        :placeholder="field.secret && isSet(key) ? t('settings.secretSet') : field.default"
         @update:model-value="(value) => (values[key] = value)"
       >
         <template v-if="field.secret && isSet(key)" #suffix>

@@ -86,6 +86,7 @@ type ThreadView struct {
 	Review          *ReviewView    `json:"review"`
 	Auto            bool           `json:"auto"`
 	AutopilotHeld   any            `json:"autopilotHeld"`
+	needsUser       bool
 }
 type AttentionView struct {
 	ID             string   `json:"id"`
@@ -171,14 +172,16 @@ func toThread(row record, now int64) (ThreadView, error) {
 	unreported := func(outcome string) bool {
 		return !row.present("turn_id") && row.text("last_outcome") == outcome && row.present("last_turn_at") && row.integer("reported_at") < row.integer("last_turn_at")
 	}
-	view.Stage = ThreadStage(StageFacts{
+	facts := StageFacts{
 		OpenAttentions: int(row.integer("open_attentions")), Started: row.flag("started"), LastReport: row.text("last_report"),
 		TurnRunning: row.present("turn_id"), TurnPending: !row.present("turn_id") && row.integer("pending_seq") > 0,
 		TurnFailed: !row.present("turn_id") && row.text("last_outcome") == "failed", TurnCancelled: unreported("cancelled"), Unreported: unreported("completed"), Waiting: row.present("wait_id"),
 		ChecksGaveUp: row.integer("check_failures") >= 3, Stopped: row.present("stopped_reason"),
 		Landed:   merged != nil && (int64(mergedAt) >= row.integer("reported_at") || merged["head"] == row["reported_head"]) || pullRequest["state"] == "merged",
 		Reviewed: row.present("reviewed_at") && row.integer("reviewed_at") >= row.integer("reported_at"), UnderReview: row.flag("reviewing"), Reviewer: row.present("review_of"),
-	})
+	}
+	view.Stage = ThreadStage(facts)
+	view.needsUser = facts.needsUser(view.Stage)
 	view.ActiveAt = max(row.integer("updated_at"), row.integer("message_at"), row.integer("transcript_at"), row.integer("todo_at"), row.integer("turn_started_at"))
 	view.Archived = view.Stage == "done" && (row.present("landed_at") && row.integer("landed_at") >= row.integer("reported_at") && row.integer("user_at") <= row.integer("landed_at") && now-row.integer("landed_at") >= int64(24*time.Hour/time.Millisecond) || now-view.ActiveAt >= int64(7*24*time.Hour/time.Millisecond))
 	if row.present("workspace_label") {
@@ -300,7 +303,7 @@ func needsMe(ctx context.Context, db queryer, projectID string, threads []Thread
 		items = append(items, object{"kind": "attention", "attention": attention, "thread": thread, "joined": joined})
 	}
 	for _, thread := range threads {
-		if (NeedsUser(thread.Stage) || thread.Aside != nil && thread.Aside.Due) && !asked[thread.ID] && (thread.ReviewOf == nil || thread.ReviewOf == "") {
+		if (thread.needsUser || thread.Aside != nil && thread.Aside.Due) && !asked[thread.ID] && (thread.ReviewOf == nil || thread.ReviewOf == "") {
 			items = append(items, object{"kind": "thread", "thread": thread})
 		}
 	}

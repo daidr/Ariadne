@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf16"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/domainerr"
 )
 
 func uiBlocks() args {
@@ -40,14 +42,14 @@ func uiBlocks() args {
 			"y": arrayOf(text), "labels": row, "rows": arrayOf(row), "stacked": boolean, "horizontal": boolean}, "kind", "x", "y", "rows"),
 		block("steps", args{"title": text, "items": arrayOf(object(args{"title": text, "description": text,
 			"status": enum("done", "current", "pending", "failed")}, "title"))}, "items"),
-		block("thread", args{"threadId": text}, "threadId"),
+		block("thread", args{"threadId": threadIDField()}, "threadId"),
 	}}}
 }
 
 func (turn *turn) interactionTools() []tool {
 	return []tool{
-		specification("post_ui", "Post a message with a choice, confirmation, form, table, chart, steps or a link to a thread. One question per message. An answer arrives in a later turn. Ask when the user's intent is unclear or a decision has material consequences.",
-			args{"text": field("string"), "blocks": uiBlocks()}, []string{"blocks"}, turn.postUI),
+		specification("post_ui", `Post a message with interface blocks. For discussion cards, pass threadIds with the IDs from successful create_thread or list_threads results, for example {"text":"I assigned the work.","threadIds":["thr_actual_id"]}. For choice, confirm, form, table, chart and steps, pass blocks. A thread block inside blocks requires both type and threadId. Provide threadIds or blocks, with at most six cards and blocks in total. One question per message. An answer arrives in a later turn.`,
+			args{"text": field("string"), "blocks": uiBlocks(), "threadIds": args{"type": "array", "items": threadIDField(), "minItems": 1, "maxItems": 6}}, nil, turn.postUI),
 		specification("withdraw_ask", "Withdraw your own unanswered question when the user answered elsewhere or it no longer matters. Give a short reason for the user.",
 			args{"attentionId": field("string"), "reason": field("string")}, []string{"attentionId", "reason"}, func(ctx context.Context, input args) (string, error) {
 				return "Withdrawn.", turn.Repository.WithdrawAttention(ctx, turn.conversation.ID, text(input, "attentionId"), text(input, "reason"))
@@ -63,14 +65,37 @@ func (turn *turn) postUI(ctx context.Context, input args) (string, error) {
 		return "", errors.New("text must be a string")
 	}
 	blocks, ok := input["blocks"].([]any)
-	if !ok || len(blocks) == 0 {
-		return "", errors.New("blocks must be a nonempty array")
+	if !ok && input["blocks"] != nil {
+		return "", errors.New("blocks must be an array")
+	}
+	ids, err := stringsOf(input["threadIds"])
+	if err != nil {
+		return "", errors.New("threadIds must be an array of thread ID strings. " + threadIDHelp)
+	}
+	if len(blocks)+len(ids) == 0 {
+		return "", errors.New("provide blocks or threadIds")
+	}
+	if len(blocks)+len(ids) > 6 {
+		return "", errors.New("post_ui accepts at most six cards and blocks in total")
+	}
+	blocks = slices.Clone(blocks)
+	for _, id := range ids {
+		blocks = append(blocks, args{"type": "thread", "threadId": id})
 	}
 	conversation := turn.conversation
 	message, err := turn.Repository.PostMessage(ctx, conversation.ProjectID, core.MessageInput{
 		ConversationID: conversation.ID, Author: conversation.Role, Content: text(input, "text"), Blocks: blocks,
 	})
 	if err != nil {
+		var invalid *domainerr.Error
+		if errors.As(err, &invalid) && invalid.Key == "error.blockInvalid" {
+			if reason := text(invalid.Params, "reason"); reason != "" {
+				if strings.Contains(reason, ".threadId") {
+					reason += ". " + threadIDHelp + " For discussion cards you can pass those IDs in threadIds."
+				}
+				return "", errors.New(reason)
+			}
+		}
 		return "", err
 	}
 	result := args{"messageId": message.ID, "status": "shown"}
