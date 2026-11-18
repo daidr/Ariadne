@@ -583,6 +583,15 @@ export type TranscriptNote =
       /** The answer as the model reads it, e.g. `choice: …` or `approved`. */
       answer: string
     }
+  | {
+      type: 'answer-in-thread'
+      threadId: string
+      attentionId: string
+      question: AskBlock
+      context: string
+      answer: BlockAnswer
+      openAsks: { attentionId: string; question: AskBlock; context: string }[]
+    }
   | { type: 'user-in-thread'; threadId: string; messageId: string; content: string }
   /** The user put an emoji on a message of the conversation, or took it back. */
   | { type: 'user-reacted'; messageId: string; emoji: string; quote: string; removed: boolean }

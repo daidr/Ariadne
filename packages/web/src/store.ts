@@ -21,6 +21,7 @@ import type {
   ThreadView,
   TurnFile,
 } from '@ariadne/core'
+import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
 import type { Draft } from './components/attachments'
 import { reuse } from './reuse'
@@ -192,7 +193,6 @@ interface State {
    * they go to the thread together.
    */
   lineComments: Record<string, LineComment[]>
-  error: string | null
 }
 
 export const state = reactive<State>({
@@ -224,11 +224,11 @@ export const state = reactive<State>({
   writing: {},
   background: {},
   lineComments: {},
-  error: null,
 })
 
 export function report(error: unknown) {
-  state.error = error instanceof ApiError ? tm(error.localized) : String(error)
+  const message = error instanceof ApiError ? tm(error.localized) : String(error)
+  toast.danger(message, { duration: 7000, closable: true })
 }
 
 const PROJECT_ORDER_KEY = 'ariadne.projectOrder'
@@ -1039,11 +1039,6 @@ export async function dismissProposal(proposalId: string) {
   } catch (error) {
     report(error)
   }
-}
-
-/** Ask the repository for the thread's pull request now; the event stream refreshes the view. */
-export async function refreshPullRequest(threadId: string) {
-  await api.refreshPullRequest(threadId).catch(report)
 }
 
 /** Apply the user's own edit of the plan; returns whether it took effect. */

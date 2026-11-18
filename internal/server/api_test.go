@@ -253,6 +253,8 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 		}
 		known[method+" "+route.Path] = true
 	}
+	// Routes added after the frozen Bun contract also require authentication.
+	known["GET /api/files/:fileId/sheet"] = true
 	t.Logf("%d native API routes registered", len(api.routes))
 	registered := map[string]bool{}
 	for _, route := range api.routes {
@@ -265,7 +267,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	for _, route := range api.routes {
 		if !known[route] {
-			t.Fatalf("route missing from compatibility contract: %s", route)
+			t.Fatalf("route missing from the tested route inventory: %s", route)
 		}
 		parts := strings.SplitN(route, " ", 2)
 		if route == "GET /api/health" {

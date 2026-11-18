@@ -60,6 +60,7 @@ func (turn *turn) interactionTools() []tool {
 }
 
 func (turn *turn) postUI(ctx context.Context, input args) (string, error) {
+	defer turn.clearDraft()
 	raw := input["text"]
 	if _, ok := raw.(string); raw != nil && !ok {
 		return "", errors.New("text must be a string")
@@ -83,9 +84,13 @@ func (turn *turn) postUI(ctx context.Context, input args) (string, error) {
 		blocks = append(blocks, args{"type": "thread", "threadId": id})
 	}
 	conversation := turn.conversation
-	message, err := turn.Repository.PostMessage(ctx, conversation.ProjectID, core.MessageInput{
+	post := core.MessageInput{
 		ConversationID: conversation.ID, Author: conversation.Role, Content: text(input, "text"), Blocks: blocks,
-	})
+	}
+	if turn.draft != nil {
+		post.MessageID = &turn.draft.MessageID
+	}
+	message, err := turn.Repository.PostMessage(ctx, conversation.ProjectID, post)
 	if err != nil {
 		var invalid *domainerr.Error
 		if errors.As(err, &invalid) && invalid.Key == "error.blockInvalid" {
@@ -97,6 +102,9 @@ func (turn *turn) postUI(ctx context.Context, input args) (string, error) {
 			}
 		}
 		return "", err
+	}
+	if turn.draft != nil {
+		turn.draft.Posted()
 	}
 	result := args{"messageId": message.ID, "status": "shown"}
 	if attention := message.AttentionID(); attention != "" {

@@ -121,7 +121,7 @@ func testArtifactCollaboration(t *testing.T, artifactKind, initial, want string,
 			t.Fatal("missing server sync step 1", info, err)
 		}
 		write(conn, protocol.EncodeSyncStep1(d))
-		if _, err := collab.HandleSync(d, read(conn), "test"); err != nil {
+		if _, err := collab.HandleSync(d, readSync(conn), "test"); err != nil {
 			t.Fatal(err)
 		}
 		return conn, d
@@ -140,7 +140,11 @@ func testArtifactCollaboration(t *testing.T, artifactKind, initial, want string,
 			conn *websocket.Conn
 			doc  *crdt.Doc
 		}{{left, leftDoc}, {right, rightDoc}} {
-			if _, err := collab.HandleSync(reader.doc, read(reader.conn), "test"); err != nil {
+			lock, err := protocol.InspectMessage(read(reader.conn))
+			if err != nil || lock.Type != protocol.MessageAwareness || !strings.Contains(string(lock.Body), `"documentLocks"`) {
+				t.Fatal("the draft lock did not arrive before its content", lock, err)
+			}
+			if _, err := collab.HandleSync(reader.doc, readSync(reader.conn), "test"); err != nil {
 				t.Fatal(err)
 			}
 			content, err := collab.ReadDocument(reader.doc)
@@ -157,6 +161,24 @@ func testArtifactCollaboration(t *testing.T, artifactKind, initial, want string,
 		stored, err := repo.GetArtifact(ctx, artifact.ID, nil)
 		if err != nil || stored.Content != initial || stored.Version != artifact.Version {
 			t.Fatal("unfinished draft was saved", stored, err)
+		}
+		// A peer with a stale editor may send a change before seeing the lock.
+		stale, staleDoc := connect()
+		before, err := collab.ReadDocument(staleDoc)
+		if err != nil || !strings.Contains(before, "模型正在写这段。") {
+			t.Fatal("stale peer did not receive the current document", before, err)
+		}
+		vector := crdt.EncodeStateVector(staleDoc)
+		if err := collab.UpdateDocument(staleDoc, strings.Replace(before, "模型正在写这段。", "冲突修改。", 1), "stale"); err != nil {
+			t.Fatal(err)
+		}
+		update, err := crdt.EncodeStateAsUpdate(staleDoc, vector)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(stale, protocol.EncodeUpdate(update))
+		if _, _, err := stale.Read(ctx); websocket.CloseStatus(err) != 4409 {
+			t.Fatal("the stale peer was not asked to reload the locked document", err)
 		}
 		defer draft.Close()
 	}

@@ -25,7 +25,7 @@ import {
   type ChatMessageProps,
   type ChatListExpose,
 } from 'dou-ui'
-import type { MessageView, NoticeView } from '@ariadne/core'
+import type { MessageView, NoticeView, ReplyDraftBlock } from '@ariadne/core'
 import {
   ChevronDownIcon,
   CpuIcon,
@@ -99,6 +99,7 @@ import ArtifactNotice from './ArtifactNotice.vue'
 import RecapNotice from './RecapNotice.vue'
 import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
+import DraftBlock from '../blocks/DraftBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
 import AgentText from '../markdown/AgentText.vue'
 import MessageImage from '../markdown/MessageImage.vue'
@@ -467,6 +468,12 @@ function partsOf(message: MessageView): ChatMessageProps['parts'] {
     ...(message.content ? [{ type: 'text' as const, text: message.content, streaming }] : []),
     ...(own ? [] : files),
     ...(message.comments.length ? [{ type: 'comments' }] : []),
+    ...(message.id === writing.value?.id
+      ? (state.writing[message.conversationId]?.blocks ?? []).map((block) => ({
+          type: 'draft-block',
+          block,
+        }))
+      : []),
     ...message.blocks.map((_, index) => ({ type: 'block', index })),
     ...(message.ask ? [{ type: 'ask' }] : []),
     ...(shown.value.changes.has(message.id) ? [{ type: 'changes' }] : []),
@@ -681,7 +688,7 @@ watch(
           </DouShimmer>
           <ReviewActions v-if="thread.stage === 'review' && !merging" :thread-id="thread.id" />
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <PullRequestTag :thread="thread" refreshable />
+          <PullRequestTag :thread="thread" />
           <ReviewMark :thread="thread" />
           <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
           <template v-if="reviewed">
@@ -1020,6 +1027,10 @@ watch(
               <ShowBlock
                 v-else-if="part.type === 'block'"
                 :block="message.blocks[part.index as number]!"
+              />
+              <DraftBlock
+                v-else-if="part.type === 'draft-block'"
+                :block="part.block as ReplyDraftBlock"
               />
               <RelayedTo v-else-if="part.type === 'relayed'" :relays="message.relayedTo" />
               <TurnChanges
@@ -1402,11 +1413,6 @@ watch(
 .conversation-capsules::after {
   inset-block-start: 0;
   backdrop-filter: blur(12px);
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--dou-color-bg-canvas) 90%, transparent)
-  );
   mask-image: linear-gradient(to bottom, transparent, #000);
 }
 

@@ -15,15 +15,19 @@ import (
 // Draft is a live model edit in an open room. Its changes are broadcast without
 // becoming a version, and its undo manager tracks no user edits.
 type Draft struct {
-	room    *room
-	Base    string
-	Version int64
-	last    string
-	writer  string
-	undo    *crdt.UndoManager
-	pieces  int
-	wroteAt time.Time
-	changed bool
+	room      *room
+	Base      string
+	Version   int64
+	last      string
+	writer    string
+	undo      *crdt.UndoManager
+	pieces    int
+	wroteAt   time.Time
+	changed   bool
+	locked    map[string]bool
+	reserved  string
+	cursor    map[string]any
+	lockPulse *time.Timer
 }
 
 func (rooms *Rooms) Draft(ctx context.Context, id string, kind, writer string) (*Draft, error) {
@@ -86,21 +90,14 @@ func (draft *Draft) Write(next string) error {
 	}
 	defer trial.Destroy()
 	base := draft.last
+	var changed map[string]bool
 	switch kind {
 	case "document":
 		content, err := normalizeDocument(next)
 		if err != nil {
 			return err
 		}
-		current, err := ReadDocument(trial)
-		if err != nil {
-			return err
-		}
-		merged, ok := core.MergeText(base, current, content)
-		if !ok {
-			return errors.New("the draft overlaps another edit")
-		}
-		err = UpdateDocument(trial, merged, draft)
+		changed, err = draft.updateDocumentPreview(trial, content)
 		if err != nil {
 			return err
 		}
@@ -123,17 +120,73 @@ func (draft *Draft) Write(next string) error {
 		if err != nil {
 			return err
 		}
+		if kind == "document" {
+			if err := draft.lockDocumentBlocks(changed); err != nil {
+				return err
+			}
+		}
 		writerState := observeWriter(active, func() { err = crdt.ApplyUpdate(active.doc, change, draft) }, draft.writer)
 		if err != nil {
 			return err
 		}
 		active.state = state
 		active.broadcast(protocol.EncodeUpdate(change), nil)
-		active.publishWriter(draft.writer, writerState)
+		if kind == "document" {
+			draft.cursor = writerState
+			draft.publishDocumentWriter()
+		} else {
+			active.publishWriter(draft.writer, writerState)
+		}
 		draft.changed = true
 	}
 	draft.last, draft.wroteAt = next, time.Now()
 	draft.pieces++
+	return nil
+}
+
+func (draft *Draft) updateDocumentPreview(trial *crdt.Doc, content string) (map[string]bool, error) {
+	current, err := ReadDocument(trial)
+	if err != nil {
+		return nil, err
+	}
+	merged, ok := core.MergeText(draft.last, current, content)
+	if !ok {
+		return nil, errors.New("the draft overlaps another edit")
+	}
+	return changedDocumentBlocks(trial, func() error { return UpdateDocument(trial, merged, draft) })
+}
+
+// Reserve the existing blocks a known replacement will change before any new
+// text is visible. The probe only runs in a temporary copy of the document.
+func (draft *Draft) ReserveDocument(next string) error {
+	active := draft.room
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	if active.draft != draft || active.artifact.Kind != "document" || next == draft.reserved || len(next) > 256<<10 {
+		return nil
+	}
+	content, err := normalizeDocument(next)
+	if err != nil {
+		return err
+	}
+	trial, err := Load("document", active.state)
+	if err != nil {
+		return err
+	}
+	defer trial.Destroy()
+	changed, err := draft.updateDocumentPreview(trial, content)
+	if err != nil {
+		return err
+	}
+	for id := range changed {
+		if !active.doc.GetMap("document").Has(id) {
+			delete(changed, id)
+		}
+	}
+	if err := draft.lockDocumentBlocks(changed); err != nil {
+		return err
+	}
+	draft.reserved = next
 	return nil
 }
 
@@ -147,12 +200,20 @@ func (draft *Draft) Close() {
 }
 
 func (active *room) cancelDraft() {
+	if active.rollbackDraft() {
+		active.clearWriter()
+	}
+}
+
+func (active *room) rollbackDraft() bool {
 	draft := active.draft
 	if draft == nil {
-		return
+		return false
 	}
 	active.draft = nil
-	active.clearWriter()
+	if draft.lockPulse != nil {
+		draft.lockPulse.Stop()
+	}
 	vector := crdt.EncodeStateVector(active.doc)
 	for draft.undo.CanUndo() {
 		if draft.undo.Undo() == nil {
@@ -167,6 +228,7 @@ func (active *room) cancelDraft() {
 			active.owner.report(err)
 		} else {
 			active.state = state
+			active.checkpoint = true
 		}
 		if change, err := crdt.EncodeStateAsUpdate(active.doc, vector); err == nil {
 			active.broadcast(protocol.EncodeUpdate(change), nil)
@@ -177,4 +239,5 @@ func (active *room) cancelDraft() {
 	if !active.dirty.IsZero() {
 		active.changed()
 	}
+	return true
 }

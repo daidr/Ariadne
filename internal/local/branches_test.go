@@ -69,7 +69,7 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	if err != nil || changes == nil {
 		t.Fatal(changes, err)
 	}
-	if changes.From != base || changes.Head != head || len(changes.Commits) != 1 || len(changes.Files) != 4 || !reflect.DeepEqual(changes.Uncommitted, []string{"uncommitted.txt"}) {
+	if changes.From != base || changes.Head != head || changes.BaseHead != base || len(changes.Commits) != 1 || len(changes.Files) != 4 || !reflect.DeepEqual(changes.Uncommitted, []string{"uncommitted.txt"}) {
 		t.Fatalf("%+v", changes)
 	}
 	versions, err := FileVersions(t.Context(), git, VersionInput{From: base, Head: head, Path: "renamed.txt", PreviousPath: new("file.txt")})
@@ -136,6 +136,8 @@ func assertBranchOracle(t *testing.T, root string, input BranchInput, from, head
 	if err != nil {
 		t.Fatalf("legacy %v\n%s", err, want)
 	}
+	// The legacy comparison predates the base tip used by the conditional request.
+	changes.BaseHead = ""
 	got, _ := json.Marshal(map[string]any{"changes": changes, "versions": versions})
 	var actual, expected any
 	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {

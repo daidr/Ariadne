@@ -16,11 +16,18 @@ type BranchCommit struct {
 	SHA     string `json:"sha"`
 	Subject string `json:"subject"`
 }
+
+type BranchRevisions struct {
+	Head     string
+	BaseHead string
+}
+
 type BranchChanges struct {
 	Branch      string         `json:"branch"`
 	Base        string         `json:"base"`
 	From        string         `json:"from"`
 	Head        string         `json:"head"`
+	BaseHead    string         `json:"baseHead,omitempty"`
 	Commits     []BranchCommit `json:"commits"`
 	Files       []ChangedFile  `json:"files"`
 	Uncommitted []string       `json:"uncommitted"`

@@ -471,6 +471,15 @@ func (factory *Workspaces) Snapshot(ctx context.Context, threadID string) (*stri
 	}
 	return &tree, nil
 }
+func (factory *Workspaces) revisions(ctx context.Context, branch, baseRef string) (sdk.BranchRevisions, error) {
+	ctx, done, err := factory.begin(ctx)
+	if err != nil {
+		return sdk.BranchRevisions{}, err
+	}
+	defer done()
+	return branchRevisions(ctx, factory.git, branch, baseRef)
+}
+
 func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base string) (*sdk.BranchChanges, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {

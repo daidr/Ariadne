@@ -6,8 +6,16 @@ import type {
   ArtifactVersionView,
   ArtifactView,
 } from '@ariadne/core'
-import { DouAlert, DouButton, DouInput, DouSelect, DouText, type CommentAction } from 'dou-ui'
-import { CheckIcon, PencilIcon, RotateCcwIcon } from '@dou-ui/icons'
+import { DouButton, DouInput, DouPopover, DouText, type CommentAction } from 'dou-ui'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  HistoryIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+} from '@dou-ui/icons'
 import {
   computed,
   defineAsyncComponent,
@@ -20,10 +28,10 @@ import {
   type EffectScope,
 } from 'vue'
 import { api, ApiError } from '../api'
-import { locale, t } from '../i18n'
+import { t } from '../i18n'
 import { report, state } from '../store'
 import ViewActions from '../full/ViewActions.vue'
-import { authorName } from './author'
+import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
 import { kindIcon } from './kinds'
 import { useSharedArtifact, type SharedArtifact } from './shared'
@@ -39,7 +47,14 @@ const bodies = {
 }
 
 const artifact = ref<ArtifactView | null>(null)
-const versions = ref<ArtifactVersionView[]>([])
+const versions = shallowRef<ArtifactVersionView[]>([])
+const menu = ref<'actions' | 'history' | null>(null)
+const menuOpen = computed({
+  get: () => menu.value !== null,
+  set: (open) => (menu.value = open ? 'actions' : null),
+})
+const historyOpen = computed(() => menu.value === 'history')
+const historyStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const comments = ref<ArtifactCommentThreadView[]>([])
 /** The comment thread open in the text. */
 const activeComment = ref<string | null>(null)
@@ -52,19 +67,21 @@ const body = ref<{
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
 const saving = ref(false)
+const switchingVersion = ref(false)
 const renaming = ref(false)
 const title = ref('')
 const titleInput = ref<InstanceType<typeof DouInput> | null>(null)
 
 /** The newest version is edited together: changes go out as they are made. */
 const viewingOld = computed(() => !!artifact.value && artifact.value.version !== latest.value)
-
-const versionOptions = computed(() =>
-  versions.value.map((v) => ({
-    value: v.version,
-    label: `${t('artifact.version', { version: v.version })} · ${authorName(v.author)}${v.reason ? ` · ${v.reason}` : ''}`,
-  })),
-)
+const historyNeighbors = computed(() => {
+  const index = versions.value.findIndex(({ version }) => version === artifact.value?.version)
+  return {
+    previous: index >= 0 ? versions.value[index + 1]?.version : undefined,
+    // The newest version opens the live editor through the separate return action.
+    next: index > 1 ? versions.value[index - 1]?.version : undefined,
+  }
+})
 
 /** What the editor starts from: the version shown. */
 const bodyContent = ref('')
@@ -74,31 +91,66 @@ function show(next: ArtifactView) {
   bodyContent.value = next.content
 }
 
+let viewRequest = 0
+
 async function load(version?: number) {
+  const request = ++viewRequest
+  const id = props.id
   try {
-    const detail = await api.getArtifact(props.id, version)
-    versions.value = detail.versions
+    const detail = await api.getArtifact(id, { version, versions: version !== undefined })
+    if (request !== viewRequest || id !== props.id) return
+    if (version !== undefined) versions.value = detail.versions
     comments.value = detail.comments
     latest.value = detail.versions[0]?.version ?? detail.artifact.version
     show(detail.artifact)
   } catch (error) {
-    report(error)
+    if (request === viewRequest && id === props.id) report(error)
   }
 }
+
+async function switchVersion(version?: number) {
+  if (switchingVersion.value) return
+  menu.value = null
+  switchingVersion.value = true
+  try {
+    await load(version)
+  } finally {
+    switchingVersion.value = false
+  }
+}
+
+watch(historyOpen, async (open, _, onCleanup) => {
+  if (!open) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  historyStatus.value = 'loading'
+  try {
+    const detail = await api.getArtifact(props.id, { signal: controller.signal })
+    if (controller.signal.aborted) return
+    versions.value = detail.versions
+    historyStatus.value = 'ready'
+  } catch {
+    if (!controller.signal.aborted) historyStatus.value = 'error'
+  }
+})
 
 watch(
   () => props.id,
   () => {
     renaming.value = false
+    menu.value = null
+    artifact.value = null
     void load()
   },
   { immediate: true },
 )
-// A new version was saved (from the room, or a restore): its number and the list follow.
+// Keep the live view in sync while the user is editing.
 watch(
   () => state.artifacts.find((a) => a.id === props.id)?.version,
   (version) => {
-    if (version && version !== latest.value && !viewingOld.value) void load()
+    if (version && version !== latest.value && !viewingOld.value && !switchingVersion.value) {
+      void load()
+    }
   },
 )
 // Someone commented (an agent answering): take the comments in, leaving edits open.
@@ -107,7 +159,7 @@ watch(
   async (at, before) => {
     if (!at || at === before) return
     try {
-      comments.value = (await api.getArtifact(props.id)).comments
+      comments.value = (await api.getArtifact(props.id, { versions: false })).comments
     } catch (error) {
       report(error)
     }
@@ -119,19 +171,34 @@ watch(
 /** The room of the artifact open now, joined while its newest version is shown. */
 const shared = shallowRef<SharedArtifact | null>(null)
 let room: { id: string; scope: EffectScope } | null = null
+const roomGeneration = shallowRef(0)
+
+function join(id: string) {
+  const scope = effectScope()
+  room = { id, scope }
+  const onLockedEdit =
+    artifact.value?.kind === 'document'
+      ? () => {
+          if (room?.scope !== scope) return
+          // Rejoin with a fresh Y.Doc so the rejected update is never replayed.
+          leave()
+          join(id)
+          report(t('artifact.aiEditConflict'))
+        }
+      : undefined
+  shared.value = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
+  roomGeneration.value++
+  shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
+    if (origin !== shared.value?.provider.value) touched()
+  })
+}
+
 watch(
   () => (artifact.value && !viewingOld.value ? artifact.value.id : null),
   (id) => {
     if (room?.id === id) return
     leave()
-    if (!id) return
-    const scope = effectScope()
-    shared.value = scope.run(() => useSharedArtifact(id)) ?? null
-    room = { id, scope }
-    shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
-      // The page's own edits; what comes from the server is the provider's.
-      if (origin !== shared.value?.provider.value) touched()
-    })
+    if (id) join(id)
   },
 )
 
@@ -299,7 +366,8 @@ async function save(
       ...(input.title ? { title: input.title } : {}),
       ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
     })
-    versions.value = detail.versions
+    if (props.id !== current.id) return false
+    viewRequest++
     comments.value = detail.comments
     latest.value = detail.artifact.version
     show(detail.artifact)
@@ -307,7 +375,7 @@ async function save(
   } catch (error) {
     // The reason is written for the agent; the user gets a plain line.
     if (error instanceof ApiError && error.localized.key === 'error.artifactInvalid') {
-      state.error = t('artifact.invalidSave')
+      report(t('artifact.invalidSave'))
     } else report(error)
     return false
   } finally {
@@ -338,9 +406,6 @@ async function rename() {
   }
   if (await save({ title: next, reason: t('artifact.renameReason') })) renaming.value = false
 }
-
-const time = (at: number) =>
-  new Date(at).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 </script>
 
 <template>
@@ -378,19 +443,6 @@ const time = (at: number) =>
           <PencilIcon />
         </DouButton>
       </div>
-      <DouText
-        v-if="artifact && place === 'full'"
-        variant="tertiary"
-        size="sm"
-        class="artifact-meta"
-      >
-        {{
-          t('artifact.updated', {
-            who: authorName(artifact.updatedBy),
-            time: time(artifact.updatedAt),
-          })
-        }}
-      </DouText>
       <CommentList
         v-if="artifact?.kind === 'document' && !viewingOld"
         :comments="comments"
@@ -398,29 +450,107 @@ const time = (at: number) =>
         @open="(id: string) => (activeComment = id)"
         @action="comment"
       />
-      <div v-if="versionOptions.length > 1" class="artifact-versions">
-        <DouSelect
-          :model-value="artifact?.version ?? null"
-          :options="versionOptions"
+      <DouPopover
+        v-if="artifact"
+        v-model:open="menuOpen"
+        :title="historyOpen ? t('artifact.versions') : undefined"
+        :aria-label="historyOpen ? undefined : t('artifact.menu')"
+        :width="historyOpen ? 'min(340px, calc(100vw - 24px))' : 144"
+        :style="historyOpen ? undefined : { '--dou-popover-padding': '4px' }"
+        :disabled="saving || switchingVersion"
+        placement="bottom-end"
+      >
+        <DouButton
+          variant="ghost"
           size="sm"
-          :aria-label="t('artifact.versions')"
-          @update:model-value="(value) => load(Number(value))"
-        />
-      </div>
-      <DouButton v-if="viewingOld" size="sm" variant="outline" :loading="saving" @click="restore">
-        <template #leading><RotateCcwIcon /></template>
-        {{ t('artifact.restore') }}
-      </DouButton>
+          :aria-label="t('artifact.menu')"
+          :title="t('artifact.menu')"
+          :disabled="saving || switchingVersion"
+        >
+          <MoreHorizontalIcon />
+        </DouButton>
+        <template #content="{ close }">
+          <ArtifactHistory
+            v-if="historyOpen"
+            :versions="versions"
+            :selected="artifact.version"
+            :status="historyStatus"
+            @select="
+              (version) => {
+                close()
+                void switchVersion(version === versions[0]?.version ? undefined : version)
+              }
+            "
+          />
+          <DouButton
+            v-else
+            block
+            variant="ghost"
+            size="sm"
+            class="artifact-menu-item"
+            @click="menu = 'history'"
+          >
+            <template #leading><HistoryIcon /></template>
+            {{ t('artifact.versions') }}
+          </DouButton>
+        </template>
+      </DouPopover>
       <ViewActions :view="{ kind: 'artifact', id }" :place="place" />
     </div>
-    <DouAlert v-if="viewingOld" tone="neutral" class="artifact-alert">
-      {{ t('artifact.viewing', { version: artifact?.version ?? 0 }) }}
-    </DouAlert>
+    <div v-if="viewingOld" class="history-context">
+      <div class="history-navigation" role="group" :aria-label="t('artifact.versions')">
+        <DouButton
+          size="sm"
+          variant="ghost"
+          :aria-label="t('artifact.previousVersion')"
+          :title="t('artifact.previousVersion')"
+          :disabled="saving || switchingVersion || historyNeighbors.previous === undefined"
+          @click="
+            historyNeighbors.previous !== undefined && switchVersion(historyNeighbors.previous)
+          "
+        >
+          <ChevronUpIcon />
+        </DouButton>
+        <DouButton
+          size="sm"
+          variant="ghost"
+          :aria-label="t('artifact.nextVersion')"
+          :title="t('artifact.nextVersion')"
+          :disabled="saving || switchingVersion || historyNeighbors.next === undefined"
+          @click="historyNeighbors.next !== undefined && switchVersion(historyNeighbors.next)"
+        >
+          <ChevronDownIcon />
+        </DouButton>
+      </div>
+      <DouText size="sm" variant="secondary" class="history-caption">
+        {{ t('artifact.viewing', { version: artifact?.version ?? 0 }) }}
+      </DouText>
+      <div class="history-actions">
+        <DouButton
+          size="sm"
+          variant="ghost"
+          :disabled="saving || switchingVersion"
+          @click="switchVersion()"
+        >
+          {{ t('artifact.returnToLatest') }}
+        </DouButton>
+        <DouButton
+          size="sm"
+          variant="outline"
+          :disabled="switchingVersion"
+          :loading="saving"
+          @click="restore"
+        >
+          <template #leading><RotateCcwIcon /></template>
+          {{ t('artifact.restore') }}
+        </DouButton>
+      </div>
+    </div>
     <div class="artifact-body">
       <component
         :is="bodies[artifact.kind]"
         v-if="artifact && (viewingOld || shared)"
-        :key="`${artifact.id}:${viewingOld ? artifact.version : 'live'}`"
+        :key="`${artifact.id}:${viewingOld ? artifact.version : `live-${roomGeneration}`}`"
         ref="body"
         v-bind="commentProps"
         :shared="viewingOld ? undefined : (shared ?? undefined)"
@@ -463,24 +593,35 @@ const time = (at: number) =>
   min-width: 0;
 }
 
-.artifact-meta {
+.artifact-menu-item {
+  justify-content: flex-start;
+}
+
+.history-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 8px 4px 16px;
+  border-bottom: 1px solid var(--dou-color-border);
+}
+
+.history-caption {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-navigation {
+  display: flex;
   flex: none;
-  white-space: nowrap;
+  gap: 2px;
 }
 
-.artifact-versions {
-  flex: none;
-  width: 200px;
-}
-
-/* A tab on the side is narrow: the version list gives up room before the title does. */
-.is-side .artifact-versions {
-  flex: 0 1 160px;
-  min-width: 96px;
-}
-
-.artifact-alert {
-  margin: 8px 16px 0;
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-inline-start: auto;
 }
 
 .artifact-body {

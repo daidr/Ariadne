@@ -63,7 +63,9 @@ type WorktreeRemoveOptions struct {
 	Spare   bool `json:"spare,omitempty"`
 }
 type BranchCapability struct {
-	Changes   func(context.Context, ThreadBranch, string) (*BranchChanges, error)
+	Changes func(context.Context, ThreadBranch, string) (*BranchChanges, error)
+	// Revisions can check the refs without computing a diff or scanning the worktree.
+	Revisions func(context.Context, ThreadBranch, string) (BranchRevisions, error)
 	File      func(context.Context, FileVersionRequest) (FileVersions, error)
 	Merged    func(context.Context, ThreadBranch, string) (bool, error)
 	Merge     func(context.Context, MergeRequest) (MergeOutcome, error)

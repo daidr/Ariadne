@@ -48,6 +48,13 @@ func (manager *Manager) Branches(ctx context.Context, project string) (*sdk.Bran
 			})
 		}
 	}
+	if raw.Revisions != nil {
+		proxy.Revisions = func(ctx context.Context, branch sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) (sdk.BranchRevisions, error) {
+				return b.Revisions(ctx, branch, base)
+			})
+		}
+	}
 	if raw.File != nil {
 		proxy.File = func(ctx context.Context, request sdk.FileVersionRequest) (sdk.FileVersions, error) {
 			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) (sdk.FileVersions, error) {

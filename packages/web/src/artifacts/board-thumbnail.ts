@@ -76,7 +76,7 @@ async function draw(
   signal: AbortSignal,
 ): Promise<string | null> {
   const [{ artifact }, { renderFlowSVG }, { whiteboardExtensions }] = await Promise.all([
-    api.getArtifact(id, undefined, signal),
+    api.getArtifact(id, { signal, versions: false }),
     import('@dou-ui/flow'),
     import('./whiteboard-extensions'),
     import('@dou-ui/flow/style.css'),

@@ -44,7 +44,7 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 	}
 	switch kind {
 	case "document":
-		if input["content"] == nil && input["edits"] == nil {
+		if input["content"] == nil && input["edits"] == nil && input["pendingAnchor"] == nil {
 			return
 		}
 	case "whiteboard":
@@ -95,6 +95,24 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 				next = previewRewrite(documentView(draft.Base), next)
 			}
 		} else {
+			if anchor, _ := input["pendingAnchor"].(string); anchor != "" {
+				// Probe the replacement before its new text is available. Removing
+				// the whole anchor in the probe identifies every block it spans.
+				edits, _ := input["precedingEdits"].([]any)
+				probe := append(append([]any(nil), edits...), args{"old": anchor, "new": "<pending>…</pending>"})
+				reserved, err := documentEdits(documentView(draft.Base), probe)
+				if err == nil {
+					reserved, err = documentFromView(reserved, draft.Base, true)
+				}
+				if err == nil {
+					if err := draft.ReserveDocument(reserved); err != nil {
+						return
+					}
+				}
+			}
+			if input["edits"] == nil {
+				return
+			}
 			next, err = documentEdits(documentView(draft.Base), input["edits"])
 		}
 		if err == nil {
@@ -118,9 +136,8 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 	}
 }
 
-// Read only complete IDs and complete array entries. A growing Markdown string
-// can be shown immediately. Removals, source fetches and image imports wait for
-// the validated tool call.
+// Read complete IDs and array entries, plus growing Markdown and replacements
+// with a complete anchor. Source fetches and image imports wait for the tool.
 func growingArtifactArguments(body string) (args, bool) {
 	out := args{}
 	decoder := json.NewDecoder(strings.NewReader(body))
@@ -140,8 +157,25 @@ func growingArtifactArguments(body string) (args, bool) {
 			}
 			var entries []any
 			for decoder.More() && len(entries) < 128 {
+				offset := decoder.InputOffset()
 				var value args
 				if err := decoder.Decode(&value); err != nil {
+					if key == "edits" && prefixEOF(err) {
+						source := strings.TrimSpace(body[offset:])
+						value := prefixObject(strings.TrimSpace(strings.TrimPrefix(source, ",")))
+						old, _ := value["old"].(string)
+						if old != "" {
+							out["pendingAnchor"] = old
+							out["precedingEdits"] = entries
+						}
+						replacement, complete := value["new"].(string)
+						if !complete {
+							replacement = previewString(value["new"])
+						}
+						if old != "" && (complete || replacement != "") {
+							entries = append(entries, args{"old": old, "new": replacement})
+						}
+					}
 					if len(entries) > 0 {
 						out[key] = entries
 					}
@@ -158,9 +192,11 @@ func growingArtifactArguments(body string) (args, bool) {
 		default:
 			var value any
 			if err := decoder.Decode(&value); err != nil {
-				if key == "content" {
-					out[key] = partialString(body, "content")
-					return out, true
+				if key == "content" && prefixEOF(err) {
+					if value, ok := prefixObject(body)["content"].(growingString); ok {
+						out[key] = string(value)
+						return out, true
+					}
 				}
 				return out, false
 			}

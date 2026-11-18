@@ -28,9 +28,14 @@ func workError(err error) error {
 type ThreadChanges struct {
 	Changes   *sdk.BranchChanges `json:"changes"`
 	Mergeable bool               `json:"mergeable"`
+	Unchanged bool               `json:"unchanged,omitempty"`
 }
 
 func (manager *Manager) ThreadChanges(ctx context.Context, threadID string) (ThreadChanges, error) {
+	return manager.ThreadChangesSince(ctx, threadID, nil)
+}
+
+func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string, known *sdk.BranchRevisions) (ThreadChanges, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return ThreadChanges{}, err
@@ -51,15 +56,23 @@ func (manager *Manager) ThreadChanges(ctx context.Context, threadID string) (Thr
 	if branch == nil || base == nil || *branch == "" || *base == "" {
 		return ThreadChanges{}, nil
 	}
-	changes, err := branches.Changes(ctx, sdk.ThreadBranch{ThreadID: threadID, Branch: *branch}, *base)
-	if err != nil {
-		return ThreadChanges{}, workError(err)
-	}
 	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
 	if err != nil {
 		return ThreadChanges{}, err
 	}
-	return ThreadChanges{Changes: changes, Mergeable: branches.Merge != nil && project.Settings.Delivery.Mode != "external"}, nil
+	mergeable := branches.Merge != nil && project.Settings.Delivery.Mode != "external"
+	owner := sdk.ThreadBranch{ThreadID: threadID, Branch: *branch}
+	if known != nil && branches.Revisions != nil {
+		revisions, err := branches.Revisions(ctx, owner, *base)
+		if err != nil {
+			return ThreadChanges{}, workError(err)
+		}
+		if revisions == *known {
+			return ThreadChanges{Mergeable: mergeable, Unchanged: true}, nil
+		}
+	}
+	changes, err := branches.Changes(ctx, owner, *base)
+	return ThreadChanges{Changes: changes, Mergeable: mergeable}, workError(err)
 }
 func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request sdk.FileVersionRequest) (sdk.FileVersions, error) {
 	ctx, done, err := manager.begin(ctx)
@@ -87,24 +100,24 @@ type ThreadMerge struct {
 	Thread  core.ThreadView  `json:"thread"`
 }
 
-func (manager *Manager) MergeThread(ctx context.Context, threadID, method, message string) (ThreadMerge, error) {
-	return manager.mergeThread(ctx, threadID, method, message, "")
+func (manager *Manager) MergeThread(ctx context.Context, threadID, method, message, expectedHead string) (ThreadMerge, error) {
+	return manager.mergeThread(ctx, threadID, method, message, expectedHead, false)
 }
 
 func (manager *Manager) MergeReviewedThread(ctx context.Context, threadID, head string) (ThreadMerge, error) {
 	if head == "" {
 		return ThreadMerge{}, domainerr.New("error.noBranch", nil)
 	}
-	return manager.mergeThread(ctx, threadID, "", "", head)
+	return manager.mergeThread(ctx, threadID, "", "", head, true)
 }
 
-func (manager *Manager) mergeThread(ctx context.Context, threadID, method, message, reviewedHead string) (ThreadMerge, error) {
+func (manager *Manager) mergeThread(ctx context.Context, threadID, method, message, expectedHead string, auto bool) (ThreadMerge, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return ThreadMerge{}, err
 	}
 	defer done()
-	if reviewedHead == "" && method != "merge" && method != "squash" {
+	if !auto && method != "merge" && method != "squash" {
 		return ThreadMerge{}, domainerr.New("error.invalidBody", map[string]any{"reason": "method"})
 	}
 	repo := manager.options.Repository
@@ -156,7 +169,7 @@ func (manager *Manager) mergeThread(ctx context.Context, threadID, method, messa
 	if project.Settings.Delivery.Mode == "external" {
 		return ThreadMerge{}, domainerr.New("error.externalDelivery", nil)
 	}
-	if reviewedHead != "" {
+	if auto {
 		round, err := repo.PassedReview(ctx, threadID)
 		if err != nil {
 			return ThreadMerge{}, err
@@ -165,7 +178,7 @@ func (manager *Manager) mergeThread(ctx context.Context, threadID, method, messa
 		if err != nil {
 			return ThreadMerge{}, err
 		}
-		if !project.Settings.Autopilot.Enabled || project.AutopilotPaused || round["head"] != reviewedHead || conversation.Turn != nil {
+		if !project.Settings.Autopilot.Enabled || project.AutopilotPaused || round["head"] != expectedHead || conversation.Turn != nil {
 			return ThreadMerge{Thread: thread}, nil
 		}
 		method = project.Settings.Autopilot.Method
@@ -174,14 +187,14 @@ func (manager *Manager) mergeThread(ctx context.Context, threadID, method, messa
 	if message == "" {
 		message = thread.Title
 	}
-	outcome, err := branches.Merge(ctx, sdk.MergeRequest{ThreadID: threadID, Branch: *branch, Base: *base, Method: method, Message: message, ExpectedHead: reviewedHead})
+	outcome, err := branches.Merge(ctx, sdk.MergeRequest{ThreadID: threadID, Branch: *branch, Base: *base, Method: method, Message: message, ExpectedHead: expectedHead})
 	if err != nil {
 		return ThreadMerge{}, workError(err)
 	}
 	switch outcome.Kind {
 	case "merged":
 		data := map[string]any{"branch": *branch, "base": *base, "method": method, "sha": outcome.SHA, "head": outcome.Head}
-		if reviewedHead != "" {
+		if auto {
 			data["auto"] = true
 			thread, err = repo.RecordMerge(ctx, threadID, data)
 		} else {

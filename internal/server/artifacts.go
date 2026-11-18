@@ -12,9 +12,13 @@ import (
 
 func (api *API) artifactResponse(r *http.Request, artifact core.ArtifactView) (any, int, error) {
 	repo := api.options.Repository
-	versions, err := repo.ListArtifactVersions(r.Context(), artifact.ID)
-	if err != nil {
-		return nil, 0, err
+	var versions any = []object{}
+	if r.Method != http.MethodGet || r.URL.Query().Get("versions") != "0" {
+		var err error
+		versions, err = repo.ListArtifactVersions(r.Context(), artifact.ID)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	comments, err := repo.ListArtifactComments(r.Context(), artifact.ID)
 	return object{"artifact": artifact, "versions": versions, "comments": comments}, 200, err

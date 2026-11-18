@@ -74,6 +74,25 @@ func describeAnswer(block, answer object) string {
 	return encoded(answer)
 }
 
+func notifyCoordinatorOfThreadAnswer(w *projectionWriter, e eventstore.Event, source record, question object, answer object, attentionID any) {
+	id := coordinator(w, e.ProjectID)
+	if id == nil || id == source["conversation_id"] {
+		return
+	}
+	openAsks := []object{}
+	for _, ask := range w.all(`SELECT a.id, a.block, m.content
+		FROM attentions a JOIN messages m ON m.id = a.message_id
+		WHERE a.conversation_id = ? AND a.closed = 0 ORDER BY a.id`, id) {
+		openAsks = append(openAsks, object{
+			"attentionId": ask["id"], "question": w.parsed(ask, "block", nil), "context": ask.text("content"),
+		})
+	}
+	addEntry(w, e, id, "note", nil, object{
+		"type": "answer-in-thread", "threadId": source["conversation_id"], "attentionId": attentionID,
+		"question": question, "context": source.text("content"), "answer": answer, "openAsks": openAsks,
+	}, true)
+}
+
 func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 	note := func(id any, payload any, wake bool) { addEntry(w, e, id, "note", nil, payload, wake) }
 	switch e.Type {
@@ -233,11 +252,14 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 			note(c, tagged("plan-changed-by-user", pick(d, "revisionId", "revertOf", "reason")), d.str("revertOf") != "")
 		}
 	case "attention.answered":
-		row := w.one("SELECT conversation_id, block FROM attentions WHERE id = ?", d["attentionId"])
+		row := w.one(`SELECT a.conversation_id, a.block, m.content
+			FROM attentions a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = ?`, d["attentionId"])
 		if row == nil || row["conversation_id"] == nil || row["conversation_id"] == "" {
 			return
 		}
 		block, _ := w.parsed(row, "block", map[string]any{}).(map[string]any)
+		answer := d.obj("answer")
+		description := describeAnswer(block, answer)
 		ids := []any{row["conversation_id"]}
 		for _, waiter := range w.all("SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid", d["attentionId"]) {
 			ids = append(ids, waiter["thread_id"])
@@ -248,7 +270,10 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 				continue
 			}
 			seen[id] = true
-			note(id, object{"type": "answer", "attentionId": d["attentionId"], "question": askTitle(block), "answer": describeAnswer(block, d.obj("answer"))}, true)
+			note(id, object{"type": "answer", "attentionId": d["attentionId"], "question": askTitle(block), "answer": description}, true)
+		}
+		if d.yes("notifyCoordinator") {
+			notifyCoordinatorOfThreadAnswer(w, e, row, block, answer, d["attentionId"])
 		}
 	case "issue.written", "issue.write_unsure":
 		write := w.one("SELECT thread_id, tracker, number, action FROM issue_writes WHERE attention_id = ?", d["attentionId"])

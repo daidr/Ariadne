@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ApiError, type ProjectWorktrees, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { t, tm } from '../i18n'
+import { report } from '../store'
 import StageLabel from './StageLabel.vue'
 
 // Threads' worktrees on disk, project by project, to see what they take and remove some.
@@ -65,7 +66,7 @@ async function remove(projectId: string, threadId: string) {
     emit('changed')
     await load()
   } catch (cause) {
-    error.value = message(cause)
+    report(cause)
   } finally {
     removing.value = null
   }

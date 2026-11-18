@@ -1,3 +1,5 @@
+import type { UiBlock } from './blocks'
+
 /**
  * A command a thread is running now, as the user watches it: what it is, since when, and
  * the end of its output so far. Kept in memory only: the event log records the command's
@@ -45,10 +47,15 @@ export interface ReplyDraft {
   /** The id the message gets once posted, so the page keeps showing the same one. */
   messageId: string
   text: string
+  /** Display-only cards. No attention exists until the message is stored. */
+  blocks?: ReplyDraftBlock[]
   startedAt: number
   /** It was posted as `messageId`; the message itself follows in the log. */
   posted?: boolean
 }
+
+export type ReplyDraftBlock =
+  UiBlock | { type: 'preview'; title: string; description: string; labels: string[] | null }
 
 /** A conversation's reply draft grew, was posted, or was taken back (`null`). */
 export interface DraftUpdate {

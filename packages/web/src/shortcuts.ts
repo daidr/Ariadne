@@ -41,23 +41,6 @@ export function registerPanel(kind: PanelKind, handle: PanelHandle): () => void 
 }
 
 /**
- * Open a thread with the caret in its input, for the user to say what to change. Its panel
- * may only mount once the thread is open, so this waits a few frames for it.
- */
-export async function writeToThread(threadId: string) {
-  await openThread(threadId)
-  for (let frame = 0; frame < 30; frame++) {
-    await new Promise(requestAnimationFrame)
-    const panel = panels.get(threadId)
-    if (panel) {
-      lastPanel.value = threadId
-      panel.focus()
-      return
-    }
-  }
-}
-
-/**
  * The caret in the coordinator's input, once its panel is on screen; the input itself may
  * come a little after the panel, while the project loads.
  */

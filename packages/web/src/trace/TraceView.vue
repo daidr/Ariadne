@@ -10,8 +10,8 @@ import {
   DouText,
   type TableColumn,
 } from 'dou-ui'
-import { ChevronLeftIcon, RotateCwIcon } from '@dou-ui/icons'
-import { computed, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { ChevronLeftIcon } from '@dou-ui/icons'
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { duration, locale, t, tm } from '../i18n'
 import { onLiveEvent, backMain, state } from '../store'
@@ -91,6 +91,20 @@ onUnmounted(
     if (data.conversationId === props.conversationId) void load()
   }),
 )
+watch(
+  () => state.stream,
+  (status) => {
+    if (status === 'open') void load()
+  },
+)
+function loadWhenVisible() {
+  if (!document.hidden) void load()
+}
+onMounted(() => document.addEventListener('visibilitychange', loadWhenVisible))
+onUnmounted(() => {
+  latest++
+  document.removeEventListener('visibilitychange', loadWhenVisible)
+})
 
 const rows = computed(() => traceRows(turns.value))
 const selected = computed(() => findRow(rows.value, current.value))
@@ -222,15 +236,6 @@ function pick(key: string) {
       <DouSegmentedControl v-if="timeline" v-model="mode" size="sm" :options="modes" />
       <DouButton v-if="more" variant="ghost" size="sm" @click="loadEarlier">
         {{ t('trace.earlier') }}
-      </DouButton>
-      <DouButton
-        variant="ghost"
-        size="sm"
-        :aria-label="t('changes.refresh')"
-        :title="t('changes.refresh')"
-        @click="load"
-      >
-        <RotateCwIcon />
       </DouButton>
     </div>
     <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>

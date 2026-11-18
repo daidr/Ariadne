@@ -18,7 +18,16 @@ func (api *API) registerWorkspaces() {
 		if manager == nil {
 			return object{"changes": nil, "mergeable": false}, 200, nil
 		}
-		value, err := manager.ThreadChanges(r.Context(), r.PathValue("threadId"))
+		var known *sdk.BranchRevisions
+		query := r.URL.Query()
+		if query.Has("head") || query.Has("baseHead") {
+			head, baseHead := query.Get("head"), query.Get("baseHead")
+			if !commitID.MatchString(head) || !commitID.MatchString(baseHead) {
+				return nil, 0, badInput("head or baseHead")
+			}
+			known = &sdk.BranchRevisions{Head: head, BaseHead: baseHead}
+		}
+		value, err := manager.ThreadChangesSince(r.Context(), r.PathValue("threadId"), known)
 		return value, 200, err
 	})
 	api.add("GET", "/api/threads/:threadId/changes/file", func(r *http.Request) (any, int, error) {
@@ -60,7 +69,14 @@ func (api *API) registerWorkspaces() {
 		if method != "squash" && method != "merge" {
 			return nil, 0, badInput("method")
 		}
-		value, err := manager.MergeThread(r.Context(), r.PathValue("threadId"), method, text(body, "message"))
+		head := ""
+		if body["expectedHead"] != nil {
+			head = text(body, "expectedHead")
+			if !commitID.MatchString(head) {
+				return nil, 0, badInput("expectedHead")
+			}
+		}
+		value, err := manager.MergeThread(r.Context(), r.PathValue("threadId"), method, text(body, "message"), head)
 		return value, 200, err
 	})
 	api.add("POST", "/api/threads/:threadId/merge/undo", func(r *http.Request) (any, int, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -262,6 +263,11 @@ func TestPostingQuestionsRelaysEditsAndReadMatchLegacy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// This relay was added after the Bun baseline. Its delivery and effect
+			// are covered by the coordinator runner test.
+			transcript = slices.DeleteFunc(transcript, func(entry object) bool {
+				return entry.obj("note").str("type") == "answer-in-thread"
+			})
 			notices, err := repo.ListNotices(t.Context(), id, NoticeRange{})
 			if err != nil {
 				t.Fatal(err)
@@ -274,7 +280,14 @@ func TestPostingQuestionsRelaysEditsAndReadMatchLegacy(t *testing.T) {
 		}
 		events := []object{}
 		for _, e := range stored {
-			events = append(events, object{"seq": e.Seq, "type": e.Type, "projectId": e.ProjectID, "data": e.Data, "at": e.At})
+			data := e.Data
+			if e.Type == "attention.answered" {
+				var payload object
+				decodeInput(t, data, &payload)
+				delete(payload, "notifyCoordinator")
+				data = json.RawMessage(encoded(payload))
+			}
+			events = append(events, object{"seq": e.Seq, "type": e.Type, "projectId": e.ProjectID, "data": data, "at": e.At})
 			if e.Type == "attention.opened" && (command.str("op") == "requestApproval" || command.str("op") == "callApproval" || command.str("op") == "issueApproval") {
 				var data object
 				decodeInput(t, e.Data, &data)

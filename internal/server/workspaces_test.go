@@ -25,6 +25,72 @@ func workspaceHTTPSeed() []eventstore.NewEvent {
 	}
 	return []eventstore.NewEvent{event("project.created", object{"name": "project", "coordinatorId": "coo_a"}), event("project.source.set", object{"source": object{"kind": "fixture", "settings": object{}}}), event("thread.created", object{"threadId": "thr_a", "title": "task", "nodeId": nil}), event("workspace.opened", object{"threadId": "thr_a", "label": "fixture", "branch": "work/thread", "base": "integration"})}
 }
+
+func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.Store.Append(ctx, workspaceHTTPSeed()); err != nil {
+		t.Fatal(err)
+	}
+	initial, base := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	revisions := sdk.BranchRevisions{Head: initial, BaseHead: base}
+	diffs := 0
+	registry := sources.New()
+	registry.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"workspace"}},
+		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+			return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Isolated: true, Branches: &sdk.BranchCapability{
+				Revisions: func(context.Context, sdk.ThreadBranch, string) (sdk.BranchRevisions, error) {
+					return revisions, nil
+				},
+				Changes: func(context.Context, sdk.ThreadBranch, string) (*sdk.BranchChanges, error) {
+					diffs++
+					return &sdk.BranchChanges{Head: revisions.Head, BaseHead: revisions.BaseHead}, nil
+				},
+				Merge: func(_ context.Context, input sdk.MergeRequest) (sdk.MergeOutcome, error) {
+					if input.ExpectedHead != initial {
+						t.Fatalf("expected head = %q", input.ExpectedHead)
+					}
+					return sdk.MergeOutcome{Kind: "moved"}, nil
+				},
+			}}}, nil
+		},
+	})
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	api, err := New(Options{Repository: repo, Token: "test-token", Workspaces: manager, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, "/api/threads/thr_a"+path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer test-token")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		return response
+	}
+	probe := "/changes?head=" + initial + "&baseHead=" + base
+	if response := call("GET", probe, ""); response.Code != 200 || !strings.Contains(response.Body.String(), `"unchanged":true`) || diffs != 0 {
+		t.Fatalf("unchanged refs: %d %s; diff calls: %d", response.Code, response.Body, diffs)
+	}
+	revisions.BaseHead = strings.Repeat("d", 40)
+	if response := call("GET", probe, ""); response.Code != 200 || !strings.Contains(response.Body.String(), revisions.BaseHead) || diffs != 1 {
+		t.Fatalf("changed base: %d %s; diff calls: %d", response.Code, response.Body, diffs)
+	}
+	revisions.Head = strings.Repeat("c", 40)
+	if response := call("POST", "/merge", encoded(object{"method": "squash", "expectedHead": initial})); response.Code != 200 || !strings.Contains(response.Body.String(), `"kind":"moved"`) {
+		t.Fatalf("merge of older comparison: %d %s", response.Code, response.Body)
+	}
+}
+
 func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
 	no := false
 	file := "/api/threads/thr_a/changes/file?from=" + strings.Repeat("a", 40) + "&head=" + strings.Repeat("b", 40) + "&path=file.txt"

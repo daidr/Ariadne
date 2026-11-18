@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -9,10 +10,11 @@ import (
 )
 
 type ReplyDraft struct {
-	MessageID string `json:"messageId"`
-	Text      string `json:"text"`
-	StartedAt int64  `json:"startedAt"`
-	Posted    bool   `json:"posted,omitempty"`
+	MessageID string          `json:"messageId"`
+	Text      string          `json:"text"`
+	Blocks    json.RawMessage `json:"blocks,omitempty"`
+	StartedAt int64           `json:"startedAt"`
+	Posted    bool            `json:"posted,omitempty"`
 }
 type DraftUpdate struct {
 	ProjectID      string      `json:"projectId"`
@@ -21,6 +23,7 @@ type DraftUpdate struct {
 }
 type draftEntry struct {
 	project, conversation, message, text string
+	blocks                               json.RawMessage
 	startedAt                            int64
 	shown                                bool
 	timer                                *time.Timer
@@ -28,6 +31,7 @@ type draftEntry struct {
 type DraftHandle struct {
 	MessageID string
 	Write     func(string) error
+	WriteUI   func(string, json.RawMessage) error
 	Withdraw  func()
 	Posted    func()
 }
@@ -52,7 +56,7 @@ func NewDrafts(state *State, options LiveOptions) *ReplyDrafts {
 func (drafts *ReplyDrafts) emit(entry *draftEntry, drop, posted bool) error {
 	update := DraftUpdate{ProjectID: entry.project, ConversationID: entry.conversation}
 	if !drop {
-		update.Draft = &ReplyDraft{MessageID: entry.message, Text: entry.text, StartedAt: entry.startedAt, Posted: posted}
+		update.Draft = &ReplyDraft{MessageID: entry.message, Text: entry.text, Blocks: entry.blocks, StartedAt: entry.startedAt, Posted: posted}
 	}
 	data, err := json.Marshal(update)
 	if err != nil {
@@ -69,8 +73,8 @@ func (drafts *ReplyDrafts) drop(entry *draftEntry) {
 		entry.timer.Stop()
 		entry.timer = nil
 	}
-	drafts.bytes -= len(entry.text)
-	entry.text = ""
+	drafts.bytes -= len(entry.text) + len(entry.blocks)
+	entry.text, entry.blocks = "", nil
 	if entry.shown {
 		drafts.emit(entry, true, false)
 	}
@@ -93,38 +97,43 @@ func (drafts *ReplyDrafts) Start(project, conversation, message string) (DraftHa
 	}
 	entry := &draftEntry{project: project, conversation: conversation, message: message}
 	drafts.entries[conversation] = entry
-	write := func(text string) error {
+	write := func(text string, blocks json.RawMessage) error {
 		drafts.mu.Lock()
 		defer drafts.mu.Unlock()
 		if drafts.closed || drafts.entries[conversation] != entry {
 			return nil
 		}
-		if text == "" || text == entry.text {
+		if text == "" && len(blocks) == 0 || text == entry.text && bytes.Equal(blocks, entry.blocks) {
 			return nil
 		}
-		if len(text) > 200*1024 || drafts.bytes-len(entry.text)+len(text) > 16*1024*1024 {
+		size := len(text) + len(blocks)
+		delta := size - len(entry.text) - len(entry.blocks)
+		if size > 200*1024 || drafts.bytes+delta > 16*1024*1024 {
 			return errors.New("reply draft preview exceeds size limit")
 		}
-		oldText, oldAt := entry.text, entry.startedAt
-		if entry.text == "" {
-			entry.startedAt = drafts.options.Now().UnixMilli()
+		startedAt := entry.startedAt
+		if !entry.shown {
+			startedAt = drafts.options.Now().UnixMilli()
 		}
-		entry.text = text
-		data, _ := json.Marshal(DraftUpdate{ProjectID: project, ConversationID: conversation, Draft: &ReplyDraft{MessageID: message, Text: text, StartedAt: entry.startedAt}})
+		data, err := json.Marshal(DraftUpdate{ProjectID: project, ConversationID: conversation, Draft: &ReplyDraft{MessageID: message, Text: text, Blocks: blocks, StartedAt: startedAt}})
+		if err != nil {
+			return err
+		}
 		if len(data) > MaxPendingBytes-1024 {
-			entry.text, entry.startedAt = oldText, oldAt
 			return errors.New("reply draft preview exceeds frame limit")
 		}
-		entry.text = strings.Clone(text)
 		if !entry.shown {
-			if err := drafts.emit(entry, false, false); err != nil {
-				entry.text, entry.startedAt = oldText, oldAt
+			if err := drafts.state.Set(Update{Kind: "draft", ProjectID: project, ConversationID: conversation, Data: data}, true); err != nil {
 				return err
 			}
 			entry.shown = true
+			entry.text, entry.blocks, entry.startedAt = strings.Clone(text), bytes.Clone(blocks), startedAt
+			drafts.bytes += delta
+			return nil
 		}
-		drafts.bytes += len(text) - len(oldText)
-		if oldText == "" || entry.timer != nil {
+		entry.text, entry.blocks = strings.Clone(text), bytes.Clone(blocks)
+		drafts.bytes += delta
+		if entry.timer != nil {
 			return nil
 		}
 		entry.timer = time.AfterFunc(drafts.options.Interval, func() {
@@ -155,10 +164,13 @@ func (drafts *ReplyDrafts) Start(project, conversation, message string) (DraftHa
 			}
 		}
 		delete(drafts.entries, conversation)
-		drafts.bytes -= len(entry.text)
-		entry.text = ""
+		drafts.bytes -= len(entry.text) + len(entry.blocks)
+		entry.text, entry.blocks = "", nil
 	}
-	return DraftHandle{MessageID: message, Write: write, Withdraw: withdraw, Posted: posted}, nil
+	return DraftHandle{
+		MessageID: message, Write: func(text string) error { return write(text, nil) },
+		WriteUI: write, Withdraw: withdraw, Posted: posted,
+	}, nil
 }
 func (drafts *ReplyDrafts) Drop(conversation string) {
 	drafts.mu.Lock()

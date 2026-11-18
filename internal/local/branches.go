@@ -93,12 +93,24 @@ func ParseStatus(output string) []string {
 
 type BranchInput struct{ Branch, Base, BaseRef, Worktree string }
 
+func branchRevisions(ctx context.Context, git GitRun, branch, baseRef string) (sdk.BranchRevisions, error) {
+	head := commitSHA(ctx, git, "refs/heads/"+branch, "")
+	if head == "" {
+		return sdk.BranchRevisions{}, ctx.Err()
+	}
+	base := commitSHA(ctx, git, baseRef, "")
+	return sdk.BranchRevisions{Head: head, BaseHead: base}, ctx.Err()
+}
+
 func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.BranchChanges, error) {
-	head := commitSHA(ctx, git, "refs/heads/"+input.Branch, "")
+	revisions, err := branchRevisions(ctx, git, input.Branch, input.BaseRef)
+	if err != nil {
+		return nil, err
+	}
+	head, baseSHA := revisions.Head, revisions.BaseHead
 	if head == "" {
 		return nil, nil
 	}
-	baseSHA := commitSHA(ctx, git, input.BaseRef, "")
 	if baseSHA == "" {
 		return nil, &sdk.MergeRefused{Reason: "no-base", Detail: input.Base + " does not exist"}
 	}
@@ -133,7 +145,7 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 			uncommitted = ParseStatus(status.Stdout)
 		}
 	}
-	return &sdk.BranchChanges{Branch: input.Branch, Base: input.Base, From: from, Head: head, Commits: commits, Files: files, Uncommitted: uncommitted}, nil
+	return &sdk.BranchChanges{Branch: input.Branch, Base: input.Base, From: from, Head: head, BaseHead: baseSHA, Commits: commits, Files: files, Uncommitted: uncommitted}, nil
 }
 func TreeDiff(ctx context.Context, git GitRun, from, to string) ([]sdk.ChangedFile, error) {
 	// Resolve user-supplied revisions before handing them to a command that

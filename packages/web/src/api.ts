@@ -775,14 +775,21 @@ export const api = {
     request<{ comments: SentLineComment[] }>('GET', `/api/threads/${threadId}/line-comments`),
   getSkills: (conversationId: string) =>
     request<{ skills: SkillView[] }>('GET', `/api/conversations/${conversationId}/skills`),
-  getChanges: (threadId: string) =>
-    request<{ changes: BranchChanges | null; mergeable: boolean }>(
+  getChanges: (
+    threadId: string,
+    known?: { head: string; baseHead: string },
+    signal?: AbortSignal,
+  ) =>
+    request<{ changes: BranchChanges | null; mergeable: boolean; unchanged?: boolean }>(
       'GET',
-      `/api/threads/${threadId}/changes`,
+      `/api/threads/${threadId}/changes${known ? queryString(known) : ''}`,
+      undefined,
+      signal,
     ),
   getChangedFile: (
     threadId: string,
     input: { from: string; head: string; path: string; previousPath: string | null },
+    signal?: AbortSignal,
   ) => {
     const query = new URLSearchParams({
       from: input.from,
@@ -790,9 +797,17 @@ export const api = {
       path: input.path,
       ...(input.previousPath ? { previousPath: input.previousPath } : {}),
     })
-    return request<{ file: FileVersions }>('GET', `/api/threads/${threadId}/changes/file?${query}`)
+    return request<{ file: FileVersions }>(
+      'GET',
+      `/api/threads/${threadId}/changes/file?${query}`,
+      undefined,
+      signal,
+    )
   },
-  mergeThread: (threadId: string, input: { method: MergeMethod; message: string }) =>
+  mergeThread: (
+    threadId: string,
+    input: { method: MergeMethod; message: string; expectedHead: string },
+  ) =>
     request<{ outcome: MergeOutcome; thread: ThreadView }>(
       'POST',
       `/api/threads/${threadId}/merge`,
@@ -809,8 +824,6 @@ export const api = {
     ),
   removeWorktree: (projectId: string, threadId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),
-  refreshPullRequest: (threadId: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/pull-request/refresh`),
   dismissProposal: (projectId: string, proposalId: string) =>
     request<{ plan: PlanView }>(
       'POST',
@@ -844,12 +857,18 @@ export const api = {
     request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
   listArtifacts: (projectId: string) =>
     request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
-  getArtifact: (id: string, version?: number, signal?: AbortSignal) =>
+  getArtifact: (
+    id: string,
+    options: { version?: number; signal?: AbortSignal; versions?: boolean } = {},
+  ) =>
     request<ArtifactDetail>(
       'GET',
-      `/api/artifacts/${id}${version === undefined ? '' : `?version=${version}`}`,
+      `/api/artifacts/${id}${queryString({
+        version: options.version === undefined ? undefined : String(options.version),
+        versions: options.versions === false ? '0' : undefined,
+      })}`,
       undefined,
-      signal,
+      options.signal,
     ),
   createArtifact: (projectId: string, input: { kind: ArtifactKind; title: string }) =>
     request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),

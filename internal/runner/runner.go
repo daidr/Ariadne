@@ -59,6 +59,7 @@ type turn struct {
 	id                string
 	draft             *realtime.DraftHandle
 	draftCall         *int
+	draftTool         string
 	artifactDrafts    map[int]*collab.Draft
 	skills            *skills.Set
 	external          []tool
@@ -477,11 +478,9 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 		} else if entry, available := byName[call.Name]; !available {
 			err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
 		} else {
-			if turn.draft != nil && (turn.draftCall == nil || *turn.draftCall != index) {
-				// A previous call's preview must never supply this call's message id.
-				if call.Name == "send_message" {
-					turn.clearDraft()
-				}
+			if turn.draft != nil && replyTool(call.Name) && (*turn.draftCall != index || turn.draftTool != call.Name) {
+				// A preview belongs to exactly one call in this response.
+				turn.clearDraft()
 			}
 			if entry.withCallID != nil {
 				content, err = entry.withCallID(ctx, call.ID, args)
@@ -490,6 +489,13 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			} else {
 				content, err = entry.run(ctx, args)
 			}
+		}
+		if err != nil && turn.draft != nil && *turn.draftCall == index {
+			turn.clearDraft()
+		}
+		if draft := turn.artifactDrafts[index]; draft != nil {
+			draft.Close()
+			delete(turn.artifactDrafts, index)
 		}
 		if ctx.Err() != nil {
 			return [32]byte{}, ctx.Err()

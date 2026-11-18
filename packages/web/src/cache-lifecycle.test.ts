@@ -72,7 +72,7 @@ test('clearing thumbnails aborts in-flight work, drops queued jobs, and rejects 
   clearBoardThumbnails()
   expect(await first).toBeNull()
   expect(await queued).toBeNull()
-  expect(vi.mocked(api.getArtifact).mock.calls[0]![2]!.aborted).toBe(true)
+  expect(vi.mocked(api.getArtifact).mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
   finish({ artifact: { content: '{"nodes":[{}]}' } } as never)
   const again = boardThumbnail('first', 1, 'light')
   expect(await again).toContain('data:image/svg+xml')

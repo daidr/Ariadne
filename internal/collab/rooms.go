@@ -22,6 +22,7 @@ import (
 const (
 	maxRooms       = 16
 	maxPeers       = 16
+	maxAwareness   = 8 // identities owned by one connection
 	maxRoomState   = 12 << 20
 	maxQueuedBytes = 16 << 20
 	saveDelay      = 1500 * time.Millisecond
@@ -46,6 +47,7 @@ type room struct {
 	due         time.Time
 	dirty       time.Time
 	draft       *Draft
+	checkpoint  bool // the rollback must survive a peer reconnect
 	writerID    uint64
 	writer      presence
 	writerTimer *time.Timer
@@ -219,7 +221,13 @@ func (rooms *Rooms) Serve(w http.ResponseWriter, r *http.Request, id string) err
 		if err != nil {
 			return nil
 		}
-		if kind != websocket.MessageBinary || active.receive(client, body) != nil {
+		if kind != websocket.MessageBinary {
+			return nil
+		}
+		if err := active.receive(client, body); err != nil {
+			if errors.Is(err, errDocumentBlockLocked) {
+				_ = socket.Close(4409, errDocumentBlockLocked.Error())
+			}
 			return nil
 		}
 	}
@@ -276,7 +284,18 @@ func (active *room) receive(client *peer, frame []byte) error {
 			if err != nil {
 				return err
 			}
-			_, err = HandleSync(trial, frame, client)
+			if locks := active.draft.locked; len(locks) != 0 {
+				var changed map[string]bool
+				changed, err = changedDocumentBlocks(trial, func() error {
+					_, err := HandleSync(trial, frame, client)
+					return err
+				})
+				if err == nil && documentLocksChanged(active.doc, trial, locks, changed) {
+					err = errDocumentBlockLocked
+				}
+			} else {
+				_, err = HandleSync(trial, frame, client)
+			}
 			if err == nil && snapshot != nil && !equalJSON(snapshot, trial.GetMap("snapshot").ToJSON()) {
 				err = errors.New("dashboard data comes from the server")
 			}
@@ -404,6 +423,7 @@ func (active *room) save(ctx context.Context, input core.ArtifactRevision) (core
 	}
 	active.artifact = result
 	active.dirty = time.Time{}
+	active.checkpoint = false
 	if active.timer != nil {
 		active.timer.Stop()
 	}
@@ -424,6 +444,11 @@ func (rooms *Rooms) Flush(ctx context.Context, id string) error {
 		return errors.New("collaboration state is unavailable")
 	}
 	if active.dirty.IsZero() {
+		return nil
+	}
+	// Feedback from an unlocked block must not cancel a document preview.
+	// Finalizing or rolling back the draft makes the pending user edits saveable.
+	if active.draft != nil && active.artifact.Kind == "document" {
 		return nil
 	}
 	active.cancelDraft()
@@ -539,7 +564,12 @@ func (rooms *Rooms) revise(ctx context.Context, id string, input core.ArtifactRe
 	if input.BaseVersion != nil && *input.BaseVersion != active.artifact.Version {
 		return core.ArtifactView{}, domainerr.New("error.artifactConflict", map[string]any{"version": active.artifact.Version})
 	}
-	active.cancelDraft()
+	hadDraft := active.rollbackDraft()
+	defer func() {
+		if hadDraft {
+			active.clearWriter()
+		}
+	}()
 	if !active.dirty.IsZero() {
 		if _, err := active.save(ctx, core.ArtifactRevision{Author: "user"}); err != nil {
 			return core.ArtifactView{}, err
@@ -579,6 +609,9 @@ func (rooms *Rooms) revise(ctx context.Context, id string, input core.ArtifactRe
 	if update != nil {
 		active.broadcast(protocol.EncodeUpdate(update), nil)
 		active.publishWriter(input.WriterName, writerState)
+		if writerState != nil {
+			hadDraft = false
+		}
 	}
 	return result, nil
 }
@@ -615,6 +648,11 @@ func (rooms *Rooms) retire(ctx context.Context, active *room, save bool) {
 				rooms.report(saveErr)
 			}
 		}
+	} else if save && active.doc != nil && active.checkpoint {
+		// A reconnecting peer can still have the draft's updates. Keep their
+		// deletion history even when the document content never changed.
+		rooms.report(rooms.repo.CheckpointSharedState(ctx, active.artifact.ID,
+			core.SharedState{Version: active.artifact.Version, State: active.state}))
 	}
 	if active.timer != nil {
 		active.timer.Stop()
@@ -706,7 +744,10 @@ func disconnectedPresence(client *peer) []byte {
 
 func (active *room) acceptPresence(client *peer, body []byte) error {
 	count, err := popVaruint(&body)
-	if err != nil || count > 8 || len(body) > 64<<10 {
+	// A y-websocket client also forwards changes it received from the room,
+	// including the initial snapshot of other participants.
+	const maxForwarded = maxPeers*maxAwareness + 1
+	if err != nil || count > maxForwarded || len(body) > maxForwarded*((8<<10)+24)+(8<<10) {
 		return errors.New("invalid awareness frame")
 	}
 	next, err := parsePresence(count, body)
@@ -716,22 +757,33 @@ func (active *room) acceptPresence(client *peer, body []byte) error {
 	known := len(client.awareness)
 	for id, item := range next {
 		if id >= 1<<52 {
-			return errors.New("awareness identity is reserved")
+			delete(next, id)
+			continue
 		}
+		foreign := false
 		for other := range active.peers {
 			if _, exists := other.awareness[id]; exists && other != client {
-				return errors.New("awareness identity already belongs to another connection")
+				foreign = true
+				break
 			}
+		}
+		if foreign {
+			delete(next, id)
+			continue
 		}
 		prior, present := client.awareness[id]
 		if !present {
+			if item.json == "null" {
+				delete(next, id)
+				continue
+			}
 			known++
 		}
 		if present && (item.clock < prior.clock || item.clock == prior.clock && (prior.json == "null" || item.json != "null")) {
 			delete(next, id)
 		}
 	}
-	if known > 8 {
+	if known > maxAwareness {
 		return errors.New("too many awareness identities")
 	}
 	for id, item := range next {
@@ -753,7 +805,11 @@ func parsePresence(count uint64, body []byte) (map[uint64]presence, error) {
 			return nil, err
 		}
 		size, err := popVaruint(&body)
-		if err != nil || size == 0 || size > uint64(len(body)) || size > 8<<10 {
+		maxSize := uint64(8 << 10)
+		if id >= 1<<52 {
+			maxSize = 16 << 10
+		}
+		if err != nil || size == 0 || size > uint64(len(body)) || size > maxSize {
 			return nil, errors.New("invalid awareness size")
 		}
 		data := bytes.TrimSpace(body[:size])

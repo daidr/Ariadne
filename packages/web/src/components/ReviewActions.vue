@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { DouButton, DouTooltip } from 'dou-ui'
-import { CheckIcon, PencilIcon } from '@dou-ui/icons'
+import { CheckIcon } from '@dou-ui/icons'
 import { t } from '../i18n'
-import { writeToThread } from '../shortcuts'
 import { completeThread } from '../store'
 
 /**
- * The two ways out of a review: the user is through with it, or wants more done, which
- * opens the thread with the caret in its input. `compact`: icons only, named on hover,
- * where a row's title needs the room.
+ * Complete a review. `compact` leaves more room for the thread's title in a list row.
  */
 const props = defineProps<{ threadId: string; compact?: boolean }>()
 
@@ -25,16 +22,6 @@ function done() {
           <CheckIcon />
         </DouButton>
       </DouTooltip>
-      <DouTooltip :content="t('thread.reviseAsk')">
-        <DouButton
-          size="xs"
-          variant="ghost"
-          :aria-label="t('thread.reviseAsk')"
-          @click="writeToThread(props.threadId)"
-        >
-          <PencilIcon />
-        </DouButton>
-      </DouTooltip>
     </template>
     <template v-else>
       <DouButton size="sm" variant="ghost" @click="done">
@@ -42,10 +29,6 @@ function done() {
           <CheckIcon />
         </template>
         {{ t('thread.complete') }}
-      </DouButton>
-      <DouButton size="sm" variant="ghost" @click="writeToThread(props.threadId)">
-        <template #leading><PencilIcon /></template>
-        {{ t('thread.reviseAsk') }}
       </DouButton>
     </template>
   </span>

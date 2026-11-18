@@ -11,6 +11,8 @@ import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import { api } from '../api'
+import { t } from '../i18n'
+import { documentLocks } from './document-locks'
 import { pendingDocumentBlock } from './pending-block'
 import type { SharedArtifact } from './shared'
 
@@ -46,6 +48,7 @@ const extensions = props.shared
         awareness: props.shared.awareness,
         user: { name: me.name },
       }),
+      documentLocks(props.shared.awareness, () => t('artifact.aiEditing')),
     ]
   : blocks
 const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
@@ -151,5 +154,9 @@ defineExpose({ quotes, anchored })
   --dou-editor-reading-width: 40em;
   --dou-editor-block-gap: 10px;
   --dou-editor-list-gap: 4px;
+}
+
+.document-text :deep([data-ai-editing] > .dou-editor__content) {
+  background-color: color-mix(in srgb, var(--dou-color-primary) 9%, transparent);
 }
 </style>

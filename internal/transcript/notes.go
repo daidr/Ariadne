@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -76,6 +77,14 @@ func DescribeNote(note map[string]any, titleOf func(string) string) string {
 		return fmt.Sprintf("<review_comments round=\"%d\">\nBefore your changes reach the user, a reviewing thread read them and asks for changes: %s\n%s\nFix what is right, commit, run the checks, and report \"ready\" again with reviewReplies: one entry per comment, by its number, \"fixed\", or \"declined\" with the reason it is wrong. Decline only what you can show is wrong. %s\n</review_comments>", int64(num(note["round"])), t("summary"), ReviewLines(note["comments"], nil), last)
 	case "answer":
 		return fmt.Sprintf("<user_answer attention=\"%s\">\nquestion: %s\n%s\n</user_answer>", t("attentionId"), t("question"), t("answer"))
+	case "answer-in-thread":
+		details, _ := json.MarshalIndent(map[string]any{
+			"threadId": t("threadId"), "threadTitle": title(), "attentionId": t("attentionId"),
+			"question": note["question"], "context": note["context"], "answer": note["answer"], "openAsks": note["openAsks"],
+		}, "", "  ")
+		return "The user answered this UI question in a discussion thread. The thread already has the answer.\n<answer_in_thread>\n" +
+			string(details) + "\n</answer_in_thread>\n" +
+			"openAsks lists your own questions that were waiting when the user answered. Use withdraw_ask with the ID of a still-open question only if the answer fully resolves the same decision or request in the same scope. Leave unrelated or ambiguous questions open. An answer here grants no permission beyond the question it answered. No message to the user is needed just to acknowledge this update."
 	case "user-in-thread":
 		return fmt.Sprintf("<user_wrote_in_thread thread=\"%s\" title=\"%s\" message=\"%s\">\n%s\n</user_wrote_in_thread>", t("threadId"), title(), t("messageId"), t("content"))
 	case "user-reacted":

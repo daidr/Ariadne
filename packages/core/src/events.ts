@@ -619,7 +619,7 @@ export interface EventMap {
      */
     purpose?: string | null
   }
-  'attention.answered': { attentionId: string; answer: BlockAnswer }
+  'attention.answered': { attentionId: string; answer: BlockAnswer; notifyCoordinator?: true }
   /**
    * The agent that asked takes its question back, e.g. once the user answered it in words
    * or it no longer matters. It leaves "needs me"; the message shows it was withdrawn.

@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { DouAlert, DouButton, DouForm, DouFormItem, DouInput, DouSelect, DouText } from 'dou-ui'
-import { computed, onMounted, ref, watch } from 'vue'
+import {
+  DouAlert,
+  DouButton,
+  DouForm,
+  DouFormItem,
+  DouInput,
+  DouSelect,
+  DouText,
+  toast,
+} from 'dou-ui'
+import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type SearchSettings, type SearchSettingsInput } from '../api'
 import { lt, t, tm } from '../i18n'
+import { report } from '../store'
 
 /** A separate search API, used after the plugins and model services. */
 const search = ref<SearchSettings | null>(null)
@@ -15,7 +25,6 @@ const drafts = ref<
 })
 const error = ref<string | null>(null)
 const checking = ref(false)
-const checked = ref<{ ok: boolean; status: number | null } | null>(null)
 const active = computed(() => drafts.value[provider.value])
 const saved = computed(() => search.value?.services.find((item) => item.kind === provider.value))
 const options = computed(
@@ -43,13 +52,6 @@ async function reload() {
   }
 }
 onMounted(reload)
-watch(
-  [provider, drafts],
-  () => {
-    checked.value = null
-  },
-  { deep: true },
-)
 
 function input(onlyActive = false): SearchSettingsInput {
   const services: SearchSettingsInput['services'] = {}
@@ -70,11 +72,15 @@ function clear() {
 async function check() {
   checking.value = true
   error.value = null
-  checked.value = null
   try {
-    checked.value = await api.checkSearchSettings(input(true))
+    const { ok, status } = await api.checkSearchSettings(input(true))
+    if (ok) {
+      toast.success(t('settings.searchCheckOk'))
+    } else {
+      report(status ? t('settings.searchCheckHttp', { status }) : t('settings.searchCheckFailed'))
+    }
   } catch (cause) {
-    error.value = cause instanceof ApiError ? tm(cause.localized) : String(cause)
+    report(cause)
   } finally {
     checking.value = false
   }
@@ -135,15 +141,6 @@ defineExpose({ save, checking })
           {{ t('settings.searchCheck') }}
         </DouButton>
       </div>
-      <DouAlert v-if="checked" :tone="checked.ok ? 'success' : 'danger'">
-        {{
-          checked.ok
-            ? t('settings.searchCheckOk')
-            : checked.status
-              ? t('settings.searchCheckHttp', { status: checked.status })
-              : t('settings.searchCheckFailed')
-        }}
-      </DouAlert>
     </template>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
     <DouButton v-if="!search" size="sm" @click="reload">{{ t('settings.searchReload') }}</DouButton>

@@ -14,6 +14,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ApiError, type DataUsage, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { locale, t, tm } from '../i18n'
+import { report } from '../store'
 
 // What Ariadne's data directory takes, and copies of the database made on request.
 const usage = ref<DataUsage | null>(null)
@@ -53,7 +54,7 @@ async function backup() {
     await api.backupData()
     await load()
   } catch (cause) {
-    error.value = message(cause)
+    report(cause)
   } finally {
     backingUp.value = false
   }
@@ -66,7 +67,7 @@ async function remove(name: string) {
     await api.removeBackup(name)
     await load()
   } catch (cause) {
-    error.value = message(cause)
+    report(cause)
   } finally {
     removing.value = null
   }

@@ -29,7 +29,7 @@ import { answerAttention } from '../store'
  * once the agent took it back, only what it asked and why it was withdrawn.
  */
 const props = defineProps<{
-  attentionId: string
+  attentionId?: string
   block: AskBlock
   answer: BlockAnswer | null
   withdrawn?: string | null
@@ -45,6 +45,7 @@ const sending = ref(false)
 const sent = ref<BlockAnswer | null>(null)
 const answered = computed(() => props.answer ?? sent.value)
 async function send(given: BlockAnswer) {
+  if (!props.attentionId) return
   sending.value = true
   try {
     if (await answerAttention(props.attentionId, given)) sent.value = given

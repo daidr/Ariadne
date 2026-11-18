@@ -1,29 +1,16 @@
 <script setup lang="ts">
-import { DouButton, DouLink, DouTag } from 'dou-ui'
+import { DouLink, DouTag } from 'dou-ui'
 import type { ThreadView } from '@ariadne/core'
-import {
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestIcon,
-  RefreshIcon,
-} from '@dou-ui/icons'
-import { computed, ref } from 'vue'
+import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestIcon } from '@dou-ui/icons'
+import { computed } from 'vue'
 import { t } from '../i18n'
 import { checksTone } from '../stage'
-import { refreshPullRequest } from '../store'
 
-// A thread's pull request with how its checks stand; "refresh" asks the repository now.
-const props = defineProps<{ thread: ThreadView; refreshable?: boolean }>()
+// Pull request checks are refreshed by the repository watcher.
+const props = defineProps<{ thread: ThreadView }>()
 const pr = computed(() => props.thread.pullRequest)
-const refreshing = ref(false)
 
 const tone = computed(() => checksTone(pr.value?.checks.state))
-
-async function refresh() {
-  refreshing.value = true
-  await refreshPullRequest(props.thread.id)
-  refreshing.value = false
-}
 </script>
 
 <template>
@@ -43,17 +30,6 @@ async function refresh() {
     >
       {{ t(`pr.checks.${pr.checks.state}`) }}
     </DouTag>
-    <DouButton
-      v-if="refreshable && pr.state === 'open'"
-      size="sm"
-      variant="ghost"
-      :loading="refreshing"
-      :aria-label="t('pr.refresh')"
-      :title="t('pr.refresh')"
-      @click="refresh"
-    >
-      <RefreshIcon />
-    </DouButton>
   </span>
 </template>
 

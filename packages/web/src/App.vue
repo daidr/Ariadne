@@ -10,10 +10,20 @@ import {
   DouLayoutMain,
   DouSplitter,
   DouText,
+  DouToastViewport,
   useColorMode,
 } from 'dou-ui'
-import { FolderCogIcon, SettingsIcon } from '@dou-ui/icons'
-import { defineAsyncComponent, onMounted, provide, ref, watch, watchEffect } from 'vue'
+import { FolderCogIcon, PanelLeftIcon, SettingsIcon } from '@dou-ui/icons'
+import {
+  computed,
+  defineAsyncComponent,
+  onMounted,
+  provide,
+  ref,
+  useTemplateRef,
+  watch,
+  watchEffect,
+} from 'vue'
 import AttentionBar from './components/AttentionBar.vue'
 import AutopilotSwitch from './components/AutopilotSwitch.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
@@ -33,6 +43,7 @@ import { COLOR_MODE_KEY } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSourceStatus } from './source-status'
+import { useSidebarLayout } from './sidebar-layout'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
@@ -50,6 +61,18 @@ provide(openSettingsKey, openSettings)
 
 // Where the project's files are rides on its settings button.
 const { summary } = useSourceStatus()
+
+const projectBody = useTemplateRef<HTMLElement>('projectBody')
+const {
+  size: projectSize,
+  min: projectMin,
+  max: projectMax,
+  collapsed: projectsCollapsed,
+  save: saveProjectSidebar,
+} = useSidebarLayout('projects', projectBody)
+const projectSidebarLabel = computed(() =>
+  t(projectsCollapsed.value ? 'nav.expandProjects' : 'nav.collapseProjects'),
+)
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -87,7 +110,20 @@ watchEffect(() => {
     <DouLayout class="app">
       <DouLayoutHeader :height="48">
         <div class="header">
-          <DouText weight="medium">{{ t('app.name') }}</DouText>
+          <div class="header-brand">
+            <DouButton
+              v-if="state.main.kind !== 'trace'"
+              variant="ghost"
+              size="sm"
+              :aria-label="projectSidebarLabel"
+              :title="projectSidebarLabel"
+              :aria-expanded="!projectsCollapsed"
+              @click="projectsCollapsed = !projectsCollapsed"
+            >
+              <PanelLeftIcon aria-hidden="true" />
+            </DouButton>
+            <DouText weight="medium">{{ t('app.name') }}</DouText>
+          </div>
           <div class="header-actions">
             <!-- What belongs to the open project, set apart from the app's own buttons. -->
             <ProjectSearch />
@@ -125,57 +161,64 @@ watchEffect(() => {
       <DouAlert v-else-if="state.stream === 'unauthorized'" tone="danger" class="banner">
         {{ t('error.unauthorized') }}
       </DouAlert>
-      <DouAlert
-        v-if="state.error"
-        tone="danger"
-        closable
-        class="banner"
-        @close="state.error = null"
-      >
-        {{ state.error }}
-      </DouAlert>
       <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
       <TraceView
         v-if="state.main.kind === 'trace'"
         :conversation-id="state.main.conversationId"
         class="body"
       />
-      <DouLayout v-else class="body">
-        <DouLayoutAside :width="220">
-          <ProjectList />
-        </DouLayoutAside>
-        <DouLayoutMain class="main">
-          <!-- Threads open on the right, so the coordinator stays in view beside them. -->
-          <!-- The plan shown large takes the side too, so it is not drawn twice. -->
-          <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
-            <PlanMain />
-          </div>
-          <!-- Before there is a project, and while a new one is made. -->
-          <div v-else-if="!state.currentId || state.starting" class="pane">
-            <StartScreen />
-          </div>
-          <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
-            <template #start>
-              <div class="pane">
-                <PlanMain v-if="state.main.kind === 'plan'" />
-                <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
-                <ConversationPanel v-else />
+      <div v-else ref="projectBody" class="body">
+        <DouSplitter
+          v-model="projectSize"
+          v-model:collapsed="projectsCollapsed"
+          :min="projectMin"
+          :max="projectMax"
+          :aria-label="t('nav.resizeProjects')"
+          class="project-split"
+          collapsible
+          @change="saveProjectSidebar"
+        >
+          <template #start>
+            <DouLayoutAside width="100%" :bordered="false" class="project-sidebar">
+              <ProjectList />
+            </DouLayoutAside>
+          </template>
+          <template #end>
+            <DouLayoutMain class="main">
+              <!-- Threads open on the right, so the coordinator stays in view beside them. -->
+              <!-- The plan shown large takes the side too, so it is not drawn twice. -->
+              <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
+                <PlanMain />
               </div>
-            </template>
-            <template #end>
-              <div class="pane">
-                <SideLayout />
+              <!-- Before there is a project, and while a new one is made. -->
+              <div v-else-if="!state.currentId || state.starting" class="pane">
+                <StartScreen />
               </div>
-            </template>
-          </DouSplitter>
-        </DouLayoutMain>
-      </DouLayout>
+              <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
+                <template #start>
+                  <div class="pane">
+                    <PlanMain v-if="state.main.kind === 'plan'" />
+                    <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
+                    <ConversationPanel v-else />
+                  </div>
+                </template>
+                <template #end>
+                  <div class="pane">
+                    <SideLayout />
+                  </div>
+                </template>
+              </DouSplitter>
+            </DouLayoutMain>
+          </template>
+        </DouSplitter>
+      </div>
     </DouLayout>
     <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
     <ShortcutSheet />
     <ProjectSettings />
     <FullView />
     <FilePreview />
+    <DouToastViewport />
   </DouConfigProvider>
 </template>
 
@@ -209,6 +252,12 @@ body,
   gap: 4px;
 }
 
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .banner {
   margin: 8px 16px 0;
 }
@@ -218,10 +267,27 @@ body,
   min-height: 0;
 }
 
+.project-split {
+  --dou-splitter-line: var(--dou-color-border-subtle);
+}
+
+/* A collapsed outer splitter also matches the start panes of nested splitters. */
+.project-split.is-collapsed
+  > .dou-splitter__pane.is-end
+  .dou-splitter:not(.is-collapsed)
+  > .dou-splitter__pane.is-start {
+  visibility: inherit;
+}
+
+.project-sidebar {
+  height: 100%;
+}
+
 .main {
   --dou-layout-main-padding: 0;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-width: 0;
 }
 

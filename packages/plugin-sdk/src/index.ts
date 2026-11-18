@@ -88,6 +88,8 @@ export interface BranchChanges {
   from: string
   /** The branch's newest commit. */
   head: string
+  /** The base tip when the comparison was made. */
+  baseHead?: string
   /** Commits on the branch the base does not have, newest first (at most 100). */
   commits: { sha: string; subject: string }[]
   files: ChangedFile[]
@@ -112,6 +114,8 @@ export type MergeOutcome =
   | { kind: 'conflict'; files: string[] }
   /** The base already has everything the branch has. */
   | { kind: 'empty' }
+  /** The branch moved on from the commit shown at confirmation. */
+  | { kind: 'moved' }
 
 /** A thread's worktree on disk. */
 export interface WorktreeInfo {

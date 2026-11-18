@@ -67,6 +67,9 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 		Changes: func(ctx context.Context, thread sdk.ThreadBranch, base string) (*sdk.BranchChanges, error) {
 			return factory.Changes(ctx, thread.ThreadID, thread.Branch, base)
 		},
+		Revisions: func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
+			return factory.revisions(ctx, thread.Branch, "refs/heads/"+base)
+		},
 		File: func(ctx context.Context, input sdk.FileVersionRequest) (sdk.FileVersions, error) {
 			ctx, done, err := factory.begin(ctx)
 			if err != nil {

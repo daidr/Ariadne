@@ -360,7 +360,13 @@ func (repo *Repository) AnswerAttention(ctx context.Context, id string, input an
 			return err
 		}
 		projectID := row.text("project_id")
-		changes := []change{{"attention.answered", object{"attentionId": id, "answer": answer}}}
+		answered := object{"attentionId": id, "answer": answer}
+		// Record the forwarding decision so rebuilding old events never wakes the
+		// coordinator over answers sent before this feature.
+		if row.present("thread_id") && row.present("message_id") {
+			answered["notifyCoordinator"] = true
+		}
+		changes := []change{{"attention.answered", answered}}
 		proposal := w.one("SELECT id, reason, ops, revert_of FROM plan_proposals WHERE attention_id = ? AND status = 'open'", id)
 		if w.err != nil {
 			return w.err
