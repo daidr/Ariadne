@@ -77,6 +77,7 @@ type connection struct {
 	lastUsed  time.Time
 	order     uint64
 	closeOnce sync.Once
+	closing   bool // protected by Hub.mu
 	closed    chan struct{}
 	previous  *connection
 }
@@ -290,10 +291,11 @@ func (hub *Hub) closeConnection(conn *connection) {
 func (hub *Hub) scheduleClose(conn *connection) {
 	conn.cancel()
 	hub.mu.Lock()
-	if hub.closed {
+	if hub.closed || conn.closing {
 		hub.mu.Unlock()
 		return
 	}
+	conn.closing = true
 	hub.workers.Add(1)
 	hub.mu.Unlock()
 	go func() { defer hub.workers.Done(); hub.closeConnection(conn) }()
@@ -577,12 +579,15 @@ func (hub *Hub) Reconfigure(ctx context.Context) error {
 	}
 	hub.mu.Lock()
 	stale := []*connection{}
-	for id, conn := range hub.connections {
-		if known[id] != conn.key {
-			delete(hub.connections, id)
-			hub.failures.Remove(id)
-			stale = append(stale, conn)
+	for conn := range hub.owned {
+		id := conn.config.ID
+		if known[id] == conn.key {
+			continue
 		}
+		if hub.connections[id] == conn {
+			delete(hub.connections, id)
+		}
+		stale = append(stale, conn)
 	}
 	for _, id := range hub.failures.Keys() {
 		if key, exists := known[id]; !exists {

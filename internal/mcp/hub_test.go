@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,12 +61,18 @@ func waitMCP(t *testing.T, condition func() bool) {
 func TestHubConnectionReuseRedactionMetadataAndReconfigure(t *testing.T) {
 	var initialize, deleted atomic.Int32
 	var refused atomic.Bool
+	failedClose, releaseClose := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseClose) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(405)
 			return
 		}
 		if r.Method == "DELETE" {
+			if r.Header.Get("Mcp-Session-Id") == "2" {
+				close(failedClose)
+				<-releaseClose
+			}
 			deleted.Add(1)
 			return
 		}
@@ -79,8 +86,7 @@ func TestHubConnectionReuseRedactionMetadataAndReconfigure(t *testing.T) {
 		}
 		switch message.Method {
 		case "initialize":
-			initialize.Add(1)
-			w.Header().Set("Mcp-Session-Id", "session")
+			w.Header().Set("Mcp-Session-Id", strconv.Itoa(int(initialize.Add(1))))
 			response(map[string]any{"protocolVersion": "2025-06-18", "serverInfo": map[string]any{"name": "server", "version": "1"}})
 		case "notifications/initialized":
 			w.WriteHeader(202)
@@ -97,6 +103,7 @@ func TestHubConnectionReuseRedactionMetadataAndReconfigure(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	defer release()
 	config := ServerConfig{ID: "server", Transport: "http", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer private-credential"}, Tools: map[string]string{}}
 	source := &serverConfigSource{}
 	source.set(config)
@@ -145,7 +152,20 @@ func TestHubConnectionReuseRedactionMetadataAndReconfigure(t *testing.T) {
 		t.Fatal("caller mutated cached tools")
 	}
 	source.set()
-	if err := hub.Reconfigure(t.Context()); err != nil {
+	select {
+	case <-failedClose:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed MCP session did not start closing")
+	}
+	configured := make(chan error, 1)
+	go func() { configured <- hub.Reconfigure(t.Context()) }()
+	select {
+	case err := <-configured:
+		t.Fatal("reconfigure returned before the detached session closed", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	release()
+	if err := <-configured; err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := hub.last.Stats(); n != 0 {
