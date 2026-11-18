@@ -109,6 +109,7 @@ func attentionEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run("INSERT INTO attentions (id, project_id, thread_id, conversation_id, message_id, block, purpose, created_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", d["attentionId"], e.ProjectID, d["threadId"], conversation, d["messageId"], encoded(d["block"]), d["purpose"], e.At, e.Seq)
 	case "attention.joined":
 		w.run("INSERT OR IGNORE INTO attention_waiters (attention_id, thread_id) VALUES (?, ?)", d["attentionId"], d["threadId"])
+		w.run("UPDATE attentions SET changed_seq = ? WHERE id = ? AND message_id IS NULL AND purpose IS NOT NULL", e.Seq, d["attentionId"])
 	case "attention.answered":
 		var approved any
 		if d.obj("answer").str("type") == "confirm" {

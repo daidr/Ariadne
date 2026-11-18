@@ -18,8 +18,10 @@
     "@dou-ui/flow": "0.1.0-alpha.18",
     "@dou-ui/icons": "0.1.0-alpha.18",
     "@dou-ui/pivot": "0.1.0-alpha.18",
+    "@dou-ui/sheet": "0.1.0-alpha.18",
     "dou-ui": "0.1.0-alpha.18",
     "markdown-it": "14.1.0",
+    "shiki": "3.23.0",
     "y-protocols": "1.0.7",
     "y-websocket": "3.1.0",
     "yjs": "13.6.33"

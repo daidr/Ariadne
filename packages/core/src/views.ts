@@ -285,6 +285,7 @@ export type NoticeView = {
   conversationId: string
   createdAt: number
 } & (
+  | ({ kind: 'approval' } & Omit<MessageAsk, 'attentionId'>)
   | {
       kind: 'memory'
       action: 'saved' | 'removed'

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ImageIcon } from '@dou-ui/icons'
-import { DouImagePreview, DouLink } from 'dou-ui'
+import { FileIcon } from '@dou-ui/icons'
+import { DouLink } from 'dou-ui'
 import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
 import { openThreadFrom, state } from '../store'
 import { linkSummary } from './link-summaries'
 import type { LinkSummary } from '@ariadne/plugin-sdk'
-import { fileSrc, innerLink } from './links'
+import { innerLink } from './links'
+import { openFilePreview } from '../files/preview'
 import PullRequestLink from './PullRequestLink.vue'
 import { useOpenView } from '../opened-from'
 
@@ -15,7 +16,7 @@ const openView = useOpenView()
 
 /**
  * A link in an agent's message. A thread shows its state and opens beside the coordinator,
- * an artifact opens in the main view, a kept image opens large; one not in this project is
+ * an artifact opens in the main view, a file opens in a preview; one not in this project is
  * left as its text. A full address a plugin knows, such as a pull request, shows what it
  * names. `bare` is a link written as its address alone.
  */
@@ -37,8 +38,7 @@ const artifact = computed(() =>
     ? (state.artifacts.find((item) => item.id === inner.value!.id) ?? null)
     : null,
 )
-const image = computed(() => (inner.value?.kind === 'file' ? fileSrc(inner.value.id) : null))
-const viewing = ref(false)
+const file = computed(() => (inner.value?.kind === 'file' ? inner.value.id : null))
 
 const summary = ref<LinkSummary | null>(null)
 watch(
@@ -60,19 +60,24 @@ watch(
 function open(event?: MouseEvent) {
   if (thread.value) openThreadFrom(event, thread.value.id)
   else if (artifact.value) openView({ kind: 'artifact', id: artifact.value.id })
-  else if (image.value) viewing.value = true
+  else if (file.value) {
+    const label = props.children.children
+    openFilePreview({
+      id: file.value,
+      name: !props.bare && typeof label === 'string' ? label : undefined,
+    })
+  }
 }
 </script>
 
 <template>
-  <DouLink v-if="thread || artifact || image" variant="soft" class="inline-ref" @click="open">
+  <DouLink v-if="thread || artifact || file" variant="soft" class="inline-ref" @click="open">
     <template #leading>
       <StageIcon v-if="thread" :stage="thread.stage" />
       <component :is="kindIcon[artifact.kind]" v-else-if="artifact" />
-      <ImageIcon v-else />
+      <FileIcon v-else />
     </template>
     <component :is="children" />
-    <DouImagePreview v-if="image" v-model:open="viewing" :images="[image]" />
   </DouLink>
   <PullRequestLink
     v-else-if="href && summary?.kind === 'pull-request'"

@@ -105,6 +105,11 @@
     },
     {
       "method": "GET",
+      "path": "/api/files/:fileId/sheet",
+      "source": "internal/server/api.go"
+    },
+    {
+      "method": "GET",
       "path": "/api/health",
       "source": "packages/server/src/app.ts"
     },

@@ -4,6 +4,7 @@ import type { SettingsSchema } from '@ariadne/plugin-sdk'
 import type { DirectoryListing } from '../api'
 import { lt, t } from '../i18n'
 import DirectoryInput from './DirectoryInput.vue'
+import SettingsLabelHelp from './SettingsLabelHelp.vue'
 
 // The form a plugin describes with its settings schema. Values are edited in place.
 // A stored secret is never sent to the browser: it shows as "set" and can be cleared.
@@ -28,8 +29,19 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
     <DouFormItem
       :label="lt(field.title)"
       :required="schema.required?.includes(String(key))"
-      :help="bare ? undefined : lt(field.description)"
+      :help="
+        bare || (field.type === 'string' && field.directory) ? undefined : lt(field.description)
+      "
     >
+      <template
+        v-if="!bare && field.type === 'string' && field.directory && lt(field.description)"
+        #label
+      >
+        <SettingsLabelHelp
+          :label="lt(field.title) ?? String(key)"
+          :content="lt(field.description) ?? ''"
+        />
+      </template>
       <DirectoryInput
         v-if="field.type === 'string' && field.directory && browse"
         :model-value="asString(values[key])"

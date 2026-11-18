@@ -153,6 +153,25 @@ async function request<T>(
   return data as T
 }
 
+export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal: AbortSignal) {
+  const response = await fetch(`/api/files/${encodeURIComponent(id)}`, {
+    method,
+    headers: { authorization: `Bearer ${token() ?? ''}` },
+    signal,
+  })
+  if (!response.ok) throw new Error(`File request failed (${response.status})`)
+  return response
+}
+
+export function fetchSheet(id: string, index: number, signal: AbortSignal) {
+  return request<{ sheets: string[]; rows: string[][]; rowNumbers: number[]; truncated: boolean }>(
+    'GET',
+    `/api/files/${encodeURIComponent(id)}/sheet?index=${index}`,
+    undefined,
+    signal,
+  )
+}
+
 /** One project's threads' worktrees, as the settings list them. */
 export interface ProjectWorktrees {
   id: string

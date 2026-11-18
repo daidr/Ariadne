@@ -405,6 +405,11 @@ CREATE INDEX attentions_message ON attentions (message_id);
 
 CREATE INDEX attentions_project ON attentions (project_id, closed);
 
+CREATE INDEX attentions_conversation_approval ON attentions (conversation_id, created_at)
+  WHERE message_id IS NULL AND purpose IS NOT NULL;
+
+CREATE INDEX attention_waiters_thread ON attention_waiters (thread_id, attention_id);
+
 CREATE INDEX events_project ON events (project_id, seq);
 
 CREATE INDEX files_hash ON files (project_id, sha256);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import type { DockNode } from 'dou-ui'
+import { moveDockTab, splitDockTab, type DockNode } from 'dou-ui'
 import {
   type SideLayout,
   close,
@@ -16,6 +16,7 @@ import {
   prune,
   split,
   threadKey,
+  updateDock,
 } from './layout'
 
 const tabs = (layout: SideLayout) => groupsOf(layout.root).map((g) => g.tabs)
@@ -31,7 +32,7 @@ describe('side layout', () => {
 
   test('opens a thread after the tab in front, and brings an open one forward', () => {
     let layout = open(defaultLayout(), threadKey('a'))
-    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts']])
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a']])
     expect(focusedThread(layout)).toBe('a')
     layout = open(layout, 'artifacts')
     layout = open(layout, threadKey('a'))
@@ -42,7 +43,7 @@ describe('side layout', () => {
   test('replace takes the place of the thread in front, not of a list', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     layout = open(layout, threadKey('b'), { replace: true })
-    expect(tabs(layout)).toEqual([['plan', 'thread:b', 'threads', 'artifacts']])
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:b']])
     layout = open(layout, 'threads')
     layout = open(layout, threadKey('c'), { replace: true })
     expect(tabs(layout)[0]).toContain('thread:b')
@@ -62,35 +63,37 @@ describe('side layout', () => {
     layout = open(layout, 'plan', { beside: 'vertical' })
     expect(shape(layout.root)).toEqual([
       'horizontal',
-      ['threads', 'artifacts'],
-      ['vertical', ['thread:a'], ['plan']],
+      ['plan', 'threads', 'artifacts'],
+      ['vertical', ['thread:a'], ['list:plan:1']],
     ])
   })
 
   test('splits a tab out, and an emptied group gives its room back', () => {
     let layout = split(defaultLayout(), 'threads', 'vertical')
-    expect(shape(layout.root)).toEqual(['vertical', ['plan', 'artifacts'], ['threads']])
-    expect(focusedGroup(layout).tabs).toEqual(['threads'])
+    expect(shape(layout.root)).toEqual([
+      'vertical',
+      ['plan', 'threads', 'artifacts'],
+      ['list:threads:1'],
+    ])
+    expect(focusedGroup(layout).tabs).toEqual(['list:threads:1'])
     // The last tab of a group cannot split off: nothing would stay behind.
-    expect(split(layout, 'threads', 'horizontal')).toBe(layout)
-    layout = close(layout, 'threads')
-    expect(shape(layout.root)).toEqual(['plan', 'artifacts'])
-    expect(focusedGroup(layout).tabs).toEqual(['plan', 'artifacts'])
+    expect(split(layout, 'list:threads:1', 'horizontal')).toBe(layout)
+    layout = close(layout, 'list:threads:1')
+    expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts'])
   })
 
   test('closing the tab in front brings its neighbour forward', () => {
-    let layout = open(defaultLayout(), 'threads')
-    layout = close(layout, 'threads')
+    let layout = open(defaultLayout(), threadKey('a'))
+    layout = close(layout, threadKey('a'))
     expect(focusedGroup(layout).active).toBe('artifacts')
-    layout = close(layout, 'artifacts')
-    expect(focusedGroup(layout).active).toBe('plan')
+    expect(close(layout, 'artifacts')).toBe(layout)
   })
 
   test('closing the other tabs closes threads only, and the side never ends up empty', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     layout = open(layout, threadKey('b'))
     layout = closeOthers(layout, threadKey('a'))
-    expect(tabs(layout)).toEqual([['plan', 'thread:a', 'threads', 'artifacts']])
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a']])
     for (const key of ['plan', 'threads', 'artifacts', 'thread:a'] as const) {
       layout = close(layout, key)
     }
@@ -101,12 +104,53 @@ describe('side layout', () => {
     let layout = split(defaultLayout(), 'threads', 'horizontal')
     const [left, right] = groupsOf(layout.root)
     layout = move(layout, 'plan', right!.id)
-    expect(tabs(layout)).toEqual([['artifacts'], ['threads', 'plan']])
-    expect(focusedGroup(layout).active).toBe('plan')
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts'],
+      ['list:threads:1', 'list:plan:1'],
+    ])
+    expect(focusedGroup(layout).active).toBe('list:plan:1')
     layout = move(layout, 'artifacts', right!.id)
-    // The left group emptied and went.
-    expect(tabs(layout)).toEqual([['threads', 'plan', 'artifacts']])
-    expect(groupsOf(layout.root).some((g) => g.id === left!.id)).toBe(false)
+    layout = move(layout, 'list:plan:1', left!.id)
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts'],
+      ['list:threads:1', 'list:artifacts:1'],
+    ])
+    expect(groupsOf(layout.root)[0]?.active).toBe('plan')
+  })
+
+  test('dragging a fixed tab copies it, and a copy returned to the first panel leaves its selection alone', () => {
+    let layout = open(defaultLayout(), threadKey('a'))
+    const first = focusedGroup(layout).id
+    layout = updateDock(layout, splitDockTab(layout.root, 'plan', first, 'bottom'))
+    const second = groupsOf(layout.root)[1]!.id
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a'], ['list:plan:1']])
+    layout = updateDock(layout, splitDockTab(layout.root, 'plan', first, 'top'))
+    expect(groupsOf(layout.root)[0]?.id).toBe(first)
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts', 'thread:a'],
+      ['list:plan:2'],
+      ['list:plan:1'],
+    ])
+    layout = updateDock(layout, moveDockTab(layout.root, 'list:plan:1', first))
+    expect(groupsOf(layout.root).find((group) => group.id === second)).toBeUndefined()
+    expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a'], ['list:plan:2']])
+    expect(groupsOf(layout.root)[0]?.active).toBe('thread:a')
+    expect(parseLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout)
+  })
+
+  test('older layouts keep their list in its panel and restore the fixed entry in the first panel', () => {
+    const layout = parseLayout({
+      root: {
+        type: 'split',
+        start: { type: 'group', id: 'first', tabs: ['threads', 'thread:a'] },
+        end: { type: 'group', id: 'second', tabs: ['plan', 'artifacts'], active: 'artifacts' },
+      },
+    })!
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts', 'thread:a'],
+      ['list:plan:1', 'list:artifacts:1'],
+    ])
+    expect(groupsOf(layout.root)[1]?.active).toBe('list:artifacts:1')
   })
 
   test('lists the threads open anywhere', () => {
@@ -139,7 +183,7 @@ describe('side layout', () => {
       focused: 'missing',
     })
     expect(parsed).toEqual({
-      root: { type: 'group', id: 'g1', tabs: ['plan'], active: 'plan' },
+      root: { type: 'group', id: 'g1', tabs: ['plan', 'threads', 'artifacts'], active: 'plan' },
       focused: 'g1',
     })
   })
@@ -156,7 +200,7 @@ describe('side layout', () => {
     expect(parsed?.root).toEqual({
       type: 'group',
       id: 'g',
-      tabs: ['plan', 'artifact:art_1', 'changes:th_1'],
+      tabs: ['plan', 'threads', 'artifacts', 'artifact:art_1', 'changes:th_1'],
       active: 'plan',
     })
     expect(viewOf('turn:th_1:tu_1')).toEqual({ kind: 'turn', threadId: 'th_1', turnId: 'tu_1' })

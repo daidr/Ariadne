@@ -1,8 +1,7 @@
 /**
  * The right side of the page: groups of tabs, split side by side or one above another as
- * the user likes, in the layout a `DouDock` shows. Each thing shown there lives in one tab
- * at a time. The functions here never change the layout they are given; they return the
- * new one.
+ * the user likes, in the layout a `DouDock` shows. Lists have a fixed tab and can also
+ * have a movable copy. Layout updates never mutate the tree they are given.
  */
 import {
   dockGroups,
@@ -19,16 +18,25 @@ import {
  * What a tab shows: one of the project's lists, a thread's conversation, an artifact, a
  * thread's branch changes, or what one turn of a thread changed.
  */
+export type ListKey = 'plan' | 'threads' | 'artifacts'
 export type PaneKey =
-  | 'plan'
-  | 'threads'
-  | 'artifacts'
+  | ListKey
+  | `list:${ListKey}:${number}`
   | `thread:${string}`
   | `artifact:${string}`
   | `changes:${string}`
   | `turn:${string}`
 
-export const LISTS = ['plan', 'threads', 'artifacts'] as const satisfies PaneKey[]
+export const LISTS = ['plan', 'threads', 'artifacts'] as const satisfies ListKey[]
+export const isPinned = (key: string | number): key is ListKey =>
+  (LISTS as readonly (string | number)[]).includes(key)
+export function listOf(key: string | number): ListKey | null {
+  if (isPinned(key)) return key
+  const list =
+    typeof key === 'string' ? /^list:(plan|threads|artifacts):\d+$/.exec(key)?.[1] : undefined
+  if (list !== undefined && isPinned(list)) return list
+  return null
+}
 
 export type SplitDirection = 'horizontal' | 'vertical'
 
@@ -64,9 +72,6 @@ export function viewOf(key: PaneKey): PaneView | null {
   return null
 }
 
-/** Lists never close; everything else does. */
-export const isList = (key: PaneKey) => (LISTS as readonly string[]).includes(key)
-
 /** The tabs of a group; the layout only ever holds pane keys. */
 export const tabsOf = (group: DockGroup) => group.tabs as PaneKey[]
 
@@ -80,6 +85,19 @@ export function defaultLayout(front: 'plan' | 'threads' = 'plan'): SideLayout {
 
 /** Every group, left to right and top to bottom. */
 export const groupsOf = (node: DockNode): DockGroup[] => dockGroups(node)
+
+function listCopy(root: DockNode, key: ListKey): PaneKey {
+  let index = 1
+  while (findDockGroup(root, `list:${key}:${index}`)) index++
+  return `list:${key}:${index}`
+}
+
+function mapGroups(node: DockNode, map: (group: DockGroup) => DockGroup): DockNode {
+  if (node.type === 'group') return map(node)
+  const start = mapGroups(node.start, map)
+  const end = mapGroups(node.end, map)
+  return start === node.start && end === node.end ? node : { ...node, start, end }
+}
 
 export function groupWith(layout: SideLayout, key: PaneKey): DockGroup | null {
   return findDockGroup(layout.root, key) ?? null
@@ -103,10 +121,67 @@ export function openThreads(layout: SideLayout): string[] {
 
 /** A layout with a new root, still pointing at a group that is there. */
 function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused): SideLayout {
-  // The lists never close, so a side left without tabs only comes from a layout gone wrong.
-  if (groupsOf(root).every((item) => !item.tabs.length)) return defaultLayout()
+  const previous = groupsOf(layout.root)[0]!
+  let first = groupsOf(root)[0]!
+  if (previous.id !== first.id) {
+    const original = groupsOf(root).find((group) => group.id === previous.id)
+    if (original) {
+      // Splitting on the leading edge still keeps the fixed tabs in the first panel.
+      const leading = first
+      root = mapGroups(root, (group) =>
+        group.id === leading.id ? original : group.id === original.id ? leading : group,
+      )
+      first = original
+    }
+  }
+  const tabs = [...LISTS, ...first.tabs.filter((key) => !listOf(key))]
+  const active =
+    first.active != null && tabs.includes(first.active)
+      ? first.active
+      : previous.active != null && tabs.includes(previous.active)
+        ? previous.active
+        : tabs[0]
+  if (
+    first.active !== active ||
+    tabs.some((key, i) => first.tabs[i] !== key) ||
+    tabs.length !== first.tabs.length
+  ) {
+    root = mapGroups(root, (group) => (group.id === first.id ? { ...group, tabs, active } : group))
+  }
   const groups = groupsOf(root)
   return { root, focused: groups.some((item) => item.id === focused) ? focused : groups[0]!.id }
+}
+
+/** A native drag of a fixed tab opens its copy. Returning a copy removes it. */
+export function updateDock(layout: SideLayout, root: DockNode): SideLayout {
+  const first = groupsOf(layout.root)[0]!
+  root = mapGroups(root, (group) => {
+    if (group.id === first.id) return group
+    const lists = new Map<ListKey, string | number>()
+    let active = group.active
+    for (const key of group.tabs) {
+      const list = listOf(key)
+      if (list && !isPinned(key)) lists.set(list, key)
+    }
+    const tabs = [
+      ...new Set(
+        group.tabs.map((key) => {
+          const list = listOf(key)
+          if (!list) return key
+          const copy = lists.get(list) ?? listCopy(root, list)
+          lists.set(list, copy)
+          if (key === active) active = copy
+          return copy
+        }),
+      ),
+    ]
+    return active !== group.active ||
+      tabs.some((key, i) => key !== group.tabs[i]) ||
+      tabs.length !== group.tabs.length
+      ? { ...group, tabs, active }
+      : group
+  })
+  return withRoot(layout, root)
 }
 
 /** Bring `key` to the front of its group and use that group. */
@@ -131,6 +206,7 @@ const sideOf = (direction: SplitDirection) => (direction === 'horizontal' ? 'rig
 
 /** Split `key` off to the right of or below the group `groupId`, into a group of its own. */
 function splitOff(layout: SideLayout, key: PaneKey, groupId: string, direction: SplitDirection) {
+  if (isPinned(key)) key = listCopy(layout.root, key)
   const root = splitDockTab(layout.root, key, groupId, sideOf(direction))
   if (root === layout.root) return layout
   return withRoot(layout, root, findDockGroup(root, key)!.id)
@@ -157,7 +233,7 @@ export function open(layout: SideLayout, key: PaneKey, options: OpenOptions = {}
 
 /** Close a tab. A group left empty goes, and the group beside it takes its room. */
 export function close(layout: SideLayout, key: PaneKey): SideLayout {
-  if (!groupWith(layout, key)) return layout
+  if (isPinned(key) || !groupWith(layout, key)) return layout
   return withRoot(layout, removeDockTab(layout.root, key))
 }
 
@@ -170,7 +246,7 @@ export function closeOthers(layout: SideLayout, key: PaneKey): SideLayout {
   if (!target) return layout
   let root = selectDockTab(layout.root, key)
   for (const other of tabsOf(target)) {
-    if (other !== key && !isList(other)) root = removeDockTab(root, other)
+    if (other !== key && !isPinned(other)) root = removeDockTab(root, other)
   }
   return withRoot(layout, root, target.id)
 }
@@ -184,8 +260,16 @@ export function split(layout: SideLayout, key: PaneKey, direction: SplitDirectio
 
 /** Move `key` to the end of the group `groupId`, in front there. */
 export function move(layout: SideLayout, key: PaneKey, groupId: string): SideLayout {
+  const list = listOf(key)
+  if (list && groupId === groupsOf(layout.root)[0]!.id) return close(layout, key)
+  const target = groupsOf(layout.root).find((item) => item.id === groupId)
+  if (!target) return layout
   if (groupWith(layout, key)?.id === groupId) return layout
-  if (!groupsOf(layout.root).some((item) => item.id === groupId)) return layout
+  if (list) {
+    const existing = tabsOf(target).find((tab) => listOf(tab) === list)
+    if (existing) return activate(close(layout, key), existing)
+    if (isPinned(key)) key = listCopy(layout.root, key)
+  }
   return withRoot(layout, moveDockTab(layout.root, key, groupId), groupId)
 }
 
@@ -201,7 +285,7 @@ export function prune(layout: SideLayout, keep: (key: PaneKey) => boolean): Side
 // A turn's changes are not kept: what it compares is only known while the page is open.
 const isKey = (value: unknown): value is PaneKey =>
   typeof value === 'string' &&
-  ((LISTS as readonly string[]).includes(value) || /^(thread|artifact|changes):.+/.test(value))
+  (listOf(value) !== null || /^(thread|artifact|changes):.+/.test(value))
 
 function parseNode(value: unknown, seen: Set<string>, ids: Set<string>): DockNode | null {
   if (!value || typeof value !== 'object') return null
@@ -234,5 +318,5 @@ export function parseLayout(raw: unknown): SideLayout | null {
   const root = parseNode((raw as { root?: unknown }).root, new Set(), new Set())
   if (!root) return null
   const focused = (raw as { focused?: unknown }).focused
-  return withRoot({ root }, root, typeof focused === 'string' ? focused : undefined)
+  return updateDock({ root, ...(typeof focused === 'string' ? { focused } : {}) }, root)
 }

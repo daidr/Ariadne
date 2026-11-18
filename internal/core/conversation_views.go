@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"slices"
@@ -228,6 +229,49 @@ func (reader Reader) ListNotices(ctx context.Context, id string, bounds NoticeRa
 	return listNotices(ctx, reader.DB, id, bounds)
 }
 
+func pageNotices(ctx context.Context, db queryer, id string, bounds NoticeRange, since *int64) ([]object, error) {
+	var notices []object
+	var err error
+	// Tool approvals already have a durable card and answer. Surface unlinked cards
+	// in the conversation that asked or joined without creating a second approval.
+	approvalsQuery := `WITH selected AS (
+	 SELECT id FROM attentions WHERE conversation_id = ?1 AND message_id IS NULL AND purpose IS NOT NULL
+	 UNION SELECT attention_id FROM attention_waiters WHERE thread_id = ?1
+	)
+	 SELECT a.id, ?1 AS conversation_id, a.created_at, 'approval' AS kind,
+	 json_object('block', json(a.block), 'answer', json(a.answer), 'withdrawn', a.withdrawn) AS payload
+	 FROM selected CROSS JOIN attentions a ON a.id = selected.id
+	 WHERE a.message_id IS NULL AND a.purpose NOT LIKE ?2`
+	args := []any{id, milestoneGate + "%"}
+	if since != nil {
+		notices, err = readNotices(ctx, db, "SELECT * FROM notices WHERE conversation_id = ? AND changed_seq > ? ORDER BY created_at, id", id, *since)
+		approvalsQuery += " AND a.changed_seq > ?"
+		args = append(args, *since)
+	} else {
+		notices, err = listNotices(ctx, db, id, bounds)
+		if bounds.From != nil {
+			approvalsQuery += " AND a.created_at >= ?"
+			args = append(args, *bounds.From)
+		}
+		if bounds.To != nil {
+			approvalsQuery += " AND a.created_at < ?"
+			args = append(args, *bounds.To)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	approvals, err := readNotices(ctx, db, approvalsQuery+" ORDER BY a.created_at, a.id", args...)
+	if err != nil || len(approvals) == 0 {
+		return notices, err
+	}
+	notices = append(notices, approvals...)
+	slices.SortStableFunc(notices, func(a, b object) int {
+		return cmp.Compare(record(a).integer("createdAt"), record(b).integer("createdAt"))
+	})
+	return notices, nil
+}
+
 type MessageCursor struct {
 	Before *string
 	From   *string
@@ -251,7 +295,7 @@ func (reader Reader) PageMessages(ctx context.Context, id string, cursor Message
 			if err != nil {
 				return err
 			}
-			result.Notices, err = readNotices(ctx, tx, "SELECT * FROM notices WHERE conversation_id = ? AND changed_seq > ? ORDER BY created_at, id", id, *cursor.Since)
+			result.Notices, err = pageNotices(ctx, tx, id, NoticeRange{}, cursor.Since)
 			return err
 		}
 		limit := 40
@@ -298,7 +342,7 @@ func (reader Reader) PageMessages(ctx context.Context, id string, cursor Message
 				bounds.To = &at
 			}
 		}
-		result.Notices, err = listNotices(ctx, tx, id, bounds)
+		result.Notices, err = pageNotices(ctx, tx, id, bounds, nil)
 		return err
 	})
 	return

@@ -80,7 +80,7 @@ function viewLabel(key: PaneKey): { label: string; icon: Component } | null {
 }
 
 const labelOf = (key: PaneKey) =>
-  lists[key]?.label() ?? threadAt(key)?.title ?? viewLabel(key)?.label ?? ''
+  lists[side.listOf(key) ?? '']?.label() ?? threadAt(key)?.title ?? viewLabel(key)?.label ?? ''
 
 /** The artifacts and changes open in tabs. */
 const openViews = computed(() =>
@@ -91,9 +91,16 @@ const openViews = computed(() =>
 )
 
 // Every thread of the project is listed, open or not, so one can be dragged in from the
-// thread list. Lists never close; threads, artifacts and changes do.
+// thread list. The fixed tabs and their copies have separate dock keys.
 const panels = computed<DockPanel[]>(() => [
-  ...side.LISTS.map((key) => ({ value: key, label: lists[key]!.label(), icon: lists[key]!.icon })),
+  ...groups.value.flatMap((group) =>
+    side.tabsOf(group).flatMap((key) => {
+      const list = side.listOf(key)
+      return list
+        ? [{ value: key, label: lists[list]!.label(), closable: !side.isPinned(key) }]
+        : []
+    }),
+  ),
   ...(state.detail?.threads ?? []).map((thread) => ({
     value: side.threadKey(thread.id),
     label: thread.title,
@@ -121,14 +128,11 @@ const canSplit = (group: DockGroup, to: 'right' | 'bottom') =>
   group.tabs.length > 1 && !!dock.value?.canSplit(group.id, to)
 
 function changed(root: DockNode) {
-  setSide({ ...state.side, root })
+  setSide(side.updateDock(state.side, root))
 }
 
-/** Bring a list into this group: moved here from wherever it is, or opened. */
-function bring(group: DockGroup, key: PaneKey) {
-  const at = side.groupWith(state.side, key)
-  if (at && at.id !== group.id) setSide(side.move(state.side, key, group.id))
-  else setSide(side.open(side.focus(state.side, group.id), key))
+function bring(group: DockGroup, key: side.ListKey) {
+  setSide(side.move(state.side, key, group.id))
 }
 </script>
 
@@ -147,7 +151,17 @@ function bring(group: DockGroup, key: PaneKey) {
       @remove="(key) => closePane(key as PaneKey)"
     >
       <template #label="{ value }">
-        <span v-if="threadAt(value as PaneKey)" class="pane-thread-label">
+        <DouTooltip v-if="side.isPinned(value)" :content="labelOf(value)">
+          <span class="pane-list-label">
+            <component :is="lists[value]!.icon" aria-hidden="true" />
+            <span class="pane-list-name">{{ labelOf(value) }}</span>
+          </span>
+        </DouTooltip>
+        <span v-else-if="side.listOf(value)" class="pane-thread-label">
+          <component :is="lists[side.listOf(value)!]!.icon" aria-hidden="true" />
+          <span class="pane-thread-title">{{ labelOf(value as PaneKey) }}</span>
+        </span>
+        <span v-else-if="threadAt(value as PaneKey)" class="pane-thread-label">
           <StageIcon :stage="threadAt(value as PaneKey)!.stage" />
           <span class="pane-thread-title">{{ threadAt(value as PaneKey)!.title }}</span>
         </span>
@@ -155,13 +169,13 @@ function bring(group: DockGroup, key: PaneKey) {
       </template>
       <template #default="{ value }">
         <div
-          v-if="side.isList(value as PaneKey)"
+          v-if="side.listOf(value)"
           class="pane-list"
-          :class="{ 'pane-flush': value === 'plan' }"
+          :class="{ 'pane-flush': side.listOf(value) === 'plan' }"
         >
-          <PlanPanel v-if="value === 'plan'" />
-          <ThreadList v-else-if="value === 'threads'" />
-          <ArtifactList v-else-if="value === 'artifacts'" />
+          <PlanPanel v-if="side.listOf(value) === 'plan'" />
+          <ThreadList v-else-if="side.listOf(value) === 'threads'" />
+          <ArtifactList v-else />
         </div>
         <ConversationPanel
           v-else-if="side.threadOf(value as PaneKey)"
@@ -176,7 +190,7 @@ function bring(group: DockGroup, key: PaneKey) {
       </template>
       <template #extra="{ group, active }">
         <DouTooltip
-          v-if="active === 'plan' && state.plan?.nodes.length"
+          v-if="active !== undefined && side.listOf(active) === 'plan' && state.plan?.nodes.length"
           :content="t('plan.expand')"
           placement="bottom"
         >
@@ -224,7 +238,7 @@ function bring(group: DockGroup, key: PaneKey) {
               v-for="key in side.LISTS"
               :key="key"
               :value="key"
-              :disabled="group.tabs.includes(key)"
+              :disabled="group.tabs.some((tab) => side.listOf(tab) === key)"
               @click="bring(group, key)"
             >
               <template #prefix><component :is="lists[key]!.icon" /></template>
@@ -232,7 +246,7 @@ function bring(group: DockGroup, key: PaneKey) {
             </DouDropdownItem>
           </DouDropdownSub>
           <DouDropdownItem
-            v-if="group.tabs.some((key) => key !== active && !side.isList(key as PaneKey))"
+            v-if="group.tabs.some((key) => key !== active && !side.isPinned(key))"
             value="close-others"
             divided
             @click="setSide(side.closeOthers(state.side, active as PaneKey))"
@@ -270,6 +284,22 @@ function bring(group: DockGroup, key: PaneKey) {
 /* The plan's canvas fills its pane. */
 .pane-flush {
   padding: 0;
+}
+
+.pane-list-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-size: 16px;
+}
+
+.pane-list-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .pane-thread-label {

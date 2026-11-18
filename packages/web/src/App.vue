@@ -25,6 +25,7 @@ import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
+import FilePreview from './files/FilePreview.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, openProjectSettings, start, state } from './store'
 import { notifyAbout } from './notify'
@@ -174,6 +175,7 @@ watchEffect(() => {
     <ShortcutSheet />
     <ProjectSettings />
     <FullView />
+    <FilePreview />
   </DouConfigProvider>
 </template>
 

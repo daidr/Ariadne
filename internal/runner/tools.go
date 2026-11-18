@@ -101,7 +101,7 @@ func reply(value any, err error) (string, error) {
 func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	conversation := turn.conversation
 	specs := []tool{
-		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language.",
+		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID. Supported attachments are images, MP4, WebM, XLSX (up to 10 MiB each), and UTF-8 text including source code and CSV (up to 1 MiB each).",
 			args{"text": field("string"), "replyTo": field("string"), "files": arrayOf(field("string"))}, []string{"text"}, turn.sendMessage),
 		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
 			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),

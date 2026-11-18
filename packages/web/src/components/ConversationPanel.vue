@@ -49,6 +49,7 @@ import {
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
+import { openFilePreview } from '../files/preview'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
 import MessageQuote from './MessageQuote.vue'
@@ -138,7 +139,7 @@ const mentions = useMentions(
   composer?.mentions,
 )
 
-// A message's images open in a preview, its text files in a tab of their own.
+// Images in the same message can be browsed together.
 const preview = ref<{ open: boolean; images: string[]; index: number }>({
   open: false,
   images: [],
@@ -147,7 +148,7 @@ const preview = ref<{ open: boolean; images: string[]; index: number }>({
 function openAttachment(message: MessageView, file: ChatAttachment) {
   if (!file.url) return
   if (!file.type?.startsWith('image/')) {
-    window.open(file.url, '_blank', 'noopener')
+    openFilePreview({ id: String(file.uid), name: file.name, mime: file.type, size: file.size })
     return
   }
   const images = shownAttachments(message.attachments).filter((item) =>
@@ -707,8 +708,15 @@ watch(
       </div>
       <template v-for="item in shown.items" :key="item.id">
         <div v-if="item.notice" class="notice">
+          <AskBlock
+            v-if="item.notice.kind === 'approval'"
+            :attention-id="item.notice.id"
+            :block="item.notice.block"
+            :answer="item.notice.answer"
+            :withdrawn="item.notice.withdrawn"
+          />
           <template
-            v-if="item.notice.kind === 'memory' || item.notice.kind === 'memory-everywhere'"
+            v-else-if="item.notice.kind === 'memory' || item.notice.kind === 'memory-everywhere'"
           >
             <DouText variant="tertiary" size="sm" class="notice-text">
               {{ memoryNotice(item.notice) }}

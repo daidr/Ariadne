@@ -185,6 +185,22 @@ func New(options Options) (*API, error) {
 			return nil
 		})
 	}
+	api.add("GET", "/api/files/:fileId/sheet", func(r *http.Request) (any, int, error) {
+		id := r.PathValue("fileId")
+		if !fileID.MatchString(id) {
+			return nil, 0, domainerr.NotFound(id)
+		}
+		index := 0
+		if given := r.URL.Query().Get("index"); given != "" {
+			var err error
+			index, err = strconv.Atoi(given)
+			if err != nil || index < 0 {
+				return nil, 0, badInput("invalid worksheet index")
+			}
+		}
+		preview, err := api.files.PreviewSheet(r.Context(), id, index)
+		return preview, 200, err
+	})
 	api.handler = api.auth.Middleware(api.mux)
 	return api, nil
 }

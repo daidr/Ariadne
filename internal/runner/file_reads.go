@@ -139,8 +139,9 @@ func (turn *turn) messageAttachments(ctx context.Context, ids []string) ([]any, 
 		if mediaType, _, err := mime.ParseMediaType(media); err == nil {
 			media = mediaType
 		}
-		if media == "application/octet-stream" && !files.IsText(data) {
-			return nil, fmt.Errorf("%s is neither an image nor a text attachment", path)
+		if media == "application/octet-stream" && strings.EqualFold(filepath.Ext(path), ".avif") &&
+			len(data) >= 12 && string(data[4:12]) == "ftypavif" {
+			media = "image/avif"
 		}
 		saved, err := store.Save(ctx, project, media, data, true)
 		if err != nil {

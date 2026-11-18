@@ -31,6 +31,7 @@ import SourceForm from './SourceForm.vue'
 import SourceNotes from './SourceNotes.vue'
 import MemoryList from './MemoryList.vue'
 import ProjectUsage from './ProjectUsage.vue'
+import SettingsLabelHelp from './SettingsLabelHelp.vue'
 
 /**
  * The open project's own settings: where its files are, instructions, workspaces and MCP,
@@ -276,10 +277,13 @@ async function save() {
               class="project-code"
             />
           </DouFormItem>
-          <DouFormItem
-            :label="t('projectSettings.check')"
-            :help="t('projectSettings.checkHelp', { placeholder: '{file}' })"
-          >
+          <DouFormItem :label="t('projectSettings.check')">
+            <template #label>
+              <SettingsLabelHelp
+                :label="t('projectSettings.check')"
+                :content="t('projectSettings.checkHelp', { placeholder: '{file}' })"
+              />
+            </template>
             <DouInput
               v-model="check"
               :maxlength="2000"
@@ -288,7 +292,7 @@ async function save() {
             />
           </DouFormItem>
           <DouFormItem :label="t('projectSettings.env')">
-            <SecretPairs v-model="env" :add-label="t('mcp.addEnv')" />
+            <SecretPairs v-model="env" :add-label="t('projectSettings.envAdd')" />
           </DouFormItem>
           <DouFormItem :label="t('project.mcp')">
             <DouSelect
@@ -337,24 +341,23 @@ async function save() {
               @update:model-value="setReview"
             />
           </div>
-          <DouFormItem
-            :help="
-              t(
-                settings.delivery.mode === 'external'
-                  ? 'projectSettings.autopilotExternalHelp'
-                  : 'projectSettings.autopilotHelp',
-              )
-            "
-          >
-            <div class="project-switch">
-              <span>{{ t('projectSettings.autopilot') }}</span>
-              <DouSwitch
-                :model-value="settings.autopilot.enabled"
-                :aria-label="t('projectSettings.autopilot')"
-                @update:model-value="setAutopilot"
-              />
-            </div>
-          </DouFormItem>
+          <div class="project-switch">
+            <SettingsLabelHelp
+              :label="t('projectSettings.autopilot')"
+              :content="
+                t(
+                  settings.delivery.mode === 'external'
+                    ? 'projectSettings.autopilotExternalHelp'
+                    : 'projectSettings.autopilotHelp',
+                )
+              "
+            />
+            <DouSwitch
+              :model-value="settings.autopilot.enabled"
+              :aria-label="t('projectSettings.autopilot')"
+              @update:model-value="setAutopilot"
+            />
+          </div>
           <!-- Switching it on starts work at once: which, is said before saving. -->
           <DouText
             v-if="settings.autopilot.enabled && !state.detail?.project.settings.autopilot.enabled"

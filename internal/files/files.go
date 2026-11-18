@@ -23,6 +23,7 @@ import (
 
 const MaxFileBytes = 10 * 1024 * 1024
 const MaxTextBytes = 1024 * 1024
+const SpreadsheetMIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 const Schema = `CREATE TABLE IF NOT EXISTS files (
  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, mime TEXT NOT NULL,
@@ -72,6 +73,9 @@ func (store Store) Save(ctx context.Context, project, mime string, data []byte, 
 
 // SaveTx lets an artifact and its inline images commit or roll back together.
 func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, project, mime string, data []byte, allowText bool) (Stored, error) {
+	if len(data) > MaxFileBytes {
+		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": MaxFileBytes / 1024 / 1024})
+	}
 	var exists int
 	if err := tx.SQL().QueryRowContext(ctx, "SELECT 1 FROM projects WHERE id = ?", project).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -80,8 +84,13 @@ func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, proje
 		return Stored{}, err
 	}
 	given := textutil.Lower(textutil.Trim(strings.SplitN(mime, ";", 2)[0]))
+	detected := http.DetectContentType(data)
 	if IsImage(given) {
 		mime = given
+	} else if allowText && (detected == "video/mp4" || detected == "video/webm") {
+		mime = detected
+	} else if allowText && isSpreadsheet(data) {
+		mime = SpreadsheetMIME
 	} else if allowText && !strings.HasPrefix(given, "image/") && IsText(data) {
 		mime = "text/plain"
 	} else {
@@ -94,12 +103,8 @@ func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, proje
 		}
 		return Stored{}, domainerr.New(key, map[string]any{"type": given})
 	}
-	limit := MaxFileBytes
-	if mime == "text/plain" {
-		limit = MaxTextBytes
-	}
-	if len(data) > limit {
-		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": limit / 1024 / 1024})
+	if mime == "text/plain" && len(data) > MaxTextBytes {
+		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": MaxTextBytes / 1024 / 1024})
 	}
 	hash := sha256.Sum256(data)
 	digest := hex.EncodeToString(hash[:])

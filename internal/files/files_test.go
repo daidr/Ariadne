@@ -73,6 +73,22 @@ func TestInvalidAttachmentAndOversizeAreRefused(t *testing.T) {
 	}
 }
 
+func TestVideoAttachmentsUseDetectedType(t *testing.T) {
+	store := newStore(t)
+	for _, file := range []struct {
+		data []byte
+		mime string
+	}{
+		{[]byte("\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), "video/mp4"},
+		{[]byte("\x1a\x45\xdf\xa3"), "video/webm"},
+	} {
+		saved, err := store.Save(t.Context(), "p1", "application/octet-stream", file.data, true)
+		if err != nil || saved.MIME != file.mime {
+			t.Fatalf("save %s: %+v %v", file.mime, saved, err)
+		}
+	}
+}
+
 func TestFileHTTPRequiresAuthenticationAndPreservesHeaders(t *testing.T) {
 	store := newStore(t)
 	file, err := store.Save(t.Context(), "p1", "text/plain", []byte("正文\n"), true)

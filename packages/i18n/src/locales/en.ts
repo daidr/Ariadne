@@ -220,7 +220,7 @@ export const en: Record<MessageKey, string> = {
   'project.references.remove': 'Remove',
   'project.source.hosting': 'Hosting',
   'project.source.hostingNone': 'None',
-  'project.source.clear': 'Remove',
+  'project.source.clear': 'Remove source',
   'source.remote':
     'Thread commands run on {host} as the user SSH logs in as; the connection forwards no agent, ports or X11, so commands cannot reach back to this machine.',
   'notice.memoryAdded': 'Saved to project memory: {text}',
@@ -436,7 +436,15 @@ export const en: Record<MessageKey, string> = {
     'This kind of file is not supported: {type} (use a PNG, JPEG, GIF, WebP or AVIF image)',
   'error.fileTooLarge': 'The file is too large; the limit is {max} MB',
   'error.attachmentType':
-    'This kind of file is not supported: {type} (send an image or a text file)',
+    'Unsupported attachment type: {type}. Send an image, text file, MP4, WebM or XLSX.',
+  'filePreview.title': 'File preview',
+  'filePreview.download': 'Download',
+  'filePreview.limited': 'Showing part of this sheet',
+  'filePreview.empty': 'This sheet is empty',
+  'filePreview.loading': 'Loading file',
+  'filePreview.error': 'Could not preview this file',
+  'filePreview.unsupported': 'Preview is unavailable for this file type',
+  'filePreview.tooLarge': 'This file is too large to preview',
   'error.tooManyAttachments': 'A message can carry at most {max} files',
   'error.askWithdrawn': 'This question was withdrawn: {reason}',
   'error.askClosed': 'This question was already answered or withdrawn',
@@ -811,8 +819,7 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.tab.instructions': 'Instructions',
   'projectSettings.tab.workspace': 'Workspace',
   'projectSettings.tab.routines': 'Routines',
-  'routine.empty':
-    'No routines yet. Tell the coordinator, e.g. "go through new issues every day at 9"',
+  'routine.empty': 'Try telling the coordinator “Go through new issues every day at 9”',
   'routine.placeholder': 'Sort the issues opened since yesterday and tell me about urgent ones',
   'routine.prompt': 'What to do',
   'routine.remove': 'Remove',
@@ -834,6 +841,7 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.checkHelp':
     'Runs after each file a thread edits, and a failure goes back to it; {placeholder} becomes the changed files',
   'projectSettings.env': 'Command environment variables',
+  'projectSettings.envAdd': 'Add',
   'projectSettings.autopilotMethod': 'Merge method',
   'projectSettings.budgetThread': 'Most one thread may use (k tokens)',
   'projectSettings.budgetProject': 'Most the project may use (k tokens)',
@@ -906,7 +914,7 @@ export const en: Record<MessageKey, string> = {
   'projectSettings.retention.keep': 'Until manually removed',
   'projectSettings.autopilot': 'Autopilot',
   'projectSettings.autopilotHelp':
-    'Merges once the review passes and checks are green, starts nodes whose dependencies are done, and asks you at milestones',
+    'Merges once the review and all checks pass, starts nodes whose dependencies are done, and asks you at milestones',
   'projectSettings.autopilotStarts': 'Starts right away: {titles}',
   'projectSettings.autopilotStartsNone': 'Nothing is ready to start yet',
   'recap.title': 'Away {time}: {parts}',
