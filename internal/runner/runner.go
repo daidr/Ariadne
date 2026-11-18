@@ -92,8 +92,8 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 	if model == nil {
 		return domainerr.New("error.noModel", nil)
 	}
-	id, err := runner.Repository.StartTurn(ctx, conversation.ID, model.Label)
-	if err != nil {
+	id, err := runner.Repository.StartScheduledTurn(ctx, conversation.ID, model.Label)
+	if err != nil || id == "" {
 		return err
 	}
 	turn := &turn{Runner: runner, conversation: conversation, id: id, instructionsDirty: true}
@@ -197,7 +197,7 @@ func (turn *turn) history(ctx context.Context) (int64, []transcript.Entry, error
 
 func (turn *turn) withImages(ctx context.Context, messages []transcript.Message) []sdk.Message {
 	store := files.Store{Events: turn.Repository.Store}
-	left := int64(24 << 20)
+	left := int64(transcript.MaxInputImageBytes)
 	return transcript.WithImageData(messages, func(attachment transcript.Attachment) (sdk.Image, bool) {
 		size, err := store.Info(ctx, turn.conversation.ProjectID, attachment.FileID)
 		if err != nil || size == nil || size.Size > left || !files.IsImage(size.MIME) {
@@ -217,6 +217,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 	config := turn.Settings.TurnSettings(conversation.ProjectID)
 	limits, _ := config["limits"].(map[string]any)
 	repeats := max(2, int(asNumber(limits["loopRepeats"])))
+	const maxCycle = 3
 	var recent [][32]byte
 	cuts, lastInput := 0, 0
 	hintedUnsent, compactionFailed := false, false
@@ -406,15 +407,12 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			return err
 		}
 		recent = append(recent, hash)
-		recent = recent[max(0, len(recent)-12):]
-		matches := 0
-		for _, seen := range recent {
-			if seen == hash {
-				matches++
+		recent = recent[max(0, len(recent)-repeats*maxCycle):]
+		for width := 1; width <= min(maxCycle, len(recent)/repeats); width++ {
+			cycle := recent[len(recent)-width*repeats:]
+			if slices.Equal(cycle[width:], cycle[:len(cycle)-width]) {
+				return domainerr.New("error.repeating", map[string]any{"count": repeats})
 			}
-		}
-		if matches >= repeats {
-			return domainerr.New("error.repeating", map[string]any{"count": matches})
 		}
 	}
 }
@@ -500,7 +498,7 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			content = textutil.HeadUnits(err.Error(), 2000)
 		}
 		content = strings.Clone(textutil.HeadUnits(content, 200_000))
-		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, err != nil})
+		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, err != nil, attachments})
 		_, _ = hash.Write(encoded)
 		if err := turn.Repository.RecordToolResult(ctx, turn.conversation.ID, turn.id, core.ToolResult{
 			ToolCallID: call.ID, Name: call.Name, Content: content, IsError: err != nil, Files: attachments,

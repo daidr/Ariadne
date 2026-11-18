@@ -152,7 +152,7 @@ func (janitor *Janitor) run(ctx context.Context, watch <-chan struct{}, seq int6
 				}
 				key := ""
 				switch event.Type {
-				case "branch.merged", "pull_request.closed", "thread.reported":
+				case "branch.merged", "pull_request.closed", "thread.reported", "thread.completed":
 					key = "threadId"
 				case "turn.finished":
 					key = "conversationId"

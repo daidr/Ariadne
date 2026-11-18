@@ -108,6 +108,17 @@ func TestWorkspaceAcceptsOriginalRootAlias(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadDistinguishesMissingFileFromOutsidePath(t *testing.T) {
+	workspace := newTestWorkspace(t, t.TempDir(), WorkspaceOptions{})
+	if _, err := workspace.ReadBytes(t.Context(), ".ariadne/screenshots/baseline.png", 1024); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected file not found for a missing workspace path, got %v", err)
+	}
+	var outside *sdk.WorkspacePathError
+	if _, err := workspace.ReadBytes(t.Context(), "../baseline.png", 1024); !errors.As(err, &outside) {
+		t.Fatalf("expected workspace path error for an outside path, got %v", err)
+	}
+}
+
 func TestWorkspaceStaysInsideRootDuringSymlinkSwap(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(outside, "kept"), []byte("private"), 0600)

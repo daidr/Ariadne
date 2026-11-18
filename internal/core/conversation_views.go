@@ -314,6 +314,14 @@ type TranscriptOptions struct {
 	ModelContext bool
 }
 
+// A coordinator's user-in-thread note points to the original message. Resolve
+// attachment metadata here so existing transcripts work without rebuilding them.
+const sourceAttachments = `CASE WHEN t.kind = 'note' AND json_extract(t.payload, '$.type') = 'user-in-thread'
+ THEN (SELECT m.attachments FROM messages m
+  WHERE m.id = json_extract(t.payload, '$.messageId') AND m.project_id = t.project_id
+   AND m.conversation_id = json_extract(t.payload, '$.threadId') AND m.author = 'user'
+   AND m.attachments != '[]') END AS source_attachments`
+
 func listTranscript(ctx context.Context, db queryer, id string, options TranscriptOptions) ([]object, error) {
 	after, upTo := int64(-1), maxSafeInteger
 	if options.After != nil {
@@ -322,7 +330,7 @@ func listTranscript(ctx context.Context, db queryer, id string, options Transcri
 	if options.UpTo != nil {
 		upTo = *options.UpTo
 	}
-	query := "SELECT seq, kind, ref, payload FROM transcript WHERE conversation_id = ? AND seq > ? AND seq <= ? ORDER BY id"
+	query := "SELECT t.seq, t.kind, t.ref, t.payload, " + sourceAttachments + " FROM transcript t WHERE t.conversation_id = ? AND t.seq > ? AND t.seq <= ? ORDER BY t.id"
 	if options.ModelContext {
 		query = `WITH scope AS MATERIALIZED (
  SELECT id, seq, kind FROM transcript WHERE conversation_id = ? AND seq > ? AND seq <= ?
@@ -332,7 +340,7 @@ func listTranscript(ctx context.Context, db queryer, id string, options Transcri
  SELECT t.id, json_extract(t.payload, '$.upTo') AS up_to FROM latest_summary s
  JOIN transcript t ON t.id = s.id
 )
-SELECT t.seq, t.kind, t.ref, t.payload FROM scope s JOIN transcript t ON t.id = s.id
+SELECT t.seq, t.kind, t.ref, t.payload, ` + sourceAttachments + ` FROM scope s JOIN transcript t ON t.id = s.id
 WHERE s.kind IN ('message', 'prompt', 'cleared')
  OR s.id = (SELECT id FROM boundary)
  OR (s.kind != 'summary' AND
@@ -377,6 +385,13 @@ ORDER BY s.id`
 				entry["openAsks"] = asks
 			}
 		case "note":
+			if row.present("source_attachments") {
+				files, err := row.json("source_attachments", nil)
+				if err != nil {
+					return nil, err
+				}
+				asObject(payload)["attachments"] = files
+			}
 			entry["note"] = payload
 		case "step", "tool", "summary", "cleared", "prompt":
 			for key, value := range asObject(payload) {

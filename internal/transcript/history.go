@@ -13,6 +13,7 @@ import (
 
 const KeptUserTokens = 20000
 const MaxImages = 20
+const MaxInputImageBytes = 24 << 20
 const MaxAttachedChars = 100000
 const ClearableChars = 500
 const CutHint = `<output_cut_off>Your reply above hit the output length limit and was cut off; anything unfinished in it, such as a tool call whose arguments were not complete, was dropped, and the user has not seen it. Go on from where it stopped, in smaller pieces: keep replies shorter and write a large file in parts (create it with the first part, then add the rest in further edits).</output_cut_off>`

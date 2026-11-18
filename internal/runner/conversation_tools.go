@@ -35,6 +35,9 @@ func (turn *turn) recentMessages(ctx context.Context, id string, input args) ([]
 		content := textutil.HeadUnits(message.Content, min(16000, budget))
 		budget -= len(content)
 		item := args{"id": message.ID, "author": message.Author, "kind": message.Kind, "content": content, "edited": message.EditedAt != nil}
+		if files, _ := message.Attachments.([]any); len(files) > 0 {
+			item["attachments"] = files
+		}
 		if message.Ask != nil {
 			item["ask"] = message.Ask
 		}
@@ -128,7 +131,19 @@ func (turn *turn) suggestConnector(ctx context.Context, input args) (string, err
 
 func (turn *turn) coordinatorTools() []tool {
 	return []tool{
-		specification("stop_thread", "Stop a thread and its running command. Give a short reason that the user will see.",
+		specification("complete_thread", "Mark a discussion complete when the user asks to finish, close, or archive it. This preserves the work and its branch.",
+			args{"threadId": threadIDField()}, []string{"threadId"}, func(ctx context.Context, input args) (string, error) {
+				if !turn.userSpoke {
+					return "", errors.New("a request from the user is required to complete a thread")
+				}
+				thread, err := turn.ownThread(ctx, text(input, "threadId"))
+				if err != nil {
+					return "", err
+				}
+				after, err := turn.Repository.FinishThread(ctx, thread.ID, turn.conversation.ID)
+				return reply(args{"threadId": thread.ID, "stage": after.Stage}, err)
+			}),
+		specification("stop_thread", "Pause a thread and its running command when its work should resume later. Give a short reason that the user will see.",
 			args{"threadId": field("string"), "reason": field("string")}, []string{"threadId", "reason"}, func(ctx context.Context, input args) (string, error) {
 				thread, err := turn.ownThread(ctx, text(input, "threadId"))
 				if err != nil {
@@ -146,7 +161,7 @@ func (turn *turn) coordinatorTools() []tool {
 				_, err = turn.Repository.ResumeThread(ctx, thread.ID, turn.conversation.ID)
 				return "Resumed.", err
 			}),
-		specification("read_thread", "Read a thread's latest messages, checklist and status.",
+		specification("read_thread", "Read a thread's latest messages, attachment names and IDs, checklist and status.",
 			args{"threadId": threadIDField(), "limit": field("integer")}, []string{"threadId"}, func(ctx context.Context, input args) (string, error) {
 				thread, err := turn.ownThread(ctx, text(input, "threadId"))
 				if err != nil {

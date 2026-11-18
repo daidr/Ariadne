@@ -109,6 +109,8 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if d.str("report") == "done" {
 			upstreamDone(w, e, d)
 		}
+	case "thread.completed":
+		upstreamDone(w, e, d)
 	case "review.requested":
 		author := w.one("SELECT last_summary FROM threads WHERE id = ?", d["threadId"])
 		before := w.one("SELECT comments, replies FROM reviews WHERE thread_id = ? AND id < ? ORDER BY id DESC LIMIT 1", d["threadId"], e.Seq)

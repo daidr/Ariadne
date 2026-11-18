@@ -65,7 +65,17 @@ type ToolResult struct {
 	Timing     any
 }
 
-func (repo *Repository) StartTurn(ctx context.Context, id, model string) (turnID string, err error) {
+func (repo *Repository) StartTurn(ctx context.Context, id, model string) (string, error) {
+	return repo.startTurn(ctx, id, model, false)
+}
+
+// StartScheduledTurn rechecks the pending work after the scheduler has selected
+// a conversation. An empty ID means the queued work was withdrawn meanwhile.
+func (repo *Repository) StartScheduledTurn(ctx context.Context, id, model string) (string, error) {
+	return repo.startTurn(ctx, id, model, true)
+}
+
+func (repo *Repository) startTurn(ctx context.Context, id, model string, scheduled bool) (turnID string, err error) {
 	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
 		current, err := conversation(ctx, tx.SQL(), id)
 		if err != nil {
@@ -74,19 +84,25 @@ func (repo *Repository) StartTurn(ctx context.Context, id, model string) (turnID
 		if current.Turn != nil {
 			return domainerr.New("error.turnRunning", nil)
 		}
-		turnID, err = newID("trn")
-		if err != nil {
-			return err
+		if scheduled && current.PendingSeq == 0 {
+			return nil
 		}
 		changes := []change{}
 		if current.Role == "thread" {
-			rows, err := records(ctx, tx.SQL(), "SELECT started FROM threads WHERE id = ?", id)
+			rows, err := records(ctx, tx.SQL(), "SELECT started, stopped_reason FROM threads WHERE id = ?", id)
 			if err != nil {
 				return err
+			}
+			if scheduled && len(rows) > 0 && rows[0].present("stopped_reason") {
+				return nil
 			}
 			if len(rows) > 0 && !rows[0].flag("started") {
 				changes = append(changes, change{"thread.started", object{"threadId": id}})
 			}
+		}
+		turnID, err = newID("trn")
+		if err != nil {
+			return err
 		}
 		changes = append(changes, change{"turn.started", object{"conversationId": id, "turnId": turnID, "model": model}})
 		return appendChanges(tx, current.ProjectID, changes)
@@ -405,6 +421,9 @@ func (repo *Repository) endBeforeTurn(ctx context.Context, id, outcome string, f
 		current, err := conversation(ctx, tx.SQL(), id)
 		if err != nil {
 			return err
+		}
+		if current.Role == "thread" && current.PendingSeq == 0 && current.Turn == nil {
+			return nil
 		}
 		turnID, err := newID("trn")
 		if err != nil {

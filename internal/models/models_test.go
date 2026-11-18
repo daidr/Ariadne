@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,18 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 		if provider.Find != nil {
 			found = append(found, provider.Find(sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return true }})...)
 		}
-		native = append(native, map[string]any{"info": provider.Info, "found": found, "describe": provider.Describe(config, request)})
+		describe := provider.Describe(config, request)
+		if provider.Info.Kind == "codex" {
+			trace, _ := describe.(map[string]any)
+			argv, _ := trace["argv"].([]string)
+			hooks := slices.Index(argv, "features.hooks=false")
+			if hooks < 1 || argv[hooks-1] != "-c" {
+				t.Fatalf("Codex launch must disable hooks: %v", argv)
+			}
+			// The legacy provider inherited hooks. Compare the other flags as before.
+			trace["argv"] = slices.Delete(argv, hooks-1, hooks+1)
+		}
+		native = append(native, map[string]any{"info": provider.Info, "found": found, "describe": describe})
 	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {

@@ -3,6 +3,7 @@ package transcript
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -299,8 +300,15 @@ func ToMessages(entries []Entry, titleOf func(string) string, options ChatOption
 			note := obj(entry["note"])
 			var images []Attachment
 			notes := ""
-			if note["type"] == "artifact-feedback" {
+			switch note["type"] {
+			case "artifact-feedback":
 				images, notes = viewable(attachments(note["images"]), options)
+			case "user-in-thread":
+				var files string
+				files, images = attachedFiles(attachments(note["attachments"]), options)
+				if files != "" {
+					notes = "\n\n" + files
+				}
 			}
 			appendUser(Message{Role: "user", Content: DescribeNote(note, titleOf) + notes, Images: images})
 		}
@@ -310,23 +318,39 @@ func ToMessages(entries []Entry, titleOf func(string) string, options ChatOption
 }
 func keepNewestImages(messages []Message) []Message {
 	kept := 0
+	remaining := int64(MaxInputImageBytes)
 	for i := len(messages) - 1; i >= 0; i-- {
 		message := &messages[i]
 		if message.Role != "user" && message.Role != "tool" || len(message.Images) == 0 {
 			continue
 		}
-		room := max(0, MaxImages-kept)
-		drop := max(0, len(message.Images)-room)
-		kept += len(message.Images) - drop
-		if drop == 0 {
+		var bytes int64
+		for _, image := range message.Images {
+			bytes += image.Size
+		}
+		if len(message.Images) <= MaxImages-kept && bytes <= remaining {
+			kept += len(message.Images)
+			remaining -= bytes
 			continue
 		}
-		notes := []string{}
-		for _, file := range message.Images[:drop] {
-			notes = append(notes, `[image "`+file.Name+`" was shown earlier and is no longer attached]`)
+		var notes []string
+		var images []Attachment
+		for j := len(message.Images) - 1; j >= 0; j-- {
+			file := message.Images[j]
+			switch {
+			case kept == MaxImages:
+				notes = append(notes, `[image "`+file.Name+`" was shown earlier and is no longer attached]`)
+			case file.Size > remaining:
+				notes = append(notes, `[image "`+file.Name+`" was omitted because of the total image size limit]`)
+			default:
+				images = append(images, file)
+				remaining -= file.Size
+				kept++
+			}
 		}
+		slices.Reverse(notes)
+		slices.Reverse(images)
 		message.Content += "\n" + strings.Join(notes, "\n")
-		images := append([]Attachment(nil), message.Images[drop:]...)
 		message.Images = images
 	}
 	return messages

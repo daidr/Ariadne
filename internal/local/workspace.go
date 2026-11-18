@@ -152,6 +152,9 @@ func (workspace *Workspace) open(path string, flags int) (*os.File, error) {
 		return nil, err
 	}
 	file, err := workspace.root.OpenFile(relative, flags, 0666)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+	}
 	if err != nil {
 		return nil, pathError(path)
 	}

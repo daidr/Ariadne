@@ -15,15 +15,14 @@ const MAX_MODEL_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_SIDE = 2560
 
 /**
- * A picture too large for models, drawn again smaller (JPEG) until it fits. Animated GIFs
- * and pictures the browser cannot draw are sent as they are; the model is told it could
- * not look at them.
+ * Convert AVIF and oversized pictures to a model-compatible JPEG. Preserve
+ * GIFs and originals that the browser cannot convert.
  */
 async function fitForModel(file: File): Promise<Blob> {
   if (
     !file.type.startsWith('image/') ||
     file.type === 'image/gif' ||
-    file.size <= MAX_MODEL_IMAGE_BYTES
+    (file.size <= MAX_MODEL_IMAGE_BYTES && file.type !== 'image/avif')
   ) {
     return file
   }
@@ -48,6 +47,8 @@ async function fitForModel(file: File): Promise<Blob> {
       const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
       if (blob.size <= MAX_MODEL_IMAGE_BYTES) return blob
     }
+    return file
+  } catch {
     return file
   } finally {
     bitmap.close()

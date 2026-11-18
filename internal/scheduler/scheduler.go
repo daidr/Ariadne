@@ -178,7 +178,7 @@ func (scheduler *Scheduler) consume(seq int64) (int64, error) {
 					scheduler.options.OnThreadStopped(data.ThreadID)
 				}
 			}
-			finish := event.Type == "branch.merged" || event.Type == "pull_request.closed" || event.Type == "thread.reviewed"
+			finish := event.Type == "branch.merged" || event.Type == "pull_request.closed" || event.Type == "thread.reviewed" || event.Type == "thread.completed"
 			if event.Type == "thread.reported" {
 				finish = data.Report == "ready" || data.Report == "done" || data.Report == "failed" || data.Report == "blocked"
 			}

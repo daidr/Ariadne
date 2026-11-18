@@ -32,7 +32,12 @@ func CodexArgv(settings CodexSettings) []string {
 	if command == "" {
 		command = "codex"
 	}
-	argv := append(process.SplitCommand(command), "app-server", "-c", `web_search="disabled"`, "-c", "mcp_servers={}", "-c", "features.step_model_switching=true")
+	argv := append(process.SplitCommand(command), "app-server",
+		"-c", `web_search="disabled"`,
+		"-c", "mcp_servers={}",
+		"-c", "features.hooks=false",
+		"-c", "features.step_model_switching=true",
+	)
 	for _, tool := range codexOwnTools {
 		argv = append(argv, "-c", "features."+tool+"=false")
 	}

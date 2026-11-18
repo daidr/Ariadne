@@ -193,6 +193,34 @@ func (repo *Repository) CompleteThread(ctx context.Context, threadID string) (Th
 		return []change{{"thread.reviewed", object{"threadId": threadID}}}, nil
 	})
 }
+
+// FinishThread records an explicit request to close a discussion without
+// changing its workspace, branch, or previous report contents.
+func (repo *Repository) FinishThread(ctx context.Context, threadID, by string) (ThreadView, error) {
+	return repo.mutateThread(ctx, threadID, func(tx *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if current.Stage == "answer" {
+			return nil, badInput("the thread still has a question waiting for an answer")
+		}
+		conv, err := conversation(ctx, tx.SQL(), threadID)
+		if err != nil {
+			return nil, err
+		}
+		if conv.Turn != nil || (current.Review != nil && current.Review.Reviewing) {
+			return nil, domainerr.New("error.merge.working", nil)
+		}
+		if current.Stage == "done" && current.Aside == nil && conv.Wait == nil {
+			return nil, nil
+		}
+		var changes []change
+		if wait := conv.Wait; wait != nil {
+			changes = append(changes, change{"conversation.wait_ended", object{"conversationId": threadID,
+				"waitId": wait.ID, "how": "cancelled", "by": by, "until": wait.Until, "note": wait.Note}})
+		}
+		changes = append(changes, change{"thread.completed", object{"threadId": threadID, "by": by, "summary": current.LastSummary}})
+		return changes, nil
+	})
+}
+
 func (repo *Repository) ResumeThread(ctx context.Context, threadID, by string) (ThreadView, error) {
 	return repo.mutateThread(ctx, threadID, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
 		if current.Stopped == nil {
