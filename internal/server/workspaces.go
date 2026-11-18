@@ -88,7 +88,7 @@ func (api *API) registerWorkspaces() {
 		if manager == nil {
 			return object{"projects": []any{}, "windows": runtime.GOOS == "windows"}, 200, nil
 		}
-		projects, err := manager.ListWorktrees(r.Context())
+		projects, err := manager.ListWorktrees(r.Context(), r.URL.Query().Get("sizes") != "0")
 		return object{"projects": projects, "windows": runtime.GOOS == "windows"}, 200, err
 	})
 	api.add("DELETE", "/api/projects/:projectId/worktrees/:threadId", func(r *http.Request) (any, int, error) {

@@ -10,6 +10,10 @@ func (api *API) registerData() {
 		if api.options.Data == nil {
 			return nil, 0, badInput("data")
 		}
+		if r.URL.Query().Get("sizes") == "0" {
+			summary, err := api.options.Data.Summary()
+			return summary, 200, err
+		}
 		usage, err := api.options.Data.Usage(r.Context())
 		return usage, 200, err
 	})

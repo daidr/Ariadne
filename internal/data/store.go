@@ -126,7 +126,9 @@ func fileSize(path string) (int64, error) {
 	}
 	return info.Size(), nil
 }
-func (store *Store) Usage(ctx context.Context) (Usage, error) {
+
+// Summary lists backups and database size without walking managed directories.
+func (store *Store) Summary() (Usage, error) {
 	result := Usage{Home: store.options.Home, BackupsDir: store.backupsDir()}
 	for _, path := range []string{store.options.DatabasePath, store.options.DatabasePath + "-wal", store.options.DatabasePath + "-shm"} {
 		size, err := fileSize(path)
@@ -137,6 +139,11 @@ func (store *Store) Usage(ctx context.Context) (Usage, error) {
 	}
 	var err error
 	result.Backups, err = store.Backups()
+	return result, err
+}
+
+func (store *Store) Usage(ctx context.Context) (Usage, error) {
+	result, err := store.Summary()
 	if err != nil {
 		return Usage{}, err
 	}

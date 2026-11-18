@@ -698,7 +698,13 @@ export const api = {
   getWorkSettings: () => request<WorkSettings>('GET', '/api/settings/work'),
   saveWorkSettings: (input: Partial<Omit<WorkSettings, 'defaults'>>) =>
     request<WorkSettings>('PUT', '/api/settings/work', input),
-  getDataUsage: () => request<DataUsage>('GET', '/api/settings/data'),
+  getDataUsage: (sizes: boolean, signal?: AbortSignal) =>
+    request<DataUsage>(
+      'GET',
+      sizes ? '/api/settings/data' : '/api/settings/data?sizes=0',
+      undefined,
+      signal,
+    ),
   backupData: () => request<{ backup: BackupInfo }>('POST', '/api/settings/data/backups'),
   removeBackup: (name: string) =>
     request<void>('DELETE', `/api/settings/data/backups/${encodeURIComponent(name)}`),
@@ -757,8 +763,13 @@ export const api = {
     ),
   undoMerge: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/merge/undo`),
-  listWorktrees: () =>
-    request<{ projects: ProjectWorktrees[]; windows: boolean }>('GET', '/api/worktrees'),
+  listWorktrees: (sizes: boolean, signal?: AbortSignal) =>
+    request<{ projects: ProjectWorktrees[]; windows: boolean }>(
+      'GET',
+      sizes ? '/api/worktrees' : '/api/worktrees?sizes=0',
+      undefined,
+      signal,
+    ),
   removeWorktree: (projectId: string, threadId: string) =>
     request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),
   refreshPullRequest: (threadId: string) =>

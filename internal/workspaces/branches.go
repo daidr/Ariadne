@@ -83,9 +83,9 @@ func (manager *Manager) Branches(ctx context.Context, project string) (*sdk.Bran
 		}
 	}
 	if raw.Worktrees != nil {
-		proxy.Worktrees = func(ctx context.Context) ([]sdk.WorktreeInfo, error) {
+		proxy.Worktrees = func(ctx context.Context, measure bool) ([]sdk.WorktreeInfo, error) {
 			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.WorktreeInfo, error) {
-				return b.Worktrees(ctx)
+				return b.Worktrees(ctx, measure)
 			})
 		}
 	}

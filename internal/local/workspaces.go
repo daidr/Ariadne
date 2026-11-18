@@ -488,7 +488,7 @@ func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base s
 	}
 	return BranchChanges(ctx, factory.git, BranchInput{Branch: branch, Base: base, BaseRef: "refs/heads/" + base, Worktree: dir})
 }
-func (factory *Workspaces) Worktrees(ctx context.Context) ([]sdk.WorktreeInfo, error) {
+func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.WorktreeInfo, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {
 		return nil, err
@@ -511,10 +511,24 @@ func (factory *Workspaces) Worktrees(ctx context.Context) ([]sdk.WorktreeInfo, e
 				continue
 			}
 			path := filepath.Join(root, entry.Name())
-			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: path, Bytes: fsutil.DiskUsage(ctx, path)})
+			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: path})
 		}
 	}
-	return result, nil
+	if measure {
+		// DiskUsage limits concurrent walks globally. Bound the workers here too
+		// so a large list does not queue a separate goroutine for every directory.
+		workers := min(4, len(result))
+		var scans sync.WaitGroup
+		for worker := range workers {
+			scans.Go(func() {
+				for i := worker; i < len(result) && ctx.Err() == nil; i += workers {
+					result[i].Bytes = fsutil.DiskUsage(ctx, result[i].Path)
+				}
+			})
+		}
+		scans.Wait()
+	}
+	return result, ctx.Err()
 }
 func (factory *Workspaces) Close() error {
 	factory.mu.Lock()

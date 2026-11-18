@@ -26,6 +26,29 @@ func newFactory(t *testing.T, options FactoryOptions) *Workspaces {
 	})
 	return factory
 }
+func TestWorktreesListsPathsWithoutSizingThem(t *testing.T) {
+	factory := newWorkspaceOwner()
+	t.Cleanup(func() { _ = factory.Close() })
+	root := t.TempDir()
+	factory.roots = []string{root}
+	path := filepath.Join(root, "thr_a")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "payload.txt"), []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	worktrees, err := factory.Worktrees(t.Context(), false)
+	if err != nil || len(worktrees) != 1 || worktrees[0].Path != path || worktrees[0].Bytes != nil {
+		t.Fatalf("unexpected worktree list: %+v, %v", worktrees, err)
+	}
+	measured, err := factory.Worktrees(t.Context(), true)
+	if err != nil || len(measured) != 1 || measured[0].Bytes == nil || *measured[0].Bytes < 4 {
+		t.Fatalf("unexpected measured worktrees: %+v, %v", measured, err)
+	}
+}
+
 func TestPlainWorkspacesShareFilesAndReleaseClosedHandles(t *testing.T) {
 	root := t.TempDir()
 	empty := ""

@@ -124,6 +124,25 @@ func TestBackupNamesRestoreRemovalAndDailyRetention(t *testing.T) {
 		t.Fatal(backups)
 	}
 }
+func TestSummaryReturnsBackupsWithoutScanningPlugins(t *testing.T) {
+	store, _ := testStore(t, func(context.Context, string) *int64 {
+		t.Error("summary started a disk scan")
+		return nil
+	})
+	if err := os.Mkdir(filepath.Join(store.options.Home, "plugins"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := store.Backup(t.Context(), false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.Summary()
+	if err != nil || summary.Database == 0 || summary.Plugins != nil ||
+		len(summary.Backups) != 1 || summary.Backups[0].Name != backup.Name {
+		t.Fatalf("unexpected summary: %+v, %v", summary, err)
+	}
+}
+
 func TestUsageScansShareWorkExpireAndClose(t *testing.T) {
 	var calls atomic.Int64
 	entered, release := make(chan struct{}, 10), make(chan struct{}, 10)

@@ -74,7 +74,7 @@ func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
 				}
 				return sdk.MergeOutcome{Kind: "merged", SHA: strings.Repeat("c", 40), Head: strings.Repeat("b", 40)}, nil
 			},
-			UndoMerge: func(context.Context, sdk.UndoMergeRequest) error { return nil }, Remove: func(context.Context, string, sdk.WorktreeRemoveOptions) (bool, error) { return true, nil }, Worktrees: func(context.Context) ([]sdk.WorktreeInfo, error) { return []sdk.WorktreeInfo{}, nil },
+			UndoMerge: func(context.Context, sdk.UndoMergeRequest) error { return nil }, Remove: func(context.Context, string, sdk.WorktreeRemoveOptions) (bool, error) { return true, nil }, Worktrees: func(context.Context, bool) ([]sdk.WorktreeInfo, error) { return []sdk.WorktreeInfo{}, nil },
 		}}}, nil
 	}})
 	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})

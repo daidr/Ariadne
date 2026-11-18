@@ -10,28 +10,41 @@ import {
   DouText,
 } from 'dou-ui'
 import { DatabasePlusIcon, TrashIcon } from '@dou-ui/icons'
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ApiError, type DataUsage } from '../api'
 import { formatBytes } from '../bytes'
 import { locale, t, tm } from '../i18n'
 
 // What Ariadne's data directory takes, and copies of the database made on request.
 const usage = ref<DataUsage | null>(null)
+const pluginBytes = ref<number | null>()
 const error = ref<string | null>(null)
 const backingUp = ref(false)
 const removing = ref<string | null>(null)
+const controller = new AbortController()
+const { signal } = controller
+onBeforeUnmount(() => controller.abort())
 
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
 
 async function load() {
   try {
-    usage.value = await api.getDataUsage()
+    usage.value = await api.getDataUsage(false, signal)
   } catch (cause) {
-    error.value = message(cause)
+    if (!signal.aborted) error.value = message(cause)
   }
 }
-onMounted(load)
+onMounted(async () => {
+  await load()
+  if (!usage.value || signal.aborted) return
+  try {
+    pluginBytes.value = (await api.getDataUsage(true, signal)).plugins
+  } catch (cause) {
+    pluginBytes.value = null
+    if (!signal.aborted) error.value = message(cause)
+  }
+})
 
 const time = (at: number) =>
   new Date(at).toLocaleString(locale.value, {
@@ -81,8 +94,9 @@ async function remove(name: string) {
         <DouDescriptionsItem :label="t('data.database')">
           {{ formatBytes(usage.database) }}
         </DouDescriptionsItem>
-        <DouDescriptionsItem v-if="usage.plugins !== null" :label="t('data.plugins')">
-          {{ formatBytes(usage.plugins) }}
+        <DouDescriptionsItem v-if="pluginBytes !== null" :label="t('data.plugins')">
+          <DouSpinner v-if="pluginBytes === undefined" size="sm" />
+          <template v-else>{{ formatBytes(pluginBytes) }}</template>
         </DouDescriptionsItem>
       </DouDescriptions>
       <div class="data-head">

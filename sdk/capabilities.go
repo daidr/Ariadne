@@ -63,13 +63,14 @@ type WorktreeRemoveOptions struct {
 	Spare   bool `json:"spare,omitempty"`
 }
 type BranchCapability struct {
-	Changes       func(context.Context, ThreadBranch, string) (*BranchChanges, error)
-	File          func(context.Context, FileVersionRequest) (FileVersions, error)
-	Merged        func(context.Context, ThreadBranch, string) (bool, error)
-	Merge         func(context.Context, MergeRequest) (MergeOutcome, error)
-	UndoMerge     func(context.Context, UndoMergeRequest) error
-	Remove        func(context.Context, string, WorktreeRemoveOptions) (bool, error)
-	Worktrees     func(context.Context) ([]WorktreeInfo, error)
+	Changes   func(context.Context, ThreadBranch, string) (*BranchChanges, error)
+	File      func(context.Context, FileVersionRequest) (FileVersions, error)
+	Merged    func(context.Context, ThreadBranch, string) (bool, error)
+	Merge     func(context.Context, MergeRequest) (MergeOutcome, error)
+	UndoMerge func(context.Context, UndoMergeRequest) error
+	Remove    func(context.Context, string, WorktreeRemoveOptions) (bool, error)
+	// Worktrees can list paths without measuring them when measure is false.
+	Worktrees     func(ctx context.Context, measure bool) ([]WorktreeInfo, error)
 	SharesStorage func(context.Context) (bool, error)
 	Snapshot      func(context.Context, string) (*string, error)
 	Diff          func(context.Context, string, string) ([]ChangedFile, error)

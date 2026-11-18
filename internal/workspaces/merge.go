@@ -254,7 +254,7 @@ type ProjectWorktrees struct {
 	Error     *domainerr.Error `json:"error"`
 }
 
-func (manager *Manager) ListWorktrees(ctx context.Context) ([]ProjectWorktrees, error) {
+func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]ProjectWorktrees, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (manager *Manager) ListWorktrees(ctx context.Context) ([]ProjectWorktrees, 
 			if branches == nil || branches.Worktrees == nil {
 				return nil
 			}
-			worktrees, err := branches.Worktrees(ctx)
+			worktrees, err := branches.Worktrees(ctx, measure)
 			if err != nil {
 				return err
 			}
@@ -293,7 +293,7 @@ func (manager *Manager) ListWorktrees(ctx context.Context) ([]ProjectWorktrees, 
 				}
 				listed.Worktrees = append(listed.Worktrees, ListedWorktree{WorktreeInfo: worktree, Thread: own})
 			}
-			if len(listed.Worktrees) > 0 && branches.SharesStorage != nil {
+			if measure && len(listed.Worktrees) > 0 && branches.SharesStorage != nil {
 				shared, err := branches.SharesStorage(ctx)
 				if err != nil {
 					return err
