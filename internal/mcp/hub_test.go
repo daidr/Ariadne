@@ -272,6 +272,7 @@ func TestHubToolChangeBurstCoalescesAndCachesExpire(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	defer server.CloseClientConnections()
 	config := ServerConfig{ID: "server", Transport: "http", URL: server.URL}
 	source := &serverConfigSource{}
 	source.set(config)

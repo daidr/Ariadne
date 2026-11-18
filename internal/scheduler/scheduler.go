@@ -198,12 +198,25 @@ func (scheduler *Scheduler) consume(seq int64) (int64, error) {
 }
 func (scheduler *Scheduler) fill() error {
 	repo := scheduler.options.Repository
+	// A running turn may finish between the pending query and dispatch. The
+	// query might see a pending message before that turn starts or settles it.
+	// Skip every turn that owned its slot before the snapshot. Finishing the
+	// run wakes the scheduler, which can then read the current pending state.
+	scheduler.mu.Lock()
+	active := make(map[string]bool, len(scheduler.running))
+	for id := range scheduler.running {
+		active[id] = true
+	}
+	scheduler.mu.Unlock()
 	pending, err := repo.ListPendingConversations(scheduler.ctx)
 	if err != nil {
 		return err
 	}
 	caps := map[string]*int{}
 	for _, conversation := range pending {
+		if active[conversation.ID] {
+			continue
+		}
 		if conversation.Role != "coordinator" {
 			if _, known := caps[conversation.ProjectID]; !known {
 				project, err := repo.GetProject(scheduler.ctx, conversation.ProjectID)

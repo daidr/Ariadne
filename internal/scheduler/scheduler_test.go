@@ -69,7 +69,8 @@ func blockedRunner(repo *core.Repository, starts chan<- started) func(context.Co
 }
 func start(t *testing.T, repo *core.Repository, slots, reserved int, run func(context.Context, core.ConversationView) error) *Scheduler {
 	t.Helper()
-	scheduler, err := New(Options{Repository: repo, Slots: intPointer(slots), ReservedSlots: intPointer(reserved), Run: run})
+	scheduler, err := New(Options{Repository: repo, Slots: intPointer(slots), ReservedSlots: intPointer(reserved), Run: run,
+		OnError: func(err error) { t.Error(err) }})
 	if err != nil {
 		t.Fatal(err)
 	}

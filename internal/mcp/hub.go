@@ -451,6 +451,19 @@ func (hub *Hub) refresh(conn *connection) {
 		case <-conn.ctx.Done():
 			return
 		case <-conn.changes:
+			// A broker may emit many notifications while rebuilding its tool
+			// catalog. Keep one pending refresh and bound the request rate.
+			timer := time.NewTimer(50 * time.Millisecond)
+			select {
+			case <-conn.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			select {
+			case <-conn.changes:
+			default:
+			}
 			ctx, cancel := context.WithTimeout(conn.ctx, hub.options.SetupTimeout)
 			tools, err := conn.client.ListTools(ctx)
 			cancel()
