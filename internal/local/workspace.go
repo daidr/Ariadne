@@ -27,6 +27,7 @@ type Workspace struct {
 	mu          sync.RWMutex
 	root        *os.Root
 	directory   string
+	inputDir    string
 	options     WorkspaceOptions
 	life        context.Context
 	cancel      context.CancelFunc
@@ -58,7 +59,7 @@ func NewWorkspace(directory string, options WorkspaceOptions) (*Workspace, error
 		options.Base = new(*options.Base)
 	}
 	life, cancel := context.WithCancel(context.Background())
-	return &Workspace{root: root, directory: resolved, options: options, life: life, cancel: cancel}, nil
+	return &Workspace{root: root, directory: resolved, inputDir: absolute, options: options, life: life, cancel: cancel}, nil
 }
 func (workspace *Workspace) Info() sdk.WorkspaceInfo {
 	info := sdk.WorkspaceInfo{ID: workspace.options.ID, Label: workspace.directory, Local: true}
@@ -87,6 +88,12 @@ func (workspace *Workspace) resolve(path string) (string, error) {
 	target := filepath.Clean(filepath.Join(workspace.directory, filepath.FromSlash(path)))
 	if filepath.IsAbs(path) {
 		target = filepath.Clean(path)
+		if !within(target, workspace.directory) && within(target, workspace.inputDir) {
+			// The caller may use the spelling with which the workspace was
+			// opened, such as /var on macOS or an 8.3 path on Windows.
+			relative, _ := filepath.Rel(workspace.inputDir, target)
+			target = filepath.Join(workspace.directory, relative)
+		}
 	}
 	if !within(target, workspace.directory) {
 		return "", pathError(path)

@@ -40,3 +40,28 @@ func TestRemovalCannotEscapeTheOwnedRoot(t *testing.T) {
 		t.Fatal("cancelled cleanup continued")
 	}
 }
+
+func TestRemovalAcceptsCanonicalChildUnderRootAlias(t *testing.T) {
+	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skip("symlink privileges unavailable")
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveTree(t.Context(), alias, root); err == nil {
+		t.Fatal("cleanup accepted its canonical root")
+	}
+	if err := RemoveTree(t.Context(), alias, child); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(child); !os.IsNotExist(err) {
+		t.Fatal("owned child was not removed", err)
+	}
+}

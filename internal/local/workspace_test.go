@@ -84,6 +84,30 @@ func TestWorkspacePathsAndHiddenGit(t *testing.T) {
 		t.Fatal(bytes, err)
 	}
 }
+func TestWorkspaceAcceptsOriginalRootAlias(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skip("symlink privileges unavailable")
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	workspace := newTestWorkspace(t, alias, WorkspaceOptions{HideGit: true})
+	path := filepath.Join(alias, "sub", "new.txt")
+	if err := workspace.WriteFile(t.Context(), path, "kept"); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := workspace.ReadFile(t.Context(), path); err != nil || content != "kept" {
+		t.Fatal(content, err)
+	}
+	for _, relative := range []string{".git/config", "escape/new.txt"} {
+		if err := workspace.WriteFile(t.Context(), filepath.Join(alias, relative), "unexpected"); err == nil {
+			t.Fatalf("write through root alias accepted %s", relative)
+		}
+	}
+}
+
 func TestWorkspaceStaysInsideRootDuringSymlinkSwap(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(outside, "kept"), []byte("private"), 0600)

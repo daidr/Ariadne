@@ -22,8 +22,20 @@ func RemoveTree(ctx context.Context, allowedRoot, target string) error {
 		return err
 	}
 	relative, err := filepath.Rel(root, absolute)
-	if err != nil || relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("cleanup target is outside its owned directory: %s", target)
+	if err != nil || !childPath(relative) {
+		// An owner may use an alias for its root while its child paths use
+		// the canonical spelling. Resolve only the owner, so the target
+		// cannot redirect cleanup through a symlink inside the tree.
+		resolved, resolveErr := filepath.EvalSymlinks(root)
+		if resolveErr == nil {
+			relative, err = filepath.Rel(resolved, absolute)
+			if err == nil && childPath(relative) {
+				root = resolved
+			}
+		}
+		if resolveErr != nil || err != nil || !childPath(relative) {
+			return fmt.Errorf("cleanup target is outside its owned directory: %s", target)
+		}
 	}
 	directory, err := os.OpenRoot(root)
 	if errors.Is(err, os.ErrNotExist) {
@@ -52,4 +64,8 @@ func RemoveTree(ctx context.Context, allowedRoot, target string) error {
 		}
 		delay = min(delay*2, 100*time.Millisecond)
 	}
+}
+
+func childPath(path string) bool {
+	return path != "." && !filepath.IsAbs(path) && path != ".." && !strings.HasPrefix(path, ".."+string(filepath.Separator))
 }
