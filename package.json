@@ -8,17 +8,17 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --filter '@ariadne/server' --filter '@ariadne/web' dev",
-    "dev:sandbox": "bun packages/server/src/dev/sandbox.ts",
-    "start": "bun packages/server/src/start.ts",
+    "dev": "bun tools/dev/start.ts dev",
+    "dev:sandbox": "bun tools/dev/sandbox.ts",
+    "start": "bun tools/dev/start.ts",
     "build": "bun run --filter @ariadne/web build",
-    "build:daemon": "bun run --filter @ariadne/daemon build",
-    "release": "bun packages/server/src/release-build.ts",
-    "record:provider": "bun packages/server/src/record-provider.ts",
+    "release": "go run ./tools/release",
+    "release:go": "go run ./tools/release",
+    "record:provider": "go run ./tools/recordprovider",
     "test": "bun --bun vitest run",
     "typecheck": "vue-tsc --noEmit",
     "lint": "oxlint --deny-warnings",
-    "check": "bun fmt --check && bun run lint && bun run typecheck && bun run test"
+    "check": "bun fmt --check --end-of-line=auto && bun run lint && bun run typecheck && bun run test"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",

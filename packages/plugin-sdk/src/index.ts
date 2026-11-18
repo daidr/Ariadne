@@ -1,47 +1,3 @@
-import type { Capabilities, CapabilityName } from './capabilities'
-import type { DirectoryListing } from './directories'
-
-export type * from './capabilities'
-export { FileTooLargeError, MergeRefused, readOnlyView, WorkspacePathError } from './capabilities'
-export {
-  describeHttpError,
-  httpErrorPart,
-  incompletePart,
-  MAX_RETRY_AFTER_MS,
-  readServerSentEvents,
-  retryAfterMs,
-  transportErrorPart,
-  type ServerSentEvent,
-} from './sse'
-export { defaultShell, shellArgv } from './shell'
-export { globToRegExp } from './glob'
-export {
-  execArgv,
-  listFiles,
-  MAX_MATCH_LINES,
-  searchableView,
-  singleFileView,
-  searchByReading,
-  searchLines,
-  searchFilter,
-  viewPath,
-  walk,
-  type ViewChecks,
-} from './search'
-export { processes, ProcessLedger, type Leftovers, type TrackedProcess } from './processes'
-export {
-  browseLocal,
-  browseTyped,
-  DirectoryNotFound,
-  listLocalDirectory,
-  MAX_DIRECTORIES,
-  NothingToBrowse,
-  type DirectoryEntry,
-  type DirectoryListing,
-  type ListDirectory,
-  type PathFlavor,
-} from './directories'
-
 /**
  * User-facing text from a plugin, one entry per locale. Chinese is the source language and
  * must be present; the UI falls back to it when the user's locale is missing.
@@ -78,451 +34,6 @@ export type SettingField =
       default?: string
     }
 
-/** A kind of context source a plugin contributes, e.g. "local directory". */
-export interface ContextProvider<Settings = Record<string, unknown>> {
-  kind: string
-  title: LocalizedText
-  settings: SettingsSchema
-  provides: CapabilityName[]
-  /**
-   * The source's workspaces are on another machine: threads' commands run there, as the
-   * user the source logs in as.
-   */
-  remote?: boolean
-  /**
-   * How the source is named in one line, with `{setting}` replaced by its value, e.g.
-   * `{host}:{path}`. Without it the first text setting is shown.
-   */
-  summary?: string
-  /**
-   * Its repository and issues can come with a remote source's workspaces: threads work on
-   * the other machine, and their branches are pushed from here, with this source's
-   * credentials, which never reach that machine.
-   */
-  hosting?: boolean
-  /**
-   * Where a source with these settings sends its secret settings, e.g. an instance's
-   * address, for kinds whose settings choose the host. A source that has no secret of its
-   * own borrows another's of the same kind only when both name the same place; a kind
-   * without this always sends them to the same place. Throws on settings it cannot read.
-   */
-  secretsFor?(settings: Partial<Settings>): string
-  /** Build the capabilities of one configured source. */
-  connect(settings: Settings): Promise<Partial<Capabilities>>
-  /**
-   * The directories at what the user typed into a `directory` setting, on the machine the
-   * other settings (filled in as far as the user got) point at; see `browseTyped`. Without
-   * it the path is only typed. Ariadne gives up after 15 seconds and aborts `signal`.
-   */
-  browse?(
-    settings: Partial<Settings>,
-    typed: string,
-    options: { signal?: AbortSignal },
-  ): Promise<DirectoryListing>
-}
-
-export interface ToolCall {
-  id: string
-  name: string
-  /** JSON text of the arguments, exactly as the model produced it. */
-  arguments: string
-}
-
-/** A picture for the model: PNG, JPEG, GIF or WebP, base64 encoded. */
-export interface ImagePart {
-  mime: string
-  data: string
-}
-
-/**
- * What a model thought before answering, as its provider returned it. `signature` (or the
- * opaque `text` of a `redacted` block) lets the provider check the block when it is sent
- * back; a provider that does not need it back may drop it.
- */
-export interface ReasoningBlock {
-  text: string
-  signature?: string
-  redacted?: boolean
-}
-
-/**
- * One message of a model request. Both protocols require a tool result to follow the
- * assistant message that made the call, so assistant turns carry their calls and the whole
- * request can be rebuilt from the event log. Images come after a message's text; a tool's
- * images belong to its result (a protocol that cannot put them there sends them right
- * after the results of the step).
- */
-export type ChatMessage =
-  | { role: 'system'; content: string }
-  | { role: 'user'; content: string; images?: ImagePart[] }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[]; reasoning?: ReasoningBlock[] }
-  | {
-      role: 'tool'
-      toolCallId: string
-      content: string
-      isError?: boolean
-      images?: ImagePart[]
-    }
-
-export interface ToolSpec {
-  name: string
-  description: string
-  /** JSON Schema of the arguments. */
-  parameters: Record<string, unknown>
-}
-
-export type ModelStreamPart =
-  /**
-   * The service sent something, even if nothing to hand on yet (a piece of reasoning, a
-   * keep-alive): a request that does is not silent, however long the answer takes.
-   */
-  | { type: 'alive' }
-  | { type: 'text'; text: string }
-  /**
-   * The arguments of a tool call as far as they are written: `call` counts the calls of
-   * this response from 0, and `arguments` is the JSON text so far, cut wherever the
-   * service is in it. For showing a long call at work before it comes whole as `tool-call`.
-   */
-  | { type: 'tool-input'; call: number; name: string; arguments: string }
-  | ({ type: 'tool-call' } & ToolCall)
-  /**
-   * One whole block of reasoning; it comes before the answer it led to. `startedAt` is
-   * when its first piece came, as it is only handed on once whole.
-   */
-  | ({ type: 'reasoning'; startedAt?: number } & ReasoningBlock)
-  /**
-   * Tokens of the whole response. `input` counts everything the model read, `cached` the
-   * part of it read from the provider's cache and `cacheWrite` the part written to it;
-   * `reasoning` is the part of `output` spent thinking. Each only when the provider says.
-   */
-  | {
-      type: 'usage'
-      input: number
-      output: number
-      /** Input of the latest upstream inference, when usage sums multiple inferences. */
-      contextInput?: number
-      cached?: number
-      cacheWrite?: number
-      reasoning?: number
-      /**
-       * What the service itself says the response cost, in US dollars. A user's price for
-       * the model is used only where this is missing.
-       */
-      costUsd?: number
-    }
-  | {
-      type: 'finish'
-      reason: 'stop' | 'length' | 'tool-calls' | 'error'
-      error?: string
-      /**
-       * The error is worth trying again: rate limited, overloaded, the connection failed or
-       * the stream ended early. `retryAfterMs` is how long the service asked to wait.
-       */
-      retryable?: boolean
-      retryAfterMs?: number
-      /**
-       * The service turned the request away for its load or the account's quota (rate
-       * limit, overload, a server error), even when it asks to wait too long to retry:
-       * another model may answer instead.
-       */
-      busy?: boolean
-    }
-
-/** How hard a model thinks before it answers. Without it the request asks nothing of it. */
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-
-/** Every effort, least first. */
-export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
-
-/** What a model is taken to accept when nobody says which efforts it does. */
-export const COMMON_EFFORTS: readonly Effort[] = ['low', 'medium', 'high']
-
-/**
- * The effort a model that accepts `efforts` (the common ones when unknown) thinks at when
- * `wanted` is asked: the nearest it accepts at or below it, else the least it accepts.
- * `null` when it accepts none: it is asked nothing.
- */
-export function effortWithin(wanted: Effort, efforts?: readonly Effort[]): Effort | null {
-  const accepted = efforts ?? COMMON_EFFORTS
-  if (accepted.includes(wanted)) return wanted
-  const rank = EFFORTS.indexOf(wanted)
-  const ranked = EFFORTS.filter((e) => accepted.includes(e))
-  return ranked.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? ranked[0] ?? null
-}
-
-/** What the agent loop asks of a model provider for one response. */
-export interface ModelRequest {
-  model: string
-  messages: ChatMessage[]
-  tools: ToolSpec[]
-  effort?: Effort
-  /**
-   * `false` for a one-off request whose prompt no later request starts with, such as a
-   * summary: a provider that caches what it is told to keeps none of it, since writing to
-   * the cache costs more than reading the prompt once.
-   */
-  cache?: boolean
-  /** The most the model may write in this response; the provider's default without. */
-  maxTokens?: number
-  /** Headers the user added to every request, sent after the provider's own. */
-  headers?: Record<string, string>
-  /**
-   * Fields the user added to every request's body (e.g. `temperature`). They go in on top
-   * of the provider's, except the messages, tools, model and streaming, which stay its own.
-   */
-  extraBody?: Record<string, unknown>
-  /**
-   * Which conversation the request belongs to (a research has its own). A provider that
-   * keeps a session between requests, such as an agent program, keeps one per conversation
-   * and carries it on while the next request extends the last; without it the request
-   * stands alone.
-   */
-  conversation?: string
-  signal?: AbortSignal
-}
-
-/** Body fields a request's `extraBody` cannot replace. */
-export const FIXED_BODY_FIELDS = ['model', 'messages', 'tools', 'stream', 'system']
-
-/** `body` with the user's extra fields on top, except those the provider must set itself. */
-export function withExtraBody<T extends Record<string, unknown>>(
-  body: T,
-  extra: Record<string, unknown> | undefined,
-): T {
-  if (!extra) return body
-  const added = Object.fromEntries(
-    Object.entries(extra).filter(([key]) => !FIXED_BODY_FIELDS.includes(key)),
-  )
-  return { ...body, ...added }
-}
-
-/** A model a provider lists, with what it says of it besides the name. */
-export interface ListedModel {
-  /** The name to ask for it by. */
-  id: string
-  /** What the service calls it, when that says more than the name (`Opus 5.5` for `opus`). */
-  title?: string
-  /**
-   * The model the name stands for, when it is an alias (`claude-opus-5-5` for `opus`): the
-   * public catalog is looked up by it.
-   */
-  resolves?: string
-  /** The efforts it accepts, least first; empty when how hard it thinks cannot be set. */
-  efforts?: Effort[]
-}
-
-/** A wire protocol for talking to models, such as the OpenAI-compatible or Anthropic protocol. */
-export interface ModelProvider<Settings = Record<string, unknown>> {
-  kind: string
-  title: LocalizedText
-  settings: SettingsSchema
-  /**
-   * It runs an agent program on this machine instead of calling a service over HTTP: the
-   * headers, body fields and timeout a user can add to requests do not apply to it.
-   */
-  program?: boolean
-  /**
-   * Stream one response. Text may arrive in pieces; each tool call arrives whole. Errors
-   * of the remote service end the stream with a `finish` part of reason `error`, marked
-   * `retryable` when trying again may help; the agent loop retries only those.
-   */
-  stream(settings: Settings, request: ModelRequest): AsyncIterable<ModelStreamPart>
-  /**
-   * The body `stream` sends for `request`, without credentials (they go in headers). The
-   * trace shows it as the request the service got.
-   */
-  requestBody?(settings: Settings, request: ModelRequest): unknown
-  /**
-   * The service's own web search, when it has one: agents then search with the key they
-   * already talk to the model with, and no search service needs setting up.
-   */
-  search?: ModelSearch<Settings>
-  /**
-   * The models the account behind `settings` can use, for the settings form to offer,
-   * newest first where the service says: names, or entries saying more of them. Throws with
-   * the reason when the service cannot be asked (a wrong address or key): the form shows it.
-   * Without it, model names are only typed.
-   */
-  models?(
-    settings: Settings,
-    options?: { headers?: Record<string, string>; signal?: AbortSignal },
-  ): Promise<(string | ListedModel)[]>
-  /**
-   * Whether the setup can work at all, without asking a model: the reason when it cannot
-   * (the program is not installed), in the user's languages, `null` when it can. Checked when the settings are
-   * saved; without it the model is asked for one word instead.
-   */
-  check?(settings: Settings): Promise<LocalizedText | null>
-  /**
-   * Setups of this kind already on the machine (a key in the environment, a program
-   * signed in), offered on first run so the user need not type them in.
-   */
-  find?(context: FindContext): FoundSetup<Settings>[]
-}
-
-/** Where a setup was found on this machine: an environment variable, or a program. */
-export type FoundFrom = { env: string } | { program: string }
-
-/** A setup of a model provider found on this machine, ready to use as it is. */
-export interface FoundSetup<Settings = Record<string, unknown>> {
-  /** Tells the provider's finds apart, e.g. the variable's name. */
-  id: string
-  /** The service it talks to, where the provider's own title says too little. */
-  name?: string
-  from: FoundFrom
-  settings: Settings
-}
-
-/** What a provider may look at to find a setup; never the network. */
-export interface FindContext {
-  env: Readonly<Record<string, string | undefined>>
-  /** The user's home directory. */
-  home: string
-  /** The path of a program on the user's PATH, `null` when there is none. */
-  which(program: string): string | null
-}
-
-/** The reason a service gave for turning a request down, short enough to show in a form. */
-export async function refusalText(response: Response): Promise<string> {
-  const body = (await response.text().catch(() => '')).trim()
-  let detail = body
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown }
-    const message =
-      typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message ?? parsed.message)
-    if (typeof message === 'string' && message.trim()) detail = message.trim()
-  } catch {
-    // Not JSON: the text itself, as far as it goes.
-  }
-  return `${response.status}${detail ? ` ${detail.slice(0, 300)}` : ''}`
-}
-
-/** What a model's own web search is asked. */
-export interface ModelSearchRequest {
-  model: string
-  query: string
-  /** How many sources to name at most. */
-  limit: number
-  /** Headers the user added to every request, sent after the provider's own. */
-  headers?: Record<string, string>
-  signal?: AbortSignal
-}
-
-/**
- * What a model found on the web: what the pages say about the query, in its words, and
- * the pages it read, best first. A source's `snippet` is the passage it quoted, `''` when
- * it quoted none.
- */
-export interface ModelSearchAnswer {
-  text: string
-  sources: SearchResult[]
-  /** Tokens the search took, as a response's `usage` part counts them. */
-  usage?: { input: number; output: number; cached?: number; cacheWrite?: number }
-}
-
-/**
- * What a model is asked when it searches for an agent: the agent reads the answer as a
- * tool result and decides itself what to make of it.
- */
-export const searchAsk = (query: string) =>
-  `Search the web for the query below, once or twice, and report what the pages say that bears on it: the facts, with names, numbers, versions and dates, each cited to its page. At most 300 words, in the language of the query. No advice and no questions back; where the results do not answer it, say so.\n\nQuery: ${query}`
-
-/** Whether `baseUrl` is on `host`: a service's own address, not a relay's. */
-export function onHost(baseUrl: string, host: string): boolean {
-  try {
-    return new URL(baseUrl).hostname.toLowerCase() === host
-  } catch {
-    return false
-  }
-}
-
-/**
- * The service turned the search itself down (a 4xx other than a timeout or rate limit):
- * search is off for the account, or this model has none. Asking again will not help, so
- * Ariadne stops counting the model among those that search until its settings are saved again.
- */
-export class ModelSearchRefused extends Error {
-  constructor(readonly status: number) {
-    super(`HTTP ${status}`)
-    this.name = 'ModelSearchRefused'
-  }
-}
-
-/** The error for a search request the service answered with `status`. */
-export const searchHttpError = (status: number): Error =>
-  status >= 400 && status < 500 && status !== 408 && status !== 429
-    ? new ModelSearchRefused(status)
-    : new Error(`HTTP ${status}`)
-
-/** A model service that searches the web itself: one request, searched and read there. */
-export interface ModelSearch<Settings = Record<string, unknown>> {
-  /**
-   * Whether the service these settings point at searches: answered from the settings
-   * alone, without asking it. A relay under another address is taken not to.
-   */
-  available(settings: Settings): boolean
-  /**
-   * Search now. Ariadne gives up after a while and aborts `signal`. A thrown error's
-   * message is not shown to the model: it may quote the request.
-   */
-  run(settings: Settings, request: ModelSearchRequest): Promise<ModelSearchAnswer>
-}
-
-/** Undo a registration. */
-export type Dispose = () => void | Promise<void>
-
-/**
- * Live data for dashboards. A dashboard names a source and its settings; refreshing it
- * fetches the data again and stores it as a new version, so every version stays a
- * snapshot that replays the same. Dashboards without a source keep the data they were
- * given.
- */
-export interface DashboardSource<Settings = Record<string, unknown>> {
-  kind: string
-  title: LocalizedText
-  /** For the model: what data it gives, and which named data sets come back. */
-  description: string
-  /**
-   * The model chooses these and they are stored in the event log with the dashboard, so
-   * they must not hold secrets: fields marked `secret` are refused. Keep credentials in
-   * the plugin's own configuration instead.
-   */
-  settings: SettingsSchema
-  /**
-   * Fetch now. Returns named data sets: arrays of rows, or one object for a stat. Ariadne
-   * gives up after 30 seconds and aborts `signal`, so stop the work then.
-   */
-  fetch(
-    settings: Settings,
-    context: { projectId: string; signal?: AbortSignal },
-  ): Promise<Record<string, unknown>>
-}
-
-/** One hit of a web search. */
-export interface SearchResult {
-  title: string
-  url: string
-  /** A few lines from the page about the query. */
-  snippet: string
-}
-
-/**
- * A web search service for threads and the coordinator. A plugin that brings one keeps
- * its credentials (say, an API key from the environment or its own file) to itself, and
- * agents search with it before anything else. Without one they search with the model
- * service's own search (`ModelProvider.search`), then with the service the user gave a
- * key for in the settings; with none of these there is no search tool, only `fetch_url`.
- */
-export interface SearchProvider {
-  kind: string
-  title: LocalizedText
-  /**
-   * Search now and return the best hits first, at most `limit`. Ariadne gives up after
-   * 30 seconds and aborts `signal`. A thrown error's message is not shown to the model.
-   */
-  search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SearchResult[]>
-}
-
 /**
  * A pull request (or GitHub's kin: a GitLab merge request) as a link to it shows, without
  * asking its host: `label` is how a message names it, e.g. `daidr/Ariadne#34`.
@@ -556,41 +67,73 @@ export interface PullRequestPreview {
 
 export type LinkPreview = PullRequestPreview
 
+export type ChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
+
+/** One file a branch changed against its base. */
+export interface ChangedFile {
+  path: string
+  /** Where a renamed or copied file came from. */
+  previousPath: string | null
+  status: ChangedFileStatus
+  /** Lines added and removed; `null` for a binary file. */
+  added: number | null
+  removed: number | null
+}
+
+/** What a thread's branch changed, from where it left its base to its newest commit. */
+export interface BranchChanges {
+  branch: string
+  base: string
+  /** The commit the branch is compared against: the newest one it shares with the base. */
+  from: string
+  /** The branch's newest commit. */
+  head: string
+  /** Commits on the branch the base does not have, newest first (at most 100). */
+  commits: { sha: string; subject: string }[]
+  files: ChangedFile[]
+  /** Files changed in the worktree and not committed: not part of the changes or a merge. */
+  uncommitted: string[]
+}
+
+/** A file before and after: `null` where it does not exist. */
+export interface FileVersions {
+  before: string | null
+  after: string | null
+  /** Not text, or too large to show: the contents are left out. */
+  skipped: 'binary' | 'large' | null
+}
+
+export type MergeMethod = 'squash' | 'merge'
+
+export type MergeOutcome =
+  /** The base now ends with `sha`, which takes in the branch up to `head`. */
+  | { kind: 'merged'; sha: string; head: string }
+  /** Nothing merged: these files changed on both sides. */
+  | { kind: 'conflict'; files: string[] }
+  /** The base already has everything the branch has. */
+  | { kind: 'empty' }
+
+/** A thread's worktree on disk. */
+export interface WorktreeInfo {
+  threadId: string
+  path: string
+  /** Space it takes, when it could be measured. */
+  bytes: number | null
+}
+
+/** One directory a listing shows; `path` is ready to use, so callers never join paths. */
+export interface DirectoryEntry {
+  name: string
+  path: string
+}
+
 /**
- * Links in messages that point at something a host knows, such as a pull request. Ariadne
- * asks `match` for every full https address it shows, so it must answer from the address
- * alone; `preview` is asked only when the user points at the link. It keeps its
- * credentials to itself, like a search provider.
+ * The directories in one directory, for picking a path in a form. `path` is the directory
+ * listed, `parent` the one above it (`null` at a root). When what was typed is not a
+ * directory, its parent is listed, keeping only the names that start like its last part.
  */
-export interface LinkProvider {
-  kind: string
-  title: LocalizedText
-  match(url: URL): LinkSummary | null
-  /**
-   * What the link points at now; `null` when it is not there (or not visible). Ariadne
-   * gives up after 10 seconds and aborts `signal`. A thrown error's message is not shown.
-   */
-  preview(url: URL, options: { signal?: AbortSignal }): Promise<LinkPreview | null>
-}
-
-/** What `setup` receives: every method registers something and returns its disposer. */
-export interface PluginContext {
-  /** A directory only this plugin writes to, e.g. for checkouts. Created on demand. */
-  dataDir: string
-  registerContextProvider(provider: ContextProvider<never>): Dispose
-  registerModelProvider(provider: ModelProvider<never>): Dispose
-  registerDashboardSource(source: DashboardSource<never>): Dispose
-  registerSearchProvider(provider: SearchProvider): Dispose
-  registerLinkProvider(provider: LinkProvider): Dispose
-}
-
-export interface Plugin {
-  id: string
-  name: LocalizedText
-  /** Register contributions. A returned function runs when the plugin unloads. */
-  setup(ctx: PluginContext): void | Dispose | Promise<void | Dispose>
-}
-
-export function definePlugin(plugin: Plugin): Plugin {
-  return plugin
+export interface DirectoryListing {
+  path: string
+  parent: string | null
+  directories: DirectoryEntry[]
 }

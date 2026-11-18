@@ -1,0 +1,82 @@
+name: go-backend
+
+on:
+  push:
+    branches: [master]
+    paths:
+      [
+        'go.mod',
+        'go.sum',
+        '.go-version',
+        'package.json',
+        'bun.lock',
+        'internal/**',
+        'sdk/**',
+        'cmd/**',
+        'tools/**',
+        'packages/**',
+        '.github/workflows/go.yml',
+      ]
+  pull_request:
+    paths:
+      [
+        'go.mod',
+        'go.sum',
+        '.go-version',
+        'package.json',
+        'bun.lock',
+        'internal/**',
+        'sdk/**',
+        'cmd/**',
+        'tools/**',
+        'packages/**',
+        '.github/workflows/go.yml',
+      ]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          cache: true
+      - run: go version
+      # Workspaces exercise many rooted filesystem operations. Do not spend
+      # minutes hashing their temporary inputs after the tests have finished.
+      - run: go test -count=1 -parallel=4 -timeout=180s ./...
+      - run: go vet ./...
+
+  compatibility:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    env:
+      ARIADNE_REQUIRE_LEGACY: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: go run ./tools/legacyoracle
+      - run: |
+          bun dist/legacy-oracle/tools/backend-contract.ts
+          cmp internal/compat/testdata/backend-contract.json dist/legacy-oracle/internal/compat/testdata/backend-contract.json
+          cmp internal/compat/testdata/schema.sql dist/legacy-oracle/internal/compat/testdata/schema.sql
+      - run: go test -race -count=1 -parallel=4 -timeout=300s ./...

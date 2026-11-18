@@ -3,5 +3,12 @@
   "compilerOptions": {
     "types": ["bun", "vite/client"]
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/src/**/*.vue", "packages/*/*.ts"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.vue",
+    "packages/*/*.ts",
+    "tools/dev/*.ts",
+    "tools/release/*.ts"
+  ],
+  "exclude": ["dist", "tools/legacyoracle/fixtures"]
 }

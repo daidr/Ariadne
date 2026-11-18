@@ -17,29 +17,6 @@
         "vue-tsc": "3.3.14",
       },
     },
-    "packages/agent": {
-      "name": "@ariadne/agent",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/core": "workspace:*",
-        "@ariadne/i18n": "workspace:*",
-        "@ariadne/mcp": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@dou-ui/dashboard": "0.1.0-alpha.18",
-        "@dou-ui/editor": "0.1.0-alpha.18",
-        "@dou-ui/flow": "0.1.0-alpha.18",
-        "dou-ui": "0.1.0-alpha.18",
-        "happy-dom": "21.0.4",
-        "lib0": "0.2.119",
-        "markdown-it": "14.1.0",
-        "y-protocols": "1.0.7",
-        "yjs": "13.6.33",
-      },
-      "devDependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/remote": "workspace:*",
-      },
-    },
     "packages/core": {
       "name": "@ariadne/core",
       "version": "0.0.0",
@@ -47,134 +24,13 @@
         "@ariadne/i18n": "workspace:*",
       },
     },
-    "packages/daemon": {
-      "name": "@ariadne/daemon",
-      "version": "0.0.0",
-      "bin": {
-        "ariadne-daemon": "./src/main.ts",
-      },
-      "dependencies": {
-        "@ariadne/i18n": "workspace:*",
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/relay": "workspace:*",
-      },
-    },
     "packages/i18n": {
       "name": "@ariadne/i18n",
       "version": "0.0.0",
     },
-    "packages/mcp": {
-      "name": "@ariadne/mcp",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-agents": {
-      "name": "@ariadne/plugin-agents",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-anthropic": {
-      "name": "@ariadne/plugin-anthropic",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-daemon": {
-      "name": "@ariadne/plugin-daemon",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/daemon": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/relay": "workspace:*",
-        "@ariadne/remote": "workspace:*",
-      },
-      "devDependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-      },
-    },
-    "packages/plugin-github": {
-      "name": "@ariadne/plugin-github",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-gitlab": {
-      "name": "@ariadne/plugin-gitlab",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-local": {
-      "name": "@ariadne/plugin-local",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
-    "packages/plugin-openai-compatible": {
-      "name": "@ariadne/plugin-openai-compatible",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-sdk": "workspace:*",
-      },
-    },
     "packages/plugin-sdk": {
       "name": "@ariadne/plugin-sdk",
       "version": "0.0.0",
-    },
-    "packages/plugin-ssh": {
-      "name": "@ariadne/plugin-ssh",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/relay": "workspace:*",
-        "@ariadne/remote": "workspace:*",
-      },
-    },
-    "packages/relay": {
-      "name": "@ariadne/relay",
-      "version": "0.0.0",
-      "dependencies": {
-        "msgpackr": "1.11.5",
-      },
-    },
-    "packages/remote": {
-      "name": "@ariadne/remote",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/relay": "workspace:*",
-      },
-    },
-    "packages/server": {
-      "name": "@ariadne/server",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ariadne/agent": "workspace:*",
-        "@ariadne/core": "workspace:*",
-        "@ariadne/i18n": "workspace:*",
-        "@ariadne/plugin-agents": "workspace:*",
-        "@ariadne/plugin-anthropic": "workspace:*",
-        "@ariadne/plugin-daemon": "workspace:*",
-        "@ariadne/plugin-github": "workspace:*",
-        "@ariadne/plugin-gitlab": "workspace:*",
-        "@ariadne/plugin-local": "workspace:*",
-        "@ariadne/plugin-openai-compatible": "workspace:*",
-        "@ariadne/plugin-sdk": "workspace:*",
-        "@ariadne/plugin-ssh": "workspace:*",
-      },
     },
     "packages/web": {
       "name": "@ariadne/web",
@@ -199,39 +55,11 @@
     },
   },
   "packages": {
-    "@ariadne/agent": ["@ariadne/agent@workspace:packages/agent"],
-
     "@ariadne/core": ["@ariadne/core@workspace:packages/core"],
-
-    "@ariadne/daemon": ["@ariadne/daemon@workspace:packages/daemon"],
 
     "@ariadne/i18n": ["@ariadne/i18n@workspace:packages/i18n"],
 
-    "@ariadne/mcp": ["@ariadne/mcp@workspace:packages/mcp"],
-
-    "@ariadne/plugin-agents": ["@ariadne/plugin-agents@workspace:packages/plugin-agents"],
-
-    "@ariadne/plugin-anthropic": ["@ariadne/plugin-anthropic@workspace:packages/plugin-anthropic"],
-
-    "@ariadne/plugin-daemon": ["@ariadne/plugin-daemon@workspace:packages/plugin-daemon"],
-
-    "@ariadne/plugin-github": ["@ariadne/plugin-github@workspace:packages/plugin-github"],
-
-    "@ariadne/plugin-gitlab": ["@ariadne/plugin-gitlab@workspace:packages/plugin-gitlab"],
-
-    "@ariadne/plugin-local": ["@ariadne/plugin-local@workspace:packages/plugin-local"],
-
-    "@ariadne/plugin-openai-compatible": ["@ariadne/plugin-openai-compatible@workspace:packages/plugin-openai-compatible"],
-
     "@ariadne/plugin-sdk": ["@ariadne/plugin-sdk@workspace:packages/plugin-sdk"],
-
-    "@ariadne/plugin-ssh": ["@ariadne/plugin-ssh@workspace:packages/plugin-ssh"],
-
-    "@ariadne/relay": ["@ariadne/relay@workspace:packages/relay"],
-
-    "@ariadne/remote": ["@ariadne/remote@workspace:packages/remote"],
-
-    "@ariadne/server": ["@ariadne/server@workspace:packages/server"],
 
     "@ariadne/web": ["@ariadne/web@workspace:packages/web"],
 
@@ -266,18 +94,6 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.6.0", "", {}, "sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
-
-    "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.7", "", { "os": "darwin", "cpu": "arm64" }, "sha512-2zPHLn+MuGJ6GP/5jDrwa9Jy0CI+D3Ibpvopf5SFfmc1G9gdofR4uB7YrJAAp4vodn/7iDOciyv8bgkRPLw7cA=="],
-
-    "@msgpackr-extract/msgpackr-extract-darwin-x64": ["@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.7", "", { "os": "darwin", "cpu": "x64" }, "sha512-of1miwFfEdgs5nythewsEoocfpbjzUf8PC996YDe3kAyv0ZJiMJs5NXlYhE6IdjxfNEPqUXj/BYBnpD8kRdfeQ=="],
-
-    "@msgpackr-extract/msgpackr-extract-linux-arm": ["@msgpackr-extract/msgpackr-extract-linux-arm@3.0.7", "", { "os": "linux", "cpu": "arm" }, "sha512-aDPbiEkFHs3H68705JKxJ15IT41wFdvDhba1pL8ygfdoshboL5dsXtiu76/CqhLWYneE+9hwBE+0abqNOiQ4Bw=="],
-
-    "@msgpackr-extract/msgpackr-extract-linux-arm64": ["@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.7", "", { "os": "linux", "cpu": "arm64" }, "sha512-jcRydYARTW0gX5idJhxV7m3KkRUD7KtZLYFF1ZY18HrPqpGY0TCqPUTJCwka2kVfVOwfKs3ZmlPSmQb4S6xj7w=="],
-
-    "@msgpackr-extract/msgpackr-extract-linux-x64": ["@msgpackr-extract/msgpackr-extract-linux-x64@3.0.7", "", { "os": "linux", "cpu": "x64" }, "sha512-A9xOmARctmUvHrBj5GGzGAigsZFnqE4kld5oprX3PyPbkVALV4jwBc17gPZrhSOvnXQc81hE9K7S2hDUCgialA=="],
-
-    "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.7", "", { "os": "win32", "cpu": "x64" }, "sha512-PRBiOqK4mcR0rvm6nybO7pSOYRR2Zza0+43UK2IvbVGelzMqZViiZJmOWGuWOX678QKESO6YrHx36z43nSS6iQ=="],
 
     "@one-ini/wasm": ["@one-ini/wasm@0.2.1", "", {}, "sha512-TUqERXGNTifZ9y2g3wPxQrw3HpHv/02DsW3D90T9x0hhonrL1ZqpSmNrU2XkoIq0fP1N6gZfVQzy2Fw1ZvGBNg=="],
 
@@ -497,15 +313,9 @@
 
     "minipass": ["minipass@7.1.3", "", {}, "sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A=="],
 
-    "msgpackr": ["msgpackr@1.11.5", "", { "optionalDependencies": { "msgpackr-extract": "^3.0.2" } }, "sha512-UjkUHN0yqp9RWKy0Lplhh+wlpdt9oQBYgULZOiFhV3VclSF1JnSQWZ5r9gORQlNYaUKQoR8itv7g7z1xDDuACA=="],
-
-    "msgpackr-extract": ["msgpackr-extract@3.0.7", "", { "dependencies": { "node-gyp-build-optional-packages": "5.2.2" }, "optionalDependencies": { "@msgpackr-extract/msgpackr-extract-darwin-arm64": "3.0.7", "@msgpackr-extract/msgpackr-extract-darwin-x64": "3.0.7", "@msgpackr-extract/msgpackr-extract-linux-arm": "3.0.7", "@msgpackr-extract/msgpackr-extract-linux-arm64": "3.0.7", "@msgpackr-extract/msgpackr-extract-linux-x64": "3.0.7", "@msgpackr-extract/msgpackr-extract-win32-x64": "3.0.7" }, "hasInstallScript": true, "bin": { "download-msgpackr-prebuilds": "bin/download-prebuilds.js" } }, "sha512-/dOQboWnkR1cjm88XyH/cGSivECGgyQu3814+bNUAq5wACQC8Ya/CViB9WApvWJ5Hya/JJQQmUeBFOZj8MLjGA=="],
-
     "muggle-string": ["muggle-string@0.4.1", "", {}, "sha512-VNTrAak/KhO2i8dqqnqnAHOa3cYBwXEZe9h+D5h/1ZqFSTEFHdM65lR7RoIqq3tBBYavsOXV84NoHXZ0AkPyqQ=="],
 
     "nanoid": ["nanoid@3.3.20", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ=="],
-
-    "node-gyp-build-optional-packages": ["node-gyp-build-optional-packages@5.2.2", "", { "dependencies": { "detect-libc": "^2.0.1" }, "bin": { "node-gyp-build-optional-packages": "bin.js", "node-gyp-build-optional-packages-optional": "optional.js", "node-gyp-build-optional-packages-test": "build-test.js" } }, "sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw=="],
 
     "nopt": ["nopt@10.0.1", "", { "dependencies": { "abbrev": "^5.0.0" }, "bin": { "nopt": "bin/nopt.js" } }, "sha512-df3sBr/6ax9hSGuC3CspvLlbnX8cP5L5nZwXF8cGN8l0zSWR6BvzmQ6jPUKjvo6+/xdpkNvEcucBNUdBeeV13g=="],
 

@@ -8,17 +8,18 @@
 
 ## 开发
 
-需要 [Bun](https://bun.sh) 1.4 及以上。
+需要 Go 1.27.4 和 [Bun](https://bun.sh) 1.4.4。Go 运行后端，Bun 用于前端开发和构建。
 
 ```sh
 bun install
 bun run start    # 启动本地服务（127.0.0.1:7428）和构建好的页面，页面有改动时先构建
 bun run dev      # 开发用：同时启动本地服务和前端开发服务器（localhost:5173）
 bun run dev:sandbox # 浏览器验收：临时 settings、数据库、示例仓库和模拟 AI 接口
-bun run check    # 格式、lint、类型检查和测试
+bun run check    # 格式、lint、类型检查和前端测试
+go test ./...    # Go 后端测试
 ```
 
-`dev:sandbox` 每次在系统临时目录创建独立的 `ARIADNE_HOME`，不读取或改写日常使用的 settings 和数据库。终端会打印带令牌的浏览器链接（默认 `http://127.0.0.1:5183`）、settings 路径和本机模拟 AI endpoint；后端默认端口为 `7438`，可用 `bun run dev:sandbox --port 7440 --web-port 5185` 调整，端口被占用时直接报错。前后端均支持热更新。
+`dev:sandbox` 每次在系统临时目录创建独立的 `ARIADNE_HOME`，并打印浏览器链接、settings 路径和模拟 AI 地址。默认浏览器端口为 `5183`，后端端口为 `7438`，可用 `--port 7440 --web-port 5185` 调整。前端支持热更新。修改 Go 后端后重启沙箱生效。旧数据验证和实现说明见 [Go 后端迁移](./docs/backend-go-migration.md)。
 
 沙箱预置工作中、待确认和已完成的讨论串，代码变更来自临时示例 Git 仓库，可以实际查看和合并。模型设置已接好本机 OpenAI 兼容接口，不需要真实 API Key：`mock` 流式回复，`mock-slow` 慢速流式回复（可测试中断），`mock-error` 返回请求失败（可测试错误与重试）。这些模型只按固定规则回复，不执行 AI 推理。按 Ctrl+C 停止前后端及模拟接口，临时数据保留便于排查，下次启动另建一套。
 
@@ -29,10 +30,9 @@ bun run check    # 格式、lint、类型检查和测试
 ```sh
 bun run release                                # 当前平台
 bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
-bun run release --no-upx                       # 不压缩
 ```
 
-先构建页面，再把服务端和全部页面文件编译成一个程序，最后仅对 Linux 产物用 [UPX](https://upx.github.io) 压缩，产物在 `dist/release/ariadne-<平台>`。可选平台：`linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64`。构建 Linux 产物且未指定 `--no-upx` 时，`PATH` 里没有 `upx` 会直接报错；Windows 和 macOS 的程序不压缩（UPX 打包后的 Bun 程序可能无法启动），单独构建这两个平台不需要安装 UPX。当前平台的程序构建后会运行一次 `ariadne self-check`，确认还能读到页面；为其他平台交叉构建的程序跑不了这一步，要拿到对应的机器上自己运行一次。
+构建程序将前端嵌入 Go 可执行文件，输出到 `dist/release/ariadne-<平台>`。支持 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64` 和 `windows-x64`，所有平台禁用 UPX。构建当前平台时会执行 `self-check`，发版流程会在每个目标平台上运行产物自检。
 
 这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
 
@@ -43,9 +43,7 @@ bun run release --no-upx                       # 不压缩
 由 `.github/workflows/release.yml` 自动完成：
 
 1. master 每有新提交，就把上次发版之后的提交整理进 release PR（分支 `release/alpha`）。PR 里把 `package.json` 的版本号改成下一个 alpha，并在 `CHANGELOG.md` 顶部加上这一版的提交列表。这个分支每次都从 master 重新生成，不要在上面手动提交。
-2. 合入 release PR 后，构建全部平台的程序，在 Linux、Windows、macOS 上各运行一次 `--version` 和 `self-check`，都通过后发布 `v<版本号>` 预发布版本，附上程序和这一版的更新日志。
-
-GitHub Actions 发版构建统一传入 `--no-upx`，所有平台均不使用 UPX，也不再下载安装 UPX。
+2. 合入 release PR 后，构建五个平台的程序。在各目标平台核对 `--version` 并运行 `self-check`。全部通过后发布 `v<版本号>` 预发布版本，附上程序和这一版的更新日志。
 
 需要在仓库的 Settings → Actions → General 里勾选 “Allow GitHub Actions to create and approve pull requests”，否则开不了 release PR。正式版本另走流程，还没有做。
 
@@ -59,20 +57,17 @@ GitHub Actions 发版构建统一传入 `--no-upx`，所有平台均不使用 UP
 
 之后首屏就是一个输入框：写下想做的事，可以顺手选一个目录，发出去就建好了项目。项目名取目录名；没选目录时由协调器按第一句话起一个，右键项目可以随时重命名。
 
-要让讨论串读写代码、运行命令，在顶栏的“项目设置”里给项目来源选一个本机目录、GitHub 仓库、GitLab 仓库、SSH 远程目录或远程 daemon。
+要让讨论串读写代码、运行命令，在顶栏的“项目设置”里给项目来源选一个本机目录、GitHub 仓库、GitLab 仓库。
 
 - 本机目录：git 仓库会为每个讨论串建一个独立的 worktree（放在 `~/.ariadne/plugins/local/worktrees/` 下）和分支 `ariadne/…`，讨论串的提交留在这个分支上。讨论串面板上的“改动”逐个文件显示它相对基线分支改了什么，可在改动页合并到基线分支（默认压成一个提交，需要 git 2.38+），也可以直接“完成”交付。工作区按项目的保留策略回收，分支保留。
 - GitHub 仓库：填 `owner/name`，访问令牌可以留空（会用 `GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`）。讨论串在自己的分支上工作，完成后推送分支、开 PR；PR 的检查失败时讨论串会被唤醒去修，合并由你决定。公开仓库第一次推送前会先问你一次，同意后整个项目有效。令牌存在 `~/.ariadne/config.json`，不进事件日志。
 - GitLab 仓库：填 `group/project`（可以带子组）或项目地址；自建实例在“实例地址”里填 `https://gitlab.example.com`，或者直接填项目的完整地址。访问令牌需要 `api` 权限，可以留空：会用 `GITLAB_TOKEN`（只用于 `GITLAB_HOST` 指的实例，没设置时是 GitLab.com）或 `glab` 为这个实例保存的令牌。讨论串开的是 merge request（`!12`），流水线失败时同样会被唤醒去修；`internal` 项目对实例上所有人可见，第一次推送前也会先问你。
-- SSH 远程目录：填主机（`user@host` 或 `~/.ssh/config` 里的 Host）和远端的绝对路径。用你自己的 ssh 配置、密钥和 agent，不支持密码；第一次连接前先在终端里 ssh 一次确认主机指纹。git 仓库会在远端的 `~/.ariadne-worktrees/` 下为每个讨论串建 worktree 和分支 `ariadne/…`，看改动和合并与本机目录相同。命令在远端以登录用户身份运行，连接不转发 agent 和端口。讨论串在远端的 `git push` 推不出去，合并之后由你自己推送。远端的 `PATH` 里有 `ariadne-daemon` 时，Ariadne 只开一个 ssh 进程，所有调用都走它，更快。
 
 项目设置的“交付与托管”支持外部流程：填写集成平台、提票或预发布分支的交付要求后，讨论串按要求交付，AI 审阅通过后自动完成，不要求合并到默认分支。也可以直接告诉协调器修改交付方式或要求，它会按用户请求保存，不再额外确认；讨论串只读取这项配置。“工作区”中可单独选择自动回收、合入后回收或手动清理。
 
-- 远程 daemon：连不了 SSH 的机器用它。在远端运行 `ariadne-daemon`（`bun run build:daemon` 打出单文件程序，或者有 bun 时 `bun packages/daemon/src/main.ts`），第一次启动打印配对码；把地址、配对码和远端目录填进来。默认只监听 `127.0.0.1:7429`，`--listen 0.0.0.0:7429` 让其他机器连上来；连接总是 TLS，按配对码里的证书指纹认 daemon。`ariadne-daemon pair` 换一个配对码，旧的立即失效。daemon 只存令牌的哈希；讨论串的命令以运行 daemon 的用户身份执行，建议给它单独一个用户。需要远端有 openssl。
+需要在远程机器上工作时，直接在那台机器部署 Ariadne，通过浏览器访问。
 
 还要让它们读别的仓库或目录（共用的组件库、接口文档、另一个服务的代码），在项目设置的“项目来源”里添加参考，或者直接跟协调器说。参考是只读的，命令看不到它。
-
-- SSH 和 daemon 都可以再选一个“代码托管”（GitHub 或 GitLab）：讨论串在远端写代码，推送和开 PR 由本机做，令牌不去远端。远端目录必须是这个仓库的签出。
 
 协调器和讨论串写的长内容放在“产物”里：文档、画板和仪表盘快照。右侧“产物”页的“全部产物”打开项目的产物总览，可以筛选、搜索，也可以自己新建；每种产物都能直接编辑，每次保存是一个新版本。
 
@@ -85,25 +80,15 @@ GitHub Actions 发版构建统一传入 `--no-upx`，所有平台均不使用 UP
 | `ARIADNE_GITHUB_API_URL` | GitHub REST API 的地址（GitHub Enterprise）  | `https://api.github.com` |
 | `ARIADNE_GITHUB_GIT_URL` | 克隆仓库用的地址前缀                         | `https://github.com`     |
 | `ARIADNE_REPO_POLL_MS`   | 检查 PR 状态的间隔（毫秒）                   | `60000`                  |
-| `ARIADNE_DAEMON_HOME`    | daemon 的证书和令牌哈希所在的目录（远端）    | `~/.ariadne-daemon`      |
 
-## 包
+## 代码目录
 
-| 包                                  | 内容                                                          |
-| ----------------------------------- | ------------------------------------------------------------- |
-| `@ariadne/i18n`                     | 文案与翻译，服务端和前端共用                                  |
-| `@ariadne/core`                     | 领域模型、SQLite 事件存储与投影                               |
-| `@ariadne/plugin-sdk`               | 插件、上下文 provider 与模型 provider 的接口                  |
-| `@ariadne/agent`                    | agent loop、调度、协调器与讨论串的工具                        |
-| `@ariadne/plugin-openai-compatible` | OpenAI 兼容协议的模型 provider                                |
-| `@ariadne/plugin-anthropic`         | Anthropic 协议的模型 provider                                 |
-| `@ariadne/plugin-agents`            | 外部 agent（Claude Code、Codex、ACP）当模型 provider          |
-| `@ariadne/plugin-local`             | 本地目录项目来源：工作区与 git worktree，托管仓库的共享 clone |
-| `@ariadne/plugin-github`            | GitHub 仓库项目来源：共享 clone、worktree、PR 与检查          |
-| `@ariadne/plugin-gitlab`            | GitLab 仓库项目来源：MR、流水线、issue，支持自建实例          |
-| `@ariadne/plugin-ssh`               | SSH 远程目录项目来源：远端 worktree、文件与命令               |
-| `@ariadne/plugin-daemon`            | 远程 daemon 项目来源：配对、证书指纹、一条连接跑所有调用      |
-| `@ariadne/daemon`                   | 在远端运行的 `ariadne-daemon`                                 |
-| `@ariadne/remote`                   | 远端工作区：脚本与 worktree，SSH 和 daemon 共用               |
-| `@ariadne/server`                   | 本地 HTTP 服务、鉴权、事件流与用户设置                        |
-| `@ariadne/web`                      | 浏览器界面                                                    |
+| 目录                                                                    | 内容                                            |
+| ----------------------------------------------------------------------- | ----------------------------------------------- |
+| `cmd/ariadne`                                                           | Go 命令行和内嵌页面                             |
+| `internal/server`、`internal/collab`                                    | HTTP、鉴权、SSE 和产物协作                      |
+| `internal/core`、`internal/eventstore`                                  | 领域逻辑、SQLite 事件存储与投影                 |
+| `internal/runner`、`internal/models`                                    | 协调器和讨论串、模型 provider、内置工具         |
+| `internal/local`、`internal/hosting`                                    | 本地、GitHub 与 GitLab 项目来源                 |
+| `internal/plugins`、`sdk`                                               | [Lua 插件](./docs/lua-plugins.md)宿主和能力接口 |
+| `packages/web`、`packages/i18n`、`packages/core`、`packages/plugin-sdk` | 浏览器界面、翻译和前端使用的类型                |

@@ -1,0 +1,37 @@
+// Package domainerr preserves the localized error envelope consumed by the web UI.
+package domainerr
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+)
+
+type Error struct {
+	Key    string         `json:"key"`
+	Params map[string]any `json:"params,omitempty"`
+}
+
+func (err *Error) Error() string                   { return err.Key }
+func New(key string, params map[string]any) *Error { return &Error{Key: key, Params: params} }
+func NotFound(what string) *Error                  { return New("error.notFound", map[string]any{"what": what}) }
+
+func Write(writer http.ResponseWriter, err error) {
+	var localized *Error
+	status := http.StatusInternalServerError
+	if errors.As(err, &localized) {
+		status = http.StatusBadRequest
+		if localized.Key == "error.notFound" {
+			status = http.StatusNotFound
+		}
+		if localized.Key == "error.artifactConflict" {
+			status = http.StatusConflict
+		}
+	} else {
+		localized = New("error.invalidBody", map[string]any{"reason": "internal"})
+	}
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(status)
+	_ = json.NewEncoder(writer).Encode(map[string]any{"error": localized})
+}

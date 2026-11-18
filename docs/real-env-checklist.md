@@ -39,7 +39,7 @@
 
 在设置里加 DeepSeek（OpenAI 兼容接口，地址 `https://api.deepseek.com`），`deepseek-chat` 和 `deepseek-reasoner` 各加一个模型。
 
-- [ ] **录样本**：`bun run record:provider` 列出设置里的模型；`bun run record:provider <模型 id> deepseek-reasoner` 录一遍，每个场景都是 ✓。`deepseek-chat` 也录一遍。录下的文件在 `packages/server/fixtures/providers/` 下，搜一下里面没有 API Key，然后提交。之后 `bun run check` 会回放它们。
+- [ ] **录样本**：`bun run record:provider` 列出设置里的模型；`bun run record:provider <模型 id> deepseek-reasoner` 录一遍，并检查各场景输出。`deepseek-chat` 也录一遍。样本保存在 `tools/recordprovider/testdata/providers/`，检查没有 API Key 后提交。`go test ./tools/recordprovider` 会回放这些样本。
 - [ ] **思考内容**：用 `deepseek-reasoner` 跑一个要调用工具的讨论串，几步之后不报“缺少 reasoning_content”这类错误；追踪里能看到每一步的思考。
 - [ ] **输出被截断**：给模型设一个很小的“单次最多输出”（比如 200），让它写一个长文件；它被截断后接着写，追踪里那一步标着被截断，连续三次才失败。
 - [ ] **清理之后的缓存**：一个长对话触发“清理旧的工具结果”之后，下一个请求的缓存命中（追踪里的“缓存”）先掉一次，之后的请求又能命中。
@@ -87,12 +87,10 @@ Codex 需要 0.167.1 或更新版本。先在终端里把对应的程序登录�
 
 - [ ] **本机浏览器**：装了 Chrome 或 Edge 的 Windows 和 macOS 上，让讨论串用 `browser` 打开一个页面并截图；追踪里看到截图，`~/.ariadne/browser` 下没有下载内容。
 - [ ] **自动下载**：在没有 Chrome、Edge、Chromium 的机器（或临时改名浏览器）上用一次，第一次调用会下载 Chrome for Testing 的 headless shell 到 `~/.ariadne/browser`，之后直接用；Windows 上用系统自带的 `tar` 解压，Linux 和 macOS 用 `unzip`。
-- [ ] **SSH 端口**：SSH 项目（远端没装 `ariadne-daemon`）里，让讨论串在远端后台起一个开发服务器，再用 `browser` 打开 `http://localhost:<端口>`，页面能打开，热更新的 WebSocket 能连上。这条路径用的是 `ssh -W localhost:<端口>` 加 `ClearAllForwardings=yes`，要确认它没有被拦下；再试一个只监听 `::1` 的服务器（比如 Vite 在部分系统上的默认值）。远端装的是旧版 `ariadne-daemon` 时也应走这条路径。
-- [ ] **daemon 端口**：daemon 项目里做同样的事，走 relay 的 `tcp` 通道。
 
 ## 发版程序
 
-- [ ] **Windows 产物**：确认未经过 UPX 压缩，并能运行 `--version` 和 `self-check`（发版流程的 Windows 自检会验证这两项）；UPX 仅用于 Linux。
+- [ ] **发布产物**：五个平台均关闭 UPX。发版流程在目标平台核对 `--version` 并运行 `self-check`。
 - [ ] **压缩后的程序**：直接运行压缩后的程序，页面自动打开，能建项目、跑一个讨论串、打开文档（文档的协同编辑走 WebSocket）。
 - [ ] **ACP 的工具桥**：用发版程序跑一个只支持本地 MCP 程序的 ACP agent，追踪里 Ariadne 的工具调用照常（程序用 `ariadne mcp-stdio <地址>` 启动自己做桥）。
 - [ ] **macOS**：`darwin-arm64` 程序在 Mac 上能启动（没有签名时第一次要在“隐私与安全性”里放行）。

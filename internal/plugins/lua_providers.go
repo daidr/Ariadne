@@ -1,0 +1,307 @@
+package plugins
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"iter"
+	"net/url"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/daidr/Ariadne/sdk"
+	lua "github.com/yuin/gopher-lua"
+)
+
+func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) error {
+	switch provider.group {
+	case "models":
+		_, err := pc.RegisterModel(program.model(provider))
+		return err
+	case "contexts":
+		_, err := pc.RegisterContext(program.source(provider))
+		return err
+	case "dashboards":
+		_, err := pc.RegisterDashboard(sdk.DashboardSource{
+			Info: sdk.DashboardSourceInfo{Kind: provider.kind, Title: provider.title, Description: provider.description, Settings: provider.settings},
+			Fetch: func(ctx context.Context, settings map[string]any, project string) (map[string]any, error) {
+				var out map[string]any
+				err := program.result(ctx, provider, "fetch", &out, settings, project)
+				return out, err
+			},
+		})
+		return err
+	case "searches":
+		_, err := pc.RegisterSearch(sdk.SearchProvider{
+			Kind: provider.kind, Title: provider.title,
+			Search: func(ctx context.Context, query string, limit int) ([]sdk.SearchResult, error) {
+				var out []sdk.SearchResult
+				limit = min(max(limit, 0), 100)
+				err := program.result(ctx, provider, "search", &out, query, limit)
+				if len(out) > limit {
+					out = slices.Clone(out[:limit])
+				}
+				return out, err
+			},
+		})
+		return err
+	case "links":
+		_, err := pc.RegisterLink(sdk.LinkProvider{
+			Kind: provider.kind, Title: provider.title,
+			Match: func(address *url.URL) *sdk.LinkMatch {
+				var label *string
+				if err := program.result(context.Background(), provider, "match", &label, address.String()); err != nil || label == nil || *label == "" || len(*label) > 1024 {
+					return nil
+				}
+				return &sdk.LinkMatch{Kind: provider.kind, Label: *label}
+			},
+			Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
+				var preview *sdk.PullRequestPreview
+				err := program.result(ctx, provider, "preview", &preview, address.String())
+				if preview != nil {
+					preview.Kind = provider.kind
+				}
+				return preview, err
+			},
+		})
+		return err
+	}
+	return errors.New("unknown Lua plugin provider type")
+}
+
+func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {
+	model := sdk.ModelProvider{
+		Info: sdk.ModelProviderInfo{Kind: provider.kind, Title: provider.title, Settings: provider.settings},
+		Stream: func(ctx context.Context, settings map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+			return func(yield func(sdk.Part) bool) {
+				program.stream(ctx, provider, settings, request, yield)
+			}
+		},
+	}
+	if provider.methods["models"] {
+		model.Models = func(ctx context.Context, settings map[string]any, options sdk.ModelListOptions) ([]sdk.ListedModel, error) {
+			var out []sdk.ListedModel
+			err := program.result(ctx, provider, "models", &out, settings, options.Headers)
+			return out, err
+		}
+	}
+	if provider.methods["check"] {
+		model.Check = func(ctx context.Context, settings map[string]any) (sdk.LocalizedText, error) {
+			var out sdk.LocalizedText
+			err := program.result(ctx, provider, "check", &out, settings)
+			return out, err
+		}
+	}
+	if provider.methods["describe"] {
+		model.Describe = func(settings map[string]any, request sdk.Request) any {
+			var out any
+			if err := program.result(context.Background(), provider, "describe", &out, settings, request); err != nil {
+				return nil
+			}
+			return out
+		}
+	}
+	if provider.methods["search"] {
+		model.Search = func(ctx context.Context, settings map[string]any, request sdk.SearchRequest) (sdk.SearchAnswer, error) {
+			var out sdk.SearchAnswer
+			err := program.result(ctx, provider, "search", &out, settings, request)
+			return out, err
+		}
+	}
+	return model
+}
+
+func (program *luaProgram) stream(ctx context.Context, provider luaProvider, settings map[string]any, request sdk.Request, yield func(sdk.Part) bool) {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	emitted, bytes := 0, 0
+	stopped := false
+	var finish *sdk.Part
+	var streamError error
+	err := program.call(ctx, provider, "stream", 10*time.Minute, true, func(values luaValues, fn *lua.LFunction) error {
+		input, err := luaArgs(values, []any{settings, request})
+		if err != nil {
+			return err
+		}
+		state := values.state
+		emit := state.NewFunction(func(state *lua.LState) int {
+			fail := func(err error) {
+				streamError = err
+				state.RaiseError("%s", err)
+			}
+			if streamError != nil {
+				fail(streamError)
+			}
+			if stopped || state.Context().Err() != nil {
+				state.RaiseError("stream was cancelled")
+			}
+			data, err := values.encode(state.CheckTable(1))
+			emitted++
+			bytes += len(data)
+			if err != nil || emitted > 65536 || bytes > 32<<20 {
+				fail(errors.New("invalid or oversized Lua stream output"))
+			}
+			var part sdk.Part
+			if err := unmarshalLuaPart(data, &part); err != nil {
+				fail(err)
+			}
+			if finish != nil {
+				fail(errors.New("plugin emitted data after finish"))
+			}
+			if part.Type == "finish" {
+				finish = &part
+			} else if !yield(part) {
+				stopped = true
+				stop()
+				state.RaiseError("stream was cancelled")
+			}
+			return 0
+		})
+		err = state.CallByParam(lua.P{Fn: fn, Protect: true}, append(input, emit)...)
+		return errors.Join(streamError, err)
+	})
+	if stopped || ctx.Err() != nil {
+		return
+	}
+	if err == nil && finish != nil {
+		yield(*finish)
+		return
+	}
+	if err == nil {
+		err = errors.New("Lua model plugin did not emit a finish part")
+	}
+	busy := errors.Is(err, errLuaBusy)
+	yield(sdk.Part{Type: "finish", Reason: "error", Error: err.Error(), Retryable: busy, Busy: busy})
+}
+
+func unmarshalLuaPart(data []byte, part *sdk.Part) error {
+	if err := json.Unmarshal(data, part); err != nil {
+		return err
+	}
+	switch part.Type {
+	case "text", "reasoning", "usage":
+		return nil
+	case "tool-input":
+		if part.Call != nil && *part.Call >= 0 {
+			return nil
+		}
+	case "tool-call":
+		if part.ID != "" && part.Name != "" {
+			return nil
+		}
+	case "finish":
+		if part.Reason != "" {
+			return nil
+		}
+	}
+	return errors.New("invalid Lua model stream part")
+}
+
+func (program *luaProgram) source(provider luaProvider) sdk.ContextProvider {
+	source := sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: provider.kind, Title: provider.title, Settings: provider.settings, Provides: []string{"workspace"}, Remote: true},
+		Connect: func(ctx context.Context, settings map[string]any) (sdk.Capabilities, error) {
+			if provider.methods["check"] {
+				var result any
+				if err := program.result(ctx, provider, "check", &result, settings); err != nil {
+					return sdk.Capabilities{}, err
+				}
+			}
+			view := &luaSource{program: program, provider: provider, settings: settings}
+			return sdk.Capabilities{
+				Workspace: &sdk.WorkspaceCapability{ViewOnly: true, View: func(context.Context) (sdk.SourceView, error) { return view, nil }},
+				Close: func() error {
+					view.mu.Lock()
+					view.settings = nil
+					view.closed = true
+					view.mu.Unlock()
+					return nil
+				},
+			}, nil
+		},
+	}
+	if provider.methods["browse"] {
+		source.Browse = func(ctx context.Context, settings map[string]any, folder string) (*sdk.DirectoryListing, error) {
+			var out *sdk.DirectoryListing
+			err := program.result(ctx, provider, "browse", &out, settings, folder)
+			return out, err
+		}
+	}
+	return source
+}
+
+type luaSource struct {
+	program  *luaProgram
+	provider luaProvider
+	mu       sync.RWMutex
+	settings map[string]any
+	closed   bool
+}
+
+func (view *luaSource) input(path string) (map[string]any, string, error) {
+	path, err := sdk.ViewPath(path)
+	if err != nil {
+		return nil, "", err
+	}
+	view.mu.RLock()
+	defer view.mu.RUnlock()
+	if view.closed {
+		return nil, "", errors.New("plugin source was closed")
+	}
+	return view.settings, path, nil
+}
+
+func (view *luaSource) List(ctx context.Context, path string) ([]sdk.DirectoryEntry, error) {
+	settings, path, err := view.input(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []sdk.DirectoryEntry
+	if err := view.program.result(ctx, view.provider, "list", &out, settings, path); err != nil {
+		return nil, err
+	}
+	if len(out) > 20000 {
+		return nil, errors.New("plugin source directory has too many entries")
+	}
+	for _, entry := range out {
+		if entry.Name == "" || entry.Name == "." || entry.Name == ".." || len(entry.Name) > 1024 ||
+			(entry.Kind != "file" && entry.Kind != "directory") || strings.ContainsAny(entry.Name, "/\\") {
+			return nil, errors.New("plugin source returned an invalid directory entry")
+		}
+		if _, err := sdk.ViewPath(entry.Name); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (view *luaSource) ReadBytes(ctx context.Context, path string, maxBytes int64) ([]byte, error) {
+	settings, path, err := view.input(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []byte
+	limit := int64(maxLuaValue)
+	if maxBytes > 0 {
+		limit = min(limit, maxBytes)
+	}
+	err = view.program.call(ctx, view.provider, "read", 30*time.Second, true, func(values luaValues, fn *lua.LFunction) error {
+		input, err := luaArgs(values, []any{settings, path, limit})
+		if err != nil {
+			return err
+		}
+		state := values.state
+		if err := state.CallByParam(lua.P{Fn: fn, NRet: 1, Protect: true}, input...); err != nil {
+			return err
+		}
+		value, ok := state.Get(-1).(lua.LString)
+		if !ok || int64(len(value)) > limit {
+			return errors.New("plugin source must return a byte string within the read limit")
+		}
+		out = []byte(value)
+		return nil
+	})
+	return out, err
+}

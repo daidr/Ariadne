@@ -1,0 +1,831 @@
+{
+  "format": 1,
+  "go": "1.27.4",
+  "projectionVersion": 67,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/artifacts/:artifactId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/artifacts/:artifactId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/artifacts/:artifactId/comments",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/artifacts/:artifactId/feedback",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "WS",
+      "path": "/api/artifacts/:artifactId/live",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/artifacts/:artifactId/refresh",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/attentions/:attentionId/answer",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversations/:conversationId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversations/:conversationId/read",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversations/:conversationId/retry",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversations/:conversationId/skills",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversations/:conversationId/stop",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversations/:conversationId/trace",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/conversations/:conversationId/trace/requests/:seq",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/conversations/:conversationId/wait",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversations/:conversationId/wait/now",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/directories",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/:fileId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/files/:fileId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/links",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/links/preview",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:messageId/reactions",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/plugins",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/plugins",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/plugins/remove",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:projectId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/artifacts",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/artifacts",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/autopilot",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/export",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/files",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/mcp",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/memory",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/memory",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:projectId/memory/:memoryId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/memory/:memoryId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/mention-files",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/messages",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/notices/:noticeId/undo",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/plan",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/plan/nodes/:nodeId/issues",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:projectId/plan/nodes/:nodeId/issues/:number",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/plan/proposals/:proposalId/dismiss",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/plan/revise",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/plan/revisions/:revisionId/revert",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/plan/revisions/:revisionId/revert",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/references",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:projectId/references/:referenceId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/references/status",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/:projectId/return",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/search",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/settings",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/settings",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/slots",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/:projectId/source",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/:projectId/source",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/:projectId/worktrees/:threadId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/concurrency",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/concurrency",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/data",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/data/backups",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/data/backups/:name",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/found",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/found/use",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/input",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/input",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/mcp",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/mcp",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/mcp/:serverId/check",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/model-info",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/model-list",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/models",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/models",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/search",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/search",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/search/check",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/work",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/work",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/source-kinds",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/source-kinds/:kind/browse",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/threads/:threadId/aside",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/:threadId/changes",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/:threadId/changes/file",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/:threadId/commands/:commandId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/commands/:commandId/stop",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/complete",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/:threadId/line-comments",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/merge",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/merge/undo",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/threads/:threadId/model",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/pull-request/refresh",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/threads/:threadId/references/:referenceId",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/references/:referenceId/keep",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/resume",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/reviewed",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/threads/:threadId/reviews",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/threads/:threadId/stop",
+      "source": "packages/server/src/app.ts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/worktrees",
+      "source": "packages/server/src/app.ts"
+    }
+  ],
+  "events": [
+    "approval.used",
+    "artifact.commented",
+    "artifact.created",
+    "artifact.feedback",
+    "artifact.feedback_done",
+    "artifact.revised",
+    "attention.answered",
+    "attention.joined",
+    "attention.opened",
+    "attention.withdrawn",
+    "autopilot.held",
+    "branch.conflicted",
+    "branch.merge_undone",
+    "branch.merged",
+    "checks.failed",
+    "conversation.compacted",
+    "conversation.compaction_failed",
+    "conversation.instructions",
+    "conversation.model_fallback",
+    "conversation.model_retry",
+    "conversation.prompt_updated",
+    "conversation.results_cleared",
+    "conversation.wait_ended",
+    "conversation.wait_set",
+    "issue.write_unsure",
+    "issue.writing",
+    "issue.written",
+    "memory.everywhere",
+    "memory.removed",
+    "memory.saved",
+    "message.edited",
+    "message.posted",
+    "message.reacted",
+    "message.read",
+    "notice.dismissed",
+    "plan.issue_linked",
+    "plan.issue_unlinked",
+    "plan.proposal.dismissed",
+    "plan.proposal.stale",
+    "plan.proposed",
+    "plan.revised",
+    "project.autopilot.paused",
+    "project.check.noted",
+    "project.created",
+    "project.deleted",
+    "project.mcp.set",
+    "project.references.set",
+    "project.renamed",
+    "project.settings.set",
+    "project.setup.noted",
+    "project.slots.set",
+    "project.source.set",
+    "prompt.recorded",
+    "pull_request.closed",
+    "pull_request.synced",
+    "research.step",
+    "review.abandoned",
+    "review.replied",
+    "review.requested",
+    "review.submitted",
+    "routine.ran",
+    "search.answered",
+    "thread.aside_due",
+    "thread.aside_ended",
+    "thread.created",
+    "thread.model_set",
+    "thread.nudged",
+    "thread.references.set",
+    "thread.renamed",
+    "thread.reported",
+    "thread.resumed",
+    "thread.reviewed",
+    "thread.set_aside",
+    "thread.started",
+    "thread.stopped",
+    "todo.updated",
+    "tool.finished",
+    "turn.changed",
+    "turn.finished",
+    "turn.requested",
+    "turn.started",
+    "turn.step",
+    "user.returned",
+    "workspace.opened",
+    "workspace.removed"
+  ],
+  "schema": [
+    {
+      "type": "table",
+      "name": "artifact_comments",
+      "sql": "CREATE TABLE artifact_comments (\n      id TEXT PRIMARY KEY,\n      artifact_id TEXT NOT NULL,\n      quote TEXT NOT NULL,\n      -- On a whiteboard: the item or connector (JSON), see ArtifactCommentAnchor.\n      anchor TEXT,\n      comments TEXT NOT NULL,\n      resolved_by TEXT,\n      resolved_at INTEGER,\n      created_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "artifact_feedback",
+      "sql": "CREATE TABLE artifact_feedback (\n      artifact_id TEXT NOT NULL,\n      round INTEGER NOT NULL,\n      version INTEGER NOT NULL,\n      notify TEXT NOT NULL,\n      items TEXT NOT NULL,\n      images TEXT NOT NULL,\n      done_by TEXT,\n      done_at INTEGER,\n      summary TEXT,\n      created_at INTEGER NOT NULL,\n      PRIMARY KEY (artifact_id, round)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "artifact_shared",
+      "sql": "CREATE TABLE artifact_shared (\n    artifact_id TEXT PRIMARY KEY,\n    project_id TEXT NOT NULL,\n    version INTEGER NOT NULL,\n    state BLOB NOT NULL,\n    updated_at INTEGER NOT NULL\n  )"
+    },
+    {
+      "type": "table",
+      "name": "artifact_versions",
+      "sql": "CREATE TABLE artifact_versions (\n      artifact_id TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      title TEXT NOT NULL,\n      content TEXT NOT NULL,\n      author TEXT NOT NULL,\n      reason TEXT NOT NULL,\n      created_at INTEGER NOT NULL,\n      PRIMARY KEY (artifact_id, version)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "artifacts",
+      "sql": "CREATE TABLE artifacts (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      title TEXT NOT NULL,\n      node_id TEXT,\n      version INTEGER NOT NULL,\n      content TEXT NOT NULL,\n      -- The summary lists show (JSON), worked out once per version rather than per list.\n      preview TEXT NOT NULL,\n      created_by TEXT NOT NULL,\n      updated_by TEXT NOT NULL,\n      -- The agent that wrote it last; it hears about the user's edits.\n      last_agent TEXT,\n      open_comments INTEGER NOT NULL DEFAULT 0,\n      commented_at INTEGER NOT NULL DEFAULT 0,\n      created_at INTEGER NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "attention_waiters",
+      "sql": "CREATE TABLE attention_waiters (\n      attention_id TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      PRIMARY KEY (attention_id, thread_id)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "attentions",
+      "sql": "CREATE TABLE attentions (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      thread_id TEXT,\n      conversation_id TEXT,\n      message_id TEXT,\n      block TEXT NOT NULL,\n      closed INTEGER NOT NULL DEFAULT 0,\n      answer TEXT,\n      withdrawn TEXT,\n      approved INTEGER,\n      purpose TEXT,\n      created_at INTEGER NOT NULL,\n      -- The event that last changed what the row shows, for pages that fetch only changes.\n      changed_seq INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "conversations",
+      "sql": "CREATE TABLE conversations (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      role TEXT NOT NULL,\n      pending_seq INTEGER NOT NULL DEFAULT 0,\n      pending_since INTEGER NOT NULL DEFAULT 0,\n      turn_id TEXT,\n      turn_started_seq INTEGER,\n      turn_started_at INTEGER,\n      -- When its newest turn started, kept after it ends: was there a report since?\n      last_turn_at INTEGER,\n      model TEXT,\n      last_outcome TEXT,\n      last_error TEXT,\n      input_tokens INTEGER NOT NULL DEFAULT 0,\n      output_tokens INTEGER NOT NULL DEFAULT 0,\n      cached_tokens INTEGER NOT NULL DEFAULT 0,\n      cache_write_tokens INTEGER NOT NULL DEFAULT 0,\n      reasoning_tokens INTEGER NOT NULL DEFAULT 0,\n      cost_usd REAL NOT NULL DEFAULT 0,\n      cost_cny REAL NOT NULL DEFAULT 0,\n      context_tokens INTEGER NOT NULL DEFAULT 0,\n      instructions TEXT,\n      activity TEXT,\n      -- The turn went on with the fallback model.\n      fallback INTEGER NOT NULL DEFAULT 0,\n      compactions INTEGER NOT NULL DEFAULT 0,\n      wait_id TEXT,\n      wait_until INTEGER,\n      wait_note TEXT\n    )"
+    },
+    {
+      "type": "table",
+      "name": "events",
+      "sql": "CREATE TABLE events (\n      seq INTEGER PRIMARY KEY AUTOINCREMENT,\n      id TEXT NOT NULL UNIQUE,\n      type TEXT NOT NULL,\n      project_id TEXT NOT NULL,\n      data TEXT NOT NULL,\n      at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "files",
+      "sql": "CREATE TABLE files (\n    id TEXT PRIMARY KEY,\n    project_id TEXT NOT NULL,\n    mime TEXT NOT NULL,\n    size INTEGER NOT NULL,\n    sha256 TEXT NOT NULL,\n    data BLOB NOT NULL,\n    created_at INTEGER NOT NULL\n  )"
+    },
+    {
+      "type": "table",
+      "name": "issue_writes",
+      "sql": "CREATE TABLE issue_writes (\n      attention_id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      purpose TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      tracker TEXT NOT NULL,\n      number INTEGER NOT NULL,\n      action TEXT NOT NULL,\n      status TEXT NOT NULL,\n      url TEXT,\n      written_seq INTEGER\n    )"
+    },
+    {
+      "type": "table",
+      "name": "memories",
+      "sql": "CREATE TABLE memories (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      text TEXT NOT NULL,\n      author TEXT NOT NULL,\n      created_at INTEGER NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "messages",
+      "sql": "CREATE TABLE messages (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      conversation_id TEXT NOT NULL,\n      author TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      content TEXT NOT NULL,\n      created_at INTEGER NOT NULL,\n      edited_at INTEGER,\n      edit_reason TEXT,\n      original_content TEXT,\n      read_at INTEGER,\n      edited_since_read INTEGER NOT NULL DEFAULT 0,\n      blocks TEXT,\n      attachments TEXT,\n      mentions TEXT,\n      comments TEXT,\n      -- On a relay: the user's messages it passes along. On a user's message: the relays\n      -- that passed it to threads.\n      cites TEXT,\n      relayed_to TEXT,\n      -- The message it answers (JSON QuotedMessage), and the emojis on it (JSON Reaction[]).\n      reply_to TEXT,\n      reactions TEXT,\n      -- The event that last changed the row, for pages that fetch only changes.\n      changed_seq INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "notices",
+      "sql": "CREATE TABLE notices (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      conversation_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      payload TEXT NOT NULL,\n      undone INTEGER NOT NULL DEFAULT 0,\n      created_at INTEGER NOT NULL,\n      -- The event that last changed the row, for pages that fetch only changes.\n      changed_seq INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "plan_edges",
+      "sql": "CREATE TABLE plan_edges (\n      project_id TEXT NOT NULL,\n      from_id TEXT NOT NULL,\n      to_id TEXT NOT NULL,\n      changed_in TEXT,\n      PRIMARY KEY (project_id, from_id, to_id)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "plan_node_issues",
+      "sql": "CREATE TABLE plan_node_issues (\n      project_id TEXT NOT NULL,\n      node_id TEXT NOT NULL,\n      tracker TEXT NOT NULL,\n      number INTEGER NOT NULL,\n      title TEXT NOT NULL,\n      url TEXT NOT NULL,\n      linked_by TEXT NOT NULL,\n      seq INTEGER NOT NULL,\n      PRIMARY KEY (project_id, node_id, tracker, number)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "plan_nodes",
+      "sql": "CREATE TABLE plan_nodes (\n      id TEXT NOT NULL,\n      project_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      title TEXT NOT NULL,\n      description TEXT NOT NULL,\n      acceptance TEXT NOT NULL,\n      position INTEGER NOT NULL,\n      changed_in TEXT,\n      created_at INTEGER NOT NULL,\n      updated_at INTEGER NOT NULL,\n      PRIMARY KEY (project_id, id)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "plan_proposals",
+      "sql": "CREATE TABLE plan_proposals (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      attention_id TEXT NOT NULL UNIQUE,\n      reason TEXT NOT NULL,\n      ops TEXT NOT NULL,\n      revert_of TEXT,\n      status TEXT NOT NULL,\n      stale_reason TEXT,\n      created_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "plan_revisions",
+      "sql": "CREATE TABLE plan_revisions (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      author TEXT NOT NULL,\n      reason TEXT NOT NULL,\n      ops TEXT NOT NULL,\n      inverse TEXT NOT NULL,\n      revert_of TEXT,\n      reverted_by TEXT,\n      proposal_id TEXT,\n      seq INTEGER NOT NULL,\n      created_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "projects",
+      "sql": "CREATE TABLE projects (\n      id TEXT PRIMARY KEY,\n      name TEXT NOT NULL,\n      coordinator_id TEXT NOT NULL,\n      source TEXT,\n      -- Sources the project only reads, as JSON.\n      reference_sources TEXT NOT NULL DEFAULT '[]',\n      slots INTEGER,\n      mcp TEXT NOT NULL DEFAULT '[]',\n      settings TEXT,\n      -- What Ariadne found out about the repository itself (JSON, ProjectDetected).\n      detected TEXT,\n      -- The user paused its autopilot; and the event at which it last went on (switched on\n      -- or resumed).\n      autopilot_paused INTEGER NOT NULL DEFAULT 0,\n      autopilot_since INTEGER,\n      -- Its name is only the start of the user's first words, until someone names it.\n      unnamed INTEGER NOT NULL DEFAULT 0,\n      created_at INTEGER NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "prompts",
+      "sql": "CREATE TABLE prompts (\n      project_id TEXT NOT NULL,\n      hash TEXT NOT NULL,\n      content TEXT NOT NULL,\n      PRIMARY KEY (project_id, hash)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "reviews",
+      "sql": "CREATE TABLE reviews (\n      id INTEGER PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      reviewer_id TEXT NOT NULL,\n      round INTEGER NOT NULL,\n      head TEXT,\n      requested_at INTEGER NOT NULL,\n      verdict TEXT,\n      summary TEXT,\n      comments TEXT NOT NULL DEFAULT '[]',\n      replies TEXT,\n      submitted_at INTEGER,\n      abandoned_at INTEGER\n    )"
+    },
+    {
+      "type": "table",
+      "name": "search_docs",
+      "sql": "CREATE TABLE search_docs (\n      id INTEGER PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      ref_id TEXT NOT NULL UNIQUE,\n      conversation_id TEXT,\n      at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "search_text",
+      "sql": "CREATE VIRTUAL TABLE search_text USING fts5(title, body, tokenize = 'trigram')"
+    },
+    {
+      "type": "table",
+      "name": "threads",
+      "sql": "CREATE TABLE threads (\n      id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      title TEXT NOT NULL,\n      node_id TEXT,\n      started INTEGER NOT NULL DEFAULT 0,\n      last_report TEXT,\n      last_summary TEXT,\n      last_headline TEXT,\n      -- Ids of the artifacts it pointed the user to (JSON), shown by their current titles.\n      last_artifacts TEXT NOT NULL DEFAULT '[]',\n      reported_at INTEGER,\n      reported_head TEXT,\n      -- When it was last told to report after a turn that ended without one.\n      nudged_at INTEGER,\n      workspace_label TEXT,\n      workspace_branch TEXT,\n      workspace_base TEXT,\n      workspace_removed INTEGER NOT NULL DEFAULT 0,\n      workspace_parked INTEGER NOT NULL DEFAULT 0,\n      merged TEXT,\n      -- When its work last landed (its branch or pull request was merged), and when the\n      -- user last wrote to it: landed with nothing written since, it is archived.\n      landed_at INTEGER,\n      user_at INTEGER,\n      -- What its workspace changes against the base (JSON ChangeTotals), as of its last\n      -- turn that changed something.\n      changes TEXT,\n      pull_request TEXT,\n      -- The sources it alone reads (JSON ThreadReference[]).\n      reference_sources TEXT NOT NULL DEFAULT '[]',\n      reference_ended TEXT NOT NULL DEFAULT '[]',\n      check_failures INTEGER NOT NULL DEFAULT 0,\n      stopped_reason TEXT,\n      stopped_by TEXT,\n      stopped_at INTEGER,\n      reviewed_at INTEGER,\n      model TEXT,\n      branch_slug TEXT,\n      -- For a reviewing thread: the author it reviews.\n      review_of TEXT,\n      -- For an author: its reviewing thread, the rounds of its latest delivery, whether a\n      -- round runs now, and whether that delivery reached the user.\n      reviewer_id TEXT,\n      review_rounds INTEGER NOT NULL DEFAULT 0,\n      reviewing INTEGER NOT NULL DEFAULT 0,\n      review_delivered INTEGER NOT NULL DEFAULT 1,\n      -- The branch commit the autopilot last left for the user (empty for none), so it does\n      -- not try that commit again.\n      autopilot_held TEXT,\n      auto INTEGER NOT NULL DEFAULT 0,\n      -- Set aside until this time, why and by whom; due once that time came.\n      aside_until INTEGER,\n      aside_reason TEXT,\n      aside_by TEXT,\n      aside_due INTEGER NOT NULL DEFAULT 0,\n      created_at INTEGER NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todos",
+      "sql": "CREATE TABLE todos (\n      conversation_id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      items TEXT NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "transcript",
+      "sql": "CREATE TABLE transcript (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      project_id TEXT NOT NULL,\n      conversation_id TEXT NOT NULL,\n      seq INTEGER NOT NULL,\n      kind TEXT NOT NULL,\n      ref TEXT,\n      payload TEXT\n    )"
+    },
+    {
+      "type": "table",
+      "name": "used_approvals",
+      "sql": "CREATE TABLE used_approvals (\n      attention_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL\n    )"
+    },
+    {
+      "type": "index",
+      "name": "artifact_comments_artifact",
+      "sql": "CREATE INDEX artifact_comments_artifact ON artifact_comments (artifact_id, created_at)"
+    },
+    {
+      "type": "index",
+      "name": "artifacts_project",
+      "sql": "CREATE INDEX artifacts_project ON artifacts (project_id, updated_at)"
+    },
+    {
+      "type": "index",
+      "name": "attentions_message",
+      "sql": "CREATE INDEX attentions_message ON attentions (message_id)"
+    },
+    {
+      "type": "index",
+      "name": "attentions_project",
+      "sql": "CREATE INDEX attentions_project ON attentions (project_id, closed)"
+    },
+    {
+      "type": "index",
+      "name": "events_project",
+      "sql": "CREATE INDEX events_project ON events (project_id, seq)"
+    },
+    {
+      "type": "index",
+      "name": "files_hash",
+      "sql": "CREATE INDEX files_hash ON files (project_id, sha256)"
+    },
+    {
+      "type": "index",
+      "name": "memories_project",
+      "sql": "CREATE INDEX memories_project ON memories (project_id, created_at)"
+    },
+    {
+      "type": "index",
+      "name": "messages_conversation",
+      "sql": "CREATE INDEX messages_conversation ON messages (conversation_id, id)"
+    },
+    {
+      "type": "index",
+      "name": "notices_conversation",
+      "sql": "CREATE INDEX notices_conversation ON notices (conversation_id, created_at)"
+    },
+    {
+      "type": "index",
+      "name": "plan_nodes_project",
+      "sql": "CREATE INDEX plan_nodes_project ON plan_nodes (project_id, position)"
+    },
+    {
+      "type": "index",
+      "name": "plan_revisions_project",
+      "sql": "CREATE INDEX plan_revisions_project ON plan_revisions (project_id, seq)"
+    },
+    {
+      "type": "index",
+      "name": "reviews_thread",
+      "sql": "CREATE INDEX reviews_thread ON reviews (thread_id, id)"
+    },
+    {
+      "type": "index",
+      "name": "search_docs_project",
+      "sql": "CREATE INDEX search_docs_project ON search_docs (project_id, kind, at)"
+    },
+    {
+      "type": "index",
+      "name": "threads_project",
+      "sql": "CREATE INDEX threads_project ON threads (project_id, id)"
+    },
+    {
+      "type": "index",
+      "name": "transcript_conversation",
+      "sql": "CREATE INDEX transcript_conversation ON transcript (conversation_id, id)"
+    }
+  ]
+}

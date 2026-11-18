@@ -1,0 +1,99 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+)
+
+type projectDeletion struct {
+	done chan struct{}
+	err  error
+}
+
+func (api *API) registerProjectDeletion() {
+	api.add("DELETE", "/api/projects/:projectId", func(r *http.Request) (any, int, error) {
+		id := r.PathValue("projectId")
+		if _, err := api.options.Repository.GetProject(r.Context(), id); err != nil {
+			return nil, 0, err
+		}
+		api.deletionMu.Lock()
+		if api.deleteClosed {
+			api.deletionMu.Unlock()
+			return nil, 0, errors.New("API is closed")
+		}
+		if api.deleteWaiters >= 1024 {
+			api.deletionMu.Unlock()
+			return nil, 0, badInput("too many waiting project deletions")
+		}
+		job := api.deletions[id]
+		if job == nil {
+			if len(api.deletions) >= 128 {
+				api.deletionMu.Unlock()
+				return nil, 0, badInput("too many pending project deletions")
+			}
+			job = &projectDeletion{done: make(chan struct{})}
+			api.deletions[id] = job
+			api.deleteJobs.Add(1)
+			go func() {
+				defer api.deleteJobs.Done()
+				defer func() {
+					if recover() != nil {
+						job.err = errors.New("project deletion failed")
+					}
+					api.deletionMu.Lock()
+					delete(api.deletions, id)
+					close(job.done)
+					api.deletionMu.Unlock()
+				}()
+				ctx, cancel := context.WithTimeout(api.deleteLife, 2*time.Minute)
+				defer cancel()
+				job.err = api.deleteProject(ctx, id)
+			}()
+		}
+		api.deleteWaiters++
+		api.deletionMu.Unlock()
+		defer func() { api.deletionMu.Lock(); api.deleteWaiters--; api.deletionMu.Unlock() }()
+		select {
+		case <-r.Context().Done():
+			return nil, 0, r.Context().Err()
+		case <-job.done:
+			return nil, 204, job.err
+		}
+	})
+}
+func (api *API) deleteProject(ctx context.Context, id string) error {
+	if api.options.Scheduler != nil {
+		release, err := api.options.Scheduler.HoldProject(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	if api.options.Workspaces != nil {
+		if err := api.options.Workspaces.DiscardProject(ctx, id); err != nil {
+			return err
+		}
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := api.options.Workspaces.InvalidateProject(cleanup, id); err != nil {
+				api.report(err)
+			}
+		}()
+	}
+	if err := api.options.Repository.DeleteProject(ctx, id); err != nil {
+		return err
+	}
+	api.syncer.Forget(id)
+	api.state.DropProject(id)
+	api.rooms.DropProject(id)
+	if api.options.OnProjectDeleted != nil {
+		api.options.OnProjectDeleted(id)
+	}
+	if api.options.Settings != nil {
+		return api.options.Settings.ForgetProject(id)
+	}
+	return nil
+}

@@ -1,0 +1,404 @@
+package workspaces
+
+import (
+	"context"
+	"errors"
+
+	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/textutil"
+	"github.com/daidr/Ariadne/sdk"
+)
+
+func workError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var domain *domainerr.Error
+	if errors.As(err, &domain) {
+		return err
+	}
+	var refused *sdk.MergeRefused
+	if errors.As(err, &refused) {
+		return domainerr.New("error.merge."+refused.Reason, map[string]any{"detail": refused.Detail})
+	}
+	return domainerr.New("error.merge.failed", map[string]any{"detail": err.Error()})
+}
+
+type ThreadChanges struct {
+	Changes   *sdk.BranchChanges `json:"changes"`
+	Mergeable bool               `json:"mergeable"`
+}
+
+func (manager *Manager) ThreadChanges(ctx context.Context, threadID string) (ThreadChanges, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return ThreadChanges{}, err
+	}
+	defer done()
+	thread, err := manager.options.Repository.GetThread(ctx, threadID)
+	if err != nil {
+		return ThreadChanges{}, err
+	}
+	branches, err := manager.Branches(ctx, thread.ProjectID)
+	if err != nil {
+		return ThreadChanges{}, err
+	}
+	if branches == nil || branches.Changes == nil || thread.Workspace == nil {
+		return ThreadChanges{}, nil
+	}
+	branch, base := optionalString(thread.Workspace.Branch), optionalString(thread.Workspace.Base)
+	if branch == nil || base == nil || *branch == "" || *base == "" {
+		return ThreadChanges{}, nil
+	}
+	changes, err := branches.Changes(ctx, sdk.ThreadBranch{ThreadID: threadID, Branch: *branch}, *base)
+	if err != nil {
+		return ThreadChanges{}, workError(err)
+	}
+	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return ThreadChanges{}, err
+	}
+	return ThreadChanges{Changes: changes, Mergeable: branches.Merge != nil && project.Settings.Delivery.Mode != "external"}, nil
+}
+func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request sdk.FileVersionRequest) (sdk.FileVersions, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return sdk.FileVersions{}, err
+	}
+	defer done()
+	thread, err := manager.options.Repository.GetThread(ctx, threadID)
+	if err != nil {
+		return sdk.FileVersions{}, err
+	}
+	branches, err := manager.Branches(ctx, thread.ProjectID)
+	if err != nil {
+		return sdk.FileVersions{}, err
+	}
+	if branches == nil || branches.File == nil {
+		return sdk.FileVersions{}, domainerr.New("error.noBranch", nil)
+	}
+	file, err := branches.File(ctx, request)
+	return file, workError(err)
+}
+
+type ThreadMerge struct {
+	Outcome sdk.MergeOutcome `json:"outcome"`
+	Thread  core.ThreadView  `json:"thread"`
+}
+
+func (manager *Manager) MergeThread(ctx context.Context, threadID, method, message string) (ThreadMerge, error) {
+	return manager.mergeThread(ctx, threadID, method, message, "")
+}
+
+func (manager *Manager) MergeReviewedThread(ctx context.Context, threadID, head string) (ThreadMerge, error) {
+	if head == "" {
+		return ThreadMerge{}, domainerr.New("error.noBranch", nil)
+	}
+	return manager.mergeThread(ctx, threadID, "", "", head)
+}
+
+func (manager *Manager) mergeThread(ctx context.Context, threadID, method, message, reviewedHead string) (ThreadMerge, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	defer done()
+	if reviewedHead == "" && method != "merge" && method != "squash" {
+		return ThreadMerge{}, domainerr.New("error.invalidBody", map[string]any{"reason": "method"})
+	}
+	repo := manager.options.Repository
+	thread, err := repo.GetThread(ctx, threadID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	unlock, err := manager.gates.lock(ctx, workspaceID(thread.ProjectID, threadID))
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	defer unlock()
+	thread, err = repo.GetThread(ctx, threadID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	project, err := repo.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	if project.Settings.Delivery.Mode == "external" {
+		return ThreadMerge{}, domainerr.New("error.externalDelivery", nil)
+	}
+	if thread.Workspace == nil {
+		return ThreadMerge{}, domainerr.New("error.noBranch", nil)
+	}
+	branch, base := optionalString(thread.Workspace.Branch), optionalString(thread.Workspace.Base)
+	if branch == nil || base == nil || *branch == "" || *base == "" {
+		return ThreadMerge{}, domainerr.New("error.noBranch", nil)
+	}
+	conversation, err := repo.GetConversation(ctx, threadID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	if conversation.Turn != nil {
+		return ThreadMerge{}, domainerr.New("error.merge.working", nil)
+	}
+	branches, err := manager.Branches(ctx, thread.ProjectID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	if branches == nil || branches.Merge == nil {
+		return ThreadMerge{}, domainerr.New("error.merge.unsupported", nil)
+	}
+	project, err = repo.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return ThreadMerge{}, err
+	}
+	if project.Settings.Delivery.Mode == "external" {
+		return ThreadMerge{}, domainerr.New("error.externalDelivery", nil)
+	}
+	if reviewedHead != "" {
+		round, err := repo.PassedReview(ctx, threadID)
+		if err != nil {
+			return ThreadMerge{}, err
+		}
+		conversation, err := repo.GetConversation(ctx, threadID)
+		if err != nil {
+			return ThreadMerge{}, err
+		}
+		if !project.Settings.Autopilot.Enabled || project.AutopilotPaused || round["head"] != reviewedHead || conversation.Turn != nil {
+			return ThreadMerge{Thread: thread}, nil
+		}
+		method = project.Settings.Autopilot.Method
+	}
+	message = textutil.Trim(message)
+	if message == "" {
+		message = thread.Title
+	}
+	outcome, err := branches.Merge(ctx, sdk.MergeRequest{ThreadID: threadID, Branch: *branch, Base: *base, Method: method, Message: message, ExpectedHead: reviewedHead})
+	if err != nil {
+		return ThreadMerge{}, workError(err)
+	}
+	switch outcome.Kind {
+	case "merged":
+		data := map[string]any{"branch": *branch, "base": *base, "method": method, "sha": outcome.SHA, "head": outcome.Head}
+		if reviewedHead != "" {
+			data["auto"] = true
+			thread, err = repo.RecordMerge(ctx, threadID, data)
+		} else {
+			thread, err = repo.RecordUserMerge(ctx, threadID, data, method)
+		}
+	case "conflict":
+		thread, err = repo.RecordMergeConflict(ctx, threadID, map[string]any{"branch": *branch, "base": *base, "files": outcome.Files})
+	}
+	return ThreadMerge{Outcome: outcome, Thread: thread}, err
+}
+func (manager *Manager) UndoMerge(ctx context.Context, threadID string) (core.ThreadView, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return core.ThreadView{}, err
+	}
+	defer done()
+	repo := manager.options.Repository
+	thread, err := repo.GetThread(ctx, threadID)
+	if err != nil {
+		return thread, err
+	}
+	unlock, err := manager.gates.lock(ctx, workspaceID(thread.ProjectID, threadID))
+	if err != nil {
+		return thread, err
+	}
+	defer unlock()
+	thread, err = repo.GetThread(ctx, threadID)
+	if err != nil {
+		return thread, err
+	}
+	merge, ok := thread.Merged.(map[string]any)
+	if !ok {
+		return thread, domainerr.New("error.undoMerge.none", nil)
+	}
+	branches, err := manager.Branches(ctx, thread.ProjectID)
+	if err != nil {
+		return thread, err
+	}
+	if branches == nil || branches.UndoMerge == nil {
+		return thread, domainerr.New("error.merge.unsupported", nil)
+	}
+	branch, _ := merge["branch"].(string)
+	base, _ := merge["base"].(string)
+	sha, _ := merge["sha"].(string)
+	if err := branches.UndoMerge(ctx, sdk.UndoMergeRequest{Branch: branch, Base: base, SHA: sha}); err != nil {
+		return thread, workError(err)
+	}
+	thread, err = repo.RecordMergeUndone(ctx, threadID)
+	if err != nil {
+		return thread, err
+	}
+	if thread.Workspace != nil && thread.Workspace.Removed {
+		// Reopening takes the same per-thread gate.
+		unlock()
+		manager.ForThread(ctx, thread.ProjectID, threadID)
+		return repo.GetThread(ctx, threadID)
+	}
+	return thread, nil
+}
+
+type ListedWorktree struct {
+	sdk.WorktreeInfo
+	Thread *core.ThreadView `json:"thread"`
+}
+type ProjectWorktrees struct {
+	ID        string           `json:"id"`
+	Name      string           `json:"name"`
+	Worktrees []ListedWorktree `json:"worktrees"`
+	Shared    *bool            `json:"shared"`
+	Error     *domainerr.Error `json:"error"`
+}
+
+func (manager *Manager) ListWorktrees(ctx context.Context) ([]ProjectWorktrees, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	repo := manager.options.Repository
+	projects, err := repo.ListProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	output := []ProjectWorktrees{}
+	for _, project := range projects {
+		if !manager.Available(ctx, project.ID) {
+			continue
+		}
+		listed := ProjectWorktrees{ID: project.ID, Name: project.Name, Worktrees: []ListedWorktree{}}
+		err := func() error {
+			branches, err := manager.Branches(ctx, project.ID)
+			if err != nil {
+				return err
+			}
+			if branches == nil || branches.Worktrees == nil {
+				return nil
+			}
+			worktrees, err := branches.Worktrees(ctx)
+			if err != nil {
+				return err
+			}
+			for _, worktree := range worktrees {
+				var own *core.ThreadView
+				if thread, err := repo.GetThread(ctx, worktree.ThreadID); err == nil {
+					if thread.ProjectID != project.ID {
+						continue
+					}
+					own = &thread
+				}
+				listed.Worktrees = append(listed.Worktrees, ListedWorktree{WorktreeInfo: worktree, Thread: own})
+			}
+			if len(listed.Worktrees) > 0 && branches.SharesStorage != nil {
+				shared, err := branches.SharesStorage(ctx)
+				if err != nil {
+					return err
+				}
+				listed.Shared = &shared
+			}
+			output = append(output, listed)
+			return nil
+		}()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			var known *domainerr.Error
+			if !errors.As(err, &known) {
+				known = domainerr.New("error.workspace", map[string]any{"detail": err.Error()})
+			}
+			listed.Worktrees = []ListedWorktree{}
+			listed.Shared = nil
+			listed.Error = known
+			output = append(output, listed)
+		}
+	}
+	return output, nil
+}
+func SummarizeChecks(checks []sdk.CheckInfo) map[string]any {
+	failed := []string{}
+	pending := false
+	for _, check := range checks {
+		if check.Status != "completed" {
+			pending = true
+			continue
+		}
+		if check.Conclusion == nil {
+			continue
+		}
+		switch *check.Conclusion {
+		case "failure", "timed_out", "cancelled", "action_required", "error", "startup_failure":
+			failed = append(failed, check.Name)
+		}
+	}
+	state := "success"
+	if len(checks) == 0 {
+		state = "none"
+	} else if len(failed) > 0 {
+		state = "failure"
+	} else if pending {
+		state = "pending"
+	}
+	return map[string]any{"state": state, "failed": failed}
+}
+func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, known *sdk.PullRequestInfo, auto map[string]any) (map[string]any, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	thread, err := manager.options.Repository.GetThread(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	repo, err := manager.Repo(ctx, thread.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	pr := known
+	if pr == nil {
+		if current, ok := thread.PullRequest.(map[string]any); ok {
+			if repo.PullRequest == nil {
+				return nil, domainerr.New("error.noRepo", nil)
+			}
+			number, _ := current["number"].(float64)
+			value, err := repo.PullRequest(ctx, int(number))
+			if err != nil {
+				return nil, err
+			}
+			if value.Number != int(number) {
+				return nil, errors.New("repository returned a different pull request")
+			}
+			pr = &value
+		} else if thread.Workspace != nil {
+			if branch := optionalString(thread.Workspace.Branch); branch != nil && repo.PullRequestFor != nil {
+				pr, err = repo.PullRequestFor(ctx, *branch)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if pr == nil {
+		return nil, nil
+	}
+	if repo.Checks == nil {
+		return nil, domainerr.New("error.noRepo", nil)
+	}
+	checks, err := repo.Checks(ctx, pr.HeadSHA)
+	if err != nil {
+		return nil, err
+	}
+	value := map[string]any{"number": pr.Number, "url": pr.URL, "title": pr.Title, "state": pr.State, "headSha": pr.HeadSHA, "checks": SummarizeChecks(checks)}
+	if pr.Reference != "" {
+		value["reference"] = pr.Reference
+	}
+	if err := manager.options.Repository.SyncPullRequest(ctx, threadID, value, auto); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
