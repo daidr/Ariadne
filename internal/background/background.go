@@ -26,14 +26,15 @@ type Result struct {
 	Stopped  bool  `json:"stopped"`
 }
 type Command struct {
-	ID        string  `json:"id"`
-	ThreadID  string  `json:"threadId"`
-	Command   string  `json:"command"`
-	CWD       string  `json:"cwd"`
-	StartedAt int64   `json:"startedAt"`
-	URL       *string `json:"url"`
-	Result    *Result `json:"result"`
-	Keep      bool    `json:"keep"`
+	ID             string  `json:"id"`
+	ThreadID       string  `json:"threadId"`
+	Command        string  `json:"command"`
+	CWD            string  `json:"cwd"`
+	SourceIdentity string  `json:"-"`
+	StartedAt      int64   `json:"startedAt"`
+	URL            *string `json:"url"`
+	Result         *Result `json:"result"`
+	Keep           bool    `json:"keep"`
 }
 type Output struct {
 	Command Command `json:"command"`
@@ -45,8 +46,9 @@ type Peek struct {
 	Tail    string  `json:"tail"`
 }
 type StartOptions struct {
-	Local, Keep bool
-	CWD         string
+	Local, Keep    bool
+	CWD            string
+	SourceIdentity string
 }
 type Options struct {
 	Now func() time.Time
@@ -172,6 +174,7 @@ func (commands *Commands) forget(job *job) {
 	job.output.clear()
 	job.view.Command = ""
 	job.view.CWD = ""
+	job.view.SourceIdentity = ""
 	job.view.URL = nil
 	close(job.changed)
 	job.changed = make(chan struct{})
@@ -220,7 +223,7 @@ func (commands *Commands) room(thread string) error {
 	return nil
 }
 func (commands *Commands) track(thread, command string, ctx context.Context, cancel context.CancelFunc, options StartOptions) (*job, error) {
-	if len(thread) > 512 || len(command) > 32*1024 || len(options.CWD) > 4096 || thread == "" {
+	if len(thread) > 512 || len(command) > 32*1024 || len(options.CWD) > 4096 || len(options.SourceIdentity) > 128 || thread == "" {
 		return nil, errors.New("background command metadata exceeds size limit")
 	}
 	if err := commands.room(thread); err != nil {
@@ -231,7 +234,7 @@ func (commands *Commands) track(thread, command string, ctx context.Context, can
 	if cwd == "" {
 		cwd = "."
 	}
-	job := &job{view: Command{ID: "cmd-" + strconv.FormatUint(commands.next, 10), ThreadID: strings.Clone(thread), Command: strings.Clone(command), CWD: strings.Clone(cwd), StartedAt: commands.options.Now().UnixMilli(), Keep: options.Keep}, ctx: ctx, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}), seeking: options.Local}
+	job := &job{view: Command{ID: "cmd-" + strconv.FormatUint(commands.next, 10), ThreadID: strings.Clone(thread), Command: strings.Clone(command), CWD: strings.Clone(cwd), SourceIdentity: strings.Clone(options.SourceIdentity), StartedAt: commands.options.Now().UnixMilli(), Keep: options.Keep}, ctx: ctx, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}), seeking: options.Local}
 	commands.jobs[job.view.ID] = job
 	commands.order = append(commands.order, job.view.ID)
 	commands.active++

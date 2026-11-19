@@ -54,7 +54,7 @@ func setupEndedNote(id string, result *background.Result) string {
 	}
 	return fmt.Sprintf("[Ariadne: %s, the setup of your new workspace, %s; what the work needs may be missing. It does not run again by itself: read_command_output %s shows what it printed, and run_command what the work needs.]", id, ending, id)
 }
-func (manager *Manager) prepareSetup(ctx context.Context, project core.ProjectView, thread core.ThreadView, value *workspaceConnection, key string, isolated bool) {
+func (manager *Manager) prepareSetup(ctx context.Context, project core.ProjectView, thread core.ThreadView, value *workspaceConnection, key, sourceID string, isolated bool) {
 	own := !project.Settings.Workspace.Auto.Setup
 	command := project.Settings.Workspace.Setup
 	if !own {
@@ -84,7 +84,7 @@ func (manager *Manager) prepareSetup(ctx context.Context, project core.ProjectVi
 						timeout = chosen
 					}
 				}
-				view := &workspaceView{manager: manager, project: project.ID, thread: thread.ID, key: key, info: copyInfo(value.workspace.Info())}
+				view := &workspaceView{manager: manager, project: project.ID, thread: thread.ID, key: key, sourceID: sourceID, info: copyInfo(value.workspace.Info())}
 				job, err := manager.Background.Start(thread.ID, command, func(ctx context.Context, options sdk.ExecOptions) (sdk.ExecResult, error) {
 					options.Shell = shell.Argv
 					options.Env = env

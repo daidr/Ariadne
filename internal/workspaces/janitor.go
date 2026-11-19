@@ -230,7 +230,7 @@ func (janitor *Janitor) landed(ctx context.Context, thread core.ThreadView) (boo
 	if base == nil || branch == nil || *base == "" || *branch == "" {
 		return false, nil
 	}
-	branches, err := janitor.manager.Branches(ctx, thread.ProjectID)
+	branches, err := janitor.manager.BranchesForThread(ctx, thread)
 	if err != nil || branches == nil {
 		return false, err
 	}

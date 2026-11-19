@@ -11,6 +11,7 @@ import type {
   LineComment,
   LiveUpdate,
   DraftUpdate,
+  FileSourceSet,
   BackgroundUpdate,
   BackgroundView,
   MessageView,
@@ -176,7 +177,7 @@ export function fetchSheet(id: string, index: number, signal: AbortSignal) {
 export interface ProjectWorktrees {
   id: string
   name: string
-  worktrees: (WorktreeInfo & { thread: ThreadView | null })[]
+  worktrees: (WorktreeInfo & { thread: ThreadView | null; sourceId?: string })[]
   /** Whether the source supports cloning on the worktree volume, when probed. */
   shared: boolean | null
   /** Why they could not be listed, e.g. the remote machine was unreachable. */
@@ -541,6 +542,8 @@ export const api = {
     name: string
     source?: SourceInput
     references?: { kind: string; settings: Record<string, unknown> }[]
+    sources?: (SourceInput & { id?: string })[]
+    primaryIndex?: number
   }) => request<{ project: ProjectView }>('POST', '/api/projects', input),
   renameProject: (id: string, name: string) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${id}`, { name }),
@@ -685,7 +688,12 @@ export const api = {
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
   browseSource: (
     kind: string,
-    body: { projectId: string | null; settings: Record<string, unknown>; path: string },
+    body: {
+      projectId: string | null
+      sourceId?: string
+      settings: Record<string, unknown>
+      path: string
+    },
   ) =>
     request<{ listing: DirectoryListing | null }>(
       'POST',
@@ -704,6 +712,15 @@ export const api = {
     ),
   setSource: (projectId: string, source: SourceInput | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
+  getFileSources: (projectId: string) =>
+    request<FileSourceSet & { secretsSet: Record<string, string[]> }>(
+      'GET',
+      `/api/projects/${projectId}/sources`,
+    ),
+  setFileSources: (
+    projectId: string,
+    body: { sources: (SourceInput & { id?: string })[]; primaryIndex?: number },
+  ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/sources`, body),
   addReference: (
     projectId: string,
     reference: { kind: string; settings: Record<string, unknown> },
@@ -831,8 +848,11 @@ export const api = {
       undefined,
       signal,
     ),
-  removeWorktree: (projectId: string, threadId: string) =>
-    request<void>('DELETE', `/api/projects/${projectId}/worktrees/${threadId}`),
+  removeWorktree: (projectId: string, threadId: string, sourceId?: string) =>
+    request<void>(
+      'DELETE',
+      `/api/projects/${projectId}/worktrees/${threadId}${sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : ''}`,
+    ),
   dismissProposal: (projectId: string, proposalId: string) =>
     request<{ plan: PlanView }>(
       'POST',

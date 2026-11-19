@@ -17,6 +17,7 @@ import (
 type Watcher struct {
 	Repository *core.Repository
 	Repo       func(context.Context, string) (*sdk.RepoCapability, error)
+	ThreadRepo func(context.Context, core.ThreadView) (*sdk.RepoCapability, error)
 	OnError    func(error)
 }
 
@@ -75,7 +76,17 @@ func (watcher Watcher) refresh(ctx context.Context, item core.OpenPullRequest) e
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	repo, err := watcher.Repo(ctx, item.ProjectID)
+	var repo *sdk.RepoCapability
+	var err error
+	if watcher.ThreadRepo != nil {
+		thread, readErr := watcher.Repository.GetThread(ctx, item.ThreadID)
+		if readErr != nil {
+			return readErr
+		}
+		repo, err = watcher.ThreadRepo(ctx, thread)
+	} else {
+		repo, err = watcher.Repo(ctx, item.ProjectID)
+	}
 	if err != nil {
 		return err
 	}

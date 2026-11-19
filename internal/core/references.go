@@ -20,6 +20,7 @@ type Reference struct {
 	Kind        string         `json:"kind"`
 	Settings    map[string]any `json:"settings"`
 	AttentionID *string        `json:"attentionId,omitempty"`
+	Writable    bool           `json:"writable,omitempty"`
 }
 
 var referenceParts = regexp.MustCompile(`[\\/:]+`)
@@ -75,7 +76,7 @@ func asReference(raw object) Reference {
 	if value, has := raw["attentionId"].(string); has {
 		attentionID = &value
 	}
-	return Reference{ID: raw.str("id"), Name: raw.str("name"), Kind: raw.str("kind"), Settings: raw.obj("settings"), AttentionID: attentionID}
+	return Reference{ID: raw.str("id"), Name: raw.str("name"), Kind: raw.str("kind"), Settings: raw.obj("settings"), AttentionID: attentionID, Writable: raw.yes("writable")}
 }
 func existingReference(references []object, source Source) object {
 	for _, ref := range references {
@@ -130,13 +131,21 @@ func readThread(ctx context.Context, db queryer, id string, now int64) (ThreadVi
 	return toThread(rows[0], now)
 }
 func (repo *Repository) AddThreadReference(ctx context.Context, id string, source Source, where, attentionID string) (result Reference, err error) {
+	return repo.addThreadReference(ctx, id, source, where, attentionID, false)
+}
+
+func (repo *Repository) AddThreadFileSource(ctx context.Context, id string, source Source, where, attentionID string) (Reference, error) {
+	return repo.addThreadReference(ctx, id, source, where, attentionID, true)
+}
+
+func (repo *Repository) addThreadReference(ctx context.Context, id string, source Source, where, attentionID string, writable bool) (result Reference, err error) {
 	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
 		thread, err := readThread(ctx, tx.SQL(), id, repo.Reader.now())
 		if err != nil {
 			return err
 		}
 		references := refs(thread.References)
-		if already := existingReference(references, source); already != nil {
+		if already := existingReference(references, source); already != nil && already.yes("writable") == writable {
 			result = asReference(already)
 			return nil
 		}
@@ -149,7 +158,10 @@ func (repo *Repository) AddThreadReference(ctx context.Context, id string, sourc
 			return err
 		}
 		names := append(refNames(refs(detail.Project.References)), refNames(references)...)
-		result = Reference{ID: refID, Name: ReferenceName(where, names), Kind: source.Kind, Settings: source.Settings, AttentionID: &attentionID}
+		for _, source := range detail.Project.WritableSources().Sources {
+			names = append(names, source.Name)
+		}
+		result = Reference{ID: refID, Name: ReferenceName(where, names), Kind: source.Kind, Settings: source.Settings, AttentionID: &attentionID, Writable: writable}
 		values := []any{}
 		for _, ref := range references {
 			values = append(values, ref)
@@ -198,6 +210,35 @@ func (repo *Repository) KeepThreadReference(ctx context.Context, id, referenceID
 		if err != nil {
 			return err
 		}
+		if kept.yes("writable") {
+			result = asReference(kept)
+			before := detail.Project.WritableSources()
+			after := FileSourceSet{PrimaryID: before.PrimaryID, Sources: append([]FileSource{}, before.Sources...)}
+			source := FileSource{ID: result.ID, Name: result.Name, Kind: result.Kind, Settings: result.Settings}
+			names := refNames(refs(detail.Project.References))
+			found := false
+			for _, existing := range before.Sources {
+				if encoded(existing.definition()) == encoded(source.definition()) {
+					source = existing
+					found = true
+					break
+				}
+				names = append(names, existing.Name)
+			}
+			if !found {
+				source.Name = ReferenceName(source.Name, names)
+				after.Sources = append(after.Sources, source)
+			}
+			if after.PrimaryID == "" {
+				after.PrimaryID = source.ID
+			}
+			event, err := fileSourcesChanged(before, after)
+			if err != nil {
+				return err
+			}
+			result.Name = source.Name
+			return appendChanges(tx, thread.ProjectID, []change{event, {"thread.references.set", object{"threadId": id, "references": remaining, "ended": object{"attentionId": kept["attentionId"], "name": kept["name"], "now": result.Name}}}})
+		}
 		references := refs(detail.Project.References)
 		if len(references) >= 8 {
 			return domainerr.New("error.tooManyReferences", map[string]any{"max": 8})
@@ -243,9 +284,10 @@ type NewReference struct {
 	Where  string `json:"where"`
 }
 type ProjectStart struct {
-	Source     any            `json:"source"`
-	Message    string         `json:"message"`
-	References []NewReference `json:"references"`
+	Source      any            `json:"source"`
+	Message     string         `json:"message"`
+	References  []NewReference `json:"references"`
+	FileSources *FileSourceSet `json:"fileSources,omitempty"`
 }
 
 func firstWords(message string) string {
@@ -292,7 +334,15 @@ func (repo *Repository) CreateProject(ctx context.Context, name *string, start P
 		if err := appendChanges(tx, projectID, []change{{"project.created", data}}); err != nil {
 			return err
 		}
-		if truthy(start.Source) {
+		if start.FileSources != nil {
+			event, err := fileSourcesChanged(FileSourceSet{}, *start.FileSources)
+			if err != nil {
+				return err
+			}
+			if err := appendChanges(tx, projectID, []change{event}); err != nil {
+				return err
+			}
+		} else if truthy(start.Source) {
 			if err := appendChanges(tx, projectID, []change{{"project.source.set", object{"source": start.Source}}}); err != nil {
 				return err
 			}

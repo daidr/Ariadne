@@ -26,8 +26,7 @@ import { nextRunOf, WEEK } from './routines'
 import { saveProjectSettings, state } from '../store'
 import { openSettingsKey } from '../open-settings'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
-import ReferenceSources from './ReferenceSources.vue'
-import SourceForm from './SourceForm.vue'
+import FileSourcesForm from './FileSourcesForm.vue'
 import SourceNotes from './SourceNotes.vue'
 import MemoryList from './MemoryList.vue'
 import ProjectUsage from './ProjectUsage.vue'
@@ -44,7 +43,7 @@ const tab = computed({
   get: () => state.projectSettingsTab,
   set: (value) => (state.projectSettingsTab = value),
 })
-const source = ref<InstanceType<typeof SourceForm> | null>(null)
+const source = ref<InstanceType<typeof FileSourcesForm> | null>(null)
 const settings = ref<ProjectSettings | null>(null)
 const env = ref<DraftPair[]>([])
 /** Budgets in thousands of tokens, as typed; empty is no cap. */
@@ -245,9 +244,13 @@ async function save() {
     <DouTabs v-if="settings" v-model="tab" placement="start" :height="560">
       <DouTabPanel value="source" :label="t('projectSettings.tab.source')">
         <div class="project-stack">
-          <SourceForm ref="source" />
+          <FileSourcesForm
+            v-if="state.detail"
+            :key="state.detail.project.id"
+            :project-id="state.detail.project.id"
+            ref="source"
+          />
           <SourceNotes />
-          <ReferenceSources />
         </div>
       </DouTabPanel>
       <DouTabPanel value="instructions" :label="t('projectSettings.tab.instructions')">

@@ -11,12 +11,57 @@ import (
 )
 
 func (repo *Repository) RecordWorkspace(ctx context.Context, id, label string, branch, base *string) error {
+	return repo.RecordWorkspaceSource(ctx, id, "", label, branch, base)
+}
+
+func (repo *Repository) RecordWorkspaceSource(ctx context.Context, id, sourceID, label string, branch, base *string) error {
 	_, err := repo.mutateThread(ctx, id, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
 		known := current.Workspace
-		if known != nil && !known.Removed && known.Label == label && encoded(known.Branch) == encoded(branch) && encoded(known.Base) == encoded(base) {
+		if known != nil && !known.Removed && (sourceID == "" || known.SourceID == sourceID) && known.Label == label && encoded(known.Branch) == encoded(branch) && encoded(known.Base) == encoded(base) {
 			return nil, nil
 		}
-		return []change{{"workspace.opened", object{"threadId": id, "label": label, "branch": branch, "base": base}}}, nil
+		data := object{"threadId": id, "label": label, "branch": branch, "base": base}
+		if sourceID != "" {
+			data["sourceId"] = sourceID
+		}
+		return []change{{"workspace.opened", data}}, nil
+	})
+	return err
+}
+
+func (reader Reader) SecondaryWorkspace(ctx context.Context, thread, source string) (*WorkspaceView, error) {
+	return secondaryWorkspace(ctx, reader.DB, thread, source)
+}
+
+func secondaryWorkspace(ctx context.Context, db queryer, thread, source string) (*WorkspaceView, error) {
+	rows, err := records(ctx, db, `SELECT type, data FROM events WHERE type IN ('workspace.source.opened', 'workspace.source.removed')
+	 AND json_extract(data, '$.threadId') = ? AND json_extract(data, '$.sourceId') = ? ORDER BY seq DESC LIMIT 1`, thread, source)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	value, err := rows[0].json("data", nil)
+	data := asObject(value)
+	return &WorkspaceView{SourceID: source, Label: data.str("label"), Branch: data["branch"], Base: data["base"], Removed: rows[0].text("type") == "workspace.source.removed"}, err
+}
+
+func (repo *Repository) RecordSecondaryWorkspace(ctx context.Context, thread, source, label string, branch, base *string) error {
+	_, err := repo.mutateThread(ctx, thread, func(tx *eventstore.Transaction, _ ThreadView) ([]change, error) {
+		known, err := secondaryWorkspace(ctx, tx.SQL(), thread, source)
+		if err != nil || known != nil && !known.Removed && known.Label == label && encoded(known.Branch) == encoded(branch) && encoded(known.Base) == encoded(base) {
+			return nil, err
+		}
+		return []change{{"workspace.source.opened", object{"threadId": thread, "sourceId": source, "label": label, "branch": branch, "base": base}}}, nil
+	})
+	return err
+}
+
+func (repo *Repository) RecordSecondaryWorktreeRemoved(ctx context.Context, thread, source string) error {
+	_, err := repo.mutateThread(ctx, thread, func(tx *eventstore.Transaction, _ ThreadView) ([]change, error) {
+		known, err := secondaryWorkspace(ctx, tx.SQL(), thread, source)
+		if err != nil || known == nil || known.Removed {
+			return nil, err
+		}
+		return []change{{"workspace.source.removed", object{"threadId": thread, "sourceId": source, "label": known.Label, "branch": known.Branch, "base": known.Base}}}, nil
 	})
 	return err
 }

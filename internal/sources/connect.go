@@ -19,8 +19,43 @@ import (
 
 const HostingSecret = "hosting."
 const ReferenceSecret = "reference."
+const LegacySourceID = "primary"
 
 func ReferenceSecretPrefix(id string) string { return ReferenceSecret + id + "." }
+
+func FileSourceSecretPrefix(id string) string {
+	if id == "" || id == LegacySourceID {
+		return ""
+	}
+	return ReferenceSecretPrefix(id)
+}
+
+func FileSourceSecrets(all map[string]any, id string) map[string]any {
+	result := map[string]any{}
+	prefix := FileSourceSecretPrefix(id)
+	for key, value := range all {
+		if prefix == "" {
+			if !strings.HasPrefix(key, ReferenceSecret) {
+				result[key] = value
+			}
+		} else if name, ok := strings.CutPrefix(key, prefix); ok {
+			result[name] = value
+		}
+	}
+	return result
+}
+
+// Reference secrets retain their own namespace. Borrow only from the actual
+// primary, which may have moved away from the historical unprefixed source.
+func ReferenceSecretInputs(all map[string]any, primaryID string) map[string]any {
+	values := FileSourceSecrets(all, primaryID)
+	for key, value := range all {
+		if strings.HasPrefix(key, ReferenceSecret) {
+			values[key] = value
+		}
+	}
+	return values
+}
 
 type Part struct {
 	Kind     string         `json:"kind"`

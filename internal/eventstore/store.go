@@ -75,7 +75,11 @@ CREATE INDEX IF NOT EXISTS events_trace_starts ON events (project_id, json_extra
 CREATE INDEX IF NOT EXISTS events_trace_requests ON events (project_id, json_extract(data, '$.conversationId'), seq)
  WHERE type IN ('turn.step', 'conversation.compacted');
 CREATE INDEX IF NOT EXISTS events_todo_conversation ON events (json_extract(data, '$.conversationId'), seq)
- WHERE type = 'todo.updated';`
+ WHERE type = 'todo.updated';
+CREATE INDEX IF NOT EXISTS events_workspace_source ON events (json_extract(data, '$.threadId'), seq)
+ WHERE type = 'workspace.opened' AND json_extract(data, '$.sourceId') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS events_secondary_workspace ON events (json_extract(data, '$.threadId'), json_extract(data, '$.sourceId'), seq)
+ WHERE type IN ('workspace.source.opened', 'workspace.source.removed');`
 
 func Open(ctx context.Context, options Options) (*Store, error) {
 	if options.Path == "" {

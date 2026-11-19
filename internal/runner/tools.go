@@ -174,6 +174,11 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 			if reference := turn.referenceTool(); reference != nil {
 				specs = append(specs, *reference)
 			}
+			if pending, err := turn.Repository.HasLegacySourceApproval(ctx, conversation.ID); err == nil && pending {
+				if legacy := turn.sourceRequestTool(false); legacy != nil {
+					specs = append(specs, *legacy)
+				}
+			}
 		}
 	}
 	if turn.Workspaces != nil && project.Source != nil {
@@ -201,22 +206,22 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	}
 	if turn.Workspaces != nil && (project.Source != nil || len(projectReferences) > 0 || ownReferences) {
 		specs = append(specs,
-			specification("list_dir", "List files and directories relative to the project or a named reference.",
+			specification("list_dir", "List files and directories relative to a source. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string")}, nil, turn.listDirectory),
 			turn.readFileTool(),
-			specification("search", "Search tracked and unignored files for a regular expression. Results include file paths and matching line numbers.",
+			specification("search", "Search tracked and unignored files for a regular expression. Results include file paths and matching line numbers. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string"), "glob": field("string"), "ignoreCase": field("boolean")}, []string{"pattern"}, turn.searchFiles),
-			specification("find_files", "Find tracked and unignored files by a glob. A pattern without a slash matches names at any depth.",
+			specification("find_files", "Find tracked and unignored files by a glob. A pattern without a slash matches names at any depth. Pass source to select a named file source.",
 				args{"path": field("string"), "source": field("string"), "reference": field("string"), "pattern": field("string")}, []string{"pattern"}, turn.findFiles),
 		)
-		if conversation.Role == "thread" && project.Source != nil {
+		if conversation.Role == "thread" && (project.Source != nil || ownReferences) {
 			thread, err := turn.Repository.GetThread(ctx, conversation.ID)
 			if err == nil && thread.ReviewOf == nil {
-				if repo, err := turn.Workspaces.Repo(ctx, project.ID); err == nil && repo != nil {
+				if repo, err := turn.Workspaces.RepoForThread(ctx, thread); err == nil && repo != nil {
 					specs = append(specs, turn.repoTools(repo)...)
 				}
-				specs = append(specs, specification("write_file", "Create or replace a text file in your workspace.",
-					args{"path": field("string"), "content": field("string")}, []string{"path", "content"}, turn.writeFile))
+				specs = append(specs, specification("write_file", "Create or replace a text file. Pass source to select a writable source.",
+					args{"path": field("string"), "content": field("string"), "source": field("string")}, []string{"path", "content"}, turn.writeFile))
 				specs = append(specs, turn.editorTools()...)
 				if !slices.Contains(project.Settings.Tools, "commands") {
 					specs = append(specs, turn.commandTools()...)
@@ -328,12 +333,24 @@ func (turn *turn) messageThread(ctx context.Context, input args) (string, error)
 
 func (turn *turn) source(ctx context.Context, input args) (sdk.SourceView, error) {
 	conversation := turn.conversation
-	ref := text(input, "source")
-	if ref == "" {
-		ref = text(input, "reference")
+	name := text(input, "source")
+	if name == "" && text(input, "reference") != "" {
+		return turn.Workspaces.ReferenceView(ctx, conversation.ProjectID, text(input, "reference"), conversation.ID)
 	}
-	if ref != "" {
-		return turn.Workspaces.ReferenceView(ctx, conversation.ProjectID, ref, conversation.ID)
+	var sourceID string
+	if name != "" {
+		owner := ""
+		if conversation.Role == "thread" {
+			owner = conversation.ID
+		}
+		var err error
+		sourceID, err = turn.Workspaces.ResolveFileSource(ctx, conversation.ProjectID, name, owner)
+		if err != nil {
+			return nil, err
+		}
+		if sourceID == "" {
+			return turn.Workspaces.ReferenceView(ctx, conversation.ProjectID, name, conversation.ID)
+		}
 	}
 	if conversation.Role == "thread" {
 		owner := conversation.ID
@@ -347,17 +364,24 @@ func (turn *turn) source(ctx context.Context, input args) (sdk.SourceView, error
 				return nil, err
 			}
 			if original.Workspace == nil || original.Workspace.Removed {
-				return turn.Workspaces.View(ctx, conversation.ProjectID)
+				return turn.Workspaces.ViewFileSource(ctx, conversation.ProjectID, sourceID)
+			}
+			if sourceID != "" {
+				view, err := turn.Workspaces.ExistingThreadSource(ctx, original, sourceID)
+				if err != nil || view != nil {
+					return view, err
+				}
+				return turn.Workspaces.ViewFileSource(ctx, conversation.ProjectID, sourceID)
 			}
 			owner = author
 		}
-		view, err := turn.Workspaces.ForThread(ctx, conversation.ProjectID, owner)
+		view, err := turn.Workspaces.ForThreadSource(ctx, conversation.ProjectID, owner, sourceID)
 		if err == nil && thread.Workspace == nil {
 			turn.instructionsDirty = true
 		}
 		return view, err
 	}
-	return turn.Workspaces.View(ctx, conversation.ProjectID)
+	return turn.Workspaces.ViewFileSource(ctx, conversation.ProjectID, sourceID)
 }
 
 func (turn *turn) listDirectory(ctx context.Context, input args) (string, error) {

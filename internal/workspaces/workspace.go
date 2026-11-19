@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/leases"
 	"github.com/daidr/Ariadne/internal/projectsettings"
@@ -27,10 +28,19 @@ type workspaceView struct {
 	manager              *Manager
 	project, thread, key string
 	info                 sdk.WorkspaceInfo
+	sourceID             string
+	secondary            bool
 }
 type connectedWorkspace struct{ *workspaceView }
 
 func workspaceID(project, thread string) string { return project + "\x00" + thread }
+func (view *workspaceView) cacheID() string {
+	id := workspaceID(view.project, view.thread)
+	if view.secondary {
+		id += "\x00" + view.sourceID
+	}
+	return id
+}
 func optionalString(value any) *string {
 	if text, ok := value.(string); ok {
 		return &text
@@ -49,7 +59,39 @@ func copyInfo(info sdk.WorkspaceInfo) sdk.WorkspaceInfo {
 	return info
 }
 func (view *workspaceView) Info() sdk.WorkspaceInfo { return copyInfo(view.info) }
+func (view *workspaceView) SourceIdentity() string  { return view.key }
+
+func (manager *Manager) ExistingThreadSource(ctx context.Context, thread core.ThreadView, sourceID string) (sdk.SourceView, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if _, shared := project.WritableSources().Get(sourceID); !shared {
+		return nil, nil
+	}
+	if threadSourceID(project, thread) != sourceID {
+		workspace, err := manager.options.Repository.SecondaryWorkspace(ctx, thread.ID, sourceID)
+		if err != nil || workspace == nil || workspace.Removed {
+			return nil, err
+		}
+	}
+	view, err := manager.ForThreadSource(ctx, project.ID, thread.ID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return sdk.ReadOnlyView(view), nil
+}
+
 func (manager *Manager) ForThread(ctx context.Context, project, thread string) (sdk.Workspace, error) {
+	return manager.ForThreadSource(ctx, project, thread, "")
+}
+
+func (manager *Manager) ForThreadSource(ctx context.Context, project, thread, sourceID string) (sdk.Workspace, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return nil, err
@@ -60,30 +102,48 @@ func (manager *Manager) ForThread(ctx context.Context, project, thread string) (
 		return nil, err
 	}
 	defer unlock()
-	config, err := manager.sourceConfig(ctx, project)
+	known, err := manager.options.Repository.GetThread(ctx, thread)
 	if err != nil {
 		return nil, err
 	}
-	lease, err := manager.acquireWorkspace(ctx, project, thread, config.key)
+	if known.ProjectID != project {
+		return nil, domainerr.NotFound(thread)
+	}
+	projectView, err := manager.options.Repository.GetProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	primary := threadSourceID(projectView, known)
+	if sourceID == "" {
+		sourceID = primary
+	}
+	config, err := manager.sourceConfig(ctx, project, sourceSelection{id: sourceID, owner: thread})
+	if err != nil {
+		return nil, err
+	}
+	view := &workspaceView{manager: manager, project: strings.Clone(project), thread: strings.Clone(thread), key: config.key, sourceID: config.id, secondary: sourceID != primary}
+	lease, err := manager.acquireWorkspace(ctx, view)
 	if err != nil {
 		return nil, unreadable(err)
 	}
 	defer lease.Release()
-	view := &workspaceView{manager: manager, project: strings.Clone(project), thread: strings.Clone(thread), key: config.key, info: copyInfo(lease.Value.workspace.Info())}
+	view.info = copyInfo(lease.Value.workspace.Info())
 	if _, ok := lease.Value.workspace.(sdk.WorkspaceConnector); ok {
 		return &connectedWorkspace{view}, nil
 	}
 	return view, nil
 }
-func (manager *Manager) acquireWorkspace(ctx context.Context, project, thread, key string) (leases.Lease[*workspaceConnection], error) {
+func (manager *Manager) acquireWorkspace(ctx context.Context, view *workspaceView) (leases.Lease[*workspaceConnection], error) {
 	var empty leases.Lease[*workspaceConnection]
+	project, thread, key := view.project, view.thread, view.key
+	selection := sourceSelection{id: view.sourceID, owner: thread}
 	manager.mu.Lock()
 	blocked := manager.discarding[project]
 	manager.mu.Unlock()
 	if blocked {
 		return empty, errors.New("project workspaces are being discarded")
 	}
-	current, err := manager.sourceConfig(ctx, project)
+	current, err := manager.sourceConfig(ctx, project, selection)
 	if err != nil {
 		return empty, err
 	}
@@ -97,8 +157,8 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, project, thread, k
 	if known.ProjectID != project {
 		return empty, domainerr.NotFound(thread)
 	}
-	return manager.workspaces.Acquire(ctx, workspaceID(project, thread), key, func(ctx context.Context) (*workspaceConnection, error) {
-		source, err := manager.acquireSource(ctx, project, key)
+	return manager.workspaces.Acquire(ctx, view.cacheID(), key, func(ctx context.Context) (*workspaceConnection, error) {
+		source, err := manager.acquireSource(ctx, project, key, selection)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +171,7 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, project, thread, k
 		ctx, stop := source.Context(ctx)
 		defer stop()
 		capability := source.Value.caps.Workspace
-		if capability == nil || capability.Open == nil {
+		if capability == nil || capability.Open == nil || capability.ViewOnly {
 			return nil, domainerr.New("error.noSource", nil)
 		}
 		// Re-read after connecting: another process may have recorded the branch.
@@ -128,12 +188,22 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, project, thread, k
 		}
 		branch := projectsettings.ThreadBranch(settings.Settings.Workspace.BranchPrefix, thread, optionalString(known.BranchSlug))
 		request := sdk.WorkspaceRequest{ThreadID: thread, Branch: &branch}
-		fresh := known.Workspace == nil || known.Workspace.Removed
-		if known.Workspace != nil {
-			if previous := optionalString(known.Workspace.Branch); previous != nil {
+		if !view.secondary && threadSourceID(settings, known) != view.sourceID {
+			return nil, changedSource()
+		}
+		previousWorkspace := known.Workspace
+		if view.secondary || previousWorkspace == nil && settings.FileSources != nil {
+			previousWorkspace, err = manager.options.Repository.SecondaryWorkspace(ctx, thread, view.sourceID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		fresh := previousWorkspace == nil || previousWorkspace.Removed
+		if previousWorkspace != nil {
+			if previous := optionalString(previousWorkspace.Branch); previous != nil {
 				request.Branch = previous
 			}
-			base := optionalString(known.Workspace.Base)
+			base := optionalString(previousWorkspace.Base)
 			request.Base = &base
 		}
 		workspace, err := capability.Open(ctx, request)
@@ -150,12 +220,19 @@ func (manager *Manager) acquireWorkspace(ctx context.Context, project, thread, k
 			}
 		}()
 		info := workspace.Info()
-		if err := manager.options.Repository.RecordWorkspace(ctx, thread, info.Label, info.Branch, info.Base); err != nil {
+		if view.secondary {
+			err = manager.options.Repository.RecordSecondaryWorkspace(ctx, thread, view.sourceID, info.Label, info.Branch, info.Base)
+		} else if settings.FileSources == nil && view.sourceID == core.LegacyPrimarySource {
+			err = manager.options.Repository.RecordWorkspace(ctx, thread, info.Label, info.Branch, info.Base)
+		} else {
+			err = manager.options.Repository.RecordWorkspaceSource(ctx, thread, view.sourceID, info.Label, info.Branch, info.Base)
+		}
+		if err != nil {
 			return nil, err
 		}
 		value := &workspaceConnection{workspace: workspace, source: source}
-		if fresh {
-			manager.prepareSetup(ctx, settings, known, value, key, capability.Isolated)
+		if fresh && !view.secondary {
+			manager.prepareSetup(ctx, settings, known, value, key, view.sourceID, capability.Isolated)
 		}
 		valid, keep = true, true
 		return value, nil
@@ -172,7 +249,7 @@ func withWorkspace[T any](ctx context.Context, view *workspaceView, work func(co
 	if err != nil {
 		return zero, err
 	}
-	lease, err := view.manager.acquireWorkspace(ctx, view.project, view.thread, view.key)
+	lease, err := view.manager.acquireWorkspace(ctx, view)
 	unlock()
 	if err != nil {
 		return zero, unreadable(err)
@@ -256,7 +333,7 @@ func (view *workspaceView) Close() error {
 		return err
 	}
 	defer unlock()
-	return view.manager.workspaces.RemoveWait(ctx, workspaceID(view.project, view.thread))
+	return view.manager.workspaces.RemoveWait(ctx, view.cacheID())
 }
 func (view *connectedWorkspace) Connect(ctx context.Context, port int) (net.Conn, error) {
 	// The connection itself pins the workspace until Close; see connectWorkspace.

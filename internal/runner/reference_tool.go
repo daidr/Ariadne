@@ -19,21 +19,29 @@ import (
 )
 
 const referenceToolName = "add_reference"
+const fileSourceToolName = "add_source"
 
 func referenceReadHint(toolName string, err error) string {
 	switch toolName {
-	case "read_file", "list_dir", "search", "find_files":
+	case "read_file", "list_dir", "search", "find_files", "write_file", "edit_file", "apply_patch", "run_command":
 		var pathErr *sdk.WorkspacePathError
 		if errors.As(err, &pathErr) && pathErr.Reason == "" {
-			return "\n\nFor a target inside the workspace or an existing reference, use a path relative to that source. If the task requires reading outside those sources, use add_reference to request read-only access to the specific file or directory. Use kind \"local-directory\" and settings.path for a local path. After approval, use the returned source name and a path relative to that source."
+			return "\n\nUse a path relative to an available source. If the task needs a directory outside these sources, request access with add_source. Use kind \"local-directory\" and settings.path for a local directory. After approval, pass the returned source name and use paths relative to it."
 		}
 	}
 	return ""
 }
 
 func (turn *turn) referenceTool() *tool {
+	return turn.sourceRequestTool(true)
+}
+
+func (turn *turn) sourceRequestTool(writable bool) *tool {
 	var kinds, descriptions []string
 	for _, info := range turn.Sources.Kinds() {
+		if writable && !slices.Contains(info.Provides, "workspace") {
+			continue
+		}
 		var fields []string
 		for _, key := range slices.Sorted(maps.Keys(info.Settings.Properties)) {
 			if !info.Settings.Properties[key].Secret {
@@ -53,15 +61,27 @@ func (turn *turn) referenceTool() *tool {
 		required = append(required, "reason")
 		scope = "The user chooses whether to allow it for this discussion or for the project."
 	}
-	entry := specification(referenceToolName, "Request read-only access to a source needed for the user's work. "+scope+" Never provide credentials. Kinds: "+strings.Join(descriptions, ", ")+".",
-		properties, required, turn.addReference)
+	name, access, run := referenceToolName, "read-only access", turn.addReference
+	if writable {
+		name, access, run = fileSourceToolName, "read and write access to a directory or repository", turn.addFileSource
+	}
+	entry := specification(name, "Request "+access+" needed for the user's work. "+scope+" Prefer scope limited to the current discussion when it only needs access there. Never provide credentials. Kinds: "+strings.Join(descriptions, ", ")+".",
+		properties, required, run)
 	return &entry
 }
 
 func (turn *turn) addReference(ctx context.Context, input args) (string, error) {
+	return turn.requestSource(ctx, input, false)
+}
+
+func (turn *turn) addFileSource(ctx context.Context, input args) (string, error) {
+	return turn.requestSource(ctx, input, true)
+}
+
+func (turn *turn) requestSource(ctx context.Context, input args, writable bool) (string, error) {
 	kind := text(input, "kind")
 	provider, ok := turn.Sources.Get(kind)
-	if !ok {
+	if !ok || writable && !slices.Contains(provider.Info.Provides, "workspace") {
 		return "", errors.New("unknown source kind")
 	}
 	given, ok := input["settings"].(args)
@@ -116,16 +136,35 @@ func (turn *turn) addReference(ctx context.Context, input args) (string, error) 
 	for _, raw := range references {
 		known, _ := raw.(args)
 		normalized, _ := jsonutil.Encode(known["settings"])
-		if known["kind"] == kind && string(normalized) == string(encoded) {
+		if known["kind"] == kind && string(normalized) == string(encoded) && (!writable || known["writable"] == true) {
+			if writable {
+				return reply(args{"source": known["name"]}, nil)
+			}
 			return fmt.Sprintf("Read this reference using source %q.", known["name"]), nil
 		}
 	}
 	full := len(projectRefs) >= 8
+	if writable {
+		set := project.WritableSources()
+		full = len(set.Sources) >= 9
+		for _, known := range set.Sources {
+			normalized, _ := jsonutil.Encode(known.Settings)
+			if known.Kind == kind && string(normalized) == string(encoded) {
+				return reply(args{"source": known.Name}, nil)
+			}
+		}
+	}
 	if full && !isThread {
-		return "", errors.New("the project already has eight references")
+		return "", errors.New("the project has reached its source limit")
 	}
 	check, cancel := context.WithTimeout(ctx, 5*time.Second)
-	where, err := turn.Workspaces.CheckReference(check, projectID, sources.Part{Kind: kind, Settings: settings}, nil)
+	var where string
+	part := sources.Part{Kind: kind, Settings: settings}
+	if writable {
+		where, err = turn.Workspaces.CheckFileSource(check, part)
+	} else {
+		where, err = turn.Workspaces.CheckReference(check, projectID, part, nil)
+	}
 	cancel()
 	if err != nil {
 		return "", err
@@ -142,9 +181,13 @@ func (turn *turn) addReference(ctx context.Context, input args) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	purpose := fmt.Sprintf("reference:%x", sha256.Sum256(fingerprint))
+	purposeKind := "reference"
+	if writable {
+		purposeKind = "file-source"
+	}
+	purpose := fmt.Sprintf("%s:%x", purposeKind, sha256.Sum256(fingerprint))
 	options := core.CallApprovalOptions{InChat: true, AllowProjectReference: isThread && !full}
-	if isThread {
+	if isThread && !writable {
 		// Existing approvals may still have the old three choices.
 		options.No = new(2)
 	}
@@ -156,6 +199,12 @@ func (turn *turn) addReference(ctx context.Context, input args) (string, error) 
 		if turn.Settings.Locale() != "en" {
 			projectQuestion, threadQuestion, no, yes = "允许整个项目读取这个来源？", "允许当前讨论串读取这个来源？", "拒绝", "允许"
 			scopeQuestion = "允许读取这个来源？"
+		}
+		if writable {
+			projectQuestion, threadQuestion, scopeQuestion = "Allow this project to read and write this source?", "Allow this discussion to read and write this source?", "Allow read and write access to this source?"
+			if turn.Settings.Locale() != "en" {
+				projectQuestion, threadQuestion, scopeQuestion = "允许整个项目读写这个来源？", "允许当前讨论串读写这个来源？", "允许读写这个来源？"
+			}
 		}
 		question := projectQuestion
 		if isThread {
@@ -171,20 +220,35 @@ func (turn *turn) addReference(ctx context.Context, input args) (string, error) 
 	}
 	switch approval.State {
 	case "declined":
-		return "", errors.New("the user declined this reference")
+		return "", errors.New("the user declined this source")
 	case "approved":
-		if err := turn.Repository.UseApproval(ctx, projectID, owner, approval.AttentionID, "reference"); err != nil {
+		if err := turn.Repository.UseApproval(ctx, projectID, owner, approval.AttentionID, purposeKind); err != nil {
 			return "", err
 		}
 		source := core.Source{Kind: kind, Settings: settings}
 		var added core.Reference
-		if isThread && approval.Scope != "project" && (approval.Choice == nil || *approval.Choice == 1) {
+		threadOnly := isThread && approval.Scope != "project" && (approval.Choice == nil || *approval.Choice == 1)
+		switch {
+		case writable && threadOnly:
+			added, err = turn.Repository.AddThreadFileSource(ctx, owner, source, where, approval.AttentionID)
+		case writable:
+			id, err := core.NewFileSourceID()
+			if err != nil {
+				return "", err
+			}
+			current, err := turn.Repository.AddProjectFileSource(ctx, projectID, core.FileSource{ID: id, Kind: kind, Settings: settings}, where)
+			created, _ := current.WritableSources().Get(id)
+			return reply(args{"source": created.Name}, err)
+		case threadOnly:
 			added, err = turn.Repository.AddThreadReference(ctx, owner, source, where, approval.AttentionID)
-		} else {
+		default:
 			added, err = turn.Repository.AddProjectReference(ctx, projectID, source, where)
 		}
 		return reply(args{"source": added.Name}, err)
 	default:
+		if writable {
+			return "Waiting for the user to approve read and write access to this source.", nil
+		}
 		return "Waiting for the user to approve read-only access to this reference.", nil
 	}
 }

@@ -134,6 +134,14 @@ type CallApprovalResult struct {
 	Scope       string `json:"-"`
 }
 
+func (reader Reader) HasLegacySourceApproval(ctx context.Context, conversation string) (bool, error) {
+	rows, err := records(ctx, reader.DB, `SELECT 1 FROM attentions a
+	 WHERE a.conversation_id = ? AND a.purpose LIKE 'reference:%'
+	 AND (a.closed = 0 OR a.approved = 1 AND NOT EXISTS (
+	 SELECT 1 FROM used_approvals u WHERE u.attention_id = a.id)) LIMIT 1`, conversation)
+	return len(rows) != 0, err
+}
+
 // MarshalJSON retains a null choice on approved confirmations.
 func (result CallApprovalResult) MarshalJSON() ([]byte, error) {
 	value := object{"state": result.State}

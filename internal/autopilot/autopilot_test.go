@@ -18,8 +18,10 @@ type fakeWorkspaces struct {
 	local  func(string, string) (workspaces.ThreadMerge, error)
 }
 
-func (source fakeWorkspaces) HasRepo(context.Context, string) bool { return source.remote != nil }
-func (source fakeWorkspaces) Repo(context.Context, string) (*sdk.RepoCapability, error) {
+func (source fakeWorkspaces) HasRepoForThread(context.Context, core.ThreadView) bool {
+	return source.remote != nil
+}
+func (source fakeWorkspaces) RepoForThread(context.Context, core.ThreadView) (*sdk.RepoCapability, error) {
 	return source.remote, nil
 }
 func (source fakeWorkspaces) MergeReviewedThread(_ context.Context, thread, head string) (workspaces.ThreadMerge, error) {

@@ -275,6 +275,16 @@ export interface ProjectSource {
   hosting?: { kind: string; settings: Record<string, unknown> }
 }
 
+export interface FileSource extends ProjectSource {
+  id: string
+  name: string
+}
+
+export interface FileSourceSet {
+  primaryId: string
+  sources: FileSource[]
+}
+
 /**
  * A source the project only reads, beside the one its threads work in: another repository
  * or directory to look things up in. Nothing is changed, run or checked out there.
@@ -295,6 +305,7 @@ export interface ProjectReference {
  * the user allowed it on the card `attentionId`, and it goes with the thread.
  */
 export interface ThreadReference extends ProjectReference {
+  writable?: boolean
   attentionId: string
 }
 
@@ -433,6 +444,10 @@ export interface EventMap {
   'project.deleted': Record<string, never>
   /** The project's context source; `null` removes it. */
   'project.source.set': { source: ProjectSource | null }
+  'project.file_sources.set': {
+    source: (ProjectSource & { fileSources: FileSourceSet }) | null
+    primaryChanged: boolean
+  }
   /** The sources the project only reads, whole; see `ProjectReference`. */
   'project.references.set': { references: ProjectReference[] }
   /** How many of the shared work slots this project may take at once; `null` is no cap. */
@@ -508,6 +523,7 @@ export interface EventMap {
    */
   'workspace.opened': {
     threadId: string
+    sourceId?: string
     label: string
     branch: string | null
     base: string | null
@@ -518,6 +534,14 @@ export interface EventMap {
    * closed) and the thread was finished with it; `user`: the user removed it.
    */
   'workspace.removed': { threadId: string; reason: WorktreeRemoval }
+  'workspace.source.opened': {
+    threadId: string
+    sourceId: string
+    label: string
+    branch: string | null
+    base: string | null
+  }
+  'workspace.source.removed': EventMap['workspace.source.opened']
   /** The user merged the thread's branch into its base; the base now ends with `sha`. */
   'branch.merged': { threadId: string } & BranchMerge
   /**

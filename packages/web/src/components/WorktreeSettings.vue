@@ -58,11 +58,11 @@ function reclaimable(path: string) {
     : t('worktrees.reclaimUnknown')
 }
 
-async function remove(projectId: string, threadId: string) {
-  removing.value = threadId
+async function remove(projectId: string, threadId: string, path: string, sourceId?: string) {
+  removing.value = path
   error.value = null
   try {
-    await api.removeWorktree(projectId, threadId)
+    await api.removeWorktree(projectId, threadId, sourceId)
     emit('changed')
     await load()
   } catch (cause) {
@@ -96,7 +96,7 @@ async function remove(projectId: string, threadId: string) {
         </div>
         <DouText v-if="project.error" size="sm" tone="danger">{{ tm(project.error) }}</DouText>
         <ul class="worktrees-list">
-          <li v-for="worktree in project.worktrees" :key="worktree.threadId" class="worktree">
+          <li v-for="worktree in project.worktrees" :key="worktree.path" class="worktree">
             <div class="worktree-main">
               <div class="worktree-title">
                 <DouText size="sm" truncate>
@@ -129,13 +129,13 @@ async function remove(projectId: string, threadId: string) {
               tone="danger"
               :description="reclaimable(worktree.path)"
               :confirm-text="t('worktrees.remove')"
-              @confirm="remove(project.id, worktree.threadId)"
+              @confirm="remove(project.id, worktree.threadId, worktree.path, worktree.sourceId)"
             >
               <DouButton
                 size="sm"
                 variant="ghost"
                 tone="danger"
-                :loading="removing === worktree.threadId"
+                :loading="removing === worktree.path"
                 :aria-label="t('worktrees.remove')"
                 :title="t('worktrees.remove')"
               >

@@ -27,6 +27,7 @@ import type {
   ProjectReference,
   ThreadReference,
   ProjectSource,
+  FileSourceSet,
   Author,
   MessageKind,
   ReasoningRecord,
@@ -55,6 +56,7 @@ export interface ProjectView {
   needsMe: number
   /** Where threads work; `null` until the user picks a directory. */
   source: ProjectSource | null
+  fileSources?: FileSourceSet
   /** Sources its conversations read and never change, beside the one threads work in. */
   references: ProjectReference[]
   /**
@@ -111,6 +113,7 @@ export interface ThreadView {
    * there to look through and merge.
    */
   workspace: {
+    sourceId?: string
     label: string
     branch: string | null
     base: string | null

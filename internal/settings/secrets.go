@@ -3,6 +3,7 @@ package settings
 import (
 	"strings"
 
+	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
 )
 
@@ -83,6 +84,31 @@ func (store *Store) SaveReferenceSecrets(project, reference string, secrets Obje
 			all[project] = merged
 		} else {
 			delete(all, project)
+		}
+		config["sourceSecrets"] = all
+		return nil
+	})
+}
+
+func (store *Store) SaveFileSourceSecrets(project string, touched []string, values Object) error {
+	return store.update(func(config Object) error {
+		all := object(config["sourceSecrets"])
+		merged := object(all[project])
+		for _, id := range touched {
+			prefix := sources.FileSourceSecretPrefix(id)
+			for key := range merged {
+				if prefix == "" && !strings.HasPrefix(key, ReferenceSecret) || prefix != "" && strings.HasPrefix(key, prefix) {
+					delete(merged, key)
+				}
+			}
+		}
+		for key, value := range values {
+			merged[key] = value
+		}
+		if len(merged) == 0 {
+			delete(all, project)
+		} else {
+			all[project] = merged
 		}
 		config["sourceSecrets"] = all
 		return nil

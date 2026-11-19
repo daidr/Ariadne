@@ -60,12 +60,20 @@ func (view *sourceView) Search(ctx context.Context, path, pattern string, option
 	return value, err
 }
 func (manager *Manager) View(ctx context.Context, project string) (sdk.SourceView, error) {
+	return manager.ViewFileSource(ctx, project, "")
+}
+
+func (manager *Manager) ViewFileSource(ctx context.Context, project, id string) (sdk.SourceView, error) {
+	var selection []sourceSelection
+	if id != "" {
+		selection = append(selection, sourceSelection{id: id})
+	}
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	config, err := manager.sourceConfig(ctx, project)
+	config, err := manager.sourceConfig(ctx, project, selection...)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +91,7 @@ func (manager *Manager) View(ctx context.Context, project string) (sdk.SourceVie
 				return struct{}{}, errors.New("source returned no view")
 			}
 			return struct{}{}, work(ctx, view)
-		})
+		}, selection...)
 		return unreadable(err)
 	}
 	view := &sourceView{use: use}
@@ -135,7 +143,7 @@ func (manager *Manager) referenceConfig(ctx context.Context, projectID, name, th
 		secrets = manager.options.Secrets(projectID)
 	}
 	reference := sources.Reference{Part: sources.Part{Kind: picked.Kind, Settings: picked.Settings}, ID: picked.ID}
-	pickedSecrets := manager.options.Sources.ReferenceSecrets(definition, reference, secrets)
+	pickedSecrets := manager.options.Sources.ReferenceSecrets(definition, reference, sources.ReferenceSecretInputs(secrets, project.WritableSources().PrimaryID))
 	hashed, err := secretDigests(pickedSecrets)
 	if err != nil {
 		return referenceConfig{}, unreadable(err)
@@ -229,7 +237,7 @@ func (manager *Manager) CheckReference(ctx context.Context, projectID string, re
 	if manager.options.Secrets != nil {
 		all = manager.options.Secrets(projectID)
 	}
-	borrowed := manager.options.Sources.ReferenceSecrets(definition, sources.Reference{Part: reference}, all)
+	borrowed := manager.options.Sources.ReferenceSecrets(definition, sources.Reference{Part: reference}, sources.ReferenceSecretInputs(all, project.WritableSources().PrimaryID))
 	for key, value := range secrets {
 		borrowed[key] = value
 	}
@@ -251,10 +259,34 @@ func (manager *Manager) CheckReference(ctx context.Context, projectID string, re
 	return reference.Kind, nil
 }
 
+func (manager *Manager) CheckFileSource(ctx context.Context, part sources.Part) (string, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	caps, err := manager.options.Sources.ConnectSource(ctx, sources.Definition{Part: part}, nil)
+	if err != nil {
+		return "", err
+	}
+	if caps.Close != nil {
+		defer caps.Close()
+	}
+	if caps.Workspace == nil || caps.Workspace.Open == nil || caps.Workspace.ViewOnly {
+		return "", errors.New("choose a writable directory or repository")
+	}
+	if summary := manager.options.Sources.Summary(part); summary != nil {
+		return *summary, nil
+	}
+	return part.Kind, nil
+}
+
 type ReferenceDescription struct {
-	Name string `json:"name"`
-	Line string `json:"line"`
-	Own  bool   `json:"own,omitempty"`
+	Name     string `json:"name"`
+	Line     string `json:"line"`
+	Own      bool   `json:"own,omitempty"`
+	Writable bool   `json:"writable,omitempty"`
+	Primary  bool   `json:"primary,omitempty"`
 }
 
 func (manager *Manager) References(ctx context.Context, projectID, locale, threadID string) ([]ReferenceDescription, error) {
@@ -268,15 +300,25 @@ func (manager *Manager) References(ctx context.Context, projectID, locale, threa
 		return nil, err
 	}
 	out := []ReferenceDescription{}
+	set := project.WritableSources()
+	primary := set.PrimaryID
+	var own []projectReference
+	if threadID != "" {
+		if thread, err := manager.options.Repository.GetThread(ctx, threadID); err == nil && thread.ProjectID == projectID {
+			primary = threadSourceID(project, thread)
+			own = references(thread.References)
+		}
+	}
+	if project.FileSources != nil {
+		for _, source := range set.Sources {
+			out = append(out, ReferenceDescription{Name: source.Name, Line: manager.describePart(sources.Part{Kind: source.Kind, Settings: source.Settings}, locale), Writable: true, Primary: source.ID == primary})
+		}
+	}
 	for _, ref := range references(project.References) {
 		out = append(out, ReferenceDescription{Name: ref.Name, Line: manager.describePart(sources.Part{Kind: ref.Kind, Settings: ref.Settings}, locale)})
 	}
-	if threadID != "" {
-		if thread, err := manager.options.Repository.GetThread(ctx, threadID); err == nil && thread.ProjectID == projectID {
-			for _, ref := range references(thread.References) {
-				out = append(out, ReferenceDescription{Name: ref.Name, Line: manager.describePart(sources.Part{Kind: ref.Kind, Settings: ref.Settings}, locale), Own: true})
-			}
-		}
+	for _, ref := range own {
+		out = append(out, ReferenceDescription{Name: ref.Name, Line: manager.describePart(sources.Part{Kind: ref.Kind, Settings: ref.Settings}, locale), Own: true, Writable: ref.Writable})
 	}
 	return out, nil
 }

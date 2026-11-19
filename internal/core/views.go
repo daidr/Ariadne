@@ -20,6 +20,7 @@ type ProjectView struct {
 	UpdatedAt       int64                    `json:"updatedAt"`
 	NeedsMe         int                      `json:"needsMe"`
 	Source          any                      `json:"source"`
+	FileSources     *FileSourceSet           `json:"fileSources,omitempty"`
 	References      any                      `json:"references"`
 	Slots           any                      `json:"slots"`
 	MCP             any                      `json:"mcp"`
@@ -30,11 +31,12 @@ type ProjectView struct {
 }
 
 type WorkspaceView struct {
-	Label   string `json:"label"`
-	Branch  any    `json:"branch"`
-	Base    any    `json:"base"`
-	Removed bool   `json:"removed"`
-	Parked  bool   `json:"parked"`
+	SourceID string `json:"sourceId,omitempty"`
+	Label    string `json:"label"`
+	Branch   any    `json:"branch"`
+	Base     any    `json:"base"`
+	Removed  bool   `json:"removed"`
+	Parked   bool   `json:"parked"`
 }
 type AsideView struct {
 	Until  int64  `json:"until"`
@@ -139,6 +141,9 @@ const threadSelect = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.la
  c.wait_id, c.input_tokens, c.output_tokens, c.cached_tokens, c.cache_write_tokens,
  c.reasoning_tokens, c.cost_usd, c.cost_cny, c.turn_started_at,
  td.items AS todo_items, td.updated_at AS todo_at,
+ (SELECT json_extract(e.data, '$.sourceId') FROM events e WHERE e.type = 'workspace.opened'
+ AND json_extract(e.data, '$.sourceId') IS NOT NULL AND json_extract(e.data, '$.threadId') = t.id
+ ORDER BY e.seq DESC LIMIT 1) AS workspace_source,
  (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
  (SELECT e.at FROM events e WHERE e.seq = (SELECT tr.seq FROM transcript tr
  WHERE tr.conversation_id = t.id ORDER BY tr.id DESC LIMIT 1)) AS transcript_at,
@@ -175,7 +180,7 @@ func toThread(row record, now int64) (ThreadView, error) {
 	view.ActiveAt = max(row.integer("updated_at"), row.integer("message_at"), row.integer("transcript_at"), row.integer("todo_at"), row.integer("turn_started_at"))
 	view.Archived = view.Stage == "done" && (row.present("landed_at") && row.integer("landed_at") >= row.integer("reported_at") && row.integer("user_at") <= row.integer("landed_at") && now-row.integer("landed_at") >= int64(24*time.Hour/time.Millisecond) || now-view.ActiveAt >= int64(7*24*time.Hour/time.Millisecond))
 	if row.present("workspace_label") {
-		view.Workspace = &WorkspaceView{Label: row.text("workspace_label"), Branch: row["workspace_branch"], Base: row["workspace_base"], Removed: row.flag("workspace_removed"), Parked: row.flag("workspace_parked")}
+		view.Workspace = &WorkspaceView{SourceID: row.text("workspace_source"), Label: row.text("workspace_label"), Branch: row["workspace_branch"], Base: row["workspace_base"], Removed: row.flag("workspace_removed"), Parked: row.flag("workspace_parked")}
 	}
 	if row.present("aside_until") {
 		view.Aside = &AsideView{Until: row.integer("aside_until"), Reason: row.text("aside_reason"), By: row.text("aside_by"), Due: row.flag("aside_due")}
@@ -334,6 +339,10 @@ func toProject(ctx context.Context, db queryer, row record, needs int) (ProjectV
 			return ProjectView{}, err
 		}
 		*field.target = value
+	}
+	view.FileSources, view.Source, err = readFileSources(view.Source)
+	if err != nil {
+		return ProjectView{}, err
 	}
 	rows, err := records(ctx, db, `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
 	 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,

@@ -490,7 +490,7 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 		}
 		if err != nil && content == "" {
 			hint := ""
-			if _, available := byName[referenceToolName]; available {
+			if _, available := byName[fileSourceToolName]; available {
 				hint = referenceReadHint(call.Name, err)
 			}
 			content = textutil.HeadUnits(err.Error(), 2000-len(hint)) + hint

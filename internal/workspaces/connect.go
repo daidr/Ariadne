@@ -31,7 +31,7 @@ func (manager *Manager) connectWorkspace(ctx context.Context, view *workspaceVie
 		done()
 		return nil, err
 	}
-	lease, err := manager.acquireWorkspace(ctx, view.project, view.thread, view.key)
+	lease, err := manager.acquireWorkspace(ctx, view)
 	unlock()
 	if err != nil {
 		done()

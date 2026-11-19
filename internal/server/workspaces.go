@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"runtime"
 
+	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -92,7 +93,7 @@ func (api *API) registerWorkspaces() {
 		if err != nil {
 			return nil, 0, err
 		}
-		if manager != nil && manager.HasRepo(r.Context(), thread.ProjectID) {
+		if manager != nil && manager.HasRepoForThread(r.Context(), thread) {
 			if _, err := manager.SyncPullRequest(r.Context(), id, nil, nil); err != nil {
 				return nil, 0, err
 			}
@@ -117,8 +118,12 @@ func (api *API) registerWorkspaces() {
 		}
 		removed := "dirty"
 		var err error
+		source := r.URL.Query().Get("sourceId")
+		if source != "" && !core.ValidFileSourceID(source) {
+			return nil, 0, badInput("sourceId")
+		}
 		if manager != nil {
-			removed, err = manager.RemoveWorktree(r.Context(), project, thread, "user")
+			removed, err = manager.RemoveSourceWorktree(r.Context(), project, thread, source, "user")
 			if err != nil {
 				return nil, 0, err
 			}

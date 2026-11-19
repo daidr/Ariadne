@@ -276,7 +276,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	add(janitor.Stop)
 	daily.Start(life)
 	add(daily.Stop)
-	watcher := repowatch.Watcher{Repository: repo, Repo: manager.Repo, OnError: onError}
+	watcher := repowatch.Watcher{Repository: repo, ThreadRepo: manager.RepoForThread, OnError: onError}
 	watchDone := make(chan struct{})
 	interval := time.Minute
 	if ms, err := strconv.Atoi(os.Getenv("ARIADNE_REPO_POLL_MS")); err == nil && ms > 0 && ms <= 24*60*60*1000 {

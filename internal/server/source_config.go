@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -72,7 +73,7 @@ func (api *API) splitSource(project string, part sources.Part, previous, prefix 
 	}
 	return plain, object{}, nil
 }
-func (api *API) readSource(ctx context.Context, raw any, project string, previous *sources.Definition) (sources.Definition, object, error) {
+func (api *API) readSource(ctx context.Context, raw any, project string, previous *sources.Definition, secretPrefix string, writable bool) (sources.Definition, object, error) {
 	part, err := api.readSourcePart(raw, "source")
 	if err != nil {
 		return sources.Definition{}, nil, err
@@ -104,13 +105,13 @@ func (api *API) readSource(ctx context.Context, raw any, project string, previou
 			beforeHost = previous.Hosting.Kind
 		}
 	}
-	plain, secrets, err := api.splitSource(project, part, before, "")
+	plain, secrets, err := api.splitSource(project, part, before, secretPrefix)
 	if err != nil {
 		return sources.Definition{}, nil, err
 	}
 	source := sources.Definition{Part: sources.Part{Kind: part.Kind, Settings: plain}}
 	if hosting != nil {
-		plain, hostSecrets, err := api.splitSource(project, *hosting, beforeHost, sources.HostingSecret)
+		plain, hostSecrets, err := api.splitSource(project, *hosting, beforeHost, secretPrefix+sources.HostingSecret)
 		if err != nil {
 			return sources.Definition{}, nil, err
 		}
@@ -118,7 +119,11 @@ func (api *API) readSource(ctx context.Context, raw any, project string, previou
 		maps.Copy(secrets, hostSecrets)
 	}
 	if api.options.Sources != nil {
-		caps, err := api.options.Sources.ConnectSource(ctx, source, secrets)
+		connectionSecrets := make(object, len(secrets))
+		for key, value := range secrets {
+			connectionSecrets[strings.TrimPrefix(key, secretPrefix)] = value
+		}
+		caps, err := api.options.Sources.ConnectSource(ctx, source, connectionSecrets)
 		if err != nil {
 			return sources.Definition{}, nil, err
 		}
@@ -126,6 +131,9 @@ func (api *API) readSource(ctx context.Context, raw any, project string, previou
 			if err := caps.Close(); err != nil {
 				return sources.Definition{}, nil, err
 			}
+		}
+		if writable && (caps.Workspace == nil || caps.Workspace.Open == nil || caps.Workspace.ViewOnly) {
+			return sources.Definition{}, nil, badInput("source does not provide a writable workspace")
 		}
 	}
 	return source, secrets, nil
@@ -180,6 +188,7 @@ func (api *API) checkReference(ctx context.Context, project string, source *sour
 	return checkedReference{part: reference, secrets: secrets, where: where}, nil
 }
 func (api *API) registerSourceConfig() {
+	api.registerFileSources()
 	api.add("POST", "/api/projects", func(request *http.Request) (any, int, error) {
 		body, err := readJSON(request)
 		if err != nil {
@@ -190,6 +199,9 @@ func (api *API) registerSourceConfig() {
 			name = &value
 		}
 		message := text(body, "message")
+		if _, list := body["sources"]; list {
+			return api.createProjectWithFileSources(request.Context(), body, name, message)
+		}
 		rawReferences := []any{}
 		if body["references"] != nil {
 			var ok bool
@@ -201,7 +213,7 @@ func (api *API) registerSourceConfig() {
 		var source *sources.Definition
 		secrets := object{}
 		if body["source"] != nil {
-			value, readSecrets, err := api.readSource(request.Context(), body["source"], "", nil)
+			value, readSecrets, err := api.readSource(request.Context(), body["source"], "", nil, "", false)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -264,6 +276,9 @@ func (api *API) registerSourceConfig() {
 		if err != nil {
 			return nil, 0, err
 		}
+		if current.FileSources != nil {
+			return nil, 0, badInput("use the sources list for this project")
+		}
 		var raw any
 		secrets := object{}
 		if value, exists := body["source"]; !exists || value != nil {
@@ -271,7 +286,7 @@ func (api *API) registerSourceConfig() {
 			if err != nil {
 				return nil, 0, err
 			}
-			source, readSecrets, err := api.readSource(request.Context(), value, id, previous)
+			source, readSecrets, err := api.readSource(request.Context(), value, id, previous, "", false)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -312,7 +327,7 @@ func (api *API) registerSourceConfig() {
 		}
 		secrets := object{}
 		if store := api.options.Settings; store != nil {
-			secrets = store.SourceSecrets(id)
+			secrets = sources.ReferenceSecretInputs(store.SourceSecrets(id), project.WritableSources().PrimaryID)
 		}
 		reference, err := api.checkReference(request.Context(), id, source, secrets, part)
 		if err != nil {

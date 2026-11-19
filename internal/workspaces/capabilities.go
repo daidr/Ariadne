@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+
+	"github.com/daidr/Ariadne/internal/core"
 	"strings"
 	"sync"
 
@@ -11,14 +13,14 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func withRepo[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, *sdk.RepoCapability) (T, error)) (T, error) {
+func withRepo[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, *sdk.RepoCapability) (T, error), selection ...sourceSelection) (T, error) {
 	return withSource(ctx, manager, project, key, func(ctx context.Context, caps sdk.Capabilities) (T, error) {
 		if caps.Repo == nil {
 			var zero T
 			return zero, domainerr.New("error.noRepo", nil)
 		}
 		return work(ctx, caps.Repo)
-	})
+	}, selection...)
 }
 func withTracker[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, *sdk.TrackerCapability) (T, error)) (T, error) {
 	return withSource(ctx, manager, project, key, func(ctx context.Context, caps sdk.Capabilities) (T, error) {
@@ -30,86 +32,103 @@ func withTracker[T any](ctx context.Context, manager *Manager, project, key stri
 	})
 }
 func (manager *Manager) Repo(ctx context.Context, project string) (*sdk.RepoCapability, error) {
+	return manager.repo(ctx, project)
+}
+
+func (manager *Manager) RepoForThread(ctx context.Context, thread core.ThreadView) (*sdk.RepoCapability, error) {
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	config, err := manager.sourceConfig(ctx, project)
+	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return manager.repo(ctx, project.ID, sourceSelection{id: threadSourceID(project, thread)})
+}
+
+func (manager *Manager) repo(ctx context.Context, project string, selection ...sourceSelection) (*sdk.RepoCapability, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	config, err := manager.sourceConfig(ctx, project, selection...)
 	if err != nil {
 		return nil, err
 	}
 	key := config.key
-	raw, err := withRepo(ctx, manager, project, key, func(_ context.Context, repo *sdk.RepoCapability) (sdk.RepoCapability, error) { return *repo, nil })
+	raw, err := withRepo(ctx, manager, project, key, func(_ context.Context, repo *sdk.RepoCapability) (sdk.RepoCapability, error) { return *repo, nil }, selection...)
 	if err != nil {
 		return nil, err
 	}
 	proxy := &sdk.RepoCapability{Remote: strings.Clone(raw.Remote), WebURL: strings.Clone(raw.WebURL)}
 	if raw.DefaultBranch != nil {
 		proxy.DefaultBranch = func(ctx context.Context) (string, error) {
-			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.DefaultBranch(ctx) })
+			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.DefaultBranch(ctx) }, selection...)
 		}
 	}
 	if raw.IsPublic != nil {
 		proxy.IsPublic = func(ctx context.Context) (bool, error) {
-			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (bool, error) { return repo.IsPublic(ctx) })
+			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (bool, error) { return repo.IsPublic(ctx) }, selection...)
 		}
 	}
 	if raw.Fetch != nil {
 		proxy.Fetch = func(ctx context.Context) error {
 			_, err := withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (struct{}, error) {
 				return struct{}{}, repo.Fetch(ctx)
-			})
+			}, selection...)
 			return err
 		}
 	}
 	if raw.Push != nil {
 		proxy.Push = func(ctx context.Context, branch string) (string, error) {
-			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.Push(ctx, branch) })
+			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.Push(ctx, branch) }, selection...)
 		}
 	}
 	if raw.PullRequestFor != nil {
 		proxy.PullRequestFor = func(ctx context.Context, branch string) (*sdk.PullRequestInfo, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (*sdk.PullRequestInfo, error) {
 				return repo.PullRequestFor(ctx, branch)
-			})
+			}, selection...)
 		}
 	}
 	if raw.PullRequest != nil {
 		proxy.PullRequest = func(ctx context.Context, number int) (sdk.PullRequestInfo, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (sdk.PullRequestInfo, error) {
 				return repo.PullRequest(ctx, number)
-			})
+			}, selection...)
 		}
 	}
 	if raw.OpenPullRequest != nil {
 		proxy.OpenPullRequest = func(ctx context.Context, input sdk.OpenPullRequest) (sdk.PullRequestInfo, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (sdk.PullRequestInfo, error) {
 				return repo.OpenPullRequest(ctx, input)
-			})
+			}, selection...)
 		}
 	}
 	if raw.Checks != nil {
 		proxy.Checks = func(ctx context.Context, sha string) ([]sdk.CheckInfo, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) ([]sdk.CheckInfo, error) {
 				return repo.Checks(ctx, sha)
-			})
+			}, selection...)
 		}
 	}
 	if raw.MergePullRequest != nil {
 		proxy.MergePullRequest = func(ctx context.Context, number int, method, sha string) (sdk.PullRequestMergeOutcome, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (sdk.PullRequestMergeOutcome, error) {
 				return repo.MergePullRequest(ctx, number, method, sha)
-			})
+			}, selection...)
 		}
 	}
 	if raw.CheckLog != nil {
 		proxy.CheckLog = func(ctx context.Context, id string) (string, error) {
-			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.CheckLog(ctx, id) })
+			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (string, error) { return repo.CheckLog(ctx, id) }, selection...)
 		}
 	}
 	if raw.Objects != nil {
-		proxy.Objects = manager.objects(project, key, *raw.Objects)
+		proxy.Objects = manager.objects(project, key, *raw.Objects, selection...)
 	}
 	return proxy, nil
 }
@@ -228,20 +247,20 @@ func (reader *onceReader) Close() error {
 	reader.once.Do(func() { reader.err = reader.ReadCloser.Close() })
 	return reader.err
 }
-func (manager *Manager) objects(project, key string, available sdk.GitObjects) *sdk.GitObjects {
+func (manager *Manager) objects(project, key string, available sdk.GitObjects, selection ...sourceSelection) *sdk.GitObjects {
 	proxy := &sdk.GitObjects{}
 	if available.Refs != nil {
 		proxy.Refs = func(ctx context.Context, prefixes []string) (map[string]string, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) (map[string]string, error) {
 				return repo.Objects.Refs(ctx, prefixes)
-			})
+			}, selection...)
 		}
 	}
 	if available.Has != nil {
 		proxy.Has = func(ctx context.Context, shas []string) ([]string, error) {
 			return withRepo(ctx, manager, project, key, func(ctx context.Context, repo *sdk.RepoCapability) ([]string, error) {
 				return repo.Objects.Has(ctx, shas)
-			})
+			}, selection...)
 		}
 	}
 	if available.Bundle != nil {
@@ -250,7 +269,7 @@ func (manager *Manager) objects(project, key string, available sdk.GitObjects) *
 			if err != nil {
 				return nil, err
 			}
-			lease, err := manager.acquireSource(ctx, project, key)
+			lease, err := manager.acquireSource(ctx, project, key, selection...)
 			if err != nil {
 				done()
 				return nil, err
@@ -292,7 +311,7 @@ func (manager *Manager) objects(project, key string, available sdk.GitObjects) *
 					body = reader
 				}
 				return struct{}{}, repo.Objects.Receive(ctx, body, refs)
-			})
+			}, selection...)
 			return err
 		}
 	}

@@ -255,6 +255,8 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	// Routes added after the frozen Bun contract also require authentication.
 	known["GET /api/files/:fileId/sheet"] = true
+	known["GET /api/projects/:projectId/sources"] = true
+	known["PUT /api/projects/:projectId/sources"] = true
 	t.Logf("%d native API routes registered", len(api.routes))
 	registered := map[string]bool{}
 	for _, route := range api.routes {

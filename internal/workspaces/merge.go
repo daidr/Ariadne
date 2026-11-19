@@ -45,7 +45,7 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 	if err != nil {
 		return ThreadChanges{}, err
 	}
-	branches, err := manager.Branches(ctx, thread.ProjectID)
+	branches, err := manager.BranchesForThread(ctx, thread)
 	if err != nil {
 		return ThreadChanges{}, err
 	}
@@ -84,7 +84,7 @@ func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request
 	if err != nil {
 		return sdk.FileVersions{}, err
 	}
-	branches, err := manager.Branches(ctx, thread.ProjectID)
+	branches, err := manager.BranchesForThread(ctx, thread)
 	if err != nil {
 		return sdk.FileVersions{}, err
 	}
@@ -155,7 +155,7 @@ func (manager *Manager) mergeThread(ctx context.Context, threadID, method, messa
 	if conversation.Turn != nil {
 		return ThreadMerge{}, domainerr.New("error.merge.working", nil)
 	}
-	branches, err := manager.Branches(ctx, thread.ProjectID)
+	branches, err := manager.BranchesForThread(ctx, thread)
 	if err != nil {
 		return ThreadMerge{}, err
 	}
@@ -229,7 +229,7 @@ func (manager *Manager) UndoMerge(ctx context.Context, threadID string) (core.Th
 	if !ok {
 		return thread, domainerr.New("error.undoMerge.none", nil)
 	}
-	branches, err := manager.Branches(ctx, thread.ProjectID)
+	branches, err := manager.BranchesForThread(ctx, thread)
 	if err != nil {
 		return thread, err
 	}
@@ -257,7 +257,8 @@ func (manager *Manager) UndoMerge(ctx context.Context, threadID string) (core.Th
 
 type ListedWorktree struct {
 	sdk.WorktreeInfo
-	Thread *core.ThreadView `json:"thread"`
+	Thread   *core.ThreadView `json:"thread"`
+	SourceID string           `json:"sourceId,omitempty"`
 }
 type ProjectWorktrees struct {
 	ID        string           `json:"id"`
@@ -280,53 +281,71 @@ func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]Proj
 	}
 	output := []ProjectWorktrees{}
 	for _, project := range projects {
-		if !manager.Available(ctx, project.ID) {
-			continue
-		}
 		listed := ProjectWorktrees{ID: project.ID, Name: project.Name, Worktrees: []ListedWorktree{}}
-		err := func() error {
-			branches, err := manager.Branches(ctx, project.ID)
-			if err != nil {
-				return err
-			}
-			if branches == nil || branches.Worktrees == nil {
-				return nil
-			}
-			worktrees, err := branches.Worktrees(ctx, measure)
-			if err != nil {
-				return err
-			}
-			for _, worktree := range worktrees {
-				var own *core.ThreadView
-				if thread, err := repo.GetThread(ctx, worktree.ThreadID); err == nil {
-					if thread.ProjectID != project.ID {
-						continue
-					}
-					own = &thread
+		selections, err := manager.projectSourceSelections(ctx, project)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		for _, selection := range selections {
+			err := func() error {
+				branches, err := manager.branches(ctx, project.ID, selection)
+				if err != nil || branches == nil || branches.Worktrees == nil {
+					return err
 				}
-				listed.Worktrees = append(listed.Worktrees, ListedWorktree{WorktreeInfo: worktree, Thread: own})
-			}
-			if measure && len(listed.Worktrees) > 0 && branches.SharesStorage != nil {
-				shared, err := branches.SharesStorage(ctx)
+				worktrees, err := branches.Worktrees(ctx, measure)
 				if err != nil {
 					return err
 				}
-				listed.Shared = &shared
+				for _, worktree := range worktrees {
+					if seen[worktree.Path] || selection.owner != "" && selection.owner != worktree.ThreadID {
+						continue
+					}
+					var own *core.ThreadView
+					sourceID := selection.id
+					if thread, err := repo.GetThread(ctx, worktree.ThreadID); err == nil {
+						if thread.ProjectID != project.ID {
+							continue
+						}
+						own = &thread
+						// Different configured subdirectories can share the same checkout.
+						if primary := threadSourceID(project, thread); primary != selection.id {
+							extra, err := repo.SecondaryWorkspace(ctx, thread.ID, selection.id)
+							if err != nil {
+								return err
+							}
+							if extra == nil || extra.Removed {
+								continue
+							}
+						}
+					}
+					if project.FileSources == nil && sourceID == core.LegacyPrimarySource {
+						sourceID = ""
+					}
+					seen[worktree.Path] = true
+					listed.Worktrees = append(listed.Worktrees, ListedWorktree{WorktreeInfo: worktree, Thread: own, SourceID: sourceID})
+				}
+				if measure && len(worktrees) > 0 && branches.SharesStorage != nil {
+					shared, err := branches.SharesStorage(ctx)
+					if err != nil {
+						return err
+					}
+					if listed.Shared == nil || shared {
+						listed.Shared = &shared
+					}
+				}
+				return nil
+			}()
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if !errors.As(err, &listed.Error) {
+					listed.Error = domainerr.New("error.workspace", map[string]any{"detail": err.Error()})
+				}
 			}
-			output = append(output, listed)
-			return nil
-		}()
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			var known *domainerr.Error
-			if !errors.As(err, &known) {
-				known = domainerr.New("error.workspace", map[string]any{"detail": err.Error()})
-			}
-			listed.Worktrees = []ListedWorktree{}
-			listed.Shared = nil
-			listed.Error = known
+		}
+		if len(selections) != 0 {
 			output = append(output, listed)
 		}
 	}
@@ -368,7 +387,7 @@ func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, kn
 	if err != nil {
 		return nil, err
 	}
-	repo, err := manager.Repo(ctx, thread.ProjectID)
+	repo, err := manager.RepoForThread(ctx, thread)
 	if err != nil {
 		return nil, err
 	}

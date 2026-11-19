@@ -37,6 +37,21 @@ func (turn *turn) canEditThread(ctx context.Context) bool {
 	return err == nil
 }
 
+func (turn *turn) editWorkspace(ctx context.Context, thread core.ThreadView, input args) (sdk.Workspace, error) {
+	name := text(input, "source")
+	if name == "" {
+		return turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+	}
+	id, err := turn.Workspaces.ResolveFileSource(ctx, thread.ProjectID, name, thread.ID)
+	if err != nil {
+		return nil, err
+	}
+	if id == "" {
+		return nil, fmt.Errorf("no writable file source named %q", name)
+	}
+	return turn.Workspaces.ForThreadSource(ctx, thread.ProjectID, thread.ID, id)
+}
+
 func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 	thread, err := turn.editable(ctx)
 	if err != nil {
@@ -50,7 +65,7 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 	if !ok || len(content) > 1<<20 {
 		return "", errors.New("content must be a text string of at most 1 MiB")
 	}
-	workspace, err := turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+	workspace, err := turn.editWorkspace(ctx, thread, input)
 	if err != nil {
 		return "", err
 	}
@@ -63,8 +78,8 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 
 func (turn *turn) commandTools() []tool {
 	return []tool{
-		specification("run_command", "Run a shell command in the workspace. Commands covered by an approval rule require the user's answer. Long commands may continue in the background.",
-			args{"command": field("string"), "cwd": field("string"), "timeoutSeconds": field("integer"), "background": field("boolean"), "keepForUser": field("boolean")}, []string{"command"}, turn.runCommand),
+		specification("run_command", "Run a shell command in the workspace. Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background.",
+			args{"command": field("string"), "cwd": field("string"), "source": field("string"), "timeoutSeconds": field("integer"), "background": field("boolean"), "keepForUser": field("boolean")}, []string{"command"}, turn.runCommand),
 		specification("read_command_output", "Read the status and new output of one of your background commands.",
 			args{"handle": field("string"), "waitSeconds": field("integer")}, []string{"handle"}, turn.readCommand),
 		specification("stop_command", "Stop one of your background commands.",
@@ -74,7 +89,7 @@ func (turn *turn) commandTools() []tool {
 
 // commandGate binds approval to this conversation, exact command and directory.
 // The approval is recorded as used before the command can start.
-func (turn *turn) commandGate(ctx context.Context, command, cwd string, rules []commandpolicy.Rule) (bool, string, error) {
+func (turn *turn) commandGate(ctx context.Context, command, cwd, source, identity string, rules []commandpolicy.Rule) (bool, string, error) {
 	verdict := commandpolicy.Decide(command, rules)
 	switch verdict.Action {
 	case "allow":
@@ -86,10 +101,17 @@ func (turn *turn) commandGate(ctx context.Context, command, cwd string, rules []
 	if cwd != "." {
 		detail = "cd " + cwd + "\n" + detail
 	}
+	if source != "" {
+		detail = "[" + source + "]\n" + detail
+	}
 	if len(detail) > 10000 {
 		return false, "", errors.New("this command is too long for approval")
 	}
-	key, err := jsonutil.Encode([]string{cwd, command})
+	binding := []string{cwd, command}
+	if identity != "" {
+		binding = append(binding, identity)
+	}
+	key, err := jsonutil.Encode(binding)
 	if err != nil {
 		return false, "", err
 	}
@@ -137,7 +159,10 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 		return "", errors.New("command must be nonempty shell text within 32 KiB")
 	}
 	cwd, err := sdk.ViewPath(text(input, "cwd"))
-	if err != nil || len(cwd) > 4096 {
+	if err != nil {
+		return "", err
+	}
+	if len(cwd) > 4096 {
 		return "", errors.New("cwd must be a relative workspace directory")
 	}
 	cwd = path.Clean(strings.ReplaceAll(cwd, "\\", "/"))
@@ -150,13 +175,22 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 	if err := json.Unmarshal(data, &rules); err != nil {
 		return "", err
 	}
-	allowed, note, err := turn.commandGate(ctx, command, cwd, rules)
-	if err != nil || !allowed {
-		return note, err
-	}
-	workspace, err := turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+	workspace, err := turn.editWorkspace(ctx, thread, input)
 	if err != nil {
 		return "", err
+	}
+	source := text(input, "source")
+	identity := workspace.(interface{ SourceIdentity() string }).SourceIdentity()
+	binding := identity
+	if source == "" && project.FileSources == nil {
+		binding = ""
+	}
+	if source == "" && project.FileSources != nil {
+		source = workspace.Info().Label
+	}
+	allowed, note, err := turn.commandGate(ctx, command, cwd, source, binding, rules)
+	if err != nil || !allowed {
+		return note, err
 	}
 	turn.instructionsDirty = true
 	setup, err := turn.Workspaces.SetupDone(ctx, thread.ID)
@@ -187,7 +221,7 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 	if bg, _ := input["background"].(bool); bg {
 		keep, _ := input["keepForUser"].(bool)
 		for _, previous := range commands.List(thread.ID) {
-			if previous.Result == nil && previous.Command == command && previous.CWD == cwd {
+			if previous.Result == nil && previous.Command == command && previous.CWD == cwd && previous.SourceIdentity == identity {
 				stopped, err := commands.Stop(ctx, thread.ID, previous.ID)
 				if err != nil || stopped == nil || stopped.Result == nil {
 					return "", errors.New("the previous copy of this command has not stopped")
@@ -195,17 +229,17 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 				keep = keep || previous.Keep
 			}
 		}
-		job, err := commands.Start(thread.ID, command, run, background.StartOptions{CWD: cwd, Keep: keep, Local: local})
+		job, err := commands.Start(thread.ID, command, run, background.StartOptions{CWD: cwd, Keep: keep, Local: local, SourceIdentity: identity})
 		if err != nil {
 			return "", err
 		}
 		first, err := commands.Read(ctx, thread.ID, job.ID, 2*time.Second)
 		return formatOutput(first, limit, setup, err)
 	}
-	return turn.foreground(ctx, thread, command, cwd, setup, time.Duration(wait)*time.Second, limit, local, run)
+	return turn.foreground(ctx, thread, command, cwd, setup, time.Duration(wait)*time.Second, limit, local, run, identity)
 }
 
-func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, command, cwd, setup string, wait time.Duration, limit int, local bool, run background.Executor) (string, error) {
+func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, command, cwd, setup string, wait time.Duration, limit int, local bool, run background.Executor, identity string) (string, error) {
 	live := realtime.LiveHandle{Output: func(string) {}, End: func() {}}
 	if turn.Live != nil {
 		if handle, err := turn.Live.Start(realtime.LiveCommand{ProjectID: thread.ProjectID, ConversationID: thread.ID, Command: command, CWD: cwd}); err == nil {
@@ -268,7 +302,7 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 	case <-timer.C:
 		if move && stop() && ctx.Err() == nil {
 			mu.Lock()
-			job, appendOutput, err := commands.Adopt(thread.ID, command, active, cancel, ended, output, background.StartOptions{CWD: cwd, Local: local})
+			job, appendOutput, err := commands.Adopt(thread.ID, command, active, cancel, ended, output, background.StartOptions{CWD: cwd, Local: local, SourceIdentity: identity})
 			if err == nil {
 				adopted, appendToJob, output = true, appendOutput, ""
 			}

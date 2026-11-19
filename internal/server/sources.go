@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -27,7 +28,7 @@ func (api *API) registerSources() {
 		}
 		secrets := []string{}
 		if api.options.Settings != nil {
-			secrets = api.options.Settings.SourceSecretsSet(id)
+			secrets = appendSecretNames(sources.FileSourceSecrets(api.options.Settings.SourceSecrets(id), project.WritableSources().PrimaryID))
 		}
 		return object{"source": project.Source, "secretsSet": secrets}, 200, nil
 	})
@@ -59,12 +60,31 @@ func (api *API) registerSources() {
 				return nil, 0, err
 			}
 			previous := ""
-			if source, ok := project.Source.(map[string]any); ok {
-				previous, _ = source["kind"].(string)
+			prefix := ""
+			set := project.WritableSources()
+			sourceID := set.PrimaryID
+			if supplied, present := body["sourceId"].(string); present {
+				sourceID = supplied
 			}
-			plain, secrets := api.options.Settings.SplitSourceSettings(projectID, kind, given, previous, "", sources.SecretFields(provider.Info))
+			if source, ok := set.Get(sourceID); ok {
+				previous = source.Kind
+				prefix = sources.FileSourceSecretPrefix(source.ID)
+			} else if sourceID != "" {
+				if refs, _ := project.References.([]any); len(refs) > 0 {
+					for _, raw := range refs {
+						reference, _ := raw.(map[string]any)
+						if text(reference, "id") == sourceID {
+							previous = text(reference, "kind")
+							prefix = sources.FileSourceSecretPrefix(sourceID)
+						}
+					}
+				}
+			}
+			plain, secrets := api.options.Settings.SplitSourceSettings(projectID, kind, given, previous, prefix, sources.SecretFields(provider.Info))
 			filled = plain
-			maps.Copy(filled, secrets)
+			for key, value := range secrets {
+				filled[strings.TrimPrefix(key, prefix)] = value
+			}
 		}
 		ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
 		defer cancel()

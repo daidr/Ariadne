@@ -179,16 +179,89 @@ func secretDigests(secrets map[string]any) (map[string]any, error) {
 type sourceConfig struct {
 	definition                    sources.Definition
 	secrets                       map[string]any
-	key                           string
+	key, id                       string
 	generation, hostingGeneration uint64
 }
 
-func (manager *Manager) sourceConfig(ctx context.Context, projectID string) (sourceConfig, error) {
+type sourceSelection struct {
+	id    string
+	owner string
+}
+
+func threadSourceID(project core.ProjectView, thread core.ThreadView) string {
+	if thread.Workspace != nil {
+		if thread.Workspace.SourceID != "" {
+			return thread.Workspace.SourceID
+		}
+		return core.LegacyPrimarySource
+	}
+	return project.WritableSources().PrimaryID
+}
+
+// Names are for the model. Leases and persisted worktrees use the stable ID.
+func (manager *Manager) ResolveFileSource(ctx context.Context, projectID, name, owner string) (string, error) {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	project, err := manager.options.Repository.GetProject(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	if owner != "" {
+		thread, err := manager.options.Repository.GetThread(ctx, owner)
+		if err != nil || thread.ProjectID != projectID {
+			return "", domainerr.NotFound(owner)
+		}
+		for _, reference := range references(thread.References) {
+			if reference.Writable && (reference.Name == name || reference.ID == name) {
+				return reference.ID, nil
+			}
+		}
+	}
+	for _, source := range project.WritableSources().Sources {
+		if source.Name == name || source.ID == name {
+			return source.ID, nil
+		}
+	}
+	return "", nil
+}
+
+func (manager *Manager) sourceConfig(ctx context.Context, projectID string, selections ...sourceSelection) (sourceConfig, error) {
 	project, err := manager.options.Repository.GetProject(ctx, projectID)
 	if err != nil {
 		return sourceConfig{}, err
 	}
-	definition, err := sources.DecodeDefinition(project.Source)
+	set := project.WritableSources()
+	selection := sourceSelection{id: set.PrimaryID}
+	if len(selections) != 0 && selections[0].id != "" {
+		selection = selections[0]
+	}
+	var raw any = project.Source
+	if selection.id != "" {
+		source, found := set.Get(selection.id)
+		if !found && selection.owner != "" {
+			thread, err := manager.options.Repository.GetThread(ctx, selection.owner)
+			if err != nil {
+				return sourceConfig{}, err
+			}
+			if thread.ProjectID == projectID {
+				for _, ref := range references(thread.References) {
+					if ref.ID == selection.id && ref.Writable {
+						source = core.FileSource{ID: ref.ID, Kind: ref.Kind, Settings: ref.Settings}
+						found = true
+						break
+					}
+				}
+			}
+		}
+		if !found {
+			return sourceConfig{}, changedSource()
+		}
+		raw = source
+	}
+	definition, err := sources.DecodeDefinition(raw)
 	if err != nil {
 		return sourceConfig{}, unreadable(err)
 	}
@@ -197,13 +270,9 @@ func (manager *Manager) sourceConfig(ctx context.Context, projectID string) (sou
 	}
 	secrets := map[string]any{}
 	if manager.options.Secrets != nil {
-		for key, value := range manager.options.Secrets(projectID) {
-			if !strings.HasPrefix(key, sources.ReferenceSecret) {
-				secrets[key] = value
-			}
-		}
+		secrets = sources.FileSourceSecrets(manager.options.Secrets(projectID), selection.id)
 	}
-	config := sourceConfig{definition: *definition, secrets: secrets, generation: manager.options.Sources.Generation(definition.Kind)}
+	config := sourceConfig{definition: *definition, secrets: secrets, generation: manager.options.Sources.Generation(definition.Kind), id: selection.id}
 	if definition.Hosting != nil {
 		config.hostingGeneration = manager.options.Sources.Generation(definition.Hosting.Kind)
 	}
@@ -211,27 +280,31 @@ func (manager *Manager) sourceConfig(ctx context.Context, projectID string) (sou
 	if err != nil {
 		return sourceConfig{}, unreadable(err)
 	}
-	config.key, err = digest([]any{definition, hashed, config.generation, config.hostingGeneration})
+	config.key, err = digest([]any{config.id, definition, hashed, config.generation, config.hostingGeneration})
 	if err != nil {
 		return sourceConfig{}, unreadable(err)
 	}
 	return config, nil
 }
-func (manager *Manager) acquireSource(ctx context.Context, project, key string) (leases.Lease[*connection], error) {
-	config, err := manager.sourceConfig(ctx, project)
+func (manager *Manager) acquireSource(ctx context.Context, project, key string, selection ...sourceSelection) (leases.Lease[*connection], error) {
+	config, err := manager.sourceConfig(ctx, project, selection...)
 	if err != nil {
 		return leases.Lease[*connection]{}, err
 	}
 	if key != "" && config.key != key {
 		return leases.Lease[*connection]{}, changedSource()
 	}
-	lease, err := manager.connections.Acquire(ctx, project, config.key, func(ctx context.Context) (*connection, error) {
+	id := project
+	if config.id != core.LegacyPrimarySource {
+		id += "\x00" + config.id
+	}
+	lease, err := manager.connections.Acquire(ctx, id, config.key, func(ctx context.Context) (*connection, error) {
 		caps, err := manager.options.Sources.ConnectSource(ctx, config.definition, config.secrets)
 		if err != nil {
 			return nil, err
 		}
 		value := &connection{caps: caps}
-		current, err := manager.sourceConfig(ctx, project)
+		current, err := manager.sourceConfig(ctx, project, selection...)
 		if err != nil || current.key != config.key {
 			value.Close()
 			if err != nil {
@@ -246,14 +319,14 @@ func (manager *Manager) acquireSource(ctx context.Context, project, key string) 
 	}
 	return lease, nil
 }
-func withSource[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, sdk.Capabilities) (T, error)) (T, error) {
+func withSource[T any](ctx context.Context, manager *Manager, project, key string, work func(context.Context, sdk.Capabilities) (T, error), selection ...sourceSelection) (T, error) {
 	var zero T
 	ctx, done, err := manager.begin(ctx)
 	if err != nil {
 		return zero, err
 	}
 	defer done()
-	lease, err := manager.acquireSource(ctx, project, key)
+	lease, err := manager.acquireSource(ctx, project, key, selection...)
 	if err != nil {
 		return zero, err
 	}
@@ -288,6 +361,27 @@ func (manager *Manager) Available(ctx context.Context, project string) bool {
 }
 func (manager *Manager) HasRepo(ctx context.Context, project string) bool {
 	return manager.provides(ctx, project, "repo")
+}
+func (manager *Manager) HasRepoForThread(ctx context.Context, thread core.ThreadView) bool {
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return false
+	}
+	defer done()
+	project, err := manager.options.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return false
+	}
+	config, err := manager.sourceConfig(ctx, project.ID, sourceSelection{id: threadSourceID(project, thread)})
+	if err != nil {
+		return false
+	}
+	kind := config.definition.Kind
+	if config.definition.Hosting != nil {
+		kind = config.definition.Hosting.Kind
+	}
+	provider, exists := manager.options.Sources.Get(kind)
+	return exists && slices.Contains(provider.Info.Provides, "repo")
 }
 func (manager *Manager) HasTracker(ctx context.Context, project string) bool {
 	return manager.provides(ctx, project, "tracker")
@@ -463,6 +557,7 @@ func (manager *Manager) InvalidateProject(ctx context.Context, project string) e
 		}
 	}
 	manager.connections.Remove(project)
+	manager.connections.RemovePrefix(project + "\x00")
 	manager.references.RemovePrefix(project + "\x00")
 	manager.mu.Lock()
 	delete(manager.discarding, project)
@@ -475,6 +570,7 @@ type projectReference struct {
 	Name     string         `json:"name"`
 	Kind     string         `json:"kind"`
 	Settings map[string]any `json:"settings"`
+	Writable bool           `json:"writable,omitempty"`
 }
 
 func (manager *Manager) InvalidateReference(ctx context.Context, project, reference string) error {
@@ -483,7 +579,17 @@ func (manager *Manager) InvalidateReference(ctx context.Context, project, refere
 		return err
 	}
 	defer done()
+	manager.connections.Remove(project + "\x00" + reference)
 	return manager.references.RemoveWait(ctx, project+"\x00"+reference)
+}
+
+func (manager *Manager) InvalidateFileSource(project, source string) {
+	id := project
+	if source != core.LegacyPrimarySource {
+		id += "\x00" + source
+	}
+	manager.connections.Remove(id)
+	manager.mentions.RemovePrefix(project + "\x00")
 }
 
 func references(raw any) []projectReference {

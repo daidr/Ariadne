@@ -164,6 +164,8 @@ func projectEvent(w *projectionWriter, e eventstore.Event, d object) error {
 		w.run("UPDATE projects SET detected = ?, updated_at = ? WHERE id = ?", encoded(detected), e.At, e.ProjectID)
 	case "project.source.set":
 		w.run("UPDATE projects SET source = ?, detected = NULL, updated_at = ? WHERE id = ?", nullableJSON(d["source"]), e.At, e.ProjectID)
+	case "project.file_sources.set":
+		w.run("UPDATE projects SET source = ?, detected = CASE WHEN ? THEN NULL ELSE detected END, updated_at = ? WHERE id = ?", nullableJSON(d["source"]), d.yes("primaryChanged"), e.At, e.ProjectID)
 	default:
 		w.run("UPDATE projects SET updated_at = ? WHERE id = ?", e.At, e.ProjectID)
 	}

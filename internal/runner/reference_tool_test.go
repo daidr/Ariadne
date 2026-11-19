@@ -94,7 +94,7 @@ func TestOutsideWorkspaceReadsSuggestRequestingOnlyNeededAccess(t *testing.T) {
 		seen++
 		content := text(entry, "content")
 		wantHint := entry["toolCallId"] != "missing"
-		if entry["isError"] != true || strings.Contains(content, "add_reference") != wantHint ||
+		if entry["isError"] != true || strings.Contains(content, "add_source") != wantHint ||
 			wantHint && !strings.Contains(content, "is outside the workspace") {
 			t.Errorf("unexpected result for %v: %q", entry["toolCallId"], content)
 		}
@@ -235,6 +235,51 @@ func TestOutsideWorkspaceReadsSuggestRequestingOnlyNeededAccess(t *testing.T) {
 				}
 				if hasReference(currentProject.References, path) != (scope == "project") || hasReference(currentThread.References, path) != (scope == "thread") {
 					t.Fatalf("legacy approval did not honor the chosen scope %q", scope)
+				}
+			})
+		}
+	})
+
+	t.Run("writable source follows the confirmed scope", func(t *testing.T) {
+		for _, scope := range []string{"thread", "project"} {
+			t.Run(scope, func(t *testing.T) {
+				path := filepath.Join(outside, "writable-"+scope)
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+				request := args{"kind": "local-directory", "settings": args{"path": path}, "reason": "Update the requested files."}
+				if _, err := agent.addFileSource(ctx, request); err != nil {
+					t.Fatal(err)
+				}
+				cards, err := repo.ListOpenAttentions(ctx, project.ID)
+				if err != nil || len(cards) != 1 {
+					t.Fatal(cards, err)
+				}
+				card, _ := cards[0].Block.(map[string]any)
+				if !strings.Contains(text(card, "title"), "读写") || card["allowProjectReference"] != true {
+					t.Fatal(card)
+				}
+				if err := repo.AnswerAttention(ctx, cards[0].ID, args{"type": "confirm", "approved": true, "scope": scope}); err != nil {
+					t.Fatal(err)
+				}
+				result, err := agent.addFileSource(ctx, request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var approved struct{ Source string }
+				if err := json.Unmarshal([]byte(result), &approved); err != nil || approved.Source == "" {
+					t.Fatal(result, err)
+				}
+				if _, err := agent.writeFile(ctx, args{"source": approved.Source, "path": "grant.txt", "content": "approved"}); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(filepath.Join(path, "grant.txt"))
+				if err != nil || string(data) != "approved" {
+					t.Fatal(string(data), err)
+				}
+				id, err := work.ResolveFileSource(ctx, project.ID, approved.Source, "")
+				if err != nil || (id != "") != (scope == "project") {
+					t.Fatalf("grant visible beyond its scope: %s, %v", id, err)
 				}
 			})
 		}

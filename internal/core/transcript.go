@@ -244,7 +244,7 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if c != nil && proposal != nil {
 			note(c, object{"type": "proposal-stale", "proposalId": d["proposalId"], "reason": proposal["reason"], "staleBecause": d["reason"]}, true)
 		}
-	case "project.source.set":
+	case "project.source.set", "project.file_sources.set":
 		c := coordinator(w, e.ProjectID)
 		if c == nil {
 			return

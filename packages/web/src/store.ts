@@ -1020,6 +1020,19 @@ export async function setSource(source: SourceInput | null): Promise<string | nu
   }
 }
 
+export async function saveFileSources(
+  projectId: string,
+  input: Parameters<typeof api.setFileSources>[1],
+): Promise<string | null> {
+  try {
+    await api.setFileSources(projectId, input)
+    if (state.currentId === projectId) await refreshCurrent()
+    return null
+  } catch (error) {
+    return error instanceof ApiError ? tm(error.localized) : String(error)
+  }
+}
+
 /** Add a source the open project only reads; the reason when it was refused. */
 export async function addReference(reference: {
   kind: string

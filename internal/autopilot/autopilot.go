@@ -15,8 +15,8 @@ import (
 )
 
 type Workspaces interface {
-	HasRepo(context.Context, string) bool
-	Repo(context.Context, string) (*sdk.RepoCapability, error)
+	HasRepoForThread(context.Context, core.ThreadView) bool
+	RepoForThread(context.Context, core.ThreadView) (*sdk.RepoCapability, error)
 	MergeReviewedThread(context.Context, string, string) (workspaces.ThreadMerge, error)
 	SyncPullRequest(context.Context, string, *sdk.PullRequestInfo, map[string]any) (map[string]any, error)
 }
@@ -210,7 +210,7 @@ func (service *Service) merge(ctx context.Context, thread core.ThreadView, local
 }
 
 func (service *Service) mergeReviewed(ctx context.Context, thread core.ThreadView, head, locale string) (string, string, error) {
-	if service.Workspaces.HasRepo(ctx, thread.ProjectID) {
+	if service.Workspaces.HasRepoForThread(ctx, thread) {
 		return service.mergePullRequest(ctx, thread, head, locale)
 	}
 	result, err := service.Workspaces.MergeReviewedThread(ctx, thread.ID, head)
@@ -228,7 +228,7 @@ func (service *Service) mergeReviewed(ctx context.Context, thread core.ThreadVie
 }
 
 func (service *Service) mergePullRequest(ctx context.Context, thread core.ThreadView, head, locale string) (string, string, error) {
-	remote, err := service.Workspaces.Repo(ctx, thread.ProjectID)
+	remote, err := service.Workspaces.RepoForThread(ctx, thread)
 	if err != nil {
 		return "", "", err
 	}

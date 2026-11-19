@@ -1,0 +1,133 @@
+package workspaces
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/local"
+	"github.com/daidr/Ariadne/internal/sources"
+)
+
+func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required")
+	}
+	ctx := t.Context()
+	first, second, managed := t.TempDir(), t.TempDir(), t.TempDir()
+	git := func(dir string, args ...string) {
+		t.Helper()
+		command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	makeRepo := func(dir, branch, contents string) {
+		t.Helper()
+		git(dir, "init", "--initial-branch="+branch)
+		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git(dir, "add", "file.txt")
+		git(dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial")
+	}
+	makeRepo(first, "first-base", "first")
+	makeRepo(second, "second-base", "second")
+
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	registry := sources.New()
+	if _, err := registry.Register(local.DirectoryProvider(managed, nil, true)); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	set := core.FileSourceSet{PrimaryID: "src_first", Sources: []core.FileSource{
+		{ID: "src_first", Name: "frontend", Kind: "local-directory", Settings: map[string]any{"path": first}},
+		{ID: "src_second", Name: "backend", Kind: "local-directory", Settings: map[string]any{"path": second}},
+	}}
+	project, err := repo.CreateProject(ctx, new("Two repositories"), core.ProjectStart{FileSources: &set})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := newThread(t, repo, project.ID)
+	main, err := manager.ForThread(ctx, project.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra, err := manager.ForThreadSource(ctx, project.ID, thread.ID, "src_second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if main.Info().Label == extra.Info().Label {
+		t.Fatal("the two repositories share a checkout")
+	}
+	for _, workspace := range []struct {
+		source, want string
+	}{
+		{"src_first", "first"}, {"src_second", "second"},
+	} {
+		view, err := manager.ForThreadSource(ctx, project.ID, thread.ID, workspace.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := view.ReadFile(ctx, "file.txt"); got != workspace.want || err != nil {
+			t.Fatalf("%s read %q: %v", workspace.source, got, err)
+		}
+		if err := view.WriteFile(ctx, "file.txt", "edited "+workspace.want); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for folder, want := range map[string]string{first: "first", second: "second"} {
+		if got, err := os.ReadFile(filepath.Join(folder, "file.txt")); string(got) != want || err != nil {
+			t.Fatalf("original checkout %s changed: %q, %v", folder, got, err)
+		}
+	}
+	switched := set
+	switched.PrimaryID = "src_second"
+	if _, err := repo.SetProjectFileSources(ctx, project.ID, set, switched); err != nil {
+		t.Fatal(err)
+	}
+	if err := main.Close(); err != nil {
+		t.Fatal(err)
+	}
+	old, err := manager.ForThread(ctx, project.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := old.ReadFile(ctx, "file.txt"); got != "edited first" || err != nil {
+		t.Fatalf("existing thread opened a different repository: %q, %v", got, err)
+	}
+	next := newThread(t, repo, project.ID)
+	current, err := manager.ForThread(ctx, project.ID, next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := current.ReadFile(ctx, "file.txt"); got != "second" || err != nil {
+		t.Fatalf("new thread did not use the new primary: %q, %v", got, err)
+	}
+	if result, err := manager.ThreadChanges(ctx, thread.ID); err != nil || result.Changes == nil || result.Changes.Base != "first-base" {
+		t.Fatalf("existing branch was compared in the wrong repository: %+v, %v", result, err)
+	}
+	list, err := manager.ListWorktrees(ctx, false)
+	if err != nil || len(list) != 1 || len(list[0].Worktrees) != 3 {
+		t.Fatalf("worktrees: %+v, %v", list, err)
+	}
+	git(extra.Info().Label, "restore", "--", "file.txt")
+	if status, err := manager.RemoveSourceWorktree(ctx, project.ID, thread.ID, "src_second", "user"); err != nil || status != "removed" {
+		t.Fatalf("remove secondary worktree: %s, %v", status, err)
+	}
+	known, err := repo.GetThread(ctx, thread.ID)
+	if err != nil || known.Workspace == nil || known.Workspace.Removed || known.Workspace.SourceID != "src_first" {
+		t.Fatalf("removing the secondary worktree changed the primary: %+v, %v", known.Workspace, err)
+	}
+}

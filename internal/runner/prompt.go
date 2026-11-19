@@ -71,6 +71,30 @@ func (turn *turn) sections(ctx context.Context, project core.ProjectView, config
 		{"writing", writingGuide(locale)},
 		{"workflow", workflow},
 	}
+	if turn.Workspaces != nil {
+		owner := ""
+		if turn.conversation.Role == "thread" {
+			owner = turn.conversation.ID
+		}
+		if available, err := turn.Workspaces.References(ctx, project.ID, locale, owner); err == nil && len(available) != 0 {
+			lines := make([]string, 0, len(available))
+			for _, source := range available {
+				access := "read-only"
+				if source.Writable && strings.HasPrefix(workflow, threadGuide) {
+					access = "writable"
+				}
+				if source.Primary {
+					access += ", default"
+				}
+				if source.Own {
+					access += ", this thread"
+				}
+				lines = append(lines, source.Name+" ("+access+"): "+source.Line)
+			}
+			sections = append(sections, [2]string{"file-sources", "To work in a named file source, pass its name as source to the file or command tool. Before editing another source, read its repository instructions with the same source parameter. Each Git repository has its own discussion worktree.\n" +
+				transcript.Fenced("file sources", strings.Join(lines, "\n"), "").Text + "\n\n"})
+		}
+	}
 	if value, _ := config["instructions"].(string); value != "" {
 		sections = append(sections, [2]string{"user-instructions", transcript.Fenced("user instructions", value, "").Text + "\n\n"})
 	}

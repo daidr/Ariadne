@@ -18,7 +18,7 @@ import (
 )
 
 func (turn *turn) readFileTool() tool {
-	entry := specification("read_file", "Read numbered lines of a file. Use the returned offset for more lines. Images are attached to the result.",
+	entry := specification("read_file", "Read numbered lines of a file. Pass source to select a named file source. Use the returned offset for more lines. Images are attached to the result.",
 		args{"path": field("string"), "source": field("string"), "reference": field("string"), "offset": field("integer"), "limit": field("integer")},
 		[]string{"path"}, nil)
 	entry.call = turn.readFile

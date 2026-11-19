@@ -18,18 +18,21 @@ const maxEditBytes = 1 << 20
 func (turn *turn) editorTools() []tool {
 	edit := args{"old": field("string"), "new": field("string"), "all": field("boolean")}
 	return []tool{
-		specification("edit_file", "Replace a unique part of a workspace file. Give old and new, or edits applied in order. Use all to replace every occurrence.",
-			args{"path": field("string"), "old": field("string"), "new": field("string"), "all": field("boolean"),
+		specification("edit_file", "Replace a unique part of a workspace file. Pass source to select a writable source. Give old and new, or edits applied in order. Use all to replace every occurrence.",
+			args{"path": field("string"), "source": field("string"), "old": field("string"), "new": field("string"), "all": field("boolean"),
 				"edits": arrayOf(args{"type": "object", "properties": edit, "required": []string{"old", "new"}})},
 			[]string{"path"}, turn.editFile),
-		specification("apply_patch", "Apply a patch to workspace files. Use *** Begin Patch, *** Add File: path, *** Update File: path, *** Move to: path or *** Delete File: path, then *** End Patch. Each hunk can start with @@ and uses space for context, - for removal, + for addition. Hunks are checked before writing.",
-			args{"input": field("string")}, []string{"input"}, turn.applyPatch),
+		specification("apply_patch", "Apply a patch to workspace files. Pass source to select a writable source. Use *** Begin Patch, *** Add File: path, *** Update File: path, *** Move to: path or *** Delete File: path, then *** End Patch. Each hunk can start with @@ and uses space for context, - for removal, + for addition. Hunks are checked before writing.",
+			args{"input": field("string"), "source": field("string")}, []string{"input"}, turn.applyPatch),
 	}
 }
 
 func editPath(raw string) (string, error) {
 	name, err := sdk.ViewPath(raw)
-	if err != nil || name == "." || len(name) > 4096 || strings.ContainsAny(name, "\r\n\x00") {
+	if err != nil {
+		return "", err
+	}
+	if name == "." || len(name) > 4096 || strings.ContainsAny(name, "\r\n\x00") {
 		return "", errors.New("a relative file path within the workspace is required")
 	}
 	for _, part := range strings.Split(strings.ReplaceAll(name, "\\", "/"), "/") {
@@ -67,7 +70,7 @@ func (turn *turn) editFile(ctx context.Context, input args) (string, error) {
 			return "", errors.New("edits must contain 1 to 128 replacements")
 		}
 	}
-	workspace, err := turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+	workspace, err := turn.editWorkspace(ctx, thread, input)
 	if err != nil {
 		return "", err
 	}
@@ -114,7 +117,7 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	workspace, err := turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+	workspace, err := turn.editWorkspace(ctx, thread, input)
 	if err != nil {
 		return "", err
 	}
