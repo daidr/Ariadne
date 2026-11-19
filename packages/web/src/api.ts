@@ -85,6 +85,35 @@ export interface McpSettings {
   status: McpServerStatus[]
 }
 
+export interface UpdatePreferences {
+  channel: 'stable' | 'preview'
+  automatic: boolean
+}
+
+export interface UpdateStatus {
+  version: string
+  preferences: UpdatePreferences
+  canInstall: boolean
+  state:
+    | 'idle'
+    | 'checking'
+    | 'current'
+    | 'no-release'
+    | 'available'
+    | 'downloading'
+    | 'installing'
+    | 'ready'
+  downloadPercent: number
+  failure?: 'check' | 'download' | 'downloadTimeout' | 'verification' | 'install' | 'permission'
+  release: {
+    version: string
+    notes: string
+    url: string
+    prerelease: boolean
+    installable: boolean
+  } | null
+}
+
 const TOKEN_KEY = 'ariadne.token'
 
 /**
@@ -496,6 +525,14 @@ export interface ArtifactDetail {
 }
 
 export const api = {
+  updateStatus: (signal?: AbortSignal) =>
+    request<UpdateStatus>('GET', '/api/updates', undefined, signal),
+  saveUpdatePreferences: (preferences: UpdatePreferences, signal?: AbortSignal) =>
+    request<UpdateStatus>('PUT', '/api/updates', preferences, signal),
+  checkForUpdate: (signal?: AbortSignal) =>
+    request<UpdateStatus>('POST', '/api/updates/check', undefined, signal),
+  installUpdate: (version: string, signal?: AbortSignal) =>
+    request<UpdateStatus>('POST', '/api/updates/install', { version }, signal),
   listMemories: (projectId: string) =>
     request<{ memories: MemoryView[] }>('GET', `/api/projects/${projectId}/memory`),
   addMemory: (projectId: string, text: string) =>

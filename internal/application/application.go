@@ -40,6 +40,7 @@ import (
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/timers"
+	"github.com/daidr/Ariadne/internal/update"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -51,6 +52,7 @@ type Options struct {
 	OnError       func(error)
 	Ledger        *process.Ledger
 	StdioLauncher agents.StdioLauncher
+	Update        *update.Options
 }
 
 type Application struct {
@@ -110,6 +112,13 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	user, err := settings.Open(filepath.Join(home, "config.json"))
 	if err != nil {
 		return nil, err
+	}
+	var updates *update.Service
+	if options.Update != nil {
+		supplied := *options.Update
+		supplied.OnError = onError
+		updates = update.New(life, user, supplied)
+		add(updates.Close)
 	}
 
 	eventHub := realtime.NewHub()
@@ -220,7 +229,8 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	api, err := server.New(server.Options{
 		Repository: repo, Token: cfg.Token, Web: options.Web, Scheduler: schedule, State: state,
 		Data: storage, Settings: user, Models: builtins.Registry, Sources: registry,
-		Links: resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
+		Updates: updates,
+		Links:   resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
 		Plugins: host, HTTPClient: options.Client, OnError: onError,
 		Rooms:       rooms,
 		FindContext: &sdk.FindContext{Env: env, Home: userHome, Which: func(name string) bool { _, err := exec.LookPath(name); return err == nil }},

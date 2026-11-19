@@ -37,6 +37,7 @@ import (
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
+	"github.com/daidr/Ariadne/internal/update"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -53,6 +54,7 @@ type Options struct {
 	HasTracker       func(string) bool
 	Data             *data.Store
 	Settings         *settings.Store
+	Updates          *update.Service
 	SearchAvailable  func() ([]string, []any)
 	HTTPClient       *http.Client
 	Models           *models.Registry
@@ -160,6 +162,7 @@ func New(options Options) (*API, error) {
 	api.registerPlans()
 	api.registerData()
 	api.registerSettings()
+	api.registerUpdates()
 	api.registerPlugins()
 	api.registerModels()
 	api.registerModelCatalog()

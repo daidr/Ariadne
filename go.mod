@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/yuin/goldmark v1.8.6
 	github.com/yuin/gopher-lua v1.1.2
+	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.44.0

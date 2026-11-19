@@ -22,6 +22,7 @@ import (
 	"github.com/daidr/Ariadne/internal/httpauth"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/providers/agents"
+	"github.com/daidr/Ariadne/internal/update"
 )
 
 var version = "dev"
@@ -105,12 +106,16 @@ func serve(ctx context.Context, cfg config.Config, listener net.Listener) error 
 	if err != nil {
 		return err
 	}
+	executable, executableErr := os.Executable()
+	updater := &update.Options{Version: version}
+	if bundledBuild && executableErr == nil && os.Getenv("ARIADNE_DISABLE_SELF_UPDATE") != "1" {
+		updater.Executable = executable
+	}
 	app, err := application.Open(ctx, application.Options{
-		Config: cfg, Web: web, Ledger: process.DefaultLedger,
+		Config: cfg, Web: web, Ledger: process.DefaultLedger, Update: updater,
 		OnError: func(err error) { log.Printf("ariadne: %v", err) },
 		StdioLauncher: func(address string) (string, []string, error) {
-			executable, err := os.Executable()
-			return executable, []string{agents.StdioBridgeCommand, address}, err
+			return executable, []string{agents.StdioBridgeCommand, address}, executableErr
 		},
 	})
 	if err != nil {

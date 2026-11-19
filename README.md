@@ -34,6 +34,8 @@ bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
 
 构建程序将前端嵌入 Go 可执行文件，输出到 `dist/release/ariadne-<平台>`。支持 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64` 和 `windows-x64`，所有平台禁用 UPX。构建当前平台时会执行 `self-check`，发版流程会在每个目标平台上运行产物自检。
 
+在「设置 → 更新」可检查新版本、查看更新日志，并选择正式或测试渠道。发布的测试版默认跟随测试渠道，正式渠道暂无发布时会保留当前版本。独立程序可以手动更新，也可以开启自动更新，下载核验通过后会替换程序，下一次启动生效。由包管理器管理的安装可设 `ARIADNE_DISABLE_SELF_UPDATE=1`，继续使用应用内的版本检查和更新日志。
+
 这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
 
 `ariadne --version` 打印版本号，版本号来自根目录 `package.json`。

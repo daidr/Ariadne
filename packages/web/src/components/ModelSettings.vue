@@ -43,6 +43,7 @@ import McpSettings from './McpSettings.vue'
 import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
 import SearchSettings from './SearchSettings.vue'
+import UpdatesSettings from './UpdatesSettings.vue'
 import SettingsFields from './SettingsFields.vue'
 import SettingsLabelHelp from './SettingsLabelHelp.vue'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
@@ -306,7 +307,7 @@ const priced = computed(() =>
 )
 
 export type SettingsTab =
-  'models' | 'search' | 'instructions' | 'commands' | 'input' | 'mcp' | 'data'
+  'models' | 'search' | 'instructions' | 'commands' | 'input' | 'mcp' | 'data' | 'updates'
 type WorkPart = 'instructions' | 'commands'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
@@ -980,12 +981,18 @@ async function saveModels(): Promise<boolean> {
       <DouTabPanel value="data" :label="t('settings.tab.data')">
         <DataTab v-if="open" @plugins-changed="reloadKinds" />
       </DouTabPanel>
+      <DouTabPanel value="updates" :label="t('settings.tab.updates')">
+        <UpdatesSettings v-if="open && tab === 'updates'" />
+      </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
-      <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
-      <DouButton tone="primary" :loading="saving" :disabled="search?.checking" @click="saveAll">
-        {{ t('settings.save') }}
-      </DouButton>
+      <DouButton v-if="tab === 'updates'" @click="close">{{ t('view.close') }}</DouButton>
+      <template v-else>
+        <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
+        <DouButton tone="primary" :loading="saving" :disabled="search?.checking" @click="saveAll">
+          {{ t('settings.save') }}
+        </DouButton>
+      </template>
     </template>
   </DouDialog>
 </template>

@@ -257,6 +257,10 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	known["GET /api/files/:fileId/sheet"] = true
 	known["GET /api/projects/:projectId/sources"] = true
 	known["PUT /api/projects/:projectId/sources"] = true
+	known["GET /api/updates"] = true
+	known["PUT /api/updates"] = true
+	known["POST /api/updates/check"] = true
+	known["POST /api/updates/install"] = true
 	t.Logf("%d native API routes registered", len(api.routes))
 	registered := map[string]bool{}
 	for _, route := range api.routes {
