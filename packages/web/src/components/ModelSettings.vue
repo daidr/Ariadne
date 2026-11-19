@@ -885,7 +885,7 @@ async function saveModels(): Promise<boolean> {
                 </DouButton>
                 <template v-if="provider.advanced && !kindOf(provider.kind)?.program">
                   <DouFormItem :label="t('settings.headers')">
-                    <SecretPairs v-model="provider.headers" :add-label="t('mcp.addHeader')" />
+                    <SecretPairs v-model="provider.headers" />
                   </DouFormItem>
                   <DouFormItem :label="t('settings.extraBody')">
                     <DouTextarea

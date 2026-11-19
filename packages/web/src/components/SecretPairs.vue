@@ -12,7 +12,6 @@ export interface DraftPair {
 }
 
 const pairs = defineModel<DraftPair[]>({ required: true })
-defineProps<{ addLabel: string }>()
 </script>
 
 <script lang="ts">
@@ -61,7 +60,7 @@ export const pairsInput = (list: DraftPair[]) =>
       @click="pairs.push({ name: '', value: '', stored: false })"
     >
       <template #leading><PlusIcon /></template>
-      {{ addLabel }}
+      {{ t('settings.addPair') }}
     </DouButton>
   </div>
 </template>

@@ -77,9 +77,9 @@ const viewingOld = computed(() => !!artifact.value && artifact.value.version !==
 const historyNeighbors = computed(() => {
   const index = versions.value.findIndex(({ version }) => version === artifact.value?.version)
   return {
-    previous: index >= 0 ? versions.value[index + 1]?.version : undefined,
+    older: index >= 0 ? versions.value[index + 1]?.version : undefined,
     // The newest version opens the live editor through the separate return action.
-    next: index > 1 ? versions.value[index - 1]?.version : undefined,
+    newer: index > 1 ? versions.value[index - 1]?.version : undefined,
   }
 })
 
@@ -502,22 +502,20 @@ async function rename() {
         <DouButton
           size="sm"
           variant="ghost"
-          :aria-label="t('artifact.previousVersion')"
-          :title="t('artifact.previousVersion')"
-          :disabled="saving || switchingVersion || historyNeighbors.previous === undefined"
-          @click="
-            historyNeighbors.previous !== undefined && switchVersion(historyNeighbors.previous)
-          "
+          :aria-label="t('artifact.newerVersion')"
+          :title="t('artifact.newerVersion')"
+          :disabled="saving || switchingVersion || historyNeighbors.newer === undefined"
+          @click="historyNeighbors.newer !== undefined && switchVersion(historyNeighbors.newer)"
         >
           <ChevronUpIcon />
         </DouButton>
         <DouButton
           size="sm"
           variant="ghost"
-          :aria-label="t('artifact.nextVersion')"
-          :title="t('artifact.nextVersion')"
-          :disabled="saving || switchingVersion || historyNeighbors.next === undefined"
-          @click="historyNeighbors.next !== undefined && switchVersion(historyNeighbors.next)"
+          :aria-label="t('artifact.olderVersion')"
+          :title="t('artifact.olderVersion')"
+          :disabled="saving || switchingVersion || historyNeighbors.older === undefined"
+          @click="historyNeighbors.older !== undefined && switchVersion(historyNeighbors.older)"
         >
           <ChevronDownIcon />
         </DouButton>

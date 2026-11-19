@@ -292,7 +292,7 @@ async function save() {
             />
           </DouFormItem>
           <DouFormItem :label="t('projectSettings.env')">
-            <SecretPairs v-model="env" :add-label="t('projectSettings.envAdd')" />
+            <SecretPairs v-model="env" />
           </DouFormItem>
           <DouFormItem :label="t('project.mcp')">
             <DouSelect

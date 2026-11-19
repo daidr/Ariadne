@@ -118,11 +118,14 @@ defineExpose({ save, checking })
             autocomplete="off"
           />
         </DouFormItem>
-        <DouFormItem
-          :label="t('settings.searchKey')"
-          :help="saved?.keySet && !active.cleared ? t('settings.secretSet') : undefined"
-        >
-          <DouInput v-model="active.apiKey" type="password" show-password autocomplete="off">
+        <DouFormItem :label="t('settings.searchKey')">
+          <DouInput
+            v-model="active.apiKey"
+            type="password"
+            :placeholder="saved?.keySet && !active.cleared ? t('settings.secretSet') : undefined"
+            show-password
+            autocomplete="off"
+          >
             <template v-if="saved?.keySet && !active.cleared" #suffix>
               <DouButton size="xs" variant="ghost" @click="clear">{{
                 t('settings.clearSecret')

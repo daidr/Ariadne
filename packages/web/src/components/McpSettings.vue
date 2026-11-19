@@ -363,7 +363,7 @@ function setMark(server: DraftServer, tool: string, mark: unknown) {
             </div>
             <DouButton size="sm" variant="ghost" class="mcp-pair-add" @click="addPair(server)">
               <template #leading><PlusIcon /></template>
-              {{ t(isStdio(server) ? 'mcp.addEnv' : 'mcp.addHeader') }}
+              {{ t('settings.addPair') }}
             </DouButton>
           </div>
         </DouFormItem>
