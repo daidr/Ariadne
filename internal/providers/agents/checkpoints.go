@@ -22,10 +22,11 @@ const maxCheckpointBytes = 4 * 1024 * 1024
 const checkpointTTL = 30 * 24 * time.Hour
 
 type Checkpoint struct {
-	Config string          `json:"config"`
-	System string          `json:"system"`
-	FPS    []string        `json:"fps"`
-	Driver json.RawMessage `json:"driver"`
+	Config    string          `json:"config"`
+	System    string          `json:"system"`
+	FPS       []string        `json:"fps"`
+	Driver    json.RawMessage `json:"driver"`
+	Directory string          `json:"directory,omitempty"`
 }
 type checkpointFile struct {
 	at    time.Time
@@ -157,15 +158,16 @@ func (store *Checkpoints) Read(key string) *Checkpoint {
 		return nil
 	}
 	var value struct {
-		Config *string         `json:"config"`
-		System *string         `json:"system"`
-		FPS    []string        `json:"fps"`
-		Driver json.RawMessage `json:"driver"`
+		Config    *string         `json:"config"`
+		System    *string         `json:"system"`
+		FPS       []string        `json:"fps"`
+		Driver    json.RawMessage `json:"driver"`
+		Directory string          `json:"directory"`
 	}
 	if json.Unmarshal(data, &value) != nil || value.Config == nil || value.System == nil || value.FPS == nil || !driverPresent(value.Driver) {
 		return nil
 	}
-	return &Checkpoint{Config: *value.Config, System: *value.System, FPS: value.FPS, Driver: value.Driver}
+	return &Checkpoint{Config: *value.Config, System: *value.System, FPS: value.FPS, Driver: value.Driver, Directory: value.Directory}
 }
 func (store *Checkpoints) Write(key string, value Checkpoint) error {
 	data, err := jsonutil.Encode(value)

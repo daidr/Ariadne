@@ -44,6 +44,7 @@ type Sessions struct {
 }
 type session struct {
 	key, config, dir, system string
+	dirOwned                 bool
 	fps, awaiting            []string
 	busy                     bool // protected by Sessions.mu, including startup and stream delivery
 	lastUsed                 time.Time
@@ -170,7 +171,9 @@ func (s *session) close(root string, suspend bool) error {
 		// Process shutdown and delayed Windows directory locks have separate bounds.
 		cleanup, cleanupCancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cleanupCancel()
-		s.closeErr = errors.Join(s.closeErr, fsutil.RemoveTree(cleanup, root, s.dir))
+		if s.dirOwned {
+			s.closeErr = errors.Join(s.closeErr, fsutil.RemoveTree(cleanup, root, s.dir))
+		}
 		s.fps, s.awaiting = nil, nil
 	})
 	return s.closeErr
@@ -350,9 +353,18 @@ func (m *Sessions) claim(key, config string) (*session, bool, error) {
 	return s, true, nil
 }
 func (m *Sessions) open(ctx context.Context, s *session, settings map[string]any, request sdk.Request, system string, saved *Checkpoint) error {
-	if err := os.Mkdir(s.dir, 0700); err != nil {
+	directory := s.dir
+	if saved != nil && m.kind.ResumeDirectory {
+		id, err := uuid.Parse(saved.Directory)
+		if err != nil || id.String() != saved.Directory {
+			return errors.New("invalid agent session checkpoint directory")
+		}
+		directory = filepath.Join(m.root, saved.Directory)
+	}
+	if err := os.Mkdir(directory, 0700); err != nil {
 		return err
 	}
+	s.dir, s.dirOwned = directory, true
 	driverContext := DriverContext{Settings: settings, Model: request.Model, Effort: request.Effort, System: system, Directory: s.dir, Persistent: m.checkpoints != nil && s.key != "", Tools: AgentTools{Specs: request.Tools, Call: s.call}, Emit: func(event Event) { s.queue.push(event) }}
 	if saved != nil {
 		driverContext.Resume = saved.Driver
@@ -725,12 +737,20 @@ func (m *Sessions) consume(ctx context.Context, s *session, request sdk.Request,
 				if data, err := cp.Checkpoint(); err == nil && driverPresent(data) {
 					m.mu.Lock()
 					if m.pool[s.key] == s && s.life.Err() == nil {
-						_ = m.checkpoints.Write(s.key, Checkpoint{Config: s.config, System: s.system, FPS: s.fps, Driver: data})
+						saved := Checkpoint{Config: s.config, System: s.system, FPS: s.fps, Driver: data}
+						if m.kind.ResumeDirectory {
+							saved.Directory = filepath.Base(s.dir)
+						}
+						_ = m.checkpoints.Write(s.key, saved)
 					}
 					m.mu.Unlock()
 				}
 			}
-			return yield(sdk.Part{Type: "finish", Reason: "stop"}) && s.key != ""
+			reason := event.StopReason
+			if reason == "" {
+				reason = "stop"
+			}
+			return yield(sdk.Part{Type: "finish", Reason: reason}) && s.key != ""
 		default:
 			yield(failure(fmt.Errorf("unknown agent event %q", event.Type), false, false))
 			return false

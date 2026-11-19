@@ -20,6 +20,7 @@ type Usage struct {
 type Event struct {
 	Type, Text, ID, Name, Arguments, Detail string
 	Usage                                   Usage
+	StopReason                              string
 	Retryable, Busy                         bool
 }
 type AgentTools struct {
@@ -55,11 +56,12 @@ type Checkpointer interface {
 	Checkpoint() (json.RawMessage, error)
 }
 type Kind struct {
-	Name          string
-	Persistent    bool
-	MutableEffort bool
-	Fingerprint   func(sdk.Message) string
-	Create        func(DriverContext) (Driver, error)
+	Name            string
+	Persistent      bool
+	ResumeDirectory bool
+	MutableEffort   bool
+	Fingerprint     func(sdk.Message) string
+	Create          func(DriverContext) (Driver, error)
 }
 
 const PlaceNote = "You run through a helper program on the user's own computer. Anything it says about its working directory, shell, operating system or sandbox describes that program, not your workspace: the workspace is wherever your tools run, as described above, and it may be another machine. Read, change and run things only with the tools you were given."

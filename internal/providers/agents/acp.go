@@ -21,10 +21,43 @@ type ACPSettings struct {
 }
 type StdioLauncher func(string) (string, []string, error)
 
+const antigravityACPName = "Antigravity ACP Server"
+
 var acpClient = map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false}, "clientInfo": codexClient}
+
+type acpInitialize struct {
+	Version   int `json:"protocolVersion"`
+	AgentInfo struct {
+		Name string `json:"name"`
+	} `json:"agentInfo"`
+	Capabilities struct {
+		Load   bool `json:"loadSession"`
+		Prompt struct {
+			Image bool `json:"image"`
+		} `json:"promptCapabilities"`
+		MCP struct {
+			HTTP bool `json:"http"`
+		} `json:"mcpCapabilities"`
+		Session struct {
+			Resume *struct{} `json:"resume"`
+		} `json:"sessionCapabilities"`
+	} `json:"agentCapabilities"`
+}
+
+func initializeACP(ctx context.Context, peer *rpc.Peer) (acpInitialize, error) {
+	var hello acpInitialize
+	if err := peer.Request(ctx, "initialize", acpClient, &hello); err != nil {
+		return hello, err
+	}
+	if hello.Version != 1 {
+		return hello, fmt.Errorf("unsupported ACP protocol version %d (expected 1)", hello.Version)
+	}
+	return hello, nil
+}
 
 func ForConversationTools(raw json.RawMessage, tools []sdk.Tool) bool {
 	var call struct {
+		Name  string         `json:"name"`
 		Title any            `json:"title"`
 		Input map[string]any `json:"rawInput"`
 	}
@@ -34,11 +67,11 @@ func ForConversationTools(raw json.RawMessage, tools []sdk.Tool) bool {
 	known := map[string]bool{}
 	for _, tool := range tools {
 		name := textutil.Lower(tool.Name)
-		for _, spelling := range []string{"mcp__" + BridgeServerName + "__" + name, BridgeServerName + "__" + name, BridgeServerName + "/" + name, BridgeServerName + "." + name, name + " (" + BridgeServerName + " mcp server)"} {
+		for _, spelling := range []string{"mcp__" + BridgeServerName + "__" + name, "mcp_" + BridgeServerName + "_" + name, BridgeServerName + "__" + name, BridgeServerName + "/" + name, BridgeServerName + "." + name, name + " (" + BridgeServerName + " mcp server)"} {
 			known[spelling] = true
 		}
 	}
-	candidates := []any{call.Title}
+	candidates := []any{call.Name, call.Title}
 	for _, field := range []string{"tool", "toolName", "tool_name", "name"} {
 		candidates = append(candidates, call.Input[field])
 	}
@@ -103,16 +136,18 @@ func ListACPModels(ctx context.Context, settings ACPSettings, directory string) 
 		defer cancel()
 		_ = stdio.Close(cleanup)
 	}()
-	if err := stdio.Peer.Request(ctx, "initialize", acpClient, nil); err != nil {
+	hello, err := initializeACP(ctx, stdio.Peer)
+	if err != nil {
 		return nil, err
 	}
-	var result struct {
-		Models json.RawMessage `json:"models"`
-	}
+	var result acpSession
 	if err := stdio.Peer.Request(ctx, "session/new", map[string]any{"cwd": directory, "mcpServers": []any{}}, &result); err != nil {
 		return nil, err
 	}
-	return ACPModels(result.Models), nil
+	if result.ID == "" {
+		return nil, errors.New("the ACP agent opened no session")
+	}
+	return result.listedModels(ctx, stdio.Peer, hello.AgentInfo.Name), nil
 }
 func ACPKind(bridge *ToolBridge, shim StdioLauncher) Kind {
 	if shim == nil {
@@ -121,7 +156,7 @@ func ACPKind(bridge *ToolBridge, shim StdioLauncher) Kind {
 			return program, []string{StdioBridgeCommand, url}, err
 		}
 	}
-	return Kind{Name: "acp", Create: func(ctx DriverContext) (Driver, error) {
+	return Kind{Name: "acp", Persistent: true, ResumeDirectory: true, MutableEffort: true, Fingerprint: NativeFingerprint, Create: func(ctx DriverContext) (Driver, error) {
 		settings := ACPSettings{}
 		if command, ok := ctx.Settings["command"].(string); ok {
 			settings.Command = command
@@ -140,9 +175,18 @@ type acpDriver struct {
 	mu                              sync.Mutex
 	sessionID                       string
 	started, first, images, closing bool
+	active, restorable, antigravity bool
 	thought                         strings.Builder
+	turnFailure                     string
+	thoughtOption                   acpConfigOption
+	defaultLevel                    string
 	removeTools                     func()
 	requests                        sync.WaitGroup
+}
+
+type acpCheckpoint struct {
+	SessionID    string `json:"sessionId"`
+	DefaultLevel string `json:"defaultLevel,omitempty"`
 }
 
 func (d *acpDriver) emitLocked(event Event) {
@@ -161,8 +205,9 @@ func (d *acpDriver) request(ctx context.Context, method string, raw json.RawMess
 		return nil, fmt.Errorf("%w: %s is not supported", rpc.ErrUnhandled, method)
 	}
 	var params struct {
-		Call    json.RawMessage `json:"toolCall"`
-		Options []struct {
+		SessionID string          `json:"sessionId"`
+		Call      json.RawMessage `json:"toolCall"`
+		Options   []struct {
 			ID   string `json:"optionId"`
 			Kind string `json:"kind"`
 		} `json:"options"`
@@ -170,33 +215,34 @@ func (d *acpDriver) request(ctx context.Context, method string, raw json.RawMess
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return nil, err
 	}
-	prefix := "reject"
+	cancelled := map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
+	d.mu.Lock()
+	allowedSession := d.active && !d.closing && params.SessionID == d.sessionID
+	d.mu.Unlock()
+	if !allowedSession {
+		return cancelled, nil
+	}
+	choice := "reject_once"
 	if ForConversationTools(params.Call, d.ctx.Tools.Specs) {
-		prefix = "allow"
+		choice = "allow_once"
 	}
-	pick := -1
-	for i, option := range params.Options {
-		if option.Kind == prefix+"_once" {
-			pick = i
-			break
-		}
-		if pick < 0 && strings.HasPrefix(option.Kind, prefix) {
-			pick = i
+	for _, option := range params.Options {
+		if option.Kind == choice && option.ID != "" {
+			return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option.ID}}, nil
 		}
 	}
-	if pick < 0 {
-		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
-	}
-	return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": params.Options[pick].ID}}, nil
+	return cancelled, nil
 }
 func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	if method != "session/update" {
 		return
 	}
 	var params struct {
-		Update struct {
+		SessionID string `json:"sessionId"`
+		Update    struct {
 			Type    string                      `json:"sessionUpdate"`
 			Content struct{ Type, Text string } `json:"content"`
+			Options []acpConfigOption           `json:"configOptions"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &params) != nil {
@@ -204,10 +250,16 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.closing {
+	if d.closing || !d.started || params.SessionID != d.sessionID {
 		return
 	}
 	update := params.Update
+	if update.Type == "config_option_update" {
+		d.thoughtOption = (acpSession{Options: update.Options}).option("thought_level")
+	}
+	if !d.active {
+		return
+	}
 	if update.Type == "agent_thought_chunk" {
 		if update.Content.Type == "text" && update.Content.Text != "" {
 			if len(update.Content.Text) > 64<<20-d.thought.Len() {
@@ -221,8 +273,18 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	}
 	d.flushThoughtLocked()
 	if update.Type == "agent_message_chunk" && update.Content.Type == "text" {
-		if update.Content.Text != "" {
-			d.emitLocked(Event{Type: "text", Text: update.Content.Text})
+		text := update.Content.Text
+		if d.antigravity {
+			// agy reports terminal executor errors as chat chunks followed by end_turn.
+			if detail, ok := strings.CutPrefix(text, "\n⚠ agent executor error: "); ok {
+				if detail = textutil.Trim(detail); detail != "" {
+					d.turnFailure = detail
+					return
+				}
+			}
+		}
+		if text != "" {
+			d.emitLocked(Event{Type: "text", Text: text})
 		}
 		return
 	}
@@ -250,20 +312,12 @@ func (d *acpDriver) Start(life context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(life, time.Minute)
 	defer cancel()
-	var init struct {
-		Capabilities struct {
-			Prompt struct {
-				Image bool `json:"image"`
-			} `json:"promptCapabilities"`
-			MCP struct {
-				HTTP bool `json:"http"`
-			} `json:"mcpCapabilities"`
-		} `json:"agentCapabilities"`
-	}
-	if err := peer.Request(ctx, "initialize", acpClient, &init); err != nil {
+	init, err := initializeACP(ctx, peer)
+	if err != nil {
 		return d.startError(err)
 	}
 	d.images = init.Capabilities.Prompt.Image
+	d.restorable = init.Capabilities.Session.Resume != nil || init.Capabilities.Load
 	servers := []any{}
 	if len(d.ctx.Tools.Specs) > 0 {
 		if d.bridge == nil {
@@ -284,27 +338,48 @@ func (d *acpDriver) Start(life context.Context) error {
 			servers = append(servers, map[string]any{"name": BridgeServerName, "command": command, "args": args, "env": []any{}})
 		}
 	}
-	var session struct {
-		ID     string           `json:"sessionId"`
-		Models acpSessionModels `json:"models"`
+	params := map[string]any{"cwd": d.ctx.Directory, "mcpServers": servers}
+	method := "session/new"
+	var saved acpCheckpoint
+	resuming := len(d.ctx.Resume) != 0
+	if resuming {
+		if !d.restorable || json.Unmarshal(d.ctx.Resume, &saved) != nil || saved.SessionID == "" {
+			return errors.New("ACP session checkpoint cannot be restored")
+		}
+		method = "session/load"
+		if init.Capabilities.Session.Resume != nil {
+			method = "session/resume"
+		}
+		params["sessionId"] = saved.SessionID
 	}
-	if err := peer.Request(ctx, "session/new", map[string]any{"cwd": d.ctx.Directory, "mcpServers": servers}, &session); err != nil {
+	var session acpSession
+	if err := peer.Request(ctx, method, params, &session); err != nil {
 		return d.startError(err)
 	}
-	d.sessionID = session.ID
-	if d.sessionID == "" {
+	sessionID := session.ID
+	if resuming {
+		sessionID = saved.SessionID
+	}
+	if sessionID == "" {
 		return errors.New("the agent opened no session")
 	}
-	model := textutil.Trim(d.ctx.Model)
-	if model != "" && model != "default" {
-		for _, offered := range session.Models.Available {
-			if trimmedJSON(offered.ID) == model {
-				_ = peer.Request(ctx, "session/set_model", map[string]any{"sessionId": d.sessionID, "modelId": model}, nil)
-				break
-			}
+	d.mu.Lock()
+	d.sessionID = sessionID
+	d.mu.Unlock()
+	if !resuming || len(session.Models) != 0 || session.option("model").ID != "" {
+		session, err = d.selectModel(ctx, session)
+		if err != nil {
+			return d.startError(err)
 		}
 	}
 	d.mu.Lock()
+	d.first = !resuming
+	d.antigravity = init.AgentInfo.Name == antigravityACPName
+	d.thoughtOption = session.option("thought_level")
+	d.defaultLevel = trimmedJSON(d.thoughtOption.Current)
+	if resuming && saved.DefaultLevel != "" {
+		d.defaultLevel = saved.DefaultLevel
+	}
 	d.started = true
 	d.mu.Unlock()
 	return nil
@@ -328,15 +403,17 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		return err
 	}
 	d.mu.Lock()
-	if d.closing {
+	if d.closing || !d.started || d.active {
 		d.mu.Unlock()
-		return errors.New("ACP session is closed")
+		return errors.New("ACP session is not ready for a prompt")
 	}
 	text := input.Text
 	if d.first {
 		text = "<instructions>\n" + d.ctx.System + "\n</instructions>\n\n" + text
 	}
 	d.first = false
+	d.active = true
+	sessionID := d.sessionID
 	prompt := []any{map[string]any{"type": "text", "text": text}}
 	if d.images {
 		for _, image := range input.Images {
@@ -359,15 +436,21 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 				Thought int64 `json:"thoughtTokens"`
 			} `json:"usage"`
 		}
-		err := d.stdio.Peer.Request(d.life, "session/prompt", map[string]any{"sessionId": d.sessionID, "prompt": prompt}, &result)
+		err := d.stdio.Peer.Request(d.life, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": prompt}, &result)
 		d.mu.Lock()
 		defer d.mu.Unlock()
+		d.active = false
 		if d.closing {
 			return
 		}
+		detail := d.turnFailure
+		d.turnFailure = ""
 		if err != nil {
-			busy := rpc.BusyText(err.Error())
-			d.emitLocked(Event{Type: "failed", Detail: err.Error(), Retryable: busy, Busy: busy})
+			detail = err.Error()
+		}
+		if detail != "" {
+			busy := rpc.BusyText(detail)
+			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy})
 			return
 		}
 		d.flushThoughtLocked()
@@ -375,28 +458,42 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: u.Input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought}})
 		}
 		switch result.Stop {
+		case "end_turn":
+			d.emitLocked(Event{Type: "done"})
+		case "max_tokens", "max_turn_requests":
+			d.emitLocked(Event{Type: "done", StopReason: "length"})
 		case "refusal":
 			d.emitLocked(Event{Type: "failed", Detail: "the agent refused to go on"})
 		case "cancelled":
 			d.emitLocked(Event{Type: "failed", Detail: "the agent cancelled the turn"})
 		default:
-			d.emitLocked(Event{Type: "done"})
+			d.emitLocked(Event{Type: "failed", Detail: fmt.Sprintf("unknown ACP stop reason %q", result.Stop)})
 		}
 	}()
 	return nil
 }
+func (d *acpDriver) Checkpoint() (json.RawMessage, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.restorable || !d.started || d.closing || d.sessionID == "" {
+		return nil, nil
+	}
+	return json.Marshal(acpCheckpoint{SessionID: d.sessionID, DefaultLevel: d.defaultLevel})
+}
+
 func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 	d.mu.Lock()
 	d.closing = true
+	active, sessionID := d.active, d.sessionID
 	d.mu.Unlock()
 	if d.removeTools != nil {
 		d.removeTools()
 	}
 	var err error
 	if d.stdio != nil {
-		if d.sessionID != "" {
+		if active && sessionID != "" {
 			notify, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			_ = d.stdio.Peer.Notify(notify, "session/cancel", map[string]any{"sessionId": d.sessionID})
+			_ = d.stdio.Peer.Notify(notify, "session/cancel", map[string]any{"sessionId": sessionID})
 			cancel()
 		}
 		err = d.stdio.Close(ctx)
@@ -404,6 +501,7 @@ func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 	d.requests.Wait()
 	d.mu.Lock()
 	d.thought.Reset()
+	d.turnFailure = ""
 	d.mu.Unlock()
 	return err
 }
