@@ -57,7 +57,7 @@ import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
 import PullRequestTag from './PullRequestTag.vue'
-import { todoPlan } from './todo'
+import { placeTodo, todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
 import {
   composerFor,
@@ -254,17 +254,6 @@ function pickModel(value: string | number | undefined) {
   if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
 }
 const todo = computed(() => todoPlan(view.value.todo, working.value))
-// A list all ticked folds to its title; one with steps left opens again.
-const todoOpen = ref(true)
-// Another conversation starts from its own list, not from how the last one was left.
-watch(
-  [
-    () => todo.value.length > 0 && todo.value.every((item) => item.status === 'done'),
-    conversationId,
-  ],
-  ([finished]) => (todoOpen.value = !finished),
-  { immediate: true },
-)
 // New input is waiting for a free slot.
 const queued = computed(() => !working.value && (view.value.conversation?.pendingSeq ?? 0) > 0)
 const failure = computed(() =>
@@ -372,6 +361,13 @@ const shown = computed(() => {
   }
   return { items, changes }
 })
+const entries = computed(() =>
+  placeTodo(
+    shown.value.items,
+    view.value.todo,
+    view.value.more ? view.value.messages[0] : undefined,
+  ),
+)
 
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
@@ -713,8 +709,16 @@ watch(
       <div v-if="view.loadingEarlier" class="earlier" role="status">
         <DouSpinner size="sm" />
       </div>
-      <template v-for="item in shown.items" :key="item.id">
-        <div v-if="item.notice" class="notice">
+      <template v-for="item in entries" :key="item.id">
+        <DouChatPlan
+          v-if="'todo' in item"
+          :items="todo"
+          :title="t('todo.title')"
+          :collapsible="false"
+          :live="working"
+          class="todo"
+        />
+        <div v-else-if="item.notice" class="notice">
           <AskBlock
             v-if="item.notice.kind === 'approval'"
             :attention-id="item.notice.id"
@@ -1078,15 +1082,6 @@ watch(
         :esc-armed="escArmed"
         :wait="wait"
       />
-      <!-- What it is doing, what comes next, what it waits on: in place of progress messages. -->
-      <DouChatPlan
-        v-if="todo.length"
-        :items="todo"
-        :title="t('todo.title')"
-        v-model:open="todoOpen"
-        :live="working"
-        class="todo"
-      />
     </DouChatList>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="props.threadId" :title="thread?.title" :description="t('thread.empty')" />
@@ -1220,6 +1215,14 @@ watch(
 </template>
 
 <style scoped>
+.todo :deep(.dou-chat-plan__header) {
+  display: none;
+}
+
+.todo :deep(.dou-chat-plan__list) {
+  padding-block-start: 10px;
+}
+
 .notice {
   display: flex;
   align-items: center;

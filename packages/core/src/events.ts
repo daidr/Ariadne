@@ -81,6 +81,12 @@ export interface TodoItem {
   detail?: string
 }
 
+export interface TodoPosition {
+  at: number
+  /** Null if the list was placed before the first message. */
+  afterMessageId?: string | null
+}
+
 /** A tool call as the model made it; `arguments` is the model's JSON text, unparsed. */
 export interface ToolCallRecord {
   id: string
@@ -679,7 +685,7 @@ export interface EventMap {
     waiting: string[]
     asks: string[]
   }
-  'todo.updated': { conversationId: string; items: TodoItem[] }
+  'todo.updated': { conversationId: string; items: TodoItem[]; position?: Partial<TodoPosition> }
   /**
    * A standing preference or fact of the project ("write in Chinese", "the API lives in
    * packages/server"), saved or changed. Every conversation of the project sees them.

@@ -249,19 +249,47 @@ func (repo *Repository) UpdateTodo(ctx context.Context, projectID, id string, it
 		if items == nil {
 			items = []TodoItem{}
 		}
-		if err := appendChanges(tx, projectID, []change{{"todo.updated", object{"conversationId": id, "items": items}}}); err != nil {
-			return err
-		}
-		rows, err := records(ctx, tx.SQL(), "SELECT items, updated_at FROM todos WHERE conversation_id = ?", id)
+		before, err := readTodo(ctx, tx.SQL(), id)
 		if err != nil {
 			return err
 		}
-		parsed, err := rows[0].json("items", []any{})
-		if err != nil {
+		data := object{"conversationId": id, "items": items}
+		if len(items) > 0 {
+			if sameTodoSteps(array(before, "items"), items) {
+				position := before.obj("position")
+				if position == nil {
+					position = object{"at": before["updatedAt"]}
+				}
+				data["position"] = position
+			} else {
+				rows, err := records(ctx, tx.SQL(), "SELECT id FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1", id)
+				if err != nil {
+					return err
+				}
+				position := object{"afterMessageId": nil}
+				if len(rows) > 0 {
+					position["afterMessageId"] = rows[0]["id"]
+				}
+				data["position"] = position
+			}
+		}
+		if err := appendChanges(tx, projectID, []change{{"todo.updated", data}}); err != nil {
 			return err
 		}
-		result = object{"conversationId": id, "items": parsed, "updatedAt": rows[0]["updated_at"]}
-		return nil
+		result, err = readTodo(ctx, tx.SQL(), id)
+		return err
 	})
 	return
+}
+
+func sameTodoSteps(before []any, items []TodoItem) bool {
+	if len(before) != len(items) {
+		return false
+	}
+	for i, item := range items {
+		if asObject(before[i]).str("label") != item.Label {
+			return false
+		}
+	}
+	return true
 }

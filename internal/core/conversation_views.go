@@ -520,7 +520,14 @@ func (reader Reader) MessagesChangedSince(ctx context.Context, id string, seq in
 	return len(rows) > 0, err
 }
 func (reader Reader) GetTodo(ctx context.Context, id string) (object, error) {
-	rows, err := records(ctx, reader.DB, "SELECT items, updated_at FROM todos WHERE conversation_id = ?", id)
+	return readTodo(ctx, reader.DB, id)
+}
+func readTodo(ctx context.Context, db queryer, id string) (object, error) {
+	rows, err := records(ctx, db, `SELECT t.items, t.updated_at, json_extract(e.data, '$.position') AS position, e.at AS event_at
+ FROM todos t LEFT JOIN events e ON e.seq = (
+  SELECT seq FROM events WHERE type = 'todo.updated' AND json_extract(data, '$.conversationId') = ?1
+  ORDER BY seq DESC LIMIT 1
+ ) WHERE t.conversation_id = ?1`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -532,7 +539,20 @@ func (reader Reader) GetTodo(ctx context.Context, id string) (object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return object{"conversationId": id, "items": items, "updatedAt": row.integer("updated_at")}, nil
+	result := object{"conversationId": id, "items": items, "updatedAt": row.integer("updated_at")}
+	raw, err := row.json("position", nil)
+	if err != nil {
+		return nil, err
+	}
+	if position := asObject(raw); position != nil {
+		at := row.integer("event_at")
+		if original, ok := number(position["at"]); ok {
+			at = int64(original)
+		}
+		position["at"] = at
+		result["position"] = position
+	}
+	return result, nil
 }
 func (reader Reader) GetInstructions(ctx context.Context, id string) (any, error) {
 	rows, err := records(ctx, reader.DB, "SELECT instructions FROM conversations WHERE id = ?", id)

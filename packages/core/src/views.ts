@@ -36,6 +36,7 @@ import type {
   ReviewVerdict,
   ThreadPullRequest,
   TodoItem,
+  TodoPosition,
   TokenUsage,
   ToolCallRecord,
   TurnOutcome,
@@ -426,6 +427,7 @@ export interface TodoView {
   conversationId: string
   items: TodoItem[]
   updatedAt: number
+  position?: TodoPosition
 }
 
 /**
