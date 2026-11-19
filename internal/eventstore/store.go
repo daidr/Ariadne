@@ -69,7 +69,11 @@ const schema = `CREATE TABLE IF NOT EXISTS events (
  data TEXT NOT NULL,
  at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS events_project ON events (project_id, seq);`
+CREATE INDEX IF NOT EXISTS events_project ON events (project_id, seq);
+CREATE INDEX IF NOT EXISTS events_trace_starts ON events (project_id, json_extract(data, '$.conversationId'), seq)
+ WHERE type = 'turn.started';
+CREATE INDEX IF NOT EXISTS events_trace_requests ON events (project_id, json_extract(data, '$.conversationId'), seq)
+ WHERE type IN ('turn.step', 'conversation.compacted');`
 
 func Open(ctx context.Context, options Options) (*Store, error) {
 	if options.Path == "" {

@@ -83,7 +83,9 @@ func New(options Options) (*Store, error) {
 		options.ScanTTL = 30 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Store{options: options, ctx: ctx, cancel: cancel}, nil
+	store := &Store{options: options, ctx: ctx, cancel: cancel}
+	store.storage = store.readStorageCache()
+	return store, nil
 }
 func (store *Store) backupsDir() string { return filepath.Join(store.options.Home, "backups") }
 func (store *Store) Backups() ([]BackupInfo, error) {
@@ -213,6 +215,7 @@ func (store *Store) InvalidateUsage() {
 	store.bytes = nil
 	store.expires = time.Time{}
 	store.storage = nil
+	_ = os.Remove(store.storageCachePath())
 	if store.storagePending != nil {
 		store.storagePending.cancel()
 	}

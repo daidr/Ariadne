@@ -45,6 +45,13 @@ func (api *API) registerTrace() {
 			before := int64(value)
 			options.Before = &before
 		}
+		if r.URL.Query().Has("from") {
+			value, err := queryNumber(r.URL.Query().Get("from"))
+			if err != nil || math.IsNaN(value) || value < 1 || value >= float64(math.MaxInt64) || math.Trunc(value) != value {
+				return nil, 0, badInput("from")
+			}
+			options.From = new(int64(value))
+		}
 		value, err := trace.Build(r.Context(), api.options.Repository, r.PathValue("conversationId"), options)
 		return value, 200, err
 	})

@@ -49,6 +49,7 @@ import type { ReviewRoundView, SentLineComment } from '@ariadne/core'
 import ReviewMark from '../review/ReviewMark.vue'
 import { reviewNotes } from '../review/review-comments'
 import { sameComparison, useBranchUpdates } from './branch-updates'
+import { fileVersionsFor } from './file-versions'
 
 /**
  * What a thread's branch changed against its base, with merging it; or, with `turn`, what
@@ -138,6 +139,9 @@ const changes = computed<BranchChanges | null>(() => {
       }
     : branch.changes.value
 })
+const from = computed(() => changes.value?.from ?? '')
+const head = computed(() => changes.value?.head ?? '')
+const loadVersions = computed(() => fileVersionsFor(props.threadId, from.value, head.value))
 
 onBeforeUnmount(
   onLiveEvent((event) => {
@@ -538,8 +542,7 @@ const methodOptions = computed(() => [
                 :data-file-path="item.path"
                 :thread-id="threadId"
                 :file="item"
-                :from="changes.from"
-                :head="changes.head"
+                :load-versions="loadVersions"
                 :sent="sentComments"
                 :notes="notes"
               />

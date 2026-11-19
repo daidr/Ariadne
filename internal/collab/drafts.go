@@ -12,6 +12,8 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 )
 
+const draftInterval = 75 * time.Millisecond
+
 // Draft is a live model edit in an open room. Its changes are broadcast without
 // becoming a version, and its undo manager tracks no user edits.
 type Draft struct {
@@ -28,6 +30,7 @@ type Draft struct {
 	reserved  string
 	cursor    map[string]any
 	lockPulse *time.Timer
+	paragraph *paragraphDraft
 }
 
 func (rooms *Rooms) Draft(ctx context.Context, id string, kind, writer string) (*Draft, error) {
@@ -80,9 +83,10 @@ func (draft *Draft) Write(next string) error {
 	active := draft.room
 	active.mu.Lock()
 	defer active.mu.Unlock()
-	if active.draft != draft || next == draft.last || len(next) > 256<<10 || draft.pieces >= 128 || time.Since(draft.wroteAt) < 75*time.Millisecond {
+	if active.draft != draft || next == draft.last || len(next) > 256<<10 || draft.pieces >= 128 || time.Since(draft.wroteAt) < draftInterval {
 		return nil
 	}
+	draft.paragraph = nil
 	kind := active.artifact.Kind
 	trial, err := Load(kind, active.state)
 	if err != nil {

@@ -13,6 +13,12 @@ import (
 )
 
 func TestDocumentDraftReplacementTracksCursorAndRollsBack(t *testing.T) {
+	t.Run("general", func(t *testing.T) { checkDocumentDraft(t, false) })
+	t.Run("single paragraph", func(t *testing.T) { checkDocumentDraft(t, true) })
+}
+
+func checkDocumentDraft(t *testing.T, paragraph bool) {
+	t.Helper()
 	ctx := t.Context()
 	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
 	if err != nil {
@@ -41,8 +47,14 @@ func TestDocumentDraftReplacementTracksCursorAndRollsBack(t *testing.T) {
 	if err != nil || draft == nil {
 		t.Fatal(draft, err)
 	}
-	if err := draft.ReserveDocument(strings.Replace(initial, "原来的交付说明。", "<pending>…</pending>", 1)); err != nil {
-		t.Fatal(err)
+	if paragraph {
+		if handled, err := draft.WriteParagraph("原来的交付说明。", nil); err != nil || !handled {
+			t.Fatal(handled, err)
+		}
+	} else {
+		if err := draft.ReserveDocument(strings.Replace(initial, "原来的交付说明。", "<pending>…</pending>", 1)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	blocks, err := readDocumentBlocks(active.doc.GetMap("document"))
 	if err != nil || len(blocks) != 3 {
@@ -89,7 +101,11 @@ func TestDocumentDraftReplacementTracksCursorAndRollsBack(t *testing.T) {
 
 	for _, fragment := range []string{"先核对预发布分支的构建结果", "先核对预发布分支的构建结果，再附上验收记录"} {
 		draft.wroteAt = time.Time{}
-		if err := draft.Write(strings.Replace(initial, "原来的交付说明。", fragment, 1)); err != nil {
+		if paragraph {
+			if handled, err := draft.WriteParagraph("原来的交付说明。", &fragment); err != nil || !handled {
+				t.Fatal(handled, err)
+			}
+		} else if err := draft.Write(strings.Replace(initial, "原来的交付说明。", fragment, 1)); err != nil {
 			t.Fatal(err)
 		}
 		content, err := ReadDocument(active.doc)

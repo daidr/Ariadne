@@ -13,6 +13,7 @@ import {
 import { ChevronLeftIcon } from '@dou-ui/icons'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
+import { coalescedRefresh } from '../coalesced-refresh'
 import { duration, locale, t, tm } from '../i18n'
 import { onLiveEvent, backMain, state } from '../store'
 import TraceInspector from './TraceInspector.vue'
@@ -37,50 +38,86 @@ const range = ref<TimeRange | null>(null)
 // Rows the user folded; everything else stays open, also as new rows come in.
 const folded = ref(new Set<string>())
 
-// Loads overlap as events arrive; only the latest one's answer is used.
-let latest = 0
+let controller = new AbortController()
+let liveTimer: ReturnType<typeof setTimeout> | undefined
+const events = new Set<string>([
+  'turn.started',
+  'turn.step',
+  'research.step',
+  'tool.finished',
+  'turn.finished',
+  'conversation.model_retry',
+  'conversation.model_fallback',
+  'conversation.compacted',
+  'conversation.results_cleared',
+  'conversation.compaction_failed',
+  'conversation.instructions',
+])
 
-/** The newest turns again, keeping older ones already paged in. */
-async function load() {
-  const ticket = ++latest
+/** Rebuild the newest turn and any turns that started after it. */
+const load = coalescedRefresh<never, void>(async () => {
+  const id = props.conversationId
+  const { signal } = controller
+  if (signal.aborted) return
+  const from = turns.value.at(-1)?.seq
   try {
-    const page = await api.getTrace(props.conversationId)
-    if (ticket !== latest) return
-    const oldest = page.turns[0]?.seq ?? Number.POSITIVE_INFINITY
-    const older = turns.value.filter((turn) => turn.seq < oldest)
-    if (!turns.value.length) more.value = page.more
-    turns.value = [...older, ...page.turns]
+    const page = await api.getTrace(id, { from, signal })
+    if (signal.aborted) return
+    // Reopen pagination if a long disconnect exceeded the bounded live window.
+    if (from === undefined || page.more) {
+      more.value = page.more
+      turns.value = page.turns
+    } else if (page.turns.length) {
+      turns.value = [...turns.value.filter((turn) => turn.seq < from), ...page.turns]
+    }
     problem.value = null
   } catch (error) {
-    if (ticket === latest) {
+    if (!signal.aborted) {
       problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
     }
   } finally {
-    if (ticket === latest) loading.value = false
+    if (!signal.aborted) loading.value = false
   }
+})
+
+function refreshNow() {
+  clearTimeout(liveTimer)
+  liveTimer = undefined
+  void load()
 }
 
+const loadingEarlier = ref(false)
 async function loadEarlier() {
   const first = turns.value[0]
-  if (!first) return
+  if (!first || loadingEarlier.value) return
+  loadingEarlier.value = true
+  const { signal } = controller
   try {
-    const page = await api.getTrace(props.conversationId, first.seq)
+    const page = await api.getTrace(props.conversationId, { before: first.seq, signal })
+    if (signal.aborted || turns.value[0]?.seq !== first.seq) return
     turns.value = [...page.turns, ...turns.value]
     more.value = page.more
   } catch (error) {
-    problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
+    if (!signal.aborted)
+      problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
+  } finally {
+    if (!signal.aborted) loadingEarlier.value = false
   }
 }
 
 watch(
   () => props.conversationId,
   () => {
+    controller.abort()
+    controller = new AbortController()
     turns.value = []
+    more.value = false
+    loadingEarlier.value = false
     current.value = null
     folded.value = new Set()
     range.value = null
     loading.value = true
-    void load()
+    refreshNow()
   },
   { immediate: true },
 )
@@ -88,21 +125,29 @@ watch(
 onUnmounted(
   onLiveEvent((event) => {
     const data = event.data as { conversationId?: unknown }
-    if (data.conversationId === props.conversationId) void load()
+    if (
+      !document.hidden &&
+      liveTimer === undefined &&
+      events.has(event.type) &&
+      data.conversationId === props.conversationId
+    ) {
+      liveTimer = setTimeout(refreshNow, 100)
+    }
   }),
 )
 watch(
   () => state.stream,
   (status) => {
-    if (status === 'open') void load()
+    if (status === 'open') refreshNow()
   },
 )
 function loadWhenVisible() {
-  if (!document.hidden) void load()
+  if (!document.hidden) refreshNow()
 }
 onMounted(() => document.addEventListener('visibilitychange', loadWhenVisible))
 onUnmounted(() => {
-  latest++
+  controller.abort()
+  clearTimeout(liveTimer)
   document.removeEventListener('visibilitychange', loadWhenVisible)
 })
 

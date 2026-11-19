@@ -65,7 +65,7 @@ func (reader Reader) LastStepBefore(ctx context.Context, id string, before int64
 }
 
 type TurnEventOptions struct {
-	Before              *int64
+	Before, From        *int64
 	Turns               *int
 	MaxBytes, MaxEvents int64
 }
@@ -95,7 +95,11 @@ func (reader Reader) ListTurnEvents(ctx context.Context, id string, options Turn
 		if options.Before != nil {
 			before = *options.Before
 		}
-		starts, err := records(ctx, tx, `SELECT seq FROM events WHERE project_id = ? AND type = 'turn.started' AND json_extract(data, '$.conversationId') = ? AND seq < ? ORDER BY seq DESC LIMIT ?`, current.ProjectID, id, before, count+1)
+		from := int64(0)
+		if options.From != nil {
+			from = *options.From
+		}
+		starts, err := records(ctx, tx, `SELECT seq FROM events WHERE project_id = ? AND type = 'turn.started' AND json_extract(data, '$.conversationId') = ? AND seq >= ? AND seq < ? ORDER BY seq DESC LIMIT ?`, current.ProjectID, id, from, before, count+1)
 		if err != nil {
 			return err
 		}

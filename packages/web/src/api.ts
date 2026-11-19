@@ -528,7 +528,11 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
-  listProjects: () => request<{ projects: ProjectView[]; lastSeq: number }>('GET', '/api/projects'),
+  listProjects: (ids: readonly string[] = []) =>
+    request<{ projects: ProjectView[]; lastSeq: number }>(
+      'GET',
+      '/api/projects' + (ids.length ? '?' + new URLSearchParams(ids.map((id) => ['id', id])) : ''),
+    ),
   /**
    * A new project, with where its files are and the sources it only reads; each is
    * connected first, and the project is made only when all of them can be.
@@ -571,10 +575,15 @@ export const api = {
         since: cursor.since === undefined ? undefined : String(cursor.since),
       })}`,
     ),
-  getTrace: (id: string, before?: number) =>
+  getTrace: (id: string, options: { before?: number; from?: number; signal?: AbortSignal } = {}) =>
     request<{ turns: TraceTurn[]; more: boolean }>(
       'GET',
-      `/api/conversations/${id}/trace${before === undefined ? '' : `?before=${before}`}`,
+      `/api/conversations/${id}/trace${queryString({
+        before: options.before?.toString(),
+        from: options.from?.toString(),
+      })}`,
+      undefined,
+      options.signal,
     ),
   getTraceRequest: (id: string, seq: number) =>
     request<{ request: TraceRequestDetail }>(

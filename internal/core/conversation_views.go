@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -366,6 +367,13 @@ const sourceAttachments = `CASE WHEN t.kind = 'note' AND json_extract(t.payload,
    AND m.conversation_id = json_extract(t.payload, '$.threadId') AND m.author = 'user'
    AND m.attachments != '[]') END AS source_attachments`
 
+const inlineToolOutputLimit = 8 << 10
+
+const sourceToolOutput = `CASE WHEN t.kind = 'tool' AND json_type(t.payload, '$.content') IS NULL
+ THEN (SELECT json_extract(e.data, '$.content') FROM events e
+  WHERE e.seq = t.seq AND e.type = 'tool.finished' AND e.project_id = t.project_id
+   AND json_extract(e.data, '$.conversationId') = t.conversation_id) END AS source_tool_output`
+
 func listTranscript(ctx context.Context, db queryer, id string, options TranscriptOptions) ([]object, error) {
 	after, upTo := int64(-1), maxSafeInteger
 	if options.After != nil {
@@ -374,29 +382,33 @@ func listTranscript(ctx context.Context, db queryer, id string, options Transcri
 	if options.UpTo != nil {
 		upTo = *options.UpTo
 	}
-	query := "SELECT t.seq, t.kind, t.ref, t.payload, " + sourceAttachments + " FROM transcript t WHERE t.conversation_id = ? AND t.seq > ? AND t.seq <= ? ORDER BY t.id"
+	fields := "t.seq, t.kind, t.ref, t.payload, " + sourceAttachments + ", " + sourceToolOutput
+	query := "SELECT " + fields + " FROM transcript t WHERE t.conversation_id = ? AND t.seq > ? AND t.seq <= ? ORDER BY t.id"
 	if options.ModelContext {
-		query = `WITH scope AS MATERIALIZED (
- SELECT id, seq, kind FROM transcript WHERE conversation_id = ? AND seq > ? AND seq <= ?
-), latest_summary AS MATERIALIZED (
- SELECT id FROM scope WHERE kind = 'summary' ORDER BY id DESC LIMIT 1
-), boundary AS MATERIALIZED (
- SELECT t.id, json_extract(t.payload, '$.upTo') AS up_to FROM latest_summary s
- JOIN transcript t ON t.id = s.id
+		query = `WITH boundary AS MATERIALIZED (
+ SELECT id, json_extract(payload, '$.upTo') AS up_to FROM transcript
+ WHERE conversation_id = ?1 AND seq > ?2 AND seq <= ?3 AND kind = 'summary'
+ ORDER BY id DESC LIMIT 1
 )
-SELECT t.seq, t.kind, t.ref, t.payload, ` + sourceAttachments + ` FROM scope s JOIN transcript t ON t.id = s.id
-WHERE s.kind IN ('message', 'prompt', 'cleared')
- OR s.id = (SELECT id FROM boundary)
- OR (s.kind != 'summary' AND
- CASE WHEN s.kind = 'step' THEN COALESCE(json_extract(t.payload, '$.sawSeq'), 0) + 0.5 ELSE s.seq END
+SELECT ` + fields + ` FROM transcript t
+WHERE t.conversation_id = ?1 AND t.seq > ?2 AND t.seq <= ?3 AND (
+ t.kind IN ('message', 'prompt', 'cleared')
+ OR t.id = (SELECT id FROM boundary)
+ OR (t.kind != 'summary' AND
+ CASE WHEN t.kind = 'step' THEN COALESCE(json_extract(t.payload, '$.sawSeq'), 0) + 0.5 ELSE t.seq END
  > COALESCE((SELECT up_to FROM boundary), -1))
-ORDER BY s.id`
+)
+ORDER BY t.id`
 	}
 	rows, err := records(ctx, db, query, id, after, upTo)
 	if err != nil {
 		return nil, err
 	}
-	entries := []object{}
+	messages, err := transcriptMessages(ctx, db, rows, options.UpTo)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]object, 0, len(rows))
 	for _, row := range rows {
 		payload, err := row.json("payload", nil)
 		if err != nil {
@@ -406,23 +418,9 @@ ORDER BY s.id`
 		entry := object{"seq": row["seq"], "kind": kind}
 		switch kind {
 		case "message":
-			message, err := findMessage(ctx, db, row.text("ref"))
-			if err != nil {
-				return nil, err
-			}
-			if message == nil {
+			message, ok := messages[row.text("ref")]
+			if !ok {
 				continue
-			}
-			if options.UpTo != nil && message.EditedAt != nil {
-				edits, err := records(ctx, db, `SELECT json_extract(data, '$.content') AS content FROM events WHERE project_id = (SELECT project_id FROM messages WHERE id = ?1) AND type = 'message.edited' AND json_extract(data, '$.messageId') = ?2 AND seq <= ?3 ORDER BY seq DESC LIMIT 1`, message.ID, message.ID, upTo)
-				if err != nil {
-					return nil, err
-				}
-				if len(edits) > 0 && edits[0].present("content") {
-					message.Content = edits[0].text("content")
-				} else if original, ok := message.OriginalContent.(string); ok {
-					message.Content = original
-				}
 			}
 			entry["message"] = message
 			if asks, has := asObject(payload)["openAsks"]; has && truthy(asks) {
@@ -441,12 +439,77 @@ ORDER BY s.id`
 			for key, value := range asObject(payload) {
 				entry[key] = value
 			}
+			if row.present("source_tool_output") {
+				entry["content"] = row["source_tool_output"]
+			}
 		default:
 			continue
 		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+func transcriptMessages(ctx context.Context, db queryer, rows []record, upTo *int64) (map[string]*MessageView, error) {
+	var ids []string
+	for _, row := range rows {
+		if row.text("kind") == "message" {
+			ids = append(ids, row.text("ref"))
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	encoded, _ := json.Marshal(ids)
+	values, err := readMessages(ctx, db, messageSelect+" WHERE m.id IN (SELECT value FROM json_each(?)) ORDER BY m.id, a.rowid", string(encoded))
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*MessageView, len(values))
+	var edited []string
+	for i := range values {
+		message := &values[i]
+		if _, exists := byID[message.ID]; exists {
+			continue
+		}
+		byID[message.ID] = message
+		if upTo != nil && message.EditedAt != nil {
+			edited = append(edited, message.ID)
+		}
+	}
+	if len(edited) == 0 {
+		return byID, nil
+	}
+	encoded, _ = json.Marshal(edited)
+	// The latest eligible edit supplies content at the replay cursor.
+	history, err := records(ctx, db, `WITH edited AS MATERIALIZED (
+	 SELECT m.id, m.project_id FROM messages m WHERE m.id IN (SELECT value FROM json_each(?1))
+	), latest AS (
+	 SELECT json_extract(e.data,'$.messageId') AS id, max(e.seq) AS seq
+	 FROM events e WHERE e.project_id IN (SELECT project_id FROM edited)
+	 AND e.type = 'message.edited' AND e.seq <= ?2
+	 AND EXISTS (SELECT 1 FROM edited m WHERE m.id = json_extract(e.data,'$.messageId') AND m.project_id = e.project_id)
+	 GROUP BY id
+	)
+	SELECT l.id, json_extract(e.data,'$.content') AS content FROM latest l JOIN events e ON e.seq = l.seq`, string(encoded), *upTo)
+	if err != nil {
+		return nil, err
+	}
+	content := make(map[string]string, len(history))
+	for _, row := range history {
+		if row.present("content") {
+			content[row.text("id")] = row.text("content")
+		}
+	}
+	for _, id := range edited {
+		message := byID[id]
+		if text, ok := content[id]; ok {
+			message.Content = text
+		} else if original, ok := message.OriginalContent.(string); ok {
+			message.Content = original
+		}
+	}
+	return byID, nil
 }
 func (reader Reader) ListTranscript(ctx context.Context, id string, options TranscriptOptions) (result []object, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error { result, err = listTranscript(ctx, tx, id, options); return err })

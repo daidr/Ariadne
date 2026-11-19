@@ -384,12 +384,24 @@ func (api *API) events(w http.ResponseWriter, r *http.Request) error {
 func (api *API) registerReads() {
 	repo := api.options.Repository
 	api.add("GET", "/api/projects", func(r *http.Request) (any, int, error) {
-		projects, err := repo.ListProjects(r.Context())
+		ids := r.URL.Query()["id"]
+		if len(ids) > 128 {
+			return nil, 0, badInput("id")
+		}
+		// Start SSE before any changes that could happen while the list is read.
+		seq, err := repo.Store.LastSeq(r.Context())
 		if err != nil {
 			return nil, 0, err
 		}
-		seq, err := repo.Store.LastSeq(r.Context())
-		return object{"projects": projects, "lastSeq": seq}, 200, err
+		list := repo.ListProjects
+		if len(ids) > 0 {
+			list = func(ctx context.Context) ([]core.ProjectView, error) { return repo.ListProjectsByID(ctx, ids) }
+		}
+		projects, err := list(r.Context())
+		if err != nil {
+			return nil, 0, err
+		}
+		return object{"projects": projects, "lastSeq": seq}, 200, nil
 	})
 	api.add("GET", "/api/projects/:projectId", func(r *http.Request) (any, int, error) {
 		id := r.PathValue("projectId")

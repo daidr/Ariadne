@@ -328,6 +328,9 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		addEntry(w, e, d["conversationId"], "step", nil, payload, false)
 	case "tool.finished":
 		payload := pick(d, "toolCallId", "name", "content", "isError")
+		if len(d.str("content")) >= inlineToolOutputLimit {
+			delete(payload, "content")
+		}
 		if len(array(d, "files")) > 0 {
 			payload["files"] = d["files"]
 		}

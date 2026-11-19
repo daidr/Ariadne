@@ -61,6 +61,7 @@ type turn struct {
 	draftCall         *int
 	draftTool         string
 	artifactDrafts    map[int]*collab.Draft
+	artifactPreviewAt map[int]time.Time
 	skills            *skills.Set
 	external          []tool
 	instructionsDirty bool
@@ -231,7 +232,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if !ok {
 			return domainerr.New("error.modelUnknown", map[string]any{"provider": model.Provider.Kind})
 		}
-		project, err := turn.Repository.GetProject(ctx, conversation.ProjectID)
+		project, err := turn.Repository.GetProjectForRun(ctx, conversation.ProjectID)
 		if err != nil {
 			return err
 		}

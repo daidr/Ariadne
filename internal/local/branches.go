@@ -257,11 +257,15 @@ func readBlob(ctx context.Context, git GitRun, revision, path string) (*string, 
 	if err != nil {
 		return nil, false, err
 	}
-	resolved := git(ctx, []string{"rev-parse", "--verify", "--end-of-options", revision + "^{tree}"}, GitOptions{})
-	if resolved.ExitCode != 0 {
-		return nil, false, nil
+	tree := revision + "^{tree}"
+	if !isObjectID(revision) {
+		resolved := git(ctx, []string{"rev-parse", "--verify", "--end-of-options", tree}, GitOptions{})
+		if resolved.ExitCode != 0 {
+			return nil, false, nil
+		}
+		tree = strings.TrimSpace(resolved.Stdout)
 	}
-	spec := strings.TrimSpace(resolved.Stdout) + ":" + clean
+	spec := tree + ":" + clean
 	size := git(ctx, []string{"cat-file", "-s", spec}, GitOptions{})
 	if size.ExitCode != 0 {
 		return nil, false, nil
@@ -282,6 +286,12 @@ func readBlob(ctx context.Context, git GitRun, revision, path string) (*string, 
 		return nil, true, nil
 	}
 	return &content.Stdout, false, nil
+}
+
+func isObjectID(ref string) bool {
+	return (len(ref) == 40 || len(ref) == 64) && strings.IndexFunc(ref, func(r rune) bool {
+		return !strings.ContainsRune("0123456789abcdefABCDEF", r)
+	}) == -1
 }
 
 func binaryText(text string) bool {

@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"os"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,42 @@ import (
 
 	"github.com/daidr/Ariadne/internal/fsutil"
 )
+
+func TestStorageCacheSurvivesRestartAndInvalidationRemovesIt(t *testing.T) {
+	first, _ := testStore(t, nil)
+	options := first.options
+	calls := int64(0)
+	paths := []string{"managed-worktree"}
+	options.Measure = func(context.Context, string, []string) fsutil.StorageSizes {
+		calls++
+		return fsutil.StorageSizes{Total: new(calls), Worktrees: map[string]fsutil.DirectorySize{
+			paths[0]: {Bytes: new(int64(80)), Exclusive: new(int64(20))},
+		}}
+	}
+	first.options = options
+	snapshot, err := first.MeasureStorage(t.Context(), paths)
+	if err != nil || snapshot == nil || *snapshot.Total != 1 {
+		t.Fatal(snapshot, err)
+	}
+	first.Close()
+	next, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(next.Close)
+	saved := next.LatestStorage()
+	if saved == nil || saved.MeasuredAt != snapshot.MeasuredAt || *saved.Worktrees[paths[0]].Exclusive != 20 {
+		t.Fatalf("restored snapshot: %+v", saved)
+	}
+	second, err := next.MeasureStorage(t.Context(), paths)
+	if err != nil || second == nil || *second.Total != 2 {
+		t.Fatal(second, err)
+	}
+	next.InvalidateUsage()
+	if _, err := os.Stat(next.storageCachePath()); !os.IsNotExist(err) {
+		t.Fatalf("invalidated snapshot retained: %v", err)
+	}
+}
 
 func TestStorageSharesScanAndInvalidatesLastMeasurement(t *testing.T) {
 	store, _ := testStore(t, nil)

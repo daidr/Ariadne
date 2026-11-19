@@ -23,12 +23,12 @@ func records(ctx context.Context, db queryer, query string, args ...any) ([]reco
 		return nil, err
 	}
 	result := make([]record, 0)
+	values := make([]any, len(columns))
+	pointers := make([]any, len(columns))
+	for i := range values {
+		pointers[i] = &values[i]
+	}
 	for rows.Next() {
-		values := make([]any, len(columns))
-		pointers := make([]any, len(columns))
-		for i := range values {
-			pointers[i] = &values[i]
-		}
 		if err := rows.Scan(pointers...); err != nil {
 			return nil, err
 		}

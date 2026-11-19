@@ -29,7 +29,21 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 	if version > schema.Version {
 		return fmt.Errorf("database projection version %d is newer than supported version %d", version, schema.Version)
 	}
-	if version == schema.Version {
+	if version == 67 {
+		// Tool output remains in the event log. The transcript only needs its
+		// lookup fields and any associated files.
+		if _, err := tx.ExecContext(ctx, `UPDATE transcript SET payload = json_remove(payload, '$.content')
+		 WHERE kind = 'tool' AND json_type(payload, '$.content') = 'text'
+		 AND length(CAST(json_extract(payload, '$.content') AS BLOB)) >= ?
+		 AND EXISTS (
+		  SELECT 1 FROM events e WHERE e.seq = transcript.seq AND e.project_id = transcript.project_id
+		  AND e.type = 'tool.finished' AND json_extract(e.data, '$.conversationId') = transcript.conversation_id
+		  AND json_extract(e.data, '$.content') = json_extract(transcript.payload, '$.content')
+		 )`, inlineToolOutputLimit); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || version == 67 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

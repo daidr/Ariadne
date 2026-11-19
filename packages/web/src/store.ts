@@ -25,6 +25,7 @@ import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
 import type { Draft } from './components/attachments'
 import { reuse } from './reuse'
+import { coalescedRefresh } from './coalesced-refresh'
 import * as side from './side/layout'
 import type { OpenOptions, PaneKey, SideLayout, SplitDirection } from './side/layout'
 import {
@@ -265,10 +266,28 @@ export function reorderProjects(ids: string[]) {
   }
 }
 
-async function refreshProjects() {
-  const { projects, lastSeq } = await api.listProjects()
-  state.projects = reuse(toRaw(state.projects), orderProjects(projects))
-  return lastSeq
+let deletedDuringRefresh: Set<string> | undefined
+const refreshProjectList = coalescedRefresh<string | null, number>(async (keys) => {
+  const ids = keys.has(null) || keys.size > 128 ? [] : [...keys].filter((id) => id !== null)
+  const deleted = new Set<string>()
+  deletedDuringRefresh = deleted
+  try {
+    const { projects, lastSeq } = await api.listProjects(ids)
+    const current = toRaw(state.projects)
+    const updated = projects.filter((project) => !deleted.has(project.id))
+    if (ids.length) {
+      const requested = new Set(ids)
+      updated.push(...current.filter((project) => !requested.has(project.id)))
+    }
+    state.projects = reuse(current, orderProjects(updated))
+    return lastSeq
+  } finally {
+    deletedDuringRefresh = undefined
+  }
+})
+
+function refreshProjects(ids: Iterable<string | null> = [null]) {
+  return refreshProjectList(ids)
 }
 
 /** The parts of the open project the page loads, each refreshed when an event touches it. */
@@ -280,12 +299,9 @@ const ALL_PARTS: readonly Part[] = ['detail', 'conversations', 'plan', 'artifact
  * since they were last loaded. Refreshes run one after another, so a slow answer never
  * lands on top of a newer one.
  */
-let refreshing: Promise<void> = Promise.resolve()
+const refreshParts = coalescedRefresh(loadParts)
 function refreshCurrent(parts: Iterable<Part> = ALL_PARTS): Promise<void> {
-  const wanted = new Set(parts)
-  const run = refreshing.then(() => loadParts(wanted))
-  refreshing = run.catch(() => {})
-  return run
+  return refreshParts(parts)
 }
 
 /** Where the open project's threads were last synced to, to ask only for what changed. */
@@ -639,6 +655,7 @@ function shownThreads(): string[] {
   return beside && !shown.includes(beside) ? [...shown, beside] : shown
 }
 
+let openedThreads = Promise.resolve()
 /** Load the conversations newly on screen, and let go of those gone from it. */
 function syncThreads() {
   const open = new Set(shownThreads())
@@ -649,7 +666,7 @@ function syncThreads() {
   // A thread dragged in from the thread list has nothing loaded yet.
   const opened = [...open].filter((threadId) => !state.threads[threadId])
   for (const threadId of opened) state.threads[threadId] = emptyConversation()
-  if (opened.length) void refreshCurrent(['conversations']).catch(report)
+  if (opened.length) openedThreads = refreshCurrent(['conversations']).catch(report)
 }
 
 /** Show a view full screen, or none; the thread beside it loads. */
@@ -699,7 +716,7 @@ export async function openPane(key: PaneKey, options: OpenOptions = {}) {
   const threadId = side.threadOf(key)
   const loading = !!threadId && !state.threads[threadId]
   setSide(side.open(state.side, key, options))
-  if (loading) await refreshing
+  if (loading) await openedThreads
 }
 
 /**
@@ -712,7 +729,7 @@ export async function openThread(threadId: string, options: OpenOptions = {}) {
   if (full.threadId === threadId) return
   const loading = !state.threads[threadId]
   setFull({ ...full, threadId })
-  if (loading) await refreshing
+  if (loading) await openedThreads
 }
 
 /**
@@ -769,6 +786,7 @@ export async function deleteProject(id: string) {
 
 /** Let go of a project that is gone; if it was open, the next one opens. */
 function forgetProject(id: string) {
+  deletedDuringRefresh?.add(id)
   clearBoardThumbnails()
   clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)
@@ -1196,9 +1214,10 @@ function onEvent(event: AnyStoredEvent) {
     pending = false
     const current = state.currentId !== null && touched.has(state.currentId)
     const changed = [...parts]
+    const projects = [...touched]
     touched.clear()
     parts.clear()
-    void refreshProjects().catch(report)
+    if (projects.length) void refreshProjects(projects).catch(report)
     if (current && changed.length) void refreshCurrent(changed).catch(report)
   })
 }

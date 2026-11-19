@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -168,18 +169,7 @@ func toThread(row record, now int64) (ThreadView, error) {
 	}
 	merged, _ := view.Merged.(map[string]any)
 	pullRequest, _ := view.PullRequest.(map[string]any)
-	mergedAt, _ := merged["at"].(float64)
-	unreported := func(outcome string) bool {
-		return !row.present("turn_id") && row.text("last_outcome") == outcome && row.present("last_turn_at") && row.integer("reported_at") < row.integer("last_turn_at")
-	}
-	facts := StageFacts{
-		OpenAttentions: int(row.integer("open_attentions")), Started: row.flag("started"), LastReport: row.text("last_report"),
-		TurnRunning: row.present("turn_id"), TurnPending: !row.present("turn_id") && row.integer("pending_seq") > 0,
-		TurnFailed: !row.present("turn_id") && row.text("last_outcome") == "failed", TurnCancelled: unreported("cancelled"), Unreported: unreported("completed"), Waiting: row.present("wait_id"),
-		ChecksGaveUp: row.integer("check_failures") >= 3, Stopped: row.present("stopped_reason"),
-		Landed:   merged != nil && (int64(mergedAt) >= row.integer("reported_at") || merged["head"] == row["reported_head"]) || pullRequest["state"] == "merged",
-		Reviewed: row.present("reviewed_at") && row.integer("reviewed_at") >= row.integer("reported_at"), UnderReview: row.flag("reviewing"), Reviewer: row.present("review_of"),
-	}
+	facts := threadStageFacts(row, merged, pullRequest)
 	view.Stage = ThreadStage(facts)
 	view.needsUser = facts.needsUser(view.Stage)
 	view.ActiveAt = max(row.integer("updated_at"), row.integer("message_at"), row.integer("transcript_at"), row.integer("todo_at"), row.integer("turn_started_at"))
@@ -217,6 +207,21 @@ func toThread(row record, now int64) (ThreadView, error) {
 		}
 	}
 	return view, nil
+}
+
+func threadStageFacts(row record, merged, pullRequest map[string]any) StageFacts {
+	mergedAt, _ := merged["at"].(float64)
+	unreported := func(outcome string) bool {
+		return !row.present("turn_id") && row.text("last_outcome") == outcome && row.present("last_turn_at") && row.integer("reported_at") < row.integer("last_turn_at")
+	}
+	return StageFacts{
+		OpenAttentions: int(row.integer("open_attentions")), Started: row.flag("started"), LastReport: row.text("last_report"),
+		TurnRunning: row.present("turn_id"), TurnPending: !row.present("turn_id") && row.integer("pending_seq") > 0,
+		TurnFailed: !row.present("turn_id") && row.text("last_outcome") == "failed", TurnCancelled: unreported("cancelled"), Unreported: unreported("completed"), Waiting: row.present("wait_id"),
+		ChecksGaveUp: row.integer("check_failures") >= 3, Stopped: row.present("stopped_reason"),
+		Landed:   merged != nil && (int64(mergedAt) >= row.integer("reported_at") || merged["head"] == row["reported_head"]) || pullRequest["state"] == "merged",
+		Reviewed: row.present("reviewed_at") && row.integer("reviewed_at") >= row.integer("reported_at"), UnderReview: row.flag("reviewing"), Reviewer: row.present("review_of"),
+	}
 }
 
 func listThreads(ctx context.Context, db queryer, projectID string, now int64) ([]ThreadView, error) {
@@ -368,27 +373,106 @@ func (reader Reader) GetProjectDetail(ctx context.Context, projectID string) (re
 	return
 }
 func (reader Reader) GetProject(ctx context.Context, projectID string) (ProjectView, error) {
-	detail, err := reader.GetProjectDetail(ctx, projectID)
-	return detail.Project, err
+	return reader.readProject(ctx, projectID, true)
 }
-func (reader Reader) ListProjects(ctx context.Context) (result []ProjectView, err error) {
-	result = []ProjectView{}
-	now := reader.now()
+
+// Project settings and usage are sufficient for running a model step.
+func (reader Reader) GetProjectForRun(ctx context.Context, projectID string) (ProjectView, error) {
+	return reader.readProject(ctx, projectID, false)
+}
+
+func (reader Reader) readProject(ctx context.Context, projectID string, includeNeeds bool) (result ProjectView, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
-		rows, err := records(ctx, tx, "SELECT * FROM projects ORDER BY updated_at DESC")
+		rows, err := records(ctx, tx, "SELECT * FROM projects WHERE id = ?", projectID)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return domainerr.NotFound(projectID)
+		}
+		count := 0
+		if includeNeeds {
+			count, err = projectNeedsCount(ctx, tx, projectID)
+			if err != nil {
+				return err
+			}
+		}
+		result, err = toProject(ctx, tx, rows[0], count)
+		return err
+	})
+	return
+}
+
+func projectNeedsCount(ctx context.Context, db queryer, projectID string) (int, error) {
+	rows, err := records(ctx, db, `SELECT a.id, a.thread_id, w.thread_id AS joined
+	 FROM attentions a LEFT JOIN attention_waiters w ON w.attention_id = a.id
+	 WHERE a.project_id = ? AND a.closed = 0`, projectID)
+	if err != nil {
+		return 0, err
+	}
+	attentions, asked := map[string]bool{}, map[string]bool{}
+	for _, row := range rows {
+		attentions[row.text("id")] = true
+		asked[row.text("thread_id")] = true
+		asked[row.text("joined")] = true
+	}
+	count := len(attentions)
+	// Only stage and aside fields contribute to the badge. Message recency,
+	// workspace data, artifacts and todos belong to the full thread view.
+	candidates, err := records(ctx, db, `SELECT t.id, t.started, t.last_report, t.reported_at, t.reported_head,
+	 t.merged, t.pull_request, t.check_failures, t.stopped_reason, t.reviewed_at, t.reviewing, t.aside_until, t.aside_due, t.review_of,
+	 c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id
+	 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+	 WHERE t.project_id = ? AND coalesce(t.review_of, '') = ''
+	 AND (t.last_report = 'ready' OR c.last_outcome IN ('completed','cancelled','failed') OR t.aside_due = 1)`, projectID)
+	if err != nil {
+		return 0, err
+	}
+	for _, row := range candidates {
+		if asked[row.text("id")] {
+			continue
+		}
+		merged, err := row.json("merged", nil)
+		if err != nil {
+			return 0, err
+		}
+		pull, err := row.json("pull_request", nil)
+		if err != nil {
+			return 0, err
+		}
+		facts := threadStageFacts(row, asObject(merged), asObject(pull))
+		if facts.needsUser(ThreadStage(facts)) || row.present("aside_until") && row.flag("aside_due") {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (reader Reader) ListProjects(ctx context.Context) (result []ProjectView, err error) {
+	return reader.listProjects(ctx, "SELECT * FROM projects ORDER BY updated_at DESC")
+}
+
+func (reader Reader) ListProjectsByID(ctx context.Context, ids []string) ([]ProjectView, error) {
+	values, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	return reader.listProjects(ctx, "SELECT * FROM projects WHERE id IN (SELECT value FROM json_each(?)) ORDER BY updated_at DESC", string(values))
+}
+
+func (reader Reader) listProjects(ctx context.Context, query string, args ...any) (result []ProjectView, err error) {
+	result = []ProjectView{}
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		rows, err := records(ctx, tx, query, args...)
 		if err != nil {
 			return err
 		}
 		for _, row := range rows {
-			threads, err := listThreads(ctx, tx, row.text("id"), now)
+			needs, err := projectNeedsCount(ctx, tx, row.text("id"))
 			if err != nil {
 				return err
 			}
-			needs, err := needsMe(ctx, tx, row.text("id"), threads)
-			if err != nil {
-				return err
-			}
-			view, err := toProject(ctx, tx, row, len(needs))
+			view, err := toProject(ctx, tx, row, needs)
 			if err != nil {
 				return err
 			}

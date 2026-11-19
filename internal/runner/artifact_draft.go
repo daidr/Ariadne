@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/daidr/Ariadne/internal/collab"
 )
@@ -16,6 +17,7 @@ func (turn *turn) clearPreviews() {
 		}
 	}
 	turn.artifactDrafts = nil
+	turn.artifactPreviewAt = nil
 }
 
 func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body string) {
@@ -35,6 +37,9 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 	}
 	draft, known := turn.artifactDrafts[*call]
 	if known && draft == nil || !known && len(turn.artifactDrafts) >= 8 {
+		return
+	}
+	if known && time.Since(turn.artifactPreviewAt[*call]) < 75*time.Millisecond {
 		return
 	}
 	input, partial := growingArtifactArguments(body)
@@ -77,6 +82,10 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 		}
 		turn.artifactDrafts[*call] = draft
 	}
+	if turn.artifactPreviewAt == nil {
+		turn.artifactPreviewAt = map[int]time.Time{}
+	}
+	turn.artifactPreviewAt[*call] = time.Now()
 	if raw := input["baseVersion"]; raw != nil {
 		version, err := artifactInteger(raw, "baseVersion")
 		if err != nil || version != draft.Version {
@@ -95,6 +104,11 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 				next = previewRewrite(documentView(draft.Base), next)
 			}
 		} else {
+			if old, replacement := singleParagraphEdit(input); old != "" {
+				if handled, err := draft.WriteParagraph(old, replacement); handled || err != nil {
+					return
+				}
+			}
 			if anchor, _ := input["pendingAnchor"].(string); anchor != "" {
 				// Probe the replacement before its new text is available. Removing
 				// the whole anchor in the probe identifies every block it spans.
@@ -134,6 +148,25 @@ func (turn *turn) previewArtifact(ctx context.Context, call *int, name, body str
 	if err == nil {
 		_ = draft.Write(next)
 	}
+}
+
+func singleParagraphEdit(input args) (string, *string) {
+	edits, _ := input["edits"].([]any)
+	if len(edits) == 1 {
+		if preceding, _ := input["precedingEdits"].([]any); len(preceding) != 0 {
+			return "", nil
+		}
+		edit, _ := edits[0].(args)
+		old, _ := edit["old"].(string)
+		if replacement, ok := edit["new"].(string); ok {
+			return old, &replacement
+		}
+	}
+	if len(edits) == 0 {
+		anchor, _ := input["pendingAnchor"].(string)
+		return anchor, nil
+	}
+	return "", nil
 }
 
 // Read complete IDs and array entries, plus growing Markdown and replacements

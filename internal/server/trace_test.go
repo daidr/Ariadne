@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,5 +95,29 @@ func TestTraceTimelineHTTPMatchesLegacy(t *testing.T) {
 		if _, err := repo.ListTurnEvents(t.Context(), "coo_a", limits); err == nil {
 			t.Fatal("trace bounds ignored")
 		}
+	}
+
+	full := func(query string) []any {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/api/conversations/coo_a/trace"+query, nil)
+		r.Header.Set("Authorization", "Bearer test-token")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, r)
+		var body struct {
+			Turns []any `json:"turns"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 {
+			t.Fatal(response.Code, response.Body.String(), err)
+		}
+		return body.Turns
+	}
+	turns := full("")
+	if len(turns) != 2 {
+		t.Fatal(turns)
+	}
+	last := turns[1].(map[string]any)
+	suffix := full("?from=" + strconv.FormatInt(int64(last["seq"].(float64)), 10))
+	if len(suffix) != 1 || encoded(suffix[0]) != encoded(last) {
+		t.Fatalf("incremental page changed the turn or request numbers: %+v", suffix)
 	}
 }

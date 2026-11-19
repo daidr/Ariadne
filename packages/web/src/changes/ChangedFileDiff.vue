@@ -5,7 +5,7 @@ import { DouCodeDiff } from '@dou-ui/code'
 import '@dou-ui/code/style.css'
 import { DouAlert, DouEmpty, DouSpinner, DouText } from 'dou-ui'
 import { computed, shallowRef, watch } from 'vue'
-import { api, ApiError } from '../api'
+import { ApiError } from '../api'
 import { t, tm } from '../i18n'
 import { useReviewComments, type ReviewNote } from '../review/review-comments'
 import { languageOf } from './languages'
@@ -14,8 +14,11 @@ import { useLineComments } from './line-comments'
 const props = defineProps<{
   threadId: string
   file: ChangedFile
-  from: string
-  head: string
+  loadVersions: (
+    path: string,
+    previousPath: string | null,
+    signal: AbortSignal,
+  ) => Promise<FileVersions>
   sent: readonly SentLineComment[]
   notes: ReviewNote[]
 }>()
@@ -23,26 +26,16 @@ const mode = defineModel<'split' | 'inline' | 'auto'>('mode', { required: true }
 const versions = shallowRef<FileVersions | null>(null)
 const problem = shallowRef<string | null>(null)
 watch(
-  [
-    () => props.threadId,
-    () => props.from,
-    () => props.head,
-    () => props.file.path,
-    () => props.file.previousPath,
-  ],
-  async ([id, from, head, path, previousPath], _before, cleanup) => {
+  [() => props.loadVersions, () => props.file.path, () => props.file.previousPath],
+  async ([load, path, previousPath], _before, cleanup) => {
     versions.value = null
     problem.value = null
     const controller = new AbortController()
     const { signal } = controller
     cleanup(() => controller.abort())
     try {
-      const result = await api.getChangedFile(
-        id,
-        { from, head, path, previousPath: previousPath ?? null },
-        signal,
-      )
-      if (!signal.aborted) versions.value = result.file
+      const result = await load(path, previousPath ?? null, signal)
+      if (!signal.aborted) versions.value = result
     } catch (error) {
       if (!signal.aborted)
         problem.value = error instanceof ApiError ? tm(error.localized) : String(error)

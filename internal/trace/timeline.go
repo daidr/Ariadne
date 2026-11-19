@@ -19,7 +19,7 @@ type Timeline struct {
 	More  bool     `json:"more"`
 }
 type Options struct {
-	Before              *int64
+	Before, From        *int64
 	Turns               *int
 	MaxBytes, MaxEvents int64
 }
@@ -99,7 +99,7 @@ func Build(ctx context.Context, repo *core.Repository, conversation string, opti
 	var page core.TurnEventPage
 	for {
 		var err error
-		page, err = repo.ListTurnEvents(ctx, conversation, core.TurnEventOptions{Before: options.Before, Turns: &turns, MaxBytes: bytes, MaxEvents: events})
+		page, err = repo.ListTurnEvents(ctx, conversation, core.TurnEventOptions{Before: options.Before, From: options.From, Turns: &turns, MaxBytes: bytes, MaxEvents: events})
 		if err == nil {
 			break
 		}
