@@ -36,6 +36,8 @@ export interface ConfirmBlock {
   tone: ConfirmTone
   approveText: string | null
   denyText: string | null
+  /** System reference approvals can offer project-wide access. */
+  allowProjectReference?: true
 }
 
 export const FORM_FIELD_KINDS = [
@@ -160,5 +162,5 @@ export const BLOCK_TYPES = [...ASK_BLOCK_TYPES, ...SHOW_BLOCK_TYPES] as const
 /** How the user answered an ask block; its `type` is the block's. */
 export type BlockAnswer =
   | { type: 'choice'; choice: number }
-  | { type: 'confirm'; approved: boolean }
+  | { type: 'confirm'; approved: boolean; scope?: 'thread' | 'project' }
   | { type: 'form'; values: Record<string, FormValue> }

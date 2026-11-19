@@ -538,10 +538,16 @@ func ParseAnswer(block map[string]any, raw any) (object, error) {
 		}
 		answer = object{"type": "choice", "choice": value["choice"]}
 	case "confirm":
-		if _, ok := value["approved"].(bool); !ok {
+		approved, ok := value["approved"].(bool)
+		if !ok {
 			v.invalid("approved must be true or false")
 		}
-		answer = object{"type": "confirm", "approved": value["approved"]}
+		answer = object{"type": "confirm", "approved": approved}
+		if approved && question.yes("allowProjectReference") {
+			answer["scope"] = v.oneOf(value["scope"], []string{"thread", "project"}, "scope", "thread")
+		} else if value["scope"] != nil {
+			v.invalid("scope is only available when allowing a reference with a choice of scope")
+		}
 	case "form":
 		given := v.requireObject(value["values"], "values must be an object by field key")
 		fields := []object{}

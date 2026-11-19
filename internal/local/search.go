@@ -44,6 +44,9 @@ func (workspace *Workspace) probe(ctx context.Context, key string, argv []string
 	}
 }
 func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileListing, error) {
+	if _, err := workspace.Resolve(path); err != nil {
+		return sdk.FileListing{}, err
+	}
 	options := sdk.ExecOptions{Timeout: 60 * time.Second}
 	inGit, err := workspace.probe(ctx, "git", []string{"git", "rev-parse", "--is-inside-work-tree"})
 	if err != nil {
@@ -99,6 +102,9 @@ func (workspace *Workspace) Files(ctx context.Context, path string) (sdk.FileLis
 	return sdk.FileListing{Files: files, Partial: partial}, nil
 }
 func (workspace *Workspace) Search(ctx context.Context, pattern, path string, options sdk.SearchOptions) (sdk.FileSearchResult, error) {
+	if _, err := workspace.Resolve(path); err != nil {
+		return sdk.FileSearchResult{}, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	glob := strings.TrimPrefix(strings.TrimSpace(options.Glob), "./")

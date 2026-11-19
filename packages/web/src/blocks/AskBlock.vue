@@ -3,7 +3,7 @@ import type { AskBlock, BlockAnswer, FormBlock, FormValue } from '@ariadne/core'
 import {
   DouButton,
   DouChatConfirm,
-  DouChatSuggestions,
+  DouChatQuestion,
   DouCodeBlock,
   DouDescriptions,
   DouDescriptionsItem,
@@ -11,12 +11,16 @@ import {
   DouFormItem,
   DouInput,
   DouInputNumber,
+  DouRadio,
+  DouRadioGroup,
   DouSelect,
   DouSwitch,
   DouText,
   DouTextarea,
   type ChatConfirmDecision,
-  type ChatSuggestion,
+  type ChatQuestionOption,
+  type ChatQuestionStatus,
+  type RadioValue,
 } from 'dou-ui'
 import { CheckIcon } from '@dou-ui/icons'
 import { computed, reactive, ref, watch } from 'vue'
@@ -34,6 +38,7 @@ const props = defineProps<{
   answer: BlockAnswer | null
   withdrawn?: string | null
 }>()
+defineSlots<{ after?: () => unknown }>()
 
 const title = computed(() =>
   props.block.type === 'choice' ? props.block.question : props.block.title,
@@ -45,7 +50,7 @@ const sending = ref(false)
 const sent = ref<BlockAnswer | null>(null)
 const answered = computed(() => props.answer ?? sent.value)
 async function send(given: BlockAnswer) {
-  if (!props.attentionId) return
+  if (!props.attentionId || sending.value) return
   sending.value = true
   try {
     if (await answerAttention(props.attentionId, given)) sent.value = given
@@ -54,29 +59,45 @@ async function send(given: BlockAnswer) {
   }
 }
 
-// A choice: one card per option, the recommended one marked.
-const suggestions = computed<ChatSuggestion[]>(() =>
+const questionOptions = computed<ChatQuestionOption[]>(() =>
   props.block.type === 'choice'
     ? props.block.options.map((option, index) => ({
-        value: String(index),
+        value: index,
         label: option.label,
         description: option.consequence,
-        disabled: sending.value,
+        disabled: sending.value || !props.attentionId,
       }))
     : [],
 )
-const chosen = computed(() =>
-  props.block.type === 'choice' && answered.value?.type === 'choice'
-    ? (props.block.options[answered.value.choice]?.label ?? null)
-    : null,
+const questionAnswer = computed(() =>
+  answered.value?.type === 'choice' ? answered.value.choice : undefined,
 )
+const questionStatus = computed<ChatQuestionStatus>(() => {
+  if (props.withdrawn) return 'withdrawn'
+  return questionAnswer.value === undefined ? 'waiting' : 'answered'
+})
 
 const confirmStatus = computed(() => {
   if (answered.value?.type === 'confirm') return answered.value.approved ? 'approved' : 'denied'
   return props.withdrawn ? 'withdrawn' : 'waiting'
 })
+const referenceScope = ref<RadioValue>('thread')
+const confirmDescription = computed(() => {
+  if (props.block.type !== 'confirm') return undefined
+  if (props.withdrawn) return props.withdrawn
+  if (answered.value?.type === 'confirm' && answered.value.scope) {
+    return t(answered.value.scope === 'project' ? 'reference.ask.project' : 'reference.ask.thread')
+  }
+  return props.block.description || undefined
+})
 function decide(decision: ChatConfirmDecision) {
-  if (!sending.value) void send({ type: 'confirm', approved: decision !== 'deny' })
+  const approved = decision !== 'deny'
+  if (approved && props.block.type === 'confirm' && props.block.allowProjectReference) {
+    const scope = referenceScope.value === 'project' ? 'project' : 'thread'
+    void send({ type: 'confirm', approved, scope })
+  } else {
+    void send({ type: 'confirm', approved })
+  }
 }
 
 // A form: its values start from the defaults; once submitted it lists what was sent.
@@ -114,57 +135,45 @@ function submit() {
 
 <template>
   <div class="ask-block">
-    <!-- A confirm says so itself; a choice or form keeps only what it asked. -->
-    <template v-if="withdrawn && block.type !== 'confirm'">
+    <template v-if="withdrawn && block.type === 'form'">
       <DouText weight="medium" class="ask-title">{{ title }}</DouText>
       <DouText variant="tertiary" size="sm">{{
         t('block.withdrawn', { reason: withdrawn })
       }}</DouText>
     </template>
-    <template v-else-if="block.type === 'choice'">
-      <template v-if="answered">
-        <DouText weight="medium" class="ask-title">{{ block.question }}</DouText>
-        <div class="ask-chosen">
-          <DouText variant="secondary" size="sm" class="ask-answer">
-            <CheckIcon />{{ t('block.chosen', { label: chosen ?? '' }) }}
-          </DouText>
-          <!-- What can still be done about the answer, e.g. taking it back. -->
-          <slot name="after" />
-        </div>
+    <DouChatQuestion
+      v-else-if="block.type === 'choice'"
+      :options="questionOptions"
+      :answer="questionAnswer"
+      :status="questionStatus"
+      :description="withdrawn || undefined"
+      @select="(value) => send({ type: 'choice', choice: Number(value) })"
+    >
+      <template #title>
+        <span class="ask-title">{{ block.question }}</span>
       </template>
-      <DouChatSuggestions
-        v-else
-        :items="suggestions"
-        variant="card"
-        @select="(value) => send({ type: 'choice', choice: Number(value) })"
-      >
-        <!-- Its own lines kept: a question may say where and why under what it asks. -->
-        <template #title>
-          <span class="ask-title">{{ block.question }}</span>
-        </template>
-        <template #item="{ item }">
-          <span class="ask-option">
-            <DouText weight="medium" size="sm">
-              {{ item.label }}
-              <DouText
-                v-if="Number(item.value) === block.recommended"
-                tone="primary"
-                size="sm"
-                class="ask-recommended"
-              >
-                {{ t('block.recommended') }}
-              </DouText>
+      <template v-if="block.recommended != null" #option="{ option }">
+        <span class="ask-option">
+          <DouText weight="medium" size="sm">
+            {{ option.label }}
+            <DouText
+              v-if="option.value === block.recommended"
+              tone="primary"
+              size="sm"
+              class="ask-recommended"
+            >
+              {{ t('block.recommended') }}
             </DouText>
-            <DouText variant="secondary" size="sm">{{ item.description }}</DouText>
-          </span>
-        </template>
-      </DouChatSuggestions>
-    </template>
+          </DouText>
+          <DouText variant="secondary" size="sm">{{ option.description }}</DouText>
+        </span>
+      </template>
+    </DouChatQuestion>
 
     <DouChatConfirm
       v-else-if="block.type === 'confirm'"
       :title="block.title"
-      :description="(withdrawn ?? block.description) || undefined"
+      :description="confirmDescription"
       :tone="block.tone"
       :status="confirmStatus"
       :approve-text="block.approveText ?? undefined"
@@ -172,6 +181,17 @@ function submit() {
       @decide="decide"
     >
       <DouCodeBlock v-if="block.detail && !withdrawn" :code="block.detail" wrap :max-lines="12" />
+      <DouRadioGroup
+        v-if="block.allowProjectReference && confirmStatus === 'waiting'"
+        v-model="referenceScope"
+        :aria-label="t('reference.ask.scope')"
+        :disabled="sending || !attentionId"
+        size="sm"
+        class="ask-reference-scope"
+      >
+        <DouRadio value="thread">{{ t('reference.ask.thread') }}</DouRadio>
+        <DouRadio value="project">{{ t('reference.ask.project') }}</DouRadio>
+      </DouRadioGroup>
     </DouChatConfirm>
 
     <template v-else-if="form && submitted">
@@ -251,6 +271,7 @@ function submit() {
         </div>
       </DouForm>
     </template>
+    <slot v-if="answered && !withdrawn" name="after" />
   </div>
 </template>
 
@@ -264,6 +285,7 @@ function submit() {
 
 .ask-title {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .ask-head {
@@ -284,13 +306,6 @@ function submit() {
   gap: 4px;
 }
 
-.ask-chosen {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
 .ask-actions {
   display: flex;
   justify-content: flex-end;
@@ -305,5 +320,9 @@ function submit() {
 
 .ask-recommended {
   margin-inline-start: 6px;
+}
+
+.ask-reference-scope {
+  margin-block-start: 8px;
 }
 </style>

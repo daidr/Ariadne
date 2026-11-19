@@ -81,6 +81,10 @@ func askApproval(tx *eventstore.Transaction, projectID, conversationID, purpose 
 	if err != nil {
 		return err
 	}
+	if options.AllowProjectReference && !coordinator {
+		// Attach the system approval scope after validating the model-facing block.
+		asObject(opened.data).obj("block")["allowProjectReference"] = true
+	}
 	return appendChanges(tx, projectID, append(changes, opened))
 }
 func (repo *Repository) RequestApproval(ctx context.Context, projectID, threadID, purpose string, card ApprovalCard) (state string, err error) {
@@ -119,13 +123,15 @@ func (repo *Repository) RequestApproval(ctx context.Context, projectID, threadID
 }
 
 type CallApprovalOptions struct {
-	InChat bool `json:"inChat"`
-	No     *int `json:"no"`
+	InChat                bool `json:"inChat"`
+	No                    *int `json:"no"`
+	AllowProjectReference bool `json:"-"`
 }
 type CallApprovalResult struct {
 	State       string `json:"state"`
 	AttentionID string `json:"attentionId,omitempty"`
 	Choice      *int   `json:"choice,omitempty"`
+	Scope       string `json:"-"`
 }
 
 // MarshalJSON retains a null choice on approved confirmations.
@@ -180,7 +186,7 @@ func (repo *Repository) CallApproval(ctx context.Context, projectID, conversatio
 			}
 		}
 		if approved == 1 && !newest.present("used") {
-			result = CallApprovalResult{State: "approved", AttentionID: newest.text("id"), Choice: choice}
+			result = CallApprovalResult{State: "approved", AttentionID: newest.text("id"), Choice: choice, Scope: answer.str("scope")}
 			return nil
 		}
 		if approved == 0 {

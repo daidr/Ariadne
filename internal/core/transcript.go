@@ -58,6 +58,12 @@ func describeAnswer(block, answer object) string {
 	}
 	if answer.str("type") == "confirm" {
 		if answer.yes("approved") {
+			switch answer.str("scope") {
+			case "thread":
+				return "approved for this thread"
+			case "project":
+				return "approved for the project"
+			}
 			return "approved"
 		}
 		return "declined"

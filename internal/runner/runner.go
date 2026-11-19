@@ -489,7 +489,11 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			return [32]byte{}, ctx.Err()
 		}
 		if err != nil && content == "" {
-			content = textutil.HeadUnits(err.Error(), 2000)
+			hint := ""
+			if _, available := byName[referenceToolName]; available {
+				hint = referenceReadHint(call.Name, err)
+			}
+			content = textutil.HeadUnits(err.Error(), 2000-len(hint)) + hint
 		}
 		content = strings.Clone(textutil.HeadUnits(content, 200_000))
 		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, err != nil, attachments})
