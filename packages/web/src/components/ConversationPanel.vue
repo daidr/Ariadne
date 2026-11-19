@@ -213,6 +213,12 @@ const capsuleChanges = computed(() => {
     ? { threadId: owner.id, totals: branchChanges(owner) }
     : null
 })
+const showCapsules = computed(
+  () =>
+    (capsuleChanges.value?.totals?.files ?? 0) > 0 ||
+    createdArtifacts.value.length > 0 ||
+    background.value.length > 0,
+)
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
 // The main model kept failing: this turn goes on with the role's fallback.
 const fallback = computed(() => {
@@ -622,6 +628,24 @@ function retry() {
 // Scrolled to the top: the page before. A first page too short to scroll fetches the
 // next one by itself, since there is no top to reach.
 const list = useTemplateRef<ChatListExpose>('list')
+const footer = useTemplateRef<HTMLElement>('footer')
+const footerHeight = ref(0)
+watch(
+  footer,
+  (element, _, cleanup) => {
+    if (!element) {
+      footerHeight.value = 0
+      return
+    }
+    const measure = () => (footerHeight.value = element.getBoundingClientRect().height)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element, { box: 'border-box' })
+    cleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
 function earlier() {
   if (conversationId.value && view.value.more) void loadEarlier(conversationId.value)
 }
@@ -672,6 +696,7 @@ watch(
 <template>
   <div
     class="conversation"
+    :style="{ '--conversation-footer-height': footerHeight ? `${footerHeight}px` : undefined }"
     :data-panel="kind"
     @focusin="lastPanel = kind"
     @pointerdown="lastPanel = kind"
@@ -1093,123 +1118,129 @@ watch(
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
-    <!-- A stopped thread is not scheduled, so its reason and 继续 win over "queued". -->
-    <DouAlert v-if="thread?.stopped" tone="warning" class="conversation-alert">
-      {{
-        t(thread.stopped.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator', {
-          reason: thread.stopped.reason,
-        })
-      }}
-      <template #action>
-        <DouButton size="sm" variant="outline" @click="resumeThread(thread.id)">
-          <template #leading><PlayIcon /></template>
-          {{ t('thread.resume') }}
-        </DouButton>
-      </template>
-    </DouAlert>
-    <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
-      {{ tm(failure) }}
-      <template #action>
-        <DouButton v-if="failure.key === 'error.noModel'" size="sm" @click="openSettings()">
-          {{ t('conversation.openSettings') }}
-        </DouButton>
-        <DouButton size="sm" variant="outline" @click="retry">
-          <template #leading><RotateCwIcon /></template>
-          {{ t('conversation.retry') }}
-        </DouButton>
-      </template>
-    </DouAlert>
-    <DouAlert v-else-if="cancelled || silent" tone="neutral" class="conversation-alert">
-      {{ t(cancelled ? 'conversation.cancelled' : 'conversation.silent') }}
-      <template #action>
-        <DouButton size="sm" variant="outline" @click="retry">
-          <template #leading><PlayIcon /></template>
-          {{ t('conversation.continue') }}
-        </DouButton>
-      </template>
-    </DouAlert>
-
     <DouImagePreview
       v-model:open="preview.open"
       v-model:index="preview.index"
       :images="preview.images"
     />
     <div
-      v-if="state.detail"
-      class="conversation-input"
-      data-message-input
-      @keydown="onInputKeydown"
+      v-if="state.detail || thread?.stopped || failure || cancelled || silent"
+      ref="footer"
+      class="conversation-footer"
     >
-      <div v-if="conversationId" class="conversation-capsules">
+      <!-- A stopped thread is not scheduled, so its reason and 继续 win over "queued". -->
+      <DouAlert v-if="thread?.stopped" tone="warning" class="conversation-alert">
+        {{
+          t(thread.stopped.by === 'user' ? 'thread.stoppedByUser' : 'thread.stoppedByCoordinator', {
+            reason: thread.stopped.reason,
+          })
+        }}
+        <template #action>
+          <DouButton size="sm" variant="outline" @click="resumeThread(thread.id)">
+            <template #leading><PlayIcon /></template>
+            {{ t('thread.resume') }}
+          </DouButton>
+        </template>
+      </DouAlert>
+      <DouAlert v-else-if="failure" tone="danger" class="conversation-alert">
+        {{ tm(failure) }}
+        <template #action>
+          <DouButton v-if="failure.key === 'error.noModel'" size="sm" @click="openSettings()">
+            {{ t('conversation.openSettings') }}
+          </DouButton>
+          <DouButton size="sm" variant="outline" @click="retry">
+            <template #leading><RotateCwIcon /></template>
+            {{ t('conversation.retry') }}
+          </DouButton>
+        </template>
+      </DouAlert>
+      <DouAlert v-else-if="cancelled || silent" tone="neutral" class="conversation-alert">
+        {{ t(cancelled ? 'conversation.cancelled' : 'conversation.silent') }}
+        <template #action>
+          <DouButton size="sm" variant="outline" @click="retry">
+            <template #leading><PlayIcon /></template>
+            {{ t('conversation.continue') }}
+          </DouButton>
+        </template>
+      </DouAlert>
+
+      <div
+        v-if="state.detail"
+        class="conversation-input"
+        data-message-input
+        @keydown="onInputKeydown"
+      >
         <ConversationBar
+          v-if="conversationId && showCapsules"
           :key="conversationId"
           :conversation-id="conversationId"
           :changes="capsuleChanges"
           :artifacts="createdArtifacts"
           :background="background"
+          class="conversation-capsules"
         />
-      </div>
-      <DouChatInput
-        ref="input"
-        v-model="draft"
-        :submit-on="state.input.submitOn"
-        :commands="commands"
-        :mentions="mentions.options.value"
-        @command="useSnippet"
-        @mention="mentions.pick"
-        :placeholder="props.threadId ? t('thread.placeholder') : t('coordinator.placeholder')"
-        :disabled="!state.detail"
-        :can-submit="canSubmit"
-        :loading="working"
-        @submit="submit"
-        @stop="stop"
-        @attach="attachments.add"
-      >
-        <template v-if="attachments.files.value.length" #header>
-          <DouChatAttachments v-model="attachments.files.value" @remove="attachments.release" />
-        </template>
-        <template #actions>
-          <input ref="picker" type="file" multiple hidden @change="pick" />
-          <DouButton
-            variant="ghost"
-            size="sm"
-            :aria-label="t('composer.attach')"
-            :title="t('composer.attach')"
-            :disabled="!state.detail"
-            @click="picker?.click()"
-          >
-            <PaperclipIcon />
-          </DouButton>
-          <!-- Which model answers here, and how full its context is. -->
-          <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
-            <DouButton variant="ghost" size="sm" :title="t('thread.model')">
-              <template #leading><CpuIcon /></template>
-              <span class="conversation-model">{{ modelLabel ?? t('thread.noModel') }}</span>
-              <template #trailing><ChevronDownIcon /></template>
+        <DouChatInput
+          ref="input"
+          v-model="draft"
+          :submit-on="state.input.submitOn"
+          :commands="commands"
+          :mentions="mentions.options.value"
+          @command="useSnippet"
+          @mention="mentions.pick"
+          :placeholder="props.threadId ? t('thread.placeholder') : t('coordinator.placeholder')"
+          :disabled="!state.detail"
+          :can-submit="canSubmit"
+          :loading="working"
+          @submit="submit"
+          @stop="stop"
+          @attach="attachments.add"
+        >
+          <template v-if="attachments.files.value.length" #header>
+            <DouChatAttachments v-model="attachments.files.value" @remove="attachments.release" />
+          </template>
+          <template #actions>
+            <input ref="picker" type="file" multiple hidden @change="pick" />
+            <DouButton
+              variant="ghost"
+              size="sm"
+              :aria-label="t('composer.attach')"
+              :title="t('composer.attach')"
+              :disabled="!state.detail"
+              @click="picker?.click()"
+            >
+              <PaperclipIcon />
             </DouButton>
-            <template #menu>
-              <DouDropdownRadioGroup :model-value="pickedModel" @update:model-value="pickModel">
-                <DouDropdownItem value="">
-                  {{ t('thread.modelDefault', { label: defaultLabel }) }}
-                </DouDropdownItem>
-                <DouDropdownItem v-for="model in state.models" :key="model.id" :value="model.id">
-                  {{ model.label }}
-                </DouDropdownItem>
-              </DouDropdownRadioGroup>
-            </template>
-          </DouDropdown>
-          <DouText v-else-if="modelLabel" variant="tertiary" size="sm" class="conversation-model">
-            {{ modelLabel }}
-          </DouText>
-          <ContextUsage
-            v-if="view.model && view.conversation?.contextTokens"
-            :used="view.conversation.contextTokens"
-            :total="view.model.compactAt"
-            :compactions="view.conversation.compactions"
-            :usage="view.conversation.usage"
-          />
-        </template>
-      </DouChatInput>
+            <!-- Which model answers here, and how full its context is. -->
+            <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
+              <DouButton variant="ghost" size="sm" :title="t('thread.model')">
+                <template #leading><CpuIcon /></template>
+                <span class="conversation-model">{{ modelLabel ?? t('thread.noModel') }}</span>
+                <template #trailing><ChevronDownIcon /></template>
+              </DouButton>
+              <template #menu>
+                <DouDropdownRadioGroup :model-value="pickedModel" @update:model-value="pickModel">
+                  <DouDropdownItem value="">
+                    {{ t('thread.modelDefault', { label: defaultLabel }) }}
+                  </DouDropdownItem>
+                  <DouDropdownItem v-for="model in state.models" :key="model.id" :value="model.id">
+                    {{ model.label }}
+                  </DouDropdownItem>
+                </DouDropdownRadioGroup>
+              </template>
+            </DouDropdown>
+            <DouText v-else-if="modelLabel" variant="tertiary" size="sm" class="conversation-model">
+              {{ modelLabel }}
+            </DouText>
+            <ContextUsage
+              v-if="view.model && view.conversation?.contextTokens"
+              :used="view.conversation.contextTokens"
+              :total="view.model.compactAt"
+              :compactions="view.conversation.compactions"
+              :usage="view.conversation.usage"
+            />
+          </template>
+        </DouChatInput>
+      </div>
     </div>
   </div>
 </template>
@@ -1300,7 +1331,8 @@ watch(
 }
 
 .conversation {
-  --conversation-capsule-height: 44px;
+  --conversation-footer-padding: 16px;
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1349,13 +1381,57 @@ watch(
   min-height: 0;
 }
 
-/* Messages scroll behind the capsules, while the last message can clear them. */
 .conversation-list :deep(.dou-chat-list__content) {
-  padding-bottom: calc(var(--conversation-capsule-height) + 16px);
+  padding-block-end: 0;
+}
+
+/* Count the footer clearance in the content size that ChatList observes. */
+.conversation-list :deep(.dou-chat-list__content)::after {
+  content: '';
+  flex: none;
+  margin-block-start: calc(-1 * var(--dou-chat-list-gap));
+  padding-block-end: var(--conversation-footer-height, var(--dou-chat-list-padding));
+}
+
+.conversation-list :deep(.dou-chat-list__viewport) {
+  scroll-padding-block-end: var(--conversation-footer-height, 0px);
+}
+
+.conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__content) {
+  box-sizing: border-box;
+  min-block-size: 100%;
+}
+
+/* Paint inside the scrollport so its scrollbar and the floating composer stay above the fade. */
+.conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__viewport)::after {
+  --conversation-bottom-fade: 12px;
+  --conversation-mask-height: calc(
+    var(--conversation-footer-padding) + var(--conversation-bottom-fade)
+  );
+  content: '';
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 2;
+  display: block;
+  block-size: var(--conversation-mask-height);
+  margin-block-start: calc(-1 * var(--conversation-mask-height));
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--dou-dialog-bg, var(--dou-color-bg-canvas)) var(--conversation-bottom-fade)
+  );
+  pointer-events: none;
+}
+
+.conversation:has(.conversation-input)
+  .conversation-list
+  :deep(.dou-chat-list__viewport:focus-visible)::after {
+  inset-block-end: 2px;
+  margin-inline: 2px;
 }
 
 .conversation-list :deep(.dou-chat-list__scroll) {
-  bottom: calc(var(--conversation-capsule-height) + 12px);
+  inset-block-end: calc(var(--conversation-footer-height, 0px) + 12px);
   z-index: 2;
 }
 
@@ -1369,10 +1445,7 @@ watch(
   flex: 1;
   display: grid;
   place-items: center;
-}
-
-.conversation-alert {
-  margin: 0 16px var(--conversation-capsule-height);
+  padding-block-end: var(--conversation-footer-height, 0px);
 }
 
 .routine-prompt {
@@ -1381,60 +1454,32 @@ watch(
   overflow-wrap: anywhere;
 }
 
-.conversation-input {
-  position: relative;
-  flex: none;
-  padding: 0 16px 16px;
-}
-
-.conversation-capsules {
+.conversation-footer {
   position: absolute;
   inset-inline: 0;
-  bottom: 100%;
-  z-index: 1;
-  isolation: isolate;
+  inset-block-end: 0;
+  z-index: 3;
   display: flex;
-  align-items: flex-end;
-  box-sizing: border-box;
-  height: var(--conversation-capsule-height);
-  padding: 0 16px 4px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px var(--conversation-footer-padding);
   pointer-events: none;
 }
 
-/* Two masked layers increase blur toward the composer without a solid top edge. */
-.conversation-capsules::before,
-.conversation-capsules::after {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: -24px 0 0;
-  pointer-events: none;
-  backdrop-filter: blur(3px);
-  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+.conversation-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.conversation-capsules::after {
-  inset-block-start: 0;
-  backdrop-filter: blur(12px);
-  mask-image: linear-gradient(to bottom, transparent, #000);
-}
-
-.conversation-capsules :deep(.conversation-bar) {
-  flex: 1;
-}
-
-.conversation-capsules :deep(button) {
+.conversation-alert,
+.conversation-capsules :deep(button),
+.conversation-input :deep(.dou-chat-input) {
   pointer-events: auto;
 }
 
 .conversation-input :deep(.dou-chat-input:not(:focus-within)) {
   box-shadow: none;
-}
-
-/* Keep the composer's focus ring above the capsule backdrop at their shared edge. */
-.conversation-input :deep(.dou-chat-input) {
-  position: relative;
-  z-index: 2;
 }
 
 .conversation-tools {
