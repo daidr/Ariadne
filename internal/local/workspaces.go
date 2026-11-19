@@ -504,8 +504,28 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 	}
 	defer done()
 	result := []sdk.WorktreeInfo{}
+	if !factory.Isolated() {
+		return result, nil
+	}
+	fields, err := worktreeFields(ctx, factory.git)
+	if err != nil {
+		return nil, err
+	}
+	registered := map[string]bool{}
+	for _, field := range fields {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok {
+			registered[filepath.Clean(path)] = true
+		}
+	}
 	for _, root := range factory.roots {
-		entries, err := os.ReadDir(root)
+		resolved, err := filepath.EvalSymlinks(root)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		entries, err := os.ReadDir(resolved)
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -520,6 +540,21 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 				continue
 			}
 			path := filepath.Join(root, entry.Name())
+			if !registered[path] && !registered[filepath.Join(resolved, entry.Name())] {
+				continue
+			}
+			// A registration can outlive the checkout. Require its local Git
+			// pointer as well, so a plain directory at the old path stays out.
+			info, err := os.Lstat(filepath.Join(path, ".git"))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !info.Mode().IsRegular() {
+				continue
+			}
 			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: path})
 		}
 	}

@@ -26,18 +26,15 @@ func newFactory(t *testing.T, options FactoryOptions) *Workspaces {
 	})
 	return factory
 }
-func TestWorktreesListsPathsWithoutSizingThem(t *testing.T) {
-	factory := newWorkspaceOwner()
-	t.Cleanup(func() { _ = factory.Close() })
-	root := t.TempDir()
-	factory.roots = []string{root}
-	path := filepath.Join(root, "thr_a")
-	if err := os.Mkdir(path, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(path, "payload.txt"), []byte("data"), 0600); err != nil {
-		t.Fatal(err)
-	}
+func TestWorktreesListsRegisteredPathsWithoutSizingThem(t *testing.T) {
+	root, git := initGit(t)
+	writeGit(t, root, "worktree/payload.txt", "tracked project files")
+	gitCommit(t, git, "Track a directory named worktree")
+	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "worktree"), DataDir: t.TempDir(), DisableClone: true})
+	path := filepath.Join(factory.roots[0], "thr_a")
+	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_a"), path)
+	ordinary := filepath.Join(factory.roots[0], "worktree")
+	writeGit(t, ordinary, "payload.txt", "normal directory in the managed root")
 
 	worktrees, err := factory.Worktrees(t.Context(), false)
 	if err != nil || len(worktrees) != 1 || worktrees[0].Path != path || worktrees[0].Bytes != nil {
@@ -46,6 +43,14 @@ func TestWorktreesListsPathsWithoutSizingThem(t *testing.T) {
 	measured, err := factory.Worktrees(t.Context(), true)
 	if err != nil || len(measured) != 1 || measured[0].Bytes == nil || *measured[0].Bytes < 4 {
 		t.Fatalf("unexpected measured worktrees: %+v, %v", measured, err)
+	}
+	if removed, err := factory.Remove(t.Context(), "thr_a", RemoveOptions{}); err != nil || !removed {
+		t.Fatalf("cannot remove a registered worktree without discussion data: %t, %v", removed, err)
+	}
+	for _, dir := range []string{filepath.Join(root, "worktree"), ordinary} {
+		if _, err := os.Stat(filepath.Join(dir, "payload.txt")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -192,13 +192,21 @@ func usesFilters(ctx context.Context, git GitRun, tree string) (bool, error) {
 	}
 	return false, gitFailure(found, "git grep")
 }
-func checkoutOf(ctx context.Context, git GitRun, ref string) (string, error) {
+func worktreeFields(ctx context.Context, git GitRun) ([]string, error) {
 	list := git(ctx, []string{"worktree", "list", "--porcelain", "-z"}, GitOptions{Whole: true})
 	if list.ExitCode != 0 {
-		return "", gitFailure(list, "git worktree list")
+		return nil, gitFailure(list, "git worktree list")
+	}
+	return strings.Split(list.Stdout, "\x00"), nil
+}
+
+func checkoutOf(ctx context.Context, git GitRun, ref string) (string, error) {
+	fields, err := worktreeFields(ctx, git)
+	if err != nil {
+		return "", err
 	}
 	path := ""
-	for _, field := range strings.Split(list.Stdout, "\x00") {
+	for _, field := range fields {
 		if field == "" {
 			path = ""
 			continue
