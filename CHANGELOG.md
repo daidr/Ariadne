@@ -1,5 +1,15 @@
 # 更新日志
 
+## 0.1.0-alpha.12 (2026-11-19)
+
+- feat: add in-app updates and download progress
+- feat: support multiple writable project sources
+- fix(web): scroll full-height conversations with a bottom fade
+- fix: anchor conversation todos in the message timeline
+- fix: streamline reference approvals and chat questions
+- fix: keep discussion replies in their thread
+- Merge pull request #142 from daidr/release/alpha
+
 ## 0.1.0-alpha.11 (2026-11-19)
 
 - fix: list only registered Git worktrees
