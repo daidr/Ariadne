@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.10 (2026-11-19)
+
+- perf: reduce live refresh, transcript, and storage costs
+- feat: stream artifact edits and simplify review workflows
+- feat: preview attachments and refine workspace controls
+- Merge pull request #140 from daidr/release/alpha
+
 ## 0.1.0-alpha.9 (2026-11-18)
 
 - fix: complete archived threads and improve agent reliability
