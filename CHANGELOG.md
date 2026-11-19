@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.1.0-alpha.11 (2026-11-19)
+
+- fix: list only registered Git worktrees
+- fix(web): correct artifact history navigation and simplify settings
+- Merge pull request #141 from daidr/release/alpha
+
 ## 0.1.0-alpha.10 (2026-11-19)
 
 - perf: reduce live refresh, transcript, and storage costs
