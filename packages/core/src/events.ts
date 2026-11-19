@@ -814,6 +814,8 @@ export interface EventMap {
     conversationId: string
     turnId: string
     text: string
+    /** A coordinator step handling updates from a discussion thread in the background. */
+    quiet?: boolean
     reasoning: ReasoningRecord[]
     toolCalls: ToolCallRecord[]
     /**

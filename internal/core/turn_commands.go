@@ -44,6 +44,7 @@ type Step struct {
 	Input     StepInput
 	Timing    CallTiming
 	Cut       bool
+	Quiet     bool
 }
 type Compaction struct {
 	Summary    string
@@ -167,6 +168,9 @@ func (repo *Repository) RecordStep(ctx context.Context, id, turnID string, step 
 			calls = []sdk.ToolCall{}
 		}
 		data := object{"conversationId": id, "turnId": turnID, "text": step.Text, "reasoning": reasoning, "toolCalls": calls, "finish": finish, "sawSeq": step.SawSeq, "usage": step.Usage, "input": input, "timing": step.Timing}
+		if step.Quiet {
+			data["quiet"] = true
+		}
 		if w.err != nil {
 			return w.err
 		}

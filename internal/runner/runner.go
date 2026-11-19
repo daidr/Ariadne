@@ -67,6 +67,7 @@ type turn struct {
 	instructionsDirty bool
 	handledBefore     int64
 	userSpoke         bool
+	quiet             bool
 }
 
 func (runner *Runner) Resolve(ctx context.Context, conversation core.ConversationView) (*settings.ResolvedModel, error) {
@@ -278,8 +279,8 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				return err
 			}
 		}
-		if conversation.Role == "coordinator" && !turn.userSpoke {
-			turn.userSpoke = userSpokeSince(entries, turn.handledBefore)
+		if conversation.Role == "coordinator" {
+			turn.trackCoordinatorInput(entries)
 		}
 		record := recordCall(model, model.Effort)
 		chat, title := trace.ModelInput(ctx, turn.Repository, conversation.ProjectID, record, model.Images)
@@ -381,7 +382,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		if err := turn.Repository.RecordStep(ctx, conversation.ID, turn.id, core.Step{
 			Text: answer.Text, Reasoning: answer.Reasoning, ToolCalls: answer.ToolCalls, SawSeq: saw, Usage: modelstep.WithCost(answer.Usage, price),
-			Input: core.StepInput{System: prompt.system, Tools: prompt.tools, Call: string(called), Images: model.Images}, Timing: answer.Timing, Cut: answer.Cut,
+			Input: core.StepInput{System: prompt.system, Tools: prompt.tools, Call: string(called), Images: model.Images}, Timing: answer.Timing, Cut: answer.Cut, Quiet: turn.quiet,
 		}); err != nil {
 			return err
 		}
@@ -398,7 +399,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			if answer.Cut {
 				continue
 			}
-			if strings.TrimSpace(answer.Text) != "" && !hintedUnsent {
+			if !turn.quiet && strings.TrimSpace(answer.Text) != "" && !hintedUnsent {
 				hintedUnsent = true
 				continue
 			}
@@ -407,6 +408,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		hash, err := turn.execute(ctx, tools, answer.ToolCalls)
 		if err != nil {
 			return err
+		}
+		if turn.quiet && !answer.Cut && !slices.ContainsFunc(answer.ToolCalls, func(call sdk.ToolCall) bool {
+			return !coordinatorChatTool(call.Name)
+		}) {
+			return turn.Repository.CompleteModelTurn(ctx, conversation.ID, turn.id)
 		}
 		recent = append(recent, hash)
 		recent = recent[max(0, len(recent)-repeats*maxCycle):]
@@ -417,27 +423,6 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			}
 		}
 	}
-}
-
-func userSpokeSince(entries []transcript.Entry, since int64) bool {
-	for _, entry := range entries {
-		if asNumber(entry["seq"]) <= float64(since) {
-			continue
-		}
-		switch entry["kind"] {
-		case "message":
-			sent, _ := entry["message"].(*core.MessageView)
-			if sent != nil && sent.Author == "user" {
-				return true
-			}
-		case "note":
-			note, _ := entry["note"].(map[string]any)
-			if note["type"] == "user-in-thread" || note["type"] == "answer" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func latestCleared(entries []transcript.Entry) float64 {
@@ -476,6 +461,8 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 		var err error
 		if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
 			err = errors.New("tool arguments must be a JSON object within 2 MiB")
+		} else if turn.quiet && coordinatorChatTool(call.Name) {
+			err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
 		} else if entry, available := byName[call.Name]; !available {
 			err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
 		} else {

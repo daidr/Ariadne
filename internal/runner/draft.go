@@ -18,7 +18,7 @@ func (turn *turn) clearDraft() {
 }
 
 func (turn *turn) preview(call *int, name, arguments string) {
-	if turn.Drafts == nil || !replyTool(name) || call == nil || len(arguments) > 256<<10 {
+	if turn.quiet || turn.Drafts == nil || !replyTool(name) || call == nil || len(arguments) > 256<<10 {
 		return
 	}
 	if turn.draft != nil && (*turn.draftCall != *call || turn.draftTool != name) {

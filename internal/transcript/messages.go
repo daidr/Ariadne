@@ -273,7 +273,7 @@ func ToMessages(entries []Entry, titleOf func(string) string, options ChatOption
 				open = &openStep{ids: ids, cut: yes(entry["cut"])}
 			} else if yes(entry["cut"]) {
 				out = append(out, Message{Role: "user", Content: CutHint})
-			} else if textutil.Trim(message.Content) != "" {
+			} else if !yes(entry["quiet"]) && textutil.Trim(message.Content) != "" {
 				out = append(out, Message{Role: "user", Content: UnsentHint})
 			}
 		case "prompt":

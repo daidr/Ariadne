@@ -290,7 +290,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run("UPDATE conversations SET turn_id = ?1, turn_started_at = ?2, last_turn_at = ?2, turn_started_seq = ?3, model = ?4, activity = NULL, fallback = 0 WHERE id = ?5", d["turnId"], e.At, e.Seq, d["model"], id)
 	case "turn.step":
 		var status any
-		if d.str("finish") != "stop" {
+		if d.str("finish") != "stop" && !d.yes("quiet") {
 			status = activity(d.str("text"))
 		}
 		w.run(`UPDATE conversations SET

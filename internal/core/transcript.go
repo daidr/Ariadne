@@ -320,7 +320,7 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 	case "conversation.results_cleared":
 		addEntry(w, e, d["conversationId"], "cleared", nil, pick(d, "upTo"), false)
 	case "turn.step":
-		payload := pick(d, "text", "reasoning", "toolCalls", "sawSeq")
+		payload := pick(d, "text", "reasoning", "toolCalls", "sawSeq", "quiet")
 		payload["call"] = d.obj("input")["call"]
 		if d.str("finish") == "length" {
 			payload["cut"] = true
