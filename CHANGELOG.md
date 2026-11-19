@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.13 (2026-11-19)
+
+- fix: improve Antigravity and ACP provider compatibility
+- Merge pull request #143 from daidr/release/alpha
+
 ## 0.1.0-alpha.12 (2026-11-19)
 
 - feat: add in-app updates and download progress
