@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ArtifactVersionView } from '@ariadne/core'
 import { CheckIcon } from '@dou-ui/icons'
-import { DouButton, DouSpinner, DouText } from 'dou-ui'
+import { DouSpinner, DouText } from 'dou-ui'
 import { onMounted, useTemplateRef } from 'vue'
 import { locale, t } from '../i18n'
 import { authorName } from './author'
@@ -27,8 +27,8 @@ const time = (at: number) =>
     </DouText>
     <ol v-else class="history-list">
       <li v-for="(version, index) in versions" :key="version.version">
-        <DouButton
-          variant="ghost"
+        <button
+          type="button"
           class="history-row"
           :aria-current="version.version === selected ? 'true' : undefined"
           @click="emit('select', version.version)"
@@ -42,17 +42,15 @@ const time = (at: number) =>
                 {{ t('artifact.current') }}
               </DouText>
             </span>
-            <DouText size="sm" variant="secondary">
+            <DouText size="sm" variant="secondary" class="history-meta">
               {{ authorName(version.author) }} · {{ time(version.createdAt) }}
             </DouText>
             <DouText v-if="version.reason" size="sm" variant="secondary" class="history-reason">
               {{ version.reason }}
             </DouText>
           </span>
-          <template v-if="version.version === selected" #trailing>
-            <CheckIcon aria-hidden="true" />
-          </template>
-        </DouButton>
+          <CheckIcon v-if="version.version === selected" aria-hidden="true" />
+        </button>
       </li>
     </ol>
   </div>
@@ -74,6 +72,7 @@ const time = (at: number) =>
 
 .history-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 0;
   padding: 0;
@@ -81,13 +80,29 @@ const time = (at: number) =>
 }
 
 .history-row {
-  width: 100%;
-  height: auto;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1em;
+  align-items: center;
+  gap: 8px;
+  inline-size: 100%;
   padding: 10px 12px;
+  border: 0;
+  border-radius: var(--dou-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   text-align: start;
-  white-space: normal;
   line-height: 1.35;
+  cursor: pointer;
+}
+
+.history-row:hover {
+  background: var(--dou-color-neutral-soft);
+}
+
+.history-row:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: -2px;
 }
 
 .history-detail {
@@ -98,11 +113,13 @@ const time = (at: number) =>
 
 .history-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
 }
 
-.history-reason {
+.history-reason,
+.history-meta {
   overflow-wrap: anywhere;
 }
 </style>

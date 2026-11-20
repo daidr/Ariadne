@@ -61,6 +61,7 @@ const activeComment = ref<string | null>(null)
 const body = ref<{
   quotes?: () => Record<string, string>
   anchored?: () => Set<string>
+  revealComment?: (id: string) => void
   markedPictures?: () => Promise<Blob[]>
   markHeard?: () => void
 } | null>(null)
@@ -281,6 +282,11 @@ const commentProps = computed(() =>
     : {},
 )
 
+function openComment(id: string) {
+  body.value?.revealComment?.(id)
+  activeComment.value = id
+}
+
 /** The longest quote the server keeps (MAX_COMMENT_QUOTE). */
 const MAX_QUOTE = 1000
 
@@ -447,7 +453,7 @@ async function rename() {
         v-if="artifact?.kind === 'document' && !viewingOld"
         :comments="comments"
         :anchored="() => body?.anchored?.() ?? new Set()"
-        @open="(id: string) => (activeComment = id)"
+        @open="openComment"
         @action="comment"
       />
       <DouPopover

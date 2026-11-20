@@ -55,6 +55,7 @@ const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
 const editor = useTemplateRef<InstanceType<typeof DouEditor>>('editor')
+const scrollArea = useTemplateRef<HTMLElement>('scrollArea')
 
 /** The threads as the editor shows them; changes here show at once, before the server. */
 const threads = ref<CommentThread[]>([])
@@ -116,11 +117,25 @@ function anchored(): Set<string> {
   )
 }
 
-defineExpose({ quotes, anchored })
+function revealComment(id: string) {
+  const container = scrollArea.value
+  const instance = editor.value
+  const view = instance?.view
+  if (!container || !view) return
+  const anchor = instance.getCommentAnchors()[id]
+  if (!anchor) return
+  const { top, bottom } = view.coordsAtPos(anchor.from)
+  const viewportTop = container.getBoundingClientRect().top + container.clientTop
+  if (top >= viewportTop && bottom <= viewportTop + container.clientHeight) return
+  const viewportCenter = viewportTop + container.clientHeight / 2
+  container.scrollTop += (top + bottom) / 2 - viewportCenter
+}
+
+defineExpose({ quotes, anchored, revealComment })
 </script>
 
 <template>
-  <div class="document">
+  <div ref="scrollArea" class="document">
     <DouEditor
       v-if="ready"
       ref="editor"
@@ -148,12 +163,29 @@ defineExpose({ quotes, anchored })
   box-sizing: border-box;
 }
 
-/* A readable column, about 40 characters of Chinese a line; paragraphs apart, list items close. */
 .document-text {
   --dou-editor-line-height: 1.8;
-  --dou-editor-reading-width: 40em;
+  --dou-editor-reading-width: 48em;
   --dou-editor-block-gap: 10px;
   --dou-editor-list-gap: 4px;
+}
+
+.document-text :deep(.dou-editor-table col:not([style*='width:'])) {
+  /* DouUI budgets 96px per automatic column. Apply that minimum to each column. */
+  min-inline-size: 96px;
+}
+
+.document-text :deep(.dou-editor-table :is(th, td)) {
+  /* Limit intrinsic sizing. Explicit widths on the columns still take precedence. */
+  max-inline-size: calc(0.75 * var(--dou-editor-reading-width));
+  overflow-wrap: anywhere;
+}
+
+.document-text :deep([data-comment] .dou-editor__inline-code) {
+  /* The comment wraps the code. Keep its tint and underline visible through the code styling. */
+  padding-block: 0;
+  background-color: color-mix(in srgb, var(--dou-color-text) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dou-color-text) 5%, transparent);
 }
 
 .document-text :deep([data-ai-editing] > .dou-editor__content) {
