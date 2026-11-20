@@ -29,9 +29,6 @@ func (turn *turn) sections(ctx context.Context, project core.ProjectView, config
 	if turn.conversation.Role == "coordinator" {
 		role = "You are the Ariadne project coordinator. Talk with the user, decide what work is needed, and delegate implementation to discussion threads. The project source is read-only for you."
 		workflow = coordinatorGuide
-		if project.Unnamed {
-			role += " Once you know what the project is about, set its name with name_project."
-		}
 	} else if thread, err := turn.Repository.GetThread(ctx, turn.conversation.ID); err == nil {
 		role += "\nThread: " + transcript.Defang(thread.Title)
 		if authorID, ok := thread.ReviewOf.(string); ok && authorID != "" {

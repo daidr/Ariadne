@@ -8,6 +8,7 @@ import {
   type MessageParams,
 } from '@ariadne/i18n'
 import { en as douEn, zhCN as douZhCN } from 'dou-ui'
+import type { UsageTotals } from '@ariadne/core'
 import type { LocalizedText } from '@ariadne/plugin-sdk'
 import { computed, ref } from 'vue'
 
@@ -61,6 +62,20 @@ const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
 /** A token count, e.g. `950`, `12.3k` or `1.2M`, the same in every locale. */
 export function count(value: number): string {
   return compact.format(value).replace('K', 'k')
+}
+
+export function percent(part: number, whole: number): string {
+  return whole
+    ? new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 0 }).format(
+        part / whole,
+      )
+    : '—'
+}
+
+export function cacheHitRate({ input, cached, cacheWrite }: UsageTotals): string {
+  // Older usage can contain cache counts without the corresponding total input.
+  if (cached + cacheWrite > input) return '—'
+  return percent(cached, input)
 }
 
 /** Names joined as the locale lists them: `A、B和C`, `A, B, and C`. */

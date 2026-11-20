@@ -81,9 +81,13 @@ func askApproval(tx *eventstore.Transaction, projectID, conversationID, purpose 
 	if err != nil {
 		return err
 	}
+	block := asObject(opened.data).obj("block")
+	if options.ConfirmDetail != "" && block.str("type") == "confirm" {
+		block["detail"] = options.ConfirmDetail
+	}
 	if options.AllowProjectReference && !coordinator {
 		// Attach the system approval scope after validating the model-facing block.
-		asObject(opened.data).obj("block")["allowProjectReference"] = true
+		block["allowProjectReference"] = true
 	}
 	return appendChanges(tx, projectID, append(changes, opened))
 }
@@ -126,6 +130,8 @@ type CallApprovalOptions struct {
 	InChat                bool `json:"inChat"`
 	No                    *int `json:"no"`
 	AllowProjectReference bool `json:"-"`
+	// ConfirmDetail holds tool-supplied text verbatim after validation of the card fields.
+	ConfirmDetail string `json:"-"`
 }
 type CallApprovalResult struct {
 	State       string `json:"state"`

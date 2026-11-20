@@ -42,7 +42,7 @@ func TestStopThreadJoinsActualProcessBeforeReleasingWorkspace(t *testing.T) {
 	defer cancel()
 	ready := false
 	for !ready && ctx.Err() == nil {
-		output, err := commands.Read(ctx, "thread", view.ID, time.Second)
+		output, err := commands.Read(ctx, "thread", view.ID, time.Second, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

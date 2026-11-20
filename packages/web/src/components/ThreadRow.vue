@@ -15,6 +15,7 @@ import { checksTone, questionOf, statusLine } from '../stage'
 import { state } from '../store'
 import ReviewMark from '../review/ReviewMark.vue'
 import { branchChanges } from '../review/merge-offered'
+import { useServerNow } from '../server-clock'
 import StageIcon from './StageIcon.vue'
 
 /**
@@ -22,6 +23,7 @@ import StageIcon from './StageIcon.vue'
  * `nested`: a reviewing thread, under its author's row.
  */
 const props = defineProps<{ thread: ThreadView; nested?: boolean }>()
+const now = useServerNow()
 
 const line = computed(() => {
   if (!props.nested) {
@@ -112,7 +114,7 @@ const prTone = computed(() =>
         </DouText>
       </DouTooltip>
       <DouText size="sm" variant="tertiary" class="row-time row-trim">
-        <DouRelativeTime :value="thread.activeAt" short />
+        <DouRelativeTime :value="Math.min(thread.activeAt, now)" :now="now" short />
       </DouText>
     </span>
     <span v-if="line" class="row-foot">

@@ -175,10 +175,10 @@ func lineComments(given []any) ([]object, error) {
 }
 func messageCites(w *projectionWriter, projectID string, ids []string) ([]object, error) {
 	unique := []string{}
-	seen := map[string]bool{}
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
+	firstIndex := map[string]int{}
+	for index, id := range ids {
+		if _, seen := firstIndex[id]; !seen {
+			firstIndex[id] = index
 			unique = append(unique, id)
 		}
 	}
@@ -192,7 +192,9 @@ func messageCites(w *projectionWriter, projectID string, ids []string) ([]object
 			return nil, w.err
 		}
 		if row == nil || row.text("author") != "user" {
-			return nil, domainerr.NotFound(id)
+			err := domainerr.NotFoundField("cites", id)
+			err.Index = new(firstIndex[id])
+			return nil, err
 		}
 		cite := object{"messageId": id, "conversationId": row["conversation_id"], "content": row["content"], "at": row["created_at"]}
 		for _, key := range []string{"attachments", "mentions"} {

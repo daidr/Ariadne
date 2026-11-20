@@ -89,6 +89,56 @@ func (reader Reader) ListRunningConversations(ctx context.Context) ([]Conversati
 	return reader.listConversations(ctx, "SELECT * FROM conversations WHERE turn_id IS NOT NULL")
 }
 
+type ConversationActivity struct {
+	Status   string    `json:"status"`
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+type ThreadActivity struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	ConversationActivity
+}
+
+type ProjectActivity struct {
+	Coordinator ConversationActivity `json:"coordinator"`
+	Threads     []ThreadActivity     `json:"threads"`
+}
+
+// ProjectActivity serves the sidebar on demand without loading the project transcript or thread views.
+func (reader Reader) ProjectActivity(ctx context.Context, projectID string) (ProjectActivity, error) {
+	rows, err := records(ctx, reader.DB, `SELECT c.id, c.role, t.title, td.items AS todo_items,
+	 CASE WHEN c.turn_id IS NOT NULL THEN 'running'
+	      WHEN c.pending_seq > 0 THEN 'queued'
+	      WHEN c.wait_id IS NOT NULL THEN 'waiting'
+	      ELSE 'idle' END AS status
+	 FROM conversations c LEFT JOIN threads t ON t.id = c.id
+	 LEFT JOIN todos td ON td.conversation_id = c.id AND c.turn_id IS NOT NULL
+	 WHERE c.project_id = ? AND (c.role = 'coordinator' OR
+	   (t.id IS NOT NULL AND t.stopped_reason IS NULL AND (c.turn_id IS NOT NULL OR c.pending_seq > 0 OR c.wait_id IS NOT NULL)))
+	 ORDER BY c.turn_id IS NULL, c.pending_seq = 0, c.pending_since, c.id`, projectID)
+	if err != nil {
+		return ProjectActivity{}, err
+	}
+	view := ProjectActivity{Threads: []ThreadActivity{}}
+	for _, row := range rows {
+		progress, _, err := readTodoProgress(row)
+		if err != nil {
+			return ProjectActivity{}, err
+		}
+		activity := ConversationActivity{Status: row.text("status"), Progress: progress}
+		if row.text("role") == "coordinator" {
+			view.Coordinator = activity
+		} else {
+			view.Threads = append(view.Threads, ThreadActivity{ID: row.text("id"), Title: row.text("title"), ConversationActivity: activity})
+		}
+	}
+	if view.Coordinator.Status == "" {
+		return ProjectActivity{}, domainerr.NotFound(projectID)
+	}
+	return view, nil
+}
+
 type MessageView struct {
 	ID              string `json:"id"`
 	ConversationID  string `json:"conversationId"`

@@ -126,10 +126,11 @@ func acpChildCommand(t *testing.T, scenario string) (string, string) {
 }
 
 func TestACPAntigravityExecutorError(t *testing.T) {
-	for _, test := range []struct{ scenario, reason string }{
-		{"agy-error", "error"},
-		{"agy-recovered", "stop"},
-		{"other-agent", "stop"},
+	for _, test := range []struct{ scenario, reason, detail string }{
+		{"agy-error", "error", "synthetic Gemini request rejected"},
+		{"agy-executor-start", "error", "plan model not specified"},
+		{"agy-recovered", "stop", ""},
+		{"other-agent", "stop", ""},
 	} {
 		t.Run(test.scenario, func(t *testing.T) {
 			command, _ := acpChildCommand(t, test.scenario)
@@ -138,12 +139,44 @@ func TestACPAntigravityExecutorError(t *testing.T) {
 			parts := codexParts(t, m, map[string]any{"command": command}, request)
 			lastPart(t, parts, test.reason)
 			if test.reason == "error" && (textParts(parts) != "" ||
-				!strings.Contains(parts[len(parts)-1].Error, "synthetic Gemini request rejected") ||
+				!strings.Contains(parts[len(parts)-1].Error, test.detail) ||
 				parts[len(parts)-1].Retryable) {
 				t.Fatalf("unexpected executor failure: %+v", parts)
 			}
 		})
 	}
+}
+
+func TestACPAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
+	command, _ := acpChildCommand(t, "agy-usage")
+	settings := map[string]any{"command": command}
+	opts := SessionOptions{DataDir: t.TempDir()}
+	m := newTestSessions(t, ACPKind(nil, nil), opts)
+	request := sdk.Request{Conversation: "coordinator", Messages: []sdk.Message{user("first")}}
+	first := codexParts(t, m, settings, request)
+	check := func(parts []sdk.Part) {
+		t.Helper()
+		lastPart(t, parts, "stop")
+		for _, part := range parts {
+			if part.Type != "usage" {
+				continue
+			}
+			if tokenValue(part.Input) != 170000 || tokenValue(part.Cached) != 167000 ||
+				tokenValue(part.Output) != 47 || tokenValue(part.Reasoning) != 7 ||
+				tokenValue(part.ContextInput) != 90034 {
+				t.Fatalf("incorrect ACP usage: %+v", part)
+			}
+			return
+		}
+		t.Fatal("no ACP usage reported")
+	}
+	check(first)
+	if err := m.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m = newTestSessions(t, ACPKind(nil, nil), opts)
+	request.Messages = append(request.Messages, assistant(textParts(first)), user("second"))
+	check(codexParts(t, m, settings, request))
 }
 
 func TestACPModernProtocolAndRestart(t *testing.T) {
@@ -226,6 +259,7 @@ func TestACPChild(t *testing.T) {
 	defer log.Close()
 	restore := args[len(args)-1]
 	model, effort := "base", "high"
+	resumed := false
 	options := func() json.RawMessage {
 		modelOption := fmt.Sprintf(`{"id":"model-picker","type":"select","category":"model","currentValue":%q,"options":[{"group":"test","name":"Test","options":[{"value":"base","name":"Base"},{"value":"alternate","name":"Alternate"},{"value":"fixed","name":"Fixed"}]}]}`, model)
 		if model == "fixed" {
@@ -277,6 +311,7 @@ func TestACPChild(t *testing.T) {
 				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old history"}}}}`))
 			}
 			model, effort = "alternate", "extra"
+			resumed = true
 			result = map[string]any{"configOptions": options()}
 		case "session/set_config_option":
 			switch request.Params.ConfigID {
@@ -291,6 +326,8 @@ func TestACPChild(t *testing.T) {
 			switch restore {
 			case "agy-error", "other-agent":
 				text = "\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"
+			case "agy-executor-start":
+				text = "\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"
 			case "agy-recovered":
 				text = "\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"
 			}
@@ -299,7 +336,16 @@ func TestACPChild(t *testing.T) {
 			if effort == "low" {
 				stop = "max_tokens"
 			}
-			result = map[string]any{"stopReason": stop}
+			response := map[string]any{"stopReason": stop}
+			if restore == "agy-usage" {
+				if !resumed {
+					for _, used := range []int{80013, 90034} {
+						_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":%d,"size":400000}}}`, used)))
+					}
+				}
+				response["usage"] = map[string]any{"inputTokens": 3000, "outputTokens": 47, "cachedReadTokens": 167000, "thoughtTokens": 7, "totalTokens": 170047}
+			}
+			result = response
 		default:
 			t.Fatalf("unexpected method: %s", request.Method)
 		}

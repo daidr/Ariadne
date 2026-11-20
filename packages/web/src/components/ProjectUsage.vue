@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DouText } from 'dou-ui'
 import { computed } from 'vue'
-import { count, locale, t } from '../i18n'
+import { cacheHitRate, count, percent, t } from '../i18n'
 import { openThread, state } from '../store'
 import UsageBreakdown from './UsageBreakdown.vue'
 import { costText } from '../cost'
@@ -20,12 +20,7 @@ const usage = computed(
 )
 const cost = computed(() => (state.showCost ? costText(usage.value.cost) : null))
 const total = computed(() => usage.value.input + usage.value.output)
-const percent = (part: number, whole: number) =>
-  whole
-    ? new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 0 }).format(
-        part / whole,
-      )
-    : '—'
+const hitRate = computed(() => cacheHitRate(usage.value))
 
 /** The conversations that used the most, the coordinator's among them. */
 const top = computed(() => {
@@ -67,7 +62,7 @@ function go(id: string | null) {
       </li>
       <li>
         <span>{{ t('usage.hitRate') }}</span>
-        <span class="usage-value">{{ percent(usage.cached, usage.input) }}</span>
+        <span class="usage-value">{{ hitRate }}</span>
       </li>
     </ul>
 

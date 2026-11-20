@@ -70,6 +70,8 @@ type turn struct {
 	quiet             bool
 }
 
+const maxToolResultChars = 200_000
+
 func (runner *Runner) Resolve(ctx context.Context, conversation core.ConversationView) (*settings.ResolvedModel, error) {
 	kinds := runner.Models.Kinds()
 	if conversation.Role == "thread" {
@@ -224,6 +226,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 	var recent [][32]byte
 	cuts, lastInput := 0, 0
 	hintedUnsent, compactionFailed := false, false
+	recoveredContext := false
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -364,7 +367,14 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
 		if err != nil {
 			var failure *modelstep.Failure
-			if ctx.Err() == nil && model.Fallback != nil && errors.As(err, &failure) && failure.Exhausted != nil {
+			if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.Program && failure.ContextLimit && !recoveredContext {
+				// The failed native session has been released. Compact if there is
+				// enough history, then resume the same discussion with a fresh session.
+				recoveredContext = true
+				lastInput = max(lastInput, threshold)
+				continue
+			}
+			if ctx.Err() == nil && model.Fallback != nil && failure != nil && failure.Exhausted != nil {
 				if err := turn.Repository.RecordModelFallback(ctx, conversation.ID, turn.id, model.Label, model.Fallback.Label, *failure.Exhausted); err != nil {
 					return err
 				}
@@ -493,9 +503,9 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			if _, available := byName[fileSourceToolName]; available {
 				hint = referenceReadHint(call.Name, err)
 			}
-			content = textutil.HeadUnits(err.Error(), 2000-len(hint)) + hint
+			content = textutil.HeadUnits(toolErrorText(err), 2000-len(hint)) + hint
 		}
-		content = strings.Clone(textutil.HeadUnits(content, 200_000))
+		content = strings.Clone(textutil.HeadUnits(content, maxToolResultChars))
 		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, err != nil, attachments})
 		_, _ = hash.Write(encoded)
 		if err := turn.Repository.RecordToolResult(ctx, turn.conversation.ID, turn.id, core.ToolResult{

@@ -40,6 +40,7 @@ type Output struct {
 	Command Command `json:"command"`
 	Text    string  `json:"text"`
 	Missed  int64   `json:"missed"`
+	More    bool    `json:"more,omitempty"`
 }
 type Peek struct {
 	Command Command `json:"command"`
@@ -49,6 +50,7 @@ type StartOptions struct {
 	Local, Keep    bool
 	CWD            string
 	SourceIdentity string
+	Timeout        time.Duration
 }
 type Options struct {
 	Now func() time.Time
@@ -282,8 +284,7 @@ func (commands *Commands) limitOutput() {
 			break
 		}
 		amount := min(drop.output.length(), commands.units-maxOutputUnits)
-		drop.output.drop(amount)
-		commands.units -= amount
+		commands.units -= drop.output.drop(amount)
 	}
 }
 func execute(ctx context.Context, exec Executor, options sdk.ExecOptions) (result sdk.ExecResult, err error) {
@@ -306,9 +307,13 @@ func (commands *Commands) Start(thread, command string, exec Executor, options S
 	view := copyView(job.view)
 	commands.mu.Unlock()
 	commands.notify(thread)
+	timeout := options.Timeout
+	if timeout <= 0 {
+		timeout = Timeout
+	}
 	go func() {
 		defer commands.workers.Done()
-		result, err := execute(ctx, exec, sdk.ExecOptions{Timeout: Timeout, OnOutput: func(text, _ string) { commands.append(job, text) }})
+		result, err := execute(ctx, exec, sdk.ExecOptions{Timeout: timeout, OnOutput: func(text, _ string) { commands.append(job, text) }})
 		commands.settle(job, result, err)
 	}()
 	return view, nil
@@ -370,7 +375,7 @@ func (commands *Commands) own(thread, id string) *job {
 	}
 	return nil
 }
-func (commands *Commands) Read(ctx context.Context, thread, id string, wait time.Duration) (*Output, error) {
+func (commands *Commands) Read(ctx context.Context, thread, id string, wait time.Duration, limit int) (*Output, error) {
 	commands.mu.Lock()
 	job := commands.own(thread, id)
 	if job == nil {
@@ -399,10 +404,14 @@ func (commands *Commands) Read(ctx context.Context, thread, id string, wait time
 			return nil, nil
 		}
 	}
-	text, missed := job.output.take()
+	if err := ctx.Err(); err != nil {
+		commands.mu.Unlock()
+		return nil, err
+	}
+	text, missed, more := job.output.take(limit)
 	view := copyView(job.view)
 	commands.mu.Unlock()
-	return &Output{Command: view, Text: text, Missed: missed}, nil
+	return &Output{Command: view, Text: text, Missed: missed, More: more}, nil
 }
 func (commands *Commands) Peek(thread, id string, chars int) *Peek {
 	commands.mu.Lock()

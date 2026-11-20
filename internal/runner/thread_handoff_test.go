@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func TestCoordinatorUsesReturnedThreadIDsForMessagesAndCards(t *testing.T) {
@@ -83,5 +84,114 @@ func TestCoordinatorUsesReturnedThreadIDsForMessagesAndCards(t *testing.T) {
 	if len(blocks) != 2 || text(objectField(args{"block": blocks[0]}, "block"), "threadId") != second ||
 		text(objectField(args{"block": blocks[1]}, "block"), "threadId") != first {
 		t.Fatalf("wrong card targets or order: %v", blocks)
+	}
+}
+
+func TestCoordinatorCanRecoverFromInvalidThreadReferences(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "relay.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Test handoff"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const body = "你帮我看看新增图标是什么流程"
+	userMessage, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: project.CoordinatorID, Author: "user", Content: body,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := repo.StartScheduledTurn(ctx, project.CoordinatorID, "mock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &turn{Runner: &Runner{Repository: repo}, id: turnID, conversation: core.ConversationView{
+		ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator",
+	}}
+	tools := agent.tools(ctx, project)
+	for _, entry := range tools {
+		if entry.spec.Name != "create_thread" && entry.spec.Name != "message_thread" {
+			continue
+		}
+		fields := objectField(entry.spec.Parameters, "properties")
+		description := text(objectField(fields, "userMessages"), "description")
+		if !strings.Contains(description, "exact id") || !strings.Contains(description, "list_messages") {
+			t.Errorf("%s did not explain how to provide message IDs: %q", entry.spec.Name, description)
+		}
+	}
+	call := func(id, name string, input args) args {
+		t.Helper()
+		data, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = agent.execute(ctx, tools, []sdk.ToolCall{{ID: id, Name: name, Arguments: string(data)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		transcript, err := repo.ListTranscript(ctx, project.CoordinatorID, core.TranscriptOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range transcript {
+			if entry["kind"] == "tool" && entry["toolCallId"] == id {
+				return entry
+			}
+		}
+		t.Fatalf("tool result %s was not recorded", id)
+		return nil
+	}
+	checkError := func(entry args, fragments ...string) {
+		t.Helper()
+		content := text(entry, "content")
+		if entry["isError"] != true {
+			t.Fatalf("expected an error, got %q", content)
+		}
+		for _, fragment := range fragments {
+			if !strings.Contains(content, fragment) {
+				t.Errorf("tool error %q did not contain %q", content, fragment)
+			}
+		}
+	}
+	checkError(call("body", "create_thread", args{
+		"title": "Icon workflow", "brief": "Inspect the repository", "userMessages": []any{userMessage.ID, body},
+	}), "userMessages[1]", "list_messages", "brief")
+	checkError(call("shape", "create_thread", args{
+		"title": "Icon workflow", "brief": "Inspect the repository", "userMessages": body,
+	}), "userMessages", "array", "list_messages")
+	checkError(call("node", "create_thread", args{
+		"title": "Icon workflow", "brief": "Inspect the repository", "nodeId": "nod_missing",
+	}), "nodeId", "nod_missing", "read_plan")
+	checkError(call("generic", "read_thread", args{"threadId": "thr_missing"}), "thr_missing")
+	if threads, err := repo.ListThreads(ctx, project.ID); err != nil || len(threads) != 0 {
+		t.Fatalf("failed create_thread calls left a thread: %v, %v", threads, err)
+	}
+
+	listed := call("messages", "list_messages", args{})
+	if listed["isError"] == true || !strings.Contains(text(listed, "content"), userMessage.ID) {
+		t.Fatalf("list_messages did not return the user's ID: %v", listed)
+	}
+	created := call("retry", "create_thread", args{
+		"title": "Icon workflow", "brief": "Inspect the repository", "userMessages": []any{userMessage.ID},
+	})
+	var result args
+	if created["isError"] == true || json.Unmarshal([]byte(text(created, "content")), &result) != nil {
+		t.Fatalf("retry with a real message ID failed: %v", created)
+	}
+	threadID := text(result, "threadId")
+	checkError(call("bad-relay", "message_thread", args{
+		"threadId": threadID, "content": "Follow-up", "userMessages": []any{"msg_missing"},
+	}), "userMessages[0]", "list_messages", "content")
+	messages, err := repo.ListMessages(ctx, threadID)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("the failed relay should leave only the initial brief: %v, %v", messages, err)
+	}
+	cites, _ := messages[0].Cites.([]any)
+	if len(cites) != 1 || text(cites[0].(map[string]any), "messageId") != userMessage.ID {
+		t.Fatalf("the retried brief lost its original user message: %v", cites)
 	}
 }

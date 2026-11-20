@@ -282,6 +282,7 @@ func (api *API) add(method, pattern string, run endpoint) {
 		if pattern != "/api/health" {
 			http.SetCookie(w, api.auth.FileSessionCookie(r))
 			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Ariadne-Server-Time", strconv.FormatInt(time.Now().UnixMilli(), 10))
 		}
 		if status == 0 {
 			status = 200
@@ -419,6 +420,10 @@ func (api *API) registerReads() {
 		}
 		hasTracker := api.options.HasTracker != nil && api.options.HasTracker(id)
 		return object{"project": detail.Project, "threads": delta.Threads, "needsMe": detail.NeedsMe, "sync": sync, "hasTracker": hasTracker}, 200, nil
+	})
+	api.add("GET", "/api/projects/:projectId/activity", func(r *http.Request) (any, int, error) {
+		activity, err := repo.ProjectActivity(r.Context(), r.PathValue("projectId"))
+		return activity, 200, err
 	})
 	api.add("GET", "/api/projects/:projectId/search", func(r *http.Request) (any, int, error) {
 		value, err := repo.Search(r.Context(), r.PathValue("projectId"), prefix(r.URL.Query().Get("q"), 200))

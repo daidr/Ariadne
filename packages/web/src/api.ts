@@ -19,6 +19,7 @@ import type {
   PlanOp,
   PlanUndoPreview,
   PlanView,
+  ProjectActivity,
   ProjectView,
   ReviewRoundView,
   SentLineComment,
@@ -46,6 +47,7 @@ import type {
   SettingsSchema,
   WorktreeInfo,
 } from '@ariadne/plugin-sdk'
+import { synchronizeServerClock } from './server-clock'
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
 export type McpToolMark = 'read' | 'ask' | 'off'
@@ -177,6 +179,7 @@ async function request<T>(
     ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
   })
+  if (response.ok) synchronizeServerClock(response.headers.get('X-Ariadne-Server-Time'))
   if (response.status === 204) return undefined as T
   const data = await response.json()
   if (!response.ok) throw new ApiError(response.status, data.error)
@@ -591,6 +594,8 @@ export const api = {
       'GET',
       `/api/projects/${id}${since ? `?since=${encodeURIComponent(since)}` : ''}`,
     ),
+  getProjectActivity: (id: string, signal: AbortSignal) =>
+    request<ProjectActivity>('GET', `/api/projects/${id}/activity`, undefined, signal),
   /**
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.

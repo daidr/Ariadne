@@ -9,6 +9,33 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 )
 
+func TestCoordinatorCannotRenameProject(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, nil, core.ProjectStart{Message: "整理项目需求"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !project.Unnamed {
+		t.Fatal("expected an unnamed project")
+	}
+	coordinator := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
+		ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator",
+	}}
+	for _, entry := range coordinator.tools(ctx, project) {
+		if entry.spec.Name == "name_project" {
+			t.Fatal("the coordinator can still rename a project")
+		}
+	}
+	if strings.Contains(joinSections(coordinator.sections(ctx, project, nil)), "name_project") {
+		t.Fatal("the coordinator prompt still asks it to name the project")
+	}
+}
+
 func TestCoordinatorCompletesPreviouslyPausedDiscussion(t *testing.T) {
 	ctx := t.Context()
 	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "test.sqlite")})

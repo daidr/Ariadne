@@ -256,6 +256,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	// Routes added after the frozen Bun contract also require authentication.
 	known["GET /api/files/:fileId/sheet"] = true
 	known["GET /api/projects/:projectId/sources"] = true
+	known["GET /api/projects/:projectId/activity"] = true
 	known["PUT /api/projects/:projectId/sources"] = true
 	known["GET /api/updates"] = true
 	known["PUT /api/updates"] = true

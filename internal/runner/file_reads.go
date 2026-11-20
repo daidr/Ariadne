@@ -15,10 +15,11 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/files"
 	"github.com/daidr/Ariadne/internal/textutil"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func (turn *turn) readFileTool() tool {
-	entry := specification("read_file", "Read numbered lines of a file. Pass source to select a named file source. Use the returned offset for more lines. Images are attached to the result.",
+	entry := specification("read_file", "Read numbered lines of a text file up to 1 MiB. Pass source to select a named file source. Use the returned offset for more lines. Give large logs, traces, source maps and generated bundles to a script for a targeted summary. Images are attached to the result.",
 		args{"path": field("string"), "source": field("string"), "reference": field("string"), "offset": field("integer"), "limit": field("integer")},
 		[]string{"path"}, nil)
 	entry.call = turn.readFile
@@ -55,6 +56,10 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	}
 	data, err := view.ReadBytes(ctx, path, maxBytes)
 	if err != nil {
+		var tooLarge *sdk.FileTooLargeError
+		if image == "" && errors.As(err, &tooLarge) {
+			return "", nil, fmt.Errorf("%w. Offsets apply only within the text read limit. For a large trace, log, source map or bundle, have a workspace script read the file and print only the needed fields or a small summary", err)
+		}
 		return "", nil, err
 	}
 	if image != "" && http.DetectContentType(data) == image {

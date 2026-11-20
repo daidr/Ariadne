@@ -72,7 +72,7 @@ func (repo *Repository) createThread(ctx context.Context, tx *eventstore.Transac
 		return ThreadView{}, err
 	}
 	if len(rows) == 0 {
-		return ThreadView{}, domainerr.NotFound(projectID)
+		return ThreadView{}, domainerr.NotFoundField("projectId", projectID)
 	}
 	title := projectsettings.Trim(input.Title)
 	if title == "" {
@@ -84,7 +84,7 @@ func (repo *Repository) createThread(ctx context.Context, tx *eventstore.Transac
 			return ThreadView{}, err
 		}
 		if len(nodes) == 0 {
-			return ThreadView{}, domainerr.NotFound(*input.NodeID)
+			return ThreadView{}, domainerr.NotFoundField("nodeId", *input.NodeID)
 		}
 	}
 	id, err := newID("thr")

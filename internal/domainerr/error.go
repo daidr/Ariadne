@@ -10,11 +10,21 @@ import (
 type Error struct {
 	Key    string         `json:"key"`
 	Params map[string]any `json:"params,omitempty"`
+
+	// Field and Index give tool callers the location of an invalid reference.
+	Field string `json:"-"`
+	Index *int   `json:"-"`
 }
 
 func (err *Error) Error() string                   { return err.Key }
 func New(key string, params map[string]any) *Error { return &Error{Key: key, Params: params} }
 func NotFound(what string) *Error                  { return New("error.notFound", map[string]any{"what": what}) }
+
+func NotFoundField(field, what string) *Error {
+	err := NotFound(what)
+	err.Field = field
+	return err
+}
 
 func Write(writer http.ResponseWriter, err error) {
 	var localized *Error

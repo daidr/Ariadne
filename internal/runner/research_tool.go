@@ -158,7 +158,7 @@ func researchRead(ctx context.Context, readable map[string]tool, call sdk.ToolCa
 		content, err = entry.run(ctx, input)
 	}
 	if err != nil {
-		return textutil.HeadUnits(err.Error(), 2000), true
+		return textutil.HeadUnits(toolErrorText(err), 2000), true
 	}
 	return textutil.HeadUnits(content, 20000), false
 }

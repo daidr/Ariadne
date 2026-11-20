@@ -5,6 +5,7 @@ import {
   DouContextMenu,
   DouEmpty,
   DouSortable,
+  DouSpinner,
   DouText,
   useDialog,
 } from 'dou-ui'
@@ -17,7 +18,7 @@ import {
   SettingsIcon,
   TrashIcon,
 } from '@dou-ui/icons'
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import {
@@ -31,9 +32,21 @@ import {
   state,
   openProjectSettings,
 } from '../store'
+import ProjectActivityPopover from './ProjectActivityPopover.vue'
 
 const dialog = useDialog()
 const canReorder = computed(() => state.projects.length > 1)
+const menuOpen = ref(false)
+const inspecting = ref<string>()
+
+function inspectProject(id: string, open: boolean) {
+  if (open && !menuOpen.value) inspecting.value = id
+  else if (inspecting.value === id) inspecting.value = undefined
+}
+
+watch(menuOpen, (open) => {
+  if (open) inspecting.value = undefined
+})
 
 async function moveProject(event: KeyboardEvent, id: string, offset: number) {
   if (!canReorder.value) return
@@ -136,6 +149,7 @@ async function confirmDelete(id: string) {
     </div>
     <DouContextMenu
       v-if="state.projects.length"
+      v-model:open="menuOpen"
       v-model:target="target"
       :items="actions"
       :before-open="targetProject"
@@ -150,22 +164,43 @@ async function confirmDelete(id: string) {
           @update:model-value="(projects) => reorderProjects(projects.map((project) => project.id))"
         >
           <template #default="{ item }">
-            <button
-              type="button"
-              class="projects-open"
-              :data-project-id="item.id"
-              :data-dou-sortable-handle="canReorder ? '' : undefined"
-              :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
-              :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-              @click="openProject(item.id)"
-              @keydown.enter.space.stop
-              @keydown.alt.up.prevent="moveProject($event, item.id, -1)"
-              @keydown.alt.down.prevent="moveProject($event, item.id, 1)"
+            <ProjectActivityPopover
+              v-slot="{ inspect, dismiss }"
+              :project-id="item.id"
+              :name="item.name"
+              :open="inspecting === item.id"
+              :disabled="menuOpen"
+              @update:open="(open) => inspectProject(item.id, open)"
             >
-              <FolderIcon class="projects-folder" aria-hidden="true" />
-              <span class="projects-name" :title="item.name">{{ item.name }}</span>
-              <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
-            </button>
+              <button
+                type="button"
+                class="projects-open"
+                :data-project-id="item.id"
+                :data-dou-sortable-handle="canReorder ? '' : undefined"
+                :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
+                :aria-expanded="inspecting === item.id"
+                :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
+                @click="openProject(item.id)"
+                @focus="inspect"
+                @blur="dismiss"
+                @keydown.esc="dismiss"
+                @keydown.enter.space.stop
+                @keydown.alt.up.prevent="moveProject($event, item.id, -1)"
+                @keydown.alt.down.prevent="moveProject($event, item.id, 1)"
+              >
+                <span class="projects-folder">
+                  <FolderIcon aria-hidden="true" />
+                  <span v-if="item.runningTurns" class="projects-running">
+                    <DouSpinner
+                      :size="8"
+                      :label="t('project.running', { count: item.runningTurns })"
+                    />
+                  </span>
+                </span>
+                <span class="projects-name">{{ item.name }}</span>
+                <DouBadge class="projects-count" :value="item.needsMe" tone="warning" />
+              </button>
+            </ProjectActivityPopover>
           </template>
         </DouSortable>
       </nav>
@@ -189,6 +224,7 @@ async function confirmDelete(id: string) {
 }
 
 .projects-open {
+  --project-row-bg: var(--dou-color-bg-canvas);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -197,7 +233,7 @@ async function confirmDelete(id: string) {
   padding: 0 10px;
   border: 0;
   border-radius: var(--dou-radius-control);
-  background: transparent;
+  background: var(--project-row-bg);
   color: var(--dou-color-text-secondary);
   font: inherit;
   text-align: start;
@@ -209,12 +245,12 @@ async function confirmDelete(id: string) {
 }
 
 .projects-open:hover {
-  background: color-mix(in oklab, var(--dou-color-text) 6%, transparent);
+  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 6%, var(--dou-color-bg-canvas));
   color: var(--dou-color-text);
 }
 
 .projects-open[aria-current] {
-  background: color-mix(in oklab, var(--dou-color-text) 8%, transparent);
+  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 8%, var(--dou-color-bg-canvas));
   color: var(--dou-color-text);
   font-weight: var(--dou-font-weight-medium);
 }
@@ -225,9 +261,30 @@ async function confirmDelete(id: string) {
 }
 
 .projects-folder {
+  position: relative;
+  display: grid;
+  place-items: center;
   flex: none;
   width: 16px;
   height: 16px;
+  font-size: 16px;
+}
+
+.projects-running {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  display: flex;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--project-row-bg);
+  color: var(--dou-color-primary-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .projects-running :deep(.dou-spinner) {
+    animation: none;
+  }
 }
 
 .projects-name {

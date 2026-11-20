@@ -17,7 +17,7 @@ const MaxInputImageBytes = 24 << 20
 const MaxAttachedChars = 100000
 const ClearableChars = 500
 const CutHint = `<output_cut_off>Your reply above hit the output length limit and was cut off; anything unfinished in it, such as a tool call whose arguments were not complete, was dropped, and the user has not seen it. Go on from where it stopped, in smaller pieces: keep replies shorter and write a large file in parts (create it with the first part, then add the rest in further edits).</output_cut_off>`
-const UnsentHint = `<not_sent>The text above was not sent: the user only sees what you send with send_message. If it was meant for them, send it now; otherwise end the turn without text.</not_sent>`
+const UnsentHint = `<not_sent>The user only sees replies sent with send_message. If the text above was a reply for them, use send_message now. Follow the rest of your workflow before ending the turn.</not_sent>`
 
 func LocalTime(ms int64) string { return time.UnixMilli(ms).In(time.Local).Format("2006-01-02 15:04") }
 func OrderKey(entry Entry) float64 {

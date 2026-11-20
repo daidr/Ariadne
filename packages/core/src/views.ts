@@ -54,6 +54,8 @@ export interface ProjectView {
   updatedAt: number
   /** Length of the project's "needs me" list, see `NeedsMeItem`. */
   needsMe: number
+  /** Active coordinator, discussion and review turns. Omitted when idle. */
+  runningTurns?: number
   /** Where threads work; `null` until the user picks a directory. */
   source: ProjectSource | null
   fileSources?: FileSourceSet
@@ -73,6 +75,18 @@ export interface ProjectView {
   autopilotPaused: boolean
   /** Tokens every conversation of the project has used, summaries included. */
   usage: UsageTotals
+}
+
+export type ActivityStatus = 'running' | 'queued' | 'waiting' | 'idle'
+
+export interface ConversationActivity {
+  status: ActivityStatus
+  progress?: { done: number; total: number }
+}
+
+export interface ProjectActivity {
+  coordinator: ConversationActivity
+  threads: (ConversationActivity & { id: string; title: string })[]
 }
 
 /**

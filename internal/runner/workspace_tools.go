@@ -78,9 +78,12 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 
 func (turn *turn) commandTools() []tool {
 	return []tool{
-		specification("run_command", "Run a shell command in the workspace. Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background.",
-			args{"command": field("string"), "cwd": field("string"), "source": field("string"), "timeoutSeconds": field("integer"), "background": field("boolean"), "keepForUser": field("boolean")}, []string{"command"}, turn.runCommand),
-		specification("read_command_output", "Read the status and new output of one of your background commands.",
+		specification("run_command", "Run a shell command in the workspace. Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background. For large logs, traces, source maps or generated bundles, use a script that prints a small targeted summary.",
+			args{"command": field("string"), "cwd": field("string"), "source": field("string"),
+				"timeoutSeconds": args{"type": "integer", "description": "Maximum execution time, even after the command moves to the background."},
+				"yieldSeconds":   args{"type": "integer", "description": "How long to wait for a foreground command before returning a background handle."},
+				"background":     field("boolean"), "keepForUser": field("boolean")}, []string{"command"}, turn.runCommand),
+		specification("read_command_output", "Read the status and next page of output of one of your background commands. If more is available, use the same handle to continue.",
 			args{"handle": field("string"), "waitSeconds": field("integer")}, []string{"handle"}, turn.readCommand),
 		specification("stop_command", "Stop one of your background commands.",
 			args{"handle": field("string")}, []string{"handle"}, turn.stopCommand),
@@ -104,9 +107,6 @@ func (turn *turn) commandGate(ctx context.Context, command, cwd, source, identit
 	if source != "" {
 		detail = "[" + source + "]\n" + detail
 	}
-	if len(detail) > 10000 {
-		return false, "", errors.New("this command is too long for approval")
-	}
 	binding := []string{cwd, command}
 	if identity != "" {
 		binding = append(binding, identity)
@@ -122,12 +122,12 @@ func (turn *turn) commandGate(ctx context.Context, command, cwd, source, identit
 		if turn.Settings.Locale() != "en" {
 			title, yes, no = "允许运行这条命令一次？", "运行", "不要"
 		}
-		card := map[string]any{"type": "confirm", "title": title, "detail": detail, "tone": "neutral", "approveText": yes, "denyText": no}
+		card := map[string]any{"type": "confirm", "title": title, "tone": "neutral", "approveText": yes, "denyText": no}
 		if verdict.Pattern != nil {
 			card["description"] = textutil.HeadUnits(*verdict.Pattern, 500)
 		}
 		return card
-	}, core.CallApprovalOptions{})
+	}, core.CallApprovalOptions{ConfirmDetail: detail})
 	if err != nil {
 		return false, "", err
 	}
@@ -206,12 +206,18 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 		env["GIT_EDITOR"] = "true"
 	}
 	limits, _ := config["limits"].(map[string]any)
-	wait := max(1, int(asNumber(limits["commandTimeout"])))
-	if n, present := input["timeoutSeconds"]; present {
-		wait = int(max(1, min(7200, asNumber(n))))
+	maximum := max(1, asNumber(limits["commandTimeoutMax"]))
+	wait := asNumber(limits["commandTimeout"])
+	if n, present := input["yieldSeconds"]; present {
+		wait = asNumber(n)
 	}
-	wait = min(wait, max(1, int(asNumber(limits["commandTimeoutMax"]))))
-	limit := max(2000, int(asNumber(limits["commandOutput"])))
+	yield := time.Duration(max(1, min(maximum, wait))) * time.Second
+	var timeout time.Duration
+	if n, present := input["timeoutSeconds"]; present {
+		timeout = time.Duration(max(1, min(maximum, asNumber(n)))) * time.Second
+	}
+	// Leave space for the status, setup note and continuation message.
+	limit := min(max(2000, int(asNumber(limits["commandOutput"]))), maxToolResultChars-512)
 	run := func(ctx context.Context, options sdk.ExecOptions) (sdk.ExecResult, error) {
 		options.Directory, options.Env, options.Shell = cwd, env, shell.Argv
 		return workspace.Exec(ctx, command, options)
@@ -229,17 +235,17 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 				keep = keep || previous.Keep
 			}
 		}
-		job, err := commands.Start(thread.ID, command, run, background.StartOptions{CWD: cwd, Keep: keep, Local: local, SourceIdentity: identity})
+		job, err := commands.Start(thread.ID, command, run, background.StartOptions{CWD: cwd, Keep: keep, Local: local, SourceIdentity: identity, Timeout: timeout})
 		if err != nil {
 			return "", err
 		}
-		first, err := commands.Read(ctx, thread.ID, job.ID, 2*time.Second)
-		return formatOutput(first, limit, setup, err)
+		first, err := commands.Read(ctx, thread.ID, job.ID, 2*time.Second, limit)
+		return formatOutput(first, setup, err)
 	}
-	return turn.foreground(ctx, thread, command, cwd, setup, time.Duration(wait)*time.Second, limit, local, run, identity)
+	return turn.foreground(ctx, thread, command, cwd, setup, yield, timeout, limit, local, run, identity)
 }
 
-func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, command, cwd, setup string, wait time.Duration, limit int, local bool, run background.Executor, identity string) (string, error) {
+func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, command, cwd, setup string, wait, timeout time.Duration, limit int, local bool, run background.Executor, identity string) (string, error) {
 	live := realtime.LiveHandle{Output: func(string) {}, End: func() {}}
 	if turn.Live != nil {
 		if handle, err := turn.Live.Start(realtime.LiveCommand{ProjectID: thread.ProjectID, ConversationID: thread.ID, Command: command, CWD: cwd}); err == nil {
@@ -248,10 +254,12 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 	}
 	defer live.End()
 	commands := turn.Workspaces.Background
-	move := commands.HasRoom(thread.ID)
-	timeout := wait
-	if move {
-		timeout = background.Timeout
+	move := (timeout == 0 || wait < timeout) && commands.HasRoom(thread.ID)
+	if timeout == 0 {
+		timeout = wait
+		if move {
+			timeout = background.Timeout
+		}
 	}
 	active, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	stop := context.AfterFunc(ctx, cancel)
@@ -290,8 +298,12 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 			}
 		}})
 	}()
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
+	var yield <-chan time.Time
+	if move {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		yield = timer.C
+	}
 	select {
 	case result := <-ended:
 		return formatCommand(result, limit, setup)
@@ -299,8 +311,8 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 		cancel()
 		<-ended
 		return "", ctx.Err()
-	case <-timer.C:
-		if move && stop() && ctx.Err() == nil {
+	case <-yield:
+		if stop() && ctx.Err() == nil {
 			mu.Lock()
 			job, appendOutput, err := commands.Adopt(thread.ID, command, active, cancel, ended, output, background.StartOptions{CWD: cwd, Local: local, SourceIdentity: identity})
 			if err == nil {
@@ -308,8 +320,8 @@ func (turn *turn) foreground(ctx context.Context, thread core.ThreadView, comman
 			}
 			mu.Unlock()
 			if err == nil {
-				first, err := commands.Read(ctx, thread.ID, job.ID, 0)
-				return formatOutput(first, limit, setup, err)
+				first, err := commands.Read(ctx, thread.ID, job.ID, 0, limit)
+				return formatOutput(first, setup, err)
 			}
 		}
 		cancel()
@@ -321,8 +333,14 @@ func formatCommand(result background.Execution, limit int, setup string) (string
 	if result.Err != nil {
 		return "", result.Err
 	}
-	output := textutil.HeadUnits(result.Result.Stdout+"\n"+result.Result.Stderr, limit)
-	text := fmt.Sprintf("Exit code %d\n%s", result.Result.ExitCode, output)
+	stdout, stderr := result.Result.Stdout, result.Result.Stderr
+	if len(stdout)+len(stderr)+1 > limit {
+		budget := max(0, limit-1)
+		errorBudget := max(budget/2, budget-len(stdout))
+		stderr = commandExcerpt(stderr, errorBudget)
+		stdout = commandExcerpt(stdout, max(budget-errorBudget, budget-len(stderr)))
+	}
+	text := fmt.Sprintf("Exit code %d\n%s\n%s", result.Result.ExitCode, stdout, stderr)
 	if setup != "" {
 		text = setup + "\n\n" + text
 	}
@@ -332,7 +350,20 @@ func formatCommand(result background.Execution, limit int, setup string) (string
 	return text, nil
 }
 
-func formatOutput(output *background.Output, limit int, setup string, err error) (string, error) {
+func commandExcerpt(output string, limit int) string {
+	head := textutil.HeadUnits(output, limit)
+	if len(head) == len(output) {
+		return output
+	}
+	const notice = "\n[… output truncated …]\n"
+	if limit <= len(notice) {
+		return head
+	}
+	budget := limit - len(notice)
+	return textutil.HeadUnits(output, budget/3) + notice + textutil.TailUnits(output, budget-budget/3)
+}
+
+func formatOutput(output *background.Output, setup string, err error) (string, error) {
 	if err != nil {
 		return "", err
 	}
@@ -349,7 +380,11 @@ func formatOutput(output *background.Output, limit int, setup string, err error)
 	if setup != "" {
 		state = setup + "\n\n" + state
 	}
-	return state + "\n" + textutil.HeadUnits(output.Text, limit), nil
+	text := state + "\n" + output.Text
+	if output.More {
+		text += "\n[More output is available. Call read_command_output again with this handle.]"
+	}
+	return text, nil
 }
 
 func (turn *turn) readCommand(ctx context.Context, input args) (string, error) {
@@ -358,8 +393,8 @@ func (turn *turn) readCommand(ctx context.Context, input args) (string, error) {
 		return "", err
 	}
 	wait := time.Duration(max(0, min(60, asNumber(input["waitSeconds"]))) * float64(time.Second))
-	output, err := turn.Workspaces.Background.Read(ctx, thread.ID, text(input, "handle"), wait)
-	return formatOutput(output, 30000, "", err)
+	output, err := turn.Workspaces.Background.Read(ctx, thread.ID, text(input, "handle"), wait, 30000)
+	return formatOutput(output, "", err)
 }
 
 func (turn *turn) stopCommand(ctx context.Context, input args) (string, error) {

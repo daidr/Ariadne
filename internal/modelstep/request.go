@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,9 +22,12 @@ const maxCalls = 1024
 const maxRetryDelay = time.Minute
 
 var errSilent = errors.New("model response timed out")
+var contextLimit = regexp.MustCompile(`(?i)context_length_exceeded|maximum context length|context (window|length) (is )?(exceeded|full|too (large|long))|input token count[^\n]*(exceeds|above) (the )?(maximum|limit)|prompt is too long`)
 
 type Failure struct {
 	Localized *domainerr.Error
+	// ContextLimit requires reducing or rebuilding the request instead of backing off.
+	ContextLimit bool
 	// Exhausted is set only for a busy service, allowing the turn to use its
 	// configured fallback. Bad credentials or invalid requests do not trigger it.
 	Exhausted *string
@@ -110,6 +114,7 @@ func WithCost(usage *core.TokenUsage, price *sdk.ModelPrice) *core.TokenUsage {
 	return &out
 }
 func fail(detail string, busy bool, request sdk.Request) *Failure {
+	tooLarge := contextLimit.MatchString(detail)
 	detail = strings.Clone(textutil.HeadUnits(detail, 500))
 	key := "error.modelRequest"
 	for _, message := range request.Messages {
@@ -118,8 +123,8 @@ func fail(detail string, busy bool, request sdk.Request) *Failure {
 			break
 		}
 	}
-	failure := &Failure{Localized: domainerr.New(key, map[string]any{"detail": detail})}
-	if busy {
+	failure := &Failure{Localized: domainerr.New(key, map[string]any{"detail": detail}), ContextLimit: tooLarge}
+	if busy && !tooLarge {
 		failure.Exhausted = new(detail)
 	}
 	return failure
@@ -165,7 +170,7 @@ func Request(ctx context.Context, provider sdk.ModelProvider, settings map[strin
 			return result, nil
 		}
 		reset(options)
-		if !failure.Retryable || attempt >= retries {
+		if !failure.Retryable || attempt >= retries || contextLimit.MatchString(failure.Error) {
 			return nil, fail(failure.Error, failure.Busy, request)
 		}
 		delay := min(maxRetryDelay, base*time.Duration(1<<attempt))

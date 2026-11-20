@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DouChatArtifact } from 'dou-ui'
+import { DouShimmer } from 'dou-ui'
 import { MessagesIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import ChangeTotals from '../components/ChangeTotals.vue'
@@ -28,8 +28,6 @@ const line = computed(() =>
     ? statusLine(thread.value, questionOf(thread.value.id, state.detail?.needsMe))
     : null,
 )
-// While it works the line shimmers, the way a running artifact card shows it is underway.
-const running = computed(() => thread.value?.stage === 'working' || !!line.value?.live)
 const changes = computed(() => branchChanges(thread.value))
 const hasActions = computed(
   () =>
@@ -37,84 +35,159 @@ const hasActions = computed(
     thread.value?.stage === 'review' ||
     (!!thread.value?.review && !thread.value.review.reviewing && thread.value.review.rounds > 0),
 )
-const headline = computed(() => {
-  if (!thread.value) return undefined
-  const progress = thread.value.stage === 'working' ? thread.value.progress : null
-  const status = t(`thread.stage.${thread.value.stage}`)
-  const text = line.value?.text
-  const description = text !== status ? text : undefined
-  if (!progress) return description
-  const count = t('thread.progressShort', progress)
-  return description ? `${description} · ${count}` : count
+const description = computed(() => {
+  const stage = thread.value?.stage
+  return stage && line.value?.text !== t(`thread.stage.${stage}`) ? line.value?.text : undefined
 })
+const progress = computed(() =>
+  thread.value?.stage === 'working' && thread.value.progress
+    ? t('thread.progressShort', thread.value.progress)
+    : undefined,
+)
 </script>
 
 <template>
-  <div v-if="thread" class="thread-card">
-    <DouChatArtifact
-      :title="thread.title"
-      :description="headline"
-      :status="running && headline ? 'running' : 'done'"
-      :active="activeThreadId === thread.id"
-      class="thread-card__artifact"
-      @open="open"
-      @pointerdown="(event: PointerEvent) => dragThread(event, thread!.id)"
+  <div v-if="thread" class="thread-card" :class="{ 'is-active': activeThreadId === thread.id }">
+    <button
+      type="button"
+      class="thread-card__open"
+      @click="open"
+      @pointerdown="dragThread($event, thread.id)"
     >
-      <template #icon><MessagesIcon /></template>
-      <template v-if="hasActions" #actions>
-        <ChangeTotals v-if="changes" :totals="changes" :thread-id="thread.id" button />
-        <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
-        <ReviewMark :thread="thread" />
-      </template>
-    </DouChatArtifact>
-    <span class="thread-card__stage"><StageIcon :stage="thread.stage" /></span>
+      <span class="thread-card__icon" aria-hidden="true"><MessagesIcon /></span>
+      <span class="thread-card__text">
+        <span class="thread-card__title">{{ thread.title }}</span>
+        <span v-if="description || progress" class="thread-card__summary">
+          <component
+            :is="line?.live ? DouShimmer : 'span'"
+            v-if="description"
+            class="thread-card__description"
+            :title="description"
+          >
+            {{ description }}
+          </component>
+          <span v-if="progress" class="thread-card__progress">
+            <span v-if="description" aria-hidden="true">· </span>{{ progress }}
+          </span>
+        </span>
+      </span>
+      <StageIcon class="thread-card__stage" :stage="thread.stage" />
+    </button>
+    <div v-if="hasActions" class="thread-card__actions">
+      <ChangeTotals v-if="changes" :totals="changes" :thread-id="thread.id" button />
+      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
+      <ReviewMark :thread="thread" />
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* The card can be dragged onto the side; a swipe still scrolls the chat. */
 .thread-card {
-  position: relative;
   width: 100%;
   max-width: 420px;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-container);
+  background-color: var(--dou-color-bg-surface);
+  color: var(--dou-color-text);
+  font-size: var(--dou-font-size-sm);
+  line-height: 20px;
+  transition:
+    border-color var(--dou-motion-duration-fast) var(--dou-motion-easing),
+    background-color var(--dou-motion-duration-fast) var(--dou-motion-easing);
 }
 
-.thread-card__artifact {
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-  touch-action: pan-y;
+.thread-card:hover,
+.thread-card.is-active {
+  border-color: var(--dou-color-border-strong);
 }
 
-/* Opening the thread and reviewing its work have their own rows. */
-.thread-card :deep(.dou-chat-artifact__main) {
+.thread-card.is-active {
+  background-color: color-mix(in oklab, var(--dou-color-text) 5%, var(--dou-color-bg-surface));
+}
+
+.thread-card.is-active:hover {
+  background-color: color-mix(in oklab, var(--dou-color-text) 8%, var(--dou-color-bg-surface));
+}
+
+.thread-card__open {
+  display: flex;
   align-items: flex-start;
-  padding-right: 40px;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px 10px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  touch-action: pan-y;
+  cursor: pointer;
 }
 
-/* Keep the discussion icon; its stage takes the former arrow's place. */
-.thread-card :deep(.dou-chat-artifact__arrow) {
-  display: none;
+.thread-card__open:focus-visible {
+  outline: 2px solid var(--dou-color-focus);
+  outline-offset: 2px;
+}
+
+.thread-card__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--dou-radius-control);
+  background-color: var(--dou-color-bg-muted);
+  color: var(--dou-color-text-secondary);
+  font-size: 20px;
+}
+
+.is-active .thread-card__icon {
+  background-color: var(--dou-color-bg-surface);
+}
+
+.thread-card__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.thread-card__title {
+  font-weight: var(--dou-font-weight-medium);
+  overflow-wrap: anywhere;
 }
 
 .thread-card__stage {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  margin-top: 1px;
+}
+
+.thread-card__summary {
   display: flex;
-  pointer-events: none;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--dou-color-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
-.thread-card :deep(.dou-chat-artifact__title) {
-  overflow-wrap: anywhere;
-  white-space: normal;
+.thread-card__description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.thread-card :deep(.dou-chat-artifact__description:empty) {
-  display: none;
+.thread-card__progress {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.thread-card :deep(.dou-chat-artifact__actions) {
+.thread-card__actions {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px 8px;

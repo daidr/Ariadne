@@ -165,7 +165,7 @@ func DescribeNote(note map[string]any, titleOf func(string) string) string {
 	case "thread-stopped-by-user":
 		return fmt.Sprintf("<thread_stopped_by_user thread=\"%s\" title=\"%s\">\nThe user stopped this thread: %s\nIt stays stopped until the user lets it go on; do not resume it or route its work elsewhere unless the user asks.\n</thread_stopped_by_user>", t("threadId"), title(), t("reason"))
 	case "report-missing":
-		return "<report_missing>\nYour last turn ended without a report, so the user cannot tell what came of it. Report now with the report tool: \"waiting\" if this round is over, or whichever state fits. If there is more to do, do it first, then report.\n</report_missing>"
+		return "<report_missing>\nCall the Ariadne report tool with the current outcome, a short headline, and a summary. Use done for completed work with no review needed, ready for changes ready to deliver or review, and waiting when an external result is still pending. Use blocked when a required step cannot proceed. A chat reply does not record a report.\n</report_missing>"
 	case "thread-reviewed":
 		return fmt.Sprintf("<thread_reviewed thread=\"%s\" title=\"%s\">\nThe user is through with what this thread put up for review and did not merge it in Ariadne; it counts as done. Do not ask them to review it again.\n</thread_reviewed>", t("threadId"), title())
 	case "pull-request-closed":

@@ -24,6 +24,41 @@ func closeCommands(t *testing.T, commands *Commands) {
 		t.Error(err)
 	}
 }
+
+func TestBackgroundReadKeepsUnreadPagesAfterExit(t *testing.T) {
+	ctx := t.Context()
+	commands := New(Options{})
+	t.Cleanup(func() { closeCommands(t, commands) })
+	const limit = 30_000
+	first := strings.Repeat("x", limit-1)
+	second := "😀" + strings.Repeat("y", limit-2)
+	const third = "build failed\n"
+	job, err := commands.Start("thread", "build", func(ctx context.Context, options sdk.ExecOptions) (sdk.ExecResult, error) {
+		options.OnOutput(first+second+third, "stdout")
+		return sdk.ExecResult{ExitCode: 1}, nil
+	}, StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commands.Wait(ctx, "thread", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := commands.Read(cancelled, "thread", job.ID, 0, limit); err != context.Canceled {
+		t.Fatalf("cancelled read: %v", err)
+	}
+	for i, expected := range []string{first, second, third, ""} {
+		page, err := commands.Read(ctx, "thread", job.ID, 0, limit)
+		if err != nil || page == nil {
+			t.Fatalf("page %d: %v", i, err)
+		}
+		if page.Text != expected || page.More != (i < 2) || page.Missed != 0 || page.Command.Result == nil {
+			t.Fatalf("page %d: got %d bytes, more %v, missed %d", i, len(page.Text), page.More, page.Missed)
+		}
+	}
+}
+
 func TestBackgroundFlowAndServedURLsMatchLegacy(t *testing.T) {
 	urls := []string{"  \x1b[32m➜\x1b[39m  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n", "Listening on http://0.0.0.0:3000 (press Ctrl+C)\n", "open http://127.0.0.1:8080/docs/.\n", "proxy /api -> http://localhost:8787\n  Local:   http://localhost:5173/\n", "Local: http://localhost:51", "fetching https://example.com:443/x \n", "Ready http://[::]:5173/\n", "Ready http://[::1]:5173/\n", "Local: http://localhost:5173/\u3000", "http://localhost:123456/\n"}
 	chunks := []string{"\x1b[32mLocal: http://localhost:5173/\x1b[0m\n", "10%\r100%\n中文😀\n"}
@@ -47,7 +82,7 @@ func TestBackgroundFlowAndServedURLsMatchLegacy(t *testing.T) {
 	reads := []any{}
 	for _, chunk := range chunks {
 		options.OnOutput(chunk, "stdout")
-		read, err := commands.Read(t.Context(), "thread", command.ID, 0)
+		read, err := commands.Read(t.Context(), "thread", command.ID, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +154,7 @@ func TestThreadCapacityReaderCancellationStopAndCloseReleaseResources(t *testing
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	readDone := make(chan struct{})
-	go func() { commands.Read(ctx, "thread", first.ID, time.Minute); close(readDone) }()
+	go func() { commands.Read(ctx, "thread", first.ID, time.Minute, 0); close(readDone) }()
 	cancel()
 	select {
 	case <-readDone:
@@ -186,12 +221,12 @@ func TestOutputTruncationReadCursorAndGlobalCapacityReleaseArrays(t *testing.T) 
 	if buffer.length() != keptOutput || buffer.dropped != 1_000_000 {
 		t.Fatal("output truncation changed", buffer.length(), buffer.dropped)
 	}
-	text, missed := buffer.take()
+	text, missed, _ := buffer.take(0)
 	if len(text) != keptOutput || missed != 1_000_000 {
 		t.Fatal("read cursor lost truncation count", missed)
 	}
 	buffer.append("next")
-	if text, missed := buffer.take(); text != "next" || missed != 0 {
+	if text, missed, _ := buffer.take(0); text != "next" || missed != 0 {
 		t.Fatal("incremental read wrong", text, missed)
 	}
 	buffer.drop(buffer.length())
@@ -232,7 +267,7 @@ func TestAdoptedCommandOutputAndCancellationAreOwned(t *testing.T) {
 		t.Fatal(err)
 	}
 	append("after\n")
-	output, err := commands.Read(t.Context(), "thread", view.ID, 0)
+	output, err := commands.Read(t.Context(), "thread", view.ID, 0, 0)
 	if err != nil || output == nil || output.Text != "before\nafter\n" {
 		t.Fatal("adopted output lost", err)
 	}

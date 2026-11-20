@@ -178,6 +178,7 @@ type acpDriver struct {
 	active, restorable, antigravity bool
 	thought                         strings.Builder
 	turnFailure                     string
+	contextUsed                     *int64
 	thoughtOption                   acpConfigOption
 	defaultLevel                    string
 	removeTools                     func()
@@ -187,6 +188,16 @@ type acpDriver struct {
 type acpCheckpoint struct {
 	SessionID    string `json:"sessionId"`
 	DefaultLevel string `json:"defaultLevel,omitempty"`
+	ContextUsed  *int64 `json:"contextUsed,omitempty"`
+}
+
+type acpTurnUsage struct {
+	Input   int64  `json:"inputTokens"`
+	Output  int64  `json:"outputTokens"`
+	Cached  int64  `json:"cachedReadTokens"`
+	Written int64  `json:"cachedWriteTokens"`
+	Thought int64  `json:"thoughtTokens"`
+	Total   *int64 `json:"totalTokens"`
 }
 
 func (d *acpDriver) emitLocked(event Event) {
@@ -243,6 +254,7 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 			Type    string                      `json:"sessionUpdate"`
 			Content struct{ Type, Text string } `json:"content"`
 			Options []acpConfigOption           `json:"configOptions"`
+			Used    *int64                      `json:"used"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &params) != nil {
@@ -256,6 +268,9 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	update := params.Update
 	if update.Type == "config_option_update" {
 		d.thoughtOption = (acpSession{Options: update.Options}).option("thought_level")
+	}
+	if update.Type == "usage_update" && update.Used != nil && *update.Used >= 0 {
+		d.contextUsed = update.Used
 	}
 	if !d.active {
 		return
@@ -275,12 +290,14 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	if update.Type == "agent_message_chunk" && update.Content.Type == "text" {
 		text := update.Content.Text
 		if d.antigravity {
-			// agy reports terminal executor errors as chat chunks followed by end_turn.
-			if detail, ok := strings.CutPrefix(text, "\n⚠ agent executor error: "); ok {
-				if detail = textutil.Trim(detail); detail != "" {
-					d.turnFailure = detail
-					return
-				}
+			// agy sends fatal executor failures as single chat chunks followed by end_turn.
+			if detail, ok := strings.CutPrefix(text, "\n⚠ failed to construct executor: "); ok && textutil.Trim(detail) != "" {
+				d.turnFailure = "failed to construct executor: " + textutil.Trim(detail)
+				return
+			}
+			if detail, ok := strings.CutPrefix(text, "\n⚠ agent executor error: "); ok && textutil.Trim(detail) != "" {
+				d.turnFailure = textutil.Trim(detail)
+				return
 			}
 		}
 		if text != "" {
@@ -380,6 +397,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	if resuming && saved.DefaultLevel != "" {
 		d.defaultLevel = saved.DefaultLevel
 	}
+	d.contextUsed = saved.ContextUsed
 	d.started = true
 	d.mu.Unlock()
 	return nil
@@ -427,14 +445,8 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 	go func() {
 		defer d.requests.Done()
 		var result struct {
-			Stop  string `json:"stopReason"`
-			Usage *struct {
-				Input   int64 `json:"inputTokens"`
-				Output  int64 `json:"outputTokens"`
-				Cached  int64 `json:"cachedReadTokens"`
-				Written int64 `json:"cachedWriteTokens"`
-				Thought int64 `json:"thoughtTokens"`
-			} `json:"usage"`
+			Stop  string        `json:"stopReason"`
+			Usage *acpTurnUsage `json:"usage"`
 		}
 		err := d.stdio.Peer.Request(d.life, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": prompt}, &result)
 		d.mu.Lock()
@@ -455,7 +467,15 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		}
 		d.flushThoughtLocked()
 		if u := result.Usage; u != nil {
-			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: u.Input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought}})
+			input := u.Input
+			// agy reports uncached input separately. Its total includes cached
+			// input and output, and thinking is already part of output.
+			if d.antigravity && (u.Total == nil || *u.Total-u.Output != u.Input) {
+				input += u.Cached + u.Written
+			}
+			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought, ContextInput: d.contextUsed}})
+		} else if d.contextUsed != nil {
+			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: d.contextUsed}})
 		}
 		switch result.Stop {
 		case "end_turn":
@@ -478,7 +498,7 @@ func (d *acpDriver) Checkpoint() (json.RawMessage, error) {
 	if !d.restorable || !d.started || d.closing || d.sessionID == "" {
 		return nil, nil
 	}
-	return json.Marshal(acpCheckpoint{SessionID: d.sessionID, DefaultLevel: d.defaultLevel})
+	return json.Marshal(acpCheckpoint{SessionID: d.sessionID, DefaultLevel: d.defaultLevel, ContextUsed: d.contextUsed})
 }
 
 func (d *acpDriver) Close(ctx context.Context, discard bool) error {

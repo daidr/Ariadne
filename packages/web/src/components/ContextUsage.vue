@@ -2,7 +2,7 @@
 import type { UsageTotals } from '@ariadne/core'
 import { contextUsage, DouButton, DouChatContextMeter, DouPopover, DouTooltip } from 'dou-ui'
 import { computed, ref } from 'vue'
-import { count, locale, t } from '../i18n'
+import { cacheHitRate, count, t } from '../i18n'
 import UsageBreakdown from './UsageBreakdown.vue'
 import { costText } from '../cost'
 import { state } from '../store'
@@ -44,13 +44,7 @@ const hint = computed(() =>
 )
 const tokens = computed(() => props.usage.input + props.usage.output)
 const cost = computed(() => (state.showCost ? costText(props.usage.cost) : null))
-const hitRate = computed(() =>
-  props.usage.input
-    ? new Intl.NumberFormat(locale.value, { style: 'percent', maximumFractionDigits: 0 }).format(
-        props.usage.cached / props.usage.input,
-      )
-    : '—',
-)
+const hitRate = computed(() => cacheHitRate(props.usage))
 </script>
 
 <template>

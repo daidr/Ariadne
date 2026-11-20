@@ -19,6 +19,7 @@ type ProjectView struct {
 	CreatedAt       int64                    `json:"createdAt"`
 	UpdatedAt       int64                    `json:"updatedAt"`
 	NeedsMe         int                      `json:"needsMe"`
+	RunningTurns    int64                    `json:"runningTurns,omitempty"`
 	Source          any                      `json:"source"`
 	FileSources     *FileSourceSet           `json:"fileSources,omitempty"`
 	References      any                      `json:"references"`
@@ -195,23 +196,37 @@ func toThread(row record, now int64) (ThreadView, error) {
 	if row.text("reviewer_id") != "" {
 		view.Review = &ReviewView{ReviewerID: row.text("reviewer_id"), Rounds: row.integer("review_rounds"), Reviewing: row.flag("reviewing")}
 	}
-	todos, err := row.json("todo_items", []any{})
+	progress, doing, err := readTodoProgress(row)
 	if err != nil {
 		return ThreadView{}, err
 	}
-	if items, ok := todos.([]any); ok && len(items) > 0 {
-		view.Progress = &Progress{Total: len(items)}
-		for _, item := range items {
-			todo, _ := item.(map[string]any)
-			if todo["status"] == "done" {
-				view.Progress.Done++
-			}
-			if todo["status"] == "doing" && view.Doing == nil {
-				view.Doing = todo["label"]
+	view.Progress, view.Doing = progress, doing
+	return view, nil
+}
+
+func readTodoProgress(row record) (*Progress, any, error) {
+	todos, err := row.json("todo_items", []any{})
+	if err != nil {
+		return nil, nil, err
+	}
+	items, _ := todos.([]any)
+	if len(items) == 0 {
+		return nil, nil, nil
+	}
+	progress := &Progress{Total: len(items)}
+	var doing any
+	for _, item := range items {
+		todo, _ := item.(map[string]any)
+		switch todo["status"] {
+		case "done":
+			progress.Done++
+		case "doing":
+			if doing == nil {
+				doing = todo["label"]
 			}
 		}
 	}
-	return view, nil
+	return progress, doing, nil
 }
 
 func threadStageFacts(row record, merged, pullRequest map[string]any) StageFacts {
@@ -346,12 +361,14 @@ func toProject(ctx context.Context, db queryer, row record, needs int) (ProjectV
 	}
 	rows, err := records(ctx, db, `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
 	 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
-	 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny
+	 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny,
+	 count(turn_id) AS running_turns
 	 FROM conversations WHERE project_id = ?`, row["id"])
 	if err != nil {
 		return ProjectView{}, err
 	}
 	view.Usage = usage(rows[0])
+	view.RunningTurns = rows[0].integer("running_turns")
 	return view, nil
 }
 

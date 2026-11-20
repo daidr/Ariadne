@@ -54,9 +54,18 @@ func field(kind string) args { return args{"type": kind} }
 func arrayOf(item args) args { return args{"type": "array", "items": item} }
 
 const threadIDHelp = "Use the threadId returned by create_thread or list_threads."
+const userMessageIDHelp = "Copy the exact id of a message with author=user from list_messages, or from read_thread for another discussion."
 
 func threadIDField() args {
 	return args{"type": "string", "minLength": 1, "description": threadIDHelp}
+}
+
+func userMessagesField(textField string) args {
+	return args{
+		"type":        "array",
+		"description": "Optional original user message references, with up to eight distinct IDs in this project. " + userMessageIDHelp + " Put new instructions in " + textField + ".",
+		"items":       args{"type": "string", "minLength": 1, "description": userMessageIDHelp},
+	}
 }
 
 func text(input args, name string) string {
@@ -88,6 +97,64 @@ func stringsOf(value any) ([]string, error) {
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+func userMessageIDs(value any) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	items, ok := value.([]any)
+	if !ok || len(items) > 30 {
+		return nil, errors.New("userMessages must be an array of user message IDs, with at most eight distinct IDs. " + userMessageIDHelp)
+	}
+	ids := make([]string, 0, len(items))
+	for index, item := range items {
+		id, ok := item.(string)
+		if !ok || id == "" {
+			return nil, fmt.Errorf("userMessages[%d] must be a user message ID. %s", index, userMessageIDHelp)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func relayToolError(err error, textField string) error {
+	var detail *domainerr.Error
+	if !errors.As(err, &detail) {
+		return err
+	}
+	if detail.Key == "error.invalidBody" && detail.Params["reason"] == "cites" {
+		return errors.New("userMessages supports up to eight distinct user message IDs. Keep the references needed for this task and retry.")
+	}
+	if detail.Key != "error.notFound" {
+		return err
+	}
+	switch detail.Field {
+	case "cites":
+		field := "userMessages"
+		if detail.Index != nil {
+			field = fmt.Sprintf("userMessages[%d]", *detail.Index)
+		}
+		return fmt.Errorf("%s does not identify a user message in this project. %s Put instructions in %s. Omit userMessages if you do not need to relay the original message or its attachments.", field, userMessageIDHelp, textField)
+	case "nodeId":
+		id, _ := detail.Params["what"].(string)
+		return fmt.Errorf("nodeId %q is not a plan node in this project. Call read_plan for a current node ID, or omit nodeId to create an unlinked discussion.", textutil.HeadUnits(id, 128))
+	case "projectId":
+		return errors.New("The current project could not be found. The discussion was not created.")
+	}
+	return err
+}
+
+func toolErrorText(err error) string {
+	text := err.Error()
+	var missing *domainerr.Error
+	if text == "error.notFound" && errors.As(err, &missing) {
+		if what, ok := missing.Params["what"].(string); ok && what != "" {
+			return fmt.Sprintf("Could not find %q.", textutil.HeadUnits(what, 256))
+		}
+		return "The requested record could not be found."
+	}
+	return text
 }
 
 func reply(value any, err error) (string, error) {
@@ -147,9 +214,9 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs, turn.coordinatorTools()...)
 		specs = append(specs,
 			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
-				args{"title": field("string"), "brief": field("string"), "nodeId": field("string"), "branch": field("string"), "model": field("string"), "userMessages": arrayOf(field("string"))}, []string{"title", "brief"}, turn.createThread),
+				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by read_plan."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
-				args{"threadId": threadIDField(), "content": field("string"), "userMessages": arrayOf(field("string"))}, []string{"threadId"}, turn.messageThread),
+				args{"threadId": threadIDField(), "content": field("string"), "userMessages": userMessagesField("content")}, []string{"threadId"}, turn.messageThread),
 			specification("list_threads", "List discussion threads in the current project with their threadId, title and stage.",
 				args{}, nil, func(ctx context.Context, _ args) (string, error) {
 					threads, err := turn.Repository.ListThreads(ctx, conversation.ProjectID)
@@ -301,13 +368,13 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 			return "", errors.New("model must be one of the configured models")
 		}
 	}
-	cites, err := stringsOf(input["userMessages"])
+	cites, err := userMessageIDs(input["userMessages"])
 	if err != nil {
 		return "", err
 	}
 	thread, err := turn.Repository.CreateBriefedThread(ctx, turn.conversation.ProjectID,
 		core.NewThread{Title: title, Model: model, NodeID: optional(input, "nodeId"), Branch: optional(input, "branch")}, brief, cites)
-	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, err)
+	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, relayToolError(err, "brief"))
 }
 
 func (turn *turn) messageThread(ctx context.Context, input args) (string, error) {
@@ -323,12 +390,19 @@ func (turn *turn) messageThread(ctx context.Context, input args) (string, error)
 		}
 		return "", err
 	}
-	cites, err := stringsOf(input["userMessages"])
+	cites, err := userMessageIDs(input["userMessages"])
 	if err != nil {
 		return "", err
 	}
-	_, err = turn.Repository.PostMessage(ctx, thread.ProjectID, core.MessageInput{ConversationID: id, Author: "coordinator", Kind: "relay", Content: text(input, "content"), Cites: cites})
-	return "Sent.", err
+	content := text(input, "content")
+	if content == "" && len(cites) == 0 {
+		return "", errors.New("message_thread requires instructions in content or original user message IDs in userMessages")
+	}
+	_, err = turn.Repository.PostMessage(ctx, thread.ProjectID, core.MessageInput{ConversationID: id, Author: "coordinator", Kind: "relay", Content: content, Cites: cites})
+	if err != nil {
+		return "", relayToolError(err, "content")
+	}
+	return "Sent.", nil
 }
 
 func (turn *turn) source(ctx context.Context, input args) (sdk.SourceView, error) {

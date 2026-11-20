@@ -174,12 +174,6 @@ func (turn *turn) coordinatorTools() []tool {
 				messages, err := turn.recentMessages(ctx, thread.ID, input)
 				return reply(args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "lastSummary": thread.LastSummary, "todo": todo["items"], "messages": messages}, err)
 			}),
-		specification("name_project", "Give the project a short name in the user's language.",
-			args{"name": field("string")}, []string{"name"}, func(ctx context.Context, input args) (string, error) {
-				name := textutil.HeadUnits(strings.Join(strings.Fields(text(input, "name")), " "), 60)
-				_, err := turn.Repository.RenameProject(ctx, turn.conversation.ProjectID, name)
-				return "Named.", err
-			}),
 		specification("routine", "List recurring work, or add or remove a routine when the user asks. Days are 0 for Sunday through 6 for Saturday. Use local HH:mm.",
 			args{"action": field("string"), "prompt": field("string"), "days": arrayOf(field("integer")), "time": field("string"), "routineId": field("string")}, []string{"action"}, turn.routine),
 	}
