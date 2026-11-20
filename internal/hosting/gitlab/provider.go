@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/hostinghttp"
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/internal/process"
@@ -27,6 +28,7 @@ type Options struct {
 	Clone            local.Cloner
 	DisableClone     bool
 	Instances        *Instances
+	PluginSettings   func() map[string]any
 }
 
 func environment(given map[string]string) map[string]string {
@@ -168,11 +170,23 @@ func Connect(settings Settings, options Options) (*Connection, error) {
 	return &Connection{Capabilities: sdk.Capabilities{Workspace: clone.Capability(), Repo: repo, Tracker: tracker, Close: close}, API: api, Instance: parsed.Instance, Path: parsed.Path}, nil
 }
 func Provider(options Options) sdk.ContextProvider {
-	return sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "gitlab", Title: sdk.LocalizedText{"zh-CN": "GitLab 仓库", "en": "GitLab repository"}, Hosting: true, Provides: []string{"workspace", "repo", "tracker"}, Settings: sdk.SettingsSchema{Type: "object", FieldOrder: []string{"repository", "instance", "token"}, Required: []string{"repository"}, Properties: map[string]sdk.SettingField{
-		"repository": {Type: "string", Title: sdk.LocalizedText{"zh-CN": "仓库", "en": "Repository"}, Description: sdk.LocalizedText{"zh-CN": "group/project（可含子组）或项目地址；每个讨论串在自己的分支上工作", "en": "group/project (subgroups too) or its URL; each thread works on its own branch"}},
-		"instance":   {Type: "string", Title: sdk.LocalizedText{"zh-CN": "实例地址", "en": "Instance"}, Description: sdk.LocalizedText{"zh-CN": "自建实例填 https://gitlab.example.com；留空时用 GitLab.com，或仓库地址里的实例", "en": "For a self-managed instance, https://gitlab.example.com; left empty, GitLab.com or the instance in the repository URL"}},
-		"token":      {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "访问令牌", "en": "Access token"}, Description: sdk.LocalizedText{"zh-CN": "需要 api 权限。留空时使用 GITLAB_TOKEN 环境变量（只用于 GITLAB_HOST 指的实例，未设置时为 GitLab.com）或 glab 为这个实例保存的令牌", "en": "Needs the api scope. Left empty: GITLAB_TOKEN (only for the GITLAB_HOST instance, GitLab.com when unset) or the token glab keeps for this instance"}},
-	}}}, SecretsFor: func(values map[string]any) (string, error) {
+	return sdk.ContextProvider{NeedsPluginSettings: true, PluginFields: []string{"token"}, Browse: local.BrowseHostedDirectory, Info: sdk.ContextProviderInfo{Kind: "gitlab", Title: sdk.LocalizedText{"zh-CN": "GitLab 仓库", "en": "GitLab repository"}, Hosting: true, Provides: []string{"workspace", "repo", "tracker"}, Settings: sdk.SettingsSchema{Type: "object", FieldOrder: []string{"repository", "instance", local.HostedDirectory, "token"}, Required: []string{"repository"}, Properties: map[string]sdk.SettingField{
+		"repository":          {Type: "string", Title: sdk.LocalizedText{"zh-CN": "仓库", "en": "Repository"}, Description: sdk.LocalizedText{"zh-CN": "group/project（可含子组）或项目地址；每个讨论串在自己的分支上工作", "en": "group/project (subgroups too) or its URL; each thread works on its own branch"}},
+		"instance":            {Type: "string", Title: sdk.LocalizedText{"zh-CN": "实例地址", "en": "Instance"}, Description: sdk.LocalizedText{"zh-CN": "自建实例填 https://gitlab.example.com；留空时用 GitLab.com，或仓库地址里的实例", "en": "For a self-managed instance, https://gitlab.example.com; left empty, GitLab.com or the instance in the repository URL"}},
+		"token":               {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "访问令牌", "en": "Access token"}, Description: sdk.LocalizedText{"zh-CN": "需要 api 权限。留空时使用 GITLAB_TOKEN 环境变量（只用于 GITLAB_HOST 指的实例，未设置时为 GitLab.com）或 glab 为这个实例保存的令牌", "en": "Needs the api scope. Left empty: GITLAB_TOKEN (only for the GITLAB_HOST instance, GitLab.com when unset) or the token glab keeps for this instance"}},
+		local.HostedDirectory: local.HostedDirectoryField(),
+	}}}, NewSourceDefaults: func() map[string]any { return local.HostedSourceDefaults(options.PluginSettings) }, ValidateSettings: func(values, previous map[string]any) error {
+		if previous == nil {
+			return nil
+		}
+		repository, _ := previous["repository"].(string)
+		instance, _ := previous["instance"].(string)
+		parsed, err := ParseRepository(repository, instance)
+		if err != nil {
+			return err
+		}
+		return local.CheckHostedDirectoryChange(options.DataDir, parsed.Path, InstanceDirs(parsed.Instance), values[local.HostedDirectory], previous[local.HostedDirectory])
+	}, SecretsFor: func(values map[string]any) (string, error) {
 		repository, _ := values["repository"].(string)
 		instance, _ := values["instance"].(string)
 		parsed, err := ParseRepository(repository, instance)
@@ -182,7 +196,19 @@ func Provider(options Options) sdk.ContextProvider {
 			repository, _ := values["repository"].(string)
 			instance, _ := values["instance"].(string)
 			token, _ := values["token"].(string)
-			connected, err := Connect(Settings{Repository: repository, Instance: instance, Token: token}, options)
+			explicitToken := token
+			if token == "" {
+				if parsed, err := ParseRepository(repository, instance); err == nil {
+					token = pluginToken(options, parsed.Instance)
+				}
+			}
+			dataDir, err := local.HostedDataDir(options.DataDir, values[local.HostedDirectory])
+			if err != nil {
+				return sdk.Capabilities{}, err
+			}
+			configured := options
+			configured.DataDir = dataDir
+			connected, err := Connect(Settings{Repository: repository, Instance: instance, Token: token}, configured)
 			if err != nil {
 				return sdk.Capabilities{}, err
 			}
@@ -191,7 +217,7 @@ func Provider(options Options) sdk.ContextProvider {
 				return sdk.Capabilities{}, err
 			}
 			if options.Instances != nil {
-				release, err := options.Instances.Register(connected.Instance, connected.Path, token)
+				release, err := options.Instances.Register(connected.Instance, connected.Path, explicitToken)
 				if err != nil {
 					connected.Capabilities.Close()
 					return sdk.Capabilities{}, err
@@ -204,4 +230,33 @@ func Provider(options Options) sdk.ContextProvider {
 			}
 			return connected.Capabilities, nil
 		}}
+}
+
+func PluginSchema() *sdk.SettingsSchema {
+	return &sdk.SettingsSchema{Type: "object", Required: []string{"token"}, FieldOrder: []string{"instance", "token", local.HostedDirectory}, Properties: map[string]sdk.SettingField{
+		"instance":            {Type: "string", Default: GitLabCom, Title: sdk.LocalizedText{"zh-CN": "实例地址", "en": "Instance URL"}},
+		"token":               {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "Token", "en": "Token"}, Description: sdk.LocalizedText{"zh-CN": "用于此实例，需要 api 权限", "en": "For this instance. Requires the api scope"}},
+		local.HostedDirectory: local.DefaultHostedDirectoryField(),
+	}}
+}
+
+func ValidatePluginSettings(values map[string]any) error {
+	instance, _ := values["instance"].(string)
+	if _, err := ParseInstance(instance); err != nil {
+		return domainerr.New("error.gitlabInstance", nil)
+	}
+	return nil
+}
+
+func pluginToken(options Options, instance string) string {
+	if options.PluginSettings == nil {
+		return ""
+	}
+	values := options.PluginSettings()
+	configured, _ := values["instance"].(string)
+	if safe, err := ParseInstance(configured); err != nil || safe != instance {
+		return ""
+	}
+	token, _ := values["token"].(string)
+	return token
 }

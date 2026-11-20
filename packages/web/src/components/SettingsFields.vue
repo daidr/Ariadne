@@ -26,17 +26,8 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
 
 <template>
   <template v-for="(field, key) in schema.properties" :key="key">
-    <DouFormItem
-      :label="lt(field.title)"
-      :required="schema.required?.includes(String(key))"
-      :help="
-        bare || (field.type === 'string' && field.directory) ? undefined : lt(field.description)
-      "
-    >
-      <template
-        v-if="!bare && field.type === 'string' && field.directory && lt(field.description)"
-        #label
-      >
+    <DouFormItem :label="lt(field.title)" :required="schema.required?.includes(String(key))">
+      <template v-if="!bare && lt(field.description)" #label>
         <SettingsLabelHelp
           :label="lt(field.title) ?? String(key)"
           :content="lt(field.description) ?? ''"

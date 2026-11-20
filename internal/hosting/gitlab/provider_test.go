@@ -59,6 +59,18 @@ func TestTokenResolutionKeepsEnvironmentWithinItsHost(t *testing.T) {
 		t.Fatal("unnecessary CLI lookup", runs.Load())
 	}
 }
+
+func TestPluginTokenMatchesOnlyConfiguredGitLabInstance(t *testing.T) {
+	options := Options{PluginSettings: func() map[string]any {
+		return map[string]any{"instance": "https://GITLAB.example:443/team/", "token": "fixture"}
+	}}
+	if pluginToken(options, "https://gitlab.example/team") != "fixture" ||
+		pluginToken(options, "https://gitlab.example") != "" ||
+		pluginToken(options, "https://gitlab.example/other") != "" ||
+		pluginToken(options, "https://gitlab.example:8443/team") != "" {
+		t.Fatal("plugin credential escaped its configured instance")
+	}
+}
 func TestInstancesUpdateDeleteBoundsAndClose(t *testing.T) {
 	instances := NewInstances(map[string]string{})
 	defer instances.Close()

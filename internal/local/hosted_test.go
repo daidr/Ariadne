@@ -39,7 +39,12 @@ func newHostedTest(t *testing.T, remote, data string, clone Cloner) *Hosted {
 func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	t.Parallel()
 	remote, remoteGit := initGit(t)
-	host := newHostedTest(t, remote, t.TempDir(), nil)
+	storage := t.TempDir()
+	data, err := HostedDataDir(filepath.Join(t.TempDir(), "github"), storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := newHostedTest(t, remote, data, nil)
 	view, err := host.View(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +59,10 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	info := workspace.Info()
 	if info.Branch == nil || info.Base == nil || *info.Base != "main" || !info.Local {
 		t.Fatal(info)
+	}
+	if host.bare != filepath.Join(storage, "ariadne", "github", "repos", "owner", "repository.git") ||
+		filepath.Dir(info.Label) != filepath.Join(storage, "ariadne", "github", "worktrees", "owner", "repository") {
+		t.Fatal("clone and worktree were not written beneath the selected directory", host.bare, info.Label)
 	}
 	program, err := os.Executable()
 	if err != nil {

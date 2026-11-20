@@ -66,6 +66,24 @@ type Hosted struct {
 	fetchedAt time.Time
 }
 
+func hostedPaths(data, path string, namespace []string) (string, string, error) {
+	segments := append(append([]string(nil), namespace...), strings.Split(path, "/")...)
+	for _, part := range segments {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "/\\\x00") {
+			return "", "", errors.New("invalid hosted repository path")
+		}
+	}
+	data, err := filepath.Abs(data)
+	if err != nil {
+		return "", "", err
+	}
+	last := segments[len(segments)-1]
+	parents := segments[:len(segments)-1]
+	bare := filepath.Join(append([]string{data, "repos"}, append(append([]string(nil), parents...), last+".git")...)...)
+	worktrees := filepath.Join(append([]string{data, "worktrees"}, segments...)...)
+	return bare, worktrees, nil
+}
+
 func NewHosted(options HostedOptions) (*Hosted, error) {
 	if options.DataDir == "" || options.Path == "" || options.DefaultBranch == nil {
 		return nil, errors.New("hosted clone requires a data directory, repository path and default branch")
@@ -73,20 +91,10 @@ func NewHosted(options HostedOptions) (*Hosted, error) {
 	if _, err := HostedGitEnv(options.RemoteURL, nil); err != nil {
 		return nil, err
 	}
-	segments := append(append([]string(nil), options.Namespace...), strings.Split(options.Path, "/")...)
-	for _, part := range segments {
-		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "/\\\x00") {
-			return nil, errors.New("invalid hosted repository path")
-		}
-	}
-	data, err := filepath.Abs(options.DataDir)
+	bare, worktrees, err := hostedPaths(options.DataDir, options.Path, options.Namespace)
 	if err != nil {
 		return nil, err
 	}
-	last := segments[len(segments)-1]
-	parents := segments[:len(segments)-1]
-	bare := filepath.Join(append([]string{data, "repos"}, append(append([]string(nil), parents...), last+".git")...)...)
-	worktrees := filepath.Join(append([]string{data, "worktrees"}, segments...)...)
 	clone := options.Clone
 	if clone == nil && !options.DisableClone {
 		clone = PlatformCloner

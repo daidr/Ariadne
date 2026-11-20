@@ -21,7 +21,7 @@ func TestTokenPriorityAndCLIIsolation(t *testing.T) {
 	var runs atomic.Int32
 	run := func(ctx context.Context, args []string, options process.RunOptions) sdk.ExecResult {
 		runs.Add(1)
-		if strings.Join(args, " ") != "gh auth token" || options.Timeout != 10*time.Second || !options.ForThread || options.Directory == "" {
+		if strings.Join(args, " ") != "gh auth token --hostname github.com" || options.Timeout != 10*time.Second || !options.ForThread || options.Directory == "" || options.Env["GH_PROMPT_DISABLED"] != "1" {
 			t.Errorf("unexpected CLI invocation: %v %+v", args, options)
 		}
 		return sdk.ExecResult{Stdout: " cli-token\n"}
@@ -30,7 +30,7 @@ func TestTokenPriorityAndCLIIsolation(t *testing.T) {
 		configured string
 		env        map[string]string
 		want       string
-	}{{" explicit ", map[string]string{"GH_TOKEN": "env"}, "explicit"}, {"", map[string]string{"GH_TOKEN": " first ", "GITHUB_TOKEN": "second"}, "first"}, {"", map[string]string{"GITHUB_TOKEN": " second "}, "second"}, {"", map[string]string{}, "cli-token"}} {
+	}{{" explicit ", map[string]string{"GH_TOKEN": "env"}, "explicit"}, {"", map[string]string{"GH_TOKEN": " first ", "GITHUB_TOKEN": "second"}, "first"}, {"", map[string]string{"GITHUB_TOKEN": " second "}, "second"}, {"", map[string]string{"GH_HOST": "ghe.example.com"}, "cli-token"}} {
 		token, err := FindToken(t.Context(), test.configured, test.env, run)
 		if err != nil || token == nil || *token != test.want {
 			t.Fatalf("token resolution failed: %v", err)
@@ -38,6 +38,44 @@ func TestTokenPriorityAndCLIIsolation(t *testing.T) {
 	}
 	if runs.Load() != 1 {
 		t.Fatal("unnecessary CLI resolution", runs.Load())
+	}
+}
+
+func TestPluginReadinessUsesGitHubCredentials(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		values  map[string]any
+		env     map[string]string
+		result  sdk.ExecResult
+		ready   bool
+		wantCLI int
+	}{
+		{name: "manual", values: map[string]any{"token": "manual"}, ready: true},
+		{name: "environment", env: map[string]string{"GH_TOKEN": "env"}, ready: true},
+		{name: "logged in", result: sdk.ExecResult{Stdout: "cli-token\n"}, ready: true, wantCLI: 1},
+		{name: "signed out", result: sdk.ExecResult{ExitCode: 1, Stdout: "not a token"}, wantCLI: 1},
+		{name: "missing", result: sdk.ExecResult{ExitCode: -1}, wantCLI: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			env := test.env
+			if env == nil {
+				env = map[string]string{}
+			}
+			calls := 0
+			ready, close := PluginReadiness(Options{Env: env, Run: func(context.Context, []string, process.RunOptions) sdk.ExecResult {
+				calls++
+				return test.result
+			}})
+			defer close()
+			for range 2 {
+				if ready(t.Context(), test.values) != test.ready {
+					t.Fatal("unexpected settings readiness")
+				}
+			}
+			if calls != test.wantCLI {
+				t.Fatalf("expected %d CLI lookups, got %d", test.wantCLI, calls)
+			}
+		})
 	}
 }
 func TestProviderValidatesCachesAndClosesRepository(t *testing.T) {
@@ -64,8 +102,9 @@ func TestProviderValidatesCachesAndClosesRepository(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	provider := Provider(Options{DataDir: t.TempDir(), APIBase: server.URL, GitBase: server.URL, Client: server.Client(), Env: map[string]string{}})
-	caps, err := provider.Connect(t.Context(), map[string]any{"repository": "acme/app", "token": "secret"})
+	provider := Provider(Options{DataDir: t.TempDir(), APIBase: server.URL, GitBase: server.URL, Client: server.Client(), Env: map[string]string{},
+		PluginSettings: func() map[string]any { return map[string]any{"token": "secret"} }})
+	caps, err := provider.Connect(t.Context(), map[string]any{"repository": "acme/app"})
 	if err != nil {
 		t.Fatal(err)
 	}

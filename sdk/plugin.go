@@ -14,6 +14,7 @@ type SearchProvider struct {
 type PluginContext struct {
 	Context           context.Context
 	DataDir           string
+	Settings          func() map[string]any
 	OnDispose         func(func(context.Context) error) error
 	RegisterModel     func(ModelProvider) (func(), error)
 	RegisterContext   func(ContextProvider) (func(), error)
@@ -22,7 +23,12 @@ type PluginContext struct {
 	RegisterLink      func(LinkProvider) (func(), error)
 }
 type Plugin struct {
-	ID    string
-	Name  LocalizedText
-	Setup func(context.Context, PluginContext) (func(context.Context) error, error)
+	ID       string
+	Name     LocalizedText
+	Settings *SettingsSchema
+	// SettingsReady checks configuration that can also come from outside Ariadne.
+	// When omitted, readiness is determined by the schema's required fields.
+	SettingsReady    func(context.Context, map[string]any) bool
+	ValidateSettings func(map[string]any) error
+	Setup            func(context.Context, PluginContext) (func(context.Context) error, error)
 }

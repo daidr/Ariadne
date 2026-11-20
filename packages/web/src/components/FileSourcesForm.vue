@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { ProjectReference } from '@ariadne/core'
-import { DouButton, DouFormItem, DouSelect, DouText } from 'dou-ui'
+import { DouButton, DouText } from 'dou-ui'
 import { FolderOpenIcon, PencilIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useId, watch } from 'vue'
 import { api, ApiError, type SourceInput, type SourceKind } from '../api'
-import { lt, t, tm } from '../i18n'
+import { t, tm } from '../i18n'
+import { pluginRevision } from '../plugin-config'
 import { nameFrom, summaryOf } from '../source-status'
 import { removeReference, saveFileSources, state } from '../store'
-import SettingsFields from './SettingsFields.vue'
+import FileSourceDialog from './FileSourceDialog.vue'
 
 const props = defineProps<{ projectId?: string }>()
 type Draft = SourceInput & { id?: string; key: string }
@@ -15,31 +16,24 @@ const kinds = ref<SourceKind[]>([])
 const drafts = ref<Draft[]>([])
 const primary = ref<string | null>(null)
 const editing = ref<Draft | null>(null)
-const editingKind = ref('')
+const labelId = useId()
 const secretsSet = ref<Record<string, string[]>>({})
 const problem = ref<string | null>(null)
 const loaded = ref(false)
 let opened = ''
 
-const kindsThatWrite = computed(() =>
-  kinds.value.filter((kind) => kind.provides.includes('workspace')),
+const defaultKind = computed(() =>
+  kinds.value.find((kind) => kind.provides.includes('workspace') && kind.plugin?.ready !== false),
 )
 const kindOf = (kind: string) => kinds.value.find((item) => item.kind === kind) ?? null
-const current = computed(() => kindOf(editing.value?.kind ?? ''))
-const hostingKinds = computed(() => kinds.value.filter((kind) => kind.hosting))
-const hosting = computed(() => kindOf(editing.value?.hosting?.kind ?? ''))
 const visibleReferences = computed(() =>
   (props.projectId ? (state.detail?.project.references ?? []) : []).filter(
     (reference) => !drafts.value.some((draft) => draft.id === reference.id),
   ),
 )
-const kindOptions = computed(() =>
-  kindsThatWrite.value.map((kind) => ({ value: kind.kind, label: lt(kind.title) ?? kind.kind })),
+const editingExisting = computed(
+  () => drafts.value.some((draft) => draft.key === editing.value?.key) || !!editing.value?.id,
 )
-const hostingOptions = computed(() => [
-  { value: '', label: t('project.source.hostingNone') },
-  ...hostingKinds.value.map((kind) => ({ value: kind.kind, label: lt(kind.title) ?? kind.kind })),
-])
 const active = computed(() => drafts.value.find((draft) => draft.key === primary.value))
 const primaryName = computed(() =>
   active.value ? nameFrom(kindOf(active.value.kind), active.value.settings) : '',
@@ -82,7 +76,6 @@ onMounted(async () => {
     }
     opened = JSON.stringify(input())
     loaded.value = true
-    if (!props.projectId && kindsThatWrite.value.length) add()
   } catch (error) {
     problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
     // Creating a project without any files is still possible.
@@ -90,68 +83,45 @@ onMounted(async () => {
   }
 })
 
-function add() {
-  const kind = kindsThatWrite.value[0]?.kind
-  if (kind) edit({ key: crypto.randomUUID(), kind, settings: {} })
-}
+watch(pluginRevision, async (_revision, _before, onCleanup) => {
+  let current = true
+  onCleanup(() => {
+    current = false
+  })
+  try {
+    const refreshed = await api.sourceKinds()
+    if (current) kinds.value = refreshed.kinds
+  } catch (error) {
+    if (current) problem.value = error instanceof ApiError ? tm(error.localized) : String(error)
+  }
+})
 
-function edit(draft: Draft) {
-  editingKind.value = draft.kind
+function add() {
+  if (!defaultKind.value || drafts.value.length >= 9) return
   editing.value = {
-    ...draft,
-    settings: { ...draft.settings },
-    hosting: draft.hosting
-      ? { kind: draft.hosting.kind, settings: { ...draft.hosting.settings } }
-      : null,
+    key: crypto.randomUUID(),
+    kind: defaultKind.value.kind,
+    settings: { ...defaultKind.value.defaults },
   }
 }
 
 function writable(reference: ProjectReference) {
-  edit({ id: reference.id, key: reference.id, kind: reference.kind, settings: reference.settings })
+  editing.value = {
+    id: reference.id,
+    key: reference.id,
+    kind: reference.kind,
+    settings: reference.settings,
+  }
 }
 
-function changeKind(value: unknown) {
+function apply(source: SourceInput) {
   if (!editing.value) return
-  editing.value.kind = String(value)
-  editing.value.settings = {}
-  editing.value.hosting = null
-}
-
-function changeHosting(value: unknown) {
-  if (editing.value) editing.value.hosting = value ? { kind: String(value), settings: {} } : null
-}
-
-const storedKeys = computed(() => {
-  const draft = editing.value
-  return draft?.id && draft.kind === editingKind.value ? (secretsSet.value[draft.id] ?? []) : []
-})
-const mainKeys = computed(() => storedKeys.value.filter((key) => !key.startsWith('hosting.')))
-const hostingKeys = computed(() => {
-  const original = drafts.value.find((draft) => draft.key === editing.value?.key)
-  return original?.hosting?.kind === editing.value?.hosting?.kind
-    ? storedKeys.value.filter((key) => key.startsWith('hosting.')).map((key) => key.slice(8))
-    : []
-})
-const canApply = computed(
-  () =>
-    !!current.value &&
-    (current.value.settings.required ?? []).every((key) => {
-      const value = editing.value?.settings[key]
-      return typeof value === 'string'
-        ? !!value.trim()
-        : value != null || mainKeys.value.includes(key)
-    }),
-)
-
-function confirm() {
-  if (!editing.value || !canApply.value) return false
-  const draft = editing.value
-  const i = drafts.value.findIndex((entry) => entry.key === draft.key)
-  if (i === -1) drafts.value.push(draft)
-  else drafts.value[i] = draft
+  const draft = { ...editing.value, ...source }
+  const index = drafts.value.findIndex((entry) => entry.key === draft.key)
+  if (index === -1) drafts.value.push(draft)
+  else drafts.value[index] = draft
   if (!primary.value) primary.value = draft.key
   editing.value = null
-  return true
 }
 
 function remove(key: string) {
@@ -159,22 +129,8 @@ function remove(key: string) {
   if (primary.value === key) primary.value = drafts.value[0]?.key ?? null
 }
 
-function browse(_key: string, path: string) {
-  const draft = editing.value
-  if (!draft) return Promise.reject(new Error('source form is closed'))
-  return api
-    .browseSource(draft.kind, {
-      projectId: props.projectId ?? null,
-      sourceId: draft.id ?? '',
-      settings: { ...draft.settings },
-      path,
-    })
-    .then((result) => result.listing)
-}
-
 async function save() {
-  if (!props.projectId || !loaded.value) return false
-  if (editing.value && !confirm()) return false
+  if (!props.projectId || !ready.value) return false
   const values = input()
   const key = JSON.stringify(values)
   if (key === opened) return true
@@ -191,136 +147,108 @@ async function save() {
   return !problem.value
 }
 
-defineExpose({ ready, primaryName, editing, confirm, input, save })
+defineExpose({ ready, primaryName, input, save })
 </script>
 
 <template>
-  <div class="file-sources">
-    <div v-for="draft in drafts" :key="draft.key" class="file-source">
-      <FolderOpenIcon class="source-icon" />
-      <DouText size="sm" truncate class="source-label" :title="sourceTitle(draft)">
-        {{ sourceLabel(draft) }}
-      </DouText>
-      <template v-if="drafts.length > 1">
-        <DouText v-if="primary === draft.key" size="sm" variant="secondary">
-          {{ t('project.sources.primary') }}
+  <div class="file-sources" role="group" :aria-labelledby="labelId">
+    <div class="sources-heading">
+      <DouText :id="labelId" size="sm" weight="medium">{{ t('newProject.source') }}</DouText>
+      <DouButton
+        v-if="defaultKind && drafts.length < 9"
+        variant="ghost"
+        size="sm"
+        :aria-label="t('project.sources.add')"
+        :title="t('project.sources.add')"
+        @click="add"
+      >
+        <PlusIcon />
+      </DouButton>
+    </div>
+    <ul v-if="drafts.length || visibleReferences.length" class="source-list">
+      <li v-for="draft in drafts" :key="draft.key" class="file-source">
+        <FolderOpenIcon class="source-icon" />
+        <DouText size="sm" truncate class="source-label" :title="sourceTitle(draft)">
+          {{ sourceLabel(draft) }}
         </DouText>
-        <DouButton v-else variant="ghost" size="sm" @click="primary = draft.key">
-          {{ t('project.sources.makePrimary') }}
+        <template v-if="drafts.length > 1">
+          <DouText v-if="primary === draft.key" size="sm" variant="secondary">
+            {{ t('project.sources.primary') }}
+          </DouText>
+          <DouButton v-else variant="ghost" size="sm" @click="primary = draft.key">
+            {{ t('project.sources.makePrimary') }}
+          </DouButton>
+        </template>
+        <DouButton
+          variant="ghost"
+          size="sm"
+          :aria-label="t('project.sources.edit')"
+          :title="t('project.sources.edit')"
+          @click="editing = draft"
+        >
+          <PencilIcon />
         </DouButton>
-      </template>
-      <DouButton
-        variant="ghost"
-        size="sm"
-        :aria-label="t('project.sources.edit')"
-        :title="t('project.sources.edit')"
-        @click="edit(draft)"
-      >
-        <PencilIcon />
-      </DouButton>
-      <DouButton
-        variant="ghost"
-        size="sm"
-        :aria-label="t('project.references.remove')"
-        :title="t('project.references.remove')"
-        @click="remove(draft.key)"
-      >
-        <TrashIcon />
-      </DouButton>
-    </div>
-    <div v-for="reference in visibleReferences" :key="reference.id" class="file-source">
-      <FolderOpenIcon class="source-icon" />
-      <DouText size="sm" truncate class="source-label" :title="sourceTitle(reference)">
-        {{ sourceLabel(reference) }}
-      </DouText>
-      <DouText size="sm" variant="secondary">{{ t('project.sources.readOnly') }}</DouText>
-      <DouButton variant="ghost" size="sm" @click="writable(reference)">
-        {{ t('project.sources.enableWrites') }}
-      </DouButton>
-      <DouButton
-        variant="ghost"
-        size="sm"
-        :aria-label="t('project.references.remove')"
-        :title="t('project.references.remove')"
-        @click="removeReference(reference.id)"
-      >
-        <TrashIcon />
-      </DouButton>
-    </div>
-    <template v-if="editing">
-      <DouFormItem :label="t('project.source.kind')">
-        <DouSelect
-          :model-value="editing.kind"
-          :options="kindOptions"
-          @update:model-value="changeKind"
-        />
-      </DouFormItem>
-      <SettingsFields
-        v-if="current"
-        :key="current.kind"
-        :schema="current.settings"
-        :values="editing.settings"
-        :secrets-set="mainKeys"
-        :browse="current.browse ? browse : undefined"
-        @clear-secret="
-          (key) => {
-            if (editing) editing.settings[key] = null
-          }
-        "
-      />
-      <template v-if="current?.remote && hostingKinds.length">
-        <DouFormItem :label="t('project.source.hosting')">
-          <DouSelect
-            :model-value="editing.hosting?.kind ?? ''"
-            :options="hostingOptions"
-            @update:model-value="changeHosting"
-          />
-        </DouFormItem>
-        <SettingsFields
-          v-if="hosting && editing.hosting"
-          :key="'hosting-' + hosting.kind"
-          :schema="hosting.settings"
-          :values="editing.hosting.settings"
-          :secrets-set="hostingKeys"
-          @clear-secret="
-            (key) => {
-              if (editing?.hosting) editing.hosting.settings[key] = null
-            }
-          "
-        />
-      </template>
-      <div class="source-actions">
-        <DouButton size="sm" tone="primary" :disabled="!canApply" @click="confirm">
-          {{ t('project.references.confirm') }}
+        <DouButton
+          variant="ghost"
+          size="sm"
+          :aria-label="t('project.references.remove')"
+          :title="t('project.references.remove')"
+          @click="remove(draft.key)"
+        >
+          <TrashIcon />
         </DouButton>
-        <DouButton size="sm" variant="ghost" @click="editing = null">{{
-          t('settings.cancel')
-        }}</DouButton>
-      </div>
-    </template>
-    <DouButton
-      v-else-if="kindsThatWrite.length && drafts.length < 9"
-      variant="ghost"
-      size="sm"
-      class="add-source"
-      @click="add"
-    >
-      <template #leading><PlusIcon /></template>
-      {{ t('project.sources.add') }}
-    </DouButton>
+      </li>
+      <li v-for="reference in visibleReferences" :key="reference.id" class="file-source">
+        <FolderOpenIcon class="source-icon" />
+        <DouText size="sm" truncate class="source-label" :title="sourceTitle(reference)">
+          {{ sourceLabel(reference) }}
+        </DouText>
+        <DouText size="sm" variant="secondary">{{ t('project.sources.readOnly') }}</DouText>
+        <DouButton variant="ghost" size="sm" @click="writable(reference)">
+          {{ t('project.sources.enableWrites') }}
+        </DouButton>
+        <DouButton
+          variant="ghost"
+          size="sm"
+          :aria-label="t('project.references.remove')"
+          :title="t('project.references.remove')"
+          @click="removeReference(reference.id)"
+        >
+          <TrashIcon />
+        </DouButton>
+      </li>
+    </ul>
+    <FileSourceDialog
+      v-if="editing"
+      :key="editing.key"
+      :source="editing"
+      :existing="editingExisting"
+      :kinds="kinds"
+      :project-id="projectId"
+      :secrets-set="editing.id ? (secretsSet[editing.id] ?? []) : []"
+      @apply="apply"
+      @cancel="editing = null"
+    />
     <DouText v-if="problem" tone="danger" size="sm" role="alert">{{ problem }}</DouText>
   </div>
 </template>
 
 <style scoped>
-.file-sources {
+.file-sources,
+.source-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.file-source,
-.source-actions {
+.source-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.sources-heading,
+.file-source {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -336,7 +264,7 @@ defineExpose({ ready, primaryName, editing, confirm, input, save })
   min-width: 0;
 }
 
-.add-source {
-  align-self: flex-start;
+.sources-heading {
+  justify-content: space-between;
 }
 </style>

@@ -18,6 +18,7 @@ import (
 	"github.com/daidr/Ariadne/internal/dashboard"
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
@@ -40,13 +41,14 @@ func emptyProvides() Provides {
 }
 
 type Record struct {
-	ID       *string           `json:"id"`
-	Name     sdk.LocalizedText `json:"name"`
-	Source   string            `json:"source"`
-	Path     *string           `json:"path"`
-	Status   string            `json:"status"`
-	Error    *string           `json:"error"`
-	Provides Provides          `json:"provides"`
+	ID           *string           `json:"id"`
+	Name         sdk.LocalizedText `json:"name"`
+	Source       string            `json:"source"`
+	Path         *string           `json:"path"`
+	Status       string            `json:"status"`
+	Error        *string           `json:"error"`
+	Provides     Provides          `json:"provides"`
+	Configurable bool              `json:"configurable,omitempty"`
 }
 type Options struct {
 	DataRoot    string
@@ -56,12 +58,16 @@ type Options struct {
 	Dashboards  *dashboard.Registry
 	Links       *links.Resolver
 	OnError     func(error)
+	Settings    *settings.Store
 }
 type loaded struct {
-	record  Record
-	file    string
-	dispose []func(context.Context) error
-	cancel  context.CancelFunc
+	record   Record
+	file     string
+	dispose  []func(context.Context) error
+	cancel   context.CancelFunc
+	schema   *sdk.SettingsSchema
+	ready    func(context.Context, map[string]any) bool
+	validate func(map[string]any) error
 }
 type Host struct {
 	options     Options
@@ -192,6 +198,10 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	if !pluginID.MatchString(plugin.ID) || plugin.Setup == nil {
 		return errors.New("plugin requires a safe id and setup")
 	}
+	schema, err := checkedSettingsSchema(plugin.Settings)
+	if err != nil {
+		return err
+	}
 	if data, err := json.Marshal(plugin.Name); err != nil {
 		return err
 	} else if len(data) > 16384 {
@@ -233,6 +243,8 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 		return err
 	}
 	pc := sdk.PluginContext{Context: life, DataDir: dataDir}
+	store := host.options.Settings
+	pc.Settings = func() map[string]any { return pluginValues(store, plugin.ID, schema) }
 	pc.OnDispose = func(cleanup func(context.Context) error) error {
 		state.mu.Lock()
 		defer state.mu.Unlock()
@@ -253,6 +265,12 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 		return register(state, provider, provider.Info.Kind, &state.provides.Models, host.options.Models.Register)
 	}
 	pc.RegisterContext = func(provider sdk.ContextProvider) (func(), error) {
+		if provider.NeedsPluginSettings {
+			if schema == nil || (len(schema.Required) == 0 && plugin.SettingsReady == nil) {
+				return nil, errors.New("a source that requires plugin settings needs required fields or a readiness check")
+			}
+			provider.Info.Plugin = &sdk.SourcePlugin{ID: plugin.ID}
+		}
 		return register(state, provider, provider.Info.Kind, &state.provides.Contexts, host.options.Sources.Register)
 	}
 	pc.RegisterDashboard = func(provider sdk.DashboardSource) (func(), error) {
@@ -284,7 +302,7 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	if err := startup.Err(); err != nil {
 		return err
 	}
-	record := Record{ID: new(plugin.ID), Name: plugin.Name, Source: "builtin", Status: "loaded", Provides: state.provides}
+	record := Record{ID: new(plugin.ID), Name: plugin.Name, Source: "builtin", Status: "loaded", Provides: state.provides, Configurable: schema != nil}
 	if path != nil {
 		record.Source = "path"
 		record.Path = new(*path)
@@ -294,7 +312,7 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	if host.closing {
 		return errors.New("plugin host is closed")
 	}
-	host.loaded = append(host.loaded, &loaded{record: copyRecord(record), dispose: state.disposers, cancel: cancel})
+	host.loaded = append(host.loaded, &loaded{record: copyRecord(record), dispose: state.disposers, cancel: cancel, schema: schema, ready: plugin.SettingsReady, validate: plugin.ValidateSettings})
 	state.disposers = nil
 	complete = true
 	return nil

@@ -5,6 +5,7 @@ package sources
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"sync"
 
@@ -43,6 +44,7 @@ func (registry *Registry) Register(provider sdk.ContextProvider) (func(), error)
 	}
 	owned := provider
 	owned.Info = copyInfo(provider.Info)
+	owned.PluginFields = slices.Clone(provider.PluginFields)
 	registry.providers[provider.Info.Kind] = &owned
 	registry.next++
 	registry.versions[provider.Info.Kind] = registry.next
@@ -60,6 +62,41 @@ func (registry *Registry) Register(provider sdk.ContextProvider) (func(), error)
 			registry.order = slices.DeleteFunc(registry.order, func(kind string) bool { return kind == provider.Info.Kind })
 		})
 	}, nil
+}
+func (registry *Registry) Invalidate(kinds []string) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	for _, kind := range kinds {
+		if registry.providers[kind] != nil {
+			registry.next++
+			registry.versions[kind] = registry.next
+		}
+	}
+}
+
+// Defaults are safe to send to a source form and become part of a new source
+// when it is saved. A change to a plugin default does not change saved sources.
+func Defaults(provider sdk.ContextProvider) map[string]any {
+	if provider.NewSourceDefaults == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for key, value := range provider.NewSourceDefaults() {
+		if field, ok := provider.Info.Settings.Properties[key]; ok && !field.Secret {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func (registry *Registry) NewSettings(kind string, values map[string]any) map[string]any {
+	provider, _ := registry.Get(kind)
+	settings := Defaults(provider)
+	if len(settings) == 0 {
+		return values
+	}
+	maps.Copy(settings, values)
+	return settings
 }
 func (registry *Registry) Generation(kind string) uint64 {
 	registry.mu.RLock()

@@ -33,6 +33,7 @@ import ProjectSearch from './components/ProjectSearch.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
 import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
+import PluginConfigDialog from './components/PluginConfigDialog.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
 import FilePreview from './files/FilePreview.vue'
@@ -214,6 +215,7 @@ watchEffect(() => {
       </div>
     </DouLayout>
     <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
+    <PluginConfigDialog />
     <ShortcutSheet />
     <ProjectSettings />
     <FullView />

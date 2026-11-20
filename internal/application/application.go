@@ -145,6 +145,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	addSimple(func() error { resolver.Close(); return nil })
 	host, err := plugins.New(plugins.Options{
 		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: builtins.Registry, Sources: registry, Dashboards: dashboards, Links: resolver, OnError: onError,
+		Settings: user,
 	})
 	if err != nil {
 		return nil, err
@@ -337,18 +338,35 @@ func installSources(ctx context.Context, host *plugins.Host, home string, client
 	gitlabOptions := gitlab.Options{DataDir: filepath.Join(dataDir, "gitlab"), Client: client, Instances: gitlab.NewInstances(nil)}
 	add(gitlabOptions.Instances.Close)
 	githubOptions := github.Options{DataDir: filepath.Join(dataDir, "github"), Client: client}
+	githubReady, closeGitHubReady := github.PluginReadiness(githubOptions)
+	add(closeGitHubReady)
+	localProvider := local.DirectoryProvider(filepath.Join(dataDir, "local"), nil, false)
 	entries := []struct {
-		id     string
-		source sdk.ContextProvider
-		link   func() sdk.LinkProvider
+		id        string
+		name      sdk.LocalizedText
+		settings  *sdk.SettingsSchema
+		ready     func(context.Context, map[string]any) bool
+		validate  func(map[string]any) error
+		source    func() sdk.ContextProvider
+		link      func() sdk.LinkProvider
+		configure func(func() map[string]any)
 	}{
-		{id: "local", source: local.DirectoryProvider(filepath.Join(dataDir, "local"), nil, false)},
-		{id: "github", source: github.Provider(githubOptions), link: func() sdk.LinkProvider { return github.Links(githubOptions) }},
-		{id: "gitlab", source: gitlab.Provider(gitlabOptions), link: func() sdk.LinkProvider { return gitlab.Links(gitlabOptions) }},
+		{id: "local", name: localProvider.Info.Title, source: func() sdk.ContextProvider { return localProvider }},
+		{id: "github", name: sdk.LocalizedText{"zh-CN": "GitHub", "en": "GitHub"}, settings: github.PluginSchema(),
+			ready:  githubReady,
+			source: func() sdk.ContextProvider { return github.Provider(githubOptions) }, link: func() sdk.LinkProvider { return github.Links(githubOptions) },
+			configure: func(values func() map[string]any) { githubOptions.PluginSettings = values }},
+		{id: "gitlab", name: sdk.LocalizedText{"zh-CN": "GitLab", "en": "GitLab"}, settings: gitlab.PluginSchema(),
+			validate: gitlab.ValidatePluginSettings,
+			source:   func() sdk.ContextProvider { return gitlab.Provider(gitlabOptions) }, link: func() sdk.LinkProvider { return gitlab.Links(gitlabOptions) },
+			configure: func(values func() map[string]any) { gitlabOptions.PluginSettings = values }},
 	}
 	for _, entry := range entries {
-		plugin := sdk.Plugin{ID: entry.id, Name: entry.source.Info.Title, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
-			if _, err := pc.RegisterContext(entry.source); err != nil {
+		plugin := sdk.Plugin{ID: entry.id, Name: entry.name, Settings: entry.settings, SettingsReady: entry.ready, ValidateSettings: entry.validate, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
+			if entry.configure != nil {
+				entry.configure(pc.Settings)
+			}
+			if _, err := pc.RegisterContext(entry.source()); err != nil {
 				return nil, err
 			}
 			if entry.link != nil {

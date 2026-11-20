@@ -19,6 +19,35 @@ func pluginPaths(config Object) []string {
 
 func (store *Store) PluginPaths() []string { return pluginPaths(store.snapshot()) }
 
+func (store *Store) PluginValues(id string) Object {
+	return cloneMap(object(object(store.snapshot()["pluginSettings"])[id]))
+}
+
+func (store *Store) SavePluginValues(id string, changes Object) error {
+	return store.update(func(config Object) error {
+		plugins := object(config["pluginSettings"])
+		values := object(plugins[id])
+		for key, value := range changes {
+			if value == nil {
+				delete(values, key)
+			} else {
+				values[key] = value
+			}
+		}
+		if len(values) == 0 {
+			delete(plugins, id)
+		} else {
+			plugins[id] = values
+		}
+		if len(plugins) == 0 {
+			delete(config, "pluginSettings")
+		} else {
+			config["pluginSettings"] = plugins
+		}
+		return nil
+	})
+}
+
 func (store *Store) SavePluginPath(path string, maxPaths int) error {
 	return store.update(func(next Object) error {
 		paths := pluginPaths(next)

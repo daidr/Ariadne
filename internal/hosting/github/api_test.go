@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/hostinghttp"
+	"github.com/daidr/Ariadne/internal/legacytest"
+	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -223,6 +224,14 @@ func TestAPIAndMetadataMatchLegacy(t *testing.T) {
 		}
 	}
 	info := Provider(Options{}).Info
+	// Compare the legacy fields after checking the new directory field.
+	if !reflect.DeepEqual(info.Settings.Properties[local.HostedDirectory], local.HostedDirectoryField()) {
+		t.Fatal("repository storage directory field is missing or invalid")
+	}
+	delete(info.Settings.Properties, local.HostedDirectory)
+	info.Settings.FieldOrder = slices.DeleteFunc(info.Settings.FieldOrder, func(field string) bool {
+		return field == local.HostedDirectory
+	})
 	metadata := map[string]any{"kind": info.Kind, "title": info.Title, "settings": info.Settings, "provides": info.Provides, "hosting": info.Hosting}
 	native := map[string]any{"scenarios": nativeScenarios, "repositories": nativeRepos, "links": nativeLinks, "metadata": metadata}
 	bun, err := exec.LookPath("bun")

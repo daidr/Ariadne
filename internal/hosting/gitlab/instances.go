@@ -294,6 +294,9 @@ func Links(options Options) sdk.LinkProvider {
 				defer api.Close()
 				return api.Preview(ctx, mr.IID)
 			}
+			if value := pluginToken(options, mr.Instance); value != "" && !slices.Contains(mr.Tokens, value) {
+				mr.Tokens = append(mr.Tokens, value)
+			}
 			for i := 0; i <= len(mr.Tokens); i++ {
 				token := func(ctx context.Context) (*string, error) { return fallback(ctx, mr.Instance) }
 				if i < len(mr.Tokens) {

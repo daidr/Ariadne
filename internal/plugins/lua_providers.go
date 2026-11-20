@@ -201,7 +201,8 @@ func unmarshalLuaPart(data []byte, part *sdk.Part) error {
 
 func (program *luaProgram) source(provider luaProvider) sdk.ContextProvider {
 	source := sdk.ContextProvider{
-		Info: sdk.ContextProviderInfo{Kind: provider.kind, Title: provider.title, Settings: provider.settings, Provides: []string{"workspace"}, Remote: true},
+		NeedsPluginSettings: provider.needsPluginSettings,
+		Info:                sdk.ContextProviderInfo{Kind: provider.kind, Title: provider.title, Settings: provider.settings, Provides: []string{"workspace"}, Remote: true},
 		Connect: func(ctx context.Context, settings map[string]any) (sdk.Capabilities, error) {
 			if provider.methods["check"] {
 				var result any

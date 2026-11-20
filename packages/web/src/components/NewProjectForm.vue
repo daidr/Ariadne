@@ -30,10 +30,6 @@ function onEnter(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing || !(event.target instanceof HTMLInputElement))
     return
   event.preventDefault()
-  if (sources.value?.editing) {
-    sources.value.confirm()
-    return
-  }
   void create()
 }
 

@@ -42,6 +42,7 @@ import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WorkSettings from './WorkSettings.vue'
 import DataTab from './DataTab.vue'
+import PluginSettings from './PluginSettings.vue'
 import SearchSettings from './SearchSettings.vue'
 import UpdatesSettings from './UpdatesSettings.vue'
 import SettingsFields from './SettingsFields.vue'
@@ -307,7 +308,15 @@ const priced = computed(() =>
 )
 
 export type SettingsTab =
-  'models' | 'search' | 'instructions' | 'commands' | 'input' | 'mcp' | 'data' | 'updates'
+  | 'models'
+  | 'search'
+  | 'instructions'
+  | 'commands'
+  | 'input'
+  | 'mcp'
+  | 'plugins'
+  | 'data'
+  | 'updates'
 type WorkPart = 'instructions' | 'commands'
 const tab = defineModel<SettingsTab>('tab', { default: 'models' })
 const mcp = ref<InstanceType<typeof McpSettings> | null>(null)
@@ -978,15 +987,20 @@ async function saveModels(): Promise<boolean> {
       <DouTabPanel value="mcp" :label="t('settings.tab.mcp')">
         <McpSettings v-if="open" ref="mcp" />
       </DouTabPanel>
+      <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
+        <PluginSettings v-if="open && tab === 'plugins'" @changed="reloadKinds" />
+      </DouTabPanel>
       <DouTabPanel value="data" :label="t('settings.tab.data')">
-        <DataTab v-if="open" @plugins-changed="reloadKinds" />
+        <DataTab v-if="open" />
       </DouTabPanel>
       <DouTabPanel value="updates" :label="t('settings.tab.updates')">
         <UpdatesSettings v-if="open && tab === 'updates'" />
       </DouTabPanel>
     </DouTabs>
     <template #footer="{ close }">
-      <DouButton v-if="tab === 'updates'" @click="close">{{ t('view.close') }}</DouButton>
+      <DouButton v-if="tab === 'updates' || tab === 'plugins'" @click="close">{{
+        t('view.close')
+      }}</DouButton>
       <template v-else>
         <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
         <DouButton tone="primary" :loading="saving" :disabled="search?.checking" @click="saveAll">

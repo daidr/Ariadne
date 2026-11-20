@@ -20,6 +20,42 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+func TestNewSourceDefaultsRespectOverridesAndSavedSources(t *testing.T) {
+	registry := sources.New()
+	directory := t.TempDir()
+	_, err := registry.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: "fixture", Settings: sdk.SettingsSchema{Properties: map[string]sdk.SettingField{
+			"directory": {Type: "string", Directory: true},
+			"token":     {Type: "string", Secret: true},
+		}}},
+		NewSourceDefaults: func() map[string]any { return object{"directory": directory, "token": "private"} },
+		Connect:           func(context.Context, map[string]any) (sdk.Capabilities, error) { return sdk.Capabilities{}, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &API{options: Options{Sources: registry}}
+	makePart := func(settings object) sources.Part { return sources.Part{Kind: "fixture", Settings: settings} }
+	first := makePart(object{})
+	if err := api.prepareSource(&first, nil); err != nil || first.Settings["directory"] != directory || first.Settings["token"] != nil {
+		t.Fatal("invalid new source defaults", first, err)
+	}
+	other := t.TempDir()
+	override := makePart(object{"directory": other})
+	if err := api.prepareSource(&override, nil); err != nil || override.Settings["directory"] != other {
+		t.Fatal("ignored project directory", override, err)
+	}
+	clear := makePart(object{"directory": ""})
+	if err := api.prepareSource(&clear, nil); err != nil || clear.Settings["directory"] != nil {
+		t.Fatal("explicit blank was replaced by the default", clear, err)
+	}
+	directory = t.TempDir()
+	existing := makePart(object{"directory": other})
+	if err := api.prepareSource(&existing, &override); err != nil || existing.Settings["directory"] != other {
+		t.Fatal("changing plugin defaults moved a saved project", existing, err)
+	}
+}
+
 func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "notes.txt")

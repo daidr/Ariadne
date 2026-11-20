@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { DouAlert, DouText } from 'dou-ui'
+import { DouAlert } from 'dou-ui'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ApiError, type StorageSnapshot } from '../api'
-import { t, tm } from '../i18n'
+import { tm } from '../i18n'
 import DataSettings from './DataSettings.vue'
-import PluginSettings from './PluginSettings.vue'
 import WorktreeSettings from './WorktreeSettings.vue'
 
 /**
  * What Ariadne keeps on this machine and how it runs there: data and backups, threads'
- * worktrees, and plugins loaded from a folder. Backups, removals and plugins act at once.
+ * worktrees. Backups and removals act at once.
  */
-const emit = defineEmits<{ pluginsChanged: [] }>()
 const storage = ref<StorageSnapshot | null>(null)
 const measuring = ref(true)
 const error = ref<string | null>(null)
@@ -49,11 +47,6 @@ async function measure(cached = false) {
 }
 
 onMounted(() => measure(true))
-
-function pluginsChanged() {
-  emit('pluginsChanged')
-  void measure()
-}
 </script>
 
 <template>
@@ -61,10 +54,6 @@ function pluginsChanged() {
     <DouAlert v-if="error" tone="danger" closable @close="error = null">{{ error }}</DouAlert>
     <DataSettings :storage="storage" :measuring="measuring" />
     <WorktreeSettings :storage="storage" :measuring="measuring" @changed="measure()" />
-    <section class="data-tab-section">
-      <DouText weight="medium">{{ t('settings.tab.plugins') }}</DouText>
-      <PluginSettings @changed="pluginsChanged" />
-    </section>
   </div>
 </template>
 
@@ -73,11 +62,5 @@ function pluginsChanged() {
   display: flex;
   flex-direction: column;
   gap: 24px;
-}
-
-.data-tab-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 </style>

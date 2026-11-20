@@ -106,6 +106,9 @@ func (turn *turn) requestSource(ctx context.Context, input args, writable bool) 
 			return "", fmt.Errorf("reference setting %q is required", key)
 		}
 	}
+	if writable {
+		settings = turn.Sources.NewSettings(kind, settings)
+	}
 	encoded, err := jsonutil.Encode(settings)
 	if err != nil || len(encoded) > 5000 {
 		return "", errors.New("reference settings are too large")

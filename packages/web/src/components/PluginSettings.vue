@@ -4,6 +4,7 @@ import { TrashIcon } from '@dou-ui/icons'
 import { computed, onMounted, ref } from 'vue'
 import { api, ApiError, type PluginRecord } from '../api'
 import { lt, t, tm } from '../i18n'
+import { openPluginSettings, pluginsChanged } from '../plugin-config'
 import DirectoryInput from './DirectoryInput.vue'
 
 const browseLocal = (typed: string) => api.browseLocal(typed).then((result) => result.listing)
@@ -26,7 +27,10 @@ async function run(action: () => Promise<{ plugins: PluginRecord[] }>, changed =
   error.value = null
   try {
     plugins.value = (await action()).plugins
-    if (changed) emit('changed')
+    if (changed) {
+      pluginsChanged()
+      emit('changed')
+    }
     return true
   } catch (cause) {
     error.value = message(cause)
@@ -57,7 +61,6 @@ async function add() {
   if (await run(() => api.addPlugin(path.value.trim()))) path.value = ''
 }
 
-// The built-in ones cannot be turned off: only those loaded from a folder are listed.
 const local = computed(() => plugins.value.filter((plugin) => plugin.source !== 'builtin'))
 
 const nameOf = (plugin: PluginRecord) =>
@@ -94,7 +97,7 @@ const provides = (plugin: PluginRecord) => [
       </DouButton>
     </form>
     <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
-    <DouCard v-for="plugin in local" :key="plugin.id ?? plugin.path ?? ''" padding="sm">
+    <DouCard v-for="plugin in plugins" :key="plugin.id ?? plugin.path ?? ''" padding="sm">
       <div class="plugins-row">
         <div class="plugins-main">
           <div class="plugins-title">
@@ -117,18 +120,27 @@ const provides = (plugin: PluginRecord) => [
             }}
           </DouText>
         </div>
-        <DouPopconfirm
-          v-if="plugin.source === 'path' && plugin.path"
-          :title="removeQuestion(plugin)"
-          tone="danger"
-          :confirm-text="t('plugins.remove')"
-          @confirm="run(() => api.removePlugin(plugin.path!))"
-        >
-          <DouButton size="sm" variant="ghost" tone="danger" :aria-label="t('plugins.remove')">
-            <template #leading><TrashIcon /></template>
-            {{ t('plugins.remove') }}
+        <div class="plugins-actions">
+          <DouButton
+            v-if="plugin.id && plugin.configurable"
+            size="sm"
+            variant="outline"
+            @click="openPluginSettings(plugin.id)"
+          >
+            {{ t('plugins.settings') }}
           </DouButton>
-        </DouPopconfirm>
+          <DouPopconfirm
+            v-if="plugin.source === 'path' && plugin.path"
+            :title="removeQuestion(plugin)"
+            tone="danger"
+            :confirm-text="t('plugins.remove')"
+            @confirm="run(() => api.removePlugin(plugin.path!))"
+          >
+            <DouButton size="sm" variant="ghost" tone="danger" :aria-label="t('plugins.remove')">
+              <TrashIcon />
+            </DouButton>
+          </DouPopconfirm>
+        </div>
       </div>
     </DouCard>
   </div>
@@ -163,6 +175,12 @@ const provides = (plugin: PluginRecord) => [
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.plugins-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
 }
 
 .plugins-title {

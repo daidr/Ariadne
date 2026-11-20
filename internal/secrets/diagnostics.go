@@ -37,7 +37,7 @@ func ConfiguredValues(config map[string]any) []string {
 		switch value := value.(type) {
 		case map[string]any:
 			for k, v := range value {
-				collect(v, sensitive || SensitiveKey(k) || k == "headers" || k == "env")
+				collect(v, sensitive || SensitiveKey(k) || k == "headers" || k == "env" || k == "pluginSettings")
 			}
 		case []any:
 			for _, v := range value {

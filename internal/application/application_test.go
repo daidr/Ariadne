@@ -18,7 +18,54 @@ import (
 
 	"github.com/daidr/Ariadne/internal/config"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	"github.com/daidr/Ariadne/sdk"
 )
+
+func TestGitHubSourceUsesAutomaticCredentials(t *testing.T) {
+	const token = "fixture-github-token"
+	t.Setenv("GH_TOKEN", token)
+	home := t.TempDir()
+	cfg := config.Config{Home: home, DatabasePath: filepath.Join(home, "ariadne.sqlite"), Token: "fixture-session"}
+	app, err := Open(t.Context(), Options{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close(context.Background())
+	get := func(path string) []byte {
+		t.Helper()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+cfg.Token)
+		response := httptest.NewRecorder()
+		app.Handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || bytes.Contains(response.Body.Bytes(), []byte(token)) {
+			t.Fatalf("unexpected or unredacted response from %s (HTTP %d)", path, response.Code)
+		}
+		return response.Body.Bytes()
+	}
+	var catalog struct{ Kinds []sdk.ContextProviderInfo }
+	if err := json.Unmarshal(get("/api/source-kinds"), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	available := map[string]bool{}
+	for _, kind := range catalog.Kinds {
+		if kind.Plugin != nil {
+			available[kind.Kind] = kind.Plugin.Ready
+		}
+	}
+	if !available["github"] || available["gitlab"] {
+		t.Fatal("the GitHub credential should enable only the GitHub source")
+	}
+	var settings struct {
+		Ready      bool
+		SecretsSet []string
+	}
+	if err := json.Unmarshal(get("/api/plugins/github/settings"), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !settings.Ready || len(settings.SecretsSet) > 0 {
+		t.Fatal("automatic token was missed or displayed as a stored secret")
+	}
+}
 
 func TestNativeHTTPExecutesTurnAndRebuildsRequests(t *testing.T) {
 	const userText = "请用模拟服务回复，并把外部交付要求设为通过集成平台交付"

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -105,6 +106,20 @@ func (api *API) readSource(ctx context.Context, raw any, project string, previou
 			beforeHost = previous.Hosting.Kind
 		}
 	}
+	if api.options.Sources != nil {
+		var oldSource, oldHosting *sources.Part
+		if previous != nil {
+			oldSource, oldHosting = &previous.Part, previous.Hosting
+		}
+		if err := api.prepareSource(&part, oldSource); err != nil {
+			return sources.Definition{}, nil, err
+		}
+		if hosting != nil {
+			if err := api.prepareSource(hosting, oldHosting); err != nil {
+				return sources.Definition{}, nil, err
+			}
+		}
+	}
 	plain, secrets, err := api.splitSource(project, part, before, secretPrefix)
 	if err != nil {
 		return sources.Definition{}, nil, err
@@ -137,6 +152,32 @@ func (api *API) readSource(ctx context.Context, raw any, project string, previou
 		}
 	}
 	return source, secrets, nil
+}
+
+func (api *API) prepareSource(part *sources.Part, previous *sources.Part) error {
+	provider, ok := api.options.Sources.Get(part.Kind)
+	if !ok {
+		return badInput("kind")
+	}
+	var last object
+	if previous == nil || previous.Kind != part.Kind {
+		for key, value := range sources.Defaults(provider) {
+			if _, supplied := part.Settings[key]; !supplied {
+				part.Settings[key] = value
+			}
+		}
+	} else {
+		last = previous.Settings
+	}
+	for key, field := range provider.Info.Settings.Properties {
+		if field.Directory && part.Settings[key] == "" && !slices.Contains(provider.Info.Settings.Required, key) {
+			delete(part.Settings, key)
+		}
+	}
+	if provider.ValidateSettings != nil {
+		return provider.ValidateSettings(part.Settings, last)
+	}
+	return nil
 }
 
 type checkedReference struct {

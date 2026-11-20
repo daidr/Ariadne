@@ -23,22 +23,24 @@ var luaCalls = make(chan struct{}, 32)
 var errLuaBusy = errors.New("Lua plugin has too many active calls")
 
 type luaProvider struct {
-	group, kind string
-	index       int
-	methods     map[string]bool
-	title       sdk.LocalizedText
-	settings    sdk.SettingsSchema
-	description string
+	group, kind         string
+	index               int
+	methods             map[string]bool
+	title               sdk.LocalizedText
+	settings            sdk.SettingsSchema
+	description         string
+	needsPluginSettings bool
 }
 
 type luaProgram struct {
-	mu      sync.Mutex
-	active  sync.WaitGroup
-	proto   *lua.FunctionProto
-	life    context.Context
-	client  *http.Client
-	origins map[string]bool
-	slots   chan struct{}
+	mu       sync.Mutex
+	active   sync.WaitGroup
+	proto    *lua.FunctionProto
+	life     context.Context
+	client   *http.Client
+	origins  map[string]bool
+	slots    chan struct{}
+	settings func() map[string]any
 }
 
 func newLuaState(ctx context.Context, bridge *luaHTTP) luaValues {
@@ -181,8 +183,14 @@ func compilePlugin(ctx context.Context, name string, source []byte) (plugin sdk.
 	if err != nil {
 		return sdk.Plugin{}, err
 	}
-	return sdk.Plugin{ID: string(id), Name: title, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
-		program := &luaProgram{proto: proto, life: pc.Context, client: newPluginHTTP(), origins: origins, slots: make(chan struct{}, 8)}
+	var schema *sdk.SettingsSchema
+	if raw := definition.RawGetString("settings"); raw != lua.LNil {
+		if err := values.decode(raw, &schema); err != nil || schema == nil {
+			return sdk.Plugin{}, errors.New("invalid plugin settings schema")
+		}
+	}
+	return sdk.Plugin{ID: string(id), Name: title, Settings: schema, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
+		program := &luaProgram{proto: proto, life: pc.Context, client: newPluginHTTP(), origins: origins, slots: make(chan struct{}, 8), settings: pc.Settings}
 		if err := pc.OnDispose(program.close); err != nil {
 			return nil, err
 		}
@@ -222,6 +230,7 @@ func luaProviders(values luaValues, definition *lua.LTable) ([]luaProvider, erro
 				return nil, fmt.Errorf("%s[%d] requires a valid kind", group.name, i)
 			}
 			provider := luaProvider{group: group.name, kind: string(kind), index: i, methods: map[string]bool{}}
+			provider.needsPluginSettings = entry.RawGetString("requiresPluginSettings") == lua.LTrue
 			if err := values.decode(entry.RawGetString("title"), &provider.title); err != nil || textutil.Trim(provider.title["zh-CN"]) == "" {
 				return nil, fmt.Errorf("%s requires a Chinese title", kind)
 			}
@@ -344,6 +353,21 @@ func (program *luaProgram) call(ctx context.Context, provider luaProvider, metho
 	definition, err := luaDefinition(values, proto)
 	if err != nil {
 		return err
+	}
+	if program.settings != nil {
+		api := values.state.GetGlobal("ariadne").(*lua.LTable)
+		api.RawSetString("settings", values.state.NewFunction(func(state *lua.LState) int {
+			raw, err := json.Marshal(program.settings())
+			if err != nil {
+				state.RaiseError("cannot read plugin settings")
+			}
+			value, err := values.fromJSON(raw)
+			if err != nil {
+				state.RaiseError("cannot read plugin settings")
+			}
+			state.Push(value)
+			return 1
+		}))
 	}
 	group, ok := definition.RawGetString(provider.group).(*lua.LTable)
 	if !ok {

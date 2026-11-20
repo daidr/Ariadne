@@ -28,6 +28,7 @@ type Options struct {
 	Run                       func(context.Context, []string, process.RunOptions) sdk.ExecResult
 	Clone                     local.Cloner
 	DisableClone              bool
+	PluginSettings            func() map[string]any
 }
 
 var ownerPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
@@ -74,7 +75,9 @@ func FindToken(ctx context.Context, configured string, env map[string]string, ru
 	if cwd, err := os.Getwd(); err == nil {
 		root = filepath.VolumeName(cwd) + string(filepath.Separator)
 	}
-	result := run(ctx, []string{"gh", "auth", "token"}, process.RunOptions{Directory: root, Timeout: 10 * time.Second, ForThread: true, Env: map[string]string{"GH_TOKEN": env["GH_TOKEN"], "GITHUB_TOKEN": env["GITHUB_TOKEN"], "GH_HOST": env["GH_HOST"]}})
+	result := run(ctx, []string{"gh", "auth", "token", "--hostname", "github.com"}, process.RunOptions{
+		Directory: root, Timeout: 10 * time.Second, ForThread: true, Env: map[string]string{"GH_PROMPT_DISABLED": "1"},
+	})
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -150,14 +153,39 @@ func Connect(settings Settings, options Options) (*Connection, error) {
 }
 func Provider(options Options) sdk.ContextProvider {
 	return sdk.ContextProvider{
-		Info: sdk.ContextProviderInfo{Kind: "github", Title: sdk.LocalizedText{"zh-CN": "GitHub 仓库", "en": "GitHub repository"}, Hosting: true, Provides: []string{"workspace", "repo", "tracker"}, Settings: sdk.SettingsSchema{Type: "object", FieldOrder: []string{"repository", "token"}, Required: []string{"repository"}, Properties: map[string]sdk.SettingField{
-			"repository": {Type: "string", Title: sdk.LocalizedText{"zh-CN": "仓库", "en": "Repository"}, Description: sdk.LocalizedText{"zh-CN": "owner/name 或仓库地址；每个讨论串在自己的分支上工作", "en": "owner/name or the URL; each thread works on its own branch"}},
-			"token":      {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "访问令牌", "en": "Access token"}, Description: sdk.LocalizedText{"zh-CN": "留空时使用 GH_TOKEN、GITHUB_TOKEN 环境变量或 gh auth token", "en": "Left empty: GH_TOKEN, GITHUB_TOKEN, or gh auth token"}},
+		NeedsPluginSettings: true,
+		PluginFields:        []string{"token"},
+		Browse:              local.BrowseHostedDirectory,
+		NewSourceDefaults:   func() map[string]any { return local.HostedSourceDefaults(options.PluginSettings) },
+		Info: sdk.ContextProviderInfo{Kind: "github", Title: sdk.LocalizedText{"zh-CN": "GitHub 仓库", "en": "GitHub repository"}, Hosting: true, Provides: []string{"workspace", "repo", "tracker"}, Settings: sdk.SettingsSchema{Type: "object", FieldOrder: []string{"repository", local.HostedDirectory, "token"}, Required: []string{"repository"}, Properties: map[string]sdk.SettingField{
+			"repository":          {Type: "string", Title: sdk.LocalizedText{"zh-CN": "仓库", "en": "Repository"}, Description: sdk.LocalizedText{"zh-CN": "owner/name 或仓库地址；每个讨论串在自己的分支上工作", "en": "owner/name or the URL; each thread works on its own branch"}},
+			"token":               {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "访问令牌", "en": "Access token"}, Description: sdk.LocalizedText{"zh-CN": "留空时使用 GH_TOKEN、GITHUB_TOKEN 环境变量或 gh auth token", "en": "Left empty: GH_TOKEN, GITHUB_TOKEN, or gh auth token"}},
+			local.HostedDirectory: local.HostedDirectoryField(),
 		}}},
+		ValidateSettings: func(values, previous map[string]any) error {
+			if previous == nil {
+				return nil
+			}
+			repository, _ := previous["repository"].(string)
+			owner, name, err := ParseRepository(repository)
+			if err != nil {
+				return err
+			}
+			return local.CheckHostedDirectoryChange(options.DataDir, owner+"/"+name, nil, values[local.HostedDirectory], previous[local.HostedDirectory])
+		},
 		Connect: func(ctx context.Context, values map[string]any) (sdk.Capabilities, error) {
 			repository, _ := values["repository"].(string)
 			token, _ := values["token"].(string)
-			connected, err := Connect(Settings{Repository: repository, Token: token}, options)
+			if token == "" && options.PluginSettings != nil {
+				token, _ = options.PluginSettings()["token"].(string)
+			}
+			dataDir, err := local.HostedDataDir(options.DataDir, values[local.HostedDirectory])
+			if err != nil {
+				return sdk.Capabilities{}, err
+			}
+			configured := options
+			configured.DataDir = dataDir
+			connected, err := Connect(Settings{Repository: repository, Token: token}, configured)
 			if err != nil {
 				return sdk.Capabilities{}, err
 			}
@@ -168,6 +196,32 @@ func Provider(options Options) sdk.ContextProvider {
 			return connected.Capabilities, nil
 		},
 	}
+}
+
+func PluginSchema() *sdk.SettingsSchema {
+	return &sdk.SettingsSchema{Type: "object", FieldOrder: []string{"token", local.HostedDirectory}, Properties: map[string]sdk.SettingField{
+		"token": {Type: "string", Secret: true, Title: sdk.LocalizedText{"zh-CN": "Token", "en": "Token"}, Description: sdk.LocalizedText{
+			"zh-CN": "留空时使用运行 Ariadne 的机器上的 GH_TOKEN、GITHUB_TOKEN 或 GitHub CLI 登录。",
+			"en":    "Leave blank to use GH_TOKEN, GITHUB_TOKEN, or the GitHub CLI login on the machine running Ariadne.",
+		}},
+		local.HostedDirectory: local.DefaultHostedDirectoryField(),
+	}}
+}
+
+func PluginReadiness(options Options) (func(context.Context, map[string]any) bool, func() error) {
+	available := hostinghttp.NewMemo(5*time.Second, func(ctx context.Context) (bool, error) {
+		token, err := FindToken(ctx, "", environment(options.Env), options.Run)
+		return token != nil, err
+	}, nil)
+	return func(ctx context.Context, values map[string]any) bool {
+		if token, _ := values["token"].(string); textutil.Trim(token) != "" {
+			return true
+		}
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		ready, _ := available.Get(ctx)
+		return ready
+	}, available.Close
 }
 
 type PullURL struct {
@@ -238,7 +292,13 @@ func Links(options Options) sdk.LinkProvider {
 				mu.Unlock()
 				jobs.Done()
 			}()
-			api, err := NewAPI(APIOptions{Base: options.APIBase, Owner: pull.Owner, Name: pull.Name, Token: token.Get, Client: options.Client})
+			credentials := token.Get
+			if options.PluginSettings != nil {
+				if value, _ := options.PluginSettings()["token"].(string); value != "" {
+					credentials = func(context.Context) (*string, error) { return &value, nil }
+				}
+			}
+			api, err := NewAPI(APIOptions{Base: options.APIBase, Owner: pull.Owner, Name: pull.Name, Token: credentials, Client: options.Client})
 			if err != nil {
 				return nil, err
 			}

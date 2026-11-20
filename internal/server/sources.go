@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,11 +14,27 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func (api *API) sourceKinds() []sdk.ContextProviderInfo {
+func (api *API) sourceKinds(ctx context.Context) []sdk.ContextProviderInfo {
 	if api.options.Sources == nil {
 		return []sdk.ContextProviderInfo{}
 	}
-	return api.options.Sources.Kinds()
+	kinds := api.options.Sources.Kinds()
+	for i := range kinds {
+		info := &kinds[i]
+		provider, _ := api.options.Sources.Get(info.Kind)
+		info.Defaults = sources.Defaults(provider)
+		if info.Plugin == nil {
+			continue
+		}
+		info.Plugin.Ready = api.options.Plugins != nil && api.options.Plugins.SettingsReady(ctx, info.Plugin.ID)
+		for _, key := range provider.PluginFields {
+			delete(info.Settings.Properties, key)
+		}
+		info.Settings.Required = slices.DeleteFunc(info.Settings.Required, func(key string) bool {
+			return slices.Contains(provider.PluginFields, key)
+		})
+	}
+	return kinds
 }
 func (api *API) registerSources() {
 	api.add("GET", "/api/projects/:projectId/source", func(request *http.Request) (any, int, error) {
@@ -32,7 +49,9 @@ func (api *API) registerSources() {
 		}
 		return object{"source": project.Source, "secretsSet": secrets}, 200, nil
 	})
-	api.add("GET", "/api/source-kinds", func(*http.Request) (any, int, error) { return object{"kinds": api.sourceKinds()}, 200, nil })
+	api.add("GET", "/api/source-kinds", func(r *http.Request) (any, int, error) {
+		return object{"kinds": api.sourceKinds(r.Context())}, 200, nil
+	})
 	api.add("POST", "/api/source-kinds/:kind/browse", func(request *http.Request) (any, int, error) {
 		kind := request.PathValue("kind")
 		if api.options.Sources == nil {

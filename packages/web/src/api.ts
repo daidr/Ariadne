@@ -274,6 +274,8 @@ export interface SourceInput {
 export type { DirectoryListing }
 
 export interface SourceKind extends ModelKind {
+  plugin?: { id: string; ready: boolean }
+  defaults?: Record<string, unknown>
   provides: string[]
   /** Threads' commands run on another machine. */
   remote: boolean
@@ -304,6 +306,7 @@ export interface PluginRecord {
   path: string | null
   status: 'loaded' | 'failed'
   error: string | null
+  configurable?: boolean
   provides: {
     models: string[]
     contexts: string[]
@@ -311,6 +314,15 @@ export interface PluginRecord {
     searches: string[]
     links: string[]
   }
+}
+
+export interface PluginConfig {
+  name: LocalizedText
+  schema: SettingsSchema
+  fieldOrder?: string[]
+  values: Record<string, unknown>
+  secretsSet: string[]
+  ready: boolean
 }
 
 /** Worker turns that run at once, plus reserved worker replies; coordinators are independent. */
@@ -684,6 +696,10 @@ export const api = {
   checkSearchSettings: (input: SearchSettingsInput) =>
     request<{ ok: boolean; status: number | null }>('POST', '/api/settings/search/check', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
+  getPluginConfig: (id: string) =>
+    request<PluginConfig>('GET', `/api/plugins/${encodeURIComponent(id)}/settings`),
+  savePluginConfig: (id: string, values: Record<string, unknown>) =>
+    request<PluginConfig>('PUT', `/api/plugins/${encodeURIComponent(id)}/settings`, { values }),
   addPlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
   removePlugin: (path: string) =>
