@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.1.0-alpha.14 (2026-11-20)
+
+- fix: polish document history, comments, and table layout
+- fix: improve agent tool reliability and project activity display
+- Merge pull request #144 from daidr/release/alpha
+
 ## 0.1.0-alpha.13 (2026-11-19)
 
 - fix: improve Antigravity and ACP provider compatibility
