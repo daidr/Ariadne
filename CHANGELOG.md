@@ -1,5 +1,10 @@
 # 更新日志
 
+## 0.1.0-alpha.15 (2026-11-20)
+
+- feat: export trace diagnostics and record ACP failures
+- Merge pull request #145 from daidr/release/alpha
+
 ## 0.1.0-alpha.14 (2026-11-20)
 
 - fix: polish document history, comments, and table layout
