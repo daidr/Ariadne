@@ -257,6 +257,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	known["GET /api/files/:fileId/sheet"] = true
 	known["GET /api/projects/:projectId/sources"] = true
 	known["GET /api/projects/:projectId/activity"] = true
+	known["GET /api/threads/:threadId/pull-request/checks"] = true
 	known["GET /api/conversations/:conversationId/trace/export"] = true
 	known["PUT /api/projects/:projectId/sources"] = true
 	known["GET /api/plugins/:pluginId/settings"] = true

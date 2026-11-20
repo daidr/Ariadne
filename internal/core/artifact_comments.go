@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/eventstore"
@@ -260,7 +262,14 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 		if result["doneAt"] != nil {
 			return nil
 		}
-		data := object{"artifactId": artifactID, "round": round, "by": by, "summary": utf16Slice(textutil.Trim(summary), 0, maxCommentBody)}
+		clean := textutil.Trim(summary)
+		if clean == "" {
+			return badInput("summary")
+		}
+		if err := requireFeedbackReplies(ctx, tx.SQL(), artifactID, result); err != nil {
+			return err
+		}
+		data := object{"artifactId": artifactID, "round": round, "by": by, "summary": utf16Slice(clean, 0, maxCommentBody)}
 		if err := appendChanges(tx, artifact.ProjectID, []change{{"artifact.feedback_done", data}}); err != nil {
 			return err
 		}
@@ -274,4 +283,48 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 		return nil
 	})
 	return
+}
+
+func requireFeedbackReplies(ctx context.Context, db queryer, artifactID string, round object) error {
+	items := map[string][]object{}
+	for _, item := range objects(round["items"]) {
+		if id := item.str("threadId"); item.str("kind") == "comment" && id != "" {
+			items[id] = append(items[id], item)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	threads, err := artifactComments(ctx, db, artifactID)
+	if err != nil {
+		return err
+	}
+	roundAt, _ := number(round["createdAt"])
+	var missing []string
+	for _, thread := range threads {
+		id := thread.str("id")
+		if len(items[id]) == 0 || thread.obj("resolved").str("by") == "user" {
+			continue
+		}
+		comments := objects(thread["comments"])
+		for _, comment := range slices.Backward(comments) {
+			if comment.str("author") != "user" {
+				break
+			}
+			at, _ := number(comment["createdAt"])
+			if slices.ContainsFunc(items[id], func(item object) bool {
+				if commentID := item.str("commentId"); commentID != "" {
+					return commentID == comment.str("id")
+				}
+				return at <= roundAt && item.str("body") == comment.str("body")
+			}) {
+				missing = append(missing, id)
+				break
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("reply with comment_artifact before finishing feedback; unanswered comment threads: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }

@@ -624,6 +624,8 @@ export const api = {
       conversation: ConversationView
       messages: MessageView[]
       notices: NoticeView[]
+      /** Last read coordinator reply, on the initial page. */
+      readThrough?: string
       /** Earlier messages exist before the first one here; not said with `since`. */
       more: boolean
       /** The newest event this answer holds; changes after it come with `since`. */
@@ -671,6 +673,11 @@ export const api = {
       undefined,
       signal,
     ),
+  pullRequestChecks: (threadId: string, signal?: AbortSignal) =>
+    request<{
+      headSha: string
+      checks: { id: string; name: string; status: string; conclusion: string | null }[]
+    }>('GET', `/api/threads/${threadId}/pull-request/checks`, undefined, signal),
   stopCommand: (threadId: string, commandId: string) =>
     request<{ command: BackgroundView }>(
       'POST',

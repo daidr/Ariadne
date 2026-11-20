@@ -306,15 +306,24 @@ func (api *API) MergeMergeRequest(ctx context.Context, number int, method, sha s
 	return sdk.PullRequestMergeOutcome{Kind: "refused", Detail: failure.Reason}, nil
 }
 func (api *API) Checks(ctx context.Context, sha string) ([]sdk.CheckInfo, error) {
-	var raw []rawStatus
-	if err := api.rest.Request(ctx, "GET", api.path+"/repository/commits/"+hostinghttp.Component(sha)+"/statuses?per_page=100", nil, &raw); err != nil {
-		return nil, err
-	}
+	path := api.path + "/repository/commits/" + hostinghttp.Component(sha) + "/statuses?per_page=100"
 	newest := map[string]rawStatus{}
-	for _, status := range raw {
-		seen, exists := newest[status.Name]
-		if !exists || status.ID > seen.ID {
-			newest[status.Name] = status
+	for page := 1; ; page++ {
+		address := path
+		if page > 1 {
+			address += "&page=" + strconv.Itoa(page)
+		}
+		var raw []rawStatus
+		if err := api.rest.Request(ctx, "GET", address, nil, &raw); err != nil {
+			return nil, err
+		}
+		for _, status := range raw {
+			if seen, exists := newest[status.Name]; !exists || status.ID > seen.ID {
+				newest[status.Name] = status
+			}
+		}
+		if len(raw) < 100 {
+			break
 		}
 	}
 	ordered := make([]rawStatus, 0, len(newest))

@@ -398,9 +398,13 @@ func (workspace *Workspace) Exec(ctx context.Context, command string, options sd
 	if len(shell) == 0 {
 		shell = process.DefaultShell().Argv
 	}
-	return workspace.ExecFile(ctx, process.ShellArgv(shell, command), options)
+	return workspace.exec(ctx, process.ShellArgv(shell, command), options, true)
 }
 func (workspace *Workspace) ExecFile(ctx context.Context, argv []string, options sdk.ExecOptions) (sdk.ExecResult, error) {
+	return workspace.exec(ctx, argv, options, false)
+}
+
+func (workspace *Workspace) exec(ctx context.Context, argv []string, options sdk.ExecOptions, plainOutput bool) (sdk.ExecResult, error) {
 	ctx, done := workspace.active(ctx)
 	defer done()
 	directory := options.Directory
@@ -420,7 +424,7 @@ func (workspace *Workspace) ExecFile(ctx context.Context, argv []string, options
 	workspace.commandJobs.Add(1)
 	workspace.mu.RUnlock()
 	defer workspace.commandJobs.Done()
-	return process.Run(ctx, argv, process.RunOptions{Directory: resolved, Timeout: options.Timeout, Env: options.Env, ForThread: true, OnOutput: options.OnOutput}), nil
+	return process.Run(ctx, argv, process.RunOptions{Directory: resolved, Timeout: options.Timeout, Env: options.Env, ForThread: true, OnOutput: options.OnOutput, PlainOutput: plainOutput}), nil
 }
 func (workspace *Workspace) Close() error {
 	defer workspace.closeHook.Do(func() {

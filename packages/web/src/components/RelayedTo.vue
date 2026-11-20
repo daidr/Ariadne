@@ -46,7 +46,9 @@ function open(relay: MessageRelay) {
             underline="hover"
             @click="open(relay)"
           >
-            <template #leading><StageIcon :stage="thread.stage" /></template>
+            <template #leading>
+              <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
+            </template>
             {{ thread.title }}
           </DouLink>
         </div>

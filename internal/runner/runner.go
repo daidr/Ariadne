@@ -104,11 +104,9 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 	}
 	turn := &turn{Runner: runner, conversation: conversation, id: id, instructionsDirty: true}
 	defer turn.clearPreviews()
-	if conversation.Role == "coordinator" {
-		turn.handledBefore, err = runner.Repository.LastHandledSeq(ctx, conversation.ID)
-		if err != nil {
-			return err
-		}
+	turn.handledBefore, err = runner.Repository.LastHandledSeq(ctx, conversation.ID)
+	if err != nil {
+		return err
 	}
 	turn.skills, err = skills.Conversation(ctx, runner.Repository, conversation, runner.Workspaces, runner.SkillsDirs)
 	if err != nil {
@@ -227,6 +225,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 	var recent [][32]byte
 	cuts, lastInput := 0, 0
 	hintedUnsent, compactionFailed := false, false
+	remindedFeedback := false
 	recoveredContext := false
 
 	for {
@@ -285,6 +284,8 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		if conversation.Role == "coordinator" {
 			turn.trackCoordinatorInput(entries)
+		} else {
+			turn.trackThreadInput(entries)
 		}
 		record := recordCall(model, model.Effort)
 		called, err := json.Marshal(record)
@@ -415,11 +416,23 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			if answer.Cut {
 				continue
 			}
+			if !turn.quiet && !remindedFeedback && slices.ContainsFunc(tools, func(tool tool) bool {
+				return tool.spec.Name == "finish_feedback_round"
+			}) {
+				reminded, err := turn.Repository.RemindPendingArtifactFeedback(ctx, conversation.ID, turn.id)
+				if err != nil {
+					return err
+				}
+				if reminded {
+					remindedFeedback, hintedUnsent = true, true
+					continue
+				}
+			}
 			if !turn.quiet && strings.TrimSpace(answer.Text) != "" && !hintedUnsent {
 				hintedUnsent = true
 				continue
 			}
-			return turn.Repository.CompleteModelTurn(ctx, conversation.ID, turn.id)
+			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
 		hash, err := turn.execute(ctx, tools, answer.ToolCalls)
 		if err != nil {
@@ -428,7 +441,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if turn.quiet && !answer.Cut && !slices.ContainsFunc(answer.ToolCalls, func(call sdk.ToolCall) bool {
 			return !coordinatorChatTool(call.Name)
 		}) {
-			return turn.Repository.CompleteModelTurn(ctx, conversation.ID, turn.id)
+			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
 		recent = append(recent, hash)
 		recent = recent[max(0, len(recent)-repeats*maxCycle):]

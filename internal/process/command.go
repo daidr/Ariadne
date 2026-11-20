@@ -64,6 +64,20 @@ func Environ() map[string]string {
 	}
 	return result
 }
+
+func plainShellEnv(configured map[string]string) map[string]string {
+	env := map[string]string{
+		"NO_COLOR": "1", "TERM": "dumb", "COLORTERM": "",
+		"PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
+	}
+	for key, value := range configured {
+		if runtime.GOOS == "windows" {
+			key = strings.ToUpper(key)
+		}
+		env[key] = value
+	}
+	return env
+}
 func environment(options Options) []string {
 	base := Environ()
 	if options.ReplaceEnv {

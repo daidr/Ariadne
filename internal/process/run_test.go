@@ -40,6 +40,39 @@ func TestRunTimeoutAndPreCancellation(t *testing.T) {
 	}
 }
 
+func TestRunPlainOutputUsesShellDefaultsAndKeepsBothStreams(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	options := RunOptions{Env: map[string]string{"ARIADNE_PROCESS_HELPER": "1"}, ForThread: true, PlainOutput: true}
+	var streamed = map[string]string{}
+	options.OnOutput = func(text, stream string) { streamed[stream] += text }
+	result := Run(t.Context(), helper(t, "colors"), options)
+	if result.ExitCode != 7 || result.Stdout != "1|dumb|cat\n" || result.Stderr != "失败\n" {
+		t.Fatal(result)
+	}
+	if streamed["stdout"] != result.Stdout || streamed["stderr"] != result.Stderr {
+		t.Fatal(streamed)
+	}
+	options.PlainOutput = false
+	result = Run(t.Context(), helper(t, "colors"), options)
+	if !strings.Contains(result.Stdout, "xterm-256color") || result.Stderr != "\x1b[31m失败\x1b[0m\n" {
+		t.Fatal(result)
+	}
+}
+
+func TestPlainOutputFiltersSplitTerminalEscapesBeforeBuffering(t *testing.T) {
+	var live strings.Builder
+	buffer := outputBuffer{plain: true, notify: func(chunk, _ string) { live.WriteString(chunk) }}
+	for _, chunk := range []string{"A\x1b[3", "1m中文", "\x1b[0m\x1b]8;;https://example.test\x1b", "\\link\x1b]8;;\x07", "\tend\n"} {
+		if n, err := buffer.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("write %q: %d, %v", chunk, n, err)
+		}
+	}
+	const want = "A中文link\tend\n"
+	if buffer.String() != want || live.String() != want {
+		t.Fatalf("buffered %q, streamed %q", buffer.String(), live.String())
+	}
+}
+
 func TestWholeOutputLimitAndLiteralShellEncoding(t *testing.T) {
 	stopped := false
 	buffer := &outputBuffer{whole: true, stop: func() { stopped = true }}

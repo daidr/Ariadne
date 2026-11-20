@@ -13,6 +13,7 @@ type StageFacts struct {
 	ChecksGaveUp   bool
 	Stopped        bool
 	Landed         bool
+	HostedPR       bool
 	Reviewed       bool
 	UnderReview    bool
 	Reviewer       bool
@@ -31,7 +32,7 @@ func ThreadStage(facts StageFacts) string {
 	if facts.TurnPending {
 		return "queued"
 	}
-	if facts.TurnFailed || (facts.ChecksGaveUp && facts.LastReport != "done") {
+	if facts.TurnFailed || (facts.ChecksGaveUp && facts.LastReport != "done" && !(facts.LastReport == "ready" && facts.Landed)) {
 		return "blocked"
 	}
 	if facts.TurnCancelled && !facts.Reviewer {
@@ -66,8 +67,10 @@ func ThreadStage(facts StageFacts) string {
 
 func (facts StageFacts) needsUser(stage string) bool {
 	switch stage {
-	case "answer", "review", "halted", "silent":
+	case "answer", "halted", "silent":
 		return true
+	case "review":
+		return !facts.HostedPR
 	case "blocked":
 		// A failed turn can be retried by the user. A status report or CI
 		// failure needs an explicit attention card to ask for their help.

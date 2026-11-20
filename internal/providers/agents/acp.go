@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,42 @@ type ACPSettings struct {
 type StdioLauncher func(string) (string, []string, error)
 
 const antigravityACPName = "Antigravity ACP Server"
+const AntigravityCommand = "agy acp --process-per-session --disable-telemetry"
+const antigravityToolProfileName = "ariadne-provider"
+
+const antigravityToolProfile = `---
+name: ` + antigravityToolProfileName + `
+description: Agent for conversations managed by Ariadne.
+mainAgent: true
+subagent: false
+tools: []
+---
+Use the Ariadne tools provided for this conversation.
+`
+
+func usesAntigravityToolProfile(argv []string) bool {
+	if len(argv) < 2 || argv[1] != "acp" || strings.TrimSuffix(strings.ToLower(filepath.Base(argv[0])), ".exe") != "agy" {
+		return false
+	}
+	return !slices.ContainsFunc(argv[2:], func(arg string) bool {
+		return arg == "--agent" || strings.HasPrefix(arg, "--agent=")
+	})
+}
+
+func prepareAntigravityToolProfile(argv []string, directory string) ([]string, error) {
+	directory, err := filepath.Abs(directory)
+	if err != nil {
+		return nil, err
+	}
+	agentsDir := filepath.Join(directory, ".agents", "agents")
+	if err := os.MkdirAll(agentsDir, 0700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, antigravityToolProfileName+".md"), []byte(antigravityToolProfile), 0600); err != nil {
+		return nil, err
+	}
+	return append(argv, "--agent", antigravityToolProfileName, "--add-dir", directory), nil
+}
 
 var acpClient = map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false}, "clientInfo": codexClient}
 
@@ -152,18 +189,26 @@ func ListACPModels(ctx context.Context, settings ACPSettings, directory string) 
 	return result.listedModels(ctx, stdio.Peer, hello.AgentInfo.Name), nil
 }
 func ACPKind(bridge *ToolBridge, shim StdioLauncher) Kind {
+	return acpKind("acp", "", bridge, shim)
+}
+
+func AntigravityKind(bridge *ToolBridge, shim StdioLauncher) Kind {
+	return acpKind("antigravity", AntigravityCommand, bridge, shim)
+}
+
+func acpKind(name, defaultCommand string, bridge *ToolBridge, shim StdioLauncher) Kind {
 	if shim == nil {
 		shim = func(url string) (string, []string, error) {
 			program, err := os.Executable()
 			return program, []string{StdioBridgeCommand, url}, err
 		}
 	}
-	return Kind{Name: "acp", Persistent: true, ResumeDirectory: true, MutableEffort: true, Fingerprint: NativeFingerprint, Create: func(ctx DriverContext) (Driver, error) {
-		settings := ACPSettings{}
-		if command, ok := ctx.Settings["command"].(string); ok {
-			settings.Command = command
+	return Kind{Name: name, Persistent: true, ResumeDirectory: true, MutableEffort: true, Fingerprint: NativeFingerprint, Create: func(ctx DriverContext) (Driver, error) {
+		command, _ := ctx.Settings["command"].(string)
+		if textutil.Trim(command) == "" {
+			command = defaultCommand
 		}
-		return &acpDriver{ctx: ctx, settings: settings, bridge: bridge, shim: shim, first: true}, nil
+		return &acpDriver{ctx: ctx, settings: ACPSettings{Command: command}, bridge: bridge, shim: shim, first: true, manageAntigravityTools: name == "antigravity"}, nil
 	}}
 }
 
@@ -180,6 +225,8 @@ type acpDriver struct {
 	hello                           acpInitialize
 	started, first, images, closing bool
 	active, restorable, antigravity bool
+	manageAntigravityTools          bool
+	agentProfile                    string
 	thought                         strings.Builder
 	turnFailure                     string
 	contextUsed                     *int64
@@ -191,6 +238,7 @@ type acpDriver struct {
 
 type acpCheckpoint struct {
 	SessionID    string `json:"sessionId"`
+	AgentProfile string `json:"agentProfile,omitempty"`
 	DefaultLevel string `json:"defaultLevel,omitempty"`
 	ContextUsed  *int64 `json:"contextUsed,omitempty"`
 }
@@ -348,6 +396,27 @@ func (d *acpDriver) Start(life context.Context) error {
 		return d.diagnosticError("launch", errors.New("no command is set for the agent"))
 	}
 	d.executable = filepath.Base(argv[0])
+	if d.manageAntigravityTools && usesAntigravityToolProfile(argv) {
+		d.agentProfile = antigravityToolProfileName
+	}
+	var saved acpCheckpoint
+	resuming := len(d.ctx.Resume) != 0
+	if resuming {
+		if json.Unmarshal(d.ctx.Resume, &saved) != nil || saved.SessionID == "" {
+			return d.diagnosticError("restore checkpoint", errors.New("ACP session checkpoint cannot be restored"))
+		}
+		// AGY restores the original Agent. Replay Ariadne's history once when the tool profile changes.
+		if saved.AgentProfile != d.agentProfile {
+			return d.diagnosticError("restore checkpoint", errors.New("ACP agent profile changed"))
+		}
+	}
+	if d.agentProfile != "" {
+		var err error
+		argv, err = prepareAntigravityToolProfile(argv, d.ctx.Directory)
+		if err != nil {
+			return d.diagnosticError("prepare Antigravity agent", err)
+		}
+	}
 	d.life = life
 	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
 	peer, err := rpc.New(rpc.Options{Context: life, Strict: true, Send: lines.SendJSON, Request: d.request, Notification: d.notification})
@@ -396,10 +465,8 @@ func (d *acpDriver) Start(life context.Context) error {
 	}
 	params := map[string]any{"cwd": d.ctx.Directory, "mcpServers": servers}
 	method := "session/new"
-	var saved acpCheckpoint
-	resuming := len(d.ctx.Resume) != 0
 	if resuming {
-		if !d.restorable || json.Unmarshal(d.ctx.Resume, &saved) != nil || saved.SessionID == "" {
+		if !d.restorable {
 			return d.diagnosticError("restore checkpoint", errors.New("ACP session checkpoint cannot be restored"))
 		}
 		method = "session/load"
@@ -552,7 +619,7 @@ func (d *acpDriver) Checkpoint() (json.RawMessage, error) {
 	if !d.restorable || !d.started || d.closing || d.sessionID == "" {
 		return nil, nil
 	}
-	return json.Marshal(acpCheckpoint{SessionID: d.sessionID, DefaultLevel: d.defaultLevel, ContextUsed: d.contextUsed})
+	return json.Marshal(acpCheckpoint{SessionID: d.sessionID, AgentProfile: d.agentProfile, DefaultLevel: d.defaultLevel, ContextUsed: d.contextUsed})
 }
 
 func (d *acpDriver) Close(ctx context.Context, discard bool) error {

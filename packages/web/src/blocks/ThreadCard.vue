@@ -3,7 +3,7 @@ import { DouShimmer } from 'dou-ui'
 import { MessagesIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import ChangeTotals from '../components/ChangeTotals.vue'
-import ReviewActions from '../components/ReviewActions.vue'
+import PullRequestTag from '../components/PullRequestTag.vue'
 import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -32,7 +32,7 @@ const changes = computed(() => branchChanges(thread.value))
 const hasActions = computed(
   () =>
     !!changes.value ||
-    thread.value?.stage === 'review' ||
+    !!thread.value?.pullRequest ||
     (!!thread.value?.review && !thread.value.review.reviewing && thread.value.review.rounds > 0),
 )
 const description = computed(() => {
@@ -71,11 +71,15 @@ const progress = computed(() =>
           </span>
         </span>
       </span>
-      <StageIcon class="thread-card__stage" :stage="thread.stage" />
+      <StageIcon
+        class="thread-card__stage"
+        :stage="thread.stage"
+        :pull-request-state="thread.pullRequest?.state"
+      />
     </button>
     <div v-if="hasActions" class="thread-card__actions">
+      <PullRequestTag :thread="thread" />
       <ChangeTotals v-if="changes" :totals="changes" :thread-id="thread.id" button />
-      <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" />
       <ReviewMark :thread="thread" />
     </div>
   </div>
@@ -192,10 +196,5 @@ const progress = computed(() =>
   justify-content: flex-end;
   gap: 4px 8px;
   padding: 0 12px 10px;
-}
-
-.thread-card :deep(.review-actions) {
-  flex-shrink: 1;
-  flex-wrap: wrap;
 }
 </style>

@@ -501,5 +501,15 @@ func (api *API) conversation(r *http.Request) (any, int, error) {
 	if api.options.ModelOf != nil {
 		model, err = api.options.ModelOf(r, conversation)
 	}
-	return object{"conversation": conversation, "messages": page.Messages, "notices": page.Notices, "more": page.More, "lastSeq": seq, "todo": todo, "model": model}, 200, err
+	result := object{"conversation": conversation, "messages": page.Messages, "notices": page.Notices, "more": page.More, "lastSeq": seq, "todo": todo, "model": model}
+	if err == nil && conversation.Role == "coordinator" && cursor.Since == nil && cursor.Before == nil {
+		readThrough, readErr := repo.LastReadMessage(r.Context(), id)
+		if readErr != nil {
+			return nil, 0, readErr
+		}
+		if readThrough != "" {
+			result["readThrough"] = readThrough
+		}
+	}
+	return result, 200, err
 }

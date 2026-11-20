@@ -259,29 +259,58 @@ func (api *API) MergePullRequest(ctx context.Context, number int, method, sha st
 func (api *API) Checks(ctx context.Context, sha string) ([]sdk.CheckInfo, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var runs struct {
-		Runs []struct {
-			ID         json.Number `json:"id"`
-			Name       string      `json:"name"`
-			Status     string      `json:"status"`
-			Conclusion *string     `json:"conclusion"`
-			URL        *string     `json:"html_url"`
-		} `json:"check_runs"`
+	type checkRun struct {
+		ID         json.Number `json:"id"`
+		Name       string      `json:"name"`
+		Status     string      `json:"status"`
+		Conclusion *string     `json:"conclusion"`
+		URL        *string     `json:"html_url"`
 	}
-	var combined struct {
-		Statuses []struct {
-			Context string  `json:"context"`
-			State   string  `json:"state"`
-			URL     *string `json:"target_url"`
-		} `json:"statuses"`
+	type commitStatus struct {
+		Context string  `json:"context"`
+		State   string  `json:"state"`
+		URL     *string `json:"target_url"`
 	}
+	var runs []checkRun
+	var statuses []commitStatus
+	path := api.path + "/commits/" + hostinghttp.Component(sha)
 	finished := make(chan error, 2)
-	go func() {
-		finished <- api.rest.Request(ctx, "GET", api.path+"/commits/"+hostinghttp.Component(sha)+"/check-runs?per_page=100", nil, &runs)
-	}()
-	go func() {
-		finished <- api.rest.Request(ctx, "GET", api.path+"/commits/"+hostinghttp.Component(sha)+"/status", nil, &combined)
-	}()
+	pages := func(endpoint, query string, pageSize int, read func(string) (int, error)) {
+		for page := 1; ; page++ {
+			params := query
+			if page > 1 {
+				if params != "" {
+					params += "&"
+				}
+				params += "page=" + strconv.Itoa(page)
+			}
+			address := path + endpoint
+			if params != "" {
+				address += "?" + params
+			}
+			count, err := read(address)
+			if err != nil || count < pageSize {
+				finished <- err
+				return
+			}
+		}
+	}
+	go pages("/check-runs", "per_page=100", 100, func(address string) (int, error) {
+		var page struct {
+			Runs []checkRun `json:"check_runs"`
+		}
+		err := api.rest.Request(ctx, "GET", address, nil, &page)
+		runs = append(runs, page.Runs...)
+		return len(page.Runs), err
+	})
+	go pages("/status", "", 30, func(address string) (int, error) {
+		var page struct {
+			Statuses []commitStatus `json:"statuses"`
+		}
+		err := api.rest.Request(ctx, "GET", address, nil, &page)
+		statuses = append(statuses, page.Statuses...)
+		return len(page.Statuses), err
+	})
 	first := <-finished
 	if first != nil {
 		cancel()
@@ -294,7 +323,7 @@ func (api *API) Checks(ctx context.Context, sha string) ([]sdk.CheckInfo, error)
 		return nil, second
 	}
 	checks := []sdk.CheckInfo{}
-	for _, run := range runs.Runs {
+	for _, run := range runs {
 		status, conclusion := "queued", (*string)(nil)
 		if run.Status == "in_progress" {
 			status = run.Status
@@ -304,7 +333,7 @@ func (api *API) Checks(ctx context.Context, sha string) ([]sdk.CheckInfo, error)
 		}
 		checks = append(checks, sdk.CheckInfo{ID: string(run.ID), Name: run.Name, Status: status, Conclusion: conclusion, URL: run.URL})
 	}
-	for _, raw := range combined.Statuses {
+	for _, raw := range statuses {
 		status, conclusion := "completed", &raw.State
 		if raw.State == "pending" {
 			status, conclusion = "in_progress", nil

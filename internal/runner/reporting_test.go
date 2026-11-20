@@ -2,17 +2,146 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/eventstore"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
+
+func TestDocumentFeedbackSurvivesAnEmptyModelReply(t *testing.T) {
+	for _, respond := range []bool{false, true} {
+		t.Run(fmt.Sprint(respond), func(t *testing.T) {
+			ctx := t.Context()
+			home := t.TempDir()
+			now := time.UnixMilli(1900000000000)
+			repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite"), Now: func() time.Time { return now }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = repo.Close() })
+			project, err := repo.CreateProject(ctx, new("Document feedback"), core.ProjectStart{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Draft"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, err := repo.CreateArtifact(ctx, project.ID, core.NewArtifact{Title: "Draft", Kind: "document", Content: "Original text.", Author: thread.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(time.Second)
+			if _, err := repo.CommentOnArtifact(ctx, doc.ID, "user", map[string]any{
+				"type": "create", "threadId": "comment_thread", "commentId": "user_comment", "quote": "Original text.", "body": "Where did this come from?",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// An AI edit before the feedback is sent must not hide the comment.
+			now = now.Add(time.Second)
+			if _, err := repo.ReviseArtifact(ctx, doc.ID, core.ArtifactRevision{Author: thread.ID, BaseVersion: &doc.Version, Content: "Original text. More context."}); err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := repo.FeedbackCandidates(ctx, "", now)
+			if err != nil || !slices.Contains(candidates, doc.ID) {
+				t.Fatalf("comment missing from scheduled feedback: %v %v", candidates, err)
+			}
+			feedback, err := repo.SendPendingArtifactFeedback(ctx, doc.ID, nil)
+			if err != nil || feedback == nil {
+				t.Fatalf("comment was not delivered: %v %v", feedback, err)
+			}
+			id, err := repo.StartScheduledTurn(ctx, thread.ID, "fixture")
+			if err != nil || id == "" {
+				t.Fatalf("feedback did not wake the discussion: %q %v", id, err)
+			}
+			conversation, err := repo.GetConversation(ctx, thread.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := settings.Open(filepath.Join(home, "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry := models.New()
+			info := sdk.ModelProviderInfo{Kind: "fixture", Program: true}
+			requests := 0
+			_, err = registry.Register(sdk.ModelProvider{Info: info, Stream: func(_ context.Context, _ map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+				return func(yield func(sdk.Part) bool) {
+					requests++
+					call := sdk.Part{Type: "tool-call"}
+					switch requests {
+					case 1:
+						if !slices.ContainsFunc(request.Messages, func(message sdk.Message) bool {
+							return strings.Contains(message.Content, "Where did this come from?") && strings.Contains(message.Content, "comment_thread")
+						}) {
+							t.Error("model did not receive the comment")
+						}
+					case 2:
+						last := request.Messages[len(request.Messages)-1].Content
+						if !strings.Contains(last, "<artifact_feedback_pending>") || !strings.Contains(last, doc.ID) {
+							t.Error("missing targeted reminder")
+						}
+						if respond {
+							call.ID, call.Name = "reply", "comment_artifact"
+							call.Arguments = fmt.Sprintf(`{"artifactId":%q,"commentThread":"comment_thread","body":"It comes from our first draft."}`, doc.ID)
+						}
+					case 3:
+						call.ID, call.Name = "finish", "finish_feedback_round"
+						call.Arguments = fmt.Sprintf(`{"artifactId":%q,"round":1,"summary":"Answered in the original comment."}`, doc.ID)
+					case 4:
+					default:
+						t.Error("extra model request")
+					}
+					if call.Name != "" {
+						if yield(call) {
+							yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+						}
+						return
+					}
+					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, id: id, conversation: conversation}
+			if err := active.run(ctx, &settings.ResolvedModel{Provider: info, Model: "fixture", Label: "fixture"}); err != nil {
+				t.Fatal(err)
+			}
+			rounds, err := repo.ListArtifactFeedback(ctx, doc.ID)
+			if err != nil || len(rounds) != 1 || (rounds[0]["doneAt"] != nil) != respond {
+				t.Fatalf("unexpected feedback result: %v %v", rounds, err)
+			}
+			wantRequests := 2
+			if respond {
+				wantRequests = 4
+			}
+			if requests != wantRequests {
+				t.Fatalf("got %d model requests, want %d", requests, wantRequests)
+			}
+			traceEvents := map[string]int{}
+			err = repo.ReadTraceSnapshot(ctx, thread.ID, func(snapshot core.TraceSnapshot) error {
+				return snapshot.Events(func(event eventstore.Event) error {
+					traceEvents[event.Type]++
+					return nil
+				})
+			})
+			if err != nil || traceEvents["artifact.feedback"] != 1 || traceEvents["conversation.feedback_reminder"] != 1 ||
+				(traceEvents["artifact.feedback_done"] == 1) != respond {
+				t.Fatalf("missing feedback events in diagnostic trace: %v %v", traceEvents, err)
+			}
+		})
+	}
+}
 
 func TestUnreportedDiscussionReceivesActionableReminder(t *testing.T) {
 	ctx := t.Context()

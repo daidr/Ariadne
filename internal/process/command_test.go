@@ -36,6 +36,10 @@ func TestHelperProcess(t *testing.T) {
 			os.Stdout.Write([]byte{value})
 		}
 		os.Exit(0)
+	case "colors":
+		fmt.Printf("\x1b[32m%s|%s|%s\x1b[0m\n", os.Getenv("NO_COLOR"), os.Getenv("TERM"), os.Getenv("GIT_PAGER"))
+		fmt.Fprint(os.Stderr, "\x1b[31m失败\x1b[0m\n")
+		os.Exit(7)
 	case "output":
 		fmt.Print("BEGIN")
 		for i := 0; i < 2500; i++ {

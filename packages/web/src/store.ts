@@ -84,6 +84,7 @@ export interface TurnChangesRef {
 export interface ConversationState {
   conversation: ConversationView | null
   messages: MessageView[]
+  readThrough?: string
   /** What happened in the conversation besides messages, shown in line with them. */
   notices: NoticeView[]
   todo: TodoView | null
@@ -462,6 +463,7 @@ function take(
     conversation,
     todo,
     model,
+    readThrough: page.readThrough ?? current.readThrough,
     messages: page.messages,
     notices: page.notices,
     more: page.more,

@@ -41,6 +41,10 @@ const artifact = computed(() =>
 const file = computed(() => (inner.value?.kind === 'file' ? inner.value.id : null))
 
 const summary = ref<LinkSummary | null>(null)
+const trackedPullRequest = computed(() => {
+  if (summary.value?.kind !== 'pull-request') return undefined
+  return state.detail?.threads.find((item) => item.pullRequest?.url === props.href)
+})
 watch(
   () => (props.external && props.href?.startsWith('https://') ? props.href : null),
   (url, _before, cleanup) => {
@@ -73,7 +77,11 @@ function open(event?: MouseEvent) {
 <template>
   <DouLink v-if="thread || artifact || file" variant="soft" class="inline-ref" @click="open">
     <template #leading>
-      <StageIcon v-if="thread" :stage="thread.stage" />
+      <StageIcon
+        v-if="thread"
+        :stage="thread.stage"
+        :pull-request-state="thread.pullRequest?.state"
+      />
       <component :is="kindIcon[artifact.kind]" v-else-if="artifact" />
       <FileIcon v-else />
     </template>
@@ -84,6 +92,7 @@ function open(event?: MouseEvent) {
     :href="href"
     :label="summary.label"
     :children="bare ? null : children"
+    :tracked="trackedPullRequest"
   />
   <DouLink v-else-if="href && !inner" :href="href" :external="external">
     <component :is="children" />

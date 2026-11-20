@@ -57,7 +57,7 @@ func (turn *turn) sections(ctx context.Context, project core.ProjectView, config
 			if project.Settings.Delivery.Mode == "external" {
 				workflow += "For external delivery, use push_branch only when the configured workflow calls for publishing your branch. Follow the issue and deployment requirements without merging into the default branch.\n\n"
 			} else {
-				workflow += "For a hosted repository, use open_pull_request after committing. Use push_branch for later commits, sync_branch for conflicts or rejected pushes, and repo_status or read_check_log for failed checks. Wait for approval when the project needs permission to publish.\n\n"
+				workflow += "For a hosted repository, use open_pull_request after committing. Use push_branch for later commits, sync_branch for conflicts or rejected pushes, and repo_status or read_check_log for failed checks. Wait for approval when the project needs permission to publish. When the user explicitly asks you in this discussion to merge its PR, use repo_status followed by merge_pull_request when available.\n\n"
 			}
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,19 +24,30 @@ type CodexSettings struct {
 	Command string `json:"command,omitempty"`
 }
 
-var codexOwnTools = []string{"shell_tool", "unified_exec", "view_image", "image_generation", "multi_agent", "apps", "plugins", "browser_use", "in_app_browser", "computer_use", "sleep_tool", "tool_suggest", "skill_search", "memories", "goals"}
+var codexOwnTools = []string{
+	"shell_tool", "unified_exec", "view_image", "image_generation", "multi_agent", "multi_agent_v2",
+	"apps", "plugins", "browser_use", "in_app_browser", "computer_use", "sleep_tool", "tool_suggest",
+	"skill_search", "memories", "goals", "code_mode", "code_mode_only", "deferred_executor",
+	"request_permissions_tool", "send_message_to_user_async", "token_budget", "current_time_reminder",
+}
 var codexLocalContext = []string{"include_environment_context=false", "include_permissions_instructions=false", "include_apps_instructions=false", "skills.include_instructions=false", "skills.bundled.enabled=false", "project_doc_max_bytes=0"}
 var codexClient = map[string]any{"name": "ariadne", "title": "Ariadne", "version": "1.0.0"}
 var efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-func CodexArgv(settings CodexSettings) []string {
+func codexCommand(settings CodexSettings) []string {
 	command := textutil.Trim(settings.Command)
 	if command == "" {
 		command = "codex"
 	}
-	argv := append(process.SplitCommand(command), "app-server",
+	return process.SplitCommand(command)
+}
+
+func CodexArgv(settings CodexSettings) []string {
+	argv := append(codexCommand(settings), "app-server",
 		"-c", `web_search="disabled"`,
 		"-c", "mcp_servers={}",
+		"-c", "tools.experimental_request_user_input.enabled=false",
+		"-c", "tools.update_plan.enabled=false",
 		"-c", "features.hooks=false",
 		"-c", "features.step_model_switching=true",
 	)
@@ -45,6 +58,58 @@ func CodexArgv(settings CodexSettings) []string {
 		argv = append(argv, "-c", setting)
 	}
 	return argv
+}
+
+func writeCodexToolFreeCatalog(ctx context.Context, settings CodexSettings, directory string, env map[string]string) (string, error) {
+	argv := append(codexCommand(settings), "debug", "models")
+	result := process.Run(ctx, argv, process.RunOptions{Directory: directory, Env: env, ReplaceEnv: true, Whole: true, Timeout: time.Minute})
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf("read Codex model catalog (exit %d): %s", result.ExitCode, textutil.Trim(result.Stderr))
+	}
+	return saveCodexToolFreeCatalog(directory, []byte(result.Stdout))
+}
+
+func saveCodexToolFreeCatalog(directory string, data []byte) (string, error) {
+	var catalog map[string]json.RawMessage
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return "", fmt.Errorf("decode Codex model catalog: %w", err)
+	}
+	var models []map[string]json.RawMessage
+	if err := json.Unmarshal(catalog["models"], &models); err != nil {
+		return "", fmt.Errorf("decode Codex model entries: %w", err)
+	}
+	if len(models) == 0 {
+		return "", errors.New("the Codex model catalog is empty")
+	}
+	for _, model := range models {
+		if model == nil {
+			return "", errors.New("the Codex model catalog contains an empty entry")
+		}
+		delete(model, "apply_patch_tool_type")
+		model["experimental_supported_tools"] = json.RawMessage(`[]`)
+		model["supports_search_tool"] = json.RawMessage(`false`)
+		model["tool_mode"] = json.RawMessage(`"direct"`)
+		delete(model, "multi_agent_version")
+	}
+	entries, err := json.Marshal(models)
+	if err != nil {
+		return "", err
+	}
+	catalog["models"] = entries
+	directory, err = filepath.Abs(directory)
+	if err != nil {
+		return "", err
+	}
+	// The session owns this directory and removes it after app-server exits.
+	file, err := os.CreateTemp(directory, "codex-models-*.json")
+	if err != nil {
+		return "", err
+	}
+	if err := errors.Join(json.NewEncoder(file).Encode(catalog), file.Close()); err != nil {
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
 }
 
 var codexVersion = regexp.MustCompile(`/([0-9]+)\.([0-9]+)\.([0-9]+)`)
@@ -357,7 +422,13 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 	}
 }
 func (d *codexDriver) Start(life context.Context) error {
-	lines := process.NewJSONLines(process.JSONOptions{Argv: CodexArgv(d.settings), Directory: d.ctx.Directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
+	env := process.AgentEnv(nil)
+	catalog, err := writeCodexToolFreeCatalog(life, d.settings, d.ctx.Directory, env)
+	if err != nil {
+		return err
+	}
+	argv := append(CodexArgv(d.settings), "-c", "model_catalog_json="+strconv.Quote(filepath.ToSlash(catalog)))
+	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: env, ReplaceEnv: true})
 	peer, err := rpc.New(rpc.Options{Context: life, Send: lines.SendJSON, Request: d.request, Notification: d.notification})
 	if err != nil {
 		return err
@@ -388,6 +459,14 @@ func (d *codexDriver) Start(life context.Context) error {
 	if err = peer.Notify(ctx, "initialized", nil); err != nil {
 		return d.startError(err)
 	}
+	var config struct {
+		Config struct {
+			MCPServers map[string]json.RawMessage `json:"mcp_servers"`
+		} `json:"config"`
+	}
+	if err = peer.Request(ctx, "config/read", map[string]any{"cwd": d.ctx.Directory}, &config); err != nil {
+		return d.startError(err)
+	}
 	var saved *codexSaved
 	if len(d.ctx.Resume) > 0 {
 		if json.Unmarshal(d.ctx.Resume, &saved) != nil || saved == nil || saved.ThreadID == "" || saved.Total == nil {
@@ -408,9 +487,17 @@ func (d *codexDriver) Start(life context.Context) error {
 		for key, value := range tool.Parameters {
 			schema[key] = value
 		}
-		tools = append(tools, map[string]any{"type": "function", "name": tool.Name, "description": tool.Description, "inputSchema": schema})
+		tools = append(tools, map[string]any{"type": "function", "name": tool.Name, "description": tool.Description, "inputSchema": schema, "deferLoading": false})
 	}
 	params := map[string]any{"cwd": d.ctx.Directory, "approvalPolicy": "untrusted", "approvalsReviewer": "user", "sandbox": "read-only", "baseInstructions": d.ctx.System, "environments": []any{}, "dynamicTools": tools}
+	if len(config.Config.MCPServers) > 0 {
+		// Codex merges TOML tables, so an empty table does not clear inherited servers.
+		servers := make(map[string]any, len(config.Config.MCPServers))
+		for name := range config.Config.MCPServers {
+			servers[name] = map[string]bool{"enabled": false}
+		}
+		params["config"] = map[string]any{"mcp_servers": servers}
+	}
 	if d.ctx.Model != "" && d.ctx.Model != "default" {
 		params["model"] = d.ctx.Model
 	}

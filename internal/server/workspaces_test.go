@@ -26,6 +26,62 @@ func workspaceHTTPSeed() []eventstore.NewEvent {
 	return []eventstore.NewEvent{event("project.created", object{"name": "project", "coordinatorId": "coo_a"}), event("project.source.set", object{"source": object{"kind": "fixture", "settings": object{}}}), event("thread.created", object{"threadId": "thr_a", "title": "task", "nodeId": nil}), event("workspace.opened", object{"threadId": "thr_a", "label": "fixture", "branch": "work/thread", "base": "integration"})}
 }
 
+func TestPullRequestChecksReadTrackedCommit(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.Store.Append(ctx, workspaceHTTPSeed()); err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("a", 40)
+	if err := repo.SyncPullRequest(ctx, "thr_a", object{"number": 4, "state": "open", "headSha": head, "checks": object{"state": "pending"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	registry := sources.New()
+	if _, err := registry.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"repo"}},
+		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+			return sdk.Capabilities{Repo: &sdk.RepoCapability{Checks: func(_ context.Context, sha string) ([]sdk.CheckInfo, error) {
+				if sha != head {
+					t.Errorf("checked %q, want %q", sha, head)
+				}
+				return []sdk.CheckInfo{
+					{ID: "build", Name: "Build", Status: "in_progress"},
+					{ID: "lint", Name: "Lint", Status: "completed", Conclusion: new("success")},
+				}, nil
+			}}}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	api, err := New(Options{Repository: repo, Token: "test-token", Workspaces: manager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	request := httptest.NewRequest("GET", "/api/threads/thr_a/pull-request/checks?headSha=other", nil)
+	request.Header.Set("Authorization", "Bearer test-token")
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	var result struct {
+		HeadSHA string          `json:"headSha"`
+		Checks  []sdk.CheckInfo `json:"checks"`
+	}
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil ||
+		result.HeadSHA != head || len(result.Checks) != 2 || result.Checks[0].Status != "in_progress" ||
+		result.Checks[1].Conclusion == nil || *result.Checks[1].Conclusion != "success" {
+		t.Fatalf("checks: %d %s", response.Code, response.Body)
+	}
+}
+
 func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
 	ctx := t.Context()
 	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})

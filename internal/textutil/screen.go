@@ -1,15 +1,15 @@
 package textutil
 
 import (
-	"regexp"
 	"strings"
 	"unicode/utf8"
 )
 
-var terminalEscapes = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[@-Z\\\\-_]")
-
 func ScreenText(text string) string {
-	text = terminalEscapes.ReplaceAllString(text, "")
+	if strings.ContainsRune(text, '\x1b') {
+		var escapes TerminalEscapes
+		text = string(escapes.Strip([]byte(text)))
+	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {

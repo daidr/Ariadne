@@ -61,7 +61,7 @@
 
 ## 外部 agent
 
-Codex 需要 0.167.1 或更新版本。先在终端里把对应的程序登录好（`claude`、`codex login`，ACP agent 按它自己的说明）。在设置里分别加 Claude Code、Codex 和一个 ACP agent 的提供方，模型名可以填 `default`。
+Codex 需要 0.167.1 或更新版本。先在终端里登录对应的程序（`claude`、`codex login`、`agy acp --login`，其他 ACP agent 按各自的说明）。在设置里可直接选择 Claude Code、Codex 或 Antigravity CLI，也可以手动添加其他 ACP agent。模型名可以填 `default`。
 
 - [ ] **Claude Code**：用它跑一个要读写文件、跑命令的讨论串；追踪里每个工具调用都在；讨论串里回复一次之后再说一句，追踪里第二回合的输入只多了这一句（同一个进程接着做）。用量和“估算花费”有数。
 - [ ] **Codex**：同上；它不会自己跑命令（追踪里看不到它绕开工具的动作），思考深度改成“高”之后它照常工作且 thread 不变。正常重启或空闲回收后再发消息，应走 `thread/resume`；清理旧结果或压缩后原生历史里不再包含旧工具结果原文。

@@ -324,14 +324,6 @@ func UnknownResult(outcome string) string {
 	return fmt.Sprintf("The result of this call is unknown: the turn ended (%s) before it was recorded. It may already have taken effect; check before calling it again.", outcome)
 }
 func (repo *Repository) FinishTurn(ctx context.Context, id, turnID, outcome string, failure *domainerr.Error) error {
-	return repo.finishTurn(ctx, id, turnID, outcome, failure, false)
-}
-
-func (repo *Repository) CompleteModelTurn(ctx context.Context, id, turnID string) error {
-	return repo.finishTurn(ctx, id, turnID, "completed", nil, true)
-}
-
-func (repo *Repository) finishTurn(ctx context.Context, id, turnID, outcome string, failure *domainerr.Error, settleFeedback bool) error {
 	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
 		// Ending a turn only needs call identities. Do not decode every chat
 		// message, attachment and historical tool output to find unanswered calls.
@@ -353,20 +345,6 @@ ORDER BY step.id, CAST(call.key AS INTEGER)`, id)
 			changes = append(changes, change{"tool.finished", object{"conversationId": id, "turnId": turnID, "toolCallId": call["id"], "name": call["name"], "content": UnknownResult(outcome), "isError": true}})
 		}
 		changes = append(changes, change{"turn.finished", object{"conversationId": id, "turnId": turnID, "outcome": outcome, "error": failure}})
-		if settleFeedback {
-			rows, err := records(ctx, tx.SQL(), `SELECT f.artifact_id, f.round
-				FROM artifact_feedback f JOIN artifacts a ON a.id = f.artifact_id
-				JOIN conversations c ON c.id = f.notify
-				WHERE a.project_id = ? AND c.id = ? AND f.done_at IS NULL AND f.created_at <= c.turn_started_at
-				ORDER BY f.created_at, f.artifact_id, f.round`, projectID, id)
-			if err != nil {
-				return err
-			}
-			for _, row := range rows {
-				changes = append(changes, change{"artifact.feedback_done", object{"artifactId": row["artifact_id"],
-					"round": row["round"], "by": id, "summary": ""}})
-			}
-		}
 		if err := appendChanges(tx, projectID, changes); err != nil {
 			return err
 		}

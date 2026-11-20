@@ -162,7 +162,10 @@ function bring(group: DockGroup, key: side.ListKey) {
           <span class="pane-thread-title">{{ labelOf(value as PaneKey) }}</span>
         </span>
         <span v-else-if="threadAt(value as PaneKey)" class="pane-thread-label">
-          <StageIcon :stage="threadAt(value as PaneKey)!.stage" />
+          <StageIcon
+            :stage="threadAt(value as PaneKey)!.stage"
+            :pull-request-state="threadAt(value as PaneKey)!.pullRequest?.state"
+          />
           <span class="pane-thread-title">{{ threadAt(value as PaneKey)!.title }}</span>
         </span>
         <template v-else>{{ labelOf(value as PaneKey) }}</template>

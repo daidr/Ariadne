@@ -399,6 +399,9 @@ CREATE TABLE used_approvals (
 
 CREATE INDEX artifact_comments_artifact ON artifact_comments (artifact_id, created_at);
 
+CREATE INDEX artifact_feedback_pending ON artifact_feedback (notify, created_at, artifact_id, round)
+  WHERE done_at IS NULL;
+
 CREATE INDEX artifacts_project ON artifacts (project_id, updated_at);
 
 CREATE INDEX attentions_message ON attentions (message_id);

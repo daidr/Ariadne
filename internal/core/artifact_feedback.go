@@ -7,7 +7,36 @@ import (
 	"math"
 	"slices"
 	"time"
+
+	"github.com/daidr/Ariadne/internal/eventstore"
 )
+
+// RemindPendingArtifactFeedback adds context for one more model request in
+// this turn. It does not wake the conversation or complete a feedback round.
+func (repo *Repository) RemindPendingArtifactFeedback(ctx context.Context, id, turnID string) (bool, error) {
+	recorded := false
+	err := repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
+		rows, err := records(ctx, tx.SQL(), `SELECT f.artifact_id, f.round
+			FROM artifact_feedback f JOIN artifacts a ON a.id = f.artifact_id
+			JOIN conversations c ON c.id = f.notify
+			WHERE a.project_id = ? AND c.id = ? AND f.done_at IS NULL
+			  AND (f.created_at <= c.turn_started_at OR c.pending_seq = 0)
+			  AND c.wait_id IS NULL
+			  AND NOT EXISTS (SELECT 1 FROM attentions WHERE conversation_id = c.id AND closed = 0)
+			ORDER BY f.created_at, f.artifact_id, f.round LIMIT 20`, projectID, id)
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		rounds := make([]object, 0, len(rows))
+		for _, row := range rows {
+			rounds = append(rounds, object{"artifactId": row["artifact_id"], "round": row["round"]})
+		}
+		err = appendChanges(tx, projectID, []change{{"conversation.feedback_reminder", object{"conversationId": id, "turnId": turnID, "rounds": rounds}}})
+		recorded = err == nil
+		return err
+	})
+	return recorded, err
+}
 
 // FeedbackCandidates pages over changed artifacts without reading their bodies.
 // SendPendingArtifactFeedback rechecks the baseline in the write transaction.
@@ -20,9 +49,12 @@ func (reader Reader) FeedbackCandidates(ctx context.Context, after string, cutof
 		    (a.updated_by = 'user' AND a.version > max(1,
 		      coalesce((SELECT max(version) FROM artifact_feedback WHERE artifact_id = a.id), 0),
 		      coalesce((SELECT max(version) FROM artifact_versions WHERE artifact_id = a.id AND author <> 'user'), 0)))
-		    OR a.commented_at > max(
-		      coalesce((SELECT max(created_at) FROM artifact_feedback WHERE artifact_id = a.id), 0),
-		      coalesce((SELECT max(created_at) FROM artifact_versions WHERE artifact_id = a.id AND author <> 'user'), 0))
+		    OR a.commented_at > coalesce((SELECT max(created_at) FROM artifact_feedback WHERE artifact_id = a.id), 0)
+		      AND EXISTS (
+		        SELECT 1 FROM artifact_comments c, json_each(c.comments) comment
+		        WHERE c.artifact_id = a.id AND json_extract(comment.value, '$.author') = 'user'
+		          AND json_extract(comment.value, '$.createdAt') >
+		            coalesce((SELECT max(created_at) FROM artifact_feedback WHERE artifact_id = a.id), 0))
 		  )
 		ORDER BY a.id LIMIT 64`, after, cutoff.UnixMilli())
 	if err != nil {
@@ -35,8 +67,8 @@ func (reader Reader) FeedbackCandidates(ctx context.Context, after string, cutof
 	return ids, nil
 }
 
-// pendingArtifactFeedback compares committed content and comments with the
-// newer of the last feedback round and the agent's last version.
+// Document edits start from the latest known version. Comments have their
+// own baseline so an AI edit cannot hide a user's unsent comment.
 func pendingArtifactFeedback(w *projectionWriter, artifact ArtifactView) ([]any, error) {
 	if artifact.Kind != "document" && artifact.Kind != "whiteboard" {
 		return nil, nil
@@ -51,7 +83,7 @@ func pendingArtifactFeedback(w *projectionWriter, artifact ArtifactView) ([]any,
 		since = round
 	}
 	version := max(1, since.integer("version"))
-	created := since.integer("created_at")
+	created := round.integer("created_at")
 	base, err := getArtifact(w.ctx, w.tx, artifact.ID, &version)
 	if err != nil {
 		return nil, err
@@ -97,7 +129,7 @@ func pendingArtifactFeedback(w *projectionWriter, artifact ArtifactView) ([]any,
 			case artifact.Kind == "whiteboard":
 				where = boardAnchor(board, anchor, thread.str("id"))
 			}
-			items = append(items, object{"kind": "comment", "threadId": thread["id"], "action": action,
+			items = append(items, object{"kind": "comment", "threadId": thread["id"], "commentId": comment["id"], "action": action,
 				"body": comment["body"], "where": where})
 		}
 	}

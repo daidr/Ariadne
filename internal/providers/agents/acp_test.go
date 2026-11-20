@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,6 +112,48 @@ func TestACPRequiresCommandAndBridge(t *testing.T) {
 		t.Fatal("empty command accepted")
 	}
 	if err := driver.Close(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAntigravityToolProfile(t *testing.T) {
+	directory := t.TempDir()
+	argv := []string{filepath.Join(directory, "AGY.EXE"), "acp", "--process-per-session"}
+	if !usesAntigravityToolProfile(argv) {
+		t.Fatal("the Antigravity ACP command should use the Ariadne profile")
+	}
+	for _, override := range [][]string{
+		{"agy", "acp", "--agent", "custom"},
+		{"agy", "acp", "--agent=custom"},
+		{"wrapper", "acp"},
+		{"agy", "models"},
+	} {
+		if usesAntigravityToolProfile(override) {
+			t.Fatalf("unexpected managed profile for %v", override)
+		}
+	}
+	prepared, err := prepareAntigravityToolProfile(argv, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(prepared, append(argv, "--agent", antigravityToolProfileName, "--add-dir", directory)) {
+		t.Fatalf("unexpected Antigravity command: %v", prepared)
+	}
+	profile, err := os.ReadFile(filepath.Join(directory, ".agents", "agents", antigravityToolProfileName+".md"))
+	if err != nil || !strings.Contains(string(profile), "\ntools: []\n") {
+		t.Fatalf("Antigravity tool profile is missing: %s, %v", profile, err)
+	}
+}
+
+func TestAntigravityReplaysHistoryAfterToolProfileChange(t *testing.T) {
+	driver, err := AntigravityKind(nil, nil).Create(DriverContext{Resume: json.RawMessage(`{"sessionId":"old"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := driver.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "agent profile changed") {
+		t.Fatalf("an old ACP session would retain its original tools: %v", err)
+	}
+	if err := driver.Close(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 }

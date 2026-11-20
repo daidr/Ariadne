@@ -55,7 +55,7 @@ func TestSharedArtifactVersionAndStateCommitTogether(t *testing.T) {
 	}
 }
 
-func TestCompletedModelTurnSettlesOnlyFeedbackItStartedWith(t *testing.T) {
+func TestCompletedModelTurnKeepsFeedbackOpenUntilAddressed(t *testing.T) {
 	ctx := t.Context()
 	clock := time.UnixMilli(1900000000000)
 	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "artifact.sqlite"), Now: func() time.Time { return clock }})
@@ -71,27 +71,46 @@ func TestCompletedModelTurnSettlesOnlyFeedbackItStartedWith(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send := func() {
+	send := func(id, body string) {
 		t.Helper()
 		clock = clock.Add(time.Second)
-		if _, err := repo.SendArtifactFeedback(ctx, artifact.ID, ArtifactFeedback{Items: []any{object{"kind": "edit", "diff": "+ Added"}}}); err != nil {
+		action := object{"type": "create", "threadId": id, "commentId": id + "-user", "quote": "Draft", "body": body}
+		if _, err := repo.CommentOnArtifact(ctx, artifact.ID, "user", action); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	send()
+	send("comment_a", "Please explain this.")
 	turn, err := repo.StartTurn(ctx, project.CoordinatorID, "model")
 	if err != nil {
 		t.Fatal(err)
 	}
-	send()
-	if err := repo.CompleteModelTurn(ctx, project.CoordinatorID, turn); err != nil {
+	send("comment_b", "What does this mean?")
+	if err := repo.FinishTurn(ctx, project.CoordinatorID, turn, "completed", nil); err != nil {
 		t.Fatal(err)
 	}
 	rounds, err := repo.ListArtifactFeedback(ctx, artifact.ID)
 	if err != nil || len(rounds) != 2 {
 		t.Fatal(rounds, err)
 	}
-	if rounds[0]["doneAt"] != nil || rounds[1]["doneBy"] != project.CoordinatorID {
-		t.Fatal("turn settled feedback outside its start time", rounds)
+	if rounds[0]["doneAt"] != nil || rounds[1]["doneAt"] != nil {
+		t.Fatal("empty turn settled feedback", rounds)
+	}
+	if _, err := repo.FinishArtifactFeedback(ctx, artifact.ID, 1, project.CoordinatorID, "Answered."); err == nil {
+		t.Fatal("unanswered comment did not prevent closing feedback")
+	}
+	if _, err := repo.CommentOnArtifact(ctx, artifact.ID, project.CoordinatorID, object{
+		"type": "reply", "threadId": "comment_a", "commentId": "comment_a-agent", "body": "This is the first draft.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FinishArtifactFeedback(ctx, artifact.ID, 1, project.CoordinatorID, "Explained the draft."); err != nil {
+		t.Fatal(err)
+	}
+	rounds, err = repo.ListArtifactFeedback(ctx, artifact.ID)
+	if err != nil || rounds[0]["doneAt"] != nil || rounds[1]["doneBy"] != project.CoordinatorID {
+		t.Fatal("explicit finish settled the wrong feedback", rounds, err)
 	}
 }

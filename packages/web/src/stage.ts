@@ -1,4 +1,4 @@
-import type { NeedsMeItem, ThreadStage, ThreadView } from '@ariadne/core'
+import type { NeedsMeItem, ThreadPullRequest, ThreadStage, ThreadView } from '@ariadne/core'
 import { t } from './i18n'
 
 /** How each thread stage is tinted wherever it is shown. */
@@ -19,7 +19,9 @@ export const stageTone: Record<
 }
 
 /** How a pull request's checks are tinted. */
-export function checksTone(state: 'none' | 'pending' | 'success' | 'failure' | undefined) {
+export function checksTone(
+  state: 'none' | 'pending' | 'success' | 'failure' | undefined,
+): 'success' | 'danger' | 'warning' | 'neutral' {
   switch (state) {
     case 'success':
       return 'success'
@@ -30,6 +32,12 @@ export function checksTone(state: 'none' | 'pending' | 'success' | 'failure' | u
     default:
       return 'neutral'
   }
+}
+
+export function threadStageLabel(stage: ThreadStage, pr?: ThreadPullRequest['state']) {
+  if (stage === 'review' && pr === 'open') return t('thread.stage.waitingMerge')
+  if (stage === 'review' && pr === 'closed') return t('pr.state.closed')
+  return t(`thread.stage.${stage}`)
 }
 
 /** Stages where the last report explains the review or what halted the work. */

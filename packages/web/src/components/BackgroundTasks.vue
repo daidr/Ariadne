@@ -21,7 +21,7 @@ const command = computed(
     placement="top-start"
     :width="520"
     :title="t('command.tasks')"
-    style="box-shadow: 0 2px 8px rgb(0 0 0 / 8%)"
+    class="background-task-popover"
   >
     <DouButton variant="outline" size="sm" class="task-pill" :aria-expanded="open">
       <template #leading><DouStatusDot tone="success" /></template>
@@ -62,20 +62,36 @@ const command = computed(
   box-shadow: none;
   border-color: var(--dou-color-border);
 }
+:global(.background-task-popover) {
+  display: flex;
+  flex-direction: column;
+  max-height: var(--dou-floating-available);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+:global(.background-task-popover > .dou-popover__content) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
 .task-details {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
 }
 .task-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-height: 32px;
   max-height: 144px;
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 .task-choice {
+  flex: none;
   justify-content: flex-start;
   width: 100%;
 }

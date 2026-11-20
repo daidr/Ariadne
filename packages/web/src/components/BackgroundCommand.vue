@@ -2,7 +2,7 @@
 import type { BackgroundView } from '@ariadne/core'
 import { DouButton, DouCodeBlock, DouLink, DouText } from 'dou-ui'
 import { StopIcon } from '@dou-ui/icons'
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import { report, stopBackground } from '../store'
@@ -56,15 +56,20 @@ async function stop() {
 // The newest output stays in view, unless the user scrolled up to read.
 const box = useTemplateRef<HTMLElement>('box')
 let pinned = true
-function onScroll() {
-  const el = box.value
-  if (el) pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+function onScroll(event: Event) {
+  const el = event.target
+  if (el instanceof HTMLElement && el.matches('.dou-code-block__body')) {
+    pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }
 }
-watch(tail, async () => {
-  await nextTick()
-  const el = box.value
-  if (el && pinned) el.scrollTop = el.scrollHeight
-})
+watch(
+  tail,
+  () => {
+    const el = box.value?.querySelector<HTMLElement>('.dou-code-block__body')
+    if (el && pinned) el.scrollTop = el.scrollHeight
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
@@ -89,7 +94,7 @@ watch(tail, async () => {
     <DouLink v-if="command.url" :href="command.url" external class="background-url">{{
       served
     }}</DouLink>
-    <div ref="box" class="background-output" @scroll="onScroll">
+    <div ref="box" class="background-output" @scroll.capture="onScroll">
       <DouCodeBlock v-if="tail" :code="tail" wrap streaming />
       <DouText v-else variant="tertiary" size="sm" class="background-empty">{{
         t('command.noOutput')
@@ -104,6 +109,7 @@ watch(tail, async () => {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 
 .background-url {
@@ -119,6 +125,7 @@ watch(tail, async () => {
 
 .background-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -133,9 +140,23 @@ watch(tail, async () => {
   white-space: nowrap;
 }
 
-.background-output {
+.background-output,
+.background-output :deep(.dou-code-block) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.background-output :deep(.dou-code-block__body) {
+  box-sizing: border-box;
   max-height: 240px;
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.background-output :deep(.dou-code-block__copy) {
+  right: var(--dou-code-block-padding-x);
 }
 
 .background-empty {

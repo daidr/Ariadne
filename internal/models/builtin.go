@@ -121,7 +121,12 @@ func NewBuiltins(options BuiltinOptions) (*Builtins, error) {
 	}); err != nil {
 		return nil, err
 	}
-	for _, kind := range []agents.Kind{agents.ClaudeKind(builtins.bridge), agents.CodexKind(), agents.ACPKind(builtins.bridge, options.StdioLauncher)} {
+	for _, kind := range []agents.Kind{
+		agents.ClaudeKind(builtins.bridge),
+		agents.CodexKind(),
+		agents.AntigravityKind(builtins.bridge, options.StdioLauncher),
+		agents.ACPKind(builtins.bridge, options.StdioLauncher),
+	} {
 		sessions, err := agents.NewSessions(kind, agents.SessionOptions{DataDir: filepath.Join(options.DataDir, "agents"), Context: options.Context, Now: options.Now})
 		if err != nil {
 			_ = builtins.Close(context.Background())
@@ -167,21 +172,30 @@ func (builtins *Builtins) Forget(ctx context.Context, conversation string) error
 	return combined
 }
 func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.ModelProvider {
-	title, program := "ACP agent", ""
-	if kind == "claude-code" {
-		title, program = "Claude Code", "claude"
-	}
-	if kind == "codex" {
-		title, program = "Codex", "codex"
+	title, program, defaultCommand := "ACP agent", "", ""
+	switch kind {
+	case "claude-code":
+		title, program, defaultCommand = "Claude Code", "claude", "claude"
+	case "codex":
+		title, program, defaultCommand = "Codex", "codex", "codex"
+	case "antigravity":
+		title, program, defaultCommand = "Antigravity CLI", "agy", agents.AntigravityCommand
 	}
 	field := sdk.SettingField{Type: "string", Title: localized("命令", "Command")}
 	required := []string(nil)
 	if program != "" {
-		field.Default = program
+		field.Default = defaultCommand
 		field.Description = localized("用它已登录的账号", "Uses the account it is signed in with")
 	} else {
 		field.Description = localized("启动它的 ACP 模式的命令", "Starts the agent in its ACP mode")
 		required = []string{"command"}
+	}
+	commandFor := func(settings map[string]any) string {
+		command := stringSetting(settings, "command")
+		if kind == "antigravity" && textutil.Trim(command) == "" {
+			return defaultCommand
+		}
+		return command
 	}
 	info := sdk.ModelProviderInfo{Kind: kind, Title: localized(title, title), Program: true, Settings: sdk.SettingsSchema{Type: "object", Properties: map[string]sdk.SettingField{"command": field}, Required: required}}
 	return sdk.ModelProvider{Info: info, Stream: sessions.Stream,
@@ -190,7 +204,7 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 			for _, tool := range request.Tools {
 				tools = append(tools, tool.Name)
 			}
-			command := stringSetting(settings, "command")
+			command := commandFor(settings)
 			switch kind {
 			case "codex":
 				thread := map[string]any{"model": request.Model, "baseInstructions": "<system prompt>", "dynamicTools": tools}
@@ -209,7 +223,11 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 				if len(tools) > 0 {
 					servers = append(servers, agents.BridgeServerName)
 				}
-				return map[string]any{"argv": process.SplitCommand(command), "session": map[string]any{"model": request.Model, "mcpServers": servers}, "tools": tools, "messages": len(request.Messages)}
+				session := map[string]any{"model": request.Model, "mcpServers": servers}
+				if kind == "antigravity" && request.Effort != "" {
+					session["thoughtLevel"] = request.Effort
+				}
+				return map[string]any{"argv": process.SplitCommand(command), "session": session, "tools": tools, "messages": len(request.Messages)}
 			}
 		},
 		Models: func(ctx context.Context, settings map[string]any, options sdk.ModelListOptions) ([]sdk.ListedModel, error) {
@@ -226,7 +244,7 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 				defer cancel()
 				_ = fsutil.RemoveTree(cleanup, root, directory)
 			}()
-			command := stringSetting(settings, "command")
+			command := commandFor(settings)
 			var listed []sdk.ListedModel
 			switch kind {
 			case "codex":
@@ -238,6 +256,9 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 			}
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if kind == "antigravity" && err != nil {
+				return nil, err
 			}
 			if err == nil && len(listed) > 0 {
 				hasDefault := false
@@ -258,7 +279,7 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 			return fixed, nil
 		},
 		Check: func(ctx context.Context, settings map[string]any) (sdk.LocalizedText, error) {
-			words := process.SplitCommand(stringSetting(settings, "command"))
+			words := process.SplitCommand(commandFor(settings))
 			if len(words) == 0 {
 				return nil, nil
 			}
@@ -290,7 +311,7 @@ func agentProvider(kind string, sessions *agents.Sessions, dataDir string) sdk.M
 				_, config := os.Stat(filepath.Join(context.Home, ".claude.json"))
 				signedIn = context.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "" || credentials == nil || config == nil
 			}
-			if signedIn {
+			if signedIn || kind == "antigravity" && which(program) {
 				return []sdk.FoundProvider{{ID: kind, From: map[string]string{"program": program}, Settings: map[string]any{}}}
 			}
 			return nil

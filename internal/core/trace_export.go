@@ -36,7 +36,12 @@ func (reader Reader) ReadTraceSnapshot(ctx context.Context, id string, read func
 func (s TraceSnapshot) Events(visit func(eventstore.Event) error) error {
 	rows, err := s.tx.QueryContext(s.ctx, `SELECT e.seq, e.id, e.type, e.project_id, e.data, e.at FROM events e
  WHERE e.project_id = ?1 AND (
-  e.type IN (`+traceEventTypes+`, 'conversation.prompt_updated', 'message.posted') AND json_extract(e.data, '$.conversationId') = ?2
+  e.type IN (`+traceEventTypes+`, 'conversation.prompt_updated', 'conversation.feedback_reminder', 'message.posted') AND json_extract(e.data, '$.conversationId') = ?2
+  OR e.type = 'artifact.feedback' AND json_extract(e.data, '$.notify') = ?2
+  OR e.type = 'artifact.feedback_done' AND EXISTS (
+   SELECT 1 FROM artifact_feedback f JOIN artifacts a ON a.id = f.artifact_id
+   WHERE a.project_id = ?1 AND f.artifact_id = json_extract(e.data, '$.artifactId')
+     AND f.round = json_extract(e.data, '$.round') AND f.notify = ?2)
   OR e.type = 'message.edited' AND EXISTS (SELECT 1 FROM messages m
    WHERE m.id = json_extract(e.data, '$.messageId') AND m.project_id = ?1 AND m.conversation_id = ?2)
  ) ORDER BY e.seq`, s.Conversation.ProjectID, s.Conversation.ID)

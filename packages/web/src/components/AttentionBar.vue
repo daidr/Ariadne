@@ -9,7 +9,6 @@ import { endAside, openMain, openThread, openThreadFrom, retryTurn, state } from
 import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
-import ReviewActions from './ReviewActions.vue'
 
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
@@ -96,9 +95,8 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
                 </DouLink>
                 <ReviewMark :thread="item.thread" />
               </span>
-              <ReviewActions v-if="item.thread.stage === 'review'" :thread-id="item.thread.id" />
               <DouButton
-                v-else-if="item.thread.stage === 'halted' || item.thread.stage === 'silent'"
+                v-if="item.thread.stage === 'halted' || item.thread.stage === 'silent'"
                 size="sm"
                 variant="ghost"
                 @click="retryTurn(item.thread.id)"

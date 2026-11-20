@@ -285,7 +285,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 			thread, err := turn.Repository.GetThread(ctx, conversation.ID)
 			if err == nil && thread.ReviewOf == nil {
 				if repo, err := turn.Workspaces.RepoForThread(ctx, thread); err == nil && repo != nil {
-					specs = append(specs, turn.repoTools(repo)...)
+					specs = append(specs, turn.repoTools(repo, project.Settings.Delivery.Mode != "external")...)
 				}
 				specs = append(specs, specification("write_file", "Create or replace a text file. Pass source to select a writable source.",
 					args{"path": field("string"), "content": field("string"), "source": field("string")}, []string{"path", "content"}, turn.writeFile))

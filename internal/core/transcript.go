@@ -238,6 +238,8 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		payload["title"] = artifact["title"]
 		payload["kind"] = artifact["kind"]
 		note(d["notify"], payload, true)
+	case "conversation.feedback_reminder":
+		note(d["conversationId"], object{"type": "artifact-feedback-reminder", "rounds": d["rounds"]}, false)
 	case "plan.proposal.stale":
 		c := coordinator(w, e.ProjectID)
 		proposal := w.one("SELECT reason FROM plan_proposals WHERE id = ?", d["proposalId"])

@@ -49,16 +49,10 @@ const label = computed(() => {
         <template #end>
           <div class="full-pane full-thread">
             <div v-if="thread" class="full-thread-title">
-              <StageIcon :stage="thread.stage" />
+              <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
               <DouText size="sm" weight="medium" truncate>{{ thread.title }}</DouText>
             </div>
-            <ConversationPanel
-              :thread-id="threadId"
-              :merging="
-                full.view.kind === 'changes' && !full.view.turn && full.view.threadId === threadId
-              "
-              class="full-conversation"
-            />
+            <ConversationPanel :thread-id="threadId" class="full-conversation" />
           </div>
         </template>
       </DouSplitter>

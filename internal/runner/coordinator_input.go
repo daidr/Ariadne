@@ -1,9 +1,19 @@
 package runner
 
 import (
+	"slices"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/transcript"
 )
+
+func (turn *turn) trackThreadInput(entries []transcript.Entry) {
+	turn.userSpoke = turn.userSpoke || slices.ContainsFunc(entries, func(entry transcript.Entry) bool {
+		message, _ := entry["message"].(*core.MessageView)
+		return asNumber(entry["seq"]) > float64(turn.handledBefore) &&
+			message != nil && message.Author == "user" && message.ConversationID == turn.conversation.ID
+	})
+}
 
 // Only work triggered by discussion updates is quiet. Read the same snapshot
 // that goes to the model, so a concurrent direct request can be answered there.

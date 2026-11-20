@@ -2,16 +2,10 @@
 import ChangeTotals from './ChangeTotals.vue'
 import type { ThreadView } from '@ariadne/core'
 import { DouProgress, DouRelativeTime, DouShimmer, DouText, DouTooltip } from 'dou-ui'
-import {
-  AlarmClockIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestIcon,
-  ScanSearchIcon,
-} from '@dou-ui/icons'
+import { AlarmClockIcon, ScanSearchIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { dayText, t } from '../i18n'
-import { checksTone, questionOf, statusLine } from '../stage'
+import { questionOf, statusLine } from '../stage'
 import { state } from '../store'
 import ReviewMark from '../review/ReviewMark.vue'
 import { branchChanges } from '../review/merge-offered'
@@ -19,7 +13,7 @@ import { useServerNow } from '../server-clock'
 import StageIcon from './StageIcon.vue'
 
 /**
- * One thread in the thread list: its status, title, pull request, todos and last word.
+ * One thread in the thread list: its status, title, todos and last word.
  * `nested`: a reviewing thread, under its author's row.
  */
 const props = defineProps<{ thread: ThreadView; nested?: boolean }>()
@@ -40,11 +34,6 @@ const unfinished = computed(() => {
   if (!progress || props.thread.stage === 'done' || progress.done >= progress.total) return null
   return progress
 })
-const prTone = computed(() =>
-  props.thread.pullRequest?.state === 'open'
-    ? checksTone(props.thread.pullRequest.checks.state)
-    : 'neutral',
-)
 </script>
 
 <template>
@@ -56,7 +45,7 @@ const prTone = computed(() =>
           <ScanSearchIcon aria-hidden="true" />
         </DouText>
       </DouTooltip>
-      <StageIcon v-else :stage="thread.stage" />
+      <StageIcon v-else :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
       <DouText
         truncate
         class="row-title row-trim"
@@ -64,24 +53,6 @@ const prTone = computed(() =>
         :variant="nested ? 'secondary' : undefined"
       >
         {{ nested ? t('review.row') : thread.title }}
-      </DouText>
-      <DouText
-        v-if="thread.pullRequest"
-        size="sm"
-        :tone="prTone"
-        :variant="prTone === 'neutral' ? 'tertiary' : 'default'"
-        class="row-mark"
-        :title="thread.pullRequest.title"
-      >
-        <GitMergeIcon v-if="thread.pullRequest.state === 'merged'" aria-hidden="true" />
-        <GitPullRequestClosedIcon
-          v-else-if="thread.pullRequest.state === 'closed'"
-          aria-hidden="true"
-        />
-        <GitPullRequestIcon v-else aria-hidden="true" />
-        <span class="row-trim">{{
-          thread.pullRequest.reference ?? `#${thread.pullRequest.number}`
-        }}</span>
       </DouText>
       <ReviewMark :thread="thread" />
       <ChangeTotals

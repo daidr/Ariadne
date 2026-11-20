@@ -34,6 +34,9 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 	defer builtins.Close(context.Background())
 	native := []any{}
 	for _, provider := range builtins.Registry.Providers() {
+		if provider.Info.Kind == "antigravity" {
+			continue // This provider was added after the legacy oracle snapshot.
+		}
 		found := []sdk.FoundProvider{}
 		if provider.Find != nil {
 			found = append(found, provider.Find(sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return true }})...)
@@ -42,12 +45,21 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 		if provider.Info.Kind == "codex" {
 			trace, _ := describe.(map[string]any)
 			argv, _ := trace["argv"].([]string)
-			hooks := slices.Index(argv, "features.hooks=false")
-			if hooks < 1 || argv[hooks-1] != "-c" {
-				t.Fatalf("Codex launch must disable hooks: %v", argv)
+			// Check the flags added since the frozen oracle, then compare its original flags.
+			for _, setting := range []string{
+				"features.hooks=false", "tools.experimental_request_user_input.enabled=false",
+				"tools.update_plan.enabled=false", "features.multi_agent_v2=false",
+				"features.code_mode=false", "features.code_mode_only=false", "features.deferred_executor=false",
+				"features.request_permissions_tool=false", "features.send_message_to_user_async=false",
+				"features.token_budget=false", "features.current_time_reminder=false",
+			} {
+				index := slices.Index(argv, setting)
+				if index < 1 || argv[index-1] != "-c" {
+					t.Fatalf("Codex launch missing %s: %v", setting, argv)
+				}
+				argv = slices.Delete(argv, index-1, index+1)
 			}
-			// The legacy provider inherited hooks. Compare the other flags as before.
-			trace["argv"] = slices.Delete(argv, hooks-1, hooks+1)
+			trace["argv"] = argv
 		}
 		native = append(native, map[string]any{"info": provider.Info, "found": found, "describe": describe})
 	}
@@ -73,6 +85,42 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 	var actual, expected any
 	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(output, &expected) != nil || !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("Go %s\nTS %s", got, output)
+	}
+}
+
+func TestAntigravityBuiltinDiscoveryAndDefaultCommand(t *testing.T) {
+	ctx := t.Context()
+	builtins, err := NewBuiltins(BuiltinOptions{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
+	provider, ok := builtins.Registry.Get("antigravity")
+	if !ok || !provider.Info.Program {
+		t.Fatal("Antigravity program provider missing")
+	}
+	command := provider.Info.Settings.Properties["command"].Default
+	if command != "agy acp --process-per-session --disable-telemetry" || len(provider.Info.Settings.Required) != 0 {
+		t.Fatal("unexpected Antigravity default command", command)
+	}
+	request := sdk.Request{Model: "fixture", Effort: "high"}
+	trace := provider.Describe(nil, request).(map[string]any)
+	if !slices.Equal(trace["argv"].([]string), strings.Fields(command.(string))) {
+		t.Fatal("the preset and runtime command diverged", trace)
+	}
+	override := provider.Describe(map[string]any{"command": "my-agy acp"}, request).(map[string]any)
+	if !slices.Equal(override["argv"].([]string), []string{"my-agy", "acp"}) {
+		t.Fatal("the command override was ignored", override)
+	}
+	found := provider.Find(sdk.FindContext{Which: func(command string) bool { return command == "agy" }})
+	if len(found) != 1 || found[0].From["program"] != "agy" {
+		t.Fatal("installed CLI was not discovered", found)
+	}
+	if found := provider.Find(sdk.FindContext{Which: func(string) bool { return false }}); len(found) > 0 {
+		t.Fatal("missing CLI was offered", found)
+	}
+	if details, err := provider.Check(ctx, map[string]any{"command": "missing-agy-fixture acp"}); err != nil || details["en"] != "command not found: missing-agy-fixture" {
+		t.Fatal("missing CLI check", details, err)
 	}
 }
 func TestRegistryLifecycleAndModelCheck(t *testing.T) {
@@ -138,7 +186,8 @@ func TestBuiltinCloseReleasesProgramsAndRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(builtins.Registry.Kinds()) != 5 {
+	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
+	if len(builtins.Registry.Kinds()) != 6 {
 		t.Fatal("missing builtins")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)

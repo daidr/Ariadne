@@ -240,6 +240,7 @@ func threadStageFacts(row record, merged, pullRequest map[string]any) StageFacts
 		TurnFailed: !row.present("turn_id") && row.text("last_outcome") == "failed", TurnCancelled: unreported("cancelled"), Unreported: unreported("completed"), Waiting: row.present("wait_id"),
 		ChecksGaveUp: row.integer("check_failures") >= 3, Stopped: row.present("stopped_reason"),
 		Landed:   merged != nil && (int64(mergedAt) >= row.integer("reported_at") || merged["head"] == row["reported_head"]) || pullRequest["state"] == "merged",
+		HostedPR: pullRequest["state"] == "open" || pullRequest["state"] == "closed",
 		Reviewed: row.present("reviewed_at") && row.integer("reviewed_at") >= row.integer("reported_at"), UnderReview: row.flag("reviewing"), Reviewer: row.present("review_of"),
 	}
 }

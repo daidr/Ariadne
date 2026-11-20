@@ -10,7 +10,7 @@ import {
 } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { checksTone, questionOf, showsHeadline, statusLine } from '../stage'
+import { checksTone, questionOf, showsHeadline, statusLine, threadStageLabel } from '../stage'
 import { state } from '../store'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
@@ -106,7 +106,7 @@ function lineOf(id: string): string | null {
           class="plan-node-thread-title"
           :title="lineOf(thread.id) ?? thread.title"
         >
-          {{ lineOf(thread.id) ?? t(`thread.stage.${thread.stage}`) }}
+          {{ lineOf(thread.id) ?? threadStageLabel(thread.stage, thread.pullRequest?.state) }}
         </DouText>
         <ThreadHeadline
           v-else
@@ -132,7 +132,7 @@ function lineOf(id: string): string | null {
           >
             {{ t(`pr.checks.${thread.pullRequest.checks.state}`) }}
           </DouTag>
-          <StageIcon :stage="thread.stage" />
+          <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
         </span>
         <ThreadHeadline
           v-if="named(thread.title)"

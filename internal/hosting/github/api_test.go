@@ -44,6 +44,42 @@ type sent struct {
 	Authorization string `json:"authorization"`
 }
 
+func TestChecksCollectFollowingPages(t *testing.T) {
+	runs := make([]map[string]any, 100)
+	for i := range runs {
+		runs[i] = map[string]any{"id": i + 1, "name": fmt.Sprintf("run %d", i+1), "status": "completed", "conclusion": "success"}
+	}
+	statuses := make([]map[string]any, 30)
+	for i := range statuses {
+		statuses[i] = map[string]any{"context": fmt.Sprintf("status %d", i+1), "state": "success"}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.RequestURI() {
+		case "/repos/acme/app/commits/abc/check-runs?per_page=100":
+			json.NewEncoder(w).Encode(map[string]any{"check_runs": runs})
+		case "/repos/acme/app/commits/abc/check-runs?per_page=100&page=2":
+			json.NewEncoder(w).Encode(map[string]any{"check_runs": []any{map[string]any{"id": 101, "name": "last run", "status": "queued"}}})
+		case "/repos/acme/app/commits/abc/status":
+			json.NewEncoder(w).Encode(map[string]any{"statuses": statuses})
+		case "/repos/acme/app/commits/abc/status?page=2":
+			json.NewEncoder(w).Encode(map[string]any{"statuses": []any{map[string]any{"context": "last status", "state": "failure"}}})
+		default:
+			t.Errorf("unexpected checks request: %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	api, err := NewAPI(APIOptions{Base: server.URL, Owner: "acme", Name: "app", Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	checks, err := api.Checks(t.Context(), "abc")
+	if err != nil || len(checks) != 132 || checks[100].Name != "last run" || checks[131].Name != "last status" {
+		t.Fatalf("received %d checks: %v", len(checks), err)
+	}
+}
+
 func pull(number int, state, branch, at string) map[string]any {
 	return map[string]any{"number": number, "html_url": fmt.Sprintf("https://github.com/acme/app/pull/%d", number), "title": "修复问题", "state": state, "merged_at": nil, "draft": false, "head": map[string]any{"sha": "abc", "ref": branch}, "base": map[string]any{"ref": "main"}, "created_at": at, "user": map[string]any{"login": "alice"}, "additions": 4, "deletions": 1, "changed_files": 2, "closed_at": nil}
 }

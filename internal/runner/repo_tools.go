@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func (turn *turn) repoTools(repo *sdk.RepoCapability) []tool {
+func (turn *turn) repoTools(repo *sdk.RepoCapability, canMerge bool) []tool {
 	tools := []tool{
 		specification("repo_status", "Read the current branch's pull request and the checks for its latest commit.",
 			args{}, nil, func(ctx context.Context, _ args) (string, error) { return turn.repoStatus(ctx, repo) }),
@@ -25,6 +26,14 @@ func (turn *turn) repoTools(repo *sdk.RepoCapability) []tool {
 		specification("open_pull_request", "Push your branch and open or return its pull request. Provide a title, a description and how you checked your work.",
 			args{"title": field("string"), "body": field("string"), "draft": field("boolean")}, []string{"title", "body"},
 			func(ctx context.Context, input args) (string, error) { return turn.openPullRequest(ctx, repo, input) }),
+	}
+	if canMerge && repo.PullRequest != nil && repo.MergePullRequest != nil {
+		tools = append(tools, specification("merge_pull_request",
+			"Merge this discussion's pull request only when the user explicitly asks you to merge in this discussion. Call repo_status first and pass that PR's number and full head SHA. Report the outcome to the coordinator. Respect the hosting platform's merge requirements.",
+			args{"number": field("integer"), "headSha": field("string"), "method": args{"type": "string", "enum": []string{"merge", "squash"}}},
+			[]string{"number", "headSha"}, func(ctx context.Context, input args) (string, error) {
+				return turn.mergePullRequest(ctx, repo, input)
+			}))
 	}
 	if repo.CheckLog != nil {
 		tools = append(tools, specification("read_check_log", "Read the end of a CI check log using its ID from repo_status.",
@@ -37,6 +46,74 @@ func (turn *turn) repoTools(repo *sdk.RepoCapability) []tool {
 			}))
 	}
 	return tools
+}
+
+func (turn *turn) mergePullRequest(ctx context.Context, repo *sdk.RepoCapability, input args) (string, error) {
+	if !turn.userSpoke {
+		return "", errors.New("a merge request from the user in this discussion is required")
+	}
+	thread, err := turn.editable(ctx)
+	if err != nil {
+		return "", err
+	}
+	project, err := turn.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	if project.Settings.Delivery.Mode == "external" {
+		return "", domainerr.New("error.externalDelivery", nil)
+	}
+	known, _ := thread.PullRequest.(map[string]any)
+	number := int(asNumber(known["number"]))
+	head := text(input, "headSha")
+	if number <= 0 || asNumber(input["number"]) != float64(number) || head == "" || known["headSha"] != head {
+		return "", errors.New("use repo_status to get this discussion's pull request number and current head SHA")
+	}
+	current, err := repo.PullRequest(ctx, number)
+	if err != nil {
+		return "", err
+	}
+	if current.Number != number || current.HeadSHA != head || text(known, "url") != current.URL {
+		return "", errors.New("the pull request changed. Check its current state before merging")
+	}
+	if current.State == "merged" {
+		return turn.recordPullRequestMerge(ctx, thread.ID, known, current, sdk.PullRequestMergeOutcome{Kind: "merged"})
+	}
+	if current.State != "open" || current.Draft {
+		return "", errors.New("this pull request must be open and ready for review to merge")
+	}
+	project, err = turn.Repository.GetProject(ctx, thread.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	if project.Settings.Delivery.Mode == "external" {
+		return "", domainerr.New("error.externalDelivery", nil)
+	}
+	method := text(input, "method")
+	if method == "" {
+		method = project.Settings.Autopilot.Method
+	}
+	if method != "merge" && method != "squash" {
+		return "", errors.New("merge method must be merge or squash")
+	}
+	outcome, err := repo.MergePullRequest(ctx, number, method, head)
+	if err != nil {
+		return "", err
+	}
+	if outcome.Kind == "merged" {
+		return turn.recordPullRequestMerge(ctx, thread.ID, known, current, outcome)
+	}
+	return reply(args{"number": number, "url": current.URL, "outcome": outcome}, nil)
+}
+
+func (turn *turn) recordPullRequestMerge(ctx context.Context, threadID string, previous args, current sdk.PullRequestInfo, outcome sdk.PullRequestMergeOutcome) (string, error) {
+	next := maps.Clone(previous)
+	next["state"] = "merged"
+	next["title"] = current.Title
+	if err := turn.Repository.SyncPullRequestIfCurrent(ctx, threadID, previous, next); err != nil {
+		return "", fmt.Errorf("the host merged PR #%d, but the discussion status could not be updated: %w", current.Number, err)
+	}
+	return reply(args{"number": current.Number, "url": current.URL, "outcome": outcome}, nil)
 }
 
 func (turn *turn) repoWorkspace(ctx context.Context) (core.ThreadView, sdk.Workspace, string, error) {

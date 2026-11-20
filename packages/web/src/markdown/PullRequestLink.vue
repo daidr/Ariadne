@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ThreadView } from '@ariadne/core'
 import type { LinkPreview } from '@ariadne/plugin-sdk'
 import {
   GitMergeIcon,
@@ -11,32 +12,106 @@ import {
   DouPopover,
   DouRelativeTime,
   DouSkeleton,
+  DouStatusDot,
   DouTag,
   DouText,
   type TagTone,
 } from 'dou-ui'
-import { computed, ref, type Component, type VNode } from 'vue'
+import { computed, shallowRef, useTemplateRef, watch, type Component, type VNode } from 'vue'
 import { t } from '../i18n'
+import { checksTone } from '../stage'
 import { linkPreview } from './link-summaries'
+import PullRequestChecks from './PullRequestChecks.vue'
 
 /**
- * A pull request in a message: `owner/name#12` (or the link's own words), with a card of
- * its state, title, author and size when the user points at it. It is a chip: the icon
- * already says it leaves Ariadne, so it has no external mark.
+ * A PR link with a card on hover and keyboard focus.
+ * Tracked PRs get their state and checks from the project updates.
  */
-const props = defineProps<{ href: string; label: string; children: VNode | null }>()
+const props = withDefaults(
+  defineProps<{
+    href: string
+    label: string
+    children?: VNode | null
+    tracked?: Pick<ThreadView, 'id' | 'pullRequest'>
+    variant?: 'soft' | 'text' | 'pill'
+  }>(),
+  { variant: 'soft' },
+)
 
-const preview = ref<LinkPreview | null | undefined>(undefined)
-function load(open: boolean) {
-  if (!open) return
-  void linkPreview(props.href).then((value) => (preview.value = value))
+const preview = shallowRef<LinkPreview | null>()
+const open = shallowRef(false)
+// Expanding CI can move the card away from the pointer while its controls have focus.
+const cardFocused = shallowRef(false)
+const card = useTemplateRef<HTMLElement>('card')
+watch(
+  () => props.href,
+  () => {
+    preview.value = undefined
+    load(open.value)
+  },
+)
+
+function load(isOpen: boolean) {
+  if (!isOpen) return
+  const href = props.href
+  void linkPreview(href).then((value) => {
+    if (href === props.href) preview.value = value
+  })
+}
+watch(open, (isOpen) => {
+  if (!isOpen) cardFocused.value = false
+  load(isOpen)
+})
+
+function focusLink(event: FocusEvent) {
+  if (!focusCameFromCard(event)) open.value = true
 }
 
+function blurLink(event: FocusEvent) {
+  if (!focusCameFromCard(event)) open.value = false
+}
+
+function focusCameFromCard(event: FocusEvent) {
+  return event.relatedTarget instanceof Node && card.value?.contains(event.relatedTarget)
+}
+
+function leaveCard(event: FocusEvent) {
+  if (focusCameFromCard(event)) return
+  cardFocused.value = false
+  if (event.relatedTarget !== anchor.value?.$el) open.value = false
+}
+
+// Fetch state for untracked PRs as they become visible, using the same cache as the card.
+const anchor = useTemplateRef<InstanceType<typeof DouLink>>('anchor')
+watch(
+  [anchor, () => props.href, () => !!props.tracked],
+  ([link, , tracked], _before, cleanup) => {
+    const element = link?.$el
+    if (tracked || !(element instanceof Element) || typeof IntersectionObserver === 'undefined')
+      return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect()
+        load(true)
+      }
+    })
+    observer.observe(element)
+    cleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
+
 type State = 'open' | 'draft' | 'merged' | 'closed'
-const state = computed<State | null>(() => {
-  const pr = preview.value
-  if (!pr) return null
-  return pr.state === 'open' && pr.draft ? 'draft' : pr.state
+const trackedPR = computed(() => props.tracked?.pullRequest)
+const pr = computed(() => trackedPR.value ?? preview.value)
+const state = computed<State | undefined>(() =>
+  pr.value?.state === 'open' && preview.value?.state === 'open' && preview.value.draft
+    ? 'draft'
+    : pr.value?.state,
+)
+const checks = computed(() => {
+  const result = trackedPR.value?.checks.state
+  return result && result !== 'none' ? result : null
 })
 const icons: Record<State, Component> = {
   open: GitPullRequestIcon,
@@ -53,32 +128,67 @@ const tones: Record<State, TagTone> = {
 </script>
 
 <template>
-  <DouPopover trigger="hover" placement="top" :width="380" :show-delay="300" @update:open="load">
+  <DouPopover
+    v-model:open="open"
+    :trigger="cardFocused ? 'manual' : 'hover'"
+    :placement="variant === 'pill' ? 'top-start' : 'top'"
+    :width="380"
+    :show-delay="300"
+  >
     <DouLink
+      ref="anchor"
       :href="href"
       target="_blank"
       rel="noopener noreferrer"
-      variant="soft"
-      class="inline-ref"
+      :variant="variant === 'pill' ? 'text' : variant"
+      :underline="variant === 'pill' ? 'none' : undefined"
+      :class="{ 'inline-ref': variant === 'soft', 'pr-pill': variant === 'pill' }"
+      :aria-description="state && t(`link.pr.${state}`)"
+      :aria-expanded="open"
+      @focus="focusLink"
+      @blur="blurLink"
     >
-      <template #leading><component :is="state ? icons[state] : GitPullRequestIcon" /></template>
+      <template #leading>
+        <component
+          :is="icons[state ?? 'open']"
+          :class="state && `pr-icon-${tones[state]}`"
+          aria-hidden="true"
+        />
+      </template>
       <component :is="children" v-if="children" />
       <template v-else>{{ label }}</template>
+      <template v-if="variant !== 'soft' && checks" #trailing>
+        <DouStatusDot :tone="checksTone(checks)" :label="t(`pr.checks.${checks}`)" size="sm" />
+      </template>
     </DouLink>
     <template #content>
-      <div v-if="preview" class="pr-card">
+      <div
+        v-if="pr && state"
+        ref="card"
+        class="pr-card"
+        @focusin="cardFocused = true"
+        @focusout="leaveCard"
+      >
         <div class="pr-card-head">
-          <DouTag :tone="tones[state!]" size="sm" round>
-            <template #leading><component :is="icons[state!]" /></template>
-            {{ t(`link.pr.${state!}`) }}
+          <DouTag :tone="tones[state]" size="sm" round>
+            <template #leading><component :is="icons[state]" /></template>
+            {{ t(`link.pr.${state}`) }}
           </DouTag>
           <DouText variant="secondary" size="sm" class="pr-card-ref">
-            {{ preview.repository }} {{ preview.reference ?? `#${preview.number}` }}
+            {{ preview?.repository }} {{ pr.reference ?? `#${pr.number}` }}
           </DouText>
-          <DouText variant="tertiary" size="sm"><DouRelativeTime :value="preview.at" /></DouText>
+          <DouText v-if="preview" variant="tertiary" size="sm">
+            <DouRelativeTime :value="preview.at" />
+          </DouText>
         </div>
-        <DouText class="pr-card-title">{{ preview.title }}</DouText>
-        <div class="pr-card-foot">
+        <DouText class="pr-card-title">{{ pr.title }}</DouText>
+        <PullRequestChecks
+          v-if="open && tracked && trackedPR && checks"
+          :thread-id="tracked.id"
+          :head="trackedPR.headSha"
+          :summary="checks"
+        />
+        <div v-if="preview" class="pr-card-foot">
           <DouText variant="secondary" size="sm" class="pr-card-author">{{
             preview.author
           }}</DouText>
@@ -107,6 +217,37 @@ const tones: Record<State, TagTone> = {
 /* Kept apart from the words around it, as MessageLink does. */
 .inline-ref {
   margin-inline: 0.25em;
+}
+.pr-pill {
+  flex: none;
+  align-items: center;
+  gap: var(--dou-control-gap-sm);
+  box-sizing: border-box;
+  height: var(--dou-control-height-sm);
+  padding: 0 var(--dou-control-padding-x-sm);
+  border: 1px solid var(--dou-color-border);
+  border-radius: 999px;
+  background-color: var(--dou-color-bg-surface);
+  font-size: var(--dou-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+.pr-pill:hover {
+  border-color: var(--dou-color-border-strong);
+  background-color: color-mix(in oklab, var(--dou-color-text) 4%, var(--dou-color-bg-surface));
+}
+.pr-icon-success {
+  color: var(--dou-color-success-text);
+}
+.pr-icon-primary {
+  color: var(--dou-color-primary-text);
+}
+.pr-icon-danger {
+  color: var(--dou-color-danger-text);
+}
+.pr-icon-neutral {
+  color: var(--dou-color-text-tertiary);
 }
 .pr-card {
   display: flex;

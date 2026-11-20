@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon, HelpCircleIcon } from '@dou-ui/icons
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import { openMain, openMessage, openThread, state } from '../store'
+import PullRequestTag from './PullRequestTag.vue'
 import ThreadRow from './ThreadRow.vue'
 
 /**
@@ -105,7 +106,14 @@ function select(key: string | number) {
         <ChevronRightIcon v-else />
       </template>
     </DouButton>
-    <DouMenu v-if="open" class="recap-menu" :aria-label="title" :items="items" @select="select">
+    <DouMenu
+      v-if="open"
+      class="recap-menu"
+      :aria-label="title"
+      :items="items"
+      actions-visible="always"
+      @select="select"
+    >
       <template #label="{ item }">
         <ThreadRow v-if="byId.get(String(item.key))" :thread="byId.get(String(item.key))!" />
         <span v-else class="recap-ask">
@@ -114,6 +122,12 @@ function select(key: string | number) {
           </DouText>
           <DouText truncate class="recap-ask-title">{{ item.label }}</DouText>
         </span>
+      </template>
+      <template #actions="{ item }">
+        <PullRequestTag
+          v-if="byId.get(String(item.key))?.pullRequest"
+          :thread="byId.get(String(item.key))"
+        />
       </template>
     </DouMenu>
   </div>
@@ -139,6 +153,10 @@ function select(key: string | number) {
 .recap-menu {
   align-self: stretch;
   --dou-menu-item-height: auto;
+}
+
+.recap-menu :deep(.dou-menu__actions) {
+  inset-block-start: 5px;
 }
 
 .recap-ask {

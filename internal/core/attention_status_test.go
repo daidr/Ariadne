@@ -77,3 +77,50 @@ func TestWorkStatusDoesNotCreateUserAttention(t *testing.T) {
 		t.Fatalf("CI retry limit overwrote completed delivery: %s", stage)
 	}
 }
+
+func TestPullRequestDeliveryFollowsTheHost(t *testing.T) {
+	ctx := t.Context()
+	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "pull.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Hosted delivery"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, NewThread{Title: "Fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReportThread(ctx, thread.ID, ThreadReport{
+		Kind: "ready", Headline: "Ready", Summary: "Ready for review",
+	}, nil, ReviewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus := func(stage string, count int) {
+		t.Helper()
+		detail, err := repo.GetProjectDetail(ctx, project.ID)
+		if err != nil || len(detail.Threads) != 1 || detail.Threads[0].Stage != stage || len(detail.NeedsMe) != count {
+			t.Fatalf("want %s and %d items, got %+v, %v", stage, count, detail, err)
+		}
+		projects, err := repo.ListProjects(ctx)
+		if err != nil || len(projects) != 1 || projects[0].NeedsMe != count {
+			t.Fatalf("want sidebar count %d, got %+v, %v", count, projects, err)
+		}
+	}
+	assertStatus("review", 1)
+	for _, stage := range []string{"open", "closed", "merged"} {
+		if err := repo.SyncPullRequest(ctx, thread.ID, object{
+			"number": 1, "state": stage, "headSha": "abc",
+			"checks": object{"state": "pending"},
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if stage == "merged" {
+			assertStatus("done", 0)
+		} else {
+			assertStatus("review", 0)
+		}
+	}
+}

@@ -26,7 +26,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { editPlan, openMain, openThreadFrom, sendMessage, setNodeIssue, state } from '../store'
 import { kindIcon } from '../artifacts/kinds'
-import ReviewActions from '../components/ReviewActions.vue'
 import { startedAhead } from './layout'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
@@ -334,17 +333,15 @@ const removeQuestion = computed(() => {
             class="node-thread-open"
             @click="(event) => openThreadFrom(event, thread.id)"
           >
-            <span class="node-thread-lead"><StageIcon :stage="thread.stage" /></span>
+            <span class="node-thread-lead">
+              <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
+            </span>
             <span class="node-thread-text">
               <DouText size="sm" :truncate="2" :title="thread.title">{{ thread.title }}</DouText>
               <ThreadHeadline :stage="thread.stage" :headline="thread.lastHeadline" />
             </span>
           </button>
-          <span
-            v-if="thread.pullRequest || hasBranch(thread.id) || thread.stage === 'review'"
-            class="node-thread-tools"
-          >
-            <ReviewActions v-if="thread.stage === 'review'" :thread-id="thread.id" compact />
+          <span v-if="thread.pullRequest || hasBranch(thread.id)" class="node-thread-tools">
             <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
             <ChangeTotals
               v-if="hasBranch(thread.id) && changesOf(thread.id)"

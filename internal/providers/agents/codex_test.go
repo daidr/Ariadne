@@ -27,6 +27,36 @@ func TestCodexChild(t *testing.T) {
 		return
 	}
 	logFile := os.Args[index+1]
+	if slices.Contains(os.Args, "debug") {
+		fmt.Fprintln(os.Stdout, `{"models":[
+			{"slug":"big","apply_patch_tool_type":"freeform","experimental_supported_tools":["clock"],
+			 "supports_search_tool":true,"tool_mode":"code_mode_only","multi_agent_version":"v2","context_window":32000},
+			{"slug":"small","apply_patch_tool_type":"function","context_window":16000}
+		]}`)
+		os.Exit(0)
+	}
+	catalogReady := false
+	for _, arg := range os.Args {
+		if rawPath, ok := strings.CutPrefix(arg, "model_catalog_json="); ok {
+			var path string
+			var catalog struct{ Models []map[string]any }
+			if json.Unmarshal([]byte(rawPath), &path) != nil {
+				os.Exit(4)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil || json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 2 {
+				os.Exit(4)
+			}
+			for i, model := range catalog.Models {
+				tools, ok := model["experimental_supported_tools"].([]any)
+				if !ok || len(tools) != 0 || model["apply_patch_tool_type"] != nil || model["multi_agent_version"] != nil ||
+					model["context_window"] != []float64{32000, 16000}[i] || model["supports_search_tool"] != false || model["tool_mode"] != "direct" {
+					os.Exit(4)
+				}
+			}
+			catalogReady = true
+		}
+	}
 	var writeMu, mu sync.Mutex
 	next := 1000
 	waiting := map[int]chan json.RawMessage{}
@@ -71,6 +101,9 @@ func TestCodexChild(t *testing.T) {
 			mu.Unlock()
 			continue
 		}
+		if (message.Method == "thread/start" || message.Method == "thread/resume") && !catalogReady {
+			os.Exit(4)
+		}
 		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			os.Exit(3)
@@ -86,6 +119,8 @@ func TestCodexChild(t *testing.T) {
 			}
 			response(map[string]any{"userAgent": agent})
 		case "initialized":
+		case "config/read":
+			response(map[string]any{"config": map[string]any{"mcp_servers": map[string]any{"personal.mcp": map[string]any{"enabled": true}}}})
 		case "model/list":
 			var params map[string]any
 			json.Unmarshal(message.Params, &params)
@@ -289,6 +324,10 @@ func TestCodexNativeProtocolAndConversationReuse(t *testing.T) {
 	for _, message := range messages {
 		if message["method"] == "thread/start" {
 			params := message["params"].(map[string]any)
+			server := params["config"].(map[string]any)["mcp_servers"].(map[string]any)["personal.mcp"].(map[string]any)
+			if server["enabled"] != false {
+				t.Fatal(server)
+			}
 			if len(params["environments"].([]any)) != 0 || params["ephemeral"] != false || params["baseInstructions"] != PlaceNote || params["sandbox"] != "read-only" {
 				t.Fatal(params)
 			}
@@ -433,6 +472,21 @@ func compareLegacyAgent(t *testing.T, kindName, fakeName string, kind Kind) {
 		t.Skip("Bun absent; native child protocol tests run separately")
 	}
 	fake := legacytest.Path(t, "packages/plugin-agents/src/fakes/fake-"+fakeName+".ts")
+	if kindName == "codex" {
+		// The frozen oracle predates the catalog and config requests.
+		source, err := os.ReadFile(fake)
+		if err != nil {
+			t.Fatal(err)
+		}
+		common, _ := json.Marshal(filepath.ToSlash(filepath.Join(filepath.Dir(fake), "common.ts")))
+		adapted := strings.Replace(string(source), "from './common'", "from "+string(common), 1)
+		adapted = strings.Replace(adapted, "    case 'initialize':", "    case 'config/read':\n      write({ id: message.id, result: { config: {} } })\n      break\n    case 'initialize':", 1)
+		adapted = `if (process.argv.includes('debug')) { console.log(JSON.stringify({ models: [{ slug: 'gpt-big' }] })); process.exit(0) }` + "\n" + adapted
+		fake = filepath.Join(t.TempDir(), "fake-codex.ts")
+		if err := os.WriteFile(fake, []byte(adapted), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	command := `"` + bun + `" "` + fake + `"`
 	m := newTestSessions(t, kind, SessionOptions{Quiet: 30 * time.Millisecond})
 	settings := map[string]any{"command": command}

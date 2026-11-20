@@ -56,7 +56,6 @@ import MessageQuote from './MessageQuote.vue'
 import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
-import PullRequestTag from './PullRequestTag.vue'
 import { placeTodo, todoPlan } from './todo'
 import { shownAttachments, useAttachments } from './attachments'
 import {
@@ -83,13 +82,15 @@ import {
 import WorkspaceTag from './WorkspaceTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
-import ReviewActions from './ReviewActions.vue'
 import ReviewMark from '../review/ReviewMark.vue'
 import ReviewNotice from '../review/ReviewNotice.vue'
 import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
 import ConversationActivity from './ConversationActivity.vue'
 import ConversationBar from './ConversationBar.vue'
+import ConversationMarker from './ConversationMarker.vue'
+import { messageTimes } from './conversation-timeline'
+import { useCoordinatorUnread } from './coordinator-unread'
 import { branchChanges } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import { useMentions } from './mentions'
@@ -111,8 +112,7 @@ import { provideFromThread } from '../opened-from'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
 // `tabbed`: in a side tab group, whose own menu holds the thread's.
-// `merging`: its changes are open beside it, with the ways out of the review on them.
-const props = defineProps<{ threadId?: string; tabbed?: boolean; merging?: boolean }>()
+const props = defineProps<{ threadId?: string; tabbed?: boolean }>()
 
 // What opens from a thread shows full screen, with this thread beside it.
 provideFromThread(() => props.threadId ?? null)
@@ -217,7 +217,8 @@ const showCapsules = computed(
   () =>
     (capsuleChanges.value?.totals?.files ?? 0) > 0 ||
     createdArtifacts.value.length > 0 ||
-    background.value.length > 0,
+    background.value.length > 0 ||
+    !!thread.value?.pullRequest,
 )
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
 // The main model kept failing: this turn goes on with the role's fallback.
@@ -374,6 +375,7 @@ const entries = computed(() =>
     view.value.more ? view.value.messages[0] : undefined,
   ),
 )
+const times = computed(() => messageTimes(shown.value.items))
 
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
@@ -628,6 +630,14 @@ function retry() {
 // Scrolled to the top: the page before. A first page too short to scroll fetches the
 // next one by itself, since there is no top to reach.
 const list = useTemplateRef<ChatListExpose>('list')
+const unread = props.threadId
+  ? undefined
+  : useCoordinatorUnread(
+      () => view.value,
+      () => list.value?.viewport,
+      () => !state.full && state.currentId === view.value.conversation?.projectId,
+    )
+const newMessagesAt = computed(() => unread?.boundary.value)
 const footer = useTemplateRef<HTMLElement>('footer')
 const footerHeight = ref(0)
 watch(
@@ -683,12 +693,11 @@ watch(
   { immediate: true },
 )
 
-// Everything on screen counts as read.
+// Threads keep their read behavior. The coordinator tracks the visible tail.
 watch(
   () => view.value.messages.at(-1)?.id,
   (last) => {
-    const conversation = conversationId.value
-    if (last && conversation) void api.markRead(conversation, last)
+    if (last && props.threadId) void api.markRead(props.threadId, last)
   },
 )
 </script>
@@ -707,9 +716,7 @@ watch(
           <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
             {{ t('review.underway', { round: thread.review.rounds }) }}
           </DouShimmer>
-          <ReviewActions v-if="thread.stage === 'review' && !merging" :thread-id="thread.id" />
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <PullRequestTag :thread="thread" />
           <ReviewMark :thread="thread" />
           <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
           <template v-if="reviewed">
@@ -729,6 +736,7 @@ watch(
       v-if="timeline.length || todo.length || working || queued || wait"
       ref="list"
       class="conversation-list"
+      @at-bottom-change="unread?.onBottomChange($event)"
       @top-reached="earlier"
     >
       <div v-if="view.loadingEarlier" class="earlier" role="status">
@@ -940,7 +948,12 @@ watch(
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>
         </div>
-        <template v-for="message in item.message ? [item.message] : []" v-else :key="message.id">
+        <div v-for="message in item.message ? [item.message] : []" v-else :key="message.id">
+          <ConversationMarker
+            v-if="message.id === newMessagesAt || times.has(message.id)"
+            :at="message.createdAt"
+            :unread="message.id === newMessagesAt"
+          />
           <!-- What the coordinator told a thread: there for whoever wants it, out of the way otherwise. -->
           <DouCollapse
             v-if="message.kind === 'relay'"
@@ -1094,7 +1107,7 @@ watch(
               </DouPopover>
             </template>
           </DouChatMessage>
-        </template>
+        </div>
       </template>
       <ConversationActivity
         :conversation-id="conversationId"
@@ -1177,6 +1190,7 @@ watch(
           :changes="capsuleChanges"
           :artifacts="createdArtifacts"
           :background="background"
+          :thread="thread"
           class="conversation-capsules"
         />
         <DouChatInput
@@ -1474,6 +1488,7 @@ watch(
 
 .conversation-alert,
 .conversation-capsules :deep(button),
+.conversation-capsules :deep(a),
 .conversation-input :deep(.dou-chat-input) {
   pointer-events: auto;
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,7 +83,7 @@ func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": body}
+		actual := object{"status": response.Code, "body": legacyModelSettingsResponse(body)}
 		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
 			t.Fatalf("%s %s\ngot %s\nwant %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
 		}
@@ -93,4 +94,16 @@ func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
 			t.Fatal("API key leaked to settings page")
 		}
 	}
+}
+
+func legacyModelSettingsResponse(body any) any {
+	value, _ := body.(map[string]any)
+	if kinds, ok := value["kinds"].([]any); ok {
+		// The legacy snapshot predates the built-in Antigravity provider.
+		value["kinds"] = slices.DeleteFunc(kinds, func(kind any) bool {
+			entry, _ := kind.(map[string]any)
+			return entry["kind"] == "antigravity"
+		})
+	}
+	return body
 }

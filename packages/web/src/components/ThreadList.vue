@@ -13,7 +13,7 @@ import {
 } from '../stage'
 import { activeThreadId, openThread, state } from '../store'
 import { dragThread } from '../side/dock'
-import ReviewActions from './ReviewActions.vue'
+import PullRequestTag from './PullRequestTag.vue'
 import ThreadRow from './ThreadRow.vue'
 import { openGroups } from './thread-list'
 
@@ -132,10 +132,9 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
           />
         </template>
         <template #actions="{ item }">
-          <ReviewActions
-            v-if="byId.get(String(item.key))?.stage === 'review'"
-            :thread-id="String(item.key)"
-            compact
+          <PullRequestTag
+            v-if="byId.get(String(item.key))?.pullRequest"
+            :thread="byId.get(String(item.key))"
           />
         </template>
       </DouMenu>
@@ -167,6 +166,14 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
 .thread-menu {
   align-self: stretch;
   --dou-menu-item-height: auto;
+}
+
+.thread-menu :deep(.dou-menu__actions) {
+  inset-block-start: 5px;
+}
+
+.thread-menu :deep(.dou-menu__entry:has(> .dou-menu__item .row-nested) > .dou-menu__actions) {
+  inset-block-start: 2px;
 }
 
 /* A row can be dragged onto the side; a swipe still scrolls the list. */

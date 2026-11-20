@@ -121,6 +121,9 @@ func DescribeNote(note map[string]any, titleOf func(string) string) string {
 		return fmt.Sprintf("<artifact_comment artifact=\"%s\" title=\"%s\" comment_thread=\"%s\" kind=\"%s\">\nOn the text: %s\nThe user wrote: %s\nAnswer with comment_artifact in that comment thread: a reply, a question back, or what you changed (change the document first if they ask for it; once you change the commented text, resolve the comment, since it no longer finds its text). resolve_artifact_comment once it is settled. Do not answer it in a chat message.\n</artifact_comment>", t("artifactId"), t("title"), t("threadId"), kind, t("quote"), t("body"))
 	case "artifact-feedback":
 		return describeFeedback(note)
+	case "artifact-feedback-reminder":
+		rounds, _ := json.Marshal(note["rounds"])
+		return "<artifact_feedback_pending>These feedback rounds are still open: " + string(rounds) + ". Use read_artifact to see the current document, comments and feedback. Reply to the original comments with comment_artifact and make any requested edits before calling finish_feedback_round. If you already posted a reply, reuse it. If you need an answer or cannot address the feedback, keep the round open.</artifact_feedback_pending>"
 	case "checks-failed":
 		attempt := float64(1)
 		if note["attempt"] != nil {

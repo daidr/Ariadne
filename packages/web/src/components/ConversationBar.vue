@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ArtifactSummary, BackgroundView, ChangeTotals } from '@ariadne/core'
+import type { ArtifactSummary, BackgroundView, ChangeTotals, ThreadView } from '@ariadne/core'
 import { FileDiffIcon, PackageIcon } from '@dou-ui/icons'
 import { DouButton, DouPopover } from 'dou-ui'
 import { shallowRef } from 'vue'
@@ -7,12 +7,14 @@ import { t } from '../i18n'
 import { useOpenView } from '../opened-from'
 import { kindIcon } from '../artifacts/kinds'
 import BackgroundTasks from './BackgroundTasks.vue'
+import PullRequestTag from './PullRequestTag.vue'
 
 defineProps<{
   conversationId: string
   changes: { threadId: string; totals: ChangeTotals | null } | null
   artifacts: ArtifactSummary[]
   background: BackgroundView[]
+  thread?: Pick<ThreadView, 'id' | 'pullRequest'> | null
 }>()
 const openView = useOpenView()
 const artifactsOpen = shallowRef(false)
@@ -39,6 +41,7 @@ function openArtifact(id: string) {
         <span class="pill-removed">−{{ changes.totals.removed }}</span>
       </template>
     </DouButton>
+    <PullRequestTag v-if="thread?.pullRequest" :thread="thread" pill />
     <DouPopover
       v-if="artifacts.length"
       v-model:open="artifactsOpen"

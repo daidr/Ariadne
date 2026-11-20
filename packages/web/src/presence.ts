@@ -1,4 +1,4 @@
-import { watch } from 'vue'
+import { shallowRef, watch } from 'vue'
 import { api } from './api'
 import { state } from './store'
 
@@ -27,6 +27,11 @@ function lastSeen(projectId: string): number | null {
  * nothing between two writes.
  */
 let seen = { projectId: '', at: 0 }
+export const returnedToProject = shallowRef<{ projectId: string; at: number }>()
+
+export function currentProjectIsIdle() {
+  return seen.projectId === state.currentId && Date.now() - seen.at >= AWAY_MS
+}
 
 /**
  * The user is at the open project: they moved, typed, or came back to the page. After a
@@ -46,6 +51,7 @@ export function touch(now: number): void {
     return
   }
   if (last !== null && now - last >= AWAY_MS) {
+    returnedToProject.value = { projectId, at: now }
     // Missing one recap is not worth an error on the user's first move back.
     void api.noteReturn(projectId, now - last).catch(() => {})
   }

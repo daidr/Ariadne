@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
@@ -21,12 +22,14 @@ const MaxWholeOutput = 64 * 1024 * 1024
 var ErrOutputLimit = errors.New("command output exceeds 64 MiB")
 
 type RunOptions struct {
-	Directory string
-	Env       map[string]string
-	ForThread bool
-	Whole     bool
-	Timeout   time.Duration
-	OnOutput  func(text, stream string)
+	Directory   string
+	Env         map[string]string
+	ReplaceEnv  bool
+	ForThread   bool
+	Whole       bool
+	PlainOutput bool
+	Timeout     time.Duration
+	OnOutput    func(text, stream string)
 }
 type outputBuffer struct {
 	head, tail []uint16
@@ -38,9 +41,15 @@ type outputBuffer struct {
 	notify     func(string, string)
 	stop       context.CancelFunc
 	tooLarge   bool
+	plain      bool
+	escapes    textutil.TerminalEscapes
 }
 
 func (buffer *outputBuffer) Write(data []byte) (int, error) {
+	length := len(data)
+	if buffer.plain {
+		data = buffer.escapes.Strip(data)
+	}
 	if buffer.whole {
 		if buffer.full.Len() > MaxWholeOutput-len(data) {
 			buffer.tooLarge = true
@@ -72,7 +81,7 @@ func (buffer *outputBuffer) Write(data []byte) (int, error) {
 	if len(data) > 0 && buffer.notify != nil {
 		buffer.notify(string(data), buffer.stream)
 	}
-	return len(data), nil
+	return length, nil
 }
 func (buffer *outputBuffer) String() string {
 	if buffer.whole {
@@ -110,11 +119,15 @@ func Run(ctx context.Context, argv []string, options RunOptions) sdk.ExecResult 
 			options.OnOutput(text, stream)
 		}
 	}
-	out := &outputBuffer{whole: options.Whole, stream: "stdout", notify: notify, stop: cancel}
-	errOut := &outputBuffer{stream: "stderr", notify: notify, stop: cancel}
+	out := &outputBuffer{whole: options.Whole, stream: "stdout", notify: notify, stop: cancel, plain: options.PlainOutput}
+	errOut := &outputBuffer{stream: "stderr", notify: notify, stop: cancel, plain: options.PlainOutput}
 	stdout := transform.NewWriter(out, unicode.UTF8BOM.NewDecoder())
 	stderr := transform.NewWriter(errOut, unicode.UTF8BOM.NewDecoder())
-	command, err := Start(invocation, argv, Options{Directory: options.Directory, Env: options.Env, ForThread: options.ForThread, Stdout: stdout, Stderr: stderr})
+	env := options.Env
+	if options.PlainOutput {
+		env = plainShellEnv(env)
+	}
+	command, err := Start(invocation, argv, Options{Directory: options.Directory, Env: env, ReplaceEnv: options.ReplaceEnv, ForThread: options.ForThread, Stdout: stdout, Stderr: stderr})
 	if err != nil {
 		if ctx.Err() != nil {
 			return sdk.ExecResult{ExitCode: 130, Stderr: "cancelled"}

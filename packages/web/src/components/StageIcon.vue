@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ThreadStage } from '@ariadne/core'
+import type { ThreadPullRequest, ThreadStage } from '@ariadne/core'
 import { DouStatusDot, DouText, DouTooltip } from 'dou-ui'
 import {
   AlertCircleIcon,
@@ -14,11 +14,10 @@ import {
 } from '@dou-ui/icons'
 import type { Component } from 'vue'
 import { computed } from 'vue'
-import { t } from '../i18n'
-import { stageTone } from '../stage'
+import { stageTone, threadStageLabel } from '../stage'
 
 /** A thread's stage as an icon, named on hover: working ripples, the rest take its tone. */
-const props = defineProps<{ stage: ThreadStage }>()
+const props = defineProps<{ stage: ThreadStage; pullRequestState?: ThreadPullRequest['state'] }>()
 
 const icons: Record<Exclude<ThreadStage, 'working'>, Component> = {
   answer: HelpCircleIcon,
@@ -31,7 +30,7 @@ const icons: Record<Exclude<ThreadStage, 'working'>, Component> = {
   idle: CircleDashedIcon,
   done: CheckCircleIcon,
 }
-const label = computed(() => t(`thread.stage.${props.stage}`))
+const label = computed(() => threadStageLabel(props.stage, props.pullRequestState))
 // The same tint as the stage's word, which the icon takes through currentColor.
 const tone = computed(() => (props.stage === 'working' ? 'neutral' : stageTone[props.stage]))
 </script>

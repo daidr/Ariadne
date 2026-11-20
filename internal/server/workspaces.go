@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"runtime"
+	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -100,6 +102,31 @@ func (api *API) registerWorkspaces() {
 			thread, err = api.options.Repository.GetThread(r.Context(), id)
 		}
 		return object{"thread": thread}, 200, err
+	})
+	api.add("GET", "/api/threads/:threadId/pull-request/checks", func(r *http.Request) (any, int, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		thread, err := api.options.Repository.GetThread(ctx, r.PathValue("threadId"))
+		if err != nil {
+			return nil, 0, err
+		}
+		pullRequest, _ := thread.PullRequest.(map[string]any)
+		head, _ := pullRequest["headSha"].(string)
+		if manager == nil || head == "" {
+			return nil, 0, domainerr.New("error.noRepo", nil)
+		}
+		repo, err := manager.RepoForThread(ctx, thread)
+		if err != nil {
+			return nil, 0, err
+		}
+		if repo.Checks == nil {
+			return nil, 0, domainerr.New("error.noRepo", nil)
+		}
+		checks, err := repo.Checks(ctx, head)
+		if checks == nil {
+			checks = []sdk.CheckInfo{}
+		}
+		return object{"headSha": head, "checks": checks}, 200, err
 	})
 	api.add("GET", "/api/worktrees", func(r *http.Request) (any, int, error) {
 		if manager == nil {

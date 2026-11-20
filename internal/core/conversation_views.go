@@ -229,6 +229,14 @@ func (reader Reader) GetMessage(ctx context.Context, id string) (MessageView, er
 func (reader Reader) ListMessages(ctx context.Context, id string) ([]MessageView, error) {
 	return readMessages(ctx, reader.DB, messageSelect+" WHERE m.conversation_id = ? ORDER BY m.id", id)
 }
+
+func (reader Reader) LastReadMessage(ctx context.Context, id string) (string, error) {
+	rows, err := records(ctx, reader.DB, "SELECT id FROM messages WHERE conversation_id = ? AND read_at IS NOT NULL ORDER BY id DESC LIMIT 1", id)
+	if err != nil || len(rows) == 0 {
+		return "", err
+	}
+	return rows[0].text("id"), nil
+}
 func toNotice(row record) (object, error) {
 	payload, err := row.json("payload", nil)
 	if err != nil {
