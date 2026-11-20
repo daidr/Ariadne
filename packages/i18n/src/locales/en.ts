@@ -655,6 +655,9 @@ export const en: Record<MessageKey, string> = {
   'trace.open': 'Trace',
   'trace.coordinator': 'Coordinator trace',
   'trace.title': 'Trace · {name}',
+  'trace.export': 'Export trace',
+  'trace.exportHint':
+    'Download a ZIP with conversation text and tool logs. Review it before sharing.',
   'trace.empty': 'No turns yet',
   'trace.earlier': 'Earlier turns',
   'trace.running': 'Running',
@@ -680,6 +683,7 @@ export const en: Record<MessageKey, string> = {
   'trace.mode.duration': 'By time',
   'trace.kind.turn': 'Turn',
   'trace.kind.request': 'Request {n}',
+  'trace.kind.requestFailed': 'Request failed',
   'trace.kind.summary': 'Summary {n}',
   'trace.kind.research': 'Research {n}',
   'trace.kind.tool': 'Tool',

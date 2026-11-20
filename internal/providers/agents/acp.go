@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +29,8 @@ var acpClient = map[string]any{"protocolVersion": 1, "clientCapabilities": map[s
 type acpInitialize struct {
 	Version   int `json:"protocolVersion"`
 	AgentInfo struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Version string `json:"version"`
 	} `json:"agentInfo"`
 	Capabilities struct {
 		Load   bool `json:"loadSession"`
@@ -174,6 +176,8 @@ type acpDriver struct {
 	life                            context.Context
 	mu                              sync.Mutex
 	sessionID                       string
+	executable, sessionMethod       string
+	hello                           acpInitialize
 	started, first, images, closing bool
 	active, restorable, antigravity bool
 	thought                         strings.Builder
@@ -198,6 +202,37 @@ type acpTurnUsage struct {
 	Written int64  `json:"cachedWriteTokens"`
 	Thought int64  `json:"thoughtTokens"`
 	Total   *int64 `json:"totalTokens"`
+}
+
+type nativeAgentError struct {
+	err    error
+	detail *sdk.AgentError
+}
+
+func (failure *nativeAgentError) Error() string { return failure.err.Error() }
+func (failure *nativeAgentError) Unwrap() error { return failure.err }
+
+func (d *acpDriver) diagnosticLocked(operation string, err error) *sdk.AgentError {
+	detail := &sdk.AgentError{
+		Operation: operation, Executable: d.executable, SessionMethod: d.sessionMethod,
+		Name: textutil.HeadUnits(d.hello.AgentInfo.Name, 256), Version: textutil.HeadUnits(d.hello.AgentInfo.Version, 256),
+		ProtocolVersion: d.hello.Version,
+	}
+	if d.stdio != nil {
+		detail.Stderr = d.stdio.Process.StderrTail()
+	}
+	var remote *rpc.Error
+	if errors.As(err, &remote) {
+		detail.RPCCode = new(remote.Code)
+		detail.RPCData = strings.Clone(textutil.HeadUnits(string(remote.Data), 8192))
+	}
+	return detail
+}
+
+func (d *acpDriver) diagnosticError(operation string, err error) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return &nativeAgentError{err: err, detail: d.diagnosticLocked(operation, err)}
 }
 
 func (d *acpDriver) emitLocked(event Event) {
@@ -310,8 +345,9 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 func (d *acpDriver) Start(life context.Context) error {
 	argv := process.SplitCommand(d.settings.Command)
 	if len(argv) == 0 {
-		return errors.New("no command is set for the agent")
+		return d.diagnosticError("launch", errors.New("no command is set for the agent"))
 	}
+	d.executable = filepath.Base(argv[0])
 	d.life = life
 	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
 	peer, err := rpc.New(rpc.Options{Context: life, Strict: true, Send: lines.SendJSON, Request: d.request, Notification: d.notification})
@@ -323,26 +359,29 @@ func (d *acpDriver) Start(life context.Context) error {
 		peer.End(err)
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		d.emitLocked(Event{Type: "failed", Detail: err.Error(), Retryable: d.started})
+		d.emitLocked(Event{Type: "failed", Detail: err.Error(), Retryable: d.started, AgentError: d.diagnosticLocked("transport", err)})
 	}); err != nil {
-		return err
+		return d.diagnosticError("launch", err)
 	}
 	ctx, cancel := context.WithTimeout(life, time.Minute)
 	defer cancel()
 	init, err := initializeACP(ctx, peer)
+	d.mu.Lock()
+	d.hello = init
+	d.mu.Unlock()
 	if err != nil {
-		return d.startError(err)
+		return d.startError("initialize", err)
 	}
 	d.images = init.Capabilities.Prompt.Image
 	d.restorable = init.Capabilities.Session.Resume != nil || init.Capabilities.Load
 	servers := []any{}
 	if len(d.ctx.Tools.Specs) > 0 {
 		if d.bridge == nil {
-			return errors.New("ACP tools require an agent tool bridge")
+			return d.diagnosticError("tool bridge", errors.New("ACP tools require an agent tool bridge"))
 		}
 		registration, err := d.bridge.Add(d.ctx.Tools)
 		if err != nil {
-			return err
+			return d.diagnosticError("tool bridge", err)
 		}
 		d.removeTools = registration.Remove
 		if init.Capabilities.MCP.HTTP {
@@ -350,7 +389,7 @@ func (d *acpDriver) Start(life context.Context) error {
 		} else {
 			command, args, err := d.shim(registration.URL)
 			if err != nil {
-				return err
+				return d.diagnosticError("tool bridge", err)
 			}
 			servers = append(servers, map[string]any{"name": BridgeServerName, "command": command, "args": args, "env": []any{}})
 		}
@@ -361,7 +400,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	resuming := len(d.ctx.Resume) != 0
 	if resuming {
 		if !d.restorable || json.Unmarshal(d.ctx.Resume, &saved) != nil || saved.SessionID == "" {
-			return errors.New("ACP session checkpoint cannot be restored")
+			return d.diagnosticError("restore checkpoint", errors.New("ACP session checkpoint cannot be restored"))
 		}
 		method = "session/load"
 		if init.Capabilities.Session.Resume != nil {
@@ -370,15 +409,18 @@ func (d *acpDriver) Start(life context.Context) error {
 		params["sessionId"] = saved.SessionID
 	}
 	var session acpSession
+	d.mu.Lock()
+	d.sessionMethod = method
+	d.mu.Unlock()
 	if err := peer.Request(ctx, method, params, &session); err != nil {
-		return d.startError(err)
+		return d.startError(method, err)
 	}
 	sessionID := session.ID
 	if resuming {
 		sessionID = saved.SessionID
 	}
 	if sessionID == "" {
-		return errors.New("the agent opened no session")
+		return d.diagnosticError(method, errors.New("the agent opened no session"))
 	}
 	d.mu.Lock()
 	d.sessionID = sessionID
@@ -386,7 +428,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	if !resuming || len(session.Models) != 0 || session.option("model").ID != "" {
 		session, err = d.selectModel(ctx, session)
 		if err != nil {
-			return d.startError(err)
+			return d.startError("select model", err)
 		}
 	}
 	d.mu.Lock()
@@ -402,7 +444,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	d.mu.Unlock()
 	return nil
 }
-func (d *acpDriver) startError(err error) error {
+func (d *acpDriver) startError(operation string, err error) error {
 	var remote *rpc.Error
 	if errors.As(err, &remote) && remote.Code == -32000 {
 		err = fmt.Errorf("the agent asks to sign in first (run it once in a terminal): %w", err)
@@ -412,9 +454,9 @@ func (d *acpDriver) startError(err error) error {
 		tail = tail[len(tail)-3:]
 	}
 	if text := strings.Join(tail, "\n"); text != "" {
-		return fmt.Errorf("%w: %s", err, text)
+		err = fmt.Errorf("%w: %s", err, text)
 	}
-	return err
+	return d.diagnosticError(operation, err)
 }
 func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) error {
 	if err := ctx.Err(); err != nil {
@@ -462,7 +504,13 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		}
 		if detail != "" {
 			busy := rpc.BusyText(detail)
-			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy})
+			operation := "session/prompt"
+			if err == nil {
+				operation = "session/update"
+			}
+			diagnostic := d.diagnosticLocked(operation, err)
+			diagnostic.StopReason = result.Stop
+			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy, AgentError: diagnostic})
 			return
 		}
 		d.flushThoughtLocked()
@@ -477,17 +525,23 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		} else if d.contextUsed != nil {
 			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: d.contextUsed}})
 		}
+		var failure string
 		switch result.Stop {
 		case "end_turn":
 			d.emitLocked(Event{Type: "done"})
 		case "max_tokens", "max_turn_requests":
 			d.emitLocked(Event{Type: "done", StopReason: "length"})
 		case "refusal":
-			d.emitLocked(Event{Type: "failed", Detail: "the agent refused to go on"})
+			failure = "the agent refused to go on"
 		case "cancelled":
-			d.emitLocked(Event{Type: "failed", Detail: "the agent cancelled the turn"})
+			failure = "the agent cancelled the turn"
 		default:
-			d.emitLocked(Event{Type: "failed", Detail: fmt.Sprintf("unknown ACP stop reason %q", result.Stop)})
+			failure = fmt.Sprintf("unknown ACP stop reason %q", result.Stop)
+		}
+		if failure != "" {
+			diagnostic := d.diagnosticLocked("session/prompt", nil)
+			diagnostic.StopReason = result.Stop
+			d.emitLocked(Event{Type: "failed", Detail: failure, AgentError: diagnostic})
 		}
 	}()
 	return nil

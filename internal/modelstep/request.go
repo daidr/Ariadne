@@ -41,6 +41,15 @@ type Retry struct {
 	DelayMS int64  `json:"delayMs"`
 	Detail  string `json:"detail"`
 }
+type AttemptFailure struct {
+	Attempt    int             `json:"attempt"`
+	StartedAt  int64           `json:"startedAt"`
+	FinishedAt int64           `json:"finishedAt"`
+	Detail     string          `json:"detail"`
+	Retryable  bool            `json:"retryable"`
+	WillRetry  bool            `json:"willRetry"`
+	AgentError *sdk.AgentError `json:"agentError,omitempty"`
+}
 type Result struct {
 	Text      string           `json:"text"`
 	Reasoning []sdk.Reasoning  `json:"reasoning"`
@@ -54,6 +63,7 @@ type Options struct {
 	BaseDelay *time.Duration
 	Timeout   time.Duration
 	OnRetry   func(Retry) error
+	OnFailure func(AttemptFailure) error
 	OnInput   func(call *int, name, arguments string)
 	Reset     func()
 	Now       func() time.Time
@@ -154,10 +164,25 @@ func Request(ctx context.Context, provider sdk.ModelProvider, settings map[strin
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		startedAt := options.Now().UnixMilli()
 		result, failure, err := collect(ctx, provider, settings, request, options, limit)
 		if ctx.Err() != nil {
 			reset(options)
 			return nil, ctx.Err()
+		}
+		willRetry := failure != nil && failure.Retryable && attempt < retries && !contextLimit.MatchString(failure.Error)
+		if options.OnFailure != nil && (failure != nil || err != nil) {
+			note := AttemptFailure{Attempt: attempt + 1, StartedAt: startedAt, FinishedAt: options.Now().UnixMilli(), WillRetry: willRetry}
+			if failure != nil {
+				note.Detail, note.Retryable, note.AgentError = failure.Error, failure.Retryable, failure.AgentError
+			} else {
+				note.Detail = err.Error()
+			}
+			note.Detail = strings.Clone(textutil.HeadUnits(note.Detail, 8192))
+			if err := options.OnFailure(note); err != nil {
+				reset(options)
+				return nil, err
+			}
 		}
 		if err != nil {
 			reset(options)
@@ -170,7 +195,7 @@ func Request(ctx context.Context, provider sdk.ModelProvider, settings map[strin
 			return result, nil
 		}
 		reset(options)
-		if !failure.Retryable || attempt >= retries || contextLimit.MatchString(failure.Error) {
+		if !willRetry {
 			return nil, fail(failure.Error, failure.Busy, request)
 		}
 		delay := min(maxRetryDelay, base*time.Duration(1<<attempt))

@@ -466,7 +466,12 @@ func (m *Sessions) continuation(s *session, rest []sdk.Message, fps []string, sy
 	}
 }
 func failure(err error, retryable, busy bool) sdk.Part {
-	return sdk.Part{Type: "finish", Reason: "error", Error: err.Error(), Retryable: retryable, Busy: busy}
+	part := sdk.Part{Type: "finish", Reason: "error", Error: err.Error(), Retryable: retryable, Busy: busy}
+	var native *nativeAgentError
+	if errors.As(err, &native) {
+		part.AgentError = native.detail
+	}
+	return part
 }
 
 func (m *Sessions) Stream(ctx context.Context, settings map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
@@ -722,7 +727,9 @@ func (m *Sessions) consume(ctx context.Context, s *session, request sdk.Request,
 				*usage.CostUSD += *u.CostUSD
 			}
 		case "failed":
-			yield(failure(errors.New(event.Detail), event.Retryable, event.Busy))
+			part := failure(errors.New(event.Detail), event.Retryable, event.Busy)
+			part.AgentError = event.AgentError
+			yield(part)
 			return false
 		case "done":
 			for _, call := range calls {

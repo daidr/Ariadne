@@ -25,6 +25,7 @@ import (
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/internal/realtime"
+	"github.com/daidr/Ariadne/internal/secrets"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/skills"
 	"github.com/daidr/Ariadne/internal/sources"
@@ -286,6 +287,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			turn.trackCoordinatorInput(entries)
 		}
 		record := recordCall(model, model.Effort)
+		called, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		stepInput := core.StepInput{System: prompt.system, Tools: prompt.tools, Call: string(called), Images: model.Images}
 		chat, title := trace.ModelInput(ctx, turn.Repository, conversation.ProjectID, record, model.Images)
 		messages := append([]transcript.Message{{Role: "system", Content: prompt.system}}, transcript.ToMessages(entries, title, chat)...)
 		request := requestFor(model, conversation.ID)
@@ -293,6 +299,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		retries := int(asNumber(limits["modelRetries"]))
 		options := modelstep.Options{
 			Retries: &retries, Timeout: time.Duration(asNumber(model.Request["timeoutSeconds"]) * float64(time.Second)),
+			OnFailure: turn.recordModelFailure(ctx, saw, stepInput, "step", ""),
 			OnRetry: func(retry modelstep.Retry) error {
 				return turn.Repository.RecordModelRetry(ctx, conversation.ID, turn.id, retry.Attempt, retry.DelayMS, retry.Detail)
 			},
@@ -335,15 +342,18 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					ask := requestFor(model, "")
 					ask.Effort = ""
 					ask.Messages = turn.withImages(ctx, transcript.SummaryRequest(entries, *cut, title, conversation.Role, chat, float64(budget)))
-					summary, err := modelstep.Summarise(ctx, provider, model.Settings, ask, options)
+					encoded, err := json.Marshal(recordCall(model, ""))
+					if err != nil {
+						return err
+					}
+					summaryOptions := options
+					summaryInput := core.StepInput{System: ask.Messages[0].Content, Tools: "[]", Call: string(encoded), Images: model.Images}
+					summaryOptions.OnFailure = turn.recordModelFailure(ctx, saw, summaryInput, "summary", "")
+					summary, err := modelstep.Summarise(ctx, provider, model.Settings, ask, summaryOptions)
 					if err != nil {
 						return err
 					}
 					if summary.OK {
-						encoded, err := json.Marshal(recordCall(model, ""))
-						if err != nil {
-							return err
-						}
 						if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
 							return err
 						}
@@ -360,10 +370,6 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 
 		request.Messages = turn.withImages(ctx, messages)
-		called, err := json.Marshal(record)
-		if err != nil {
-			return err
-		}
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
 		if err != nil {
 			var failure *modelstep.Failure
@@ -392,7 +398,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}
 		if err := turn.Repository.RecordStep(ctx, conversation.ID, turn.id, core.Step{
 			Text: answer.Text, Reasoning: answer.Reasoning, ToolCalls: answer.ToolCalls, SawSeq: saw, Usage: modelstep.WithCost(answer.Usage, price),
-			Input: core.StepInput{System: prompt.system, Tools: prompt.tools, Call: string(called), Images: model.Images}, Timing: answer.Timing, Cut: answer.Cut, Quiet: turn.quiet,
+			Input: stepInput, Timing: answer.Timing, Cut: answer.Cut, Quiet: turn.quiet,
 		}); err != nil {
 			return err
 		}
@@ -432,6 +438,19 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				return domainerr.New("error.repeating", map[string]any{"count": repeats})
 			}
 		}
+	}
+}
+
+func (turn *turn) recordModelFailure(ctx context.Context, saw int64, input core.StepInput, purpose, toolCallID string) func(modelstep.AttemptFailure) error {
+	return func(failure modelstep.AttemptFailure) error {
+		redact := secrets.NewDiagnosticRedactor(secrets.ConfiguredValues(turn.Settings.Current()))
+		failure.Detail = redact.Text(failure.Detail)
+		if failure.AgentError != nil {
+			info := *failure.AgentError
+			info.Stderr, info.RPCData = redact.Text(info.Stderr), redact.Text(info.RPCData)
+			failure.AgentError = &info
+		}
+		return turn.Repository.RecordModelFailure(ctx, turn.conversation.ID, turn.id, saw, input, purpose, toolCallID, failure)
 	}
 }
 

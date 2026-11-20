@@ -192,6 +192,19 @@ func (repo *Repository) RecordResearchStep(ctx context.Context, id, turnID strin
 		return appendChanges(tx, projectID, append(keeper.pieces, change{"research.step", data}))
 	})
 }
+
+func (repo *Repository) RecordModelFailure(ctx context.Context, id, turnID string, saw int64, input StepInput, purpose, toolCallID string, failure any) error {
+	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
+		w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
+		keeper := newPromptKeeper(w, projectID)
+		data := object{"conversationId": id, "turnId": turnID, "purpose": purpose, "toolCallId": toolCallID, "sawSeq": saw,
+			"input": object{"system": keeper.keep(input.System), "tools": keeper.keep(input.Tools), "call": keeper.keep(input.Call), "images": input.Images}, "failure": failure}
+		if w.err != nil {
+			return w.err
+		}
+		return appendChanges(tx, projectID, append(keeper.pieces, change{"conversation.model_failed", data}))
+	})
+}
 func (repo *Repository) RecordSearch(ctx context.Context, id, turnID, model string, usage *TokenUsage) error {
 	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
 		return appendChanges(tx, projectID, []change{{"search.answered", object{"conversationId": id, "turnId": turnID, "model": model, "usage": usage}}})

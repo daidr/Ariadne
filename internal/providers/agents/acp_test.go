@@ -147,6 +147,19 @@ func TestACPAntigravityExecutorError(t *testing.T) {
 	}
 }
 
+func TestACPFailureIncludesRPCDiagnostics(t *testing.T) {
+	command, _ := acpChildCommand(t, "agy-rpc-error")
+	m := newTestSessions(t, ACPKind(nil, nil), SessionOptions{})
+	parts := codexParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "diagnostics", Messages: []sdk.Message{user("hello")}})
+	lastPart(t, parts, "error")
+	detail := parts[len(parts)-1].AgentError
+	if detail == nil || detail.Operation != "session/prompt" || detail.SessionMethod != "session/new" ||
+		detail.ProtocolVersion != 1 || detail.Name != antigravityACPName || detail.Version != "test-1" ||
+		detail.RPCCode == nil || *detail.RPCCode != -32603 || !strings.Contains(detail.RPCData, "request-id-42") {
+		t.Fatalf("missing ACP error details: %+v", detail)
+	}
+}
+
 func TestACPAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
 	command, _ := acpChildCommand(t, "agy-usage")
 	settings := map[string]any{"command": command}
@@ -297,7 +310,7 @@ func TestACPChild(t *testing.T) {
 			}
 			hello := map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities}
 			if strings.HasPrefix(restore, "agy-") {
-				hello["agentInfo"] = map[string]any{"name": antigravityACPName}
+				hello["agentInfo"] = map[string]any{"name": antigravityACPName, "version": "test-1"}
 			}
 			result = hello
 		case "session/new":
@@ -322,6 +335,10 @@ func TestACPChild(t *testing.T) {
 			}
 			result = map[string]any{"configOptions": options()}
 		case "session/prompt":
+			if restore == "agy-rpc-error" {
+				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
+				continue
+			}
 			text := "answer"
 			switch restore {
 			case "agy-error", "other-agent":

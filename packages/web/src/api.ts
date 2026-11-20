@@ -196,6 +196,13 @@ export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal
   return response
 }
 
+async function download(path: string, fallbackName: string) {
+  const response = await fetch(path, { headers: { authorization: `Bearer ${token() ?? ''}` } })
+  if (!response.ok) throw new ApiError(response.status, (await response.json()).error)
+  const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
+  return { blob: await response.blob(), name: name ?? fallbackName }
+}
+
 export function fetchSheet(id: string, index: number, signal: AbortSignal) {
   return request<{ sheets: string[]; rows: string[][]; rowNumbers: number[]; truncated: boolean }>(
     'GET',
@@ -635,6 +642,11 @@ export const api = {
       'GET',
       `/api/conversations/${id}/trace/requests/${seq}`,
     ),
+  exportTrace: (id: string) =>
+    download(
+      `/api/conversations/${encodeURIComponent(id)}/trace/export`,
+      `ariadne-trace-${id}.zip`,
+    ),
   setThreadModel: (threadId: string, model: string | null) =>
     request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
@@ -825,14 +837,8 @@ export const api = {
       input,
     ),
   /** The project's log as a file; the token goes in a header, so not as a plain link. */
-  exportProject: async (projectId: string) => {
-    const response = await fetch(`/api/projects/${projectId}/export`, {
-      headers: { authorization: `Bearer ${token() ?? ''}` },
-    })
-    if (!response.ok) throw new ApiError(response.status, (await response.json()).error)
-    const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
-    return { blob: await response.blob(), name: name ?? `ariadne-${projectId}.json` }
-  },
+  exportProject: (projectId: string) =>
+    download(`/api/projects/${projectId}/export`, `ariadne-${projectId}.json`),
   setAutopilotPaused: (projectId: string, paused: boolean) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/autopilot`, { paused }),
   setProjectSlots: (projectId: string, slots: number | null) =>

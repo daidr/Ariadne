@@ -176,4 +176,14 @@ func TestAgentContextLimitCompactsAndContinuesSameDiscussion(t *testing.T) {
 	if err != nil || result.Stage != "done" || requests != 3 || summaries != 1 {
 		t.Fatalf("expected one recovered turn in the original discussion, got %s after %d requests and %d summaries: %v", result.Stage, requests, summaries, err)
 	}
+	page, err := repo.ListTurnEvents(ctx, thread.ID, core.TurnEventOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range page.Events {
+		if event.Type == "conversation.model_failed" && strings.Contains(string(event.Data), "exceeds the maximum number of tokens") {
+			return
+		}
+	}
+	t.Fatal("the failed request must be in the trace even after recovery")
 }

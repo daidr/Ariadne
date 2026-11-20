@@ -229,6 +229,17 @@ func Build(ctx context.Context, repo *core.Repository, conversation string, opti
 			toolsFrom = math.Max(toolsFrom, number(optional(timing, "finishedAt", event.At)))
 		case "conversation.model_retry":
 			appendItem(object{"kind": "retry", "at": event.At, "attempt": data["attempt"], "delayMs": data["delayMs"], "detail": data["detail"]})
+		case "conversation.model_failed":
+			failure := obj(data["failure"])
+			failure["kind"], failure["seq"], failure["purpose"] = "request-failed", event.Seq, data["purpose"]
+			call, err := callOf(event.ProjectID, text(obj(data["input"])["call"]))
+			if err != nil {
+				return output, err
+			}
+			if call != nil {
+				failure["provider"], failure["model"] = call.Provider, call.Model
+			}
+			appendItem(failure)
 		case "conversation.model_fallback":
 			appendItem(object{"kind": "fallback", "at": event.At, "from": data["from"], "to": data["to"], "detail": data["detail"]})
 		case "conversation.compacted":

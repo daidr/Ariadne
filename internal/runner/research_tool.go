@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -85,6 +86,7 @@ func (turn *turn) research(ctx context.Context, id, question, system string, mod
 		if err != nil {
 			return "", err
 		}
+		options.OnFailure = turn.recordModelFailure(ctx, 0, core.StepInput{System: system, Tools: string(definitions), Call: string(call)}, "research", id)
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
 		if err != nil {
 			return "", err

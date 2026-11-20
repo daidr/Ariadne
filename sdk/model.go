@@ -49,27 +49,42 @@ type Request struct {
 }
 
 type Part struct {
-	Type         string   `json:"type"`
-	Text         string   `json:"text,omitempty"`
-	ID           string   `json:"id,omitempty"`
-	Name         string   `json:"name,omitempty"`
-	Arguments    string   `json:"arguments,omitempty"`
-	Call         *int     `json:"call,omitempty"`
-	Signature    string   `json:"signature,omitempty"`
-	Redacted     bool     `json:"redacted,omitempty"`
-	StartedAt    int64    `json:"startedAt,omitempty"`
-	Input        *int64   `json:"input,omitempty"`
-	Output       *int64   `json:"output,omitempty"`
-	ContextInput *int64   `json:"contextInput,omitempty"`
-	Cached       *int64   `json:"cached,omitempty"`
-	CacheWrite   *int64   `json:"cacheWrite,omitempty"`
-	Reasoning    *int64   `json:"reasoning,omitempty"`
-	CostUSD      *float64 `json:"costUsd,omitempty"`
-	Reason       string   `json:"reason,omitempty"`
-	Error        string   `json:"error,omitempty"`
-	Retryable    bool     `json:"retryable,omitempty"`
-	RetryAfterMS *int64   `json:"retryAfterMs,omitempty"`
-	Busy         bool     `json:"busy,omitempty"`
+	Type         string      `json:"type"`
+	Text         string      `json:"text,omitempty"`
+	ID           string      `json:"id,omitempty"`
+	Name         string      `json:"name,omitempty"`
+	Arguments    string      `json:"arguments,omitempty"`
+	Call         *int        `json:"call,omitempty"`
+	Signature    string      `json:"signature,omitempty"`
+	Redacted     bool        `json:"redacted,omitempty"`
+	StartedAt    int64       `json:"startedAt,omitempty"`
+	Input        *int64      `json:"input,omitempty"`
+	Output       *int64      `json:"output,omitempty"`
+	ContextInput *int64      `json:"contextInput,omitempty"`
+	Cached       *int64      `json:"cached,omitempty"`
+	CacheWrite   *int64      `json:"cacheWrite,omitempty"`
+	Reasoning    *int64      `json:"reasoning,omitempty"`
+	CostUSD      *float64    `json:"costUsd,omitempty"`
+	Reason       string      `json:"reason,omitempty"`
+	Error        string      `json:"error,omitempty"`
+	Retryable    bool        `json:"retryable,omitempty"`
+	RetryAfterMS *int64      `json:"retryAfterMs,omitempty"`
+	Busy         bool        `json:"busy,omitempty"`
+	AgentError   *AgentError `json:"agentError,omitempty"`
+}
+
+// AgentError describes a native agent or protocol failure without wire payloads.
+type AgentError struct {
+	Operation       string `json:"operation"`
+	Executable      string `json:"executable,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Version         string `json:"version,omitempty"`
+	ProtocolVersion int    `json:"protocolVersion,omitempty"`
+	SessionMethod   string `json:"sessionMethod,omitempty"`
+	RPCCode         *int   `json:"rpcCode,omitempty"`
+	RPCData         string `json:"rpcData,omitempty"`
+	StopReason      string `json:"stopReason,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
 }
 
 func WithExtraBody(body, extra map[string]any) map[string]any {

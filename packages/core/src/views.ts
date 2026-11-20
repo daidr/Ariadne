@@ -930,8 +930,35 @@ export interface TraceRequest {
   toolCalls: TraceToolCall[]
 }
 
+export interface TraceRequestFailure {
+  kind: 'request-failed'
+  seq: number
+  purpose: 'step' | 'summary' | 'research'
+  provider?: string
+  model?: string
+  attempt: number
+  startedAt: number
+  finishedAt: number
+  detail: string
+  retryable: boolean
+  willRetry: boolean
+  agentError?: {
+    operation: string
+    executable?: string
+    name?: string
+    version?: string
+    protocolVersion?: number
+    sessionMethod?: string
+    rpcCode?: number
+    rpcData?: string
+    stopReason?: string
+    stderr?: string
+  }
+}
+
 export type TraceItem =
   | TraceRequest
+  | TraceRequestFailure
   | { kind: 'retry'; at: number; attempt: number; delayMs: number; detail: string }
   /** The main model's retries ran out; the turn went on with `to`. */
   | { kind: 'fallback'; at: number; from: string; to: string; detail: string }

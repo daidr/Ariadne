@@ -424,6 +424,8 @@ const sourceToolOutput = `CASE WHEN t.kind = 'tool' AND json_type(t.payload, '$.
   WHERE e.seq = t.seq AND e.type = 'tool.finished' AND e.project_id = t.project_id
    AND json_extract(e.data, '$.conversationId') = t.conversation_id) END AS source_tool_output`
 
+const transcriptFields = "t.seq, t.kind, t.ref, t.payload, " + sourceAttachments + ", " + sourceToolOutput
+
 func listTranscript(ctx context.Context, db queryer, id string, options TranscriptOptions) ([]object, error) {
 	after, upTo := int64(-1), maxSafeInteger
 	if options.After != nil {
@@ -432,15 +434,14 @@ func listTranscript(ctx context.Context, db queryer, id string, options Transcri
 	if options.UpTo != nil {
 		upTo = *options.UpTo
 	}
-	fields := "t.seq, t.kind, t.ref, t.payload, " + sourceAttachments + ", " + sourceToolOutput
-	query := "SELECT " + fields + " FROM transcript t WHERE t.conversation_id = ? AND t.seq > ? AND t.seq <= ? ORDER BY t.id"
+	query := "SELECT " + transcriptFields + " FROM transcript t WHERE t.conversation_id = ? AND t.seq > ? AND t.seq <= ? ORDER BY t.id"
 	if options.ModelContext {
 		query = `WITH boundary AS MATERIALIZED (
  SELECT id, json_extract(payload, '$.upTo') AS up_to FROM transcript
  WHERE conversation_id = ?1 AND seq > ?2 AND seq <= ?3 AND kind = 'summary'
  ORDER BY id DESC LIMIT 1
 )
-SELECT ` + fields + ` FROM transcript t
+SELECT ` + transcriptFields + ` FROM transcript t
 WHERE t.conversation_id = ?1 AND t.seq > ?2 AND t.seq <= ?3 AND (
  t.kind IN ('message', 'prompt', 'cleared')
  OR t.id = (SELECT id FROM boundary)
@@ -454,7 +455,11 @@ ORDER BY t.id`
 	if err != nil {
 		return nil, err
 	}
-	messages, err := transcriptMessages(ctx, db, rows, options.UpTo)
+	return decodeTranscript(ctx, db, rows, options.UpTo)
+}
+
+func decodeTranscript(ctx context.Context, db queryer, rows []record, upTo *int64) ([]object, error) {
+	messages, err := transcriptMessages(ctx, db, rows, upTo)
 	if err != nil {
 		return nil, err
 	}

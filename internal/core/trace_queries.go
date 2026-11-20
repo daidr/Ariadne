@@ -74,7 +74,7 @@ type TurnEventPage struct {
 	More   bool               `json:"more"`
 }
 
-const traceEventTypes = `'turn.started', 'turn.step', 'research.step', 'tool.finished', 'turn.finished', 'conversation.model_retry', 'conversation.model_fallback', 'conversation.compacted', 'conversation.results_cleared', 'conversation.compaction_failed', 'conversation.instructions'`
+const traceEventTypes = `'turn.started', 'turn.step', 'research.step', 'tool.finished', 'turn.finished', 'conversation.model_retry', 'conversation.model_failed', 'conversation.model_fallback', 'conversation.compacted', 'conversation.results_cleared', 'conversation.compaction_failed', 'conversation.instructions'`
 const TraceLimitReason = "trace is too large"
 
 func (reader Reader) ListTurnEvents(ctx context.Context, id string, options TurnEventOptions) (result TurnEventPage, err error) {

@@ -993,16 +993,19 @@ export async function setAutopilotPaused(paused: boolean) {
 /** Download everything the project's log holds as a file. */
 export async function exportProject(id: string) {
   try {
-    const { blob, name } = await api.exportProject(id)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = name
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    saveDownload(await api.exportProject(id))
   } catch (error) {
     report(error)
   }
+}
+
+export function saveDownload({ blob, name }: { blob: Blob; name: string }) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 /** Save the project's working directory; returns why it was refused, or `null`. */

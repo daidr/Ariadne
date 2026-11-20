@@ -10,12 +10,12 @@ import {
   DouText,
   type TableColumn,
 } from 'dou-ui'
-import { ChevronLeftIcon } from '@dou-ui/icons'
+import { ChevronLeftIcon, DownloadIcon } from '@dou-ui/icons'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
 import { duration, locale, t, tm } from '../i18n'
-import { onLiveEvent, backMain, state } from '../store'
+import { onLiveEvent, backMain, report, saveDownload, state } from '../store'
 import TraceInspector from './TraceInspector.vue'
 import TraceTimeline from './TraceTimeline.vue'
 import { findRow, parentKeys, traceRows, type TraceRow } from './rows'
@@ -31,6 +31,7 @@ const name = computed(() => {
 const turns = ref<TraceTurn[]>([])
 const more = ref(false)
 const loading = ref(true)
+const exporting = ref(false)
 const problem = ref<string | null>(null)
 const current = ref<string | number | null>(null)
 // The stretch marked out on the timeline.
@@ -47,12 +48,25 @@ const events = new Set<string>([
   'tool.finished',
   'turn.finished',
   'conversation.model_retry',
+  'conversation.model_failed',
   'conversation.model_fallback',
   'conversation.compacted',
   'conversation.results_cleared',
   'conversation.compaction_failed',
   'conversation.instructions',
 ])
+
+async function exportTrace() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    saveDownload(await api.exportTrace(props.conversationId))
+  } catch (error) {
+    report(error)
+  } finally {
+    exporting.value = false
+  }
+}
 
 /** Rebuild the newest turn and any turns that started after it. */
 const load = coalescedRefresh<never, void>(async () => {
@@ -281,6 +295,16 @@ function pick(key: string) {
       <DouSegmentedControl v-if="timeline" v-model="mode" size="sm" :options="modes" />
       <DouButton v-if="more" variant="ghost" size="sm" @click="loadEarlier">
         {{ t('trace.earlier') }}
+      </DouButton>
+      <DouButton
+        variant="ghost"
+        size="sm"
+        :title="t('trace.exportHint')"
+        :loading="exporting"
+        @click="exportTrace"
+      >
+        <template #leading><DownloadIcon /></template>
+        {{ t('trace.export') }}
       </DouButton>
     </div>
     <DouAlert v-if="problem" tone="danger" class="trace-problem">{{ problem }}</DouAlert>

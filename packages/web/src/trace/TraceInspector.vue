@@ -48,6 +48,20 @@ onMounted(async () => {
 const json = (value: unknown) =>
   typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 
+const agentError = computed(() => {
+  if (!props.row.failure?.agentError) return null
+  const { stderr, rpcData, ...fields } = props.row.failure.agentError
+  let data: unknown = rpcData
+  if (rpcData) {
+    try {
+      data = JSON.parse(rpcData)
+    } catch {
+      // The agent may return a non-JSON message, or a clipped diagnostic.
+    }
+  }
+  return { stderr, details: json({ ...fields, rpcData: data }) }
+})
+
 /** A tool's arguments as indented JSON when they parse, else the text the model wrote. */
 function pretty(text: string) {
   try {
@@ -191,6 +205,20 @@ const title = computed(() =>
                 <span class="inspector-mono">{{ row.retry.detail }}</span>
               </DouDescriptionsItem>
             </template>
+            <template v-else-if="row.failure">
+              <DouDescriptionsItem :label="t('trace.field.model')">
+                {{ [row.failure.provider, row.failure.model].filter(Boolean).join(' / ') }}
+              </DouDescriptionsItem>
+              <DouDescriptionsItem :label="t('trace.field.attempt')">
+                {{ row.failure.attempt }}
+              </DouDescriptionsItem>
+              <DouDescriptionsItem :label="t('trace.field.startedAt')">
+                {{ clock(row.start) }}
+              </DouDescriptionsItem>
+              <DouDescriptionsItem :label="t('trace.field.error')">
+                <DouCodeBlock :code="row.failure.detail" wrap :max-lines="8" />
+              </DouDescriptionsItem>
+            </template>
             <template v-else>
               <DouDescriptionsItem :label="t('trace.field.startedAt')">
                 {{ clock(row.start) }}
@@ -220,6 +248,16 @@ const title = computed(() =>
               </DouDescriptionsItem>
             </template>
           </DouDescriptions>
+          <template v-if="agentError">
+            <DouCodeBlock :code="agentError.details" lang="json" wrap :max-lines="16" />
+            <DouCodeBlock
+              v-if="agentError.stderr"
+              :code="agentError.stderr"
+              filename="stderr"
+              wrap
+              :max-lines="12"
+            />
+          </template>
         </div>
       </DouTabPanel>
 

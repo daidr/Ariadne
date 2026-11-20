@@ -186,10 +186,11 @@ func (d *acpDriver) Configure(ctx context.Context, effort string) error {
 		return nil
 	}
 	result, err := setACPConfig(ctx, d.stdio.Peer, d.sessionID, option.ID, value)
-	if err == nil {
-		d.mu.Lock()
-		d.thoughtOption = result.option("thought_level")
-		d.mu.Unlock()
+	if err != nil {
+		return d.diagnosticError("session/set_config_option", err)
 	}
-	return err
+	d.mu.Lock()
+	d.thoughtOption = result.option("thought_level")
+	d.mu.Unlock()
+	return nil
 }

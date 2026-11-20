@@ -45,6 +45,7 @@ import (
 type Options struct {
 	Repository       *core.Repository
 	Token            string
+	Version          string
 	Now              func() time.Time
 	Hub              *realtime.Hub
 	Scheduler        *scheduler.Scheduler

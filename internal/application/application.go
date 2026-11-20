@@ -114,8 +114,10 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		return nil, err
 	}
 	var updates *update.Service
+	version := ""
 	if options.Update != nil {
 		supplied := *options.Update
+		version = supplied.Version
 		supplied.OnError = onError
 		updates = update.New(life, user, supplied)
 		add(updates.Close)
@@ -227,7 +229,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	}
 	janitor := workspaces.NewJanitor(manager, workspaces.JanitorOptions{OnError: onError})
 	api, err := server.New(server.Options{
-		Repository: repo, Token: cfg.Token, Web: options.Web, Scheduler: schedule, State: state,
+		Repository: repo, Token: cfg.Token, Version: version, Web: options.Web, Scheduler: schedule, State: state,
 		Data: storage, Settings: user, Models: builtins.Registry, Sources: registry,
 		Updates: updates,
 		Links:   resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,

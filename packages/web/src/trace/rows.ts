@@ -1,4 +1,4 @@
-import type { TraceRequest, TraceToolCall, TraceTurn } from '@ariadne/core'
+import type { TraceRequest, TraceRequestFailure, TraceToolCall, TraceTurn } from '@ariadne/core'
 import { t, tm } from '../i18n'
 
 /** One line of the trace table: a turn, a request in it, a tool call of that request, … */
@@ -7,6 +7,7 @@ export interface TraceRow {
   kind:
     | 'turn'
     | 'request'
+    | 'request-failed'
     | 'tool'
     | 'retry'
     | 'fallback'
@@ -29,6 +30,7 @@ export interface TraceRow {
   tool: TraceToolCall | null
   /** For a retry: the attempt, the wait and what failed. */
   retry: { attempt: number; delayMs: number; detail: string } | null
+  failure?: TraceRequestFailure
   children?: TraceRow[]
 }
 
@@ -107,6 +109,16 @@ export function traceRows(turns: TraceTurn[]): TraceRow[] {
       switch (item.kind) {
         case 'request':
           children.push(requestRow(turn, item))
+          break
+        case 'request-failed':
+          children.push({
+            ...base(turn, String(item.seq), item.startedAt, item.finishedAt),
+            kind: 'request-failed',
+            event: t('trace.kind.requestFailed'),
+            content: oneLine(item.detail),
+            tone: item.willRetry ? 'warning' : 'danger',
+            failure: item,
+          })
           break
         case 'retry':
           children.push({

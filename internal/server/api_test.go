@@ -257,6 +257,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	known["GET /api/files/:fileId/sheet"] = true
 	known["GET /api/projects/:projectId/sources"] = true
 	known["GET /api/projects/:projectId/activity"] = true
+	known["GET /api/conversations/:conversationId/trace/export"] = true
 	known["PUT /api/projects/:projectId/sources"] = true
 	known["GET /api/updates"] = true
 	known["PUT /api/updates"] = true
@@ -306,7 +307,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatal(cookies)
 	}
-	for _, path := range []string{"/api/projects", "/api/projects?token=secret", "/api/artifacts/missing", "/api/settings/models"} {
+	for _, path := range []string{"/api/projects", "/api/projects?token=secret", "/api/artifacts/missing", "/api/settings/models", "/api/conversations/missing/trace/export"} {
 		request := httptest.NewRequest("GET", "http://test.invalid"+path, nil)
 		request.AddCookie(cookies[0])
 		response := httptest.NewRecorder()

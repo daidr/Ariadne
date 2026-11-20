@@ -22,6 +22,7 @@ type Event struct {
 	Usage                                   Usage
 	StopReason                              string
 	Retryable, Busy                         bool
+	AgentError                              *sdk.AgentError
 }
 type AgentTools struct {
 	Specs []sdk.Tool
