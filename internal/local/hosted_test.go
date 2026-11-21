@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/fsutil"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -60,8 +61,12 @@ func TestHostedCloneBranchWorkAndSafePush(t *testing.T) {
 	if info.Branch == nil || info.Base == nil || *info.Base != "main" || !info.Local {
 		t.Fatal(info)
 	}
-	if host.bare != filepath.Join(storage, "ariadne", "github", "repos", "owner", "repository.git") ||
-		filepath.Dir(info.Label) != filepath.Join(storage, "ariadne", "github", "worktrees", "owner", "repository") {
+	expectedStorage, err := fsutil.CanonicalPath(storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.bare != filepath.Join(expectedStorage, "ariadne", "github", "repos", "owner", "repository.git") ||
+		filepath.Dir(info.Label) != filepath.Join(expectedStorage, "ariadne", "github", "worktrees", "owner", "repository") {
 		t.Fatal("clone and worktree were not written beneath the selected directory", host.bare, info.Label)
 	}
 	program, err := os.Executable()

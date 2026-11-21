@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/fsutil"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/secrets"
 	"github.com/daidr/Ariadne/sdk"
@@ -73,14 +74,20 @@ func hostedPaths(data, path string, namespace []string) (string, string, error) 
 			return "", "", errors.New("invalid hosted repository path")
 		}
 	}
-	data, err := filepath.Abs(data)
+	data, err := fsutil.CanonicalPath(data)
 	if err != nil {
 		return "", "", err
 	}
 	last := segments[len(segments)-1]
 	parents := segments[:len(segments)-1]
-	bare := filepath.Join(append([]string{data, "repos"}, append(append([]string(nil), parents...), last+".git")...)...)
-	worktrees := filepath.Join(append([]string{data, "worktrees"}, segments...)...)
+	bare, err := fsutil.CanonicalPath(filepath.Join(append([]string{data, "repos"}, append(append([]string(nil), parents...), last+".git")...)...))
+	if err != nil {
+		return "", "", err
+	}
+	worktrees, err := fsutil.CanonicalPath(filepath.Join(append([]string{data, "worktrees"}, segments...)...))
+	if err != nil {
+		return "", "", err
+	}
 	return bare, worktrees, nil
 }
 

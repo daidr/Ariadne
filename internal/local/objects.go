@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/daidr/Ariadne/internal/fsutil"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -38,7 +38,7 @@ type ObjectStore struct {
 }
 
 func NewObjectStore(directory string) (*ObjectStore, error) {
-	absolute, err := filepath.Abs(directory)
+	absolute, err := fsutil.CanonicalPath(directory)
 	if err != nil {
 		return nil, err
 	}
