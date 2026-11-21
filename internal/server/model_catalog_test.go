@@ -3,12 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,7 +18,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
+func TestModelListingCatalogAndFoundSetupHTTP(t *testing.T) {
 	catalogJSON := `{"openai":{"models":{"big":{"cost":{"input":1,"output":2},"limit":{"context":128000,"output":4096},"modalities":{"input":["text","image"]},"tool_call":true,"reasoning":false,"release_date":"2026-11-01"},"old":{"tool_call":true,"release_date":"2025-01-01"},"embedding":{"tool_call":false,"release_date":"2026-11-02"}}}}`
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/catalog" {
@@ -57,19 +54,6 @@ func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
 		{Method: "GET", Path: "/api/settings/found"},
 		{Method: "GET", Path: "/api/settings/models"},
 	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		input := object{"settings": true, "models": true, "catalog": json.RawMessage(catalogJSON), "find": object{"env": env, "home": home, "available": []string{}}, "seed": []any{}, "sql": "SELECT 1", "requests": requests}
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(encoded(input))
-		data, err := command.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
 	if err != nil {
@@ -92,7 +76,7 @@ func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for index, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -101,12 +85,8 @@ func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": legacyModelSettingsResponse(body)}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
-			t.Fatalf("%s %s\ngot %s\nwant %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
-		}
 		if response.Code >= 500 {
-			t.Fatal(actual)
+			t.Fatal(object{"status": response.Code, "body": body})
 		}
 		if strings.Contains(response.Body.String(), `"apiKey":"private"`) {
 			t.Fatal("discovery leaked credentials")

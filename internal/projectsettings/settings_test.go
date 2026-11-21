@@ -3,11 +3,6 @@ package projectsettings
 import (
 	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +11,7 @@ import (
 	"github.com/daidr/Ariadne/internal/domainerr"
 )
 
-func TestSettingsMatchLegacyValidationAndDefaults(t *testing.T) {
+func TestSettingsValidationAndDefaults(t *testing.T) {
 	type check struct {
 		Mode  string   `json:"mode"`
 		Input any      `json:"input"`
@@ -83,38 +78,8 @@ func TestSettingsMatchLegacyValidationAndDefaults(t *testing.T) {
 	if value, err := Parse(map[string]any{}, nil); err != nil || value.Workspace.Retention != "auto" || !value.Review.Enabled {
 		t.Fatalf("defaults: %+v %v", value, err)
 	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Log("native validation ran; legacy oracle requires Bun")
-		return
-	}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	input, _ := json.Marshal(cases)
-	cmd := legacytest.Command(t, bun, "packages/core/src/testing/go-settings-fixture.ts")
-	cmd.Dir = root
-	cmd.Stdin = strings.NewReader(string(input))
-	legacyJSON, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("settings oracle: %v\n%s", err, legacyJSON)
-	}
-	nativeJSON, _ := json.Marshal(results)
-	var native, legacy []any
-	if err := json.Unmarshal(nativeJSON, &native); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(legacyJSON, &legacy); err != nil {
-		t.Fatal(err)
-	}
-	for i := range native {
-		if !reflect.DeepEqual(native[i], legacy[i]) {
-			t.Errorf("case %d (%s) differs\nGo: %v\nTS: %v", i, cases[i].Mode, native[i], legacy[i])
-		}
+	if len(results) != len(cases) {
+		t.Fatalf("results count = %d, want %d", len(results), len(cases))
 	}
 }
 

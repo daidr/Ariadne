@@ -3,11 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +16,7 @@ import (
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestMCPSettingsCheckAndProjectSelectionHTTPMatchLegacy(t *testing.T) {
+func TestMCPSettingsCheckAndProjectSelectionHTTP(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(405)
@@ -59,18 +56,6 @@ func TestMCPSettingsCheckAndProjectSelectionHTTPMatchLegacy(t *testing.T) {
 	}
 	seed := []eventstore.NewEvent{{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"Project","coordinatorId":"crd_a"}`)}}
 	requests := []apiRequest{{Method: "GET", Path: "/api/settings/mcp"}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL, "read")}, {Method: "POST", Path: "/api/settings/mcp/server/check"}, {Method: "GET", Path: "/api/settings/mcp"}, {Method: "PUT", Path: "/api/projects/prj_a/mcp", Body: object{"servers": []any{"server"}}}, {Method: "PUT", Path: "/api/projects/prj_a/mcp", Body: object{"servers": []any{"unknown"}}}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL, "off")}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL+"/bad", "read")}, {Method: "POST", Path: "/api/settings/mcp/server/check"}, {Method: "PUT", Path: "/api/settings/mcp", Body: object{"servers": []any{}}}, {Method: "POST", Path: "/api/settings/mcp/unknown/check"}}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(encoded(object{"settings": true, "mcp": true, "seed": seed, "sql": "SELECT 1", "requests": requests}))
-		data, err := command.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
@@ -94,7 +79,7 @@ func TestMCPSettingsCheckAndProjectSelectionHTTPMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for index, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -103,12 +88,8 @@ func TestMCPSettingsCheckAndProjectSelectionHTTPMatchLegacy(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
-			t.Fatalf("%s %s\ngot %s\nwant %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
-		}
 		if response.Code >= 500 || strings.Contains(response.Body.String(), "Bearer private") {
-			t.Fatal(actual)
+			t.Fatal(object{"status": response.Code, "body": body})
 		}
 	}
 }

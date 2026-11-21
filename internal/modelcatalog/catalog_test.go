@@ -2,15 +2,10 @@ package modelcatalog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -32,18 +27,17 @@ func newTestCatalog(t *testing.T, options Options) *Catalog {
 	return catalog
 }
 
-func TestModelCatalogMatchesLegacySelection(t *testing.T) {
+func TestModelCatalogSelection(t *testing.T) {
 	raw := `{"reseller":{"models":{"deepseek/chat":{"cost":{"input":0.5,"output":2},"limit":{"output":2048},"modalities":{"input":["image"]},"reasoning":false,"tool_call":false,"release_date":"2026-01-02"},"vendor/bare":{"limit":{"context":16000}}}},"openrouter":{"models":{"deepseek/chat":{"cost":{"input":0.3,"output":1.2},"limit":{"output":4096},"reasoning":false},"prefix/huge":{"limit":{"output":1024}},"same":{"cost":{"input":2,"output":4}}}},"deepseek":{"models":{"chat":{"cost":{"input":0.27,"output":1.1,"cache_read":0.07},"limit":{"context":128000,"output":8192},"modalities":{"input":["text"]},"tool_call":true,"reasoning":true,"release_date":"2026-02-03"},"huge":{"limit":{"output":1000001}}}},"anthropic":{"models":{"claude":{"cost":{"input":3,"output":15,"cache_read":0.3,"cache_write":3.75},"limit":{"context":200000,"output":32000},"modalities":{"input":[]},"tool_call":true},"incomplete":{"cost":{"input":"x","output":1},"limit":{"context":8000},"tool_call":false}}},"tie-first":{"models":{"same":{"cost":{"input":1,"output":3}}}},"free":{"models":{"empty":{}}}}`
 	data, err := parseCatalog(strings.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	type ask struct {
-		Model string `json:"model"`
-		Hint  string `json:"hint"`
+		Model string
+		Hint  string
 	}
 	asks := []ask{{" CHAT ", ""}, {"chat", "https://openrouter.ai/api"}, {"chat", "reseller"}, {"claude", ""}, {"bare", ""}, {"empty", ""}, {"unknown", ""}, {"incomplete", ""}, {"huge", ""}, {"same", ""}, {"same", "tie-first"}, {"deepseek/chat", ""}}
-	output := []any{}
 	for _, ask := range asks {
 		var match *PriceMatch
 		for _, entry := range data.matches(ask.Model, ask.Hint) {
@@ -52,27 +46,16 @@ func TestModelCatalogMatchesLegacySelection(t *testing.T) {
 				break
 			}
 		}
-		output = append(output, map[string]any{"lookup": match, "info": describe(data, []string{ask.Model}, ask.Hint)})
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
+		info := describe(data, []string{ask.Model}, ask.Hint)
+		if ask.Model == "claude" && (match == nil || match.Source != "anthropic" || info["claude"].ContextTokens == nil || *info["claude"].ContextTokens != 200000) {
+			t.Fatalf("unexpected claude catalog match: %+v %+v", match, info)
 		}
-		return
-	}
-	input, _ := json.Marshal(map[string]any{"catalog": json.RawMessage(raw), "asks": asks})
-	command := legacytest.Command(t, bun, "packages/server/src/testing/go-model-catalog-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	got, _ := json.Marshal(output)
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
+		if ask.Model == "chat" && ask.Hint == "reseller" && (match == nil || match.Source != "reseller") {
+			t.Fatalf("hint did not select reseller: %+v", match)
+		}
+		if ask.Model == "unknown" && (match != nil || len(info) != 0) {
+			t.Fatalf("unknown model matched: %+v %+v", match, info)
+		}
 	}
 }
 

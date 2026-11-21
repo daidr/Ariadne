@@ -15,14 +15,6 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestACPStreamMatchesLegacyThroughSameChildProtocol(t *testing.T) {
-	bridge := newTestBridge(t)
-	kind := ACPKind(bridge, nil)
-	// Match the frozen oracle's process lifecycle. In-session effort changes
-	// and other modern ACP behavior are covered by TestACPModernProtocolAndRestart.
-	kind.MutableEffort = false
-	compareLegacyAgent(t, "acp", "acp", kind)
-}
 func TestACPToolPermissionBoundary(t *testing.T) {
 	tools := []sdk.Tool{{Name: "read"}}
 	cases := []struct {

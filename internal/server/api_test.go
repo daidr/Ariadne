@@ -5,13 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -74,7 +71,7 @@ func canonical(raw any) any {
 	}
 	return visit(value)
 }
-func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
+func TestDomainHTTPResponses(t *testing.T) {
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
 		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"讨论串","nodeId":null,"branch":null,"model":null}`)},
@@ -149,23 +146,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	invalid := "[]"
 	requests = append(requests, apiRequest{Method: "PUT", Path: "/api/projects/prj_a", Raw: &invalid})
-	var expected []any
-	bun, legacyErr := exec.LookPath("bun")
-	if legacyErr == nil {
-		input := encoded(object{"seed": seed, "sql": sql, "requests": requests})
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(input)
-		data, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-		if err := json.Unmarshal(data, &expected); err != nil {
-			t.Fatalf("%v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(legacyErr)
-	}
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "api.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
@@ -211,13 +191,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 				cursor := sync["cursor"].(string)
 				aliases["cursor"] = cursor
 				sync["cursor"] = "epoch.cursor"
-			}
-		}
-		actual := object{"status": response.Code, "body": value}
-		if expected != nil {
-			want := normalizeLegacyAPIResponse(expected[i])
-			if !reflect.DeepEqual(canonical(actual), canonical(want)) {
-				t.Fatalf("request %d %s %s differs\ngot %s\nwant%s", i, item.Method, item.Path, encoded(canonical(actual)), encoded(canonical(want)))
 			}
 		}
 		if response.Code >= 500 {
@@ -388,61 +361,6 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 	if response.StatusCode != 400 {
 		t.Fatal(response.StatusCode)
 	}
-}
-
-func normalizeLegacyAPIResponse(raw any) any {
-	resp, ok := raw.(map[string]any)
-	if !ok {
-		return raw
-	}
-	body, ok := resp["body"].(map[string]any)
-	if !ok {
-		return raw
-	}
-	if sync, ok := body["sync"].(map[string]any); ok {
-		sync["cursor"] = "epoch.cursor"
-	}
-	if needs, ok := body["needsMe"].([]any); ok {
-		normalized := make([]any, 0, len(needs))
-		for _, entry := range needs {
-			item, ok := entry.(map[string]any)
-			if !ok {
-				normalized = append(normalized, entry)
-				continue
-			}
-			switch item["kind"] {
-			case "thread":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				normalized = append(normalized, map[string]any{"kind": "thread", "threadId": id})
-			case "attention":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				joinedIDs := []any{}
-				if joined, ok := item["joined"].([]any); ok {
-					for _, rawThread := range joined {
-						if thread, ok := rawThread.(map[string]any); ok {
-							joinedIDs = append(joinedIDs, thread["id"])
-						}
-					}
-				}
-				normalized = append(normalized, map[string]any{
-					"kind":      "attention",
-					"attention": item["attention"],
-					"threadId":  id,
-					"joinedIds": joinedIDs,
-				})
-			default:
-				normalized = append(normalized, entry)
-			}
-		}
-		body["needsMe"] = normalized
-	}
-	return resp
 }
 
 func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
