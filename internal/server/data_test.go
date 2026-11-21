@@ -173,11 +173,17 @@ func TestDataServiceConnectEndToEnd(t *testing.T) {
 		t.Fatalf("expected invalid argument with localized detail, got code=%v detail=%+v", connectErr.Code(), detail)
 	}
 
-	// Invalid worktree path returns error.invalidBody with reason=path.
+	// Invalid worktree path returns error.invalidBody with reason=path and response metadata headers.
 	_, err = client.MeasureWorktreeReclaimable(ctx, connect.NewRequest(&ariadnev1.MeasureWorktreeReclaimableRequest{Path: "relative/path"}))
 	connectErr, detail = extractLocalizedError(t, err)
 	if connectErr.Code() != connect.CodeInvalidArgument || detail == nil || detail.Key != "error.invalidBody" || detail.Params["reason"].GetStringValue() != "path" {
 		t.Fatalf("unexpected reclaimable error: code=%v detail=%+v", connectErr.Code(), detail)
+	}
+	if got := connectErr.Meta().Get("X-Ariadne-Server-Time"); got != strconv.FormatInt(now.UnixMilli(), 10) {
+		t.Fatalf("unexpected error X-Ariadne-Server-Time: %q", got)
+	}
+	if got := connectErr.Meta().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("unexpected error Cache-Control: %q", got)
 	}
 }
 

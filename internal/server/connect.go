@@ -133,41 +133,42 @@ func (api *API) toConnectError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var existing *connect.Error
-	if errors.As(err, &existing) {
-		return existing
-	}
-	if errors.Is(err, context.Canceled) {
-		return connect.NewError(connect.CodeCanceled, err)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return connect.NewError(connect.CodeDeadlineExceeded, err)
-	}
-	var localized *domainerr.Error
-	code := connect.CodeInternal
-	if errors.As(err, &localized) {
-		switch localized.Key {
-		case "error.unauthorized":
-			code = connect.CodeUnauthenticated
-		case "error.notFound":
-			code = connect.CodeNotFound
-		case "error.artifactConflict":
-			code = connect.CodeAborted
-		default:
-			code = connect.CodeInvalidArgument
+	var connectErr *connect.Error
+	switch {
+	case errors.As(err, &connectErr):
+	case errors.Is(err, context.Canceled):
+		connectErr = connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		connectErr = connect.NewError(connect.CodeDeadlineExceeded, err)
+	default:
+		var localized *domainerr.Error
+		code := connect.CodeInternal
+		if errors.As(err, &localized) {
+			switch localized.Key {
+			case "error.unauthorized":
+				code = connect.CodeUnauthenticated
+			case "error.notFound":
+				code = connect.CodeNotFound
+			case "error.artifactConflict":
+				code = connect.CodeAborted
+			default:
+				code = connect.CodeInvalidArgument
+			}
+		} else {
+			api.report(err)
+			localized = domainerr.New("error.invalidBody", object{"reason": "internal"})
 		}
-	} else {
-		api.report(err)
-		localized = domainerr.New("error.invalidBody", object{"reason": "internal"})
+		connectErr = connect.NewError(code, errors.New(localized.Key))
+		detailMsg := &ariadnev1.LocalizedError{
+			Key:    localized.Key,
+			Params: encodeErrorParams(localized.Params),
+		}
+		if detail, detailErr := connect.NewErrorDetail(detailMsg); detailErr == nil {
+			connectErr.AddDetail(detail)
+		}
 	}
-	connectErr := connect.NewError(code, errors.New(localized.Key))
-	detailMsg := &ariadnev1.LocalizedError{
-		Key:    localized.Key,
-		Params: encodeErrorParams(localized.Params),
-	}
-	if detail, detailErr := connect.NewErrorDetail(detailMsg); detailErr == nil {
-		connectErr.AddDetail(detail)
-	}
+	connectErr.Meta().Set("Cache-Control", "no-store")
+	connectErr.Meta().Set("X-Ariadne-Server-Time", strconv.FormatInt(api.now().UnixMilli(), 10))
 	return connectErr
 }
 

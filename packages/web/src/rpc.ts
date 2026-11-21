@@ -155,7 +155,10 @@ export function createAriadneTransport(options: AriadneTransportOptions = {}): T
         return await base.unary(method, signal, timeoutMs, header, input, contextValues)
       } catch (error) {
         if (signal?.aborted) throw error
-        if (error instanceof ConnectError) throw connectErrorToApiError(error)
+        if (error instanceof ConnectError) {
+          synchronizeServerClock(error.metadata.get('X-Ariadne-Server-Time'))
+          throw connectErrorToApiError(error)
+        }
         throw error
       }
     },
@@ -164,7 +167,10 @@ export function createAriadneTransport(options: AriadneTransportOptions = {}): T
         return await base.stream(method, signal, timeoutMs, header, input, contextValues)
       } catch (error) {
         if (signal?.aborted) throw error
-        if (error instanceof ConnectError) throw connectErrorToApiError(error)
+        if (error instanceof ConnectError) {
+          synchronizeServerClock(error.metadata.get('X-Ariadne-Server-Time'))
+          throw connectErrorToApiError(error)
+        }
         throw error
       }
     },

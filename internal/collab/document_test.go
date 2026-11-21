@@ -40,7 +40,8 @@ func TestRealArtifactStatesRoundTripBetweenYjsAndGo(t *testing.T) {
 		Content  string          `json:"content"`
 		Sync     string          `json:"sync"`
 	}
-	oracle := func(kind, state, reply string) fixture {
+	legacytest.Path(t, "packages/agent/src/testing/go-collaboration-fixture.ts")
+	oracle := func(t *testing.T, kind, state, reply string) fixture {
 		t.Helper()
 		input, _ := json.Marshal(map[string]string{"kind": kind, "state": state, "reply": reply})
 		cmd := legacytest.Command(t, bun, "packages/agent/src/testing/go-collaboration-fixture.ts")
@@ -58,7 +59,7 @@ func TestRealArtifactStatesRoundTripBetweenYjsAndGo(t *testing.T) {
 	}
 	for _, kind := range []string{"document", "whiteboard", "dashboard"} {
 		t.Run(kind, func(t *testing.T) {
-			before := oracle(kind, "", "")
+			before := oracle(t, kind, "", "")
 			state, err := base64.StdEncoding.DecodeString(before.State)
 			if err != nil {
 				t.Fatal(err)
@@ -106,14 +107,14 @@ func TestRealArtifactStatesRoundTripBetweenYjsAndGo(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				fromGo := oracle(kind, base64.StdEncoding.EncodeToString(data), "")
+				fromGo := oracle(t, kind, base64.StdEncoding.EncodeToString(data), "")
 				compareContent(t, fromGo.Content, before.Content)
 			}
 			encoded, err := crdt.EncodeStateAsUpdate(doc, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			after := oracle(kind, base64.StdEncoding.EncodeToString(encoded), "")
+			after := oracle(t, kind, base64.StdEncoding.EncodeToString(encoded), "")
 			if after.Content != before.Content {
 				t.Fatalf("re-encoded content changed\nbefore: %s\nafter: %s", before.Content, after.Content)
 			}
@@ -149,7 +150,7 @@ func TestRealArtifactStatesRoundTripBetweenYjsAndGo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("JS sync frame: %v", err)
 			}
-			edited := oracle(kind, before.State, base64.StdEncoding.EncodeToString(reply))
+			edited := oracle(t, kind, before.State, base64.StdEncoding.EncodeToString(reply))
 			nativeJSON, err := Snapshot(doc, kind)
 			if err != nil {
 				t.Fatal(err)
