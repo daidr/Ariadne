@@ -30,6 +30,7 @@ const row = useTemplateRef<HTMLElement>('row')
 const header = shallowRef<HTMLElement | null>(null)
 const portal = shallowRef<HTMLElement | null>(null)
 const controls = shallowRef<Record<string, string | null>>({})
+const dragging = shallowRef(false)
 const dropSlot = shallowRef<number | null>(null)
 
 function buttons() {
@@ -94,16 +95,20 @@ function select(key: ListKey) {
 function press(event: PointerEvent, key: ListKey) {
   if (event.button !== 0) return
   gesture?.abort()
+  dragging.value = false
   dropSlot.value = null
   const { pointerId, clientX, clientY } = event
   const { signal } = (gesture = new AbortController())
   const from = props.tabs.findIndex((tab) => tab.key === key)
   if (props.dragAcrossGroups) emit('drag', event, key)
 
+  function dragStarted(point: PointerEvent) {
+    return props.dragAcrossGroups
+      ? document.documentElement.classList.contains('dou-tabs-dragging')
+      : dragging.value || Math.hypot(point.clientX - clientX, point.clientY - clientY) > 4
+  }
+
   function insertion(point: PointerEvent) {
-    if (props.dragAcrossGroups && !document.documentElement.classList.contains('dou-tabs-dragging'))
-      return null
-    if (Math.hypot(point.clientX - clientX, point.clientY - clientY) <= 4) return null
     const rect = row.value?.getBoundingClientRect()
     if (
       !rect ||
@@ -122,12 +127,15 @@ function press(event: PointerEvent, key: ListKey) {
   }
   function end() {
     gesture?.abort()
+    dragging.value = false
     dropSlot.value = null
   }
   window.addEventListener(
     'pointermove',
     (point) => {
-      if (point.pointerId === pointerId) dropSlot.value = insertion(point)
+      if (point.pointerId !== pointerId) return
+      dragging.value = dragStarted(point)
+      dropSlot.value = dragging.value ? insertion(point) : null
     },
     { signal },
   )
@@ -135,10 +143,11 @@ function press(event: PointerEvent, key: ListKey) {
     'pointerup',
     (point) => {
       if (point.pointerId !== pointerId) return
-      const slot = insertion(point)
+      const dragged = dragStarted(point)
+      const slot = dragged ? insertion(point) : null
       end()
+      if (dragged) suppressClickUntil = performance.now() + 100
       if (slot === null) return
-      suppressClickUntil = performance.now() + 100
       // Apply the fixed group order after Dock has processed the same release.
       queueMicrotask(() => emit('reorder', key, slot > from ? slot - 1 : slot))
     },
@@ -191,7 +200,7 @@ onBeforeUnmount(() => {
     <div
       ref="row"
       class="side-pinned-tabs"
-      :class="{ 'is-reordering': dropSlot !== null }"
+      :class="{ 'is-dragging-pin': dragging }"
       role="tablist"
       :aria-label="t('side.pinnedTabs')"
     >

@@ -5,7 +5,7 @@ import { h, nextTick } from 'vue'
 import { MessagesIcon, PackageIcon, WorkflowIcon } from '@dou-ui/icons'
 import PinnedSideTabs from './PinnedSideTabs.vue'
 
-test('renders the fixed tabs before the scrolling list and supports selection and ordering', async () => {
+test.each([false, true])('separates pinned drag feedback (desktop: %s)', async (desktop) => {
   const select = vi.fn()
   const reorder = vi.fn()
   const wrapper = mount(
@@ -21,7 +21,7 @@ test('renders the fixed tabs before the scrolling list and supports selection an
           h('div', { class: 'dou-tabs__extra' }, [
             h(PinnedSideTabs, {
               active: 'plan',
-              dragAcrossGroups: false,
+              dragAcrossGroups: desktop,
               tabs: [
                 { key: 'plan', label: 'Plan', icon: WorkflowIcon },
                 { key: 'threads', label: 'Threads', icon: MessagesIcon },
@@ -57,15 +57,29 @@ test('renders the fixed tabs before the scrolling list and supports selection an
     })
     reorder.mockClear()
     await threads.trigger('pointerdown', { pointerId: 7, button: 0, clientX: 60, clientY: 18 })
+    if (desktop) document.documentElement.classList.add('dou-tabs-dragging')
     window.dispatchEvent(
-      new PointerEvent('pointermove', { pointerId: 7, clientX: 10, clientY: 18 }),
+      new PointerEvent('pointermove', { pointerId: 7, clientX: 67, clientY: 18 }),
+    )
+    await nextTick()
+    expect(bar.classes()).toContain('is-dragging-pin')
+    expect(bar.find('.drop-before, .drop-after').exists()).toBe(false)
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7, clientX: 67, clientY: 18 }))
+    await nextTick()
+    expect(bar.classes()).not.toContain('is-dragging-pin')
+    expect(reorder).not.toHaveBeenCalled()
+
+    await threads.trigger('pointerdown', { pointerId: 8, button: 0, clientX: 60, clientY: 18 })
+    window.dispatchEvent(
+      new PointerEvent('pointermove', { pointerId: 8, clientX: 10, clientY: 18 }),
     )
     await nextTick()
     expect(wrapper.get('[aria-label="Plan"]').classes()).toContain('drop-before')
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7, clientX: 10, clientY: 18 }))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 8, clientX: 10, clientY: 18 }))
     await nextTick()
     expect(reorder).toHaveBeenCalledWith('threads', 0)
   } finally {
+    if (desktop) document.documentElement.classList.remove('dou-tabs-dragging')
     wrapper.unmount()
   }
 })

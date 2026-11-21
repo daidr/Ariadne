@@ -340,7 +340,8 @@ function dragPinned(event: PointerEvent, key: side.ListKey) {
   container-type: inline-size;
 }
 
-.side-dock :deep(.dou-tabs__header:has(.side-pinned-tabs.is-reordering) .dou-tabs__marker) {
+/* The fixed strip owns insertion feedback for its tabs in the first group. */
+.side-dock :deep(.dou-tabs__header:has(.side-pinned-tabs.is-dragging-pin) .dou-tabs__marker) {
   visibility: hidden;
 }
 
