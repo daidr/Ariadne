@@ -302,8 +302,6 @@ export const en: Record<MessageKey, string> = {
   'memory.remove': 'Remove',
   'memory.save': 'Save',
   'thread.workspace': 'Workspace',
-  'thread.planNode': 'Plan node',
-  'thread.planNodeUnlink': 'Unlink plan node',
   'thread.branch': 'Branch {branch}',
   'todo.title': 'Todo',
   'thread.reviewed': 'Looks good',
