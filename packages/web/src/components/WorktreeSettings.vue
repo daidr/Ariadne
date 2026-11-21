@@ -88,7 +88,8 @@ async function estimateReclaimable(path: string, open: boolean) {
   }
 }
 
-async function remove(projectId: string, threadId: string, path: string, sourceId?: string) {
+async function remove(projectId: string, worktree: ProjectWorktrees['worktrees'][number]) {
+  const { path, threadId, sourceId, orphaned } = worktree
   removing.value = path
   if (reclaim.value?.path === path) {
     reclaimRequest?.abort()
@@ -96,11 +97,14 @@ async function remove(projectId: string, threadId: string, path: string, sourceI
   }
   error.value = null
   try {
-    await api.removeWorktree(projectId, threadId, sourceId)
+    await api.removeWorktree(projectId, threadId, sourceId, orphaned)
     emit('changed')
     await load()
   } catch (cause) {
     report(cause)
+    if (cause instanceof ApiError && cause.localized.key === 'error.worktreeOrphanChanged') {
+      await load()
+    }
   } finally {
     removing.value = null
   }
@@ -136,7 +140,10 @@ async function remove(projectId: string, threadId: string, path: string, sourceI
                 <DouText size="sm" truncate>
                   {{ worktree.thread?.title ?? t('worktrees.unknown') }}
                 </DouText>
-                <DouText v-if="worktree.thread?.merged" size="sm" tone="success">
+                <DouText v-if="worktree.orphaned" size="sm" tone="warning" class="worktree-size">
+                  {{ t('worktrees.orphaned') }}
+                </DouText>
+                <DouText v-else-if="worktree.thread?.merged" size="sm" tone="success">
                   {{ t('worktrees.merged') }}
                 </DouText>
                 <StageLabel v-else-if="worktree.thread" :stage="worktree.thread.stage" />
@@ -156,16 +163,22 @@ async function remove(projectId: string, threadId: string, path: string, sourceI
             </DouText>
             <DouPopconfirm
               :title="
-                t('worktrees.removeConfirm', {
+                t(worktree.orphaned ? 'worktrees.removeOrphanConfirm' : 'worktrees.removeConfirm', {
                   title: worktree.thread?.title ?? worktree.threadId,
                 })
               "
               tone="danger"
               :width="320"
-              :description="reclaimable(worktree.path, true)"
+              :description="
+                worktree.orphaned
+                  ? t('worktrees.removeOrphanDescription', {
+                      space: reclaimable(worktree.path, true),
+                    })
+                  : reclaimable(worktree.path, true)
+              "
               :confirm-text="t('worktrees.remove')"
               @update:open="estimateReclaimable(worktree.path, $event)"
-              @confirm="remove(project.id, worktree.threadId, worktree.path, worktree.sourceId)"
+              @confirm="remove(project.id, worktree)"
             >
               <DouButton
                 size="sm"

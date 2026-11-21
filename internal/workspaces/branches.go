@@ -3,9 +3,9 @@ package workspaces
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"github.com/daidr/Ariadne/internal/core"
-
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -108,6 +108,13 @@ func (manager *Manager) branches(ctx context.Context, project string, selection 
 			}, selection...)
 		}
 	}
+	if raw.RemoveOrphaned != nil {
+		proxy.RemoveOrphaned = func(ctx context.Context, thread, label string) (bool, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) (bool, error) {
+				return b.RemoveOrphaned(ctx, thread, label)
+			}, selection...)
+		}
+	}
 	if raw.Worktrees != nil {
 		proxy.Worktrees = func(ctx context.Context, measure bool) ([]sdk.WorktreeInfo, error) {
 			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.WorktreeInfo, error) {
@@ -142,6 +149,22 @@ func (manager *Manager) RemoveWorktree(ctx context.Context, project, thread, rea
 }
 
 func (manager *Manager) RemoveSourceWorktree(ctx context.Context, project, thread, sourceID, reason string) (string, error) {
+	return manager.removeSourceWorktree(ctx, project, thread, sourceID, reason, false)
+}
+
+func (manager *Manager) RemoveOrphanedWorktree(ctx context.Context, project, thread, sourceID string) (string, error) {
+	return manager.removeSourceWorktree(ctx, project, thread, sourceID, "user", true)
+}
+
+func hasRecordedCheckout(workspace *core.WorkspaceView) bool {
+	if workspace == nil || !filepath.IsAbs(workspace.Label) {
+		return false
+	}
+	branch, _ := workspace.Branch.(string)
+	return branch != ""
+}
+
+func (manager *Manager) removeSourceWorktree(ctx context.Context, project, thread, sourceID, reason string, orphaned bool) (string, error) {
 	if reason != "idle" && reason != "merged" && reason != "user" {
 		return "", errors.New("invalid worktree removal reason")
 	}
@@ -184,11 +207,29 @@ func (manager *Manager) RemoveSourceWorktree(ctx context.Context, project, threa
 			return "busy", nil
 		}
 	}
+	workspace := owner.Workspace
+	if orphaned {
+		if !known {
+			return "orphan-changed", nil
+		}
+		if secondary {
+			workspace, err = manager.options.Repository.SecondaryWorkspace(ctx, thread, sourceID)
+			if err != nil {
+				return "", err
+			}
+		}
+		if !hasRecordedCheckout(workspace) {
+			return "orphan-changed", nil
+		}
+	}
 	branches, err := manager.branches(ctx, project, sourceSelection{id: sourceID, owner: thread})
 	if err != nil {
 		return "", err
 	}
-	if branches == nil || branches.Remove == nil {
+	if orphaned && (branches == nil || branches.RemoveOrphaned == nil) {
+		return "orphan-changed", nil
+	}
+	if !orphaned && (branches == nil || branches.Remove == nil) {
 		return "dirty", nil
 	}
 	if known {
@@ -200,7 +241,7 @@ func (manager *Manager) RemoveSourceWorktree(ctx context.Context, project, threa
 			return "busy", nil
 		}
 	}
-	if reason == "idle" {
+	if reason == "idle" || orphaned {
 		for _, job := range manager.Background.List(thread) {
 			if job.Result == nil {
 				return "busy", nil
@@ -221,7 +262,18 @@ func (manager *Manager) RemoveSourceWorktree(ctx context.Context, project, threa
 	if err := manager.workspaces.RemoveWait(ctx, id); err != nil {
 		return "", err
 	}
-	removed, err := branches.Remove(ctx, thread, sdk.WorktreeRemoveOptions{Spare: reason == "idle"})
+	var removed bool
+	if orphaned {
+		removed, err = branches.RemoveOrphaned(ctx, thread, workspace.Label)
+		if err != nil {
+			return "", domainerr.New("error.worktreeOrphanRemove", map[string]any{"detail": err.Error()})
+		}
+		if !removed {
+			return "orphan-changed", nil
+		}
+	} else {
+		removed, err = branches.Remove(ctx, thread, sdk.WorktreeRemoveOptions{Spare: reason == "idle"})
+	}
 	if err != nil {
 		return "", err
 	}

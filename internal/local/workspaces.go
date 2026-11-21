@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -404,6 +405,17 @@ func (factory *Workspaces) SharesStorage(ctx context.Context) (bool, error) {
 	return root != "", err
 }
 func (factory *Workspaces) Remove(ctx context.Context, threadID string, options RemoveOptions) (bool, error) {
+	return factory.remove(ctx, threadID, options, "")
+}
+
+func (factory *Workspaces) RemoveOrphaned(ctx context.Context, threadID, label string) (bool, error) {
+	if !filepath.IsAbs(label) {
+		return false, nil
+	}
+	return factory.remove(ctx, threadID, RemoveOptions{}, label)
+}
+
+func (factory *Workspaces) remove(ctx context.Context, threadID string, options RemoveOptions, orphanLabel string) (bool, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {
 		return false, err
@@ -431,7 +443,24 @@ func (factory *Workspaces) Remove(ctx context.Context, threadID string, options 
 			return false, err
 		}
 	}
-	if _, err := os.Stat(dir); err == nil {
+	info, err := os.Lstat(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if orphanLabel != "" {
+		if info == nil || !info.IsDir() {
+			return false, nil
+		}
+		return factory.removeOrphanedDirectory(ctx, dir, orphanLabel, info)
+	}
+	if info != nil {
+		// A previous Git removal can leave files without their checkout metadata.
+		// Only the explicitly confirmed orphan cleanup can remove that directory.
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
 		if err := factory.verifiedWorktree(ctx, dir); err != nil {
 			return false, err
 		}
@@ -441,6 +470,52 @@ func (factory *Workspaces) Remove(ctx context.Context, threadID string, options 
 		err = DropSnapshots(ctx, factory.git, threadID)
 	}
 	return removed, err
+}
+
+func (factory *Workspaces) removeOrphanedDirectory(ctx context.Context, dir, label string, checked os.FileInfo) (bool, error) {
+	subdir, err := filepath.Rel(factory.repository, factory.path)
+	if err != nil || !filepath.IsLocal(subdir) || worktreePathKey(filepath.Join(dir, subdir)) != worktreePathKey(label) {
+		return false, nil
+	}
+	root, err := os.OpenRoot(filepath.Dir(dir))
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	name := filepath.Base(dir)
+	if _, err := root.Lstat(filepath.Join(name, ".git")); !os.IsNotExist(err) {
+		return false, err
+	}
+	paths, err := registeredWorktrees(ctx, factory.git)
+	if err != nil {
+		return false, err
+	}
+	for _, path := range paths {
+		if worktreePathKey(path) == worktreePathKey(dir) {
+			return false, nil
+		}
+		info, err := os.Stat(path)
+		if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		if err == nil && os.SameFile(checked, info) {
+			return false, nil
+		}
+	}
+	current, err := root.Lstat(name)
+	if err != nil {
+		return false, err
+	}
+	if !current.IsDir() || !os.SameFile(checked, current) {
+		return false, nil
+	}
+	if _, err := root.Lstat(filepath.Join(name, ".git")); !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := fsutil.RemoveTreeAt(ctx, root, name); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 func (factory *Workspaces) Snapshot(ctx context.Context, threadID string) (*string, error) {
 	ctx, done, err := factory.begin(ctx)
@@ -497,6 +572,28 @@ func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base s
 	}
 	return BranchChanges(ctx, factory.git, BranchInput{Branch: branch, Base: base, BaseRef: "refs/heads/" + base, Worktree: dir})
 }
+func registeredWorktrees(ctx context.Context, git GitRun) ([]string, error) {
+	fields, err := worktreeFields(ctx, git)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, field := range fields {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
+func worktreePathKey(path string) string {
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(path)
+	}
+	return path
+}
+
 func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.WorktreeInfo, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {
@@ -507,15 +604,13 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 	if !factory.Isolated() {
 		return result, nil
 	}
-	fields, err := worktreeFields(ctx, factory.git)
+	paths, err := registeredWorktrees(ctx, factory.git)
 	if err != nil {
 		return nil, err
 	}
 	registered := map[string]bool{}
-	for _, field := range fields {
-		if path, ok := strings.CutPrefix(field, "worktree "); ok {
-			registered[filepath.Clean(path)] = true
-		}
+	for _, path := range paths {
+		registered[worktreePathKey(path)] = true
 	}
 	for _, root := range factory.roots {
 		resolved, err := filepath.EvalSymlinks(root)
@@ -540,19 +635,24 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 				continue
 			}
 			path := filepath.Join(root, entry.Name())
-			if !registered[path] && !registered[filepath.Join(resolved, entry.Name())] {
+			canonical := filepath.Join(resolved, entry.Name())
+			listed := registered[worktreePathKey(path)] || registered[worktreePathKey(canonical)]
+			if !listed && !strings.HasPrefix(entry.Name(), "thr_") {
 				continue
 			}
 			// A registration can outlive the checkout. Require its local Git
-			// pointer as well, so a plain directory at the old path stays out.
-			info, err := os.Lstat(filepath.Join(path, ".git"))
+			// pointer. The manager checks recorded ownership of unregistered paths.
+			info, err := os.Lstat(filepath.Join(canonical, ".git"))
 			if os.IsNotExist(err) {
+				if !listed {
+					result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: canonical, Orphaned: true})
+				}
 				continue
 			}
 			if err != nil {
 				return nil, err
 			}
-			if !info.Mode().IsRegular() {
+			if !listed || !info.Mode().IsRegular() {
 				continue
 			}
 			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: path})

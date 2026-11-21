@@ -106,7 +106,8 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 		Remove: func(ctx context.Context, threadID string, options sdk.WorktreeRemoveOptions) (bool, error) {
 			return factory.Remove(ctx, threadID, RemoveOptions{Discard: options.Discard, Spare: options.Spare})
 		},
-		Worktrees: factory.Worktrees, SharesStorage: factory.SharesStorage, Snapshot: factory.Snapshot,
+		RemoveOrphaned: factory.RemoveOrphaned,
+		Worktrees:      factory.Worktrees, SharesStorage: factory.SharesStorage, Snapshot: factory.Snapshot,
 		Diff: func(ctx context.Context, from, to string) ([]sdk.ChangedFile, error) {
 			ctx, done, err := factory.begin(ctx)
 			if err != nil {

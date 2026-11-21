@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -26,12 +27,18 @@ func ServerGitEnv(protocols ...string) map[string]string {
 	if len(protocols) == 0 {
 		protocols = []string{"https"}
 	}
-	return map[string]string{
+	env := map[string]string{
 		"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.DevNull,
 		"GIT_ALLOW_PROTOCOL": strings.Join(protocols, ":"),
 		"GIT_CONFIG_COUNT":   "2", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": os.DevNull,
 		"GIT_CONFIG_KEY_1": "core.fsmonitor", "GIT_CONFIG_VALUE_1": "false",
 	}
+	if runtime.GOOS == "windows" {
+		env["GIT_CONFIG_COUNT"] = "3"
+		env["GIT_CONFIG_KEY_2"] = "core.longpaths"
+		env["GIT_CONFIG_VALUE_2"] = "true"
+	}
+	return env
 }
 func NewGit(directory string, protocols ...string) GitRun {
 	return func(ctx context.Context, args []string, options GitOptions) sdk.ExecResult {

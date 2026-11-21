@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -52,6 +53,80 @@ func TestWorktreesListsRegisteredPathsWithoutSizingThem(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestWorktreeRemovalSupportsLongPathsOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Git for Windows path handling")
+	}
+	root, git := initGit(t)
+	writeGit(t, root, ".gitignore", "node_modules/\n")
+	gitCommit(t, git, "ignore dependencies")
+	factory := newFactory(t, FactoryOptions{Path: root, DataDir: t.TempDir(), DisableClone: true})
+	dir := filepath.Join(factory.roots[0], "thr_long")
+	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_long"), dir)
+	dependency := filepath.Join("node_modules", strings.Repeat("a", 75), strings.Repeat("b", 75), strings.Repeat("c", 75), "file.txt")
+	writeGit(t, dir, dependency, "dependency")
+	removed, err := factory.Remove(t.Context(), "thr_long", RemoveOptions{Spare: true})
+	if err != nil || !removed {
+		t.Fatalf("long-path worktree was not removed: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("worktree is still on disk", err)
+	}
+	gitOK(t, git, "show-ref", "--verify", "refs/heads/"+BranchFor("thr_long"))
+}
+
+func TestExplicitCleanupOfOrphanedWorktree(t *testing.T) {
+	ctx := t.Context()
+	root, git := initGit(t)
+	writeGit(t, root, "app/file.txt", "tracked")
+	gitCommit(t, git, "add nested source")
+	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: t.TempDir(), DisableClone: true})
+	const thread = "thr_orphan"
+	path := filepath.Join(factory.roots[0], thread)
+	label := filepath.Join(path, "app")
+	branch := BranchFor(thread)
+	gitOK(t, git, "worktree", "add", "-b", branch, path)
+	longFile := filepath.Join("node_modules", strings.Repeat("a", 75), strings.Repeat("b", 75), strings.Repeat("c", 75), "file.txt")
+	writeGit(t, path, longFile, "left behind")
+	outside := t.TempDir()
+	writeGit(t, outside, "sentinel.txt", "keep")
+	if err := os.Symlink(outside, filepath.Join(path, "outside")); err != nil && runtime.GOOS != "windows" {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(path, ".git")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Git still lists the checkout. Leave it alone until Git releases it.
+	if removed, err := factory.RemoveOrphaned(ctx, thread, label); err != nil || removed {
+		t.Fatalf("registered checkout removal: %t, %v", removed, err)
+	}
+	gitOK(t, git, "worktree", "prune", "--expire", "now")
+	worktrees, err := factory.Worktrees(ctx, false)
+	if err != nil || len(worktrees) != 1 || worktrees[0].Path != path || !worktrees[0].Orphaned {
+		t.Fatalf("orphan list: %+v, %v", worktrees, err)
+	}
+	if removed, err := factory.Remove(ctx, thread, RemoveOptions{Spare: true}); err != nil || removed {
+		t.Fatalf("automatic cleanup touched an orphan: %t, %v", removed, err)
+	}
+	if removed, err := factory.RemoveOrphaned(ctx, thread, path); err != nil || removed {
+		t.Fatalf("removed without matching the recorded source: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(path, longFile)); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := factory.RemoveOrphaned(ctx, thread, label); err != nil || !removed {
+		t.Fatalf("orphan cleanup: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("orphan is still on disk", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "sentinel.txt")); err != nil {
+		t.Fatal("cleanup followed an external link", err)
+	}
+	gitOK(t, git, "show-ref", "--verify", "refs/heads/"+branch)
 }
 
 func TestPlainWorkspacesShareFilesAndReleaseClosedHandles(t *testing.T) {

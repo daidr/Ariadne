@@ -45,6 +45,15 @@ func RemoveTree(ctx context.Context, allowedRoot, target string) error {
 		return err
 	}
 	defer directory.Close()
+	return RemoveTreeAt(ctx, directory, relative)
+}
+
+// RemoveTreeAt removes a subtree below an already opened root, with the same retries as RemoveTree.
+func RemoveTreeAt(ctx context.Context, directory *os.Root, relative string) error {
+	relative = filepath.Clean(relative)
+	if !childPath(relative) {
+		return fmt.Errorf("cleanup target is outside its owned directory: %s", relative)
+	}
 	until := time.Now().Add(3 * time.Second)
 	delay := 5 * time.Millisecond
 	for {

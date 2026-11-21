@@ -3,6 +3,7 @@ package workspaces
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -302,21 +303,33 @@ func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]Proj
 						continue
 					}
 					var own *core.ThreadView
+					var workspace *core.WorkspaceView
 					sourceID := selection.id
 					if thread, err := repo.GetThread(ctx, worktree.ThreadID); err == nil {
 						if thread.ProjectID != project.ID {
 							continue
 						}
 						own = &thread
+						workspace = thread.Workspace
 						// Different configured subdirectories can share the same checkout.
 						if primary := threadSourceID(project, thread); primary != selection.id {
 							extra, err := repo.SecondaryWorkspace(ctx, thread.ID, selection.id)
 							if err != nil {
 								return err
 							}
-							if extra == nil || extra.Removed {
+							if extra == nil || extra.Removed && !worktree.Orphaned {
 								continue
 							}
+							workspace = extra
+						}
+					}
+					if worktree.Orphaned {
+						if branches.RemoveOrphaned == nil || !hasRecordedCheckout(workspace) {
+							continue
+						}
+						subdir, err := filepath.Rel(worktree.Path, workspace.Label)
+						if err != nil || !filepath.IsLocal(subdir) {
+							continue
 						}
 					}
 					if project.FileSources == nil && sourceID == core.LegacyPrimarySource {

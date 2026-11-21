@@ -926,10 +926,10 @@ export const api = {
       undefined,
       signal,
     ),
-  removeWorktree: (projectId: string, threadId: string, sourceId?: string) =>
+  removeWorktree: (projectId: string, threadId: string, sourceId?: string, orphaned?: boolean) =>
     request<void>(
       'DELETE',
-      `/api/projects/${projectId}/worktrees/${threadId}${sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : ''}`,
+      `/api/projects/${projectId}/worktrees/${threadId}${queryString({ sourceId, orphaned: orphaned ? '1' : undefined })}`,
     ),
   dismissProposal: (projectId: string, proposalId: string) =>
     request<{ plan: PlanView }>(

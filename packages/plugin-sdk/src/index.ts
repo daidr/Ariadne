@@ -132,6 +132,7 @@ export type MergeOutcome =
 export interface WorktreeInfo {
   threadId: string
   path: string
+  orphaned?: boolean
   /** Space it takes, when it could be measured. */
   bytes: number | null
 }

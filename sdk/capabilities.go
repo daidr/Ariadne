@@ -71,6 +71,8 @@ type BranchCapability struct {
 	Merge     func(context.Context, MergeRequest) (MergeOutcome, error)
 	UndoMerge func(context.Context, UndoMergeRequest) error
 	Remove    func(context.Context, string, WorktreeRemoveOptions) (bool, error)
+	// RemoveOrphaned checks the recorded workspace label before removing a checkout left on disk without its Git registration.
+	RemoveOrphaned func(ctx context.Context, threadID, label string) (bool, error)
 	// Worktrees can list paths without measuring them when measure is false.
 	Worktrees     func(ctx context.Context, measure bool) ([]WorktreeInfo, error)
 	SharesStorage func(context.Context) (bool, error)

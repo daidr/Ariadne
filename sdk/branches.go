@@ -75,4 +75,5 @@ type WorktreeInfo struct {
 	ThreadID string `json:"threadId"`
 	Path     string `json:"path"`
 	Bytes    *int64 `json:"bytes"`
+	Orphaned bool   `json:"orphaned,omitempty"`
 }

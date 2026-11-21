@@ -122,7 +122,11 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if err != nil || len(list) != 1 || len(list[0].Worktrees) != 3 {
 		t.Fatalf("worktrees: %+v, %v", list, err)
 	}
-	git(extra.Info().Label, "restore", "--", "file.txt")
+	extraPath := extra.Info().Label
+	if status, err := manager.RemoveOrphanedWorktree(ctx, project.ID, thread.ID, "src_second"); err != nil || status != "orphan-changed" {
+		t.Fatalf("registered checkout accepted orphan cleanup: %s, %v", status, err)
+	}
+	git(extraPath, "restore", "--", "file.txt")
 	if status, err := manager.RemoveSourceWorktree(ctx, project.ID, thread.ID, "src_second", "user"); err != nil || status != "removed" {
 		t.Fatalf("remove secondary worktree: %s, %v", status, err)
 	}
@@ -130,4 +134,42 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	if err != nil || known.Workspace == nil || known.Workspace.Removed || known.Workspace.SourceID != "src_first" {
 		t.Fatalf("removing the secondary worktree changed the primary: %+v, %v", known.Workspace, err)
 	}
+
+	// A past cleanup can leave a directory even after the record says it was removed.
+	missingRecord := newThread(t, repo, project.ID)
+	unowned := filepath.Join(filepath.Dir(extraPath), missingRecord.ID)
+	for _, dir := range []string{extraPath, unowned} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "leftover.txt"), []byte("left behind"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err = manager.ListWorktrees(ctx, false)
+	if err != nil || len(list) != 1 || len(list[0].Worktrees) != 3 {
+		t.Fatalf("worktrees including the owned orphan: %+v, %v", list, err)
+	}
+	var orphans []ListedWorktree
+	for _, workspace := range list[0].Worktrees {
+		if workspace.Orphaned {
+			orphans = append(orphans, workspace)
+		}
+	}
+	if len(orphans) != 1 || orphans[0].Path != extraPath || orphans[0].SourceID != "src_second" || orphans[0].ThreadID != thread.ID {
+		t.Fatalf("unexpected orphans: %+v", orphans)
+	}
+	if status, err := manager.RemoveOrphanedWorktree(ctx, project.ID, missingRecord.ID, "src_second"); err != nil || status != "orphan-changed" {
+		t.Fatalf("unrecorded directory accepted orphan cleanup: %s, %v", status, err)
+	}
+	if status, err := manager.RemoveOrphanedWorktree(ctx, project.ID, thread.ID, "src_second"); err != nil || status != "removed" {
+		t.Fatalf("remove owned orphan: %s, %v", status, err)
+	}
+	if _, err := os.Stat(extraPath); !os.IsNotExist(err) {
+		t.Fatal("owned orphan is still on disk", err)
+	}
+	if _, err := os.Stat(filepath.Join(unowned, "leftover.txt")); err != nil {
+		t.Fatal("unrecorded directory was changed", err)
+	}
+	git(second, "show-ref", "--verify", "refs/heads/"+local.BranchFor(thread.ID))
 }

@@ -482,6 +482,16 @@ func (host *Hosted) Capability() *sdk.WorkspaceCapability {
 		})
 		return removed, err
 	}
+	removeOrphaned := branches.RemoveOrphaned
+	branches.RemoveOrphaned = func(ctx context.Context, threadID, label string) (bool, error) {
+		var removed bool
+		err := host.serial(ctx, func(ctx context.Context) error {
+			var err error
+			removed, err = removeOrphaned(ctx, threadID, label)
+			return err
+		})
+		return removed, err
+	}
 	return capability
 }
 func (host *Hosted) Close() error { return errors.Join(host.owner.Close(), host.objects.Close()) }

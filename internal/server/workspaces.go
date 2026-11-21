@@ -150,7 +150,11 @@ func (api *API) registerWorkspaces() {
 			return nil, 0, badInput("sourceId")
 		}
 		if manager != nil {
-			removed, err = manager.RemoveSourceWorktree(r.Context(), project, thread, source, "user")
+			if r.URL.Query().Get("orphaned") == "1" {
+				removed, err = manager.RemoveOrphanedWorktree(r.Context(), project, thread, source)
+			} else {
+				removed, err = manager.RemoveSourceWorktree(r.Context(), project, thread, source, "user")
+			}
 			if err != nil {
 				return nil, 0, err
 			}
@@ -160,6 +164,9 @@ func (api *API) registerWorkspaces() {
 		}
 		if removed == "dirty" {
 			return nil, 0, domainerr.New("error.worktreeDirty", nil)
+		}
+		if removed == "orphan-changed" {
+			return nil, 0, domainerr.New("error.worktreeOrphanChanged", nil)
 		}
 		if api.options.Data != nil {
 			api.options.Data.InvalidateUsage()
