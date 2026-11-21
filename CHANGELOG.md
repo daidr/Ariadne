@@ -1,5 +1,14 @@
 # 更新日志
 
+## 0.1.0-alpha.16 (2026-11-21)
+
+- feat: add issue status links and previews
+- fix: scope pull request approvals and render chat breaks
+- feat: estimate reclaimable workspace space on ReFS
+- feat: improve discussion delivery, provider integration and command output
+- feat: configure hosted source plugins and repository storage
+- Merge pull request #146 from daidr/release/alpha
+
 ## 0.1.0-alpha.15 (2026-11-20)
 
 - feat: export trace diagnostics and record ACP failures
