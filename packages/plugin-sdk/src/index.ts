@@ -34,13 +34,12 @@ export type SettingField =
       default?: string
     }
 
-/**
- * A pull request (or GitHub's kin: a GitLab merge request) as a link to it shows, without
- * asking its host: `label` is how a message names it, e.g. `daidr/Ariadne#34`.
- */
+/** The label recognized from a hosted link without asking its host. */
 export interface LinkSummary {
-  kind: 'pull-request'
+  kind: 'pull-request' | 'issue'
   label: string
+  reference?: string
+  repositoryUrl?: string
 }
 
 /** What the card over a pull request link shows. Titles are written by anyone who can open one. */
@@ -65,7 +64,19 @@ export interface PullRequestPreview {
   at: string
 }
 
-export type LinkPreview = PullRequestPreview
+export interface IssuePreview {
+  kind: 'issue'
+  repository: string
+  number: number
+  url: string
+  title: string
+  state: 'open' | 'closed'
+  stateReason?: string
+  labels?: string[]
+  updatedAt?: string
+}
+
+export type LinkPreview = PullRequestPreview | IssuePreview
 
 export type ChangedFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type'
 

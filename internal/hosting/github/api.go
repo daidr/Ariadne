@@ -65,11 +65,12 @@ func (raw rawPull) info() sdk.PullRequestInfo {
 }
 
 type rawIssue struct {
-	Number int    `json:"number"`
-	URL    string `json:"html_url"`
-	Title  string `json:"title"`
-	State  string `json:"state"`
-	User   *struct {
+	Number      int    `json:"number"`
+	URL         string `json:"html_url"`
+	Title       string `json:"title"`
+	State       string `json:"state"`
+	StateReason string `json:"state_reason"`
+	User        *struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Labels        []json.RawMessage `json:"labels"`
@@ -402,16 +403,32 @@ func (api *API) Issues(ctx context.Context, query sdk.IssueQuery) ([]sdk.IssueSu
 	}
 	return issues, nil
 }
-func (api *API) Issue(ctx context.Context, number int) (sdk.IssueDetail, error) {
-	path := api.path + "/issues/" + strconv.Itoa(number)
+func (api *API) readIssue(ctx context.Context, number int) (rawIssue, error) {
 	var raw rawIssue
-	if err := api.rest.Request(ctx, "GET", path, nil, &raw); err != nil {
-		return sdk.IssueDetail{}, err
+	if err := api.rest.Request(ctx, "GET", api.path+"/issues/"+strconv.Itoa(number), nil, &raw); err != nil {
+		return rawIssue{}, err
 	}
 	if raw.isPull() {
 		message := fmt.Sprintf("#%d is a pull request, not an issue", number)
-		return sdk.IssueDetail{}, &hostinghttp.Error{Name: "GitHub", Status: 404, Reason: message, Message: message}
+		return rawIssue{}, &hostinghttp.Error{Name: "GitHub", Status: 404, Reason: message, Message: message}
 	}
+	return raw, nil
+}
+
+func (api *API) PreviewIssue(ctx context.Context, number int) (*sdk.LinkPreview, error) {
+	raw, err := api.readIssue(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	return raw.info().LinkPreview(api.owner+"/"+api.name, raw.StateReason), nil
+}
+
+func (api *API) Issue(ctx context.Context, number int) (sdk.IssueDetail, error) {
+	raw, err := api.readIssue(ctx, number)
+	if err != nil {
+		return sdk.IssueDetail{}, err
+	}
+	path := api.path + "/issues/" + strconv.Itoa(number)
 	pages := max(1, (raw.Comments+19)/20)
 	read := func(page int) ([]rawComment, error) {
 		var result []rawComment

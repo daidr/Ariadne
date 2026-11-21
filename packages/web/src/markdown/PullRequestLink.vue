@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { ThreadView } from '@ariadne/core'
-import type { LinkPreview } from '@ariadne/plugin-sdk'
 import {
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -20,7 +19,7 @@ import {
 import { computed, shallowRef, useTemplateRef, watch, type Component, type VNode } from 'vue'
 import { t } from '../i18n'
 import { checksTone } from '../stage'
-import { linkPreview } from './link-summaries'
+import { useLinkPreview } from './useLinkPreview'
 import PullRequestChecks from './PullRequestChecks.vue'
 
 /**
@@ -38,29 +37,20 @@ const props = withDefaults(
   { variant: 'soft' },
 )
 
-const preview = shallowRef<LinkPreview | null>()
 const open = shallowRef(false)
+const anchor = useTemplateRef<InstanceType<typeof DouLink>>('anchor')
+const link = useLinkPreview(
+  () => props.href,
+  anchor,
+  open,
+  () => !props.tracked,
+)
+const preview = computed(() => (link.value?.kind === 'pull-request' ? link.value : null))
 // Expanding CI can move the card away from the pointer while its controls have focus.
 const cardFocused = shallowRef(false)
 const card = useTemplateRef<HTMLElement>('card')
-watch(
-  () => props.href,
-  () => {
-    preview.value = undefined
-    load(open.value)
-  },
-)
-
-function load(isOpen: boolean) {
-  if (!isOpen) return
-  const href = props.href
-  void linkPreview(href).then((value) => {
-    if (href === props.href) preview.value = value
-  })
-}
 watch(open, (isOpen) => {
   if (!isOpen) cardFocused.value = false
-  load(isOpen)
 })
 
 function focusLink(event: FocusEvent) {
@@ -80,26 +70,6 @@ function leaveCard(event: FocusEvent) {
   cardFocused.value = false
   if (event.relatedTarget !== anchor.value?.$el) open.value = false
 }
-
-// Fetch state for untracked PRs as they become visible, using the same cache as the card.
-const anchor = useTemplateRef<InstanceType<typeof DouLink>>('anchor')
-watch(
-  [anchor, () => props.href, () => !!props.tracked],
-  ([link, , tracked], _before, cleanup) => {
-    const element = link?.$el
-    if (tracked || !(element instanceof Element) || typeof IntersectionObserver === 'undefined')
-      return
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        observer.disconnect()
-        load(true)
-      }
-    })
-    observer.observe(element)
-    cleanup(() => observer.disconnect())
-  },
-  { flush: 'post' },
-)
 
 type State = 'open' | 'draft' | 'merged' | 'closed'
 const trackedPR = computed(() => props.tracked?.pullRequest)
@@ -205,7 +175,7 @@ const tones: Record<State, TagTone> = {
           </DouText>
         </div>
       </div>
-      <DouText v-else-if="preview === null" variant="secondary" size="sm">
+      <DouText v-else-if="link === null" variant="secondary" size="sm">
         {{ t('link.pr.unavailable') }}
       </DouText>
       <DouSkeleton v-else :lines="3" />

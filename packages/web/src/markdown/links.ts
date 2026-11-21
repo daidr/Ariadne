@@ -1,4 +1,5 @@
 import type { MarkdownUrlKind } from 'dou-ui'
+import type { ProjectSource } from '@ariadne/core'
 
 /**
  * Something in Ariadne a message points at: `[title](thread:thr_…)`, `[title](artifact:art_…)`,
@@ -40,4 +41,36 @@ export function isBare(node: {
 }): boolean {
   const [only, ...rest] = node.children
   return !rest.length && only?.type === 'text' && !!node.href && only.value === node.href
+}
+
+const repositoryPath = (url: URL) => url.pathname.replace(/\/+$/, '').replace(/\.git$/i, '')
+
+export function sameHostedRepository(
+  source: ProjectSource | null | undefined,
+  repositoryUrl: string,
+) {
+  const host = source?.hosting ?? source
+  if (host?.kind !== 'github' && host?.kind !== 'gitlab') return false
+  const repository = host.settings.repository
+  if (typeof repository !== 'string') return false
+  const instance = host.settings.instance
+  const base =
+    host.kind === 'github'
+      ? 'https://github.com'
+      : typeof instance === 'string' && instance.trim()
+        ? instance.trim().replace(/\/+$/, '')
+        : 'https://gitlab.com'
+  const address = repository.trim().replace(/^(?:ssh:\/\/)?git@([^:/]+)[:/]/, 'https://$1/')
+  try {
+    const local = new URL(/^https?:\/\//i.test(address) ? address : `${base}/${address}`)
+    const link = new URL(repositoryUrl)
+    const path = repositoryPath(local)
+    const target = repositoryPath(link)
+    return (
+      local.host === link.host &&
+      (host.kind === 'github' ? path.toLowerCase() === target.toLowerCase() : path === target)
+    )
+  } catch {
+    return false
+  }
 }

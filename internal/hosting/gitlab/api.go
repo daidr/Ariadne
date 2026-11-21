@@ -397,12 +397,26 @@ func (api *API) Issues(ctx context.Context, query sdk.IssueQuery) ([]sdk.IssueSu
 	}
 	return issues, nil
 }
-func (api *API) Issue(ctx context.Context, number int) (sdk.IssueDetail, error) {
-	path := api.path + "/issues/" + strconv.Itoa(number)
+func (api *API) readIssue(ctx context.Context, number int) (rawIssue, error) {
 	var raw rawIssue
-	if err := api.rest.Request(ctx, "GET", path, nil, &raw); err != nil {
+	err := api.rest.Request(ctx, "GET", api.path+"/issues/"+strconv.Itoa(number), nil, &raw)
+	return raw, err
+}
+
+func (api *API) PreviewIssue(ctx context.Context, number int) (*sdk.LinkPreview, error) {
+	raw, err := api.readIssue(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	return raw.info().LinkPreview(api.repository, ""), nil
+}
+
+func (api *API) Issue(ctx context.Context, number int) (sdk.IssueDetail, error) {
+	raw, err := api.readIssue(ctx, number)
+	if err != nil {
 		return sdk.IssueDetail{}, err
 	}
+	path := api.path + "/issues/" + strconv.Itoa(number)
 	notes := []rawNote{}
 	if raw.Comments != 0 {
 		if err := api.rest.Request(ctx, "GET", path+"/notes?sort=desc&order_by=created_at&per_page=100", nil, &notes); err != nil {

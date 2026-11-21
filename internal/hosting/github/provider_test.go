@@ -17,6 +17,35 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+func TestIssueLinkPreview(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != "GET" || request.URL.Path != "/repos/acme/app/issues/42" {
+			t.Errorf("unexpected issue preview request: %s %s", request.Method, request.URL.Path)
+			http.NotFound(w, request)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"number": 42, "title": "Make the link clear", "state": "closed", "state_reason": "completed",
+			"html_url": "https://github.com/acme/app/issues/42", "updated_at": "2026-11-21T09:00:00Z",
+			"labels": []any{map[string]any{"name": "bug"}}, "comments": 40,
+		})
+	}))
+	defer server.Close()
+	provider := Links(Options{APIBase: server.URL, Client: server.Client(), Env: map[string]string{"GH_TOKEN": "fixture"}})
+	defer provider.Close()
+	address, _ := url.Parse("https://github.com/acme/app/issues/42#issuecomment-7")
+	match := provider.Match(address)
+	if match == nil || match.Kind != "issue" || match.Reference != "#42" ||
+		match.Label != "acme/app#42" || match.RepositoryURL != "https://github.com/acme/app" {
+		t.Fatalf("issue match = %+v", match)
+	}
+	preview, err := provider.Preview(t.Context(), address)
+	if err != nil || preview == nil || preview.Kind != "issue" || preview.StateReason != "completed" ||
+		preview.UpdatedAt != "2026-11-21T09:00:00Z" || strings.Join(preview.Labels, ",") != "bug" {
+		t.Fatalf("issue preview = %+v, %v", preview, err)
+	}
+}
+
 func TestTokenPriorityAndCLIIsolation(t *testing.T) {
 	var runs atomic.Int32
 	run := func(ctx context.Context, args []string, options process.RunOptions) sdk.ExecResult {

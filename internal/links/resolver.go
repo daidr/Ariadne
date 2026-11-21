@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -189,6 +190,7 @@ func clone(value *sdk.PullRequestPreview) *sdk.PullRequestPreview {
 		return nil
 	}
 	copy := *value
+	copy.Labels = slices.Clone(value.Labels)
 	if value.Author != nil {
 		author := *value.Author
 		copy.Author = &author

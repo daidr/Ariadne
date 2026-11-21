@@ -229,25 +229,37 @@ type PullURL struct {
 	Number      int
 }
 
-var pullPath = regexp.MustCompile(`^/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/pull/(\d{1,9})(?:/[\w/.-]*)?$`)
+var linkPath = regexp.MustCompile(`^/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/(pull|issues)/(\d{1,9})(?:/[\w/.-]*)?$`)
 
 func ParsePullRequestURL(address *url.URL, web string) *PullURL {
+	link, kind := parseLinkURL(address, web)
+	if kind != "pull-request" {
+		return nil
+	}
+	return link
+}
+
+func parseLinkURL(address *url.URL, web string) (*PullURL, string) {
 	home, err := url.Parse(web)
 	if address == nil || err != nil || address.Scheme != "https" || !strings.EqualFold(address.Host, home.Host) {
-		return nil
+		return nil, ""
 	}
 	prefix := strings.TrimRight(home.EscapedPath(), "/")
 	path := address.EscapedPath()
 	if prefix != "" && !strings.HasPrefix(path, prefix+"/") {
-		return nil
+		return nil, ""
 	}
-	match := pullPath.FindStringSubmatch(strings.TrimPrefix(path, prefix))
+	match := linkPath.FindStringSubmatch(strings.TrimPrefix(path, prefix))
 	if match == nil {
-		return nil
+		return nil, ""
 	}
 	var number int
-	fmt.Sscanf(match[3], "%d", &number)
-	return &PullURL{Owner: match[1], Name: match[2], Number: number}
+	fmt.Sscanf(match[4], "%d", &number)
+	kind := "pull-request"
+	if match[3] == "issues" {
+		kind = "issue"
+	}
+	return &PullURL{Owner: match[1], Name: match[2], Number: number}, kind
 }
 func Links(options Options) sdk.LinkProvider {
 	web := "https://github.com"
@@ -261,17 +273,24 @@ func Links(options Options) sdk.LinkProvider {
 	closed := false
 	active := 0
 	done := make(chan struct{})
-	return sdk.LinkProvider{Kind: "github", Title: sdk.LocalizedText{"zh-CN": "GitHub 拉取请求", "en": "GitHub pull requests"},
+	return sdk.LinkProvider{Kind: "github", Title: sdk.LocalizedText{"zh-CN": "GitHub 链接", "en": "GitHub links"},
 		Match: func(address *url.URL) *sdk.LinkMatch {
-			pull := ParsePullRequestURL(address, web)
-			if pull == nil {
+			link, kind := parseLinkURL(address, web)
+			if link == nil {
 				return nil
 			}
-			return &sdk.LinkMatch{Kind: "pull-request", Label: fmt.Sprintf("%s/%s#%d", pull.Owner, pull.Name, pull.Number)}
+			repository := link.Owner + "/" + link.Name
+			reference := fmt.Sprintf("#%d", link.Number)
+			match := &sdk.LinkMatch{Kind: kind, Label: repository + reference}
+			if kind == "issue" {
+				match.Reference = reference
+				match.RepositoryURL = strings.TrimRight(web, "/") + "/" + repository
+			}
+			return match
 		},
-		Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
-			pull := ParsePullRequestURL(address, web)
-			if pull == nil {
+		Preview: func(ctx context.Context, address *url.URL) (*sdk.LinkPreview, error) {
+			link, kind := parseLinkURL(address, web)
+			if link == nil {
 				return nil, nil
 			}
 			mu.Lock()
@@ -298,12 +317,16 @@ func Links(options Options) sdk.LinkProvider {
 					credentials = func(context.Context) (*string, error) { return &value, nil }
 				}
 			}
-			api, err := NewAPI(APIOptions{Base: options.APIBase, Owner: pull.Owner, Name: pull.Name, Token: credentials, Client: options.Client})
+			api, err := NewAPI(APIOptions{Base: options.APIBase, Owner: link.Owner, Name: link.Name, Token: credentials, Client: options.Client})
 			if err != nil {
 				return nil, err
 			}
 			defer api.Close()
-			preview, err := api.Preview(ctx, pull.Number)
+			read := api.Preview
+			if kind == "issue" {
+				read = api.PreviewIssue
+			}
+			preview, err := read(ctx, link.Number)
 			var failure *hostinghttp.Error
 			if errors.As(err, &failure) && failure.Status == 404 {
 				return nil, nil

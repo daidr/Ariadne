@@ -7,9 +7,10 @@ import StageIcon from '../components/StageIcon.vue'
 import { openThreadFrom, state } from '../store'
 import { linkSummary } from './link-summaries'
 import type { LinkSummary } from '@ariadne/plugin-sdk'
-import { innerLink } from './links'
+import { innerLink, sameHostedRepository } from './links'
 import { openFilePreview } from '../files/preview'
 import PullRequestLink from './PullRequestLink.vue'
+import IssueLink from './IssueLink.vue'
 import { useOpenView } from '../opened-from'
 
 const openView = useOpenView()
@@ -41,6 +42,15 @@ const artifact = computed(() =>
 const file = computed(() => (inner.value?.kind === 'file' ? inner.value.id : null))
 
 const summary = ref<LinkSummary | null>(null)
+const issueLabel = computed(() => {
+  const issue = summary.value
+  if (issue?.kind !== 'issue') return ''
+  return issue.reference &&
+    issue.repositoryUrl &&
+    sameHostedRepository(state.detail?.project.source, issue.repositoryUrl)
+    ? issue.reference
+    : issue.label
+})
 const trackedPullRequest = computed(() => {
   if (summary.value?.kind !== 'pull-request') return undefined
   return state.detail?.threads.find((item) => item.pullRequest?.url === props.href)
@@ -93,6 +103,12 @@ function open(event?: MouseEvent) {
     :label="summary.label"
     :children="bare ? null : children"
     :tracked="trackedPullRequest"
+  />
+  <IssueLink
+    v-else-if="href && summary?.kind === 'issue'"
+    :href="href"
+    :label="issueLabel"
+    :children="bare ? null : children"
   />
   <DouLink v-else-if="href && !inner" :href="href" :external="external">
     <component :is="children" />

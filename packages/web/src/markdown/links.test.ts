@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { innerLink, isBare, sanitizeUrl } from './links'
+import { innerLink, isBare, sameHostedRepository, sanitizeUrl } from './links'
 
 describe('message links', () => {
   it('reads thread and artifact links', () => {
@@ -42,4 +42,18 @@ describe('bare links', () => {
       isBare({ href: 'https://a.test/x', children: [text('https://a.test/x'), text('!')] }),
     ).toBe(false)
   })
+})
+
+it('shortens issue labels only for the project repository', () => {
+  const github = { kind: 'github', settings: { repository: 'git@github.com:Team/Repo.git' } }
+  expect(sameHostedRepository(github, 'https://github.com/team/repo')).toBe(true)
+  expect(sameHostedRepository(github, 'https://github.com/team/other')).toBe(false)
+  expect(sameHostedRepository(github, 'https://gitlab.com/team/repo')).toBe(false)
+  const gitlab = {
+    kind: 'gitlab',
+    settings: { instance: 'https://gitlab.example.com/gitlab/', repository: 'team/tools/repo' },
+  }
+  expect(sameHostedRepository(gitlab, 'https://gitlab.example.com/gitlab/team/tools/repo')).toBe(
+    true,
+  )
 })

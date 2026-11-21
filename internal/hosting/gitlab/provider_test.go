@@ -22,6 +22,41 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+func TestIssueLinkPreview(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != "GET" || request.URL.Path != "/api/v4/projects/group/sub/app/issues/16" ||
+			request.Header.Get("Authorization") != "Bearer fixture" {
+			t.Errorf("unexpected issue preview request: %s %s", request.Method, request.URL.Path)
+			http.NotFound(w, request)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"iid": 16, "title": "Make the link clear", "state": "closed",
+			"web_url":    "https://gitlab.example.com/group/sub/app/-/issues/16",
+			"updated_at": "2026-11-21T09:00:00Z", "labels": []string{"bug"}, "user_notes_count": 9,
+		})
+	}))
+	defer server.Close()
+	instances := NewInstances(map[string]string{})
+	defer instances.Close()
+	if err := instances.Add(server.URL, "group/sub/app", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	provider := Links(Options{Instances: instances, Client: server.Client()})
+	defer provider.Close()
+	address, _ := url.Parse(server.URL + "/group/sub/app/-/issues/16")
+	match := provider.Match(address)
+	if match == nil || match.Kind != "issue" || match.Reference != "#16" ||
+		match.Label != "group/sub/app#16" || match.RepositoryURL != server.URL+"/group/sub/app" {
+		t.Fatalf("issue match = %+v", match)
+	}
+	preview, err := provider.Preview(t.Context(), address)
+	if err != nil || preview == nil || preview.Kind != "issue" || preview.State != "closed" ||
+		preview.StateReason != "" || !reflect.DeepEqual(preview.Labels, []string{"bug"}) {
+		t.Fatalf("issue preview = %+v, %v", preview, err)
+	}
+}
+
 func TestTokenResolutionKeepsEnvironmentWithinItsHost(t *testing.T) {
 	var runs atomic.Int32
 	run := func(ctx context.Context, args []string, options process.RunOptions) sdk.ExecResult {

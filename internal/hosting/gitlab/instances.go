@@ -154,6 +154,7 @@ type InstanceMatch struct {
 	Tokens   []string `json:"tokens"`
 	Path     string   `json:"path"`
 	IID      int      `json:"iid"`
+	kind     string
 }
 
 func (instances *Instances) Find(address *url.URL) *InstanceMatch {
@@ -167,7 +168,7 @@ func (instances *Instances) find(address *url.URL, credentials bool) *InstanceMa
 	}
 	var found *InstanceMatch
 	for _, instance := range instances.order {
-		mr := ParseMergeRequestURL(address, instance)
+		mr, kind := parseLinkURL(address, instance)
 		if mr == nil || found != nil && len(instance) <= len(found.Instance) {
 			continue
 		}
@@ -186,7 +187,7 @@ func (instances *Instances) find(address *url.URL, credentials bool) *InstanceMa
 				}
 			}
 		}
-		found = &InstanceMatch{Instance: instance, Tokens: tokens, Path: mr.Path, IID: mr.IID}
+		found = &InstanceMatch{Instance: instance, Tokens: tokens, Path: mr.Path, IID: mr.IID, kind: kind}
 	}
 	return found
 }
@@ -256,14 +257,18 @@ func Links(options Options) sdk.LinkProvider {
 			return running.token, running.err
 		}
 	}
-	return sdk.LinkProvider{Kind: "gitlab", Title: sdk.LocalizedText{"zh-CN": "GitLab 合并请求", "en": "GitLab merge requests"}, Match: func(address *url.URL) *sdk.LinkMatch {
+	return sdk.LinkProvider{Kind: "gitlab", Title: sdk.LocalizedText{"zh-CN": "GitLab 链接", "en": "GitLab links"}, Match: func(address *url.URL) *sdk.LinkMatch {
 		mr := instances.find(address, false)
 		if mr == nil {
 			return nil
 		}
+		if mr.kind == "issue" {
+			reference := fmt.Sprintf("#%d", mr.IID)
+			return &sdk.LinkMatch{Kind: mr.kind, Label: mr.Path + reference, Reference: reference, RepositoryURL: mr.Instance + "/" + mr.Path}
+		}
 		return &sdk.LinkMatch{Kind: "pull-request", Label: fmt.Sprintf("%s!%d", mr.Path, mr.IID)}
 	},
-		Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
+		Preview: func(ctx context.Context, address *url.URL) (*sdk.LinkPreview, error) {
 			mr := instances.Find(address)
 			if mr == nil {
 				return nil, nil
@@ -286,12 +291,15 @@ func Links(options Options) sdk.LinkProvider {
 				mu.Unlock()
 				jobs.Done()
 			}()
-			read := func(token func(context.Context) (*string, error)) (*sdk.PullRequestPreview, error) {
+			read := func(token func(context.Context) (*string, error)) (*sdk.LinkPreview, error) {
 				api, err := NewAPI(APIOptions{Base: mr.Instance + "/api/v4", Path: mr.Path, WebURL: mr.Instance + "/" + mr.Path, Token: token, Client: options.Client})
 				if err != nil {
 					return nil, err
 				}
 				defer api.Close()
+				if mr.kind == "issue" {
+					return api.PreviewIssue(ctx, mr.IID)
+				}
 				return api.Preview(ctx, mr.IID)
 			}
 			if value := pluginToken(options, mr.Instance); value != "" && !slices.Contains(mr.Tokens, value) {

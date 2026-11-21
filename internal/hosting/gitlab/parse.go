@@ -201,25 +201,37 @@ type MergeURL struct {
 	IID  int    `json:"iid"`
 }
 
-var mergePath = regexp.MustCompile(`^/(.+?)/-/merge_requests/(\d{1,9})(?:/[\w/.-]*)?$`)
+var linkPath = regexp.MustCompile(`^/(.+?)/-/(merge_requests|issues)/(\d{1,9})(?:/[\w/.-]*)?$`)
 
 func ParseMergeRequestURL(address *url.URL, instance string) *MergeURL {
+	link, kind := parseLinkURL(address, instance)
+	if kind == "pull-request" {
+		return link
+	}
+	return nil
+}
+
+func parseLinkURL(address *url.URL, instance string) (*MergeURL, string) {
 	home, err := url.Parse(instance)
 	if address == nil || err != nil || address.Scheme != home.Scheme || !strings.EqualFold(address.Host, home.Host) {
-		return nil
+		return nil, ""
 	}
 	prefix := strings.TrimRight(home.EscapedPath(), "/")
 	pathname := address.EscapedPath()
 	if prefix != "" && !strings.HasPrefix(pathname, prefix+"/") {
-		return nil
+		return nil, ""
 	}
-	match := mergePath.FindStringSubmatch(strings.TrimPrefix(pathname, prefix))
+	match := linkPath.FindStringSubmatch(strings.TrimPrefix(pathname, prefix))
 	if match == nil {
-		return nil
+		return nil, ""
 	}
 	if _, err := checkPath(match[1], address.String()); err != nil {
-		return nil
+		return nil, ""
 	}
-	number, _ := strconv.Atoi(match[2])
-	return &MergeURL{Path: match[1], IID: number}
+	number, _ := strconv.Atoi(match[3])
+	kind := "pull-request"
+	if match[2] == "issues" {
+		kind = "issue"
+	}
+	return &MergeURL{Path: match[1], IID: number}, kind
 }

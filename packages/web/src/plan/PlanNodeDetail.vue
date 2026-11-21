@@ -14,7 +14,6 @@ import {
 } from 'dou-ui'
 import {
   AlertTriangleIcon,
-  CircleDotIcon,
   FileDiffIcon,
   LinkPlusIcon,
   PlayIcon,
@@ -29,6 +28,7 @@ import { kindIcon } from '../artifacts/kinds'
 import { startedAhead } from './layout'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
 import PullRequestLink from './PlanPullRequest.vue'
+import IssueLink from '../markdown/IssueLink.vue'
 import ChangeTotals from '../components/ChangeTotals.vue'
 import { branchChanges } from '../review/merge-offered'
 import StageIcon from '../components/StageIcon.vue'
@@ -388,10 +388,7 @@ const removeQuestion = computed(() => {
     >
       <ul v-if="node.issues.length" class="node-detail-list">
         <li v-for="issue in node.issues" :key="issue.number" class="node-issue">
-          <DouLink :href="issue.url" external class="node-issue-link" :title="issue.title">
-            <template #leading><CircleDotIcon /></template>
-            #{{ issue.number }} {{ issue.title }}
-          </DouLink>
+          <IssueLink :href="issue.url" :label="`#${issue.number} ${issue.title}`" variant="text" />
           <DouText variant="tertiary" size="sm" class="node-issue-by">
             {{ t('plan.issueLinkedBy', { who: linkedBy(issue.linkedBy) }) }}
           </DouText>
@@ -589,12 +586,6 @@ const removeQuestion = computed(() => {
   align-items: center;
   gap: 0 8px;
   padding-block: 2px;
-}
-
-.node-issue-link {
-  min-width: 0;
-  font-size: var(--dou-font-size-sm);
-  overflow-wrap: anywhere;
 }
 
 .node-detail-link {
