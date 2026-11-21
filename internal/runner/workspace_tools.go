@@ -77,14 +77,16 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 }
 
 func (turn *turn) commandTools() []tool {
+	readOutput := specification("read_command_output", "Read the status and next page of output of one of your background commands. If more is available, use the same handle to continue.",
+		args{"handle": field("string"), "waitSeconds": args{"type": "integer", "description": "Seconds to wait for new output or completion while the command is running, up to 60."}}, []string{"handle"}, nil)
+	readOutput.poll = turn.readCommand
 	return []tool{
 		specification("run_command", "Run a shell command in the workspace. Pass source to select a writable source. Commands covered by an approval rule require the user's answer. Long commands may continue in the background. For large logs, traces, source maps or generated bundles, use a script that prints a small targeted summary.",
 			args{"command": field("string"), "cwd": field("string"), "source": field("string"),
 				"timeoutSeconds": args{"type": "integer", "description": "Maximum execution time, even after the command moves to the background."},
 				"yieldSeconds":   args{"type": "integer", "description": "How long to wait for a foreground command before returning a background handle."},
 				"background":     field("boolean"), "keepForUser": field("boolean")}, []string{"command"}, turn.runCommand),
-		specification("read_command_output", "Read the status and next page of output of one of your background commands. If more is available, use the same handle to continue.",
-			args{"handle": field("string"), "waitSeconds": field("integer")}, []string{"handle"}, turn.readCommand),
+		readOutput,
 		specification("stop_command", "Stop one of your background commands.",
 			args{"handle": field("string")}, []string{"handle"}, turn.stopCommand),
 	}
@@ -387,14 +389,24 @@ func formatOutput(output *background.Output, setup string, err error) (string, e
 	return text, nil
 }
 
-func (turn *turn) readCommand(ctx context.Context, input args) (string, error) {
+func (turn *turn) readCommand(ctx context.Context, input args) (string, repeatEffect, error) {
 	thread, err := turn.editable(ctx)
 	if err != nil {
-		return "", err
+		return "", repeatTrack, err
 	}
-	wait := time.Duration(max(0, min(60, asNumber(input["waitSeconds"]))) * float64(time.Second))
+	wait := time.Duration(min(background.MaxReadWait.Seconds(), max(0, asNumber(input["waitSeconds"]))) * float64(time.Second))
 	output, err := turn.Workspaces.Background.Read(ctx, thread.ID, text(input, "handle"), wait, 30000)
-	return formatOutput(output, "", err)
+	content, err := formatOutput(output, "", err)
+	if err != nil || output == nil {
+		return content, repeatTrack, err
+	}
+	if output.Text != "" || output.More || output.Missed > 0 {
+		return content, repeatProgress, nil
+	}
+	if output.Command.Result == nil && wait > 0 {
+		return content, repeatWait, nil
+	}
+	return content, repeatTrack, nil
 }
 
 func (turn *turn) stopCommand(ctx context.Context, input args) (string, error) {
