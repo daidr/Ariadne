@@ -1,12 +1,14 @@
 package runner
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
 func TestCoordinatorCannotRenameProject(t *testing.T) {
@@ -178,6 +180,21 @@ func TestCoordinatorLinkThreadNode(t *testing.T) {
 	}
 	if _, err := linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": 123}); err == nil {
 		t.Fatal("expected error for non-string nodeId")
+	}
+	reviewID := "thr_review_link"
+	reviewData, err := json.Marshal(args{"threadId": reviewID, "title": "审查", "nodeId": nil, "model": nil, "branch": nil, "reviewOf": thread.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "thread.created",
+		ProjectID: project.ID,
+		Data:      reviewData,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := linkTool.run(ctx, args{"threadId": reviewID, "nodeId": "nod_1"}); err == nil || !strings.Contains(err.Error(), "review thread cannot be linked to a plan node") {
+		t.Fatalf("expected readable error for review thread, got %v", err)
 	}
 
 	// Bind to nod_1.

@@ -404,12 +404,19 @@ func (turn *turn) linkThreadNode(ctx context.Context, input args) (string, error
 	thread, err := turn.Repository.SetThreadNode(ctx, turn.conversation.ProjectID, id, nodeID, turn.conversation.ID)
 	if err != nil {
 		var detail *domainerr.Error
-		if errors.As(err, &detail) && detail.Key == "error.notFound" {
-			if detail.Field == "nodeId" {
-				what, _ := detail.Params["what"].(string)
-				return "", fmt.Errorf("nodeId %q is not a plan node in this project. Call read_plan for a current node ID, or omit nodeId to unlink.", textutil.HeadUnits(what, 128))
+		if errors.As(err, &detail) {
+			switch detail.Key {
+			case "error.notFound":
+				if detail.Field == "nodeId" {
+					what, _ := detail.Params["what"].(string)
+					return "", fmt.Errorf("nodeId %q is not a plan node in this project. Call read_plan for a current node ID, or omit nodeId to unlink.", textutil.HeadUnits(what, 128))
+				}
+				return "", fmt.Errorf("No discussion thread %q in this project. Call list_threads to find its threadId.", id)
+			case "error.invalidBody":
+				if reason, ok := detail.Params["reason"].(string); ok && reason != "" {
+					return "", errors.New(reason)
+				}
 			}
-			return "", fmt.Errorf("No discussion thread %q in this project. Call list_threads to find its threadId.", id)
 		}
 		return "", err
 	}
