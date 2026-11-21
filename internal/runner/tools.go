@@ -211,6 +211,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				specs = append(specs, turn.interactionTools()...)
 				specs = append(specs, turn.threadManagementTools(false)...)
 				specs = append(specs, turn.readPlanTool())
+				specs = append(specs, turn.memoryTools()...)
 				specs = append(specs, turn.artifactTools()...)
 			}
 		}

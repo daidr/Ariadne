@@ -9,16 +9,39 @@ import (
 
 func (turn *turn) memoryTools() []tool {
 	return []tool{
-		specification("remember", "Save a lasting fact or preference the user stated or confirmed in their own words. Pass memoryId to change a project entry. Use scope everywhere for a user preference that applies to every project. Only use this while answering the user.",
+		specification("remember", "Save a lasting fact or preference the user stated or confirmed directly in this conversation. Pass memoryId to change a project entry. Use scope everywhere for a user preference that applies to every project. Only use this while answering the user directly.",
 			args{"text": field("string"), "memoryId": field("string"), "scope": args{"type": "string", "enum": []string{"project", "everywhere"}}}, []string{"text"}, turn.remember),
-		specification("forget", "Remove a project memory by memoryId, or a line of instructions for every project by its exact text, when the user asks.",
+		specification("forget", "Remove a project memory by memoryId, or a line of instructions for every project by its exact text, when the user asks directly in this conversation.",
 			args{"memoryId": field("string"), "text": field("string")}, nil, turn.forget),
 	}
 }
 
+func (turn *turn) canEditMemory(ctx context.Context) error {
+	if turn.conversation.Role == "thread" {
+		thread, err := turn.Repository.GetThread(ctx, turn.conversation.ID)
+		if err != nil {
+			return err
+		}
+		if reviewOf, ok := thread.ReviewOf.(string); ok && reviewOf != "" {
+			return errors.New("review threads cannot change memory")
+		}
+		if !turn.userSpoke {
+			return errors.New("memory changes need the user's own input in this turn")
+		}
+		return nil
+	}
+	if !turn.directUserInput {
+		if turn.userSpoke {
+			return errors.New("memory changes requested in a discussion thread are handled by that thread")
+		}
+		return errors.New("memory changes need the user's own input in this turn")
+	}
+	return nil
+}
+
 func (turn *turn) remember(ctx context.Context, input args) (string, error) {
-	if !turn.userSpoke {
-		return "", errors.New("memory changes need the user's own input in this turn")
+	if err := turn.canEditMemory(ctx); err != nil {
+		return "", err
 	}
 	conversation := turn.conversation
 	words, memoryID := text(input, "text"), optional(input, "memoryId")
@@ -46,8 +69,8 @@ func (turn *turn) remember(ctx context.Context, input args) (string, error) {
 }
 
 func (turn *turn) forget(ctx context.Context, input args) (string, error) {
-	if !turn.userSpoke {
-		return "", errors.New("memory changes need the user's own input in this turn")
+	if err := turn.canEditMemory(ctx); err != nil {
+		return "", err
 	}
 	conversation := turn.conversation
 	if id := text(input, "memoryId"); id != "" {
