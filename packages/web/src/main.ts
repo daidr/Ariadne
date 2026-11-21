@@ -1,9 +1,11 @@
 import 'dou-ui/style.css'
 import { createApp } from 'vue'
+import { createWebHistory, RouterView } from 'vue-router'
 import App from './App.vue'
 import { initToken } from './api'
 import { watchPresence } from './presence'
+import { createWorkspaceRouter } from './workspace-route'
 
 initToken()
-createApp(App).mount('#app')
+createApp(RouterView).use(createWorkspaceRouter(createWebHistory(), App)).mount('#app')
 watchPresence()

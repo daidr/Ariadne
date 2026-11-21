@@ -160,7 +160,7 @@ function bring(group: DockGroup, key: side.ListKey) {
       class="side-dock"
       @update:model-value="changed"
       @update:active-group="focusGroup"
-      @remove="(key) => closePane(key as PaneKey)"
+      @remove="(key) => closePane(key as PaneKey, compact)"
     >
       <template #label="{ value }">
         <DouTooltip v-if="side.isPinned(value)" :content="labelOf(value)">

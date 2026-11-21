@@ -45,6 +45,7 @@ import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
 import { clearBoardThumbnails } from './artifacts/board-thumbnail'
 import { clearLinkCaches } from './markdown/link-summaries'
+import type { WorkspaceLocation, WorkspaceSnapshot } from './workspace-route'
 
 /** What the middle column shows. */
 export type MainView =
@@ -382,8 +383,7 @@ async function loadParts(parts: ReadonlySet<Part>) {
   // Only now: an answer dropped above must be asked for again from where this one began.
   if (fetched) synced = { projectId: id, cursor: fetched.cursor }
   const artifactIds = artifacts ? new Set(artifacts.artifacts.map((a) => a.id)) : null
-  setSide(side.prune(state.side, (key) => stillThere(key, known, artifactIds)))
-  if (state.full && !fullStillThere(state.full.view, known, artifactIds)) setFull(null)
+  validateWorkspace(detail, known, artifactIds)
   if (coordinator) state.coordinator = coordinator(state.coordinator)
   // A thread closed meanwhile stays closed.
   for (const [threadId, apply] of threads ?? []) {
@@ -413,6 +413,21 @@ function fullStillThere(view: OpenedView, threads: Set<string>, artifactIds: Set
   return view.kind === 'artifact'
     ? !artifactIds || artifactIds.has(view.id)
     : threads.has(view.threadId)
+}
+
+function validateWorkspace(
+  detail: ProjectDetail,
+  threads: Set<string>,
+  artifacts: Set<string> | null,
+) {
+  setSide(side.prune(state.side, (key) => stillThere(key, threads, artifacts)))
+  if (state.full && !fullStillThere(state.full.view, threads, artifacts)) setFull(null)
+  if (
+    state.main.kind === 'trace' &&
+    state.main.conversationId !== detail.project.coordinatorId &&
+    !threads.has(state.main.conversationId)
+  )
+    resetMain()
 }
 
 /**
@@ -586,19 +601,25 @@ export async function openMessage(conversationId: string, messageId: string) {
   state.focus = { conversationId, messageId, nonce: (state.focus?.nonce ?? 0) + 1 }
 }
 
-export async function openProject(id: string, { reveal = true } = {}) {
+function prepareProject(id: string | null) {
   clearBoardThumbnails()
   clearLinkCaches()
   state.starting = false
   state.currentId = id
-  showSide(readSide(id))
+  if (!id) sideUntouched = true
+  showSide(id ? readSide(id) : side.defaultLayout())
   state.detail = null
   state.plan = null
   state.artifacts = []
   state.memories = []
   resetMain()
-  if (reveal) showWorkspace('coordinator')
+  state.focus = null
   state.coordinator = emptyConversation()
+}
+
+export async function openProject(id: string, { reveal = true } = {}) {
+  prepareProject(id)
+  if (reveal) showWorkspace('coordinator')
   await refreshCurrent().catch(report)
 }
 
@@ -748,8 +769,8 @@ export function openThreadFrom(event: MouseEvent | KeyboardEvent | undefined, th
   return openThread(threadId, event?.altKey ? { beside: 'horizontal' } : {})
 }
 
-export function closePane(key: PaneKey) {
-  setSide(side.close(state.side, key))
+export function closePane(key: PaneKey, acrossGroups = false) {
+  setSide(side.close(state.side, key, acrossGroups))
 }
 
 export function splitPane(key: PaneKey, direction: SplitDirection) {
@@ -804,16 +825,8 @@ function forgetProject(id: string) {
     void openProject(next, { reveal: state.workspaceLevel !== 'projects' })
     return
   }
-  state.currentId = null
-  sideUntouched = true
-  showSide(side.defaultLayout())
-  state.detail = null
-  state.plan = null
-  state.artifacts = []
-  state.memories = []
-  resetMain()
+  prepareProject(null)
   showWorkspace('projects')
-  state.coordinator = emptyConversation()
 }
 
 /** Whether it was sent; a failure is reported, and the draft is kept for another try. */
@@ -893,6 +906,81 @@ export function backMain() {
   state.main = view
   state.planWide = view.kind === 'plan'
   showWorkspace(level)
+}
+
+export function captureWorkspace(): { location: WorkspaceLocation; snapshot: WorkspaceSnapshot } {
+  return {
+    location: {
+      projectId: state.currentId,
+      level: state.workspaceLevel,
+      main: state.main,
+      starting: state.starting,
+      tab: state.currentId ? side.activeOf(side.focusedGroup(state.side)) : null,
+      modal: state.full ? paneKeyOf(state.full.view) : null,
+      from: state.full?.threadId ?? null,
+    },
+    snapshot: {
+      side: state.side,
+      paneParams: state.paneParams,
+      full: state.full,
+      planWide: state.planWide,
+      mainTrail,
+    },
+  }
+}
+
+/** Apply a URL before loading its project, so all its open conversations load together. */
+export async function restoreWorkspace(location: WorkspaceLocation, saved?: WorkspaceSnapshot) {
+  const exists = (id: string | null) => state.projects.some((project) => project.id === id)
+  const projectId = exists(location.projectId)
+    ? location.projectId
+    : exists(state.currentId)
+      ? state.currentId
+      : (state.projects[0]?.id ?? null)
+  const useProject = projectId === location.projectId
+  const changed = projectId !== state.currentId || (!!projectId && !state.detail)
+  if (changed) prepareProject(projectId)
+
+  const stored = useProject && saved ? side.parseLayout(saved.side, true) : null
+  if (stored && saved) {
+    state.side = stored
+    state.paneParams = saved.paneParams
+    sideUntouched = false
+  } else if (useProject && projectId && location.tab) {
+    const tab = location.tab
+    if (!tab.startsWith('turn:') || state.paneParams[tab]?.turn) {
+      state.side = side.open(
+        state.side,
+        side.groupWith(state.side, tab) ? tab : (side.listOf(tab) ?? tab),
+      )
+      sideUntouched = false
+    }
+  }
+
+  const modal = useProject && projectId && location.modal ? openedViewOf(location.modal) : null
+  state.full =
+    stored && saved
+      ? saved.full
+      : modal
+        ? { view: modal, threadId: location.from, fromSide: false }
+        : null
+  state.starting = location.starting && (useProject || !location.projectId)
+  state.workspaceLevel = state.starting ? 'coordinator' : useProject ? location.level : 'projects'
+  state.main = useProject && projectId ? location.main : { kind: 'conversation' }
+  state.planWide =
+    stored && saved ? saved.planWide : state.main.kind === 'plan' && state.workspaceLevel !== 'side'
+  mainTrail = stored && saved ? saved.mainTrail : []
+
+  if (changed) {
+    await refreshCurrent().catch(report)
+  } else if (state.detail) {
+    validateWorkspace(
+      state.detail,
+      new Set(state.detail.threads.map((thread) => thread.id)),
+      new Set(state.artifacts.map((artifact) => artifact.id)),
+    )
+    syncThreads()
+  }
 }
 
 /** The tab a view opens in on the right side. */
@@ -1289,7 +1377,7 @@ export async function setThreadModel(threadId: string, model: string | null) {
   }
 }
 
-async function load(): Promise<number | null> {
+async function load(restore: () => Promise<void>): Promise<number | null> {
   api.getModelSettings().then(applyModelSettings, () => {})
   api.getInputSettings().then(
     (input) => (state.input = input),
@@ -1297,8 +1385,7 @@ async function load(): Promise<number | null> {
   )
   try {
     const lastSeq = await refreshProjects()
-    const target = state.currentId ?? state.projects[0]?.id
-    if (target) await openProject(target, { reveal: false })
+    await restore()
     return lastSeq
   } catch (error) {
     report(error)
@@ -1306,8 +1393,8 @@ async function load(): Promise<number | null> {
   }
 }
 
-export async function start() {
-  const lastSeq = await load()
+export async function start(restore: () => Promise<void>) {
+  const lastSeq = await load(restore)
   // Follow from the state just loaded. If loading failed (say the page opened before the
   // server), follow from the server's newest event and load once the stream is up.
   let loaded = lastSeq !== null
@@ -1324,7 +1411,7 @@ export async function start() {
       }
       if (loaded) return
       loaded = true
-      void load()
+      void load(restore)
     },
     onLive,
     onBackground,

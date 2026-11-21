@@ -44,6 +44,8 @@ export interface SideLayout {
   root: DockNode
   /** The group the user last used: what opens next goes there. */
   focused?: string
+  /** The tabs the user has activated, most recent first. */
+  recent?: PaneKey[]
 }
 
 export const threadKey = (id: string): PaneKey => `thread:${id}`
@@ -80,7 +82,10 @@ export const activeOf = (group: DockGroup) => (group.active ?? group.tabs[0]) as
 
 /** What a project starts with: its lists in one group, the plan in front unless told otherwise. */
 export function defaultLayout(front: 'plan' | 'threads' = 'plan'): SideLayout {
-  return { root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: front } }
+  return {
+    root: { type: 'group', id: 'group-1', tabs: [...LISTS], active: front },
+    recent: [front],
+  }
 }
 
 /** Every group, left to right and top to bottom. */
@@ -161,7 +166,17 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
     root = mapGroups(root, (group) => (group.id === first.id ? { ...group, tabs, active } : group))
   }
   const groups = groupsOf(root)
-  return { root, focused: groups.some((item) => item.id === focused) ? focused : groups[0]!.id }
+  const groupByTab = new Map(
+    groups.flatMap((group) => tabsOf(group).map((key) => [key, group] as const)),
+  )
+  const recent = [...new Set(layout.recent ?? [])].filter((key) => groupByTab.has(key))
+  const current =
+    groups.find((group) => group.id === focused) ?? groupByTab.get(recent[0]!) ?? groups[0]!
+  return {
+    root,
+    focused: current.id,
+    recent: [...new Set([activeOf(current), ...recent])],
+  }
 }
 
 /** A native drag of a fixed tab opens its copy. Returning a copy removes it. */
@@ -244,9 +259,17 @@ export function open(layout: SideLayout, key: PaneKey, options: OpenOptions = {}
 }
 
 /** Close a tab. A group left empty goes, and the group beside it takes its room. */
-export function close(layout: SideLayout, key: PaneKey): SideLayout {
-  if (isPinned(key) || !groupWith(layout, key)) return layout
-  return withRoot(layout, removeDockTab(layout.root, key))
+export function close(layout: SideLayout, key: PaneKey, acrossGroups = false): SideLayout {
+  if (isPinned(key)) return layout
+  const group = groupWith(layout, key)
+  if (!group) return layout
+  const inFront = activeOf(group) === key
+  const compact = acrossGroups && inFront && group.id === focusedGroup(layout).id
+  const previous =
+    inFront && layout.recent?.find((tab) => tab !== key && (compact || group.tabs.includes(tab)))
+  const root = removeDockTab(previous ? selectDockTab(layout.root, previous) : layout.root, key)
+  const focused = compact && previous ? groupWith(layout, previous)?.id : layout.focused
+  return withRoot(layout, root, focused)
 }
 
 /**
@@ -294,12 +317,16 @@ export function prune(layout: SideLayout, keep: (key: PaneKey) => boolean): Side
   return next
 }
 
-// A turn's changes are not kept: what it compares is only known while the page is open.
-const isKey = (value: unknown): value is PaneKey =>
+export const isPaneKey = (value: unknown): value is PaneKey =>
   typeof value === 'string' &&
-  (listOf(value) !== null || /^(thread|artifact|changes):.+/.test(value))
+  (listOf(value) !== null || /^(?:(?:thread|artifact|changes):[^:]+|turn:[^:]+:[^:]+)$/.test(value))
 
-function parseNode(value: unknown, seen: Set<string>, ids: Set<string>): DockNode | null {
+function parseNode(
+  value: unknown,
+  seen: Set<string>,
+  ids: Set<string>,
+  keepTurnChanges: boolean,
+): DockNode | null {
   if (!value || typeof value !== 'object') return null
   const node = value as Record<string, unknown>
   if (node.type === 'group') {
@@ -307,17 +334,18 @@ function parseNode(value: unknown, seen: Set<string>, ids: Set<string>): DockNod
     ids.add(node.id)
     const tabs: PaneKey[] = []
     for (const key of node.tabs) {
-      if (!isKey(key) || seen.has(key)) continue
+      if (!isPaneKey(key) || seen.has(key) || (!keepTurnChanges && key.startsWith('turn:')))
+        continue
       seen.add(key)
       tabs.push(key)
     }
     if (!tabs.length) return null
-    const active = isKey(node.active) && tabs.includes(node.active) ? node.active : tabs[0]!
+    const active = isPaneKey(node.active) && tabs.includes(node.active) ? node.active : tabs[0]!
     return { type: 'group', id: node.id, tabs, active }
   }
   if (node.type !== 'split') return null
-  const start = parseNode(node.start, seen, ids)
-  const end = parseNode(node.end, seen, ids)
+  const start = parseNode(node.start, seen, ids, keepTurnChanges)
+  const end = parseNode(node.end, seen, ids, keepTurnChanges)
   if (!start || !end) return start ?? end
   const direction = node.direction === 'vertical' ? 'vertical' : 'horizontal'
   const size = typeof node.size === 'number' && node.size > 0 && node.size < 100 ? node.size : 50
@@ -325,10 +353,17 @@ function parseNode(value: unknown, seen: Set<string>, ids: Set<string>): DockNod
 }
 
 /** A layout as stored, checked; `null` if it does not hold one. */
-export function parseLayout(raw: unknown): SideLayout | null {
+export function parseLayout(raw: unknown, keepTurnChanges = false): SideLayout | null {
   if (!raw || typeof raw !== 'object') return null
-  const root = parseNode((raw as { root?: unknown }).root, new Set(), new Set())
+  const root = parseNode((raw as { root?: unknown }).root, new Set(), new Set(), keepTurnChanges)
   if (!root) return null
-  const focused = (raw as { focused?: unknown }).focused
-  return updateDock({ root, ...(typeof focused === 'string' ? { focused } : {}) }, root)
+  const { focused, recent } = raw as { focused?: unknown; recent?: unknown }
+  return updateDock(
+    {
+      root,
+      focused: typeof focused === 'string' ? focused : undefined,
+      recent: Array.isArray(recent) ? recent.filter(isPaneKey) : undefined,
+    },
+    root,
+  )
 }

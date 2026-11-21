@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { moveDockTab, splitDockTab, type DockNode } from 'dou-ui'
 import {
   type SideLayout,
+  activate,
   close,
   closeOthers,
   compactGroup,
@@ -98,11 +99,33 @@ describe('side layout', () => {
     expect(shape(layout.root)).toEqual(['plan', 'threads', 'artifacts'])
   })
 
-  test('closing the tab in front brings its neighbour forward', () => {
+  test('closing the first opened tab goes back to the previously active list', () => {
     let layout = open(defaultLayout(), threadKey('a'))
     layout = close(layout, threadKey('a'))
-    expect(focusedGroup(layout).active).toBe('artifacts')
+    expect(focusedGroup(layout).active).toBe('plan')
     expect(close(layout, 'artifacts')).toBe(layout)
+  })
+
+  test('closing the active tab follows selection history, even after reloading the layout', () => {
+    let layout = open(defaultLayout(), threadKey('a'))
+    layout = open(layout, threadKey('b'))
+    layout = open(layout, threadKey('c'))
+    layout = activate(layout, threadKey('a'))
+    layout = activate(layout, threadKey('c'))
+    const restored = parseLayout(JSON.parse(JSON.stringify(layout)))!
+    expect(focusedThread(close(restored, threadKey('b')))).toBe('c')
+    expect(focusedThread(close(restored, threadKey('c')))).toBe('a')
+  })
+
+  test('the compact row goes back across desktop groups, and closing an empty group also returns focus', () => {
+    let layout = open(defaultLayout(), threadKey('a'))
+    layout = open(layout, threadKey('b'), { beside: 'horizontal' })
+    layout = open(layout, threadKey('c'))
+    layout = activate(layout, threadKey('a'))
+    layout = activate(layout, threadKey('c'))
+    expect(focusedThread(close(layout, threadKey('c')))).toBe('b')
+    expect(focusedThread(close(layout, threadKey('c'), true))).toBe('a')
+    expect(focusedThread(close(close(layout, threadKey('c')), threadKey('b')))).toBe('a')
   })
 
   test('closing the other tabs closes threads only, and the side never ends up empty', () => {
@@ -201,6 +224,7 @@ describe('side layout', () => {
     expect(parsed).toEqual({
       root: { type: 'group', id: 'g1', tabs: ['plan', 'threads', 'artifacts'], active: 'plan' },
       focused: 'g1',
+      recent: ['plan'],
     })
   })
 
