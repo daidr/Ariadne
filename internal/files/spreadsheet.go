@@ -89,7 +89,7 @@ func (store Store) PreviewSheet(ctx context.Context, id string, index int) (Shee
 	if err != nil {
 		return SheetPreview{}, err
 	}
-	if file.MIME != SpreadsheetMIME || len(file.Data) > MaxFileBytes {
+	if file.MIME != SpreadsheetMIME || len(file.Data) > MaxPreviewBytes {
 		return SheetPreview{}, domainerr.New("filePreview.error", nil)
 	}
 	view, err := previewSheet(ctx, file.Data, index)

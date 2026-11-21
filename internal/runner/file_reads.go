@@ -76,6 +76,10 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	if len(data) > 1<<20 {
 		return "", nil, errors.New("the text file exceeds the 1 MiB read limit")
 	}
+	return formatNumberedLines(data, input), nil, nil
+}
+
+func formatNumberedLines(data []byte, input args) string {
 	content := strings.TrimPrefix(strings.ToValidUTF8(string(data), "�"), "\ufeff")
 	lines := strings.Split(content, "\n")
 	offset, limit := 1, 240
@@ -101,7 +105,7 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	if end < len(lines) {
 		fmt.Fprintf(&out, "\n[Lines %d–%d of %d. Continue at offset %d.]", offset, end, len(lines), end+1)
 	}
-	return out.String(), nil, nil
+	return out.String()
 }
 
 func attachment(saved files.Stored, name string) args {
@@ -194,7 +198,7 @@ func (turn *turn) keepMessageImages(ctx context.Context, content string) string 
 			if err != nil {
 				continue
 			}
-			data, err := view.ReadBytes(ctx, decoded, files.MaxFileBytes)
+			data, err := view.ReadBytes(ctx, decoded, files.MaxImageBytes)
 			if media := workspaceImageType(decoded); err == nil && http.DetectContentType(data) == media {
 				if saved, err := store.Save(ctx, turn.conversation.ProjectID, media, data, false); err == nil {
 					id, pathIDs[decoded] = saved.ID, saved.ID

@@ -53,13 +53,13 @@ watch(previewFile, async (file, _previous, cleanup) => {
       size = Number(response.headers.get('content-length') ?? 0)
     }
     if (signal.aborted) return
-    if (size > maxFileBytes) {
-      problem.value = 'tooLarge'
-      return
-    }
     const kind = previewKind(mime, file.name ?? '')
     if (!kind) {
       problem.value = 'unsupported'
+      return
+    }
+    if (size > maxFileBytes) {
+      problem.value = 'tooLarge'
       return
     }
     if (kind === 'sheet') {

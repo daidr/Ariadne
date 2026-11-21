@@ -168,8 +168,9 @@ func reply(value any, err error) (string, error) {
 func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	conversation := turn.conversation
 	specs := []tool{
-		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID. Supported attachments are images, MP4, WebM, XLSX (up to 10 MiB each), and UTF-8 text including source code and CSV (up to 1 MiB each).",
+		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID (up to 50 MiB each).",
 			args{"text": field("string"), "replyTo": field("string"), "files": arrayOf(field("string"))}, []string{"text"}, turn.sendMessage),
+		turn.readAttachmentTool(),
 		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
 			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),
 		specification("search_messages", "Search messages and thread titles in the current project.",
@@ -295,6 +296,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				}
 				specs = append(specs, specification("write_file", "Create or replace a text file. Pass source to select a writable source.",
 					args{"path": field("string"), "content": field("string"), "source": field("string")}, []string{"path", "content"}, turn.writeFile))
+				specs = append(specs, turn.saveAttachmentTool())
 				specs = append(specs, turn.editorTools()...)
 				if !slices.Contains(project.Settings.Tools, "commands") {
 					specs = append(specs, turn.commandTools()...)

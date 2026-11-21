@@ -172,7 +172,9 @@ async function request<T>(
   const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
   // A file goes as it is, with its own type; anything else as JSON.
   const raw = body instanceof Blob
-  if (body !== undefined) headers['content-type'] = raw ? body.type : 'application/json'
+  if (body !== undefined) {
+    headers['content-type'] = raw ? body.type || 'application/octet-stream' : 'application/json'
+  }
   const response = await fetch(path, {
     method,
     headers,
