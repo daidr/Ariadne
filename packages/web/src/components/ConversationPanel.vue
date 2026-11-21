@@ -12,7 +12,6 @@ import {
   DouDropdownItem,
   DouDropdownRadioGroup,
   DouEmpty,
-  DouImagePreview,
   DouInput,
   DouLink,
   DouPopover,
@@ -94,6 +93,7 @@ import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
 import { branchChanges } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
+import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
@@ -1169,7 +1169,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
-    <DouImagePreview
+    <ImagePreview
       v-model:open="preview.open"
       v-model:index="preview.index"
       :images="preview.images"
