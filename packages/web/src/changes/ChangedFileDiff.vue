@@ -113,10 +113,10 @@ const oneSided = computed(() => !versions.value?.before || !versions.value?.afte
   margin: 8px 12px;
 }
 
-.diff {
-  /* Keep the editor's line virtualization for long files. At its edge, the wheel
-     continues scrolling the file list. Short diffs take their intrinsic height. */
-  max-block-size: max(180px, calc(100cqh - 34px));
+/* Let the outer virtual list own vertical scrolling while keeping horizontal scroll for long lines. */
+.diff :deep(.dou-code-editor__scroller) {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .diff :deep(.line-comment-mark) {
