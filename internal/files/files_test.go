@@ -1,6 +1,8 @@
 package files
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -48,28 +50,108 @@ func TestAttachmentsDeduplicateOnlyWithinProjectAndMIME(t *testing.T) {
 	}
 }
 
+func makeTestZip(t *testing.T, entries map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := zip.NewWriter(&buf)
+	for name, body := range entries {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func TestInvalidAttachmentAndOversizeAreRefused(t *testing.T) {
 	store := newStore(t)
+	zipData := makeTestZip(t, map[string][]byte{"readme.txt": []byte("hello")})
 	for _, test := range []struct {
-		mime string
-		data []byte
-		text bool
-		key  string
+		mime            string
+		data            []byte
+		allowAttachment bool
+		key             string
 	}{
 		{"image/svg+xml", []byte("<svg/>"), false, "error.fileType"},
-		{"image/svg+xml", []byte("<svg/>"), true, "error.attachmentType"},
-		{"text/plain", []byte{'a', 0}, true, "error.attachmentType"},
-		{"text/plain", []byte{255}, true, "error.attachmentType"},
-		{"text/plain", []byte(strings.Repeat("x", MaxTextBytes+1)), true, "error.fileTooLarge"},
+		{"application/zip", zipData, false, "error.fileType"},
+		{"text/plain", []byte("hello"), false, "error.fileType"},
+		{"image/png", make([]byte, MaxImageBytes+1), false, "error.fileTooLarge"},
+		{"application/octet-stream", make([]byte, MaxFileBytes+1), true, "error.fileTooLarge"},
 	} {
-		_, err := store.Save(t.Context(), "p1", test.mime, test.data, test.text)
+		_, err := store.Save(t.Context(), "p1", test.mime, test.data, test.allowAttachment)
 		var localized *domainerr.Error
 		if !errors.As(err, &localized) || localized.Key != test.key {
-			t.Fatalf("%s: %v", test.mime, err)
+			t.Fatalf("%s (allowAttachment=%t): got %v, want %s", test.mime, test.allowAttachment, err, test.key)
 		}
 	}
 	if _, err := store.Save(t.Context(), "gone", "image/png", []byte("image"), false); err == nil {
 		t.Fatal("wrote file for missing project")
+	}
+}
+
+func TestGeneralAttachmentsStoreSafeMIMEAndHeaders(t *testing.T) {
+	store := newStore(t)
+	zipData := makeTestZip(t, map[string][]byte{"hello.txt": []byte("world")})
+	emptyZip := makeTestZip(t, nil)
+	docxMIME := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+	for _, tc := range []struct {
+		name               string
+		givenMIME          string
+		data               []byte
+		wantMIME           string
+		wantAttachmentDisp bool
+	}{
+		{"zip with windows mime", "application/x-zip-compressed", zipData, "application/zip", true},
+		{"zip with empty mime", "", zipData, "application/zip", true},
+		{"empty zip archive", "application/zip", emptyZip, "application/zip", true},
+		{"docx preserves safe zip mime", docxMIME, zipData, docxMIME, true},
+		{"pdf detected", "application/octet-stream", []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"), "application/pdf", true},
+		{"7z detected", "", append([]byte{0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c}, 0, 0), "application/x-7z-compressed", true},
+		{"binary labeled text", "text/plain", []byte{'a', 0, 'b'}, "application/octet-stream", true},
+		{"invalid utf8 binary", "text/plain", []byte{0xff, 0xfe}, "application/octet-stream", true},
+		{"svg downgraded to plain text", "image/svg+xml", []byte("<svg><script>alert(1)</script></svg>"), "text/plain", false},
+		{"large utf8 text accepted", "text/plain", []byte(strings.Repeat("x", MaxTextBytes+1024)), "text/plain", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saved, err := store.Save(t.Context(), "p1", tc.givenMIME, tc.data, true)
+			if err != nil {
+				t.Fatalf("save failed: %v", err)
+			}
+			if saved.MIME != tc.wantMIME {
+				t.Fatalf("got MIME %q, want %q", saved.MIME, tc.wantMIME)
+			}
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /api/files/{fileId}", store.Serve)
+			req := httptest.NewRequest("GET", "http://localhost"+saved.URL, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != 200 {
+				t.Fatalf("serve status: %d", rec.Code)
+			}
+			if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("missing nosniff header: %v", rec.Header())
+			}
+			if rec.Header().Get("Content-Security-Policy") != "default-src 'none'" {
+				t.Fatalf("missing CSP header: %v", rec.Header())
+			}
+			gotDisp := rec.Header().Get("Content-Disposition")
+			if tc.wantAttachmentDisp && gotDisp != "attachment" {
+				t.Fatalf("expected Content-Disposition=attachment, got %q", gotDisp)
+			}
+			if !tc.wantAttachmentDisp && gotDisp != "" {
+				t.Fatalf("expected inline serve without Content-Disposition, got %q", gotDisp)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), tc.data) {
+				t.Fatalf("served bytes differed from saved data")
+			}
+		})
 	}
 }
 

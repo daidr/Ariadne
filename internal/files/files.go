@@ -21,7 +21,9 @@ import (
 	"github.com/daidr/Ariadne/internal/textutil"
 )
 
-const MaxFileBytes = 10 * 1024 * 1024
+const MaxFileBytes = 50 * 1024 * 1024
+const MaxImageBytes = 10 * 1024 * 1024
+const MaxPreviewBytes = 10 * 1024 * 1024
 const MaxTextBytes = 1024 * 1024
 const SpreadsheetMIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -60,9 +62,65 @@ func IsImage(mime string) bool {
 
 func IsText(data []byte) bool { return utf8.Valid(data) && !bytes.ContainsRune(data, 0) }
 
-func (store Store) Save(ctx context.Context, project, mime string, data []byte, allowText bool) (stored Stored, err error) {
+func isSafeZipDocument(mime string) bool {
+	switch mime {
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		"application/vnd.oasis.opendocument.text",
+		"application/vnd.oasis.opendocument.spreadsheet",
+		"application/vnd.oasis.opendocument.presentation",
+		"application/epub+zip",
+		"application/java-archive":
+		return true
+	}
+	return false
+}
+
+func isSafeAudio(mime string) bool {
+	switch mime {
+	case "audio/mpeg", "audio/wave", "audio/ogg", "audio/flac", "audio/aiff", "application/ogg":
+		return true
+	}
+	return false
+}
+
+func isInlineServed(mime string) bool {
+	return IsImage(mime) || mime == "text/plain" || mime == "video/mp4" || mime == "video/webm"
+}
+
+func binaryAttachmentMIME(given, detected string, data []byte) string {
+	switch {
+	case detected == "application/zip" || bytes.HasPrefix(data, []byte("PK\x05\x06")):
+		if isSafeZipDocument(given) {
+			return given
+		}
+		return "application/zip"
+	case detected == "application/pdf":
+		return "application/pdf"
+	case detected == "application/x-gzip":
+		return "application/gzip"
+	case isSafeAudio(detected):
+		return detected
+	case bytes.HasPrefix(data, []byte{0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c}):
+		return "application/x-7z-compressed"
+	case bytes.HasPrefix(data, []byte("Rar!\x1a\x07")):
+		return "application/vnd.rar"
+	case len(data) >= 4 && data[0] == 'B' && data[1] == 'Z' && data[2] == 'h' && data[3] >= '1' && data[3] <= '9':
+		return "application/x-bzip2"
+	case bytes.HasPrefix(data, []byte{0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00}):
+		return "application/x-xz"
+	case bytes.HasPrefix(data, []byte{0x28, 0xb5, 0x2f, 0xfd}):
+		return "application/zstd"
+	case len(data) >= 263 && bytes.Equal(data[257:262], []byte("ustar")):
+		return "application/x-tar"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func (store Store) Save(ctx context.Context, project, mime string, data []byte, allowAttachment bool) (stored Stored, err error) {
 	err = store.Events.Within(ctx, func(tx *eventstore.Transaction) error {
-		stored, err = store.SaveTx(ctx, tx, project, mime, data, allowText)
+		stored, err = store.SaveTx(ctx, tx, project, mime, data, allowAttachment)
 		return err
 	})
 	if err != nil {
@@ -72,9 +130,13 @@ func (store Store) Save(ctx context.Context, project, mime string, data []byte, 
 }
 
 // SaveTx lets an artifact and its inline images commit or roll back together.
-func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, project, mime string, data []byte, allowText bool) (Stored, error) {
-	if len(data) > MaxFileBytes {
-		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": MaxFileBytes / 1024 / 1024})
+func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, project, mime string, data []byte, allowAttachment bool) (Stored, error) {
+	limit := MaxImageBytes
+	if allowAttachment {
+		limit = MaxFileBytes
+	}
+	if len(data) > limit {
+		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": limit / 1024 / 1024})
 	}
 	var exists int
 	if err := tx.SQL().QueryRowContext(ctx, "SELECT 1 FROM projects WHERE id = ?", project).Scan(&exists); err != nil {
@@ -84,27 +146,34 @@ func (store Store) SaveTx(ctx context.Context, tx *eventstore.Transaction, proje
 		return Stored{}, err
 	}
 	given := textutil.Lower(textutil.Trim(strings.SplitN(mime, ";", 2)[0]))
-	detected := http.DetectContentType(data)
+	detected := textutil.Lower(textutil.Trim(strings.SplitN(http.DetectContentType(data), ";", 2)[0]))
 	if IsImage(given) {
 		mime = given
-	} else if allowText && (detected == "video/mp4" || detected == "video/webm") {
-		mime = detected
-	} else if allowText && isSpreadsheet(data) {
-		mime = SpreadsheetMIME
-	} else if allowText && !strings.HasPrefix(given, "image/") && IsText(data) {
-		mime = "text/plain"
-	} else {
-		key := "error.fileType"
-		if allowText {
-			key = "error.attachmentType"
-		}
+	} else if !allowAttachment {
 		if given == "" {
 			given = "?"
 		}
-		return Stored{}, domainerr.New(key, map[string]any{"type": given})
-	}
-	if mime == "text/plain" && len(data) > MaxTextBytes {
-		return Stored{}, domainerr.New("error.fileTooLarge", map[string]any{"max": MaxTextBytes / 1024 / 1024})
+		return Stored{}, domainerr.New("error.fileType", map[string]any{"type": given})
+	} else if (given == "" || given == "application/octet-stream") && IsImage(detected) {
+		mime = detected
+	} else if (given == "" || given == "application/octet-stream") && len(data) >= 12 && string(data[4:12]) == "ftypavif" {
+		mime = "image/avif"
+	} else if detected == "video/mp4" || detected == "video/webm" {
+		mime = detected
+	} else if isSpreadsheet(data) {
+		mime = SpreadsheetMIME
+	} else if detected == "application/zip" || bytes.HasPrefix(data, []byte("PK\x05\x06")) {
+		if isSafeZipDocument(given) {
+			mime = given
+		} else {
+			mime = "application/zip"
+		}
+	} else if detected == "application/pdf" {
+		mime = "application/pdf"
+	} else if IsText(data) && (len(data) > 0 || given == "" || given == "application/octet-stream" || strings.HasPrefix(given, "text/")) {
+		mime = "text/plain"
+	} else {
+		mime = binaryAttachmentMIME(given, detected, data)
 	}
 	hash := sha256.Sum256(data)
 	digest := hex.EncodeToString(hash[:])
@@ -174,13 +243,18 @@ func (store Store) Serve(writer http.ResponseWriter, request *http.Request) {
 		domainerr.Write(writer, err)
 		return
 	}
-	if mime == "text/plain" {
-		mime = "text/plain; charset=utf-8"
+	contentType := mime
+	if contentType == "text/plain" {
+		contentType = "text/plain; charset=utf-8"
 	}
-	for key, value := range map[string]string{
-		"Content-Type": mime, "Cache-Control": "private, no-store", "Content-Length": fmt.Sprint(size),
+	headers := map[string]string{
+		"Content-Type": contentType, "Cache-Control": "private, no-store", "Content-Length": fmt.Sprint(size),
 		"Cross-Origin-Resource-Policy": "same-origin", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'",
-	} {
+	}
+	if !isInlineServed(mime) {
+		headers["Content-Disposition"] = "attachment"
+	}
+	for key, value := range headers {
 		writer.Header().Set(key, value)
 	}
 	if request.Method != http.MethodHead {

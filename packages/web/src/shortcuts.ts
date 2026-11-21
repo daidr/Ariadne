@@ -81,6 +81,7 @@ export function threadOrder(): string[] {
   return threadGroups.flatMap((group) =>
     sortThreads(
       threads.filter((thread) => groupOfThread(thread, actions) === group && !nested(thread)),
+      group,
     ).flatMap((thread) => {
       const reviewer = thread.review?.reviewerId
       return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]

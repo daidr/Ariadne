@@ -502,6 +502,8 @@ export interface EventMap {
   }
   /** The thread's model changed; `null` goes back to the default for threads. */
   'thread.model_set': { threadId: string; model: string | null; by: string }
+  /** The thread's linked plan node changed; `null` removes the link. */
+  'thread.node.set': { threadId: string; nodeId: string | null; by: string }
   /** The thread was given a new title: by itself, or by the coordinator (`by` is its id). */
   'thread.renamed': { threadId: string; title: string; by: string }
   /**

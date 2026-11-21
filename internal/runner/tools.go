@@ -14,12 +14,21 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+type repeatEffect uint8
+
+const (
+	repeatTrack repeatEffect = iota
+	repeatWait
+	repeatProgress
+)
+
 type args = map[string]any
 type tool struct {
 	spec       sdk.Tool
 	run        func(context.Context, args) (string, error)
 	call       func(context.Context, args) (string, []any, error)
 	withCallID func(context.Context, string, args) (string, error)
+	poll       func(context.Context, args) (string, repeatEffect, error)
 }
 
 func specification(name, description string, fields args, required []string, run func(context.Context, args) (string, error)) tool {
@@ -168,8 +177,9 @@ func reply(value any, err error) (string, error) {
 func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	conversation := turn.conversation
 	specs := []tool{
-		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID. Supported attachments are images, MP4, WebM, XLSX (up to 10 MiB each), and UTF-8 text including source code and CSV (up to 1 MiB each).",
+		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID (up to 50 MiB each).",
 			args{"text": field("string"), "replyTo": field("string"), "files": arrayOf(field("string"))}, []string{"text"}, turn.sendMessage),
+		turn.readAttachmentTool(),
 		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
 			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),
 		specification("search_messages", "Search messages and thread titles in the current project.",
@@ -215,14 +225,20 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs,
 			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
 				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by read_plan."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
+			specification("link_thread_node", "Link an existing discussion thread to a plan node, move it to another node, or unlink it. Pass an existing nodeId from read_plan to link or move, or omit nodeId or set unlink to true to remove the link.",
+				args{
+					"threadId": threadIDField(),
+					"nodeId":   args{"type": "string", "description": "Existing plan node ID returned by read_plan. Omit or leave empty to unlink."},
+					"unlink":   args{"type": "boolean", "description": "Set to true to remove the thread's plan node link."},
+				}, []string{"threadId"}, turn.linkThreadNode),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
 				args{"threadId": threadIDField(), "content": field("string"), "userMessages": userMessagesField("content")}, []string{"threadId"}, turn.messageThread),
-			specification("list_threads", "List discussion threads in the current project with their threadId, title and stage.",
+			specification("list_threads", "List discussion threads in the current project with their threadId, title, stage and linked nodeId.",
 				args{}, nil, func(ctx context.Context, _ args) (string, error) {
 					threads, err := turn.Repository.ListThreads(ctx, conversation.ProjectID)
 					var result []args
 					for _, thread := range threads[:min(len(threads), 100)] {
-						result = append(result, args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "summary": thread.LastSummary})
+						result = append(result, args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "nodeId": thread.NodeID, "summary": thread.LastSummary})
 					}
 					return reply(result, err)
 				}),
@@ -289,6 +305,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				}
 				specs = append(specs, specification("write_file", "Create or replace a text file. Pass source to select a writable source.",
 					args{"path": field("string"), "content": field("string"), "source": field("string")}, []string{"path", "content"}, turn.writeFile))
+				specs = append(specs, turn.saveAttachmentTool())
 				specs = append(specs, turn.editorTools()...)
 				if !slices.Contains(project.Settings.Tools, "commands") {
 					specs = append(specs, turn.commandTools()...)
@@ -375,6 +392,46 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 	thread, err := turn.Repository.CreateBriefedThread(ctx, turn.conversation.ProjectID,
 		core.NewThread{Title: title, Model: model, NodeID: optional(input, "nodeId"), Branch: optional(input, "branch")}, brief, cites)
 	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, relayToolError(err, "brief"))
+}
+
+func (turn *turn) linkThreadNode(ctx context.Context, input args) (string, error) {
+	id := text(input, "threadId")
+	if id == "" || id == "undefined" || id == "null" {
+		return "", errors.New("link_thread_node requires a real threadId. " + threadIDHelp)
+	}
+	unlink, _ := input["unlink"].(bool)
+	var nodeID *string
+	if !unlink {
+		if raw, present := input["nodeId"]; present && raw != nil {
+			value, ok := raw.(string)
+			if !ok {
+				return "", errors.New("nodeId must be a plan node ID string")
+			}
+			if clean := textutil.Trim(value); clean != "" {
+				nodeID = &clean
+			}
+		}
+	}
+	thread, err := turn.Repository.SetThreadNode(ctx, turn.conversation.ProjectID, id, nodeID, turn.conversation.ID)
+	if err != nil {
+		var detail *domainerr.Error
+		if errors.As(err, &detail) {
+			switch detail.Key {
+			case "error.notFound":
+				if detail.Field == "nodeId" {
+					what, _ := detail.Params["what"].(string)
+					return "", fmt.Errorf("nodeId %q is not a plan node in this project. Call read_plan for a current node ID, or omit nodeId to unlink.", textutil.HeadUnits(what, 128))
+				}
+				return "", fmt.Errorf("No discussion thread %q in this project. Call list_threads to find its threadId.", id)
+			case "error.invalidBody":
+				if reason, ok := detail.Params["reason"].(string); ok && reason != "" {
+					return "", errors.New(reason)
+				}
+			}
+		}
+		return "", err
+	}
+	return reply(args{"threadId": thread.ID, "nodeId": thread.NodeID}, nil)
 }
 
 func (turn *turn) messageThread(ctx context.Context, input args) (string, error) {
