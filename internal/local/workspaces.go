@@ -95,15 +95,23 @@ func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, er
 		if err != nil {
 			return fail(err)
 		}
-		data, err := filepath.Abs(options.DataDir)
-		if err != nil {
-			return fail(err)
-		}
 		if options.DataDir == "" {
 			return fail(errors.New("workspaces require a data directory"))
 		}
+		data, err := fsutil.CanonicalPath(options.DataDir)
+		if err != nil {
+			return fail(err)
+		}
 		key := fmt.Sprintf("%x", sha256.Sum256([]byte(repository)))[:12]
-		roots = []string{filepath.Join(data, "worktrees", key), filepath.Join(filepath.Dir(repository), WorktreeDirectory, key)}
+		managedRoot, err := fsutil.CanonicalPath(filepath.Join(data, "worktrees", key))
+		if err != nil {
+			return fail(err)
+		}
+		siblingRoot, err := fsutil.CanonicalPath(filepath.Join(filepath.Dir(repository), WorktreeDirectory, key))
+		if err != nil {
+			return fail(err)
+		}
+		roots = []string{managedRoot, siblingRoot}
 	}
 	clone := options.Clone
 	if clone == nil && !options.DisableClone {
@@ -208,14 +216,14 @@ func (factory *Workspaces) checkedDirectory(threadID string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(dir)
 	if os.IsNotExist(err) {
-		return dir, nil
+		return fsutil.CanonicalPath(dir)
 	}
 	if err != nil {
 		return "", err
 	}
 	for _, root := range factory.roots {
 		parent, err := filepath.EvalSymlinks(root)
-		if err == nil && resolved == filepath.Join(parent, threadID) {
+		if err == nil && cleanPathKey(resolved) == cleanPathKey(filepath.Join(parent, threadID)) {
 			return resolved, nil
 		}
 	}
@@ -474,7 +482,7 @@ func (factory *Workspaces) remove(ctx context.Context, threadID string, options 
 
 func (factory *Workspaces) removeOrphanedDirectory(ctx context.Context, dir, label string, checked os.FileInfo) (bool, error) {
 	subdir, err := filepath.Rel(factory.repository, factory.path)
-	if err != nil || !filepath.IsLocal(subdir) || worktreePathKey(filepath.Join(dir, subdir)) != worktreePathKey(label) {
+	if err != nil || !filepath.IsLocal(subdir) || cleanPathKey(filepath.Join(dir, subdir)) != worktreePathKey(label) {
 		return false, nil
 	}
 	root, err := os.OpenRoot(filepath.Dir(dir))
@@ -490,8 +498,9 @@ func (factory *Workspaces) removeOrphanedDirectory(ctx context.Context, dir, lab
 	if err != nil {
 		return false, err
 	}
+	dirKey := cleanPathKey(dir)
 	for _, path := range paths {
-		if worktreePathKey(path) == worktreePathKey(dir) {
+		if worktreePathKey(path) == dirKey {
 			return false, nil
 		}
 		info, err := os.Stat(path)
@@ -586,12 +595,22 @@ func registeredWorktrees(ctx context.Context, git GitRun) ([]string, error) {
 	return paths, nil
 }
 
-func worktreePathKey(path string) string {
+func cleanPathKey(path string) string {
 	path = filepath.Clean(path)
 	if runtime.GOOS == "windows" {
 		return strings.ToLower(path)
 	}
 	return path
+}
+
+func worktreePathKey(path string) string {
+	if path == "" {
+		return ""
+	}
+	if resolved, err := fsutil.CanonicalPath(path); err == nil {
+		path = resolved
+	}
+	return cleanPathKey(path)
 }
 
 func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.WorktreeInfo, error) {
@@ -610,8 +629,10 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 	}
 	registered := map[string]bool{}
 	for _, path := range paths {
+		registered[cleanPathKey(path)] = true
 		registered[worktreePathKey(path)] = true
 	}
+	seenRoots := map[string]bool{}
 	for _, root := range factory.roots {
 		resolved, err := filepath.EvalSymlinks(root)
 		if os.IsNotExist(err) {
@@ -620,6 +641,11 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 		if err != nil {
 			return nil, err
 		}
+		rootKey := cleanPathKey(resolved)
+		if seenRoots[rootKey] {
+			continue
+		}
+		seenRoots[rootKey] = true
 		entries, err := os.ReadDir(resolved)
 		if os.IsNotExist(err) {
 			continue
@@ -636,7 +662,7 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 			}
 			path := filepath.Join(root, entry.Name())
 			canonical := filepath.Join(resolved, entry.Name())
-			listed := registered[worktreePathKey(path)] || registered[worktreePathKey(canonical)]
+			listed := registered[cleanPathKey(path)] || registered[cleanPathKey(canonical)]
 			if !listed && !strings.HasPrefix(entry.Name(), "thr_") {
 				continue
 			}
@@ -655,7 +681,7 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 			if !listed || !info.Mode().IsRegular() {
 				continue
 			}
-			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: path})
+			result = append(result, sdk.WorktreeInfo{ThreadID: entry.Name(), Path: canonical})
 		}
 	}
 	if measure {
