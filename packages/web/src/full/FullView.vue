@@ -60,7 +60,7 @@ const label = computed(() => {
               <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
               <DouText size="sm" weight="medium" truncate>{{ thread.title }}</DouText>
             </div>
-            <ConversationPanel :thread-id="threadId" class="full-conversation" />
+            <ConversationPanel :key="threadId" :thread-id="threadId" class="full-conversation" />
           </div>
         </template>
       </DouSplitter>

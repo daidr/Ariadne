@@ -57,6 +57,7 @@ import { placeTodo, todoPlan } from './todo'
 import { isInlineImage, shownAttachments, useAttachments } from './attachments'
 import {
   composerFor,
+  coordinatorComposerFor,
   emptyConversation,
   loadEarlier,
   openMain,
@@ -125,8 +126,13 @@ provideFromThread(() => props.threadId ?? null)
 const openView = (view: OpenedView) => openFrom(view, { from: props.threadId ?? null })
 const openSettings = inject(openSettingsKey, () => {})
 
-// A thread's input is kept in the store, so moving its tab to another group keeps it.
-const composer = props.threadId ? composerFor(props.threadId) : null
+// Unsent input is kept in the store, so opening trace/plan/artifacts or moving tabs keeps it.
+const projectId = state.currentId ?? state.detail?.project.id ?? null
+const composer = props.threadId
+  ? composerFor(props.threadId)
+  : projectId
+    ? coordinatorComposerFor(projectId)
+    : null
 const draft = composer?.draft ?? ref('')
 const attachments = useAttachments(() => state.detail?.project.id ?? null, composer?.files)
 const picker = useTemplateRef<HTMLInputElement>('picker')
@@ -384,9 +390,9 @@ const entries = computed(() => [
   { id: 'conversation-activity', activity: true as const },
 ])
 const times = computed(() => messageTimes(shown.value.items))
-const askDrafts = new Map<string, AskDraft>()
+const askDrafts = composer?.askDrafts ?? new Map<string, AskDraft>()
 provide(askDraftsKey, askDrafts)
-watch(conversationId, () => askDrafts.clear())
+if (!composer) watch(conversationId, () => askDrafts.clear())
 
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
