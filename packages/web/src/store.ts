@@ -298,6 +298,7 @@ function refreshProjects(ids: Iterable<string | null> = [null]) {
 
 /** The parts of the open project the page loads, each refreshed when an event touches it. */
 type Part = 'detail' | 'conversations' | 'plan' | 'artifacts' | 'memories'
+type RefreshKey = Part | `conversation:${string}`
 const ALL_PARTS: readonly Part[] = ['detail', 'conversations', 'plan', 'artifacts', 'memories']
 
 /**
@@ -306,7 +307,7 @@ const ALL_PARTS: readonly Part[] = ['detail', 'conversations', 'plan', 'artifact
  * lands on top of a newer one.
  */
 const refreshParts = coalescedRefresh(loadParts)
-function refreshCurrent(parts: Iterable<Part> = ALL_PARTS): Promise<void> {
+function refreshCurrent(parts: Iterable<RefreshKey> = ALL_PARTS): Promise<void> {
   return refreshParts(parts)
 }
 
@@ -351,18 +352,40 @@ async function fetchDetail(id: string): Promise<{ detail: ProjectDetail; cursor:
   return { detail, cursor: sync.cursor }
 }
 
-async function loadParts(parts: ReadonlySet<Part>) {
+function syncProjectRow(project: ProjectView) {
+  const currentProjects = toRaw(state.projects)
+  const index = currentProjects.findIndex((item) => item.id === project.id)
+  if (index < 0) return
+  const next = [...currentProjects]
+  next[index] = project
+  state.projects = reuse(currentProjects, orderProjects(next))
+}
+
+async function loadParts(parts: ReadonlySet<RefreshKey>) {
   const id = state.currentId
   if (!id) return
   const fetched = parts.has('detail') || !state.detail ? await fetchDetail(id) : null
+  // Keep the sidebar row up to date even if the user switched projects or a sibling fetch fails.
+  if (fetched) syncProjectRow(fetched.detail.project)
+  if (state.currentId !== id) return
   const detail = fetched?.detail ?? state.detail!
-  const conversations = parts.has('conversations')
+  const allConversations = parts.has('conversations')
+  const targetConversations = new Set<string>()
+  if (!allConversations) {
+    for (const key of parts) {
+      if (key.startsWith('conversation:'))
+        targetConversations.add(key.slice('conversation:'.length))
+    }
+  }
+  const needCoordinator = allConversations || targetConversations.has(detail.project.coordinatorId)
   // A thread that no longer exists closes; its tab would show nothing.
   const known = new Set(detail.threads.map((thread) => thread.id))
-  const threadIds = shownThreads().filter((threadId) => known.has(threadId))
+  const threadIds = shownThreads().filter(
+    (threadId) => known.has(threadId) && (allConversations || targetConversations.has(threadId)),
+  )
   const [coordinator, threads, plan, artifacts, memory] = await Promise.all([
-    conversations ? fetchConversation(detail.project.coordinatorId, state.coordinator) : null,
-    conversations
+    needCoordinator ? fetchConversation(detail.project.coordinatorId, state.coordinator) : null,
+    threadIds.length
       ? Promise.all(
           threadIds.map(async (threadId) => {
             const current = state.threads[threadId] ?? emptyConversation()
@@ -601,6 +624,7 @@ export async function openMessage(conversationId: string, messageId: string) {
 }
 
 function prepareProject(id: string | null) {
+  parts.clear()
   clearBoardThumbnails()
   clearLinkCaches()
   state.starting = false
@@ -1256,11 +1280,19 @@ export async function answerAttention(id: string, answer: BlockAnswer): Promise<
   )
 }
 
-// Coalesce bursts of events into one refresh per frame, remembering every project touched
-// and which parts of the open one.
-let pending = false
+// Coalesce bursts of events into one refresh per frame (or a short window for high-frequency
+// progress events), remembering every project touched and which parts of the open one.
+const HIGH_FREQ_COALESCE_MS = 250
+const HIGH_FREQ_EVENTS = new Set<string>([
+  'turn.step',
+  'research.step',
+  'search.answered',
+  'turn.changed',
+])
+let rafPending = false
+let slowTimer: ReturnType<typeof setTimeout> | undefined
 const touched = new Set<string>()
-const parts = new Set<Part>()
+const parts = new Set<RefreshKey>()
 const listeners = new Set<(event: AnyStoredEvent) => void>()
 
 /** Hear every event as it arrives, e.g. to notify the user. */
@@ -1277,14 +1309,15 @@ export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => vo
 export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
   switch (type.split('.')[0]) {
     case 'prompt':
+    case 'tool':
       return []
     case 'memory':
       return ['memories', 'conversations']
     case 'artifact':
       return ['artifacts', 'conversations']
     // What a turn does while it runs; its threads' stages on the plan stay as they are.
-    case 'tool':
     case 'research':
+    case 'search':
     case 'todo':
     case 'conversation':
     case 'notice':
@@ -1295,7 +1328,7 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
     case 'user':
       return ['conversations']
     case 'turn':
-      return type === 'turn.step'
+      return type === 'turn.step' || type === 'turn.changed'
         ? ['detail', 'conversations']
         : ['detail', 'conversations', 'plan']
     // Anything that may move a thread's stage, which the plan's nodes show.
@@ -1318,6 +1351,95 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
   }
 }
 
+/** Whether an event can change a row in the project sidebar list (`ProjectView`). */
+export function affectsProjectList(type: AnyStoredEvent['type']): boolean {
+  switch (type.split('.')[0]) {
+    case 'prompt':
+    case 'tool':
+    case 'todo':
+    case 'memory':
+    case 'artifact':
+    case 'plan':
+    case 'notice':
+    case 'user':
+      return false
+    case 'message':
+      return type === 'message.posted'
+    case 'turn':
+      return type !== 'turn.changed'
+    case 'conversation':
+      return (
+        type === 'conversation.wait_set' ||
+        type === 'conversation.wait_ended' ||
+        type === 'conversation.compacted'
+      )
+    default:
+      return true
+  }
+}
+
+/** Specific conversations an event touches, or `null` when any open conversation may change. */
+export function touchedConversationsOf(
+  event: AnyStoredEvent,
+  coordinatorId: string | null = null,
+): readonly string[] | null {
+  const data = event.data as {
+    conversationId?: unknown
+    cites?: unknown
+    author?: unknown
+    comments?: unknown
+  }
+  const conversationId = typeof data?.conversationId === 'string' ? data.conversationId : null
+  const group = event.type.split('.')[0]
+  if (event.type === 'message.posted') {
+    const ids = conversationId ? [conversationId] : []
+    if (Array.isArray(data?.cites)) {
+      for (const cite of data.cites) {
+        const cited = (cite as { conversationId?: unknown })?.conversationId
+        if (typeof cited === 'string' && !ids.includes(cited)) ids.push(cited)
+      }
+    }
+    const hasComments = Array.isArray(data?.comments) && data.comments.length > 0
+    // A user message in a thread without line comments also wakes the coordinator.
+    if (data?.author === 'user' && !hasComments) {
+      if (!coordinatorId) return null
+      if (!ids.includes(coordinatorId)) ids.push(coordinatorId)
+    }
+    return ids.length ? ids : null
+  }
+  if (
+    conversationId &&
+    (group === 'turn' ||
+      group === 'todo' ||
+      group === 'research' ||
+      group === 'search' ||
+      group === 'conversation' ||
+      group === 'message')
+  ) {
+    return [conversationId]
+  }
+  return null
+}
+
+function flushEvents() {
+  rafPending = false
+  if (slowTimer !== undefined) {
+    clearTimeout(slowTimer)
+    slowTimer = undefined
+  }
+  const currentId = state.currentId
+  const changed = [...parts]
+  const detailRefreshed =
+    currentId !== null &&
+    changed.includes('detail') &&
+    state.projects.some((project) => project.id === currentId)
+  const projects = [...touched].filter((id) => !(detailRefreshed && id === currentId))
+  touched.clear()
+  parts.clear()
+  if (projects.length) void refreshProjects(projects).catch(report)
+  if (currentId !== null && changed.length) void refreshCurrent(changed).catch(report)
+}
+
 function onEvent(event: AnyStoredEvent) {
   for (const listener of listeners) listener(event)
   if (event.type === 'project.deleted') {
@@ -1327,20 +1449,38 @@ function onEvent(event: AnyStoredEvent) {
   }
   // A piece of model input stored once changes nothing on screen.
   if (event.type === 'prompt.recorded') return
-  touched.add(event.projectId)
-  if (event.projectId === state.currentId) for (const part of partsOf(event.type)) parts.add(part)
-  if (pending) return
-  pending = true
-  requestAnimationFrame(() => {
-    pending = false
-    const current = state.currentId !== null && touched.has(state.currentId)
-    const changed = [...parts]
-    const projects = [...touched]
-    touched.clear()
-    parts.clear()
-    if (projects.length) void refreshProjects(projects).catch(report)
-    if (current && changed.length) void refreshCurrent(changed).catch(report)
-  })
+  if (affectsProjectList(event.type)) touched.add(event.projectId)
+  if (event.projectId === state.currentId) {
+    for (const part of partsOf(event.type)) {
+      if (part === 'conversations') {
+        const conversations = touchedConversationsOf(
+          event,
+          state.detail?.project.coordinatorId ?? null,
+        )
+        if (conversations) {
+          for (const cid of conversations) parts.add(`conversation:${cid}`)
+        } else {
+          parts.add('conversations')
+        }
+      } else {
+        parts.add(part)
+      }
+    }
+  }
+  if (!touched.size && !parts.size) return
+  if (HIGH_FREQ_EVENTS.has(event.type)) {
+    if (!rafPending && slowTimer === undefined) {
+      slowTimer = setTimeout(flushEvents, HIGH_FREQ_COALESCE_MS)
+    }
+    return
+  }
+  if (slowTimer !== undefined) {
+    clearTimeout(slowTimer)
+    slowTimer = undefined
+  }
+  if (rafPending) return
+  rafPending = true
+  requestAnimationFrame(flushEvents)
 }
 
 /** Take in the model settings as saved: whether the coordinator has one, and the choices. */

@@ -456,11 +456,11 @@ export type NeedsMeItem =
   | {
       kind: 'attention'
       attention: AttentionView
-      thread: ThreadView | null
+      threadId: string | null
       /** Other threads waiting on the same card, which hear the same answer. */
-      joined: ThreadView[]
+      joinedIds: string[]
     }
-  | { kind: 'thread'; thread: ThreadView }
+  | { kind: 'thread'; threadId: string }
 
 export type ConversationRole = 'coordinator' | 'thread'
 

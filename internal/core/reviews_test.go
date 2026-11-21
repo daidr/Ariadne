@@ -185,8 +185,9 @@ func TestReviewRoundsExternalDeliveryAndAbandonMatchLegacy(t *testing.T) {
 			events = append(events, object{"seq": e.Seq, "type": e.Type, "projectId": e.ProjectID, "data": e.Data, "at": e.At})
 		}
 		actual := object{"value": value, "error": localized, "detail": detail, "reviews": reviews, "open": open, "passed": passed, "reads": reads, "coordinator": coordinator, "events": events}
-		if !reflect.DeepEqual(normalizedIDs(actual), normalizedIDs(expected[i])) {
-			t.Fatalf("command %d %s differs\ngot %s\nwant%s", i, encoded(command), encoded(normalizedIDs(actual)), encoded(normalizedIDs(expected[i])))
+		want := normalizedIDs(normalizeLegacyExpected(expected[i]))
+		if !reflect.DeepEqual(normalizedIDs(actual), want) {
+			t.Fatalf("command %d %s differs\ngot %s\nwant%s", i, encoded(command), encoded(normalizedIDs(actual)), encoded(want))
 		}
 	}
 }
