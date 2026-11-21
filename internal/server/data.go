@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"time"
+
+	"github.com/daidr/Ariadne/internal/fsutil"
 )
 
 func (api *API) registerData() {
@@ -20,6 +23,8 @@ func (api *API) registerData() {
 			return object{"storage": store.LatestStorage()}, 200, nil
 		case "storage":
 			return api.measureStorage(r)
+		case "reclaimable":
+			return api.measureReclaimable(r)
 		}
 		usage, err := store.Usage(r.Context())
 		return usage, 200, err
@@ -41,6 +46,28 @@ func (api *API) registerData() {
 		}
 		return nil, 204, api.options.Data.RemoveBackup(r.PathValue("name"))
 	})
+}
+
+func (api *API) measureReclaimable(r *http.Request) (any, int, error) {
+	manager := api.options.Workspaces
+	path := r.URL.Query().Get("path")
+	if manager == nil || !filepath.IsAbs(path) {
+		return nil, 0, badInput("path")
+	}
+	projects, err := manager.ListWorktrees(r.Context(), false)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, project := range projects {
+		for _, tree := range project.Worktrees {
+			if tree.Path == path {
+				ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+				defer cancel()
+				return object{"exclusive": fsutil.MeasureReFSExclusive(ctx, tree.Path)}, 200, nil
+			}
+		}
+	}
+	return nil, 0, badInput("path")
 }
 
 func (api *API) measureStorage(r *http.Request) (any, int, error) {

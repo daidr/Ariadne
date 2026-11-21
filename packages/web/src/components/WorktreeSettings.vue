@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DouAlert, DouButton, DouEmpty, DouPopconfirm, DouSpinner, DouText } from 'dou-ui'
 import { TrashIcon } from '@dou-ui/icons'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiError, type ProjectWorktrees, type StorageSnapshot } from '../api'
 import { formatBytes } from '../bytes'
 import { t, tm } from '../i18n'
@@ -15,10 +15,13 @@ const removing = ref<string | null>(null)
 const props = defineProps<{ storage: StorageSnapshot | null; measuring: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
 let controller: AbortController | undefined
+let reclaimRequest: AbortController | undefined
+const reclaim = shallowRef<{ path: string; exclusive?: number | null }>()
 let closed = false
 onBeforeUnmount(() => {
   closed = true
   controller?.abort()
+  reclaimRequest?.abort()
 })
 const message = (cause: unknown) =>
   cause instanceof ApiError ? tm(cause.localized) : String(cause)
@@ -48,18 +51,49 @@ const total = computed(() =>
       }),
 )
 
-function reclaimable(path: string) {
+function reclaimable(path: string, showProgress = false) {
   const size = props.storage?.worktrees[path]
   if (size?.reclaimableEstimate != null) {
     return t('worktrees.reclaimEstimate', { size: formatBytes(size.reclaimableEstimate) })
   }
-  return size?.exclusive
-    ? t('worktrees.reclaimable', { size: formatBytes(size.exclusive) })
+  const probe = reclaim.value?.path === path ? reclaim.value : undefined
+  if (showProgress && probe && probe.exclusive === undefined) {
+    return t('worktrees.reclaimMeasuring')
+  }
+  const exclusive = probe?.exclusive ?? size?.exclusive
+  return exclusive != null
+    ? t('worktrees.reclaimable', { size: formatBytes(exclusive) })
     : t('worktrees.reclaimUnknown')
+}
+
+async function estimateReclaimable(path: string, open: boolean) {
+  if (!open) {
+    if (reclaim.value?.path === path && reclaim.value.exclusive === undefined) {
+      reclaimRequest?.abort()
+      reclaim.value = undefined
+    }
+    return
+  }
+  reclaimRequest?.abort()
+  const size = props.storage?.worktrees[path]
+  if (size?.reclaimableEstimate != null || size?.exclusive != null) return
+  const request = new AbortController()
+  reclaimRequest = request
+  reclaim.value = { path }
+  try {
+    const { exclusive } = await api.measureReclaimable(path, request.signal)
+    if (!request.signal.aborted) reclaim.value = { path, exclusive }
+  } catch {
+    if (!request.signal.aborted) reclaim.value = { path, exclusive: null }
+  }
 }
 
 async function remove(projectId: string, threadId: string, path: string, sourceId?: string) {
   removing.value = path
+  if (reclaim.value?.path === path) {
+    reclaimRequest?.abort()
+    reclaim.value = undefined
+  }
   error.value = null
   try {
     await api.removeWorktree(projectId, threadId, sourceId)
@@ -127,8 +161,10 @@ async function remove(projectId: string, threadId: string, path: string, sourceI
                 })
               "
               tone="danger"
-              :description="reclaimable(worktree.path)"
+              :width="320"
+              :description="reclaimable(worktree.path, true)"
               :confirm-text="t('worktrees.remove')"
+              @update:open="estimateReclaimable(worktree.path, $event)"
               @confirm="remove(project.id, worktree.threadId, worktree.path, worktree.sourceId)"
             >
               <DouButton

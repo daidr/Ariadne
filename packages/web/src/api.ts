@@ -845,6 +845,13 @@ export const api = {
       undefined,
       signal,
     ),
+  measureReclaimable: (path: string, signal: AbortSignal) =>
+    request<{ exclusive: number | null }>(
+      'GET',
+      `/api/settings/data?sizes=reclaimable&path=${encodeURIComponent(path)}`,
+      undefined,
+      signal,
+    ),
   backupData: () => request<{ backup: BackupInfo }>('POST', '/api/settings/data/backups'),
   removeBackup: (name: string) =>
     request<void>('DELETE', `/api/settings/data/backups/${encodeURIComponent(name)}`),

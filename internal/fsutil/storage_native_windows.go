@@ -15,6 +15,7 @@ import (
 
 type nativeDirectory struct {
 	buffer [8 << 10]uint64 // Windows directory records require 8-byte alignment.
+	refs   *refsProbe
 }
 
 var getCompressedFileSize = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetCompressedFileSizeW")
@@ -69,7 +70,7 @@ func (scan *directoryScan) readNative(ctx context.Context, path string, _ fs.Fil
 		if err != nil && !read {
 			return false
 		}
-		if err != nil || !scan.nativeEntries(buf, device, path, counts, &directories) {
+		if err != nil || !scan.nativeEntries(ctx, buf, device, path, counts, &directories) {
 			markFailed(counts)
 			return true
 		}
@@ -79,7 +80,7 @@ func (scan *directoryScan) readNative(ctx context.Context, path string, _ fs.Fil
 	return true
 }
 
-func (scan *directoryScan) nativeEntries(buf []byte, device uint64, path string, counts []*sizeCounter, directories *[]string) bool {
+func (scan *directoryScan) nativeEntries(ctx context.Context, buf []byte, device uint64, path string, counts []*sizeCounter, directories *[]string) bool {
 	// Offsets of FILE_ID_EXTD_DIR_INFO, including FileName after FileId.
 	const header = 88
 	for len(buf) >= header {
@@ -112,8 +113,21 @@ func (scan *directoryScan) nativeEntries(buf []byte, device uint64, path string,
 				if id.file == 0 && id.high == 0 {
 					id = fileIdentity{}
 				}
+				var exclusive *int64
+				if probe := scan.native.refs; probe != nil && ctx.Err() == nil {
+					// The probe excludes hard-linked data, so no file ID set is needed.
+					id = fileIdentity{}
+					if bytes == 0 {
+						exclusive = new(int64(0))
+					} else {
+						exclusive = probe.read(ctx, path, string(utf16.Decode(chars)))
+						if exclusive != nil && *exclusive > bytes {
+							exclusive = nil // Allocation changed during the scan.
+						}
+					}
+				}
 				for _, counter := range counts {
-					counter.add(bytes, logical, id, nil)
+					counter.add(bytes, logical, id, exclusive)
 				}
 			}
 		}
