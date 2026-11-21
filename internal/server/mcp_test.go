@@ -10,13 +10,18 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/mcp"
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestMCPSettingsCheckAndProjectSelectionHTTP(t *testing.T) {
+func TestMCPSettingsCheckAndProjectSelectionConnect(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			w.WriteHeader(405)
@@ -36,9 +41,9 @@ func TestMCPSettingsCheckAndProjectSelectionHTTP(t *testing.T) {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
 		}
-		json.NewDecoder(r.Body).Decode(&message)
+		_ = json.NewDecoder(r.Body).Decode(&message)
 		response := func(result any) {
-			json.NewEncoder(w).Encode(object{"jsonrpc": "2.0", "id": message.ID, "result": result})
+			_ = json.NewEncoder(w).Encode(object{"jsonrpc": "2.0", "id": message.ID, "result": result})
 		}
 		switch message.Method {
 		case "initialize":
@@ -51,11 +56,8 @@ func TestMCPSettingsCheckAndProjectSelectionHTTP(t *testing.T) {
 		}
 	}))
 	defer service.Close()
-	config := func(url, mark string) object {
-		return object{"servers": []any{object{"id": "server", "name": "Server", "transport": "http", "url": url, "headers": []any{object{"name": "Authorization", "value": "Bearer private"}}, "tools": object{"read": mark}}}}
-	}
+
 	seed := []eventstore.NewEvent{{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"Project","coordinatorId":"crd_a"}`)}}
-	requests := []apiRequest{{Method: "GET", Path: "/api/settings/mcp"}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL, "read")}, {Method: "POST", Path: "/api/settings/mcp/server/check"}, {Method: "GET", Path: "/api/settings/mcp"}, {Method: "PUT", Path: "/api/projects/prj_a/mcp", Body: object{"servers": []any{"server"}}}, {Method: "PUT", Path: "/api/projects/prj_a/mcp", Body: object{"servers": []any{"unknown"}}}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL, "off")}, {Method: "PUT", Path: "/api/settings/mcp", Body: config(service.URL+"/bad", "read")}, {Method: "POST", Path: "/api/settings/mcp/server/check"}, {Method: "PUT", Path: "/api/settings/mcp", Body: object{"servers": []any{}}}, {Method: "POST", Path: "/api/settings/mcp/unknown/check"}}
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
@@ -79,17 +81,84 @@ func TestMCPSettingsCheckAndProjectSelectionHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+	server := httptest.NewServer(api)
+	defer server.Close()
+
+	client := ariadnev1connect.NewSettingsServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	checkNoLeak := func(msg proto.Message) {
+		t.Helper()
+		raw, err := proto.Marshal(msg)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if response.Code >= 500 || strings.Contains(response.Body.String(), "Bearer private") {
-			t.Fatal(object{"status": response.Code, "body": body})
+		if strings.Contains(string(raw), "Bearer private") {
+			t.Fatal("MCP secret leaked in response")
 		}
+	}
+	makeServer := func(address, mark string) *ariadnev1.McpServerInput {
+		return &ariadnev1.McpServerInput{
+			Id:        "server",
+			Name:      "Server",
+			Transport: "http",
+			Url:       &address,
+			Headers:   []*ariadnev1.SecretPair{{Name: "Authorization", Value: "Bearer private"}},
+			Tools:     map[string]string{"read": mark},
+		}
+	}
+
+	initial, err := client.GetMcpSettings(t.Context(), connect.NewRequest(&ariadnev1.GetMcpSettingsRequest{}))
+	if err != nil || len(initial.Msg.GetServers()) != 0 {
+		t.Fatalf("GetMcpSettings: %+v %v", initial, err)
+	}
+
+	saved, err := client.SaveMcpSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveMcpSettingsRequest{
+		Servers: []*ariadnev1.McpServerInput{makeServer(service.URL, "read")},
+	}))
+	if err != nil || len(saved.Msg.GetServers()) != 1 {
+		t.Fatalf("SaveMcpSettings: %+v %v", saved, err)
+	}
+	checkNoLeak(saved.Msg)
+
+	checked, err := client.CheckMcpServer(t.Context(), connect.NewRequest(&ariadnev1.CheckMcpServerRequest{ServerId: "server"}))
+	if err != nil || checked.Msg.GetStatus().GetState() != "ready" {
+		t.Fatalf("CheckMcpServer: %+v %v", checked, err)
+	}
+	checkNoLeak(checked.Msg)
+
+	// Project-level MCP selection remains on REST until Domain 2 migration.
+	putProjectMCP := func(servers []string, wantStatus int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "http://test.invalid/api/projects/prj_a/mcp", strings.NewReader(encoded(object{"servers": servers})))
+		req.Header.Set("Authorization", "Bearer test-token")
+		res := httptest.NewRecorder()
+		api.ServeHTTP(res, req)
+		if res.Code != wantStatus {
+			t.Fatalf("PUT project mcp returned %d: %s", res.Code, res.Body.String())
+		}
+	}
+	putProjectMCP([]string{"server"}, 200)
+	putProjectMCP([]string{"unknown"}, 400)
+
+	if _, err := client.SaveMcpSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveMcpSettingsRequest{
+		Servers: []*ariadnev1.McpServerInput{makeServer(service.URL+"/bad", "read")},
+	})); err != nil {
+		t.Fatalf("SaveMcpSettings(bad): %v", err)
+	}
+	badChecked, err := client.CheckMcpServer(t.Context(), connect.NewRequest(&ariadnev1.CheckMcpServerRequest{ServerId: "server"}))
+	if err != nil || badChecked.Msg.GetStatus().GetState() != "failed" {
+		t.Fatalf("expected failed state for /bad MCP server, got %+v %v", badChecked, err)
+	}
+
+	if _, err := client.SaveMcpSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveMcpSettingsRequest{})); err != nil {
+		t.Fatalf("SaveMcpSettings(clear): %v", err)
+	}
+	if _, err := client.CheckMcpServer(t.Context(), connect.NewRequest(&ariadnev1.CheckMcpServerRequest{ServerId: "unknown"})); err == nil {
+		t.Fatal("expected unknown MCP check to fail")
+	} else if connectErr, _ := extractLocalizedError(t, err); connectErr.Code() != connect.CodeNotFound {
+		t.Fatalf("expected CodeNotFound, got %v", connectErr.Code())
 	}
 }

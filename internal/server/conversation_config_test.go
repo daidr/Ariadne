@@ -9,7 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
@@ -23,7 +27,7 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
  ('notice_all','prj_a','coo_a','memory-everywhere','{"action":"saved","text":"keep line"}',0),
  ('notice_removed','prj_a','coo_a','memory-everywhere','{"action":"removed","text":"restore line"}',0);`
 	no := false
-	requests := []apiRequest{
+	beforeRestore := []apiRequest{
 		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": "m"}, Auth: &no},
 		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{}},
 		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": 42}},
@@ -35,9 +39,9 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_local/undo"},
 		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_all/undo"},
 		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_all/undo"},
-		{Method: "GET", Path: "/api/settings/work"},
+	}
+	afterRestore := []apiRequest{
 		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_removed/undo"},
-		{Method: "GET", Path: "/api/settings/work"},
 		{Method: "POST", Path: "/api/projects/other/notices/notice_removed/undo"},
 		{Method: "GET", Path: "/api/projects/prj_a/references/status"},
 		{Method: "GET", Path: "/api/projects/missing/references/status"},
@@ -68,18 +72,37 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
-		if item.Auth == nil || *item.Auth {
-			request.Header.Set("Authorization", "Bearer test-token")
+	server := httptest.NewServer(api)
+	defer server.Close()
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	run := func(items []apiRequest) {
+		for _, item := range items {
+			request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
+			if item.Auth == nil || *item.Auth {
+				request.Header.Set("Authorization", "Bearer test-token")
+			}
+			response := httptest.NewRecorder()
+			api.ServeHTTP(response, request)
+			var body any = response.Body.String()
+			_ = json.Unmarshal(response.Body.Bytes(), &body)
+			if response.Code >= 500 {
+				t.Fatal(response.Body.String())
+			}
 		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any = response.Body.String()
-		json.Unmarshal(response.Body.Bytes(), &body)
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	}
+	run(beforeRestore)
+	workBefore, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workBefore.Msg.GetWork().GetInstructions() != "" {
+		t.Fatalf("unexpected work settings after removing global memory: %+v %v", workBefore, err)
+	}
+	run(afterRestore)
+	workAfter, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workAfter.Msg.GetWork().GetInstructions() != "restore line" {
+		t.Fatalf("unexpected work settings after restoring global memory: %+v %v", workAfter, err)
 	}
 	memories, err := repo.ListMemories(t.Context(), "prj_a")
 	if err != nil || len(memories) != 0 {

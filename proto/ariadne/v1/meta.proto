@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/settings.proto";
+import "google/protobuf/struct.proto";
+
+// MetaService provides authenticated liveness probes, source metadata,
+// directory browsing, and link summaries/previews.
+service MetaService {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc ListSourceKinds(ListSourceKindsRequest) returns (ListSourceKindsResponse);
+  rpc BrowseSource(BrowseSourceRequest) returns (BrowseSourceResponse);
+  rpc BrowseLocal(BrowseLocalRequest) returns (BrowseLocalResponse);
+  rpc SummarizeLinks(SummarizeLinksRequest) returns (SummarizeLinksResponse);
+  rpc PreviewLink(PreviewLinkRequest) returns (PreviewLinkResponse);
+}
+
+message PingRequest {}
+
+message PingResponse {
+  bool ok = 1;
+}
+
+message SourcePluginInfo {
+  string id = 1;
+  bool ready = 2;
+}
+
+message SourceKind {
+  string kind = 1;
+  LocalizedText title = 2;
+  SettingsSchema settings = 3;
+  repeated string provides = 4;
+  bool remote = 5;
+  bool hosting = 6;
+  bool browse = 7;
+  optional string summary = 8;
+  optional SourcePluginInfo plugin = 9;
+  google.protobuf.Struct defaults = 10;
+}
+
+message ListSourceKindsRequest {}
+
+message ListSourceKindsResponse {
+  repeated SourceKind kinds = 1;
+}
+
+message BrowsableDirectory {
+  string name = 1;
+  string path = 2;
+}
+
+message DirectoryListing {
+  string path = 1;
+  optional string parent = 2;
+  repeated BrowsableDirectory directories = 3;
+}
+
+message BrowseSourceRequest {
+  string kind = 1;
+  optional string project_id = 2;
+  optional string source_id = 3;
+  google.protobuf.Struct settings = 4;
+  string path = 5;
+}
+
+message BrowseSourceResponse {
+  optional DirectoryListing listing = 1;
+}
+
+message BrowseLocalRequest {
+  string path = 1;
+}
+
+message BrowseLocalResponse {
+  optional DirectoryListing listing = 1;
+}
+
+message LinkSummary {
+  string kind = 1;
+  string label = 2;
+  optional string reference = 3;
+  optional string repository_url = 4;
+}
+
+message LinkSummaryEntry {
+  optional LinkSummary summary = 1;
+}
+
+message SummarizeLinksRequest {
+  repeated string urls = 1;
+}
+
+message SummarizeLinksResponse {
+  map<string, LinkSummaryEntry> links = 1;
+}
+
+message LinkPreview {
+  string kind = 1;
+  string repository = 2;
+  int32 number = 3;
+  optional string reference = 4;
+  string url = 5;
+  string title = 6;
+  string state = 7;
+  bool draft = 8;
+  bool conflicted = 9;
+  optional string author = 10;
+  optional int32 additions = 11;
+  optional int32 deletions = 12;
+  optional int32 changed_files = 13;
+  string at = 14;
+  optional string updated_at = 15;
+  optional string state_reason = 16;
+  repeated string labels = 17;
+}
+
+message PreviewLinkRequest {
+  string url = 1;
+}
+
+message PreviewLinkResponse {
+  optional LinkPreview preview = 1;
+}
