@@ -50,6 +50,9 @@ type Driver interface {
 type HistorySeeder interface {
 	Seed(context.Context, []sdk.Message) (Input, error)
 }
+type HistoryBudgeter interface {
+	HistoryBudget(system string) int
+}
 type EffortConfigurer interface {
 	Configure(context.Context, string) error
 }

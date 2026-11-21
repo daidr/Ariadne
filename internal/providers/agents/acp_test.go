@@ -303,6 +303,95 @@ func TestACPModernProtocolAndRestart(t *testing.T) {
 	}
 }
 
+func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T) {
+	command, log := acpChildCommand(t, "rejected-replay")
+	opts := SessionOptions{DataDir: t.TempDir()}
+	settings := map[string]any{"command": command}
+	system := "SYS_HEAD " + strings.Repeat("指令内容", 1300) + " SYS_TAIL" // ~15.6 KiB system instructions
+
+	m := newTestSessions(t, ACPKind(nil, nil), opts)
+	firstReq := sdk.Request{
+		Conversation: "coordinator",
+		Model:        "alternate",
+		Messages:     []sdk.Message{{Role: "system", Content: system}, user("first")},
+	}
+	first := codexParts(t, m, settings, firstReq)
+	lastPart(t, first, "stop")
+	if err := m.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a long coordinator history with an early huge search result and old images,
+	// ending with a new user message carrying a screenshot when ACP resume is rejected.
+	oldImg := sdk.Image{MIME: "image/png", Data: "T0xEX0lNRw=="}
+	newImg := sdk.Image{MIME: "image/png", Data: "TkVXX0lNRw=="}
+	messages := []sdk.Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: "OLD_MSG_msg_01a1ff4e " + strings.Repeat("旧问题", 400), Images: []sdk.Image{oldImg}},
+		{Role: "assistant", Content: "running search", ToolCalls: []sdk.ToolCall{{ID: "call_big_search", Name: "search", Arguments: `{"pattern":"foo"}`}}},
+		{Role: "tool", ToolCallID: "call_big_search", Content: "HUGE_SEARCH_HEAD\n" + strings.Repeat("matched line\n", 14_000) + "\nHUGE_SEARCH_TAIL"},
+		{Role: "assistant", Content: "old search summary"},
+	}
+	for i := 1; i <= 30; i++ {
+		messages = append(messages,
+			sdk.Message{Role: "user", Content: fmt.Sprintf("MID_TURN_%02d %s", i, strings.Repeat("历史轮次", 220))},
+			sdk.Message{Role: "assistant", Content: fmt.Sprintf("MID_REPLY_%02d %s", i, strings.Repeat("历史回复", 220))},
+		)
+	}
+	latest := "NEW_MSG_msg_01a1ffc8 请排查刚才截图里的问题"
+	messages = append(messages, sdk.Message{Role: "user", Content: latest, Images: []sdk.Image{newImg}})
+
+	if err := os.Truncate(log, 0); err != nil {
+		t.Fatal(err)
+	}
+	m = newTestSessions(t, ACPKind(nil, nil), opts)
+	second := codexParts(t, m, settings, sdk.Request{
+		Conversation: "coordinator",
+		Model:        "alternate",
+		Messages:     messages,
+	})
+	lastPart(t, second, "stop")
+
+	var promptBlocks []any
+	for _, entry := range readCodexLog(t, log) {
+		if entry["method"] == "session/prompt" {
+			promptBlocks = entry["params"].(map[string]any)["prompt"].([]any)
+		}
+	}
+	if len(promptBlocks) == 0 {
+		t.Fatal("missing session/prompt RPC call")
+	}
+	text := promptBlocks[0].(map[string]any)["text"].(string)
+	if len(text) > defaultHistoryReplayBytes {
+		t.Fatalf("rebuilt ACP prompt (including <instructions>) exceeded replay budget: %d > %d", len(text), defaultHistoryReplayBytes)
+	}
+	if !strings.Contains(text, "SYS_HEAD") || !strings.Contains(text, "SYS_TAIL") {
+		t.Fatal("system instructions were truncated")
+	}
+	if !strings.Contains(text, historyOmittedNote) {
+		t.Fatal("expected omission note in rebuilt ACP history")
+	}
+	if strings.Contains(text, "OLD_MSG_msg_01a1ff4e") || strings.Contains(text, "HUGE_SEARCH_HEAD") {
+		t.Fatal("old dropped message and huge search result should have been evicted from replay")
+	}
+	if !strings.Contains(text, "MID_TURN_30") || !strings.Contains(text, "MID_REPLY_30") {
+		t.Fatal("most recent turns before latest user message were not preserved")
+	}
+	if !strings.Contains(text, "<user>\n"+latest+"\n</user>") || !strings.HasSuffix(text, historyFooter+historyAnswerEnding) {
+		t.Fatal("latest triggering user message was lost or truncated")
+	}
+	var imagePayloads []string
+	for _, block := range promptBlocks[1:] {
+		item := block.(map[string]any)
+		if item["type"] == "image" {
+			imagePayloads = append(imagePayloads, item["data"].(string))
+		}
+	}
+	if !reflect.DeepEqual(imagePayloads, []string{newImg.Data}) {
+		t.Fatalf("expected only kept message images, got %v", imagePayloads)
+	}
+}
+
 func TestACPChild(t *testing.T) {
 	args := os.Args
 	if len(args) < 4 || args[len(args)-3] != "--" {
@@ -329,6 +418,7 @@ func TestACPChild(t *testing.T) {
 	}
 	output := json.NewEncoder(os.Stdout)
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 4096), 4<<20)
 	for scanner.Scan() {
 		if _, err := fmt.Fprintln(log, scanner.Text()); err != nil {
 			t.Fatal(err)
@@ -351,6 +441,9 @@ func TestACPChild(t *testing.T) {
 			if restore != "session/load" {
 				capabilities["sessionCapabilities"] = map[string]any{"resume": map[string]any{}}
 			}
+			if restore == "rejected-replay" {
+				capabilities["promptCapabilities"] = map[string]any{"image": true}
+			}
 			hello := map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities}
 			if strings.HasPrefix(restore, "agy-") {
 				hello["agentInfo"] = map[string]any{"name": antigravityACPName, "version": "test-1"}
@@ -359,7 +452,7 @@ func TestACPChild(t *testing.T) {
 		case "session/new":
 			result = map[string]any{"sessionId": "test-session", "configOptions": options()}
 		case "session/load", "session/resume":
-			if restore == "rejected" {
+			if restore == "rejected" || restore == "rejected-replay" {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32002, "message": "unknown session"}})
 				continue
 			}
