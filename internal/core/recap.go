@@ -92,8 +92,7 @@ func (repo *Repository) NoteReturn(ctx context.Context, projectID string, away f
 		}
 		for _, item := range needs {
 			if item.str("kind") == "thread" {
-				thread := item["thread"].(ThreadView)
-				if float64(max(thread.ActiveAt, thread.UpdatedAt)) > since {
+				if thread, ok := byID[item.str("threadId")]; ok && float64(max(thread.ActiveAt, thread.UpdatedAt)) > since {
 					addWaiting(thread.ID)
 				}
 			} else {
@@ -102,13 +101,19 @@ func (repo *Repository) NoteReturn(ctx context.Context, projectID string, away f
 					continue
 				}
 				askers := 0
-				if thread, ok := item["thread"].(ThreadView); ok {
-					addWaiting(thread.ID)
-					askers++
+				if id := item.str("threadId"); id != "" {
+					if _, ok := byID[id]; ok {
+						addWaiting(id)
+						askers++
+					}
 				}
-				for _, thread := range item["joined"].([]ThreadView) {
-					addWaiting(thread.ID)
-					askers++
+				if joinedIDs, ok := item["joinedIds"].([]string); ok {
+					for _, id := range joinedIDs {
+						if _, ok := byID[id]; ok {
+							addWaiting(id)
+							askers++
+						}
+					}
 				}
 				if askers == 0 {
 					asks = append(asks, attention.ID)

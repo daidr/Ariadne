@@ -24,7 +24,10 @@ type StreamOptions struct {
 	WriteTimeout time.Duration
 }
 
-// Serve subscribes before replay, then reads the durable log one frame at a time.
+// replayBatchSize caps durable events fetched per SQLite query during SSE replay.
+const replayBatchSize = 64
+
+// Serve subscribes before replay, then streams the durable log in batches.
 // Context cancellation, a write deadline or queue overflow releases both subscriptions.
 func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub, options StreamOptions) error {
 	changed, stopLog := log.Watch()
@@ -79,21 +82,33 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 			return failure
 		}
 		if dirty {
-			events, err := log.Read(request.Context(), eventstore.ReadOptions{AfterSeq: lastSeq, ProjectID: options.ProjectID, Limit: 1})
+			events, err := log.Read(request.Context(), eventstore.ReadOptions{AfterSeq: lastSeq, ProjectID: options.ProjectID, Limit: replayBatchSize})
 			if err != nil {
 				return err
 			}
 			if len(events) > 0 {
-				event := events[0]
-				data, err := json.Marshal(event)
-				if err != nil {
-					return err
+				for _, event := range events {
+					if err := request.Context().Err(); err != nil {
+						return err
+					}
+					sub.mu.Lock()
+					closed, failure := sub.closed, sub.err
+					sub.mu.Unlock()
+					if closed {
+						return failure
+					}
+					data, err := json.Marshal(event)
+					if err != nil {
+						return err
+					}
+					if err := write([]byte(fmt.Sprintf("id: %d\nevent: ariadne\ndata: %s\n\n", event.Seq, data))); err != nil {
+						return err
+					}
+					lastSeq = event.Seq
 				}
-				if err := write([]byte(fmt.Sprintf("id: %d\nevent: ariadne\ndata: %s\n\n", event.Seq, data))); err != nil {
-					return err
+				if len(events) == replayBatchSize {
+					continue
 				}
-				lastSeq = event.Seq
-				continue
 			}
 			dirty = false
 		}
