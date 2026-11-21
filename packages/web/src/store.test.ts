@@ -8,11 +8,14 @@ import {
   merge,
   openedViewOf,
   openMain,
+  openPane,
   openThread,
   openView,
   partsOf,
   patchThreads,
   setSide,
+  showWorkspace,
+  startNewProject,
   state,
   type ConversationState,
 } from './store'
@@ -128,6 +131,33 @@ describe('back in the middle column', () => {
 })
 
 const tabs = () => side.groupsOf(state.side.root).flatMap(side.tabsOf)
+
+describe('narrow workspace navigation', () => {
+  test('opens the project form from the list and returns from the dock without closing its tab', async () => {
+    setSide(side.defaultLayout())
+    showWorkspace('projects')
+    startNewProject()
+    expect(state.workspaceLevel).toBe('coordinator')
+    expect(state.starting).toBe(true)
+    showWorkspace('projects')
+    expect(state.starting).toBe(false)
+    openMain({ kind: 'conversation' })
+    await openPane('threads')
+    expect(state.workspaceLevel).toBe('side')
+    showWorkspace('coordinator')
+    expect(side.activeOf(side.focusedGroup(state.side))).toBe('threads')
+  })
+
+  test('returns to the right panel after opening a view from it', async () => {
+    await openPane('plan')
+    openMain({ kind: 'artifacts' })
+    expect(state.workspaceLevel).toBe('coordinator')
+    backMain()
+    expect(state.workspaceLevel).toBe('side')
+    expect(side.activeOf(side.focusedGroup(state.side))).toBe('plan')
+    openMain({ kind: 'conversation' })
+  })
+})
 
 describe('artifacts and changes', () => {
   test('open in a tab on the right side, beside the coordinator', async () => {

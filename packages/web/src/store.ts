@@ -54,6 +54,8 @@ export type MainView =
   /** What a conversation's agent did, turn by turn, for finding out what went wrong. */
   | { kind: 'trace'; conversationId: string }
 
+export type WorkspaceLevel = 'projects' | 'coordinator' | 'side'
+
 /**
  * Something read beside the conversations, in a tab on the right side or full screen: an
  * artifact; or what a thread's branch changed, with merging it, or with `turn`, what one
@@ -156,6 +158,8 @@ interface State {
   /** The project's memory: standing preferences every conversation sees. */
   memories: MemoryView[]
   main: MainView
+  /** The part of the workspace in front on narrow screens. */
+  workspaceLevel: WorkspaceLevel
   /** What a changes tab compares and opens first; not remembered with the layout. */
   paneParams: Record<string, { turn?: TurnChangesRef; path?: string }>
   /** The view shown full screen, if one is. */
@@ -209,6 +213,7 @@ export const state = reactive<State>({
   artifacts: [],
   memories: [],
   main: { kind: 'conversation' },
+  workspaceLevel: 'projects',
   paneParams: {},
   full: null,
   planWide: false,
@@ -551,7 +556,7 @@ export async function openMessage(conversationId: string, messageId: string) {
   const project = state.detail?.project
   if (!project) return
   if (conversationId === project.coordinatorId) {
-    if (state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
+    openMain({ kind: 'conversation' })
   } else {
     await openThread(conversationId)
   }
@@ -581,7 +586,7 @@ export async function openMessage(conversationId: string, messageId: string) {
   state.focus = { conversationId, messageId, nonce: (state.focus?.nonce ?? 0) + 1 }
 }
 
-export async function openProject(id: string) {
+export async function openProject(id: string, { reveal = true } = {}) {
   clearBoardThumbnails()
   clearLinkCaches()
   state.starting = false
@@ -591,7 +596,8 @@ export async function openProject(id: string) {
   state.plan = null
   state.artifacts = []
   state.memories = []
-  openMain({ kind: 'conversation' })
+  resetMain()
+  if (reveal) showWorkspace('coordinator')
   state.coordinator = emptyConversation()
   await refreshCurrent().catch(report)
 }
@@ -714,7 +720,7 @@ export const activeThreadId = computed(() => side.focusedThread(state.side))
  * it already is, else in the group last used, or in a new group beside it.
  */
 export async function openPane(key: PaneKey, options: OpenOptions = {}) {
-  state.planWide = false
+  showWorkspace('side')
   const threadId = side.threadOf(key)
   const loading = !!threadId && !state.threads[threadId]
   setSide(side.open(state.side, key, options))
@@ -795,7 +801,7 @@ function forgetProject(id: string) {
   if (state.currentId !== id) return
   const next = state.projects[0]?.id
   if (next) {
-    void openProject(next)
+    void openProject(next, { reveal: state.workspaceLevel !== 'projects' })
     return
   }
   state.currentId = null
@@ -805,7 +811,8 @@ function forgetProject(id: string) {
   state.plan = null
   state.artifacts = []
   state.memories = []
-  openMain({ kind: 'conversation' })
+  resetMain()
+  showWorkspace('projects')
   state.coordinator = emptyConversation()
 }
 
@@ -843,25 +850,49 @@ export async function retryTurn(conversationId: string) {
  * Where "back" leads from the view in the middle column: the views opened on the way there,
  * so an artifact opened from a message goes back to the message, not to the artifact list.
  */
-let mainTrail: MainView[] = []
+let mainTrail: { view: MainView; level: WorkspaceLevel }[] = []
 const sameView = (a: MainView, b: MainView) => JSON.stringify(a) === JSON.stringify(b)
+
+export function showWorkspace(level: WorkspaceLevel) {
+  if (level !== 'coordinator') state.starting = false
+  if (level === 'side') state.planWide = false
+  state.workspaceLevel = level
+}
+
+export function startNewProject() {
+  state.starting = true
+  showWorkspace('coordinator')
+  if (state.main.kind === 'trace') resetMain()
+}
+
+function resetMain() {
+  mainTrail = []
+  state.main = { kind: 'conversation' }
+  state.planWide = false
+}
 
 /** Show the plan graph large, or an artifact, in the middle column. */
 export function openMain(view: MainView) {
   if (view.kind === 'conversation') mainTrail = []
   else if (!sameView(view, state.main)) {
-    mainTrail = mainTrail.filter((seen) => !sameView(seen, view))
-    mainTrail.push(state.main)
+    mainTrail = mainTrail.filter((seen) => !sameView(seen.view, view))
+    mainTrail.push({ view: state.main, level: state.workspaceLevel })
   }
   state.main = view
   state.planWide = view.kind === 'plan'
+  state.starting = false
+  showWorkspace('coordinator')
 }
 
 /** Go back to the view this one was opened from; the coordinator when there is none. */
 export function backMain() {
-  const view = mainTrail.pop() ?? { kind: 'conversation' }
+  const { view, level } = mainTrail.pop() ?? {
+    view: { kind: 'conversation' },
+    level: 'coordinator',
+  }
   state.main = view
   state.planWide = view.kind === 'plan'
+  showWorkspace(level)
 }
 
 /** The tab a view opens in on the right side. */
@@ -1267,7 +1298,7 @@ async function load(): Promise<number | null> {
   try {
     const lastSeq = await refreshProjects()
     const target = state.currentId ?? state.projects[0]?.id
-    if (target) await openProject(target)
+    if (target) await openProject(target, { reveal: false })
     return lastSeq
   } catch (error) {
     report(error)

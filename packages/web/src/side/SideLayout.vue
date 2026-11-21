@@ -2,9 +2,7 @@
 import {
   DouButton,
   DouDock,
-  DouDropdown,
   DouDropdownItem,
-  DouDropdownRadioGroup,
   DouDropdownSub,
   DouTooltip,
   type DockGroup,
@@ -46,6 +44,8 @@ import * as side from './layout'
 import type { PaneKey } from './layout'
 import { MIN_HEIGHT, MIN_WIDTH } from './sizes'
 
+const props = defineProps<{ compact: boolean; active: boolean }>()
+
 /**
  * The right side, beside the coordinator: the project's lists and threads in groups of
  * tabs, split as the user likes. A tab dragged to the edge of a group gets a group of its
@@ -59,8 +59,8 @@ const lists: Record<string, { label: () => string; icon: Component }> = {
 }
 
 const threadById = computed(() => new Map((state.detail?.threads ?? []).map((th) => [th.id, th])))
-const threadAt = (key: PaneKey) => {
-  const id = side.threadOf(key)
+const threadAt = (key: PaneKey | undefined) => {
+  const id = key && side.threadOf(key)
   return id ? (threadById.value.get(id) ?? null) : null
 }
 const artifactById = computed(() => new Map(state.artifacts.map((a) => [a.id, a])))
@@ -121,14 +121,25 @@ watch(activeThreadId, (threadId) => {
 })
 
 const groups = computed(() => side.groupsOf(state.side.root))
+const compactGroup = computed(() => side.compactGroup(state.side))
 const othersThan = (group: DockGroup) => groups.value.filter((item) => item.id !== group.id)
 
 // Splitting halves the group: only offered while both halves still have room to be read.
 const canSplit = (group: DockGroup, to: 'right' | 'bottom') =>
-  group.tabs.length > 1 && !!dock.value?.canSplit(group.id, to)
+  !props.compact && group.tabs.length > 1 && !!dock.value?.canSplit(group.id, to)
 
 function changed(root: DockNode) {
+  if (props.compact) {
+    if (root.type !== 'group') return
+    const active = side.activeOf(root)
+    if (active !== side.activeOf(compactGroup.value)) setSide(side.activate(state.side, active))
+    return
+  }
   setSide(side.updateDock(state.side, root))
+}
+
+function focusGroup(id: string | undefined) {
+  if (!props.compact) setSide(side.focus(state.side, id))
 }
 
 function bring(group: DockGroup, key: side.ListKey) {
@@ -140,14 +151,15 @@ function bring(group: DockGroup, key: side.ListKey) {
   <div class="side-layout">
     <DouDock
       ref="dock"
-      :model-value="state.side.root"
-      :active-group="state.side.focused"
+      :model-value="compact ? compactGroup : state.side.root"
+      :active-group="compact ? compactGroup.id : state.side.focused"
       :panels="panels"
       :min="min"
+      :draggable="!compact"
       size="sm"
       class="side-dock"
       @update:model-value="changed"
-      @update:active-group="(id) => setSide(side.focus(state.side, id))"
+      @update:active-group="focusGroup"
       @remove="(key) => closePane(key as PaneKey)"
     >
       <template #label="{ value }">
@@ -183,6 +195,7 @@ function bring(group: DockGroup, key: side.ListKey) {
         <ConversationPanel
           v-else-if="side.threadOf(value as PaneKey)"
           :thread-id="side.threadOf(value as PaneKey)!"
+          :active="props.active && (!compact || value === compactGroup.active)"
           tabbed
         />
         <OpenedView
@@ -193,7 +206,12 @@ function bring(group: DockGroup, key: side.ListKey) {
       </template>
       <template #extra="{ group, active }">
         <DouTooltip
-          v-if="active !== undefined && side.listOf(active) === 'plan' && state.plan?.nodes.length"
+          v-if="
+            !compact &&
+            active !== undefined &&
+            side.listOf(active) === 'plan' &&
+            state.plan?.nodes.length
+          "
           :content="t('plan.expand')"
           placement="bottom"
         >
@@ -207,6 +225,7 @@ function bring(group: DockGroup, key: side.ListKey) {
           </DouButton>
         </DouTooltip>
         <ThreadTools
+          v-if="!compact || threadAt(active as PaneKey)"
           :thread="threadAt(active as PaneKey)"
           :label="t(threadAt(active as PaneKey) ? 'thread.more' : 'side.more')"
         >
@@ -226,7 +245,7 @@ function bring(group: DockGroup, key: side.ListKey) {
             <template #prefix><LayoutRowsIcon /></template>
             {{ t('side.splitDown') }}
           </DouDropdownItem>
-          <DouDropdownSub v-if="othersThan(group).length" :title="t('side.moveTo')">
+          <DouDropdownSub v-if="!compact && othersThan(group).length" :title="t('side.moveTo')">
             <DouDropdownItem
               v-for="other in othersThan(group)"
               :key="other.id"
@@ -236,7 +255,7 @@ function bring(group: DockGroup, key: side.ListKey) {
               {{ t('side.groupOf', { label: labelOf(side.activeOf(other)) }) }}
             </DouDropdownItem>
           </DouDropdownSub>
-          <DouDropdownSub :title="t('side.open')">
+          <DouDropdownSub v-if="!compact" :title="t('side.open')">
             <DouDropdownItem
               v-for="key in side.LISTS"
               :key="key"
@@ -249,7 +268,7 @@ function bring(group: DockGroup, key: side.ListKey) {
             </DouDropdownItem>
           </DouDropdownSub>
           <DouDropdownItem
-            v-if="group.tabs.some((key) => key !== active && !side.isPinned(key))"
+            v-if="!compact && group.tabs.some((key) => key !== active && !side.isPinned(key))"
             value="close-others"
             divided
             @click="setSide(side.closeOthers(state.side, active as PaneKey))"

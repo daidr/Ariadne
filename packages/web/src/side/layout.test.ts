@@ -4,6 +4,7 @@ import {
   type SideLayout,
   close,
   closeOthers,
+  compactGroup,
   viewOf,
   defaultLayout,
   focusedGroup,
@@ -38,6 +39,21 @@ describe('side layout', () => {
     layout = open(layout, threadKey('a'))
     expect(tabs(layout)[0]).toHaveLength(4)
     expect(focusedThread(layout)).toBe('a')
+  })
+
+  test('puts all split tabs in one narrow row and keeps each desktop group intact', () => {
+    let layout = open(defaultLayout(), threadKey('a'))
+    layout = open(layout, threadKey('b'), { beside: 'horizontal' })
+    expect(compactGroup(layout)).toMatchObject({
+      tabs: ['plan', 'threads', 'artifacts', 'thread:a', 'thread:b'],
+      active: 'thread:b',
+    })
+    layout = move(layout, 'plan', focusedGroup(layout).id)
+    expect(compactGroup(layout).active).toBe('plan')
+    expect(tabs(layout)).toEqual([
+      ['plan', 'threads', 'artifacts', 'thread:a'],
+      ['thread:b', 'list:plan:1'],
+    ])
   })
 
   test('replace takes the place of the thread in front, not of a list', () => {

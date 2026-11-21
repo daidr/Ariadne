@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import {
   DouAlert,
-  DouButton,
   DouConfigProvider,
-  DouDivider,
   DouLayout,
   DouLayoutAside,
-  DouLayoutHeader,
   DouLayoutMain,
   DouSplitter,
-  DouText,
   DouToastViewport,
+  useBreakpoints,
   useColorMode,
 } from 'dou-ui'
-import { FolderCogIcon, PanelLeftIcon, SettingsIcon } from '@dou-ui/icons'
 import {
   computed,
   defineAsyncComponent,
@@ -24,26 +20,23 @@ import {
   watch,
   watchEffect,
 } from 'vue'
-import AttentionBar from './components/AttentionBar.vue'
-import AutopilotSwitch from './components/AutopilotSwitch.vue'
 import ConversationPanel from './components/ConversationPanel.vue'
 import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
-import ProjectSearch from './components/ProjectSearch.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
 import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import PluginConfigDialog from './components/PluginConfigDialog.vue'
+import WorkspaceHeader from './components/WorkspaceHeader.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
 import FilePreview from './files/FilePreview.vue'
 import { douLocale, t } from './i18n'
-import { onLiveEvent, openProjectSettings, start, state } from './store'
+import { onLiveEvent, start, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
-import { useSourceStatus } from './source-status'
 import { useSidebarLayout } from './sidebar-layout'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
@@ -60,8 +53,10 @@ function openSettings(tab: SettingsTab = 'models') {
 }
 provide(openSettingsKey, openSettings)
 
-// Where the project's files are rides on its settings button.
-const { summary } = useSourceStatus()
+const breakpoints = useBreakpoints()
+const compact = computed(() => !breakpoints.lg)
+const coordinatorVisible = computed(() => !compact.value || state.workspaceLevel === 'coordinator')
+const sideVisible = computed(() => !compact.value || state.workspaceLevel === 'side')
 
 const projectBody = useTemplateRef<HTMLElement>('projectBody')
 const {
@@ -71,9 +66,9 @@ const {
   collapsed: projectsCollapsed,
   save: saveProjectSidebar,
 } = useSidebarLayout('projects', projectBody)
-const projectSidebarLabel = computed(() =>
-  t(projectsCollapsed.value ? 'nav.expandProjects' : 'nav.collapseProjects'),
-)
+function toggleProjectSidebar(collapsed: boolean) {
+  if (!compact.value) projectsCollapsed.value = collapsed
+}
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -109,53 +104,12 @@ watchEffect(() => {
 <template>
   <DouConfigProvider :locale="douLocale">
     <DouLayout class="app">
-      <DouLayoutHeader :height="48">
-        <div class="header">
-          <div class="header-brand">
-            <DouButton
-              v-if="state.main.kind !== 'trace'"
-              variant="ghost"
-              size="sm"
-              :aria-label="projectSidebarLabel"
-              :title="projectSidebarLabel"
-              :aria-expanded="!projectsCollapsed"
-              @click="projectsCollapsed = !projectsCollapsed"
-            >
-              <PanelLeftIcon aria-hidden="true" />
-            </DouButton>
-            <DouText weight="medium">{{ t('app.name') }}</DouText>
-          </div>
-          <div class="header-actions">
-            <!-- What belongs to the open project, set apart from the app's own buttons. -->
-            <ProjectSearch />
-            <template v-if="state.detail">
-              <AutopilotSwitch />
-              <AttentionBar />
-              <DouButton
-                variant="ghost"
-                size="sm"
-                :aria-label="t('projectSettings.open')"
-                :title="
-                  summary ? `${t('projectSettings.open')} · ${summary}` : t('projectSettings.open')
-                "
-                @click="openProjectSettings()"
-              >
-                <FolderCogIcon />
-              </DouButton>
-              <DouDivider direction="vertical" />
-            </template>
-            <DouButton
-              variant="ghost"
-              size="sm"
-              :aria-label="t('settings.open')"
-              :title="t('settings.open')"
-              @click="openSettings()"
-            >
-              <SettingsIcon />
-            </DouButton>
-          </div>
-        </div>
-      </DouLayoutHeader>
+      <WorkspaceHeader
+        :compact="compact"
+        :projects-collapsed="projectsCollapsed"
+        @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
+        @open-settings="openSettings()"
+      />
       <DouAlert v-if="state.stream === 'lost'" tone="warning" class="banner">
         {{ t('error.connection') }}
       </DouAlert>
@@ -164,48 +118,61 @@ watchEffect(() => {
       </DouAlert>
       <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
       <TraceView
-        v-if="state.main.kind === 'trace'"
+        v-if="state.main.kind === 'trace' && coordinatorVisible"
         :conversation-id="state.main.conversationId"
         class="body"
       />
       <div v-else ref="projectBody" class="body">
         <DouSplitter
           v-model="projectSize"
-          v-model:collapsed="projectsCollapsed"
+          :collapsed="!compact && projectsCollapsed"
           :min="projectMin"
           :max="projectMax"
           :aria-label="t('nav.resizeProjects')"
-          class="project-split"
+          :data-single-pane="
+            compact ? (state.workspaceLevel === 'projects' ? 'start' : 'end') : undefined
+          "
+          class="project-split workspace-split"
+          :disabled="compact"
           collapsible
+          @update:collapsed="toggleProjectSidebar"
           @change="saveProjectSidebar"
         >
           <template #start>
             <DouLayoutAside width="100%" :bordered="false" class="project-sidebar">
-              <ProjectList />
+              <ProjectList :compact="compact" />
             </DouLayoutAside>
           </template>
           <template #end>
             <DouLayoutMain class="main">
-              <!-- Threads open on the right, so the coordinator stays in view beside them. -->
-              <!-- The plan shown large takes the side too, so it is not drawn twice. -->
-              <div v-if="state.main.kind === 'plan' && state.planWide" class="pane">
+              <div v-if="!state.currentId || state.starting" class="pane">
+                <StartScreen class="start-panel" />
+              </div>
+              <div v-else-if="state.main.kind === 'plan' && state.planWide" class="pane">
                 <PlanMain />
               </div>
-              <!-- Before there is a project, and while a new one is made. -->
-              <div v-else-if="!state.currentId || state.starting" class="pane">
-                <StartScreen />
-              </div>
-              <DouSplitter v-else v-model="split" :min="30" :max="80" class="split">
+              <DouSplitter
+                v-else
+                v-model="split"
+                :min="30"
+                :max="80"
+                :data-single-pane="compact ? (sideVisible ? 'end' : 'start') : undefined"
+                :disabled="compact"
+                class="split workspace-split"
+              >
                 <template #start>
                   <div class="pane">
                     <PlanMain v-if="state.main.kind === 'plan'" />
                     <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
-                    <ConversationPanel v-else />
+                    <ConversationPanel v-else :active="coordinatorVisible" />
                   </div>
                 </template>
                 <template #end>
                   <div class="pane">
-                    <SideLayout />
+                    <SideLayout
+                      :compact="compact"
+                      :active="sideVisible && (!compact || !state.full)"
+                    />
                   </div>
                 </template>
               </DouSplitter>
@@ -218,7 +185,7 @@ watchEffect(() => {
     <PluginConfigDialog />
     <ShortcutSheet />
     <ProjectSettings />
-    <FullView />
+    <FullView :compact="compact" />
     <FilePreview />
     <DouToastViewport />
   </DouConfigProvider>
@@ -239,25 +206,6 @@ body,
 
 .app {
   height: 100%;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.header-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .banner {
@@ -303,5 +251,26 @@ body,
   flex-direction: column;
   height: 100%;
   min-width: 0;
+}
+
+/* Keep both slots mounted so switching levels keeps the chat draft and scroll position. */
+.workspace-split[data-single-pane] {
+  display: block;
+}
+
+.workspace-split[data-single-pane] > .dou-splitter__pane {
+  height: 100%;
+}
+
+.workspace-split[data-single-pane] > .dou-splitter__bar,
+.workspace-split[data-single-pane='start'] > .dou-splitter__pane.is-end,
+.workspace-split[data-single-pane='end'] > .dou-splitter__pane.is-start {
+  display: none;
+}
+
+.workspace-split[data-single-pane] .start-panel {
+  overflow: auto;
+  align-items: safe center;
+  padding-block: 24px;
 }
 </style>

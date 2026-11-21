@@ -29,10 +29,13 @@ import {
   renameProject,
   reorderProjects,
   report,
+  startNewProject,
   state,
   openProjectSettings,
 } from '../store'
 import ProjectActivityPopover from './ProjectActivityPopover.vue'
+
+defineProps<{ compact?: boolean }>()
 
 const dialog = useDialog()
 const canReorder = computed(() => state.projects.length > 1)
@@ -42,6 +45,12 @@ const inspecting = ref<string>()
 function inspectProject(id: string, open: boolean) {
   if (open && !menuOpen.value) inspecting.value = id
   else if (inspecting.value === id) inspecting.value = undefined
+}
+
+function selectProject(id: string) {
+  inspecting.value = undefined
+  if (state.detail?.project.id === id) openMain({ kind: 'conversation' })
+  else void openProject(id)
 }
 
 watch(menuOpen, (open) => {
@@ -134,7 +143,7 @@ async function confirmDelete(id: string) {
 </script>
 
 <template>
-  <div class="projects">
+  <div class="projects" :class="{ 'projects-compact': compact }">
     <div class="projects-head">
       <DouText variant="secondary" size="sm">{{ t('nav.projects') }}</DouText>
       <DouButton
@@ -142,7 +151,7 @@ async function confirmDelete(id: string) {
         size="sm"
         :aria-label="t('nav.newProject')"
         :title="t('nav.newProject')"
-        @click="state.starting = true"
+        @click="startNewProject"
       >
         <PlusIcon />
       </DouButton>
@@ -180,7 +189,7 @@ async function confirmDelete(id: string) {
                 :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
                 :aria-expanded="inspecting === item.id"
                 :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-                @click="openProject(item.id)"
+                @click="selectProject(item.id)"
                 @focus="inspect"
                 @blur="dismiss"
                 @keydown.esc="dismiss"
@@ -221,6 +230,10 @@ async function confirmDelete(id: string) {
   padding-inline-start: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.projects-compact .projects-open {
+  min-height: 44px;
 }
 
 .projects-open {

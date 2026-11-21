@@ -109,6 +109,18 @@ export function focusedGroup(layout: SideLayout): DockGroup {
   return groups.find((item) => item.id === layout.focused) ?? groups[0]!
 }
 
+/** Present the dock as one group on narrow screens without changing the saved splits. */
+export function compactGroup(layout: SideLayout): DockGroup {
+  const groups = groupsOf(layout.root)
+  const active = activeOf(focusedGroup(layout))
+  return {
+    type: 'group',
+    id: groups[0]!.id,
+    tabs: [...LISTS, ...groups.flatMap(tabsOf).filter((key) => !listOf(key))],
+    active: listOf(active) ?? active,
+  }
+}
+
 /** The thread in front of the group last used, if a thread is. */
 export function focusedThread(layout: SideLayout): string | null {
   return threadOf(activeOf(focusedGroup(layout)))

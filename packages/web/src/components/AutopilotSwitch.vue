@@ -4,6 +4,8 @@ import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import { setAutopilotPaused, state } from '../store'
 
+defineProps<{ compact?: boolean }>()
+
 /**
  * The open project's autopilot, while it is switched on: a rippling dot while it runs, a
  * still one while paused. One click pauses it or lets it go on.
@@ -27,12 +29,15 @@ async function toggle() {
     size="sm"
     :loading="busy"
     :aria-pressed="!paused"
+    :aria-label="paused ? t('autopilot.resume') : t('autopilot.pause')"
     :title="paused ? t('autopilot.resume') : t('autopilot.pause')"
     @click="toggle"
   >
     <template #leading>
       <DouStatusDot :tone="paused ? 'neutral' : 'success'" :ripple="!paused" />
     </template>
-    {{ paused ? t('autopilot.paused') : t('autopilot.on') }}
+    <template v-if="!compact" #default>
+      {{ paused ? t('autopilot.paused') : t('autopilot.on') }}
+    </template>
   </DouButton>
 </template>

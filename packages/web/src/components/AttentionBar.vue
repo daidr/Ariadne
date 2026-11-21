@@ -10,6 +10,8 @@ import AskBlock from '../blocks/AskBlock.vue'
 import ReportArtifacts from './ReportArtifacts.vue'
 import ReviewMark from '../review/ReviewMark.vue'
 
+defineProps<{ compact?: boolean }>()
+
 // The server builds the list; the badge is its length, so the two cannot disagree.
 const items = computed(() => state.detail?.needsMe ?? [])
 const count = computed(() => items.value.length)
@@ -17,7 +19,7 @@ const count = computed(() => items.value.length)
 /** Go to where a form was asked: its thread, or the coordinator's conversation. */
 function openAsker(threadId: string | null) {
   if (threadId) void openThread(threadId)
-  else if (state.main.kind !== 'conversation') openMain({ kind: 'conversation' })
+  else openMain({ kind: 'conversation' })
 }
 
 /** The line the thread list shows for it; its stage when its report said nothing. */
@@ -47,7 +49,7 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
     >
       <template #leading><BellIcon /></template>
       <template v-if="count" #default>
-        {{ t('attention.title') }}
+        <template v-if="!compact">{{ t('attention.title') }}</template>
         <DouBadge :value="count" tone="warning" />
       </template>
     </DouButton>

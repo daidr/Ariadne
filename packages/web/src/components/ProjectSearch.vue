@@ -34,6 +34,7 @@ import {
   openProjectSettings,
   openThread,
   report,
+  startNewProject,
   state,
 } from '../store'
 import { openSettingsKey } from '../open-settings'
@@ -142,10 +143,7 @@ const actions = computed(() => {
       ]
     : []
   return new Map<string, Action>([
-    [
-      'newProject',
-      { label: t('nav.newProject'), icon: PlusIcon, run: () => (state.starting = true) },
-    ],
+    ['newProject', { label: t('nav.newProject'), icon: PlusIcon, run: startNewProject }],
     ...own,
     ['settings', { label: t('settings.open'), icon: SettingsIcon, run: () => openSettings() }],
     [

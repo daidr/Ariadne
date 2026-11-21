@@ -7,6 +7,8 @@ import { t } from '../i18n'
 import { closeFull, state } from '../store'
 import OpenedView from './OpenedView.vue'
 
+defineProps<{ compact?: boolean }>()
+
 /**
  * An artifact or changes over the whole page. Opened from a thread, that thread stays
  * beside it, so the user can read and talk to it at once.
@@ -40,7 +42,13 @@ const label = computed(() => {
     @update:open="(open) => !open && closeFull()"
   >
     <template v-if="full">
-      <DouSplitter v-if="threadId" v-model="split" :min="40" :max="80" class="full-split">
+      <DouSplitter
+        v-if="threadId && !compact"
+        v-model="split"
+        :min="40"
+        :max="80"
+        class="full-split"
+      >
         <template #start>
           <div class="full-pane">
             <OpenedView :view="full.view" place="full" />

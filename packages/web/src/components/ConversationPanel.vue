@@ -42,10 +42,10 @@ import {
   inject,
   nextTick,
   onBeforeUnmount,
-  onMounted,
   ref,
   useTemplateRef,
   watch,
+  watchEffect,
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
 import { api } from '../api'
@@ -112,7 +112,13 @@ import { provideFromThread } from '../opened-from'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
 // `tabbed`: in a side tab group, whose own menu holds the thread's.
-const props = defineProps<{ threadId?: string; tabbed?: boolean }>()
+const props = withDefaults(
+  defineProps<{ threadId?: string; tabbed?: boolean; active?: boolean }>(),
+  {
+    active: true,
+  },
+)
+const active = computed(() => props.active)
 
 // What opens from a thread shows full screen, with this thread beside it.
 provideFromThread(() => props.threadId ?? null)
@@ -549,14 +555,18 @@ onBeforeUnmount(() => clearTimeout(disarm))
 // The keyboard reaches this conversation: `/` puts the caret in its input, Escape stops it.
 const input = useTemplateRef<{ focus: () => void; textarea: HTMLTextAreaElement | null }>('input')
 const kind = props.threadId ?? 'coordinator'
-let unregister: (() => void) | undefined
-onMounted(() => {
-  unregister = registerPanel(kind, {
-    focus: () => input.value?.focus(),
-    stop: escape,
-  })
-})
-onBeforeUnmount(() => unregister?.())
+watchEffect(
+  (cleanup) => {
+    if (!active.value) return
+    cleanup(
+      registerPanel(kind, {
+        focus: () => input.value?.focus(),
+        stop: escape,
+      }),
+    )
+  },
+  { flush: 'post' },
+)
 
 // ↑ in an empty input brings back what the user sent here before, newest first.
 const sent = computed(() =>
@@ -635,7 +645,7 @@ const unread = props.threadId
   : useCoordinatorUnread(
       () => view.value,
       () => list.value?.viewport,
-      () => !state.full && state.currentId === view.value.conversation?.projectId,
+      () => active.value && !state.full && state.currentId === view.value.conversation?.projectId,
     )
 const newMessagesAt = computed(() => unread?.boundary.value)
 const footer = useTemplateRef<HTMLElement>('footer')
@@ -659,15 +669,12 @@ watch(
 function earlier() {
   if (conversationId.value && view.value.more) void loadEarlier(conversationId.value)
 }
-watch(
-  () => [view.value.messages.length, view.value.more],
-  async () => {
-    if (!view.value.more || view.value.loadingEarlier) return
-    await nextTick()
-    const el = list.value?.viewport
-    if (el && el.scrollHeight <= el.clientHeight) earlier()
-  },
-)
+watch([() => view.value.messages.length, () => view.value.more, active], async () => {
+  if (!active.value || !view.value.more || view.value.loadingEarlier) return
+  await nextTick()
+  const el = list.value?.viewport
+  if (active.value && el?.clientHeight && el.scrollHeight <= el.clientHeight) earlier()
+})
 
 // A message the search found: scroll to it and mark it for a moment. A message from the
 // coordinator to a thread is folded, so it opens.
@@ -675,9 +682,9 @@ const focused = ref<string | null>(null)
 const openRelays = ref<string[]>([])
 let unmark: ReturnType<typeof setTimeout> | undefined
 watch(
-  () => state.focus,
-  async (focus) => {
-    if (!focus || focus.conversationId !== conversationId.value) return
+  [() => state.focus, active],
+  async ([focus, visible]) => {
+    if (!visible || !focus || focus.conversationId !== conversationId.value) return
     state.focus = null
     const message = view.value.messages.find((item) => item.id === focus.messageId)
     if (message?.kind === 'relay' && !openRelays.value.includes(message.id)) {
@@ -694,12 +701,14 @@ watch(
 )
 
 // Threads keep their read behavior. The coordinator tracks the visible tail.
-watch(
-  () => view.value.messages.at(-1)?.id,
-  (last) => {
-    if (last && props.threadId) void api.markRead(props.threadId, last)
-  },
-)
+let lastRead = ''
+watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
+  if (!visible || !last || !props.threadId || last === lastRead) return
+  lastRead = last
+  void api.markRead(props.threadId, last).catch(() => {
+    if (lastRead === last) lastRead = ''
+  })
+})
 </script>
 
 <template>
