@@ -325,8 +325,10 @@ func (d *claudeDriver) onLine(data []byte) error {
 			if detail == "" {
 				detail = "error"
 			}
-			busy := rpc.BusyText(detail)
-			emit(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy})
+			quota := rpc.QuotaText(detail)
+			busy := quota || rpc.BusyText(detail)
+			retryable := !quota && rpc.BusyText(detail)
+			emit(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
 		} else {
 			emit(Event{Type: "done"})
 		}

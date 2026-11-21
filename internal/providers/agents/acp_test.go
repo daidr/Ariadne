@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -169,11 +171,22 @@ func acpChildCommand(t *testing.T, scenario string) (string, string) {
 }
 
 func TestACPAntigravityExecutorError(t *testing.T) {
-	for _, test := range []struct{ scenario, reason, detail string }{
-		{"agy-error", "error", "synthetic Gemini request rejected"},
-		{"agy-executor-start", "error", "plan model not specified"},
-		{"agy-recovered", "stop", ""},
-		{"other-agent", "stop", ""},
+	for _, test := range []struct {
+		scenario, reason, detail string
+		busy, retryable          bool
+		expectEmptyText          bool
+	}{
+		{scenario: "agy-error", reason: "error", detail: "synthetic Gemini request rejected", expectEmptyText: true},
+		{scenario: "agy-executor-start", reason: "error", detail: "plan model not specified", expectEmptyText: true},
+		{scenario: "agy-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-quota-bare", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-quota-split", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
+		{scenario: "agy-quota-429", reason: "error", detail: "Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-rate-limit", reason: "error", detail: "Rate limit exceeded. Please try again later.", busy: true, retryable: true, expectEmptyText: true},
+		{scenario: "agy-recovered", reason: "stop"},
+		{scenario: "agy-retrying-split", reason: "stop"},
+		{scenario: "other-agent", reason: "stop"},
+		{scenario: "other-agent-quota", reason: "stop"},
 	} {
 		t.Run(test.scenario, func(t *testing.T) {
 			command, _ := acpChildCommand(t, test.scenario)
@@ -181,12 +194,57 @@ func TestACPAntigravityExecutorError(t *testing.T) {
 			request := sdk.Request{Conversation: "errors", Messages: []sdk.Message{user("hello")}}
 			parts := codexParts(t, m, map[string]any{"command": command}, request)
 			lastPart(t, parts, test.reason)
-			if test.reason == "error" && (textParts(parts) != "" ||
-				!strings.Contains(parts[len(parts)-1].Error, test.detail) ||
-				parts[len(parts)-1].Retryable) {
-				t.Fatalf("unexpected executor failure: %+v", parts)
+			last := parts[len(parts)-1]
+			if test.reason == "error" {
+				if (test.expectEmptyText && textParts(parts) != "") ||
+					!strings.Contains(last.Error, test.detail) ||
+					last.Busy != test.busy ||
+					last.Retryable != test.retryable {
+					t.Fatalf("unexpected executor failure: %+v", parts)
+				}
+				if last.AgentError == nil || last.AgentError.Operation != "session/update" || last.AgentError.StopReason != "end_turn" {
+					t.Fatalf("missing ACP update diagnostics: %+v", last.AgentError)
+				}
 			}
 		})
+	}
+}
+
+func TestACPAntigravityQuotaDoesNotRetryAndAllowsFallback(t *testing.T) {
+	command, _ := acpChildCommand(t, "agy-quota")
+	m := newTestSessions(t, ACPKind(nil, nil), SessionOptions{})
+	provider := sdk.ModelProvider{Stream: m.Stream}
+	retries := 0
+	var recorded []modelstep.AttemptFailure
+	result, err := modelstep.Request(t.Context(), provider, map[string]any{"command": command}, sdk.Request{
+		Conversation: "quota-step",
+		Messages:     []sdk.Message{user("hello")},
+	}, modelstep.Options{
+		Retries: new(3),
+		OnRetry: func(modelstep.Retry) error {
+			retries++
+			return nil
+		},
+		OnFailure: func(attempt modelstep.AttemptFailure) error {
+			recorded = append(recorded, attempt)
+			return nil
+		},
+	})
+	var failure *modelstep.Failure
+	if result != nil || !errors.As(err, &failure) {
+		t.Fatalf("expected modelstep failure, got result=%+v err=%v", result, err)
+	}
+	if retries != 0 {
+		t.Fatalf("quota failure should not retry immediately, got %d retries", retries)
+	}
+	if len(recorded) != 1 || recorded[0].Retryable || recorded[0].WillRetry || !strings.Contains(recorded[0].Detail, "Resets in 1h17m22s.") {
+		t.Fatalf("unexpected recorded attempt failure: %+v", recorded)
+	}
+	if failure.Exhausted == nil || !strings.Contains(*failure.Exhausted, "Individual quota reached") || !strings.Contains(*failure.Exhausted, "Resets in 1h17m22s.") {
+		t.Fatalf("quota failure should preserve detail and allow fallback: %+v", failure)
+	}
+	if failure.Localized == nil || failure.Localized.Key != "error.modelRequest" {
+		t.Fatalf("unexpected localized error: %+v", failure.Localized)
 	}
 }
 
@@ -382,16 +440,30 @@ func TestACPChild(t *testing.T) {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
 				continue
 			}
-			text := "answer"
+			chunks := []string{"answer"}
 			switch restore {
 			case "agy-error", "other-agent":
-				text = "\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"
+				chunks = []string{"\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"}
 			case "agy-executor-start":
-				text = "\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"
+				chunks = []string{"\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"}
+			case "agy-quota", "other-agent-quota":
+				chunks = []string{"\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}
+			case "agy-quota-bare":
+				chunks = []string{"⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s."}
+			case "agy-quota-split":
+				chunks = []string{"\n⚠ ", "Individual quota reached. Please upgrade your subscription to increase your limits. ", "Resets in 1h17m22s."}
+			case "agy-quota-429":
+				chunks = []string{"\n⚠ agent executor error: Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}
+			case "agy-rate-limit":
+				chunks = []string{"\n⚠ Rate limit exceeded. Please try again later.\n"}
 			case "agy-recovered":
-				text = "\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"
+				chunks = []string{"\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"}
+			case "agy-retrying-split":
+				chunks = []string{"\n⚠ API error (attempt 1): Error 429. Retrying.\n", "answer"}
 			}
-			_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":%q}}}}`, text)))
+			for _, chunk := range chunks {
+				_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":%q}}}}`, chunk)))
+			}
 			stop := "end_turn"
 			if effort == "low" {
 				stop = "max_tokens"
