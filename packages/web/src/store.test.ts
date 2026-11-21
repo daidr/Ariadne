@@ -102,6 +102,7 @@ describe('events', () => {
     expect(partsOf('artifact.created')).toContain('artifacts')
     expect(partsOf('message.posted')).not.toContain('artifacts')
     expect(partsOf('message.read')).toEqual(['conversations'])
+    expect(partsOf('thread.node.set')).toEqual(['detail', 'conversations', 'plan'])
   })
 })
 

@@ -1377,6 +1377,16 @@ export async function setThreadModel(threadId: string, model: string | null) {
   }
 }
 
+/** Link a thread to a plan node, move it to another node, or unlink it with `null`. */
+export async function setThreadNode(threadId: string, nodeId: string | null) {
+  try {
+    await api.setThreadNode(threadId, nodeId)
+    await refreshCurrent(['detail', 'plan'])
+  } catch (error) {
+    report(error)
+  }
+}
+
 async function load(restore: () => Promise<void>): Promise<number | null> {
   api.getModelSettings().then(applyModelSettings, () => {})
   api.getInputSettings().then(

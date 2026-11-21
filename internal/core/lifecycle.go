@@ -194,6 +194,8 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 		}
 	case "thread.model_set":
 		w.run("UPDATE threads SET model = ?, updated_at = ? WHERE id = ?", d["model"], e.At, id)
+	case "thread.node.set":
+		w.run("UPDATE threads SET node_id = ?, updated_at = ? WHERE id = ?", d["nodeId"], e.At, id)
 	case "thread.started":
 		w.run("UPDATE threads SET started = 1, updated_at = ? WHERE id = ?", e.At, id)
 	case "thread.reported":

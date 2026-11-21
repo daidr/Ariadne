@@ -215,14 +215,20 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs,
 			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
 				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by read_plan."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
+			specification("link_thread_node", "Link an existing discussion thread to a plan node, move it to another node, or unlink it. Pass an existing nodeId from read_plan to link or move, or omit nodeId or set unlink to true to remove the link.",
+				args{
+					"threadId": threadIDField(),
+					"nodeId":   args{"type": "string", "description": "Existing plan node ID returned by read_plan. Omit or leave empty to unlink."},
+					"unlink":   args{"type": "boolean", "description": "Set to true to remove the thread's plan node link."},
+				}, []string{"threadId"}, turn.linkThreadNode),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
 				args{"threadId": threadIDField(), "content": field("string"), "userMessages": userMessagesField("content")}, []string{"threadId"}, turn.messageThread),
-			specification("list_threads", "List discussion threads in the current project with their threadId, title and stage.",
+			specification("list_threads", "List discussion threads in the current project with their threadId, title, stage and linked nodeId.",
 				args{}, nil, func(ctx context.Context, _ args) (string, error) {
 					threads, err := turn.Repository.ListThreads(ctx, conversation.ProjectID)
 					var result []args
 					for _, thread := range threads[:min(len(threads), 100)] {
-						result = append(result, args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "summary": thread.LastSummary})
+						result = append(result, args{"threadId": thread.ID, "title": thread.Title, "stage": thread.Stage, "nodeId": thread.NodeID, "summary": thread.LastSummary})
 					}
 					return reply(result, err)
 				}),
@@ -375,6 +381,39 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 	thread, err := turn.Repository.CreateBriefedThread(ctx, turn.conversation.ProjectID,
 		core.NewThread{Title: title, Model: model, NodeID: optional(input, "nodeId"), Branch: optional(input, "branch")}, brief, cites)
 	return reply(args{"threadId": thread.ID, "stage": thread.Stage}, relayToolError(err, "brief"))
+}
+
+func (turn *turn) linkThreadNode(ctx context.Context, input args) (string, error) {
+	id := text(input, "threadId")
+	if id == "" || id == "undefined" || id == "null" {
+		return "", errors.New("link_thread_node requires a real threadId. " + threadIDHelp)
+	}
+	unlink, _ := input["unlink"].(bool)
+	var nodeID *string
+	if !unlink {
+		if raw, present := input["nodeId"]; present && raw != nil {
+			value, ok := raw.(string)
+			if !ok {
+				return "", errors.New("nodeId must be a plan node ID string")
+			}
+			if clean := textutil.Trim(value); clean != "" {
+				nodeID = &clean
+			}
+		}
+	}
+	thread, err := turn.Repository.SetThreadNode(ctx, turn.conversation.ProjectID, id, nodeID, turn.conversation.ID)
+	if err != nil {
+		var detail *domainerr.Error
+		if errors.As(err, &detail) && detail.Key == "error.notFound" {
+			if detail.Field == "nodeId" {
+				what, _ := detail.Params["what"].(string)
+				return "", fmt.Errorf("nodeId %q is not a plan node in this project. Call read_plan for a current node ID, or omit nodeId to unlink.", textutil.HeadUnits(what, 128))
+			}
+			return "", fmt.Errorf("No discussion thread %q in this project. Call list_threads to find its threadId.", id)
+		}
+		return "", err
+	}
+	return reply(args{"threadId": thread.ID, "nodeId": thread.NodeID}, nil)
 }
 
 func (turn *turn) messageThread(ctx context.Context, input args) (string, error) {
