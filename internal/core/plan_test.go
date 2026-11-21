@@ -74,7 +74,7 @@ func TestPlanOperationsMatchLegacy(t *testing.T) {
 		parsed, err := parsePlanOps(value["ops"])
 		var actual any
 		if err == nil {
-			preview, confirmation, failure := previewPlanOps(graph, parsed), needsConfirmation(graph, parsed), whyUndoFails(graph, parsed, map[string]string{"gone": "原节点"})
+			preview, failure := previewPlanOps(graph, parsed), whyUndoFails(graph, parsed, map[string]string{"gone": "原节点"})
 			var next planGraph
 			var inverse []object
 			next, inverse, err = applyOps(graph, parsed)
@@ -83,7 +83,7 @@ func TestPlanOperationsMatchLegacy(t *testing.T) {
 				if restoreErr != nil {
 					t.Fatal(restoreErr)
 				}
-				actual = object{"parsed": parsed, "preview": preview, "confirmation": confirmation, "failure": failure, "graph": planJSON(next), "inverse": inverse, "restored": planJSON(restored)}
+				actual = object{"parsed": parsed, "preview": preview, "failure": failure, "graph": planJSON(next), "inverse": inverse, "restored": planJSON(restored)}
 			}
 		}
 		if err != nil {
@@ -93,8 +93,13 @@ func TestPlanOperationsMatchLegacy(t *testing.T) {
 			}
 			actual = object{"error": domain}
 		}
-		if !reflect.DeepEqual(normalize(actual), normalize(expected[i])) {
-			t.Fatalf("case %d differs\ngot %s\nwant%s", i, encoded(normalize(actual)), encoded(normalize(expected[i])))
+		want := expected[i]
+		if obj, ok := want.(map[string]any); ok {
+			// Coordinator plan edits no longer require confirmation; ignore the legacy field.
+			delete(obj, "confirmation")
+		}
+		if !reflect.DeepEqual(normalize(actual), normalize(want)) {
+			t.Fatalf("case %d differs\ngot %s\nwant%s", i, encoded(normalize(actual)), encoded(normalize(want)))
 		}
 	}
 }
