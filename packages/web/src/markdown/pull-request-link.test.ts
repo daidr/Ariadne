@@ -287,3 +287,49 @@ test('shows conflict state from link preview on untracked PR links', async () =>
     wrapper.unmount()
   }
 })
+
+test('clears conflict state when tracked PR resolves conflicts even if cached preview is stale', async () => {
+  track({ state: 'open', conflicted: true, checks: { state: 'success', failed: [] } })
+  vi.spyOn(api, 'previewLink').mockResolvedValue({
+    preview: {
+      kind: 'pull-request',
+      repository: 'daidr/dou-ui',
+      number: 472,
+      url,
+      title: 'New icons',
+      state: 'open',
+      draft: false,
+      conflicted: true,
+      author: 'daidr',
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+      at: '2026-11-22T00:00:00Z',
+    },
+  })
+  const wrapper = mount(PullRequestTag, {
+    props: { thread: state.detail!.threads[0], pill: true },
+    global,
+  })
+  try {
+    const link = wrapper.get(`a[href="${url}"]`)
+    await link.trigger('focus')
+    await flushPromises()
+    expect(link.classes()).toContain('pr-pill-conflicted')
+    expect(wrapper.findAll('.pr-card-head .dou-tag').map((tag) => tag.text())).toEqual([
+      t('link.pr.conflicted'),
+    ])
+
+    // Sync updates tracked PR after conflicts are resolved while cached preview still has conflicted: true.
+    track({ state: 'open', conflicted: undefined, checks: { state: 'success', failed: [] } })
+    await wrapper.setProps({ thread: state.detail!.threads[0] })
+    expect(link.classes()).not.toContain('pr-pill-conflicted')
+    expect(link.find('.pr-icon-success').exists()).toBe(true)
+    expect(link.attributes('aria-description')).toBe(t('link.pr.open'))
+    expect(wrapper.findAll('.pr-card-head .dou-tag').map((tag) => tag.text())).toEqual([
+      t('link.pr.open'),
+    ])
+  } finally {
+    wrapper.unmount()
+  }
+})

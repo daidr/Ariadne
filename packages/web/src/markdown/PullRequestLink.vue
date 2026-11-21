@@ -81,13 +81,7 @@ const state = computed<State | undefined>(() =>
     ? 'draft'
     : pr.value?.state,
 )
-const conflicted = computed(
-  () =>
-    pr.value?.state === 'open' &&
-    Boolean(
-      trackedPR.value?.conflicted || (preview.value?.state === 'open' && preview.value.conflicted),
-    ),
-)
+const conflicted = computed(() => pr.value?.state === 'open' && Boolean(pr.value.conflicted))
 const checks = computed(() => {
   const result = trackedPR.value?.checks.state
   return result && result !== 'none' ? result : null
