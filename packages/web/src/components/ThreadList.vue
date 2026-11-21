@@ -3,7 +3,7 @@ import type { ThreadView } from '@ariadne/core'
 import { DouButton, DouEmpty, DouMenu, DouText, type MenuOption } from 'dou-ui'
 import { ChevronDownIcon, ChevronRightIcon } from '@dou-ui/icons'
 import { computed, ref } from 'vue'
-import { locale, t } from '../i18n'
+import { t } from '../i18n'
 import {
   groupOfThread,
   sortThreads,
@@ -34,14 +34,15 @@ const reviewerOf = (thread: ThreadView) => {
 
 const groups = computed(() =>
   threadGroups
-    .map((group) => ({
-      group,
-      threads: sortThreads(
+    .map((group) => {
+      const list = sortThreads(
         threads.value.filter(
           (thread) => groupOfThread(thread, actions.value) === group && !nested(thread),
         ),
-      ),
-    }))
+        group,
+      )
+      return { group, threads: list, items: itemsOf(group, list) }
+    })
     .filter((entry) => entry.threads.length),
 )
 
@@ -89,7 +90,7 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
     @click.capture="noteBeside"
     @keydown.capture="noteBeside"
   >
-    <section v-for="{ group, threads: list } in groups" :key="group" class="thread-group">
+    <section v-for="{ group, threads: list, items } in groups" :key="group" class="thread-group">
       <DouButton
         size="sm"
         variant="ghost"
@@ -110,7 +111,7 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
         class="thread-menu"
         :aria-label="t(`threads.group.${group}`)"
         :model-value="activeThreadId ?? undefined"
-        :items="itemsOf(group, list)"
+        :items="items"
         actions-visible="always"
         @select="select"
       >
