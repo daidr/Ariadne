@@ -235,6 +235,7 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	known["GET /api/projects/:projectId/sources"] = true
 	known["GET /api/projects/:projectId/activity"] = true
 	known["GET /api/threads/:threadId/pull-request/checks"] = true
+	known["PUT /api/threads/:threadId/node"] = true
 	known["GET /api/conversations/:conversationId/trace/export"] = true
 	known["PUT /api/projects/:projectId/sources"] = true
 	known["GET /api/plugins/:pluginId/settings"] = true
@@ -386,5 +387,55 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	api.ServeHTTP(auth, req)
 	if auth.Code != 200 || strings.TrimSpace(auth.Body.String()) != `{"ok":true}` {
 		t.Fatalf("authenticated /api/ping returned %d %s", auth.Code, auth.Body.String())
+	}
+}
+
+func TestSetThreadNodeRoute(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "thread-node.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("A"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RevisePlan(ctx, project.ID, core.PlanRevision{Author: "user", Reason: "计划", Ops: []map[string]any{
+		{"op": "add", "id": "nod_1", "kind": "task", "title": "任务一", "description": "", "acceptance": ""},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "讨论串"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Options{Repository: repo, Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	put := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("PUT", "http://test.invalid/api/threads/"+thread.ID+"/node", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		return response
+	}
+
+	if res := put(`{}`); res.Code != 400 {
+		t.Fatalf("missing nodeId: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":"nod_missing"}`); res.Code != 404 {
+		t.Fatalf("unknown nodeId: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":"nod_1"}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":"nod_1"`) {
+		t.Fatalf("link thread node: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":null}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":null`) {
+		t.Fatalf("unlink thread node: %d %s", res.Code, res.Body.String())
 	}
 }
