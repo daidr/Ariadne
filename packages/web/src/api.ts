@@ -588,6 +588,7 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
+  ping: () => request<{ ok: boolean }>('GET', '/api/ping'),
   listProjects: (ids: readonly string[] = []) =>
     request<{ projects: ProjectView[]; lastSeq: number }>(
       'GET',
@@ -1102,8 +1103,8 @@ export function followEvents(
         onStatus('lost')
         return
       }
-      // EventSource hides the status code; ask a plain endpoint whether the token is the reason.
-      void api.listProjects().then(
+      // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
+      void api.ping().then(
         () => schedule('lost'),
         (error) =>
           schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost'),

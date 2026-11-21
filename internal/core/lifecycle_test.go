@@ -167,6 +167,98 @@ func normalize(value any) any {
 	return visit(result)
 }
 
+// normalizeLegacyExpected adapts frozen TS oracle outputs to intentional Go v69+
+// contract improvements (ID-referenced needsMe items and new threads projection columns).
+func normalizeLegacyExpected(value any) any {
+	result := normalize(value)
+	var visit func(any) any
+	visit = func(v any) any {
+		switch node := v.(type) {
+		case map[string]any:
+			if needs, ok := node["needsMe"].([]any); ok {
+				node["needsMe"] = legacyNeedsMeToIDs(needs)
+			}
+			if needs, ok := node["needs"].([]any); ok {
+				node["needs"] = legacyNeedsMeToIDs(needs)
+			}
+			for key, child := range node {
+				node[key] = visit(child)
+			}
+		case []any:
+			for i := range node {
+				node[i] = visit(node[i])
+			}
+		}
+		return v
+	}
+	return visit(result)
+}
+
+func legacyNeedsMeToIDs(items []any) []any {
+	converted := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			converted = append(converted, raw)
+			continue
+		}
+		switch item["kind"] {
+		case "thread":
+			if _, hasID := item["threadId"]; hasID {
+				converted = append(converted, item)
+				continue
+			}
+			var id any
+			if thread, ok := item["thread"].(map[string]any); ok {
+				id = thread["id"]
+			}
+			converted = append(converted, map[string]any{"kind": "thread", "threadId": id})
+		case "attention":
+			if _, hasID := item["threadId"]; hasID {
+				converted = append(converted, item)
+				continue
+			}
+			var id any
+			if thread, ok := item["thread"].(map[string]any); ok {
+				id = thread["id"]
+			}
+			joinedIDs := []any{}
+			if joined, ok := item["joined"].([]any); ok {
+				for _, rawThread := range joined {
+					if thread, ok := rawThread.(map[string]any); ok {
+						joinedIDs = append(joinedIDs, thread["id"])
+					}
+				}
+			}
+			converted = append(converted, map[string]any{
+				"kind":      "attention",
+				"attention": item["attention"],
+				"threadId":  id,
+				"joinedIds": joinedIDs,
+			})
+		default:
+			converted = append(converted, raw)
+		}
+	}
+	return converted
+}
+
+// stripNewThreadColumns omits columns added after the frozen v67 legacy schema
+// when comparing raw SQLite threads table dumps against legacy replay output.
+func stripNewThreadColumns(rows any) any {
+	list, ok := normalize(rows).([]any)
+	if !ok {
+		return normalize(rows)
+	}
+	for _, entry := range list {
+		if row, ok := entry.(map[string]any); ok {
+			delete(row, "changed_seq")
+			delete(row, "workspace_source_id")
+		}
+	}
+	return list
+}
+
 func TestLifecycleMatchesLegacyAfterEveryEvent(t *testing.T) {
 	events := lifecycleEvents()
 	var expected []map[string]any
@@ -194,8 +286,12 @@ func TestLifecycleMatchesLegacyAfterEveryEvent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("event %d %s: %v", i+1, event.Type, err)
 		}
-		if !reflect.DeepEqual(normalize(actual), normalize(expected[i])) {
-			t.Fatalf("event %d %s differs\ngot  %s\nwant %s", i+1, event.Type, encoded(normalize(actual)), encoded(normalize(expected[i])))
+		got := normalize(actual).(map[string]any)
+		want := normalize(expected[i]).(map[string]any)
+		got["threads"] = stripNewThreadColumns(got["threads"])
+		want["threads"] = stripNewThreadColumns(want["threads"])
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("event %d %s differs\ngot  %s\nwant %s", i+1, event.Type, encoded(got), encoded(want))
 		}
 	}
 }

@@ -3,7 +3,7 @@ import { DouBadge, DouButton, DouEmpty, DouLink, DouPopover, DouText } from 'dou
 import { BellIcon, PlayIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import type { NeedsMeItem, ThreadView } from '@ariadne/core'
+import type { AttentionView, ThreadView } from '@ariadne/core'
 import { threadLine } from '../stage'
 import { endAside, openMain, openThread, openThreadFrom, retryTurn, state } from '../store'
 import AskBlock from '../blocks/AskBlock.vue'
@@ -12,9 +12,31 @@ import ReviewMark from '../review/ReviewMark.vue'
 
 defineProps<{ compact?: boolean }>()
 
+type ResolvedNeedsMeItem =
+  | { kind: 'attention'; attention: AttentionView; askers: ThreadView[] }
+  | { kind: 'thread'; thread: ThreadView }
+
 // The server builds the list; the badge is its length, so the two cannot disagree.
-const items = computed(() => state.detail?.needsMe ?? [])
-const count = computed(() => items.value.length)
+const items = computed<ResolvedNeedsMeItem[]>(() => {
+  const byId = new Map((state.detail?.threads ?? []).map((thread) => [thread.id, thread]))
+  const resolved: ResolvedNeedsMeItem[] = []
+  for (const item of state.detail?.needsMe ?? []) {
+    if (item.kind === 'attention') {
+      const askers = [...(item.threadId ? [item.threadId] : []), ...item.joinedIds].flatMap(
+        (id) => {
+          const thread = byId.get(id)
+          return thread ? [thread] : []
+        },
+      )
+      resolved.push({ kind: 'attention', attention: item.attention, askers })
+    } else {
+      const thread = byId.get(item.threadId)
+      if (thread) resolved.push({ kind: 'thread', thread })
+    }
+  }
+  return resolved
+})
+const count = computed(() => state.detail?.needsMe.length ?? 0)
 
 /** Go to where a form was asked: its thread, or the coordinator's conversation. */
 function openAsker(threadId: string | null) {
@@ -30,11 +52,6 @@ function headline(thread: ThreadView): string {
       : t('aside.due')
   }
   return threadLine(thread) ?? t(`thread.stage.${thread.stage}`)
-}
-
-/** Every thread waiting on a card, so the user sees whom one answer reaches. */
-function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[] {
-  return [...(item.thread ? [item.thread] : []), ...item.joined]
 }
 </script>
 
@@ -57,8 +74,8 @@ function askers(item: Extract<NeedsMeItem, { kind: 'attention' }>): ThreadView[]
       <div v-if="count" class="attention-list">
         <template v-for="item in items">
           <div v-if="item.kind === 'attention'" :key="item.attention.id" class="attention">
-            <DouText v-if="askers(item).length" variant="secondary" size="sm" truncate>
-              <template v-for="(thread, index) in askers(item)" :key="thread.id">
+            <DouText v-if="item.askers.length" variant="secondary" size="sm" truncate>
+              <template v-for="(thread, index) in item.askers" :key="thread.id">
                 <template v-if="index"> · </template>
                 <DouLink
                   underline="hover"

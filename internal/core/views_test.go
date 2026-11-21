@@ -80,8 +80,9 @@ func TestProjectAndThreadViewsMatchLegacy(t *testing.T) {
 		}
 		detail.Project.RunningTurns = 0
 		actual := object{"projects": projects, "detail": detail}
-		if !reflect.DeepEqual(normalize(actual), normalize(expected[i])) {
-			t.Fatalf("step %d differs\ngot %s\nwant%s", i, encoded(normalize(actual)), encoded(normalize(expected[i])))
+		want := normalizeLegacyExpected(expected[i])
+		if !reflect.DeepEqual(normalize(actual), want) {
+			t.Fatalf("step %d differs\ngot %s\nwant%s", i, encoded(normalize(actual)), encoded(want))
 		}
 	}
 	_, err = (Reader{DB: store.DB()}).GetThread(t.Context(), "missing")
