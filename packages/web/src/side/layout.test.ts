@@ -16,6 +16,7 @@ import {
   openThreads,
   parseLayout,
   prune,
+  reorderPinned,
   split,
   threadKey,
   updateDock,
@@ -175,6 +176,24 @@ describe('side layout', () => {
     expect(tabs(layout)).toEqual([['plan', 'threads', 'artifacts', 'thread:a'], ['list:plan:2']])
     expect(groupsOf(layout.root)[0]?.active).toBe('thread:a')
     expect(parseLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout)
+  })
+
+  test('keeps the fixed tab order across copies, compact mode and a restored layout', () => {
+    let layout = open(defaultLayout(), threadKey('a'))
+    layout = reorderPinned(layout, 'artifacts', 0)
+    expect(tabs(layout)).toEqual([['artifacts', 'plan', 'threads', 'thread:a']])
+    expect(focusedGroup(layout).active).toBe('thread:a')
+    expect(reorderPinned(layout, 'artifacts', 3)).toBe(layout)
+
+    const first = focusedGroup(layout).id
+    layout = updateDock(layout, moveDockTab(layout.root, 'plan', first, 0))
+    layout = updateDock(layout, splitDockTab(layout.root, 'artifacts', first, 'right'))
+    layout = parseLayout(JSON.parse(JSON.stringify(layout)))!
+    expect(tabs(layout)).toEqual([
+      ['artifacts', 'plan', 'threads', 'thread:a'],
+      ['list:artifacts:1'],
+    ])
+    expect(compactGroup(layout).tabs).toEqual(['artifacts', 'plan', 'threads', 'thread:a'])
   })
 
   test('older layouts keep their list in its panel and restore the fixed entry in the first panel', () => {

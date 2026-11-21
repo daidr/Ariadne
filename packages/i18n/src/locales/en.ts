@@ -65,6 +65,7 @@ export const en: Record<MessageKey, string> = {
   'side.more': 'Layout',
   'side.moveTo': 'Move to',
   'side.groupOf': 'Group with “{label}”',
+  'side.pinnedTabs': 'Pinned tabs',
   'side.open': 'Open',
   'side.closeOthers': 'Close others',
   'plan.empty': 'No plan yet',

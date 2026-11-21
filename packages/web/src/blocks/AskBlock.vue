@@ -23,9 +23,10 @@ import {
   type RadioValue,
 } from 'dou-ui'
 import { CheckIcon } from '@dou-ui/icons'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref, shallowRef, watch } from 'vue'
 import { t } from '../i18n'
 import { answerAttention } from '../store'
+import { askDraftsKey, type AskDraft } from './ask-drafts'
 
 /**
  * A choice, confirmation or form an agent (or the system) asks the user, the same in the
@@ -81,7 +82,6 @@ const confirmStatus = computed(() => {
   if (answered.value?.type === 'confirm') return answered.value.approved ? 'approved' : 'denied'
   return props.withdrawn ? 'withdrawn' : 'waiting'
 })
-const referenceScope = ref<RadioValue>('thread')
 const confirmDescription = computed(() => {
   if (props.block.type !== 'confirm') return undefined
   if (props.withdrawn) return props.withdrawn
@@ -102,16 +102,34 @@ function decide(decision: ChatConfirmDecision) {
 
 // A form: its values start from the defaults; once submitted it lists what was sent.
 const form = computed(() => (props.block.type === 'form' ? props.block : null))
-const values = reactive<Record<string, FormValue>>({})
+const drafts = inject(askDraftsKey, null)
+const draft = shallowRef<AskDraft>(reactive({ scope: 'thread', values: {} }))
+const values = computed(() => draft.value.values)
+const referenceScope = computed<RadioValue>({
+  get: () => draft.value.scope,
+  set: (scope) => (draft.value.scope = scope),
+})
 watch(
-  () => props.block,
-  () => {
-    for (const key of Object.keys(values)) delete values[key]
-    if (!form.value) return
-    for (const field of form.value.fields) {
-      const value = field.default
-      values[field.key] = Array.isArray(value) ? [...value] : (value ?? null)
+  [() => props.attentionId, () => props.block, answered, () => props.withdrawn],
+  ([id, block, answer, withdrawn]) => {
+    const editable =
+      id &&
+      drafts &&
+      !answer &&
+      !withdrawn &&
+      (block.type === 'form' || (block.type === 'confirm' && block.allowProjectReference))
+    if (id && !editable) drafts?.delete(id)
+    const existing = editable ? drafts.get(id) : undefined
+    const fields: Record<string, FormValue> = {}
+    for (const field of form.value?.fields ?? []) {
+      const value =
+        existing && Object.hasOwn(existing.values, field.key)
+          ? existing.values[field.key]
+          : field.default
+      fields[field.key] = Array.isArray(value) ? [...value] : (value ?? null)
     }
+    draft.value = reactive({ scope: existing?.scope ?? 'thread', values: fields })
+    if (editable) drafts.set(id, draft.value)
   },
   { immediate: true },
 )
@@ -126,10 +144,10 @@ function shown(field: FormBlock['fields'][number], value: FormValue | undefined)
 }
 const options = (field: FormBlock['fields'][number]) =>
   field.options.map((option) => ({ label: option.label, value: option.value }))
-const text = (key: string) => (typeof values[key] === 'string' ? (values[key] as string) : '')
-const numberOf = (key: string) => (typeof values[key] === 'number' ? (values[key] as number) : null)
+const text = (key: string) => (typeof values.value[key] === 'string' ? values.value[key] : '')
+const numberOf = (key: string) => (typeof values.value[key] === 'number' ? values.value[key] : null)
 function submit() {
-  void send({ type: 'form', values: { ...values } })
+  void send({ type: 'form', values: { ...values.value } })
 }
 </script>
 

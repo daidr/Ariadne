@@ -40,6 +40,7 @@ import {
   state,
 } from '../store'
 import { sideDock } from './dock'
+import PinnedSideTabs from './PinnedSideTabs.vue'
 import * as side from './layout'
 import type { PaneKey } from './layout'
 import { MIN_HEIGHT, MIN_WIDTH } from './sizes'
@@ -122,6 +123,13 @@ watch(activeThreadId, (threadId) => {
 
 const groups = computed(() => side.groupsOf(state.side.root))
 const compactGroup = computed(() => side.compactGroup(state.side))
+const pinned = computed(() =>
+  side.pinnedTabsOf(groups.value[0]!).map((key) => ({
+    key,
+    label: lists[key]!.label(),
+    icon: lists[key]!.icon,
+  })),
+)
 const othersThan = (group: DockGroup) => groups.value.filter((item) => item.id !== group.id)
 
 // Splitting halves the group: only offered while both halves still have room to be read.
@@ -145,6 +153,10 @@ function focusGroup(id: string | undefined) {
 function bring(group: DockGroup, key: side.ListKey) {
   setSide(side.move(state.side, key, group.id))
 }
+
+function dragPinned(event: PointerEvent, key: side.ListKey) {
+  dock.value?.startDrop(event, { value: key })
+}
 </script>
 
 <template>
@@ -163,12 +175,9 @@ function bring(group: DockGroup, key: side.ListKey) {
       @remove="(key) => closePane(key as PaneKey, compact)"
     >
       <template #label="{ value }">
-        <DouTooltip v-if="side.isPinned(value)" :content="labelOf(value)">
-          <span class="pane-list-label">
-            <component :is="lists[value]!.icon" aria-hidden="true" />
-            <span class="pane-list-name">{{ labelOf(value) }}</span>
-          </span>
-        </DouTooltip>
+        <span v-if="side.isPinned(value)" class="pane-pinned-label" :data-pinned-label="value">
+          {{ labelOf(value) }}
+        </span>
         <span v-else-if="side.listOf(value)" class="pane-thread-label">
           <component :is="lists[side.listOf(value)!]!.icon" aria-hidden="true" />
           <span class="pane-thread-title">{{ labelOf(value as PaneKey) }}</span>
@@ -205,6 +214,15 @@ function bring(group: DockGroup, key: side.ListKey) {
         />
       </template>
       <template #extra="{ group, active }">
+        <PinnedSideTabs
+          v-if="group.id === groups[0]?.id"
+          :tabs="pinned"
+          :active="active"
+          :drag-across-groups="!compact"
+          @select="(key) => setSide(side.activate(state.side, key))"
+          @reorder="(key, index) => setSide(side.reorderPinned(state.side, key, index))"
+          @drag="dragPinned"
+        />
         <DouTooltip
           v-if="
             !compact &&
@@ -308,20 +326,28 @@ function bring(group: DockGroup, key: side.ListKey) {
   padding: 0;
 }
 
-.pane-list-label {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  font-size: 16px;
+.side-dock :deep(.dou-tabs__tab:has(.pane-pinned-label)) {
+  display: none;
 }
 
-.pane-list-name {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+.side-dock :deep(.side-pinned-host) {
+  display: flex;
+  flex: none;
+  align-self: stretch;
+}
+
+.side-dock :deep(.dou-tabs__header:has(.side-pinned-tabs)) {
+  container-type: inline-size;
+}
+
+.side-dock :deep(.dou-tabs__header:has(.side-pinned-tabs.is-reordering) .dou-tabs__marker) {
+  visibility: hidden;
+}
+
+@container (width < 240px) {
+  .side-dock :deep(.dou-tabs__header:has(.side-pinned-tabs) > .dou-tabs__scroll) {
+    display: none;
+  }
 }
 
 .pane-thread-label {

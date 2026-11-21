@@ -64,6 +64,7 @@ export const zhCN = {
   'side.more': '分栏',
   'side.moveTo': '移到',
   'side.groupOf': '「{label}」那组',
+  'side.pinnedTabs': '常驻标签',
   'side.open': '打开',
   'side.closeOthers': '关闭其他',
   'plan.empty': '还没有计划',

@@ -5,7 +5,6 @@ import {
   DouChatAttachments,
   DouChatInput,
   DouChatPlan,
-  DouChatList,
   DouChatMessage,
   DouCollapse,
   DouCollapseItem,
@@ -18,12 +17,10 @@ import {
   DouLink,
   DouPopover,
   DouShimmer,
-  DouSpinner,
   DouText,
   type ChatAttachment,
   type ChatInputOption,
   type ChatMessageProps,
-  type ChatListExpose,
 } from 'dou-ui'
 import type { MessageView, NoticeView, ReplyDraftBlock } from '@ariadne/core'
 import {
@@ -42,6 +39,7 @@ import {
   inject,
   nextTick,
   onBeforeUnmount,
+  provide,
   ref,
   useTemplateRef,
   watch,
@@ -87,6 +85,8 @@ import ReviewNotice from '../review/ReviewNotice.vue'
 import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
 import ConversationActivity from './ConversationActivity.vue'
+import ConversationLog from './ConversationLog.vue'
+import { askDraftsKey, type AskDraft } from '../blocks/ask-drafts'
 import ConversationBar from './ConversationBar.vue'
 import ConversationMarker from './ConversationMarker.vue'
 import { messageTimes } from './conversation-timeline'
@@ -374,14 +374,18 @@ const shown = computed(() => {
   }
   return { items, changes }
 })
-const entries = computed(() =>
-  placeTodo(
+const entries = computed(() => [
+  ...placeTodo(
     shown.value.items,
     view.value.todo,
     view.value.more ? view.value.messages[0] : undefined,
   ),
-)
+  { id: 'conversation-activity', activity: true as const },
+])
 const times = computed(() => messageTimes(shown.value.items))
+const askDrafts = new Map<string, AskDraft>()
+provide(askDraftsKey, askDrafts)
+watch(conversationId, () => askDrafts.clear())
 
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
@@ -639,7 +643,9 @@ function retry() {
 
 // Scrolled to the top: the page before. A first page too short to scroll fetches the
 // next one by itself, since there is no top to reach.
-const list = useTemplateRef<ChatListExpose>('list')
+const list = useTemplateRef<{ viewport: HTMLElement | null; scrollToMessage(id: string): void }>(
+  'list',
+)
 const unread = props.threadId
   ? undefined
   : useCoordinatorUnread(
@@ -667,37 +673,57 @@ watch(
   { flush: 'post' },
 )
 function earlier() {
-  if (conversationId.value && view.value.more) void loadEarlier(conversationId.value)
+  if (active.value && conversationId.value && view.value.more)
+    void loadEarlier(conversationId.value)
 }
-watch([() => view.value.messages.length, () => view.value.more, active], async () => {
-  if (!active.value || !view.value.more || view.value.loadingEarlier) return
-  await nextTick()
-  const el = list.value?.viewport
-  if (active.value && el?.clientHeight && el.scrollHeight <= el.clientHeight) earlier()
-})
+watch(
+  [list, active, () => view.value.more, () => view.value.messages.length],
+  ([chat, visible, more], _, cleanup) => {
+    const viewport = chat?.viewport
+    if (!visible || !more || !viewport) return
+    const loadIfShort = () => {
+      if (
+        !view.value.loadingEarlier &&
+        viewport.clientHeight &&
+        viewport.scrollHeight <= viewport.clientHeight
+      ) {
+        earlier()
+      }
+    }
+    loadIfShort()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(loadIfShort)
+    observer.observe(viewport)
+    // The estimates can initially overflow even when the measured messages fit.
+    if (viewport.firstElementChild) observer.observe(viewport.firstElementChild)
+    cleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
 
 // A message the search found: scroll to it and mark it for a moment. A message from the
 // coordinator to a thread is folded, so it opens.
 const focused = ref<string | null>(null)
 const openRelays = ref<string[]>([])
 let unmark: ReturnType<typeof setTimeout> | undefined
+onBeforeUnmount(() => clearTimeout(unmark))
 watch(
-  [() => state.focus, active],
-  async ([focus, visible]) => {
-    if (!visible || !focus || focus.conversationId !== conversationId.value) return
+  [() => state.focus, active, list, conversationId],
+  async ([focus, visible, chat, id]) => {
+    if (!visible || !chat || !focus || focus.conversationId !== id) return
     state.focus = null
     const message = view.value.messages.find((item) => item.id === focus.messageId)
     if (message?.kind === 'relay' && !openRelays.value.includes(message.id)) {
       openRelays.value = [...openRelays.value, message.id]
     }
     await nextTick()
-    const el = list.value?.viewport?.querySelector(`[data-message-id="${focus.messageId}"]`)
-    list.value?.scrollToMessage(el)
+    if (list.value !== chat || conversationId.value !== id) return
+    chat.scrollToMessage(focus.messageId)
     focused.value = focus.messageId
     clearTimeout(unmark)
     unmark = setTimeout(() => (focused.value = null), 2000)
   },
-  { immediate: true },
+  { flush: 'post' },
 )
 
 // Threads keep their read behavior. The coordinator tracks the visible tail.
@@ -741,19 +767,31 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       </div>
     </div>
 
-    <DouChatList
+    <ConversationLog
       v-if="timeline.length || todo.length || working || queued || wait"
+      :key="conversationId ?? undefined"
       ref="list"
       class="conversation-list"
-      @at-bottom-change="unread?.onBottomChange($event)"
-      @top-reached="earlier"
+      :items="entries"
+      :loading-earlier="view.loadingEarlier"
+      @bottom-change="unread?.onBottomChange($event)"
+      @earlier="earlier"
     >
-      <div v-if="view.loadingEarlier" class="earlier" role="status">
-        <DouSpinner size="sm" />
-      </div>
-      <template v-for="item in entries" :key="item.id">
+      <template #default="{ item }">
+        <ConversationActivity
+          v-if="'activity' in item"
+          :conversation-id="conversationId"
+          :working="working && !thread?.stopped"
+          :queued="queued && !thread?.stopped"
+          :live="live"
+          :activity="activity"
+          :elapsed="elapsed"
+          :fallback="fallback"
+          :esc-armed="escArmed"
+          :wait="wait"
+        />
         <DouChatPlan
-          v-if="'todo' in item"
+          v-else-if="'todo' in item"
           :items="todo"
           :title="t('todo.title')"
           :collapsible="false"
@@ -1118,18 +1156,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           </DouChatMessage>
         </div>
       </template>
-      <ConversationActivity
-        :conversation-id="conversationId"
-        :working="working && !thread?.stopped"
-        :queued="queued && !thread?.stopped"
-        :live="live"
-        :activity="activity"
-        :elapsed="elapsed"
-        :fallback="fallback"
-        :esc-armed="escArmed"
-        :wait="wait"
-      />
-    </DouChatList>
+    </ConversationLog>
     <div v-else class="conversation-empty">
       <DouEmpty v-if="props.threadId" :title="thread?.title" :description="t('thread.empty')" />
       <DouEmpty v-else-if="state.modelReady === false" :description="t('error.noModel')">
@@ -1399,30 +1426,27 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   margin-inline-end: -8px;
 }
 
-.conversation-list {
-  flex: 1;
-  min-height: 0;
+.conversation-list :deep(.dou-chat-list) {
+  --conversation-clearance: var(--conversation-footer-height, var(--dou-chat-list-padding));
 }
 
-.conversation-list :deep(.dou-chat-list__content) {
-  padding-block-end: 0;
-}
-
-/* Count the footer clearance in the content size that ChatList observes. */
-.conversation-list :deep(.dou-chat-list__content)::after {
-  content: '';
-  flex: none;
-  margin-block-start: calc(-1 * var(--dou-chat-list-gap));
-  padding-block-end: var(--conversation-footer-height, var(--dou-chat-list-padding));
+/* The spacer, including composer clearance, is what ChatList observes. */
+.conversation-list :deep(.dou-virtual-list__spacer) {
+  padding-block-end: var(--conversation-clearance);
 }
 
 .conversation-list :deep(.dou-chat-list__viewport) {
   scroll-padding-block-end: var(--conversation-footer-height, 0px);
 }
 
-.conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__content) {
-  box-sizing: border-box;
-  min-block-size: 100%;
+.conversation:has(.conversation-input) .conversation-list :deep(.dou-virtual-list__spacer) {
+  min-block-size: max(
+    0px,
+    calc(
+      100% - var(--conversation-clearance) - var(--dou-chat-list-padding-top) +
+        var(--dou-chat-list-gap)
+    )
+  );
 }
 
 /* Paint inside the scrollport so its scrollbar and the floating composer stay above the fade. */
@@ -1519,12 +1543,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.earlier {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0;
 }
 
 /* A folded message from the coordinator the search led to, marked like a chat message. */

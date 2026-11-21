@@ -77,6 +77,11 @@ export function viewOf(key: PaneKey): PaneView | null {
 /** The tabs of a group; the layout only ever holds pane keys. */
 export const tabsOf = (group: DockGroup) => group.tabs as PaneKey[]
 
+export function pinnedTabsOf(group: DockGroup): ListKey[] {
+  const pinned = group.tabs.filter(isPinned)
+  return pinned.length === LISTS.length ? pinned : [...LISTS]
+}
+
 /** The tab in front of a group. */
 export const activeOf = (group: DockGroup) => (group.active ?? group.tabs[0]) as PaneKey
 
@@ -121,7 +126,7 @@ export function compactGroup(layout: SideLayout): DockGroup {
   return {
     type: 'group',
     id: groups[0]!.id,
-    tabs: [...LISTS, ...groups.flatMap(tabsOf).filter((key) => !listOf(key))],
+    tabs: [...pinnedTabsOf(groups[0]!), ...groups.flatMap(tabsOf).filter((key) => !listOf(key))],
     active: listOf(active) ?? active,
   }
 }
@@ -151,7 +156,7 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
       first = original
     }
   }
-  const tabs = [...LISTS, ...first.tabs.filter((key) => !listOf(key))]
+  const tabs = [...pinnedTabsOf(previous), ...first.tabs.filter((key) => !listOf(key))]
   const active =
     first.active != null && tabs.includes(first.active)
       ? first.active
@@ -209,6 +214,20 @@ export function updateDock(layout: SideLayout, root: DockNode): SideLayout {
       : group
   })
   return withRoot(layout, root)
+}
+
+export function reorderPinned(layout: SideLayout, key: ListKey, index: number): SideLayout {
+  const first = groupsOf(layout.root)[0]!
+  const pinned = pinnedTabsOf(first)
+  const from = pinned.indexOf(key)
+  if (index < 0 || index >= pinned.length || from === index) return layout
+  pinned.splice(from, 1)
+  pinned.splice(index, 0, key)
+  const tabs = [...pinned, ...first.tabs.filter((tab) => !listOf(tab))]
+  return {
+    ...layout,
+    root: mapGroups(layout.root, (group) => (group === first ? { ...group, tabs } : group)),
+  }
 }
 
 /** Bring `key` to the front of its group and use that group. */
