@@ -110,6 +110,7 @@ func (turn *turn) recordPullRequestMerge(ctx context.Context, threadID string, p
 	next := maps.Clone(previous)
 	next["state"] = "merged"
 	next["title"] = current.Title
+	delete(next, "conflicted")
 	if err := turn.Repository.SyncPullRequestIfCurrent(ctx, threadID, previous, next); err != nil {
 		return "", fmt.Errorf("the host merged PR #%d, but the discussion status could not be updated: %w", current.Number, err)
 	}

@@ -396,6 +396,8 @@ export interface ThreadPullRequest {
   url: string
   title: string
   state: 'open' | 'closed' | 'merged'
+  /** True when the host reports merge conflicts on an open pull request. */
+  conflicted?: boolean
   headSha: string
   checks: { state: ChecksState; failed: string[] }
 }

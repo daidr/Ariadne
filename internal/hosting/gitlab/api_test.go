@@ -254,3 +254,50 @@ func TestAPIAndParsing(t *testing.T) {
 		t.Fatalf("unexpected counts: scenarios=%d repos=%d instances=%d links=%d find=%d logs=%d", len(nativeScenarios), len(nativeRepositories), len(nativeInstances), len(nativeLinks), len(nativeFind), len(nativeLogs))
 	}
 }
+
+func TestMergeRequestConflictParsing(t *testing.T) {
+	cases := []struct {
+		name         string
+		state        string
+		hasConflicts bool
+		want         bool
+	}{
+		{name: "opened with conflicts", state: "opened", hasConflicts: true, want: true},
+		{name: "opened without conflicts", state: "opened", hasConflicts: false, want: false},
+		{name: "merged ignores conflict flag", state: "merged", hasConflicts: true, want: false},
+		{name: "closed ignores conflict flag", state: "closed", hasConflicts: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := mergeRaw(7, tc.state, "feature", "2026-11-01")
+			payload["has_conflicts"] = tc.hasConflicts
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.EscapedPath() != "/api/v4/projects/group%2Fsub%2Fapp/merge_requests/7" {
+					http.NotFound(w, r)
+					return
+				}
+				json.NewEncoder(w).Encode(payload)
+			}))
+			defer server.Close()
+			api, err := NewAPI(APIOptions{Base: server.URL + "/api/v4", Path: "group/sub/app", WebURL: "https://gitlab.test/group/sub/app", Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer api.Close()
+			info, err := api.MergeRequest(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Conflicted != tc.want {
+				t.Fatalf("MergeRequest.Conflicted = %v, want %v", info.Conflicted, tc.want)
+			}
+			preview, err := api.Preview(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.Conflicted != tc.want {
+				t.Fatalf("Preview.Conflicted = %v, want %v", preview.Conflicted, tc.want)
+			}
+		})
+	}
+}

@@ -263,3 +263,56 @@ func TestAPIAndMetadata(t *testing.T) {
 		t.Fatalf("unexpected counts: scenarios=%d repos=%d links=%d", len(nativeScenarios), len(nativeRepos), len(nativeLinks))
 	}
 }
+func TestPullRequestConflictParsing(t *testing.T) {
+	cases := []struct {
+		name           string
+		state          string
+		mergedAt       any
+		mergeable      any
+		mergeableState string
+		want           bool
+	}{
+		{name: "open dirty conflict", state: "open", mergeable: false, mergeableState: "dirty", want: true},
+		{name: "computing mergeability", state: "open", mergeable: nil, mergeableState: "unknown", want: false},
+		{name: "null mergeable with dirty state", state: "open", mergeable: nil, mergeableState: "dirty", want: false},
+		{name: "blocked by checks or review", state: "open", mergeable: false, mergeableState: "blocked", want: false},
+		{name: "clean open pull request", state: "open", mergeable: true, mergeableState: "clean", want: false},
+		{name: "closed pull request", state: "closed", mergeable: false, mergeableState: "dirty", want: false},
+		{name: "merged pull request", state: "closed", mergedAt: "2026-11-15", mergeable: false, mergeableState: "dirty", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := pull(7, tc.state, "feature", "2026-11-01")
+			payload["merged_at"] = tc.mergedAt
+			payload["mergeable"] = tc.mergeable
+			payload["mergeable_state"] = tc.mergeableState
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/repos/acme/app/pulls/7" {
+					http.NotFound(w, r)
+					return
+				}
+				json.NewEncoder(w).Encode(payload)
+			}))
+			defer server.Close()
+			api, err := NewAPI(APIOptions{Base: server.URL, Owner: "acme", Name: "app", Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer api.Close()
+			info, err := api.PullRequest(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Conflicted != tc.want {
+				t.Fatalf("PullRequest.Conflicted = %v, want %v", info.Conflicted, tc.want)
+			}
+			preview, err := api.Preview(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.Conflicted != tc.want {
+				t.Fatalf("Preview.Conflicted = %v, want %v", preview.Conflicted, tc.want)
+			}
+		})
+	}
+}

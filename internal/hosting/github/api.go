@@ -51,9 +51,11 @@ type rawPull struct {
 	User      *struct {
 		Login string `json:"login"`
 	} `json:"user"`
-	Additions    int `json:"additions"`
-	Deletions    int `json:"deletions"`
-	ChangedFiles int `json:"changed_files"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	ChangedFiles   int    `json:"changed_files"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
 }
 
 func (raw rawPull) info() sdk.PullRequestInfo {
@@ -61,7 +63,8 @@ func (raw rawPull) info() sdk.PullRequestInfo {
 	if raw.MergedAt != nil && *raw.MergedAt != "" {
 		state = "merged"
 	}
-	return sdk.PullRequestInfo{Number: raw.Number, URL: raw.URL, Title: raw.Title, State: state, Draft: raw.Draft, HeadSHA: raw.Head.SHA, Base: raw.Base.Ref}
+	conflicted := state == "open" && raw.Mergeable != nil && !*raw.Mergeable && raw.MergeableState == "dirty"
+	return sdk.PullRequestInfo{Number: raw.Number, URL: raw.URL, Title: raw.Title, State: state, Draft: raw.Draft, Conflicted: conflicted, HeadSHA: raw.Head.SHA, Base: raw.Base.Ref}
 }
 
 type rawIssue struct {
@@ -215,7 +218,7 @@ func (api *API) Preview(ctx context.Context, number int) (*sdk.PullRequestPrevie
 	if raw.MergedAt != nil {
 		at = *raw.MergedAt
 	}
-	return &sdk.PullRequestPreview{Kind: "pull-request", Repository: api.owner + "/" + api.name, Number: raw.Number, URL: raw.URL, Title: raw.Title, State: info.State, Draft: info.Draft, Author: author, Additions: &raw.Additions, Deletions: &raw.Deletions, ChangedFiles: &raw.ChangedFiles, At: at}, nil
+	return &sdk.PullRequestPreview{Kind: "pull-request", Repository: api.owner + "/" + api.name, Number: raw.Number, URL: raw.URL, Title: raw.Title, State: info.State, Draft: info.Draft, Conflicted: info.Conflicted, Author: author, Additions: &raw.Additions, Deletions: &raw.Deletions, ChangedFiles: &raw.ChangedFiles, At: at}, nil
 }
 func (api *API) OpenPullRequest(ctx context.Context, input sdk.OpenPullRequest) (sdk.PullRequestInfo, error) {
 	base := ""

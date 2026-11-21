@@ -135,6 +135,9 @@ func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
 				if truthy(pr["reference"]) {
 					asObject(pullRequest)["reference"] = pr["reference"]
 				}
+				if truthy(pr["conflicted"]) && pr.str("state") == "open" {
+					asObject(pullRequest)["conflicted"] = true
+				}
 			}
 			onNode = append(onNode, object{"id": thread.ID, "title": thread.Title, "stage": thread.Stage, "stoppedBy": stoppedBy, "lastHeadline": thread.LastHeadline, "pullRequest": pullRequest})
 		}

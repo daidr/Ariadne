@@ -718,7 +718,10 @@ export interface PlanNodeView {
     /** Who holds it stopped, while it is. */
     stoppedBy: string | null
     lastHeadline: string | null
-    pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> | null
+    pullRequest: Pick<
+      ThreadPullRequest,
+      'number' | 'reference' | 'url' | 'state' | 'conflicted' | 'checks'
+    > | null
   }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */
   changedIn: string | null
