@@ -99,6 +99,17 @@ func (turn *turn) readAttachment(ctx context.Context, input args) (string, []any
 		return turn.readSpreadsheetAttachment(ctx, store, id, info, input)
 	}
 
+	if files.IsImage(info.MIME) {
+		if entryName != "" {
+			return "", nil, errors.New("entry is only supported for ZIP archives")
+		}
+		if info.Size <= 5<<20 && info.MIME != "image/avif" {
+			return fmt.Sprintf("Attached image %s (%s, %s).", id, info.MIME, formatAttachmentBytes(info.Size)),
+				[]any{args{"fileId": id, "name": id, "mime": info.MIME, "size": info.Size}}, nil
+		}
+		return fmt.Sprintf("Attachment %s (%s, %s). Image cannot be shown inline to the model.", id, info.MIME, formatAttachmentBytes(info.Size)), nil, nil
+	}
+
 	content, err := store.Read(ctx, id)
 	if err != nil {
 		return "", nil, err
@@ -109,17 +120,6 @@ func (turn *turn) readAttachment(ctx context.Context, input args) (string, []any
 			return "", nil, errors.New("entry is only supported for ZIP archives")
 		}
 		return formatNumberedLines(content.Data, input), nil, nil
-	}
-
-	if files.IsImage(info.MIME) {
-		if entryName != "" {
-			return "", nil, errors.New("entry is only supported for ZIP archives")
-		}
-		if info.Size <= 5<<20 && info.MIME != "image/avif" {
-			return fmt.Sprintf("Attached image %s (%s, %s).", id, info.MIME, formatAttachmentBytes(info.Size)),
-				[]any{args{"fileId": id, "name": id, "mime": info.MIME, "size": info.Size}}, nil
-		}
-		return fmt.Sprintf("Attachment %s (%s, %s). Image cannot be shown inline to the model.", id, info.MIME, formatAttachmentBytes(info.Size)), nil, nil
 	}
 
 	if isZipArchive(content.Data) {
