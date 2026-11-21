@@ -34,11 +34,11 @@ func (api *API) mountConnect(
 	service protoreflect.ServiceDescriptor,
 	mount func(...connect.HandlerOption) (string, http.Handler),
 ) {
+	if service == nil {
+		panic("mountConnect requires a non-nil protobuf service descriptor")
+	}
 	pattern, handler := mount(api.connectHandlerOptions()...)
 	api.rpcMux.Handle(pattern, handler)
-	if service == nil {
-		return
-	}
 	methods := service.Methods()
 	for i := range methods.Len() {
 		method := methods.Get(i)

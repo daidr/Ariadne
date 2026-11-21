@@ -1,4 +1,9 @@
-import { DataService, GetDataUsageResponseSchema, LocalizedErrorSchema } from '@ariadne/proto'
+import {
+  DataService,
+  GetDataUsageRequestSchema,
+  GetDataUsageResponseSchema,
+  LocalizedErrorSchema,
+} from '@ariadne/proto'
 import { create, toBinary } from '@bufbuild/protobuf'
 import { Code, ConnectError } from '@connectrpc/connect'
 import { effectScope } from 'vue'
@@ -11,6 +16,52 @@ import {
   type RpcFetch,
 } from './rpc'
 import { useServerNow } from './server-clock'
+
+function encodeConnectEndStreamError(payload: Record<string, unknown>): Uint8Array {
+  const json = new TextEncoder().encode(JSON.stringify(payload))
+  const frame = new Uint8Array(5 + json.length)
+  frame[0] = 0b0000_0010 // Connect end-of-stream envelope flag
+  new DataView(frame.buffer).setUint32(1, json.length, false)
+  frame.set(json, 5)
+  return frame
+}
+
+const streamEndErrorFetch: RpcFetch = async () => {
+  const detailBytes = toBinary(
+    LocalizedErrorSchema,
+    create(LocalizedErrorSchema, {
+      key: 'error.artifactConflict',
+      params: {
+        currentVersion: { value: { case: 'numberValue', value: 7 } },
+      },
+    }),
+  )
+  const frame = encodeConnectEndStreamError({
+    error: {
+      code: 'aborted',
+      message: 'error.artifactConflict',
+      details: [
+        {
+          type: LocalizedErrorSchema.typeName,
+          value: Buffer.from(detailBytes).toString('base64'),
+        },
+      ],
+    },
+    metadata: {
+      'x-ariadne-server-time': ['1900000099000'],
+    },
+  })
+  return new Response(new Uint8Array(frame), {
+    status: 200,
+    headers: {
+      'content-type': 'application/connect+proto',
+    },
+  })
+}
+
+async function* emptyStreamInput() {
+  yield create(GetDataUsageRequestSchema, { includeSizes: false })
+}
 
 const unauthorizedFetch: RpcFetch = async () =>
   new Response(JSON.stringify({ error: { key: 'error.unauthorized' } }), {
@@ -108,5 +159,41 @@ describe('ConnectRPC transport and error mapping', () => {
       status: 401,
       localized: { key: 'error.unauthorized' },
     })
+  })
+
+  it('maps mid-stream ConnectError during message iteration to ApiError and syncs server clock', async () => {
+    vi.spyOn(performance, 'now').mockReturnValue(250)
+    const transport = createAriadneTransport({
+      getToken: () => 'secret-token',
+      fetch: streamEndErrorFetch,
+    })
+    const method = DataService.method.getDataUsage
+    const streamMethod = { ...method, methodKind: 'server_streaming' as const }
+    const response = await transport.stream(
+      streamMethod,
+      undefined,
+      undefined,
+      undefined,
+      emptyStreamInput(),
+    )
+
+    const consume = async () => {
+      for await (const _ of response.message) {
+        // Expect error on end-stream frame before any message.
+      }
+    }
+
+    await expect(consume()).rejects.toMatchObject({
+      status: 409,
+      localized: {
+        key: 'error.artifactConflict',
+        params: { currentVersion: 7 },
+      },
+    })
+
+    const scope = effectScope()
+    const now = scope.run(() => useServerNow())
+    expect(now?.value).toBe(1_900_000_099_000)
+    scope.stop()
   })
 })

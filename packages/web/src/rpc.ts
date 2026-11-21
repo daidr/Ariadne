@@ -137,6 +137,28 @@ const clockInterceptor: Interceptor = (next) => async (req) => {
   return res
 }
 
+function mapRpcError(error: unknown, signal?: AbortSignal): never {
+  if (signal?.aborted) throw error
+  if (error instanceof ConnectError) {
+    synchronizeServerClock(error.metadata.get('X-Ariadne-Server-Time'))
+    throw connectErrorToApiError(error)
+  }
+  throw error
+}
+
+async function* wrapStreamMessages<T>(
+  messages: AsyncIterable<T>,
+  signal?: AbortSignal,
+): AsyncGenerator<T> {
+  try {
+    for await (const item of messages) {
+      yield item
+    }
+  } catch (error) {
+    mapRpcError(error, signal)
+  }
+}
+
 export function createAriadneTransport(options: AriadneTransportOptions = {}): Transport {
   const readToken = options.getToken ?? getToken
   const authInterceptor: Interceptor = (next) => async (req) => {
@@ -154,24 +176,18 @@ export function createAriadneTransport(options: AriadneTransportOptions = {}): T
       try {
         return await base.unary(method, signal, timeoutMs, header, input, contextValues)
       } catch (error) {
-        if (signal?.aborted) throw error
-        if (error instanceof ConnectError) {
-          synchronizeServerClock(error.metadata.get('X-Ariadne-Server-Time'))
-          throw connectErrorToApiError(error)
-        }
-        throw error
+        mapRpcError(error, signal)
       }
     },
     async stream(method, signal, timeoutMs, header, input, contextValues) {
       try {
-        return await base.stream(method, signal, timeoutMs, header, input, contextValues)
-      } catch (error) {
-        if (signal?.aborted) throw error
-        if (error instanceof ConnectError) {
-          synchronizeServerClock(error.metadata.get('X-Ariadne-Server-Time'))
-          throw connectErrorToApiError(error)
+        const res = await base.stream(method, signal, timeoutMs, header, input, contextValues)
+        return {
+          ...res,
+          message: wrapStreamMessages(res.message, signal),
         }
-        throw error
+      } catch (error) {
+        mapRpcError(error, signal)
       }
     },
   }

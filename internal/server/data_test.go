@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -252,4 +253,14 @@ func TestConnectErrorMappingAndDirectAuthInterceptor(t *testing.T) {
 	if len(reported) != 1 || reported[0].Error() != "boom" {
 		t.Fatalf("expected unexpected error to be reported once, got %v", reported)
 	}
+
+	// Verify mountConnect fails fast if service descriptor lookup returned nil.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected mountConnect(nil, ...) to panic")
+		}
+	}()
+	api.mountConnect(nil, func(...connect.HandlerOption) (string, http.Handler) {
+		return "/invalid/", http.NotFoundHandler()
+	})
 }
