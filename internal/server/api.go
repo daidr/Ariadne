@@ -82,8 +82,10 @@ type API struct {
 	hub           *realtime.Hub
 	ownedHub      bool
 	mux           *http.ServeMux
+	rpcMux        *http.ServeMux
 	handler       http.Handler
 	routes        []string
+	rpcProcedures []string
 	closeOnce     sync.Once
 	catalog       *modelcatalog.Catalog
 	ownedCatalog  bool
@@ -129,7 +131,7 @@ func New(options Options) (*API, error) {
 		}
 		options.Hub = options.State.Hub()
 	}
-	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux()}
+	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux(), rpcMux: http.NewServeMux()}
 	api.rooms = options.Rooms
 	if api.rooms == nil {
 		api.rooms = collab.NewRooms(options.Repository, api.report)
@@ -156,6 +158,7 @@ func New(options Options) (*API, error) {
 		api.ownedState = true
 	}
 	api.mux.HandleFunc("/", api.static)
+	api.mux.Handle(rpcPrefix+"/", api.rpcHandler())
 	api.add("GET", "/api/health", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
 	api.add("GET", "/api/ping", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
 	api.registerReads()
@@ -234,6 +237,12 @@ func (api *API) Close() {
 			_ = api.catalog.Close(ctx)
 		}
 	})
+}
+func (api *API) now() time.Time {
+	if api.options.Now != nil {
+		return api.options.Now()
+	}
+	return time.Now()
 }
 func badInput(reason string) error {
 	return domainerr.New("error.invalidBody", object{"reason": reason})

@@ -307,47 +307,6 @@ func (api *API) registerSourceConfig() {
 		}
 		return object{"project": project}, 201, nil
 	})
-	api.add("PUT", "/api/projects/:projectId/source", func(request *http.Request) (any, int, error) {
-		body, err := readJSON(request)
-		if err != nil {
-			return nil, 0, err
-		}
-		id := request.PathValue("projectId")
-		current, err := api.options.Repository.GetProject(request.Context(), id)
-		if err != nil {
-			return nil, 0, err
-		}
-		if current.FileSources != nil {
-			return nil, 0, badInput("use the sources list for this project")
-		}
-		var raw any
-		secrets := object{}
-		if value, exists := body["source"]; !exists || value != nil {
-			previous, err := sources.DecodeDefinition(current.Source)
-			if err != nil {
-				return nil, 0, err
-			}
-			source, readSecrets, err := api.readSource(request.Context(), value, id, previous, "", false)
-			if err != nil {
-				return nil, 0, err
-			}
-			raw, err = sourceObject(source)
-			if err != nil {
-				return nil, 0, err
-			}
-			secrets = readSecrets
-		}
-		if store := api.options.Settings; store != nil {
-			if err := store.SaveSourceSecrets(id, secrets); err != nil {
-				return nil, 0, err
-			}
-		}
-		project, err := api.options.Repository.SetProjectSource(request.Context(), id, raw)
-		if err == nil && api.options.Workspaces != nil {
-			err = api.options.Workspaces.InvalidateProject(request.Context(), id)
-		}
-		return object{"project": project}, 200, err
-	})
 	api.add("POST", "/api/projects/:projectId/references", func(request *http.Request) (any, int, error) {
 		body, err := readJSON(request)
 		if err != nil {

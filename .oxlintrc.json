@@ -12,5 +12,5 @@
     "import/no-named-as-default": "off",
     "import/no-unassigned-import": ["warn", { "allow": ["**/*.css", "*.css"] }]
   },
-  "ignorePatterns": ["**/dist/**"]
+  "ignorePatterns": ["**/dist/**", "packages/proto/src/gen/**"]
 }

@@ -154,7 +154,7 @@ func TestWorkspaceHTTP(t *testing.T) {
 		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{"settings": object{"delivery": object{"mode": "external", "instructions": "submit to platform"}}}},
 		{Method: "GET", Path: "/api/threads/thr_a/changes"}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{}},
 		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{}}, {Method: "GET", Path: "/api/projects/prj_a/settings"},
-		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "POST", Path: "/api/threads/thr_a/pull-request/refresh"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
+		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
 	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})

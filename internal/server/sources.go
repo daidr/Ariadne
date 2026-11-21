@@ -37,18 +37,6 @@ func (api *API) sourceKinds(ctx context.Context) []sdk.ContextProviderInfo {
 	return kinds
 }
 func (api *API) registerSources() {
-	api.add("GET", "/api/projects/:projectId/source", func(request *http.Request) (any, int, error) {
-		id := request.PathValue("projectId")
-		project, err := api.options.Repository.GetProject(request.Context(), id)
-		if err != nil {
-			return nil, 0, err
-		}
-		secrets := []string{}
-		if api.options.Settings != nil {
-			secrets = appendSecretNames(sources.FileSourceSecrets(api.options.Settings.SourceSecrets(id), project.WritableSources().PrimaryID))
-		}
-		return object{"source": project.Source, "secretsSet": secrets}, 200, nil
-	})
 	api.add("GET", "/api/source-kinds", func(r *http.Request) (any, int, error) {
 		return object{"kinds": api.sourceKinds(r.Context())}, 200, nil
 	})

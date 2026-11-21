@@ -89,20 +89,6 @@ func (api *API) registerWorkspaces() {
 		thread, err := manager.UndoMerge(r.Context(), r.PathValue("threadId"))
 		return object{"thread": thread}, 200, err
 	})
-	api.add("POST", "/api/threads/:threadId/pull-request/refresh", func(r *http.Request) (any, int, error) {
-		id := r.PathValue("threadId")
-		thread, err := api.options.Repository.GetThread(r.Context(), id)
-		if err != nil {
-			return nil, 0, err
-		}
-		if manager != nil && manager.HasRepoForThread(r.Context(), thread) {
-			if _, err := manager.SyncPullRequest(r.Context(), id, nil, nil); err != nil {
-				return nil, 0, err
-			}
-			thread, err = api.options.Repository.GetThread(r.Context(), id)
-		}
-		return object{"thread": thread}, 200, err
-	})
 	api.add("GET", "/api/threads/:threadId/pull-request/checks", func(r *http.Request) (any, int, error) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
