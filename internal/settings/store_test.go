@@ -122,23 +122,49 @@ func TestSettingsConcurrentWritersAndSecretRelease(t *testing.T) {
 		t.Fatal("deleted project retained secrets")
 	}
 }
+func testSearchKinds() []sdk.SearchProviderInfo {
+	schema := func(defaultURL string) sdk.SettingsSchema {
+		return sdk.SettingsSchema{
+			Type: "object",
+			Properties: map[string]sdk.SettingField{
+				"baseUrl": {Type: "string", Title: sdk.LocalizedText{"zh-CN": "接口地址", "en": "Base URL"}, Default: defaultURL},
+				"apiKey":  {Type: "string", Title: sdk.LocalizedText{"zh-CN": "API Key", "en": "API key"}, Secret: true},
+			},
+			Required:   []string{"apiKey"},
+			FieldOrder: []string{"baseUrl", "apiKey"},
+		}
+	}
+	return []sdk.SearchProviderInfo{
+		{Kind: "tavily", Title: sdk.LocalizedText{"zh-CN": "Tavily", "en": "Tavily"}, Settings: schema("https://api.tavily.com"), Capabilities: sdk.SearchCapabilities{SupportsCheck: true}},
+		{Kind: "deepseek", Title: sdk.LocalizedText{"zh-CN": "DeepSeek Search API", "en": "DeepSeek Search API"}, Settings: schema("https://api.deepseek.com/v1/tools"), Capabilities: sdk.SearchCapabilities{MaxQueryRunes: 128, MaxResults: 50, SupportsCheck: true}},
+	}
+}
+
+func testSearchValidate(_ string, values Object) error {
+	if raw, ok := values["apiKey"].(string); ok && strings.ContainsAny(raw, " \t\n\r") {
+		return bad("apiKey")
+	}
+	return nil
+}
+
 func TestSettingsSearchKeysAndSourceSplit(t *testing.T) {
 	store := newStore(t)
-	if _, err := store.UpdateSearch(jsonObject(`{"provider":"deepseek","services":{"deepseek":{"apiKey":" secret ","baseUrl":"https://example.test/v1/tools/"}}}`)); err != nil {
+	searchKinds := testSearchKinds()
+	if _, err := store.UpdateSearch(jsonObject(`{"provider":"deepseek","services":{"deepseek":{"apiKey":" private-token ","baseUrl":"https://example.test/v1/tools/"}}}`), searchKinds, testSearchValidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpdateSearch(jsonObject(`{"services":{"deepseek":{"apiKey":""}}}`)); err != nil {
+	if _, err := store.UpdateSearch(jsonObject(`{"services":{"deepseek":{"apiKey":""}}}`), searchKinds, testSearchValidate); err != nil {
 		t.Fatal(err)
 	}
-	public, _ := json.Marshal(store.PublicSearch(nil, nil))
-	if strings.Contains(string(public), "secret") || !strings.Contains(string(public), `"keySet":true`) {
+	public, _ := json.Marshal(store.PublicSearch(searchKinds, nil, nil))
+	if strings.Contains(string(public), "private-token") || !strings.Contains(string(public), `"keySet":true`) || !strings.Contains(string(public), `"ready":true`) || !strings.Contains(string(public), `"secretsSet":["apiKey"]`) {
 		t.Fatal(string(public))
 	}
-	draft, err := store.SearchDraft(jsonObject(`{"services":{"deepseek":{"apiKey":null}}}`))
+	draft, err := store.SearchDraft(jsonObject(`{"services":{"deepseek":{"apiKey":null}}}`), searchKinds, testSearchValidate)
 	if err != nil || text(object(object(draft["services"])["deepseek"])["apiKey"]) != "" {
 		t.Fatal(draft, err)
 	}
-	if text(object(object(object(store.Current()["search"])["services"])["deepseek"])["apiKey"]) != "secret" {
+	if text(object(object(object(store.Current()["search"])["services"])["deepseek"])["apiKey"]) != "private-token" {
 		t.Fatal("checking draft saved it")
 	}
 	if err := store.SaveSourceSecrets("p", Object{"token": "old", "host.token": "host"}); err != nil {
@@ -276,8 +302,8 @@ func TestSettingsStoreLifecycle(t *testing.T) {
 			case "remove":
 				result, err = store.RemoveInstruction(text(action.Value))
 			case "search":
-				_, err = store.UpdateSearch(action.Value)
-				result = store.PublicSearch(nil, nil)
+				_, err = store.UpdateSearch(action.Value, testSearchKinds(), testSearchValidate)
+				result = store.PublicSearch(testSearchKinds(), nil, nil)
 			case "env":
 				result, err = store.UpdateProjectEnv(action.Project, action.Value)
 			case "mcp":
@@ -373,4 +399,63 @@ func TestResolvedSettingsCannotMutatePrivateConfiguration(t *testing.T) {
 	turn := store.TurnSettings("project")
 	object(turn["limits"])["commandTimeout"] = 1.
 	equalJSON(t, store.Current(), before)
+}
+
+func TestSearchConfigMigrationAndDynamicPlugins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	legacy := `{"search":{"apiKey":"legacy-tavily-token"}}`
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := append(testSearchKinds(), sdk.SearchProviderInfo{
+		Kind:        "custom-lua",
+		Title:       sdk.LocalizedText{"zh-CN": "自定义搜索", "en": "Custom Search"},
+		Description: sdk.LocalizedText{"zh-CN": "外部 Lua 搜索插件", "en": "External Lua search"},
+		Settings: sdk.SettingsSchema{
+			Type: "object",
+			Properties: map[string]sdk.SettingField{
+				"endpoint": {Type: "string", Title: sdk.LocalizedText{"zh-CN": "地址"}, Default: "https://custom.test"},
+				"token":    {Type: "string", Title: sdk.LocalizedText{"zh-CN": "密钥"}, Secret: true},
+				"maxAge":   {Type: "number", Title: sdk.LocalizedText{"zh-CN": "天数"}, Default: float64(7)},
+				"strict":   {Type: "boolean", Title: sdk.LocalizedText{"zh-CN": "严格模式"}, Default: true},
+				"region":   {Type: "enum", Title: sdk.LocalizedText{"zh-CN": "地区"}, Options: []string{"cn", "us"}, Default: "cn"},
+			},
+			Required:   []string{"token"},
+			FieldOrder: []string{"endpoint", "token", "maxAge", "strict", "region"},
+		},
+		Capabilities: sdk.SearchCapabilities{ReturnsAnswer: true, SupportsCheck: true},
+	})
+
+	// Legacy top-level apiKey migrates cleanly to tavily.
+	public := store.PublicSearch(kinds, nil, nil)
+	if text(public["provider"]) != "tavily" || public["ready"] != true || public["keySet"] != true {
+		t.Fatalf("migrated public search = %#v", public)
+	}
+	effectiveTavily := store.SearchSettings(kinds[0])
+	if text(effectiveTavily["apiKey"]) != "legacy-tavily-token" || text(effectiveTavily["baseUrl"]) != "https://api.tavily.com" {
+		t.Fatalf("effective tavily = %#v", effectiveTavily)
+	}
+
+	// Dynamic external plugin with custom field types persists cleanly and hides secrets.
+	if _, err := store.UpdateSearch(jsonObject(`{
+		"provider":"custom-lua",
+		"services":{
+			"custom-lua":{"endpoint":"https://override.test","token":"top-secret-val","maxAge":14,"strict":false,"region":"us"}
+		}
+	}`), kinds, nil); err != nil {
+		t.Fatal(err)
+	}
+	publicJSON, _ := json.Marshal(store.PublicSearch(kinds, nil, []string{"OpenAI / gpt-5"}))
+	if strings.Contains(string(publicJSON), "top-secret-val") || strings.Contains(string(publicJSON), "legacy-tavily-token") {
+		t.Fatalf("secret leaked in PublicSearch: %s", string(publicJSON))
+	}
+	effectiveCustom := store.SearchSettings(kinds[2])
+	if text(effectiveCustom["endpoint"]) != "https://override.test" || text(effectiveCustom["token"]) != "top-secret-val" ||
+		effectiveCustom["maxAge"] != float64(14) || effectiveCustom["strict"] != false || text(effectiveCustom["region"]) != "us" {
+		t.Fatalf("effective custom = %#v", effectiveCustom)
+	}
 }

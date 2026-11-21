@@ -2,12 +2,6 @@ package sdk
 
 import "context"
 
-type SearchProvider struct {
-	Kind   string
-	Title  LocalizedText
-	Search func(context.Context, string, int) ([]SearchResult, error)
-}
-
 // PluginContext registrations belong to one plugin and are rolled back together
 // if Setup fails. Context lasts until unload; the Setup argument only lasts for
 // startup. Lua plugins register through adapters in the host.

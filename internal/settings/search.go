@@ -1,22 +1,86 @@
 package settings
 
 import (
-	"context"
-	"errors"
-	"net/http"
-	"net/url"
+	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/daidr/Ariadne/internal/searchservice"
 	"github.com/daidr/Ariadne/internal/textutil"
+	"github.com/daidr/Ariadne/sdk"
 )
 
-func searchDraft(before Object, input any) (Object, error) {
+func searchInfo(kinds []sdk.SearchProviderInfo, kind string) (sdk.SearchProviderInfo, bool) {
+	for _, info := range kinds {
+		if info.Kind == kind {
+			return info, true
+		}
+	}
+	return sdk.SearchProviderInfo{}, false
+}
+
+func validSearchValue(field sdk.SettingField, raw any) bool {
+	switch field.Type {
+	case "string":
+		value, ok := raw.(string)
+		return ok && len(value) <= 32768 && !strings.ContainsRune(value, 0) &&
+			(!field.Directory || strings.TrimSpace(value) == "" || filepath.IsAbs(strings.TrimSpace(value))) &&
+			(len(field.Options) == 0 || hasString(field.Options, value))
+	case "number":
+		_, ok := number(raw)
+		return ok
+	case "boolean":
+		_, ok := raw.(bool)
+		return ok
+	default:
+		value, ok := raw.(string)
+		return ok && hasString(field.Options, value)
+	}
+}
+
+func effectiveSearchValues(schema sdk.SettingsSchema, stored Object) Object {
+	resolved := Object{}
+	for key, field := range schema.Properties {
+		if field.Default != nil {
+			resolved[key] = field.Default
+		}
+	}
+	for key := range schema.Properties {
+		value, exists := stored[key]
+		if exists && value != nil && value != "" {
+			resolved[key] = value
+		}
+	}
+	owned, err := clone(resolved)
+	if err != nil {
+		return resolved
+	}
+	return owned
+}
+
+func searchRequiredReady(schema sdk.SettingsSchema, values Object) bool {
+	for _, key := range schema.Required {
+		value, exists := values[key]
+		if !exists || value == nil || value == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func searchDraft(before Object, input any, kinds []sdk.SearchProviderInfo, validate func(string, Object) error) (Object, error) {
 	body := object(input)
-	provider := fallback(body["provider"], before["provider"])
-	if provider != "tavily" && provider != "deepseek" {
-		return nil, bad("provider")
+	provider := textutil.Trim(text(before["provider"]))
+	if raw, exists := body["provider"]; exists {
+		value, ok := raw.(string)
+		if !ok {
+			return nil, bad("provider")
+		}
+		value = textutil.Trim(value)
+		if value != "" {
+			if _, ok := searchInfo(kinds, value); !ok {
+				return nil, bad("provider")
+			}
+		}
+		provider = value
 	}
 	if raw, exists := body["services"]; exists {
 		if _, ok := raw.(map[string]any); !ok {
@@ -29,94 +93,86 @@ func searchDraft(before Object, input any) (Object, error) {
 	}
 	edits := cloneMap(object(body["services"]))
 	if key, exists := body["apiKey"]; exists {
-		edits["tavily"] = Object{"apiKey": key}
+		if _, ok := searchInfo(kinds, "tavily"); ok {
+			entry := cloneMap(object(edits["tavily"]))
+			entry["apiKey"] = key
+			edits["tavily"] = entry
+		}
 	}
 	for _, kind := range names(edits) {
-		raw := edits[kind]
-		if kind != "tavily" && kind != "deepseek" {
+		info, ok := searchInfo(kinds, kind)
+		if !ok {
 			return nil, bad("provider")
 		}
-		entry, ok := raw.(map[string]any)
+		entry, ok := edits[kind].(map[string]any)
 		if !ok {
 			return nil, bad("services")
 		}
-		service := object(services[kind])
-		if raw, exists := entry["apiKey"]; exists {
+		service := cloneMap(object(services[kind]))
+		for _, key := range names(entry) {
+			field, exists := info.Settings.Properties[key]
+			if !exists {
+				return nil, bad(key)
+			}
+			raw := entry[key]
+			if field.Secret {
+				if raw == nil {
+					delete(service, key)
+				} else {
+					value, ok := raw.(string)
+					if !ok {
+						return nil, bad(key)
+					}
+					value = textutil.Trim(value)
+					if value != "" {
+						if !validSearchValue(field, value) {
+							return nil, bad(key)
+						}
+						service[key] = value
+					}
+				}
+				continue
+			}
 			if raw == nil {
-				service["apiKey"] = ""
-			} else {
-				key, ok := raw.(string)
+				delete(service, key)
+				continue
+			}
+			if field.Type == "string" {
+				value, ok := raw.(string)
 				if !ok {
-					return nil, bad("apiKey")
+					return nil, bad(key)
 				}
-				key = textutil.Trim(key)
-				if length(key) > 200 || containsWhitespace(key) {
-					return nil, bad("apiKey")
+				value = textutil.Trim(value)
+				if !validSearchValue(field, value) {
+					return nil, bad(key)
 				}
-				if key != "" {
-					service["apiKey"] = key
-				}
+				service[key] = value
+				continue
 			}
+			if !validSearchValue(field, raw) {
+				return nil, bad(key)
+			}
+			service[key] = raw
 		}
-		if raw, exists := entry["baseUrl"]; exists {
-			address, ok := raw.(string)
-			if !ok {
-				return nil, bad("baseUrl")
+		if validate != nil {
+			if err := validate(kind, service); err != nil {
+				return nil, err
 			}
-			address = strings.TrimRight(textutil.Trim(address), "/")
-			if address != "" {
-				parsed, err := url.Parse(address)
-				if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-					return nil, bad("baseUrl")
-				}
-			}
-			service["baseUrl"] = address
 		}
 		services[kind] = service
 	}
 	return Object{"provider": provider, "services": services}, nil
 }
 
-func (store *Store) CheckSearch(ctx context.Context, input any, client *http.Client) (Object, error) {
-	draft, err := store.SearchDraft(input)
-	if err != nil {
-		return nil, err
-	}
-	provider := text(draft["provider"])
-	service := object(object(draft["services"])[provider])
-	key := text(service["apiKey"])
-	if key == "" {
-		return nil, bad("apiKey")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	_, err = (searchservice.Provider{Kind: provider, APIKey: key, BaseURL: text(service["baseUrl"]), Client: client}).Search(ctx, "Ariadne", 1)
-	result := Object{"ok": err == nil, "status": nil}
-	var httpError *searchservice.HTTPError
-	if errors.As(err, &httpError) {
-		result["status"] = httpError.Status
-	}
-	return result, nil
-}
-func (store *Store) SearchDraft(input any) (Object, error) {
+func (store *Store) SearchDraft(input any, kinds []sdk.SearchProviderInfo, validate func(string, Object) error) (Object, error) {
 	config := store.snapshot()
-	return searchDraft(object(config["search"]), input)
+	return searchDraft(object(config["search"]), input, kinds, validate)
 }
 
-func (store *Store) SearchProvider(client *http.Client) *searchservice.Provider {
-	config := object(store.snapshot()["search"])
-	kind := text(config["provider"])
-	service := object(object(config["services"])[kind])
-	key := text(service["apiKey"])
-	if key == "" {
-		return nil
-	}
-	return &searchservice.Provider{Kind: kind, APIKey: key, BaseURL: text(service["baseUrl"]), Client: client}
-}
-func (store *Store) UpdateSearch(input any) (Object, error) {
+func (store *Store) UpdateSearch(input any, kinds []sdk.SearchProviderInfo, validate func(string, Object) error) (Object, error) {
 	var result Object
 	err := store.update(func(config Object) error {
-		value, err := searchDraft(object(config["search"]), input)
+		value, err := searchDraft(object(config["search"]), input, kinds, validate)
 		if err != nil {
 			return err
 		}
@@ -127,23 +183,107 @@ func (store *Store) UpdateSearch(input any) (Object, error) {
 	return result, err
 }
 
-// PublicSearch keeps API keys in the private configuration. The host supplies
-// labels of models and plugins whose search implementations are available.
-func (store *Store) PublicSearch(models []string, plugins []any) Object {
+func (store *Store) ActiveSearchProvider() string {
+	return textutil.Trim(text(object(store.snapshot()["search"])["provider"]))
+}
+
+// EffectiveSearchSettings merges non-secret schema defaults with stored values
+// from a search configuration or draft object.
+func EffectiveSearchSettings(searchConfig Object, info sdk.SearchProviderInfo) Object {
+	stored := object(object(searchConfig["services"])[info.Kind])
+	return effectiveSearchValues(info.Settings, stored)
+}
+
+func (store *Store) SearchSettings(info sdk.SearchProviderInfo) Object {
+	return EffectiveSearchSettings(object(store.snapshot()["search"]), info)
+}
+
+// PublicSearch keeps secret fields in the private configuration and returns
+// schema-driven metadata and public values for every registered search provider.
+func (store *Store) PublicSearch(kinds []sdk.SearchProviderInfo, ready func(string, Object) bool, models []string) Object {
 	config := store.snapshot()
 	search := object(config["search"])
 	services := object(search["services"])
-	provider := text(search["provider"])
+	storedProvider := textutil.Trim(text(search["provider"]))
 	if models == nil {
 		models = []string{}
 	}
-	if plugins == nil {
-		plugins = []any{}
-	}
 	listed := []any{}
-	for _, entry := range []struct{ kind, title, address string }{{"tavily", "Tavily", "https://api.tavily.com"}, {"deepseek", "DeepSeek Search API", "https://api.deepseek.com/v1/tools"}} {
-		service := object(services[entry.kind])
-		listed = append(listed, Object{"kind": entry.kind, "title": entry.title, "defaultBaseUrl": entry.address, "baseUrl": service["baseUrl"], "keySet": text(service["apiKey"]) != ""})
+	readyPlugins := []any{}
+	firstReady := ""
+	activeReady := false
+	activeKeySet := false
+	resolvedProvider := ""
+	if storedProvider != "" {
+		if _, ok := searchInfo(kinds, storedProvider); ok {
+			resolvedProvider = storedProvider
+		}
 	}
-	return Object{"provider": provider, "keySet": text(object(services[provider])["apiKey"]) != "", "needed": len(list(object(config["models"])["models"])) > 0 && len(models) == 0 && len(plugins) == 0, "models": models, "plugins": plugins, "services": listed}
+	for _, info := range kinds {
+		stored := object(services[info.Kind])
+		effective := effectiveSearchValues(info.Settings, stored)
+		isReady := searchRequiredReady(info.Settings, effective)
+		if ready != nil {
+			isReady = ready(info.Kind, effective)
+		}
+		values := Object{}
+		secretsSet := []string{}
+		for _, key := range namesOfFields(info.Settings.Properties) {
+			field := info.Settings.Properties[key]
+			if field.Secret {
+				if truthy(stored[key]) {
+					secretsSet = append(secretsSet, key)
+				}
+				continue
+			}
+			if value, exists := stored[key]; exists && value != nil {
+				values[key] = value
+			}
+		}
+		if isReady {
+			readyPlugins = append(readyPlugins, info.Title)
+			if firstReady == "" {
+				firstReady = info.Kind
+			}
+		}
+		entry := Object{
+			"kind":         info.Kind,
+			"title":        info.Title,
+			"settings":     info.Settings,
+			"capabilities": info.Capabilities,
+			"values":       values,
+			"secretsSet":   secretsSet,
+			"ready":        isReady,
+		}
+		if len(info.Description) > 0 {
+			entry["description"] = info.Description
+		}
+		listed = append(listed, entry)
+	}
+	if resolvedProvider == "" {
+		if firstReady != "" {
+			resolvedProvider = firstReady
+		} else if len(kinds) > 0 {
+			resolvedProvider = kinds[0].Kind
+		}
+	}
+	for _, raw := range listed {
+		entry := object(raw)
+		if text(entry["kind"]) == resolvedProvider {
+			activeReady = entry["ready"] == true
+			if secrets, ok := entry["secretsSet"].([]string); ok {
+				activeKeySet = len(secrets) > 0
+			}
+			break
+		}
+	}
+	return Object{
+		"provider": resolvedProvider,
+		"ready":    activeReady,
+		"keySet":   activeKeySet,
+		"needed":   len(list(object(config["models"])["models"])) > 0 && len(models) == 0 && len(readyPlugins) == 0,
+		"models":   models,
+		"plugins":  readyPlugins,
+		"services": listed,
+	}
 }

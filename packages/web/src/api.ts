@@ -385,28 +385,44 @@ export interface Limits {
   loopRepeats: number
 }
 
-/** How the work is done everywhere: the user's instructions, command rules, limits. */
-/** Web search in the settings: whether a key is stored, and whether search waits for one. */
+export interface SearchCapabilities {
+  maxQueryRunes?: number
+  maxResults?: number
+  returnsAnswer?: boolean
+  supportsCheck?: boolean
+}
+
+export interface SearchServiceView {
+  kind: string
+  title: LocalizedText
+  description?: LocalizedText
+  settings: SettingsSchema
+  capabilities?: SearchCapabilities
+  values: Record<string, unknown>
+  secretsSet: string[]
+  ready: boolean
+}
+
+/** Web search in the settings: registered search plugins, active selection, and fallback models. */
 export interface SearchSettings {
-  provider: 'tavily' | 'deepseek'
+  provider: string
+  ready: boolean
   keySet: boolean
   needed: boolean
   models: string[]
   plugins: LocalizedText[]
-  services: {
-    kind: 'tavily' | 'deepseek'
-    title: string
-    defaultBaseUrl: string
-    baseUrl: string
-    keySet: boolean
-  }[]
+  services: SearchServiceView[]
 }
 
 export interface SearchSettingsInput {
-  provider: SearchSettings['provider']
-  services: Partial<
-    Record<SearchSettings['provider'], { baseUrl?: string; apiKey?: string | null }>
-  >
+  provider: string
+  services: Record<string, Record<string, unknown>>
+}
+
+export interface SearchCheckResult {
+  ok: boolean
+  status: number | null
+  message?: LocalizedText
 }
 
 export interface WorkSettings {
@@ -703,7 +719,7 @@ export const api = {
   saveSearchSettings: (input: SearchSettingsInput) =>
     request<SearchSettings>('PUT', '/api/settings/search', input),
   checkSearchSettings: (input: SearchSettingsInput) =>
-    request<{ ok: boolean; status: number | null }>('POST', '/api/settings/search/check', input),
+    request<SearchCheckResult>('POST', '/api/settings/search/check', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   getPluginConfig: (id: string) =>
     request<PluginConfig>('GET', `/api/plugins/${encodeURIComponent(id)}/settings`),

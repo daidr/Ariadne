@@ -248,3 +248,73 @@ func TestLuaPluginRejectsManagedPathsAndRollsBackUnsavedAdds(t *testing.T) {
 		}
 	}
 }
+
+func TestLuaSearchSettingsCheckAndResponse(t *testing.T) {
+	host, registries := fixture(t)
+	store, err := settings.Open(filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `return {
+		version = 1,
+		id = "custom-search",
+		name = { ["zh-CN"] = "自定义搜索", en = "Custom Search" },
+		searches = {{
+			kind = "custom-search",
+			title = { ["zh-CN"] = "自定义搜索", en = "Custom Search" },
+			description = { ["zh-CN"] = "支持摘要与检测", en = "Supports answers and checks" },
+			settings = {
+				type = "object",
+				properties = {
+					apiKey = { type = "string", title = { ["zh-CN"] = "密钥", en = "Key" }, secret = true },
+					region = { type = "string", title = { ["zh-CN"] = "地区", en = "Region" }, default = "cn" },
+				},
+				required = { "apiKey" },
+			},
+			search = function(query, limit, cfg)
+				return {
+					answer = "summary:" .. cfg.region .. ":" .. cfg.apiKey,
+					results = {
+						{ title = query, url = "https://example.test", snippet = "limit=" .. tostring(limit) },
+					},
+				}
+			end,
+			check = function(cfg)
+				if cfg.apiKey == "good" then
+					return { ok = true }
+				end
+				return { ok = false, status = 403, message = { ["zh-CN"] = "密钥无效", en = "Invalid key" } }
+			end,
+		}},
+	}`
+	file := luaFile(t, t.TempDir(), script)
+	if err := host.AddPath(t.Context(), store, file); err != nil {
+		t.Fatal(err)
+	}
+	searchRegistry := registries.Searches
+	if searchRegistry == nil {
+		searchRegistry = host.Searches()
+	}
+	provider, ok := searchRegistry.Get("custom-search")
+	if !ok || !provider.Capabilities.SupportsCheck || provider.Description["en"] != "Supports answers and checks" {
+		t.Fatalf("provider = %+v, ok = %v", provider, ok)
+	}
+	if searchRegistry.Ready("custom-search", map[string]any{}) {
+		t.Fatal("provider missing required apiKey should not be ready")
+	}
+	if !searchRegistry.Ready("custom-search", map[string]any{"apiKey": "good"}) {
+		t.Fatal("provider with required apiKey should be ready")
+	}
+	res, err := searchRegistry.Execute(t.Context(), "custom-search", map[string]any{"apiKey": "good", "region": "us"}, sdk.SearchQuery{Query: "hello", Limit: 3})
+	if err != nil || res.Answer != "summary:us:good" || len(res.Results) != 1 || res.Results[0].Snippet != "limit=3" {
+		t.Fatalf("execute = %+v, err = %v", res, err)
+	}
+	okCheck, err := searchRegistry.Check(t.Context(), "custom-search", map[string]any{"apiKey": "good"})
+	if err != nil || !okCheck.OK {
+		t.Fatalf("ok check = %+v, err = %v", okCheck, err)
+	}
+	badCheck, err := searchRegistry.Check(t.Context(), "custom-search", map[string]any{"apiKey": "bad"})
+	if err != nil || badCheck.OK || badCheck.Status == nil || *badCheck.Status != 403 || badCheck.Message["en"] != "Invalid key" {
+		t.Fatalf("bad check = %+v, err = %v", badCheck, err)
+	}
+}
