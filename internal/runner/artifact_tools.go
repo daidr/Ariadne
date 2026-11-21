@@ -26,7 +26,7 @@ func (turn *turn) artifactTools() []tool {
 		specification("list_artifacts", "List the documents, whiteboards and dashboards of this project.", args{}, nil, turn.listArtifacts),
 		specification("read_artifact", "Read an artifact of this project. Omit version for the current content, comments and feedback.",
 			args{"artifactId": field("string"), "version": field("integer")}, []string{"artifactId"}, turn.readArtifact),
-		specification("create_document", "Create a Markdown document in this project. For an embedded whiteboard, put a JSON object with items and connectors in a whiteboard code fence. Share the artifact link. Use <pending>description</pending> on its own line for an unfinished section.",
+		specification("create_document", "Create a Markdown document in this project. For an embedded whiteboard, put a JSON object with items and connectors in a whiteboard code fence. Share the artifact in chat as [Title](artifact:<artifactId>). Use <pending>description</pending> on its own line for an unfinished section.",
 			args{"title": field("string"), "content": field("string"), "nodeId": field("string")}, []string{"title", "content"}, turn.createDocument),
 		specification("update_document", "Change a document with edits, or replace the whole Markdown using the baseVersion you read. An edit replaces a unique passage from read_artifact. Pending browser edits are saved before applying the change.",
 			args{"artifactId": field("string"), "baseVersion": field("integer"), "title": field("string"), "reason": field("string"), "content": field("string"),

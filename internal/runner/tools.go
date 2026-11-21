@@ -213,8 +213,8 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs, turn.threadManagementTools(true)...)
 		specs = append(specs, turn.coordinatorTools()...)
 		specs = append(specs,
-			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
-				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by read_plan."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
+			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Wait for this result before using threadId in message_thread, post_ui, or thread links.",
+				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by update_plan (ids) or read_plan. If you are adding a new node, wait for update_plan to return its nodeId first."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
 				args{"threadId": threadIDField(), "content": field("string"), "userMessages": userMessagesField("content")}, []string{"threadId"}, turn.messageThread),
 			specification("list_threads", "List discussion threads in the current project with their threadId, title and stage.",

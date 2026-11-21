@@ -13,14 +13,14 @@ import (
 func (turn *turn) planTools() []tool {
 	opSchema := args{"type": "object", "required": []string{"op"}, "properties": args{
 		"op":  args{"type": "string", "enum": []string{"add", "update", "remove", "link", "unlink"}},
-		"ref": args{"type": "string", "description": "add: temporary name to reference a new node within this call."},
+		"ref": args{"type": "string", "description": "add: temporary name for a new node, usable within this call and returned with its assigned nodeId in ids."},
 		"id":  field("string"), "kind": args{"type": "string", "enum": []string{"task", "milestone", "decision"}},
 		"title": field("string"), "description": field("string"), "acceptance": field("string"),
 		"dependsOn": arrayOf(field("string")), "from": field("string"), "to": field("string"),
 	}}
 	return []tool{
 		turn.readPlanTool(),
-		specification("update_plan", "Change the plan with one reason in the user's language. Use refs within this call. Changes apply immediately and are recorded in revision history.",
+		specification("update_plan", "Change the plan with one reason in the user's language. Changes apply immediately and are recorded in revision history. Set ref on add ops to link dependencies within this call and receive assigned nodeIds in ids.",
 			args{"reason": field("string"), "ops": arrayOf(opSchema)}, []string{"reason", "ops"}, turn.updatePlan),
 		specification("revert_plan_change", "Undo an earlier plan revision.",
 			args{"revisionId": field("string"), "reason": field("string")}, []string{"revisionId", "reason"}, turn.revertPlan),
