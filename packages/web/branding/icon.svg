@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
-    <mask id="ariadne-icon-cut">
+    <mask id="ariadne-icon-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
       <rect width="64" height="64" fill="#ffffff" />
       <g transform="translate(32 34.5) rotate(-16)">
         <path d="M -20 -5.4 H 12.2 L 21.6 0 L 12.2 5.4 H -20 Z" fill="#000000" />

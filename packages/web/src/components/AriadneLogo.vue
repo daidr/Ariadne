@@ -7,7 +7,7 @@ const maskId = useId()
 <template>
   <svg class="ariadne-logo" viewBox="0 0 64 64" fill="none" aria-hidden="true">
     <defs>
-      <mask :id="maskId">
+      <mask :id="maskId" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
         <rect width="64" height="64" fill="#ffffff" />
         <g transform="translate(32 35) rotate(-16)">
           <path d="M -22 -5.8 H 13.4 L 23.4 0 L 13.4 5.8 H -22 Z" fill="#000000" />
