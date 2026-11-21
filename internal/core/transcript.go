@@ -260,14 +260,18 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 			note(c, tagged("plan-changed-by-user", pick(d, "revisionId", "revertOf", "reason")), d.str("revertOf") != "")
 		}
 	case "attention.answered":
-		row := w.one(`SELECT a.conversation_id, a.block, m.content
+		row := w.one(`SELECT a.conversation_id, a.block, a.purpose, m.content
 			FROM attentions a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = ?`, d["attentionId"])
 		if row == nil || row["conversation_id"] == nil || row["conversation_id"] == "" {
 			return
 		}
-		block, _ := w.parsed(row, "block", map[string]any{}).(map[string]any)
+		block := asObject(w.parsed(row, "block", nil))
 		answer := d.obj("answer")
 		description := describeAnswer(block, answer)
+		question := askTitle(block)
+		if strings.HasPrefix(row.text("purpose"), PullRequestMergeApprovalPrefix) && block.str("description") != "" {
+			question = fmt.Sprintf("%v\n%s", question, block.str("description"))
+		}
 		ids := []any{row["conversation_id"]}
 		for _, waiter := range w.all("SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid", d["attentionId"]) {
 			ids = append(ids, waiter["thread_id"])
@@ -278,7 +282,7 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 				continue
 			}
 			seen[id] = true
-			note(id, object{"type": "answer", "attentionId": d["attentionId"], "question": askTitle(block), "answer": description}, true)
+			note(id, object{"type": "answer", "attentionId": d["attentionId"], "question": question, "answer": description}, true)
 		}
 		if d.yes("notifyCoordinator") {
 			notifyCoordinatorOfThreadAnswer(w, e, row, block, answer, d["attentionId"])

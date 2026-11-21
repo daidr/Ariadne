@@ -1,18 +1,30 @@
 package runner
 
 import (
-	"slices"
-
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/transcript"
 )
 
 func (turn *turn) trackThreadInput(entries []transcript.Entry) {
-	turn.userSpoke = turn.userSpoke || slices.ContainsFunc(entries, func(entry transcript.Entry) bool {
+	for _, entry := range entries {
 		message, _ := entry["message"].(*core.MessageView)
-		return asNumber(entry["seq"]) > float64(turn.handledBefore) &&
-			message != nil && message.Author == "user" && message.ConversationID == turn.conversation.ID
-	})
+		if message == nil || message.ConversationID != turn.conversation.ID {
+			continue
+		}
+		if message.Author == "user" {
+			turn.userSpoke = turn.userSpoke || asNumber(entry["seq"]) > float64(turn.handledBefore)
+			turn.mergeRequestID = message.ID
+		}
+		if message.Author == "coordinator" && message.Kind == "relay" {
+			cites, _ := message.Cites.([]any)
+			if len(cites) == 1 {
+				cite, _ := cites[0].(map[string]any)
+				turn.mergeRequestID = text(cite, "messageId")
+			} else if len(cites) > 1 {
+				turn.mergeRequestID = ""
+			}
+		}
+	}
 }
 
 // Only work triggered by discussion updates is quiet. Read the same snapshot

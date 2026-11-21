@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/textutil"
 )
 
 const maxSafeInteger int64 = 9007199254740991
@@ -167,6 +168,12 @@ func (message MessageView) AttentionID() string {
 
 func toMessage(row record) (MessageView, error) {
 	view := MessageView{ID: row.text("id"), ConversationID: row.text("conversation_id"), Author: row.text("author"), Kind: row.text("kind"), Content: row.text("content"), CreatedAt: row.integer("created_at"), EditedAt: row["edited_at"], EditReason: row["edit_reason"], OriginalContent: row["original_content"], EditedSinceRead: row.flag("edited_since_read")}
+	if view.Author != "user" && view.Kind == "chat" {
+		view.Content = textutil.ChatMarkdown(view.Content)
+		if original, ok := view.OriginalContent.(string); ok {
+			view.OriginalContent = textutil.ChatMarkdown(original)
+		}
+	}
 	for _, field := range []struct {
 		key      string
 		target   *any

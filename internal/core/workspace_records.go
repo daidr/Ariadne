@@ -131,6 +131,47 @@ func (repo *Repository) SyncPullRequestIfCurrent(ctx context.Context, id string,
 	return repo.syncPullRequest(ctx, id, previous, next, nil)
 }
 
+const PullRequestMergeApprovalPrefix = "merge-pr:"
+
+type MergeRequestTarget struct {
+	ThreadID string
+	Title    string
+	Number   int
+	URL      string
+	HeadSHA  string
+}
+
+// MergeRequestTargets returns the PRs the user could have authorized when they
+// wrote the message. Later pushes and PRs cannot inherit that authorization.
+func (reader Reader) MergeRequestTargets(ctx context.Context, projectID, threadID string, message MessageView) ([]MergeRequestTarget, error) {
+	rows, err := records(ctx, reader.DB, `WITH request AS (
+	 SELECT t.seq FROM transcript t JOIN messages m ON m.id = t.ref
+	 WHERE t.conversation_id = ? AND t.kind = 'message' AND m.id = ? AND m.project_id = ? AND m.author = 'user'
+	 AND NOT EXISTS (SELECT 1 FROM transcript n JOIN messages u ON u.id = n.ref
+	   WHERE n.conversation_id = t.conversation_id AND n.kind = 'message' AND n.seq > t.seq AND u.author = 'user')
+	), pull_requests AS (
+	 SELECT json_extract(data, '$.threadId') AS thread_id, max(seq) AS seq FROM events
+	 WHERE project_id = ? AND type = 'pull_request.synced' AND seq < (SELECT seq FROM request)
+	 AND (? = '' OR json_extract(data, '$.threadId') = ?) GROUP BY thread_id
+	)
+	SELECT t.id, (SELECT json_extract(h.data, '$.title') FROM events h
+	 WHERE h.project_id = e.project_id AND h.type IN ('thread.created', 'thread.renamed')
+	 AND json_extract(h.data, '$.threadId') = t.id AND h.seq < (SELECT seq FROM request)
+	 ORDER BY h.seq DESC LIMIT 1) AS title, json_extract(e.data, '$.number') AS number,
+	 json_extract(e.data, '$.url') AS url, json_extract(e.data, '$.headSha') AS head
+	 FROM pull_requests p JOIN events e ON e.seq = p.seq JOIN threads t ON t.id = p.thread_id
+	 WHERE json_extract(e.data, '$.state') = 'open' AND t.review_of IS NULL`, message.ConversationID, message.ID, projectID, projectID, threadID, threadID)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]MergeRequestTarget, 0, len(rows))
+	for _, row := range rows {
+		targets = append(targets, MergeRequestTarget{ThreadID: row.text("id"), Title: row.text("title"),
+			Number: int(row.integer("number")), URL: row.text("url"), HeadSHA: row.text("head")})
+	}
+	return targets, nil
+}
+
 func (repo *Repository) syncPullRequest(ctx context.Context, id string, previous, pullRequest, auto map[string]any) error {
 	_, err := repo.mutateThread(ctx, id, func(tx *eventstore.Transaction, current ThreadView) ([]change, error) {
 		before := asObject(current.PullRequest)
@@ -143,6 +184,16 @@ func (repo *Repository) syncPullRequest(ctx context.Context, id string, previous
 		data := except(pullRequest, "")
 		data["threadId"] = id
 		changes := []change{{"pull_request.synced", data}}
+		if after := object(pullRequest); before.str("headSha") != after.str("headSha") ||
+			before.str("url") != after.str("url") || after.str("state") != "open" {
+			rows, err := records(ctx, tx.SQL(), `SELECT id FROM attentions WHERE conversation_id = ? AND closed = 0 AND purpose GLOB ?`, id, PullRequestMergeApprovalPrefix+"*")
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range rows {
+				changes = append(changes, change{"attention.withdrawn", object{"attentionId": row.text("id"), "reason": "Pull request changed"}})
+			}
+		}
 		after := object(pullRequest)
 		failedBefore := before != nil && before["headSha"] == after["headSha"] && before.obj("checks").str("state") == "failure"
 		if after.obj("checks").str("state") == "failure" && !failedBefore {

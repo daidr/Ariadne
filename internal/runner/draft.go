@@ -25,7 +25,7 @@ func (turn *turn) preview(call *int, name, arguments string) {
 		return
 	}
 	input := prefixObject(arguments)
-	content := previewString(input["text"])
+	content := textutil.ChatMarkdown(previewString(input["text"]))
 	var blocks json.RawMessage
 	if name == "post_ui" {
 		blocks = previewBlocks(input)

@@ -10,6 +10,7 @@ import (
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/eventstore"
 	"github.com/daidr/Ariadne/internal/projectsettings"
+	"github.com/daidr/Ariadne/internal/textutil"
 )
 
 var attachmentSpaces = regexp.MustCompile(`(?:` + jsSpace + `|\p{Cc})+`)
@@ -371,6 +372,9 @@ func postMessage(ctx context.Context, tx *eventstore.Transaction, projectID stri
 				return MessageView{}, domainerr.New("error.blockInvalid", map[string]any{"reason": fmt.Sprintf("blocks[%d].threadId is not a thread of this project", i)})
 			}
 		}
+	}
+	if input.Author != "user" && kind == "chat" {
+		input.Content = textutil.ChatMarkdown(input.Content)
 	}
 	if projectsettings.Trim(input.Content) == "" && len(blocks) == 0 && len(attachments) == 0 && len(comments) == 0 && len(cites) == 0 {
 		return MessageView{}, badInput("content")

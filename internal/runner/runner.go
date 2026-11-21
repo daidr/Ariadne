@@ -68,6 +68,7 @@ type turn struct {
 	instructionsDirty bool
 	handledBefore     int64
 	userSpoke         bool
+	mergeRequestID    string
 	quiet             bool
 }
 

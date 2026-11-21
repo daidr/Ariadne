@@ -130,6 +130,7 @@ type CallApprovalOptions struct {
 	InChat                bool `json:"inChat"`
 	No                    *int `json:"no"`
 	AllowProjectReference bool `json:"-"`
+	ExistingOnly          bool `json:"-"`
 	// ConfirmDetail holds tool-supplied text verbatim after validation of the card fields.
 	ConfirmDetail string `json:"-"`
 }
@@ -171,6 +172,10 @@ func (repo *Repository) CallApproval(ctx context.Context, projectID, conversatio
 			return w.err
 		}
 		ask := func() error {
+			if options.ExistingOnly {
+				result.State = "missing"
+				return nil
+			}
 			result.State = "asked"
 			return askApproval(tx, projectID, conversationID, purpose, project.text("coordinator_id") == conversationID, card, options)
 		}

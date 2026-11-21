@@ -29,7 +29,7 @@ func (turn *turn) repoTools(repo *sdk.RepoCapability, canMerge bool) []tool {
 	}
 	if canMerge && repo.PullRequest != nil && repo.MergePullRequest != nil {
 		tools = append(tools, specification("merge_pull_request",
-			"Merge this discussion's pull request only when the user explicitly asks you to merge in this discussion. Call repo_status first and pass that PR's number and full head SHA. Report the outcome to the coordinator. Respect the hosting platform's merge requirements.",
+			"Merge this discussion's pull request when the user wants it merged, including when the coordinator relays the original request. Call repo_status first and pass the PR number and full head SHA. This tool checks authorization and opens its own confirmation when needed. If waiting for approval, end the turn without another question. After approval retry the same PR, head and method. If declined, do not retry. Report the outcome to the coordinator.",
 			args{"number": field("integer"), "headSha": field("string"), "method": args{"type": "string", "enum": []string{"merge", "squash"}}},
 			[]string{"number", "headSha"}, func(ctx context.Context, input args) (string, error) {
 				return turn.mergePullRequest(ctx, repo, input)
@@ -49,9 +49,6 @@ func (turn *turn) repoTools(repo *sdk.RepoCapability, canMerge bool) []tool {
 }
 
 func (turn *turn) mergePullRequest(ctx context.Context, repo *sdk.RepoCapability, input args) (string, error) {
-	if !turn.userSpoke {
-		return "", errors.New("a merge request from the user in this discussion is required")
-	}
 	thread, err := turn.editable(ctx)
 	if err != nil {
 		return "", err
@@ -95,6 +92,9 @@ func (turn *turn) mergePullRequest(ctx context.Context, repo *sdk.RepoCapability
 	}
 	if method != "merge" && method != "squash" {
 		return "", errors.New("merge method must be merge or squash")
+	}
+	if state, err := turn.authorizePullRequestMerge(ctx, project, thread.ID, current, method); err != nil || state != "approved" {
+		return reply(args{"number": number, "headSha": head, "method": method, "approval": state}, err)
 	}
 	outcome, err := repo.MergePullRequest(ctx, number, method, head)
 	if err != nil {
