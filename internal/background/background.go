@@ -16,6 +16,7 @@ import (
 )
 
 const MaxRunning = 4
+const MaxReadWait = time.Minute
 const Timeout = 8 * time.Hour
 const keptOutput = 2_000_000
 const maxOutputUnits = 32 * 1024 * 1024
@@ -390,7 +391,7 @@ func (commands *Commands) Read(ctx context.Context, thread, id string, wait time
 		commands.waiters++
 		changed := job.changed
 		commands.mu.Unlock()
-		timer := time.NewTimer(min(wait, 30*time.Second))
+		timer := time.NewTimer(min(wait, MaxReadWait))
 		select {
 		case <-ctx.Done():
 		case <-changed:

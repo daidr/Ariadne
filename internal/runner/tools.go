@@ -14,12 +14,21 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+type repeatEffect uint8
+
+const (
+	repeatTrack repeatEffect = iota
+	repeatWait
+	repeatProgress
+)
+
 type args = map[string]any
 type tool struct {
 	spec       sdk.Tool
 	run        func(context.Context, args) (string, error)
 	call       func(context.Context, args) (string, []any, error)
 	withCallID func(context.Context, string, args) (string, error)
+	poll       func(context.Context, args) (string, repeatEffect, error)
 }
 
 func specification(name, description string, fields args, required []string, run func(context.Context, args) (string, error)) tool {
