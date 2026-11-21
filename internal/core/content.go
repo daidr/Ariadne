@@ -100,6 +100,13 @@ func arrayJSON(value any) any {
 }
 
 func attentionEvent(w *projectionWriter, e eventstore.Event, d object) {
+	touchAttentionThreads := func() {
+		w.run(`UPDATE threads SET changed_seq = ? WHERE id IN (
+		 SELECT thread_id FROM attentions WHERE id = ? AND thread_id IS NOT NULL
+		 UNION
+		 SELECT thread_id FROM attention_waiters WHERE attention_id = ?
+		)`, e.Seq, d["attentionId"], d["attentionId"])
+	}
 	switch e.Type {
 	case "attention.opened":
 		conversation := d["threadId"]
@@ -107,17 +114,21 @@ func attentionEvent(w *projectionWriter, e eventstore.Event, d object) {
 			conversation = coordinator(w, e.ProjectID)
 		}
 		w.run("INSERT INTO attentions (id, project_id, thread_id, conversation_id, message_id, block, purpose, created_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", d["attentionId"], e.ProjectID, d["threadId"], conversation, d["messageId"], encoded(d["block"]), d["purpose"], e.At, e.Seq)
+		touchThread(w, e.Seq, d["threadId"])
 	case "attention.joined":
 		w.run("INSERT OR IGNORE INTO attention_waiters (attention_id, thread_id) VALUES (?, ?)", d["attentionId"], d["threadId"])
 		w.run("UPDATE attentions SET changed_seq = ? WHERE id = ? AND message_id IS NULL AND purpose IS NOT NULL", e.Seq, d["attentionId"])
+		touchThread(w, e.Seq, d["threadId"])
 	case "attention.answered":
 		var approved any
 		if d.obj("answer").str("type") == "confirm" {
 			approved = boolean(d.obj("answer").yes("approved"))
 		}
 		w.run("UPDATE attentions SET closed = 1, answer = ?, approved = ?, changed_seq = ? WHERE id = ?", encoded(d["answer"]), approved, e.Seq, d["attentionId"])
+		touchAttentionThreads()
 	case "attention.withdrawn":
 		w.run("UPDATE attentions SET closed = 1, withdrawn = ?, changed_seq = ? WHERE id = ?", d["reason"], e.Seq, d["attentionId"])
+		touchAttentionThreads()
 	case "approval.used":
 		w.run("INSERT OR IGNORE INTO used_approvals (attention_id, thread_id) VALUES (?, ?)", d["attentionId"], d["threadId"])
 	}
@@ -129,6 +140,7 @@ func messageEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run(`INSERT INTO messages (id, project_id, conversation_id, author, kind, content, blocks,
 		 attachments, mentions, comments, cites, reply_to, created_at, changed_seq)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, d["messageId"], e.ProjectID, d["conversationId"], d["author"], d["kind"], d["content"], arrayJSON(d["blocks"]), arrayJSON(d["attachments"]), arrayJSON(d["mentions"]), arrayJSON(d["comments"]), arrayJSON(d["cites"]), nullableJSON(d["replyTo"]), e.At, e.Seq)
+		touchThread(w, e.Seq, d["conversationId"])
 		for _, value := range array(d, "cites") {
 			cited := object(value.(map[string]any))
 			if cited["conversationId"] == d["conversationId"] {
@@ -164,6 +176,7 @@ func messageEvent(w *projectionWriter, e eventstore.Event, d object) {
 func todoEvent(w *projectionWriter, e eventstore.Event, d object) {
 	if e.Type == "todo.updated" {
 		w.run("INSERT INTO todos (conversation_id, project_id, items, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (conversation_id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at", d["conversationId"], e.ProjectID, encoded(d["items"]), e.At)
+		touchThread(w, e.Seq, d["conversationId"])
 	}
 }
 func memoryEvent(w *projectionWriter, e eventstore.Event, d object) {

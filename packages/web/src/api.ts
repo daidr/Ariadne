@@ -172,7 +172,9 @@ async function request<T>(
   const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
   // A file goes as it is, with its own type; anything else as JSON.
   const raw = body instanceof Blob
-  if (body !== undefined) headers['content-type'] = raw ? body.type : 'application/json'
+  if (body !== undefined) {
+    headers['content-type'] = raw ? body.type || 'application/octet-stream' : 'application/json'
+  }
   const response = await fetch(path, {
     method,
     headers,
@@ -588,6 +590,7 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
+  ping: () => request<{ ok: boolean }>('GET', '/api/ping'),
   listProjects: (ids: readonly string[] = []) =>
     request<{ projects: ProjectView[]; lastSeq: number }>(
       'GET',
@@ -663,6 +666,8 @@ export const api = {
     ),
   setThreadModel: (threadId: string, model: string | null) =>
     request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
+  setThreadNode: (threadId: string, nodeId: string | null) =>
+    request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/node`, { nodeId }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   wakeNow: (id: string) => request<void>('POST', `/api/conversations/${id}/wait/now`),
   cancelWait: (id: string) => request<void>('DELETE', `/api/conversations/${id}/wait`),
@@ -1102,8 +1107,8 @@ export function followEvents(
         onStatus('lost')
         return
       }
-      // EventSource hides the status code; ask a plain endpoint whether the token is the reason.
-      void api.listProjects().then(
+      // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
+      void api.ping().then(
         () => schedule('lost'),
         (error) =>
           schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost'),

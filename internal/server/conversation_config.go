@@ -74,6 +74,26 @@ func (api *API) registerConversationConfig() {
 		thread, err := repo.SetThreadModel(r.Context(), r.PathValue("threadId"), model, "user")
 		return object{"thread": thread}, 200, err
 	})
+	api.add("PUT", "/api/threads/:threadId/node", func(r *http.Request) (any, int, error) {
+		body, err := readJSON(r)
+		if err != nil {
+			return nil, 0, err
+		}
+		raw, present := body["nodeId"]
+		if !present {
+			return nil, 0, badInput("nodeId")
+		}
+		var nodeID *string
+		if raw != nil {
+			value, ok := raw.(string)
+			if !ok {
+				return nil, 0, badInput("nodeId")
+			}
+			nodeID = &value
+		}
+		thread, err := repo.SetThreadNode(r.Context(), "", r.PathValue("threadId"), nodeID, "user")
+		return object{"thread": thread}, 200, err
+	})
 	api.add("POST", "/api/projects/:projectId/notices/:noticeId/undo", func(r *http.Request) (any, int, error) {
 		project, id := r.PathValue("projectId"), r.PathValue("noticeId")
 		notice, err := repo.EverywhereNotice(r.Context(), project, id)

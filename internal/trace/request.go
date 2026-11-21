@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -87,7 +88,18 @@ func (reader requestReader) readText(id string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	value := strings.Map(func(r rune) rune { return r }, string(file.Data))
+	data := file.Data
+	// Limit decoding to slightly past MaxAttachedChars so multi-MB text attachments
+	// still detect truncation cleanly without converting the full blob to string.
+	const maxReadBytes = (transcript.MaxAttachedChars + 2) * 4
+	if len(data) > maxReadBytes {
+		end := maxReadBytes
+		for end > 0 && !utf8.RuneStart(data[end]) {
+			end--
+		}
+		data = data[:end]
+	}
+	value := strings.Map(func(r rune) rune { return r }, string(data))
 	return strings.TrimPrefix(value, "\ufeff"), true
 }
 func (reader requestReader) writtenBy(project string, target *RecordedCall) func(string) bool {

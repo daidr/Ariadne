@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { CloseIcon, DownloadIcon } from '@dou-ui/icons'
 import { DouButton, DouDialog, DouLink, DouSpinner, DouTooltip } from 'dou-ui'
-import { computed, defineAsyncComponent, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, shallowRef, useTemplateRef, watch } from 'vue'
 import { fetchStoredFile } from '../api'
+import { useImageViewport } from '../components/use-image-viewport'
 import { t } from '../i18n'
 import { fileSrc } from '../markdown/links'
 import { parseDelimited, previewFile, previewKind, type SheetPreviewSource } from './preview'
@@ -19,6 +20,16 @@ const maxFileBytes = 10 * 1024 * 1024
 const content = shallowRef<Content | null>(null)
 const problem = shallowRef<'error' | 'unsupported' | 'tooLarge' | null>(null)
 const name = computed(() => previewFile.value?.name || t('filePreview.title'))
+const imageStage = useTemplateRef<HTMLElement>('imageStage')
+const previewImage = useTemplateRef<HTMLImageElement>('previewImage')
+const imageViewport = useImageViewport({
+  stage: imageStage,
+  image: previewImage,
+})
+
+watch(content, () => {
+  imageViewport.reset()
+})
 
 watch(previewFile, async (file, _previous, cleanup) => {
   content.value = null
@@ -42,13 +53,13 @@ watch(previewFile, async (file, _previous, cleanup) => {
       size = Number(response.headers.get('content-length') ?? 0)
     }
     if (signal.aborted) return
-    if (size > maxFileBytes) {
-      problem.value = 'tooLarge'
-      return
-    }
     const kind = previewKind(mime, file.name ?? '')
     if (!kind) {
       problem.value = 'unsupported'
+      return
+    }
+    if (size > maxFileBytes) {
+      problem.value = 'tooLarge'
       return
     }
     if (kind === 'sheet') {
@@ -133,9 +144,28 @@ watch(previewFile, async (file, _previous, cleanup) => {
         :name="name"
         :source="content.source"
       />
+      <div
+        v-else-if="content.kind === 'image'"
+        ref="imageStage"
+        class="file-media file-media-image"
+        v-bind="imageViewport.stageListeners"
+        @error.capture="problem = 'error'"
+      >
+        <img
+          ref="previewImage"
+          :src="content.url"
+          :alt="name"
+          :class="{
+            'is-movable': imageViewport.movable.value,
+            'is-interacting': imageViewport.interacting.value,
+          }"
+          :style="{ transform: imageViewport.transformStyle.value }"
+          draggable="false"
+          v-bind="imageViewport.imageListeners"
+        />
+      </div>
       <div v-else class="file-media" @error.capture="problem = 'error'">
-        <img v-if="content.kind === 'image'" :src="content.url" :alt="name" />
-        <video v-else :src="content.url" :aria-label="name" controls playsinline />
+        <video :src="content.url" :aria-label="name" controls playsinline />
       </div>
     </div>
   </DouDialog>
@@ -200,11 +230,41 @@ watch(previewFile, async (file, _previous, cleanup) => {
   place-items: center;
 }
 
+.file-media-image {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .file-media img,
 .file-media video {
   max-width: 100%;
   max-height: 100%;
   min-height: 0;
   object-fit: contain;
+}
+
+.file-media-image img {
+  transform-origin: center center;
+  will-change: transform;
+  transition: transform var(--dou-motion-duration-normal) var(--dou-motion-easing);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+.file-media-image img.is-movable {
+  cursor: grab;
+}
+
+.file-media-image img.is-interacting {
+  transition: none;
+}
+
+.file-media-image img.is-movable.is-interacting {
+  cursor: grabbing;
 }
 </style>

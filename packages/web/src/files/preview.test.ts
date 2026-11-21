@@ -6,6 +6,8 @@ describe('file preview', () => {
     expect(previewKind('text/plain; charset=utf-8', 'data.CSV')).toBe('csv')
     expect(previewKind('text/plain', 'config.json')).toBe('text')
     expect(previewKind('video/mp4', '')).toBe('video')
+    expect(previewKind('application/zip', 'archive.zip')).toBeUndefined()
+    expect(previewKind('application/pdf', 'spec.pdf')).toBeUndefined()
     expect(previewKind('application/octet-stream', 'image.png')).toBeUndefined()
   })
 

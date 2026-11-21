@@ -203,3 +203,43 @@ func TestChatMessagesAndNotesMatchLegacy(t *testing.T) {
 		})
 	}
 }
+
+func TestBinaryAndTruncatedAttachmentsPromptToolInspection(t *testing.T) {
+	longText := strings.Repeat("a", MaxAttachedChars+100)
+	entries := []Entry{
+		{
+			"kind": "message",
+			"seq":  float64(1),
+			"message": map[string]any{
+				"id":      "msg_1",
+				"author":  "user",
+				"kind":    "chat",
+				"content": "请看这两个附件",
+				"attachments": []any{
+					map[string]any{"fileId": "fil_zip1", "name": "bundle.zip", "mime": "application/zip", "size": float64(2048)},
+					map[string]any{"fileId": "fil_bigtxt", "name": "server.log", "mime": "text/plain", "size": float64(len(longText))},
+				},
+			},
+		},
+	}
+	messages := ToMessages(entries, nil, ChatOptions{
+		ReadText: func(id string) (string, bool) {
+			if id == "fil_bigtxt" {
+				return longText, true
+			}
+			return "", false
+		},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	content := messages[0].Content
+	for _, want := range []string{
+		`[the user attached "bundle.zip" (fileId: fil_zip1, type: application/zip, size: 2.0 KB); use read_attachment to inspect it, or save_attachment in a writable workspace]`,
+		"cut after " + decimal(MaxAttachedChars) + " characters (fileId: fil_bigtxt; use read_attachment or save_attachment for the rest)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("transcript missing expected snippet %q\ngot:\n%s", want, content)
+		}
+	}
+}

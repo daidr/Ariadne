@@ -68,9 +68,11 @@ export function statusLine(
   }
   switch (thread.stage) {
     case 'working':
-      return thread.doing ? { text: thread.doing, live: true } : null
+      return { text: thread.doing || t('thread.stage.working'), live: true }
+    case 'queued':
+      return { text: t('thread.stage.queued'), live: false }
     case 'answer':
-      return question ? { text: question, live: false } : null
+      return { text: question || t('thread.stage.answer'), live: false }
     case 'halted':
     case 'silent':
       return { text: t(`thread.stage.${thread.stage}`), live: false }
@@ -107,7 +109,7 @@ export type ThreadGroup = (typeof threadGroups)[number]
 
 /** Thread-level actions supplied by the server. Open questions have their own stage. */
 export function threadActionIds(items: NeedsMeItem[] | undefined): Set<string> {
-  return new Set((items ?? []).flatMap((item) => (item.kind === 'thread' ? [item.thread.id] : [])))
+  return new Set((items ?? []).flatMap((item) => (item.kind === 'thread' ? [item.threadId] : [])))
 }
 
 /** The group a thread is listed in: archived ones go last, whatever they ended as. */
@@ -143,7 +145,16 @@ export const groupOf: Record<ThreadStage, Exclude<ThreadGroup, 'archived' | 'asi
   done: 'done',
 }
 
-/** Threads in the order the list shows them within a group: the last active first. */
-export function sortThreads(threads: ThreadView[]) {
-  return threads.toSorted((a, b) => b.activeAt - a.activeAt)
+/**
+ * Threads in the order the list shows them within a group.
+ * Active groups keep creation order so concurrent turns and check syncs never jump rows;
+ * finished and archived groups still show the most recently active threads first.
+ */
+export function sortThreads(threads: readonly ThreadView[], group?: ThreadGroup): ThreadView[] {
+  if (group === 'done' || group === 'archived') {
+    return threads.toSorted(
+      (a, b) => b.activeAt - a.activeAt || b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+    )
+  }
+  return threads.toSorted((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
 }

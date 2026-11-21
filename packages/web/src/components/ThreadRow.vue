@@ -89,11 +89,15 @@ const unfinished = computed(() => {
       </DouText>
     </span>
     <span v-if="line" class="row-foot">
-      <DouText v-if="line.live" size="sm" variant="tertiary" truncate class="row-line">
-        <DouShimmer>{{ line.text }}</DouShimmer>
-      </DouText>
-      <DouText v-else size="sm" variant="secondary" truncate class="row-line" :title="line.text">
-        {{ line.text }}
+      <DouText
+        size="sm"
+        :variant="line.live ? 'tertiary' : 'secondary'"
+        truncate
+        class="row-line"
+        :title="line.text"
+      >
+        <DouShimmer v-if="line.live">{{ line.text }}</DouShimmer>
+        <template v-else>{{ line.text }}</template>
       </DouText>
     </span>
   </span>
@@ -135,6 +139,7 @@ const unfinished = computed(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 18px;
 }
 
 /*
@@ -167,11 +172,13 @@ const unfinished = computed(() => {
   align-items: center;
   gap: 3px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-time {
   flex: none;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The activity line starts under the title, past the status icon. */
@@ -180,7 +187,9 @@ const unfinished = computed(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 18px;
   padding-inline-start: 24px;
+  line-height: 18px;
 }
 
 .row-line {

@@ -245,13 +245,19 @@ func TestCompleteProjectionsReplayRealLegacyLog(t *testing.T) {
 	opts := Options{Path: path, Now: func() time.Time { return time.UnixMilli(expected.Now) }}
 	compare := func(label string, actual repositorySnapshot) {
 		t.Helper()
-		if !reflect.DeepEqual(normalize(actual), normalize(expected)) {
+		got := normalizeLegacyExpected(actual).(map[string]any)
+		want := normalizeLegacyExpected(expected).(map[string]any)
+		gotTables := got["tables"].(map[string]any)
+		wantTables := want["tables"].(map[string]any)
+		gotTables["threads"] = stripNewThreadColumns(gotTables["threads"])
+		wantTables["threads"] = stripNewThreadColumns(wantTables["threads"])
+		if !reflect.DeepEqual(got, want) {
 			for _, table := range projectionTables {
-				if !reflect.DeepEqual(normalize(actual.Tables[table]), normalize(expected.Tables[table])) {
-					t.Fatalf("%s table %s differs\ngot %s\nwant%s", label, table, encoded(normalize(actual.Tables[table])), encoded(normalize(expected.Tables[table])))
+				if !reflect.DeepEqual(gotTables[table], wantTables[table]) {
+					t.Fatalf("%s table %s differs\ngot %s\nwant%s", label, table, encoded(gotTables[table]), encoded(wantTables[table]))
 				}
 			}
-			t.Fatalf("%s read views or original bytes differ\ngot %s\nwant%s", label, encoded(normalize(actual)), encoded(normalize(expected)))
+			t.Fatalf("%s read views or original bytes differ\ngot %s\nwant%s", label, encoded(got), encoded(want))
 		}
 	}
 	repo, err := Open(t.Context(), opts)

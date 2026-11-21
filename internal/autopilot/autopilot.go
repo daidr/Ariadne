@@ -107,7 +107,7 @@ func (service *Service) readWakes(ctx context.Context, sequence *int64) error {
 func wakes(kind string) bool {
 	switch kind {
 	case "project.settings.set", "project.autopilot.paused", "thread.reported", "thread.stopped", "thread.resumed",
-		"thread.reviewed", "thread.completed", "review.submitted", "review.abandoned", "branch.merged", "pull_request.synced",
+		"thread.reviewed", "thread.completed", "thread.node.set", "review.submitted", "review.abandoned", "branch.merged", "pull_request.synced",
 		"pull_request.closed", "plan.revised", "attention.answered", "attention.withdrawn", "turn.finished":
 		return true
 	default:

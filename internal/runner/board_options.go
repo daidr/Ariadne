@@ -71,7 +71,7 @@ func (turn *turn) boardPicture(ctx context.Context, input args) (boardPicture, e
 		if err != nil {
 			return item, err
 		}
-		if info == nil || !files.IsImage(info.MIME) || info.Size > files.MaxFileBytes {
+		if info == nil || !files.IsImage(info.MIME) || info.Size > files.MaxImageBytes {
 			return item, errors.New("the file must be an image of this project")
 		}
 		content, err := store.Read(ctx, id)
@@ -93,7 +93,7 @@ func (turn *turn) boardPicture(ctx context.Context, input args) (boardPicture, e
 		if err != nil {
 			return item, err
 		}
-		data, err = view.ReadBytes(ctx, path, files.MaxFileBytes)
+		data, err = view.ReadBytes(ctx, path, files.MaxImageBytes)
 		if err != nil {
 			return item, err
 		}
