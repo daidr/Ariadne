@@ -1,6 +1,14 @@
-import type { ConversationView, MessageView, NoticeView, ThreadView, TodoView } from '@ariadne/core'
+import type {
+  AnyStoredEvent,
+  ConversationView,
+  MessageView,
+  NoticeView,
+  ThreadView,
+  TodoView,
+} from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
 import {
+  affectsProjectList,
   backMain,
   closeFull,
   closeView,
@@ -17,6 +25,7 @@ import {
   showWorkspace,
   startNewProject,
   state,
+  touchedConversationsOf,
   type ConversationState,
 } from './store'
 import * as side from './side/layout'
@@ -92,17 +101,79 @@ describe('a conversation brought up to date', () => {
   })
 })
 
+const asEvent = (type: AnyStoredEvent['type'], data: Record<string, unknown>) =>
+  ({ seq: 1, id: 'evt_1', projectId: 'prj_1', at: 0, type, data }) as unknown as AnyStoredEvent
+
 describe('events', () => {
   test('refresh only the parts they change', () => {
     expect(partsOf('prompt.recorded')).toEqual([])
+    expect(partsOf('tool.finished')).toEqual([])
     expect(partsOf('turn.step')).toEqual(['detail', 'conversations'])
-    expect(partsOf('tool.finished')).not.toContain('plan')
+    expect(partsOf('turn.changed')).toEqual(['detail', 'conversations'])
+    expect(partsOf('search.answered')).toEqual(['detail', 'conversations'])
     expect(partsOf('turn.finished')).toContain('plan')
     expect(partsOf('memory.saved')).toEqual(['memories', 'conversations'])
     expect(partsOf('artifact.created')).toContain('artifacts')
     expect(partsOf('message.posted')).not.toContain('artifacts')
     expect(partsOf('message.read')).toEqual(['conversations'])
     expect(partsOf('thread.node.set')).toEqual(['detail', 'conversations', 'plan'])
+  })
+
+  test('limit project-list refreshes to events that can change a ProjectView row', () => {
+    expect(affectsProjectList('tool.finished')).toBe(false)
+    expect(affectsProjectList('todo.updated')).toBe(false)
+    expect(affectsProjectList('message.read')).toBe(false)
+    expect(affectsProjectList('message.reacted')).toBe(false)
+    expect(affectsProjectList('turn.changed')).toBe(false)
+    expect(affectsProjectList('artifact.revised')).toBe(false)
+    expect(affectsProjectList('memory.saved')).toBe(false)
+    expect(affectsProjectList('plan.proposed')).toBe(false)
+    expect(affectsProjectList('message.posted')).toBe(true)
+    expect(affectsProjectList('turn.started')).toBe(true)
+    expect(affectsProjectList('turn.step')).toBe(true)
+    expect(affectsProjectList('attention.opened')).toBe(true)
+    expect(affectsProjectList('conversation.wait_set')).toBe(true)
+    expect(affectsProjectList('conversation.model_retry')).toBe(false)
+  })
+
+  test('narrow conversation refreshes to touched conversation IDs when known', () => {
+    expect(touchedConversationsOf(asEvent('turn.step', { conversationId: 'thr_1' }))).toEqual([
+      'thr_1',
+    ])
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', {
+          conversationId: 'thr_1',
+          author: 'thr_1',
+          cites: [{ messageId: 'msg_1', conversationId: 'crd_1', content: 'hi', at: 1 }],
+        }),
+      ),
+    ).toEqual(['thr_1', 'crd_1'])
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', { conversationId: 'thr_1', author: 'user' }),
+        'crd_1',
+      ),
+    ).toEqual(['thr_1', 'crd_1'])
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', { conversationId: 'thr_1', author: 'user' }),
+      ),
+    ).toBeNull()
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', {
+          conversationId: 'thr_1',
+          author: 'user',
+          comments: [{ path: 'a.ts', line: 1, body: 'fix' }],
+        }),
+        'crd_1',
+      ),
+    ).toEqual(['thr_1'])
+    expect(
+      touchedConversationsOf(asEvent('message.edited', { messageId: 'msg_1', content: 'x' })),
+    ).toBeNull()
+    expect(touchedConversationsOf(asEvent('attention.opened', { threadId: 'thr_1' }))).toBeNull()
   })
 })
 

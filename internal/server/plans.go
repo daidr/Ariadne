@@ -99,7 +99,7 @@ func (api *API) registerPlans() {
 		if err != nil {
 			return nil, 0, err
 		}
-		if _, err := repo.RevertPlanRevision(r.Context(), r.PathValue("projectId"), r.PathValue("revisionId"), "user", text(body, "reason"), nil); err != nil {
+		if _, err := repo.RevertPlanRevision(r.Context(), r.PathValue("projectId"), r.PathValue("revisionId"), "user", text(body, "reason")); err != nil {
 			return nil, 0, err
 		}
 		return plan(r)

@@ -173,3 +173,25 @@ func TestFileSourcesUseSeparateGitWorktreesAndPinTheDefault(t *testing.T) {
 	}
 	git(second, "show-ref", "--verify", "refs/heads/"+local.BranchFor(thread.ID))
 }
+
+func TestOrphanMatchesRecordedLabelNormalizesSymlink(t *testing.T) {
+	realRoot := t.TempDir()
+	worktree := filepath.Join(realRoot, "thr_orphan")
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "root-link")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skip("symlink privileges unavailable")
+	}
+	canonicalWorktree, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !orphanMatchesRecordedLabel(canonicalWorktree, filepath.Join(aliasRoot, "thr_orphan", "app")) {
+		t.Fatal("historical symlinked label was not matched to its canonical orphan worktree")
+	}
+	if orphanMatchesRecordedLabel(canonicalWorktree, filepath.Join(aliasRoot, "other", "app")) {
+		t.Fatal("unrelated symlinked label matched the orphan worktree")
+	}
+}

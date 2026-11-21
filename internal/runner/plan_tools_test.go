@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestCoordinatorAddsPlanNodesAndRequestsApprovalForAcceptance(t *testing.T) {
+func TestCoordinatorUpdatesAndRevertsPlanDirectly(t *testing.T) {
 	ctx := t.Context()
 	home := t.TempDir()
 	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
@@ -27,13 +28,24 @@ func TestCoordinatorAddsPlanNodesAndRequestsApprovalForAcceptance(t *testing.T) 
 	}
 	turn := &turn{Runner: &Runner{Repository: repo, Settings: store},
 		conversation: core.ConversationView{ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator"}}
+	decodeReply := func(raw string) map[string]any {
+		t.Helper()
+		var out map[string]any
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatalf("decode tool reply %q: %v", raw, err)
+		}
+		return out
+	}
+
 	add := func(title string) args { return args{"op": "add", "ref": "work", "title": title} }
-	_, err = turn.updatePlan(ctx, args{"reason": "提出计划", "ops": []any{
+	initialReply, err := turn.updatePlan(ctx, args{"reason": "提出计划", "ops": []any{
 		args{"op": "add", "title": "验收", "dependsOn": []any{"work"}}, add("实现接口"),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	initial := decodeReply(initialReply)
+	workID := initial["ids"].(map[string]any)["work"].(string)
 	plan, err := repo.GetPlan(ctx, project.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -49,16 +61,48 @@ func TestCoordinatorAddsPlanNodesAndRequestsApprovalForAcceptance(t *testing.T) 
 	if err != nil || refs["work"] == "" {
 		t.Fatal("missing temporary node reference", refs, err)
 	}
-	result, err := turn.updatePlan(ctx, args{"reason": "增加里程碑", "ops": []any{args{"op": "add", "title": "上线前验收", "kind": "milestone"}}})
-	if err != nil || !strings.Contains(result, "waiting for the user") {
-		t.Fatal(result, err)
+
+	// Adding a milestone, changing acceptance and removing a node apply immediately without approval.
+	milestoneReply, err := turn.updatePlan(ctx, args{"reason": "增加里程碑", "ops": []any{args{"op": "add", "ref": "ms", "title": "上线前验收", "kind": "milestone"}}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	milestone := decodeReply(milestoneReply)
+	if milestone["status"] != "applied" || milestone["revisionId"] == "" {
+		t.Fatalf("milestone add did not apply directly: %s", milestoneReply)
+	}
+	acceptanceReply, err := turn.updatePlan(ctx, args{"reason": "明确验收标准", "ops": []any{args{"op": "update", "id": workID, "acceptance": "单测通过"}}})
+	if err != nil || decodeReply(acceptanceReply)["status"] != "applied" {
+		t.Fatalf("acceptance update did not apply directly: %s, %v", acceptanceReply, err)
+	}
+	removeReply, err := turn.updatePlan(ctx, args{"reason": "删除节点", "ops": []any{args{"op": "remove", "id": workID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := decodeReply(removeReply)
+	if removed["status"] != "applied" || removed["revisionId"] == "" {
+		t.Fatalf("node removal did not apply directly: %s", removeReply)
+	}
+	revertReply, err := turn.revertPlan(ctx, args{"revisionId": removed["revisionId"], "reason": "恢复节点"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reverted := decodeReply(revertReply)
+	if reverted["status"] != "reverted" || reverted["revisionId"] == "" {
+		t.Fatalf("plan revert did not apply directly: %s", revertReply)
+	}
+
 	attentions, err := repo.ListOpenAttentions(ctx, project.ID)
-	if err != nil || len(attentions) != 1 || !strings.Contains(mustJSON(t, attentions[0]), "新增里程碑「上线前验收」") {
-		t.Fatal("approval card missed its change details", attentions, err)
+	if err != nil || len(attentions) != 0 {
+		t.Fatalf("plan updates created unexpected approval attentions: %+v, %v", attentions, err)
 	}
+	nodes, err = repo.ModelPlan(ctx, project.ID)
+	if err != nil || !strings.Contains(mustJSON(t, nodes), "上线前验收") || !strings.Contains(mustJSON(t, nodes), "单测通过") {
+		t.Fatalf("model plan missed directly applied changes: %+v, %v", nodes, err)
+	}
+
 	block := args{"type": "confirm", "title": "需要生成截图吗？"}
-	result, err = turn.postUI(ctx, args{"blocks": []any{block}})
+	result, err := turn.postUI(ctx, args{"blocks": []any{block}})
 	if err != nil || !strings.Contains(result, "attentionId") {
 		t.Fatal("interactive card did not reference the pending answer", result, err)
 	}

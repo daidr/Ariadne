@@ -157,6 +157,7 @@ func New(options Options) (*API, error) {
 	}
 	api.mux.HandleFunc("/", api.static)
 	api.add("GET", "/api/health", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
+	api.add("GET", "/api/ping", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
 	api.registerReads()
 	api.registerWrites()
 	api.registerArtifacts()
@@ -410,11 +411,10 @@ func (api *API) registerReads() {
 	})
 	api.add("GET", "/api/projects/:projectId", func(r *http.Request) (any, int, error) {
 		id := r.PathValue("projectId")
-		detail, err := repo.GetProjectDetail(r.Context(), id)
+		detail, delta, err := api.syncer.ProjectDetail(r.Context(), repo.Reader, id, r.URL.Query().Get("since"))
 		if err != nil {
 			return nil, 0, err
 		}
-		delta := api.syncer.Delta(id, detail.Threads, r.URL.Query().Get("since"))
 		sync := object{"cursor": delta.Cursor, "partial": delta.Partial}
 		if delta.IDs != nil {
 			sync["ids"] = delta.IDs

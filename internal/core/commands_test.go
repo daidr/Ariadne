@@ -233,8 +233,9 @@ func TestProjectAndThreadCommandsMatchLegacy(t *testing.T) {
 			events = append(events, object{"seq": e.Seq, "type": e.Type, "projectId": e.ProjectID, "data": e.Data, "at": e.At})
 		}
 		actual := object{"value": value, "error": localized, "detail": detail, "events": events}
-		if !reflect.DeepEqual(normalize(actual), normalize(expected[i])) {
-			t.Fatalf("command %d %s differs\ngot %s\nwant%s", i, encoded(command), encoded(normalize(actual)), encoded(normalize(expected[i])))
+		want := normalizeLegacyExpected(expected[i])
+		if !reflect.DeepEqual(normalize(actual), want) {
+			t.Fatalf("command %d %s differs\ngot %s\nwant%s", i, encoded(command), encoded(normalize(actual)), encoded(want))
 		}
 	}
 }

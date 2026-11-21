@@ -1,121 +1,87 @@
 package server
 
 import (
-	"encoding/json"
-	"hash/maphash"
+	"context"
+	"fmt"
+	"hash/fnv"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/daidr/Ariadne/internal/cache"
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/google/uuid"
 )
 
-type threadHash struct {
-	hash uint64
-	rev  int64
-}
-type knownThreads struct {
-	rev, idsRev int64
-	ids         string
-	threads     map[string]threadHash
-}
 type ThreadDelta struct {
 	Cursor  string            `json:"cursor"`
 	Partial bool              `json:"partial"`
 	Threads []core.ThreadView `json:"threads"`
 	IDs     *[]string         `json:"ids,omitempty"`
 }
+
+// ThreadSync encodes stateless cursors over threads.changed_seq so incremental
+// project reads avoid in-memory snapshots, global locks and full JSON hashing.
 type ThreadSync struct {
-	mu       sync.Mutex
-	epoch    string
-	rev      int64
-	seed     maphash.Seed
-	projects *cache.Cache[string, *knownThreads]
+	epoch string
 }
 
 func NewThreadSync() *ThreadSync {
-	projects, err := cache.New[string, *knownThreads](cache.Options{MaxEntries: 128, MaxWeight: 16 * 1024 * 1024, TTL: 30 * time.Minute})
-	if err != nil {
-		panic(err)
-	}
-	return &ThreadSync{epoch: uuid.NewString()[:8], seed: maphash.MakeSeed(), projects: projects}
+	return &ThreadSync{epoch: uuid.NewString()[:8]}
 }
 
-var cursorNumber = regexp.MustCompile(`^\d+$`)
+var (
+	cursorNumber = regexp.MustCompile(`^\d+$`)
+	cursorHex    = regexp.MustCompile(`^[0-9a-f]{16}$`)
+)
 
-func (syncer *ThreadSync) Delta(projectID string, threads []core.ThreadView, since string) ThreadDelta {
-	syncer.mu.Lock()
-	defer syncer.mu.Unlock()
-	known, ok := syncer.projects.Get(projectID)
-	if !ok {
-		known = &knownThreads{threads: map[string]threadHash{}}
-	}
-	ids := make([]string, 0, len(threads))
-	hashes := make([]uint64, 0, len(threads))
-	changed := false
-	weight := int64(128 + len(projectID))
-	for _, thread := range threads {
-		data, _ := json.Marshal(thread)
-		hash := maphash.Bytes(syncer.seed, data)
-		ids = append(ids, thread.ID)
-		hashes = append(hashes, hash)
-		if previous, ok := known.threads[thread.ID]; !ok || previous.hash != hash {
-			changed = true
+func hashThreadIDs(ids []string) string {
+	h := fnv.New64a()
+	for i, id := range ids {
+		if i > 0 {
+			_, _ = h.Write([]byte{'\n'})
 		}
-		weight += int64(96 + 2*len(thread.ID))
+		_, _ = h.Write([]byte(id))
 	}
-	joined := strings.Join(ids, "\n")
-	moved := joined != known.ids
-	if changed || moved {
-		syncer.rev++
-		known.rev = syncer.rev
-		before := known.threads
-		known.threads = make(map[string]threadHash, len(threads))
-		for i, thread := range threads {
-			previous, ok := before[thread.ID]
-			if ok && previous.hash == hashes[i] {
-				known.threads[thread.ID] = previous
-			} else {
-				known.threads[thread.ID] = threadHash{hashes[i], known.rev}
-			}
-		}
-		if moved {
-			known.ids, known.idsRev = joined, known.rev
-		}
-	}
-	stored := syncer.projects.Put(projectID, known, weight)
-	result := ThreadDelta{Cursor: syncer.epoch + "." + strconv.FormatInt(known.rev, 10), Threads: threads}
+	return fmt.Sprintf("%016x", h.Sum64())
+}
+
+func (syncer *ThreadSync) parseCursor(since string) (seq int64, idsHash string, at int64, ok bool) {
 	parts := strings.Split(since, ".")
-	if !stored || len(parts) < 2 || parts[0] != syncer.epoch || !cursorNumber.MatchString(parts[1]) {
-		return result
+	if len(parts) != 4 || parts[0] != syncer.epoch || !cursorNumber.MatchString(parts[1]) || !cursorHex.MatchString(parts[2]) || !cursorNumber.MatchString(parts[3]) {
+		return 0, "", 0, false
 	}
-	from, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || from > known.rev {
-		return result
+	parsedSeq, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, "", 0, false
 	}
-	result.Partial = true
-	result.Threads = []core.ThreadView{}
-	for _, thread := range threads {
-		if known.threads[thread.ID].rev > from {
-			result.Threads = append(result.Threads, thread)
-		}
+	parsedAt, err := strconv.ParseInt(parts[3], 10, 64)
+	if err != nil {
+		return 0, "", 0, false
 	}
-	if known.idsRev > from {
-		result.IDs = &ids
-	}
-	return result
+	return parsedSeq, parts[2], parsedAt, true
 }
-func (syncer *ThreadSync) Forget(id string) {
-	syncer.mu.Lock()
-	defer syncer.mu.Unlock()
-	syncer.projects.Remove(id)
+
+func (syncer *ThreadSync) ProjectDetail(ctx context.Context, reader core.Reader, projectID, since string) (core.ProjectDetailDelta, ThreadDelta, error) {
+	sinceSeq, sinceIDsHash, sinceAt, canPartial := syncer.parseCursor(since)
+	detail, err := reader.GetProjectDetailSince(ctx, projectID, sinceSeq, sinceAt, canPartial)
+	if err != nil {
+		return core.ProjectDetailDelta{}, ThreadDelta{}, err
+	}
+	idsHash := hashThreadIDs(detail.ThreadIDs)
+	cursor := syncer.epoch + "." + strconv.FormatInt(detail.Seq, 10) + "." + idsHash + "." + strconv.FormatInt(detail.At, 10)
+	delta := ThreadDelta{
+		Cursor:  cursor,
+		Partial: detail.Partial,
+		Threads: detail.Threads,
+	}
+	if detail.Partial && idsHash != sinceIDsHash {
+		ids := make([]string, len(detail.ThreadIDs))
+		copy(ids, detail.ThreadIDs)
+		delta.IDs = &ids
+	}
+	return detail, delta, nil
 }
-func (syncer *ThreadSync) Close() {
-	syncer.mu.Lock()
-	defer syncer.mu.Unlock()
-	syncer.projects.Close()
-}
+
+func (syncer *ThreadSync) Forget(string) {}
+
+func (syncer *ThreadSync) Close() {}

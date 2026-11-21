@@ -330,6 +330,7 @@ CREATE TABLE threads (
       reported_head TEXT,
       -- When it was last told to report after a turn that ended without one.
       nudged_at INTEGER,
+      workspace_source_id TEXT,
       workspace_label TEXT,
       workspace_branch TEXT,
       workspace_base TEXT,
@@ -372,7 +373,9 @@ CREATE TABLE threads (
       aside_by TEXT,
       aside_due INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      -- The event that last changed what the thread view shows, for incremental sync.
+      changed_seq INTEGER NOT NULL DEFAULT 0
     );
 
 CREATE TABLE todos (
@@ -413,6 +416,8 @@ CREATE INDEX attentions_conversation_approval ON attentions (conversation_id, cr
 
 CREATE INDEX attention_waiters_thread ON attention_waiters (thread_id, attention_id);
 
+CREATE INDEX conversations_project ON conversations (project_id);
+
 CREATE INDEX events_project ON events (project_id, seq);
 
 CREATE INDEX files_hash ON files (project_id, sha256);
@@ -432,5 +437,7 @@ CREATE INDEX reviews_thread ON reviews (thread_id, id);
 CREATE INDEX search_docs_project ON search_docs (project_id, kind, at);
 
 CREATE INDEX threads_project ON threads (project_id, id);
+
+CREATE INDEX threads_project_changed ON threads (project_id, changed_seq);
 
 CREATE INDEX transcript_conversation ON transcript (conversation_id, id);

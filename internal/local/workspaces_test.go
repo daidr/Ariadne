@@ -476,3 +476,71 @@ func TestCanceledCloneProbeWaiterAndFactoryClose(t *testing.T) {
 		t.Fatal("factory close left operation running")
 	}
 }
+
+func TestWorktreesAndOrphanCleanupNormalizeSymlinkedDataDir(t *testing.T) {
+	ctx := t.Context()
+	root, git := initGit(t)
+	writeGit(t, root, "app/file.txt", "tracked")
+	gitCommit(t, git, "add nested source")
+	realData := t.TempDir()
+	aliasData := filepath.Join(t.TempDir(), "data-link")
+	if err := os.Symlink(realData, aliasData); err != nil {
+		t.Skip("symlink privileges unavailable")
+	}
+	factory := newFactory(t, FactoryOptions{Path: filepath.Join(root, "app"), DataDir: aliasData, DisableClone: true})
+	key := filepath.Base(factory.roots[0])
+	aliasRoot := filepath.Join(aliasData, "worktrees", key)
+	canonicalRoot := factory.roots[0]
+
+	// Register a normal worktree through the unresolved symlink path to simulate
+	// a historical checkout created before path canonicalization.
+	normalAlias := filepath.Join(aliasRoot, "thr_normal")
+	normalCanonical := filepath.Join(canonicalRoot, "thr_normal")
+	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_normal"), normalAlias)
+
+	// Create an orphaned worktree and prune its Git registration.
+	orphanAlias := filepath.Join(aliasRoot, "thr_orphan")
+	orphanCanonical := filepath.Join(canonicalRoot, "thr_orphan")
+	gitOK(t, git, "worktree", "add", "-b", BranchFor("thr_orphan"), orphanAlias)
+	if err := os.Remove(filepath.Join(orphanCanonical, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	// Still registered under its unresolved alias path: must not be removed yet.
+	if removed, err := factory.RemoveOrphaned(ctx, "thr_orphan", filepath.Join(orphanAlias, "app")); err != nil || removed {
+		t.Fatalf("registered alias checkout accepted orphan cleanup: %t, %v", removed, err)
+	}
+	gitOK(t, git, "worktree", "prune", "--expire", "now")
+
+	worktrees, err := factory.Worktrees(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byThread := map[string]sdk.WorktreeInfo{}
+	for _, item := range worktrees {
+		byThread[item.ThreadID] = item
+	}
+	if len(byThread) != 2 {
+		t.Fatalf("unexpected worktrees: %+v", worktrees)
+	}
+	if got := byThread["thr_normal"]; got.Path != normalCanonical || got.Orphaned {
+		t.Fatalf("normal worktree mismatch: got %+v, want path %q", got, normalCanonical)
+	}
+	if got := byThread["thr_orphan"]; got.Path != orphanCanonical || !got.Orphaned {
+		t.Fatalf("orphan worktree mismatch: got %+v, want path %q", got, orphanCanonical)
+	}
+
+	// Even if the nested source subdirectory was already deleted and the recorded
+	// label uses the historical unresolved symlink path, explicit orphan cleanup succeeds.
+	if err := os.RemoveAll(filepath.Join(orphanCanonical, "app")); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := factory.RemoveOrphaned(ctx, "thr_orphan", orphanAlias); err != nil || removed {
+		t.Fatalf("orphan cleanup accepted mismatched alias label: %t, %v", removed, err)
+	}
+	if removed, err := factory.RemoveOrphaned(ctx, "thr_orphan", filepath.Join(orphanAlias, "app")); err != nil || !removed {
+		t.Fatalf("orphan cleanup rejected historical unresolved label: %t, %v", removed, err)
+	}
+	if _, err := os.Stat(orphanCanonical); !os.IsNotExist(err) {
+		t.Fatal("orphan directory still on disk", err)
+	}
+}

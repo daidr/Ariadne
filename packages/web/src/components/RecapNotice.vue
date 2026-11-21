@@ -24,8 +24,11 @@ const threadsOf = (ids: string[]) => ids.flatMap((id) => byId.value.get(id) ?? [
 const needing = computed(() => {
   const ids = new Set<string>()
   for (const item of state.detail?.needsMe ?? []) {
-    if (item.kind === 'thread') ids.add(item.thread.id)
-    else for (const thread of [item.thread, ...item.joined]) if (thread) ids.add(thread.id)
+    if (item.kind === 'thread') ids.add(item.threadId)
+    else {
+      if (item.threadId) ids.add(item.threadId)
+      for (const id of item.joinedIds) ids.add(id)
+    }
   }
   return ids
 })

@@ -107,7 +107,7 @@ export type ThreadGroup = (typeof threadGroups)[number]
 
 /** Thread-level actions supplied by the server. Open questions have their own stage. */
 export function threadActionIds(items: NeedsMeItem[] | undefined): Set<string> {
-  return new Set((items ?? []).flatMap((item) => (item.kind === 'thread' ? [item.thread.id] : [])))
+  return new Set((items ?? []).flatMap((item) => (item.kind === 'thread' ? [item.threadId] : [])))
 }
 
 /** The group a thread is listed in: archived ones go last, whatever they ended as. */

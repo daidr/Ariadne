@@ -172,34 +172,40 @@ func projectEvent(w *projectionWriter, e eventstore.Event, d object) error {
 	return w.err
 }
 
+func touchThread(w *projectionWriter, seq int64, id any) {
+	if id != nil {
+		w.run("UPDATE threads SET changed_seq = ? WHERE id = ?", seq, id)
+	}
+}
+
 func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 	id := d["threadId"]
 	switch e.Type {
 	case "thread.created":
-		w.run("INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, auto, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, e.ProjectID, d["title"], d["nodeId"], d["model"], d["branch"], d["reviewOf"], boolean(d.yes("auto")), e.At, e.At)
+		w.run("INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, auto, created_at, updated_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, e.ProjectID, d["title"], d["nodeId"], d["model"], d["branch"], d["reviewOf"], boolean(d.yes("auto")), e.At, e.At, e.Seq)
 		if d["reviewOf"] != nil {
-			w.run("UPDATE threads SET reviewer_id = ? WHERE id = ?", id, d["reviewOf"])
+			w.run("UPDATE threads SET reviewer_id = ?, changed_seq = ? WHERE id = ?", id, e.Seq, d["reviewOf"])
 		}
 	case "review.requested":
-		w.run("UPDATE threads SET reviewing = 1, review_delivered = 0, review_rounds = ?, updated_at = ? WHERE id = ?", d["round"], e.At, id)
+		w.run("UPDATE threads SET reviewing = 1, review_delivered = 0, review_rounds = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["round"], e.At, e.Seq, id)
 	case "review.submitted":
-		w.run("UPDATE threads SET reviewing = 0, updated_at = ?, review_delivered = CASE WHEN ? THEN 1 ELSE review_delivered END WHERE id = ?", e.At, boolean(d.str("verdict") == "pass"), id)
+		w.run("UPDATE threads SET reviewing = 0, updated_at = ?, review_delivered = CASE WHEN ? THEN 1 ELSE review_delivered END, changed_seq = ? WHERE id = ?", e.At, boolean(d.str("verdict") == "pass"), e.Seq, id)
 	case "review.abandoned":
-		w.run("UPDATE threads SET reviewing = 0, review_delivered = 1, updated_at = ? WHERE id = ?", e.At, id)
+		w.run("UPDATE threads SET reviewing = 0, review_delivered = 1, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
 	case "thread.references.set":
-		w.run("UPDATE threads SET reference_sources = ?, updated_at = ? WHERE id = ?", encoded(d["references"]), e.At, id)
+		w.run("UPDATE threads SET reference_sources = ?, updated_at = ?, changed_seq = ? WHERE id = ?", encoded(d["references"]), e.At, e.Seq, id)
 		if ended := d.obj("ended"); ended != nil {
-			w.run("UPDATE threads SET reference_ended = json_insert(reference_ended, '$[#]', json(?)) WHERE id = ?", encoded(object{"attentionId": ended["attentionId"], "kept": ended["now"] != nil}), id)
+			w.run("UPDATE threads SET reference_ended = json_insert(reference_ended, '$[#]', json(?)), changed_seq = ? WHERE id = ?", encoded(object{"attentionId": ended["attentionId"], "kept": ended["now"] != nil}), e.Seq, id)
 			addEntry(w, e, id, "note", nil, object{"type": "reference-ended", "name": ended["name"], "now": ended["now"]}, false)
 		}
 	case "thread.model_set":
-		w.run("UPDATE threads SET model = ?, updated_at = ? WHERE id = ?", d["model"], e.At, id)
+		w.run("UPDATE threads SET model = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["model"], e.At, e.Seq, id)
 	case "thread.node.set":
-		w.run("UPDATE threads SET node_id = ?, updated_at = ? WHERE id = ?", d["nodeId"], e.At, id)
+		w.run("UPDATE threads SET node_id = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["nodeId"], e.At, e.Seq, id)
 	case "thread.started":
-		w.run("UPDATE threads SET started = 1, updated_at = ? WHERE id = ?", e.At, id)
+		w.run("UPDATE threads SET started = 1, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
 	case "thread.reported":
-		w.run("UPDATE threads SET last_report = ?, last_summary = ?, last_headline = ?, last_artifacts = ?, reported_at = ?, reported_head = ?, updated_at = ? WHERE id = ?", d["report"], d["summary"], d["headline"], encoded(d["artifacts"]), e.At, d["head"], e.At, id)
+		w.run("UPDATE threads SET last_report = ?, last_summary = ?, last_headline = ?, last_artifacts = ?, reported_at = ?, reported_head = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["report"], d["summary"], d["headline"], encoded(d["artifacts"]), e.At, d["head"], e.At, e.Seq, id)
 		if d.str("report") == "ready" {
 			w.run("UPDATE threads SET autopilot_held = NULL WHERE id = ?", id)
 			if !d.yes("reviewing") {
@@ -210,51 +216,51 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 			w.run("UPDATE threads SET review_delivered = 1 WHERE id = ?", id)
 		}
 	case "workspace.opened":
-		w.run("UPDATE threads SET workspace_label = ?, workspace_branch = ?, workspace_base = ?, workspace_removed = 0, workspace_parked = 0, updated_at = ? WHERE id = ?", d["label"], d["branch"], d["base"], e.At, id)
+		w.run("UPDATE threads SET workspace_source_id = coalesce(?, workspace_source_id), workspace_label = ?, workspace_branch = ?, workspace_base = ?, workspace_removed = 0, workspace_parked = 0, updated_at = ?, changed_seq = ? WHERE id = ?", d["sourceId"], d["label"], d["branch"], d["base"], e.At, e.Seq, id)
 	case "workspace.removed":
-		w.run("UPDATE threads SET workspace_removed = 1, workspace_parked = ?, updated_at = ? WHERE id = ?", boolean(d.str("reason") == "idle"), e.At, id)
+		w.run("UPDATE threads SET workspace_removed = 1, workspace_parked = ?, updated_at = ?, changed_seq = ? WHERE id = ?", boolean(d.str("reason") == "idle"), e.At, e.Seq, id)
 	case "turn.changed":
 		if d["branch"] != nil {
-			w.run("UPDATE threads SET changes = ? WHERE id = ?", encoded(d["branch"]), d["conversationId"])
+			w.run("UPDATE threads SET changes = ?, changed_seq = ? WHERE id = ?", encoded(d["branch"]), e.Seq, d["conversationId"])
 		}
 	case "branch.merged":
 		merge := except(d, "threadId")
 		merge["at"] = e.At
-		w.run("UPDATE threads SET merged = ?1, landed_at = ?2, updated_at = ?2, workspace_parked = 0 WHERE id = ?3", encoded(merge), e.At, id)
+		w.run("UPDATE threads SET merged = ?1, landed_at = ?2, updated_at = ?2, workspace_parked = 0, changed_seq = ?3 WHERE id = ?4", encoded(merge), e.At, e.Seq, id)
 	case "branch.merge_undone":
-		w.run("UPDATE threads SET merged = NULL, landed_at = NULL, autopilot_held = ?, updated_at = ? WHERE id = ?", d["head"], e.At, id)
+		w.run("UPDATE threads SET merged = NULL, landed_at = NULL, autopilot_held = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["head"], e.At, e.Seq, id)
 	case "pull_request.synced":
-		w.run("UPDATE threads SET pull_request = ?1, updated_at = ?2, check_failures = CASE WHEN ?3 THEN 0 ELSE check_failures END WHERE id = ?4", encoded(except(d, "threadId")), e.At, boolean(d.obj("checks").str("state") == "success"), id)
+		w.run("UPDATE threads SET pull_request = ?1, updated_at = ?2, check_failures = CASE WHEN ?3 THEN 0 ELSE check_failures END, changed_seq = ?4 WHERE id = ?5", encoded(except(d, "threadId")), e.At, boolean(d.obj("checks").str("state") == "success"), e.Seq, id)
 	case "pull_request.closed":
-		w.run("UPDATE threads SET check_failures = 0, workspace_parked = 0, landed_at = CASE WHEN ?1 THEN ?2 ELSE landed_at END WHERE id = ?3", boolean(d.yes("merged")), e.At, id)
+		w.run("UPDATE threads SET check_failures = 0, workspace_parked = 0, landed_at = CASE WHEN ?1 THEN ?2 ELSE landed_at END, changed_seq = ?3 WHERE id = ?4", boolean(d.yes("merged")), e.At, e.Seq, id)
 	case "autopilot.held":
-		w.run("UPDATE threads SET autopilot_held = ? WHERE id = ?", fallback(d["head"], ""), id)
+		w.run("UPDATE threads SET autopilot_held = ?, changed_seq = ? WHERE id = ?", fallback(d["head"], ""), e.Seq, id)
 	case "checks.failed":
-		w.run("UPDATE threads SET check_failures = ? WHERE id = ?", fallback(d["attempt"], 1), id)
+		w.run("UPDATE threads SET check_failures = ?, changed_seq = ? WHERE id = ?", fallback(d["attempt"], 1), e.Seq, id)
 	case "message.posted":
 		if d.str("author") == "user" {
-			w.run("UPDATE threads SET check_failures = 0, user_at = ?, aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0 WHERE id = ?", e.At, d["conversationId"])
+			w.run("UPDATE threads SET check_failures = 0, user_at = ?, aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, changed_seq = ? WHERE id = ?", e.At, e.Seq, d["conversationId"])
 		}
 	case "thread.renamed":
-		w.run("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?", d["title"], e.At, id)
+		w.run("UPDATE threads SET title = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["title"], e.At, e.Seq, id)
 	case "thread.set_aside":
-		w.run("UPDATE threads SET aside_until = ?, aside_reason = ?, aside_by = ?, aside_due = 0, updated_at = ? WHERE id = ?", d["until"], d["reason"], d["by"], e.At, id)
+		w.run("UPDATE threads SET aside_until = ?, aside_reason = ?, aside_by = ?, aside_due = 0, updated_at = ?, changed_seq = ? WHERE id = ?", d["until"], d["reason"], d["by"], e.At, e.Seq, id)
 	case "thread.aside_due":
-		w.run("UPDATE threads SET aside_due = 1, updated_at = ? WHERE id = ? AND aside_until IS NOT NULL", e.At, id)
+		w.run("UPDATE threads SET aside_due = 1, updated_at = ?, changed_seq = ? WHERE id = ? AND aside_until IS NOT NULL", e.At, e.Seq, id)
 	case "thread.aside_ended":
-		w.run("UPDATE threads SET aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, updated_at = ? WHERE id = ?", e.At, id)
+		w.run("UPDATE threads SET aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
 	case "thread.stopped":
-		w.run("UPDATE threads SET stopped_reason = ?, stopped_by = ?, stopped_at = ?, updated_at = ? WHERE id = ?", d["reason"], d["by"], e.At, e.At, id)
+		w.run("UPDATE threads SET stopped_reason = ?, stopped_by = ?, stopped_at = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["reason"], d["by"], e.At, e.At, e.Seq, id)
 	case "thread.nudged":
-		w.run("UPDATE threads SET nudged_at = ? WHERE id = ?", e.At, id)
+		w.run("UPDATE threads SET nudged_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
 	case "thread.reviewed":
-		w.run("UPDATE threads SET reviewed_at = ?, updated_at = ? WHERE id = ?", e.At, e.At, id)
+		w.run("UPDATE threads SET reviewed_at = ?, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.At, e.Seq, id)
 	case "thread.completed":
 		w.run(`UPDATE threads SET last_report = 'done', reported_at = ?1, updated_at = ?1,
 			stopped_reason = NULL, stopped_by = NULL, stopped_at = NULL, check_failures = 0,
-			aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0 WHERE id = ?2`, e.At, id)
+			aside_until = NULL, aside_reason = NULL, aside_by = NULL, aside_due = 0, changed_seq = ?2 WHERE id = ?3`, e.At, e.Seq, id)
 	case "thread.resumed":
-		w.run("UPDATE threads SET stopped_reason = NULL, stopped_by = NULL, stopped_at = NULL, updated_at = ? WHERE id = ?", e.At, id)
+		w.run("UPDATE threads SET stopped_reason = NULL, stopped_by = NULL, stopped_at = NULL, updated_at = ?, changed_seq = ? WHERE id = ?", e.At, e.Seq, id)
 	}
 }
 
@@ -292,6 +298,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0, last_outcome = NULL, last_error = NULL WHERE id = ?", d["threadId"])
 	case "turn.started":
 		w.run("UPDATE conversations SET turn_id = ?1, turn_started_at = ?2, last_turn_at = ?2, turn_started_seq = ?3, model = ?4, activity = NULL, fallback = 0 WHERE id = ?5", d["turnId"], e.At, e.Seq, d["model"], id)
+		touchThread(w, e.Seq, id)
 	case "turn.step":
 		var status any
 		if d.str("finish") != "stop" && !d.yes("quiet") {
@@ -305,17 +312,21 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		 reasoning_tokens = reasoning_tokens + ?9, cost_usd = cost_usd + ?10, cost_cny = cost_cny + ?11,
 		 context_tokens = CASE WHEN ?5 THEN ?12 ELSE context_tokens END,
 		 activity = coalesce(?6, activity) WHERE id = ?4`, d["sawSeq"], u.number("input"), u.number("output"), id, boolean(u != nil), status, u.number("cached"), u.number("cacheWrite"), u.number("reasoning"), cost(u, "USD"), cost(u, "CNY"), fallback(u["contextInput"], u.number("input")))
+		touchThread(w, e.Seq, id)
 	case "conversation.model_fallback":
 		w.run("UPDATE conversations SET model = ?, fallback = 1 WHERE id = ? AND turn_id = ?", d["to"], id, d["turnId"])
 	case "conversation.wait_set":
 		w.run("UPDATE conversations SET wait_id = ?, wait_until = ?, wait_note = ? WHERE id = ?", d["waitId"], d["until"], d["note"], id)
+		touchThread(w, e.Seq, id)
 	case "conversation.wait_ended":
 		w.run("UPDATE conversations SET wait_id = NULL, wait_until = NULL, wait_note = NULL WHERE id = ? AND wait_id = ?", id, d["waitId"])
+		touchThread(w, e.Seq, id)
 	case "research.step", "search.answered", "conversation.compacted":
 		if e.Type == "conversation.compacted" {
 			w.run("UPDATE conversations SET compactions = compactions + 1 WHERE id = ?", id)
 		}
 		w.run("UPDATE conversations SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, cached_tokens = cached_tokens + ?, cache_write_tokens = cache_write_tokens + ?, reasoning_tokens = reasoning_tokens + ?, cost_usd = cost_usd + ?, cost_cny = cost_cny + ? WHERE id = ?", u.number("input"), u.number("output"), u.number("cached"), u.number("cacheWrite"), u.number("reasoning"), cost(u, "USD"), cost(u, "CNY"), id)
+		touchThread(w, e.Seq, id)
 	case "turn.finished":
 		end := "turn_id = NULL, turn_started_at = NULL, activity = NULL, last_outcome = ?, last_error = ?"
 		switch d.str("outcome") {
@@ -326,8 +337,10 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		default:
 			w.run("UPDATE conversations SET "+end+", pending_since = CASE WHEN pending_seq > turn_started_seq THEN max(pending_since, turn_started_seq + 1) ELSE 0 END, pending_seq = CASE WHEN pending_seq > turn_started_seq THEN pending_seq ELSE 0 END WHERE id = ?", d["outcome"], nullableJSON(d["error"]), id)
 		}
+		touchThread(w, e.Seq, id)
 	case "turn.requested":
 		w.run("UPDATE conversations SET pending_seq = ?1, last_error = NULL, pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END WHERE id = ?2", e.Seq, id)
+		touchThread(w, e.Seq, id)
 	}
 }
 
@@ -336,4 +349,5 @@ func addEntry(w *projectionWriter, e eventstore.Event, conversationID any, kind 
 	if wake {
 		w.run("UPDATE conversations SET pending_seq = ?1, pending_since = CASE WHEN pending_since = 0 THEN ?1 ELSE pending_since END WHERE id = ?2", e.Seq, conversationID)
 	}
+	touchThread(w, e.Seq, conversationID)
 }
