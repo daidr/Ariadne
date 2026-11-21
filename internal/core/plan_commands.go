@@ -12,13 +12,11 @@ import (
 	"github.com/daidr/Ariadne/internal/projectsettings"
 )
 
-type PlanConfirmation func([]map[string]any) (map[string]any, error)
 type PlanRevision struct {
-	Author       string
-	Reason       string
-	Ops          []map[string]any
-	Confirmation PlanConfirmation
-	UniqueAdds   bool
+	Author     string
+	Reason     string
+	Ops        []map[string]any
+	UniqueAdds bool
 }
 
 func mapOps(ops []map[string]any) []object {
@@ -85,7 +83,7 @@ func stopsForRemoved(w *projectionWriter, projectID string, before, after planGr
 	}
 	return changes
 }
-func changePlan(ctx context.Context, tx *eventstore.Transaction, projectID, author, reason string, ops []object, revertOf any, confirmation PlanConfirmation, now int64, uniqueAdds bool) (object, error) {
+func changePlan(ctx context.Context, tx *eventstore.Transaction, projectID, author, reason string, ops []object, revertOf any, now int64, uniqueAdds bool) (object, error) {
 	w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
 	graph := loadPlanGraph(w, projectID)
 	if w.err != nil {
@@ -99,39 +97,6 @@ func changePlan(ctx context.Context, tx *eventstore.Transaction, projectID, auth
 	after, _, err := applyOps(graph, ops)
 	if err != nil {
 		return nil, err
-	}
-	if author == "coordinator" && needsConfirmation(graph, ops) {
-		if confirmation == nil {
-			return nil, badInput("confirmation")
-		}
-		proposalID, err := newID("prp")
-		if err != nil {
-			return nil, err
-		}
-		attentionID, err := newID("att")
-		if err != nil {
-			return nil, err
-		}
-		described := describePlanChange(w, projectID, ops, now)
-		if w.err != nil {
-			return nil, w.err
-		}
-		lines := make([]map[string]any, len(described))
-		for i, line := range described {
-			lines[i] = line
-		}
-		block, err := confirmation(lines)
-		if err != nil {
-			return nil, err
-		}
-		attention, err := attentionOpened(attentionID, AttentionInput{Block: block}, false)
-		if err != nil {
-			return nil, err
-		}
-		if err := appendChanges(tx, projectID, []change{attention, {"plan.proposed", object{"proposalId": proposalID, "attentionId": attentionID, "reason": reason, "ops": ops, "revertOf": revertOf}}}); err != nil {
-			return nil, err
-		}
-		return object{"status": "proposed", "proposalId": proposalID, "attentionId": attentionID}, nil
 	}
 	revisionID, err := newID("rev")
 	if err != nil {
@@ -163,7 +128,7 @@ func (repo *Repository) RevisePlan(ctx context.Context, projectID string, input 
 		if len(input.Ops) == 0 {
 			return badInput("ops")
 		}
-		result, err = changePlan(ctx, tx, projectID, input.Author, reason, mapOps(input.Ops), nil, input.Confirmation, repo.Reader.now(), input.UniqueAdds)
+		result, err = changePlan(ctx, tx, projectID, input.Author, reason, mapOps(input.Ops), nil, repo.Reader.now(), input.UniqueAdds)
 		return err
 	})
 	return
@@ -304,7 +269,7 @@ func (reader Reader) PreviewPlanUndo(ctx context.Context, projectID, revisionID 
 	})
 	return
 }
-func (repo *Repository) RevertPlanRevision(ctx context.Context, projectID, revisionID, author, reason string, confirmation PlanConfirmation) (result object, err error) {
+func (repo *Repository) RevertPlanRevision(ctx context.Context, projectID, revisionID, author, reason string) (result object, err error) {
 	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
 		w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
 		undo, err := undoOf(w, projectID, revisionID)
@@ -318,7 +283,7 @@ func (repo *Repository) RevertPlanRevision(ctx context.Context, projectID, revis
 		if clean == "" {
 			clean = undo.reason
 		}
-		result, err = changePlan(ctx, tx, projectID, author, clean, undo.undo, revisionID, confirmation, repo.Reader.now(), false)
+		result, err = changePlan(ctx, tx, projectID, author, clean, undo.undo, revisionID, repo.Reader.now(), false)
 		return err
 	})
 	return
