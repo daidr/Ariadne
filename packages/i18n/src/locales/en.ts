@@ -369,6 +369,7 @@ export const en: Record<MessageKey, string> = {
   'composer.attach': 'Add images or files',
   'link.pr.open': 'Open',
   'link.pr.draft': 'Draft',
+  'link.pr.conflicted': 'Merge conflicts',
   'link.pr.merged': 'Merged',
   'link.pr.closed': 'Closed',
   'link.pr.files': '{count} files',

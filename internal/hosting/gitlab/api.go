@@ -54,6 +54,7 @@ type rawMerge struct {
 	ChangesCount *string `json:"changes_count"`
 	MergedAt     *string `json:"merged_at"`
 	ClosedAt     *string `json:"closed_at"`
+	HasConflicts bool    `json:"has_conflicts"`
 }
 
 func (raw rawMerge) info() sdk.PullRequestInfo {
@@ -71,7 +72,8 @@ func (raw rawMerge) info() sdk.PullRequestInfo {
 	} else if raw.DiffRefs != nil && raw.DiffRefs.HeadSHA != nil {
 		sha = *raw.DiffRefs.HeadSHA
 	}
-	return sdk.PullRequestInfo{Number: raw.IID, Reference: "!" + strconv.Itoa(raw.IID), URL: raw.URL, Title: raw.Title, State: state, Draft: draft, HeadSHA: sha, Base: raw.TargetBranch}
+	conflicted := state == "open" && raw.HasConflicts
+	return sdk.PullRequestInfo{Number: raw.IID, Reference: "!" + strconv.Itoa(raw.IID), URL: raw.URL, Title: raw.Title, State: state, Draft: draft, Conflicted: conflicted, HeadSHA: sha, Base: raw.TargetBranch}
 }
 
 type rawIssue struct {
@@ -256,7 +258,7 @@ func (api *API) Preview(ctx context.Context, number int) (*sdk.PullRequestPrevie
 	} else if info.State == "closed" && raw.ClosedAt != nil {
 		at = *raw.ClosedAt
 	}
-	return &sdk.PullRequestPreview{Kind: "pull-request", Repository: api.repository, Number: raw.IID, Reference: info.Reference, URL: raw.URL, Title: raw.Title, State: info.State, Draft: info.Draft, Author: author, ChangedFiles: files, At: at}, nil
+	return &sdk.PullRequestPreview{Kind: "pull-request", Repository: api.repository, Number: raw.IID, Reference: info.Reference, URL: raw.URL, Title: raw.Title, State: info.State, Draft: info.Draft, Conflicted: info.Conflicted, Author: author, ChangedFiles: files, At: at}, nil
 }
 func (api *API) OpenMergeRequest(ctx context.Context, input sdk.OpenPullRequest) (sdk.PullRequestInfo, error) {
 	title := input.Title

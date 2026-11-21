@@ -425,6 +425,11 @@ func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, kn
 				if err != nil {
 					return nil, err
 				}
+				if pr != nil && pr.State == "open" && repo.PullRequest != nil {
+					if detail, detailErr := repo.PullRequest(ctx, pr.Number); detailErr == nil && detail.Number == pr.Number {
+						pr = &detail
+					}
+				}
 			}
 		}
 	}
@@ -441,6 +446,9 @@ func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, kn
 	value := map[string]any{"number": pr.Number, "url": pr.URL, "title": pr.Title, "state": pr.State, "headSha": pr.HeadSHA, "checks": SummarizeChecks(checks)}
 	if pr.Reference != "" {
 		value["reference"] = pr.Reference
+	}
+	if pr.State == "open" && pr.Conflicted {
+		value["conflicted"] = true
 	}
 	if err := manager.options.Repository.SyncPullRequest(ctx, threadID, value, auto); err != nil {
 		return nil, err

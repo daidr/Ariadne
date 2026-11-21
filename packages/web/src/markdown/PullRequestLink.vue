@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  AlertTriangleIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
@@ -80,6 +81,13 @@ const state = computed<State | undefined>(() =>
     ? 'draft'
     : pr.value?.state,
 )
+const conflicted = computed(
+  () =>
+    pr.value?.state === 'open' &&
+    Boolean(
+      trackedPR.value?.conflicted || (preview.value?.state === 'open' && preview.value.conflicted),
+    ),
+)
 const checks = computed(() => {
   const result = trackedPR.value?.checks.state
   return result && result !== 'none' ? result : null
@@ -96,6 +104,19 @@ const tones: Record<State, TagTone> = {
   merged: 'primary',
   closed: 'danger',
 }
+const linkIcon = computed(() =>
+  conflicted.value ? AlertTriangleIcon : icons[state.value ?? 'open'],
+)
+const linkIconTone = computed<TagTone | undefined>(() =>
+  conflicted.value ? 'warning' : state.value ? tones[state.value] : undefined,
+)
+const description = computed(() => {
+  if (!state.value) return undefined
+  if (!conflicted.value) return t(`link.pr.${state.value}`)
+  return state.value === 'draft'
+    ? `${t('link.pr.draft')} · ${t('link.pr.conflicted')}`
+    : t('link.pr.conflicted')
+})
 </script>
 
 <template>
@@ -113,16 +134,20 @@ const tones: Record<State, TagTone> = {
       rel="noopener noreferrer"
       :variant="variant === 'pill' ? 'text' : variant"
       :underline="variant === 'pill' ? 'none' : undefined"
-      :class="{ 'inline-ref': variant === 'soft', 'pr-pill': variant === 'pill' }"
-      :aria-description="state && t(`link.pr.${state}`)"
+      :class="{
+        'inline-ref': variant === 'soft',
+        'pr-pill': variant === 'pill',
+        'pr-pill-conflicted': variant === 'pill' && conflicted,
+      }"
+      :aria-description="description"
       :aria-expanded="open"
       @focus="focusLink"
       @blur="blurLink"
     >
       <template #leading>
         <component
-          :is="icons[state ?? 'open']"
-          :class="state && `pr-icon-${tones[state]}`"
+          :is="linkIcon"
+          :class="linkIconTone && `pr-icon-${linkIconTone}`"
           aria-hidden="true"
         />
       </template>
@@ -141,10 +166,20 @@ const tones: Record<State, TagTone> = {
         @focusout="leaveCard"
       >
         <div class="pr-card-head">
-          <DouTag :tone="tones[state]" size="sm" round>
-            <template #leading><component :is="icons[state]" /></template>
-            {{ t(`link.pr.${state}`) }}
+          <DouTag v-if="conflicted && state === 'open'" tone="warning" size="sm" round>
+            <template #leading><AlertTriangleIcon /></template>
+            {{ t('link.pr.conflicted') }}
           </DouTag>
+          <template v-else>
+            <DouTag :tone="tones[state]" size="sm" round>
+              <template #leading><component :is="icons[state]" /></template>
+              {{ t(`link.pr.${state}`) }}
+            </DouTag>
+            <DouTag v-if="conflicted" tone="warning" size="sm" round>
+              <template #leading><AlertTriangleIcon /></template>
+              {{ t('link.pr.conflicted') }}
+            </DouTag>
+          </template>
           <DouText variant="secondary" size="sm" class="pr-card-ref">
             {{ preview?.repository }} {{ pullRequestLabel(pr) }}
           </DouText>
@@ -208,8 +243,19 @@ const tones: Record<State, TagTone> = {
   border-color: var(--dou-color-border-strong);
   background-color: color-mix(in oklab, var(--dou-color-text) 4%, var(--dou-color-bg-surface));
 }
+.pr-pill-conflicted {
+  border-color: color-mix(in oklab, var(--dou-color-warning) 45%, var(--dou-color-border));
+  background-color: var(--dou-color-warning-soft);
+}
+.pr-pill-conflicted:hover {
+  border-color: color-mix(in oklab, var(--dou-color-warning) 65%, var(--dou-color-border));
+  background-color: color-mix(in oklab, var(--dou-color-warning) 16%, var(--dou-color-bg-surface));
+}
 .pr-icon-success {
   color: var(--dou-color-success-text);
+}
+.pr-icon-warning {
+  color: var(--dou-color-warning-text);
 }
 .pr-icon-primary {
   color: var(--dou-color-primary-text);

@@ -358,6 +358,7 @@ export const zhCN = {
   'composer.attach': '添加图片或文件',
   'link.pr.open': '待合并',
   'link.pr.draft': '草稿',
+  'link.pr.conflicted': '合并冲突',
   'link.pr.merged': '已合并',
   'link.pr.closed': '已关闭',
   'link.pr.files': '{count} 个文件',

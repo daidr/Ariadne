@@ -300,6 +300,7 @@ func (service *Service) mergePullRequest(ctx context.Context, thread core.Thread
 	case "merged":
 		delete(service.noChecks, key)
 		pr["state"] = "merged"
+		delete(pr, "conflicted")
 		err = service.Repository.SyncPullRequest(ctx, thread.ID, pr, map[string]any{"method": method, "base": base, "sha": outcome.SHA})
 	case "conflict":
 		_, err = service.Repository.RecordMergeConflict(ctx, thread.ID, map[string]any{"branch": branch, "base": base, "files": []string{}, "pullRequest": number})

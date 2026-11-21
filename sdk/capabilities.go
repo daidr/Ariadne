@@ -115,14 +115,15 @@ type Capabilities struct {
 	Close     func() error
 }
 type PullRequestInfo struct {
-	Number    int    `json:"number"`
-	Reference string `json:"reference,omitempty"`
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	State     string `json:"state"`
-	Draft     bool   `json:"draft"`
-	HeadSHA   string `json:"headSha"`
-	Base      string `json:"base"`
+	Number     int    `json:"number"`
+	Reference  string `json:"reference,omitempty"`
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	State      string `json:"state"`
+	Draft      bool   `json:"draft"`
+	Conflicted bool   `json:"conflicted,omitempty"`
+	HeadSHA    string `json:"headSha"`
+	Base       string `json:"base"`
 }
 type PullRequestMergeOutcome struct {
 	Kind   string  `json:"kind"`
