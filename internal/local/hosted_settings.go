@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/fsutil"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -48,7 +49,10 @@ func BrowseHostedDirectory(ctx context.Context, _ map[string]any, path string) (
 func HostedDataDir(defaultDir string, raw any) (string, error) {
 	picked, ok := raw.(string)
 	if raw == nil || ok && strings.TrimSpace(picked) == "" {
-		return defaultDir, nil
+		if defaultDir == "" {
+			return "", nil
+		}
+		return fsutil.CanonicalPath(defaultDir)
 	}
 	if !ok || !filepath.IsAbs(picked) || strings.ContainsRune(picked, 0) {
 		return "", domainerr.New("error.hostedDirectoryAbsolute", nil)
@@ -59,7 +63,11 @@ func HostedDataDir(defaultDir string, raw any) (string, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	return filepath.Join(picked, "ariadne", filepath.Base(defaultDir)), nil
+	resolved, err := fsutil.CanonicalPath(picked)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, "ariadne", filepath.Base(defaultDir)), nil
 }
 
 func CheckHostedDirectoryChange(defaultDir, path string, namespace []string, current, previous any) error {
@@ -68,14 +76,21 @@ func CheckHostedDirectoryChange(defaultDir, path string, namespace []string, cur
 		return err
 	}
 	old, err := HostedDataDir(defaultDir, previous)
-	if err != nil || old == next {
+	if err != nil || cleanPathKey(old) == cleanPathKey(next) {
 		return err
 	}
-	bare, worktrees, err := hostedPaths(old, path, namespace)
+	oldBare, oldTrees, err := hostedPaths(old, path, namespace)
 	if err != nil {
 		return err
 	}
-	for _, folder := range []string{bare, worktrees} {
+	nextBare, nextTrees, err := hostedPaths(next, path, namespace)
+	if err != nil {
+		return err
+	}
+	if cleanPathKey(oldBare) == cleanPathKey(nextBare) && cleanPathKey(oldTrees) == cleanPathKey(nextTrees) {
+		return nil
+	}
+	for _, folder := range []string{oldBare, oldTrees} {
 		if _, err := os.Lstat(folder); !errors.Is(err, os.ErrNotExist) {
 			return domainerr.New("error.hostedDirectoryInUse", nil)
 		}
