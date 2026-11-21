@@ -435,7 +435,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			}
 			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
-		hash, err := turn.execute(ctx, tools, answer.ToolCalls)
+		batch, err := turn.execute(ctx, tools, answer.ToolCalls)
 		if err != nil {
 			return err
 		}
@@ -444,12 +444,18 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		}) {
 			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
-		recent = append(recent, hash)
-		recent = recent[max(0, len(recent)-repeats*maxCycle):]
-		for width := 1; width <= min(maxCycle, len(recent)/repeats); width++ {
-			cycle := recent[len(recent)-width*repeats:]
-			if slices.Equal(cycle[width:], cycle[:len(cycle)-width]) {
-				return domainerr.New("error.repeating", map[string]any{"count": repeats})
+		switch batch.effect {
+		case repeatProgress:
+			recent = nil
+		case repeatWait:
+		default:
+			recent = append(recent, batch.hash)
+			recent = recent[max(0, len(recent)-repeats*maxCycle):]
+			for width := 1; width <= min(maxCycle, len(recent)/repeats); width++ {
+				cycle := recent[len(recent)-width*repeats:]
+				if slices.Equal(cycle[width:], cycle[:len(cycle)-width]) {
+					return domainerr.New("error.repeating", map[string]any{"count": repeats})
+				}
 			}
 		}
 	}
@@ -486,21 +492,29 @@ func compactThreshold(model *settings.ResolvedModel, limits map[string]any) int 
 	return max(1, transcript.CompactAt(tokens, asNumber(limits["compactShare"])))
 }
 
-func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCall) ([32]byte, error) {
+type batchDigest struct {
+	hash   [32]byte
+	effect repeatEffect
+}
+
+func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCall) (batchDigest, error) {
 	byName := map[string]tool{}
 	for _, entry := range tools {
 		byName[entry.spec.Name] = entry
 	}
 	hash := sha256.New()
+	progressed := false
+	allWaited := len(calls) > 0
 	defer turn.clearPreviews()
 	for index, call := range calls {
 		if err := ctx.Err(); err != nil {
-			return [32]byte{}, err
+			return batchDigest{}, err
 		}
 		started := time.Now().UnixMilli()
 		var args map[string]any
 		var content string
 		var attachments []any
+		var effect repeatEffect
 		var err error
 		if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
 			err = errors.New("tool arguments must be a JSON object within 2 MiB")
@@ -517,9 +531,17 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 				content, err = entry.withCallID(ctx, call.ID, args)
 			} else if entry.call != nil {
 				content, attachments, err = entry.call(ctx, args)
+			} else if entry.poll != nil {
+				content, effect, err = entry.poll(ctx, args)
 			} else {
 				content, err = entry.run(ctx, args)
 			}
+		}
+		if effect == repeatProgress {
+			progressed = true
+		}
+		if effect != repeatWait {
+			allWaited = false
 		}
 		if err != nil && turn.draft != nil && *turn.draftCall == index {
 			turn.clearDraft()
@@ -529,7 +551,7 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			delete(turn.artifactDrafts, index)
 		}
 		if ctx.Err() != nil {
-			return [32]byte{}, ctx.Err()
+			return batchDigest{}, ctx.Err()
 		}
 		if err != nil && content == "" {
 			hint := ""
@@ -545,12 +567,17 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 			ToolCallID: call.ID, Name: call.Name, Content: content, IsError: err != nil, Files: attachments,
 			Timing: map[string]int64{"startedAt": started, "finishedAt": time.Now().UnixMilli()},
 		}); err != nil {
-			return [32]byte{}, err
+			return batchDigest{}, err
 		}
 	}
-	var digest [32]byte
-	copy(digest[:], hash.Sum(nil))
-	return digest, nil
+	var result batchDigest
+	copy(result.hash[:], hash.Sum(nil))
+	if progressed {
+		result.effect = repeatProgress
+	} else if allWaited {
+		result.effect = repeatWait
+	}
+	return result, nil
 }
 
 func namesOfTools(tools []tool) []sdk.Tool {

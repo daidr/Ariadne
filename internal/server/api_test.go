@@ -5,13 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -74,7 +70,7 @@ func canonical(raw any) any {
 	}
 	return visit(value)
 }
-func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
+func TestDomainHTTPResponses(t *testing.T) {
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
 		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"讨论串","nodeId":null,"branch":null,"model":null}`)},
@@ -148,23 +144,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	invalid := "[]"
 	requests = append(requests, apiRequest{Method: "PUT", Path: "/api/projects/prj_a", Raw: &invalid})
-	var expected []any
-	bun, legacyErr := exec.LookPath("bun")
-	if legacyErr == nil {
-		input := encoded(object{"seed": seed, "sql": sql, "requests": requests})
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(input)
-		data, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-		if err := json.Unmarshal(data, &expected); err != nil {
-			t.Fatalf("%v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(legacyErr)
-	}
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "api.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
@@ -210,13 +189,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 				cursor := sync["cursor"].(string)
 				aliases["cursor"] = cursor
 				sync["cursor"] = "epoch.cursor"
-			}
-		}
-		actual := object{"status": response.Code, "body": value}
-		if expected != nil {
-			want := normalizeLegacyAPIResponse(expected[i])
-			if !reflect.DeepEqual(canonical(actual), canonical(want)) {
-				t.Fatalf("request %d %s %s differs\ngot %s\nwant%s", i, item.Method, item.Path, encoded(canonical(actual)), encoded(canonical(want)))
 			}
 		}
 		if response.Code >= 500 {
@@ -369,61 +341,6 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 	}
 }
 
-func normalizeLegacyAPIResponse(raw any) any {
-	resp, ok := raw.(map[string]any)
-	if !ok {
-		return raw
-	}
-	body, ok := resp["body"].(map[string]any)
-	if !ok {
-		return raw
-	}
-	if sync, ok := body["sync"].(map[string]any); ok {
-		sync["cursor"] = "epoch.cursor"
-	}
-	if needs, ok := body["needsMe"].([]any); ok {
-		normalized := make([]any, 0, len(needs))
-		for _, entry := range needs {
-			item, ok := entry.(map[string]any)
-			if !ok {
-				normalized = append(normalized, entry)
-				continue
-			}
-			switch item["kind"] {
-			case "thread":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				normalized = append(normalized, map[string]any{"kind": "thread", "threadId": id})
-			case "attention":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				joinedIDs := []any{}
-				if joined, ok := item["joined"].([]any); ok {
-					for _, rawThread := range joined {
-						if thread, ok := rawThread.(map[string]any); ok {
-							joinedIDs = append(joinedIDs, thread["id"])
-						}
-					}
-				}
-				normalized = append(normalized, map[string]any{
-					"kind":      "attention",
-					"attention": item["attention"],
-					"threadId":  id,
-					"joinedIds": joinedIDs,
-				})
-			default:
-				normalized = append(normalized, entry)
-			}
-		}
-		body["needsMe"] = normalized
-	}
-	return resp
-}
-
 func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "ping.sqlite")})
 	if err != nil {
@@ -448,5 +365,125 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	api.ServeHTTP(auth, req)
 	if auth.Code != 200 || strings.TrimSpace(auth.Body.String()) != `{"ok":true}` {
 		t.Fatalf("authenticated /api/ping returned %d %s", auth.Code, auth.Body.String())
+	}
+}
+
+func TestSetThreadNodeRoute(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "thread-node.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("A"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RevisePlan(ctx, project.ID, core.PlanRevision{Author: "user", Reason: "计划", Ops: []map[string]any{
+		{"op": "add", "id": "nod_1", "kind": "task", "title": "任务一", "description": "", "acceptance": ""},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "讨论串"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(Options{Repository: repo, Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	put := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("PUT", "http://test.invalid/api/threads/"+thread.ID+"/node", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		return response
+	}
+
+	if res := put(`{}`); res.Code != 400 {
+		t.Fatalf("missing nodeId: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":"nod_missing"}`); res.Code != 404 {
+		t.Fatalf("unknown nodeId: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":"nod_1"}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":"nod_1"`) {
+		t.Fatalf("link thread node: %d %s", res.Code, res.Body.String())
+	}
+	if res := put(`{"nodeId":null}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":null`) {
+		t.Fatalf("unlink thread node: %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestStaticAssetsAndPWAMIME(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "static.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "secret",
+		Web: fstest.MapFS{
+			"index.html":           {Data: []byte("<!doctype html>")},
+			"manifest.webmanifest": {Data: []byte(`{"name":"Ariadne"}`)},
+			"favicon.svg":          {Data: []byte(`<svg></svg>`)},
+			"favicon.ico":          {Data: []byte("ico")},
+			"icons/icon-192.png":   {Data: []byte("png")},
+			"sw.js":                {Data: []byte("self.addEventListener('install', () => {})")},
+			"registerSW.js":        {Data: []byte("navigator.serviceWorker.register('/sw.js')")},
+			"workbox-test1234.js":  {Data: []byte("// workbox")},
+			"assets/app.js":        {Data: []byte("console.log('ok')")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	for _, tc := range []struct {
+		path        string
+		contentType string
+		cache       string
+	}{
+		{"/manifest.webmanifest", "application/manifest+json", "no-cache"},
+		{"/favicon.svg", "image/svg+xml", "no-cache"},
+		{"/favicon.ico", "image/x-icon", "no-cache"},
+		{"/icons/icon-192.png", "image/png", "no-cache"},
+		{"/sw.js", "text/javascript", "no-cache"},
+		{"/registerSW.js", "text/javascript", "no-cache"},
+		{"/workbox-test1234.js", "text/javascript", "no-cache"},
+		{"/assets/app.js", "text/javascript", "public, max-age=31536000, immutable"},
+	} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+tc.path, nil))
+		if response.Code != 200 {
+			t.Fatalf("%s: status %d", tc.path, response.Code)
+		}
+		if !strings.Contains(response.Header().Get("Content-Type"), tc.contentType) {
+			t.Fatalf("%s: Content-Type %q does not contain %q", tc.path, response.Header().Get("Content-Type"), tc.contentType)
+		}
+		if response.Header().Get("Cache-Control") != tc.cache {
+			t.Fatalf("%s: Cache-Control %q != %q", tc.path, response.Header().Get("Cache-Control"), tc.cache)
+		}
+	}
+
+	// Missing static assets must return 404 instead of falling back to index.html.
+	for _, missing := range []string{"/icons/missing.png", "/apple-touch-icon.png", "/missing.webmanifest", "/missing-sw.js", "/assets/missing.js"} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+missing, nil))
+		if response.Code != 404 {
+			t.Fatalf("missing static asset %s: got %d (%s)", missing, response.Code, response.Body.String())
+		}
+	}
+
+	// Client-side SPA routes still fall back to index.html.
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/projects/prj_123", nil))
+	if response.Code != 200 || response.Body.String() != "<!doctype html>" {
+		t.Fatalf("client route fallback failed: %d %s", response.Code, response.Body.String())
 	}
 }

@@ -27,17 +27,18 @@ func (turn *turn) sections(ctx context.Context, project core.ProjectView, config
 	role := "You are an Ariadne discussion thread. Work on this thread's task. Report results or blockers to the coordinator."
 	workflow := threadGuide
 	if turn.conversation.Role == "coordinator" {
-		role = "You are the Ariadne project coordinator. Talk with the user, decide what work is needed, and delegate implementation to discussion threads. The project source is read-only for you."
+		role = "You are the Ariadne project coordinator. Talk with the user, decide what work is needed, and delegate implementation to discussion threads. Project file sources are read-only for you."
 		workflow = coordinatorGuide
 	} else if thread, err := turn.Repository.GetThread(ctx, turn.conversation.ID); err == nil {
-		role += "\nThread: " + transcript.Defang(thread.Title)
 		if authorID, ok := thread.ReviewOf.(string); ok && authorID != "" {
 			workflow = reviewerGuide
-			role += "\nYou are reviewing another thread's work. Keep its workspace read-only."
+			role = "You are an Ariadne code reviewer. Review another thread's work read-only and submit your verdict with submit_review.\nThread: " + transcript.Defang(thread.Title)
 			if author, err := turn.Repository.GetThread(ctx, authorID); err == nil {
 				thread = author
 				role += "\nAuthor: " + transcript.Defang(author.Title)
 			}
+		} else {
+			role += "\nThread: " + transcript.Defang(thread.Title)
 		}
 		if nodeID, ok := thread.NodeID.(string); ok && nodeID != "" {
 			if brief, err := turn.Repository.PlanBrief(ctx, project.ID, nodeID); err == nil && brief != "" {
@@ -50,7 +51,7 @@ func (turn *turn) sections(ctx context.Context, project core.ProjectView, config
 		locale = "zh-CN"
 	}
 	if project.Source == nil && turn.conversation.Role == "thread" {
-		role += "\nThe project has no primary workspace. Read-only references may still be available."
+		role += "\nThe project has no primary workspace. Other file sources may still be available."
 	}
 	if workflow == threadGuide {
 		if source, ok := project.Source.(args); ok && (source["kind"] == "github" || source["kind"] == "gitlab") {

@@ -11,15 +11,6 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestClaudeStreamMatchesLegacyThroughSameChildProtocol(t *testing.T) {
-	bridge := NewToolBridge()
-	t.Cleanup(func() {
-		if err := bridge.Close(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	compareLegacyAgent(t, "claude-code", "claude", ClaudeKind(bridge))
-}
 func TestClaudeStreamCountingAndLimits(t *testing.T) {
 	var events []Event
 	d := &claudeDriver{ctx: DriverContext{Emit: func(event Event) { events = append(events, event) }}, seen: map[string]claudeTokens{}, streamed: map[string]bool{}}

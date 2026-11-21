@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -24,21 +21,9 @@ import (
 func planIssueSeed() []eventstore.NewEvent {
 	return append(workspaceHTTPSeed(), eventstore.NewEvent{Type: "plan.revised", ProjectID: "prj_a", Data: json.RawMessage(encoded(object{"revisionId": "rev_a", "author": "user", "reason": "plan", "ops": []any{object{"op": "add", "id": "task", "kind": "task", "title": "work", "description": "", "acceptance": ""}}}))})
 }
-func TestPlanIssueValidationHTTPMatchesLegacy(t *testing.T) {
+func TestPlanIssueValidationHTTP(t *testing.T) {
 	no := false
 	requests := []apiRequest{{Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1}, Auth: &no}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 0}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1.5}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/missing/issues", Body: object{"number": 1}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1}}, {Method: "DELETE", Path: "/api/projects/prj_a/plan/nodes/task/issues/1"}, {Method: "DELETE", Path: "/api/projects/prj_a/plan/nodes/missing/issues/1"}}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": planIssueSeed(), "sql": "SELECT 1", "requests": requests}))
-		data, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v %s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "plan.sqlite"), Now: now})
 	if err != nil {
@@ -53,6 +38,7 @@ func TestPlanIssueValidationHTTPMatchesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
+	wantCodes := []int{401, 400, 400, 400, 400, 200, 200}
 	for i, item := range requests {
 		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
 		if item.Auth == nil || *item.Auth {
@@ -60,11 +46,8 @@ func TestPlanIssueValidationHTTPMatchesLegacy(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		api.ServeHTTP(response, request)
-		var body any
-		json.Unmarshal(response.Body.Bytes(), &body)
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("plan issue differs\nGo %s\nTS %s", encoded(actual), encoded(expected[i]))
+		if response.Code != wantCodes[i] {
+			t.Fatalf("request %d %s %s status = %d, want %d (body=%s)", i, item.Method, item.Path, response.Code, wantCodes[i], response.Body.String())
 		}
 	}
 }

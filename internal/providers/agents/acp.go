@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +27,66 @@ type StdioLauncher func(string) (string, []string, error)
 const antigravityACPName = "Antigravity ACP Server"
 const AntigravityCommand = "agy acp --process-per-session --disable-telemetry"
 const antigravityToolProfileName = "ariadne-provider"
+const maxAntigravityWarningBytes = 4096
+
+var antigravityRetrying = regexp.MustCompile(`(?i)\bretrying\b`)
+var antigravityRateLimit = regexp.MustCompile(`(?i)^(?:rate limit(?:s)?\s+(?:exceeded|reached|hit)\b|too many requests\b)`)
+
+func antigravityWarningBody(text string) (string, bool) {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	rest, ok := strings.CutPrefix(trimmed, "⚠ ")
+	if !ok {
+		return "", false
+	}
+	return textutil.Trim(rest), true
+}
+
+func antigravityExecutorPrefix(body string) bool {
+	return strings.HasPrefix(body, "failed to construct executor: ") || strings.HasPrefix(body, "agent executor error: ")
+}
+
+func couldBeAntigravityWarning(text string) bool {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	if trimmed == "" || trimmed == "⚠" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(trimmed, "⚠ ")
+	if !ok {
+		return false
+	}
+	body := textutil.Trim(rest)
+	if antigravityExecutorPrefix(body) {
+		return true
+	}
+	return !strings.Contains(body, "\n")
+}
+
+func antigravityRetryingNotice(text string) bool {
+	body, ok := antigravityWarningBody(text)
+	return ok && !strings.Contains(body, "\n") && antigravityRetrying.MatchString(body)
+}
+
+// agy sends fatal executor and subscription quota failures as warning chat chunks
+// followed by end_turn rather than JSON-RPC errors.
+func antigravityFailure(text string) (string, bool) {
+	body, ok := antigravityWarningBody(text)
+	if !ok || body == "" {
+		return "", false
+	}
+	if detail, ok := strings.CutPrefix(body, "failed to construct executor: "); ok && textutil.Trim(detail) != "" {
+		return "failed to construct executor: " + textutil.Trim(detail), true
+	}
+	if detail, ok := strings.CutPrefix(body, "agent executor error: "); ok && textutil.Trim(detail) != "" {
+		return textutil.Trim(detail), true
+	}
+	if strings.Contains(body, "\n") || antigravityRetrying.MatchString(body) {
+		return "", false
+	}
+	if rpc.QuotaText(body) || antigravityRateLimit.MatchString(body) {
+		return body, true
+	}
+	return "", false
+}
 
 const antigravityToolProfile = `---
 name: ` + antigravityToolProfileName + `
@@ -228,7 +289,8 @@ type acpDriver struct {
 	manageAntigravityTools          bool
 	agentProfile                    string
 	thought                         strings.Builder
-	turnFailure                     string
+	warning                         strings.Builder
+	stepHasText                     bool
 	contextUsed                     *int64
 	thoughtOption                   acpConfigOption
 	defaultLevel                    string
@@ -293,6 +355,15 @@ func (d *acpDriver) flushThoughtLocked() {
 		d.emitLocked(Event{Type: "reasoning", Text: text})
 	}
 	d.thought.Reset()
+}
+func (d *acpDriver) flushWarningLocked() {
+	if d.warning.Len() == 0 {
+		return
+	}
+	text := d.warning.String()
+	d.warning.Reset()
+	d.stepHasText = true
+	d.emitLocked(Event{Type: "text", Text: text})
 }
 func (d *acpDriver) request(ctx context.Context, method string, raw json.RawMessage) (any, error) {
 	if method != "session/request_permission" {
@@ -359,6 +430,10 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 		return
 	}
 	if update.Type == "agent_thought_chunk" {
+		if d.antigravity {
+			d.flushWarningLocked()
+			d.stepHasText = false
+		}
 		if update.Content.Type == "text" && update.Content.Text != "" {
 			if len(update.Content.Text) > 64<<20-d.thought.Len() {
 				d.emitLocked(Event{Type: "failed", Detail: "ACP reasoning exceeded its size limit"})
@@ -372,21 +447,37 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	d.flushThoughtLocked()
 	if update.Type == "agent_message_chunk" && update.Content.Type == "text" {
 		text := update.Content.Text
-		if d.antigravity {
-			// agy sends fatal executor failures as single chat chunks followed by end_turn.
-			if detail, ok := strings.CutPrefix(text, "\n⚠ failed to construct executor: "); ok && textutil.Trim(detail) != "" {
-				d.turnFailure = "failed to construct executor: " + textutil.Trim(detail)
+		if d.antigravity && text != "" {
+			if d.warning.Len() > 0 {
+				if antigravityRetryingNotice(d.warning.String()) && strings.HasPrefix(strings.TrimLeft(text, " \t\r\n"), "⚠") && len(text) <= maxAntigravityWarningBytes && couldBeAntigravityWarning(text) {
+					d.emitLocked(Event{Type: "text", Text: d.warning.String()})
+					d.warning.Reset()
+					d.warning.WriteString(text)
+					return
+				}
+				if len(text) <= maxAntigravityWarningBytes-d.warning.Len() {
+					d.warning.WriteString(text)
+					if couldBeAntigravityWarning(d.warning.String()) {
+						return
+					}
+					d.flushWarningLocked()
+					return
+				}
+				d.flushWarningLocked()
+			} else if !d.stepHasText && len(text) <= maxAntigravityWarningBytes && couldBeAntigravityWarning(text) {
+				d.warning.WriteString(text)
 				return
 			}
-			if detail, ok := strings.CutPrefix(text, "\n⚠ agent executor error: "); ok && textutil.Trim(detail) != "" {
-				d.turnFailure = textutil.Trim(detail)
-				return
-			}
+			d.stepHasText = true
 		}
 		if text != "" {
 			d.emitLocked(Event{Type: "text", Text: text})
 		}
 		return
+	}
+	if d.antigravity && (update.Type == "tool_call" || update.Type == "tool_call_update") {
+		d.flushWarningLocked()
+		d.stepHasText = false
 	}
 	d.emitLocked(Event{Type: "alive"})
 }
@@ -500,7 +591,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	}
 	d.mu.Lock()
 	d.first = !resuming
-	d.antigravity = init.AgentInfo.Name == antigravityACPName
+	d.antigravity = d.manageAntigravityTools || init.AgentInfo.Name == antigravityACPName
 	d.thoughtOption = session.option("thought_level")
 	d.defaultLevel = trimmedJSON(d.thoughtOption.Current)
 	if resuming && saved.DefaultLevel != "" {
@@ -540,6 +631,8 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 	}
 	d.first = false
 	d.active = true
+	d.warning.Reset()
+	d.stepHasText = false
 	sessionID := d.sessionID
 	prompt := []any{map[string]any{"type": "text", "text": text}}
 	if d.images {
@@ -564,23 +657,34 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		if d.closing {
 			return
 		}
-		detail := d.turnFailure
-		d.turnFailure = ""
+		pending := d.warning.String()
+		d.warning.Reset()
+		d.stepHasText = false
+		var detail string
 		if err != nil {
 			detail = err.Error()
+		} else if d.antigravity && pending != "" {
+			if parsed, ok := antigravityFailure(pending); ok {
+				detail = parsed
+			}
 		}
 		if detail != "" {
-			busy := rpc.BusyText(detail)
+			quota := rpc.QuotaText(detail)
+			busy := quota || rpc.BusyText(detail)
+			retryable := !quota && rpc.BusyText(detail)
 			operation := "session/prompt"
 			if err == nil {
 				operation = "session/update"
 			}
 			diagnostic := d.diagnosticLocked(operation, err)
 			diagnostic.StopReason = result.Stop
-			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy, AgentError: diagnostic})
+			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy, AgentError: diagnostic})
 			return
 		}
 		d.flushThoughtLocked()
+		if pending != "" {
+			d.emitLocked(Event{Type: "text", Text: pending})
+		}
 		if u := result.Usage; u != nil {
 			input := u.Input
 			// agy reports uncached input separately. Its total includes cached
@@ -642,7 +746,8 @@ func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 	d.requests.Wait()
 	d.mu.Lock()
 	d.thought.Reset()
-	d.turnFailure = ""
+	d.warning.Reset()
+	d.stepHasText = false
 	d.mu.Unlock()
 	return err
 }

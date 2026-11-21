@@ -13,6 +13,7 @@ import {
 import {
   computed,
   defineAsyncComponent,
+  onScopeDispose,
   provide,
   ref,
   useTemplateRef,
@@ -33,7 +34,7 @@ import FilePreview from './files/FilePreview.vue'
 import { douLocale, t } from './i18n'
 import { onLiveEvent, state } from './store'
 import { notifyAbout } from './notify'
-import { COLOR_MODE_KEY } from './color-mode'
+import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSidebarLayout } from './sidebar-layout'
@@ -41,6 +42,7 @@ import { useWorkspaceRouting } from './workspace-routing'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
 useColorMode({ storageKey: COLOR_MODE_KEY })
+onScopeDispose(watchThemeColor())
 onLiveEvent(notifyAbout)
 useWorkspaceRouting()
 useShortcuts()

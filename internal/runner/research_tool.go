@@ -22,7 +22,7 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 	var specs []sdk.Tool
 	for _, entry := range available {
 		switch entry.spec.Name {
-		case "search", "find_files", "list_dir", "read_file", "read_skill", "web_search", "fetch_url",
+		case "search", "find_files", "list_dir", "read_file", "read_attachment", "read_skill", "web_search", "fetch_url",
 			"list_threads", "read_thread", "search_messages", "read_plan", "list_artifacts", "read_artifact", "list_dashboard_sources",
 			"list_issues", "read_issue", "read_check_log", "repo_status":
 			readable[entry.spec.Name] = entry

@@ -234,7 +234,7 @@ func (turn *turn) callMCP(ctx context.Context, config mcp.ServerConfig, name, ma
 		case "text":
 			output.WriteString(textutil.HeadUnits(mcp.Redact(part.Text, secrets), 50000))
 		case "image":
-			if len(attachments) < 2 && len(part.Data) <= base64.StdEncoding.EncodedLen(files.MaxFileBytes) && files.IsImage(part.MIMEType) {
+			if len(attachments) < 2 && len(part.Data) <= base64.StdEncoding.EncodedLen(files.MaxImageBytes) && files.IsImage(part.MIMEType) {
 				if decoded, err := base64.StdEncoding.DecodeString(part.Data); err == nil {
 					if stored, err := store.Save(ctx, project.ID, part.MIMEType, decoded, false); err == nil {
 						attachments = append(attachments, args{"fileId": stored.ID, "name": "image", "mime": stored.MIME, "size": stored.Size})

@@ -9,12 +9,14 @@ export const IMAGE_TYPES = [
 
 export type ImageType = (typeof IMAGE_TYPES)[number]
 
-/** A file is an image, or text attached to a message (code, a log, notes), kept as UTF-8. */
-export type FileType = ImageType | 'text/plain'
+/** A stored attachment's MIME type (images, text, archives, documents, media, or binary). */
+export type FileType = string
 
-export const MAX_FILE_BYTES = 10 * 1024 * 1024
+export const MAX_FILE_BYTES = 50 * 1024 * 1024
 
-/** Text attachments are read whole by the model, so they stay small. */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+/** Inline text preview budget for attachments. */
 export const MAX_TEXT_FILE_BYTES = 1024 * 1024
 
 export interface StoredFile {

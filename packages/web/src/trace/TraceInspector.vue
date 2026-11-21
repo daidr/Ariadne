@@ -29,7 +29,8 @@ const emit = defineEmits<{ close: [] }>()
 const tab = ref('overview')
 
 function openFile(file: ChatAttachment) {
-  if (file.url) window.open(file.url, '_blank', 'noopener')
+  const url = file.url || (file.uid ? `/api/files/${file.uid}` : '')
+  if (url) window.open(url, '_blank', 'noopener')
 }
 const detail = ref<TraceRequestDetail | null>(null)
 const problem = ref<string | null>(null)

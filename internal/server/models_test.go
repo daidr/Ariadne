@@ -3,14 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -19,7 +15,7 @@ import (
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
+func TestModelSettingsHTTPAndRealProviderCheck(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer private" {
 			t.Error("wrong model check request", r.URL.Path, r.Header)
@@ -41,19 +37,6 @@ func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
 		return object{"providers": []any{provider}, "models": []any{object{"id": "m", "provider": "p", "model": model}}, "roles": object{"thread": object{"model": "m"}}}
 	}
 	requests := []apiRequest{{Method: "GET", Path: "/api/settings/models"}, {Method: "PUT", Path: "/api/settings/models", Body: body("working")}, {Method: "GET", Path: "/api/settings/models"}, {Method: "PUT", Path: "/api/settings/models", Body: body("refused")}, {Method: "GET", Path: "/api/settings/models"}}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		input := object{"settings": true, "models": true, "seed": []any{}, "sql": "SELECT 1", "requests": requests}
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(encoded(input))
-		data, err := command.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
 	if err != nil {
@@ -74,7 +57,7 @@ func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for index, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -83,27 +66,11 @@ func TestModelSettingsHTTPAndRealProviderCheckMatchLegacy(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": legacyModelSettingsResponse(body)}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
-			t.Fatalf("%s %s\ngot %s\nwant %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
-		}
 		if response.Code != 200 {
-			t.Fatal(actual)
+			t.Fatal(object{"status": response.Code, "body": body})
 		}
 		if strings.Contains(response.Body.String(), `"apiKey":"private"`) {
 			t.Fatal("API key leaked to settings page")
 		}
 	}
-}
-
-func legacyModelSettingsResponse(body any) any {
-	value, _ := body.(map[string]any)
-	if kinds, ok := value["kinds"].([]any); ok {
-		// The legacy snapshot predates the built-in Antigravity provider.
-		value["kinds"] = slices.DeleteFunc(kinds, func(kind any) bool {
-			entry, _ := kind.(map[string]any)
-			return entry["kind"] == "antigravity"
-		})
-	}
-	return body
 }

@@ -4,6 +4,7 @@ import {
   groupOf,
   groupOfThread,
   sortThreads,
+  statusLine,
   threadActionIds,
   threadGroups,
   threadLine,
@@ -57,14 +58,59 @@ describe('thread list', () => {
     expect(groupOfThread(blocked, new Set([blocked.id]))).toBe('waiting')
   })
 
-  test('sorts by activity, title or creation without touching the list', () => {
-    const list = [
-      thread({ id: 'a', title: '评审 #10', createdAt: 3, activeAt: 1 }),
-      thread({ id: 'b', title: '评审 #9', createdAt: 1, activeAt: 3 }),
-      thread({ id: 'c', title: '修复', createdAt: 2, activeAt: 2 }),
+  test('keeps active groups in stable creation order even as concurrent activity updates activeAt', () => {
+    const initial = [
+      thread({ id: 'thr_1', title: '任务 1', stage: 'working', createdAt: 100, activeAt: 100 }),
+      thread({ id: 'thr_2', title: '任务 2', stage: 'working', createdAt: 200, activeAt: 150 }),
+      thread({ id: 'thr_3', title: '任务 3', stage: 'queued', createdAt: 300, activeAt: 120 }),
     ]
-    expect(ids(sortThreads(list))).toEqual(['b', 'c', 'a'])
+    expect(ids(sortThreads(initial, 'working'))).toEqual(['thr_3', 'thr_2', 'thr_1'])
+    expect(ids(initial)).toEqual(['thr_1', 'thr_2', 'thr_3'])
+
+    // Subsequent turns / tool calls bump activeAt in arbitrary order; visual order stays fixed.
+    const updated = [
+      thread({ id: 'thr_1', title: '任务 1', stage: 'working', createdAt: 100, activeAt: 999 }),
+      thread({ id: 'thr_2', title: '任务 2', stage: 'working', createdAt: 200, activeAt: 500 }),
+      thread({ id: 'thr_3', title: '任务 3', stage: 'working', createdAt: 300, activeAt: 350 }),
+    ]
+    expect(ids(sortThreads(updated, 'working'))).toEqual(['thr_3', 'thr_2', 'thr_1'])
+    expect(ids(sortThreads(updated, 'review'))).toEqual(['thr_3', 'thr_2', 'thr_1'])
+    expect(ids(sortThreads(updated, 'waiting'))).toEqual(['thr_3', 'thr_2', 'thr_1'])
+  })
+
+  test('breaks equal createdAt ties deterministically by id', () => {
+    const list = [
+      thread({ id: 'thr_a', createdAt: 100, activeAt: 300 }),
+      thread({ id: 'thr_c', createdAt: 100, activeAt: 100 }),
+      thread({ id: 'thr_b', createdAt: 100, activeAt: 200 }),
+    ]
+    expect(ids(sortThreads(list, 'working'))).toEqual(['thr_c', 'thr_b', 'thr_a'])
+  })
+
+  test('sorts done and archived groups by latest activity first', () => {
+    const list = [
+      thread({ id: 'a', stage: 'done', createdAt: 3, activeAt: 1 }),
+      thread({ id: 'b', stage: 'done', createdAt: 1, activeAt: 3 }),
+      thread({ id: 'c', stage: 'done', createdAt: 2, activeAt: 2 }),
+    ]
+    expect(ids(sortThreads(list, 'done'))).toEqual(['b', 'c', 'a'])
+    expect(ids(sortThreads(list, 'archived'))).toEqual(['b', 'c', 'a'])
     expect(ids(list)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('keeps a stable status line across queued and working transitions', () => {
+    const queued = statusLine(thread({ stage: 'queued', doing: null }), null)
+    const workingBlank = statusLine(thread({ stage: 'working', doing: null }), null)
+    const workingDoing = statusLine(thread({ stage: 'working', doing: '检查测试' }), null)
+    const answerFallback = statusLine(thread({ stage: 'answer' }), null)
+
+    expect(queued).toEqual({ text: expect.any(String), live: false })
+    expect(queued?.text.length).toBeGreaterThan(0)
+    expect(workingBlank).toEqual({ text: expect.any(String), live: true })
+    expect(workingBlank?.text.length).toBeGreaterThan(0)
+    expect(workingDoing).toEqual({ text: '检查测试', live: true })
+    expect(answerFallback).toEqual({ text: expect.any(String), live: false })
+    expect(answerFallback?.text.length).toBeGreaterThan(0)
   })
 
   test('extracts thread action IDs from ID-referenced needsMe items', () => {

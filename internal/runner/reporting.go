@@ -14,7 +14,7 @@ import (
 
 var reportKinds = []string{"progress", "waiting", "ready", "blocked", "failed", "done"}
 
-const reportGuide = "Use ready for checked changes ready for review or when the configured external delivery is complete. If the requested delivery ends at a target branch or ticket update, report ready once those requirements are met and note any unrelated CI failures in the summary. Use done for results with no change review needed, waiting for an outstanding external result, and blocked only when a required step cannot proceed. When the user must provide information, approval or an action before work can continue, use post_ui to ask for that specific thing."
+const reportGuide = "Use ready for checked changes ready for review or when the configured external delivery is complete (if delivery ends at a target branch or ticket update, report ready once those requirements are met and note any unrelated CI failures in the summary). Use done when no change review is needed, progress for intermediate updates, waiting for an outstanding external result, blocked only when a required step cannot proceed, and failed if the task fails. When the user must provide information, approval or an action before work can continue, use post_ui to ask for that specific thing."
 
 func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 	if author, ok := thread.ReviewOf.(string); ok && author != "" {
@@ -23,17 +23,33 @@ func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 				args{"path": field("string")}, nil, func(ctx context.Context, input args) (string, error) {
 					return turn.readChanges(ctx, author, text(input, "path"))
 				}),
-			specification("submit_review", "Submit the verdict on the current review round. Add a comment for each issue that needs a change.",
+			specification("submit_review", "Submit the verdict on the current review round. Use verdict \"pass\" with no comments when changes are ready, or \"changes\" with at least one line comment describing each issue.",
 				args{"verdict": args{"type": "string", "enum": []string{"pass", "changes"}}, "summary": field("string"),
-					"comments": arrayOf(args{"type": "object", "properties": args{"path": field("string"), "line": field("integer"), "kind": field("string"), "body": field("string")}, "required": []string{"path", "line", "kind", "body"}})},
+					"comments": arrayOf(args{"type": "object", "properties": args{"path": field("string"), "line": field("integer"), "kind": args{"type": "string", "enum": []string{"bug", "acceptance", "security"}}, "body": field("string")}, "required": []string{"path", "line", "kind", "body"}})},
 				[]string{"verdict", "summary"}, func(ctx context.Context, input args) (string, error) {
 					return reply(turn.Repository.SubmitReview(ctx, thread.ID, core.ReviewSubmission{Verdict: text(input, "verdict"), Summary: text(input, "summary"), Comments: items(input["comments"])}))
 				}),
 		}
 	}
 	return []tool{specification("report", "Report the thread's result to the coordinator. "+reportGuide,
-		args{"kind": args{"type": "string", "enum": reportKinds}, "summary": field("string"), "headline": field("string"),
-			"artifacts": arrayOf(field("string")), "reviewReplies": arrayOf(args{"type": "object", "properties": args{"comment": field("integer"), "outcome": field("string"), "note": field("string")}})},
+		args{
+			"kind":     args{"type": "string", "enum": reportKinds},
+			"summary":  field("string"),
+			"headline": args{"type": "string", "description": "Short single-line user-facing summary (60 characters or fewer, plain text)."},
+			"artifacts": args{
+				"type":        "array",
+				"description": "Optional IDs of relevant artifacts (for example art_...), not Markdown links.",
+				"items":       field("string"),
+			},
+			"reviewReplies": arrayOf(args{
+				"type": "object",
+				"properties": args{
+					"comment": args{"type": "integer", "description": "1-based review comment number."},
+					"outcome": args{"type": "string", "enum": []string{"fixed", "declined"}},
+					"note":    args{"type": "string", "description": "Explanation; required when outcome is declined."},
+				},
+			}),
+		},
 		[]string{"kind", "summary", "headline"}, turn.report)}
 }
 

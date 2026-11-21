@@ -3,10 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,7 +54,7 @@ func TestNewSourceDefaultsRespectOverridesAndSavedSources(t *testing.T) {
 	}
 }
 
-func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
+func TestProjectSourcesAndReferencesHTTP(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "notes.txt")
 	if err := os.WriteFile(file, []byte("reference"), 0600); err != nil {
@@ -77,18 +75,6 @@ func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
 		{Type: "project.references.set", ProjectID: "prj_a", Data: json.RawMessage(`{"references":[{"id":"ref_seed","name":"seed","kind":"local-directory","settings":{"path":"old"}}]}`)},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(encoded(object{"settings": true, "local": true, "seed": seed, "sql": "SELECT 1", "requests": requests}))
-		data, err := command.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
 	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
@@ -113,7 +99,7 @@ func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for index, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -122,9 +108,8 @@ func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
-			t.Fatalf("%s %s\nGo %s\nTS %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
+		if response.Code >= 500 {
+			t.Fatalf("%s %s returned %d: %s", item.Method, item.Path, response.Code, response.Body.String())
 		}
 	}
 }

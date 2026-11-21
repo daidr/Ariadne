@@ -2,12 +2,9 @@ package sources
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -121,35 +118,24 @@ func TestHostingMovesCommitsBetweenIndependentRepositories(t *testing.T) {
 		t.Fatal("closed hosting connected again")
 	}
 }
-func TestRepositoryURLNormalizationMatchesLegacy(t *testing.T) {
-	addresses := []string{"https://GitHub.com/Owner/Repo.git/", "git@github.com:Owner/Repo.git", "ssh://git@git.example.test:2222/group/sub/project.git", "https://git.example.test/group/project/", "https://user:password@git.example.test/a/b.git", "https://git.example.test/a%20b/repo.git", "https://[2001:db8::1]:8443/a/b.git", "not a repository", "https://git.example.test/"}
-	actual := []*string{}
-	for _, address := range addresses {
-		value := RepositoryOf(address)
-		if value == "" {
-			actual = append(actual, nil)
-		} else {
-			actual = append(actual, &value)
+func TestRepositoryURLNormalization(t *testing.T) {
+	cases := []struct {
+		address string
+		want    string
+	}{
+		{"https://GitHub.com/Owner/Repo.git/", "github.com/owner/repo"},
+		{"git@github.com:Owner/Repo.git", "github.com/owner/repo"},
+		{"ssh://git@git.example.test:2222/group/sub/project.git", "git.example.test/group/sub/project"},
+		{"https://git.example.test/group/project/", "git.example.test/group/project"},
+		{"https://user:password@git.example.test/a/b.git", "git.example.test/a/b"},
+		{"https://git.example.test/a%20b/repo.git", "git.example.test/a%20b/repo"},
+		{"https://[2001:db8::1]:8443/a/b.git", "[2001:db8::1]/a/b"},
+		{"not a repository", ""},
+		{"https://git.example.test/", ""},
+	}
+	for _, tc := range cases {
+		if got := RepositoryOf(tc.address); got != tc.want {
+			t.Errorf("RepositoryOf(%q) = %q, want %q", tc.address, got, tc.want)
 		}
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		return
-	}
-	data, _ := json.Marshal(addresses)
-	command := legacytest.Command(t, bun, "packages/agent/src/testing/go-hosting-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	var expected []*string
-	if json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		got, _ := json.Marshal(actual)
-		t.Fatalf("Go %s\nTS %s", got, want)
 	}
 }

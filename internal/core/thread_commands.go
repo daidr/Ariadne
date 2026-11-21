@@ -138,6 +138,39 @@ func (repo *Repository) SetThreadModel(ctx context.Context, threadID string, mod
 		return []change{{"thread.model_set", object{"threadId": threadID, "model": model, "by": by}}}, nil
 	})
 }
+
+func (repo *Repository) SetThreadNode(ctx context.Context, projectID, threadID string, nodeID *string, by string) (ThreadView, error) {
+	return repo.mutateThread(ctx, threadID, func(tx *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if projectID != "" && current.ProjectID != projectID {
+			return nil, domainerr.NotFoundField("threadId", threadID)
+		}
+		var target *string
+		if nodeID != nil {
+			clean := projectsettings.Trim(*nodeID)
+			if clean != "" {
+				if current.ReviewOf != nil {
+					return nil, badInput("review thread cannot be linked to a plan node")
+				}
+				nodes, err := records(ctx, tx.SQL(), "SELECT id FROM plan_nodes WHERE project_id = ? AND id = ?", current.ProjectID, clean)
+				if err != nil {
+					return nil, err
+				}
+				if len(nodes) == 0 {
+					return nil, domainerr.NotFoundField("nodeId", clean)
+				}
+				target = &clean
+			}
+		}
+		var existing *string
+		if value, ok := current.NodeID.(string); ok && value != "" {
+			existing = &value
+		}
+		if (existing == nil && target == nil) || (existing != nil && target != nil && *existing == *target) {
+			return nil, nil
+		}
+		return []change{{"thread.node.set", object{"threadId": threadID, "nodeId": target, "by": by}}}, nil
+	})
+}
 func (repo *Repository) StartThread(ctx context.Context, threadID string) (ThreadView, error) {
 	return repo.mutateThread(ctx, threadID, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
 		return []change{{"thread.started", object{"threadId": threadID}}}, nil

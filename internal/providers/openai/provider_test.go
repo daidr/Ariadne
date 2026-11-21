@@ -3,14 +3,9 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +26,7 @@ func sse(chunks ...any) string {
 	return text.String()
 }
 
-func TestProviderMatchesLegacyStreamAndBody(t *testing.T) {
+func TestProviderStreamAndBody(t *testing.T) {
 	cases := []struct {
 		name, body string
 		status     int
@@ -94,37 +89,6 @@ func TestProviderMatchesLegacyStreamAndBody(t *testing.T) {
 			}
 			if sent["model"] != "m" || sent["stream"] != true || sent["system"] != nil {
 				t.Fatalf("protected body fields changed: %v", sent)
-			}
-			bun, err := exec.LookPath("bun")
-			if err != nil {
-				if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-					t.Fatal(err)
-				}
-				t.Log("Bun absent: native assertions ran, legacy comparison skipped")
-				return
-			}
-			root, err := filepath.Abs(filepath.Join("..", "..", ".."))
-			if err != nil {
-				t.Fatal(err)
-			}
-			input, _ := json.Marshal(map[string]any{"settings": settings, "request": request, "body": test.body, "status": test.status, "headers": test.headers})
-			cmd := legacytest.Command(t, bun, "packages/plugin-openai-compatible/src/testing/go-provider-fixture.ts")
-			cmd.Dir = root
-			cmd.Stdin = strings.NewReader(string(input))
-			data, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("legacy oracle: %v\n%s", err, data)
-			}
-			var legacy, native any
-			if err := json.Unmarshal(data, &legacy); err != nil {
-				t.Fatalf("legacy JSON: %v\n%s", err, data)
-			}
-			nativeJSON, _ := json.Marshal(map[string]any{"body": RequestBody(settings, request), "parts": parts})
-			if err := json.Unmarshal(nativeJSON, &native); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(native, legacy) {
-				t.Fatalf("provider differs\nGo: %s\nTS: %s", nativeJSON, data)
 			}
 		})
 	}

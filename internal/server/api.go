@@ -335,6 +335,35 @@ func prefix(text string, length int) string {
 	units := utf16.Encode([]rune(text))
 	return string(utf16.Decode(units[:min(length, len(units))]))
 }
+func staticContentType(name string) string {
+	ext := strings.ToLower(path.Ext(name))
+	switch ext {
+	case ".webmanifest":
+		return "application/manifest+json"
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	}
+	return mime.TypeByExtension(ext)
+}
+
+func isStaticAssetPath(name string) bool {
+	if strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "icons/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs", ".css", ".map", ".webmanifest", ".json", ".svg", ".png", ".ico", ".webp", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".ttf", ".otf", ".txt", ".xml":
+		return true
+	default:
+		return false
+	}
+}
+
 func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") || api.options.Web == nil {
 		domainerr.Write(w, domainerr.NotFound(r.URL.Path))
@@ -346,6 +375,10 @@ func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := fs.ReadFile(api.options.Web, name)
 	if err != nil {
+		if isStaticAssetPath(name) {
+			domainerr.Write(w, domainerr.NotFound(r.URL.Path))
+			return
+		}
 		name = "index.html"
 		data, err = fs.ReadFile(api.options.Web, name)
 	}
@@ -358,8 +391,7 @@ func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(name, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	contentType := mime.TypeByExtension(path.Ext(name))
-	if contentType != "" {
+	if contentType := staticContentType(name); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))

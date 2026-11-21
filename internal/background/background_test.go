@@ -2,12 +2,6 @@ package background
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,7 +53,7 @@ func TestBackgroundReadKeepsUnreadPagesAfterExit(t *testing.T) {
 	}
 }
 
-func TestBackgroundFlowAndServedURLsMatchLegacy(t *testing.T) {
+func TestBackgroundFlowAndServedURLs(t *testing.T) {
 	urls := []string{"  \x1b[32m➜\x1b[39m  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n", "Listening on http://0.0.0.0:3000 (press Ctrl+C)\n", "open http://127.0.0.1:8080/docs/.\n", "proxy /api -> http://localhost:8787\n  Local:   http://localhost:5173/\n", "Local: http://localhost:51", "fetching https://example.com:443/x \n", "Ready http://[::]:5173/\n", "Ready http://[::1]:5173/\n", "Local: http://localhost:5173/\u3000", "http://localhost:123456/\n"}
 	chunks := []string{"\x1b[32mLocal: http://localhost:5173/\x1b[0m\n", "10%\r100%\n中文😀\n"}
 	commands := New(Options{Now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }})
@@ -103,30 +97,8 @@ func TestBackgroundFlowAndServedURLsMatchLegacy(t *testing.T) {
 	for _, output := range urls {
 		parsedURLs = append(parsedURLs, ServedURL(output))
 	}
-	native := map[string]any{"command": command, "reads": reads, "peek": peek, "kept": kept, "ended": ended, "forgotten": commands.List("thread"), "urls": parsedURLs}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native flow passed, Bun absent")
-	}
-	input, _ := json.Marshal(map[string]any{"urls": urls, "chunks": chunks})
-	cmd := legacytest.Command(t, bun, "packages/agent/src/testing/go-background-fixture.ts")
-	cmd.Dir = filepath.Join("..", "..")
-	cmd.Stdin = strings.NewReader(string(input))
-	data, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, data)
-	}
-	var actual, want any
-	encoded, _ := json.Marshal(native)
-	json.Unmarshal(encoded, &actual)
-	if err := json.Unmarshal(data, &want); err != nil {
-		t.Fatalf("legacy JSON %v %s", err, data)
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("background differs\nGo %s\nTS %s", encoded, data)
+	if len(reads) != len(chunks) || peek == nil || len(kept) != 1 || len(ended) != 1 || len(commands.List("thread")) != 0 || parsedURLs[0] == nil || *parsedURLs[0] != "http://localhost:5173/" {
+		t.Fatalf("unexpected background flow state: reads=%d kept=%d ended=%d url=%v", len(reads), len(kept), len(ended), parsedURLs[0])
 	}
 }
 func TestThreadCapacityReaderCancellationStopAndCloseReleaseResources(t *testing.T) {

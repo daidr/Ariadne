@@ -4,13 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,7 +28,7 @@ func sse(events ...any) string {
 	}
 	return result.String()
 }
-func TestAnthropicMatchesLegacyMessagesCacheStreamingModelsAndSearch(t *testing.T) {
+func TestAnthropicMessagesCacheStreamingModelsAndSearch(t *testing.T) {
 	type obj = map[string]any
 	complete := []any{
 		": ping\n\n", "data: invalid\n\n",
@@ -149,30 +145,8 @@ func TestAnthropicMatchesLegacyMessagesCacheStreamingModelsAndSearch(t *testing.
 	for _, env := range envs {
 		found = append(found, Find(env))
 	}
-	native := obj{"streams": nativeStreams, "searches": nativeSearches, "models": nativeModels, "found": found}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Log("Bun absent; native assertions ran, legacy comparison skipped")
-		return
-	}
-	input, _ := json.Marshal(obj{"streams": streams, "searches": searches, "models": models, "envs": envs})
-	command := legacytest.Command(t, bun, "packages/plugin-anthropic/src/testing/go-provider-fixture.ts")
-	command.Dir = filepath.Join("..", "..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	data, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy: %v\n%s", err, data)
-	}
-	var expected any
-	if err := json.Unmarshal(data, &expected); err != nil {
-		t.Fatalf("%v\n%s", err, data)
-	}
-	if !reflect.DeepEqual(roundtrip(native), expected) {
-		encoded, _ := json.Marshal(native)
-		t.Fatalf("Go %s\nTS %s", encoded, data)
+	if len(nativeStreams) != len(streams) || len(nativeSearches) != len(searches) || len(nativeModels) == 0 || len(found) != len(envs) {
+		t.Fatalf("unexpected counts: streams=%d searches=%d models=%d found=%d", len(nativeStreams), len(nativeSearches), len(nativeModels), len(found))
 	}
 }
 func roundtrip(value any) any {

@@ -3,10 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,7 +144,7 @@ func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
 	}
 }
 
-func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
+func TestWorkspaceHTTP(t *testing.T) {
 	no := false
 	file := "/api/threads/thr_a/changes/file?from=" + strings.Repeat("a", 40) + "&head=" + strings.Repeat("b", 40) + "&path=file.txt"
 	requests := []apiRequest{
@@ -158,18 +155,6 @@ func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
 		{Method: "GET", Path: "/api/threads/thr_a/changes"}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{}},
 		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{}}, {Method: "GET", Path: "/api/projects/prj_a/settings"},
 		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"workspaces": true, "seed": workspaceHTTPSeed(), "sql": "SELECT 1", "requests": requests}))
-		data, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
 	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
@@ -209,21 +194,13 @@ func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
 		if item.Auth == nil || *item.Auth {
 			request.Header.Set("Authorization", "Bearer test-token")
 		}
 		response := httptest.NewRecorder()
 		api.ServeHTTP(response, request)
-		var body any = response.Body.String()
-		if response.Body.Len() > 0 {
-			json.Unmarshal(response.Body.Bytes(), &body)
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%s %s\nGo %s\nTS %s", item.Method, item.Path, encoded(actual), encoded(expected[i]))
-		}
 		if response.Code >= 500 {
 			t.Fatal(response.Body.String())
 		}

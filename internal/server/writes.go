@@ -80,17 +80,23 @@ func (api *API) registerWrites() {
 		return object{"message": message}, 201, err
 	})
 	api.add("POST", "/api/projects/:projectId/files", func(r *http.Request) (any, int, error) {
-		if r.ContentLength > files.MaxFileBytes {
-			return nil, 0, domainerr.New("error.fileTooLarge", object{"max": 10})
+		forMessage := r.URL.Query().Get("for") == "message"
+		limit := files.MaxImageBytes
+		if forMessage {
+			limit = files.MaxFileBytes
 		}
-		data, err := io.ReadAll(io.LimitReader(r.Body, files.MaxFileBytes+1))
+		maxMB := limit / 1024 / 1024
+		if r.ContentLength > int64(limit) {
+			return nil, 0, domainerr.New("error.fileTooLarge", object{"max": maxMB})
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 		if err != nil {
 			return nil, 0, err
 		}
-		if len(data) > files.MaxFileBytes {
-			return nil, 0, domainerr.New("error.fileTooLarge", object{"max": 10})
+		if len(data) > limit {
+			return nil, 0, domainerr.New("error.fileTooLarge", object{"max": maxMB})
 		}
-		file, err := api.files.Save(r.Context(), r.PathValue("projectId"), r.Header.Get("Content-Type"), data, r.URL.Query().Get("for") == "message")
+		file, err := api.files.Save(r.Context(), r.PathValue("projectId"), r.Header.Get("Content-Type"), data, forMessage)
 		return object{"file": file}, 201, err
 	})
 	for _, method := range []string{"POST", "PUT"} {

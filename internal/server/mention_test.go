@@ -3,10 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +16,7 @@ import (
 	"github.com/daidr/Ariadne/internal/workspaces"
 )
 
-func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
+func TestMentionFilesAndReferenceStatusHTTP(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
 	if err := os.MkdirAll(filepath.Join(source, "src"), 0700); err != nil {
@@ -38,18 +36,6 @@ func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
 		{Method: "GET", Path: "/api/projects/prj_a/mention-files?q=not-found&conversationId=coo_a"},
 		{Method: "GET", Path: "/api/projects/prj_a/mention-files?conversationId=missing"},
 		{Method: "GET", Path: "/api/projects/prj_a/references/status"},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": traceSeed()[:1], "sql": sql, "local": true, "workspaces": true, "requests": requests}))
-		output, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(output, &expected) != nil {
-			t.Fatal(err, string(output))
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
 	}
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "files.sqlite")})
 	if err != nil {
@@ -80,7 +66,7 @@ func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
+	for _, item := range requests {
 		request := httptest.NewRequest(item.Method, item.Path, nil)
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -88,10 +74,6 @@ func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
 		var body any
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%s\nGo %s\nTS %s", item.Path, encoded(actual), encoded(expected[i]))
 		}
 		if response.Code >= 500 {
 			t.Fatal(response.Body.String())

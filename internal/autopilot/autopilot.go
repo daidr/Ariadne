@@ -107,7 +107,7 @@ func (service *Service) readWakes(ctx context.Context, sequence *int64) error {
 func wakes(kind string) bool {
 	switch kind {
 	case "project.settings.set", "project.autopilot.paused", "thread.reported", "thread.stopped", "thread.resumed",
-		"thread.reviewed", "thread.completed", "review.submitted", "review.abandoned", "branch.merged", "pull_request.synced",
+		"thread.reviewed", "thread.completed", "thread.node.set", "review.submitted", "review.abandoned", "branch.merged", "pull_request.synced",
 		"pull_request.closed", "plan.revised", "attention.answered", "attention.withdrawn", "turn.finished":
 		return true
 	default:
@@ -300,6 +300,7 @@ func (service *Service) mergePullRequest(ctx context.Context, thread core.Thread
 	case "merged":
 		delete(service.noChecks, key)
 		pr["state"] = "merged"
+		delete(pr, "conflicted")
 		err = service.Repository.SyncPullRequest(ctx, thread.ID, pr, map[string]any{"method": method, "base": base, "sha": outcome.SHA})
 	case "conflict":
 		_, err = service.Repository.RecordMergeConflict(ctx, thread.ID, map[string]any{"branch": branch, "base": base, "files": []string{}, "pullRequest": number})

@@ -12,6 +12,7 @@
     "dev:sandbox": "bun tools/dev/sandbox.ts",
     "start": "bun tools/dev/start.ts",
     "build": "bun run --filter @ariadne/web build",
+    "icons": "bun tools/icons/generate.ts",
     "release": "go run ./tools/release",
     "release:go": "go run ./tools/release",
     "record:provider": "go run ./tools/recordprovider",
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@bufbuild/buf": "1.75.0",
     "@bufbuild/protoc-gen-es": "2.17.0",
+    "@resvg/resvg-js": "2.6.2",
     "@types/bun": "1.4.4",
     "@vitejs/plugin-vue": "6.0.10",
     "@vue/test-utils": "2.5.1",
@@ -32,6 +34,7 @@
     "oxlint": "1.91.0",
     "typescript": "6.0.3",
     "vite": "8.3.5",
+    "vite-plugin-pwa": "2.0.0",
     "vitest": "5.1.0",
     "vue": "3.5.44",
     "vue-tsc": "3.3.14"

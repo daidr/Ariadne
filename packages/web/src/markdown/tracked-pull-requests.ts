@@ -6,7 +6,7 @@ import { state } from '../store'
 export interface PullRequestThread {
   id: string
   pullRequest:
-    | (Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> &
+    | (Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'conflicted' | 'checks'> &
         Partial<Pick<ThreadPullRequest, 'title' | 'headSha'>>)
     | null
 }
