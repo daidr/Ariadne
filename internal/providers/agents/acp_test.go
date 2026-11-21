@@ -173,6 +173,7 @@ func acpChildCommand(t *testing.T, scenario string) (string, string) {
 func TestACPAntigravityExecutorError(t *testing.T) {
 	for _, test := range []struct {
 		scenario, reason, detail string
+		wantText                 string
 		busy, retryable          bool
 		expectEmptyText          bool
 	}{
@@ -180,11 +181,21 @@ func TestACPAntigravityExecutorError(t *testing.T) {
 		{scenario: "agy-executor-start", reason: "error", detail: "plan model not specified", expectEmptyText: true},
 		{scenario: "agy-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
 		{scenario: "agy-quota-bare", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-split", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
+		{scenario: "agy-quota-split", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-quota-split-reset", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
 		{scenario: "agy-quota-429", reason: "error", detail: "Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-quota-429-split", reason: "error", detail: "Error 429: Individual quota reached. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
+		{scenario: "agy-retrying-then-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
+		{scenario: "agy-tool-then-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
 		{scenario: "agy-rate-limit", reason: "error", detail: "Rate limit exceeded. Please try again later.", busy: true, retryable: true, expectEmptyText: true},
-		{scenario: "agy-recovered", reason: "stop"},
-		{scenario: "agy-retrying-split", reason: "stop"},
+		{scenario: "agy-recovered", reason: "stop", wantText: "answer"},
+		{scenario: "agy-retrying-split", reason: "stop", wantText: "answer"},
+		{scenario: "agy-markdown-warning-emoji", reason: "stop", wantText: "⚠️ Temporary workaround\n⚠️ 500 lines changed\n⚠️ Timeout 设置过小"},
+		{scenario: "agy-plain-warning-text", reason: "stop", wantText: "⚠ 500 lines changed"},
+		{scenario: "agy-multiline-quota-prose", reason: "stop", wantText: "Here is the root cause and fix."},
+		{scenario: "agy-prose-then-warning", reason: "stop", wantText: "Done."},
+		{scenario: "agy-warning-before-tool-then-done", reason: "stop", wantText: "final answer"},
+		{scenario: "agy-warning-before-thought-then-done", reason: "stop", wantText: "final answer"},
 		{scenario: "other-agent", reason: "stop"},
 		{scenario: "other-agent-quota", reason: "stop"},
 	} {
@@ -205,6 +216,8 @@ func TestACPAntigravityExecutorError(t *testing.T) {
 				if last.AgentError == nil || last.AgentError.Operation != "session/update" || last.AgentError.StopReason != "end_turn" {
 					t.Fatalf("missing ACP update diagnostics: %+v", last.AgentError)
 				}
+			} else if test.wantText != "" && !strings.Contains(textParts(parts), test.wantText) {
+				t.Fatalf("expected text containing %q, got %q", test.wantText, textParts(parts))
 			}
 		})
 	}
@@ -440,29 +453,93 @@ func TestACPChild(t *testing.T) {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
 				continue
 			}
-			chunks := []string{"answer"}
+			type childUpdate struct{ kind, text string }
+			updates := []childUpdate{{kind: "agent_message_chunk", text: "answer"}}
 			switch restore {
 			case "agy-error", "other-agent":
-				chunks = []string{"\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"}}
 			case "agy-executor-start":
-				chunks = []string{"\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"}}
 			case "agy-quota", "other-agent-quota":
-				chunks = []string{"\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}}
 			case "agy-quota-bare":
-				chunks = []string{"⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s."}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s."}}
 			case "agy-quota-split":
-				chunks = []string{"\n⚠ ", "Individual quota reached. Please upgrade your subscription to increase your limits. ", "Resets in 1h17m22s."}
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ "},
+					{kind: "agent_message_chunk", text: "Individual quota reached. Please upgrade your subscription to increase your limits. "},
+					{kind: "agent_message_chunk", text: "Resets in 1h17m22s."},
+				}
+			case "agy-quota-split-reset":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. "},
+					{kind: "agent_message_chunk", text: "Resets in 1h17m22s."},
+				}
 			case "agy-quota-429":
-				chunks = []string{"\n⚠ agent executor error: Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ agent executor error: Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}}
+			case "agy-quota-429-split":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ agent executor error: Error 429: "},
+					{kind: "agent_message_chunk", text: "Individual quota reached. Resets in 1h17m22s."},
+				}
+			case "agy-retrying-then-quota":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\n"},
+					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"},
+				}
+			case "agy-tool-then-quota":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "checking..."},
+					{kind: "tool_call"},
+					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"},
+				}
 			case "agy-rate-limit":
-				chunks = []string{"\n⚠ Rate limit exceeded. Please try again later.\n"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ Rate limit exceeded. Please try again later.\n"}}
 			case "agy-recovered":
-				chunks = []string{"\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"}
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"}}
 			case "agy-retrying-split":
-				chunks = []string{"\n⚠ API error (attempt 1): Error 429. Retrying.\n", "answer"}
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\n"},
+					{kind: "agent_message_chunk", text: "answer"},
+				}
+			case "agy-markdown-warning-emoji":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "⚠️ Temporary workaround\n"},
+					{kind: "agent_message_chunk", text: "⚠️ 500 lines changed\n"},
+					{kind: "agent_message_chunk", text: "⚠️ Timeout 设置过小"},
+				}
+			case "agy-plain-warning-text":
+				updates = []childUpdate{{kind: "agent_message_chunk", text: "⚠ 500 lines changed"}}
+			case "agy-multiline-quota-prose":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "⚠ Quota reached when testing the API\n"},
+					{kind: "agent_message_chunk", text: "Here is the root cause and fix."},
+				}
+			case "agy-prose-then-warning":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "Summary:\n"},
+					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Resets in 1h.\n"},
+					{kind: "agent_message_chunk", text: "Done."},
+				}
+			case "agy-warning-before-tool-then-done":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Resets in 1h."},
+					{kind: "tool_call"},
+					{kind: "agent_message_chunk", text: "final answer"},
+				}
+			case "agy-warning-before-thought-then-done":
+				updates = []childUpdate{
+					{kind: "agent_message_chunk", text: "\n⚠ agent executor error: transient note"},
+					{kind: "agent_thought_chunk", text: "thinking"},
+					{kind: "agent_message_chunk", text: "final answer"},
+				}
 			}
-			for _, chunk := range chunks {
-				_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":%q}}}}`, chunk)))
+			for _, u := range updates {
+				if u.kind == "tool_call" {
+					_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"tool_call"}}}`))
+					continue
+				}
+				_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":%q,"content":{"type":"text","text":%q}}}}`, u.kind, u.text)))
 			}
 			stop := "end_turn"
 			if effort == "low" {
