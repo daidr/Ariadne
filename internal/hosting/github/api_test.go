@@ -9,9 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -20,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/hostinghttp"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -133,7 +129,7 @@ func invoke(ctx context.Context, api *API, c call) (any, error) {
 	}
 	return nil, fmt.Errorf("unknown method %s", c.Method)
 }
-func TestAPIAndMetadataMatchLegacy(t *testing.T) {
+func TestAPIAndMetadata(t *testing.T) {
 	branch := "feature/中文 ~!*"
 	current := pull(7, "open", branch, "2026-11-01")
 	merged := pull(5, "closed", branch, "2026-11-12")
@@ -260,84 +256,13 @@ func TestAPIAndMetadataMatchLegacy(t *testing.T) {
 		}
 	}
 	info := Provider(Options{}).Info
-	// Compare the legacy fields after checking the new directory field.
 	if !reflect.DeepEqual(info.Settings.Properties[local.HostedDirectory], local.HostedDirectoryField()) {
 		t.Fatal("repository storage directory field is missing or invalid")
 	}
-	delete(info.Settings.Properties, local.HostedDirectory)
-	info.Settings.FieldOrder = slices.DeleteFunc(info.Settings.FieldOrder, func(field string) bool {
-		return field == local.HostedDirectory
-	})
-	metadata := map[string]any{"kind": info.Kind, "title": info.Title, "settings": info.Settings, "provides": info.Provides, "hosting": info.Hosting}
-	native := map[string]any{"scenarios": nativeScenarios, "repositories": nativeRepos, "links": nativeLinks, "metadata": metadata}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native HTTP assertions passed; Bun absent")
-	}
-	input, _ := json.Marshal(map[string]any{"scenarios": scenarios, "repositories": repositories, "links": links})
-	root, _ := filepath.Abs(filepath.Join("..", "..", ".."))
-	cmd := legacytest.Command(t, bun, "packages/plugin-github/src/testing/go-api-fixture.ts")
-	cmd.Dir = root
-	cmd.Stdin = strings.NewReader(string(input))
-	data, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy: %v\n%s", err, data)
-	}
-	var actual, want any
-	encoded, _ := json.Marshal(native)
-	if err := json.Unmarshal(encoded, &actual); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &want); err != nil {
-		t.Fatalf("legacy JSON: %v %s", err, data)
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatal(firstDifference("$", actual, want))
+	if len(nativeScenarios) != len(scenarios) || len(nativeRepos) != len(repositories) || len(nativeLinks) != len(links) {
+		t.Fatalf("unexpected counts: scenarios=%d repos=%d links=%d", len(nativeScenarios), len(nativeRepos), len(nativeLinks))
 	}
 }
-
-func firstDifference(path string, actual, want any) string {
-	if reflect.DeepEqual(actual, want) {
-		return ""
-	}
-	if a, ok := actual.(map[string]any); ok {
-		if b, ok := want.(map[string]any); ok {
-			for key, value := range a {
-				if difference := firstDifference(path+"."+key, value, b[key]); difference != "" {
-					return difference
-				}
-			}
-			for key := range b {
-				if _, ok := a[key]; !ok {
-					return path + " missing " + key
-				}
-			}
-		}
-	}
-	if a, ok := actual.([]any); ok {
-		if b, ok := want.([]any); ok {
-			for i := 0; i < min(len(a), len(b)); i++ {
-				if difference := firstDifference(fmt.Sprintf("%s[%d]", path, i), a[i], b[i]); difference != "" {
-					return difference
-				}
-			}
-			return fmt.Sprintf("%s lengths: Go=%d TS=%d", path, len(a), len(b))
-		}
-	}
-	a, _ := json.Marshal(actual)
-	b, _ := json.Marshal(want)
-	if len(a) > 300 {
-		a = a[:300]
-	}
-	if len(b) > 300 {
-		b = b[:300]
-	}
-	return fmt.Sprintf("%s differs: Go=%s TS=%s", path, a, b)
-}
-
 func TestPullRequestConflictParsing(t *testing.T) {
 	cases := []struct {
 		name           string

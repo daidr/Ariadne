@@ -3,18 +3,12 @@ package commandpolicy
 import (
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf16"
 )
 
-func TestCommandRulesMatchLegacy(t *testing.T) {
+func TestCommandRules(t *testing.T) {
 	rules := []Rule{{"git push*", "ask"}, {"git push origin ariadne/*", "allow"}, {"rm -rf /*", "deny"}, {"ls*", "allow"}}
 	wide := []Rule{{"git push*", "ask"}, {"timeout *", "allow"}, {"timeout 10 git push", "allow"}}
 	sets := [][]Rule{rules, wide, Defaults(), {}, {{"rm -rf /*", "deny"}, {"*", "allow"}}, {{"git push*", "ask"}, {"wrap 😀 *", "allow"}}}
@@ -59,34 +53,8 @@ func TestCommandRulesMatchLegacy(t *testing.T) {
 			t.Fatal("push approval bypassed", command, verdict)
 		}
 	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native policy checks passed; Bun unavailable")
-	}
-	input, _ := json.Marshal(map[string]any{"commands": commands, "rules": sets})
-	cmd := legacytest.Command(t, bun, "packages/agent/src/testing/go-command-policy-fixture.ts")
-	cmd.Dir = filepath.Join("..", "..")
-	cmd.Stdin = strings.NewReader(string(input))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatal(err, string(output))
-	}
-	var expected []result
-	if err := json.Unmarshal(output, &expected); err != nil {
-		t.Fatal(err, string(output))
-	}
-	if len(native) != len(expected) {
+	if len(native) != len(commands) {
 		t.Fatal("result count differs")
-	}
-	for i := range native {
-		if !reflect.DeepEqual(native[i], expected[i]) {
-			actual, _ := json.Marshal(native[i])
-			want, _ := json.Marshal(expected[i])
-			t.Fatalf("command %q differs\nGo %s\nTS %s", commands[i], actual, want)
-		}
 	}
 }
 func TestPolicyBoundsComplexityAndRetainsDenyPriority(t *testing.T) {

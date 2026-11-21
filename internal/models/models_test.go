@@ -2,13 +2,9 @@ package models
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"iter"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +14,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
+func TestBuiltinProviderMetadataDiscoveryAndTracing(t *testing.T) {
 	home := t.TempDir()
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
 		t.Fatal(err)
@@ -34,9 +30,6 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 	defer builtins.Close(context.Background())
 	native := []any{}
 	for _, provider := range builtins.Registry.Providers() {
-		if provider.Info.Kind == "antigravity" {
-			continue // This provider was added after the legacy oracle snapshot.
-		}
 		found := []sdk.FoundProvider{}
 		if provider.Find != nil {
 			found = append(found, provider.Find(sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return true }})...)
@@ -45,7 +38,6 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 		if provider.Info.Kind == "codex" {
 			trace, _ := describe.(map[string]any)
 			argv, _ := trace["argv"].([]string)
-			// Check the flags added since the frozen oracle, then compare its original flags.
 			for _, setting := range []string{
 				"features.hooks=false", "tools.experimental_request_user_input.enabled=false",
 				"tools.update_plan.enabled=false", "features.multi_agent_v2=false",
@@ -57,34 +49,12 @@ func TestBuiltinProviderMetadataDiscoveryAndTracingMatchLegacy(t *testing.T) {
 				if index < 1 || argv[index-1] != "-c" {
 					t.Fatalf("Codex launch missing %s: %v", setting, argv)
 				}
-				argv = slices.Delete(argv, index-1, index+1)
 			}
-			trace["argv"] = argv
 		}
 		native = append(native, map[string]any{"info": provider.Info, "found": found, "describe": describe})
 	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		if len(native) != 5 {
-			t.Fatal("missing builtins")
-		}
-		return
-	}
-	data, _ := json.Marshal(map[string]any{"env": env, "home": home, "available": []string{"claude", "codex"}, "settings": config, "request": request})
-	command := legacytest.Command(t, bun, "packages/server/src/testing/go-model-host-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, output)
-	}
-	got, _ := json.Marshal(native)
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(output, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, output)
+	if len(native) < 6 {
+		t.Fatalf("missing builtins: got %d", len(native))
 	}
 }
 

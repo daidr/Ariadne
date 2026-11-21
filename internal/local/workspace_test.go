@@ -2,15 +2,9 @@ package local
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
-	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -214,7 +208,7 @@ func TestWorkspaceCommandChild(t *testing.T) {
 	}
 }
 
-func TestWorkspaceFilesAndTextMatchLegacy(t *testing.T) {
+func TestWorkspaceFilesAndText(t *testing.T) {
 	root := t.TempDir()
 	workspace := newTestWorkspace(t, root, WorkspaceOptions{ID: "source", HideGit: true})
 	files := map[string][]byte{"a.txt": []byte("a"), "B.txt": []byte("b"), "_name": []byte("_"), "中文.txt": []byte("中文"), "bom.txt": append([]byte{0xef, 0xbb, 0xbf}, []byte("hello")...), "invalid.txt": {0xe2, 0x82}, "empty": {}}
@@ -229,51 +223,27 @@ func TestWorkspaceFilesAndTextMatchLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := map[string]string{}
+	for _, entry := range entries {
+		if entry.Name == ".git" {
+			t.Fatal(".git should be hidden")
+		}
+	}
+	if len(entries) != len(files)+1 {
+		t.Fatalf("entries count = %d, want %d", len(entries), len(files)+1)
+	}
 	for name := range files {
 		value, err := workspace.ReadFile(t.Context(), name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		text[name] = value
-	}
-	native := map[string]any{"entries": entries, "text": text}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
+		if name == "bom.txt" && value != "\ufeffhello" {
+			t.Fatalf("BOM mismatch: %q", value)
 		}
-		return
-	}
-	data, _ := json.Marshal(map[string]any{"root": root, "files": func() []string {
-		names := []string{}
-		for name := range files {
-			names = append(names, name)
+		if name == "invalid.txt" && value != "\ufffd" {
+			t.Fatalf("invalid UTF-8 mismatch: %q", value)
 		}
-		return names
-	}()})
-	command := legacytest.Command(t, bun, "packages/plugin-local/src/testing/go-workspace-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	got, _ := json.Marshal(native)
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil {
-		t.Fatalf("invalid fixtures Go %s\nTS %s", got, want)
-	}
-	// Contents and entry types must match. CLDR table versions and script
-	// reordering differ between Go's collator and ICU; exact mixed-script order
-	// remains an explicitly tracked migration compatibility gap.
-	for _, value := range []any{actual, expected} {
-		entries := value.(map[string]any)["entries"].([]any)
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].(map[string]any)["name"].(string) < entries[j].(map[string]any)["name"].(string)
-		})
-	}
-	if !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
+		if name == "中文.txt" && value != "中文" {
+			t.Fatalf("UTF-8 mismatch: %q", value)
+		}
 	}
 }

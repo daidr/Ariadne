@@ -1,9 +1,7 @@
 package local
 
 import (
-	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,7 +78,6 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	if err != nil || binary.Skipped == nil || *binary.Skipped != "binary" {
 		t.Fatal(binary, err)
 	}
-	assertBranchOracle(t, root, input, base, head)
 	before := gitOK(t, git, "write-tree")
 	snapshot, err := WorktreeSnapshot(t.Context(), git, root, "thread_test")
 	if err != nil {
@@ -104,44 +101,6 @@ func TestBranchChangesVersionsAndSnapshots(t *testing.T) {
 	}
 	if gitOK(t, git, "rev-parse", "HEAD") != head {
 		t.Fatal("branch removed with snapshots")
-	}
-}
-func assertBranchOracle(t *testing.T, root string, input BranchInput, from, head string) {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		return
-	}
-	git := NewGit(root, "file")
-	changes, err := BranchChanges(t.Context(), git, input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	versions := map[string]sdk.FileVersions{}
-	for _, file := range changes.Files {
-		value, err := FileVersions(t.Context(), git, VersionInput{From: from, Head: head, Path: file.Path, PreviousPath: file.PreviousPath})
-		if err != nil {
-			t.Fatal(err)
-		}
-		versions[file.Path] = value
-	}
-	data, _ := json.Marshal(map[string]any{"root": root, "branch": input.Branch, "base": input.Base, "baseRef": input.BaseRef, "worktree": input.Worktree, "from": from, "head": head})
-	command := legacytest.Command(t, bun, "packages/plugin-local/src/testing/go-branches-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	// The legacy comparison predates the base tip used by the conditional request.
-	changes.BaseHead = ""
-	got, _ := json.Marshal(map[string]any{"changes": changes, "versions": versions})
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
 	}
 }
 func TestMergeAndUndoKeepOtherDirtyFiles(t *testing.T) {

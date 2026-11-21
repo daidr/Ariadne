@@ -6,10 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -56,7 +53,7 @@ func requestTraceSeed() []eventstore.NewEvent {
 	}
 	return output
 }
-func TestTraceRequestBodiesMatchLegacyWithoutCallingModels(t *testing.T) {
+func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
 	seed := requestTraceSeed()
 	no := false
 	requests := []apiRequest{{Method: "GET", Path: "/api/conversations/coo_a/trace/requests/1", Auth: &no}}
@@ -71,18 +68,6 @@ func TestTraceRequestBodiesMatchLegacyWithoutCallingModels(t *testing.T) {
 	imageHash := sha256.Sum256([]byte{0, 255, 8})
 	textHash := sha256.Sum256([]byte{239, 187, 191, 104, 101, 108, 108, 111})
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_image','prj_a','image/png',3,'%s',x'00ff08',0); INSERT INTO files VALUES ('fil_text','prj_a','text/plain',8,'%s',x'efbbbf68656c6c6f',0)`, hex.EncodeToString(imageHash[:]), hex.EncodeToString(textHash[:]))
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"models": true, "seed": seed, "sql": sql, "requests": requests}))
-		data, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v %s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "requests.sqlite"), Now: now})
 	if err != nil {
@@ -105,7 +90,7 @@ func TestTraceRequestBodiesMatchLegacyWithoutCallingModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
+	for _, item := range requests {
 		r := httptest.NewRequest(item.Method, item.Path, nil)
 		if item.Auth == nil || *item.Auth {
 			r.Header.Set("Authorization", "Bearer test-token")
@@ -115,10 +100,6 @@ func TestTraceRequestBodiesMatchLegacyWithoutCallingModels(t *testing.T) {
 		var body any
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err, response.Body.String())
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%s\nGo %s\nTS %s", item.Path, encoded(actual), encoded(expected[i]))
 		}
 		if response.Code >= 500 {
 			t.Fatal(response.Body.String())

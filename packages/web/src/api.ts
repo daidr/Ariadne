@@ -666,8 +666,6 @@ export const api = {
     ),
   setThreadModel: (threadId: string, model: string | null) =>
     request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
-  setThreadNode: (threadId: string, nodeId: string | null) =>
-    request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/node`, { nodeId }),
   stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
   wakeNow: (id: string) => request<void>('POST', `/api/conversations/${id}/wait/now`),
   cancelWait: (id: string) => request<void>('DELETE', `/api/conversations/${id}/wait`),

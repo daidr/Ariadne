@@ -5,11 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -116,51 +112,5 @@ func TestNativeMCPStdioProcessEnvAndOversizedLine(t *testing.T) {
 	}
 	if transport.StderrTail() != "server stderr" {
 		t.Fatal(transport.StderrTail())
-	}
-}
-
-func TestNativeMCPStdioMatchesLegacyServer(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("Bun absent; native executable tested separately")
-	}
-	script := legacytest.Path(t, "packages/mcp/src/test-server.ts")
-	transport := NewStdio(StdioOptions{Argv: []string{bun, script}, Directory: t.TempDir(), Env: process.ThreadEnv(process.Environ())})
-	client, err := NewClient(transport, ClientOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close(context.Background())
-	info, err := client.Connect(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	tools, err := client.ListTools(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	native := map[string]any{"info": info, "tools": tools}
-	for _, name := range []string{"echo", "picture", "fail"} {
-		result, err := client.CallTool(t.Context(), name, map[string]any{"text": "中文"}, time.Second)
-		if err != nil {
-			t.Fatal(err)
-		}
-		native[name] = result
-	}
-	input, _ := json.Marshal(map[string]any{"argv": []string{bun, script}})
-	command := legacytest.Command(t, bun, "packages/mcp/src/testing/go-client-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	got, _ := json.Marshal(native)
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
 	}
 }

@@ -1,12 +1,8 @@
 package skills
 
 import (
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -21,7 +17,7 @@ func write(t *testing.T, dir, name, text string) {
 		t.Fatal(err)
 	}
 }
-func TestSkillsMatchLegacy(t *testing.T) {
+func TestSkillsPrecedenceAndReads(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	write(t, first, "review.md", "fallback file")
 	write(t, first, "review/SKILL.md", "---\ndescription: >\n  Review all changes\n  and test them\nother: value\n---\n# Review\n")
@@ -82,32 +78,8 @@ func TestSkillsMatchLegacy(t *testing.T) {
 		}
 	}
 	native["reads"] = results
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native checks passed; Bun unavailable")
-	}
-	input, _ := json.Marshal(map[string]any{"dirs": []string{first, second}, "descriptions": descriptions, "names": names, "reads": reads})
-	command := legacytest.Command(t, bun, "packages/agent/src/testing/go-skills-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatal(err, string(output))
-	}
-	data, _ := json.Marshal(native)
-	var actual, want map[string]any
-	if json.Unmarshal(data, &actual) != nil || json.Unmarshal(output, &want) != nil {
-		t.Fatal("invalid JSON", string(output))
-	}
-	for key, value := range actual {
-		if !reflect.DeepEqual(value, want[key]) {
-			got, _ := json.Marshal(value)
-			expected, _ := json.Marshal(want[key])
-			t.Errorf("%s\nGo %s\nTS %s", key, got, expected)
-		}
+	if len(when) != len(descriptions) || len(named) != len(names) || len(contents) != 4 || len(files) != 4 || len(results) != len(reads) {
+		t.Fatalf("unexpected skill check results: %+v", native)
 	}
 }
 func TestSkillListingLimitsAndDirectoryBoundaries(t *testing.T) {

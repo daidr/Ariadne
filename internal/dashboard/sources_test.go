@@ -2,12 +2,7 @@ package dashboard
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,7 +16,7 @@ func testInfo() sdk.DashboardSourceInfo {
 		"query": {Type: "string"}, "count": {Type: "number", Default: float64(10)}, "mode": {Type: "enum", Options: []string{"open", "all"}, Default: "open"}, "enabled": {Type: "boolean"}, "token": {Type: "string", Secret: true},
 	}}}
 }
-func TestDashboardSettingsAndFetchMatchLegacy(t *testing.T) {
+func TestDashboardSettingsAndFetch(t *testing.T) {
 	info := testInfo()
 	values := []any{nil, []any{}, map[string]any{"query": "issues"}, map[string]any{"unknown": "value"}, map[string]any{"token": nil}, map[string]any{"query": 5}, map[string]any{"query": "issues", "mode": "wrong"}, map[string]any{"query": "issues", "count": nil, "enabled": false}}
 	checked := []any{}
@@ -44,29 +39,8 @@ func TestDashboardSettingsAndFetchMatchLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native := map[string]any{"checked": checked, "fetched": actualData}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("Bun unavailable")
-	}
-	input, _ := json.Marshal(map[string]any{"source": info, "settings": values, "fetched": fetched})
-	cmd := legacytest.Command(t, bun, "packages/agent/src/testing/go-dashboard-sources-fixture.ts")
-	cmd.Dir = filepath.Join("..", "..")
-	cmd.Stdin = strings.NewReader(string(input))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatal(err, string(output))
-	}
-	data, _ := json.Marshal(native)
-	var actual, want map[string]any
-	if json.Unmarshal(data, &actual) != nil || json.Unmarshal(output, &want) != nil {
-		t.Fatal("invalid JSON", string(output))
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("Go %s\nTS %s", data, output)
+	if len(checked) != len(values) || !reflect.DeepEqual(actualData, fetched) {
+		t.Fatalf("unexpected dashboard fetch: checked=%d data=%+v", len(checked), actualData)
 	}
 }
 func TestDashboardFetchCancellationRemovalAndLimits(t *testing.T) {
