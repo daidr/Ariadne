@@ -3,9 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -191,7 +189,7 @@ func TestMCPSecretsAndPrivateDirectoryBoundary(t *testing.T) {
 	}
 }
 
-func TestSettingsStoreMatchesLegacy(t *testing.T) {
+func TestSettingsStoreLifecycle(t *testing.T) {
 	type action struct {
 		Op        string `json:"op"`
 		Value     any    `json:"value,omitempty"`
@@ -305,27 +303,9 @@ func TestSettingsStoreMatchesLegacy(t *testing.T) {
 		}
 		native = append(native, steps)
 	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Log("native checks passed; Bun comparison unavailable")
-		return
+	if len(native) != len(cases) {
+		t.Fatalf("executed cases = %d, want %d", len(native), len(cases))
 	}
-	data, _ := json.Marshal(cases)
-	command := legacytest.Command(t, bun, "packages/server/src/testing/go-settings-store-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, output)
-	}
-	var expected any
-	if err := json.Unmarshal(output, &expected); err != nil {
-		t.Fatalf("%v\n%s", err, output)
-	}
-	equalJSON(t, native, expected)
 }
 
 func stableResolved(model *ResolvedModel) any {

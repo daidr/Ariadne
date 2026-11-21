@@ -10,5 +10,5 @@
     "tools/dev/*.ts",
     "tools/release/*.ts"
   ],
-  "exclude": ["dist", "tools/legacyoracle/fixtures"]
+  "exclude": ["dist"]
 }

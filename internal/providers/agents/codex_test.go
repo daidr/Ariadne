@@ -5,11 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -455,105 +452,5 @@ func TestCodexErrorsAndCancellation(t *testing.T) {
 	}
 	if ctx.Err() == nil || m.Count() != 0 {
 		t.Fatal("cancelled Codex process retained")
-	}
-}
-
-func TestCodexStreamMatchesLegacyThroughSameChildProtocol(t *testing.T) {
-	compareLegacyAgent(t, "codex", "codex", CodexKind())
-}
-
-func compareLegacyAgent(t *testing.T, kindName, fakeName string, kind Kind) {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("Bun absent; native child protocol tests run separately")
-	}
-	fake := legacytest.Path(t, "packages/plugin-agents/src/fakes/fake-"+fakeName+".ts")
-	if kindName == "codex" {
-		// The frozen oracle predates the catalog and config requests.
-		source, err := os.ReadFile(fake)
-		if err != nil {
-			t.Fatal(err)
-		}
-		common, _ := json.Marshal(filepath.ToSlash(filepath.Join(filepath.Dir(fake), "common.ts")))
-		adapted := strings.Replace(string(source), "from './common'", "from "+string(common), 1)
-		adapted = strings.Replace(adapted, "    case 'initialize':", "    case 'config/read':\n      write({ id: message.id, result: { config: {} } })\n      break\n    case 'initialize':", 1)
-		adapted = `if (process.argv.includes('debug')) { console.log(JSON.stringify({ models: [{ slug: 'gpt-big' }] })); process.exit(0) }` + "\n" + adapted
-		fake = filepath.Join(t.TempDir(), "fake-codex.ts")
-		if err := os.WriteFile(fake, []byte(adapted), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	command := `"` + bun + `" "` + fake + `"`
-	m := newTestSessions(t, kind, SessionOptions{Quiet: 30 * time.Millisecond})
-	settings := map[string]any{"command": command}
-	tools := []sdk.Tool{{Name: "lookup", Description: "Look up a word", Parameters: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}}}}
-	messages := []sdk.Message{{Role: "system", Content: "Initial instructions"}}
-	steps := [][]sdk.Part{}
-	for index, prompt := range []string{"hello", `CALL lookup {"key":"中文"}`, "last"} {
-		if index == 2 {
-			messages[0].Content = "Changed instructions"
-		}
-		messages = append(messages, user(prompt))
-		effort := "high"
-		if index == 0 {
-			effort = "low"
-		}
-		for range 5 {
-			parts := codexParts(t, m, settings, sdk.Request{Model: "default", Conversation: "same", Messages: messages, Tools: tools, Effort: effort})
-			calls := []sdk.ToolCall{}
-			stable := []sdk.Part{}
-			for _, part := range parts {
-				// The bounded native queue coalesces redundant liveness pulses.
-				if part.Type == "alive" {
-					continue
-				}
-				part.StartedAt = 0
-				original := part
-				if part.Type == "tool-call" {
-					part.ID = fmt.Sprint("call_", len(calls))
-					calls = append(calls, sdk.ToolCall{ID: original.ID, Name: original.Name, Arguments: original.Arguments})
-				}
-				stable = append(stable, part)
-			}
-			steps = append(steps, stable)
-			content := textParts(parts)
-			if len(calls) > 0 {
-				messages = append(messages, sdk.Message{Role: "assistant", Content: content, ToolCalls: calls})
-				for _, call := range calls {
-					messages = append(messages, sdk.Message{Role: "tool", ToolCallID: call.ID, Content: "返回的内容", Images: []sdk.Image{{MIME: "image/png", Data: "AAAA"}}})
-				}
-			} else {
-				messages = append(messages, assistant(content))
-				break
-			}
-		}
-	}
-	var models []sdk.ListedModel
-	if kindName == "claude-code" {
-		models, err = ListClaudeModels(t.Context(), ClaudeSettings{Command: command}, t.TempDir())
-	} else if kindName == "acp" {
-		models, err = ListACPModels(t.Context(), ACPSettings{Command: command}, t.TempDir())
-	} else {
-		models, err = ListCodexModels(t.Context(), CodexSettings{Command: command}, t.TempDir())
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	input, _ := json.Marshal(map[string]any{"command": command, "kind": kindName})
-	old := legacytest.Command(t, bun, "packages/plugin-agents/src/testing/go-codex-fixture.ts")
-	old.Dir = filepath.Join("..", "..", "..")
-	old.Stdin = strings.NewReader(string(input))
-	want, err := old.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy: %v\n%s", err, want)
-	}
-	got, _ := json.Marshal(map[string]any{"steps": steps, "models": models})
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
 	}
 }

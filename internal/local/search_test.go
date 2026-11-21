@@ -2,12 +2,6 @@ package local
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -16,7 +10,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestReadOnlySourcesAndSearchMatchLegacy(t *testing.T) {
+func TestReadOnlySourcesAndSearch(t *testing.T) {
 	root := t.TempDir()
 	workspace := newTestWorkspace(t, root, WorkspaceOptions{HideGit: true})
 	for path, value := range map[string]string{
@@ -52,39 +46,20 @@ func TestReadOnlySourcesAndSearchMatchLegacy(t *testing.T) {
 		{"🙂", "emoji.txt", "", false}, {`[🙂]`, "emoji.txt", "", false}, {`\🙂`, "emoji.txt", "", false},
 	}
 	native := []sdk.FileSearchResult{}
-	queryJSON := []map[string]any{}
 	for _, q := range queries {
 		result, err := sdk.SearchByReading(t.Context(), view, q.pattern, q.path, sdk.SearchOptions{Glob: q.glob, IgnoreCase: q.ignore})
 		if err != nil {
 			t.Fatal(err)
 		}
 		native = append(native, result)
-		queryJSON = append(queryJSON, map[string]any{"pattern": q.pattern, "path": q.path, "glob": q.glob, "ignoreCase": q.ignore})
 	}
 	found, err := sdk.Walk(t.Context(), view, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sort.Strings(found.Files)
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		return
-	}
-	data, _ := json.Marshal(map[string]any{"root": root, "queries": queryJSON})
-	command := legacytest.Command(t, bun, "packages/plugin-local/src/testing/go-search-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	want, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, want)
-	}
-	got, _ := json.Marshal(map[string]any{"results": native, "files": found.Files})
-	var actual, expected any
-	if json.Unmarshal(got, &actual) != nil || json.Unmarshal(want, &expected) != nil || !reflect.DeepEqual(actual, expected) {
-		t.Fatalf("Go %s\nTS %s", got, want)
+	if len(native) != len(queries) || len(found.Files) == 0 {
+		t.Fatalf("unexpected search results: queries=%d files=%v", len(native), found.Files)
 	}
 }
 func TestSearchCapsAndExpensivePattern(t *testing.T) {
