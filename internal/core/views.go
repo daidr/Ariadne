@@ -1,10 +1,12 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -108,6 +110,16 @@ type ProjectDetail struct {
 	NeedsMe []object     `json:"needsMe"`
 }
 
+type ProjectDetailDelta struct {
+	Project   ProjectView
+	Threads   []ThreadView
+	NeedsMe   []object
+	Partial   bool
+	Seq       int64
+	At        int64
+	ThreadIDs []string
+}
+
 // Reader queries a consistent SQLite snapshot across the related views. It owns
 // no caches, so deleting projects also releases their data from the read path.
 type Reader struct {
@@ -142,9 +154,6 @@ const threadSelect = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.la
  c.wait_id, c.input_tokens, c.output_tokens, c.cached_tokens, c.cache_write_tokens,
  c.reasoning_tokens, c.cost_usd, c.cost_cny, c.turn_started_at,
  td.items AS todo_items, td.updated_at AS todo_at,
- (SELECT json_extract(e.data, '$.sourceId') FROM events e WHERE e.type = 'workspace.opened'
- AND json_extract(e.data, '$.sourceId') IS NOT NULL AND json_extract(e.data, '$.threadId') = t.id
- ORDER BY e.seq DESC LIMIT 1) AS workspace_source,
  (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = t.id) AS message_at,
  (SELECT e.at FROM events e WHERE e.seq = (SELECT tr.seq FROM transcript tr
  WHERE tr.conversation_id = t.id ORDER BY tr.id DESC LIMIT 1)) AS transcript_at,
@@ -181,7 +190,7 @@ func toThread(row record, now int64) (ThreadView, error) {
 	view.ActiveAt = max(row.integer("updated_at"), row.integer("message_at"), row.integer("transcript_at"), row.integer("todo_at"), row.integer("turn_started_at"))
 	view.Archived = view.Stage == "done" && (row.present("landed_at") && row.integer("landed_at") >= row.integer("reported_at") && row.integer("user_at") <= row.integer("landed_at") && now-row.integer("landed_at") >= int64(24*time.Hour/time.Millisecond) || now-view.ActiveAt >= int64(7*24*time.Hour/time.Millisecond))
 	if row.present("workspace_label") {
-		view.Workspace = &WorkspaceView{SourceID: row.text("workspace_source"), Label: row.text("workspace_label"), Branch: row["workspace_branch"], Base: row["workspace_base"], Removed: row.flag("workspace_removed"), Parked: row.flag("workspace_parked")}
+		view.Workspace = &WorkspaceView{SourceID: row.text("workspace_source_id"), Label: row.text("workspace_label"), Branch: row["workspace_branch"], Base: row["workspace_base"], Removed: row.flag("workspace_removed"), Parked: row.flag("workspace_parked")}
 	}
 	if row.present("aside_until") {
 		view.Aside = &AsideView{Until: row.integer("aside_until"), Reason: row.text("aside_reason"), By: row.text("aside_by"), Due: row.flag("aside_due")}
@@ -279,23 +288,38 @@ func openAttentions(ctx context.Context, db queryer, projectID string) ([]Attent
 	if err != nil {
 		return nil, err
 	}
+	if len(rows) == 0 {
+		return []AttentionView{}, nil
+	}
+	waiterRows, err := records(ctx, db, `SELECT w.attention_id, w.thread_id
+	 FROM attention_waiters w
+	 JOIN attentions a ON a.id = w.attention_id
+	 WHERE a.project_id = ? AND a.closed = 0
+	 ORDER BY w.rowid`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	waitersByAttention := make(map[string][]string, len(rows))
+	for _, waiter := range waiterRows {
+		attID := waiter.text("attention_id")
+		waitersByAttention[attID] = append(waitersByAttention[attID], waiter.text("thread_id"))
+	}
 	views := make([]AttentionView, 0, len(rows))
 	for _, row := range rows {
 		block, err := row.json("block", nil)
 		if err != nil {
 			return nil, err
 		}
-		waiters, err := records(ctx, db, "SELECT thread_id FROM attention_waiters WHERE attention_id = ? ORDER BY rowid", row["id"])
-		if err != nil {
-			return nil, err
-		}
+		attID := row.text("id")
+		ownerID := row.text("thread_id")
+		hasOwner := row.present("thread_id")
 		joined := []string{}
-		for _, waiter := range waiters {
-			if waiter["thread_id"] != row["thread_id"] {
-				joined = append(joined, waiter.text("thread_id"))
+		for _, threadID := range waitersByAttention[attID] {
+			if !hasOwner || threadID != ownerID {
+				joined = append(joined, threadID)
 			}
 		}
-		views = append(views, AttentionView{ID: row.text("id"), ProjectID: row.text("project_id"), ThreadID: row["thread_id"], JoinedBy: joined, Block: block, MessageID: row["message_id"], ConversationID: row["conversation_id"], CreatedAt: row.integer("created_at")})
+		views = append(views, AttentionView{ID: attID, ProjectID: row.text("project_id"), ThreadID: row["thread_id"], JoinedBy: joined, Block: block, MessageID: row["message_id"], ConversationID: row["conversation_id"], CreatedAt: row.integer("created_at")})
 	}
 	return views, nil
 }
@@ -305,38 +329,93 @@ func needsMe(ctx context.Context, db queryer, projectID string, threads []Thread
 	if err != nil {
 		return nil, err
 	}
-	byID := map[string]ThreadView{}
+	known := make(map[string]bool, len(threads))
 	asked := map[string]bool{}
 	for _, thread := range threads {
-		byID[thread.ID] = thread
+		known[thread.ID] = true
 	}
-	items := []object{}
-	for _, attention := range attentions {
-		var thread any
-		if id, ok := attention.ThreadID.(string); ok {
-			asked[id] = true
-			if value, ok := byID[id]; ok {
-				thread = value
-			}
-		}
-		joined := []ThreadView{}
-		for _, id := range attention.JoinedBy {
-			asked[id] = true
-			if value, ok := byID[id]; ok {
-				joined = append(joined, value)
-			}
-		}
-		items = append(items, object{"kind": "attention", "attention": attention, "thread": thread, "joined": joined})
-	}
+	items := attentionNeedsItems(attentions, known, asked)
 	for _, thread := range threads {
 		if (thread.needsUser || thread.Aside != nil && thread.Aside.Due) && !asked[thread.ID] && (thread.ReviewOf == nil || thread.ReviewOf == "") {
-			items = append(items, object{"kind": "thread", "thread": thread})
+			items = append(items, object{"kind": "thread", "threadId": thread.ID})
 		}
 	}
 	return items, nil
 }
 
+func needsMeLightweight(ctx context.Context, db queryer, projectID string, known map[string]bool) ([]object, error) {
+	attentions, err := openAttentions(ctx, db, projectID)
+	if err != nil {
+		return nil, err
+	}
+	asked := map[string]bool{}
+	items := attentionNeedsItems(attentions, known, asked)
+	candidates, err := records(ctx, db, `SELECT t.id, t.started, t.last_report, t.reported_at, t.reported_head,
+	 t.merged, t.pull_request, t.check_failures, t.stopped_reason, t.reviewed_at, t.reviewing, t.aside_until, t.aside_due, t.review_of,
+	 c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id
+	 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+	 WHERE t.project_id = ? AND coalesce(t.review_of, '') = ''
+	 AND (t.last_report = 'ready' OR c.last_outcome IN ('completed','cancelled','failed') OR t.aside_due = 1)
+	 ORDER BY t.id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range candidates {
+		id := row.text("id")
+		if asked[id] {
+			continue
+		}
+		merged, err := row.json("merged", nil)
+		if err != nil {
+			return nil, err
+		}
+		pull, err := row.json("pull_request", nil)
+		if err != nil {
+			return nil, err
+		}
+		facts := threadStageFacts(row, asObject(merged), asObject(pull))
+		if facts.needsUser(ThreadStage(facts)) || row.present("aside_until") && row.flag("aside_due") {
+			items = append(items, object{"kind": "thread", "threadId": id})
+		}
+	}
+	return items, nil
+}
+
+func attentionNeedsItems(attentions []AttentionView, known, asked map[string]bool) []object {
+	items := make([]object, 0, len(attentions))
+	for _, attention := range attentions {
+		var threadID any
+		if id, ok := attention.ThreadID.(string); ok {
+			asked[id] = true
+			if known[id] {
+				threadID = id
+			}
+		}
+		joinedIDs := []string{}
+		for _, id := range attention.JoinedBy {
+			asked[id] = true
+			if known[id] {
+				joinedIDs = append(joinedIDs, id)
+			}
+		}
+		items = append(items, object{"kind": "attention", "attention": attention, "threadId": threadID, "joinedIds": joinedIDs})
+	}
+	return items
+}
+
 func toProject(ctx context.Context, db queryer, row record, needs int) (ProjectView, error) {
+	rows, err := records(ctx, db, `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
+	 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
+	 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny,
+	 count(turn_id) AS running_turns
+	 FROM conversations WHERE project_id = ?`, row["id"])
+	if err != nil {
+		return ProjectView{}, err
+	}
+	return toProjectWithUsage(row, needs, rows[0])
+}
+
+func toProjectWithUsage(row record, needs int, usageRow record) (ProjectView, error) {
 	view := ProjectView{ID: row.text("id"), Name: row.text("name"), Unnamed: row.flag("unnamed"), CoordinatorID: row.text("coordinator_id"), CreatedAt: row.integer("created_at"), UpdatedAt: row.integer("updated_at"), NeedsMe: needs, Slots: row["slots"], AutopilotPaused: row.flag("autopilot_paused")}
 	settings, err := projectsettings.Stored(row.text("settings"))
 	if err != nil {
@@ -360,16 +439,8 @@ func toProject(ctx context.Context, db queryer, row record, needs int) (ProjectV
 	if err != nil {
 		return ProjectView{}, err
 	}
-	rows, err := records(ctx, db, `SELECT sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
-	 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
-	 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny,
-	 count(turn_id) AS running_turns
-	 FROM conversations WHERE project_id = ?`, row["id"])
-	if err != nil {
-		return ProjectView{}, err
-	}
-	view.Usage = usage(rows[0])
-	view.RunningTurns = rows[0].integer("running_turns")
+	view.Usage = usage(usageRow)
+	view.RunningTurns = usageRow.integer("running_turns")
 	return view, nil
 }
 
@@ -397,6 +468,112 @@ func projectDetail(ctx context.Context, db queryer, projectID string, now int64)
 }
 func (reader Reader) GetProjectDetail(ctx context.Context, projectID string) (result ProjectDetail, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error { result, err = projectDetail(ctx, tx, projectID, reader.now()); return err })
+	return
+}
+
+func listThreadsChangedSince(ctx context.Context, db queryer, projectID string, sinceSeq, sinceAt, now int64) ([]ThreadView, error) {
+	rows, err := records(ctx, db, threadSelect+" WHERE t.project_id = ? AND t.changed_seq > ? ORDER BY t.id", projectID, sinceSeq)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ThreadView, 0, len(rows))
+	for _, row := range rows {
+		view, err := toThread(row, now)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	if now > sinceAt {
+		dayMs := int64(24 * time.Hour / time.Millisecond)
+		archivedRows, err := records(ctx, db, `SELECT id FROM threads
+		 WHERE project_id = ? AND changed_seq <= ? AND last_report IN ('done', 'ready')
+		 AND landed_at IS NOT NULL AND landed_at > ? AND landed_at <= ?
+		 ORDER BY id`, projectID, sinceSeq, sinceAt-dayMs, now-dayMs)
+		if err != nil {
+			return nil, err
+		}
+		if len(archivedRows) > 0 {
+			ids := make([]string, 0, len(archivedRows))
+			for _, row := range archivedRows {
+				ids = append(ids, row.text("id"))
+			}
+			encodedIDs, err := json.Marshal(ids)
+			if err != nil {
+				return nil, err
+			}
+			extraRows, err := records(ctx, db, threadSelect+" WHERE t.id IN (SELECT value FROM json_each(?)) ORDER BY t.id", string(encodedIDs))
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range extraRows {
+				view, err := toThread(row, now)
+				if err != nil {
+					return nil, err
+				}
+				views = append(views, view)
+			}
+			slices.SortFunc(views, func(a, b ThreadView) int { return cmp.Compare(a.ID, b.ID) })
+		}
+	}
+	return views, nil
+}
+
+func (reader Reader) GetProjectDetailSince(ctx context.Context, projectID string, sinceSeq, sinceAt int64, canPartial bool) (result ProjectDetailDelta, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		now := reader.now()
+		rows, err := records(ctx, tx, "SELECT * FROM projects WHERE id = ?", projectID)
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return domainerr.NotFound(projectID)
+		}
+		var currentSeq int64
+		if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq), 0) FROM events").Scan(&currentSeq); err != nil {
+			return err
+		}
+		idRows, err := records(ctx, tx, "SELECT id FROM threads WHERE project_id = ? ORDER BY id", projectID)
+		if err != nil {
+			return err
+		}
+		threadIDs := make([]string, 0, len(idRows))
+		known := make(map[string]bool, len(idRows))
+		for _, row := range idRows {
+			id := row.text("id")
+			threadIDs = append(threadIDs, id)
+			known[id] = true
+		}
+		const hourMs = int64(time.Hour / time.Millisecond)
+		partial := canPartial && sinceSeq >= 0 && sinceSeq <= currentSeq && now >= sinceAt && now/hourMs == sinceAt/hourMs
+		var threads []ThreadView
+		var needs []object
+		if partial {
+			threads, err = listThreadsChangedSince(ctx, tx, projectID, sinceSeq, sinceAt, now)
+			if err != nil {
+				return err
+			}
+			needs, err = needsMeLightweight(ctx, tx, projectID, known)
+			if err != nil {
+				return err
+			}
+		} else {
+			threads, err = listThreads(ctx, tx, projectID, now)
+			if err != nil {
+				return err
+			}
+			needs, err = needsMe(ctx, tx, projectID, threads)
+			if err != nil {
+				return err
+			}
+		}
+		project, err := toProject(ctx, tx, rows[0], len(needs))
+		if err != nil {
+			return err
+		}
+		result = ProjectDetailDelta{Project: project, Threads: threads, NeedsMe: needs, Partial: partial, Seq: currentSeq, At: now, ThreadIDs: threadIDs}
+		return nil
+	})
 	return
 }
 func (reader Reader) GetProject(ctx context.Context, projectID string) (ProjectView, error) {
@@ -476,7 +653,7 @@ func projectNeedsCount(ctx context.Context, db queryer, projectID string) (int, 
 }
 
 func (reader Reader) ListProjects(ctx context.Context) (result []ProjectView, err error) {
-	return reader.listProjects(ctx, "SELECT * FROM projects ORDER BY updated_at DESC")
+	return reader.listProjects(ctx, "", "SELECT * FROM projects ORDER BY updated_at DESC")
 }
 
 func (reader Reader) ListProjectsByID(ctx context.Context, ids []string) ([]ProjectView, error) {
@@ -484,22 +661,119 @@ func (reader Reader) ListProjectsByID(ctx context.Context, ids []string) ([]Proj
 	if err != nil {
 		return nil, err
 	}
-	return reader.listProjects(ctx, "SELECT * FROM projects WHERE id IN (SELECT value FROM json_each(?)) ORDER BY updated_at DESC", string(values))
+	return reader.listProjects(ctx, string(values), "SELECT * FROM projects WHERE id IN (SELECT value FROM json_each(?)) ORDER BY updated_at DESC", string(values))
 }
 
-func (reader Reader) listProjects(ctx context.Context, query string, args ...any) (result []ProjectView, err error) {
+func (reader Reader) listProjects(ctx context.Context, filterIDsJSON, query string, args ...any) (result []ProjectView, err error) {
 	result = []ProjectView{}
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
 		rows, err := records(ctx, tx, query, args...)
 		if err != nil {
 			return err
 		}
-		for _, row := range rows {
-			needs, err := projectNeedsCount(ctx, tx, row.text("id"))
+		if len(rows) == 0 {
+			return nil
+		}
+		var usageRows []record
+		if filterIDsJSON == "" {
+			usageRows, err = records(ctx, tx, `SELECT project_id, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
+			 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
+			 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny,
+			 count(turn_id) AS running_turns
+			 FROM conversations GROUP BY project_id`)
+		} else {
+			usageRows, err = records(ctx, tx, `SELECT project_id, sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
+			 sum(cached_tokens) AS cached_tokens, sum(cache_write_tokens) AS cache_write_tokens,
+			 sum(reasoning_tokens) AS reasoning_tokens, sum(cost_usd) AS cost_usd, sum(cost_cny) AS cost_cny,
+			 count(turn_id) AS running_turns
+			 FROM conversations WHERE project_id IN (SELECT value FROM json_each(?)) GROUP BY project_id`, filterIDsJSON)
+		}
+		if err != nil {
+			return err
+		}
+		usageByProject := make(map[string]record, len(usageRows))
+		for _, row := range usageRows {
+			usageByProject[row.text("project_id")] = row
+		}
+		var attentionRows []record
+		if filterIDsJSON == "" {
+			attentionRows, err = records(ctx, tx, `SELECT a.project_id, a.id, a.thread_id, w.thread_id AS joined
+			 FROM attentions a LEFT JOIN attention_waiters w ON w.attention_id = a.id
+			 WHERE a.closed = 0`)
+		} else {
+			attentionRows, err = records(ctx, tx, `SELECT a.project_id, a.id, a.thread_id, w.thread_id AS joined
+			 FROM attentions a LEFT JOIN attention_waiters w ON w.attention_id = a.id
+			 WHERE a.closed = 0 AND a.project_id IN (SELECT value FROM json_each(?))`, filterIDsJSON)
+		}
+		if err != nil {
+			return err
+		}
+		attentionsByProject := map[string]map[string]bool{}
+		askedByProject := map[string]map[string]bool{}
+		for _, row := range attentionRows {
+			pid := row.text("project_id")
+			if attentionsByProject[pid] == nil {
+				attentionsByProject[pid] = map[string]bool{}
+				askedByProject[pid] = map[string]bool{}
+			}
+			attentionsByProject[pid][row.text("id")] = true
+			if id := row.text("thread_id"); id != "" {
+				askedByProject[pid][id] = true
+			}
+			if id := row.text("joined"); id != "" {
+				askedByProject[pid][id] = true
+			}
+		}
+		needsByProject := make(map[string]int, len(rows))
+		for pid, atts := range attentionsByProject {
+			needsByProject[pid] = len(atts)
+		}
+		var candidateRows []record
+		if filterIDsJSON == "" {
+			candidateRows, err = records(ctx, tx, `SELECT t.project_id, t.id, t.started, t.last_report, t.reported_at, t.reported_head,
+			 t.merged, t.pull_request, t.check_failures, t.stopped_reason, t.reviewed_at, t.reviewing, t.aside_until, t.aside_due, t.review_of,
+			 c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id
+			 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+			 WHERE coalesce(t.review_of, '') = ''
+			 AND (t.last_report = 'ready' OR c.last_outcome IN ('completed','cancelled','failed') OR t.aside_due = 1)`)
+		} else {
+			candidateRows, err = records(ctx, tx, `SELECT t.project_id, t.id, t.started, t.last_report, t.reported_at, t.reported_head,
+			 t.merged, t.pull_request, t.check_failures, t.stopped_reason, t.reviewed_at, t.reviewing, t.aside_until, t.aside_due, t.review_of,
+			 c.turn_id, c.pending_seq, c.last_turn_at, c.last_outcome, c.wait_id
+			 FROM threads t LEFT JOIN conversations c ON c.id = t.id
+			 WHERE coalesce(t.review_of, '') = ''
+			 AND (t.last_report = 'ready' OR c.last_outcome IN ('completed','cancelled','failed') OR t.aside_due = 1)
+			 AND t.project_id IN (SELECT value FROM json_each(?))`, filterIDsJSON)
+		}
+		if err != nil {
+			return err
+		}
+		for _, row := range candidateRows {
+			pid := row.text("project_id")
+			if askedByProject[pid][row.text("id")] {
+				continue
+			}
+			merged, err := row.json("merged", nil)
 			if err != nil {
 				return err
 			}
-			view, err := toProject(ctx, tx, row, needs)
+			pull, err := row.json("pull_request", nil)
+			if err != nil {
+				return err
+			}
+			facts := threadStageFacts(row, asObject(merged), asObject(pull))
+			if facts.needsUser(ThreadStage(facts)) || row.present("aside_until") && row.flag("aside_due") {
+				needsByProject[pid]++
+			}
+		}
+		result = make([]ProjectView, 0, len(rows))
+		for _, row := range rows {
+			pid := row.text("id")
+			usageRow := usageByProject[pid]
+			if usageRow == nil {
+				usageRow = record{}
+			}
+			view, err := toProjectWithUsage(row, needsByProject[pid], usageRow)
 			if err != nil {
 				return err
 			}

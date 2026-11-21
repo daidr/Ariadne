@@ -43,7 +43,29 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 {
+	if version == 67 || version == 68 {
+		if err := addColumnIfMissing(ctx, tx, "threads", "workspace_source_id", "TEXT"); err != nil {
+			return err
+		}
+		if err := addColumnIfMissing(ctx, tx, "threads", "changed_seq", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE threads SET workspace_source_id = (
+		 SELECT json_extract(e.data, '$.sourceId') FROM events e
+		 WHERE e.project_id = threads.project_id
+		  AND e.type = 'workspace.opened'
+		  AND json_extract(e.data, '$.sourceId') IS NOT NULL
+		  AND json_extract(e.data, '$.threadId') = threads.id
+		 ORDER BY e.seq DESC LIMIT 1
+		) WHERE workspace_source_id IS NULL AND workspace_label IS NOT NULL`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE threads SET changed_seq = coalesce((SELECT max(seq) FROM events WHERE project_id = threads.project_id), 0)
+		 WHERE changed_seq = 0`); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || version == 67 || version == 68 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {
@@ -99,6 +121,19 @@ func (DomainProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Even
 	transcriptEvent(w, e, d)
 	return w.err
 }
+func addColumnIfMissing(ctx context.Context, tx *sql.Tx, table, column, definition string) error {
+	var exists int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM pragma_table_info(?) WHERE name = ?", table, column).Scan(&exists)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
+}
+
 func dropProjectionTables(ctx context.Context, tx *sql.Tx) error {
 	for _, table := range projectionTables {
 		if _, err := tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {

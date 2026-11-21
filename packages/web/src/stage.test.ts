@@ -1,6 +1,13 @@
-import type { ThreadStage, ThreadView } from '@ariadne/core'
+import type { AttentionView, NeedsMeItem, ThreadStage, ThreadView } from '@ariadne/core'
 import { describe, expect, test } from 'vitest'
-import { groupOf, groupOfThread, sortThreads, threadGroups, threadLine } from './stage'
+import {
+  groupOf,
+  groupOfThread,
+  sortThreads,
+  threadActionIds,
+  threadGroups,
+  threadLine,
+} from './stage'
 
 const thread = (over: Partial<ThreadView>): ThreadView =>
   ({
@@ -58,5 +65,18 @@ describe('thread list', () => {
     ]
     expect(ids(sortThreads(list))).toEqual(['b', 'c', 'a'])
     expect(ids(list)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('extracts thread action IDs from ID-referenced needsMe items', () => {
+    const items: NeedsMeItem[] = [
+      { kind: 'thread', threadId: 'thr_1' },
+      {
+        kind: 'attention',
+        attention: { id: 'att_1' } as AttentionView,
+        threadId: 'thr_2',
+        joinedIds: ['thr_3'],
+      },
+    ]
+    expect([...threadActionIds(items)]).toEqual(['thr_1'])
   })
 })

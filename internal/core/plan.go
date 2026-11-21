@@ -253,29 +253,6 @@ func parsePlanOps(raw any) ([]object, error) {
 	return parsed, nil
 }
 
-func needsConfirmation(graph planGraph, ops []object) bool {
-	for _, op := range ops {
-		switch op.str("op") {
-		case "remove":
-			return true
-		case "add":
-			if op.str("kind") == "milestone" {
-				return true
-			}
-		case "update":
-			if node := graph.nodes[op.str("id")]; node != nil {
-				if node.str("kind") == "milestone" {
-					return true
-				}
-				if value, has := op["acceptance"]; has && value != node["acceptance"] {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func whyUndoFails(graph planGraph, undo []object, titles map[string]string) any {
 	at := graph
 	for _, op := range undo {
