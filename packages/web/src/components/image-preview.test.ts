@@ -218,6 +218,20 @@ describe('ImagePreview', () => {
       const img = wrapper.get<HTMLImageElement>('.image-preview__image').element
       mockStageLayout(stage, img)
 
+      // Horizontal wheel (deltaY === 0) must not zoom out.
+      stage.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaX: 120,
+          deltaY: 0,
+          clientX: 200,
+          clientY: 200,
+        }),
+      )
+      await nextTick()
+      expect(wrapper.get('.image-preview__scale').text()).toBe('100%')
+
       // Wheel zoom in.
       stage.dispatchEvent(
         new WheelEvent('wheel', {
@@ -230,6 +244,27 @@ describe('ImagePreview', () => {
       )
       await nextTick()
       expect(wrapper.get('.image-preview__scale').text()).toBe('125%')
+
+      // Browser modifier shortcuts (Ctrl/Cmd/Alt) must not be intercepted.
+      const ctrlRefresh = new KeyboardEvent('keydown', {
+        key: 'r',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+      wrapper.get('.image-preview').element.dispatchEvent(ctrlRefresh)
+      const metaReset = new KeyboardEvent('keydown', {
+        key: '0',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+      wrapper.get('.image-preview').element.dispatchEvent(metaReset)
+      await nextTick()
+      expect(ctrlRefresh.defaultPrevented).toBe(false)
+      expect(metaReset.defaultPrevented).toBe(false)
+      expect(wrapper.get('.image-preview__scale').text()).toBe('125%')
+      expect(img.style.transform).toContain('rotate(0deg)')
 
       // Desktop mouse dblclick zooms to 200% and resets back to 100%.
       img.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 200, clientY: 200 }))
@@ -270,7 +305,7 @@ describe('ImagePreview', () => {
       await nextTick()
       expect(parseTransform(nextImg.style.transform)).toEqual({ x: 0, y: 0, scale: 1 })
 
-      // Single tap/click on image does not close.
+      // Pressing on image edge and releasing on mask within 8px must not close preview.
       nextImg.dispatchEvent(
         pointerEvent('pointerdown', {
           pointerId: 20,
@@ -279,18 +314,40 @@ describe('ImagePreview', () => {
           clientY: 200,
         }),
       )
-      window.dispatchEvent(
+      stage.dispatchEvent(
         pointerEvent('pointerup', {
           pointerId: 20,
           pointerType: 'mouse',
-          clientX: 200,
+          clientX: 203,
           clientY: 200,
         }),
       )
+      stage.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 203, clientY: 200 }))
       await nextTick()
       expect(wrapper.emitted('close')).toBeUndefined()
 
-      // Tap on empty mask closes preview once.
+      // Pressing on mask and releasing on image within 8px must not close preview.
+      stage.dispatchEvent(
+        pointerEvent('pointerdown', {
+          pointerId: 201,
+          pointerType: 'touch',
+          clientX: 10,
+          clientY: 10,
+        }),
+      )
+      nextImg.dispatchEvent(
+        pointerEvent('pointerup', {
+          pointerId: 201,
+          pointerType: 'touch',
+          clientX: 14,
+          clientY: 10,
+        }),
+      )
+      stage.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 14, clientY: 10 }))
+      await nextTick()
+      expect(wrapper.emitted('close')).toBeUndefined()
+
+      // Tap on empty mask (down and up on stage) closes preview once.
       stage.dispatchEvent(
         pointerEvent('pointerdown', {
           pointerId: 21,
@@ -299,7 +356,7 @@ describe('ImagePreview', () => {
           clientY: 10,
         }),
       )
-      window.dispatchEvent(
+      stage.dispatchEvent(
         pointerEvent('pointerup', {
           pointerId: 21,
           pointerType: 'touch',
@@ -325,7 +382,8 @@ describe('ImagePreview', () => {
     }
   })
 
-  test('opens ImagePreview when clicking a loaded MessageImage', async () => {
+  test('opens ImagePreview when clicking a loaded MessageImage without pre-binding resize', async () => {
+    const addListenerSpy = vi.spyOn(window, 'addEventListener')
     const wrapper = mount(MessageImage, {
       props: {
         src: 'https://example.com/photo.png',
@@ -335,6 +393,8 @@ describe('ImagePreview', () => {
     })
 
     try {
+      expect(addListenerSpy.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(0)
+
       await wrapper.get('img').trigger('load')
       await nextTick()
       expect(wrapper.get('.message-image').classes()).toContain('is-previewable')
@@ -342,7 +402,9 @@ describe('ImagePreview', () => {
       await wrapper.get('.message-image').trigger('click')
       await nextTick()
       expect(document.body.querySelector('.image-preview__stage')).not.toBeNull()
+      expect(addListenerSpy.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(1)
     } finally {
+      addListenerSpy.mockRestore()
       wrapper.unmount()
     }
   })

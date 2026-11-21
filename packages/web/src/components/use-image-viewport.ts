@@ -446,16 +446,17 @@ export function useImageViewport(options: UseImageViewportOptions) {
     setWindowListeners(false)
     reclamp()
 
+    // Any completed pointer sequence owns its trailing click on the stage so edge slips never close the modal.
+    suppressNextMaskClick = true
+
     if (hadMultiTouch || hadDrag || candidate?.moved) {
-      suppressNextMaskClick = true
       return
     }
 
     if (cancelled || !candidate || candidate.pointerId !== event.pointerId) return
 
-    if (candidate.isMask && closeOnMask()) {
+    if (candidate.isMask && event.target === options.stage.value && closeOnMask()) {
       lastTouchTap = null
-      suppressNextMaskClick = true
       options.onMaskTap?.()
       return
     }
@@ -507,6 +508,7 @@ export function useImageViewport(options: UseImageViewportOptions) {
 
   function onWheel(event: WheelEvent) {
     event.preventDefault()
+    if (event.deltaY === 0) return
     const focal: Point | undefined =
       Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
         ? { x: event.clientX, y: event.clientY }
@@ -537,25 +539,24 @@ export function useImageViewport(options: UseImageViewportOptions) {
       stageEl.addEventListener('gesturestart', preventGesture, { passive: false })
       stageEl.addEventListener('gesturechange', preventGesture, { passive: false })
       stageEl.addEventListener('gestureend', preventGesture, { passive: false })
+      if (typeof window !== 'undefined') {
+        window.addEventListener('resize', reclamp)
+      }
       cleanup(() => {
         stageEl.removeEventListener('touchmove', onTouchmove)
         stageEl.removeEventListener('gesturestart', preventGesture)
         stageEl.removeEventListener('gesturechange', preventGesture)
         stageEl.removeEventListener('gestureend', preventGesture)
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('resize', reclamp)
+        }
       })
     },
     { immediate: true },
   )
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener('resize', reclamp)
-  }
-
   onScopeDispose(() => {
     cancelGestures()
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('resize', reclamp)
-    }
   })
 
   return {

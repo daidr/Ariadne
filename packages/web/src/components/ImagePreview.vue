@@ -131,6 +131,7 @@ function go(step: number) {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return
   if (event.target instanceof HTMLButtonElement && (event.key === 'Enter' || event.key === ' ')) {
     return
   }

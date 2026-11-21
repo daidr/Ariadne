@@ -62,7 +62,16 @@ function clampAxis(
   viewportSize: number,
   centerOffset: number,
 ): number {
-  if (renderedSize <= viewportSize || viewportSize <= 0) return 0
+  if (viewportSize <= 0) return 0
+  if (renderedSize <= viewportSize) {
+    // Keep centered at 0 while the image fits inside the viewport, then smoothly transition
+    // toward `-centerOffset` near the edge so asymmetric stage padding never jumps across `renderedSize === viewportSize`.
+    const slack = (viewportSize - renderedSize) / 2
+    const min = -slack - centerOffset
+    const max = slack - centerOffset
+    const clamped = Math.min(max, Math.max(min, 0))
+    return Math.round(clamped * OFFSET_PRECISION) / OFFSET_PRECISION
+  }
   const halfOverflow = (renderedSize - viewportSize) / 2
   const min = -halfOverflow - centerOffset
   const max = halfOverflow - centerOffset

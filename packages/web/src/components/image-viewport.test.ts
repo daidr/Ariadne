@@ -56,6 +56,12 @@ describe('image viewport math', () => {
     // At 2x (800x800 in 400x600): halfOverflowY = 100, centerOffset.y = -20 -> [-80, 120].
     expect(clampOffset({ x: 0, y: 200 }, 2, 0, shifted)).toEqual({ x: 0, y: 120 })
     expect(clampOffset({ x: 0, y: -200 }, 2, 0, shifted)).toEqual({ x: 0, y: -80 })
+
+    // Smoothly transitions across renderedSize === viewportSize with asymmetric padding (no jump).
+    expect(clampOffset({ x: 0, y: 0 }, 1.2, 0, shifted)).toEqual({ x: 0, y: 0 })
+    expect(clampOffset({ x: 0, y: 0 }, 1.45, 0, shifted)).toEqual({ x: 0, y: 10 })
+    expect(clampOffset({ x: 0, y: 0 }, 1.5, 0, shifted)).toEqual({ x: 0, y: 20 })
+    expect(clampOffset({ x: 0, y: 20 }, 1.51, 0, shifted)).toEqual({ x: 0, y: 20 })
   })
 
   test('anchors focal point during stationary zoom and moving two-finger pinch', () => {
