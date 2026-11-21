@@ -292,6 +292,8 @@ export const zhCN = {
   'memory.remove': '删除',
   'memory.save': '保存',
   'thread.workspace': '工作区',
+  'thread.planNode': '计划节点',
+  'thread.planNodeUnlink': '解绑计划节点',
   'thread.branch': '分支 {branch}',
   'todo.title': '待办',
   'thread.reviewed': '看完了',

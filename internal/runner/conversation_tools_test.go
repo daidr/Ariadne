@@ -1,12 +1,14 @@
 package runner
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
 func TestCoordinatorCannotRenameProject(t *testing.T) {
@@ -120,5 +122,127 @@ func TestCoordinatorCompletesPreviouslyPausedDiscussion(t *testing.T) {
 	}
 	if _, err := complete.run(ctx, input); err == nil {
 		t.Fatal("completion interrupted an active turn")
+	}
+}
+
+func TestCoordinatorLinkThreadNode(t *testing.T) {
+	ctx := t.Context()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "link-node.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProject, err := repo.CreateProject(ctx, new("Other"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RevisePlan(ctx, project.ID, core.PlanRevision{Author: "user", Reason: "建立计划", Ops: []map[string]any{
+		{"op": "add", "id": "nod_1", "kind": "task", "title": "实现后端", "description": "新增事件和命令", "acceptance": "测试通过"},
+		{"op": "add", "id": "nod_2", "kind": "task", "title": "完善前端", "description": "实时同步视图", "acceptance": "视图一致"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "事后绑定测试"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherThread, err := repo.CreateThread(ctx, otherProject.ID, core.NewThread{Title: "其他项目讨论串"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	coordinator := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
+		ID: project.CoordinatorID, ProjectID: project.ID, Role: "coordinator",
+	}}
+	tools := map[string]tool{}
+	for _, item := range coordinator.tools(ctx, project) {
+		tools[item.spec.Name] = item
+	}
+	linkTool := tools["link_thread_node"]
+	if linkTool.run == nil {
+		t.Fatal("coordinator missing link_thread_node tool")
+	}
+
+	// Invalid arguments return actionable guidance.
+	if _, err := linkTool.run(ctx, args{"threadId": "undefined", "nodeId": "nod_1"}); err == nil || !strings.Contains(err.Error(), "list_threads") {
+		t.Fatalf("expected list_threads guidance for invalid threadId, got %v", err)
+	}
+	if _, err := linkTool.run(ctx, args{"threadId": otherThread.ID, "nodeId": "nod_1"}); err == nil || !strings.Contains(err.Error(), "list_threads") {
+		t.Fatalf("expected list_threads guidance for cross-project thread, got %v", err)
+	}
+	if _, err := linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": "nod_missing"}); err == nil || !strings.Contains(err.Error(), "read_plan") {
+		t.Fatalf("expected read_plan guidance for missing node, got %v", err)
+	}
+	if _, err := linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": 123}); err == nil {
+		t.Fatal("expected error for non-string nodeId")
+	}
+	reviewID := "thr_review_link"
+	reviewData, err := json.Marshal(args{"threadId": reviewID, "title": "审查", "nodeId": nil, "model": nil, "branch": nil, "reviewOf": thread.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "thread.created",
+		ProjectID: project.ID,
+		Data:      reviewData,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := linkTool.run(ctx, args{"threadId": reviewID, "nodeId": "nod_1"}); err == nil || !strings.Contains(err.Error(), "review thread cannot be linked to a plan node") {
+		t.Fatalf("expected readable error for review thread, got %v", err)
+	}
+
+	// Bind to nod_1.
+	result, err := linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": "nod_1"})
+	if err != nil || !strings.Contains(result, `"nodeId":"nod_1"`) {
+		t.Fatalf("link result = %s, %v", result, err)
+	}
+
+	// list_threads and read_thread expose nodeId, and thread prompt includes the linked plan brief.
+	listResult, err := tools["list_threads"].run(ctx, args{})
+	if err != nil || !strings.Contains(listResult, `"nodeId":"nod_1"`) {
+		t.Fatalf("list_threads = %s, %v", listResult, err)
+	}
+	readResult, err := tools["read_thread"].run(ctx, args{"threadId": thread.ID})
+	if err != nil || !strings.Contains(readResult, `"nodeId":"nod_1"`) {
+		t.Fatalf("read_thread = %s, %v", readResult, err)
+	}
+	worker := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
+		ID: thread.ID, ProjectID: project.ID, Role: "thread",
+	}}
+	if promptText := joinSections(worker.sections(ctx, project, nil)); !strings.Contains(promptText, "实现后端") {
+		t.Fatalf("thread prompt did not pick up linked plan node: %s", promptText)
+	}
+
+	// Rebind to nod_2.
+	result, err = linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": "nod_2"})
+	if err != nil || !strings.Contains(result, `"nodeId":"nod_2"`) {
+		t.Fatalf("rebind result = %s, %v", result, err)
+	}
+	if promptText := joinSections(worker.sections(ctx, project, nil)); !strings.Contains(promptText, "完善前端") || strings.Contains(promptText, "实现后端") {
+		t.Fatalf("thread prompt did not update to new plan node: %s", promptText)
+	}
+
+	// Unlink with unlink=true.
+	result, err = linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": "nod_2", "unlink": true})
+	if err != nil || !strings.Contains(result, `"nodeId":null`) {
+		t.Fatalf("unlink result = %s, %v", result, err)
+	}
+	if promptText := joinSections(worker.sections(ctx, project, nil)); strings.Contains(promptText, "完善前端") {
+		t.Fatalf("thread prompt still contains unlinked plan node: %s", promptText)
+	}
+
+	// Bind again, then unlink by omitting nodeId.
+	if _, err := linkTool.run(ctx, args{"threadId": thread.ID, "nodeId": "nod_1"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = linkTool.run(ctx, args{"threadId": thread.ID})
+	if err != nil || !strings.Contains(result, `"nodeId":null`) {
+		t.Fatalf("omitted nodeId unlink result = %s, %v", result, err)
 	}
 }
