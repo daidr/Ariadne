@@ -23,6 +23,7 @@ import type {
 } from '@ariadne/core'
 import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
+import type { AskDraft } from './blocks/ask-drafts'
 import type { Draft } from './components/attachments'
 import { reuse } from './reuse'
 import { coalescedRefresh } from './coalesced-refresh'
@@ -451,6 +452,7 @@ function validateWorkspace(
     !threads.has(state.main.conversationId)
   )
     resetMain()
+  pruneThreadComposers()
 }
 
 /**
@@ -675,13 +677,12 @@ function settleSide() {
   if (side.activeOf(side.focusedGroup(state.side)) !== front) state.side = side.defaultLayout(front)
 }
 
-/** Show another project's right side: nothing of the last one's threads stays. */
+/** Show another project's right side: its loaded thread conversations start fresh. */
 function showSide(layout: SideLayout) {
   state.side = layout
   state.paneParams = {}
   state.full = null
   state.threads = {}
-  for (const threadId of composers.keys()) dropComposer(threadId)
 }
 
 /** Show the right side as `next`, remembered for the project; closed threads let go. */
@@ -715,7 +716,7 @@ function syncThreads() {
   for (const threadId of Object.keys(state.threads)) {
     if (!open.has(threadId)) delete state.threads[threadId]
   }
-  for (const threadId of composers.keys()) if (!open.has(threadId)) dropComposer(threadId)
+  pruneThreadComposers(open)
   // A thread dragged in from the thread list has nothing loaded yet.
   const opened = [...open].filter((threadId) => !state.threads[threadId])
   for (const threadId of opened) state.threads[threadId] = emptyConversation()
@@ -729,32 +730,74 @@ function setFull(full: FullView | null) {
 }
 
 /**
- * What the user is writing to an open thread and has not sent: kept here rather than in
- * its panel, so moving the thread's tab to another group, which builds the panel anew,
- * keeps it. Closing the tab lets it go.
+ * What the user is writing to a conversation and has not sent: kept here rather than in
+ * its panel, so opening trace/plan/artifacts or moving a thread's tab to another group,
+ * which builds the panel anew, keeps it. Closing a thread tab or deleting a project lets it go.
  */
 export interface Composer {
   draft: Ref<string>
   files: Ref<Draft[]>
   mentions: Map<string, MentionInput>
   skills: Set<string>
+  askDrafts: Map<string, AskDraft>
 }
-const composers = new Map<string, Composer>()
+const composers = new Map<string, { projectId: string | null; composer: Composer }>()
+const coordinatorComposers = new Map<string, Composer>()
+
+function makeComposer(): Composer {
+  return {
+    draft: ref(''),
+    files: ref([]),
+    mentions: new Map(),
+    skills: new Set(),
+    askDrafts: new Map(),
+  }
+}
+
+function releaseComposerFiles(composer: Composer | undefined) {
+  for (const file of composer?.files.value ?? []) {
+    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }
+}
 
 export function composerFor(threadId: string): Composer {
-  let composer = composers.get(threadId)
+  const projectId = state.currentId ?? state.detail?.project.id ?? null
+  let entry = composers.get(threadId)
+  if (!entry) {
+    entry = { projectId, composer: makeComposer() }
+    composers.set(threadId, entry)
+  } else if (entry.projectId === null && projectId !== null) {
+    entry.projectId = projectId
+  }
+  return entry.composer
+}
+
+export function coordinatorComposerFor(projectId: string): Composer {
+  let composer = coordinatorComposers.get(projectId)
   if (!composer) {
-    composer = { draft: ref(''), files: ref([]), mentions: new Map(), skills: new Set() }
-    composers.set(threadId, composer)
+    composer = makeComposer()
+    coordinatorComposers.set(projectId, composer)
   }
   return composer
 }
 
 function dropComposer(threadId: string) {
-  for (const file of composers.get(threadId)?.files.value ?? []) {
-    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
-  }
+  releaseComposerFiles(composers.get(threadId)?.composer)
   composers.delete(threadId)
+}
+
+function pruneThreadComposers(open = new Set(shownThreads())) {
+  for (const [threadId, entry] of composers) {
+    if (entry.projectId === state.currentId && !open.has(threadId)) dropComposer(threadId)
+  }
+}
+
+function dropProjectComposers(projectId: string) {
+  releaseComposerFiles(coordinatorComposers.get(projectId))
+  coordinatorComposers.delete(projectId)
+  for (const [threadId, entry] of composers) {
+    if (entry.projectId === projectId) dropComposer(threadId)
+  }
 }
 
 /** The thread in front of the group on the right the user last used. */
@@ -840,6 +883,7 @@ export async function deleteProject(id: string) {
 /** Let go of a project that is gone; if it was open, the next one opens. */
 function forgetProject(id: string) {
   deletedDuringRefresh?.add(id)
+  dropProjectComposers(id)
   clearBoardThumbnails()
   clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)

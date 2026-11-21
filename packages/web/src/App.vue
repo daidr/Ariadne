@@ -164,7 +164,11 @@ watchEffect(() => {
                   <div class="pane">
                     <PlanMain v-if="state.main.kind === 'plan'" />
                     <ArtifactsOverview v-else-if="state.main.kind === 'artifacts'" />
-                    <ConversationPanel v-else :active="coordinatorVisible" />
+                    <ConversationPanel
+                      v-else
+                      :key="state.currentId ?? undefined"
+                      :active="coordinatorVisible"
+                    />
                   </div>
                 </template>
                 <template #end>
