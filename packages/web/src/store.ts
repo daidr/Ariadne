@@ -353,10 +353,22 @@ async function fetchDetail(id: string): Promise<{ detail: ProjectDetail; cursor:
   return { detail, cursor: sync.cursor }
 }
 
+function syncProjectRow(project: ProjectView) {
+  const currentProjects = toRaw(state.projects)
+  const index = currentProjects.findIndex((item) => item.id === project.id)
+  if (index < 0) return
+  const next = [...currentProjects]
+  next[index] = project
+  state.projects = reuse(currentProjects, orderProjects(next))
+}
+
 async function loadParts(parts: ReadonlySet<RefreshKey>) {
   const id = state.currentId
   if (!id) return
   const fetched = parts.has('detail') || !state.detail ? await fetchDetail(id) : null
+  // Keep the sidebar row up to date even if the user switched projects or a sibling fetch fails.
+  if (fetched) syncProjectRow(fetched.detail.project)
+  if (state.currentId !== id) return
   const detail = fetched?.detail ?? state.detail!
   const allConversations = parts.has('conversations')
   const targetConversations = new Set<string>()
@@ -392,16 +404,7 @@ async function loadParts(parts: ReadonlySet<RefreshKey>) {
   // What did not change stays the object it was, so nothing showing it draws again.
   state.detail = reuse(toRaw(state.detail), detail)
   // Only now: an answer dropped above must be asked for again from where this one began.
-  if (fetched) {
-    synced = { projectId: id, cursor: fetched.cursor }
-    const currentProjects = toRaw(state.projects)
-    const index = currentProjects.findIndex((project) => project.id === detail.project.id)
-    if (index >= 0) {
-      const next = [...currentProjects]
-      next[index] = detail.project
-      state.projects = reuse(currentProjects, orderProjects(next))
-    }
-  }
+  if (fetched) synced = { projectId: id, cursor: fetched.cursor }
   const artifactIds = artifacts ? new Set(artifacts.artifacts.map((a) => a.id)) : null
   validateWorkspace(detail, known, artifactIds)
   if (coordinator) state.coordinator = coordinator(state.coordinator)
@@ -622,6 +625,7 @@ export async function openMessage(conversationId: string, messageId: string) {
 }
 
 function prepareProject(id: string | null) {
+  parts.clear()
   clearBoardThumbnails()
   clearLinkCaches()
   state.starting = false
@@ -1391,8 +1395,16 @@ export function affectsProjectList(type: AnyStoredEvent['type']): boolean {
 }
 
 /** Specific conversations an event touches, or `null` when any open conversation may change. */
-export function touchedConversationsOf(event: AnyStoredEvent): readonly string[] | null {
-  const data = event.data as { conversationId?: unknown; cites?: unknown }
+export function touchedConversationsOf(
+  event: AnyStoredEvent,
+  coordinatorId: string | null = null,
+): readonly string[] | null {
+  const data = event.data as {
+    conversationId?: unknown
+    cites?: unknown
+    author?: unknown
+    comments?: unknown
+  }
   const conversationId = typeof data?.conversationId === 'string' ? data.conversationId : null
   const group = event.type.split('.')[0]
   if (event.type === 'message.posted') {
@@ -1402,6 +1414,12 @@ export function touchedConversationsOf(event: AnyStoredEvent): readonly string[]
         const cited = (cite as { conversationId?: unknown })?.conversationId
         if (typeof cited === 'string' && !ids.includes(cited)) ids.push(cited)
       }
+    }
+    const hasComments = Array.isArray(data?.comments) && data.comments.length > 0
+    // A user message in a thread without line comments also wakes the coordinator.
+    if (data?.author === 'user' && !hasComments) {
+      if (!coordinatorId) return null
+      if (!ids.includes(coordinatorId)) ids.push(coordinatorId)
     }
     return ids.length ? ids : null
   }
@@ -1451,7 +1469,10 @@ function onEvent(event: AnyStoredEvent) {
   if (event.projectId === state.currentId) {
     for (const part of partsOf(event.type)) {
       if (part === 'conversations') {
-        const conversations = touchedConversationsOf(event)
+        const conversations = touchedConversationsOf(
+          event,
+          state.detail?.project.coordinatorId ?? null,
+        )
         if (conversations) {
           for (const cid of conversations) parts.add(`conversation:${cid}`)
         } else {

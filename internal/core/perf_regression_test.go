@@ -55,6 +55,18 @@ func TestQueryPlansAvoidEventsScanAndUseProjectIndexes(t *testing.T) {
 	if !strings.Contains(changedPlan, "threads_project_changed") {
 		t.Fatalf("incremental threads query did not use threads_project_changed index:\n%s", changedPlan)
 	}
+
+	backfillPlan := strings.Join(explain(`UPDATE threads SET workspace_source_id = (
+		 SELECT json_extract(e.data, '$.sourceId') FROM events e
+		 WHERE e.project_id = threads.project_id
+		  AND e.type = 'workspace.opened'
+		  AND json_extract(e.data, '$.sourceId') IS NOT NULL
+		  AND json_extract(e.data, '$.threadId') = threads.id
+		 ORDER BY e.seq DESC LIMIT 1
+		) WHERE workspace_source_id IS NULL AND workspace_label IS NOT NULL`), "\n")
+	if !strings.Contains(backfillPlan, "events_project") || strings.Contains(backfillPlan, "SCAN events") {
+		t.Fatalf("v68 backfill query did not use events_project index:\n%s", backfillPlan)
+	}
 }
 
 func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T) {
@@ -66,6 +78,7 @@ func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T)
 	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"迁移测试","coordinatorId":"crd_a"}`)},
 		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"任务 A"}`)},
+		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_no_ws","title":"无工作区任务"}`)},
 		{Type: "workspace.opened", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","sourceId":"src_primary","label":"repo","branch":"work/a","base":"main"}`)},
 	}); err != nil {
 		t.Fatal(err)
@@ -112,8 +125,15 @@ func TestSchemaV68MigrationBackfillsWorkspaceSourceIDAndChangedSeq(t *testing.T)
 		t.Fatalf("workspace after migration = %+v", thread.Workspace)
 	}
 	var changedSeq int64
-	if err := migrated.Store.DB().QueryRowContext(t.Context(), "SELECT changed_seq FROM threads WHERE id = 'thr_a'").Scan(&changedSeq); err != nil || changedSeq != 3 {
-		t.Fatalf("changed_seq after migration = %d, want 3 (err=%v)", changedSeq, err)
+	if err := migrated.Store.DB().QueryRowContext(t.Context(), "SELECT changed_seq FROM threads WHERE id = 'thr_a'").Scan(&changedSeq); err != nil || changedSeq != 4 {
+		t.Fatalf("changed_seq after migration = %d, want 4 (err=%v)", changedSeq, err)
+	}
+	noWS, err := migrated.Reader.GetThread(t.Context(), "thr_no_ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noWS.Workspace != nil {
+		t.Fatalf("expected nil workspace for thr_no_ws, got %+v", noWS.Workspace)
 	}
 }
 

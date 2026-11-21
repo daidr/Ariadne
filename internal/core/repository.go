@@ -52,11 +52,12 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE threads SET workspace_source_id = (
 		 SELECT json_extract(e.data, '$.sourceId') FROM events e
-		 WHERE e.type = 'workspace.opened'
+		 WHERE e.project_id = threads.project_id
+		  AND e.type = 'workspace.opened'
 		  AND json_extract(e.data, '$.sourceId') IS NOT NULL
 		  AND json_extract(e.data, '$.threadId') = threads.id
 		 ORDER BY e.seq DESC LIMIT 1
-		) WHERE workspace_source_id IS NULL`); err != nil {
+		) WHERE workspace_source_id IS NULL AND workspace_label IS NOT NULL`); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE threads SET changed_seq = coalesce((SELECT max(seq) FROM events WHERE project_id = threads.project_id), 0)

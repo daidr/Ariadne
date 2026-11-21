@@ -143,10 +143,32 @@ describe('events', () => {
       touchedConversationsOf(
         asEvent('message.posted', {
           conversationId: 'thr_1',
+          author: 'thr_1',
           cites: [{ messageId: 'msg_1', conversationId: 'crd_1', content: 'hi', at: 1 }],
         }),
       ),
     ).toEqual(['thr_1', 'crd_1'])
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', { conversationId: 'thr_1', author: 'user' }),
+        'crd_1',
+      ),
+    ).toEqual(['thr_1', 'crd_1'])
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', { conversationId: 'thr_1', author: 'user' }),
+      ),
+    ).toBeNull()
+    expect(
+      touchedConversationsOf(
+        asEvent('message.posted', {
+          conversationId: 'thr_1',
+          author: 'user',
+          comments: [{ path: 'a.ts', line: 1, body: 'fix' }],
+        }),
+        'crd_1',
+      ),
+    ).toEqual(['thr_1'])
     expect(
       touchedConversationsOf(asEvent('message.edited', { messageId: 'msg_1', content: 'x' })),
     ).toBeNull()
