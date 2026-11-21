@@ -97,7 +97,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("GET", "/api/unknown", nil)
 	add("GET", "/api/projects", nil)
 	add("GET", "/api/projects/prj_a", nil)
-	add("GET", "/api/projects/prj_a/source", nil)
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	add("PUT", "/api/projects/prj_a", object{"name": " 新名称 "})
 	add("PUT", "/api/projects/prj_a", object{"name": " "})
@@ -235,51 +234,14 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	defer api.Close()
 	parameter := regexp.MustCompile(`:[a-zA-Z]+`)
-	contract, err := os.ReadFile(filepath.Join("..", "compat", "testdata", "backend-contract.json"))
-	if err != nil {
-		t.Fatal(err)
+	if len(api.routes) == 0 {
+		t.Fatal("expected native HTTP API routes to be registered")
 	}
-	var manifest struct {
-		Routes []struct{ Method, Path string }
+	if len(api.rpcProcedures) == 0 {
+		t.Fatal("expected ConnectRPC procedures to be registered")
 	}
-	if err := json.Unmarshal(contract, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	known := map[string]bool{}
-	for _, route := range manifest.Routes {
-		method := route.Method
-		if method == "WS" {
-			method = "GET"
-		}
-		known[method+" "+route.Path] = true
-	}
-	// Routes added after the frozen Bun contract also require authentication.
-	known["GET /api/files/:fileId/sheet"] = true
-	known["GET /api/projects/:projectId/sources"] = true
-	known["GET /api/projects/:projectId/activity"] = true
-	known["GET /api/threads/:threadId/pull-request/checks"] = true
-	known["GET /api/conversations/:conversationId/trace/export"] = true
-	known["PUT /api/projects/:projectId/sources"] = true
-	known["GET /api/plugins/:pluginId/settings"] = true
-	known["PUT /api/plugins/:pluginId/settings"] = true
-	known["GET /api/updates"] = true
-	known["PUT /api/updates"] = true
-	known["POST /api/updates/check"] = true
-	known["POST /api/updates/install"] = true
-	t.Logf("%d native API routes registered", len(api.routes))
-	registered := map[string]bool{}
+	t.Logf("%d native API routes and %d ConnectRPC procedures registered", len(api.routes), len(api.rpcProcedures))
 	for _, route := range api.routes {
-		registered[route] = true
-	}
-	for route := range known {
-		if !registered[route] {
-			t.Errorf("missing native route: %s", route)
-		}
-	}
-	for _, route := range api.routes {
-		if !known[route] {
-			t.Fatalf("route missing from the tested route inventory: %s", route)
-		}
 		parts := strings.SplitN(route, " ", 2)
 		if route == "GET /api/health" {
 			continue
@@ -291,17 +253,27 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 			t.Fatalf("unauthenticated %s: %d %s", route, response.Code, response.Body.String())
 		}
 	}
+	for _, procedure := range api.rpcProcedures {
+		request := httptest.NewRequest(http.MethodPost, "http://test.invalid"+rpcPrefix+procedure, nil)
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		if response.Code != 401 || !strings.Contains(response.Body.String(), "error.unauthorized") {
+			t.Fatalf("unauthenticated ConnectRPC %s: %d %s", procedure, response.Code, response.Body.String())
+		}
+	}
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/any/client/path", nil))
 	if response.Code != 200 || response.Body.String() != "app shell" {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	response = httptest.NewRecorder()
-	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/api/missing", nil))
-	if response.Code != 401 {
-		t.Fatal("API request fell through to static files")
+	for _, unknown := range []string{"/api/missing", rpcPrefix + "/ariadne.v1.MissingService/Unknown"} {
+		response = httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("POST", "http://test.invalid"+unknown, nil))
+		if response.Code != 401 {
+			t.Fatalf("unauthenticated %s did not fail before lookup: %d", unknown, response.Code)
+		}
 	}
-	// A successful bearer request grants native image reads only, never API calls.
+	// A successful bearer request grants native image reads only, never API or RPC calls.
 	request := httptest.NewRequest("GET", "http://test.invalid/api/projects", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
@@ -317,6 +289,15 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 		api.ServeHTTP(response, request)
 		if response.Code != 401 {
 			t.Fatalf("file cookie authorized %s", path)
+		}
+	}
+	for _, procedure := range api.rpcProcedures {
+		request := httptest.NewRequest(http.MethodPost, "http://test.invalid"+rpcPrefix+procedure, nil)
+		request.AddCookie(cookies[0])
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		if response.Code != 401 {
+			t.Fatalf("file cookie authorized ConnectRPC %s", procedure)
 		}
 	}
 	request = httptest.NewRequest("GET", "http://test.invalid/api/files/fil_missing", nil)

@@ -3,6 +3,7 @@ module github.com/daidr/Ariadne
 go 1.27.4
 
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/antst/go-yjs v0.1.1
 	github.com/chromedp/cdproto v0.157.8
 	github.com/chromedp/chromedp v0.21.0
@@ -16,6 +17,7 @@ require (
 	golang.org/x/net v0.58.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.44.0
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.62.0
 )
 
@@ -28,4 +30,9 @@ require (
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+)
+
+tool (
+	connectrpc.com/connect/cmd/protoc-gen-connect-go
+	google.golang.org/protobuf/cmd/protoc-gen-go
 )

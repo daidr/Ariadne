@@ -38,7 +38,6 @@ import {
   type MessageExtras,
   type ModelSettings,
   type ProjectDetail,
-  type SourceInput,
   type StreamStatus,
 } from './api'
 import { t, tm } from './i18n'
@@ -1129,21 +1128,6 @@ export function saveDownload({ blob, name }: { blob: Blob; name: string }) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Save the project's working directory; returns why it was refused, or `null`. */
-export async function setSource(source: SourceInput | null): Promise<string | null> {
-  const project = state.detail?.project
-  if (!project) return null
-  try {
-    await api.setSource(project.id, source)
-    await refreshCurrent()
-    return null
-  } catch (error) {
-    if (error instanceof ApiError) return tm(error.localized)
-    report(error)
-    return null
-  }
-}
-
 export async function saveFileSources(
   projectId: string,
   input: Parameters<typeof api.setFileSources>[1],
@@ -1546,10 +1530,6 @@ export async function endAside(threadId: string) {
 }
 
 /** The user is through with what the thread put up for review. */
-export async function reviewThread(threadId: string) {
-  await api.reviewThread(threadId).catch(report)
-}
-
 export async function completeThread(threadId: string) {
   await api.completeThread(threadId).catch(report)
 }

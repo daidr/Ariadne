@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+// ErrorParamValue carries a single interpolation argument for LocalizedError.
+message ErrorParamValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool bool_value = 3;
+  }
+}
+
+// LocalizedError is attached to ConnectRPC error details to preserve Ariadne's
+// localized error contract ({ key, params }).
+message LocalizedError {
+  string key = 1;
+  map<string, ErrorParamValue> params = 2;
+}

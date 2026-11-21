@@ -37,18 +37,30 @@ func equal(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-func (auth Auth) Bearer(request *http.Request) bool {
-	if len(request.Header.Values("Authorization")) > 1 {
+func (auth Auth) ValidBearerHeader(headers http.Header) bool {
+	if len(headers.Values("Authorization")) > 1 {
 		return false
 	}
-	header := request.Header.Get("Authorization")
-	given := ""
-	if strings.HasPrefix(header, "Bearer ") {
-		given = strings.TrimPrefix(header, "Bearer ")
-	} else if request.URL.Path == "/api/events" || livePath.MatchString(request.URL.Path) {
-		given = request.URL.Query().Get("token")
+	header := headers.Get("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		return false
 	}
+	given := strings.TrimPrefix(header, "Bearer ")
 	return given != "" && auth.Token != "" && equal(given, auth.Token)
+}
+
+func (auth Auth) Bearer(request *http.Request) bool {
+	if auth.ValidBearerHeader(request.Header) {
+		return true
+	}
+	if len(request.Header.Values("Authorization")) > 0 {
+		return false
+	}
+	if request.URL.Path == "/api/events" || livePath.MatchString(request.URL.Path) {
+		given := request.URL.Query().Get("token")
+		return given != "" && auth.Token != "" && equal(given, auth.Token)
+	}
+	return false
 }
 
 func (auth Auth) Authorized(request *http.Request) bool {

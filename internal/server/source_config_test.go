@@ -70,15 +70,9 @@ func TestProjectSourcesAndReferencesHTTPMatchLegacy(t *testing.T) {
 		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "source": part(filepath.Join(root, "missing"))}},
 		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "source": object{"kind": "missing", "settings": object{}}}},
 		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "references": object{}}},
-		{Method: "PUT", Path: "/api/projects/prj_a/source", Body: object{"source": part(root)}},
-		{Method: "GET", Path: "/api/projects/prj_a/source"},
 		{Method: "POST", Path: "/api/projects/prj_a/references", Body: object{"reference": part(file)}},
 		{Method: "POST", Path: "/api/projects/prj_a/references", Body: object{"reference": part(root)}},
 		{Method: "DELETE", Path: "/api/projects/prj_a/references/ref_seed"},
-		{Method: "PUT", Path: "/api/projects/prj_a/source", Body: object{"source": object{"kind": "local-directory", "settings": object{}}}},
-		{Method: "PUT", Path: "/api/projects/prj_a/source", Body: object{}},
-		{Method: "PUT", Path: "/api/projects/prj_a/source", Body: object{"source": nil}},
-		{Method: "GET", Path: "/api/projects/prj_a/source"},
 	}
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
@@ -153,7 +147,7 @@ func TestSourceSettingsKeepSecretsOutOfProjectAndEventLog(t *testing.T) {
 	_, err = registry.Register(sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "secure", Settings: sdk.SettingsSchema{Type: "object", Properties: map[string]sdk.SettingField{"token": {Type: "string", Secret: true}}}}, Connect: func(_ context.Context, fields map[string]any) (sdk.Capabilities, error) {
 		value, _ := fields["token"].(string)
 		received = append(received, value)
-		return sdk.Capabilities{}, nil
+		return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Open: func(context.Context, sdk.WorkspaceRequest) (sdk.Workspace, error) { return nil, nil }}}, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -163,14 +157,32 @@ func TestSourceSettingsKeepSecretsOutOfProjectAndEventLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
+	sourceID := ""
 	for _, token := range []any{"source-private-token", "", nil} {
-		body := object{"source": object{"kind": "secure", "settings": object{"token": token, "path": "repository"}}}
-		request := httptest.NewRequest("PUT", "/api/projects/prj_a/source", strings.NewReader(encoded(body)))
+		entry := object{"kind": "secure", "settings": object{"token": token, "path": "repository"}}
+		if sourceID != "" {
+			entry["id"] = sourceID
+		}
+		body := object{"sources": []any{entry}}
+		request := httptest.NewRequest("PUT", "/api/projects/prj_a/sources", strings.NewReader(encoded(body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
 		api.ServeHTTP(response, request)
 		if response.Code != 200 || strings.Contains(response.Body.String(), "source-private-token") {
 			t.Fatal(response.Code, response.Body.String())
+		}
+		if sourceID == "" {
+			var parsed struct {
+				Project struct {
+					FileSources struct {
+						PrimaryID string `json:"primaryId"`
+					} `json:"fileSources"`
+				} `json:"project"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &parsed); err != nil || parsed.Project.FileSources.PrimaryID == "" {
+				t.Fatalf("missing file source id: %v %s", err, response.Body.String())
+			}
+			sourceID = parsed.Project.FileSources.PrimaryID
 		}
 	}
 	if encoded(received) != `["source-private-token","source-private-token",""]` {
@@ -203,14 +215,31 @@ func TestUnchangedHostedSourceDoesNotAppendEvents(t *testing.T) {
 	}
 	defer api.Close()
 	var before int64
+	sourceID := ""
 	for i := range 2 {
-		body := `{"source":{"kind":"remote","settings":{"path":"/repository"},"hosting":{"kind":"host","settings":{"repository":"owner/project"}}}}`
-		request := httptest.NewRequest("PUT", "/api/projects/prj_a/source", strings.NewReader(body))
+		entry := object{"kind": "remote", "settings": object{"path": "/repository"}, "hosting": object{"kind": "host", "settings": object{"repository": "owner/project"}}}
+		if sourceID != "" {
+			entry["id"] = sourceID
+		}
+		request := httptest.NewRequest("PUT", "/api/projects/prj_a/sources", strings.NewReader(encoded(object{"sources": []any{entry}})))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
 		api.ServeHTTP(response, request)
 		if response.Code != 200 {
 			t.Fatal(response.Code, response.Body.String())
+		}
+		if sourceID == "" {
+			var parsed struct {
+				Project struct {
+					FileSources struct {
+						PrimaryID string `json:"primaryId"`
+					} `json:"fileSources"`
+				} `json:"project"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &parsed); err != nil || parsed.Project.FileSources.PrimaryID == "" {
+				t.Fatalf("missing file source id: %v %s", err, response.Body.String())
+			}
+			sourceID = parsed.Project.FileSources.PrimaryID
 		}
 		seq, err := repo.Store.LastSeq(t.Context())
 		if err != nil {

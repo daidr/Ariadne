@@ -1,0 +1,21 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/daidr/Ariadne/internal/gen/proto
+plugins:
+  - local: ['go', 'tool', 'protoc-gen-go']
+    out: internal/gen/proto
+    opt:
+      - paths=source_relative
+  - local: ['go', 'tool', 'protoc-gen-connect-go']
+    out: internal/gen/proto
+    opt:
+      - paths=source_relative
+  - local: protoc-gen-es
+    out: packages/proto/src/gen
+    opt:
+      - target=ts
+      - import_extension=none

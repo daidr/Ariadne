@@ -47,7 +47,15 @@ import type {
   SettingsSchema,
   WorktreeInfo,
 } from '@ariadne/plugin-sdk'
+import {
+  DataService,
+  type BackupInfo as ProtoBackupInfo,
+  type StorageSnapshot as ProtoStorageSnapshot,
+} from '@ariadne/proto'
+import { ApiError, createRpcClient, getToken as token, initToken } from './rpc'
 import { synchronizeServerClock } from './server-clock'
+
+export { ApiError, initToken }
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
 export type McpToolMark = 'read' | 'ask' | 'off'
@@ -116,42 +124,35 @@ export interface UpdateStatus {
   } | null
 }
 
-const TOKEN_KEY = 'ariadne.token'
+const dataClient = createRpcClient(DataService)
 
-/**
- * The server prints a link with `#token=…`. Take the token from there once, keep it,
- * and drop it from the address bar so it does not end up in history or screenshots.
- */
-export function initToken(): string | null {
-  const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash)
-  if (match?.[1]) {
-    try {
-      localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]))
-    } catch {
-      // Storage can be unavailable; the token then lives only for this page.
-      sessionToken = decodeURIComponent(match[1])
+function fromProtoBackupInfo(item: ProtoBackupInfo): BackupInfo {
+  return {
+    name: item.name,
+    size: Number(item.size),
+    createdAt: Number(item.createdAt),
+    auto: item.auto,
+  }
+}
+
+function fromProtoStorageSnapshot(snapshot?: ProtoStorageSnapshot): StorageSnapshot | null {
+  if (!snapshot) return null
+  const worktrees: Record<string, DirectorySize> = {}
+  for (const [path, size] of Object.entries(snapshot.worktrees)) {
+    worktrees[path] = {
+      bytes: size.bytes === undefined ? null : Number(size.bytes),
+      exclusive: size.exclusive === undefined ? null : Number(size.exclusive),
+      ...(size.reclaimableEstimate === undefined
+        ? {}
+        : { reclaimableEstimate: Number(size.reclaimableEstimate) }),
     }
-    history.replaceState(null, '', location.pathname + location.search)
   }
-  return token()
-}
-
-let sessionToken: string | null = null
-
-function token(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? sessionToken
-  } catch {
-    return sessionToken
-  }
-}
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly localized: LocalizedMessage,
-  ) {
-    super(localized.key)
+  return {
+    managed: snapshot.managed === undefined ? null : Number(snapshot.managed),
+    total: snapshot.total === undefined ? null : Number(snapshot.total),
+    worktrees,
+    logical: snapshot.logical,
+    measuredAt: Number(snapshot.measuredAt),
   }
 }
 
@@ -572,8 +573,6 @@ export const api = {
       'POST',
       `/api/threads/${threadId}/references/${referenceId}/keep`,
     ),
-  reviewThread: (threadId: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/reviewed`),
   completeThread: (threadId: string) =>
     request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/complete`),
   endAside: (threadId: string) =>
@@ -782,13 +781,6 @@ export const api = {
       'GET',
       `/api/directories${queryString({ path })}`,
     ),
-  getSource: (projectId: string) =>
-    request<{ source: ProjectView['source']; secretsSet: string[] }>(
-      'GET',
-      `/api/projects/${projectId}/source`,
-    ),
-  setSource: (projectId: string, source: SourceInput | null) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/source`, { source }),
   getFileSources: (projectId: string) =>
     request<FileSourceSet & { secretsSet: Record<string, string[]> }>(
       'GET',
@@ -831,30 +823,43 @@ export const api = {
   getWorkSettings: () => request<WorkSettings>('GET', '/api/settings/work'),
   saveWorkSettings: (input: Partial<Omit<WorkSettings, 'defaults'>>) =>
     request<WorkSettings>('PUT', '/api/settings/work', input),
-  getDataUsage: (sizes: boolean, signal?: AbortSignal) =>
-    request<DataUsage>(
-      'GET',
-      sizes ? '/api/settings/data' : '/api/settings/data?sizes=0',
-      undefined,
-      signal,
-    ),
-  getStorage: (cached: boolean, signal: AbortSignal) =>
-    request<{ storage: StorageSnapshot | null }>(
-      'GET',
-      cached ? '/api/settings/data?sizes=cached' : '/api/settings/data?sizes=storage',
-      undefined,
-      signal,
-    ),
-  measureReclaimable: (path: string, signal: AbortSignal) =>
-    request<{ exclusive: number | null }>(
-      'GET',
-      `/api/settings/data?sizes=reclaimable&path=${encodeURIComponent(path)}`,
-      undefined,
-      signal,
-    ),
-  backupData: () => request<{ backup: BackupInfo }>('POST', '/api/settings/data/backups'),
-  removeBackup: (name: string) =>
-    request<void>('DELETE', `/api/settings/data/backups/${encodeURIComponent(name)}`),
+  getDataUsage: async (sizes: boolean, signal?: AbortSignal): Promise<DataUsage> => {
+    const response = await dataClient.getDataUsage(
+      { includeSizes: sizes },
+      signal ? { signal } : undefined,
+    )
+    return {
+      home: response.home,
+      database: Number(response.database),
+      plugins: response.plugins === undefined ? null : Number(response.plugins),
+      backups: response.backups.map(fromProtoBackupInfo),
+      backupsDir: response.backupsDir,
+    }
+  },
+  getStorage: async (
+    cached: boolean,
+    signal: AbortSignal,
+  ): Promise<{ storage: StorageSnapshot | null }> => {
+    const response = await dataClient.getStorageSnapshot({ cachedOnly: cached }, { signal })
+    return { storage: fromProtoStorageSnapshot(response.storage) }
+  },
+  measureReclaimable: async (
+    path: string,
+    signal: AbortSignal,
+  ): Promise<{ exclusive: number | null }> => {
+    const response = await dataClient.measureWorktreeReclaimable({ path }, { signal })
+    return { exclusive: response.exclusive === undefined ? null : Number(response.exclusive) }
+  },
+  backupData: async (): Promise<{ backup: BackupInfo }> => {
+    const response = await dataClient.createBackup({})
+    if (!response.backup) {
+      throw new ApiError(500, { key: 'error.invalidBody', params: { reason: 'backup' } })
+    }
+    return { backup: fromProtoBackupInfo(response.backup) }
+  },
+  removeBackup: async (name: string): Promise<void> => {
+    await dataClient.deleteBackup({ name })
+  },
   getProjectSettings: (projectId: string) =>
     request<ProjectSettingsView>('GET', `/api/projects/${projectId}/settings`),
   saveProjectSettings: (

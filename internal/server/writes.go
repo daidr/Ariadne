@@ -148,12 +148,10 @@ func (api *API) registerWrites() {
 		thread, err := repo.ResumeThread(r.Context(), r.PathValue("threadId"), "user")
 		return object{"thread": thread}, 200, err
 	})
-	for _, action := range []string{"complete", "reviewed"} {
-		api.add("POST", "/api/threads/:threadId/"+action, func(r *http.Request) (any, int, error) {
-			thread, err := repo.CompleteThread(r.Context(), r.PathValue("threadId"))
-			return object{"thread": thread}, 200, err
-		})
-	}
+	api.add("POST", "/api/threads/:threadId/complete", func(r *http.Request) (any, int, error) {
+		thread, err := repo.CompleteThread(r.Context(), r.PathValue("threadId"))
+		return object{"thread": thread}, 200, err
+	})
 	api.add("DELETE", "/api/threads/:threadId/aside", func(r *http.Request) (any, int, error) {
 		id := r.PathValue("threadId")
 		if _, err := repo.EndAside(r.Context(), id, "user"); err != nil {

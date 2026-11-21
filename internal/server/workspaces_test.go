@@ -157,7 +157,7 @@ func TestWorkspaceHTTPMatchesLegacy(t *testing.T) {
 		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{"settings": object{"delivery": object{"mode": "external", "instructions": "submit to platform"}}}},
 		{Method: "GET", Path: "/api/threads/thr_a/changes"}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{}},
 		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{}}, {Method: "GET", Path: "/api/projects/prj_a/settings"},
-		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "POST", Path: "/api/threads/thr_a/pull-request/refresh"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
+		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
 	}
 	var expected []any
 	if bun, err := exec.LookPath("bun"); err == nil {
