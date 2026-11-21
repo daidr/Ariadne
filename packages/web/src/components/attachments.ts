@@ -1,4 +1,4 @@
-import type { Attachment } from '@ariadne/core'
+import { IMAGE_TYPES, type Attachment, type ImageType } from '@ariadne/core'
 import type { ChatAttachment } from 'dou-ui'
 import { onBeforeUnmount, ref, type Ref } from 'vue'
 import { api } from '../api'
@@ -14,13 +14,15 @@ const MAX_MODEL_IMAGE_BYTES = 5 * 1024 * 1024
 /** Larger pictures are drawn again smaller, at most this long a side. */
 const MAX_SIDE = 2560
 
+const isInlineImage = (type: string) => IMAGE_TYPES.includes(type as ImageType)
+
 /**
  * Convert AVIF and oversized pictures to a model-compatible JPEG. Preserve
  * GIFs and originals that the browser cannot convert.
  */
 async function fitForModel(file: File): Promise<Blob> {
   if (
-    !file.type.startsWith('image/') ||
+    !isInlineImage(file.type) ||
     file.type === 'image/gif' ||
     (file.size <= MAX_MODEL_IMAGE_BYTES && file.type !== 'image/avif')
   ) {
@@ -100,7 +102,7 @@ export function useAttachments(
         size: file.size,
         type: file.type,
         status: 'running',
-        ...(file.type.startsWith('image/') ? { url: URL.createObjectURL(file) } : {}),
+        ...(isInlineImage(file.type) ? { url: URL.createObjectURL(file) } : {}),
       }
       files.value.push(draft)
       void upload(draft, file)

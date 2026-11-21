@@ -299,6 +299,10 @@ func (workspace *Workspace) RemoveFile(ctx context.Context, path string) error {
 }
 
 func (workspace *Workspace) WriteFile(ctx context.Context, path, content string) error {
+	return workspace.WriteBytes(ctx, path, []byte(content))
+}
+
+func (workspace *Workspace) WriteBytes(ctx context.Context, path string, data []byte) error {
 	ctx, done := workspace.active(ctx)
 	defer done()
 	workspace.mu.RLock()
@@ -327,19 +331,19 @@ func (workspace *Workspace) WriteFile(ctx context.Context, path, content string)
 	if err := file.Truncate(0); err != nil {
 		return err
 	}
-	for len(content) > 0 {
+	for len(data) > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		piece := content[:min(len(content), 32<<10)]
-		count, err := file.WriteString(piece)
+		piece := data[:min(len(data), 32<<10)]
+		count, err := file.Write(piece)
 		if err != nil {
 			return err
 		}
 		if count == 0 {
 			return io.ErrShortWrite
 		}
-		content = content[count:]
+		data = data[count:]
 	}
 	return nil
 }

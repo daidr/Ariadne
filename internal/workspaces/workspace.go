@@ -294,6 +294,15 @@ func (view *workspaceView) WriteFile(ctx context.Context, path, text string) err
 	_, err := withWorkspace(ctx, view, func(ctx context.Context, w sdk.Workspace) (bool, error) { return true, w.WriteFile(ctx, path, text) })
 	return err
 }
+func (view *workspaceView) WriteBytes(ctx context.Context, path string, data []byte) error {
+	_, err := withWorkspace(ctx, view, func(ctx context.Context, w sdk.Workspace) (bool, error) {
+		if writer, ok := w.(sdk.WorkspaceBytes); ok {
+			return true, writer.WriteBytes(ctx, path, data)
+		}
+		return true, w.WriteFile(ctx, path, string(data))
+	})
+	return err
+}
 func (view *workspaceView) Exec(ctx context.Context, command string, options sdk.ExecOptions) (sdk.ExecResult, error) {
 	return withWorkspace(ctx, view, func(ctx context.Context, w sdk.Workspace) (sdk.ExecResult, error) {
 		return w.Exec(ctx, command, options)

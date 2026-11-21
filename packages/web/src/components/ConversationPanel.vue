@@ -581,6 +581,14 @@ const sent = computed(() =>
 )
 let recall: Recall | null = null
 watch(conversationId, () => (recall = null))
+function onInputPaste(event: ClipboardEvent) {
+  if (event.defaultPrevented) return
+  const files = [...(event.clipboardData?.files ?? [])]
+  if (!files.length) return
+  event.preventDefault()
+  attachments.add(files)
+}
+
 function onInputKeydown(event: KeyboardEvent) {
   // The `/` menu moves through its entries with the arrows and has already taken them.
   if (event.defaultPrevented || event.isComposing) return
@@ -1218,6 +1226,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
         class="conversation-input"
         data-message-input
         @keydown="onInputKeydown"
+        @paste="onInputPaste"
       >
         <ConversationBar
           v-if="conversationId && showCapsules"
