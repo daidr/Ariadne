@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { ThreadView } from '@ariadne/core'
 import {
   GitMergeIcon,
   GitPullRequestClosedIcon,
@@ -21,6 +20,7 @@ import { t } from '../i18n'
 import { checksTone } from '../stage'
 import { useLinkPreview } from './useLinkPreview'
 import PullRequestChecks from './PullRequestChecks.vue'
+import { pullRequestLabel, type PullRequestThread } from './tracked-pull-requests'
 
 /**
  * A PR link with a card on hover and keyboard focus.
@@ -31,7 +31,7 @@ const props = withDefaults(
     href: string
     label: string
     children?: VNode | null
-    tracked?: Pick<ThreadView, 'id' | 'pullRequest'>
+    tracked?: PullRequestThread
     variant?: 'soft' | 'text' | 'pill'
   }>(),
   { variant: 'soft' },
@@ -40,7 +40,7 @@ const props = withDefaults(
 const open = shallowRef(false)
 const anchor = useTemplateRef<InstanceType<typeof DouLink>>('anchor')
 const link = useLinkPreview(
-  () => props.href,
+  () => props.tracked?.pullRequest?.url ?? props.href,
   anchor,
   open,
   () => !props.tracked,
@@ -74,6 +74,7 @@ function leaveCard(event: FocusEvent) {
 type State = 'open' | 'draft' | 'merged' | 'closed'
 const trackedPR = computed(() => props.tracked?.pullRequest)
 const pr = computed(() => trackedPR.value ?? preview.value)
+const title = computed(() => trackedPR.value?.title || preview.value?.title)
 const state = computed<State | undefined>(() =>
   pr.value?.state === 'open' && preview.value?.state === 'open' && preview.value.draft
     ? 'draft'
@@ -145,15 +146,15 @@ const tones: Record<State, TagTone> = {
             {{ t(`link.pr.${state}`) }}
           </DouTag>
           <DouText variant="secondary" size="sm" class="pr-card-ref">
-            {{ preview?.repository }} {{ pr.reference ?? `#${pr.number}` }}
+            {{ preview?.repository }} {{ pullRequestLabel(pr) }}
           </DouText>
           <DouText v-if="preview" variant="tertiary" size="sm">
             <DouRelativeTime :value="preview.at" />
           </DouText>
         </div>
-        <DouText class="pr-card-title">{{ pr.title }}</DouText>
+        <DouText v-if="title" class="pr-card-title">{{ title }}</DouText>
         <PullRequestChecks
-          v-if="open && tracked && trackedPR && checks"
+          v-if="open && tracked && trackedPR?.headSha && checks"
           :thread-id="tracked.id"
           :head="trackedPR.headSha"
           :summary="checks"

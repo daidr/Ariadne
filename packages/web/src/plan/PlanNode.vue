@@ -1,19 +1,13 @@
 <script setup lang="ts">
-import { DouBadge, DouTag, DouText, DouTooltip } from 'dou-ui'
-import {
-  AlertTriangleIcon,
-  FlagIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestIcon,
-  SignpostIcon,
-} from '@dou-ui/icons'
+import { DouBadge, DouText, DouTooltip } from 'dou-ui'
+import { AlertTriangleIcon, FlagIcon, SignpostIcon } from '@dou-ui/icons'
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { checksTone, questionOf, showsHeadline, statusLine, threadStageLabel } from '../stage'
+import { questionOf, showsHeadline, statusLine, threadStageLabel } from '../stage'
 import { state } from '../store'
 import type { PlanNodeData } from './layout'
 import StageIcon from '../components/StageIcon.vue'
+import PullRequestTag from '../components/PullRequestTag.vue'
 import PlanStatusIcon from './PlanStatusIcon.vue'
 import ThreadHeadline from '../components/ThreadHeadline.vue'
 
@@ -117,21 +111,8 @@ function lineOf(id: string): string | null {
         />
         <span class="plan-node-tags">
           <span v-if="thread.pullRequest" class="plan-node-pr">
-            <GitMergeIcon v-if="thread.pullRequest.state === 'merged'" />
-            <GitPullRequestClosedIcon v-else-if="thread.pullRequest.state === 'closed'" />
-            <GitPullRequestIcon v-else />
-            {{ thread.pullRequest.reference ?? `#${thread.pullRequest.number}` }}
+            <PullRequestTag :thread="thread" />
           </span>
-          <DouTag
-            v-if="
-              thread.pullRequest?.state === 'open' && thread.pullRequest.checks.state !== 'none'
-            "
-            size="sm"
-            :tone="checksTone(thread.pullRequest.checks.state)"
-            :title="thread.pullRequest.checks.failed.join(', ')"
-          >
-            {{ t(`pr.checks.${thread.pullRequest.checks.state}`) }}
-          </DouTag>
           <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
         </span>
         <ThreadHeadline
@@ -285,10 +266,6 @@ function lineOf(id: string): string | null {
 }
 
 .plan-node-pr {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
   font-size: var(--dou-font-size-sm);
-  color: var(--dou-color-text-secondary);
 }
 </style>

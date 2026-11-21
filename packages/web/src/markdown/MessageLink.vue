@@ -10,6 +10,7 @@ import type { LinkSummary } from '@ariadne/plugin-sdk'
 import { innerLink, sameHostedRepository } from './links'
 import { openFilePreview } from '../files/preview'
 import PullRequestLink from './PullRequestLink.vue'
+import { pullRequestLabel, trackedPullRequestForUrl } from './tracked-pull-requests'
 import IssueLink from './IssueLink.vue'
 import { useOpenView } from '../opened-from'
 
@@ -51,12 +52,17 @@ const issueLabel = computed(() => {
     ? issue.reference
     : issue.label
 })
-const trackedPullRequest = computed(() => {
-  if (summary.value?.kind !== 'pull-request') return undefined
-  return state.detail?.threads.find((item) => item.pullRequest?.url === props.href)
+const tracked = computed(() =>
+  props.external && props.href ? trackedPullRequestForUrl(props.href) : undefined,
+)
+const prLabel = computed(() => {
+  if (summary.value?.kind === 'pull-request') return summary.value.label
+  const pr = tracked.value?.pullRequest
+  return pr ? pullRequestLabel(pr) : null
 })
 watch(
-  () => (props.external && props.href?.startsWith('https://') ? props.href : null),
+  () =>
+    props.external && !tracked.value && /^https:\/\//i.test(props.href ?? '') ? props.href : null,
   (url, _before, cleanup) => {
     summary.value = null
     let current = true
@@ -98,11 +104,11 @@ function open(event?: MouseEvent) {
     <component :is="children" />
   </DouLink>
   <PullRequestLink
-    v-else-if="href && summary?.kind === 'pull-request'"
+    v-else-if="href && prLabel"
     :href="href"
-    :label="summary.label"
+    :label="prLabel"
     :children="bare ? null : children"
-    :tracked="trackedPullRequest"
+    :tracked="tracked"
   />
   <IssueLink
     v-else-if="href && summary?.kind === 'issue'"

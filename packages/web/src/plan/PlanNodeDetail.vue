@@ -27,7 +27,7 @@ import { editPlan, openMain, openThreadFrom, sendMessage, setNodeIssue, state } 
 import { kindIcon } from '../artifacts/kinds'
 import { startedAhead } from './layout'
 import { liveThreads, mergeIntoForm, reasonOf } from './edit'
-import PullRequestLink from './PlanPullRequest.vue'
+import PullRequestTag from '../components/PullRequestTag.vue'
 import IssueLink from '../markdown/IssueLink.vue'
 import ChangeTotals from '../components/ChangeTotals.vue'
 import { branchChanges } from '../review/merge-offered'
@@ -342,7 +342,7 @@ const removeQuestion = computed(() => {
             </span>
           </button>
           <span v-if="thread.pullRequest || hasBranch(thread.id)" class="node-thread-tools">
-            <PullRequestLink v-if="thread.pullRequest" :pull-request="thread.pullRequest" />
+            <PullRequestTag :thread="thread" />
             <ChangeTotals
               v-if="hasBranch(thread.id) && changesOf(thread.id)"
               :totals="changesOf(thread.id)!"
