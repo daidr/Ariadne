@@ -77,7 +77,6 @@ import {
   undoNotice,
 } from '../store'
 import WorkspaceTag from './WorkspaceTag.vue'
-import ThreadNodeTag from './ThreadNodeTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -762,7 +761,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             {{ t('review.underway', { round: thread.review.rounds }) }}
           </DouShimmer>
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <ThreadNodeTag v-if="!thread.reviewOf" :thread="thread" />
           <ReviewMark :thread="thread" />
           <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
           <template v-if="reviewed">
