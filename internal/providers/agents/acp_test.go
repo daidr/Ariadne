@@ -309,20 +309,7 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 	settings := map[string]any{"command": command}
 	system := "SYS_HEAD " + strings.Repeat("指令内容", 1300) + " SYS_TAIL" // ~15.6 KiB system instructions
 
-	m := newTestSessions(t, ACPKind(nil, nil), opts)
-	firstReq := sdk.Request{
-		Conversation: "coordinator",
-		Model:        "alternate",
-		Messages:     []sdk.Message{{Role: "system", Content: system}, user("first")},
-	}
-	first := codexParts(t, m, settings, firstReq)
-	lastPart(t, first, "stop")
-	if err := m.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	// Simulate a long coordinator history with an early huge search result and old images,
-	// ending with a new user message carrying a screenshot when ACP resume is rejected.
+	// Build a long coordinator history with an early huge search result and old images.
 	oldImg := sdk.Image{MIME: "image/png", Data: "T0xEX0lNRw=="}
 	newImg := sdk.Image{MIME: "image/png", Data: "TkVXX0lNRw=="}
 	messages := []sdk.Message{
@@ -332,14 +319,31 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 		{Role: "tool", ToolCallID: "call_big_search", Content: "HUGE_SEARCH_HEAD\n" + strings.Repeat("matched line\n", 14_000) + "\nHUGE_SEARCH_TAIL"},
 		{Role: "assistant", Content: "old search summary"},
 	}
-	for i := 1; i <= 30; i++ {
+	for i := 1; i <= 29; i++ {
 		messages = append(messages,
 			sdk.Message{Role: "user", Content: fmt.Sprintf("MID_TURN_%02d %s", i, strings.Repeat("历史轮次", 220))},
 			sdk.Message{Role: "assistant", Content: fmt.Sprintf("MID_REPLY_%02d %s", i, strings.Repeat("历史回复", 220))},
 		)
 	}
+	messages = append(messages, sdk.Message{Role: "user", Content: "MID_TURN_30 " + strings.Repeat("最新前序轮次", 100)})
+
+	// Run the first turn with the long history prefix so the saved checkpoint
+	// matches the prefix and the restarted session actually attempts session/resume.
+	m := newTestSessions(t, ACPKind(nil, nil), opts)
+	first := codexParts(t, m, settings, sdk.Request{
+		Conversation: "coordinator",
+		Model:        "alternate",
+		Messages:     messages,
+	})
+	lastPart(t, first, "stop")
+	if err := m.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Keep the exact checkpointed prefix, append the assistant reply and the new
+	// triggering user message with a screenshot, and restart so session/resume is rejected.
 	latest := "NEW_MSG_msg_01a1ffc8 请排查刚才截图里的问题"
-	messages = append(messages, sdk.Message{Role: "user", Content: latest, Images: []sdk.Image{newImg}})
+	messages = append(messages, assistant(textParts(first)), sdk.Message{Role: "user", Content: latest, Images: []sdk.Image{newImg}})
 
 	if err := os.Truncate(log, 0); err != nil {
 		t.Fatal(err)
@@ -352,11 +356,21 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 	})
 	lastPart(t, second, "stop")
 
+	var lifecycle []string
 	var promptBlocks []any
 	for _, entry := range readCodexLog(t, log) {
-		if entry["method"] == "session/prompt" {
+		method, _ := entry["method"].(string)
+		switch method {
+		case "session/resume", "session/load", "session/new", "session/prompt":
+			lifecycle = append(lifecycle, method)
+		}
+		if method == "session/prompt" {
 			promptBlocks = entry["params"].(map[string]any)["prompt"].([]any)
 		}
+	}
+	wantLifecycle := []string{"session/resume", "session/new", "session/prompt"}
+	if !reflect.DeepEqual(lifecycle, wantLifecycle) {
+		t.Fatalf("expected rejected resume fallback sequence %v, got %v", wantLifecycle, lifecycle)
 	}
 	if len(promptBlocks) == 0 {
 		t.Fatal("missing session/prompt RPC call")
@@ -374,7 +388,7 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 	if strings.Contains(text, "OLD_MSG_msg_01a1ff4e") || strings.Contains(text, "HUGE_SEARCH_HEAD") {
 		t.Fatal("old dropped message and huge search result should have been evicted from replay")
 	}
-	if !strings.Contains(text, "MID_TURN_30") || !strings.Contains(text, "MID_REPLY_30") {
+	if !strings.Contains(text, "MID_TURN_30") || !strings.Contains(text, "<assistant>\n"+textParts(first)+"\n</assistant>") {
 		t.Fatal("most recent turns before latest user message were not preserved")
 	}
 	if !strings.Contains(text, "<user>\n"+latest+"\n</user>") || !strings.HasSuffix(text, historyFooter+historyAnswerEnding) {

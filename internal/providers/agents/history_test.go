@@ -244,3 +244,74 @@ func TestRenderHistoryToolExchangeAtomicityAndMidTurnRecovery(t *testing.T) {
 		}
 	})
 }
+
+func TestRenderHistoryKeepsShortHistoryVerbatimWhenWithinBudget(t *testing.T) {
+	t.Run("mid-turn 5 KiB tool result is not truncated when total fits budget", func(t *testing.T) {
+		fiveKiB := "FILE_HEAD\n" + strings.Repeat("line\n", 1024) + "FILE_TAIL"
+		messages := []sdk.Message{
+			{Role: "user", Content: "read main.go"},
+			{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_read", Name: "read_file", Arguments: `{"path":"main.go"}`}}},
+			{Role: "tool", ToolCallID: "call_read", Content: fiveKiB},
+		}
+		out := RenderHistory(messages)
+		if !strings.Contains(out.Text, fiveKiB) {
+			t.Fatal("5 KiB tool result was truncated even though total history fit within budget")
+		}
+		if strings.Contains(out.Text, "omitted") {
+			t.Fatal("unexpected omission notice for history within budget")
+		}
+	})
+
+	t.Run("8 KiB earlier user message is not truncated when total fits budget", func(t *testing.T) {
+		eightKiB := "LOG_HEAD\n" + strings.Repeat("error log line\n", 560) + "LOG_TAIL"
+		messages := []sdk.Message{
+			{Role: "user", Content: eightKiB},
+			{Role: "assistant", Content: "investigating"},
+			{Role: "user", Content: "any update?"},
+		}
+		out := RenderHistory(messages)
+		if !strings.Contains(out.Text, eightKiB) {
+			t.Fatal("8 KiB user message was truncated even though total history fit within budget")
+		}
+		if strings.Contains(out.Text, "omitted") {
+			t.Fatal("unexpected omission notice for history within budget")
+		}
+	})
+}
+
+func TestRenderHistoryPreservesAllInitialConsecutiveUserMessages(t *testing.T) {
+	firstImg := sdk.Image{MIME: "image/png", Data: "FIRST_USER_IMG"}
+	firstUser := "INITIAL_USER_QUESTION " + strings.Repeat("详细问题描述", 1200) + " END"
+	promptUpdate := "<prompt_update>workspace instructions</prompt_update>"
+	messages := []sdk.Message{
+		{Role: "user", Content: firstUser, Images: []sdk.Image{firstImg}},
+		{Role: "user", Content: promptUpdate},
+	}
+
+	out := RenderHistoryWithBudget(messages, 512)
+	if !strings.Contains(out.Text, "<user>\n"+firstUser+"\n</user>") {
+		t.Fatal("initial triggering user message before prompt_update was truncated or dropped")
+	}
+	if !strings.Contains(out.Text, "<user>\n"+promptUpdate+"\n</user>") {
+		t.Fatal("trailing prompt_update was lost")
+	}
+	if strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatal("omission note should not appear when no messages were dropped")
+	}
+	if !reflect.DeepEqual(out.Images, []sdk.Image{firstImg}) {
+		t.Fatalf("initial user image was lost: %+v", out.Images)
+	}
+}
+
+func TestRenderHistorySingleFallbackMessageDoesNotEmitOmittedNote(t *testing.T) {
+	messages := []sdk.Message{
+		{Role: "tool", ToolCallID: "call_only", Content: "ONLY_RESULT_" + strings.Repeat("x", 1000)},
+	}
+	out := RenderHistoryWithBudget(messages, 300)
+	if !strings.Contains(out.Text, "ONLY_RESULT_") {
+		t.Fatal("sole fallback message should be preserved")
+	}
+	if strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatalf("omission note must not appear when the only message was kept: %s", out.Text)
+	}
+}

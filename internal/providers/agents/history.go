@@ -229,6 +229,16 @@ func groupReplayItems(items []replayItem) [][]replayItem {
 	return groups
 }
 
+func renderReplayItems(messages []sdk.Message, names map[string]string, capContent bool) []replayItem {
+	items := make([]replayItem, 0, len(messages))
+	for _, message := range messages {
+		if item, ok := renderReplayItem(message, names, capContent); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
 func RenderHistory(messages []sdk.Message) Input {
 	return RenderHistoryWithBudget(messages, defaultHistoryReplayBytes)
 }
@@ -268,22 +278,12 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 			historyMessages = relevant[:lastNonUser+1]
 			currentMessages = relevant[lastNonUser+1:]
 		} else {
-			historyMessages = relevant[:len(relevant)-1]
-			currentMessages = relevant[len(relevant)-1:]
+			historyMessages = nil
+			currentMessages = relevant
 		}
 	}
-	currentItems := make([]replayItem, 0, len(currentMessages))
-	for _, message := range currentMessages {
-		if item, ok := renderReplayItem(message, names, false); ok {
-			currentItems = append(currentItems, item)
-		}
-	}
-	historyItems := make([]replayItem, 0, len(historyMessages))
-	for _, message := range historyMessages {
-		if item, ok := renderReplayItem(message, names, true); ok {
-			historyItems = append(historyItems, item)
-		}
-	}
+	currentItems := renderReplayItems(currentMessages, names, false)
+	historyItems := renderReplayItems(historyMessages, names, false)
 	ending := historyContinueEnding
 	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
 		ending = historyAnswerEnding
@@ -296,42 +296,48 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 	}
 
 	var keptHistory []replayItem
-	omitted := false
 	if len(historyItems) == 0 || joinedReplayBytes(historyItems) <= available {
 		keptHistory = historyItems
 	} else {
-		omitted = true
-		remaining := available - len(historyOmittedNote)
-		groups := groupReplayItems(historyItems)
-		keptReversed := make([]replayItem, 0, len(historyItems))
-		for g := len(groups) - 1; g >= 0; g-- {
-			group := groups[g]
-			need := 2 + joinedReplayBytes(group)
-			if need <= remaining {
-				for i := len(group) - 1; i >= 0; i-- {
-					keptReversed = append(keptReversed, group[i])
-				}
-				remaining -= need
-				continue
-			}
-			if len(keptReversed) == 0 {
-				for i := len(group) - 1; i >= 0; i-- {
-					itemNeed := 2 + len(group[i].text)
-					if itemNeed > remaining {
-						break
+		// Only tighten oversized historical entries when the full replay would
+		// otherwise exceed the budget; keep short histories completely verbatim.
+		historyItems = renderReplayItems(historyMessages, names, true)
+		if joinedReplayBytes(historyItems) <= available {
+			keptHistory = historyItems
+		} else {
+			remaining := available - len(historyOmittedNote)
+			groups := groupReplayItems(historyItems)
+			keptReversed := make([]replayItem, 0, len(historyItems))
+			for g := len(groups) - 1; g >= 0; g-- {
+				group := groups[g]
+				need := 2 + joinedReplayBytes(group)
+				if need <= remaining {
+					for i := len(group) - 1; i >= 0; i-- {
+						keptReversed = append(keptReversed, group[i])
 					}
-					keptReversed = append(keptReversed, group[i])
-					remaining -= itemNeed
+					remaining -= need
+					continue
 				}
+				if len(keptReversed) == 0 {
+					for i := len(group) - 1; i >= 0; i-- {
+						itemNeed := 2 + len(group[i].text)
+						if itemNeed > remaining {
+							break
+						}
+						keptReversed = append(keptReversed, group[i])
+						remaining -= itemNeed
+					}
+				}
+				break
 			}
-			break
+			if len(currentItems) == 0 && len(keptReversed) == 0 {
+				keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
+			}
+			slices.Reverse(keptReversed)
+			keptHistory = keptReversed
 		}
-		if len(currentItems) == 0 && len(keptReversed) == 0 {
-			keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
-		}
-		slices.Reverse(keptReversed)
-		keptHistory = keptReversed
 	}
+	omitted := len(keptHistory) < len(historyItems)
 
 	parts := make([]string, 0, len(keptHistory)+len(currentItems)+1)
 	images := []sdk.Image{}
