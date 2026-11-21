@@ -14,7 +14,8 @@ const MAX_MODEL_IMAGE_BYTES = 5 * 1024 * 1024
 /** Larger pictures are drawn again smaller, at most this long a side. */
 const MAX_SIDE = 2560
 
-const isInlineImage = (type: string) => IMAGE_TYPES.includes(type as ImageType)
+export const isInlineImage = (type: string | undefined) =>
+  !!type && IMAGE_TYPES.includes(type as ImageType)
 
 /**
  * Convert AVIF and oversized pictures to a model-compatible JPEG. Preserve
@@ -85,6 +86,7 @@ export function useAttachments(
       entry.fileId = stored.id
       entry.type = stored.mime
       entry.size = stored.size
+      if (!entry.url && isInlineImage(stored.mime)) entry.url = stored.url
       delete entry.status
     } catch (error) {
       // Not kept: the reason (say, a type that cannot be sent) is shown instead.
@@ -139,6 +141,6 @@ export function shownAttachments(attachments: Attachment[]): ChatAttachment[] {
     name: file.name,
     size: file.size,
     type: file.mime,
-    url: `/api/files/${file.fileId}`,
+    ...(isInlineImage(file.mime) ? { url: `/api/files/${file.fileId}` } : {}),
   }))
 }
