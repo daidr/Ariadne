@@ -384,3 +384,73 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 		t.Fatal(response.StatusCode)
 	}
 }
+
+func TestStaticAssetsAndPWAMIME(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "static.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "secret",
+		Web: fstest.MapFS{
+			"index.html":           {Data: []byte("<!doctype html>")},
+			"manifest.webmanifest": {Data: []byte(`{"name":"Ariadne"}`)},
+			"favicon.svg":          {Data: []byte(`<svg></svg>`)},
+			"favicon.ico":          {Data: []byte("ico")},
+			"icons/icon-192.png":   {Data: []byte("png")},
+			"sw.js":                {Data: []byte("self.addEventListener('install', () => {})")},
+			"registerSW.js":        {Data: []byte("navigator.serviceWorker.register('/sw.js')")},
+			"workbox-test1234.js":  {Data: []byte("// workbox")},
+			"assets/app.js":        {Data: []byte("console.log('ok')")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	for _, tc := range []struct {
+		path        string
+		contentType string
+		cache       string
+	}{
+		{"/manifest.webmanifest", "application/manifest+json", "no-cache"},
+		{"/favicon.svg", "image/svg+xml", "no-cache"},
+		{"/favicon.ico", "image/x-icon", "no-cache"},
+		{"/icons/icon-192.png", "image/png", "no-cache"},
+		{"/sw.js", "text/javascript", "no-cache"},
+		{"/registerSW.js", "text/javascript", "no-cache"},
+		{"/workbox-test1234.js", "text/javascript", "no-cache"},
+		{"/assets/app.js", "text/javascript", "public, max-age=31536000, immutable"},
+	} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+tc.path, nil))
+		if response.Code != 200 {
+			t.Fatalf("%s: status %d", tc.path, response.Code)
+		}
+		if !strings.Contains(response.Header().Get("Content-Type"), tc.contentType) {
+			t.Fatalf("%s: Content-Type %q does not contain %q", tc.path, response.Header().Get("Content-Type"), tc.contentType)
+		}
+		if response.Header().Get("Cache-Control") != tc.cache {
+			t.Fatalf("%s: Cache-Control %q != %q", tc.path, response.Header().Get("Cache-Control"), tc.cache)
+		}
+	}
+
+	// Missing static assets must return 404 instead of falling back to index.html.
+	for _, missing := range []string{"/icons/missing.png", "/apple-touch-icon.png", "/missing.webmanifest", "/missing-sw.js", "/assets/missing.js"} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+missing, nil))
+		if response.Code != 404 {
+			t.Fatalf("missing static asset %s: got %d (%s)", missing, response.Code, response.Body.String())
+		}
+	}
+
+	// Client-side SPA routes still fall back to index.html.
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/projects/prj_123", nil))
+	if response.Code != 200 || response.Body.String() != "<!doctype html>" {
+		t.Fatalf("client route fallback failed: %d %s", response.Code, response.Body.String())
+	}
+}

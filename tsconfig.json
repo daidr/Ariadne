@@ -8,6 +8,7 @@
     "packages/*/src/**/*.vue",
     "packages/*/*.ts",
     "tools/dev/*.ts",
+    "tools/icons/*.ts",
     "tools/release/*.ts"
   ],
   "exclude": ["dist", "tools/legacyoracle/fixtures"]

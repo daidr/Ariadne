@@ -11,6 +11,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import { useSourceStatus } from '../source-status'
 import { openProjectSettings, showWorkspace, state } from '../store'
+import AriadneLogo from './AriadneLogo.vue'
 import AttentionBar from './AttentionBar.vue'
 import AutopilotSwitch from './AutopilotSwitch.vue'
 import ProjectSearch from './ProjectSearch.vue'
@@ -58,6 +59,7 @@ const title = computed(() => {
         >
           <PanelLeftIcon aria-hidden="true" />
         </DouButton>
+        <AriadneLogo v-if="!compact || atProjects" class="header-logo" />
         <DouText weight="medium" truncate>{{ title }}</DouText>
       </div>
       <div class="header-actions">

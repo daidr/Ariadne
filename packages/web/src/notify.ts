@@ -143,6 +143,7 @@ export function notifyAbout(event: AnyStoredEvent) {
       .join(' · ')
     const notification = new Notification(`${reason.title} · ${where}`, {
       body: reason.body.slice(0, 200),
+      icon: '/icons/icon-192.png',
       tag: `ariadne:${reason.threadId ?? event.projectId}`,
     })
     notification.addEventListener('click', () => {

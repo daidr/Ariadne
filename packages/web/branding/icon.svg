@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <mask id="ariadne-icon-cut">
+      <rect width="64" height="64" fill="#ffffff" />
+      <g transform="translate(32 34.5) rotate(-16)">
+        <path d="M -20 -5.4 H 12.2 L 21.6 0 L 12.2 5.4 H -20 Z" fill="#000000" />
+      </g>
+    </mask>
+  </defs>
+  <rect width="64" height="64" fill="#111111" />
+  <path
+    d="M 18.5 48.5 L 30.6 17.5 Q 32 14 33.4 17.5 L 45.5 48.5"
+    stroke="#ffffff"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    mask="url(#ariadne-icon-cut)"
+  />
+  <g transform="translate(32 34.5) rotate(-16)">
+    <path
+      d="M -16 -3.1 H -14.8 V 3.1 H -16 A 2.4 2.4 0 0 1 -18.4 0.7 V -0.7 A 2.4 2.4 0 0 1 -16 -3.1 Z"
+      fill="#858585"
+    />
+    <rect x="-13" y="-3.1" width="23.6" height="6.2" rx="0.5" fill="#ffffff" />
+    <path d="M 12.4 -3.05 L 19.6 0 L 12.4 3.05 Z" fill="#ffffff" />
+  </g>
+</svg>
