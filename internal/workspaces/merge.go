@@ -7,6 +7,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
+	"github.com/daidr/Ariadne/internal/fsutil"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -327,8 +328,7 @@ func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]Proj
 						if branches.RemoveOrphaned == nil || !hasRecordedCheckout(workspace) {
 							continue
 						}
-						subdir, err := filepath.Rel(worktree.Path, workspace.Label)
-						if err != nil || !filepath.IsLocal(subdir) {
+						if !orphanMatchesRecordedLabel(worktree.Path, workspace.Label) {
 							continue
 						}
 					}
@@ -446,4 +446,23 @@ func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, kn
 		return nil, err
 	}
 	return value, nil
+}
+
+func orphanMatchesRecordedLabel(worktreePath, label string) bool {
+	if subdir, err := filepath.Rel(worktreePath, label); err == nil && filepath.IsLocal(subdir) {
+		return true
+	}
+	if !filepath.IsAbs(worktreePath) || !filepath.IsAbs(label) {
+		return false
+	}
+	resolvedWorktree, err := fsutil.CanonicalPath(worktreePath)
+	if err != nil {
+		return false
+	}
+	resolvedLabel, err := fsutil.CanonicalPath(label)
+	if err != nil {
+		return false
+	}
+	subdir, err := filepath.Rel(resolvedWorktree, resolvedLabel)
+	return err == nil && filepath.IsLocal(subdir)
 }

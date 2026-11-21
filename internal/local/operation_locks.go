@@ -2,8 +2,6 @@ package local
 
 import (
 	"context"
-	"runtime"
-	"strings"
 	"sync"
 )
 
@@ -15,9 +13,7 @@ var hostedOperations = struct {
 }{entries: map[string]*threadLock{}}
 
 func lockHosted(ctx context.Context, key string) (func(), error) {
-	if runtime.GOOS == "windows" {
-		key = strings.ToLower(key)
-	}
+	key = worktreePathKey(key)
 	hostedOperations.Lock()
 	entry := hostedOperations.entries[key]
 	if entry == nil {
