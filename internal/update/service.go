@@ -42,8 +42,11 @@ func (view View) updating() bool {
 
 type Service struct {
 	mu          sync.Mutex
+	changeMu    sync.Mutex
 	store       *settings.Store
 	view        View
+	viewSeq     uint64
+	emittedSeq  uint64
 	lastCheck   time.Time
 	checkClient *http.Client
 	assetClient *http.Client
@@ -95,10 +98,21 @@ func cloneView(view View) View {
 	return view
 }
 
-func (service *Service) emitChange(view View) {
+func (service *Service) emitChange() {
 	if service.onChange == nil {
 		return
 	}
+	service.changeMu.Lock()
+	defer service.changeMu.Unlock()
+	service.mu.Lock()
+	seq := service.viewSeq
+	if seq <= service.emittedSeq {
+		service.mu.Unlock()
+		return
+	}
+	view := cloneView(service.view)
+	service.emittedSeq = seq
+	service.mu.Unlock()
 	func() {
 		defer func() { _ = recover() }()
 		service.onChange(view)
@@ -133,10 +147,11 @@ func (service *Service) Save(value settings.UpdatePreferences) (View, error) {
 		service.lastCheck = time.Time{}
 	}
 	service.view.Preferences = value
+	service.viewSeq++
 	service.notify()
 	view := cloneView(service.view)
 	service.mu.Unlock()
-	service.emitChange(view)
+	service.emitChange()
 	return view, nil
 }
 
@@ -153,17 +168,17 @@ func (service *Service) Check(ctx context.Context) View {
 
 func (service *Service) check(ctx context.Context, wakeAutomatic bool) View {
 	service.mu.Lock()
-	before := service.view
+	before := cloneView(service.view)
 	if service.closed || before.State == "checking" || before.updating() || before.State == "ready" ||
 		time.Since(service.lastCheck) < 5*time.Second {
 		service.mu.Unlock()
 		return before
 	}
 	service.view.State = "checking"
-	checking := cloneView(service.view)
+	service.viewSeq++
 	service.jobs.Add(1)
 	service.mu.Unlock()
-	service.emitChange(checking)
+	service.emitChange()
 	defer service.jobs.Done()
 
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
@@ -194,9 +209,10 @@ func (service *Service) check(ctx context.Context, wakeAutomatic bool) View {
 		}
 	}
 	service.lastCheck = time.Now()
+	service.viewSeq++
 	result := cloneView(service.view)
 	service.mu.Unlock()
-	service.emitChange(result)
+	service.emitChange()
 	return result
 }
 
@@ -217,6 +233,7 @@ func (service *Service) startInstall(version string, automatic bool) (View, erro
 		return view, ErrUnavailable
 	}
 	service.view.State, service.view.Failure, service.view.DownloadPercent = "downloading", "", 0
+	service.viewSeq++
 	started := cloneView(service.view)
 	release := *view.Release
 	service.jobs.Go(func() {
@@ -243,12 +260,12 @@ func (service *Service) startInstall(version string, automatic bool) (View, erro
 		} else {
 			service.view.State = "ready"
 		}
-		final := cloneView(service.view)
+		service.viewSeq++
 		service.mu.Unlock()
-		service.emitChange(final)
+		service.emitChange()
 	})
 	service.mu.Unlock()
-	service.emitChange(started)
+	service.emitChange()
 	return started, nil
 }
 
@@ -258,9 +275,9 @@ func (service *Service) reportProgress(percent int) {
 	if percent == 100 {
 		service.view.State = "installing"
 	}
-	view := cloneView(service.view)
+	service.viewSeq++
 	service.mu.Unlock()
-	service.emitChange(view)
+	service.emitChange()
 }
 
 func (service *Service) run(interval time.Duration) {

@@ -372,4 +372,118 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
 
     wrapper.unmount()
   })
+
+  test('useUpdatesSettings keeps newer pushed status when an in-flight RPC resolves with stale data', async () => {
+    const available: UpdateStatus = {
+      version: '1.0.0',
+      preferences: { channel: 'stable', automatic: false },
+      canInstall: true,
+      state: 'available',
+      downloadPercent: 0,
+      release: {
+        version: '1.1.0',
+        notes: 'Notes',
+        url: 'https://example.com',
+        prerelease: false,
+        installable: true,
+      },
+    }
+    const staleDownloading: UpdateStatus = {
+      ...available,
+      state: 'downloading',
+      downloadPercent: 0,
+    }
+
+    vi.spyOn(api, 'updateStatus').mockResolvedValue(available)
+    let resolveInstall!: (view: UpdateStatus) => void
+    vi.spyOn(api, 'installUpdate').mockImplementation(
+      () =>
+        new Promise<UpdateStatus>((resolve) => {
+          resolveInstall = resolve
+        }),
+    )
+    vi.spyOn(api, 'listProjects').mockResolvedValue({ projects: [], lastSeq: 1 })
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue({
+      models: [],
+      providers: [],
+      roles: { thread: { model: '' } },
+      showCost: false,
+    } as never)
+    vi.spyOn(api, 'getInputSettings').mockResolvedValue({
+      submitOn: 'enter',
+      snippets: [],
+      keys: {},
+    } as never)
+
+    let pushFrame!: (frame: StreamEventsResponse) => void
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce((_opts, signal) =>
+      (async function* () {
+        yield create(StreamEventsResponseSchema, {
+          payload: { case: 'ready', value: create(StreamReadySchema, { lastSeq: 1n }) },
+        })
+        for (;;) {
+          if (signal?.aborted) return
+          const frame = await new Promise<StreamEventsResponse | null>((resolve) => {
+            pushFrame = resolve
+            signal?.addEventListener('abort', () => resolve(null), { once: true })
+          })
+          if (!frame) return
+          yield frame
+        }
+      })(),
+    )
+
+    await start(async () => {})
+    await flushPromises()
+
+    let updates!: ReturnType<typeof useUpdatesSettings>
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          updates = useUpdatesSettings()
+          return () => h('div')
+        },
+      }),
+    )
+
+    await flushPromises()
+    expect(updates.status.value?.state).toBe('available')
+
+    // Start install (unary RPC still in-flight).
+    updates.install()
+    expect(updates.pending.value).toBe('install')
+
+    // Newer terminal status ('ready') arrives over EventService before installUpdate resolves.
+    pushFrame(
+      create(StreamEventsResponseSchema, {
+        payload: {
+          case: 'updateStatus',
+          value: create(UpdateStatusSchema, {
+            version: '1.0.0',
+            preferences: create(UpdatePreferencesSchema, { channel: 'stable', automatic: false }),
+            canInstall: true,
+            state: 'ready',
+            downloadPercent: 0,
+            release: create(UpdateReleaseSchema, {
+              version: '1.1.0',
+              notes: 'Notes',
+              url: 'https://example.com',
+              prerelease: false,
+              installable: true,
+            }),
+          }),
+        },
+      }),
+    )
+    await flushPromises()
+    expect(updates.status.value?.state).toBe('ready')
+
+    // Now the stale installUpdate RPC response arrives: must not overwrite 'ready', but must clear pending.
+    resolveInstall(staleDownloading)
+    await flushPromises()
+    expect(updates.status.value?.state).toBe('ready')
+    expect(updates.pending.value).toBeNull()
+
+    wrapper.unmount()
+  })
 })

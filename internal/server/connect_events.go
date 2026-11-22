@@ -48,8 +48,9 @@ func (h *eventServiceHandler) StreamEvents(
 	}
 	project := req.Msg.GetProjectId()
 
+	guard := h.api.streamWriteGuard(ctx)
 	send := func(msg *ariadnev1.StreamEventsResponse) error {
-		return h.api.sendWithWriteDeadline(ctx, func() error {
+		return guard.Send(func() error {
 			return stream.Send(msg)
 		})
 	}
@@ -100,6 +101,7 @@ func (h *eventServiceHandler) StreamEvents(
 	if err == nil {
 		return nil
 	}
+	guard.ArmCloseDeadline()
 	if errors.Is(err, realtime.ErrSlowConsumer) {
 		return connect.NewError(connect.CodeResourceExhausted, err)
 	}

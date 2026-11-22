@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -290,5 +291,47 @@ func TestThreadServiceStreamCommandOutput(t *testing.T) {
 	}
 	if gotResult == nil || gotResult.GetExitCode() != 0 {
 		t.Fatalf("expected exit code 0 result on completion, got %+v", gotResult)
+	}
+}
+
+type deadlineRecorderResponseWriter struct {
+	httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineRecorderResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+func TestStreamWriteGuardPreservesDeadlineOnErrorAndSlowClose(t *testing.T) {
+	rw := &deadlineRecorderResponseWriter{ResponseRecorder: *httptest.NewRecorder()}
+	guard := &streamWriteGuard{rc: http.NewResponseController(rw)}
+
+	// 1. Successful Send arms a finite deadline, then clears it to zero.
+	if err := guard.Send(func() error { return nil }); err != nil {
+		t.Fatalf("successful Send returned error: %v", err)
+	}
+	if len(rw.deadlines) != 2 || rw.deadlines[0].IsZero() || !rw.deadlines[1].IsZero() {
+		t.Fatalf("unexpected deadlines after successful Send: %+v", rw.deadlines)
+	}
+
+	// 2. ArmCloseDeadline after successful Send arms a finite close deadline (e.g. ErrSlowConsumer).
+	guard.ArmCloseDeadline()
+	if len(rw.deadlines) != 3 || rw.deadlines[2].IsZero() {
+		t.Fatalf("expected finite close deadline after ArmCloseDeadline, got %+v", rw.deadlines)
+	}
+
+	// 3. Failed Send leaves the active deadline intact (never clears to zero), and
+	//    subsequent ArmCloseDeadline does not extend the already-failed deadline.
+	rw2 := &deadlineRecorderResponseWriter{ResponseRecorder: *httptest.NewRecorder()}
+	guard2 := &streamWriteGuard{rc: http.NewResponseController(rw2)}
+	sendErr := errors.New("i/o timeout")
+	if err := guard2.Send(func() error { return sendErr }); !errors.Is(err, sendErr) {
+		t.Fatalf("expected sendErr, got %v", err)
+	}
+	guard2.ArmCloseDeadline()
+	if len(rw2.deadlines) != 1 || rw2.deadlines[0].IsZero() {
+		t.Fatalf("failed Send must keep single finite deadline without clearing or extending, got %+v", rw2.deadlines)
 	}
 }

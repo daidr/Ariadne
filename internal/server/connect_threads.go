@@ -170,8 +170,9 @@ func (h *threadServiceHandler) StreamCommandOutput(
 	if h.api.options.Background == nil {
 		return domainerr.NotFound(id)
 	}
+	guard := h.api.streamWriteGuard(ctx)
 	found, err := h.api.options.Background.WatchPeek(ctx, req.Msg.GetThreadId(), id, 0, 150*time.Millisecond, func(peek background.Peek) error {
-		return h.api.sendWithWriteDeadline(ctx, func() error {
+		return guard.Send(func() error {
 			return stream.Send(&ariadnev1.StreamCommandOutputResponse{
 				Command: toProtoBackgroundCommand(peek.Command),
 				Tail:    peek.Tail,
@@ -179,9 +180,11 @@ func (h *threadServiceHandler) StreamCommandOutput(
 		})
 	})
 	if err != nil {
+		guard.ArmCloseDeadline()
 		return err
 	}
 	if !found {
+		guard.ArmCloseDeadline()
 		return domainerr.NotFound(id)
 	}
 	return nil

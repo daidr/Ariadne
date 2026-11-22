@@ -9,6 +9,7 @@ export function useUpdatesSettings() {
   const error = shallowRef<string | null>(null)
   const controller = new AbortController()
   let sequence = 0
+  let pushGeneration = 0
   let stopListening: (() => void) | undefined
 
   const updating = computed(
@@ -48,11 +49,16 @@ export function useUpdatesSettings() {
 
   async function perform(action: typeof pending.value, request: () => Promise<UpdateStatus>) {
     const current = ++sequence
+    const startedPushGeneration = pushGeneration
     pending.value = action
     if (action) error.value = null
     try {
       const view = await request()
-      if (!controller.signal.aborted && current === sequence) {
+      if (
+        !controller.signal.aborted &&
+        current === sequence &&
+        pushGeneration === startedPushGeneration
+      ) {
         status.value = view
         error.value = null
       }
@@ -81,9 +87,12 @@ export function useUpdatesSettings() {
   function save(preferences: UpdatePreferences, refresh: boolean) {
     if (busy.value) return
     return perform('save', async () => {
+      const beforeSavePush = pushGeneration
       const view = await api.saveUpdatePreferences(preferences, controller.signal)
       if (refresh && !controller.signal.aborted) {
-        status.value = view
+        if (pushGeneration === beforeSavePush) {
+          status.value = view
+        }
         return api.checkForUpdate(controller.signal)
       }
       return view
@@ -117,6 +126,7 @@ export function useUpdatesSettings() {
   onMounted(() => {
     stopListening = onUpdateStatus((view) => {
       if (controller.signal.aborted) return
+      pushGeneration++
       status.value = view
       error.value = null
     })
