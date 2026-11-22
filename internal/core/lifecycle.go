@@ -223,6 +223,10 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if d["branch"] != nil {
 			w.run("UPDATE threads SET changes = ?, changed_seq = ? WHERE id = ?", encoded(d["branch"]), e.Seq, d["conversationId"])
 		}
+	case "branch.changes_synced":
+		if d["totals"] != nil {
+			w.run("UPDATE threads SET changes = ?, changed_seq = ? WHERE id = ?", encoded(d["totals"]), e.Seq, id)
+		}
 	case "branch.merged":
 		merge := except(d, "threadId")
 		merge["at"] = e.At

@@ -75,11 +75,20 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 		return
 	}
 	after, err := branches.Snapshot(recordCtx, tc.threadID)
-	if err != nil || after == nil || *after == "" || *after == tc.before {
+	if err != nil || after == nil || *after == "" {
+		return
+	}
+	if *after == tc.before {
+		if branch := tc.branchTotals(recordCtx, branches, thread, *after); branch != nil {
+			_ = tc.repository.RecordBranchChanges(recordCtx, tc.threadID, branch)
+		}
 		return
 	}
 	diffFiles, err := branches.Diff(recordCtx, tc.before, *after)
 	if err != nil || len(diffFiles) == 0 {
+		if branch := tc.branchTotals(recordCtx, branches, thread, *after); branch != nil {
+			_ = tc.repository.RecordBranchChanges(recordCtx, tc.threadID, branch)
+		}
 		return
 	}
 	files := make([]core.TurnFile, len(diffFiles))

@@ -159,3 +159,129 @@ func TestTurnChangesRecordedForHostedRepository(t *testing.T) {
 		t.Fatalf("expected thread.Changes to stay intact, got %#v", updated2.Changes)
 	}
 }
+
+func TestTurnChangesBackfillsTotalsWithoutFileEdits(t *testing.T) {
+	ctx := t.Context()
+	remoteDir := initTestRemoteRepo(t)
+	dataDir := t.TempDir()
+
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	hosts := sources.New()
+	if _, err := hosts.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
+		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+			hosted, err := local.NewHosted(local.HostedOptions{
+				DataDir:   dataDir,
+				Path:      "owner/repo",
+				Namespace: []string{"github"},
+				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
+				DefaultBranch: func(context.Context) (string, error) {
+					return "main", nil
+				},
+			})
+			if err != nil {
+				return sdk.Capabilities{}, err
+			}
+			return sdk.Capabilities{
+				Workspace: hosted.Capability(),
+				Close:     hosted.Close,
+			}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+
+	project, err := repo.CreateProject(ctx, new("Hosted"), core.ProjectStart{
+		Source: core.Source{Kind: "github", Settings: map[string]any{"repository": "owner/repo"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Legacy thread with commits"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an existing thread whose branch already has committed changes
+	// while threads.changes is still NULL (e.g., created before PR #179).
+	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(ctx, "README.md", "hello\nline2\nline3\n"); err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range [][]string{
+		{"git", "config", "user.name", "Test"},
+		{"git", "config", "user.email", "test@example.invalid"},
+		{"git", "add", "README.md"},
+		{"git", "commit", "-q", "-m", "legacy commit"},
+	} {
+		res, err := ws.ExecFile(ctx, argv, sdk.ExecOptions{})
+		if err != nil || res.ExitCode != 0 {
+			t.Fatalf("exec %v: err=%v exit=%d stderr=%s", argv, err, res.ExitCode, res.Stderr)
+		}
+	}
+	before, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Changes != nil {
+		t.Fatalf("expected nil changes before backfill, got %#v", before.Changes)
+	}
+
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: thread.ID, Author: "user", Content: "Push branch",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
+	if err != nil || turnID == "" {
+		t.Fatalf("StartScheduledTurn: id=%q err=%v", turnID, err)
+	}
+	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
+	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+	discussion := &turn{
+		Runner:       runnerInstance,
+		conversation: conv,
+		id:           turnID,
+		changes:      newTurnChanges(runnerInstance, conv),
+	}
+	if _, _, _, err := discussion.repoWorkspace(ctx); err != nil {
+		t.Fatal(err)
+	}
+	discussion.changes.record(ctx, turnID)
+	if err := repo.FinishTurn(ctx, thread.ID, turnID, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	totals, ok := after.Changes.(map[string]any)
+	if !ok {
+		t.Fatalf("expected thread.Changes to be backfilled, got %#v", after.Changes)
+	}
+	if totals["files"] != float64(1) || totals["added"] != float64(2) || totals["removed"] != float64(0) {
+		t.Fatalf("unexpected backfilled totals: %#v", totals)
+	}
+	var turnChangedEvents int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'turn.changed'").Scan(&turnChangedEvents); err != nil {
+		t.Fatal(err)
+	}
+	if turnChangedEvents != 0 {
+		t.Fatalf("expected no turn.changed event for editless turn, got %d", turnChangedEvents)
+	}
+}

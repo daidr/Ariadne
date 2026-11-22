@@ -333,6 +333,32 @@ func (repo *Repository) RecordTurnChanges(ctx context.Context, id, turnID, from,
 		return appendChanges(tx, projectID, []change{{"turn.changed", data}})
 	})
 }
+
+func sameChangeTotals(raw any, next *ChangeTotals) bool {
+	current := asObject(raw)
+	if current == nil || next == nil {
+		return false
+	}
+	files, ok1 := current["files"].(float64)
+	added, ok2 := current["added"].(float64)
+	removed, ok3 := current["removed"].(float64)
+	return ok1 && ok2 && ok3 && int64(files) == next.Files && int64(added) == next.Added && int64(removed) == next.Removed
+}
+
+// RecordBranchChanges persists a thread's current branch diff totals without
+// creating a turn-changes transcript notice. It is a no-op when unchanged.
+func (repo *Repository) RecordBranchChanges(ctx context.Context, id string, totals *ChangeTotals) error {
+	if totals == nil {
+		return nil
+	}
+	_, err := repo.mutateThread(ctx, id, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if truthy(current.ReviewOf) || sameChangeTotals(current.Changes, totals) {
+			return nil, nil
+		}
+		return []change{{"branch.changes_synced", object{"threadId": id, "totals": totals}}}, nil
+	})
+	return err
+}
 func canNote(thread ThreadView, project ProjectView, kind string) bool {
 	if truthy(thread.ReviewOf) || slices.Contains(project.Settings.Tools, "commands") {
 		return false

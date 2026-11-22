@@ -75,7 +75,70 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 		}
 	}
 	changes, err := branches.Changes(ctx, owner, *base)
-	return ThreadChanges{Changes: changes, Mergeable: mergeable}, workError(err)
+	if err != nil {
+		return ThreadChanges{}, workError(err)
+	}
+	manager.syncBranchChanges(ctx, thread, branches, changes)
+	return ThreadChanges{Changes: changes, Mergeable: mergeable}, nil
+}
+
+func changeTotals(files []sdk.ChangedFile) core.ChangeTotals {
+	totals := core.ChangeTotals{Files: int64(len(files))}
+	for _, file := range files {
+		if file.Added != nil {
+			totals.Added += *file.Added
+		}
+		if file.Removed != nil {
+			totals.Removed += *file.Removed
+		}
+	}
+	return totals
+}
+
+func (manager *Manager) syncBranchChanges(ctx context.Context, thread core.ThreadView, branches *sdk.BranchCapability, changes *sdk.BranchChanges) {
+	if thread.ReviewOf != nil || changes == nil {
+		return
+	}
+	var totals *core.ChangeTotals
+	if len(changes.Uncommitted) == 0 {
+		value := changeTotals(changes.Files)
+		totals = &value
+	} else if thread.Changes == nil {
+		if branches != nil && branches.Snapshot != nil && branches.Diff != nil && changes.From != "" {
+			if snapshot, err := branches.Snapshot(ctx, thread.ID); err == nil && snapshot != nil && *snapshot != "" {
+				if files, err := branches.Diff(ctx, changes.From, *snapshot); err == nil {
+					value := changeTotals(files)
+					totals = &value
+				}
+			}
+		}
+		if totals == nil {
+			value := changeTotals(changes.Files)
+			totals = &value
+		}
+	}
+	if totals != nil {
+		_ = manager.options.Repository.RecordBranchChanges(ctx, thread.ID, totals)
+	}
+}
+
+func (manager *Manager) refreshBranchChanges(ctx context.Context, thread core.ThreadView) {
+	if thread.ReviewOf != nil || thread.Workspace == nil {
+		return
+	}
+	branch, base := optionalString(thread.Workspace.Branch), optionalString(thread.Workspace.Base)
+	if branch == nil || base == nil || *branch == "" || *base == "" {
+		return
+	}
+	branches, err := manager.BranchesForThread(ctx, thread)
+	if err != nil || branches == nil || branches.Changes == nil {
+		return
+	}
+	changes, err := branches.Changes(ctx, sdk.ThreadBranch{ThreadID: thread.ID, Branch: *branch}, *base)
+	if err != nil || changes == nil {
+		return
+	}
+	manager.syncBranchChanges(ctx, thread, branches, changes)
 }
 func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request sdk.FileVersionRequest) (sdk.FileVersions, error) {
 	ctx, done, err := manager.begin(ctx)
@@ -548,8 +611,15 @@ func (manager *Manager) SyncPullRequest(ctx context.Context, threadID string, kn
 	if pr.State == "open" && pr.Conflicted {
 		value["conflicted"] = true
 	}
+	previousHead := ""
+	if current, ok := thread.PullRequest.(map[string]any); ok {
+		previousHead, _ = current["headSha"].(string)
+	}
 	if err := manager.options.Repository.SyncPullRequest(ctx, threadID, value, auto); err != nil {
 		return nil, err
+	}
+	if thread.ReviewOf == nil && thread.Workspace != nil && (thread.Changes == nil || previousHead != pr.HeadSHA) {
+		manager.refreshBranchChanges(ctx, thread)
 	}
 	return value, nil
 }

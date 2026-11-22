@@ -21,7 +21,7 @@ import {
   type ChatInputOption,
   type ChatMessageProps,
 } from 'dou-ui'
-import type { MessageView, NoticeView, ReplyDraftBlock } from '@ariadne/core'
+import type { ChangeTotals, MessageView, NoticeView, ReplyDraftBlock } from '@ariadne/core'
 import {
   ChevronDownIcon,
   CpuIcon,
@@ -91,7 +91,7 @@ import ConversationBar from './ConversationBar.vue'
 import ConversationMarker from './ConversationMarker.vue'
 import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
-import { branchChanges, hasOpenBranch } from '../review/merge-offered'
+import { hasOpenBranch } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
@@ -219,14 +219,55 @@ const background = computed(() =>
 const createdArtifacts = computed(() =>
   state.artifacts.filter((artifact) => artifact.createdBy === conversationId.value),
 )
+const backfilledChanges = ref<{ threadId: string; totals: ChangeTotals } | null>(null)
+const attemptedBackfill = new Set<string>()
+let backfillController: AbortController | null = null
+onBeforeUnmount(() => backfillController?.abort())
+watch(
+  () => {
+    const owner = reviewed.value ?? thread.value
+    if (!hasOpenBranch(owner) || owner!.changes !== null) return null
+    return `${owner!.id}\0${owner!.pullRequest?.headSha ?? ''}`
+  },
+  (key) => {
+    backfillController?.abort()
+    backfillController = null
+    if (!key || attemptedBackfill.has(key)) return
+    attemptedBackfill.add(key)
+    const threadId = key.slice(0, key.indexOf('\0'))
+    const controller = new AbortController()
+    backfillController = controller
+    void api
+      .getChanges(threadId, undefined, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted || !result.changes) return
+        if (result.changes.uncommitted.length > 0 && result.changes.files.length === 0) return
+        const totals = result.changes.files.reduce(
+          (acc, file) => ({
+            files: acc.files + 1,
+            added: acc.added + (file.added ?? 0),
+            removed: acc.removed + (file.removed ?? 0),
+          }),
+          { files: 0, added: 0, removed: 0 },
+        )
+        backfilledChanges.value = { threadId, totals }
+      })
+      .catch(() => {
+        // Keep the pull-request fallback capsule if branch changes cannot be read right now.
+      })
+  },
+  { immediate: true },
+)
 const capsuleChanges = computed(() => {
   const owner = reviewed.value ?? thread.value
   if (!hasOpenBranch(owner)) return null
-  const totals = branchChanges(owner)
-  if (totals ? totals.files > 0 : !!owner?.pullRequest) {
-    return { threadId: owner!.id, totals }
+  const totals =
+    owner!.changes ??
+    (backfilledChanges.value?.threadId === owner!.id ? backfilledChanges.value.totals : null)
+  if (totals) {
+    return totals.files > 0 ? { threadId: owner!.id, totals } : null
   }
-  return null
+  return owner!.pullRequest ? { threadId: owner!.id, totals: null } : null
 })
 const showCapsules = computed(
   () =>
