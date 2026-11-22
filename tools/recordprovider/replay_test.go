@@ -108,6 +108,13 @@ func replaySample(t *testing.T, sample fixture) []sdk.Part {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
+	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: client}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(remove)
+	}
 	provider, ok := builtins.Registry.Get(sample.Provider)
 	if !ok {
 		t.Fatalf("unknown provider %q", sample.Provider)
