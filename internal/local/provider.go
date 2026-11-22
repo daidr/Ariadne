@@ -71,12 +71,14 @@ func (factory *Workspaces) Capability() *sdk.WorkspaceCapability {
 			return factory.revisions(ctx, thread.Branch, "refs/heads/"+base)
 		},
 		File: func(ctx context.Context, input sdk.FileVersionRequest) (sdk.FileVersions, error) {
-			ctx, done, err := factory.begin(ctx)
-			if err != nil {
+			files, err := factory.FileVersions(ctx, []sdk.FileVersionRequest{input})
+			if err != nil || len(files) == 0 {
 				return sdk.FileVersions{}, err
 			}
-			defer done()
-			return FileVersions(ctx, factory.git, VersionInput{From: input.From, Head: input.Head, Path: input.Path, PreviousPath: input.PreviousPath})
+			return files[0], nil
+		},
+		Files: func(ctx context.Context, inputs []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+			return factory.FileVersions(ctx, inputs)
 		},
 		Merged: func(ctx context.Context, thread sdk.ThreadBranch, base string) (bool, error) {
 			ctx, done, err := factory.begin(ctx)

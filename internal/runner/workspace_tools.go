@@ -40,7 +40,11 @@ func (turn *turn) canEditThread(ctx context.Context) bool {
 func (turn *turn) editWorkspace(ctx context.Context, thread core.ThreadView, input args) (sdk.Workspace, error) {
 	name := text(input, "source")
 	if name == "" {
-		return turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+		workspace, err := turn.Workspaces.ForThread(ctx, thread.ProjectID, thread.ID)
+		if err == nil {
+			turn.changes.begin(ctx, thread)
+		}
+		return workspace, err
 	}
 	id, err := turn.Workspaces.ResolveFileSource(ctx, thread.ProjectID, name, thread.ID)
 	if err != nil {
@@ -49,7 +53,11 @@ func (turn *turn) editWorkspace(ctx context.Context, thread core.ThreadView, inp
 	if id == "" {
 		return nil, fmt.Errorf("no writable file source named %q", name)
 	}
-	return turn.Workspaces.ForThreadSource(ctx, thread.ProjectID, thread.ID, id)
+	workspace, err := turn.Workspaces.ForThreadSource(ctx, thread.ProjectID, thread.ID, id)
+	if err == nil {
+		turn.changes.begin(ctx, thread)
+	}
+	return workspace, err
 }
 
 func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {

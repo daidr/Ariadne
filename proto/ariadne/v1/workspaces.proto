@@ -10,6 +10,7 @@ import "ariadne/v1/threads.proto";
 service WorkspaceService {
   rpc GetThreadChanges(GetThreadChangesRequest) returns (GetThreadChangesResponse);
   rpc GetChangedFile(GetChangedFileRequest) returns (GetChangedFileResponse);
+  rpc GetChangedFiles(GetChangedFilesRequest) returns (GetChangedFilesResponse);
   rpc MergeThread(MergeThreadRequest) returns (MergeThreadResponse);
   rpc UndoMerge(UndoMergeRequest) returns (UndoMergeResponse);
   rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
@@ -99,6 +100,22 @@ message GetChangedFileRequest {
 
 message GetChangedFileResponse {
   FileVersions file = 1;
+}
+
+message ChangedFileRef {
+  string path = 1;
+  optional string previous_path = 2;
+}
+
+message GetChangedFilesRequest {
+  string thread_id = 1;
+  string from = 2;
+  string head = 3;
+  repeated ChangedFileRef files = 4;
+}
+
+message GetChangedFilesResponse {
+  repeated FileVersions files = 1;
 }
 
 message MergeThreadRequest {

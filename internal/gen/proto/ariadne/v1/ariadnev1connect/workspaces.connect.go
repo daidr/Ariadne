@@ -39,6 +39,9 @@ const (
 	// WorkspaceServiceGetChangedFileProcedure is the fully-qualified name of the WorkspaceService's
 	// GetChangedFile RPC.
 	WorkspaceServiceGetChangedFileProcedure = "/ariadne.v1.WorkspaceService/GetChangedFile"
+	// WorkspaceServiceGetChangedFilesProcedure is the fully-qualified name of the WorkspaceService's
+	// GetChangedFiles RPC.
+	WorkspaceServiceGetChangedFilesProcedure = "/ariadne.v1.WorkspaceService/GetChangedFiles"
 	// WorkspaceServiceMergeThreadProcedure is the fully-qualified name of the WorkspaceService's
 	// MergeThread RPC.
 	WorkspaceServiceMergeThreadProcedure = "/ariadne.v1.WorkspaceService/MergeThread"
@@ -63,6 +66,7 @@ const (
 type WorkspaceServiceClient interface {
 	GetThreadChanges(context.Context, *connect.Request[v1.GetThreadChangesRequest]) (*connect.Response[v1.GetThreadChangesResponse], error)
 	GetChangedFile(context.Context, *connect.Request[v1.GetChangedFileRequest]) (*connect.Response[v1.GetChangedFileResponse], error)
+	GetChangedFiles(context.Context, *connect.Request[v1.GetChangedFilesRequest]) (*connect.Response[v1.GetChangedFilesResponse], error)
 	MergeThread(context.Context, *connect.Request[v1.MergeThreadRequest]) (*connect.Response[v1.MergeThreadResponse], error)
 	UndoMerge(context.Context, *connect.Request[v1.UndoMergeRequest]) (*connect.Response[v1.UndoMergeResponse], error)
 	ListWorktrees(context.Context, *connect.Request[v1.ListWorktreesRequest]) (*connect.Response[v1.ListWorktreesResponse], error)
@@ -92,6 +96,12 @@ func NewWorkspaceServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			httpClient,
 			baseURL+WorkspaceServiceGetChangedFileProcedure,
 			connect.WithSchema(workspaceServiceMethods.ByName("GetChangedFile")),
+			connect.WithClientOptions(opts...),
+		),
+		getChangedFiles: connect.NewClient[v1.GetChangedFilesRequest, v1.GetChangedFilesResponse](
+			httpClient,
+			baseURL+WorkspaceServiceGetChangedFilesProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("GetChangedFiles")),
 			connect.WithClientOptions(opts...),
 		),
 		mergeThread: connect.NewClient[v1.MergeThreadRequest, v1.MergeThreadResponse](
@@ -137,6 +147,7 @@ func NewWorkspaceServiceClient(httpClient connect.HTTPClient, baseURL string, op
 type workspaceServiceClient struct {
 	getThreadChanges   *connect.Client[v1.GetThreadChangesRequest, v1.GetThreadChangesResponse]
 	getChangedFile     *connect.Client[v1.GetChangedFileRequest, v1.GetChangedFileResponse]
+	getChangedFiles    *connect.Client[v1.GetChangedFilesRequest, v1.GetChangedFilesResponse]
 	mergeThread        *connect.Client[v1.MergeThreadRequest, v1.MergeThreadResponse]
 	undoMerge          *connect.Client[v1.UndoMergeRequest, v1.UndoMergeResponse]
 	listWorktrees      *connect.Client[v1.ListWorktreesRequest, v1.ListWorktreesResponse]
@@ -153,6 +164,11 @@ func (c *workspaceServiceClient) GetThreadChanges(ctx context.Context, req *conn
 // GetChangedFile calls ariadne.v1.WorkspaceService.GetChangedFile.
 func (c *workspaceServiceClient) GetChangedFile(ctx context.Context, req *connect.Request[v1.GetChangedFileRequest]) (*connect.Response[v1.GetChangedFileResponse], error) {
 	return c.getChangedFile.CallUnary(ctx, req)
+}
+
+// GetChangedFiles calls ariadne.v1.WorkspaceService.GetChangedFiles.
+func (c *workspaceServiceClient) GetChangedFiles(ctx context.Context, req *connect.Request[v1.GetChangedFilesRequest]) (*connect.Response[v1.GetChangedFilesResponse], error) {
+	return c.getChangedFiles.CallUnary(ctx, req)
 }
 
 // MergeThread calls ariadne.v1.WorkspaceService.MergeThread.
@@ -189,6 +205,7 @@ func (c *workspaceServiceClient) GetReferenceStatus(ctx context.Context, req *co
 type WorkspaceServiceHandler interface {
 	GetThreadChanges(context.Context, *connect.Request[v1.GetThreadChangesRequest]) (*connect.Response[v1.GetThreadChangesResponse], error)
 	GetChangedFile(context.Context, *connect.Request[v1.GetChangedFileRequest]) (*connect.Response[v1.GetChangedFileResponse], error)
+	GetChangedFiles(context.Context, *connect.Request[v1.GetChangedFilesRequest]) (*connect.Response[v1.GetChangedFilesResponse], error)
 	MergeThread(context.Context, *connect.Request[v1.MergeThreadRequest]) (*connect.Response[v1.MergeThreadResponse], error)
 	UndoMerge(context.Context, *connect.Request[v1.UndoMergeRequest]) (*connect.Response[v1.UndoMergeResponse], error)
 	ListWorktrees(context.Context, *connect.Request[v1.ListWorktreesRequest]) (*connect.Response[v1.ListWorktreesResponse], error)
@@ -214,6 +231,12 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 		WorkspaceServiceGetChangedFileProcedure,
 		svc.GetChangedFile,
 		connect.WithSchema(workspaceServiceMethods.ByName("GetChangedFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServiceGetChangedFilesHandler := connect.NewUnaryHandler(
+		WorkspaceServiceGetChangedFilesProcedure,
+		svc.GetChangedFiles,
+		connect.WithSchema(workspaceServiceMethods.ByName("GetChangedFiles")),
 		connect.WithHandlerOptions(opts...),
 	)
 	workspaceServiceMergeThreadHandler := connect.NewUnaryHandler(
@@ -258,6 +281,8 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 			workspaceServiceGetThreadChangesHandler.ServeHTTP(w, r)
 		case WorkspaceServiceGetChangedFileProcedure:
 			workspaceServiceGetChangedFileHandler.ServeHTTP(w, r)
+		case WorkspaceServiceGetChangedFilesProcedure:
+			workspaceServiceGetChangedFilesHandler.ServeHTTP(w, r)
 		case WorkspaceServiceMergeThreadProcedure:
 			workspaceServiceMergeThreadHandler.ServeHTTP(w, r)
 		case WorkspaceServiceUndoMergeProcedure:
@@ -285,6 +310,10 @@ func (UnimplementedWorkspaceServiceHandler) GetThreadChanges(context.Context, *c
 
 func (UnimplementedWorkspaceServiceHandler) GetChangedFile(context.Context, *connect.Request[v1.GetChangedFileRequest]) (*connect.Response[v1.GetChangedFileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.WorkspaceService.GetChangedFile is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) GetChangedFiles(context.Context, *connect.Request[v1.GetChangedFilesRequest]) (*connect.Response[v1.GetChangedFilesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.WorkspaceService.GetChangedFiles is not implemented"))
 }
 
 func (UnimplementedWorkspaceServiceHandler) MergeThread(context.Context, *connect.Request[v1.MergeThreadRequest]) (*connect.Response[v1.MergeThreadResponse], error) {

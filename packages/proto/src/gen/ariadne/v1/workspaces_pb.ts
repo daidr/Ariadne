@@ -16,7 +16,7 @@ import type { Message } from '@bufbuild/protobuf'
 export const file_ariadne_v1_workspaces: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChthcmlhZG5lL3YxL3dvcmtzcGFjZXMucHJvdG8SCmFyaWFkbmUudjEiLAoMQnJhbmNoQ29tbWl0EgsKA3NoYRgBIAEoCRIPCgdzdWJqZWN0GAIgASgJIqEBCgtDaGFuZ2VkRmlsZRIMCgRwYXRoGAEgASgJEhoKDXByZXZpb3VzX3BhdGgYAiABKAlIAIgBARIOCgZzdGF0dXMYAyABKAkSFgoFYWRkZWQYBCABKANCAjACSAGIAQESGAoHcmVtb3ZlZBgFIAEoA0ICMAJIAogBAUIQCg5fcHJldmlvdXNfcGF0aEIICgZfYWRkZWRCCgoIX3JlbW92ZWQi1wEKDUJyYW5jaENoYW5nZXMSDgoGYnJhbmNoGAEgASgJEgwKBGJhc2UYAiABKAkSDAoEZnJvbRgDIAEoCRIMCgRoZWFkGAQgASgJEhYKCWJhc2VfaGVhZBgFIAEoCUgAiAEBEikKB2NvbW1pdHMYBiADKAsyGC5hcmlhZG5lLnYxLkJyYW5jaENvbW1pdBImCgVmaWxlcxgHIAMoCzIXLmFyaWFkbmUudjEuQ2hhbmdlZEZpbGUSEwoLdW5jb21taXR0ZWQYCCADKAlCDAoKX2Jhc2VfaGVhZCJuCgxGaWxlVmVyc2lvbnMSEwoGYmVmb3JlGAEgASgJSACIAQESEgoFYWZ0ZXIYAiABKAlIAYgBARIUCgdza2lwcGVkGAMgASgJSAKIAQFCCQoHX2JlZm9yZUIICgZfYWZ0ZXJCCgoIX3NraXBwZWQiYQoMTWVyZ2VPdXRjb21lEgwKBGtpbmQYASABKAkSEAoDc2hhGAIgASgJSACIAQESEQoEaGVhZBgDIAEoCUgBiAEBEg0KBWZpbGVzGAQgAygJQgYKBF9zaGFCBwoFX2hlYWQiwwEKDkxpc3RlZFdvcmt0cmVlEhEKCXRocmVhZF9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEhYKBWJ5dGVzGAMgASgDQgIwAkgAiAEBEhAKCG9ycGhhbmVkGAQgASgIEisKBnRocmVhZBgFIAEoCzIWLmFyaWFkbmUudjEuVGhyZWFkVmlld0gBiAEBEhYKCXNvdXJjZV9pZBgGIAEoCUgCiAEBQggKBl9ieXRlc0IJCgdfdGhyZWFkQgwKCl9zb3VyY2VfaWQitQEKEFByb2plY3RXb3JrdHJlZXMSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRItCgl3b3JrdHJlZXMYAyADKAsyGi5hcmlhZG5lLnYxLkxpc3RlZFdvcmt0cmVlEhMKBnNoYXJlZBgEIAEoCEgAiAEBEi4KBWVycm9yGAUgASgLMhouYXJpYWRuZS52MS5Mb2NhbGl6ZWRFcnJvckgBiAEBQgkKB19zaGFyZWRCCAoGX2Vycm9yIkgKD0ZhaWxlZFJlZmVyZW5jZRIKCgJpZBgBIAEoCRIpCgVlcnJvchgCIAEoCzIaLmFyaWFkbmUudjEuTG9jYWxpemVkRXJyb3IibgoXR2V0VGhyZWFkQ2hhbmdlc1JlcXVlc3QSEQoJdGhyZWFkX2lkGAEgASgJEhEKBGhlYWQYAiABKAlIAIgBARIWCgliYXNlX2hlYWQYAyABKAlIAYgBAUIHCgVfaGVhZEIMCgpfYmFzZV9oZWFkIn0KGEdldFRocmVhZENoYW5nZXNSZXNwb25zZRIvCgdjaGFuZ2VzGAEgASgLMhkuYXJpYWRuZS52MS5CcmFuY2hDaGFuZ2VzSACIAQESEQoJbWVyZ2VhYmxlGAIgASgIEhEKCXVuY2hhbmdlZBgDIAEoCEIKCghfY2hhbmdlcyKCAQoVR2V0Q2hhbmdlZEZpbGVSZXF1ZXN0EhEKCXRocmVhZF9pZBgBIAEoCRIMCgRmcm9tGAIgASgJEgwKBGhlYWQYAyABKAkSDAoEcGF0aBgEIAEoCRIaCg1wcmV2aW91c19wYXRoGAUgASgJSACIAQFCEAoOX3ByZXZpb3VzX3BhdGgiQAoWR2V0Q2hhbmdlZEZpbGVSZXNwb25zZRImCgRmaWxlGAEgASgLMhguYXJpYWRuZS52MS5GaWxlVmVyc2lvbnMidgoSTWVyZ2VUaHJlYWRSZXF1ZXN0EhEKCXRocmVhZF9pZBgBIAEoCRIOCgZtZXRob2QYAiABKAkSDwoHbWVzc2FnZRgDIAEoCRIaCg1leHBlY3RlZF9oZWFkGAQgASgJSACIAQFCEAoOX2V4cGVjdGVkX2hlYWQiaAoTTWVyZ2VUaHJlYWRSZXNwb25zZRIpCgdvdXRjb21lGAEgASgLMhguYXJpYWRuZS52MS5NZXJnZU91dGNvbWUSJgoGdGhyZWFkGAIgASgLMhYuYXJpYWRuZS52MS5UaHJlYWRWaWV3IiUKEFVuZG9NZXJnZVJlcXVlc3QSEQoJdGhyZWFkX2lkGAEgASgJIjsKEVVuZG9NZXJnZVJlc3BvbnNlEiYKBnRocmVhZBgBIAEoCzIWLmFyaWFkbmUudjEuVGhyZWFkVmlldyItChRMaXN0V29ya3RyZWVzUmVxdWVzdBIVCg1pbmNsdWRlX3NpemVzGAEgASgIIlgKFUxpc3RXb3JrdHJlZXNSZXNwb25zZRIuCghwcm9qZWN0cxgBIAMoCzIcLmFyaWFkbmUudjEuUHJvamVjdFdvcmt0cmVlcxIPCgd3aW5kb3dzGAIgASgIInYKFVJlbW92ZVdvcmt0cmVlUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIWCglzb3VyY2VfaWQYAyABKAlIAIgBARIQCghvcnBoYW5lZBgEIAEoCEIMCgpfc291cmNlX2lkIhgKFlJlbW92ZVdvcmt0cmVlUmVzcG9uc2UibgoXTGlzdE1lbnRpb25GaWxlc1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIcCg9jb252ZXJzYXRpb25faWQYAiABKAlIAIgBARINCgVxdWVyeRgDIAEoCUISChBfY29udmVyc2F0aW9uX2lkIikKGExpc3RNZW50aW9uRmlsZXNSZXNwb25zZRINCgVmaWxlcxgBIAMoCSIvChlHZXRSZWZlcmVuY2VTdGF0dXNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkiSQoaR2V0UmVmZXJlbmNlU3RhdHVzUmVzcG9uc2USKwoGZmFpbGVkGAEgAygLMhsuYXJpYWRuZS52MS5GYWlsZWRSZWZlcmVuY2Uy1wUKEFdvcmtzcGFjZVNlcnZpY2USXQoQR2V0VGhyZWFkQ2hhbmdlcxIjLmFyaWFkbmUudjEuR2V0VGhyZWFkQ2hhbmdlc1JlcXVlc3QaJC5hcmlhZG5lLnYxLkdldFRocmVhZENoYW5nZXNSZXNwb25zZRJXCg5HZXRDaGFuZ2VkRmlsZRIhLmFyaWFkbmUudjEuR2V0Q2hhbmdlZEZpbGVSZXF1ZXN0GiIuYXJpYWRuZS52MS5HZXRDaGFuZ2VkRmlsZVJlc3BvbnNlEk4KC01lcmdlVGhyZWFkEh4uYXJpYWRuZS52MS5NZXJnZVRocmVhZFJlcXVlc3QaHy5hcmlhZG5lLnYxLk1lcmdlVGhyZWFkUmVzcG9uc2USSAoJVW5kb01lcmdlEhwuYXJpYWRuZS52MS5VbmRvTWVyZ2VSZXF1ZXN0Gh0uYXJpYWRuZS52MS5VbmRvTWVyZ2VSZXNwb25zZRJUCg1MaXN0V29ya3RyZWVzEiAuYXJpYWRuZS52MS5MaXN0V29ya3RyZWVzUmVxdWVzdBohLmFyaWFkbmUudjEuTGlzdFdvcmt0cmVlc1Jlc3BvbnNlElcKDlJlbW92ZVdvcmt0cmVlEiEuYXJpYWRuZS52MS5SZW1vdmVXb3JrdHJlZVJlcXVlc3QaIi5hcmlhZG5lLnYxLlJlbW92ZVdvcmt0cmVlUmVzcG9uc2USXQoQTGlzdE1lbnRpb25GaWxlcxIjLmFyaWFkbmUudjEuTGlzdE1lbnRpb25GaWxlc1JlcXVlc3QaJC5hcmlhZG5lLnYxLkxpc3RNZW50aW9uRmlsZXNSZXNwb25zZRJjChJHZXRSZWZlcmVuY2VTdGF0dXMSJS5hcmlhZG5lLnYxLkdldFJlZmVyZW5jZVN0YXR1c1JlcXVlc3QaJi5hcmlhZG5lLnYxLkdldFJlZmVyZW5jZVN0YXR1c1Jlc3BvbnNlQqwBCg5jb20uYXJpYWRuZS52MUIPV29ya3NwYWNlc1Byb3RvUAFaQGdpdGh1Yi5jb20vZGFpZHIvQXJpYWRuZS9pbnRlcm5hbC9nZW4vcHJvdG8vYXJpYWRuZS92MTthcmlhZG5ldjGiAgNBWFiqAgpBcmlhZG5lLlYxygIKQXJpYWRuZVxWMeICFkFyaWFkbmVcVjFcR1BCTWV0YWRhdGHqAgtBcmlhZG5lOjpWMWIGcHJvdG8z',
+    'ChthcmlhZG5lL3YxL3dvcmtzcGFjZXMucHJvdG8SCmFyaWFkbmUudjEiLAoMQnJhbmNoQ29tbWl0EgsKA3NoYRgBIAEoCRIPCgdzdWJqZWN0GAIgASgJIqEBCgtDaGFuZ2VkRmlsZRIMCgRwYXRoGAEgASgJEhoKDXByZXZpb3VzX3BhdGgYAiABKAlIAIgBARIOCgZzdGF0dXMYAyABKAkSFgoFYWRkZWQYBCABKANCAjACSAGIAQESGAoHcmVtb3ZlZBgFIAEoA0ICMAJIAogBAUIQCg5fcHJldmlvdXNfcGF0aEIICgZfYWRkZWRCCgoIX3JlbW92ZWQi1wEKDUJyYW5jaENoYW5nZXMSDgoGYnJhbmNoGAEgASgJEgwKBGJhc2UYAiABKAkSDAoEZnJvbRgDIAEoCRIMCgRoZWFkGAQgASgJEhYKCWJhc2VfaGVhZBgFIAEoCUgAiAEBEikKB2NvbW1pdHMYBiADKAsyGC5hcmlhZG5lLnYxLkJyYW5jaENvbW1pdBImCgVmaWxlcxgHIAMoCzIXLmFyaWFkbmUudjEuQ2hhbmdlZEZpbGUSEwoLdW5jb21taXR0ZWQYCCADKAlCDAoKX2Jhc2VfaGVhZCJuCgxGaWxlVmVyc2lvbnMSEwoGYmVmb3JlGAEgASgJSACIAQESEgoFYWZ0ZXIYAiABKAlIAYgBARIUCgdza2lwcGVkGAMgASgJSAKIAQFCCQoHX2JlZm9yZUIICgZfYWZ0ZXJCCgoIX3NraXBwZWQiYQoMTWVyZ2VPdXRjb21lEgwKBGtpbmQYASABKAkSEAoDc2hhGAIgASgJSACIAQESEQoEaGVhZBgDIAEoCUgBiAEBEg0KBWZpbGVzGAQgAygJQgYKBF9zaGFCBwoFX2hlYWQiwwEKDkxpc3RlZFdvcmt0cmVlEhEKCXRocmVhZF9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEhYKBWJ5dGVzGAMgASgDQgIwAkgAiAEBEhAKCG9ycGhhbmVkGAQgASgIEisKBnRocmVhZBgFIAEoCzIWLmFyaWFkbmUudjEuVGhyZWFkVmlld0gBiAEBEhYKCXNvdXJjZV9pZBgGIAEoCUgCiAEBQggKBl9ieXRlc0IJCgdfdGhyZWFkQgwKCl9zb3VyY2VfaWQitQEKEFByb2plY3RXb3JrdHJlZXMSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRItCgl3b3JrdHJlZXMYAyADKAsyGi5hcmlhZG5lLnYxLkxpc3RlZFdvcmt0cmVlEhMKBnNoYXJlZBgEIAEoCEgAiAEBEi4KBWVycm9yGAUgASgLMhouYXJpYWRuZS52MS5Mb2NhbGl6ZWRFcnJvckgBiAEBQgkKB19zaGFyZWRCCAoGX2Vycm9yIkgKD0ZhaWxlZFJlZmVyZW5jZRIKCgJpZBgBIAEoCRIpCgVlcnJvchgCIAEoCzIaLmFyaWFkbmUudjEuTG9jYWxpemVkRXJyb3IibgoXR2V0VGhyZWFkQ2hhbmdlc1JlcXVlc3QSEQoJdGhyZWFkX2lkGAEgASgJEhEKBGhlYWQYAiABKAlIAIgBARIWCgliYXNlX2hlYWQYAyABKAlIAYgBAUIHCgVfaGVhZEIMCgpfYmFzZV9oZWFkIn0KGEdldFRocmVhZENoYW5nZXNSZXNwb25zZRIvCgdjaGFuZ2VzGAEgASgLMhkuYXJpYWRuZS52MS5CcmFuY2hDaGFuZ2VzSACIAQESEQoJbWVyZ2VhYmxlGAIgASgIEhEKCXVuY2hhbmdlZBgDIAEoCEIKCghfY2hhbmdlcyKCAQoVR2V0Q2hhbmdlZEZpbGVSZXF1ZXN0EhEKCXRocmVhZF9pZBgBIAEoCRIMCgRmcm9tGAIgASgJEgwKBGhlYWQYAyABKAkSDAoEcGF0aBgEIAEoCRIaCg1wcmV2aW91c19wYXRoGAUgASgJSACIAQFCEAoOX3ByZXZpb3VzX3BhdGgiQAoWR2V0Q2hhbmdlZEZpbGVSZXNwb25zZRImCgRmaWxlGAEgASgLMhguYXJpYWRuZS52MS5GaWxlVmVyc2lvbnMiTAoOQ2hhbmdlZEZpbGVSZWYSDAoEcGF0aBgBIAEoCRIaCg1wcmV2aW91c19wYXRoGAIgASgJSACIAQFCEAoOX3ByZXZpb3VzX3BhdGgicgoWR2V0Q2hhbmdlZEZpbGVzUmVxdWVzdBIRCgl0aHJlYWRfaWQYASABKAkSDAoEZnJvbRgCIAEoCRIMCgRoZWFkGAMgASgJEikKBWZpbGVzGAQgAygLMhouYXJpYWRuZS52MS5DaGFuZ2VkRmlsZVJlZiJCChdHZXRDaGFuZ2VkRmlsZXNSZXNwb25zZRInCgVmaWxlcxgBIAMoCzIYLmFyaWFkbmUudjEuRmlsZVZlcnNpb25zInYKEk1lcmdlVGhyZWFkUmVxdWVzdBIRCgl0aHJlYWRfaWQYASABKAkSDgoGbWV0aG9kGAIgASgJEg8KB21lc3NhZ2UYAyABKAkSGgoNZXhwZWN0ZWRfaGVhZBgEIAEoCUgAiAEBQhAKDl9leHBlY3RlZF9oZWFkImgKE01lcmdlVGhyZWFkUmVzcG9uc2USKQoHb3V0Y29tZRgBIAEoCzIYLmFyaWFkbmUudjEuTWVyZ2VPdXRjb21lEiYKBnRocmVhZBgCIAEoCzIWLmFyaWFkbmUudjEuVGhyZWFkVmlldyIlChBVbmRvTWVyZ2VSZXF1ZXN0EhEKCXRocmVhZF9pZBgBIAEoCSI7ChFVbmRvTWVyZ2VSZXNwb25zZRImCgZ0aHJlYWQYASABKAsyFi5hcmlhZG5lLnYxLlRocmVhZFZpZXciLQoUTGlzdFdvcmt0cmVlc1JlcXVlc3QSFQoNaW5jbHVkZV9zaXplcxgBIAEoCCJYChVMaXN0V29ya3RyZWVzUmVzcG9uc2USLgoIcHJvamVjdHMYASADKAsyHC5hcmlhZG5lLnYxLlByb2plY3RXb3JrdHJlZXMSDwoHd2luZG93cxgCIAEoCCJ2ChVSZW1vdmVXb3JrdHJlZVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIRCgl0aHJlYWRfaWQYAiABKAkSFgoJc291cmNlX2lkGAMgASgJSACIAQESEAoIb3JwaGFuZWQYBCABKAhCDAoKX3NvdXJjZV9pZCIYChZSZW1vdmVXb3JrdHJlZVJlc3BvbnNlIm4KF0xpc3RNZW50aW9uRmlsZXNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSHAoPY29udmVyc2F0aW9uX2lkGAIgASgJSACIAQESDQoFcXVlcnkYAyABKAlCEgoQX2NvbnZlcnNhdGlvbl9pZCIpChhMaXN0TWVudGlvbkZpbGVzUmVzcG9uc2USDQoFZmlsZXMYASADKAkiLwoZR2V0UmVmZXJlbmNlU3RhdHVzUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJIkkKGkdldFJlZmVyZW5jZVN0YXR1c1Jlc3BvbnNlEisKBmZhaWxlZBgBIAMoCzIbLmFyaWFkbmUudjEuRmFpbGVkUmVmZXJlbmNlMrMGChBXb3Jrc3BhY2VTZXJ2aWNlEl0KEEdldFRocmVhZENoYW5nZXMSIy5hcmlhZG5lLnYxLkdldFRocmVhZENoYW5nZXNSZXF1ZXN0GiQuYXJpYWRuZS52MS5HZXRUaHJlYWRDaGFuZ2VzUmVzcG9uc2USVwoOR2V0Q2hhbmdlZEZpbGUSIS5hcmlhZG5lLnYxLkdldENoYW5nZWRGaWxlUmVxdWVzdBoiLmFyaWFkbmUudjEuR2V0Q2hhbmdlZEZpbGVSZXNwb25zZRJaCg9HZXRDaGFuZ2VkRmlsZXMSIi5hcmlhZG5lLnYxLkdldENoYW5nZWRGaWxlc1JlcXVlc3QaIy5hcmlhZG5lLnYxLkdldENoYW5nZWRGaWxlc1Jlc3BvbnNlEk4KC01lcmdlVGhyZWFkEh4uYXJpYWRuZS52MS5NZXJnZVRocmVhZFJlcXVlc3QaHy5hcmlhZG5lLnYxLk1lcmdlVGhyZWFkUmVzcG9uc2USSAoJVW5kb01lcmdlEhwuYXJpYWRuZS52MS5VbmRvTWVyZ2VSZXF1ZXN0Gh0uYXJpYWRuZS52MS5VbmRvTWVyZ2VSZXNwb25zZRJUCg1MaXN0V29ya3RyZWVzEiAuYXJpYWRuZS52MS5MaXN0V29ya3RyZWVzUmVxdWVzdBohLmFyaWFkbmUudjEuTGlzdFdvcmt0cmVlc1Jlc3BvbnNlElcKDlJlbW92ZVdvcmt0cmVlEiEuYXJpYWRuZS52MS5SZW1vdmVXb3JrdHJlZVJlcXVlc3QaIi5hcmlhZG5lLnYxLlJlbW92ZVdvcmt0cmVlUmVzcG9uc2USXQoQTGlzdE1lbnRpb25GaWxlcxIjLmFyaWFkbmUudjEuTGlzdE1lbnRpb25GaWxlc1JlcXVlc3QaJC5hcmlhZG5lLnYxLkxpc3RNZW50aW9uRmlsZXNSZXNwb25zZRJjChJHZXRSZWZlcmVuY2VTdGF0dXMSJS5hcmlhZG5lLnYxLkdldFJlZmVyZW5jZVN0YXR1c1JlcXVlc3QaJi5hcmlhZG5lLnYxLkdldFJlZmVyZW5jZVN0YXR1c1Jlc3BvbnNlQqwBCg5jb20uYXJpYWRuZS52MUIPV29ya3NwYWNlc1Byb3RvUAFaQGdpdGh1Yi5jb20vZGFpZHIvQXJpYWRuZS9pbnRlcm5hbC9nZW4vcHJvdG8vYXJpYWRuZS92MTthcmlhZG5ldjGiAgNBWFiqAgpBcmlhZG5lLlYxygIKQXJpYWRuZVxWMeICFkFyaWFkbmVcVjFcR1BCTWV0YWRhdGHqAgtBcmlhZG5lOjpWMWIGcHJvdG8z',
     [file_ariadne_v1_common, file_ariadne_v1_threads],
   )
 
@@ -412,6 +412,80 @@ export const GetChangedFileResponseSchema: GenMessage<GetChangedFileResponse> =
   messageDesc(file_ariadne_v1_workspaces, 11)
 
 /**
+ * @generated from message ariadne.v1.ChangedFileRef
+ */
+export type ChangedFileRef = Message<'ariadne.v1.ChangedFileRef'> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string
+
+  /**
+   * @generated from field: optional string previous_path = 2;
+   */
+  previousPath?: string | undefined
+}
+
+/**
+ * Describes the message ariadne.v1.ChangedFileRef.
+ * Use `create(ChangedFileRefSchema)` to create a new message.
+ */
+export const ChangedFileRefSchema: GenMessage<ChangedFileRef> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_workspaces, 12)
+
+/**
+ * @generated from message ariadne.v1.GetChangedFilesRequest
+ */
+export type GetChangedFilesRequest = Message<'ariadne.v1.GetChangedFilesRequest'> & {
+  /**
+   * @generated from field: string thread_id = 1;
+   */
+  threadId: string
+
+  /**
+   * @generated from field: string from = 2;
+   */
+  from: string
+
+  /**
+   * @generated from field: string head = 3;
+   */
+  head: string
+
+  /**
+   * @generated from field: repeated ariadne.v1.ChangedFileRef files = 4;
+   */
+  files: ChangedFileRef[]
+}
+
+/**
+ * Describes the message ariadne.v1.GetChangedFilesRequest.
+ * Use `create(GetChangedFilesRequestSchema)` to create a new message.
+ */
+export const GetChangedFilesRequestSchema: GenMessage<GetChangedFilesRequest> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_workspaces, 13)
+
+/**
+ * @generated from message ariadne.v1.GetChangedFilesResponse
+ */
+export type GetChangedFilesResponse = Message<'ariadne.v1.GetChangedFilesResponse'> & {
+  /**
+   * @generated from field: repeated ariadne.v1.FileVersions files = 1;
+   */
+  files: FileVersions[]
+}
+
+/**
+ * Describes the message ariadne.v1.GetChangedFilesResponse.
+ * Use `create(GetChangedFilesResponseSchema)` to create a new message.
+ */
+export const GetChangedFilesResponseSchema: GenMessage<GetChangedFilesResponse> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_workspaces, 14)
+
+/**
  * @generated from message ariadne.v1.MergeThreadRequest
  */
 export type MergeThreadRequest = Message<'ariadne.v1.MergeThreadRequest'> & {
@@ -442,7 +516,7 @@ export type MergeThreadRequest = Message<'ariadne.v1.MergeThreadRequest'> & {
  */
 export const MergeThreadRequestSchema: GenMessage<MergeThreadRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 12)
+  messageDesc(file_ariadne_v1_workspaces, 15)
 
 /**
  * @generated from message ariadne.v1.MergeThreadResponse
@@ -465,7 +539,7 @@ export type MergeThreadResponse = Message<'ariadne.v1.MergeThreadResponse'> & {
  */
 export const MergeThreadResponseSchema: GenMessage<MergeThreadResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 13)
+  messageDesc(file_ariadne_v1_workspaces, 16)
 
 /**
  * @generated from message ariadne.v1.UndoMergeRequest
@@ -483,7 +557,7 @@ export type UndoMergeRequest = Message<'ariadne.v1.UndoMergeRequest'> & {
  */
 export const UndoMergeRequestSchema: GenMessage<UndoMergeRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 14)
+  messageDesc(file_ariadne_v1_workspaces, 17)
 
 /**
  * @generated from message ariadne.v1.UndoMergeResponse
@@ -501,7 +575,7 @@ export type UndoMergeResponse = Message<'ariadne.v1.UndoMergeResponse'> & {
  */
 export const UndoMergeResponseSchema: GenMessage<UndoMergeResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 15)
+  messageDesc(file_ariadne_v1_workspaces, 18)
 
 /**
  * @generated from message ariadne.v1.ListWorktreesRequest
@@ -519,7 +593,7 @@ export type ListWorktreesRequest = Message<'ariadne.v1.ListWorktreesRequest'> & 
  */
 export const ListWorktreesRequestSchema: GenMessage<ListWorktreesRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 16)
+  messageDesc(file_ariadne_v1_workspaces, 19)
 
 /**
  * @generated from message ariadne.v1.ListWorktreesResponse
@@ -542,7 +616,7 @@ export type ListWorktreesResponse = Message<'ariadne.v1.ListWorktreesResponse'> 
  */
 export const ListWorktreesResponseSchema: GenMessage<ListWorktreesResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 17)
+  messageDesc(file_ariadne_v1_workspaces, 20)
 
 /**
  * @generated from message ariadne.v1.RemoveWorktreeRequest
@@ -575,7 +649,7 @@ export type RemoveWorktreeRequest = Message<'ariadne.v1.RemoveWorktreeRequest'> 
  */
 export const RemoveWorktreeRequestSchema: GenMessage<RemoveWorktreeRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 18)
+  messageDesc(file_ariadne_v1_workspaces, 21)
 
 /**
  * @generated from message ariadne.v1.RemoveWorktreeResponse
@@ -588,7 +662,7 @@ export type RemoveWorktreeResponse = Message<'ariadne.v1.RemoveWorktreeResponse'
  */
 export const RemoveWorktreeResponseSchema: GenMessage<RemoveWorktreeResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 19)
+  messageDesc(file_ariadne_v1_workspaces, 22)
 
 /**
  * @generated from message ariadne.v1.ListMentionFilesRequest
@@ -616,7 +690,7 @@ export type ListMentionFilesRequest = Message<'ariadne.v1.ListMentionFilesReques
  */
 export const ListMentionFilesRequestSchema: GenMessage<ListMentionFilesRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 20)
+  messageDesc(file_ariadne_v1_workspaces, 23)
 
 /**
  * @generated from message ariadne.v1.ListMentionFilesResponse
@@ -634,7 +708,7 @@ export type ListMentionFilesResponse = Message<'ariadne.v1.ListMentionFilesRespo
  */
 export const ListMentionFilesResponseSchema: GenMessage<ListMentionFilesResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 21)
+  messageDesc(file_ariadne_v1_workspaces, 24)
 
 /**
  * @generated from message ariadne.v1.GetReferenceStatusRequest
@@ -652,7 +726,7 @@ export type GetReferenceStatusRequest = Message<'ariadne.v1.GetReferenceStatusRe
  */
 export const GetReferenceStatusRequestSchema: GenMessage<GetReferenceStatusRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 22)
+  messageDesc(file_ariadne_v1_workspaces, 25)
 
 /**
  * @generated from message ariadne.v1.GetReferenceStatusResponse
@@ -670,7 +744,7 @@ export type GetReferenceStatusResponse = Message<'ariadne.v1.GetReferenceStatusR
  */
 export const GetReferenceStatusResponseSchema: GenMessage<GetReferenceStatusResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_workspaces, 23)
+  messageDesc(file_ariadne_v1_workspaces, 26)
 
 /**
  * WorkspaceService manages thread branch changes, merges, worktree listings,
@@ -694,6 +768,14 @@ export const WorkspaceService: GenService<{
     methodKind: 'unary'
     input: typeof GetChangedFileRequestSchema
     output: typeof GetChangedFileResponseSchema
+  }
+  /**
+   * @generated from rpc ariadne.v1.WorkspaceService.GetChangedFiles
+   */
+  getChangedFiles: {
+    methodKind: 'unary'
+    input: typeof GetChangedFilesRequestSchema
+    output: typeof GetChangedFilesResponseSchema
   }
   /**
    * @generated from rpc ariadne.v1.WorkspaceService.MergeThread

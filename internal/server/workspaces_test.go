@@ -256,3 +256,78 @@ func TestWorkspaceRPC(t *testing.T) {
 		t.Fatalf("remove worktree failed: %v", err)
 	}
 }
+
+func TestWorkspaceBatchFilesRPC(t *testing.T) {
+	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.Store.Append(t.Context(), workspaceHTTPSeed()); err != nil {
+		t.Fatal(err)
+	}
+	batchCalls := 0
+	registry := sources.New()
+	registry.Register(sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"workspace"}}, Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+		return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Isolated: true, Branches: &sdk.BranchCapability{
+			Files: func(_ context.Context, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+				batchCalls++
+				out := make([]sdk.FileVersions, len(requests))
+				for i, req := range requests {
+					after := "content:" + req.Path
+					if req.PreviousPath != nil {
+						after += "<-" + *req.PreviousPath
+					}
+					out[i] = sdk.FileVersions{After: &after}
+				}
+				return out, nil
+			},
+		}}}, nil
+	}})
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Workspaces: manager, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	client := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	from, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	prev := "old-b.go"
+	resp, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+		Files: []*ariadnev1.ChangedFileRef{
+			{Path: "a.go"},
+			{Path: "b.go", PreviousPath: &prev},
+		},
+	}))
+	if err != nil || batchCalls != 1 || len(resp.Msg.Files) != 2 || resp.Msg.Files[0].GetAfter() != "content:a.go" || resp.Msg.Files[1].GetAfter() != "content:b.go<-old-b.go" {
+		t.Fatalf("batch response: calls=%d resp=%+v err=%v", batchCalls, resp, err)
+	}
+	if _, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     "invalid",
+		Head:     head,
+		Files:    []*ariadnev1.ChangedFileRef{{Path: "a.go"}},
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for bad from, got %v", err)
+	}
+	if _, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for empty files, got %v", err)
+	}
+}

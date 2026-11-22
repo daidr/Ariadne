@@ -27,7 +27,7 @@ function openArtifact(id: string) {
 <template>
   <div class="conversation-bar" data-conversation-bar>
     <DouButton
-      v-if="changes?.totals && changes.totals.files > 0"
+      v-if="changes && (!changes.totals || changes.totals.files > 0)"
       variant="outline"
       size="sm"
       class="conversation-pill"
@@ -40,6 +40,7 @@ function openArtifact(id: string) {
         <span class="pill-added">+{{ changes.totals.added }}</span>
         <span class="pill-removed">−{{ changes.totals.removed }}</span>
       </template>
+      <template v-else>{{ t('changes.open') }}</template>
     </DouButton>
     <PullRequestTag v-if="thread?.pullRequest" :thread="thread" pill />
     <DouPopover

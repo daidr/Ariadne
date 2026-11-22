@@ -72,6 +72,7 @@ type turn struct {
 	directUserInput   bool
 	mergeRequestID    string
 	quiet             bool
+	changes           *turnChanges
 }
 
 const maxToolResultChars = 200_000
@@ -105,7 +106,7 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 	if err != nil || id == "" {
 		return err
 	}
-	turn := &turn{Runner: runner, conversation: conversation, id: id, instructionsDirty: true}
+	turn := &turn{Runner: runner, conversation: conversation, id: id, instructionsDirty: true, changes: newTurnChanges(runner, conversation)}
 	defer turn.clearPreviews()
 	turn.handledBefore, err = runner.Repository.LastHandledSeq(ctx, conversation.ID)
 	if err != nil {
@@ -120,7 +121,11 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 		return err
 	}
 	turn.external = turn.mcpTools(ctx, project)
-	return turn.run(ctx, model)
+	err = turn.run(ctx, model)
+	if err != nil {
+		turn.changes.record(ctx, turn.id)
+	}
+	return err
 }
 
 func asNumber(value any) float64 {
@@ -438,6 +443,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				hintedUnsent = true
 				continue
 			}
+			turn.changes.record(ctx, turn.id)
 			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
 		batch, err := turn.execute(ctx, tools, answer.ToolCalls)
@@ -447,6 +453,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if turn.quiet && !answer.Cut && !slices.ContainsFunc(answer.ToolCalls, func(call sdk.ToolCall) bool {
 			return !coordinatorChatTool(call.Name)
 		}) {
+			turn.changes.record(ctx, turn.id)
 			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "completed", nil)
 		}
 		switch batch.effect {

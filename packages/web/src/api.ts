@@ -1301,6 +1301,29 @@ export const api = {
     )
     return { file: fromProtoFileVersions(response.file) }
   },
+  getChangedFiles: async (
+    threadId: string,
+    input: {
+      from: string
+      head: string
+      files: { path: string; previousPath: string | null }[]
+    },
+    signal?: AbortSignal,
+  ): Promise<{ files: FileVersions[] }> => {
+    const response = await workspaceClient.getChangedFiles(
+      {
+        threadId,
+        from: input.from,
+        head: input.head,
+        files: input.files.map((file) => ({
+          path: file.path,
+          ...(file.previousPath ? { previousPath: file.previousPath } : {}),
+        })),
+      },
+      signal ? { signal } : undefined,
+    )
+    return { files: response.files.map((file) => fromProtoFileVersions(file)) }
+  },
   mergeThread: async (
     threadId: string,
     input: { method: MergeMethod; message: string; expectedHead: string },

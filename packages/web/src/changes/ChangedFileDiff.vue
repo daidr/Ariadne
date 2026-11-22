@@ -14,11 +14,13 @@ import { useLineComments } from './line-comments'
 const props = defineProps<{
   threadId: string
   file: ChangedFile
-  loadVersions: (
+  loadVersions: ((
     path: string,
     previousPath: string | null,
     signal: AbortSignal,
-  ) => Promise<FileVersions>
+  ) => Promise<FileVersions>) & {
+    peek?: (path: string, previousPath: string | null) => FileVersions | null
+  }
   sent: readonly SentLineComment[]
   notes: ReviewNote[]
 }>()
@@ -28,6 +30,12 @@ const problem = shallowRef<string | null>(null)
 watch(
   [() => props.loadVersions, () => props.file.path, () => props.file.previousPath],
   async ([load, path, previousPath], _before, cleanup) => {
+    const cached = load.peek?.(path, previousPath ?? null) ?? null
+    if (cached) {
+      versions.value = cached
+      problem.value = null
+      return
+    }
     versions.value = null
     problem.value = null
     const controller = new AbortController()

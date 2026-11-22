@@ -58,4 +58,41 @@ describe('ChangedFileDiff vertical scrolling', () => {
 
     wrapper.unmount()
   })
+
+  test('renders synchronously from peek cache without flashing loading spinner', () => {
+    const file: ChangedFile = {
+      path: 'cached.ts',
+      previousPath: null,
+      status: 'modified',
+      added: 1,
+      removed: 0,
+    }
+    let asyncCalls = 0
+    const loadVersions = Object.assign(
+      async (): Promise<FileVersions> => {
+        asyncCalls++
+        return { before: 'a\n', after: 'a\nb\n', skipped: null }
+      },
+      {
+        peek: (): FileVersions => ({ before: 'a\n', after: 'a\nb\n', skipped: null }),
+      },
+    )
+
+    const wrapper = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-cached',
+        file,
+        loadVersions,
+        sent: [],
+        notes: [],
+        mode: 'split',
+      },
+      attachTo: document.body,
+    })
+
+    expect(wrapper.find('.file-diff-loading').exists()).toBe(false)
+    expect(wrapper.find('.dou-code-diff').exists()).toBe(true)
+    expect(asyncCalls).toBe(0)
+    wrapper.unmount()
+  })
 })

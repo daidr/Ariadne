@@ -126,6 +126,7 @@ func (turn *turn) repoWorkspace(ctx context.Context) (core.ThreadView, sdk.Works
 	if err != nil {
 		return thread, nil, "", err
 	}
+	turn.changes.begin(ctx, thread)
 	turn.instructionsDirty = turn.instructionsDirty || thread.Workspace == nil
 	branch := workspace.Info().Branch
 	if branch == nil || *branch == "" {

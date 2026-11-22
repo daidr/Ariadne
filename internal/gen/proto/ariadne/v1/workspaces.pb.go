@@ -829,6 +829,170 @@ func (x *GetChangedFileResponse) GetFile() *FileVersions {
 	return nil
 }
 
+type ChangedFileRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	PreviousPath  *string                `protobuf:"bytes,2,opt,name=previous_path,json=previousPath,proto3,oneof" json:"previous_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangedFileRef) Reset() {
+	*x = ChangedFileRef{}
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangedFileRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangedFileRef) ProtoMessage() {}
+
+func (x *ChangedFileRef) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangedFileRef.ProtoReflect.Descriptor instead.
+func (*ChangedFileRef) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ChangedFileRef) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ChangedFileRef) GetPreviousPath() string {
+	if x != nil && x.PreviousPath != nil {
+		return *x.PreviousPath
+	}
+	return ""
+}
+
+type GetChangedFilesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	From          string                 `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
+	Head          string                 `protobuf:"bytes,3,opt,name=head,proto3" json:"head,omitempty"`
+	Files         []*ChangedFileRef      `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetChangedFilesRequest) Reset() {
+	*x = GetChangedFilesRequest{}
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetChangedFilesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetChangedFilesRequest) ProtoMessage() {}
+
+func (x *GetChangedFilesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetChangedFilesRequest.ProtoReflect.Descriptor instead.
+func (*GetChangedFilesRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetChangedFilesRequest) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+func (x *GetChangedFilesRequest) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *GetChangedFilesRequest) GetHead() string {
+	if x != nil {
+		return x.Head
+	}
+	return ""
+}
+
+func (x *GetChangedFilesRequest) GetFiles() []*ChangedFileRef {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+type GetChangedFilesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Files         []*FileVersions        `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetChangedFilesResponse) Reset() {
+	*x = GetChangedFilesResponse{}
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetChangedFilesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetChangedFilesResponse) ProtoMessage() {}
+
+func (x *GetChangedFilesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetChangedFilesResponse.ProtoReflect.Descriptor instead.
+func (*GetChangedFilesResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetChangedFilesResponse) GetFiles() []*FileVersions {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
 type MergeThreadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
@@ -841,7 +1005,7 @@ type MergeThreadRequest struct {
 
 func (x *MergeThreadRequest) Reset() {
 	*x = MergeThreadRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[12]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -853,7 +1017,7 @@ func (x *MergeThreadRequest) String() string {
 func (*MergeThreadRequest) ProtoMessage() {}
 
 func (x *MergeThreadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[12]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -866,7 +1030,7 @@ func (x *MergeThreadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeThreadRequest.ProtoReflect.Descriptor instead.
 func (*MergeThreadRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{12}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *MergeThreadRequest) GetThreadId() string {
@@ -907,7 +1071,7 @@ type MergeThreadResponse struct {
 
 func (x *MergeThreadResponse) Reset() {
 	*x = MergeThreadResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[13]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -919,7 +1083,7 @@ func (x *MergeThreadResponse) String() string {
 func (*MergeThreadResponse) ProtoMessage() {}
 
 func (x *MergeThreadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[13]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -932,7 +1096,7 @@ func (x *MergeThreadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeThreadResponse.ProtoReflect.Descriptor instead.
 func (*MergeThreadResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{13}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MergeThreadResponse) GetOutcome() *MergeOutcome {
@@ -958,7 +1122,7 @@ type UndoMergeRequest struct {
 
 func (x *UndoMergeRequest) Reset() {
 	*x = UndoMergeRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[14]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1134,7 @@ func (x *UndoMergeRequest) String() string {
 func (*UndoMergeRequest) ProtoMessage() {}
 
 func (x *UndoMergeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[14]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1147,7 @@ func (x *UndoMergeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoMergeRequest.ProtoReflect.Descriptor instead.
 func (*UndoMergeRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{14}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UndoMergeRequest) GetThreadId() string {
@@ -1002,7 +1166,7 @@ type UndoMergeResponse struct {
 
 func (x *UndoMergeResponse) Reset() {
 	*x = UndoMergeResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[15]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1014,7 +1178,7 @@ func (x *UndoMergeResponse) String() string {
 func (*UndoMergeResponse) ProtoMessage() {}
 
 func (x *UndoMergeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[15]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1027,7 +1191,7 @@ func (x *UndoMergeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoMergeResponse.ProtoReflect.Descriptor instead.
 func (*UndoMergeResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{15}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UndoMergeResponse) GetThread() *ThreadView {
@@ -1046,7 +1210,7 @@ type ListWorktreesRequest struct {
 
 func (x *ListWorktreesRequest) Reset() {
 	*x = ListWorktreesRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[16]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +1222,7 @@ func (x *ListWorktreesRequest) String() string {
 func (*ListWorktreesRequest) ProtoMessage() {}
 
 func (x *ListWorktreesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[16]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +1235,7 @@ func (x *ListWorktreesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorktreesRequest.ProtoReflect.Descriptor instead.
 func (*ListWorktreesRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{16}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListWorktreesRequest) GetIncludeSizes() bool {
@@ -1091,7 +1255,7 @@ type ListWorktreesResponse struct {
 
 func (x *ListWorktreesResponse) Reset() {
 	*x = ListWorktreesResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[17]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1103,7 +1267,7 @@ func (x *ListWorktreesResponse) String() string {
 func (*ListWorktreesResponse) ProtoMessage() {}
 
 func (x *ListWorktreesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[17]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1116,7 +1280,7 @@ func (x *ListWorktreesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorktreesResponse.ProtoReflect.Descriptor instead.
 func (*ListWorktreesResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{17}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListWorktreesResponse) GetProjects() []*ProjectWorktrees {
@@ -1145,7 +1309,7 @@ type RemoveWorktreeRequest struct {
 
 func (x *RemoveWorktreeRequest) Reset() {
 	*x = RemoveWorktreeRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[18]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1321,7 @@ func (x *RemoveWorktreeRequest) String() string {
 func (*RemoveWorktreeRequest) ProtoMessage() {}
 
 func (x *RemoveWorktreeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[18]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1334,7 @@ func (x *RemoveWorktreeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveWorktreeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveWorktreeRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{18}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RemoveWorktreeRequest) GetProjectId() string {
@@ -1209,7 +1373,7 @@ type RemoveWorktreeResponse struct {
 
 func (x *RemoveWorktreeResponse) Reset() {
 	*x = RemoveWorktreeResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[19]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1221,7 +1385,7 @@ func (x *RemoveWorktreeResponse) String() string {
 func (*RemoveWorktreeResponse) ProtoMessage() {}
 
 func (x *RemoveWorktreeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[19]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1234,7 +1398,7 @@ func (x *RemoveWorktreeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveWorktreeResponse.ProtoReflect.Descriptor instead.
 func (*RemoveWorktreeResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{19}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{22}
 }
 
 type ListMentionFilesRequest struct {
@@ -1248,7 +1412,7 @@ type ListMentionFilesRequest struct {
 
 func (x *ListMentionFilesRequest) Reset() {
 	*x = ListMentionFilesRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[20]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1260,7 +1424,7 @@ func (x *ListMentionFilesRequest) String() string {
 func (*ListMentionFilesRequest) ProtoMessage() {}
 
 func (x *ListMentionFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[20]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1273,7 +1437,7 @@ func (x *ListMentionFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMentionFilesRequest.ProtoReflect.Descriptor instead.
 func (*ListMentionFilesRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{20}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListMentionFilesRequest) GetProjectId() string {
@@ -1306,7 +1470,7 @@ type ListMentionFilesResponse struct {
 
 func (x *ListMentionFilesResponse) Reset() {
 	*x = ListMentionFilesResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[21]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1482,7 @@ func (x *ListMentionFilesResponse) String() string {
 func (*ListMentionFilesResponse) ProtoMessage() {}
 
 func (x *ListMentionFilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[21]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1495,7 @@ func (x *ListMentionFilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMentionFilesResponse.ProtoReflect.Descriptor instead.
 func (*ListMentionFilesResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{21}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListMentionFilesResponse) GetFiles() []string {
@@ -1350,7 +1514,7 @@ type GetReferenceStatusRequest struct {
 
 func (x *GetReferenceStatusRequest) Reset() {
 	*x = GetReferenceStatusRequest{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[22]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1526,7 @@ func (x *GetReferenceStatusRequest) String() string {
 func (*GetReferenceStatusRequest) ProtoMessage() {}
 
 func (x *GetReferenceStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[22]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1539,7 @@ func (x *GetReferenceStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReferenceStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetReferenceStatusRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{22}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetReferenceStatusRequest) GetProjectId() string {
@@ -1394,7 +1558,7 @@ type GetReferenceStatusResponse struct {
 
 func (x *GetReferenceStatusResponse) Reset() {
 	*x = GetReferenceStatusResponse{}
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[23]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1570,7 @@ func (x *GetReferenceStatusResponse) String() string {
 func (*GetReferenceStatusResponse) ProtoMessage() {}
 
 func (x *GetReferenceStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_workspaces_proto_msgTypes[23]
+	mi := &file_ariadne_v1_workspaces_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1583,7 @@ func (x *GetReferenceStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReferenceStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetReferenceStatusResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{23}
+	return file_ariadne_v1_workspaces_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetReferenceStatusResponse) GetFailed() []*FailedReference {
@@ -1517,7 +1681,18 @@ const file_ariadne_v1_workspaces_proto_rawDesc = "" +
 	"\rprevious_path\x18\x05 \x01(\tH\x00R\fpreviousPath\x88\x01\x01B\x10\n" +
 	"\x0e_previous_path\"F\n" +
 	"\x16GetChangedFileResponse\x12,\n" +
-	"\x04file\x18\x01 \x01(\v2\x18.ariadne.v1.FileVersionsR\x04file\"\x9f\x01\n" +
+	"\x04file\x18\x01 \x01(\v2\x18.ariadne.v1.FileVersionsR\x04file\"`\n" +
+	"\x0eChangedFileRef\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12(\n" +
+	"\rprevious_path\x18\x02 \x01(\tH\x00R\fpreviousPath\x88\x01\x01B\x10\n" +
+	"\x0e_previous_path\"\x8f\x01\n" +
+	"\x16GetChangedFilesRequest\x12\x1b\n" +
+	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\x12\n" +
+	"\x04from\x18\x02 \x01(\tR\x04from\x12\x12\n" +
+	"\x04head\x18\x03 \x01(\tR\x04head\x120\n" +
+	"\x05files\x18\x04 \x03(\v2\x1a.ariadne.v1.ChangedFileRefR\x05files\"I\n" +
+	"\x17GetChangedFilesResponse\x12.\n" +
+	"\x05files\x18\x01 \x03(\v2\x18.ariadne.v1.FileVersionsR\x05files\"\x9f\x01\n" +
 	"\x12MergeThreadRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\x16\n" +
 	"\x06method\x18\x02 \x01(\tR\x06method\x12\x18\n" +
@@ -1557,10 +1732,11 @@ const file_ariadne_v1_workspaces_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"Q\n" +
 	"\x1aGetReferenceStatusResponse\x123\n" +
-	"\x06failed\x18\x01 \x03(\v2\x1b.ariadne.v1.FailedReferenceR\x06failed2\xd7\x05\n" +
+	"\x06failed\x18\x01 \x03(\v2\x1b.ariadne.v1.FailedReferenceR\x06failed2\xb3\x06\n" +
 	"\x10WorkspaceService\x12]\n" +
 	"\x10GetThreadChanges\x12#.ariadne.v1.GetThreadChangesRequest\x1a$.ariadne.v1.GetThreadChangesResponse\x12W\n" +
-	"\x0eGetChangedFile\x12!.ariadne.v1.GetChangedFileRequest\x1a\".ariadne.v1.GetChangedFileResponse\x12N\n" +
+	"\x0eGetChangedFile\x12!.ariadne.v1.GetChangedFileRequest\x1a\".ariadne.v1.GetChangedFileResponse\x12Z\n" +
+	"\x0fGetChangedFiles\x12\".ariadne.v1.GetChangedFilesRequest\x1a#.ariadne.v1.GetChangedFilesResponse\x12N\n" +
 	"\vMergeThread\x12\x1e.ariadne.v1.MergeThreadRequest\x1a\x1f.ariadne.v1.MergeThreadResponse\x12H\n" +
 	"\tUndoMerge\x12\x1c.ariadne.v1.UndoMergeRequest\x1a\x1d.ariadne.v1.UndoMergeResponse\x12T\n" +
 	"\rListWorktrees\x12 .ariadne.v1.ListWorktreesRequest\x1a!.ariadne.v1.ListWorktreesResponse\x12W\n" +
@@ -1583,7 +1759,7 @@ func file_ariadne_v1_workspaces_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_workspaces_proto_rawDescData
 }
 
-var file_ariadne_v1_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_ariadne_v1_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_ariadne_v1_workspaces_proto_goTypes = []any{
 	(*BranchCommit)(nil),               // 0: ariadne.v1.BranchCommit
 	(*ChangedFile)(nil),                // 1: ariadne.v1.ChangedFile
@@ -1597,56 +1773,63 @@ var file_ariadne_v1_workspaces_proto_goTypes = []any{
 	(*GetThreadChangesResponse)(nil),   // 9: ariadne.v1.GetThreadChangesResponse
 	(*GetChangedFileRequest)(nil),      // 10: ariadne.v1.GetChangedFileRequest
 	(*GetChangedFileResponse)(nil),     // 11: ariadne.v1.GetChangedFileResponse
-	(*MergeThreadRequest)(nil),         // 12: ariadne.v1.MergeThreadRequest
-	(*MergeThreadResponse)(nil),        // 13: ariadne.v1.MergeThreadResponse
-	(*UndoMergeRequest)(nil),           // 14: ariadne.v1.UndoMergeRequest
-	(*UndoMergeResponse)(nil),          // 15: ariadne.v1.UndoMergeResponse
-	(*ListWorktreesRequest)(nil),       // 16: ariadne.v1.ListWorktreesRequest
-	(*ListWorktreesResponse)(nil),      // 17: ariadne.v1.ListWorktreesResponse
-	(*RemoveWorktreeRequest)(nil),      // 18: ariadne.v1.RemoveWorktreeRequest
-	(*RemoveWorktreeResponse)(nil),     // 19: ariadne.v1.RemoveWorktreeResponse
-	(*ListMentionFilesRequest)(nil),    // 20: ariadne.v1.ListMentionFilesRequest
-	(*ListMentionFilesResponse)(nil),   // 21: ariadne.v1.ListMentionFilesResponse
-	(*GetReferenceStatusRequest)(nil),  // 22: ariadne.v1.GetReferenceStatusRequest
-	(*GetReferenceStatusResponse)(nil), // 23: ariadne.v1.GetReferenceStatusResponse
-	(*ThreadView)(nil),                 // 24: ariadne.v1.ThreadView
-	(*LocalizedError)(nil),             // 25: ariadne.v1.LocalizedError
+	(*ChangedFileRef)(nil),             // 12: ariadne.v1.ChangedFileRef
+	(*GetChangedFilesRequest)(nil),     // 13: ariadne.v1.GetChangedFilesRequest
+	(*GetChangedFilesResponse)(nil),    // 14: ariadne.v1.GetChangedFilesResponse
+	(*MergeThreadRequest)(nil),         // 15: ariadne.v1.MergeThreadRequest
+	(*MergeThreadResponse)(nil),        // 16: ariadne.v1.MergeThreadResponse
+	(*UndoMergeRequest)(nil),           // 17: ariadne.v1.UndoMergeRequest
+	(*UndoMergeResponse)(nil),          // 18: ariadne.v1.UndoMergeResponse
+	(*ListWorktreesRequest)(nil),       // 19: ariadne.v1.ListWorktreesRequest
+	(*ListWorktreesResponse)(nil),      // 20: ariadne.v1.ListWorktreesResponse
+	(*RemoveWorktreeRequest)(nil),      // 21: ariadne.v1.RemoveWorktreeRequest
+	(*RemoveWorktreeResponse)(nil),     // 22: ariadne.v1.RemoveWorktreeResponse
+	(*ListMentionFilesRequest)(nil),    // 23: ariadne.v1.ListMentionFilesRequest
+	(*ListMentionFilesResponse)(nil),   // 24: ariadne.v1.ListMentionFilesResponse
+	(*GetReferenceStatusRequest)(nil),  // 25: ariadne.v1.GetReferenceStatusRequest
+	(*GetReferenceStatusResponse)(nil), // 26: ariadne.v1.GetReferenceStatusResponse
+	(*ThreadView)(nil),                 // 27: ariadne.v1.ThreadView
+	(*LocalizedError)(nil),             // 28: ariadne.v1.LocalizedError
 }
 var file_ariadne_v1_workspaces_proto_depIdxs = []int32{
 	0,  // 0: ariadne.v1.BranchChanges.commits:type_name -> ariadne.v1.BranchCommit
 	1,  // 1: ariadne.v1.BranchChanges.files:type_name -> ariadne.v1.ChangedFile
-	24, // 2: ariadne.v1.ListedWorktree.thread:type_name -> ariadne.v1.ThreadView
+	27, // 2: ariadne.v1.ListedWorktree.thread:type_name -> ariadne.v1.ThreadView
 	5,  // 3: ariadne.v1.ProjectWorktrees.worktrees:type_name -> ariadne.v1.ListedWorktree
-	25, // 4: ariadne.v1.ProjectWorktrees.error:type_name -> ariadne.v1.LocalizedError
-	25, // 5: ariadne.v1.FailedReference.error:type_name -> ariadne.v1.LocalizedError
+	28, // 4: ariadne.v1.ProjectWorktrees.error:type_name -> ariadne.v1.LocalizedError
+	28, // 5: ariadne.v1.FailedReference.error:type_name -> ariadne.v1.LocalizedError
 	2,  // 6: ariadne.v1.GetThreadChangesResponse.changes:type_name -> ariadne.v1.BranchChanges
 	3,  // 7: ariadne.v1.GetChangedFileResponse.file:type_name -> ariadne.v1.FileVersions
-	4,  // 8: ariadne.v1.MergeThreadResponse.outcome:type_name -> ariadne.v1.MergeOutcome
-	24, // 9: ariadne.v1.MergeThreadResponse.thread:type_name -> ariadne.v1.ThreadView
-	24, // 10: ariadne.v1.UndoMergeResponse.thread:type_name -> ariadne.v1.ThreadView
-	6,  // 11: ariadne.v1.ListWorktreesResponse.projects:type_name -> ariadne.v1.ProjectWorktrees
-	7,  // 12: ariadne.v1.GetReferenceStatusResponse.failed:type_name -> ariadne.v1.FailedReference
-	8,  // 13: ariadne.v1.WorkspaceService.GetThreadChanges:input_type -> ariadne.v1.GetThreadChangesRequest
-	10, // 14: ariadne.v1.WorkspaceService.GetChangedFile:input_type -> ariadne.v1.GetChangedFileRequest
-	12, // 15: ariadne.v1.WorkspaceService.MergeThread:input_type -> ariadne.v1.MergeThreadRequest
-	14, // 16: ariadne.v1.WorkspaceService.UndoMerge:input_type -> ariadne.v1.UndoMergeRequest
-	16, // 17: ariadne.v1.WorkspaceService.ListWorktrees:input_type -> ariadne.v1.ListWorktreesRequest
-	18, // 18: ariadne.v1.WorkspaceService.RemoveWorktree:input_type -> ariadne.v1.RemoveWorktreeRequest
-	20, // 19: ariadne.v1.WorkspaceService.ListMentionFiles:input_type -> ariadne.v1.ListMentionFilesRequest
-	22, // 20: ariadne.v1.WorkspaceService.GetReferenceStatus:input_type -> ariadne.v1.GetReferenceStatusRequest
-	9,  // 21: ariadne.v1.WorkspaceService.GetThreadChanges:output_type -> ariadne.v1.GetThreadChangesResponse
-	11, // 22: ariadne.v1.WorkspaceService.GetChangedFile:output_type -> ariadne.v1.GetChangedFileResponse
-	13, // 23: ariadne.v1.WorkspaceService.MergeThread:output_type -> ariadne.v1.MergeThreadResponse
-	15, // 24: ariadne.v1.WorkspaceService.UndoMerge:output_type -> ariadne.v1.UndoMergeResponse
-	17, // 25: ariadne.v1.WorkspaceService.ListWorktrees:output_type -> ariadne.v1.ListWorktreesResponse
-	19, // 26: ariadne.v1.WorkspaceService.RemoveWorktree:output_type -> ariadne.v1.RemoveWorktreeResponse
-	21, // 27: ariadne.v1.WorkspaceService.ListMentionFiles:output_type -> ariadne.v1.ListMentionFilesResponse
-	23, // 28: ariadne.v1.WorkspaceService.GetReferenceStatus:output_type -> ariadne.v1.GetReferenceStatusResponse
-	21, // [21:29] is the sub-list for method output_type
-	13, // [13:21] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	12, // 8: ariadne.v1.GetChangedFilesRequest.files:type_name -> ariadne.v1.ChangedFileRef
+	3,  // 9: ariadne.v1.GetChangedFilesResponse.files:type_name -> ariadne.v1.FileVersions
+	4,  // 10: ariadne.v1.MergeThreadResponse.outcome:type_name -> ariadne.v1.MergeOutcome
+	27, // 11: ariadne.v1.MergeThreadResponse.thread:type_name -> ariadne.v1.ThreadView
+	27, // 12: ariadne.v1.UndoMergeResponse.thread:type_name -> ariadne.v1.ThreadView
+	6,  // 13: ariadne.v1.ListWorktreesResponse.projects:type_name -> ariadne.v1.ProjectWorktrees
+	7,  // 14: ariadne.v1.GetReferenceStatusResponse.failed:type_name -> ariadne.v1.FailedReference
+	8,  // 15: ariadne.v1.WorkspaceService.GetThreadChanges:input_type -> ariadne.v1.GetThreadChangesRequest
+	10, // 16: ariadne.v1.WorkspaceService.GetChangedFile:input_type -> ariadne.v1.GetChangedFileRequest
+	13, // 17: ariadne.v1.WorkspaceService.GetChangedFiles:input_type -> ariadne.v1.GetChangedFilesRequest
+	15, // 18: ariadne.v1.WorkspaceService.MergeThread:input_type -> ariadne.v1.MergeThreadRequest
+	17, // 19: ariadne.v1.WorkspaceService.UndoMerge:input_type -> ariadne.v1.UndoMergeRequest
+	19, // 20: ariadne.v1.WorkspaceService.ListWorktrees:input_type -> ariadne.v1.ListWorktreesRequest
+	21, // 21: ariadne.v1.WorkspaceService.RemoveWorktree:input_type -> ariadne.v1.RemoveWorktreeRequest
+	23, // 22: ariadne.v1.WorkspaceService.ListMentionFiles:input_type -> ariadne.v1.ListMentionFilesRequest
+	25, // 23: ariadne.v1.WorkspaceService.GetReferenceStatus:input_type -> ariadne.v1.GetReferenceStatusRequest
+	9,  // 24: ariadne.v1.WorkspaceService.GetThreadChanges:output_type -> ariadne.v1.GetThreadChangesResponse
+	11, // 25: ariadne.v1.WorkspaceService.GetChangedFile:output_type -> ariadne.v1.GetChangedFileResponse
+	14, // 26: ariadne.v1.WorkspaceService.GetChangedFiles:output_type -> ariadne.v1.GetChangedFilesResponse
+	16, // 27: ariadne.v1.WorkspaceService.MergeThread:output_type -> ariadne.v1.MergeThreadResponse
+	18, // 28: ariadne.v1.WorkspaceService.UndoMerge:output_type -> ariadne.v1.UndoMergeResponse
+	20, // 29: ariadne.v1.WorkspaceService.ListWorktrees:output_type -> ariadne.v1.ListWorktreesResponse
+	22, // 30: ariadne.v1.WorkspaceService.RemoveWorktree:output_type -> ariadne.v1.RemoveWorktreeResponse
+	24, // 31: ariadne.v1.WorkspaceService.ListMentionFiles:output_type -> ariadne.v1.ListMentionFilesResponse
+	26, // 32: ariadne.v1.WorkspaceService.GetReferenceStatus:output_type -> ariadne.v1.GetReferenceStatusResponse
+	24, // [24:33] is the sub-list for method output_type
+	15, // [15:24] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_workspaces_proto_init() }
@@ -1666,15 +1849,16 @@ func file_ariadne_v1_workspaces_proto_init() {
 	file_ariadne_v1_workspaces_proto_msgTypes[9].OneofWrappers = []any{}
 	file_ariadne_v1_workspaces_proto_msgTypes[10].OneofWrappers = []any{}
 	file_ariadne_v1_workspaces_proto_msgTypes[12].OneofWrappers = []any{}
-	file_ariadne_v1_workspaces_proto_msgTypes[18].OneofWrappers = []any{}
-	file_ariadne_v1_workspaces_proto_msgTypes[20].OneofWrappers = []any{}
+	file_ariadne_v1_workspaces_proto_msgTypes[15].OneofWrappers = []any{}
+	file_ariadne_v1_workspaces_proto_msgTypes[21].OneofWrappers = []any{}
+	file_ariadne_v1_workspaces_proto_msgTypes[23].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_workspaces_proto_rawDesc), len(file_ariadne_v1_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

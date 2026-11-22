@@ -103,6 +103,59 @@ func (h *workspaceServiceHandler) GetChangedFile(
 	}), nil
 }
 
+func (h *workspaceServiceHandler) GetChangedFiles(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.GetChangedFilesRequest],
+) (*connect.Response[ariadnev1.GetChangedFilesResponse], error) {
+	manager := h.api.options.Workspaces
+	if manager == nil {
+		return nil, domainerr.New("error.noBranch", nil)
+	}
+	from, head := req.Msg.GetFrom(), req.Msg.GetHead()
+	if !commitID.MatchString(from) {
+		return nil, badInput("from")
+	}
+	if !commitID.MatchString(head) {
+		return nil, badInput("head")
+	}
+	rawFiles := req.Msg.GetFiles()
+	if len(rawFiles) == 0 || len(rawFiles) > 64 {
+		return nil, badInput("files")
+	}
+	requests := make([]sdk.FileVersionRequest, len(rawFiles))
+	for i, item := range rawFiles {
+		if item == nil || item.GetPath() == "" {
+			return nil, badInput("path")
+		}
+		var previous *string
+		if item.PreviousPath != nil && *item.PreviousPath != "" {
+			v := *item.PreviousPath
+			previous = &v
+		}
+		requests[i] = sdk.FileVersionRequest{
+			From:         from,
+			Head:         head,
+			Path:         item.GetPath(),
+			PreviousPath: previous,
+		}
+	}
+	files, err := manager.ThreadFiles(ctx, req.Msg.GetThreadId(), requests)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*ariadnev1.FileVersions, len(files))
+	for i, file := range files {
+		out[i] = &ariadnev1.FileVersions{
+			Before:  file.Before,
+			After:   file.After,
+			Skipped: file.Skipped,
+		}
+	}
+	return connect.NewResponse(&ariadnev1.GetChangedFilesResponse{
+		Files: out,
+	}), nil
+}
+
 func (h *workspaceServiceHandler) MergeThread(
 	ctx context.Context,
 	req *connect.Request[ariadnev1.MergeThreadRequest],

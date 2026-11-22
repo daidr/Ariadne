@@ -188,6 +188,9 @@ func TestHostedSharedCloneConcurrentProjectsAndClonedCheckout(t *testing.T) {
 	if branches.Merge != nil || branches.UndoMerge != nil {
 		t.Fatal("hosted branches expose local merging")
 	}
+	if branches.Snapshot == nil || branches.Diff == nil {
+		t.Fatal("hosted branches missing snapshot or diff capability")
+	}
 	removed, err := branches.Remove(t.Context(), "thread_1", sdk.WorktreeRemoveOptions{Spare: true})
 	if err != nil || !removed {
 		t.Fatal(removed, err)
@@ -241,5 +244,33 @@ func TestHostedPushReportsTheCommitItActuallySends(t *testing.T) {
 	}
 	if localHead := gitOK(t, host.owner.git, "rev-parse", ref); localHead != next {
 		t.Fatal("concurrent local work lost", localHead, next)
+	}
+}
+
+func TestHostedSnapshotAndDiff(t *testing.T) {
+	remote, _ := initGit(t)
+	host := newHostedTest(t, remote, t.TempDir(), nil)
+	workspace, err := host.Open(t.Context(), sdk.WorkspaceRequest{ThreadID: "snap_thread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branches := host.Capability().Branches
+	if branches.Snapshot == nil || branches.Diff == nil {
+		t.Fatal("hosted branches missing snapshot or diff")
+	}
+	before, err := branches.Snapshot(t.Context(), "snap_thread")
+	if err != nil || before == nil || *before == "" {
+		t.Fatalf("before snapshot: %v, err=%v", before, err)
+	}
+	if err := workspace.WriteFile(t.Context(), "file.txt", "base\nupdated\n"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := branches.Snapshot(t.Context(), "snap_thread")
+	if err != nil || after == nil || *after == "" || *after == *before {
+		t.Fatalf("after snapshot: %v, err=%v", after, err)
+	}
+	diffFiles, err := branches.Diff(t.Context(), *before, *after)
+	if err != nil || len(diffFiles) != 1 || diffFiles[0].Path != "file.txt" || diffFiles[0].Added == nil || *diffFiles[0].Added != 1 {
+		t.Fatalf("unexpected diff: %+v, err=%v", diffFiles, err)
 	}
 }
