@@ -316,7 +316,7 @@ export interface PluginRecord {
   name: LocalizedText | null
   source: 'builtin' | 'path'
   path: string | null
-  status: 'loaded' | 'failed'
+  status: 'loaded' | 'failed' | 'disabled'
   error: string | null
   configurable?: boolean
   provides: {
@@ -415,6 +415,7 @@ export interface SearchServiceView {
 /** Web search in the settings: registered search plugins, active selection, and fallback models. */
 export interface SearchSettings {
   provider: string
+  disabledProvider?: string
   ready: boolean
   keySet: boolean
   needed: boolean
@@ -734,6 +735,10 @@ export const api = {
     request<PluginConfig>('GET', `/api/plugins/${encodeURIComponent(id)}/settings`),
   savePluginConfig: (id: string, values: Record<string, unknown>) =>
     request<PluginConfig>('PUT', `/api/plugins/${encodeURIComponent(id)}/settings`, { values }),
+  setPluginEnabled: (id: string, enabled: boolean) =>
+    request<{ plugins: PluginRecord[] }>('PUT', `/api/plugins/${encodeURIComponent(id)}/enabled`, {
+      enabled,
+    }),
   addPlugin: (path: string) =>
     request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
   removePlugin: (path: string) =>

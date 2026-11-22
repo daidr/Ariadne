@@ -29,19 +29,22 @@ type luaProvider struct {
 	title               sdk.LocalizedText
 	localizedDesc       sdk.LocalizedText
 	settings            sdk.SettingsSchema
+	capabilities        sdk.ModelProviderCapabilities
+	hasNetworkOrigin    bool
 	description         string
 	needsPluginSettings bool
 }
 
 type luaProgram struct {
-	mu       sync.Mutex
-	active   sync.WaitGroup
-	proto    *lua.FunctionProto
-	life     context.Context
-	client   *http.Client
-	origins  map[string]bool
-	slots    chan struct{}
-	settings func() map[string]any
+	mu             sync.Mutex
+	active         sync.WaitGroup
+	proto          *lua.FunctionProto
+	life           context.Context
+	client         *http.Client
+	origins        map[string]bool
+	slots          chan struct{}
+	settingsSchema *sdk.SettingsSchema
+	settings       func() map[string]any
 }
 
 func newLuaState(ctx context.Context, bridge *luaHTTP) luaValues {
@@ -96,6 +99,17 @@ func newLuaState(ctx context.Context, bridge *luaHTTP) luaValues {
 				state.RaiseError("HTTP is unavailable in this plugin function")
 			}
 			value, err := bridge.request(values, state.CheckTable(1), state.OptFunction(2, nil))
+			if err != nil {
+				state.RaiseError("%s", err)
+			}
+			state.Push(value)
+			return 1
+		},
+		"http_sse": func(state *lua.LState) int {
+			if bridge == nil || bridge.origins == nil {
+				state.RaiseError("HTTP is unavailable in this plugin function")
+			}
+			value, err := bridge.sse(values, state.CheckTable(1), state.CheckFunction(2))
 			if err != nil {
 				state.RaiseError("%s", err)
 			}
@@ -191,7 +205,7 @@ func compilePlugin(ctx context.Context, name string, source []byte) (plugin sdk.
 		}
 	}
 	return sdk.Plugin{ID: string(id), Name: title, Settings: schema, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
-		program := &luaProgram{proto: proto, life: pc.Context, client: newPluginHTTP(), origins: origins, slots: make(chan struct{}, 8), settings: pc.Settings}
+		program := &luaProgram{proto: proto, life: pc.Context, client: newPluginHTTP(), origins: origins, slots: make(chan struct{}, 8), settingsSchema: schema, settings: pc.Settings}
 		if err := pc.OnDispose(program.close); err != nil {
 			return nil, err
 		}
@@ -245,6 +259,35 @@ func luaProviders(values luaValues, definition *lua.LTable) ([]luaProvider, erro
 				for _, field := range provider.settings.Properties {
 					if field.Secret && field.Default != nil {
 						return nil, fmt.Errorf("%s cannot declare a default value for a secret field", kind)
+					}
+					if field.NetworkOrigin {
+						if field.Type != "string" || field.Secret || field.Directory {
+							return nil, fmt.Errorf("%s networkOrigin must be used on a non-secret string field", kind)
+						}
+						if field.Default != nil {
+							def, ok := field.Default.(string)
+							if !ok {
+								return nil, fmt.Errorf("%s has an invalid networkOrigin default", kind)
+							}
+							if textutil.Trim(def) != "" {
+								if _, ok := parseNetworkOrigin(def); !ok {
+									return nil, fmt.Errorf("%s has an invalid networkOrigin default", kind)
+								}
+							}
+						}
+						provider.hasNetworkOrigin = true
+					}
+				}
+			}
+			if group.name == "models" {
+				if raw := entry.RawGetString("capabilities"); raw != lua.LNil {
+					if err := values.decode(raw, &provider.capabilities); err != nil {
+						return nil, fmt.Errorf("%s has invalid capabilities", kind)
+					}
+					switch provider.capabilities.ReasoningScope {
+					case "", sdk.ReasoningScopeModel, sdk.ReasoningScopeProvider:
+					default:
+						return nil, fmt.Errorf("%s has an unsupported reasoningScope", kind)
 					}
 				}
 			}
@@ -314,7 +357,7 @@ func (program *luaProgram) close(ctx context.Context) error {
 	}
 }
 
-func (program *luaProgram) call(ctx context.Context, provider luaProvider, method string, budget time.Duration, allowHTTP bool, run func(luaValues, *lua.LFunction) error) (err error) {
+func (program *luaProgram) call(ctx context.Context, provider luaProvider, method string, budget time.Duration, allowHTTP bool, callSettings map[string]any, run func(luaValues, *lua.LFunction) error) (err error) {
 	select {
 	case luaCalls <- struct{}{}:
 		defer func() { <-luaCalls }()
@@ -392,7 +435,15 @@ func (program *luaProgram) call(ctx context.Context, provider luaProvider, metho
 		return errors.New("Lua plugin provider function changed")
 	}
 	if allowHTTP {
-		httpBridge.origins = origins
+		var pluginSettings map[string]any
+		if program.settings != nil {
+			pluginSettings = program.settings()
+		}
+		httpBridge.origins = collectNetworkOrigins(
+			origins,
+			schemaValues{schema: program.settingsSchema, values: pluginSettings},
+			schemaValues{schema: &provider.settings, values: callSettings},
+		)
 	}
 	return run(values, fn)
 }
@@ -418,12 +469,12 @@ func luaArgs(values luaValues, args []any) ([]lua.LValue, error) {
 	return result, nil
 }
 
-func (program *luaProgram) result(ctx context.Context, provider luaProvider, method string, out any, args ...any) error {
+func (program *luaProgram) result(ctx context.Context, provider luaProvider, method string, callSettings map[string]any, out any, args ...any) error {
 	budget, allowHTTP := 30*time.Second, true
 	if method == "match" || method == "describe" {
 		budget, allowHTTP = 100*time.Millisecond, false
 	}
-	return program.call(ctx, provider, method, budget, allowHTTP, func(values luaValues, fn *lua.LFunction) error {
+	return program.call(ctx, provider, method, budget, allowHTTP, callSettings, func(values luaValues, fn *lua.LFunction) error {
 		input, err := luaArgs(values, args)
 		if err != nil {
 			return err

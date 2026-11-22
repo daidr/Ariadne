@@ -336,3 +336,160 @@ func TestLuaSearchSettingsCheckAndResponse(t *testing.T) {
 		t.Fatal("expected canceled check to return error")
 	}
 }
+
+func TestLuaModelPluginNetworkOriginAndHTTPSSE(t *testing.T) {
+	allowedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, ": keepalive\r\n\r\n")
+			_, _ = io.WriteString(w, "event: delta\r\ndata: {\"text\":\"你好\"}\r\n\r\n")
+			_, _ = io.WriteString(w, "data: {\"text\":\"世界\"}\ndata: second-line\n\n")
+			_, _ = io.WriteString(w, "event: stop\ndata: {\"stop\":true}\n\n")
+			_, _ = io.WriteString(w, "data: {\"text\":\"ignored-after-stop\"}\n\n")
+		case "/v1/error":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer allowedServer.Close()
+
+	blockedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "should never be reached")
+	}))
+	defer blockedServer.Close()
+
+	host, registries := fixture(t)
+	store, err := settings.Open(filepath.Join(t.TempDir(), "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `return {
+		version = 1,
+		id = "lua-sse-model",
+		name = { ["zh-CN"] = "Lua SSE 模型", en = "Lua SSE model" },
+		models = {{
+			kind = "lua-sse",
+			title = { ["zh-CN"] = "Lua SSE 模型", en = "Lua SSE model" },
+			capabilities = { reasoningScope = "provider" },
+			settings = {
+				type = "object",
+				properties = {
+					baseUrl = {
+						type = "string",
+						title = { ["zh-CN"] = "接口地址", en = "Base URL" },
+						networkOrigin = true,
+					},
+					apiKey = {
+						type = "string",
+						title = { ["zh-CN"] = "密钥", en = "API key" },
+						secret = true,
+					},
+				},
+				required = { "baseUrl" },
+			},
+			stream = function(cfg, req, emit)
+				if req.model == "blocked" then
+					ariadne.http_sse({ url = "` + blockedServer.URL + `/v1/stream", method = "POST" }, function() end)
+					return
+				end
+				local path = req.model == "error" and "/error" or "/stream"
+				local res = ariadne.http_sse({
+					url = cfg.baseUrl .. path,
+					method = "POST",
+					headers = { ["Authorization"] = "Bearer " .. (cfg.apiKey or "") },
+					body = ariadne.json_encode({ model = req.model }),
+				}, function(ev, status)
+					assert(status == 200)
+					if ev.event == "stop" then
+						emit({ type = "finish", reason = "stop" })
+						return false
+					end
+					if ev.event == "delta" then
+						local parsed = ariadne.json_decode(ev.data)
+						emit({ type = "text", text = parsed.text })
+					else
+						emit({ type = "text", text = ev.data })
+					end
+				end)
+				if res.status ~= 200 then
+					emit({
+						type = "finish",
+						reason = "error",
+						error = "HTTP " .. tostring(res.status) .. ":" .. res.headers["retry-after"] .. ":" .. res.body,
+						retryable = res.status == 429,
+					})
+				end
+			end,
+		}},
+	}`
+	file := luaFile(t, t.TempDir(), script)
+	if err := host.AddPath(t.Context(), store, file); err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := registries.Models.Get("lua-sse")
+	if !ok {
+		t.Fatal("lua-sse model provider missing")
+	}
+	if provider.Info.Capabilities.ReasoningScope != sdk.ReasoningScopeProvider {
+		t.Fatalf("expected provider reasoning scope, got %q", provider.Info.Capabilities.ReasoningScope)
+	}
+	if !provider.Info.Settings.Properties["baseUrl"].NetworkOrigin {
+		t.Fatal("expected baseUrl field to expose NetworkOrigin")
+	}
+	if provider.ValidateSettings == nil {
+		t.Fatal("expected ValidateSettings for networkOrigin field")
+	}
+	if err := provider.ValidateSettings(map[string]any{"baseUrl": "file:///etc/passwd"}); err == nil {
+		t.Fatal("expected invalid networkOrigin URL to be rejected")
+	}
+	if err := provider.ValidateSettings(map[string]any{"baseUrl": allowedServer.URL + "/v1"}); err != nil {
+		t.Fatalf("expected valid networkOrigin URL to pass, got %v", err)
+	}
+
+	// 1. Dynamic networkOrigin allows streaming SSE from user-supplied baseUrl and supports early stop.
+	cfg := map[string]any{"baseUrl": allowedServer.URL + "/v1", "apiKey": "secret"}
+	var parts []sdk.Part
+	for part := range provider.Stream(t.Context(), cfg, sdk.Request{Model: "ok"}) {
+		parts = append(parts, part)
+	}
+	if len(parts) != 3 || parts[0].Text != "你好" || parts[1].Text != "{\"text\":\"世界\"}\nsecond-line" || parts[2].Type != "finish" || parts[2].Reason != "stop" {
+		t.Fatalf("unexpected SSE parts: %+v", parts)
+	}
+
+	// 2. Non-2xx response returns {status, headers, body} without invoking onEvent.
+	parts = nil
+	for part := range provider.Stream(t.Context(), cfg, sdk.Request{Model: "error"}) {
+		parts = append(parts, part)
+	}
+	if len(parts) != 1 || parts[0].Type != "finish" || parts[0].Reason != "error" || !parts[0].Retryable || !strings.Contains(parts[0].Error, `HTTP 429:5:{"error":"rate_limited"}`) {
+		t.Fatalf("unexpected error parts: %+v", parts)
+	}
+
+	// 3. Undeclared origin is still blocked even when baseUrl is allowed.
+	parts = nil
+	for part := range provider.Stream(t.Context(), cfg, sdk.Request{Model: "blocked"}) {
+		parts = append(parts, part)
+	}
+	if len(parts) != 1 || parts[0].Type != "finish" || parts[0].Reason != "error" || !strings.Contains(parts[0].Error, "origin") {
+		t.Fatalf("expected blocked origin error, got %+v", parts)
+	}
+
+	// 4. Schema validation rejects networkOrigin on secret or non-string fields.
+	badScripts := []string{
+		`return {version=1,id="bad-secret-origin",name={["zh-CN"]="坏"},models={{kind="bad1",title={["zh-CN"]="坏"},settings={type="object",properties={u={type="string",title={["zh-CN"]="u"},secret=true,networkOrigin=true}}},stream=function() end}}}`,
+		`return {version=1,id="bad-num-origin",name={["zh-CN"]="坏"},models={{kind="bad2",title={["zh-CN"]="坏"},settings={type="object",properties={u={type="number",title={["zh-CN"]="u"},networkOrigin=true}}},stream=function() end}}}`,
+		`return {version=1,id="bad-scope",name={["zh-CN"]="坏"},models={{kind="bad3",title={["zh-CN"]="坏"},capabilities={reasoningScope="invalid"},stream=function() end}}}`,
+	}
+	for _, bad := range badScripts {
+		badFile := luaFile(t, t.TempDir(), bad)
+		if err := host.AddPath(t.Context(), store, badFile); err == nil {
+			t.Fatalf("expected invalid Lua plugin to fail compilation: %s", bad)
+		}
+	}
+}

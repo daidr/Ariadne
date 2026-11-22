@@ -411,6 +411,18 @@ export const en: Record<MessageKey, string> = {
   'plugins.remove': 'Remove',
   'plugins.removeConfirm':
     'Remove the plugin "{name}"? The protocols and project sources it provides stop working at once.',
+  'plugins.builtinSummary': 'Built-in plugins ({enabled}/{total} enabled)',
+  'plugins.group.models': 'Models',
+  'plugins.group.searches': 'Web search',
+  'plugins.group.sources': 'Sources & links',
+  'plugins.group.other': 'Other',
+  'plugins.disabled': 'Disabled',
+  'plugins.toggle': 'Enable or disable {name}',
+  'plugins.disableAffects':
+    'Disabled "{name}". Saved settings were kept. Temporarily unavailable: {names}.',
+  'settings.providerDisabled': 'Provider is disabled (settings kept; re-enable in Plugins)',
+  'settings.searchProviderDisabled':
+    'Previously selected search provider "{kind}" is disabled. Its settings are kept and return once re-enabled in Plugins.',
   'project.delete': 'Delete project',
   'project.delete.title': 'Delete project “{name}”?',
   'project.delete.body':

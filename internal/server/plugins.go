@@ -43,6 +43,27 @@ func (api *API) registerPlugins() {
 		view, err := host.SaveSettings(r.Context(), id, values)
 		return view, 200, err
 	})
+	api.add("PUT", "/api/plugins/:pluginId/enabled", func(r *http.Request) (any, int, error) {
+		id := r.PathValue("pluginId")
+		if host == nil {
+			return nil, 0, domainerr.NotFound(id)
+		}
+		body, err := readJSON(r)
+		if err != nil {
+			return nil, 0, err
+		}
+		enabled, ok := body["enabled"].(bool)
+		if !ok {
+			return nil, 0, badInput("enabled")
+		}
+		if err := host.SetBuiltinEnabled(r.Context(), api.options.Settings, id, enabled); err != nil {
+			return nil, 0, err
+		}
+		if api.options.Data != nil {
+			api.options.Data.InvalidateUsage()
+		}
+		return view(), 200, nil
+	})
 	api.add("POST", "/api/plugins", func(r *http.Request) (any, int, error) {
 		if host == nil {
 			return nil, 0, badInput("plugins")

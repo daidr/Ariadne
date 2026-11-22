@@ -130,3 +130,133 @@ func TestLuaPluginsThroughSettingsAPI(t *testing.T) {
 		t.Fatal("settings retained removed paths", err)
 	}
 }
+
+func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	store, err := settings.Open(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelReg, sourceReg, dashReg, linkReg := models.New(), sources.New(), dashboard.New(), links.New(links.Options{})
+	defer dashReg.Close(context.Background())
+	defer linkReg.Close()
+
+	host, err := plugins.New(plugins.Options{
+		DataRoot:    filepath.Join(dir, "plugins"),
+		ManagedRoot: dir,
+		Models:      modelReg,
+		Sources:     sourceReg,
+		Dashboards:  dashReg,
+		Links:       linkReg,
+		Settings:    store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{}) {
+		if err := host.Load(t.Context(), plugin, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "fixture-token",
+		Settings:   store,
+		Plugins:    host,
+		Models:     modelReg,
+		Sources:    sourceReg,
+		Dashboards: dashReg,
+		Links:      linkReg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	call := func(method, path string, body any, wantStatus int) string {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(encoded(body)))
+		req.Header.Set("Authorization", "Bearer fixture-token")
+		res := httptest.NewRecorder()
+		api.ServeHTTP(res, req)
+		if res.Code != wantStatus {
+			t.Fatalf("%s %s: status=%d body=%s", method, path, res.Code, res.Body.String())
+		}
+		if strings.Contains(res.Body.String(), "sk-anthropic-secret") {
+			t.Fatalf("%s %s leaked secret", method, path)
+		}
+		return res.Body.String()
+	}
+
+	// Both built-in HTTP model plugins load enabled by default.
+	body := call(http.MethodGet, "/api/plugins", nil, 200)
+	if !strings.Contains(body, `"id":"model-openai"`) || !strings.Contains(body, `"id":"model-anthropic"`) {
+		t.Fatalf("missing builtin HTTP model plugins: %s", body)
+	}
+
+	// Save an Anthropic provider and an OpenAI-compatible provider directly in settings.
+	if _, err := store.UpdateModels(object{
+		"providers": []any{
+			object{"id": "p-anth", "kind": "anthropic", "name": "Claude", "settings": object{"baseUrl": "https://api.anthropic.com", "apiKey": "sk-anthropic-secret"}},
+			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI", "settings": object{"baseUrl": "https://api.openai.com/v1", "apiKey": "sk-openai-secret"}},
+		},
+		"models": []any{
+			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
+			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
+		},
+		"roles": object{"thread": object{"model": "m-oa"}},
+	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid HTTP baseUrl is rejected by ValidateSettings.
+	call(http.MethodPut, "/api/settings/models", object{
+		"providers": []any{
+			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI", "settings": object{"baseUrl": "file:///etc/passwd"}},
+		},
+		"models": []any{},
+	}, 400)
+
+	// Disable model-anthropic via HTTP API.
+	call(http.MethodPut, "/api/plugins/model-anthropic/enabled", object{"enabled": "yes"}, 400)
+	call(http.MethodPut, "/api/plugins/nonexistent/enabled", object{"enabled": false}, 404)
+	body = call(http.MethodPut, "/api/plugins/model-anthropic/enabled", object{"enabled": false}, 200)
+	if !strings.Contains(body, `"status":"disabled"`) {
+		t.Fatalf("expected disabled status: %s", body)
+	}
+	if _, ok := modelReg.Get("anthropic"); ok {
+		t.Fatal("anthropic provider still registered after disabling plugin")
+	}
+
+	// Editing OpenAI provider while Anthropic is disabled preserves Anthropic's stored config and secret.
+	if _, err := store.UpdateModels(object{
+		"providers": []any{
+			object{"id": "p-anth", "kind": "anthropic", "name": "Claude", "settings": object{}},
+			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI Updated", "settings": object{"baseUrl": "https://api.openai.com/v1", "apiKey": ""}},
+		},
+		"models": []any{
+			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
+			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
+		},
+		"roles": object{"thread": object{"model": "m-oa"}},
+	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
+		t.Fatalf("saving other providers while one builtin is disabled failed: %v", err)
+	}
+
+	// Re-enable model-anthropic: provider returns and saved apiKey secret is still intact.
+	body = call(http.MethodPut, "/api/plugins/model-anthropic/enabled", object{"enabled": true}, 200)
+	if strings.Contains(body, `"status":"disabled"`) {
+		t.Fatalf("expected all loaded after re-enable: %s", body)
+	}
+	modelsBody := call(http.MethodGet, "/api/settings/models", nil, 200)
+	if !strings.Contains(modelsBody, `"kind":"anthropic"`) || !strings.Contains(modelsBody, `"secretsSet":["apiKey"]`) {
+		t.Fatalf("re-enabled anthropic did not recover saved config: %s", modelsBody)
+	}
+}

@@ -32,7 +32,9 @@ return {
 
 各组都是数组。每个 provider 需要 `kind` 和 `title`。模型、搜索、来源和仪表盘可以声明
 `settings = { type = "object", properties = { ... }, required = { ... } }`，字段可用
-`secret = true` 标记密钥，密钥字段不能提供默认值。
+`secret = true` 标记密钥（密钥字段不能提供默认值），也可用 `networkOrigin = true` 标记非密钥的字符串地址字段（如 `baseUrl`）。
+当用户在设置页保存 `networkOrigin = true` 字段的值后，宿主会解析其中的 `http(s)://host[:port]`，
+并在该插件本次调用时动态放行该 origin，无需在静态 `network` 中写死。
 
 插件也可以在返回表的顶层声明同样的 `settings` schema。这组字段会出现在「设置 → 插件」
 的独立设置窗口里。回调使用 `ariadne.settings()` 读取该插件当前的设置。来源若依赖必填的插件
@@ -52,8 +54,11 @@ return {
 
 `ariadne.http({url, method, headers, body})` 返回 `{status, headers, body}`。
 传入第二个参数 `function(chunk, status)` 可逐块读取响应，此时返回结果省略 `body`。
-回调收到的是原始字节片段，SSE 和其他流协议需要在脚本里按各自的分隔符组帧。
-请求只访问 `network` 中列出的协议、主机和端口，返回重定向响应时由脚本处理。
+回调收到的是原始字节片段。对于 SSE 流式接口，可使用
+`ariadne.http_sse({url, method, headers, body}, function(event, status) ... end)`，
+底层由宿主按 SSE 协议切帧，对 2xx 响应为每条数据事件调用回调并传入 `{event, data}`
+（返回 `false` 可提前中止读取）；非 2xx 响应则读取响应体并返回 `{status, headers, body}`。
+请求只访问 `network` 中列出的或 `networkOrigin = true` 设置字段解析出的协议、主机和端口，返回重定向响应时由脚本处理。
 插件声明阶段、链接匹配和模型请求描述阶段不执行 HTTP。
 
 插件脚本加载时编译，每次调用在独立 Lua 状态里运行，顶层声明会重新执行。

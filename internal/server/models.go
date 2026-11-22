@@ -16,6 +16,12 @@ func (api *API) modelKinds() []sdk.ModelProviderInfo {
 	}
 	return api.options.Models.Kinds()
 }
+func (api *API) modelValidate() func(string, map[string]any) error {
+	if api.options.Models == nil {
+		return nil
+	}
+	return api.options.Models.ValidateSettings
+}
 func (api *API) registerModels() {
 	api.add("GET", "/api/settings/models", func(*http.Request) (any, int, error) {
 		if api.options.Settings == nil {
@@ -32,7 +38,7 @@ func (api *API) registerModels() {
 		if err != nil {
 			return nil, 0, err
 		}
-		changed, err := store.UpdateModels(body, api.modelKinds())
+		changed, err := store.UpdateModels(body, api.modelKinds(), api.modelValidate())
 		if err != nil {
 			return nil, 0, err
 		}

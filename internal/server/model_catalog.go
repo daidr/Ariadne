@@ -71,7 +71,7 @@ func (api *API) registerModelCatalog() {
 		if err != nil {
 			return nil, 0, err
 		}
-		draft, err := api.options.Settings.DraftProvider(body["provider"], api.modelKinds())
+		draft, err := api.options.Settings.DraftProvider(body["provider"], api.modelKinds(), api.modelValidate())
 		if err != nil {
 			return nil, 0, err
 		}

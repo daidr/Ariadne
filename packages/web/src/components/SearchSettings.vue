@@ -169,6 +169,9 @@ defineExpose({ save, checking, reload })
             : t('settings.searchNoSources')
         }}
       </DouText>
+      <DouText v-if="search.disabledProvider" size="sm" variant="secondary">
+        {{ t('settings.searchProviderDisabled', { kind: search.disabledProvider }) }}
+      </DouText>
       <DouText v-if="!search.services.length" size="sm" variant="secondary">
         {{ t('settings.searchNoProviders') }}
       </DouText>

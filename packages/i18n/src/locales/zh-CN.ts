@@ -393,6 +393,17 @@ export const zhCN = {
     '插件和 Ariadne 在同一进程里运行，能读到令牌在内的所有数据，只加载你信任的代码。改了插件代码要重启才生效。',
   'plugins.remove': '移除',
   'plugins.removeConfirm': '移除插件「{name}」？它提供的协议和项目来源会立即不可用。',
+  'plugins.builtinSummary': '内置插件（{enabled}/{total} 已启用）',
+  'plugins.group.models': '模型',
+  'plugins.group.searches': '搜索',
+  'plugins.group.sources': '文件源与链接',
+  'plugins.group.other': '其他',
+  'plugins.disabled': '已停用',
+  'plugins.toggle': '启用或停用 {name}',
+  'plugins.disableAffects': '已停用「{name}」，原有配置已保留。以下配置暂不可用：{names}。',
+  'settings.providerDisabled': '提供方已停用（配置已保留，可在「插件」中重新启用）',
+  'settings.searchProviderDisabled':
+    '此前使用的搜索提供方「{kind}」已停用，配置已保留，在「插件」中重新启用后即可恢复。',
   'project.delete': '删除项目',
   'project.delete.title': '删除项目「{name}」？',
   'project.delete.body':

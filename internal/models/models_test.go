@@ -28,6 +28,13 @@ func TestBuiltinProviderMetadataDiscoveryAndTracing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer builtins.Close(context.Background())
+	for _, provider := range HTTPBuiltinProviders(HTTPOptions{}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remove()
+	}
 	native := []any{}
 	for _, provider := range builtins.Registry.Providers() {
 		found := []sdk.FoundProvider{}
@@ -157,8 +164,8 @@ func TestBuiltinCloseReleasesProgramsAndRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
-	if len(builtins.Registry.Kinds()) != 6 {
-		t.Fatal("missing builtins")
+	if len(builtins.Registry.Kinds()) != 4 {
+		t.Fatalf("missing builtins: got %d", len(builtins.Registry.Kinds()))
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -181,11 +188,28 @@ func TestRegistryMetadataOwnershipAndFoundSetupFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer builtins.Close(context.Background())
+	for _, provider := range HTTPBuiltinProviders(HTTPOptions{}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remove()
+	}
 	providers := builtins.Registry.Providers()
-	providers[0].Info.Title["zh-CN"] = "changed"
-	field := providers[0].Info.Settings.Properties["apiKey"]
+	openAIIndex := -1
+	for i, p := range providers {
+		if p.Info.Kind == "openai-compatible" {
+			openAIIndex = i
+			break
+		}
+	}
+	if openAIIndex < 0 {
+		t.Fatal("missing openai-compatible provider")
+	}
+	providers[openAIIndex].Info.Title["zh-CN"] = "changed"
+	field := providers[openAIIndex].Info.Settings.Properties["apiKey"]
 	field.Secret = false
-	providers[0].Info.Settings.Properties["apiKey"] = field
+	providers[openAIIndex].Info.Settings.Properties["apiKey"] = field
 	provider, _ := builtins.Registry.Get("openai-compatible")
 	if provider.Info.Title["zh-CN"] == "changed" || !provider.Info.Settings.Properties["apiKey"].Secret {
 		t.Fatal("caller changed registered provider metadata")

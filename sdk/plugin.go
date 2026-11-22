@@ -16,9 +16,18 @@ type PluginContext struct {
 	RegisterSearch    func(SearchProvider) (func(), error)
 	RegisterLink      func(LinkProvider) (func(), error)
 }
+type PluginProvides struct {
+	Models     []string `json:"models,omitempty"`
+	Contexts   []string `json:"contexts,omitempty"`
+	Dashboards []string `json:"dashboards,omitempty"`
+	Searches   []string `json:"searches,omitempty"`
+	Links      []string `json:"links,omitempty"`
+}
+
 type Plugin struct {
 	ID       string
 	Name     LocalizedText
+	Provides PluginProvides
 	Settings *SettingsSchema
 	// SettingsReady checks configuration that can also come from outside Ariadne.
 	// When omitted, readiness is determined by the schema's required fields.

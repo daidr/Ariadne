@@ -19,13 +19,14 @@ import (
 )
 
 type RecordedCall struct {
-	Provider  string         `json:"provider"`
-	Model     string         `json:"model"`
-	Effort    *string        `json:"effort"`
-	Settings  map[string]any `json:"settings"`
-	MaxTokens int64          `json:"maxTokens,omitempty"`
-	ExtraBody map[string]any `json:"extraBody,omitempty"`
-	Program   bool           `json:"program,omitempty"`
+	Provider       string             `json:"provider"`
+	Model          string             `json:"model"`
+	Effort         *string            `json:"effort"`
+	Settings       map[string]any     `json:"settings"`
+	MaxTokens      int64              `json:"maxTokens,omitempty"`
+	ExtraBody      map[string]any     `json:"extraBody,omitempty"`
+	Program        bool               `json:"program,omitempty"`
+	ReasoningScope sdk.ReasoningScope `json:"reasoningScope,omitempty"`
 }
 type Call struct {
 	Provider string         `json:"provider"`
@@ -111,7 +112,7 @@ func (reader requestReader) writtenBy(project string, target *RecordedCall) func
 		}
 		recorded, err := reader.call(project, hash)
 		same := false
-		if err == nil && recorded != nil && recorded.Provider == target.Provider && (target.Provider == "anthropic" || recorded.Model == target.Model) {
+		if err == nil && recorded != nil && recorded.Provider == target.Provider && (target.ReasoningScope == sdk.ReasoningScopeProvider || recorded.Model == target.Model) {
 			data, _ := jsonutil.Encode(recorded.Settings)
 			same = bytes.Equal(data, settings)
 		}
