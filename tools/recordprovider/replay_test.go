@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"maps"
@@ -13,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -103,19 +103,15 @@ func replaySample(t *testing.T, sample fixture) []sdk.Part {
 		return &http.Response{StatusCode: sample.Reply.Status, Header: header,
 			Body: io.NopCloser(strings.NewReader(sample.Reply.Body)), Request: request}, nil
 	})}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{Context: t.Context(), DataDir: t.TempDir(), Client: client})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: client}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(client) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(remove)
 	}
-	provider, ok := builtins.Registry.Get(sample.Provider)
+	provider, ok := modelReg.Get(sample.Provider)
 	if !ok {
 		t.Fatalf("unknown provider %q", sample.Provider)
 	}

@@ -19,14 +19,15 @@ import (
 )
 
 type RecordedCall struct {
-	Provider       string             `json:"provider"`
-	Model          string             `json:"model"`
-	Effort         *string            `json:"effort"`
-	Settings       map[string]any     `json:"settings"`
-	MaxTokens      int64              `json:"maxTokens,omitempty"`
-	ExtraBody      map[string]any     `json:"extraBody,omitempty"`
-	Program        bool               `json:"program,omitempty"`
-	ReasoningScope sdk.ReasoningScope `json:"reasoningScope,omitempty"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	Effort           *string            `json:"effort"`
+	Settings         map[string]any     `json:"settings"`
+	MaxTokens        int64              `json:"maxTokens,omitempty"`
+	ExtraBody        map[string]any     `json:"extraBody,omitempty"`
+	Program          bool               `json:"program,omitempty"`
+	StatefulSessions bool               `json:"statefulSessions,omitempty"`
+	ReasoningScope   sdk.ReasoningScope `json:"reasoningScope,omitempty"`
 }
 type Call struct {
 	Provider string         `json:"provider"`
@@ -54,7 +55,7 @@ func ModelInput(ctx context.Context, repo *core.Repository, project string, call
 	options := transcript.ChatOptions{Images: images, ReadText: reader.readText}
 	if call != nil {
 		options.KeepReasoning = reader.writtenBy(project, call)
-		if call.Program {
+		if call.StatefulSessions || call.Program {
 			options.PromptUpdates = new(false)
 		}
 	}

@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"iter"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/daidr/Ariadne/internal/core"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
@@ -121,5 +125,69 @@ func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *
 	api.deletionMu.Unlock()
 	if retained != 0 {
 		t.Fatal("deletion metadata retained")
+	}
+}
+
+func TestProjectDeletionCallsModelProviderForget(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "delete-forget.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	name := "Forget Project"
+	project, err := repo.CreateProject(t.Context(), &name, core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "Thread 1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var forgotten []string
+	modelReg := models.New()
+	remove, err := modelReg.Register(sdk.ModelProvider{
+		Info: sdk.ModelProviderInfo{Kind: "stateful-fixture", Program: true},
+		Stream: func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
+			return func(func(sdk.Part) bool) {}
+		},
+		Forget: func(_ context.Context, conversation string) error {
+			mu.Lock()
+			forgotten = append(forgotten, conversation)
+			mu.Unlock()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+
+	api, err := New(Options{Repository: repo, Token: "secret", Models: modelReg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	if _, err := client.DeleteProject(t.Context(), connect.NewRequest(&ariadnev1.DeleteProjectRequest{ProjectId: project.ID})); err != nil {
+		t.Fatalf("DeleteProject failed: %v", err)
+	}
+
+	mu.Lock()
+	got := slices.Clone(forgotten)
+	mu.Unlock()
+	slices.Sort(got)
+	want := []string{project.CoordinatorID, thread.ID}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("expected Forget for %v, got %v", want, got)
 	}
 }

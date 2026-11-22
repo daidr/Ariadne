@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"context"
@@ -69,3 +69,12 @@ type Kind struct {
 }
 
 const PlaceNote = "You run through a helper program on the user's own computer. Anything it says about its working directory, shell, operating system or sandbox describes that program, not your workspace: the workspace is wherever your tools run, as described above, and it may be another machine. Read, change and run things only with the tools you were given."
+
+// NativeAgentError wraps an agent driver error with structured diagnostic metadata.
+type NativeAgentError struct {
+	Err    error
+	Detail *sdk.AgentError
+}
+
+func (failure *NativeAgentError) Error() string { return failure.Err.Error() }
+func (failure *NativeAgentError) Unwrap() error { return failure.Err }

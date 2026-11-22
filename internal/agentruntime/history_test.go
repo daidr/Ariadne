@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"fmt"
@@ -83,8 +83,8 @@ func TestRenderHistoryKeepsNewestTurnsAndDropsOldestWithConsistentImages(t *test
 	if !utf8.ValidString(out.Text) {
 		t.Fatal("rendered history is not valid UTF-8")
 	}
-	if len(out.Text) > defaultHistoryReplayBytes {
-		t.Fatalf("rendered history exceeded default budget: %d > %d", len(out.Text), defaultHistoryReplayBytes)
+	if len(out.Text) > DefaultHistoryReplayBytes {
+		t.Fatalf("rendered history exceeded default budget: %d > %d", len(out.Text), DefaultHistoryReplayBytes)
 	}
 	if !strings.Contains(out.Text, historyOmittedNote) {
 		t.Fatal("expected omission note at start of truncated history")
@@ -139,8 +139,8 @@ func TestRenderHistoryCapsOversizedToolResultAndArgs(t *testing.T) {
 	if !utf8.ValidString(out.Text) {
 		t.Fatal("rendered history is not valid UTF-8")
 	}
-	if len(out.Text) > defaultHistoryReplayBytes {
-		t.Fatalf("oversized tool output blew replay budget: %d > %d", len(out.Text), defaultHistoryReplayBytes)
+	if len(out.Text) > DefaultHistoryReplayBytes {
+		t.Fatalf("oversized tool output blew replay budget: %d > %d", len(out.Text), DefaultHistoryReplayBytes)
 	}
 	if !strings.Contains(out.Text, "SEARCH_START") || !strings.Contains(out.Text, "SEARCH_END") {
 		t.Fatal("truncated historical tool result should preserve head and tail")

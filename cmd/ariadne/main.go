@@ -17,12 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/application"
 	"github.com/daidr/Ariadne/internal/config"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/httpauth"
 	"github.com/daidr/Ariadne/internal/process"
-	"github.com/daidr/Ariadne/internal/providers/agents"
 	"github.com/daidr/Ariadne/internal/update"
 )
 
@@ -47,11 +47,11 @@ func run(ctx context.Context, args []string) error {
 			return selfCheck()
 		}
 	}
-	if len(args) > 0 && args[0] == agents.StdioBridgeCommand {
+	if len(args) > 0 && args[0] == agentruntime.StdioBridgeCommand {
 		if len(args) != 2 {
 			return errors.New("mcp-stdio requires the local bridge URL")
 		}
-		return agents.RunStdioBridge(ctx, args[1], os.Stdin, os.Stdout)
+		return agentruntime.RunStdioBridge(ctx, args[1], os.Stdin, os.Stdout)
 	}
 	if len(args) != 0 && (len(args) != 1 || args[0] != "serve") {
 		return errors.New("usage: ariadne [serve | --version | self-check]")
@@ -116,7 +116,7 @@ func serve(ctx context.Context, cfg config.Config, listener net.Listener) error 
 		Config: cfg, Web: web, Ledger: process.DefaultLedger, Update: updater,
 		OnError: func(err error) { log.Printf("ariadne: %v", err) },
 		StdioLauncher: func(address string) (string, []string, error) {
-			return executable, []string{agents.StdioBridgeCommand, address}, executableErr
+			return executable, []string{agentruntime.StdioBridgeCommand, address}, executableErr
 		},
 	})
 	if err != nil {

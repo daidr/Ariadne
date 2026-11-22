@@ -28,7 +28,10 @@ const (
 )
 
 type ModelProviderCapabilities struct {
-	ReasoningScope ReasoningScope `json:"reasoningScope,omitempty"`
+	ReasoningScope     ReasoningScope `json:"reasoningScope,omitempty"`
+	StatefulSessions   bool           `json:"statefulSessions,omitempty"`
+	PreserveModelOrder bool           `json:"preserveModelOrder,omitempty"`
+	PreferDefaultModel bool           `json:"preferDefaultModel,omitempty"`
 }
 
 type ModelProviderInfo struct {
@@ -37,6 +40,22 @@ type ModelProviderInfo struct {
 	Settings     SettingsSchema            `json:"settings"`
 	Program      bool                      `json:"program,omitempty"`
 	Capabilities ModelProviderCapabilities `json:"capabilities,omitempty"`
+}
+
+// HasStatefulSessions reports whether the provider maintains cross-turn session state
+// (e.g. a local agent CLI subprocess) rather than stateless prompt replay.
+func (info ModelProviderInfo) HasStatefulSessions() bool {
+	return info.Capabilities.StatefulSessions || info.Program
+}
+
+// PreservesModelOrder reports whether model listing order from the provider should be kept as-is.
+func (info ModelProviderInfo) PreservesModelOrder() bool {
+	return info.Capabilities.PreserveModelOrder || info.Program
+}
+
+// PrefersDefaultModel reports whether auto-discovered setups should pick "default" when offered.
+func (info ModelProviderInfo) PrefersDefaultModel() bool {
+	return info.Capabilities.PreferDefaultModel || info.Program
 }
 
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}

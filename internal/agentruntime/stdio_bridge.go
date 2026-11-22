@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"bufio"
@@ -19,6 +19,9 @@ import (
 )
 
 const StdioBridgeCommand = "mcp-stdio"
+
+// StdioLauncher returns the command and arguments used to bridge a local MCP HTTP endpoint over stdio.
+type StdioLauncher func(string) (string, []string, error)
 
 // RunStdioBridge is the native CLI's mcp-stdio mode. Calls run concurrently so
 // a tool awaiting approval never blocks a ping. Input is owned for this call;

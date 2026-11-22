@@ -19,6 +19,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/config"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -180,30 +181,22 @@ func run(ctx context.Context, raw []string) error {
 	}
 	recorder := &capture{}
 	httpClient := &http.Client{Transport: recorder}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{Context: ctx, DataDir: filepath.Join(cfg.Home, "plugins"), Client: httpClient})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		stop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = builtins.Close(stop)
-	}()
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: httpClient}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(httpClient) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			return err
 		}
 		defer remove()
 	}
-	resolved, err := user.ResolveModel("thread", id, builtins.Registry.Kinds())
+	resolved, err := user.ResolveModel("thread", id, modelReg.Kinds())
 	if err != nil {
 		return err
 	}
 	if resolved == nil || resolved.Provider.Kind != "openai-compatible" && resolved.Provider.Kind != "anthropic" {
 		return errors.New("choose an OpenAI-compatible or Anthropic model")
 	}
-	provider, ok := builtins.Registry.Get(resolved.Provider.Kind)
+	provider, ok := modelReg.Get(resolved.Provider.Kind)
 	if !ok {
 		return errors.New("the selected provider is unavailable")
 	}

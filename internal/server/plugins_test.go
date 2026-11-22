@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/dashboard"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
@@ -19,6 +20,7 @@ import (
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/plugins"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
@@ -290,7 +292,7 @@ func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close(context.Background())
-	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{}) {
+	for _, plugin := range providers.HTTPPlugins(nil) {
 		if err := host.Load(t.Context(), plugin, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -486,7 +488,7 @@ func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
 	}
 	defer host.Close(context.Background())
 
-	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{}) {
+	for _, plugin := range providers.HTTPPlugins(nil) {
 		if err := host.Load(t.Context(), plugin, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -609,5 +611,175 @@ func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
 		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m-oa"},
 	})); err != nil {
 		t.Fatalf("SetThreadModel(active m-oa): %v", err)
+	}
+}
+
+func TestBuiltinAgentCLIModelPluginsToggleUsageAndValidation(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	store, err := settings.Open(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelReg, sourceReg, dashReg, linkReg := models.New(), sources.New(), dashboard.New(), links.New(links.Options{})
+	defer dashReg.Close(context.Background())
+	defer linkReg.Close()
+
+	bridge := agentruntime.NewToolBridge()
+	defer bridge.Close(context.Background())
+
+	host, err := plugins.New(plugins.Options{
+		DataRoot:    filepath.Join(dir, "plugins"),
+		ManagedRoot: dir,
+		Models:      modelReg,
+		Sources:     sourceReg,
+		Dashboards:  dashReg,
+		Links:       linkReg,
+		Settings:    store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+
+	for _, plugin := range providers.BuiltinPlugins(providers.BuiltinOptions{
+		Bridge:       bridge,
+		AgentDataDir: filepath.Join(dir, "plugins", "agents"),
+	}) {
+		if err := host.Load(t.Context(), plugin, nil); err != nil {
+			t.Fatalf("load %s: %v", plugin.ID, err)
+		}
+	}
+
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "fixture-token",
+		Settings:   store,
+		Plugins:    host,
+		Models:     modelReg,
+		Sources:    sourceReg,
+		Dashboards: dashReg,
+		Links:      linkReg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	auth := connect.WithInterceptors(bearerClientInterceptor("fixture-token"))
+	pluginClient := ariadnev1connect.NewPluginServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	// All 4 Agent CLI built-in plugins load enabled by default with their expected model kinds.
+	listRes, err := pluginClient.ListPlugins(t.Context(), connect.NewRequest(&ariadnev1.ListPluginsRequest{}))
+	if err != nil {
+		t.Fatalf("ListPlugins: %v", err)
+	}
+	expected := map[string]string{
+		"model-claude-code": "claude-code",
+		"model-codex":       "codex",
+		"model-acp":         "acp",
+		"model-antigravity": "antigravity",
+	}
+	byID := map[string]*ariadnev1.PluginRecord{}
+	for _, record := range listRes.Msg.GetPlugins() {
+		byID[record.GetId()] = record
+	}
+	for id, kind := range expected {
+		record := byID[id]
+		if record == nil || record.GetStatus() != "loaded" || record.GetSource() != "builtin" {
+			t.Fatalf("expected loaded builtin plugin %s, got %+v", id, record)
+		}
+		if !slices.Equal(record.GetProvides().GetModels(), []string{kind}) {
+			t.Fatalf("plugin %s provides.models = %v, want [%s]", id, record.GetProvides().GetModels(), kind)
+		}
+	}
+
+	// Save Agent CLI providers and verify usage stats.
+	if _, err := store.UpdateModels(object{
+		"providers": []any{
+			object{"id": "p-agy", "kind": "antigravity", "name": "Antigravity", "settings": object{}},
+			object{"id": "p-acp", "kind": "acp", "name": "My ACP", "settings": object{"command": "my-agent --acp"}},
+		},
+		"models": []any{
+			object{"id": "m-agy", "provider": "p-agy", "model": "default"},
+			object{"id": "m-acp", "provider": "p-acp", "model": "default"},
+		},
+		"roles": object{"thread": object{"model": "m-agy"}},
+	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
+		t.Fatalf("UpdateModels: %v", err)
+	}
+
+	// ValidateSettings rejects invalid command on Agent CLI provider through ConnectRPC.
+	if _, err := settingsClient.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{{
+			Id:       "p-acp",
+			Kind:     "acp",
+			Name:     "My ACP",
+			Settings: mustStruct(t, object{"command": "bad\ncommand"}),
+		}},
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("SaveModelSettings(invalid command): want InvalidArgument, got %v", err)
+	}
+
+	// Usage stats report configured providers and roles for model-antigravity and model-acp independently.
+	listRes, err = pluginClient.ListPlugins(t.Context(), connect.NewRequest(&ariadnev1.ListPluginsRequest{}))
+	if err != nil {
+		t.Fatalf("ListPlugins after config: %v", err)
+	}
+	byID = map[string]*ariadnev1.PluginRecord{}
+	for _, record := range listRes.Msg.GetPlugins() {
+		byID[record.GetId()] = record
+	}
+	if usage := byID["model-antigravity"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"Antigravity"}) || !slices.Equal(usage.GetModelRoles(), []string{"thread"}) {
+		t.Fatalf("model-antigravity usage = %+v", usage)
+	}
+	if usage := byID["model-acp"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"My ACP"}) || len(usage.GetModelRoles()) != 0 {
+		t.Fatalf("model-acp usage = %+v", usage)
+	}
+
+	// Disable model-antigravity: antigravity kind disappears from active registry while acp stays active and saved config is preserved.
+	if _, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "model-antigravity",
+		Enabled:  false,
+	})); err != nil {
+		t.Fatalf("SetPluginEnabled(false): %v", err)
+	}
+	if _, ok := modelReg.Get("antigravity"); ok {
+		t.Fatal("antigravity provider should be unregistered when disabled")
+	}
+	if _, ok := modelReg.Get("acp"); !ok {
+		t.Fatal("acp provider should remain registered when antigravity is disabled")
+	}
+
+	// Re-enable model-antigravity: antigravity kind is registered again and saved provider remains intact.
+	if _, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "model-antigravity",
+		Enabled:  true,
+	})); err != nil {
+		t.Fatalf("SetPluginEnabled(true): %v", err)
+	}
+	if _, ok := modelReg.Get("antigravity"); !ok {
+		t.Fatal("antigravity provider should be re-registered when re-enabled")
+	}
+	modelSettings, err := settingsClient.GetModelSettings(t.Context(), connect.NewRequest(&ariadnev1.GetModelSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetModelSettings: %v", err)
+	}
+	foundSaved := false
+	for _, p := range modelSettings.Msg.GetSettings().GetProviders() {
+		if p.GetId() == "p-agy" && p.GetKind() == "antigravity" {
+			foundSaved = true
+		}
+	}
+	if !foundSaved {
+		t.Fatalf("saved antigravity provider was lost after disable/re-enable: %+v", modelSettings.Msg.GetSettings().GetProviders())
 	}
 }

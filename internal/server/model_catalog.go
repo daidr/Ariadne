@@ -107,7 +107,7 @@ func (api *API) listProviderModels(ctx context.Context, rawProvider any) ([]list
 		ids = append(ids, model.ID)
 		byID[model.ID] = model
 	}
-	if !provider.Info.Program {
+	if !provider.Info.PreservesModelOrder() {
 		ids = modelcatalog.InOrder(ids, known)
 	}
 	entries := make([]listedModelResult, 0, len(ids))
@@ -188,7 +188,7 @@ func (api *API) useFoundSetup(ctx context.Context, id string) (object, []modelPr
 		hasDefault = hasDefault || model.ID == "default"
 	}
 	chosen := modelcatalog.SuggestModel(ids, known)
-	if provider.Info.Program && hasDefault {
+	if provider.Info.PrefersDefaultModel() && hasDefault {
 		chosen = "default"
 	}
 	if chosen == "" {

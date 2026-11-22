@@ -1,4 +1,4 @@
-package agents
+package acp
 
 import (
 	"context"
@@ -7,122 +7,60 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/rpc"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
 )
 
-type ACPSettings struct {
+type Settings struct {
 	Command string `json:"command,omitempty"`
 }
-type StdioLauncher func(string) (string, []string, error)
 
-const antigravityACPName = "Antigravity ACP Server"
-const AntigravityCommand = "agy acp --process-per-session --disable-telemetry"
-const antigravityToolProfileName = "ariadne-provider"
-const maxAntigravityWarningBytes = 4096
-
-var antigravityRetrying = regexp.MustCompile(`(?i)\bretrying\b`)
-var antigravityRateLimit = regexp.MustCompile(`(?i)^(?:rate limit(?:s)?\s+(?:exceeded|reached|hit)\b|too many requests\b)`)
-
-func antigravityWarningBody(text string) (string, bool) {
-	trimmed := strings.TrimLeft(text, " \t\r\n")
-	rest, ok := strings.CutPrefix(trimmed, "⚠ ")
-	if !ok {
-		return "", false
-	}
-	return textutil.Trim(rest), true
+// TurnUsage reports token counters returned by an ACP session/prompt response.
+type TurnUsage struct {
+	Input   int64  `json:"inputTokens"`
+	Output  int64  `json:"outputTokens"`
+	Cached  int64  `json:"cachedReadTokens"`
+	Written int64  `json:"cachedWriteTokens"`
+	Thought int64  `json:"thoughtTokens"`
+	Total   *int64 `json:"totalTokens"`
 }
 
-func antigravityExecutorPrefix(body string) bool {
-	return strings.HasPrefix(body, "failed to construct executor: ") || strings.HasPrefix(body, "agent executor error: ")
+// TurnFilter intercepts streaming text chunks and prompt completion for
+// provider-specific ACP dialects.
+type TurnFilter interface {
+	Reset()
+	OnMessageChunk(text string) []string
+	OnNonMessageUpdate() []string
+	OnTurnComplete(rpcErr error) (emit string, failureDetail string)
 }
 
-func couldBeAntigravityWarning(text string) bool {
-	trimmed := strings.TrimLeft(text, " \t\r\n")
-	if trimmed == "" || trimmed == "⚠" {
-		return true
-	}
-	rest, ok := strings.CutPrefix(trimmed, "⚠ ")
-	if !ok {
-		return false
-	}
-	body := textutil.Trim(rest)
-	if antigravityExecutorPrefix(body) {
-		return true
-	}
-	return !strings.Contains(body, "\n")
+// Hooks allows specialized ACP-based plugins to customize launch behavior,
+// stream filtering, and usage accounting without coupling into generic ACP.
+type Hooks struct {
+	DefaultCommand    string
+	ResolveProfile    func(argv []string) string
+	PrepareProfile    func(argv []string, directory string, profile string) ([]string, error)
+	NewTurnFilter     func() TurnFilter
+	AdjustInputTokens func(TurnUsage) int64
 }
 
-func antigravityRetryingNotice(text string) bool {
-	body, ok := antigravityWarningBody(text)
-	return ok && !strings.Contains(body, "\n") && antigravityRetrying.MatchString(body)
+// ListOptions controls optional behavior during ACP model catalog discovery.
+type ListOptions struct {
+	ProbeThoughtLevels bool
 }
 
-// agy sends fatal executor and subscription quota failures as warning chat chunks
-// followed by end_turn rather than JSON-RPC errors.
-func antigravityFailure(text string) (string, bool) {
-	body, ok := antigravityWarningBody(text)
-	if !ok || body == "" {
-		return "", false
-	}
-	if detail, ok := strings.CutPrefix(body, "failed to construct executor: "); ok && textutil.Trim(detail) != "" {
-		return "failed to construct executor: " + textutil.Trim(detail), true
-	}
-	if detail, ok := strings.CutPrefix(body, "agent executor error: "); ok && textutil.Trim(detail) != "" {
-		return textutil.Trim(detail), true
-	}
-	if strings.Contains(body, "\n") || antigravityRetrying.MatchString(body) {
-		return "", false
-	}
-	if rpc.QuotaText(body) || antigravityRateLimit.MatchString(body) {
-		return body, true
-	}
-	return "", false
+var acpClient = map[string]any{
+	"protocolVersion":    1,
+	"clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false},
+	"clientInfo":         agentruntime.ClientInfo,
 }
-
-const antigravityToolProfile = `---
-name: ` + antigravityToolProfileName + `
-description: Agent for conversations managed by Ariadne.
-mainAgent: true
-subagent: false
-tools: []
----
-Use the Ariadne tools provided for this conversation.
-`
-
-func usesAntigravityToolProfile(argv []string) bool {
-	if len(argv) < 2 || argv[1] != "acp" || strings.TrimSuffix(strings.ToLower(filepath.Base(argv[0])), ".exe") != "agy" {
-		return false
-	}
-	return !slices.ContainsFunc(argv[2:], func(arg string) bool {
-		return arg == "--agent" || strings.HasPrefix(arg, "--agent=")
-	})
-}
-
-func prepareAntigravityToolProfile(argv []string, directory string) ([]string, error) {
-	directory, err := filepath.Abs(directory)
-	if err != nil {
-		return nil, err
-	}
-	agentsDir := filepath.Join(directory, ".agents", "agents")
-	if err := os.MkdirAll(agentsDir, 0700); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(agentsDir, antigravityToolProfileName+".md"), []byte(antigravityToolProfile), 0600); err != nil {
-		return nil, err
-	}
-	return append(argv, "--agent", antigravityToolProfileName, "--add-dir", directory), nil
-}
-
-var acpClient = map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false}, "clientInfo": codexClient}
 
 type acpInitialize struct {
 	Version   int `json:"protocolVersion"`
@@ -167,7 +105,14 @@ func ForConversationTools(raw json.RawMessage, tools []sdk.Tool) bool {
 	known := map[string]bool{}
 	for _, tool := range tools {
 		name := textutil.Lower(tool.Name)
-		for _, spelling := range []string{"mcp__" + BridgeServerName + "__" + name, "mcp_" + BridgeServerName + "_" + name, BridgeServerName + "__" + name, BridgeServerName + "/" + name, BridgeServerName + "." + name, name + " (" + BridgeServerName + " mcp server)"} {
+		for _, spelling := range []string{
+			"mcp__" + agentruntime.BridgeServerName + "__" + name,
+			"mcp_" + agentruntime.BridgeServerName + "_" + name,
+			agentruntime.BridgeServerName + "__" + name,
+			agentruntime.BridgeServerName + "/" + name,
+			agentruntime.BridgeServerName + "." + name,
+			name + " (" + agentruntime.BridgeServerName + " mcp server)",
+		} {
 			known[spelling] = true
 		}
 	}
@@ -191,19 +136,19 @@ type acpSessionModels struct {
 	} `json:"availableModels"`
 }
 
-func ACPModels(data json.RawMessage) []sdk.ListedModel {
+func ParseModels(data json.RawMessage) []sdk.ListedModel {
 	var offered acpSessionModels
 	_ = json.Unmarshal(data, &offered)
 	available := []sdk.ListedModel{}
 	first := sdk.ListedModel{ID: "default"}
-	current := trimmedJSON(offered.Current)
+	current := agentruntime.TrimmedJSON(offered.Current)
 	for _, entry := range offered.Available {
-		id := trimmedJSON(entry.ID)
+		id := agentruntime.TrimmedJSON(entry.ID)
 		if id == "" {
 			continue
 		}
 		model := sdk.ListedModel{ID: id}
-		title := trimmedJSON(entry.Name)
+		title := agentruntime.TrimmedJSON(entry.Name)
 		if title != id {
 			model.Title = title
 		}
@@ -220,7 +165,12 @@ func ACPModels(data json.RawMessage) []sdk.ListedModel {
 	}
 	return append([]sdk.ListedModel{first}, available...)
 }
-func ListACPModels(ctx context.Context, settings ACPSettings, directory string) ([]sdk.ListedModel, error) {
+
+func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk.ListedModel, error) {
+	return ListModelsWithOptions(ctx, settings, directory, ListOptions{})
+}
+
+func ListModelsWithOptions(ctx context.Context, settings Settings, directory string, opts ListOptions) ([]sdk.ListedModel, error) {
 	argv := process.SplitCommand(settings.Command)
 	if len(argv) == 0 {
 		return []sdk.ListedModel{}, nil
@@ -236,8 +186,7 @@ func ListACPModels(ctx context.Context, settings ACPSettings, directory string) 
 		defer cancel()
 		_ = stdio.Close(cleanup)
 	}()
-	hello, err := initializeACP(ctx, stdio.Peer)
-	if err != nil {
+	if _, err := initializeACP(ctx, stdio.Peer); err != nil {
 		return nil, err
 	}
 	var result acpSession
@@ -247,37 +196,55 @@ func ListACPModels(ctx context.Context, settings ACPSettings, directory string) 
 	if result.ID == "" {
 		return nil, errors.New("the ACP agent opened no session")
 	}
-	return result.listedModels(ctx, stdio.Peer, hello.AgentInfo.Name), nil
-}
-func ACPKind(bridge *ToolBridge, shim StdioLauncher) Kind {
-	return acpKind("acp", "", bridge, shim)
+	return result.listedModels(ctx, stdio.Peer, opts.ProbeThoughtLevels), nil
 }
 
-func AntigravityKind(bridge *ToolBridge, shim StdioLauncher) Kind {
-	return acpKind("antigravity", AntigravityCommand, bridge, shim)
+func Kind(bridge *agentruntime.ToolBridge, shim agentruntime.StdioLauncher) agentruntime.Kind {
+	return NewKind(ProviderKind, bridge, shim, Hooks{})
 }
 
-func acpKind(name, defaultCommand string, bridge *ToolBridge, shim StdioLauncher) Kind {
+func NewKind(name string, bridge *agentruntime.ToolBridge, shim agentruntime.StdioLauncher, hooks Hooks) agentruntime.Kind {
 	if shim == nil {
 		shim = func(url string) (string, []string, error) {
 			program, err := os.Executable()
-			return program, []string{StdioBridgeCommand, url}, err
+			return program, []string{agentruntime.StdioBridgeCommand, url}, err
 		}
 	}
-	return Kind{Name: name, Persistent: true, ResumeDirectory: true, MutableEffort: true, Fingerprint: NativeFingerprint, Create: func(ctx DriverContext) (Driver, error) {
-		command, _ := ctx.Settings["command"].(string)
-		if textutil.Trim(command) == "" {
-			command = defaultCommand
-		}
-		return &acpDriver{ctx: ctx, settings: ACPSettings{Command: command}, bridge: bridge, shim: shim, first: true, manageAntigravityTools: name == "antigravity"}, nil
-	}}
+	return agentruntime.Kind{
+		Name:            name,
+		Persistent:      true,
+		ResumeDirectory: true,
+		MutableEffort:   true,
+		Fingerprint:     agentruntime.NativeFingerprint,
+		Create: func(ctx agentruntime.DriverContext) (agentruntime.Driver, error) {
+			command, _ := ctx.Settings["command"].(string)
+			if textutil.Trim(command) == "" {
+				command = hooks.DefaultCommand
+			}
+			var filter TurnFilter
+			if hooks.NewTurnFilter != nil {
+				filter = hooks.NewTurnFilter()
+			}
+			return &acpDriver{
+				ctx:      ctx,
+				settings: Settings{Command: command},
+				bridge:   bridge,
+				shim:     shim,
+				hooks:    hooks,
+				filter:   filter,
+				first:    true,
+			}, nil
+		},
+	}
 }
 
 type acpDriver struct {
-	ctx                             DriverContext
-	settings                        ACPSettings
-	bridge                          *ToolBridge
-	shim                            StdioLauncher
+	ctx                             agentruntime.DriverContext
+	settings                        Settings
+	bridge                          *agentruntime.ToolBridge
+	shim                            agentruntime.StdioLauncher
+	hooks                           Hooks
+	filter                          TurnFilter
 	stdio                           *rpc.Stdio
 	life                            context.Context
 	mu                              sync.Mutex
@@ -285,12 +252,9 @@ type acpDriver struct {
 	executable, sessionMethod       string
 	hello                           acpInitialize
 	started, first, images, closing bool
-	active, restorable, antigravity bool
-	manageAntigravityTools          bool
+	active, restorable              bool
 	agentProfile                    string
 	thought                         strings.Builder
-	warning                         strings.Builder
-	stepHasText                     bool
 	contextUsed                     *int64
 	thoughtOption                   acpConfigOption
 	defaultLevel                    string
@@ -304,23 +268,6 @@ type acpCheckpoint struct {
 	DefaultLevel string `json:"defaultLevel,omitempty"`
 	ContextUsed  *int64 `json:"contextUsed,omitempty"`
 }
-
-type acpTurnUsage struct {
-	Input   int64  `json:"inputTokens"`
-	Output  int64  `json:"outputTokens"`
-	Cached  int64  `json:"cachedReadTokens"`
-	Written int64  `json:"cachedWriteTokens"`
-	Thought int64  `json:"thoughtTokens"`
-	Total   *int64 `json:"totalTokens"`
-}
-
-type nativeAgentError struct {
-	err    error
-	detail *sdk.AgentError
-}
-
-func (failure *nativeAgentError) Error() string { return failure.err.Error() }
-func (failure *nativeAgentError) Unwrap() error { return failure.err }
 
 func (d *acpDriver) diagnosticLocked(operation string, err error) *sdk.AgentError {
 	detail := &sdk.AgentError{
@@ -342,29 +289,30 @@ func (d *acpDriver) diagnosticLocked(operation string, err error) *sdk.AgentErro
 func (d *acpDriver) diagnosticError(operation string, err error) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return &nativeAgentError{err: err, detail: d.diagnosticLocked(operation, err)}
+	return &agentruntime.NativeAgentError{Err: err, Detail: d.diagnosticLocked(operation, err)}
 }
 
-func (d *acpDriver) emitLocked(event Event) {
+func (d *acpDriver) emitLocked(event agentruntime.Event) {
 	if !d.closing {
 		d.ctx.Emit(event)
 	}
 }
+
 func (d *acpDriver) flushThoughtLocked() {
 	if text := textutil.Trim(d.thought.String()); text != "" {
-		d.emitLocked(Event{Type: "reasoning", Text: text})
+		d.emitLocked(agentruntime.Event{Type: "reasoning", Text: text})
 	}
 	d.thought.Reset()
 }
-func (d *acpDriver) flushWarningLocked() {
-	if d.warning.Len() == 0 {
-		return
+
+func (d *acpDriver) emitChunksLocked(chunks []string) {
+	for _, chunk := range chunks {
+		if chunk != "" {
+			d.emitLocked(agentruntime.Event{Type: "text", Text: chunk})
+		}
 	}
-	text := d.warning.String()
-	d.warning.Reset()
-	d.stepHasText = true
-	d.emitLocked(Event{Type: "text", Text: text})
 }
+
 func (d *acpDriver) request(ctx context.Context, method string, raw json.RawMessage) (any, error) {
 	if method != "session/request_permission" {
 		return nil, fmt.Errorf("%w: %s is not supported", rpc.ErrUnhandled, method)
@@ -398,6 +346,7 @@ func (d *acpDriver) request(ctx context.Context, method string, raw json.RawMess
 	}
 	return cancelled, nil
 }
+
 func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	if method != "session/update" {
 		return
@@ -433,71 +382,51 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 	if update.Type == "usage_update" {
 		if update.Used != nil && *update.Used > 0 {
 			used := *update.Used
-			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: &used}})
+			d.emitLocked(agentruntime.Event{Type: "usage", Usage: agentruntime.Usage{ContextInput: &used}})
 		}
-		d.emitLocked(Event{Type: "alive"})
+		d.emitLocked(agentruntime.Event{Type: "alive"})
 		return
 	}
 	if update.Type == "agent_thought_chunk" {
-		if d.antigravity {
-			d.flushWarningLocked()
-			d.stepHasText = false
+		if d.filter != nil {
+			d.emitChunksLocked(d.filter.OnNonMessageUpdate())
 		}
 		if update.Content.Type == "text" && update.Content.Text != "" {
 			if len(update.Content.Text) > 64<<20-d.thought.Len() {
-				d.emitLocked(Event{Type: "failed", Detail: "ACP reasoning exceeded its size limit"})
+				d.emitLocked(agentruntime.Event{Type: "failed", Detail: "ACP reasoning exceeded its size limit"})
 				return
 			}
 			d.thought.WriteString(update.Content.Text)
 		}
-		d.emitLocked(Event{Type: "alive"})
+		d.emitLocked(agentruntime.Event{Type: "alive"})
 		return
 	}
 	d.flushThoughtLocked()
 	if update.Type == "agent_message_chunk" && update.Content.Type == "text" {
 		text := update.Content.Text
-		if d.antigravity && text != "" {
-			if d.warning.Len() > 0 {
-				if antigravityRetryingNotice(d.warning.String()) && strings.HasPrefix(strings.TrimLeft(text, " \t\r\n"), "⚠") && len(text) <= maxAntigravityWarningBytes && couldBeAntigravityWarning(text) {
-					d.emitLocked(Event{Type: "text", Text: d.warning.String()})
-					d.warning.Reset()
-					d.warning.WriteString(text)
-					return
-				}
-				if len(text) <= maxAntigravityWarningBytes-d.warning.Len() {
-					d.warning.WriteString(text)
-					if couldBeAntigravityWarning(d.warning.String()) {
-						return
-					}
-					d.flushWarningLocked()
-					return
-				}
-				d.flushWarningLocked()
-			} else if !d.stepHasText && len(text) <= maxAntigravityWarningBytes && couldBeAntigravityWarning(text) {
-				d.warning.WriteString(text)
-				return
-			}
-			d.stepHasText = true
+		if d.filter != nil && text != "" {
+			d.emitChunksLocked(d.filter.OnMessageChunk(text))
+			return
 		}
 		if text != "" {
-			d.emitLocked(Event{Type: "text", Text: text})
+			d.emitLocked(agentruntime.Event{Type: "text", Text: text})
 		}
 		return
 	}
-	if d.antigravity && (update.Type == "tool_call" || update.Type == "tool_call_update") {
-		d.flushWarningLocked()
-		d.stepHasText = false
+	if d.filter != nil && (update.Type == "tool_call" || update.Type == "tool_call_update") {
+		d.emitChunksLocked(d.filter.OnNonMessageUpdate())
 	}
-	d.emitLocked(Event{Type: "alive"})
+	d.emitLocked(agentruntime.Event{Type: "alive"})
 }
+
 func (d *acpDriver) Start(life context.Context) error {
 	argv := process.SplitCommand(d.settings.Command)
 	if len(argv) == 0 {
 		return d.diagnosticError("launch", errors.New("no command is set for the agent"))
 	}
 	d.executable = filepath.Base(argv[0])
-	if d.manageAntigravityTools && usesAntigravityToolProfile(argv) {
-		d.agentProfile = antigravityToolProfileName
+	if d.hooks.ResolveProfile != nil {
+		d.agentProfile = d.hooks.ResolveProfile(argv)
 	}
 	var saved acpCheckpoint
 	resuming := len(d.ctx.Resume) != 0
@@ -505,16 +434,15 @@ func (d *acpDriver) Start(life context.Context) error {
 		if json.Unmarshal(d.ctx.Resume, &saved) != nil || saved.SessionID == "" {
 			return d.diagnosticError("restore checkpoint", errors.New("ACP session checkpoint cannot be restored"))
 		}
-		// AGY restores the original Agent. Replay Ariadne's history once when the tool profile changes.
 		if saved.AgentProfile != d.agentProfile {
 			return d.diagnosticError("restore checkpoint", errors.New("ACP agent profile changed"))
 		}
 	}
-	if d.agentProfile != "" {
+	if d.agentProfile != "" && d.hooks.PrepareProfile != nil {
 		var err error
-		argv, err = prepareAntigravityToolProfile(argv, d.ctx.Directory)
+		argv, err = d.hooks.PrepareProfile(argv, d.ctx.Directory, d.agentProfile)
 		if err != nil {
-			return d.diagnosticError("prepare Antigravity agent", err)
+			return d.diagnosticError("prepare agent profile", err)
 		}
 	}
 	d.life = life
@@ -528,7 +456,7 @@ func (d *acpDriver) Start(life context.Context) error {
 		peer.End(err)
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		d.emitLocked(Event{Type: "failed", Detail: err.Error(), Retryable: d.started, AgentError: d.diagnosticLocked("transport", err)})
+		d.emitLocked(agentruntime.Event{Type: "failed", Detail: err.Error(), Retryable: d.started, AgentError: d.diagnosticLocked("transport", err)})
 	}); err != nil {
 		return d.diagnosticError("launch", err)
 	}
@@ -554,13 +482,13 @@ func (d *acpDriver) Start(life context.Context) error {
 		}
 		d.removeTools = registration.Remove
 		if init.Capabilities.MCP.HTTP {
-			servers = append(servers, map[string]any{"type": "http", "name": BridgeServerName, "url": registration.URL, "headers": []any{}})
+			servers = append(servers, map[string]any{"type": "http", "name": agentruntime.BridgeServerName, "url": registration.URL, "headers": []any{}})
 		} else {
 			command, args, err := d.shim(registration.URL)
 			if err != nil {
 				return d.diagnosticError("tool bridge", err)
 			}
-			servers = append(servers, map[string]any{"name": BridgeServerName, "command": command, "args": args, "env": []any{}})
+			servers = append(servers, map[string]any{"name": agentruntime.BridgeServerName, "command": command, "args": args, "env": []any{}})
 		}
 	}
 	params := map[string]any{"cwd": d.ctx.Directory, "mcpServers": servers}
@@ -600,9 +528,8 @@ func (d *acpDriver) Start(life context.Context) error {
 	}
 	d.mu.Lock()
 	d.first = !resuming
-	d.antigravity = d.manageAntigravityTools || init.AgentInfo.Name == antigravityACPName
 	d.thoughtOption = session.option("thought_level")
-	d.defaultLevel = trimmedJSON(d.thoughtOption.Current)
+	d.defaultLevel = agentruntime.TrimmedJSON(d.thoughtOption.Current)
 	if resuming && saved.DefaultLevel != "" {
 		d.defaultLevel = saved.DefaultLevel
 	}
@@ -611,6 +538,7 @@ func (d *acpDriver) Start(life context.Context) error {
 	d.mu.Unlock()
 	return nil
 }
+
 func (d *acpDriver) startError(operation string, err error) error {
 	var remote *rpc.Error
 	if errors.As(err, &remote) && remote.Code == -32000 {
@@ -625,11 +553,13 @@ func (d *acpDriver) startError(operation string, err error) error {
 	}
 	return d.diagnosticError(operation, err)
 }
+
 func (d *acpDriver) HistoryBudget(system string) int {
 	overhead := len("<instructions>\n") + len(system) + len("\n</instructions>\n\n")
-	return max(0, defaultHistoryReplayBytes-overhead)
+	return max(0, agentruntime.DefaultHistoryReplayBytes-overhead)
 }
-func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) error {
+
+func (d *acpDriver) Prompt(ctx context.Context, input agentruntime.Input, effort string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -644,8 +574,9 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 	}
 	d.first = false
 	d.active = true
-	d.warning.Reset()
-	d.stepHasText = false
+	if d.filter != nil {
+		d.filter.Reset()
+	}
 	sessionID := d.sessionID
 	prompt := []any{map[string]any{"type": "text", "text": text}}
 	if d.images {
@@ -660,8 +591,8 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 	go func() {
 		defer d.requests.Done()
 		var result struct {
-			Stop  string        `json:"stopReason"`
-			Usage *acpTurnUsage `json:"usage"`
+			Stop  string     `json:"stopReason"`
+			Usage *TurnUsage `json:"usage"`
 		}
 		err := d.stdio.Peer.Request(d.life, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": prompt}, &result)
 		d.mu.Lock()
@@ -670,16 +601,15 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		if d.closing {
 			return
 		}
-		pending := d.warning.String()
-		d.warning.Reset()
-		d.stepHasText = false
+		var pending, filterDetail string
+		if d.filter != nil {
+			pending, filterDetail = d.filter.OnTurnComplete(err)
+		}
 		var detail string
 		if err != nil {
 			detail = err.Error()
-		} else if d.antigravity && pending != "" {
-			if parsed, ok := antigravityFailure(pending); ok {
-				detail = parsed
-			}
+		} else if filterDetail != "" {
+			detail = filterDetail
 		}
 		if detail != "" {
 			quota := rpc.QuotaText(detail)
@@ -691,12 +621,12 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 			}
 			diagnostic := d.diagnosticLocked(operation, err)
 			diagnostic.StopReason = result.Stop
-			d.emitLocked(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy, AgentError: diagnostic})
+			d.emitLocked(agentruntime.Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy, AgentError: diagnostic})
 			return
 		}
 		d.flushThoughtLocked()
 		if pending != "" {
-			d.emitLocked(Event{Type: "text", Text: pending})
+			d.emitLocked(agentruntime.Event{Type: "text", Text: pending})
 		}
 		var contextInput *int64
 		if d.contextUsed != nil {
@@ -705,21 +635,26 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		}
 		if u := result.Usage; u != nil {
 			input := u.Input
-			// agy reports uncached input separately. Its total includes cached
-			// input and output, and thinking is already part of output.
-			if d.antigravity && (u.Total == nil || *u.Total-u.Output != u.Input) {
-				input += u.Cached + u.Written
+			if d.hooks.AdjustInputTokens != nil {
+				input = d.hooks.AdjustInputTokens(*u)
 			}
-			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought, ContextInput: contextInput}})
+			d.emitLocked(agentruntime.Event{Type: "usage", Usage: agentruntime.Usage{
+				Input:        input,
+				Output:       u.Output,
+				Cached:       &u.Cached,
+				CacheWrite:   &u.Written,
+				Reasoning:    &u.Thought,
+				ContextInput: contextInput,
+			}})
 		} else if contextInput != nil {
-			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: contextInput}})
+			d.emitLocked(agentruntime.Event{Type: "usage", Usage: agentruntime.Usage{ContextInput: contextInput}})
 		}
 		var failure string
 		switch result.Stop {
 		case "end_turn":
-			d.emitLocked(Event{Type: "done"})
+			d.emitLocked(agentruntime.Event{Type: "done"})
 		case "max_tokens", "max_turn_requests":
-			d.emitLocked(Event{Type: "done", StopReason: "length"})
+			d.emitLocked(agentruntime.Event{Type: "done", StopReason: "length"})
 		case "refusal":
 			failure = "the agent refused to go on"
 		case "cancelled":
@@ -730,11 +665,12 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		if failure != "" {
 			diagnostic := d.diagnosticLocked("session/prompt", nil)
 			diagnostic.StopReason = result.Stop
-			d.emitLocked(Event{Type: "failed", Detail: failure, AgentError: diagnostic})
+			d.emitLocked(agentruntime.Event{Type: "failed", Detail: failure, AgentError: diagnostic})
 		}
 	}()
 	return nil
 }
+
 func (d *acpDriver) Checkpoint() (json.RawMessage, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -764,8 +700,9 @@ func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 	d.requests.Wait()
 	d.mu.Lock()
 	d.thought.Reset()
-	d.warning.Reset()
-	d.stepHasText = false
+	if d.filter != nil {
+		d.filter.Reset()
+	}
 	d.mu.Unlock()
 	return err
 }

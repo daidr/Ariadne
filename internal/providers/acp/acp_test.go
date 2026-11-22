@@ -1,23 +1,121 @@
-package agents
+package acp
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/daidr/Ariadne/internal/modelstep"
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/sdk"
 )
+
+func newTestSessions(t *testing.T, kind agentruntime.Kind, options agentruntime.SessionOptions) *agentruntime.Sessions {
+	t.Helper()
+	if options.DataDir == "" {
+		options.DataDir = t.TempDir()
+	}
+	if options.Quiet == 0 {
+		options.Quiet = 5 * time.Millisecond
+	}
+	m, err := agentruntime.NewSessions(kind, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := m.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	return m
+}
+
+func newTestBridge(t *testing.T) *agentruntime.ToolBridge {
+	t.Helper()
+	bridge := agentruntime.NewToolBridge()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := bridge.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	return bridge
+}
+
+func collectParts(t *testing.T, m *agentruntime.Sessions, settings map[string]any, request sdk.Request) []sdk.Part {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result := []sdk.Part{}
+	for part := range m.Stream(ctx, settings, request) {
+		result = append(result, part)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("ACP stream timed out", result)
+	}
+	return result
+}
+
+func lastPart(t *testing.T, items []sdk.Part, reason string) {
+	t.Helper()
+	if len(items) == 0 || items[len(items)-1].Reason != reason {
+		t.Fatalf("wanted finish %s, got %#v", reason, items)
+	}
+}
+
+func textParts(parts []sdk.Part) string {
+	var text strings.Builder
+	for _, part := range parts {
+		if part.Type == "text" {
+			text.WriteString(part.Text)
+		}
+	}
+	return text.String()
+}
+
+func tokenValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func user(text string) sdk.Message      { return sdk.Message{Role: "user", Content: text} }
+func assistant(text string) sdk.Message { return sdk.Message{Role: "assistant", Content: text} }
+
+func readLog(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), 32<<20)
+	messages := []map[string]any{}
+	for scanner.Scan() {
+		var message map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, message)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return messages
+}
 
 func TestACPToolPermissionBoundary(t *testing.T) {
 	tools := []sdk.Tool{{Name: "read"}}
@@ -47,7 +145,7 @@ func TestACPToolPermissionBoundary(t *testing.T) {
 			t.Fatalf("%s: %v", test.raw, got)
 		}
 	}
-	driver := &acpDriver{ctx: DriverContext{Tools: AgentTools{Specs: tools}}, sessionID: "session", active: true}
+	driver := &acpDriver{ctx: agentruntime.DriverContext{Tools: agentruntime.AgentTools{Specs: tools}}, sessionID: "session", active: true}
 	for _, own := range []bool{false, true} {
 		title := "shell"
 		want := "no"
@@ -76,14 +174,15 @@ func TestACPToolPermissionBoundary(t *testing.T) {
 		}
 	}
 }
+
 func TestACPModelsAndThoughts(t *testing.T) {
-	models := ACPModels(json.RawMessage(`{"currentModelId":"big","availableModels":[{"modelId":"default"},{"modelId":"big","name":"Big Model"},{"modelId":"small","name":"small"},{"modelId":" "}]}`))
+	models := ParseModels(json.RawMessage(`{"currentModelId":"big","availableModels":[{"modelId":"default"},{"modelId":"big","name":"Big Model"},{"modelId":"small","name":"small"},{"modelId":" "}]}`))
 	want := []sdk.ListedModel{{ID: "default", Title: "Big Model", Resolves: "big"}, {ID: "big", Title: "Big Model"}, {ID: "small"}}
 	if !reflect.DeepEqual(models, want) {
 		t.Fatal(models)
 	}
-	events := []Event{}
-	d := &acpDriver{ctx: DriverContext{Emit: func(event Event) { events = append(events, event) }}, sessionID: "session", started: true, active: true}
+	events := []agentruntime.Event{}
+	d := &acpDriver{ctx: agentruntime.DriverContext{Emit: func(event agentruntime.Event) { events = append(events, event) }}, sessionID: "session", started: true, active: true}
 	d.notification("session/update", []byte(`{"sessionId":"other","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"other"}}}`))
 	for _, chunk := range []string{"thin", "king"} {
 		data, _ := json.Marshal(map[string]any{"sessionId": "session", "update": map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": chunk}}})
@@ -99,8 +198,9 @@ func TestACPModelsAndThoughts(t *testing.T) {
 		t.Fatal("closed driver emitted")
 	}
 }
+
 func TestACPRequiresCommandAndBridge(t *testing.T) {
-	driver, err := ACPKind(nil, nil).Create(DriverContext{Settings: map[string]any{}})
+	driver, err := Kind(nil, nil).Create(agentruntime.DriverContext{Settings: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,48 +208,6 @@ func TestACPRequiresCommandAndBridge(t *testing.T) {
 		t.Fatal("empty command accepted")
 	}
 	if err := driver.Close(context.Background(), true); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAntigravityToolProfile(t *testing.T) {
-	directory := t.TempDir()
-	argv := []string{filepath.Join(directory, "AGY.EXE"), "acp", "--process-per-session"}
-	if !usesAntigravityToolProfile(argv) {
-		t.Fatal("the Antigravity ACP command should use the Ariadne profile")
-	}
-	for _, override := range [][]string{
-		{"agy", "acp", "--agent", "custom"},
-		{"agy", "acp", "--agent=custom"},
-		{"wrapper", "acp"},
-		{"agy", "models"},
-	} {
-		if usesAntigravityToolProfile(override) {
-			t.Fatalf("unexpected managed profile for %v", override)
-		}
-	}
-	prepared, err := prepareAntigravityToolProfile(argv, directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(prepared, append(argv, "--agent", antigravityToolProfileName, "--add-dir", directory)) {
-		t.Fatalf("unexpected Antigravity command: %v", prepared)
-	}
-	profile, err := os.ReadFile(filepath.Join(directory, ".agents", "agents", antigravityToolProfileName+".md"))
-	if err != nil || !strings.Contains(string(profile), "\ntools: []\n") {
-		t.Fatalf("Antigravity tool profile is missing: %s, %v", profile, err)
-	}
-}
-
-func TestAntigravityReplaysHistoryAfterToolProfileChange(t *testing.T) {
-	driver, err := AntigravityKind(nil, nil).Create(DriverContext{Resume: json.RawMessage(`{"sessionId":"old"}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := driver.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "agent profile changed") {
-		t.Fatalf("an old ACP session would retain its original tools: %v", err)
-	}
-	if err := driver.Close(t.Context(), true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -164,151 +222,42 @@ func acpChildCommand(t *testing.T, scenario string) (string, string) {
 	return fmt.Sprintf(`"%s" -test.run=^TestACPChild$ -- "%s" "%s"`, exe, log, scenario), log
 }
 
-func TestACPAntigravityExecutorError(t *testing.T) {
-	for _, test := range []struct {
-		scenario, reason, detail string
-		wantText                 string
-		busy, retryable          bool
-		expectEmptyText          bool
-	}{
-		{scenario: "agy-error", reason: "error", detail: "synthetic Gemini request rejected", expectEmptyText: true},
-		{scenario: "agy-executor-start", reason: "error", detail: "plan model not specified", expectEmptyText: true},
-		{scenario: "agy-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-bare", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-split", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-split-reset", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-429", reason: "error", detail: "Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-quota-429-split", reason: "error", detail: "Error 429: Individual quota reached. Resets in 1h17m22s.", busy: true, retryable: false, expectEmptyText: true},
-		{scenario: "agy-retrying-then-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
-		{scenario: "agy-tool-then-quota", reason: "error", detail: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.", busy: true, retryable: false},
-		{scenario: "agy-rate-limit", reason: "error", detail: "Rate limit exceeded. Please try again later.", busy: true, retryable: true, expectEmptyText: true},
-		{scenario: "agy-recovered", reason: "stop", wantText: "answer"},
-		{scenario: "agy-retrying-split", reason: "stop", wantText: "answer"},
-		{scenario: "agy-markdown-warning-emoji", reason: "stop", wantText: "⚠️ Temporary workaround\n⚠️ 500 lines changed\n⚠️ Timeout 设置过小"},
-		{scenario: "agy-plain-warning-text", reason: "stop", wantText: "⚠ 500 lines changed"},
-		{scenario: "agy-multiline-quota-prose", reason: "stop", wantText: "Here is the root cause and fix."},
-		{scenario: "agy-prose-then-warning", reason: "stop", wantText: "Done."},
-		{scenario: "agy-warning-before-tool-then-done", reason: "stop", wantText: "final answer"},
-		{scenario: "agy-warning-before-thought-then-done", reason: "stop", wantText: "final answer"},
-		{scenario: "other-agent", reason: "stop"},
-		{scenario: "other-agent-quota", reason: "stop"},
-	} {
-		t.Run(test.scenario, func(t *testing.T) {
-			command, _ := acpChildCommand(t, test.scenario)
-			m := newTestSessions(t, ACPKind(nil, nil), SessionOptions{})
-			request := sdk.Request{Conversation: "errors", Messages: []sdk.Message{user("hello")}}
-			parts := codexParts(t, m, map[string]any{"command": command}, request)
-			lastPart(t, parts, test.reason)
-			last := parts[len(parts)-1]
-			if test.reason == "error" {
-				if (test.expectEmptyText && textParts(parts) != "") ||
-					!strings.Contains(last.Error, test.detail) ||
-					last.Busy != test.busy ||
-					last.Retryable != test.retryable {
-					t.Fatalf("unexpected executor failure: %+v", parts)
-				}
-				if last.AgentError == nil || last.AgentError.Operation != "session/update" || last.AgentError.StopReason != "end_turn" {
-					t.Fatalf("missing ACP update diagnostics: %+v", last.AgentError)
-				}
-			} else if test.wantText != "" && !strings.Contains(textParts(parts), test.wantText) {
-				t.Fatalf("expected text containing %q, got %q", test.wantText, textParts(parts))
+func TestACPDoesNotInterceptWarningChunks(t *testing.T) {
+	for _, scenario := range []string{"other-agent", "other-agent-quota"} {
+		t.Run(scenario, func(t *testing.T) {
+			command, _ := acpChildCommand(t, scenario)
+			m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
+			parts := collectParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "plain", Messages: []sdk.Message{user("hello")}})
+			lastPart(t, parts, "stop")
+			if !strings.Contains(textParts(parts), "⚠") {
+				t.Fatalf("generic ACP should pass warning text through verbatim, got %+v", parts)
 			}
 		})
 	}
 }
 
-func TestACPAntigravityQuotaDoesNotRetryAndAllowsFallback(t *testing.T) {
-	command, _ := acpChildCommand(t, "agy-quota")
-	m := newTestSessions(t, ACPKind(nil, nil), SessionOptions{})
-	provider := sdk.ModelProvider{Stream: m.Stream}
-	retries := 0
-	var recorded []modelstep.AttemptFailure
-	result, err := modelstep.Request(t.Context(), provider, map[string]any{"command": command}, sdk.Request{
-		Conversation: "quota-step",
-		Messages:     []sdk.Message{user("hello")},
-	}, modelstep.Options{
-		Retries: new(3),
-		OnRetry: func(modelstep.Retry) error {
-			retries++
-			return nil
-		},
-		OnFailure: func(attempt modelstep.AttemptFailure) error {
-			recorded = append(recorded, attempt)
-			return nil
-		},
-	})
-	var failure *modelstep.Failure
-	if result != nil || !errors.As(err, &failure) {
-		t.Fatalf("expected modelstep failure, got result=%+v err=%v", result, err)
-	}
-	if retries != 0 {
-		t.Fatalf("quota failure should not retry immediately, got %d retries", retries)
-	}
-	if len(recorded) != 1 || recorded[0].Retryable || recorded[0].WillRetry || !strings.Contains(recorded[0].Detail, "Resets in 1h17m22s.") {
-		t.Fatalf("unexpected recorded attempt failure: %+v", recorded)
-	}
-	if failure.Exhausted == nil || !strings.Contains(*failure.Exhausted, "Individual quota reached") || !strings.Contains(*failure.Exhausted, "Resets in 1h17m22s.") {
-		t.Fatalf("quota failure should preserve detail and allow fallback: %+v", failure)
-	}
-	if failure.Localized == nil || failure.Localized.Key != "error.modelRequest" {
-		t.Fatalf("unexpected localized error: %+v", failure.Localized)
-	}
-}
-
 func TestACPFailureIncludesRPCDiagnostics(t *testing.T) {
-	command, _ := acpChildCommand(t, "agy-rpc-error")
-	m := newTestSessions(t, ACPKind(nil, nil), SessionOptions{})
-	parts := codexParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "diagnostics", Messages: []sdk.Message{user("hello")}})
+	command, _ := acpChildCommand(t, "rpc-error")
+	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
+	parts := collectParts(t, m, map[string]any{"command": command}, sdk.Request{Conversation: "diagnostics", Messages: []sdk.Message{user("hello")}})
 	lastPart(t, parts, "error")
 	detail := parts[len(parts)-1].AgentError
 	if detail == nil || detail.Operation != "session/prompt" || detail.SessionMethod != "session/new" ||
-		detail.ProtocolVersion != 1 || detail.Name != antigravityACPName || detail.Version != "test-1" ||
+		detail.ProtocolVersion != 1 || detail.Name != "Generic ACP Server" || detail.Version != "test-1" ||
 		detail.RPCCode == nil || *detail.RPCCode != -32603 || !strings.Contains(detail.RPCData, "request-id-42") {
 		t.Fatalf("missing ACP error details: %+v", detail)
 	}
 }
 
-func TestACPAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
-	command, _ := acpChildCommand(t, "agy-usage")
-	settings := map[string]any{"command": command}
-	opts := SessionOptions{DataDir: t.TempDir()}
-	m := newTestSessions(t, ACPKind(nil, nil), opts)
-	request := sdk.Request{Conversation: "coordinator", Messages: []sdk.Message{user("first")}}
-	first := codexParts(t, m, settings, request)
-	check := func(parts []sdk.Part) {
-		t.Helper()
-		lastPart(t, parts, "stop")
-		for _, part := range parts {
-			if part.Type != "usage" {
-				continue
-			}
-			if tokenValue(part.Input) != 170000 || tokenValue(part.Cached) != 167000 ||
-				tokenValue(part.Output) != 47 || tokenValue(part.Reasoning) != 7 ||
-				tokenValue(part.ContextInput) != 90034 {
-				t.Fatalf("incorrect ACP usage: %+v", part)
-			}
-			return
-		}
-		t.Fatal("no ACP usage reported")
-	}
-	check(first)
-	if err := m.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	m = newTestSessions(t, ACPKind(nil, nil), opts)
-	request.Messages = append(request.Messages, assistant(textParts(first)), user("second"))
-	check(codexParts(t, m, settings, request))
-}
-
 func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
-	command, _ := acpChildCommand(t, "agy-midturn-usage")
+	command, _ := acpChildCommand(t, "midturn-usage")
 	bridge := newTestBridge(t)
-	m := newTestSessions(t, ACPKind(bridge, nil), SessionOptions{})
+	m := newTestSessions(t, Kind(bridge, nil), agentruntime.SessionOptions{})
 	settings := map[string]any{"command": command}
 	tools := []sdk.Tool{{Name: "read_file", Description: "Read a file", Parameters: map[string]any{"properties": map[string]any{"path": map[string]any{"type": "string"}}}}}
 	request := sdk.Request{Conversation: "thread-midturn", Messages: []sdk.Message{user("inspect repo")}, Tools: tools}
 
-	first := codexParts(t, m, settings, request)
+	first := collectParts(t, m, settings, request)
 	lastPart(t, first, "tool-calls")
 	var call *sdk.Part
 	var firstUsage *sdk.Part
@@ -331,7 +280,7 @@ func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
 		sdk.Message{Role: "assistant", Content: textParts(first), ToolCalls: []sdk.ToolCall{{ID: call.ID, Name: call.Name, Arguments: call.Arguments}}},
 		sdk.Message{Role: "tool", ToolCallID: call.ID, Content: "file body"},
 	)
-	second := codexParts(t, m, settings, request)
+	second := collectParts(t, m, settings, request)
 	lastPart(t, second, "stop")
 	var finalUsage *sdk.Part
 	for i := range second {
@@ -350,7 +299,7 @@ func TestACPModernProtocolAndRestart(t *testing.T) {
 	for _, restore := range []string{"session/resume", "session/load", "rejected"} {
 		t.Run(restore, func(t *testing.T) {
 			command, log := acpChildCommand(t, restore)
-			models, err := ListACPModels(t.Context(), ACPSettings{Command: command}, t.TempDir())
+			models, err := ListModels(t.Context(), Settings{Command: command}, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -363,26 +312,26 @@ func TestACPModernProtocolAndRestart(t *testing.T) {
 			if err := os.Truncate(log, 0); err != nil {
 				t.Fatal(err)
 			}
-			opts := SessionOptions{DataDir: t.TempDir()}
-			m := newTestSessions(t, ACPKind(nil, nil), opts)
+			opts := agentruntime.SessionOptions{DataDir: t.TempDir()}
+			m := newTestSessions(t, Kind(nil, nil), opts)
 			settings := map[string]any{"command": command}
 			request := sdk.Request{Conversation: "existing", Model: "alternate", Effort: "xhigh", Messages: []sdk.Message{user("first")}}
-			first := codexParts(t, m, settings, request)
+			first := collectParts(t, m, settings, request)
 			lastPart(t, first, "stop")
 			if err := m.Close(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			m = newTestSessions(t, ACPKind(nil, nil), opts)
+			m = newTestSessions(t, Kind(nil, nil), opts)
 			request.Messages = append(request.Messages, assistant(textParts(first)), user("second"))
 			request.Effort = "low"
-			second := codexParts(t, m, settings, request)
+			second := collectParts(t, m, settings, request)
 			lastPart(t, second, "length")
 			if textParts(second) != "answer" {
 				t.Fatalf("history replay leaked into live output: %+v", second)
 			}
 			var newDirectories, restoredDirectories []string
 			var prompts, configurations []string
-			for _, entry := range readCodexLog(t, log) {
+			for _, entry := range readLog(t, log) {
 				params := entry["params"].(map[string]any)
 				switch entry["method"] {
 				case "session/new":
@@ -416,11 +365,10 @@ func TestACPModernProtocolAndRestart(t *testing.T) {
 
 func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T) {
 	command, log := acpChildCommand(t, "rejected-replay")
-	opts := SessionOptions{DataDir: t.TempDir()}
+	opts := agentruntime.SessionOptions{DataDir: t.TempDir()}
 	settings := map[string]any{"command": command}
 	system := "SYS_HEAD " + strings.Repeat("指令内容", 1300) + " SYS_TAIL" // ~15.6 KiB system instructions
 
-	// Build a long coordinator history with an early huge search result and old images.
 	oldImg := sdk.Image{MIME: "image/png", Data: "T0xEX0lNRw=="}
 	newImg := sdk.Image{MIME: "image/png", Data: "TkVXX0lNRw=="}
 	messages := []sdk.Message{
@@ -438,10 +386,8 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 	}
 	messages = append(messages, sdk.Message{Role: "user", Content: "MID_TURN_30 " + strings.Repeat("最新前序轮次", 100)})
 
-	// Run the first turn with the long history prefix so the saved checkpoint
-	// matches the prefix and the restarted session actually attempts session/resume.
-	m := newTestSessions(t, ACPKind(nil, nil), opts)
-	first := codexParts(t, m, settings, sdk.Request{
+	m := newTestSessions(t, Kind(nil, nil), opts)
+	first := collectParts(t, m, settings, sdk.Request{
 		Conversation: "coordinator",
 		Model:        "alternate",
 		Messages:     messages,
@@ -451,16 +397,14 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 		t.Fatal(err)
 	}
 
-	// Keep the exact checkpointed prefix, append the assistant reply and the new
-	// triggering user message with a screenshot, and restart so session/resume is rejected.
 	latest := "NEW_MSG_msg_01a1ffc8 请排查刚才截图里的问题"
 	messages = append(messages, assistant(textParts(first)), sdk.Message{Role: "user", Content: latest, Images: []sdk.Image{newImg}})
 
 	if err := os.Truncate(log, 0); err != nil {
 		t.Fatal(err)
 	}
-	m = newTestSessions(t, ACPKind(nil, nil), opts)
-	second := codexParts(t, m, settings, sdk.Request{
+	m = newTestSessions(t, Kind(nil, nil), opts)
+	second := collectParts(t, m, settings, sdk.Request{
 		Conversation: "coordinator",
 		Model:        "alternate",
 		Messages:     messages,
@@ -469,7 +413,7 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 
 	var lifecycle []string
 	var promptBlocks []any
-	for _, entry := range readCodexLog(t, log) {
+	for _, entry := range readLog(t, log) {
 		method, _ := entry["method"].(string)
 		switch method {
 		case "session/resume", "session/load", "session/new", "session/prompt":
@@ -487,13 +431,13 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 		t.Fatal("missing session/prompt RPC call")
 	}
 	text := promptBlocks[0].(map[string]any)["text"].(string)
-	if len(text) > defaultHistoryReplayBytes {
-		t.Fatalf("rebuilt ACP prompt (including <instructions>) exceeded replay budget: %d > %d", len(text), defaultHistoryReplayBytes)
+	if len(text) > agentruntime.DefaultHistoryReplayBytes {
+		t.Fatalf("rebuilt ACP prompt (including <instructions>) exceeded replay budget: %d > %d", len(text), agentruntime.DefaultHistoryReplayBytes)
 	}
 	if !strings.Contains(text, "SYS_HEAD") || !strings.Contains(text, "SYS_TAIL") {
 		t.Fatal("system instructions were truncated")
 	}
-	if !strings.Contains(text, historyOmittedNote) {
+	if !strings.Contains(text, "[Earlier messages were omitted to stay within the history replay limit.]") {
 		t.Fatal("expected omission note in rebuilt ACP history")
 	}
 	if strings.Contains(text, "OLD_MSG_msg_01a1ff4e") || strings.Contains(text, "HUGE_SEARCH_HEAD") {
@@ -502,7 +446,7 @@ func TestACPRejectedRestoreBoundsReplayAndKeepsLatestUserAndImages(t *testing.T)
 	if !strings.Contains(text, "MID_TURN_30") || !strings.Contains(text, "<assistant>\n"+textParts(first)+"\n</assistant>") {
 		t.Fatal("most recent turns before latest user message were not preserved")
 	}
-	if !strings.Contains(text, "<user>\n"+latest+"\n</user>") || !strings.HasSuffix(text, historyFooter+historyAnswerEnding) {
+	if !strings.Contains(text, "<user>\n"+latest+"\n</user>") || !strings.HasSuffix(text, "\n</history>\n\nAnswer the last user message.") {
 		t.Fatal("latest triggering user message was lost or truncated")
 	}
 	var imagePayloads []string
@@ -529,7 +473,6 @@ func TestACPChild(t *testing.T) {
 	defer log.Close()
 	restore := args[len(args)-1]
 	model, effort := "base", "high"
-	resumed := false
 	mcpURL := ""
 	options := func() json.RawMessage {
 		modelOption := fmt.Sprintf(`{"id":"model-picker","type":"select","category":"model","currentValue":%q,"options":[{"group":"test","name":"Test","options":[{"value":"base","name":"Base"},{"value":"alternate","name":"Alternate"},{"value":"fixed","name":"Fixed"}]}]}`, model)
@@ -575,12 +518,12 @@ func TestACPChild(t *testing.T) {
 			if restore == "rejected-replay" {
 				capabilities["promptCapabilities"] = map[string]any{"image": true}
 			}
-			if restore == "agy-midturn-usage" {
+			if restore == "midturn-usage" {
 				capabilities["mcpCapabilities"] = map[string]any{"http": true}
 			}
 			hello := map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities}
-			if strings.HasPrefix(restore, "agy-") {
-				hello["agentInfo"] = map[string]any{"name": antigravityACPName, "version": "test-1"}
+			if restore == "rpc-error" {
+				hello["agentInfo"] = map[string]any{"name": "Generic ACP Server", "version": "test-1"}
 			}
 			result = hello
 		case "session/new":
@@ -597,7 +540,6 @@ func TestACPChild(t *testing.T) {
 				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old history"}}}}`))
 			}
 			model, effort = "alternate", "extra"
-			resumed = true
 			result = map[string]any{"configOptions": options()}
 		case "session/set_config_option":
 			switch request.Params.ConfigID {
@@ -608,11 +550,11 @@ func TestACPChild(t *testing.T) {
 			}
 			result = map[string]any{"configOptions": options()}
 		case "session/prompt":
-			if restore == "agy-rpc-error" {
+			if restore == "rpc-error" {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
 				continue
 			}
-			if restore == "agy-midturn-usage" {
+			if restore == "midturn-usage" {
 				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":42000,"size":400000}}}`))
 				resp, err := http.Post(mcpURL, "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"README.md"}}}`))
 				if err != nil {
@@ -624,112 +566,23 @@ func TestACPChild(t *testing.T) {
 				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}`))
 				result = map[string]any{
 					"stopReason": "end_turn",
-					"usage":      map[string]any{"inputTokens": 3000, "outputTokens": 47, "cachedReadTokens": 167000, "thoughtTokens": 7, "totalTokens": 170047},
+					"usage":      map[string]any{"inputTokens": 170000, "outputTokens": 47, "cachedReadTokens": 167000, "thoughtTokens": 7, "totalTokens": 170047},
 				}
 				break
 			}
-			type childUpdate struct{ kind, text string }
-			updates := []childUpdate{{kind: "agent_message_chunk", text: "answer"}}
+			text := "answer"
 			switch restore {
-			case "agy-error", "other-agent":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"}}
-			case "agy-executor-start":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n\n"}}
-			case "agy-quota", "other-agent-quota":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}}
-			case "agy-quota-bare":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s."}}
-			case "agy-quota-split":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ "},
-					{kind: "agent_message_chunk", text: "Individual quota reached. Please upgrade your subscription to increase your limits. "},
-					{kind: "agent_message_chunk", text: "Resets in 1h17m22s."},
-				}
-			case "agy-quota-split-reset":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. "},
-					{kind: "agent_message_chunk", text: "Resets in 1h17m22s."},
-				}
-			case "agy-quota-429":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ agent executor error: Error 429: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"}}
-			case "agy-quota-429-split":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ agent executor error: Error 429: "},
-					{kind: "agent_message_chunk", text: "Individual quota reached. Resets in 1h17m22s."},
-				}
-			case "agy-retrying-then-quota":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\n"},
-					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"},
-				}
-			case "agy-tool-then-quota":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "checking..."},
-					{kind: "tool_call"},
-					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"},
-				}
-			case "agy-rate-limit":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ Rate limit exceeded. Please try again later.\n"}}
-			case "agy-recovered":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\nanswer"}}
-			case "agy-retrying-split":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ API error (attempt 1): Error 429. Retrying.\n"},
-					{kind: "agent_message_chunk", text: "answer"},
-				}
-			case "agy-markdown-warning-emoji":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "⚠️ Temporary workaround\n"},
-					{kind: "agent_message_chunk", text: "⚠️ 500 lines changed\n"},
-					{kind: "agent_message_chunk", text: "⚠️ Timeout 设置过小"},
-				}
-			case "agy-plain-warning-text":
-				updates = []childUpdate{{kind: "agent_message_chunk", text: "⚠ 500 lines changed"}}
-			case "agy-multiline-quota-prose":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "⚠ Quota reached when testing the API\n"},
-					{kind: "agent_message_chunk", text: "Here is the root cause and fix."},
-				}
-			case "agy-prose-then-warning":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "Summary:\n"},
-					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Resets in 1h.\n"},
-					{kind: "agent_message_chunk", text: "Done."},
-				}
-			case "agy-warning-before-tool-then-done":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ Individual quota reached. Resets in 1h."},
-					{kind: "tool_call"},
-					{kind: "agent_message_chunk", text: "final answer"},
-				}
-			case "agy-warning-before-thought-then-done":
-				updates = []childUpdate{
-					{kind: "agent_message_chunk", text: "\n⚠ agent executor error: transient note"},
-					{kind: "agent_thought_chunk", text: "thinking"},
-					{kind: "agent_message_chunk", text: "final answer"},
-				}
+			case "other-agent":
+				text = "\n⚠ agent executor error: generating and executing: Error 400, Message: synthetic Gemini request rejected\n"
+			case "other-agent-quota":
+				text = "\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h17m22s.\n"
 			}
-			for _, u := range updates {
-				if u.kind == "tool_call" {
-					_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"tool_call"}}}`))
-					continue
-				}
-				_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":%q,"content":{"type":"text","text":%q}}}}`, u.kind, u.text)))
-			}
+			_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":%q}}}}`, text)))
 			stop := "end_turn"
 			if effort == "low" {
 				stop = "max_tokens"
 			}
-			response := map[string]any{"stopReason": stop}
-			if restore == "agy-usage" {
-				if !resumed {
-					for _, used := range []int{80013, 90034} {
-						_ = output.Encode(json.RawMessage(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":%d,"size":400000}}}`, used)))
-					}
-				}
-				response["usage"] = map[string]any{"inputTokens": 3000, "outputTokens": 47, "cachedReadTokens": 167000, "thoughtTokens": 7, "totalTokens": 170047}
-			}
-			result = response
+			result = map[string]any{"stopReason": stop}
 		default:
 			t.Fatalf("unexpected method: %s", request.Method)
 		}

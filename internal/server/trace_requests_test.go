@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +18,7 @@ import (
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/trace"
 )
 
@@ -74,19 +74,15 @@ func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
 	if _, err := repo.Store.DB().ExecContext(t.Context(), sql); err != nil {
 		t.Fatal(err)
 	}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer builtins.Close(context.Background())
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(nil) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer remove()
 	}
-	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Models: builtins.Registry})
+	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Models: modelReg})
 	if err != nil {
 		t.Fatal(err)
 	}

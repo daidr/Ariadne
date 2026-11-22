@@ -1,4 +1,4 @@
-package agents
+package claudecode
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/jsonutil"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/rpc"
@@ -18,11 +19,11 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-type ClaudeSettings struct {
+type Settings struct {
 	Command string `json:"command,omitempty"`
 }
 
-func ClaudeArgv(settings ClaudeSettings, model, effort string) []string {
+func Argv(settings Settings, model, effort string) []string {
 	command := textutil.Trim(settings.Command)
 	if command == "" {
 		command = "claude"
@@ -34,7 +35,7 @@ func ClaudeArgv(settings ClaudeSettings, model, effort string) []string {
 	if effort != "" {
 		argv = append(argv, "--effort", effort)
 	}
-	return append(argv, "--tools", "", "--allowedTools", "mcp__"+BridgeServerName, "--permission-mode", "dontAsk", "--strict-mcp-config", "--setting-sources", "", "--settings", `{"disableAllHooks":true}`, "--disable-slash-commands", "--no-session-persistence")
+	return append(argv, "--tools", "", "--allowedTools", "mcp__"+agentruntime.BridgeServerName, "--permission-mode", "dontAsk", "--strict-mcp-config", "--setting-sources", "", "--settings", `{"disableAllHooks":true}`, "--disable-slash-commands", "--no-session-persistence")
 }
 
 type claudeModel struct {
@@ -45,7 +46,7 @@ type claudeModel struct {
 	Levels   json.RawMessage `json:"supportedEffortLevels"`
 }
 
-func ClaudeModels(data json.RawMessage) []sdk.ListedModel {
+func ParseModels(data json.RawMessage) []sdk.ListedModel {
 	var offered []claudeModel
 	if json.Unmarshal(data, &offered) != nil {
 		return nil
@@ -57,17 +58,17 @@ func ClaudeModels(data json.RawMessage) []sdk.ListedModel {
 	}
 	models := []sdk.ListedModel{}
 	for index, entry := range offered {
-		id := trimmedJSON(entry.Value)
+		id := agentruntime.TrimmedJSON(entry.Value)
 		if id == "" {
 			continue
 		}
-		title := trimmedJSON(entry.Title)
-		resolved := trimmedJSON(entry.Resolved)
+		title := agentruntime.TrimmedJSON(entry.Title)
+		resolved := agentruntime.TrimmedJSON(entry.Resolved)
 		if id == "default" {
 			title = ""
 			for otherIndex, other := range offered {
-				if otherIndex != index && trimmedJSON(other.Resolved) != "" && trimmedJSON(other.Resolved) == resolved {
-					title = trimmedJSON(other.Title)
+				if otherIndex != index && agentruntime.TrimmedJSON(other.Resolved) != "" && agentruntime.TrimmedJSON(other.Resolved) == resolved {
+					title = agentruntime.TrimmedJSON(other.Title)
 					break
 				}
 			}
@@ -85,7 +86,7 @@ func ClaudeModels(data json.RawMessage) []sdk.ListedModel {
 			var levels []string
 			_ = json.Unmarshal(entry.Levels, &levels)
 			valid := []string{}
-			for _, effort := range efforts {
+			for _, effort := range sdk.Efforts {
 				for _, level := range levels {
 					if effort == level {
 						valid = append(valid, effort)
@@ -99,10 +100,10 @@ func ClaudeModels(data json.RawMessage) []sdk.ListedModel {
 	}
 	return models
 }
-func ListClaudeModels(ctx context.Context, settings ClaudeSettings, directory string) ([]sdk.ListedModel, error) {
+func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk.ListedModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	proc := process.NewJSONLines(process.JSONOptions{Argv: ClaudeArgv(settings, "default", ""), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
+	proc := process.NewJSONLines(process.JSONOptions{Argv: Argv(settings, "default", ""), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true})
 	type answer struct {
 		models []sdk.ListedModel
 		err    error
@@ -123,7 +124,7 @@ func ListClaudeModels(ctx context.Context, settings ClaudeSettings, directory st
 		if json.Unmarshal(data, &line) != nil || line.Type != "control_response" || line.Response.ID != "ariadne-models" {
 			return nil
 		}
-		value := answer{models: ClaudeModels(line.Response.Response.Models)}
+		value := answer{models: ParseModels(line.Response.Response.Models)}
 		if line.Response.Subtype == "error" {
 			detail := line.Response.Error
 			if detail == "" {
@@ -160,9 +161,9 @@ func ListClaudeModels(ctx context.Context, settings ClaudeSettings, directory st
 		return nil, ctx.Err()
 	}
 }
-func ClaudeKind(bridge *ToolBridge) Kind {
-	return Kind{Name: "claude-code", Create: func(ctx DriverContext) (Driver, error) {
-		settings := ClaudeSettings{}
+func Kind(bridge *agentruntime.ToolBridge) agentruntime.Kind {
+	return agentruntime.Kind{Name: ProviderKind, Create: func(ctx agentruntime.DriverContext) (agentruntime.Driver, error) {
+		settings := Settings{}
 		if command, ok := ctx.Settings["command"].(string); ok {
 			settings.Command = command
 		}
@@ -186,9 +187,9 @@ func claudeUsage(usage claudeAPIUsage) claudeTokens {
 }
 
 type claudeDriver struct {
-	ctx                DriverContext
-	settings           ClaudeSettings
-	bridge             *ToolBridge
+	ctx                agentruntime.DriverContext
+	settings           Settings
+	bridge             *agentruntime.ToolBridge
 	proc               *process.JSONLines
 	removeTools        func()
 	mu                 sync.Mutex
@@ -209,7 +210,7 @@ func (d *claudeDriver) count(now, before claudeTokens, contextInput *int64) {
 		any = any || grew[i] != 0
 	}
 	if any {
-		d.ctx.Emit(Event{Type: "usage", Usage: Usage{Input: grew[0], Output: grew[1], ContextInput: contextInput, Cached: new(grew[2]), CacheWrite: new(grew[3]), Reasoning: new(grew[4])}})
+		d.ctx.Emit(agentruntime.Event{Type: "usage", Usage: agentruntime.Usage{Input: grew[0], Output: grew[1], ContextInput: contextInput, Cached: new(grew[2]), CacheWrite: new(grew[3]), Reasoning: new(grew[4])}})
 	}
 }
 func (d *claudeDriver) recordMessageUsage(id string, raw claudeAPIUsage) error {
@@ -278,7 +279,7 @@ func (d *claudeDriver) onLine(data []byte) error {
 				}
 			}
 		case event.Type == "content_block_start" && event.Block.Type == "tool_use":
-			emit(Event{Type: "alive"})
+			emit(agentruntime.Event{Type: "alive"})
 		case event.Type == "content_block_delta" && event.Delta.Type == "text_delta":
 			if event.Delta.Text != "" {
 				if d.writing != "" {
@@ -287,10 +288,10 @@ func (d *claudeDriver) onLine(data []byte) error {
 					}
 					d.streamed[d.writing] = true
 				}
-				emit(Event{Type: "text", Text: event.Delta.Text})
+				emit(agentruntime.Event{Type: "text", Text: event.Delta.Text})
 			}
 		default:
-			emit(Event{Type: "alive"})
+			emit(agentruntime.Event{Type: "alive"})
 		}
 		return nil
 	}
@@ -301,10 +302,10 @@ func (d *claudeDriver) onLine(data []byte) error {
 		for _, block := range content {
 			if block.Type == "text" && block.Text != "" {
 				if whole {
-					emit(Event{Type: "text", Text: block.Text})
+					emit(agentruntime.Event{Type: "text", Text: block.Text})
 				}
 			} else if block.Type == "thinking" && block.Thinking != "" {
-				emit(Event{Type: "reasoning", Text: block.Thinking})
+				emit(agentruntime.Event{Type: "reasoning", Text: block.Thinking})
 			}
 		}
 		if line.Message.Usage != nil {
@@ -312,7 +313,7 @@ func (d *claudeDriver) onLine(data []byte) error {
 				return err
 			}
 		}
-		emit(Event{Type: "alive"})
+		emit(agentruntime.Event{Type: "alive"})
 		return nil
 	}
 	if line.Type == "result" {
@@ -330,7 +331,7 @@ func (d *claudeDriver) onLine(data []byte) error {
 			}
 			d.cost = *line.Cost
 			if cost > 0 {
-				emit(Event{Type: "usage", Usage: Usage{CostUSD: &cost}})
+				emit(agentruntime.Event{Type: "usage", Usage: agentruntime.Usage{CostUSD: &cost}})
 			}
 		}
 		if line.IsError || line.Subtype != "" && line.Subtype != "success" {
@@ -347,13 +348,13 @@ func (d *claudeDriver) onLine(data []byte) error {
 			quota := rpc.QuotaText(detail)
 			busy := quota || rpc.BusyText(detail)
 			retryable := !quota && rpc.BusyText(detail)
-			emit(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
+			emit(agentruntime.Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
 		} else {
-			emit(Event{Type: "done"})
+			emit(agentruntime.Event{Type: "done"})
 		}
 		return nil
 	}
-	emit(Event{Type: "alive"})
+	emit(agentruntime.Event{Type: "alive"})
 	return nil
 }
 func (d *claudeDriver) Start(ctx context.Context) error {
@@ -361,7 +362,7 @@ func (d *claudeDriver) Start(ctx context.Context) error {
 	if err := os.WriteFile(systemFile, []byte(d.ctx.System), 0600); err != nil {
 		return err
 	}
-	argv := append(ClaudeArgv(d.settings, d.ctx.Model, d.ctx.Effort), "--system-prompt-file", systemFile)
+	argv := append(Argv(d.settings, d.ctx.Model, d.ctx.Effort), "--system-prompt-file", systemFile)
 	if len(d.ctx.Tools.Specs) > 0 {
 		if d.bridge == nil {
 			return errors.New("Claude tools require an agent tool bridge")
@@ -371,7 +372,7 @@ func (d *claudeDriver) Start(ctx context.Context) error {
 			return err
 		}
 		d.removeTools = registration.Remove
-		config, _ := jsonutil.Encode(map[string]any{"mcpServers": map[string]any{BridgeServerName: map[string]any{"type": "http", "url": registration.URL}}})
+		config, _ := jsonutil.Encode(map[string]any{"mcpServers": map[string]any{agentruntime.BridgeServerName: map[string]any{"type": "http", "url": registration.URL}}})
 		if err := os.WriteFile(mcpFile, config, 0600); err != nil {
 			return err
 		}
@@ -383,11 +384,11 @@ func (d *claudeDriver) Start(ctx context.Context) error {
 		saw, closing := d.sawOutput, d.closing
 		d.mu.Unlock()
 		if !closing {
-			d.ctx.Emit(Event{Type: "failed", Detail: err.Error(), Retryable: saw})
+			d.ctx.Emit(agentruntime.Event{Type: "failed", Detail: err.Error(), Retryable: saw})
 		}
 	})
 }
-func (d *claudeDriver) Prompt(ctx context.Context, input Input, effort string) error {
+func (d *claudeDriver) Prompt(ctx context.Context, input agentruntime.Input, effort string) error {
 	content := []any{map[string]any{"type": "text", "text": input.Text}}
 	for _, image := range input.Images {
 		content = append(content, map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": image.MIME, "data": image.Data}})
