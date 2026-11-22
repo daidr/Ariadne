@@ -16,8 +16,6 @@ import type {
   BackgroundView,
   MessageView,
   NeedsMeItem,
-  PlanOp,
-  PlanUndoPreview,
   PlanView,
   ProjectActivity,
   ProjectView,
@@ -944,30 +942,8 @@ export const api = {
       'POST',
       `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
     ),
-  linkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/nodes/${nodeId}/issues`, {
-      number,
-    }),
-  unlinkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>(
-      'DELETE',
-      `/api/projects/${projectId}/plan/nodes/${nodeId}/issues/${number}`,
-    ),
   getPlan: (projectId: string) =>
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
-  revisePlan: (projectId: string, input: { reason: string; ops: PlanOp[] }) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/revise`, input),
-  previewPlanUndo: (projectId: string, revisionId: string) =>
-    request<{ preview: PlanUndoPreview }>(
-      'GET',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-    ),
-  revertPlan: (projectId: string, revisionId: string, reason: string) =>
-    request<{ plan: PlanView }>(
-      'POST',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-      { reason },
-    ),
   search: (projectId: string, q: string) =>
     request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
   listArtifacts: (projectId: string) =>

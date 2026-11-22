@@ -16,11 +16,12 @@ func (turn *turn) planTools() []tool {
 		"ref": args{"type": "string", "description": "add: temporary name for a new node, usable within this call and returned with its assigned nodeId in ids."},
 		"id":  field("string"), "kind": args{"type": "string", "enum": []string{"task", "milestone", "decision"}},
 		"title": field("string"), "description": field("string"), "acceptance": field("string"),
+		"group":     args{"type": "string", "description": "Optional topic or phase name grouping related nodes visually. Pass an empty string on update to remove a node from its group."},
 		"dependsOn": arrayOf(field("string")), "from": field("string"), "to": field("string"),
 	}}
 	return []tool{
 		turn.readPlanTool(),
-		specification("update_plan", "Change the plan with one reason in the user's language. Changes apply immediately and are recorded in revision history. Set ref on add ops to link dependencies within this call and receive assigned nodeIds in ids.",
+		specification("update_plan", "Change the plan with one reason in the user's language. Reserve plan nodes for multi-step work, dependencies, milestones, or multi-thread topics rather than one-off small fixes. Use group to organize related nodes under one topic. Changes apply immediately and are recorded in revision history. Set ref on add ops to link dependencies within this call and receive assigned nodeIds in ids.",
 			args{"reason": field("string"), "ops": arrayOf(opSchema)}, []string{"reason", "ops"}, turn.updatePlan),
 		specification("revert_plan_change", "Undo an earlier plan revision.",
 			args{"revisionId": field("string"), "reason": field("string")}, []string{"revisionId", "reason"}, turn.revertPlan),
@@ -99,7 +100,7 @@ func resolvePlanOps(raw any) ([]map[string]any, map[string]string, error) {
 		case "link", "unlink":
 			clean["from"], clean["to"] = resolve(op["from"]), resolve(op["to"])
 		}
-		for _, key := range []string{"title", "description", "acceptance"} {
+		for _, key := range []string{"title", "description", "acceptance", "group"} {
 			if value, present := op[key]; present {
 				clean[key] = value
 			}

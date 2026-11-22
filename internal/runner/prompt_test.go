@@ -48,6 +48,8 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
 		"Do not use thread: or artifact: links in external destinations",
+		"Do not add a plan node for a one-off small fix",
+		"Set group on related nodes",
 		"update_plan applies immediately",
 		"revert_plan_change",
 		"wait for update_plan to return its nodeId in ids",
@@ -139,6 +141,13 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	updatePlan := findTool(coordTools, "update_plan")
 	if !strings.Contains(updatePlan.spec.Description, "nodeIds in ids") {
 		t.Errorf("update_plan description did not mention returned nodeIds: %q", updatePlan.spec.Description)
+	}
+	if !strings.Contains(updatePlan.spec.Description, "one-off small fixes") {
+		t.Errorf("update_plan description did not mention plan granularity: %q", updatePlan.spec.Description)
+	}
+	opProps := objectField(objectField(objectField(updatePlan.spec.Parameters, "properties"), "ops"), "items")
+	if text(objectField(objectField(opProps, "properties"), "group"), "type") != "string" {
+		t.Errorf("update_plan ops schema missing string group field: %+v", opProps)
 	}
 	createThread := findTool(coordTools, "create_thread")
 	nodeIDDesc := text(objectField(objectField(createThread.spec.Parameters, "properties"), "nodeId"), "description")
