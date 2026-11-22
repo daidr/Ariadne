@@ -24,7 +24,7 @@ func TestAuthenticationCannotBeBypassedWithQueryOrFileCookie(t *testing.T) {
 		{"GET", "/api/projects?token=secret", "", "", "", 401},
 		{"GET", "/api/files/fil_missing", "", "", "", 401},
 		{"HEAD", "/api/files/fil_missing", "", "", "", 401},
-		{"GET", "/api/events?token=secret", "", "", "", 204},
+		{"GET", "/api/events?token=secret", "", "", "", 401},
 		{"GET", "/api/artifacts/art_a/live?token=secret", "", "", "", 204},
 		{"GET", "/api/projects", "Bearer secret", "", "", 204},
 		{"GET", "/api/files/fil_a", "", cookie.String(), "same-origin", 204},
@@ -89,7 +89,7 @@ func TestBearerHeaderWinsAndEmptyHeaderCannotUseFileSession(t *testing.T) {
 	if auth.Authorized(request) {
 		t.Fatal("empty authorization header used cookie fallback")
 	}
-	request = httptest.NewRequest("GET", "http://localhost/api/events?token=secret", nil)
+	request = httptest.NewRequest("GET", "http://localhost/api/artifacts/art_a/live?token=secret", nil)
 	request.Header.Set("Authorization", "Bearer wrong")
 	if auth.Bearer(request) {
 		t.Fatal("query overrode explicit bearer")

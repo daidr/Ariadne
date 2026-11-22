@@ -56,7 +56,7 @@ func (auth Auth) Bearer(request *http.Request) bool {
 	if len(request.Header.Values("Authorization")) > 0 {
 		return false
 	}
-	if request.URL.Path == "/api/events" || livePath.MatchString(request.URL.Path) {
+	if livePath.MatchString(request.URL.Path) {
 		given := request.URL.Query().Get("token")
 		return given != "" && auth.Token != "" && equal(given, auth.Token)
 	}

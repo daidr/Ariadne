@@ -3,6 +3,8 @@ import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
 import { api, ApiError } from '../api'
 import { tm } from '../i18n'
 
+const RESUME_COOLDOWN_MS = 1000
+
 export function sameComparison(before: BranchChanges | null, after: BranchChanges | null) {
   return (
     before === after ||
@@ -15,7 +17,11 @@ export function sameComparison(before: BranchChanges | null, after: BranchChange
   )
 }
 
-/** Keep the comparison being read in place until the user opens the newer one. */
+/**
+ * Keep the comparison being read in place until the user opens the newer one.
+ * Refreshes are driven by real-time events and cached revision checks on window focus,
+ * without periodic background polling.
+ */
 export function useBranchUpdates(threadId: () => string | null, visible: () => boolean) {
   type Snapshot = Awaited<ReturnType<typeof api.getChanges>>
   const shown = shallowRef<Snapshot | null>(null)
@@ -24,8 +30,8 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
   const loading = shallowRef(true)
   const mergeable = shallowRef(false)
   let controller: AbortController | null = null
-  let timer: ReturnType<typeof setInterval> | undefined
   let needsFullCheck = false
+  let lastCheckedAt = 0
 
   async function check(full = false) {
     const id = threadId()
@@ -41,6 +47,7 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
     try {
       const next = await api.getChanges(id, known, request.signal)
       if (request.signal.aborted) return
+      lastCheckedAt = Date.now()
       mergeable.value = next.mergeable
       problem.value = null
       if (next.unchanged) return
@@ -79,6 +86,7 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
       controller?.abort()
       controller = null
       needsFullCheck = false
+      lastCheckedAt = 0
       shown.value = null
       newer.value = null
       problem.value = null
@@ -89,14 +97,12 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
     { immediate: true },
   )
 
-  const poll = () => {
-    void check()
-  }
   const resume = () => {
-    if (!controller && !document.hidden && visible()) void check(true)
+    if (controller || document.hidden || !visible()) return
+    if (Date.now() - lastCheckedAt < RESUME_COOLDOWN_MS) return
+    void check(false)
   }
   onMounted(() => {
-    timer = setInterval(poll, 12_000)
     window.addEventListener('focus', resume)
     document.addEventListener('visibilitychange', resume)
   })
@@ -104,7 +110,6 @@ export function useBranchUpdates(threadId: () => string | null, visible: () => b
     controller?.abort()
     controller = null
     needsFullCheck = false
-    clearInterval(timer)
     window.removeEventListener('focus', resume)
     document.removeEventListener('visibilitychange', resume)
   })

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -15,19 +16,32 @@ import (
 )
 
 const (
-	rpcPrefix          = "/api/rpc"
-	rpcMaxMessageBytes = 80 * 1024 * 1024
+	rpcPrefix            = "/api/rpc"
+	rpcMaxMessageBytes   = 80 * 1024 * 1024
+	rpcStreamWriteWindow = 10 * time.Second
 )
 
 type fileCookieContextKey struct{}
+type responseControllerContextKey struct{}
 
 func (api *API) rpcHandler() http.Handler {
 	stripped := http.StripPrefix(rpcPrefix, api.rpcMux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie := api.auth.FileSessionCookie(r)
 		ctx := context.WithValue(r.Context(), fileCookieContextKey{}, cookie)
+		ctx = context.WithValue(ctx, responseControllerContextKey{}, http.NewResponseController(w))
 		stripped.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (api *API) sendWithWriteDeadline(ctx context.Context, send func() error) error {
+	if rc, ok := ctx.Value(responseControllerContextKey{}).(*http.ResponseController); ok && rc != nil {
+		if err := rc.SetWriteDeadline(time.Now().Add(rpcStreamWriteWindow)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	}
+	return send()
 }
 
 func (api *API) mountConnect(

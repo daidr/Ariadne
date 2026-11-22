@@ -1,12 +1,8 @@
 package realtime
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -50,50 +46,63 @@ func TestStreamReplayNewEventsAndDisconnectReleaseSubscriptions(t *testing.T) {
 	appendEvent("p1")
 	appendEvent("p2")
 	appendEvent("p1")
-	done := make(chan error, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		done <- Serve(w, r, log, hub, StreamOptions{AfterSeq: 1, ProjectID: "p1", Heartbeat: time.Second})
-	}))
-	defer server.Close()
+
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	reader := bufio.NewReader(response.Body)
-	readFrame := func() string {
-		t.Helper()
-		var frame strings.Builder
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				t.Fatal(err)
-			}
-			frame.WriteString(line)
-			if line == "\n" {
-				return frame.String()
-			}
+
+	readyCh := make(chan int64, 1)
+	eventCh := make(chan eventstore.Event, 8)
+	updateCh := make(chan Update, 8)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- Stream(ctx, log, hub, StreamOptions{AfterSeq: 1, ProjectID: "p1", Heartbeat: time.Second}, StreamSink{
+			OnReady:  func(lastSeq int64) error { readyCh <- lastSeq; return nil },
+			OnEvent:  func(ev eventstore.Event) error { eventCh <- ev; return nil },
+			OnUpdate: func(u Update) error { updateCh <- u; return nil },
+		})
+	}()
+
+	select {
+	case seq := <-readyCh:
+		if seq != 1 {
+			t.Fatalf("ready seq: got %d, want 1", seq)
 		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ready")
 	}
-	if frame := readFrame(); !strings.HasPrefix(frame, "id: 3\nevent: ariadne\n") {
-		t.Fatalf("replay: %q", frame)
+
+	select {
+	case ev := <-eventCh:
+		if ev.Seq != 3 || ev.ProjectID != "p1" {
+			t.Fatalf("replay: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replay event")
 	}
+
 	appendEvent("p1")
-	if frame := readFrame(); !strings.HasPrefix(frame, "id: 4\nevent: ariadne\n") {
-		t.Fatalf("new event: %q", frame)
+	select {
+	case ev := <-eventCh:
+		if ev.Seq != 4 || ev.ProjectID != "p1" {
+			t.Fatalf("new event: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for new event")
 	}
+
 	if err := hub.Publish(update("c1", "latest")); err != nil {
 		t.Fatal(err)
 	}
-	if frame := readFrame(); !strings.HasPrefix(frame, "event: draft\n") || !strings.Contains(frame, "latest") {
-		t.Fatalf("transient: %q", frame)
+	select {
+	case u := <-updateCh:
+		if u.Kind != "draft" || !strings.Contains(string(u.Data), "latest") {
+			t.Fatalf("transient: %+v", u)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for transient update")
 	}
+
 	cancel()
 	select {
 	case <-done:
@@ -128,38 +137,26 @@ func TestStreamReplayReadsEventsInBatches(t *testing.T) {
 	log := &watchedLog{Store: store}
 	hub := NewHub()
 	defer hub.Close()
-	done := make(chan error, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		done <- Serve(w, r, log, hub, StreamOptions{AfterSeq: 0, ProjectID: "p1", Heartbeat: time.Second})
-	}))
-	defer server.Close()
+
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	reader := bufio.NewReader(response.Body)
-	for seq := 1; seq <= total; seq++ {
-		var frame strings.Builder
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				t.Fatal(err)
+
+	eventCh := make(chan eventstore.Event, total)
+	done := make(chan error, 1)
+	go func() {
+		done <- Stream(ctx, log, hub, StreamOptions{AfterSeq: 0, ProjectID: "p1", Heartbeat: time.Second}, StreamSink{
+			OnEvent: func(ev eventstore.Event) error { eventCh <- ev; return nil },
+		})
+	}()
+
+	for seq := int64(1); seq <= total; seq++ {
+		select {
+		case ev := <-eventCh:
+			if ev.Seq != seq {
+				t.Fatalf("event %d: got seq %d", seq, ev.Seq)
 			}
-			frame.WriteString(line)
-			if line == "\n" {
-				break
-			}
-		}
-		wantPrefix := fmt.Sprintf("id: %d\nevent: ariadne\n", seq)
-		if !strings.HasPrefix(frame.String(), wantPrefix) {
-			t.Fatalf("event %d: got %q, want prefix %q", seq, frame.String(), wantPrefix)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for event %d", seq)
 		}
 	}
 	cancel()

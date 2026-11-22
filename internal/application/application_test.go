@@ -217,21 +217,25 @@ func TestNativeHTTPExecutesTurnAndRebuildsRequests(t *testing.T) {
 	if strings.Contains(savedModels.Msg.String(), secret) {
 		t.Fatal("native settings included the provider secret")
 	}
-	var created struct {
-		Project struct {
-			ID          string `json:"id"`
-			Coordinator string `json:"coordinatorId"`
-		} `json:"project"`
-	}
-	if err := json.Unmarshal(request("POST", "/api/projects", map[string]any{"name": "Fixture", "message": userText}, cfg.Token, 201), &created); err != nil {
-		t.Fatal(err)
+	projectClient := ariadnev1connect.NewProjectServiceClient(
+		httpServer.Client(),
+		httpServer.URL+"/api/rpc",
+		connect.WithInterceptors(bearerInterceptor(cfg.Token)),
+	)
+	projectName := "Fixture"
+	created, err := projectClient.CreateProject(t.Context(), connect.NewRequest(&ariadnev1.CreateProjectRequest{
+		Name:    &projectName,
+		Message: userText,
+	}))
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	select {
 	case <-tipSeen:
 	case <-time.After(8 * time.Second):
 		t.Fatal("coordinator never reached mock model")
 	}
-	project, conversation := created.Project.ID, created.Project.Coordinator
+	project, conversation := created.Msg.GetProject().GetId(), created.Msg.GetProject().GetCoordinatorId()
 	convClient := ariadnev1connect.NewConversationServiceClient(
 		httpServer.Client(),
 		httpServer.URL+"/api/rpc",

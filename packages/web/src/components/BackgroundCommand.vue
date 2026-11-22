@@ -5,14 +5,14 @@ import { StopIcon } from '@dou-ui/icons'
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
-import { report, stopBackground } from '../store'
+import { report, state, stopBackground } from '../store'
 import { elapsedText } from './command-text'
 
 /**
  * A command the thread left running in the background (a dev server, a watcher), in its
  * task popover: what it is and for how long, and the address it serves at when it named one
- * (a dev server), to open the thread's work in the browser. Opened, it shows the end of its
- * output, read again every second while open, and can be stopped.
+ * (a dev server), to open the thread's work in the browser. Opened, it streams the end of its
+ * output over ConnectRPC while open, and can be stopped.
  */
 const props = defineProps<{ threadId: string; command: BackgroundView }>()
 
@@ -25,23 +25,51 @@ const served = computed(() => props.command.url?.replace(/^https?:\/\//, '').rep
 
 const tail = ref('')
 const stopping = ref(false)
-let poll: ReturnType<typeof setInterval> | undefined
-const controller = new AbortController()
-async function read() {
+let activeController: AbortController | null = null
+let unmounted = false
+let finished = props.command.result !== null
+
+async function follow() {
+  if (unmounted) return
+  activeController?.abort()
+  const controller = new AbortController()
+  activeController = controller
   try {
-    const result = await api.commandOutput(props.threadId, props.command.id, controller.signal)
-    if (!controller.signal.aborted) tail.value = result.tail
+    for await (const snapshot of api.streamCommandOutput(
+      props.threadId,
+      props.command.id,
+      controller.signal,
+    )) {
+      if (unmounted || activeController !== controller) return
+      tail.value = snapshot.tail
+      if (snapshot.command.result !== null) {
+        finished = true
+      }
+    }
   } catch (error) {
-    if (!controller.signal.aborted) report(error)
-    return
+    if (!unmounted && activeController === controller && !controller.signal.aborted) {
+      report(error)
+    }
+  } finally {
+    if (activeController === controller) {
+      activeController = null
+    }
   }
-  if (!controller.signal.aborted) poll = setTimeout(read, 1000)
 }
-void read()
+void follow()
+watch(
+  () => state?.stream,
+  (status, previous) => {
+    if (status === 'open' && previous === 'lost' && !finished && !activeController) {
+      void follow()
+    }
+  },
+)
 onBeforeUnmount(() => {
+  unmounted = true
   clearInterval(clock)
-  clearTimeout(poll)
-  controller.abort()
+  activeController?.abort()
+  activeController = null
 })
 
 async function stop() {

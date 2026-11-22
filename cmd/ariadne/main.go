@@ -19,6 +19,7 @@ import (
 
 	"github.com/daidr/Ariadne/internal/application"
 	"github.com/daidr/Ariadne/internal/config"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/httpauth"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/providers/agents"
@@ -127,7 +128,7 @@ func serve(ctx context.Context, cfg config.Config, listener net.Listener) error 
 	auth := httpauth.Auth{Token: cfg.Token}
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && r.URL.Path == "/api/events" && auth.Bearer(r) {
+			if r.Method == http.MethodPost && r.URL.Path == "/api/rpc"+ariadnev1connect.EventServiceStreamEventsProcedure && auth.ValidBearerHeader(r.Header) {
 				pageConnected.Store(true)
 			}
 			app.Handler.ServeHTTP(w, r)

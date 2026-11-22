@@ -1,0 +1,294 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+
+	"github.com/daidr/Ariadne/internal/background"
+	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/realtime"
+	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/internal/update"
+	"github.com/daidr/Ariadne/sdk"
+)
+
+func TestEventServiceStreamEventsLiveAndUpdateStatus(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "events.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	hub := realtime.NewHub()
+	defer hub.Close()
+	state := realtime.NewState(hub)
+	defer state.Close()
+
+	// Seed an initial durable event and an initial update status snapshot.
+	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
+		{Type: "project.created", ProjectID: "prj_1", Data: json.RawMessage(`{"name":"One","coordinatorId":"crd_1"}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	initialUpdate := update.View{
+		Version:         "1.0.0",
+		Preferences:     settings.UpdatePreferences{Channel: "stable", Automatic: true},
+		CanInstall:      true,
+		State:           "downloading",
+		DownloadPercent: 25,
+	}
+	initialUpdateRaw, _ := json.Marshal(initialUpdate)
+	if err := state.Set(realtime.Update{Kind: "update", Data: initialUpdateRaw}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	api, err := New(Options{Repository: repo, Token: "stream-secret", State: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewEventServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("stream-secret")),
+	)
+
+	// 1. Global subscriber (empty project_id) receives ready, replayed event, initial updateStatus, and live pushes.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	zero := int64(0)
+	stream, err := client.StreamEvents(ctx, connect.NewRequest(&ariadnev1.StreamEventsRequest{
+		AfterSeq: &zero,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Frame 1: ready
+	if !stream.Receive() || stream.Msg().GetReady() == nil {
+		t.Fatalf("expected ready frame, msg=%+v err=%v", stream.Msg(), stream.Err())
+	}
+
+	// Next two frames: replayed event + initial updateStatus (order: event replay then initial snapshots).
+	if !stream.Receive() {
+		t.Fatalf("expected replayed event, err=%v", stream.Err())
+	}
+	ev := stream.Msg().GetEvent()
+	if ev == nil || ev.GetSeq() != 1 || ev.GetType() != "project.created" || !strings.Contains(string(ev.GetRawJson()), `"One"`) {
+		t.Fatalf("unexpected replayed event: %+v", stream.Msg())
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected initial updateStatus, err=%v", stream.Err())
+	}
+	up := stream.Msg().GetUpdateStatus()
+	if up == nil || up.GetState() != "downloading" || up.GetDownloadPercent() != 25 {
+		t.Fatalf("unexpected initial updateStatus: %+v", stream.Msg())
+	}
+
+	// Push live durable event and live update progress.
+	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
+		{Type: "project.renamed", ProjectID: "prj_1", Data: json.RawMessage(`{"name":"Renamed"}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !stream.Receive() {
+		t.Fatalf("expected live event, err=%v", stream.Err())
+	}
+	ev2 := stream.Msg().GetEvent()
+	if ev2 == nil || ev2.GetSeq() != 2 || ev2.GetType() != "project.renamed" {
+		t.Fatalf("unexpected live event: %+v", stream.Msg())
+	}
+
+	nextUpdate := initialUpdate
+	nextUpdate.State = "ready"
+	nextUpdate.DownloadPercent = 100
+	nextUpdateRaw, _ := json.Marshal(nextUpdate)
+	if err := state.Set(realtime.Update{Kind: "update", Data: nextUpdateRaw}, true); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected live updateStatus, err=%v", stream.Err())
+	}
+	up2 := stream.Msg().GetUpdateStatus()
+	if up2 == nil || up2.GetState() != "ready" {
+		t.Fatalf("unexpected live updateStatus: %+v", stream.Msg())
+	}
+
+	// Push a cleared live-command update (command == nil).
+	clearedRaw, _ := json.Marshal(realtime.LiveUpdate{ProjectID: "prj_1", ConversationID: "crd_1", Command: nil})
+	if err := state.Set(realtime.Update{Kind: "live", ProjectID: "prj_1", ConversationID: "crd_1", Data: clearedRaw}, false); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("expected cleared live update, err=%v", stream.Err())
+	}
+	liveCleared := stream.Msg().GetLive()
+	if liveCleared == nil || liveCleared.GetProjectId() != "prj_1" || liveCleared.GetCommand() != nil {
+		t.Fatalf("unexpected cleared live update: %+v", stream.Msg())
+	}
+
+	cancel()
+	_ = stream.Close()
+
+	// 2. Project-scoped subscriber does NOT receive global updateStatus or other-project events.
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel2()
+	prj2 := "prj_2"
+	stream2, err := client.StreamEvents(ctx2, connect.NewRequest(&ariadnev1.StreamEventsRequest{
+		AfterSeq:  &zero,
+		ProjectId: &prj2,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stream2.Receive() || stream2.Msg().GetReady() == nil {
+		t.Fatalf("expected ready on project stream, err=%v", stream2.Err())
+	}
+	// Publish an event for prj_1 (must be skipped) and then for prj_2 (must be received).
+	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{
+		{Type: "project.renamed", ProjectID: "prj_1", Data: json.RawMessage(`{"name":"SkipMe"}`)},
+		{Type: "project.created", ProjectID: "prj_2", Data: json.RawMessage(`{"name":"Two","coordinatorId":"crd_2"}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !stream2.Receive() {
+		t.Fatalf("expected prj_2 event, err=%v", stream2.Err())
+	}
+	evPrj2 := stream2.Msg().GetEvent()
+	if evPrj2 == nil || evPrj2.GetProjectId() != "prj_2" || evPrj2.GetType() != "project.created" {
+		t.Fatalf("project-scoped stream received wrong frame: %+v", stream2.Msg())
+	}
+	cancel2()
+	_ = stream2.Close()
+}
+
+func TestThreadServiceStreamCommandOutput(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "cmdstream.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	commands := background.New(background.Options{Now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }})
+	defer commands.Close(context.Background())
+
+	firstWritten := make(chan struct{})
+	emitSecond := make(chan struct{})
+	if _, err := commands.Start("thr_1", "build", func(ctx context.Context, options sdk.ExecOptions) (sdk.ExecResult, error) {
+		options.OnOutput("step 1\n", "stdout")
+		close(firstWritten)
+		select {
+		case <-emitSecond:
+		case <-ctx.Done():
+			return sdk.ExecResult{ExitCode: 130}, nil
+		}
+		options.OnOutput("step 2\n", "stdout")
+		return sdk.ExecResult{ExitCode: 0}, nil
+	}, background.StartOptions{Local: true}); err != nil {
+		t.Fatal(err)
+	}
+	<-firstWritten
+
+	api, err := New(Options{Repository: repo, Token: "cmd-secret", Background: commands})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	// Unauthenticated request fails with CodeUnauthenticated.
+	unauth := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	unauthStream, err := unauth.StreamCommandOutput(t.Context(), connect.NewRequest(&ariadnev1.StreamCommandOutputRequest{
+		ThreadId:  "thr_1",
+		CommandId: "cmd-1",
+	}))
+	if err == nil {
+		if unauthStream.Receive() {
+			t.Fatal("unauthenticated StreamCommandOutput yielded a frame")
+		}
+		err = unauthStream.Err()
+		_ = unauthStream.Close()
+	}
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected CodeUnauthenticated, got %v", err)
+	}
+
+	client := ariadnev1connect.NewThreadServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("cmd-secret")),
+	)
+
+	// Missing command fails with CodeNotFound.
+	missingStream, err := client.StreamCommandOutput(t.Context(), connect.NewRequest(&ariadnev1.StreamCommandOutputRequest{
+		ThreadId:  "thr_1",
+		CommandId: "missing",
+	}))
+	if err == nil {
+		if missingStream.Receive() {
+			t.Fatal("missing command yielded a frame")
+		}
+		err = missingStream.Err()
+		_ = missingStream.Close()
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected CodeNotFound for missing command, got %v", err)
+	}
+
+	// Valid command streams initial output, live update, and completes on exit.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stream, err := client.StreamCommandOutput(ctx, connect.NewRequest(&ariadnev1.StreamCommandOutputRequest{
+		ThreadId:  "thr_1",
+		CommandId: "cmd-1",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	if !stream.Receive() {
+		t.Fatalf("expected initial command output frame, err=%v", stream.Err())
+	}
+	first := stream.Msg()
+	if first.GetCommand().GetId() != "cmd-1" || !strings.Contains(first.GetTail(), "step 1") || first.GetCommand().GetResult() != nil {
+		t.Fatalf("unexpected initial frame: %+v", first)
+	}
+
+	close(emitSecond)
+
+	var lastTail string
+	var gotResult *ariadnev1.BackgroundCommandResult
+	for stream.Receive() {
+		lastTail = stream.Msg().GetTail()
+		if r := stream.Msg().GetCommand().GetResult(); r != nil {
+			gotResult = r
+		}
+	}
+	if err := stream.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected stream error: %v", err)
+	}
+	if !strings.Contains(lastTail, "step 2") {
+		t.Fatalf("final tail missing step 2: %q", lastTail)
+	}
+	if gotResult == nil || gotResult.GetExitCode() != 0 {
+		t.Fatalf("expected exit code 0 result on completion, got %+v", gotResult)
+	}
+}

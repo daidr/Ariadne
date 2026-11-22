@@ -28,7 +28,14 @@ func NewState(hub *Hub) *State {
 }
 func (state *State) Hub() *Hub { return state.hub }
 func (state *State) Set(update Update, retain bool) error {
-	if update.Kind != "live" && update.Kind != "background" && update.Kind != "draft" || update.ProjectID == "" || update.ConversationID == "" || !json.Valid(update.Data) {
+	if !isValidKind(update.Kind) || !json.Valid(update.Data) {
+		return errors.New("invalid transient state")
+	}
+	if update.Kind == "update" {
+		if update.ProjectID != "" || update.ConversationID != "" {
+			return errors.New("invalid transient state")
+		}
+	} else if update.ProjectID == "" || update.ConversationID == "" {
 		return errors.New("invalid transient state")
 	}
 	if len(update.Data) > MaxPendingBytes-1024 {
@@ -45,7 +52,7 @@ func (state *State) Set(update Update, retain bool) error {
 	if len(update.ProjectID) > 512 || len(update.ConversationID) > 512 {
 		return errors.New("transient identity exceeds size limit")
 	}
-	key := update.Kind + ":" + update.ConversationID
+	key := updateKey(update)
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.closed {
@@ -92,11 +99,11 @@ func (state *State) Snapshots(project string) iter.Seq[Update] {
 		state.mu.Lock()
 		keys := slices.Clone(state.order)
 		state.mu.Unlock()
-		for _, kind := range []string{"live", "background", "draft"} {
+		for _, kind := range []string{"live", "background", "draft", "update"} {
 			for _, key := range keys {
 				state.mu.Lock()
 				update, exists := state.entries[key]
-				if exists && update.Kind == kind && (project == "" || update.ProjectID == project) {
+				if exists && update.Kind == kind && (project == "" || (update.ProjectID != "" && update.ProjectID == project)) {
 					update.Data = slices.Clone(update.Data)
 				} else {
 					exists = false

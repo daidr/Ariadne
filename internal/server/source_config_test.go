@@ -10,8 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
@@ -54,23 +59,11 @@ func TestNewSourceDefaultsRespectOverridesAndSavedSources(t *testing.T) {
 	}
 }
 
-func TestProjectSourcesAndReferencesHTTP(t *testing.T) {
+func TestProjectSourcesAndReferencesConnect(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "notes.txt")
 	if err := os.WriteFile(file, []byte("reference"), 0600); err != nil {
 		t.Fatal(err)
-	}
-	part := func(path string) object { return object{"kind": "local-directory", "settings": object{"path": path}} }
-	requests := []apiRequest{
-		{Method: "POST", Path: "/api/projects", Body: object{"name": "本地项目", "source": part(root), "references": []any{part(file)}}},
-		{Method: "POST", Path: "/api/projects", Body: object{"message": "先看看这个项目"}},
-		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "source": part(file)}},
-		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "source": part(filepath.Join(root, "missing"))}},
-		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "source": object{"kind": "missing", "settings": object{}}}},
-		{Method: "POST", Path: "/api/projects", Body: object{"name": "invalid", "references": object{}}},
-		{Method: "POST", Path: "/api/projects/prj_a/references", Body: object{"reference": part(file)}},
-		{Method: "POST", Path: "/api/projects/prj_a/references", Body: object{"reference": part(root)}},
-		{Method: "DELETE", Path: "/api/projects/prj_a/references/ref_seed"},
 	}
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
@@ -99,18 +92,59 @@ func TestProjectSourcesAndReferencesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	localName := "本地项目"
+	if _, err := client.CreateProject(t.Context(), connect.NewRequest(&ariadnev1.CreateProjectRequest{
+		Name:   &localName,
+		Source: &ariadnev1.ProjectSource{Kind: "local-directory", Settings: mustStruct(t, object{"path": root})},
+		References: []*ariadnev1.ProjectSourcePart{
+			{Kind: "local-directory", Settings: mustStruct(t, object{"path": file})},
+		},
+	})); err != nil {
+		t.Fatalf("CreateProject with local source and file reference failed: %v", err)
+	}
+	if _, err := client.CreateProject(t.Context(), connect.NewRequest(&ariadnev1.CreateProjectRequest{
+		Message: "先看看这个项目",
+	})); err != nil {
+		t.Fatalf("CreateProject from message failed: %v", err)
+	}
+	invalidName := "invalid"
+	for _, src := range []*ariadnev1.ProjectSource{
+		{Kind: "local-directory", Settings: mustStruct(t, object{"path": file})},
+		{Kind: "local-directory", Settings: mustStruct(t, object{"path": filepath.Join(root, "missing")})},
+		{Kind: "missing", Settings: mustStruct(t, object{})},
+	} {
+		if _, err := client.CreateProject(t.Context(), connect.NewRequest(&ariadnev1.CreateProjectRequest{
+			Name:   &invalidName,
+			Source: src,
+		})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("invalid source %s code = %v, want CodeInvalidArgument", src.Kind, connect.CodeOf(err))
 		}
-		if response.Code >= 500 {
-			t.Fatalf("%s %s returned %d: %s", item.Method, item.Path, response.Code, response.Body.String())
-		}
+	}
+	if _, err := client.AddProjectReference(t.Context(), connect.NewRequest(&ariadnev1.AddProjectReferenceRequest{
+		ProjectId: "prj_a",
+		Reference: &ariadnev1.ProjectSourcePart{Kind: "local-directory", Settings: mustStruct(t, object{"path": file})},
+	})); err != nil {
+		t.Fatalf("AddProjectReference(file) failed: %v", err)
+	}
+	if _, err := client.AddProjectReference(t.Context(), connect.NewRequest(&ariadnev1.AddProjectReferenceRequest{
+		ProjectId: "prj_a",
+		Reference: &ariadnev1.ProjectSourcePart{Kind: "local-directory", Settings: mustStruct(t, object{"path": root})},
+	})); err != nil {
+		t.Fatalf("AddProjectReference(root) failed: %v", err)
+	}
+	if _, err := client.RemoveProjectReference(t.Context(), connect.NewRequest(&ariadnev1.RemoveProjectReferenceRequest{
+		ProjectId:   "prj_a",
+		ReferenceId: "ref_seed",
+	})); err != nil {
+		t.Fatalf("RemoveProjectReference failed: %v", err)
 	}
 }
 
@@ -142,32 +176,43 @@ func TestSourceSettingsKeepSecretsOutOfProjectAndEventLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
 	sourceID := ""
 	for _, token := range []any{"source-private-token", "", nil} {
-		entry := object{"kind": "secure", "settings": object{"token": token, "path": "repository"}}
-		if sourceID != "" {
-			entry["id"] = sourceID
+		input := &ariadnev1.FileSourceInput{
+			Kind:     "secure",
+			Settings: mustStruct(t, object{"token": token, "path": "repository"}),
 		}
-		body := object{"sources": []any{entry}}
-		request := httptest.NewRequest("PUT", "/api/projects/prj_a/sources", strings.NewReader(encoded(body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		if response.Code != 200 || strings.Contains(response.Body.String(), "source-private-token") {
-			t.Fatal(response.Code, response.Body.String())
+		if sourceID != "" {
+			id := sourceID
+			input.Id = &id
+		}
+		resp, err := client.SetFileSources(t.Context(), connect.NewRequest(&ariadnev1.SetFileSourcesRequest{
+			ProjectId: "prj_a",
+			Sources:   []*ariadnev1.FileSourceInput{input},
+		}))
+		if err != nil {
+			t.Fatalf("SetFileSources failed: %v", err)
+		}
+		raw, err := proto.Marshal(resp.Msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "source-private-token") {
+			t.Fatal("source secret leaked in SetFileSources response")
 		}
 		if sourceID == "" {
-			var parsed struct {
-				Project struct {
-					FileSources struct {
-						PrimaryID string `json:"primaryId"`
-					} `json:"fileSources"`
-				} `json:"project"`
+			sourceID = resp.Msg.GetProject().GetFileSources().GetPrimaryId()
+			if sourceID == "" {
+				t.Fatalf("missing file source id in %+v", resp.Msg.GetProject())
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &parsed); err != nil || parsed.Project.FileSources.PrimaryID == "" {
-				t.Fatalf("missing file source id: %v %s", err, response.Body.String())
-			}
-			sourceID = parsed.Project.FileSources.PrimaryID
 		}
 	}
 	if encoded(received) != `["source-private-token","source-private-token",""]` {
@@ -199,32 +244,41 @@ func TestUnchangedHostedSourceDoesNotAppendEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
 	var before int64
 	sourceID := ""
 	for i := range 2 {
-		entry := object{"kind": "remote", "settings": object{"path": "/repository"}, "hosting": object{"kind": "host", "settings": object{"repository": "owner/project"}}}
-		if sourceID != "" {
-			entry["id"] = sourceID
+		input := &ariadnev1.FileSourceInput{
+			Kind:     "remote",
+			Settings: mustStruct(t, object{"path": "/repository"}),
+			Hosting: &ariadnev1.ProjectSourcePart{
+				Kind:     "host",
+				Settings: mustStruct(t, object{"repository": "owner/project"}),
+			},
 		}
-		request := httptest.NewRequest("PUT", "/api/projects/prj_a/sources", strings.NewReader(encoded(object{"sources": []any{entry}})))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		if response.Code != 200 {
-			t.Fatal(response.Code, response.Body.String())
+		if sourceID != "" {
+			id := sourceID
+			input.Id = &id
+		}
+		resp, err := client.SetFileSources(t.Context(), connect.NewRequest(&ariadnev1.SetFileSourcesRequest{
+			ProjectId: "prj_a",
+			Sources:   []*ariadnev1.FileSourceInput{input},
+		}))
+		if err != nil {
+			t.Fatalf("SetFileSources(%d) failed: %v", i, err)
 		}
 		if sourceID == "" {
-			var parsed struct {
-				Project struct {
-					FileSources struct {
-						PrimaryID string `json:"primaryId"`
-					} `json:"fileSources"`
-				} `json:"project"`
+			sourceID = resp.Msg.GetProject().GetFileSources().GetPrimaryId()
+			if sourceID == "" {
+				t.Fatalf("missing file source id in %+v", resp.Msg.GetProject())
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &parsed); err != nil || parsed.Project.FileSources.PrimaryID == "" {
-				t.Fatalf("missing file source id: %v %s", err, response.Body.String())
-			}
-			sourceID = parsed.Project.FileSources.PrimaryID
 		}
 		seq, err := repo.Store.LastSeq(t.Context())
 		if err != nil {

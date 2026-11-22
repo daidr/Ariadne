@@ -43,6 +43,7 @@ import type {
 import {
   ConversationService,
   DataService,
+  EventService,
   MetaService,
   PluginService,
   SettingsService,
@@ -51,6 +52,7 @@ import {
   WorkspaceService,
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
+  type StreamEventsResponse as ProtoStreamEventsResponse,
 } from '@ariadne/proto'
 import {
   fromProtoBackgroundCommand,
@@ -205,6 +207,8 @@ const keepaliveConversationClient = createRpcClient(
   }),
 )
 const workspaceClient = createRpcClient(WorkspaceService)
+const eventClient = createRpcClient(EventService)
+const utf8Decoder = new TextDecoder()
 
 function requireField<T>(value: T | undefined, name: string): T {
   if (value === undefined) {
@@ -867,6 +871,33 @@ export const api = {
       tail: response.tail,
     }
   },
+  streamCommandOutput: async function* (
+    threadId: string,
+    commandId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<{ command: BackgroundView; tail: string }> {
+    const stream = threadClient.streamCommandOutput(
+      { threadId, commandId },
+      signal ? { signal } : undefined,
+    )
+    for await (const response of stream) {
+      yield {
+        command: fromProtoBackgroundCommand(requireField(response.command, 'command')),
+        tail: response.tail,
+      }
+    }
+  },
+  streamEvents: (
+    options: { afterSeq?: number; projectId?: string },
+    signal?: AbortSignal,
+  ): AsyncIterable<ProtoStreamEventsResponse> =>
+    eventClient.streamEvents(
+      {
+        ...(options.afterSeq === undefined ? {} : { afterSeq: BigInt(options.afterSeq) }),
+        ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+      },
+      signal ? { signal } : undefined,
+    ),
   pullRequestChecks: async (
     threadId: string,
     signal?: AbortSignal,
@@ -1498,9 +1529,9 @@ export interface SkillView {
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
 
 /**
- * Follow the event log from `afterSeq`. EventSource retries network drops on its own but
- * gives up for good on a non-200 answer (a 401, or a 502 while the dev server restarts),
- * so a closed source is reopened here with backoff, resuming after the last event seen.
+ * Follow the event log from `afterSeq` over ConnectRPC binary Server Streaming.
+ * Reconnects with exponential backoff on network drops or server restarts,
+ * resuming strictly after the last durable sequence number observed.
  */
 export function followEvents(
   afterSeq: number | null,
@@ -1510,65 +1541,13 @@ export function followEvents(
   onLive?: (update: LiveUpdate) => void,
   onBackground?: (update: BackgroundUpdate) => void,
   onDraft?: (update: DraftUpdate) => void,
+  onUpdateStatus?: (status: UpdateStatus) => void,
 ): () => void {
   let lastSeq = afterSeq
-  let source: EventSource | null = null
+  let controller: AbortController | null = null
   let retry: ReturnType<typeof setTimeout> | undefined
   let delay = 500
   let stopped = false
-
-  const open = () => {
-    if (stopped) return
-    // Without a known position the server starts at its newest event.
-    const from = lastSeq === null ? '' : `afterSeq=${lastSeq}&`
-    const query = `${from}token=${encodeURIComponent(token() ?? '')}`
-    const current = new EventSource(`/api/events?${query}`)
-    source = current
-    current.addEventListener('open', () => {
-      if (stopped || source !== current) return
-      delay = 500
-      onStatus('open')
-      onOpen?.()
-    })
-    current.addEventListener('ariadne', (message) => {
-      if (stopped || source !== current) return
-      const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
-      lastSeq = Math.max(lastSeq ?? 0, event.seq)
-      onEvent(event)
-    })
-    // A running command's output: not part of the log, so it moves nothing forward.
-    current.addEventListener('live', (message) => {
-      if (stopped || source !== current) return
-      onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
-    })
-    // A reply as it is written: not part of the log either.
-    current.addEventListener('draft', (message) => {
-      if (stopped || source !== current) return
-      onDraft?.(JSON.parse((message as MessageEvent<string>).data) as DraftUpdate)
-    })
-    current.addEventListener('background', (message) => {
-      if (stopped || source !== current) return
-      onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)
-    })
-    current.addEventListener('error', () => {
-      if (stopped || source !== current) return
-      if (current.readyState !== EventSource.CLOSED) {
-        onStatus('lost')
-        return
-      }
-      // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
-      void api.ping().then(
-        () => {
-          if (source === current) schedule('lost')
-        },
-        (error) => {
-          if (source === current) {
-            schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
-          }
-        },
-      )
-    })
-  }
 
   const schedule = (status: StreamStatus) => {
     if (stopped) return
@@ -1578,11 +1557,109 @@ export function followEvents(
     delay = Math.min(delay * 2, 10_000)
   }
 
+  const open = () => {
+    if (stopped) return
+    const current = new AbortController()
+    controller = current
+    const options = lastSeq === null ? {} : { afterSeq: lastSeq }
+
+    void (async () => {
+      try {
+        for await (const frame of api.streamEvents(options, current.signal)) {
+          if (stopped || controller !== current) return
+          switch (frame.payload.case) {
+            case 'ready':
+              delay = 500
+              if (lastSeq === null) {
+                lastSeq = Number(frame.payload.value.lastSeq)
+              }
+              onStatus('open')
+              onOpen?.()
+              break
+            case 'heartbeat':
+              synchronizeServerClock(String(frame.payload.value.serverTimeMs))
+              break
+            case 'event': {
+              const ev = frame.payload.value
+              const data = ev.rawJson.length ? JSON.parse(utf8Decoder.decode(ev.rawJson)) : {}
+              const stored = {
+                seq: Number(ev.seq),
+                id: ev.id,
+                projectId: ev.projectId,
+                type: ev.type,
+                at: Number(ev.at),
+                data,
+              } as AnyStoredEvent
+              lastSeq = Math.max(lastSeq ?? 0, stored.seq)
+              onEvent(stored)
+              break
+            }
+            case 'live': {
+              const u = frame.payload.value
+              onLive?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                command: u.command
+                  ? {
+                      projectId: u.command.projectId,
+                      conversationId: u.command.conversationId,
+                      command: u.command.command,
+                      cwd: u.command.cwd,
+                      startedAt: Number(u.command.startedAt),
+                      tail: u.command.tail,
+                    }
+                  : null,
+              })
+              break
+            }
+            case 'background': {
+              const u = frame.payload.value
+              onBackground?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                commands: u.commands.map(fromProtoBackgroundCommand),
+              })
+              break
+            }
+            case 'draft': {
+              const u = frame.payload.value
+              onDraft?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                draft: u.draft
+                  ? {
+                      messageId: u.draft.messageId,
+                      text: u.draft.text,
+                      ...(u.draft.blocksJson.length
+                        ? { blocks: JSON.parse(utf8Decoder.decode(u.draft.blocksJson)) }
+                        : {}),
+                      startedAt: Number(u.draft.startedAt),
+                      ...(u.draft.posted ? { posted: true } : {}),
+                    }
+                  : null,
+              })
+              break
+            }
+            case 'updateStatus':
+              onUpdateStatus?.(fromProtoUpdateStatus(frame.payload.value))
+              break
+          }
+        }
+        if (!stopped && controller === current && !current.signal.aborted) {
+          schedule('lost')
+        }
+      } catch (error) {
+        if (stopped || controller !== current || current.signal.aborted) return
+        schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
+      }
+    })()
+  }
+
   open()
   return () => {
     stopped = true
     clearTimeout(retry)
-    source?.close()
-    source = null
+    controller?.abort()
+    controller = null
   }
 }

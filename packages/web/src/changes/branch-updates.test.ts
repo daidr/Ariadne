@@ -56,4 +56,47 @@ describe('branch comparison updates', () => {
       get.mockRestore()
     }
   })
+
+  test('does not poll on a timer and uses cached revisions when refocusing the window', async () => {
+    vi.useFakeTimers()
+    const get = vi
+      .spyOn(api, 'getChanges')
+      .mockResolvedValueOnce({ changes: changes('first', 'base-1'), mergeable: true })
+      .mockResolvedValueOnce({ changes: null, mergeable: true, unchanged: true })
+    const view = mount(
+      defineComponent({
+        setup() {
+          useBranchUpdates(
+            () => 'thread',
+            () => true,
+          )
+          return () => h('div')
+        },
+      }),
+    )
+    try {
+      await flushPromises()
+      expect(get).toHaveBeenCalledTimes(1)
+      expect(get).toHaveBeenLastCalledWith('thread', undefined, expect.any(AbortSignal))
+
+      // No periodic 12s polling while idle.
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(get).toHaveBeenCalledTimes(1)
+
+      // Refocusing uses cached revisions and coalesces back-to-back visibility+focus events.
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flushPromises()
+      expect(get).toHaveBeenCalledTimes(2)
+      expect(get).toHaveBeenLastCalledWith(
+        'thread',
+        { head: 'first', baseHead: 'base-1' },
+        expect.any(AbortSignal),
+      )
+    } finally {
+      view.unmount()
+      get.mockRestore()
+      vi.useRealTimers()
+    }
+  })
 })
