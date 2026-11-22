@@ -158,6 +158,10 @@ const kindOf = (kind: string) => kinds.value.find((k) => k.kind === kind)
 const kindOptions = computed(() =>
   kinds.value.map((kind) => ({ value: kind.kind, label: lt(kind.title) ?? kind.kind })),
 )
+const kindOptionsFor = (current: string) =>
+  kindOf(current)
+    ? kindOptions.value
+    : [{ value: current, label: current, disabled: true }, ...kindOptions.value]
 const titleOf = (kind: string) => {
   const known = kindOf(kind)
   return known ? (lt(known.title) ?? known.kind) : kind
@@ -325,10 +329,26 @@ const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
 
-/** Reload the protocols only: a plugin added or removed changes them, not the draft. */
+/** Reload protocols and hydrate settings for providers whose plugin was just re-enabled. */
 async function reloadKinds() {
   try {
-    kinds.value = (await api.getModelSettings()).kinds
+    const cleanBefore = hiddenRoles.value !== null && modelDraft() === savedModelDraft
+    const previousKinds = new Set(kinds.value.map((k) => k.kind))
+    const latest = await api.getModelSettings()
+    applyModelSettings(latest)
+    kinds.value = latest.kinds
+    const latestById = new Map(latest.providers.map((p) => [p.id, p]))
+    for (const provider of providers.value) {
+      if (previousKinds.has(provider.kind)) continue
+      if (!kindOf(provider.kind)) continue
+      const saved = latestById.get(provider.id)
+      if (!saved || saved.kind !== provider.kind) continue
+      provider.settings = { ...saved.settings }
+      provider.secretsSet = [...saved.secretsSet]
+    }
+    if (cleanBefore) {
+      savedModelDraft = modelDraft()
+    }
   } catch {
     // The models tab shows the protocols it had.
   }
@@ -725,7 +745,7 @@ async function saveModels(): Promise<boolean> {
                   <DouFormItem :label="t('settings.kind')" class="settings-grow">
                     <DouSelect
                       :model-value="provider.kind"
-                      :options="kindOptions"
+                      :options="kindOptionsFor(provider.kind)"
                       @update:model-value="(value) => setKind(provider, String(value))"
                     />
                   </DouFormItem>
@@ -755,6 +775,9 @@ async function saveModels(): Promise<boolean> {
                   :secrets-set="provider.secretsSet"
                   @clear-secret="(key) => clearSecret(provider, key)"
                 />
+                <DouText v-else size="sm" variant="secondary">
+                  {{ t('settings.providerDisabled') }}
+                </DouText>
                 <DouFormItem :label="t('settings.models')">
                   <div class="settings-models">
                     <div v-for="model in modelsOf(provider)" :key="model.id" class="settings-model">

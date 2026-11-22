@@ -448,9 +448,9 @@ func (host *Hosted) Capability() *sdk.WorkspaceCapability {
 	branches.Merge = nil
 	branches.UndoMerge = nil
 	branches.SharesStorage = host.SharesStorage
-	branches.Revisions = func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
-		return host.owner.revisions(ctx, thread.Branch, "refs/remotes/origin/"+base)
-	}
+		branches.Revisions = func(ctx context.Context, thread sdk.ThreadBranch, base string) (sdk.BranchRevisions, error) {
+			return host.owner.revisions(ctx, thread.Branch, "refs/remotes/origin/"+base, "")
+		}
 	branches.Changes = func(ctx context.Context, thread sdk.ThreadBranch, base string) (*sdk.BranchChanges, error) {
 		ctx, done, err := host.owner.begin(ctx)
 		if err != nil {

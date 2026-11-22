@@ -2592,6 +2592,110 @@ func (x *GetCommandOutputResponse) GetTail() string {
 	return ""
 }
 
+type StreamCommandOutputRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	CommandId     string                 `protobuf:"bytes,2,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamCommandOutputRequest) Reset() {
+	*x = StreamCommandOutputRequest{}
+	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamCommandOutputRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamCommandOutputRequest) ProtoMessage() {}
+
+func (x *StreamCommandOutputRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamCommandOutputRequest.ProtoReflect.Descriptor instead.
+func (*StreamCommandOutputRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *StreamCommandOutputRequest) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+func (x *StreamCommandOutputRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+type StreamCommandOutputResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Command       *BackgroundCommandView `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	Tail          string                 `protobuf:"bytes,2,opt,name=tail,proto3" json:"tail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamCommandOutputResponse) Reset() {
+	*x = StreamCommandOutputResponse{}
+	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamCommandOutputResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamCommandOutputResponse) ProtoMessage() {}
+
+func (x *StreamCommandOutputResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamCommandOutputResponse.ProtoReflect.Descriptor instead.
+func (*StreamCommandOutputResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *StreamCommandOutputResponse) GetCommand() *BackgroundCommandView {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *StreamCommandOutputResponse) GetTail() string {
+	if x != nil {
+		return x.Tail
+	}
+	return ""
+}
+
 type StopCommandRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ThreadId      string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
@@ -2602,7 +2706,7 @@ type StopCommandRequest struct {
 
 func (x *StopCommandRequest) Reset() {
 	*x = StopCommandRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2614,7 +2718,7 @@ func (x *StopCommandRequest) String() string {
 func (*StopCommandRequest) ProtoMessage() {}
 
 func (x *StopCommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[37]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2627,7 +2731,7 @@ func (x *StopCommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCommandRequest.ProtoReflect.Descriptor instead.
 func (*StopCommandRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{37}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *StopCommandRequest) GetThreadId() string {
@@ -2653,7 +2757,7 @@ type StopCommandResponse struct {
 
 func (x *StopCommandResponse) Reset() {
 	*x = StopCommandResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2665,7 +2769,7 @@ func (x *StopCommandResponse) String() string {
 func (*StopCommandResponse) ProtoMessage() {}
 
 func (x *StopCommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[38]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2678,7 +2782,7 @@ func (x *StopCommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCommandResponse.ProtoReflect.Descriptor instead.
 func (*StopCommandResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{38}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *StopCommandResponse) GetCommand() *BackgroundCommandView {
@@ -2699,7 +2803,7 @@ type ListReviewsRequest struct {
 
 func (x *ListReviewsRequest) Reset() {
 	*x = ListReviewsRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2711,7 +2815,7 @@ func (x *ListReviewsRequest) String() string {
 func (*ListReviewsRequest) ProtoMessage() {}
 
 func (x *ListReviewsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[39]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2724,7 +2828,7 @@ func (x *ListReviewsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReviewsRequest.ProtoReflect.Descriptor instead.
 func (*ListReviewsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{39}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListReviewsRequest) GetThreadId() string {
@@ -2759,7 +2863,7 @@ type ListReviewsResponse struct {
 
 func (x *ListReviewsResponse) Reset() {
 	*x = ListReviewsResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2771,7 +2875,7 @@ func (x *ListReviewsResponse) String() string {
 func (*ListReviewsResponse) ProtoMessage() {}
 
 func (x *ListReviewsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[40]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2784,7 +2888,7 @@ func (x *ListReviewsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReviewsResponse.ProtoReflect.Descriptor instead.
 func (*ListReviewsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{40}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListReviewsResponse) GetRounds() []*ReviewRoundView {
@@ -2819,7 +2923,7 @@ type ListLineCommentsRequest struct {
 
 func (x *ListLineCommentsRequest) Reset() {
 	*x = ListLineCommentsRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2831,7 +2935,7 @@ func (x *ListLineCommentsRequest) String() string {
 func (*ListLineCommentsRequest) ProtoMessage() {}
 
 func (x *ListLineCommentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[41]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2844,7 +2948,7 @@ func (x *ListLineCommentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLineCommentsRequest.ProtoReflect.Descriptor instead.
 func (*ListLineCommentsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{41}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListLineCommentsRequest) GetThreadId() string {
@@ -2879,7 +2983,7 @@ type ListLineCommentsResponse struct {
 
 func (x *ListLineCommentsResponse) Reset() {
 	*x = ListLineCommentsResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2891,7 +2995,7 @@ func (x *ListLineCommentsResponse) String() string {
 func (*ListLineCommentsResponse) ProtoMessage() {}
 
 func (x *ListLineCommentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[42]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2904,7 +3008,7 @@ func (x *ListLineCommentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListLineCommentsResponse.ProtoReflect.Descriptor instead.
 func (*ListLineCommentsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{42}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListLineCommentsResponse) GetComments() []*SentLineComment {
@@ -2937,7 +3041,7 @@ type GetPullRequestChecksRequest struct {
 
 func (x *GetPullRequestChecksRequest) Reset() {
 	*x = GetPullRequestChecksRequest{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2949,7 +3053,7 @@ func (x *GetPullRequestChecksRequest) String() string {
 func (*GetPullRequestChecksRequest) ProtoMessage() {}
 
 func (x *GetPullRequestChecksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[43]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2962,7 +3066,7 @@ func (x *GetPullRequestChecksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPullRequestChecksRequest.ProtoReflect.Descriptor instead.
 func (*GetPullRequestChecksRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{43}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetPullRequestChecksRequest) GetThreadId() string {
@@ -2982,7 +3086,7 @@ type GetPullRequestChecksResponse struct {
 
 func (x *GetPullRequestChecksResponse) Reset() {
 	*x = GetPullRequestChecksResponse{}
-	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2994,7 +3098,7 @@ func (x *GetPullRequestChecksResponse) String() string {
 func (*GetPullRequestChecksResponse) ProtoMessage() {}
 
 func (x *GetPullRequestChecksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_threads_proto_msgTypes[44]
+	mi := &file_ariadne_v1_threads_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3007,7 +3111,7 @@ func (x *GetPullRequestChecksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPullRequestChecksResponse.ProtoReflect.Descriptor instead.
 func (*GetPullRequestChecksResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{44}
+	return file_ariadne_v1_threads_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetPullRequestChecksResponse) GetHeadSha() string {
@@ -3286,6 +3390,13 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"command_id\x18\x02 \x01(\tR\tcommandId\"k\n" +
 	"\x18GetCommandOutputResponse\x12;\n" +
 	"\acommand\x18\x01 \x01(\v2!.ariadne.v1.BackgroundCommandViewR\acommand\x12\x12\n" +
+	"\x04tail\x18\x02 \x01(\tR\x04tail\"X\n" +
+	"\x1aStreamCommandOutputRequest\x12\x1b\n" +
+	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x02 \x01(\tR\tcommandId\"n\n" +
+	"\x1bStreamCommandOutputResponse\x12;\n" +
+	"\acommand\x18\x01 \x01(\v2!.ariadne.v1.BackgroundCommandViewR\acommand\x12\x12\n" +
 	"\x04tail\x18\x02 \x01(\tR\x04tail\"P\n" +
 	"\x12StopCommandRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\x1d\n" +
@@ -3320,7 +3431,7 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"o\n" +
 	"\x1cGetPullRequestChecksResponse\x12\x19\n" +
 	"\bhead_sha\x18\x01 \x01(\tR\aheadSha\x124\n" +
-	"\x06checks\x18\x02 \x03(\v2\x1c.ariadne.v1.PullRequestCheckR\x06checks2\xfa\a\n" +
+	"\x06checks\x18\x02 \x03(\v2\x1c.ariadne.v1.PullRequestCheckR\x06checks2\xe4\b\n" +
 	"\rThreadService\x12Q\n" +
 	"\fResumeThread\x12\x1f.ariadne.v1.ResumeThreadRequest\x1a .ariadne.v1.ResumeThreadResponse\x12W\n" +
 	"\x0eCompleteThread\x12!.ariadne.v1.CompleteThreadRequest\x1a\".ariadne.v1.CompleteThreadResponse\x12E\n" +
@@ -3328,7 +3439,8 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\x0eSetThreadModel\x12!.ariadne.v1.SetThreadModelRequest\x1a\".ariadne.v1.SetThreadModelResponse\x12l\n" +
 	"\x15RemoveThreadReference\x12(.ariadne.v1.RemoveThreadReferenceRequest\x1a).ariadne.v1.RemoveThreadReferenceResponse\x12f\n" +
 	"\x13KeepThreadReference\x12&.ariadne.v1.KeepThreadReferenceRequest\x1a'.ariadne.v1.KeepThreadReferenceResponse\x12]\n" +
-	"\x10GetCommandOutput\x12#.ariadne.v1.GetCommandOutputRequest\x1a$.ariadne.v1.GetCommandOutputResponse\x12N\n" +
+	"\x10GetCommandOutput\x12#.ariadne.v1.GetCommandOutputRequest\x1a$.ariadne.v1.GetCommandOutputResponse\x12h\n" +
+	"\x13StreamCommandOutput\x12&.ariadne.v1.StreamCommandOutputRequest\x1a'.ariadne.v1.StreamCommandOutputResponse0\x01\x12N\n" +
 	"\vStopCommand\x12\x1e.ariadne.v1.StopCommandRequest\x1a\x1f.ariadne.v1.StopCommandResponse\x12N\n" +
 	"\vListReviews\x12\x1e.ariadne.v1.ListReviewsRequest\x1a\x1f.ariadne.v1.ListReviewsResponse\x12]\n" +
 	"\x10ListLineComments\x12#.ariadne.v1.ListLineCommentsRequest\x1a$.ariadne.v1.ListLineCommentsResponse\x12i\n" +
@@ -3349,7 +3461,7 @@ func file_ariadne_v1_threads_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_threads_proto_rawDescData
 }
 
-var file_ariadne_v1_threads_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_ariadne_v1_threads_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_ariadne_v1_threads_proto_goTypes = []any{
 	(*TokenUsageTotals)(nil),              // 0: ariadne.v1.TokenUsageTotals
 	(*TodoProgress)(nil),                  // 1: ariadne.v1.TodoProgress
@@ -3388,21 +3500,23 @@ var file_ariadne_v1_threads_proto_goTypes = []any{
 	(*KeepThreadReferenceResponse)(nil),   // 34: ariadne.v1.KeepThreadReferenceResponse
 	(*GetCommandOutputRequest)(nil),       // 35: ariadne.v1.GetCommandOutputRequest
 	(*GetCommandOutputResponse)(nil),      // 36: ariadne.v1.GetCommandOutputResponse
-	(*StopCommandRequest)(nil),            // 37: ariadne.v1.StopCommandRequest
-	(*StopCommandResponse)(nil),           // 38: ariadne.v1.StopCommandResponse
-	(*ListReviewsRequest)(nil),            // 39: ariadne.v1.ListReviewsRequest
-	(*ListReviewsResponse)(nil),           // 40: ariadne.v1.ListReviewsResponse
-	(*ListLineCommentsRequest)(nil),       // 41: ariadne.v1.ListLineCommentsRequest
-	(*ListLineCommentsResponse)(nil),      // 42: ariadne.v1.ListLineCommentsResponse
-	(*GetPullRequestChecksRequest)(nil),   // 43: ariadne.v1.GetPullRequestChecksRequest
-	(*GetPullRequestChecksResponse)(nil),  // 44: ariadne.v1.GetPullRequestChecksResponse
-	nil,                                   // 45: ariadne.v1.TokenUsageTotals.CostEntry
-	(*structpb.Struct)(nil),               // 46: google.protobuf.Struct
+	(*StreamCommandOutputRequest)(nil),    // 37: ariadne.v1.StreamCommandOutputRequest
+	(*StreamCommandOutputResponse)(nil),   // 38: ariadne.v1.StreamCommandOutputResponse
+	(*StopCommandRequest)(nil),            // 39: ariadne.v1.StopCommandRequest
+	(*StopCommandResponse)(nil),           // 40: ariadne.v1.StopCommandResponse
+	(*ListReviewsRequest)(nil),            // 41: ariadne.v1.ListReviewsRequest
+	(*ListReviewsResponse)(nil),           // 42: ariadne.v1.ListReviewsResponse
+	(*ListLineCommentsRequest)(nil),       // 43: ariadne.v1.ListLineCommentsRequest
+	(*ListLineCommentsResponse)(nil),      // 44: ariadne.v1.ListLineCommentsResponse
+	(*GetPullRequestChecksRequest)(nil),   // 45: ariadne.v1.GetPullRequestChecksRequest
+	(*GetPullRequestChecksResponse)(nil),  // 46: ariadne.v1.GetPullRequestChecksResponse
+	nil,                                   // 47: ariadne.v1.TokenUsageTotals.CostEntry
+	(*structpb.Struct)(nil),               // 48: google.protobuf.Struct
 }
 var file_ariadne_v1_threads_proto_depIdxs = []int32{
-	45, // 0: ariadne.v1.TokenUsageTotals.cost:type_name -> ariadne.v1.TokenUsageTotals.CostEntry
+	47, // 0: ariadne.v1.TokenUsageTotals.cost:type_name -> ariadne.v1.TokenUsageTotals.CostEntry
 	6,  // 1: ariadne.v1.ThreadPullRequest.checks:type_name -> ariadne.v1.PullRequestChecksSummary
-	46, // 2: ariadne.v1.ThreadReference.settings:type_name -> google.protobuf.Struct
+	48, // 2: ariadne.v1.ThreadReference.settings:type_name -> google.protobuf.Struct
 	2,  // 3: ariadne.v1.ThreadView.last_artifacts:type_name -> ariadne.v1.ThreadArtifactRef
 	3,  // 4: ariadne.v1.ThreadView.workspace:type_name -> ariadne.v1.ThreadWorkspace
 	4,  // 5: ariadne.v1.ThreadView.merged:type_name -> ariadne.v1.ThreadBranchMerge
@@ -3426,37 +3540,40 @@ var file_ariadne_v1_threads_proto_depIdxs = []int32{
 	13, // 23: ariadne.v1.RemoveThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
 	13, // 24: ariadne.v1.KeepThreadReferenceResponse.thread:type_name -> ariadne.v1.ThreadView
 	15, // 25: ariadne.v1.GetCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
-	15, // 26: ariadne.v1.StopCommandResponse.command:type_name -> ariadne.v1.BackgroundCommandView
-	21, // 27: ariadne.v1.ListReviewsResponse.rounds:type_name -> ariadne.v1.ReviewRoundView
-	17, // 28: ariadne.v1.ListLineCommentsResponse.comments:type_name -> ariadne.v1.SentLineComment
-	22, // 29: ariadne.v1.GetPullRequestChecksResponse.checks:type_name -> ariadne.v1.PullRequestCheck
-	23, // 30: ariadne.v1.ThreadService.ResumeThread:input_type -> ariadne.v1.ResumeThreadRequest
-	25, // 31: ariadne.v1.ThreadService.CompleteThread:input_type -> ariadne.v1.CompleteThreadRequest
-	27, // 32: ariadne.v1.ThreadService.EndAside:input_type -> ariadne.v1.EndAsideRequest
-	29, // 33: ariadne.v1.ThreadService.SetThreadModel:input_type -> ariadne.v1.SetThreadModelRequest
-	31, // 34: ariadne.v1.ThreadService.RemoveThreadReference:input_type -> ariadne.v1.RemoveThreadReferenceRequest
-	33, // 35: ariadne.v1.ThreadService.KeepThreadReference:input_type -> ariadne.v1.KeepThreadReferenceRequest
-	35, // 36: ariadne.v1.ThreadService.GetCommandOutput:input_type -> ariadne.v1.GetCommandOutputRequest
-	37, // 37: ariadne.v1.ThreadService.StopCommand:input_type -> ariadne.v1.StopCommandRequest
-	39, // 38: ariadne.v1.ThreadService.ListReviews:input_type -> ariadne.v1.ListReviewsRequest
-	41, // 39: ariadne.v1.ThreadService.ListLineComments:input_type -> ariadne.v1.ListLineCommentsRequest
-	43, // 40: ariadne.v1.ThreadService.GetPullRequestChecks:input_type -> ariadne.v1.GetPullRequestChecksRequest
-	24, // 41: ariadne.v1.ThreadService.ResumeThread:output_type -> ariadne.v1.ResumeThreadResponse
-	26, // 42: ariadne.v1.ThreadService.CompleteThread:output_type -> ariadne.v1.CompleteThreadResponse
-	28, // 43: ariadne.v1.ThreadService.EndAside:output_type -> ariadne.v1.EndAsideResponse
-	30, // 44: ariadne.v1.ThreadService.SetThreadModel:output_type -> ariadne.v1.SetThreadModelResponse
-	32, // 45: ariadne.v1.ThreadService.RemoveThreadReference:output_type -> ariadne.v1.RemoveThreadReferenceResponse
-	34, // 46: ariadne.v1.ThreadService.KeepThreadReference:output_type -> ariadne.v1.KeepThreadReferenceResponse
-	36, // 47: ariadne.v1.ThreadService.GetCommandOutput:output_type -> ariadne.v1.GetCommandOutputResponse
-	38, // 48: ariadne.v1.ThreadService.StopCommand:output_type -> ariadne.v1.StopCommandResponse
-	40, // 49: ariadne.v1.ThreadService.ListReviews:output_type -> ariadne.v1.ListReviewsResponse
-	42, // 50: ariadne.v1.ThreadService.ListLineComments:output_type -> ariadne.v1.ListLineCommentsResponse
-	44, // 51: ariadne.v1.ThreadService.GetPullRequestChecks:output_type -> ariadne.v1.GetPullRequestChecksResponse
-	41, // [41:52] is the sub-list for method output_type
-	30, // [30:41] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	15, // 26: ariadne.v1.StreamCommandOutputResponse.command:type_name -> ariadne.v1.BackgroundCommandView
+	15, // 27: ariadne.v1.StopCommandResponse.command:type_name -> ariadne.v1.BackgroundCommandView
+	21, // 28: ariadne.v1.ListReviewsResponse.rounds:type_name -> ariadne.v1.ReviewRoundView
+	17, // 29: ariadne.v1.ListLineCommentsResponse.comments:type_name -> ariadne.v1.SentLineComment
+	22, // 30: ariadne.v1.GetPullRequestChecksResponse.checks:type_name -> ariadne.v1.PullRequestCheck
+	23, // 31: ariadne.v1.ThreadService.ResumeThread:input_type -> ariadne.v1.ResumeThreadRequest
+	25, // 32: ariadne.v1.ThreadService.CompleteThread:input_type -> ariadne.v1.CompleteThreadRequest
+	27, // 33: ariadne.v1.ThreadService.EndAside:input_type -> ariadne.v1.EndAsideRequest
+	29, // 34: ariadne.v1.ThreadService.SetThreadModel:input_type -> ariadne.v1.SetThreadModelRequest
+	31, // 35: ariadne.v1.ThreadService.RemoveThreadReference:input_type -> ariadne.v1.RemoveThreadReferenceRequest
+	33, // 36: ariadne.v1.ThreadService.KeepThreadReference:input_type -> ariadne.v1.KeepThreadReferenceRequest
+	35, // 37: ariadne.v1.ThreadService.GetCommandOutput:input_type -> ariadne.v1.GetCommandOutputRequest
+	37, // 38: ariadne.v1.ThreadService.StreamCommandOutput:input_type -> ariadne.v1.StreamCommandOutputRequest
+	39, // 39: ariadne.v1.ThreadService.StopCommand:input_type -> ariadne.v1.StopCommandRequest
+	41, // 40: ariadne.v1.ThreadService.ListReviews:input_type -> ariadne.v1.ListReviewsRequest
+	43, // 41: ariadne.v1.ThreadService.ListLineComments:input_type -> ariadne.v1.ListLineCommentsRequest
+	45, // 42: ariadne.v1.ThreadService.GetPullRequestChecks:input_type -> ariadne.v1.GetPullRequestChecksRequest
+	24, // 43: ariadne.v1.ThreadService.ResumeThread:output_type -> ariadne.v1.ResumeThreadResponse
+	26, // 44: ariadne.v1.ThreadService.CompleteThread:output_type -> ariadne.v1.CompleteThreadResponse
+	28, // 45: ariadne.v1.ThreadService.EndAside:output_type -> ariadne.v1.EndAsideResponse
+	30, // 46: ariadne.v1.ThreadService.SetThreadModel:output_type -> ariadne.v1.SetThreadModelResponse
+	32, // 47: ariadne.v1.ThreadService.RemoveThreadReference:output_type -> ariadne.v1.RemoveThreadReferenceResponse
+	34, // 48: ariadne.v1.ThreadService.KeepThreadReference:output_type -> ariadne.v1.KeepThreadReferenceResponse
+	36, // 49: ariadne.v1.ThreadService.GetCommandOutput:output_type -> ariadne.v1.GetCommandOutputResponse
+	38, // 50: ariadne.v1.ThreadService.StreamCommandOutput:output_type -> ariadne.v1.StreamCommandOutputResponse
+	40, // 51: ariadne.v1.ThreadService.StopCommand:output_type -> ariadne.v1.StopCommandResponse
+	42, // 52: ariadne.v1.ThreadService.ListReviews:output_type -> ariadne.v1.ListReviewsResponse
+	44, // 53: ariadne.v1.ThreadService.ListLineComments:output_type -> ariadne.v1.ListLineCommentsResponse
+	46, // 54: ariadne.v1.ThreadService.GetPullRequestChecks:output_type -> ariadne.v1.GetPullRequestChecksResponse
+	43, // [43:55] is the sub-list for method output_type
+	31, // [31:43] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_threads_proto_init() }
@@ -3478,17 +3595,17 @@ func file_ariadne_v1_threads_proto_init() {
 		(*SetThreadModelRequest_Model)(nil),
 		(*SetThreadModelRequest_UseDefault)(nil),
 	}
-	file_ariadne_v1_threads_proto_msgTypes[39].OneofWrappers = []any{}
-	file_ariadne_v1_threads_proto_msgTypes[40].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[41].OneofWrappers = []any{}
 	file_ariadne_v1_threads_proto_msgTypes[42].OneofWrappers = []any{}
+	file_ariadne_v1_threads_proto_msgTypes[43].OneofWrappers = []any{}
+	file_ariadne_v1_threads_proto_msgTypes[44].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_threads_proto_rawDesc), len(file_ariadne_v1_threads_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   46,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

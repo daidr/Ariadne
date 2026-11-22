@@ -583,12 +583,13 @@ func anyToProtoLocalizedText(raw any) *ariadnev1.LocalizedText {
 
 func toProtoSettingField(field sdk.SettingField) *ariadnev1.SettingField {
 	out := &ariadnev1.SettingField{
-		Type:        field.Type,
-		Title:       toProtoLocalizedText(field.Title),
-		Description: toProtoOptionalLocalizedText(field.Description),
-		Secret:      field.Secret,
-		Directory:   field.Directory,
-		Options:     slices.Clone(field.Options),
+		Type:          field.Type,
+		Title:         toProtoLocalizedText(field.Title),
+		Description:   toProtoOptionalLocalizedText(field.Description),
+		Secret:        field.Secret,
+		Directory:     field.Directory,
+		Options:       slices.Clone(field.Options),
+		NetworkOrigin: field.NetworkOrigin,
 	}
 	if field.Default != nil {
 		if val, err := structpb.NewValue(field.Default); err == nil {
@@ -889,7 +890,7 @@ func toProtoSearchSettings(raw map[string]any) *ariadnev1.SearchSettings {
 			Ready:        svcReady,
 		})
 	}
-	return &ariadnev1.SearchSettings{
+	out := &ariadnev1.SearchSettings{
 		Provider: provider,
 		Ready:    ready,
 		KeySet:   keySet,
@@ -898,6 +899,10 @@ func toProtoSearchSettings(raw map[string]any) *ariadnev1.SearchSettings {
 		Plugins:  plugins,
 		Services: services,
 	}
+	if disabledProvider, _ := raw["disabledProvider"].(string); disabledProvider != "" {
+		out.DisabledProvider = &disabledProvider
+	}
+	return out
 }
 
 func toProtoModelPriceFromSDK(price *sdk.ModelPrice) *ariadnev1.ModelPrice {

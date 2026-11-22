@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -159,9 +160,31 @@ func ParseStatus(output string) []string {
 	return paths
 }
 
-type BranchInput struct{ Branch, Base, BaseRef, Worktree string }
+type BranchInput struct{ Branch, Base, BaseRef, RemoteBaseRef, Worktree string }
 
-func branchRevisions(ctx context.Context, git GitRun, branch, baseRef string) (sdk.BranchRevisions, error) {
+// resolveBaseSHA picks baseRef, or upgrades to remoteBaseRef when baseRef is a
+// strict ancestor of remoteBaseRef (for example, local master lagging behind
+// origin/master after the branch merged origin/master). Local unpushed commits
+// on baseRef are preserved because baseRef is not an ancestor of remoteBaseRef.
+func resolveBaseSHA(ctx context.Context, git GitRun, baseRef, remoteBaseRef string) string {
+	baseSHA := commitSHA(ctx, git, baseRef, "")
+	if remoteBaseRef == "" {
+		return baseSHA
+	}
+	remoteSHA := commitSHA(ctx, git, remoteBaseRef, "")
+	if remoteSHA == "" || remoteSHA == baseSHA {
+		return baseSHA
+	}
+	if baseSHA == "" {
+		return remoteSHA
+	}
+	if git(ctx, []string{"merge-base", "--is-ancestor", baseSHA, remoteSHA}, GitOptions{}).ExitCode == 0 {
+		return remoteSHA
+	}
+	return baseSHA
+}
+
+func branchRevisions(ctx context.Context, git GitRun, branch, baseRef, remoteBaseRef string) (sdk.BranchRevisions, error) {
 	var head, base string
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -171,7 +194,7 @@ func branchRevisions(ctx context.Context, git GitRun, branch, baseRef string) (s
 	}()
 	go func() {
 		defer wg.Done()
-		base = commitSHA(ctx, git, baseRef, "")
+		base = resolveBaseSHA(ctx, git, baseRef, remoteBaseRef)
 	}()
 	wg.Wait()
 	if head == "" {
@@ -181,7 +204,7 @@ func branchRevisions(ctx context.Context, git GitRun, branch, baseRef string) (s
 }
 
 func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.BranchChanges, error) {
-	revisions, err := branchRevisions(ctx, git, input.Branch, input.BaseRef)
+	revisions, err := branchRevisions(ctx, git, input.Branch, input.BaseRef, input.RemoteBaseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +241,8 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			status := git(ctx, []string{"status", "--porcelain=v1", "-z", "--untracked-files=normal"}, GitOptions{Directory: input.Worktree, Whole: true})
+			statusArgs := append(worktreeConfigArgs(ctx, input.Worktree), "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+			status := git(ctx, statusArgs, GitOptions{Directory: input.Worktree, Whole: true})
 			if status.ExitCode == 0 {
 				uncommitted = ParseStatus(status.Stdout)
 			}
@@ -273,6 +297,35 @@ func validRef(ctx context.Context, git GitRun, ref string) error {
 	}
 	return nil
 }
+func seedSnapshotIndex(gitDir, snapIndex string) {
+	realIndex := filepath.Join(gitDir, "index")
+	data, err := os.ReadFile(realIndex)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_ = os.Remove(snapIndex)
+		}
+		return
+	}
+	tmp, err := os.CreateTemp(gitDir, SnapshotIndex+".tmp-*")
+	if err != nil {
+		return
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return
+	}
+	if err := os.Rename(tmpName, snapIndex); err != nil {
+		_ = os.Remove(tmpName)
+		_ = os.WriteFile(snapIndex, data, 0600)
+	}
+}
+
 func WorktreeSnapshot(ctx context.Context, git GitRun, cwd, threadID string) (string, error) {
 	if err := validRef(ctx, git, SnapshotRefs(threadID)+"snapshot"); err != nil {
 		return "", err
@@ -281,8 +334,12 @@ func WorktreeSnapshot(ctx context.Context, git GitRun, cwd, threadID string) (st
 	if dir.ExitCode != 0 {
 		return "", gitFailure(dir, "git rev-parse")
 	}
-	options := GitOptions{Directory: cwd, Env: map[string]string{"GIT_INDEX_FILE": filepath.Join(strings.TrimSpace(dir.Stdout), SnapshotIndex)}}
-	add := git(ctx, []string{"add", "--all"}, options)
+	gitDir := strings.TrimSpace(dir.Stdout)
+	snapIndex := filepath.Join(gitDir, SnapshotIndex)
+	seedSnapshotIndex(gitDir, snapIndex)
+	options := GitOptions{Directory: cwd, Env: map[string]string{"GIT_INDEX_FILE": snapIndex}}
+	addArgs := append(worktreeConfigArgs(ctx, cwd), "-c", "core.safecrlf=false", "add", "--all")
+	add := git(ctx, addArgs, options)
 	if add.ExitCode != 0 {
 		return "", gitFailure(add, "git add")
 	}

@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/threads.proto";
+import "ariadne/v1/updates.proto";
+
+// EventService streams durable event-log entries and transient real-time snapshots
+// (live commands, background commands, reply drafts, and software update progress)
+// over ConnectRPC binary Server Streaming.
+service EventService {
+  rpc StreamEvents(StreamEventsRequest) returns (stream StreamEventsResponse);
+}
+
+message StreamEventsRequest {
+  // Optional cursor: replay durable events strictly after this sequence number.
+  // When omitted, starts from the server's latest sequence number.
+  optional int64 after_seq = 1 [jstype = JS_NUMBER];
+  // Optional project filter. Empty or omitted subscribes to all projects.
+  optional string project_id = 2;
+}
+
+message StreamEventsResponse {
+  oneof payload {
+    // Emitted immediately after subscribing so clients observe stream open
+    // and receive the starting sequence cursor before replay and snapshots.
+    StreamReady ready = 1;
+    // Periodic keepalive ping.
+    StreamHeartbeat heartbeat = 2;
+    // Durable event from the SQLite event store.
+    StoredEvent event = 3;
+    // Transient live running command snapshot (command absent means ended).
+    LiveCommandUpdate live = 4;
+    // Transient background commands list for a conversation.
+    BackgroundCommandsUpdate background = 5;
+    // Transient streaming reply draft snapshot (draft absent means withdrawn).
+    ReplyDraftUpdate draft = 6;
+    // Transient software update status / download progress snapshot.
+    UpdateStatus update_status = 7;
+  }
+}
+
+message StreamReady {
+  int64 last_seq = 1 [jstype = JS_NUMBER];
+}
+
+message StreamHeartbeat {
+  int64 server_time_ms = 1 [jstype = JS_NUMBER];
+}
+
+message StoredEvent {
+  int64 seq = 1 [jstype = JS_NUMBER];
+  string id = 2;
+  string project_id = 3;
+  string type = 4;
+  int64 at = 5 [jstype = JS_NUMBER];
+  bytes raw_json = 6;
+}
+
+message LiveCommand {
+  string project_id = 1;
+  string conversation_id = 2;
+  string command = 3;
+  string cwd = 4;
+  int64 started_at = 5 [jstype = JS_NUMBER];
+  string tail = 6;
+}
+
+message LiveCommandUpdate {
+  string project_id = 1;
+  string conversation_id = 2;
+  optional LiveCommand command = 3;
+}
+
+message BackgroundCommandsUpdate {
+  string project_id = 1;
+  string conversation_id = 2;
+  repeated BackgroundCommandView commands = 3;
+}
+
+message ReplyDraft {
+  string message_id = 1;
+  string text = 2;
+  // Optional JSON-encoded display blocks array (empty when omitted).
+  bytes blocks_json = 3;
+  int64 started_at = 4 [jstype = JS_NUMBER];
+  bool posted = 5;
+}
+
+message ReplyDraftUpdate {
+  string project_id = 1;
+  string conversation_id = 2;
+  optional ReplyDraft draft = 3;
+}

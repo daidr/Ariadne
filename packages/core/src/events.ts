@@ -550,8 +550,8 @@ export interface EventMap {
   'workspace.source.removed': EventMap['workspace.source.opened']
   /** The user merged the thread's branch into its base; the base now ends with `sha`. */
   'branch.merged': { threadId: string } & BranchMerge
-  /** The thread's current branch diff totals were computed from its branch against its base. */
-  'branch.changes_synced': { threadId: string; totals: ChangeTotals }
+  /** Cached branch change totals were reconciled with the live git diff. */
+  'branch.changes_synced': { threadId: string; changes: ChangeTotals }
   /**
    * The user took that merge back: the base is where it was before `sha`, and the thread's
    * changes wait to be merged again.

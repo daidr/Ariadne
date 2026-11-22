@@ -72,3 +72,45 @@ func (store *Store) RemovePluginPath(path string) error {
 		return nil
 	})
 }
+
+func disabledPlugins(config Object) []string {
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, raw := range list(config["disabledPlugins"]) {
+		id, ok := raw.(string)
+		if !ok || id == "" || len(id) > 64 || strings.ContainsRune(id, 0) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (store *Store) DisabledPlugins() []string { return disabledPlugins(store.snapshot()) }
+
+func (store *Store) IsPluginDisabled(id string) bool {
+	return slices.Contains(disabledPlugins(store.snapshot()), id)
+}
+
+func (store *Store) SetPluginDisabled(id string, disabled bool) error {
+	if id == "" || len(id) > 64 || strings.ContainsRune(id, 0) {
+		return bad("pluginId")
+	}
+	return store.update(func(next Object) error {
+		ids := disabledPlugins(next)
+		if disabled {
+			if !slices.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		} else {
+			ids = slices.DeleteFunc(ids, func(item string) bool { return item == id })
+		}
+		stored := make([]any, 0, len(ids))
+		for _, item := range ids {
+			stored = append(stored, item)
+		}
+		next["disabledPlugins"] = stored
+		return nil
+	})
+}

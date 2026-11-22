@@ -166,7 +166,7 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 
 	// When uncommitted changes exist and thread.Changes is already recorded (e.g. from turnChanges),
 	// ThreadChanges must not downgrade thread.Changes to commit-only totals.
-	if err := repo.RecordBranchChanges(ctx, thread.ID, &core.ChangeTotals{Files: 2, Added: 10, Removed: 1}); err != nil {
+	if err := repo.SyncBranchChanges(ctx, thread.ID, core.ChangeTotals{Files: 2, Added: 10, Removed: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ws.WriteFile(ctx, "draft.txt", "wip\n"); err != nil {

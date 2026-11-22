@@ -1,21 +1,23 @@
 package server
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/realtime"
 )
 
-func TestSSEReconnectIncludesCurrentLiveBackgroundAndDraftState(t *testing.T) {
+func TestEventStreamReconnectIncludesCurrentLiveBackgroundAndDraftState(t *testing.T) {
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
 	if err != nil {
 		t.Fatal(err)
@@ -52,46 +54,71 @@ func TestSSEReconnectIncludesCurrentLiveBackgroundAndDraftState(t *testing.T) {
 	}
 	defer api.Close()
 	finished := make(chan struct{}, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { api.ServeHTTP(w, r); finished <- struct{}{} }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.ServeHTTP(w, r)
+		select {
+		case finished <- struct{}{}:
+		default:
+		}
+	}))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, "GET", server.URL+"/api/events?projectId=p", nil)
+
+	client := ariadnev1connect.NewEventServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	projectID := "p"
+	stream, err := client.StreamEvents(ctx, connect.NewRequest(&ariadnev1.StreamEventsRequest{
+		ProjectId: &projectID,
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Authorization", "Bearer secret")
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
+
+	if !stream.Receive() {
+		t.Fatalf("expected ready frame, err=%v", stream.Err())
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		t.Fatal("SSE failed", response.StatusCode)
+	if stream.Msg().GetReady() == nil {
+		t.Fatalf("expected ready first, got %+v", stream.Msg())
 	}
-	reader := bufio.NewReader(response.Body)
-	for _, kind := range []string{"live", "background", "draft"} {
-		var frame strings.Builder
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				t.Fatal(err)
-			}
-			frame.WriteString(line)
-			if line == "\n" {
-				break
-			}
+
+	var gotLive, gotBackground, gotDraft bool
+	for range 3 {
+		if !stream.Receive() {
+			t.Fatalf("expected transient snapshot frame, err=%v", stream.Err())
 		}
-		text := frame.String()
-		if !strings.Contains(text, "event: "+kind+"\n") || !strings.Contains(text, `"projectId":"p"`) || strings.Contains(text, "private") {
-			t.Fatalf("wrong initial %s frame: %s", kind, text)
+		switch payload := stream.Msg().Payload.(type) {
+		case *ariadnev1.StreamEventsResponse_Live:
+			if payload.Live.GetProjectId() != "p" || payload.Live.GetCommand().GetCommand() != "build" {
+				t.Fatalf("unexpected live snapshot: %+v", payload.Live)
+			}
+			gotLive = true
+		case *ariadnev1.StreamEventsResponse_Background:
+			if payload.Background.GetProjectId() != "p" || len(payload.Background.GetCommands()) != 1 || payload.Background.GetCommands()[0].GetId() != "cmd-1" {
+				t.Fatalf("unexpected background snapshot: %+v", payload.Background)
+			}
+			gotBackground = true
+		case *ariadnev1.StreamEventsResponse_Draft:
+			if payload.Draft.GetProjectId() != "p" || payload.Draft.GetDraft().GetText() != "回复草稿" {
+				t.Fatalf("unexpected draft snapshot: %+v", payload.Draft)
+			}
+			gotDraft = true
+		default:
+			t.Fatalf("unexpected initial frame: %+v", stream.Msg())
 		}
 	}
+	if !gotLive || !gotBackground || !gotDraft {
+		t.Fatalf("missing initial snapshots: live=%v background=%v draft=%v", gotLive, gotBackground, gotDraft)
+	}
+
 	cancel()
-	response.Body.Close()
+	_ = stream.Close()
 	select {
 	case <-finished:
 	case <-time.After(time.Second):
-		t.Fatal("SSE state subscription retained after disconnect")
+		t.Fatal("event stream state subscription retained after disconnect")
 	}
 }

@@ -63,8 +63,9 @@ func DeepSeekProvider(client *http.Client) sdk.SearchProvider {
 
 func DeepSeekPlugin(client *http.Client) sdk.Plugin {
 	return sdk.Plugin{
-		ID:   "search-deepseek",
-		Name: sdk.LocalizedText{"zh-CN": "DeepSeek 搜索", "en": "DeepSeek Search"},
+		ID:       "search-deepseek",
+		Name:     sdk.LocalizedText{"zh-CN": "DeepSeek 搜索", "en": "DeepSeek Search"},
+		Provides: sdk.PluginProvides{Searches: []string{"deepseek"}},
 		Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
 			if _, err := pc.RegisterSearch(DeepSeekProvider(client)); err != nil {
 				return nil, err

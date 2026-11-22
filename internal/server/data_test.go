@@ -21,15 +21,35 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
-func bearerClientInterceptor(token string) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if token != "" {
-				req.Header().Set("Authorization", "Bearer "+token)
-			}
-			return next(ctx, req)
+type bearerInterceptor struct {
+	token string
+}
+
+func (b bearerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		if b.token != "" {
+			req.Header().Set("Authorization", "Bearer "+b.token)
 		}
+		return next(ctx, req)
 	}
+}
+
+func (b bearerInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		if b.token != "" {
+			conn.RequestHeader().Set("Authorization", "Bearer "+b.token)
+		}
+		return conn
+	}
+}
+
+func (b bearerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return next
+}
+
+func bearerClientInterceptor(token string) connect.Interceptor {
+	return bearerInterceptor{token: token}
 }
 
 func extractLocalizedError(t *testing.T, err error) (*connect.Error, *ariadnev1.LocalizedError) {

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,12 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/dashboard"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestDashboardRefreshHTTP(t *testing.T) {
+func TestDashboardRefreshConnect(t *testing.T) {
 	content := func(source any) string {
 		value := object{"version": 1, "dashboard": object{"version": 1, "widgets": []any{}}, "data": object{"keep": []any{1}}}
 		if source != nil {
@@ -23,18 +26,6 @@ func TestDashboardRefreshHTTP(t *testing.T) {
 		}
 		return encoded(value)
 	}
-	requests := []apiRequest{}
-	add := func(name, kind, body string) {
-		requests = append(requests, apiRequest{Method: "POST", Path: "/api/projects/prj_a/artifacts", Save: name, Body: object{"kind": kind, "title": "Dashboard", "content": body}}, apiRequest{Method: "POST", Path: "/api/artifacts/@" + name + "@/refresh"})
-	}
-	add("live", "dashboard", content(object{"kind": "fixture", "settings": object{"query": "open"}}))
-	requests = append(requests, apiRequest{Method: "GET", Path: "/api/artifacts/@live@"})
-	add("static", "dashboard", content(nil))
-	add("unknown", "dashboard", content(object{"kind": "missing", "settings": object{}}))
-	add("bad", "dashboard", content(object{"kind": "fixture", "settings": object{"query": 42}}))
-	add("fail", "dashboard", content(object{"kind": "fixture", "settings": object{"query": "fail"}}))
-	add("document", "document", "# Text")
-	requests = append(requests, apiRequest{Method: "POST", Path: "/api/artifacts/missing/refresh"})
 	dir := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1800000000000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "dashboard.sqlite"), Now: now})
@@ -64,25 +55,56 @@ func TestDashboardRefreshHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	aliases := map[string]string{}
-	for _, item := range requests {
-		path := item.Path
-		for key, value := range aliases {
-			path = strings.ReplaceAll(path, "@"+key+"@", value)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	client := ariadnev1connect.NewArtifactServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+
+	makeArtifact := func(kind, body string) string {
+		t.Helper()
+		art, err := repo.CreateArtifact(t.Context(), "prj_a", core.NewArtifact{
+			Kind:    kind,
+			Title:   "Dashboard",
+			Author:  "user",
+			Content: body,
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		request := httptest.NewRequest(item.Method, path, strings.NewReader(encoded(item.Body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err, response.Body.String())
-		}
-		if item.Save != "" {
-			aliases[item.Save] = body.(map[string]any)["artifact"].(map[string]any)["id"].(string)
-		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
+		return art.ID
+	}
+
+	liveID := makeArtifact("dashboard", content(object{"kind": "fixture", "settings": object{"query": "open"}}))
+	refreshed, err := client.RefreshDashboard(t.Context(), connect.NewRequest(&ariadnev1.RefreshDashboardRequest{ArtifactId: liveID}))
+	if err != nil {
+		t.Fatalf("live RefreshDashboard failed: %v", err)
+	}
+	if !strings.Contains(refreshed.Msg.GetArtifact().GetContent(), `"value":5`) {
+		t.Fatalf("refreshed content missing fetched rows: %s", refreshed.Msg.GetArtifact().GetContent())
+	}
+	got, err := client.GetArtifact(t.Context(), connect.NewRequest(&ariadnev1.GetArtifactRequest{ArtifactId: liveID}))
+	if err != nil || !strings.Contains(got.Msg.GetArtifact().GetContent(), `"value":5`) {
+		t.Fatalf("GetArtifact after refresh failed: %v %+v", err, got)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		id       string
+		wantCode connect.Code
+	}{
+		{"static", makeArtifact("dashboard", content(nil)), connect.CodeInvalidArgument},
+		{"unknown", makeArtifact("dashboard", content(object{"kind": "missing", "settings": object{}})), connect.CodeInvalidArgument},
+		{"bad", makeArtifact("dashboard", content(object{"kind": "fixture", "settings": object{"query": 42}})), connect.CodeInvalidArgument},
+		{"fail", makeArtifact("dashboard", content(object{"kind": "fixture", "settings": object{"query": "fail"}})), connect.CodeInvalidArgument},
+		{"document", makeArtifact("document", "# Text"), connect.CodeInvalidArgument},
+		{"missing", "missing", connect.CodeNotFound},
+	} {
+		_, err := client.RefreshDashboard(t.Context(), connect.NewRequest(&ariadnev1.RefreshDashboardRequest{ArtifactId: tc.id}))
+		if connect.CodeOf(err) != tc.wantCode {
+			t.Fatalf("%s: RefreshDashboard code = %v (err=%v), want %v", tc.name, connect.CodeOf(err), err, tc.wantCode)
 		}
 	}
 }

@@ -152,6 +152,28 @@ onBeforeUnmount(
       event.data.conversationId === props.threadId
     ) {
       void branch.check(true)
+      return
+    }
+    if (
+      event.type === 'branch.merged' ||
+      event.type === 'branch.merge_undone' ||
+      event.type === 'pull_request.closed'
+    ) {
+      if (event.data.threadId === props.threadId) {
+        void branch.check(true)
+      } else {
+        void branch.check(false)
+      }
+      return
+    }
+    if (
+      (event.type === 'branch.conflicted' ||
+        event.type === 'pull_request.synced' ||
+        event.type === 'workspace.opened' ||
+        event.type === 'workspace.removed') &&
+      event.data.threadId === props.threadId
+    ) {
+      void branch.check(true)
     }
   }),
 )

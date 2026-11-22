@@ -60,7 +60,8 @@ func searchSchema(defaultBaseURL string) sdk.SettingsSchema {
 					"zh-CN": "留空使用默认地址；包含路径前缀，程序追加 /search",
 					"en":    "Leave blank for the default; include the path prefix. /search is appended",
 				},
-				Default: defaultBaseURL,
+				NetworkOrigin: true,
+				Default:       defaultBaseURL,
 			},
 			"apiKey": {
 				Type: "string",

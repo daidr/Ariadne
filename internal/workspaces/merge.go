@@ -82,7 +82,7 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 	return ThreadChanges{Changes: changes, Mergeable: mergeable}, nil
 }
 
-func changeTotals(files []sdk.ChangedFile) core.ChangeTotals {
+func summarizeChangedFiles(files []sdk.ChangedFile) core.ChangeTotals {
 	totals := core.ChangeTotals{Files: int64(len(files))}
 	for _, file := range files {
 		if file.Added != nil {
@@ -101,24 +101,24 @@ func (manager *Manager) syncBranchChanges(ctx context.Context, thread core.Threa
 	}
 	var totals *core.ChangeTotals
 	if len(changes.Uncommitted) == 0 {
-		value := changeTotals(changes.Files)
+		value := summarizeChangedFiles(changes.Files)
 		totals = &value
 	} else if thread.Changes == nil {
 		if branches != nil && branches.Snapshot != nil && branches.Diff != nil && changes.From != "" {
 			if snapshot, err := branches.Snapshot(ctx, thread.ID); err == nil && snapshot != nil && *snapshot != "" {
 				if files, err := branches.Diff(ctx, changes.From, *snapshot); err == nil {
-					value := changeTotals(files)
+					value := summarizeChangedFiles(files)
 					totals = &value
 				}
 			}
 		}
 		if totals == nil && len(changes.Files) > 0 {
-			value := changeTotals(changes.Files)
+			value := summarizeChangedFiles(changes.Files)
 			totals = &value
 		}
 	}
-	if totals != nil {
-		_ = manager.options.Repository.RecordBranchChanges(ctx, thread.ID, totals)
+	if totals != nil && (thread.Changes != nil || totals.Files > 0) && !core.SameChangeTotals(thread.Changes, *totals) {
+		_ = manager.options.Repository.SyncBranchChanges(ctx, thread.ID, *totals)
 	}
 }
 

@@ -98,7 +98,11 @@ func findByID(items []any, id string) Object {
 	}
 	return nil
 }
-func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo) ([]any, error) {
+func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, validate ...func(string, Object) error) ([]any, error) {
+	var validateSettings func(string, Object) error
+	if len(validate) > 0 {
+		validateSettings = validate[0]
+	}
 	body := object(input)
 	var changedModels []any
 	err := store.update(func(config Object) error {
@@ -116,13 +120,23 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo) ([]an
 			if id == "" {
 				return bad(at + ".id")
 			}
+			before := findByID(previousProviders, id)
 			kind := text(given["kind"])
 			info, ok := providerInfo(kinds, kind)
+			var settings Object
 			if !ok {
-				return bad(at + ".kind")
+				if before == nil || before["kind"] != kind {
+					return bad(at + ".kind")
+				}
+				settings = cloneMap(object(before["settings"]))
+			} else {
+				settings = storedProviderSecrets(kind, given["settings"], before, info)
+				if validateSettings != nil {
+					if err := validateSettings(kind, cloneMap(settings)); err != nil {
+						return err
+					}
+				}
 			}
-			before := findByID(previousProviders, id)
-			settings := storedProviderSecrets(kind, given["settings"], before, info)
 			headers, err := secretPairs(given["headers"], headerName.MatchString, object(object(before["request"])["headers"]), at+".headers")
 			if err != nil {
 				return err
@@ -273,9 +287,13 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo) ([]an
 		}
 		config["models"] = Object{"providers": providers, "models": models, "roles": roleConfig, "showCost": body["showCost"] == true}
 		changed := map[string]bool{}
+		registered := map[string]bool{}
 		for _, raw := range providers {
 			provider := object(raw)
 			id := text(provider["id"])
+			if _, known := providerInfo(kinds, text(provider["kind"])); known {
+				registered[id] = true
+			}
 			before := findByID(previousProviders, id)
 			beforeData, _ := jsonutil.Encode([]any{before["kind"], before["settings"], before["request"]})
 			afterData, _ := jsonutil.Encode([]any{provider["kind"], provider["settings"], provider["request"]})
@@ -295,6 +313,9 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo) ([]an
 				}
 			}
 			id := text(model["provider"])
+			if !registered[id] {
+				continue
+			}
 			if !exists || changed[id] {
 				delete(changed, id)
 				changedModels = append(changedModels, model)
@@ -354,7 +375,11 @@ type DraftProvider struct {
 	Hint     string
 }
 
-func (store *Store) DraftProvider(input any, kinds []sdk.ModelProviderInfo) (DraftProvider, error) {
+func (store *Store) DraftProvider(input any, kinds []sdk.ModelProviderInfo, validate ...func(string, Object) error) (DraftProvider, error) {
+	var validateSettings func(string, Object) error
+	if len(validate) > 0 {
+		validateSettings = validate[0]
+	}
 	config := store.snapshot()
 	given := object(input)
 	kind := text(given["kind"])
@@ -367,6 +392,11 @@ func (store *Store) DraftProvider(input any, kinds []sdk.ModelProviderInfo) (Dra
 	for _, key := range info.Settings.Required {
 		if _, exists := settings[key]; !exists {
 			return DraftProvider{}, bad("provider.settings." + key)
+		}
+	}
+	if validateSettings != nil {
+		if err := validateSettings(kind, cloneMap(settings)); err != nil {
+			return DraftProvider{}, err
 		}
 	}
 	headers := Object{}

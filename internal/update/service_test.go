@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -309,5 +310,77 @@ func TestInvalidDownloadLeavesTheExecutableAlone(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(filepath.Dir(executable)); err != nil || len(entries) != 1 {
 		t.Fatalf("staging file leaked: %v, %v", entries, err)
+	}
+}
+
+func TestOnChangeEmitsMonotonicFinalStateOnFastFailure(t *testing.T) {
+	name := targetAsset(runtime.GOOS, runtime.GOARCH)
+	if name == "" {
+		t.Skip("platform has no published updater asset")
+	}
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "program")
+	if err := os.WriteFile(executable, []byte("existing"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: releaseTransport(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case releaseAPI + "/latest":
+			return response(http.StatusOK, encodedRelease(githubRelease{
+				Tag: "v1.1.0", Assets: []asset{{Name: name, Digest: fmt.Sprintf("sha256:%064x", 1), Size: 8}},
+			})), nil
+		case releaseWeb + "/download/v1.1.0/" + name:
+			return response(http.StatusServiceUnavailable, nil), nil
+		default:
+			return nil, fmt.Errorf("unexpected request: %s", req.URL)
+		}
+	})}
+
+	var emittedMu sync.Mutex
+	var emitted []View
+	service := New(t.Context(), store, Options{
+		Version:    "1.0.0",
+		Executable: executable,
+		Client:     client,
+		OnChange: func(view View) {
+			emittedMu.Lock()
+			emitted = append(emitted, view)
+			emittedMu.Unlock()
+		},
+	})
+	defer service.Close(context.Background())
+
+	if view := service.Check(t.Context()); view.State != "available" {
+		t.Fatalf("update unavailable: %+v", view)
+	}
+
+	for attempt := range 15 {
+		emittedMu.Lock()
+		emitted = nil
+		emittedMu.Unlock()
+
+		if _, err := service.Install("1.1.0"); err != nil {
+			t.Fatalf("attempt %d install failed to start: %v", attempt, err)
+		}
+		final := waitForUpdate(t, service, func(view View) bool {
+			return view.State == "available" && view.Failure == "download"
+		})
+		service.jobs.Wait()
+
+		emittedMu.Lock()
+		got := append([]View(nil), emitted...)
+		emittedMu.Unlock()
+
+		if len(got) == 0 {
+			t.Fatalf("attempt %d emitted no OnChange views", attempt)
+		}
+		last := got[len(got)-1]
+		if last.State != final.State || last.Failure != final.Failure || last.DownloadPercent != final.DownloadPercent {
+			t.Fatalf("attempt %d stale OnChange overwrote final state: last=%+v want=%+v sequence=%+v", attempt, last, final, got)
+		}
 	}
 }

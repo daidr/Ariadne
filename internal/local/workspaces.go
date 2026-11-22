@@ -556,13 +556,13 @@ func (factory *Workspaces) Snapshot(ctx context.Context, threadID string) (*stri
 	}
 	return &tree, nil
 }
-func (factory *Workspaces) revisions(ctx context.Context, branch, baseRef string) (sdk.BranchRevisions, error) {
+func (factory *Workspaces) revisions(ctx context.Context, branch, baseRef, remoteBaseRef string) (sdk.BranchRevisions, error) {
 	ctx, done, err := factory.begin(ctx)
 	if err != nil {
 		return sdk.BranchRevisions{}, err
 	}
 	defer done()
-	return branchRevisions(ctx, factory.git, branch, baseRef)
+	return branchRevisions(ctx, factory.git, branch, baseRef, remoteBaseRef)
 }
 
 func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base string) (*sdk.BranchChanges, error) {
@@ -580,7 +580,7 @@ func (factory *Workspaces) Changes(ctx context.Context, threadID, branch, base s
 	} else if err != nil {
 		return nil, err
 	}
-	return BranchChanges(ctx, factory.git, BranchInput{Branch: branch, Base: base, BaseRef: "refs/heads/" + base, Worktree: dir})
+	return BranchChanges(ctx, factory.git, BranchInput{Branch: branch, Base: base, BaseRef: "refs/heads/" + base, RemoteBaseRef: "refs/remotes/origin/" + base, Worktree: dir})
 }
 func registeredWorktrees(ctx context.Context, git GitRun) ([]string, error) {
 	fields, err := worktreeFields(ctx, git)

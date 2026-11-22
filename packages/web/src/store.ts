@@ -39,6 +39,7 @@ import {
   type ModelSettings,
   type ProjectDetail,
   type StreamStatus,
+  type UpdateStatus,
 } from './api'
 import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
@@ -1162,7 +1163,7 @@ export async function createArtifact(kind: ArtifactKind) {
   }
 }
 
-/** Save the open project's settings; returns why they were refused, or `null`. */
+/** Save the open project's settings in one atomic update; returns why they were refused, or `null`. */
 export async function saveProjectSettings(
   input: Parameters<typeof api.saveProjectSettings>[1],
   slots: number | null,
@@ -1171,11 +1172,12 @@ export async function saveProjectSettings(
   const project = state.detail?.project
   if (!project) return null
   try {
-    await api.saveProjectSettings(project.id, input)
-    if (slots !== project.slots) await api.setProjectSlots(project.id, slots)
-    if (JSON.stringify(mcp) !== JSON.stringify(project.mcp)) {
-      await api.setProjectMcp(project.id, mcp)
-    }
+    await api.updateProject(project.id, {
+      settings: input.settings,
+      ...(input.env === undefined ? {} : { env: input.env }),
+      ...(slots !== project.slots ? { slots } : {}),
+      ...(JSON.stringify(mcp) !== JSON.stringify(project.mcp) ? { mcp } : {}),
+    })
     await refreshCurrent(['detail'])
     return null
   } catch (error) {
@@ -1293,11 +1295,18 @@ let slowTimer: ReturnType<typeof setTimeout> | undefined
 const touched = new Set<string>()
 const parts = new Set<RefreshKey>()
 const listeners = new Set<(event: AnyStoredEvent) => void>()
+const updateStatusListeners = new Set<(status: UpdateStatus) => void>()
 
 /** Hear every event as it arrives, e.g. to notify the user. */
 export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/** Hear pushed software update status and download progress changes. */
+export function onUpdateStatus(listener: (status: UpdateStatus) => void): () => void {
+  updateStatusListeners.add(listener)
+  return () => updateStatusListeners.delete(listener)
 }
 
 /**
@@ -1487,10 +1496,20 @@ function onEvent(event: AnyStoredEvent) {
 
 /** Take in the model settings as saved: whether the coordinator has one, and the choices. */
 export function applyModelSettings(settings: ModelSettings) {
+  const knownKinds = Array.isArray(settings.kinds)
+    ? new Set(settings.kinds.map((kind) => kind.kind))
+    : null
+  const activeProviders = knownKinds
+    ? settings.providers.filter((provider) => knownKinds.has(provider.kind))
+    : settings.providers
+  const activeProviderIds = new Set(activeProviders.map((provider) => provider.id))
+  const activeModels = knownKinds
+    ? settings.models.filter((model) => activeProviderIds.has(model.provider))
+    : settings.models
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
   state.showCost = settings.showCost
-  state.models = modelLabels(settings.models, settings.providers)
+  state.models = modelLabels(activeModels, activeProviders)
 }
 
 /** Give a thread another model, or back the default with `null`. */
@@ -1559,6 +1578,10 @@ export async function start(restore: () => Promise<void>) {
     onLive,
     onBackground,
     onDraft,
+    (status) => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
+      for (const listener of updateStatusListeners) listener(status)
+    },
   )
 }
 

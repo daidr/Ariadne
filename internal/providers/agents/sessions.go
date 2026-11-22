@@ -594,9 +594,13 @@ func (m *Sessions) Stream(ctx context.Context, settings map[string]any, request 
 				deliver = m.continuation(s, rest, fps, system, request.Effort)
 			}
 			if deliver == nil {
-				input := RenderHistory(rest)
+				var input Input
 				if seeder, ok := s.driver.(HistorySeeder); ok {
 					input, err = seeder.Seed(ctx, rest)
+				} else if budgeter, ok := s.driver.(HistoryBudgeter); ok {
+					input = RenderHistoryWithBudget(rest, budgeter.HistoryBudget(system))
+				} else {
+					input = RenderHistory(rest)
 				}
 				if err != nil {
 					yield(failure(err, false, false))

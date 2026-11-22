@@ -3,7 +3,6 @@ import type {
   ArtifactCommentAction,
   ArtifactCommentThreadView,
   ArtifactKind,
-  ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
   BlockAnswer,
@@ -11,17 +10,13 @@ import type {
   LineComment,
   LiveUpdate,
   DraftUpdate,
-  FileSourceSet,
   BackgroundUpdate,
   BackgroundView,
   MessageView,
   NeedsMeItem,
-  PlanView,
-  ProjectActivity,
   ProjectView,
   ReviewRoundView,
   SentLineComment,
-  SearchResult,
   ThreadView,
   TodoView,
   TraceRequestDetail,
@@ -48,6 +43,7 @@ import type {
 import {
   ConversationService,
   DataService,
+  EventService,
   MetaService,
   PluginService,
   SettingsService,
@@ -56,6 +52,7 @@ import {
   WorkspaceService,
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
+  type StreamEventsResponse as ProtoStreamEventsResponse,
 } from '@ariadne/proto'
 import {
   fromProtoBackgroundCommand,
@@ -92,6 +89,13 @@ import {
   setToken,
 } from './rpc'
 import {
+  domain2Api,
+  type IssueCommentView,
+  type IssueDetailView,
+  type IssueSummaryView,
+  type UpdateProjectPatch,
+} from './rpc-domain2'
+import {
   fromProtoConcurrency,
   fromProtoDirectoryListing,
   fromProtoFoundSetup,
@@ -119,6 +123,7 @@ import {
 import { synchronizeServerClock } from './server-clock'
 
 export { ApiError, getToken, initToken, isValidToken, parseTokenInput, saveToken, setToken }
+export type { IssueCommentView, IssueDetailView, IssueSummaryView, UpdateProjectPatch }
 const token = getToken
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
@@ -202,6 +207,8 @@ const keepaliveConversationClient = createRpcClient(
   }),
 )
 const workspaceClient = createRpcClient(WorkspaceService)
+const eventClient = createRpcClient(EventService)
+const utf8Decoder = new TextDecoder()
 
 function requireField<T>(value: T | undefined, name: string): T {
   if (value === undefined) {
@@ -238,14 +245,6 @@ function fromProtoStorageSnapshot(snapshot?: ProtoStorageSnapshot): StorageSnaps
     logical: snapshot.logical,
     measuredAt: Number(snapshot.measuredAt),
   }
-}
-
-/** A query string of the values given, or nothing when none is. */
-function queryString(values: Record<string, string | undefined>): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(values)) if (value !== undefined) params.set(key, value)
-  const text = params.toString()
-  return text ? `?${text}` : ''
 }
 
 async function request<T>(
@@ -385,13 +384,20 @@ export interface ModelProviderInput {
   timeoutSeconds?: number | null
 }
 
+export interface PluginUsage {
+  modelProviders: string[]
+  modelRoles: string[]
+  searches: string[]
+  projects: string[]
+}
+
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */
 export interface PluginRecord {
   id: string | null
   name: LocalizedText | null
   source: 'builtin' | 'path'
   path: string | null
-  status: 'loaded' | 'failed'
+  status: 'loaded' | 'failed' | 'disabled'
   error: string | null
   configurable?: boolean
   provides: {
@@ -401,6 +407,7 @@ export interface PluginRecord {
     searches: string[]
     links: string[]
   }
+  usage?: PluginUsage
 }
 
 export interface PluginConfig {
@@ -490,6 +497,7 @@ export interface SearchServiceView {
 /** Web search in the settings: registered search plugins, active selection, and fallback models. */
 export interface SearchSettings {
   provider: string
+  disabledProvider?: string
   ready: boolean
   keySet: boolean
   needed: boolean
@@ -499,7 +507,7 @@ export interface SearchSettings {
 }
 
 export interface SearchSettingsInput {
-  provider: string
+  provider?: string
   services: Record<string, Record<string, unknown>>
 }
 
@@ -647,6 +655,8 @@ export interface ArtifactDetail {
   artifact: ArtifactView
   versions: ArtifactVersionView[]
   comments: ArtifactCommentThreadView[]
+  nextVersionPageToken?: string
+  hasMoreVersions?: boolean
 }
 
 export const api = {
@@ -730,11 +740,7 @@ export const api = {
     const response = await metaClient.ping({})
     return { ok: response.ok }
   },
-  listProjects: (ids: readonly string[] = []) =>
-    request<{ projects: ProjectView[]; lastSeq: number }>(
-      'GET',
-      '/api/projects' + (ids.length ? '?' + new URLSearchParams(ids.map((id) => ['id', id])) : ''),
-    ),
+  listProjects: (ids: readonly string[] = []) => domain2Api.listProjects(ids),
   /**
    * A new project, with where its files are and the sources it only reads; each is
    * connected first, and the project is made only when all of them can be.
@@ -745,18 +751,19 @@ export const api = {
     references?: { kind: string; settings: Record<string, unknown> }[]
     sources?: (SourceInput & { id?: string })[]
     primaryIndex?: number
-  }) => request<{ project: ProjectView }>('POST', '/api/projects', input),
-  renameProject: (id: string, name: string) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${id}`, { name }),
-  deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
+  }) => domain2Api.createProject(input),
+  /** Unified atomic project update (name, settings, env, slots, mcp, autopilotPaused). */
+  updateProject: (id: string, patch: UpdateProjectPatch) => domain2Api.updateProject(id, patch),
+  renameProject: async (id: string, name: string): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(id, { name })
+    return { project }
+  },
+  deleteProject: (id: string) => domain2Api.deleteProject(id),
   /** With `since` (a `sync.cursor` given before), only the threads changed after it. */
-  getProject: (id: string, since?: string) =>
-    request<ProjectDetail & { sync: ThreadSync }>(
-      'GET',
-      `/api/projects/${id}${since ? `?since=${encodeURIComponent(since)}` : ''}`,
-    ),
+  getProject: (id: string, since?: string): Promise<ProjectDetail & { sync: ThreadSync }> =>
+    domain2Api.getProject(id, since),
   getProjectActivity: (id: string, signal: AbortSignal) =>
-    request<ProjectActivity>('GET', `/api/projects/${id}/activity`, undefined, signal),
+    domain2Api.getProjectActivity(id, signal),
   /**
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.
@@ -873,6 +880,33 @@ export const api = {
       tail: response.tail,
     }
   },
+  streamCommandOutput: async function* (
+    threadId: string,
+    commandId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<{ command: BackgroundView; tail: string }> {
+    const stream = threadClient.streamCommandOutput(
+      { threadId, commandId },
+      signal ? { signal } : undefined,
+    )
+    for await (const response of stream) {
+      yield {
+        command: fromProtoBackgroundCommand(requireField(response.command, 'command')),
+        tail: response.tail,
+      }
+    }
+  },
+  streamEvents: (
+    options: { afterSeq?: number; projectId?: string },
+    signal?: AbortSignal,
+  ): AsyncIterable<ProtoStreamEventsResponse> =>
+    eventClient.streamEvents(
+      {
+        ...(options.afterSeq === undefined ? {} : { afterSeq: BigInt(options.afterSeq) }),
+        ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+      },
+      signal ? { signal } : undefined,
+    ),
   pullRequestChecks: async (
     threadId: string,
     signal?: AbortSignal,
@@ -958,6 +992,10 @@ export const api = {
     fromProtoPluginConfig(
       (await pluginClient.savePluginConfig({ pluginId: id, values: toJsonObject(values) })).config,
     ),
+  setPluginEnabled: async (id: string, enabled: boolean): Promise<{ plugins: PluginRecord[] }> => {
+    const response = await pluginClient.setPluginEnabled({ pluginId: id, enabled })
+    return { plugins: response.plugins.map(fromProtoPluginRecord) }
+  },
   addPlugin: async (path: string): Promise<{ plugins: PluginRecord[] }> => {
     const response = await pluginClient.addPlugin({ path })
     return { plugins: response.plugins.map(fromProtoPluginRecord) }
@@ -1091,27 +1129,17 @@ export const api = {
     const response = await metaClient.browseLocal({ path })
     return { listing: fromProtoDirectoryListing(response.listing) }
   },
-  getFileSources: (projectId: string) =>
-    request<FileSourceSet & { secretsSet: Record<string, string[]> }>(
-      'GET',
-      `/api/projects/${projectId}/sources`,
-    ),
+  getFileSources: (projectId: string) => domain2Api.getFileSources(projectId),
   setFileSources: (
     projectId: string,
     body: { sources: (SourceInput & { id?: string })[]; primaryIndex?: number },
-  ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/sources`, body),
+  ) => domain2Api.setFileSources(projectId, body),
   addReference: (
     projectId: string,
     reference: { kind: string; settings: Record<string, unknown> },
-  ) =>
-    request<{ project: ProjectView }>('POST', `/api/projects/${projectId}/references`, {
-      reference,
-    }),
+  ) => domain2Api.addReference(projectId, reference),
   removeReference: (projectId: string, referenceId: string) =>
-    request<{ project: ProjectView }>(
-      'DELETE',
-      `/api/projects/${projectId}/references/${referenceId}`,
-    ),
+    domain2Api.removeReference(projectId, referenceId),
   /** The reference sources that cannot be read right now, with why. */
   referenceStatus: async (
     projectId: string,
@@ -1124,8 +1152,7 @@ export const api = {
       })),
     }
   },
-  refreshDashboard: (artifactId: string) =>
-    request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
+  refreshDashboard: (artifactId: string) => domain2Api.refreshDashboard(artifactId),
   getMcpSettings: async (): Promise<McpSettings> => {
     const response = await settingsClient.getMcpSettings({})
     return {
@@ -1146,8 +1173,13 @@ export const api = {
     const response = await settingsClient.checkMcpServer({ serverId: id })
     return { status: fromProtoMcpServerStatus(response.status) }
   },
-  setProjectMcp: (projectId: string, servers: string[]) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/mcp`, { servers }),
+  setProjectMcp: async (
+    projectId: string,
+    servers: string[],
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { mcp: servers })
+    return { project }
+  },
   getWorkSettings: async (): Promise<WorkSettings> =>
     fromProtoWorkSettings((await settingsClient.getWorkSettings({})).work),
   saveWorkSettings: async (input: Partial<Omit<WorkSettings, 'defaults'>>): Promise<WorkSettings> =>
@@ -1208,24 +1240,30 @@ export const api = {
   removeBackup: async (name: string): Promise<void> => {
     await dataClient.deleteBackup({ name })
   },
-  getProjectSettings: (projectId: string) =>
-    request<ProjectSettingsView>('GET', `/api/projects/${projectId}/settings`),
+  getProjectSettings: (projectId: string): Promise<ProjectSettingsView> =>
+    domain2Api.getProjectSettings(projectId),
   saveProjectSettings: (
     projectId: string,
     input: { settings: ProjectSettings; env?: { name: string; value: string }[] },
-  ) =>
-    request<ProjectSettingsView & { project: ProjectView }>(
-      'PUT',
-      `/api/projects/${projectId}/settings`,
-      input,
-    ),
+  ): Promise<ProjectSettingsView & { project: ProjectView }> =>
+    domain2Api.updateProject(projectId, input),
   /** The project's log as a file; the token goes in a header, so not as a plain link. */
   exportProject: (projectId: string) =>
     download(`/api/projects/${projectId}/export`, `ariadne-${projectId}.json`),
-  setAutopilotPaused: (projectId: string, paused: boolean) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/autopilot`, { paused }),
-  setProjectSlots: (projectId: string, slots: number | null) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
+  setAutopilotPaused: async (
+    projectId: string,
+    paused: boolean,
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { autopilotPaused: paused })
+    return { project }
+  },
+  setProjectSlots: async (
+    projectId: string,
+    slots: number | null,
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { slots })
+    return { project }
+  },
   getReviews: async (
     threadId: string,
     options: { beforeId?: number; limit?: number } = {},
@@ -1370,31 +1408,43 @@ export const api = {
     })
   },
   dismissProposal: (projectId: string, proposalId: string) =>
-    request<{ plan: PlanView }>(
-      'POST',
-      `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
-    ),
-  getPlan: (projectId: string) =>
-    request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
-  search: (projectId: string, q: string) =>
-    request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
-  listArtifacts: (projectId: string) =>
-    request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
+    domain2Api.dismissProposal(projectId, proposalId),
+  listIssues: (
+    projectId: string,
+    query: { state?: string; labels?: string[]; search?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => domain2Api.listIssues(projectId, query, signal),
+  getIssue: (projectId: string, number: number, signal?: AbortSignal) =>
+    domain2Api.getIssue(projectId, number, signal),
+  getPlan: (
+    projectId: string,
+    options: { revisionPageSize?: number; revisionPageToken?: string } = {},
+  ) => domain2Api.getPlan(projectId, options),
+  listPlanRevisions: (
+    projectId: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listPlanRevisions(projectId, options),
+  search: (projectId: string, q: string) => domain2Api.searchProject(projectId, q),
+  listArtifacts: (
+    projectId: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listArtifacts(projectId, options),
   getArtifact: (
     id: string,
-    options: { version?: number; signal?: AbortSignal; versions?: boolean } = {},
-  ) =>
-    request<ArtifactDetail>(
-      'GET',
-      `/api/artifacts/${id}${queryString({
-        version: options.version === undefined ? undefined : String(options.version),
-        versions: options.versions === false ? '0' : undefined,
-      })}`,
-      undefined,
-      options.signal,
-    ),
+    options: {
+      version?: number
+      signal?: AbortSignal
+      versions?: boolean
+      versionPageSize?: number
+      versionPageToken?: string
+    } = {},
+  ) => domain2Api.getArtifact(id, options),
+  listArtifactVersions: (
+    id: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listArtifactVersions(id, options),
   createArtifact: (projectId: string, input: { kind: ArtifactKind; title: string }) =>
-    request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),
+    domain2Api.createArtifact(projectId, input),
   saveArtifact: (
     id: string,
     input: {
@@ -1404,8 +1454,9 @@ export const api = {
       reason: string
       title?: string
       quotes?: Record<string, string>
+      includeVersions?: boolean
     },
-  ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
+  ) => domain2Api.saveArtifact(id, input),
   /**
    * The user stopped for a moment in an artifact, or left it: what they did goes to the
    * agent, with pictures of the options they marked. `leaving` lets it go out as the page
@@ -1413,25 +1464,41 @@ export const api = {
    */
   sendFeedback: (id: string, images: string[], leaving = false) =>
     leaving
-      ? void fetch(`/api/artifacts/${id}/feedback`, {
+      ? void fetch('/api/rpc/ariadne.v1.ArtifactService/SendArtifactFeedback', {
           method: 'POST',
           keepalive: true,
           headers: { authorization: authorizationHeader(), 'content-type': 'application/json' },
-          body: JSON.stringify({ images: [] }),
+          body: JSON.stringify({ artifactId: id, images: [] }),
         }).catch(() => {})
-      : request<{ feedback: unknown }>('POST', `/api/artifacts/${id}/feedback`, { images }),
+      : domain2Api.sendArtifactFeedback(id, images),
   /** Where a page joins an artifact's room, and the query that lets it in. */
   sharedRoom: (id: string) => ({
     server: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/artifacts`,
     room: `${id}/live`,
     params: { token: token() ?? '' },
   }),
+  createArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.createArtifactComment>[1],
+  ) => domain2Api.createArtifactComment(id, input),
+  replyArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.replyArtifactComment>[1],
+  ) => domain2Api.replyArtifactComment(id, input),
+  editArtifactComment: (id: string, input: Parameters<typeof domain2Api.editArtifactComment>[1]) =>
+    domain2Api.editArtifactComment(id, input),
+  deleteArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.deleteArtifactComment>[1],
+  ) => domain2Api.deleteArtifactComment(id, input),
+  resolveArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.resolveArtifactCommentThread(id, threadId),
+  reopenArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.reopenArtifactCommentThread(id, threadId),
+  removeArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.removeArtifactCommentThread(id, threadId),
   commentArtifact: (id: string, action: ArtifactCommentAction) =>
-    request<{ comments: ArtifactCommentThreadView[] }>(
-      'POST',
-      `/api/artifacts/${id}/comments`,
-      action,
-    ),
+    domain2Api.commentArtifact(id, action),
   summarizeLinks: async (
     urls: string[],
     signal?: AbortSignal,
@@ -1475,9 +1542,9 @@ export interface SkillView {
 export type StreamStatus = 'connecting' | 'open' | 'lost' | 'unauthorized'
 
 /**
- * Follow the event log from `afterSeq`. EventSource retries network drops on its own but
- * gives up for good on a non-200 answer (a 401, or a 502 while the dev server restarts),
- * so a closed source is reopened here with backoff, resuming after the last event seen.
+ * Follow the event log from `afterSeq` over ConnectRPC binary Server Streaming.
+ * Reconnects with exponential backoff on network drops or server restarts,
+ * resuming strictly after the last durable sequence number observed.
  */
 export function followEvents(
   afterSeq: number | null,
@@ -1487,65 +1554,13 @@ export function followEvents(
   onLive?: (update: LiveUpdate) => void,
   onBackground?: (update: BackgroundUpdate) => void,
   onDraft?: (update: DraftUpdate) => void,
+  onUpdateStatus?: (status: UpdateStatus) => void,
 ): () => void {
   let lastSeq = afterSeq
-  let source: EventSource | null = null
+  let controller: AbortController | null = null
   let retry: ReturnType<typeof setTimeout> | undefined
   let delay = 500
   let stopped = false
-
-  const open = () => {
-    if (stopped) return
-    // Without a known position the server starts at its newest event.
-    const from = lastSeq === null ? '' : `afterSeq=${lastSeq}&`
-    const query = `${from}token=${encodeURIComponent(token() ?? '')}`
-    const current = new EventSource(`/api/events?${query}`)
-    source = current
-    current.addEventListener('open', () => {
-      if (stopped || source !== current) return
-      delay = 500
-      onStatus('open')
-      onOpen?.()
-    })
-    current.addEventListener('ariadne', (message) => {
-      if (stopped || source !== current) return
-      const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
-      lastSeq = Math.max(lastSeq ?? 0, event.seq)
-      onEvent(event)
-    })
-    // A running command's output: not part of the log, so it moves nothing forward.
-    current.addEventListener('live', (message) => {
-      if (stopped || source !== current) return
-      onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
-    })
-    // A reply as it is written: not part of the log either.
-    current.addEventListener('draft', (message) => {
-      if (stopped || source !== current) return
-      onDraft?.(JSON.parse((message as MessageEvent<string>).data) as DraftUpdate)
-    })
-    current.addEventListener('background', (message) => {
-      if (stopped || source !== current) return
-      onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)
-    })
-    current.addEventListener('error', () => {
-      if (stopped || source !== current) return
-      if (current.readyState !== EventSource.CLOSED) {
-        onStatus('lost')
-        return
-      }
-      // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
-      void api.ping().then(
-        () => {
-          if (source === current) schedule('lost')
-        },
-        (error) => {
-          if (source === current) {
-            schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
-          }
-        },
-      )
-    })
-  }
 
   const schedule = (status: StreamStatus) => {
     if (stopped) return
@@ -1555,11 +1570,109 @@ export function followEvents(
     delay = Math.min(delay * 2, 10_000)
   }
 
+  const open = () => {
+    if (stopped) return
+    const current = new AbortController()
+    controller = current
+    const options = lastSeq === null ? {} : { afterSeq: lastSeq }
+
+    void (async () => {
+      try {
+        for await (const frame of api.streamEvents(options, current.signal)) {
+          if (stopped || controller !== current) return
+          switch (frame.payload.case) {
+            case 'ready':
+              delay = 500
+              if (lastSeq === null) {
+                lastSeq = Number(frame.payload.value.lastSeq)
+              }
+              onStatus('open')
+              onOpen?.()
+              break
+            case 'heartbeat':
+              synchronizeServerClock(String(frame.payload.value.serverTimeMs))
+              break
+            case 'event': {
+              const ev = frame.payload.value
+              const data = ev.rawJson.length ? JSON.parse(utf8Decoder.decode(ev.rawJson)) : {}
+              const stored = {
+                seq: Number(ev.seq),
+                id: ev.id,
+                projectId: ev.projectId,
+                type: ev.type,
+                at: Number(ev.at),
+                data,
+              } as AnyStoredEvent
+              lastSeq = Math.max(lastSeq ?? 0, stored.seq)
+              onEvent(stored)
+              break
+            }
+            case 'live': {
+              const u = frame.payload.value
+              onLive?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                command: u.command
+                  ? {
+                      projectId: u.command.projectId,
+                      conversationId: u.command.conversationId,
+                      command: u.command.command,
+                      cwd: u.command.cwd,
+                      startedAt: Number(u.command.startedAt),
+                      tail: u.command.tail,
+                    }
+                  : null,
+              })
+              break
+            }
+            case 'background': {
+              const u = frame.payload.value
+              onBackground?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                commands: u.commands.map(fromProtoBackgroundCommand),
+              })
+              break
+            }
+            case 'draft': {
+              const u = frame.payload.value
+              onDraft?.({
+                projectId: u.projectId,
+                conversationId: u.conversationId,
+                draft: u.draft
+                  ? {
+                      messageId: u.draft.messageId,
+                      text: u.draft.text,
+                      ...(u.draft.blocksJson.length
+                        ? { blocks: JSON.parse(utf8Decoder.decode(u.draft.blocksJson)) }
+                        : {}),
+                      startedAt: Number(u.draft.startedAt),
+                      ...(u.draft.posted ? { posted: true } : {}),
+                    }
+                  : null,
+              })
+              break
+            }
+            case 'updateStatus':
+              onUpdateStatus?.(fromProtoUpdateStatus(frame.payload.value))
+              break
+          }
+        }
+        if (!stopped && controller === current && !current.signal.aborted) {
+          schedule('lost')
+        }
+      } catch (error) {
+        if (stopped || controller !== current || current.signal.aborted) return
+        schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
+      }
+    })()
+  }
+
   open()
   return () => {
     stopped = true
     clearTimeout(retry)
-    source?.close()
-    source = null
+    controller?.abort()
+    controller = null
   }
 }

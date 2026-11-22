@@ -421,12 +421,102 @@ func (commands *Commands) Peek(thread, id string, chars int) *Peek {
 	if job == nil {
 		return nil
 	}
+	peek := commands.peekLocked(job, chars)
+	return &peek
+}
+func (commands *Commands) peekLocked(job *job, chars int) Peek {
 	if chars <= 0 {
 		chars = 20_000
 	}
 	chars = min(chars, 100_000)
 	tail := textutil.TailUnits(textutil.ScreenText(job.output.tail(chars*2)), chars)
-	return &Peek{Command: copyView(job.view), Tail: tail}
+	return Peek{Command: copyView(job.view), Tail: tail}
+}
+func sameCommandSnapshot(a, b Command) bool {
+	if a.ID != b.ID || a.Command != b.Command || a.StartedAt != b.StartedAt {
+		return false
+	}
+	if (a.URL == nil) != (b.URL == nil) || (a.URL != nil && *a.URL != *b.URL) {
+		return false
+	}
+	if (a.Result == nil) != (b.Result == nil) {
+		return false
+	}
+	if a.Result != nil && *a.Result != *b.Result {
+		return false
+	}
+	return true
+}
+
+// WatchPeek emits the current command tail immediately, then streams updates whenever
+// output grows, a served URL is detected, or the command finishes. Rapid output bursts
+// are coalesced over interval. Returns found=false when the command does not exist.
+func (commands *Commands) WatchPeek(ctx context.Context, thread, id string, chars int, interval time.Duration, emit func(Peek) error) (bool, error) {
+	commands.mu.Lock()
+	job := commands.own(thread, id)
+	if job == nil {
+		commands.mu.Unlock()
+		return false, nil
+	}
+	if commands.waiters >= 1024 {
+		commands.mu.Unlock()
+		return true, errors.New("too many background readers")
+	}
+	commands.waiters++
+	initial := commands.peekLocked(job, chars)
+	changed := job.changed
+	done := job.done
+	commands.mu.Unlock()
+
+	defer func() {
+		commands.mu.Lock()
+		commands.waiters--
+		commands.mu.Unlock()
+	}()
+
+	if err := emit(initial); err != nil {
+		return true, err
+	}
+	if initial.Command.Result != nil {
+		return true, nil
+	}
+	last := initial
+	for {
+		select {
+		case <-ctx.Done():
+			return true, ctx.Err()
+		case <-changed:
+		}
+		if interval > 0 {
+			timer := time.NewTimer(interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return true, ctx.Err()
+			case <-done:
+				timer.Stop()
+			case <-timer.C:
+			}
+		}
+		commands.mu.Lock()
+		if commands.own(thread, id) != job {
+			commands.mu.Unlock()
+			return true, nil
+		}
+		next := commands.peekLocked(job, chars)
+		changed = job.changed
+		commands.mu.Unlock()
+
+		if next.Tail != last.Tail || !sameCommandSnapshot(next.Command, last.Command) {
+			if err := emit(next); err != nil {
+				return true, err
+			}
+			last = next
+		}
+		if next.Command.Result != nil {
+			return true, nil
+		}
+	}
 }
 func (commands *Commands) Wait(ctx context.Context, thread, id string) (*Command, error) {
 	commands.mu.Lock()

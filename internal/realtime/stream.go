@@ -2,10 +2,7 @@ package realtime
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"iter"
-	"net/http"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/eventstore"
@@ -17,51 +14,45 @@ type Log interface {
 }
 
 type StreamOptions struct {
-	AfterSeq     int64
-	ProjectID    string
-	Initial      iter.Seq[Update]
-	Heartbeat    time.Duration
-	WriteTimeout time.Duration
+	AfterSeq  int64
+	ProjectID string
+	Initial   iter.Seq[Update]
+	Heartbeat time.Duration
 }
 
-// replayBatchSize caps durable events fetched per SQLite query during SSE replay.
+type StreamSink struct {
+	OnReady     func(lastSeq int64) error
+	OnEvent     func(eventstore.Event) error
+	OnUpdate    func(Update) error
+	OnHeartbeat func() error
+}
+
+// replayBatchSize caps durable events fetched per SQLite query during replay.
 const replayBatchSize = 64
 
-// Serve subscribes before replay, then streams the durable log in batches.
-// Context cancellation, a write deadline or queue overflow releases both subscriptions.
-func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub, options StreamOptions) error {
+// Stream subscribes before replay, then streams durable events in batches and
+// coalesced transient updates to sink. Context cancellation, a sink error, or
+// queue overflow releases both subscriptions.
+func Stream(ctx context.Context, log Log, hub *Hub, options StreamOptions, sink StreamSink) error {
 	changed, stopLog := log.Watch()
 	defer stopLog()
 	sub, stopUpdates := hub.Subscribe(options.ProjectID)
 	defer stopUpdates()
-	controller := http.NewResponseController(writer)
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-store")
-	writer.Header().Set("X-Accel-Buffering", "no")
+
 	heartbeat := options.Heartbeat
 	if heartbeat <= 0 {
 		heartbeat = 15 * time.Second
 	}
-	writeTimeout := options.WriteTimeout
-	if writeTimeout <= 0 {
-		writeTimeout = 10 * time.Second
-	}
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
-	write := func(frame []byte) error {
-		// A slow socket cannot retain a subscriber forever during shutdown.
-		if err := controller.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil && err != http.ErrNotSupported {
-			return err
-		}
-		if _, err := writer.Write(frame); err != nil {
-			return err
-		}
-		return controller.Flush()
-	}
-	if err := write(nil); err != nil {
-		return err
-	}
+
 	lastSeq := options.AfterSeq
+	if sink.OnReady != nil {
+		if err := sink.OnReady(lastSeq); err != nil {
+			return err
+		}
+	}
+
 	dirty := true
 	var next func() (Update, bool)
 	if options.Initial != nil {
@@ -69,8 +60,9 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 		next, stop = iter.Pull(options.Initial)
 		defer stop()
 	}
+
 	for {
-		if err := request.Context().Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		// Check closure before replay too: an overflowing queue ends the stream
@@ -82,13 +74,17 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 			return failure
 		}
 		if dirty {
-			events, err := log.Read(request.Context(), eventstore.ReadOptions{AfterSeq: lastSeq, ProjectID: options.ProjectID, Limit: replayBatchSize})
+			events, err := log.Read(ctx, eventstore.ReadOptions{
+				AfterSeq:  lastSeq,
+				ProjectID: options.ProjectID,
+				Limit:     replayBatchSize,
+			})
 			if err != nil {
 				return err
 			}
 			if len(events) > 0 {
 				for _, event := range events {
-					if err := request.Context().Err(); err != nil {
+					if err := ctx.Err(); err != nil {
 						return err
 					}
 					sub.mu.Lock()
@@ -97,12 +93,10 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 					if closed {
 						return failure
 					}
-					data, err := json.Marshal(event)
-					if err != nil {
-						return err
-					}
-					if err := write([]byte(fmt.Sprintf("id: %d\nevent: ariadne\ndata: %s\n\n", event.Seq, data))); err != nil {
-						return err
+					if sink.OnEvent != nil {
+						if err := sink.OnEvent(event); err != nil {
+							return err
+						}
 					}
 					lastSeq = event.Seq
 				}
@@ -115,28 +109,32 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 		if next != nil {
 			update, exists := next()
 			if exists {
-				if options.ProjectID == "" || options.ProjectID == update.ProjectID {
-					if err := write(sub.takeInitial(update)); err != nil {
-						return err
+				if options.ProjectID == "" || (update.ProjectID != "" && options.ProjectID == update.ProjectID) {
+					if sink.OnUpdate != nil {
+						if err := sink.OnUpdate(sub.takeInitial(update)); err != nil {
+							return err
+						}
 					}
 				}
 				continue
 			}
 			next = nil
 		}
-		frame, closed, err := sub.next()
+		update, hasUpdate, closed, err := sub.next()
 		if closed {
 			return err
 		}
-		if frame != nil {
-			if err := write(frame); err != nil {
-				return err
+		if hasUpdate {
+			if sink.OnUpdate != nil {
+				if err := sink.OnUpdate(update); err != nil {
+					return err
+				}
 			}
 			continue
 		}
 		select {
-		case <-request.Context().Done():
-			return request.Context().Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		case _, open := <-changed:
 			if !open {
 				return nil
@@ -144,8 +142,10 @@ func Serve(writer http.ResponseWriter, request *http.Request, log Log, hub *Hub,
 			dirty = true
 		case <-sub.wake:
 		case <-ticker.C:
-			if err := write([]byte(": ping\n\n")); err != nil {
-				return err
+			if sink.OnHeartbeat != nil {
+				if err := sink.OnHeartbeat(); err != nil {
+					return err
+				}
 			}
 		}
 	}

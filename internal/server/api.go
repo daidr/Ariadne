@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"io/fs"
-	"math"
 	"mime"
 	"net/http"
 	"path"
@@ -165,24 +163,23 @@ func New(options Options) (*API, error) {
 	api.mux.HandleFunc("/", api.static)
 	api.mux.Handle(rpcPrefix+"/", api.rpcHandler())
 	api.add("GET", "/api/health", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
-	api.registerReads()
 	api.registerWrites()
 	api.registerArtifacts()
-	api.registerPlans()
 	api.registerData()
+	api.registerProjectRPC()
+	api.registerPlanRPC()
+	api.registerArtifactRPC()
+	api.registerIssueRPC()
 	api.registerSettings()
 	api.registerUpdates()
 	api.registerPlugins()
-	api.registerMCP()
 	api.registerMetaRPC()
-	api.registerSourceConfig()
 	api.registerThreadService()
 	api.registerConversationService()
 	api.registerWorkspaceService()
-	api.registerProjectDeletion()
+	api.registerEventService()
 	api.registerExport()
 	api.registerTrace()
-	api.addRaw("GET", "/api/events", api.events)
 	for _, method := range []string{"GET", "HEAD"} {
 		api.addRaw(method, "/api/files/:fileId", func(w http.ResponseWriter, r *http.Request) error {
 			if !fileID.MatchString(r.PathValue("fileId")) {
@@ -308,20 +305,6 @@ func (api *API) add(method, pattern string, run endpoint) {
 	})
 }
 
-// JSON is decoded directly from a bounded reader rather than copied through a
-// second whole-body buffer. Inline whiteboard images fit within this limit.
-func readJSON(request *http.Request) (object, error) {
-	decoder := json.NewDecoder(io.LimitReader(request.Body, 80*1024*1024+1))
-	var value object
-	if err := decoder.Decode(&value); err != nil || value == nil {
-		return nil, badInput("json")
-	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
-		return nil, badInput("json")
-	}
-	return value, nil
-}
 func required(body object, key string) (string, error) {
 	value, ok := body[key].(string)
 	if !ok || textutil.Trim(value) == "" {
@@ -400,78 +383,3 @@ func (api *API) static(w http.ResponseWriter, r *http.Request) {
 }
 
 var fileID = regexp.MustCompile(`^fil_[\w-]+$`)
-
-func (api *API) events(w http.ResponseWriter, r *http.Request) error {
-	given := r.URL.Query().Get("afterSeq")
-	if _, exists := r.Header["Last-Event-Id"]; exists {
-		given = r.Header.Get("Last-Event-ID")
-	}
-	after, err := api.options.Repository.Store.LastSeq(r.Context())
-	if err != nil {
-		return err
-	}
-	if _, exists := r.URL.Query()["afterSeq"]; exists || r.Header.Get("Last-Event-ID") != "" || len(r.Header.Values("Last-Event-ID")) > 0 {
-		value, err := queryNumber(given)
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || math.Trunc(value) != value || value > math.MaxInt64 {
-			return badInput("afterSeq")
-		}
-		after = int64(value)
-	}
-	http.SetCookie(w, api.auth.FileSessionCookie(r))
-	project := r.URL.Query().Get("projectId")
-	err = realtime.Serve(w, r, api.options.Repository.Store, api.hub, realtime.StreamOptions{AfterSeq: after, ProjectID: project, Initial: api.state.Snapshots(project)})
-	if err != nil && r.Context().Err() == nil {
-		api.report(err)
-	}
-	// The event stream may already have written headers; its transport errors
-	// terminate the stream and must never append a JSON error to SSE.
-	return nil
-}
-func (api *API) registerReads() {
-	repo := api.options.Repository
-	api.add("GET", "/api/projects", func(r *http.Request) (any, int, error) {
-		ids := r.URL.Query()["id"]
-		if len(ids) > 128 {
-			return nil, 0, badInput("id")
-		}
-		// Start SSE before any changes that could happen while the list is read.
-		seq, err := repo.Store.LastSeq(r.Context())
-		if err != nil {
-			return nil, 0, err
-		}
-		list := repo.ListProjects
-		if len(ids) > 0 {
-			list = func(ctx context.Context) ([]core.ProjectView, error) { return repo.ListProjectsByID(ctx, ids) }
-		}
-		projects, err := list(r.Context())
-		if err != nil {
-			return nil, 0, err
-		}
-		return object{"projects": projects, "lastSeq": seq}, 200, nil
-	})
-	api.add("GET", "/api/projects/:projectId", func(r *http.Request) (any, int, error) {
-		id := r.PathValue("projectId")
-		detail, delta, err := api.syncer.ProjectDetail(r.Context(), repo.Reader, id, r.URL.Query().Get("since"))
-		if err != nil {
-			return nil, 0, err
-		}
-		sync := object{"cursor": delta.Cursor, "partial": delta.Partial}
-		if delta.IDs != nil {
-			sync["ids"] = delta.IDs
-		}
-		hasTracker := api.options.HasTracker != nil && api.options.HasTracker(id)
-		return object{"project": detail.Project, "threads": delta.Threads, "needsMe": detail.NeedsMe, "sync": sync, "hasTracker": hasTracker}, 200, nil
-	})
-	api.add("GET", "/api/projects/:projectId/activity", func(r *http.Request) (any, int, error) {
-		activity, err := repo.ProjectActivity(r.Context(), r.PathValue("projectId"))
-		return activity, 200, err
-	})
-	api.add("GET", "/api/projects/:projectId/search", func(r *http.Request) (any, int, error) {
-		value, err := repo.Search(r.Context(), r.PathValue("projectId"), prefix(r.URL.Query().Get("q"), 200))
-		return value, 200, err
-	})
-	api.add("GET", "/api/projects/:projectId/artifacts", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListArtifacts(r.Context(), r.PathValue("projectId"))
-		return object{"artifacts": value}, 200, err
-	})
-}

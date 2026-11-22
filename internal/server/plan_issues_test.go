@@ -6,13 +6,16 @@ import (
 	"errors"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
@@ -21,9 +24,8 @@ import (
 func planIssueSeed() []eventstore.NewEvent {
 	return append(workspaceHTTPSeed(), eventstore.NewEvent{Type: "plan.revised", ProjectID: "prj_a", Data: json.RawMessage(encoded(object{"revisionId": "rev_a", "author": "user", "reason": "plan", "ops": []any{object{"op": "add", "id": "task", "kind": "task", "title": "work", "description": "", "acceptance": ""}}}))})
 }
-func TestPlanIssueValidationHTTP(t *testing.T) {
-	no := false
-	requests := []apiRequest{{Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1}, Auth: &no}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 0}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1.5}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/missing/issues", Body: object{"number": 1}}, {Method: "POST", Path: "/api/projects/prj_a/plan/nodes/task/issues", Body: object{"number": 1}}, {Method: "DELETE", Path: "/api/projects/prj_a/plan/nodes/task/issues/1"}, {Method: "DELETE", Path: "/api/projects/prj_a/plan/nodes/missing/issues/1"}}
+
+func TestPlanIssueValidationConnect(t *testing.T) {
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "plan.sqlite"), Now: now})
 	if err != nil {
@@ -38,19 +40,46 @@ func TestPlanIssueValidationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	wantCodes := []int{401, 400, 400, 400, 400, 200, 200}
-	for i, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
-		if item.Auth == nil || *item.Auth {
-			request.Header.Set("Authorization", "Bearer test-token")
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewPlanServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	if _, err := unauth.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: 1,
+	})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("unauthenticated LinkPlanNodeIssue code = %v, want CodeUnauthenticated", connect.CodeOf(err))
+	}
+
+	client := ariadnev1connect.NewPlanServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	for _, tc := range []struct {
+		nodeID string
+		number int64
+	}{
+		{"task", 0},
+		{"task", -1},
+		{"missing", 1},
+		{"task", 1}, // no tracker configured
+	} {
+		_, err := client.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+			ProjectId: "prj_a", NodeId: tc.nodeID, Number: tc.number,
+		}))
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("LinkPlanNodeIssue(%s, %d) code = %v (err=%v), want CodeInvalidArgument", tc.nodeID, tc.number, connect.CodeOf(err), err)
 		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		if response.Code != wantCodes[i] {
-			t.Fatalf("request %d %s %s status = %d, want %d (body=%s)", i, item.Method, item.Path, response.Code, wantCodes[i], response.Body.String())
+	}
+	for _, nodeID := range []string{"task", "missing"} {
+		if _, err := client.UnlinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.UnlinkPlanNodeIssueRequest{
+			ProjectId: "prj_a", NodeId: nodeID, Number: 1,
+		})); err != nil {
+			t.Fatalf("UnlinkPlanNodeIssue(%s) failed: %v", nodeID, err)
 		}
 	}
 }
+
 func TestPlanIssueFetchOnlyAfterAuthenticationAndNodeValidation(t *testing.T) {
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "issues.sqlite")})
 	if err != nil {
@@ -81,51 +110,61 @@ func TestPlanIssueFetchOnlyAfterAuthenticationAndNodeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	invoke := func(method, path string, body any, auth bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, path, strings.NewReader(encoded(body)))
-		if auth {
-			r.Header.Set("Authorization", "Bearer secret")
-		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		return response
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewPlanServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	client := ariadnev1connect.NewPlanServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+
+	if _, err := unauth.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: 1,
+	})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected CodeUnauthenticated, got %v", err)
 	}
-	for _, item := range []struct {
-		path   string
-		body   any
-		auth   bool
-		status int
-	}{{"task", object{"number": 1}, false, 401}, {"missing", object{"number": 1}, true, 400}, {"task", object{"number": -1}, true, 400}} {
-		response := invoke("POST", "/api/projects/prj_a/plan/nodes/"+item.path+"/issues", item.body, item.auth)
-		if response.Code != item.status {
-			t.Fatal(response.Code, response.Body.String())
-		}
+	if _, err := client.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "missing", Number: 1,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument for missing node, got %v", err)
+	}
+	if _, err := client.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: -1,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument for negative issue number, got %v", err)
 	}
 	if reads.Load() != 0 {
 		t.Fatal("invalid request reached tracker")
 	}
-	if response := invoke("POST", "/api/projects/prj_a/plan/nodes/task/issues", object{"number": 1}, true); response.Code != 200 {
-		t.Fatal(response.Code, response.Body.String())
+
+	if _, err := client.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: 1,
+	})); err != nil {
+		t.Fatalf("LinkPlanNodeIssue(1) failed: %v", err)
 	}
 	issues, err := repo.PlanIssues(t.Context(), "prj_a", "task")
 	if err != nil || len(issues) != 1 || issues[0].Title != "from tracker" {
 		t.Fatal("issue metadata not saved", issues, err)
 	}
-	if response := invoke("DELETE", "/api/projects/prj_a/plan/nodes/task/issues/01", nil, true); response.Code != 200 {
-		t.Fatal(response.Body.String())
-	}
-	issues, _ = repo.PlanIssues(t.Context(), "prj_a", "task")
-	if len(issues) != 1 {
-		t.Fatal("noncanonical issue number removed link")
-	}
-	if response := invoke("DELETE", "/api/projects/prj_a/plan/nodes/task/issues/1", nil, true); response.Code != 200 {
-		t.Fatal(response.Body.String())
+	if _, err := client.UnlinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.UnlinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: 1,
+	})); err != nil {
+		t.Fatalf("UnlinkPlanNodeIssue(1) failed: %v", err)
 	}
 	issues, _ = repo.PlanIssues(t.Context(), "prj_a", "task")
 	if len(issues) != 0 {
 		t.Fatal("issue link retained")
 	}
-	if response := invoke("POST", "/api/projects/prj_a/plan/nodes/task/issues", object{"number": 404}, true); response.Code != 400 || !strings.Contains(response.Body.String(), "error.issue") {
-		t.Fatal("tracker error hidden", response.Body.String())
+	if _, err := client.LinkPlanNodeIssue(t.Context(), connect.NewRequest(&ariadnev1.LinkPlanNodeIssueRequest{
+		ProjectId: "prj_a", NodeId: "task", Number: 404,
+	})); err == nil {
+		t.Fatal("expected tracker error for 404 issue")
+	} else {
+		connectErr, loc := extractLocalizedError(t, err)
+		if connectErr.Code() != connect.CodeInvalidArgument || loc == nil || loc.GetKey() != "error.issue" {
+			t.Fatalf("tracker error hidden: code=%v loc=%+v", connectErr.Code(), loc)
+		}
 	}
 }

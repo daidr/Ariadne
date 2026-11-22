@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"maps"
-	"net/http"
 	"reflect"
 	"slices"
 	"strconv"
@@ -109,100 +108,6 @@ func (api *API) readFileSourceSet(ctx context.Context, body object, project core
 		}
 	}
 	return result, secrets, nil
-}
-
-func (api *API) createProjectWithFileSources(ctx context.Context, body object, name *string, message string) (any, int, error) {
-	if body["source"] != nil || body["references"] != nil {
-		return nil, 0, badInput("sources")
-	}
-	set, secrets, err := api.readFileSourceSet(ctx, body, core.ProjectView{})
-	if err != nil {
-		return nil, 0, err
-	}
-	project, err := api.options.Repository.CreateProject(ctx, name, core.ProjectStart{FileSources: &set, Message: message})
-	if err != nil {
-		return nil, 0, err
-	}
-	if api.options.Settings != nil && len(secrets) > 0 {
-		if err := api.options.Settings.SaveFileSourceSecrets(project.ID, nil, secrets); err != nil {
-			return nil, 0, err
-		}
-	}
-	return object{"project": project}, http.StatusCreated, nil
-}
-
-func (api *API) registerFileSources() {
-	api.add("GET", "/api/projects/:projectId/sources", func(r *http.Request) (any, int, error) {
-		id := r.PathValue("projectId")
-		project, err := api.options.Repository.GetProject(r.Context(), id)
-		if err != nil {
-			return nil, 0, err
-		}
-		set := project.WritableSources()
-		known := map[string][]string{}
-		if api.options.Settings != nil {
-			all := api.options.Settings.SourceSecrets(id)
-			for _, source := range set.Sources {
-				known[source.ID] = appendSecretNames(sources.FileSourceSecrets(all, source.ID))
-			}
-			if refs, _ := project.References.([]any); len(refs) > 0 {
-				for _, raw := range refs {
-					reference, _ := raw.(map[string]any)
-					id := text(reference, "id")
-					known[id] = appendSecretNames(sources.FileSourceSecrets(all, id))
-				}
-			}
-		}
-		return object{"sources": set.Sources, "primaryId": set.PrimaryID, "secretsSet": known}, http.StatusOK, nil
-	})
-	api.add("PUT", "/api/projects/:projectId/sources", func(r *http.Request) (any, int, error) {
-		ctx, id := r.Context(), r.PathValue("projectId")
-		body, err := readJSON(r)
-		if err != nil {
-			return nil, 0, err
-		}
-		before, err := api.options.Repository.GetProject(ctx, id)
-		if err != nil {
-			return nil, 0, err
-		}
-		set, secrets, err := api.readFileSourceSet(ctx, body, before)
-		if err != nil {
-			return nil, 0, err
-		}
-		old := before.WritableSources()
-		previousSecrets := object{}
-		if api.options.Settings != nil {
-			previousSecrets = api.options.Settings.SourceSecrets(id)
-		}
-		project, err := api.options.Repository.SetProjectFileSources(ctx, id, old, set)
-		if err != nil {
-			return nil, 0, err
-		}
-		if api.options.Settings != nil {
-			touched := make([]string, 0, len(old.Sources)+len(set.Sources))
-			for _, source := range old.Sources {
-				touched = append(touched, source.ID)
-			}
-			for _, source := range set.Sources {
-				touched = append(touched, source.ID)
-			}
-			if len(touched) > 0 {
-				if err := api.options.Settings.SaveFileSourceSecrets(id, touched, secrets); err != nil {
-					return nil, 0, err
-				}
-			}
-		}
-		if api.options.Workspaces != nil {
-			for _, previous := range old.Sources {
-				current, found := set.Get(previous.ID)
-				if !found || !reflect.DeepEqual(previous, current) ||
-					!reflect.DeepEqual(sources.FileSourceSecrets(previousSecrets, previous.ID), sources.FileSourceSecrets(secrets, previous.ID)) {
-					api.options.Workspaces.InvalidateFileSource(id, previous.ID)
-				}
-			}
-		}
-		return object{"project": project}, http.StatusOK, nil
-	})
 }
 
 func appendSecretNames(secrets object) []string {

@@ -3,7 +3,9 @@ package runner
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -283,5 +285,179 @@ func TestTurnChangesBackfillsTotalsWithoutFileEdits(t *testing.T) {
 	}
 	if turnChangedEvents != 0 {
 		t.Fatalf("expected no turn.changed event for editless turn, got %d", turnChangedEvents)
+	}
+}
+
+func TestTurnChangesAfterMergingOriginMainMatchesBranchChangesAndReconcilesStaleTotals(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\n\tautocrlf = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	remoteDir := initTestRemoteRepo(t)
+	dataDir := t.TempDir()
+
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "repo.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	var hosted *local.Hosted
+	hosts := sources.New()
+	if _, err := hosts.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{Kind: "github", Provides: []string{"workspace", "repo"}},
+		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+			var err error
+			hosted, err = local.NewHosted(local.HostedOptions{
+				DataDir:   dataDir,
+				Path:      "owner/repo",
+				Namespace: []string{"github"},
+				RemoteURL: "file://" + filepath.ToSlash(remoteDir),
+				DefaultBranch: func(context.Context) (string, error) {
+					return "main", nil
+				},
+			})
+			if err != nil {
+				return sdk.Capabilities{}, err
+			}
+			return sdk.Capabilities{
+				Workspace: hosted.Capability(),
+				Close:     hosted.Close,
+			}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: hosts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+
+	project, err := repo.CreateProject(ctx, new("Hosted"), core.ProjectStart{
+		Source: core.Source{Kind: "github", Settings: map[string]any{"repository": "owner/repo"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Merge origin/main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: thread.ID, Author: "user", Content: "Make a branch edit",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turnID1, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
+	if err != nil || turnID1 == "" {
+		t.Fatalf("StartScheduledTurn 1: id=%q err=%v", turnID1, err)
+	}
+
+	runnerInstance := &Runner{Repository: repo, Workspaces: manager}
+	conv := core.ConversationView{ID: thread.ID, ProjectID: project.ID, Role: "thread"}
+	turn1 := &turn{Runner: runnerInstance, conversation: conv, id: turnID1, changes: newTurnChanges(runnerInstance, conv)}
+	if _, err := turn1.writeFile(ctx, args{"path": "README.md", "content": "hello\nbranch line\n"}); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := manager.ForThread(ctx, project.ID, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workDir := ws.Info().Label
+	runShellGit := func(dir string, gitArgs ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", gitArgs...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s failed: %v\n%s", gitArgs, dir, err, string(out))
+		}
+	}
+	runShellGit(workDir, "config", "user.name", "Test")
+	runShellGit(workDir, "config", "user.email", "test@example.invalid")
+	runShellGit(workDir, "add", "README.md")
+	runShellGit(workDir, "commit", "-qm", "branch change")
+	turn1.changes.record(ctx, turnID1)
+	if err := repo.FinishTurn(ctx, thread.ID, turnID1, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advance remote main with a large upstream file while the branch is open.
+	if err := os.WriteFile(filepath.Join(remoteDir, "upstream.txt"), []byte(strings.Repeat("upstream\n", 80)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	remoteGit := local.NewGit(remoteDir, "file")
+	if res := remoteGit(ctx, []string{"add", "upstream.txt"}, local.GitOptions{}); res.ExitCode != 0 {
+		t.Fatalf("remote add: %s", res.Stderr)
+	}
+	if res := remoteGit(ctx, []string{"commit", "-qm", "large upstream commit"}, local.GitOptions{}); res.ExitCode != 0 {
+		t.Fatalf("remote commit: %s", res.Stderr)
+	}
+
+	// Second turn: fetch origin/main and merge it in the user shell (under core.autocrlf=true).
+	if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{
+		ConversationID: thread.ID, Author: "user", Content: "Merge origin/main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turnID2, err := repo.StartScheduledTurn(ctx, thread.ID, "mock")
+	if err != nil || turnID2 == "" {
+		t.Fatalf("StartScheduledTurn 2: id=%q err=%v", turnID2, err)
+	}
+	turn2 := &turn{Runner: runnerInstance, conversation: conv, id: turnID2, changes: newTurnChanges(runnerInstance, conv)}
+	currentThread, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn2.changes.begin(ctx, currentThread)
+	if err := hosted.Fetch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runShellGit(workDir, "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
+	turn2.changes.record(ctx, turnID2)
+	if err := repo.FinishTurn(ctx, thread.ID, turnID2, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	afterMerge, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	totals, ok := afterMerge.Changes.(map[string]any)
+	if !ok {
+		t.Fatalf("expected thread.Changes after merge, got %#v", afterMerge.Changes)
+	}
+	if totals["files"] != float64(1) || totals["added"] != float64(1) || totals["removed"] != float64(0) {
+		t.Fatalf("expected branch totals {files:1 added:1 removed:0} after merging origin/main, got %#v", totals)
+	}
+
+	// Simulate an already-stale cached thread.Changes (as from before this fix)
+	// and verify that ThreadChanges reconciles it back to the true branch diff.
+	if err := repo.SyncBranchChanges(ctx, thread.ID, core.ChangeTotals{Files: 311, Added: 115384, Removed: 114771}); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.SameChangeTotals(stale.Changes, core.ChangeTotals{Files: 311, Added: 115384, Removed: 114771}) {
+		t.Fatalf("expected stale totals to be seeded, got %#v", stale.Changes)
+	}
+	if _, err := manager.ThreadChanges(ctx, thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !core.SameChangeTotals(reconciled.Changes, core.ChangeTotals{Files: 1, Added: 1, Removed: 0}) {
+		t.Fatalf("expected ThreadChanges to reconcile stale thread.Changes to {1, 1, 0}, got %#v", reconciled.Changes)
 	}
 }

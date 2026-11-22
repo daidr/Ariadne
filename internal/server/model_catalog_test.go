@@ -64,6 +64,13 @@ func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer builtins.Close(context.Background())
+	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: service.Client()}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remove()
+	}
 	catalog := modelcatalog.New(modelcatalog.Options{URL: service.URL + "/catalog", Client: service.Client()})
 	defer catalog.Close(context.Background())
 	api, err := New(Options{

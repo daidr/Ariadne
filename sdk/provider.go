@@ -26,12 +26,13 @@ type FoundProvider struct {
 
 // ModelProvider is the contract used by built-in and external model providers.
 type ModelProvider struct {
-	Info            ModelProviderInfo
-	Stream          func(context.Context, map[string]any, Request) iter.Seq[Part]
-	Models          func(context.Context, map[string]any, ModelListOptions) ([]ListedModel, error)
-	Describe        func(map[string]any, Request) any
-	Check           func(context.Context, map[string]any) (LocalizedText, error)
-	Find            func(FindContext) []FoundProvider
-	SearchAvailable func(map[string]any) bool
-	Search          func(context.Context, map[string]any, SearchRequest) (SearchAnswer, error)
+	Info             ModelProviderInfo
+	ValidateSettings func(map[string]any) error
+	Stream           func(context.Context, map[string]any, Request) iter.Seq[Part]
+	Models           func(context.Context, map[string]any, ModelListOptions) ([]ListedModel, error)
+	Describe         func(map[string]any, Request) any
+	Check            func(context.Context, map[string]any) (LocalizedText, error)
+	Find             func(FindContext) []FoundProvider
+	SearchAvailable  func(map[string]any) bool
+	Search           func(context.Context, map[string]any, SearchRequest) (SearchAnswer, error)
 }

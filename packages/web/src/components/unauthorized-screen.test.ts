@@ -237,17 +237,16 @@ describe('UnauthorizedScreen', () => {
   })
 
   test('App shows only header and unauthorized screen without sidebar, workspace or toast on 401', async () => {
-    const eventSourceCtor = vi.fn()
-    vi.stubGlobal(
-      'EventSource',
-      class {
-        constructor(...args: unknown[]) {
-          eventSourceCtor(...args)
-        }
-        addEventListener() {}
-        close() {}
-      },
-    )
+    const streamSpy = vi.spyOn(api, 'streamEvents').mockImplementation((_opts, signal) => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise((resolve) => {
+            signal?.addEventListener('abort', () => resolve({ done: true, value: undefined }), {
+              once: true,
+            })
+          }),
+      }),
+    }))
     vi.spyOn(api, 'listProjects').mockRejectedValue(
       new ApiError(401, { key: 'error.unauthorized' }),
     )
@@ -270,7 +269,7 @@ describe('UnauthorizedScreen', () => {
     await nextTick()
 
     expect(state.stream).toBe('unauthorized')
-    expect(eventSourceCtor).not.toHaveBeenCalled()
+    expect(streamSpy).not.toHaveBeenCalled()
     expect(toastItems()).toHaveLength(0)
 
     // Header stays visible with brand only; sidebar and workspace panels are hidden.
@@ -294,45 +293,46 @@ describe('UnauthorizedScreen', () => {
     expect(toastItems()).toHaveLength(0)
   })
 
-  test('in-flight api.ping() from a stopped EventSource cannot overwrite unauthorized back to lost', async () => {
-    const listeners = new Map<string, (() => void)[]>()
-    class FakeEventSource {
-      static CLOSED = 2
-      readyState = FakeEventSource.CLOSED
-      addEventListener(type: string, cb: () => void) {
-        const list = listeners.get(type) ?? []
-        list.push(cb)
-        listeners.set(type, list)
-      }
-      close() {}
-    }
-    vi.stubGlobal('EventSource', FakeEventSource)
-
-    // Direct followEvents check: stopping before ping settles suppresses onStatus.
-    let resolveDirectPing!: (value: { ok: boolean }) => void
-    vi.spyOn(api, 'ping').mockImplementationOnce(
-      () =>
-        new Promise<{ ok: boolean }>((resolve) => {
-          resolveDirectPing = resolve
-        }),
-    )
+  test('stopping a ConnectRPC event stream suppresses late errors and never overwrites unauthorized back to lost', async () => {
+    // Direct followEvents check: stopping before stream rejects suppresses onStatus.
+    let rejectDirect!: (error: unknown) => void
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectDirect = reject
+          }),
+      }),
+    }))
     const onStatus = vi.fn()
     const stop = followEvents(null, vi.fn(), onStatus)
-    for (const cb of listeners.get('error') ?? []) cb()
     stop()
-    resolveDirectPing({ ok: true })
+    rejectDirect(new TypeError('network down'))
     await flushPromises()
     expect(onStatus).not.toHaveBeenCalled()
 
-    // Full store start() race: error starts ping, another request gets 401 first, then ping fails with a network error.
-    listeners.clear()
-    let rejectStorePing!: (error: unknown) => void
-    vi.spyOn(api, 'ping').mockImplementationOnce(
-      () =>
-        new Promise<{ ok: boolean }>((_resolve, reject) => {
-          rejectStorePing = reject
-        }),
-    )
+    // Direct 401 from ConnectRPC stream immediately marks unauthorized without extra ping.
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new ApiError(401, { key: 'error.unauthorized' })),
+      }),
+    }))
+    const statuses: string[] = []
+    const stopAuth = followEvents(null, vi.fn(), (s) => statuses.push(s))
+    await flushPromises()
+    expect(statuses).toEqual(['unauthorized'])
+    stopAuth()
+
+    // Full store start() race: stream is open, another request gets 401 first, then stream rejects with a network error.
+    let rejectStore!: (error: unknown) => void
+    vi.spyOn(api, 'streamEvents').mockImplementationOnce(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<never>((_resolve, reject) => {
+            rejectStore = reject
+          }),
+      }),
+    }))
     vi.spyOn(api, 'listProjects').mockResolvedValue({ projects: [], lastSeq: 1 })
     vi.spyOn(api, 'getModelSettings').mockResolvedValue({
       models: [],
@@ -348,14 +348,13 @@ describe('UnauthorizedScreen', () => {
 
     state.stream = 'open'
     await start(async () => {})
-    for (const cb of listeners.get('error') ?? []) cb()
 
-    // Another request gets 401 before api.ping() finishes.
+    // Another request gets 401 before the stream rejects.
     report(new ApiError(401, { key: 'error.unauthorized' }))
     expect(state.stream).toBe('unauthorized')
 
-    // Now the stale ping settles with a non-401 network error.
-    rejectStorePing(new TypeError('network down'))
+    // Now the aborted/stale stream settles with a non-401 network error.
+    rejectStore(new TypeError('network down'))
     await flushPromises()
     expect(state.stream).toBe('unauthorized')
   })

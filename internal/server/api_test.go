@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -77,55 +78,9 @@ func canonical(raw any) any {
 func TestDomainHTTPResponses(t *testing.T) {
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
-		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"讨论串","nodeId":null,"branch":null,"model":null}`)},
-		{Type: "thread.reported", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","report":"ready","summary":"可以交付","headline":"完成","artifacts":[]}`)},
-		{Type: "message.posted", ProjectID: "prj_a", Data: json.RawMessage(`{"messageId":"msg_agent","conversationId":"thr_a","author":"thread","kind":"chat","content":"代理消息"}`)},
 	}
 	hash := sha256.Sum256([]byte("abc"))
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_text','prj_a','text/plain',3,'%s',x'616263',0)`, hex.EncodeToString(hash[:]))
-	requests := []apiRequest{}
-	add := func(method, path string, body any) {
-		requests = append(requests, apiRequest{Method: method, Path: path, Body: body})
-	}
-	no := false
-	requests = append(requests, apiRequest{Method: "GET", Path: "/api/health", Auth: &no})
-	for _, path := range []string{"/api/projects", "/api/files/fil_text", "/api/files/fil_missing", "/api/projects?token=test-token", "/api/unknown"} {
-		requests = append(requests, apiRequest{Method: "GET", Path: path, Auth: &no})
-	}
-	add("HEAD", "/api/health", nil)
-	add("POST", "/api/health", nil)
-	add("GET", "/api/unknown", nil)
-	add("GET", "/api/projects", nil)
-	add("GET", "/api/projects/prj_a", nil)
-	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
-	add("PUT", "/api/projects/prj_a", object{"name": " 新名称 "})
-	add("PUT", "/api/projects/prj_a", object{"name": " "})
-	add("PUT", "/api/projects/prj_a/slots", object{"slots": 2})
-	add("PUT", "/api/projects/prj_a/slots", object{"slots": 0})
-	add("PUT", "/api/projects/prj_a/slots", object{"slots": nil})
-	add("PUT", "/api/projects/prj_a/autopilot", object{"paused": true})
-	add("GET", "/api/projects/prj_a/search?q=代理", nil)
-	add("GET", "/api/files/fil_text", nil)
-	raw := "abc"
-	requests = append(requests, apiRequest{Method: "POST", Path: "/api/projects/prj_a/files?for=message", Raw: &raw, Headers: map[string]string{"Content-Type": "text/plain"}})
-	add("GET", "/api/projects/prj_a/plan", nil)
-	add("POST", "/api/projects/prj_a/plan/revise", object{"reason": "新增任务", "ops": []object{{"op": "add", "id": "n", "kind": "task", "title": "执行", "description": "", "acceptance": "测试通过"}}})
-	add("POST", "/api/projects/prj_a/plan/revise", object{"reason": "缺少节点", "ops": []object{{"op": "remove", "id": "missing"}}})
-	add("POST", "/api/projects/prj_a/artifacts", object{"kind": "invalid", "title": "产物"})
-	requests = append(requests, apiRequest{Method: "POST", Path: "/api/projects/prj_a/artifacts", Body: object{"kind": "document", "title": "文档"}, Save: "doc"}, apiRequest{Method: "POST", Path: "/api/projects/prj_a/artifacts", Body: object{"kind": "whiteboard", "title": "画板"}, Save: "board"})
-	add("GET", "/api/artifacts/@doc@", nil)
-	add("PUT", "/api/artifacts/@doc@", object{"content": "# 文档内容", "baseVersion": 1, "quotes": object{"unused": 1}})
-	add("PUT", "/api/artifacts/@doc@", object{"content": "覆盖冲突", "baseVersion": 1})
-	for _, version := range []string{"bad", "", "0x1", "%201%20", "1.5", "1_0", "0x1p0", "inf"} {
-		add("GET", "/api/artifacts/@doc@?version="+version, nil)
-	}
-	add("POST", "/api/artifacts/@doc@/comments", object{"type": "create", "threadId": "comment_a", "commentId": "item_a", "quote": "文档内容", "body": "修改意见"})
-	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_a", "commentId": "board_item", "anchor": object{"node": "a"}, "body": "画板意见"})
-	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_bad", "commentId": "board_item", "anchor": nil, "body": "无效"})
-	add("GET", "/api/projects/prj_a/artifacts", nil)
-	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
-	invalid := "[]"
-	requests = append(requests, apiRequest{Method: "PUT", Path: "/api/projects/prj_a", Raw: &invalid})
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "api.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
@@ -142,39 +97,43 @@ func TestDomainHTTPResponses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	aliases := map[string]string{}
-	aliasPattern := regexp.MustCompile(`@([a-z]+)@`)
-	for i, item := range requests {
-		path := aliasPattern.ReplaceAllStringFunc(item.Path, func(value string) string { return aliases[value[1:len(value)-1]] })
-		body := ""
-		if item.Raw != nil {
-			body = *item.Raw
-		} else if item.Body != nil {
-			body = encoded(item.Body)
-		}
-		request := httptest.NewRequest(item.Method, "http://test.invalid"+path, strings.NewReader(body))
-		if item.Auth == nil || *item.Auth {
+
+	type expectation struct {
+		method  string
+		path    string
+		auth    bool
+		body    string
+		headers map[string]string
+		status  int
+	}
+	cases := []expectation{
+		{method: "GET", path: "/api/health", auth: false, status: 200},
+		{method: "HEAD", path: "/api/health", auth: true, status: 404},
+		{method: "POST", path: "/api/health", auth: true, status: 404},
+		{method: "GET", path: "/api/files/fil_text", auth: false, status: 401},
+		{method: "GET", path: "/api/files/fil_missing", auth: false, status: 401},
+		{method: "GET", path: "/api/events?token=test-token", auth: false, status: 401},
+		{method: "GET", path: "/api/projects?token=test-token", auth: false, status: 401},
+		{method: "GET", path: "/api/unknown", auth: false, status: 401},
+		{method: "GET", path: "/api/unknown", auth: true, status: 404},
+		{method: "GET", path: "/api/events", auth: true, status: 404},
+		{method: "GET", path: "/api/projects", auth: true, status: 404},
+		{method: "GET", path: "/api/files/fil_text", auth: true, status: 200},
+		{method: "HEAD", path: "/api/files/fil_text", auth: true, status: 200},
+		{method: "POST", path: "/api/projects/prj_a/files?for=message", auth: true, body: "abc", headers: map[string]string{"Content-Type": "text/plain"}, status: 201},
+	}
+	for _, tc := range cases {
+		request := httptest.NewRequest(tc.method, "http://test.invalid"+tc.path, strings.NewReader(tc.body))
+		if tc.auth {
 			request.Header.Set("Authorization", "Bearer test-token")
 		}
-		for key, value := range item.Headers {
+		for key, value := range tc.headers {
 			request.Header.Set(key, value)
 		}
 		response := httptest.NewRecorder()
 		api.ServeHTTP(response, request)
-		var value any = response.Body.String()
-		json.Unmarshal(response.Body.Bytes(), &value)
-		if object, ok := value.(map[string]any); ok {
-			if artifact, ok := object["artifact"].(map[string]any); ok && item.Save != "" {
-				aliases[item.Save] = artifact["id"].(string)
-			}
-			if sync, ok := object["sync"].(map[string]any); ok {
-				cursor := sync["cursor"].(string)
-				aliases["cursor"] = cursor
-				sync["cursor"] = "epoch.cursor"
-			}
-		}
-		if response.Code >= 500 {
-			t.Fatalf("request %d failed: %s", i, response.Body.String())
+		if response.Code != tc.status {
+			t.Fatalf("%s %s (auth=%v): got %d, want %d (body=%s)", tc.method, tc.path, tc.auth, response.Code, tc.status, response.Body.String())
 		}
 	}
 }
@@ -191,8 +150,20 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	defer api.Close()
 	parameter := regexp.MustCompile(`:[a-zA-Z]+`)
-	if len(api.routes) == 0 {
-		t.Fatal("expected native HTTP API routes to be registered")
+	wantNativeRoutes := []string{
+		"GET /api/artifacts/:artifactId/live",
+		"GET /api/conversations/:conversationId/trace/export",
+		"GET /api/files/:fileId",
+		"GET /api/files/:fileId/sheet",
+		"GET /api/health",
+		"GET /api/projects/:projectId/export",
+		"HEAD /api/files/:fileId",
+		"POST /api/projects/:projectId/files",
+	}
+	gotNativeRoutes := slices.Clone(api.routes)
+	slices.Sort(gotNativeRoutes)
+	if !slices.Equal(gotNativeRoutes, wantNativeRoutes) {
+		t.Fatalf("unexpected native HTTP API routes:\ngot:  %v\nwant: %v", gotNativeRoutes, wantNativeRoutes)
 	}
 	if len(api.rpcProcedures) == 0 {
 		t.Fatal("expected ConnectRPC procedures to be registered")
@@ -230,16 +201,20 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 			t.Fatalf("unauthenticated %s did not fail before lookup: %d", unknown, response.Code)
 		}
 	}
-	// A successful bearer request grants native image reads only, never API or RPC calls.
-	request := httptest.NewRequest("GET", "http://test.invalid/api/projects", nil)
+	// A successful bearer ConnectRPC request grants native file reads only, never API or RPC calls.
+	request := httptest.NewRequest(http.MethodPost, "http://test.invalid"+rpcPrefix+ariadnev1connect.MetaServicePingProcedure, strings.NewReader("{}"))
 	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	api.ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("authenticated Ping returned %d: %s", response.Code, response.Body.String())
+	}
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 {
 		t.Fatal(cookies)
 	}
-	for _, path := range []string{"/api/projects", "/api/projects?token=secret", "/api/artifacts/missing", "/api/settings/models", "/api/conversations/missing/trace/export"} {
+	for _, path := range []string{"/api/events", "/api/events?token=secret", "/api/projects", "/api/projects?token=secret", "/api/artifacts/missing", "/api/settings/models", "/api/conversations/missing/trace/export"} {
 		request := httptest.NewRequest("GET", "http://test.invalid"+path, nil)
 		request.AddCookie(cookies[0])
 		response := httptest.NewRecorder()
@@ -288,38 +263,73 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 	defer api.Close()
 	server := httptest.NewServer(api)
 	defer server.Close()
-	request, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/api/events?token=secret&afterSeq=not-a-number", nil)
+
+	// Legacy SSE endpoint with query token is rejected before lookup.
+	resp, err := server.Client().Get(server.URL + "/api/events?token=secret&afterSeq=0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Last-Event-ID", "0")
-	response, err := server.Client().Do(request)
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("legacy /api/events?token=secret returned %d, want 401", resp.StatusCode)
+	}
+
+	// Unauthenticated ConnectRPC stream fails with CodeUnauthenticated.
+	unauthClient := ariadnev1connect.NewEventServiceClient(server.Client(), server.URL+rpcPrefix)
+	unauthStream, err := unauthClient.StreamEvents(t.Context(), connect.NewRequest(&ariadnev1.StreamEventsRequest{}))
+	if err == nil {
+		if unauthStream.Receive() {
+			t.Fatal("unauthenticated StreamEvents yielded a message")
+		}
+		err = unauthStream.Err()
+		_ = unauthStream.Close()
+	}
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected CodeUnauthenticated, got %v", err)
+	}
+
+	authClient := ariadnev1connect.NewEventServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+
+	// Replay from cursor 0 delivers ready + durable event, then closes cleanly on cancel.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	zero := int64(0)
+	stream, err := authClient.StreamEvents(ctx, connect.NewRequest(&ariadnev1.StreamEventsRequest{AfterSeq: &zero}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "text/event-stream" {
-		t.Fatal(response.StatusCode, response.Header)
+	if !stream.Receive() {
+		t.Fatalf("expected ready frame, err=%v", stream.Err())
 	}
-	reader := make([]byte, 512)
-	n, err := response.Body.Read(reader)
-	if err != nil {
-		t.Fatal(err)
+	if ready := stream.Msg().GetReady(); ready == nil || ready.GetLastSeq() != 0 {
+		t.Fatalf("unexpected first frame: %+v", stream.Msg())
 	}
-	if !strings.Contains(string(reader[:n]), "event: ariadne") {
-		t.Fatal(string(reader[:n]))
+	if !stream.Receive() {
+		t.Fatalf("expected replayed event frame, err=%v", stream.Err())
 	}
-	response.Body.Close()
-	request, err = http.NewRequestWithContext(t.Context(), "GET", server.URL+"/api/events?token=secret&afterSeq=-1", nil)
-	if err != nil {
-		t.Fatal(err)
+	ev := stream.Msg().GetEvent()
+	if ev == nil || ev.GetType() != "project.created" || ev.GetProjectId() != "prj_a" || ev.GetSeq() != 1 {
+		t.Fatalf("unexpected event frame: %+v", stream.Msg())
 	}
-	response, err = server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
+	cancel()
+	_ = stream.Close()
+
+	// Negative afterSeq returns CodeInvalidArgument.
+	neg := int64(-1)
+	badStream, err := authClient.StreamEvents(t.Context(), connect.NewRequest(&ariadnev1.StreamEventsRequest{AfterSeq: &neg}))
+	if err == nil {
+		if badStream.Receive() {
+			t.Fatal("negative afterSeq yielded a message")
+		}
+		err = badStream.Err()
+		_ = badStream.Close()
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 400 {
-		t.Fatal(response.StatusCode)
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument for negative afterSeq, got %v", err)
 	}
 }
 

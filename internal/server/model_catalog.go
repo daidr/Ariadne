@@ -73,7 +73,7 @@ func (api *API) listProviderModels(ctx context.Context, rawProvider any) ([]list
 	if api.options.Settings == nil {
 		return nil, false, domainerr.NotFound("settings")
 	}
-	draft, err := api.options.Settings.DraftProvider(rawProvider, api.modelKinds())
+	draft, err := api.options.Settings.DraftProvider(rawProvider, api.modelKinds(), api.modelValidate())
 	if err != nil {
 		return nil, false, err
 	}

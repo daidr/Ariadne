@@ -625,6 +625,10 @@ func (d *acpDriver) startError(operation string, err error) error {
 	}
 	return d.diagnosticError(operation, err)
 }
+func (d *acpDriver) HistoryBudget(system string) int {
+	overhead := len("<instructions>\n") + len(system) + len("\n</instructions>\n\n")
+	return max(0, defaultHistoryReplayBytes-overhead)
+}
 func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) error {
 	if err := ctx.Err(); err != nil {
 		return err

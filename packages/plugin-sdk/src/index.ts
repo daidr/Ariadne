@@ -22,6 +22,11 @@ export type SettingField =
        * list directories (see `ContextProvider.browse`).
        */
       directory?: boolean
+      /**
+       * Marks a non-secret HTTP(S) base URL field whose origin is dynamically allowed
+       * for external Lua plugin HTTP requests when saved by the user.
+       */
+      networkOrigin?: boolean
       default?: string
     }
   | { type: 'number'; title: LocalizedText; description?: LocalizedText; default?: number }

@@ -29,7 +29,7 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 			Info: sdk.DashboardSourceInfo{Kind: provider.kind, Title: provider.title, Description: provider.description, Settings: provider.settings},
 			Fetch: func(ctx context.Context, settings map[string]any, project string) (map[string]any, error) {
 				var out map[string]any
-				err := program.result(ctx, provider, "fetch", &out, settings, project)
+				err := program.result(ctx, provider, "fetch", settings, &out, settings, project)
 				return out, err
 			},
 		})
@@ -42,14 +42,14 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 			Kind: provider.kind, Title: provider.title,
 			Match: func(address *url.URL) *sdk.LinkMatch {
 				var label *string
-				if err := program.result(context.Background(), provider, "match", &label, address.String()); err != nil || label == nil || *label == "" || len(*label) > 1024 {
+				if err := program.result(context.Background(), provider, "match", nil, &label, address.String()); err != nil || label == nil || *label == "" || len(*label) > 1024 {
 					return nil
 				}
 				return &sdk.LinkMatch{Kind: provider.kind, Label: *label}
 			},
 			Preview: func(ctx context.Context, address *url.URL) (*sdk.PullRequestPreview, error) {
 				var preview *sdk.PullRequestPreview
-				err := program.result(ctx, provider, "preview", &preview, address.String())
+				err := program.result(ctx, provider, "preview", nil, &preview, address.String())
 				if preview != nil {
 					preview.Kind = provider.kind
 				}
@@ -67,9 +67,9 @@ func (program *luaProgram) search(provider luaProvider) sdk.SearchProvider {
 		var raw json.RawMessage
 		var err error
 		if settings != nil {
-			err = program.result(ctx, provider, "search", &raw, query, limit, settings)
+			err = program.result(ctx, provider, "search", settings, &raw, query, limit, settings)
 		} else {
-			err = program.result(ctx, provider, "search", &raw, query, limit)
+			err = program.result(ctx, provider, "search", nil, &raw, query, limit)
 		}
 		if err != nil {
 			return sdk.SearchResponse{}, err
@@ -92,11 +92,16 @@ func (program *luaProgram) search(provider luaProvider) sdk.SearchProvider {
 			return response.Results, nil
 		},
 	}
+	if provider.hasNetworkOrigin {
+		searchProvider.ValidateSettings = func(values map[string]any) error {
+			return validateNetworkOriginSettings(provider.settings, values)
+		}
+	}
 	if provider.methods["check"] {
 		searchProvider.Capabilities.SupportsCheck = true
 		searchProvider.Check = func(ctx context.Context, settings map[string]any) (sdk.SearchCheckResult, error) {
 			var raw json.RawMessage
-			if err := program.result(ctx, provider, "check", &raw, settings); err != nil {
+			if err := program.result(ctx, provider, "check", settings, &raw, settings); err != nil {
 				if errors.Is(ctx.Err(), context.Canceled) {
 					return sdk.SearchCheckResult{}, err
 				}
@@ -178,31 +183,41 @@ func decodeLuaSearchCheck(raw json.RawMessage) sdk.SearchCheckResult {
 
 func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {
 	model := sdk.ModelProvider{
-		Info: sdk.ModelProviderInfo{Kind: provider.kind, Title: provider.title, Settings: provider.settings},
+		Info: sdk.ModelProviderInfo{
+			Kind:         provider.kind,
+			Title:        provider.title,
+			Settings:     provider.settings,
+			Capabilities: provider.capabilities,
+		},
 		Stream: func(ctx context.Context, settings map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
 			return func(yield func(sdk.Part) bool) {
 				program.stream(ctx, provider, settings, request, yield)
 			}
 		},
 	}
+	if provider.hasNetworkOrigin {
+		model.ValidateSettings = func(values map[string]any) error {
+			return validateNetworkOriginSettings(provider.settings, values)
+		}
+	}
 	if provider.methods["models"] {
 		model.Models = func(ctx context.Context, settings map[string]any, options sdk.ModelListOptions) ([]sdk.ListedModel, error) {
 			var out []sdk.ListedModel
-			err := program.result(ctx, provider, "models", &out, settings, options.Headers)
+			err := program.result(ctx, provider, "models", settings, &out, settings, options.Headers)
 			return out, err
 		}
 	}
 	if provider.methods["check"] {
 		model.Check = func(ctx context.Context, settings map[string]any) (sdk.LocalizedText, error) {
 			var out sdk.LocalizedText
-			err := program.result(ctx, provider, "check", &out, settings)
+			err := program.result(ctx, provider, "check", settings, &out, settings)
 			return out, err
 		}
 	}
 	if provider.methods["describe"] {
 		model.Describe = func(settings map[string]any, request sdk.Request) any {
 			var out any
-			if err := program.result(context.Background(), provider, "describe", &out, settings, request); err != nil {
+			if err := program.result(context.Background(), provider, "describe", settings, &out, settings, request); err != nil {
 				return nil
 			}
 			return out
@@ -211,7 +226,7 @@ func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {
 	if provider.methods["search"] {
 		model.Search = func(ctx context.Context, settings map[string]any, request sdk.SearchRequest) (sdk.SearchAnswer, error) {
 			var out sdk.SearchAnswer
-			err := program.result(ctx, provider, "search", &out, settings, request)
+			err := program.result(ctx, provider, "search", settings, &out, settings, request)
 			return out, err
 		}
 	}
@@ -225,7 +240,7 @@ func (program *luaProgram) stream(ctx context.Context, provider luaProvider, set
 	stopped := false
 	var finish *sdk.Part
 	var streamError error
-	err := program.call(ctx, provider, "stream", 10*time.Minute, true, func(values luaValues, fn *lua.LFunction) error {
+	err := program.call(ctx, provider, "stream", 10*time.Minute, true, settings, func(values luaValues, fn *lua.LFunction) error {
 		input, err := luaArgs(values, []any{settings, request})
 		if err != nil {
 			return err
@@ -311,7 +326,7 @@ func (program *luaProgram) source(provider luaProvider) sdk.ContextProvider {
 		Connect: func(ctx context.Context, settings map[string]any) (sdk.Capabilities, error) {
 			if provider.methods["check"] {
 				var result any
-				if err := program.result(ctx, provider, "check", &result, settings); err != nil {
+				if err := program.result(ctx, provider, "check", settings, &result, settings); err != nil {
 					return sdk.Capabilities{}, err
 				}
 			}
@@ -328,10 +343,16 @@ func (program *luaProgram) source(provider luaProvider) sdk.ContextProvider {
 			}, nil
 		},
 	}
+	if provider.hasNetworkOrigin {
+		schema := provider.settings
+		source.ValidateSettings = func(values, _ map[string]any) error {
+			return validateNetworkOriginSettings(schema, values)
+		}
+	}
 	if provider.methods["browse"] {
 		source.Browse = func(ctx context.Context, settings map[string]any, folder string) (*sdk.DirectoryListing, error) {
 			var out *sdk.DirectoryListing
-			err := program.result(ctx, provider, "browse", &out, settings, folder)
+			err := program.result(ctx, provider, "browse", settings, &out, settings, folder)
 			return out, err
 		}
 	}
@@ -365,7 +386,7 @@ func (view *luaSource) List(ctx context.Context, path string) ([]sdk.DirectoryEn
 		return nil, err
 	}
 	var out []sdk.DirectoryEntry
-	if err := view.program.result(ctx, view.provider, "list", &out, settings, path); err != nil {
+	if err := view.program.result(ctx, view.provider, "list", settings, &out, settings, path); err != nil {
 		return nil, err
 	}
 	if len(out) > 20000 {
@@ -393,7 +414,7 @@ func (view *luaSource) ReadBytes(ctx context.Context, path string, maxBytes int6
 	if maxBytes > 0 {
 		limit = min(limit, maxBytes)
 	}
-	err = view.program.call(ctx, view.provider, "read", 30*time.Second, true, func(values luaValues, fn *lua.LFunction) error {
+	err = view.program.call(ctx, view.provider, "read", 30*time.Second, true, settings, func(values luaValues, fn *lua.LFunction) error {
 		input, err := luaArgs(values, []any{settings, path, limit})
 		if err != nil {
 			return err

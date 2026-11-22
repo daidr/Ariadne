@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -15,19 +16,70 @@ import (
 )
 
 const (
-	rpcPrefix          = "/api/rpc"
-	rpcMaxMessageBytes = 80 * 1024 * 1024
+	rpcPrefix            = "/api/rpc"
+	rpcMaxMessageBytes   = 80 * 1024 * 1024
+	rpcStreamWriteWindow = 10 * time.Second
 )
 
 type fileCookieContextKey struct{}
+type responseControllerContextKey struct{}
 
 func (api *API) rpcHandler() http.Handler {
 	stripped := http.StripPrefix(rpcPrefix, api.rpcMux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie := api.auth.FileSessionCookie(r)
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+		guard := &streamWriteGuard{rc: rc}
 		ctx := context.WithValue(r.Context(), fileCookieContextKey{}, cookie)
+		ctx = context.WithValue(ctx, responseControllerContextKey{}, guard)
 		stripped.ServeHTTP(w, r.WithContext(ctx))
+		// Clear any bounded close deadline once Connect has flushed its response so
+		// healthy keep-alive connections never inherit a stale deadline on reuse.
+		if !guard.writeFailed {
+			_ = rc.SetWriteDeadline(time.Time{})
+		}
 	})
+}
+
+type streamWriteGuard struct {
+	rc          *http.ResponseController
+	writeFailed bool
+}
+
+func (api *API) streamWriteGuard(ctx context.Context) *streamWriteGuard {
+	if guard, ok := ctx.Value(responseControllerContextKey{}).(*streamWriteGuard); ok && guard != nil {
+		return guard
+	}
+	return &streamWriteGuard{}
+}
+
+func (g *streamWriteGuard) Send(send func() error) error {
+	if g.rc != nil {
+		if err := g.rc.SetWriteDeadline(time.Now().Add(rpcStreamWriteWindow)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			g.writeFailed = true
+			return err
+		}
+	}
+	if err := send(); err != nil {
+		// Leave the current (or expired) write deadline intact so Connect's error
+		// frame / EndStreamResponse flush cannot block indefinitely on a stalled peer.
+		g.writeFailed = true
+		return err
+	}
+	if g.rc != nil {
+		_ = g.rc.SetWriteDeadline(time.Time{})
+	}
+	return nil
+}
+
+// ArmCloseDeadline ensures Connect's final EndStreamResponse write has a bounded
+// write deadline when exiting a streaming RPC with an error (e.g. ErrSlowConsumer),
+// without extending an already-expired deadline after a failed Send.
+func (g *streamWriteGuard) ArmCloseDeadline() {
+	if g.rc != nil && !g.writeFailed {
+		_ = g.rc.SetWriteDeadline(time.Now().Add(rpcStreamWriteWindow))
+	}
 }
 
 func (api *API) mountConnect(

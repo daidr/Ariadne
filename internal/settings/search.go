@@ -214,9 +214,12 @@ func (store *Store) PublicSearch(kinds []sdk.SearchProviderInfo, ready func(stri
 	activeReady := false
 	activeKeySet := false
 	resolvedProvider := ""
+	disabledProvider := ""
 	if storedProvider != "" {
 		if _, ok := searchInfo(kinds, storedProvider); ok {
 			resolvedProvider = storedProvider
+		} else {
+			disabledProvider = storedProvider
 		}
 	}
 	for _, info := range kinds {
@@ -279,7 +282,7 @@ func (store *Store) PublicSearch(kinds []sdk.SearchProviderInfo, ready func(stri
 			break
 		}
 	}
-	return Object{
+	out := Object{
 		"provider": resolvedProvider,
 		"ready":    activeReady,
 		"keySet":   activeKeySet,
@@ -288,4 +291,8 @@ func (store *Store) PublicSearch(kinds []sdk.SearchProviderInfo, ready func(stri
 		"plugins":  readyPlugins,
 		"services": listed,
 	}
+	if disabledProvider != "" {
+		out["disabledProvider"] = disabledProvider
+	}
+	return out
 }
