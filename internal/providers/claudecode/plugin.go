@@ -31,13 +31,31 @@ func findProviders(ctx sdk.FindContext) []sdk.FoundProvider {
 	if !which(DefaultCommand) {
 		return nil
 	}
-	home := textutil.Trim(ctx.Env["CLAUDE_CONFIG_DIR"])
-	if home == "" {
-		home = filepath.Join(ctx.Home, ".claude")
+	signedIn := ctx.Env["CLAUDE_CODE_OAUTH_TOKEN"] != ""
+	if !signedIn {
+		configDir := textutil.Trim(ctx.Env["CLAUDE_CONFIG_DIR"])
+		var candidates []string
+		if configDir != "" {
+			candidates = []string{
+				filepath.Join(configDir, ".credentials.json"),
+				filepath.Join(configDir, ".claude.json"),
+			}
+		} else {
+			defaultDir := filepath.Join(ctx.Home, ".claude")
+			candidates = []string{
+				filepath.Join(defaultDir, ".credentials.json"),
+				filepath.Join(ctx.Home, ".claude.json"),
+				filepath.Join(defaultDir, ".claude.json"),
+			}
+		}
+		for _, path := range candidates {
+			if _, err := os.Stat(path); err == nil {
+				signedIn = true
+				break
+			}
+		}
 	}
-	_, credentials := os.Stat(filepath.Join(home, ".credentials.json"))
-	_, config := os.Stat(filepath.Join(ctx.Home, ".claude.json"))
-	if ctx.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "" || credentials == nil || config == nil {
+	if signedIn {
 		return []sdk.FoundProvider{{
 			ID:       ProviderKind,
 			From:     map[string]string{"program": DefaultCommand},
@@ -85,9 +103,9 @@ func ModelProvider(sessions *agentruntime.Sessions, dataDir string) sdk.ModelPro
 			}
 			return []sdk.ListedModel{{ID: "default"}, {ID: "sonnet"}, {ID: "opus"}, {ID: "haiku"}}, nil
 		},
-			Check: func(_ context.Context, settings map[string]any) (sdk.LocalizedText, error) {
-				return agentruntime.CheckCommand(commandFor(settings))
-			},
+		Check: func(_ context.Context, settings map[string]any) (sdk.LocalizedText, error) {
+			return agentruntime.CheckCommand(commandFor(settings))
+		},
 		Find: findProviders,
 	}
 }

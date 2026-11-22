@@ -153,3 +153,91 @@ func TestClaudeModelsAndPromptShape(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFindProvidersRespectsClaudeConfigDir(t *testing.T) {
+	whichYes := func(program string) bool { return program == DefaultCommand }
+
+	t.Run("custom CLAUDE_CONFIG_DIR with .claude.json only", func(t *testing.T) {
+		home := t.TempDir()
+		custom := t.TempDir()
+		if err := os.WriteFile(filepath.Join(custom, ".claude.json"), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		found := findProviders(sdk.FindContext{
+			Home:  home,
+			Env:   map[string]string{"CLAUDE_CONFIG_DIR": custom},
+			Which: whichYes,
+		})
+		if len(found) != 1 || found[0].ID != ProviderKind {
+			t.Fatalf("expected claude-code to be discovered from CLAUDE_CONFIG_DIR/.claude.json, got %+v", found)
+		}
+	})
+
+	t.Run("custom CLAUDE_CONFIG_DIR with .credentials.json only", func(t *testing.T) {
+		home := t.TempDir()
+		custom := t.TempDir()
+		if err := os.WriteFile(filepath.Join(custom, ".credentials.json"), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		found := findProviders(sdk.FindContext{
+			Home:  home,
+			Env:   map[string]string{"CLAUDE_CONFIG_DIR": custom},
+			Which: whichYes,
+		})
+		if len(found) != 1 || found[0].ID != ProviderKind {
+			t.Fatalf("expected claude-code to be discovered from CLAUDE_CONFIG_DIR/.credentials.json, got %+v", found)
+		}
+	})
+
+	t.Run("empty custom CLAUDE_CONFIG_DIR does not fall back to HOME/.claude.json", func(t *testing.T) {
+		home := t.TempDir()
+		custom := t.TempDir()
+		if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		found := findProviders(sdk.FindContext{
+			Home:  home,
+			Env:   map[string]string{"CLAUDE_CONFIG_DIR": custom},
+			Which: whichYes,
+		})
+		if len(found) != 0 {
+			t.Fatalf("expected isolated empty CLAUDE_CONFIG_DIR not to match HOME/.claude.json, got %+v", found)
+		}
+	})
+
+	t.Run("default HOME checks .claude/.credentials.json, .claude.json, and .claude/.claude.json", func(t *testing.T) {
+		for _, rel := range []string{
+			filepath.Join(".claude", ".credentials.json"),
+			".claude.json",
+			filepath.Join(".claude", ".claude.json"),
+		} {
+			home := t.TempDir()
+			full := filepath.Join(home, rel)
+			if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(full, []byte("{}"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			found := findProviders(sdk.FindContext{
+				Home:  home,
+				Env:   map[string]string{},
+				Which: whichYes,
+			})
+			if len(found) != 1 || found[0].ID != ProviderKind {
+				t.Fatalf("expected claude-code to be discovered from %s, got %+v", rel, found)
+			}
+		}
+	})
+
+	t.Run("oauth token overrides empty directories", func(t *testing.T) {
+		found := findProviders(sdk.FindContext{
+			Home:  t.TempDir(),
+			Env:   map[string]string{"CLAUDE_CONFIG_DIR": t.TempDir(), "CLAUDE_CODE_OAUTH_TOKEN": "tok"},
+			Which: whichYes,
+		})
+		if len(found) != 1 || found[0].ID != ProviderKind {
+			t.Fatalf("expected claude-code to be discovered via CLAUDE_CODE_OAUTH_TOKEN, got %+v", found)
+		}
+	})
+}
