@@ -385,6 +385,13 @@ export interface ModelProviderInput {
   timeoutSeconds?: number | null
 }
 
+export interface PluginUsage {
+  modelProviders: string[]
+  modelRoles: string[]
+  searches: string[]
+  projects: string[]
+}
+
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */
 export interface PluginRecord {
   id: string | null
@@ -401,6 +408,7 @@ export interface PluginRecord {
     searches: string[]
     links: string[]
   }
+  usage?: PluginUsage
 }
 
 export interface PluginConfig {

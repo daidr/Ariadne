@@ -1483,10 +1483,20 @@ function onEvent(event: AnyStoredEvent) {
 
 /** Take in the model settings as saved: whether the coordinator has one, and the choices. */
 export function applyModelSettings(settings: ModelSettings) {
+  const knownKinds = Array.isArray(settings.kinds)
+    ? new Set(settings.kinds.map((kind) => kind.kind))
+    : null
+  const activeProviders = knownKinds
+    ? settings.providers.filter((provider) => knownKinds.has(provider.kind))
+    : settings.providers
+  const activeProviderIds = new Set(activeProviders.map((provider) => provider.id))
+  const activeModels = knownKinds
+    ? settings.models.filter((model) => activeProviderIds.has(model.provider))
+    : settings.models
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
   state.showCost = settings.showCost
-  state.models = modelLabels(settings.models, settings.providers)
+  state.models = modelLabels(activeModels, activeProviders)
 }
 
 /** Give a thread another model, or back the default with `null`. */

@@ -2,6 +2,7 @@ package settings
 
 import (
 	"math"
+	"slices"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/transcript"
@@ -181,19 +182,81 @@ func (store *Store) ResolveCoordinator(triage bool, contextTokens float64, kinds
 	}
 	return coordinator, nil
 }
-func (store *Store) ModelChoices() []any {
+func (store *Store) ModelChoices(kinds []sdk.ModelProviderInfo) []any {
 	config := store.snapshot()
 	models := object(config["models"])
+	providers := list(models["providers"])
 	thread := modelFor(config, "thread", "")
 	choices := []any{}
 	for _, raw := range list(models["models"]) {
 		model := object(raw)
-		if findByID(list(models["providers"]), text(model["provider"])) == nil {
+		provider := findByID(providers, text(model["provider"]))
+		if provider == nil {
 			continue
+		}
+		if kinds != nil {
+			if _, known := providerInfo(kinds, text(provider["kind"])); !known {
+				continue
+			}
 		}
 		choices = append(choices, Object{"id": model["id"], "label": modelLabel(config, model), "note": fallback(model["note"], ""), "threadDefault": model["id"] == thread["id"]})
 	}
 	return choices
+}
+
+// ModelUsageByKinds returns configured provider names and active role keys referencing any of kinds.
+func (store *Store) ModelUsageByKinds(kinds []string) ([]string, []string) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	models := object(store.snapshot()["models"])
+	providerIDs := map[string]bool{}
+	var providerNames []string
+	for _, raw := range list(models["providers"]) {
+		provider := object(raw)
+		kind := text(provider["kind"])
+		if !slices.Contains(kinds, kind) {
+			continue
+		}
+		if id := text(provider["id"]); id != "" {
+			providerIDs[id] = true
+		}
+		name := text(provider["name"])
+		if name == "" {
+			name = kind
+		}
+		if !slices.Contains(providerNames, name) {
+			providerNames = append(providerNames, name)
+		}
+	}
+	if len(providerIDs) == 0 {
+		return providerNames, nil
+	}
+	modelIDs := map[string]bool{}
+	for _, raw := range list(models["models"]) {
+		model := object(raw)
+		if providerIDs[text(model["provider"])] {
+			if id := text(model["id"]); id != "" {
+				modelIDs[id] = true
+			}
+		}
+	}
+	roleMap := object(models["roles"])
+	var usedRoles []string
+	fallbackUsed := false
+	for _, role := range roles {
+		entry := object(roleMap[role])
+		if modelIDs[text(entry["model"])] {
+			usedRoles = append(usedRoles, role)
+		}
+		if modelIDs[text(entry["fallback"])] {
+			fallbackUsed = true
+		}
+	}
+	if fallbackUsed {
+		usedRoles = append(usedRoles, "fallback")
+	}
+	return providerNames, usedRoles
 }
 
 func (store *Store) ResolvedModels(role string, kinds []sdk.ModelProviderInfo) []*ResolvedModel {

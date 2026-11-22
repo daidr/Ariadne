@@ -579,6 +579,16 @@ export function fromProtoPluginRecord(record: ProtoPluginRecord): PluginRecord {
       searches: [...(record.provides?.searches ?? [])],
       links: [...(record.provides?.links ?? [])],
     },
+    ...(record.usage
+      ? {
+          usage: {
+            modelProviders: [...record.usage.modelProviders],
+            modelRoles: [...record.usage.modelRoles],
+            searches: [...record.usage.searches],
+            projects: [...record.usage.projects],
+          },
+        }
+      : {}),
   }
 }
 

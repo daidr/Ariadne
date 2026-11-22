@@ -362,10 +362,22 @@ describe('Domain 1 ConnectRPC mappers', () => {
         source: 'builtin',
         status: 'disabled',
         provides: { models: ['anthropic'] },
+        usage: {
+          modelProviders: ['Claude'],
+          modelRoles: ['thread'],
+          searches: [],
+          projects: [],
+        },
       }),
     )
     expect(disabledRecord.status).toBe('disabled')
     expect(disabledRecord.provides.models).toEqual(['anthropic'])
+    expect(disabledRecord.usage).toEqual({
+      modelProviders: ['Claude'],
+      modelRoles: ['thread'],
+      searches: [],
+      projects: [],
+    })
 
     const cfg = fromProtoPluginConfig(
       create(PluginConfigSchema, {

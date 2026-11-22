@@ -84,7 +84,11 @@ func (h *threadServiceHandler) SetThreadModel(
 		value := action.Model
 		found := false
 		if h.api.options.Settings != nil {
-			for _, raw := range h.api.options.Settings.ModelChoices() {
+			var kinds []sdk.ModelProviderInfo
+			if h.api.options.Models != nil {
+				kinds = h.api.options.Models.Kinds()
+			}
+			for _, raw := range h.api.options.Settings.ModelChoices(kinds) {
 				choice := protoMap(raw)
 				if choice["id"] == value {
 					found = true

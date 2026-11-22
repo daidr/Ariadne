@@ -1,33 +1,28 @@
-import type { PluginRecord } from '../api'
+import type { MessageKey } from '@ariadne/i18n'
+import type { PluginRecord, PluginUsage } from '../api'
+import { t } from '../i18n'
 
-export type BuiltinPluginGroupKey = 'models' | 'searches' | 'sources' | 'other'
+export type PluginCapability = 'models' | 'searches' | 'contexts' | 'links' | 'dashboards'
 
-export interface BuiltinPluginGroup {
-  key: BuiltinPluginGroupKey
-  plugins: PluginRecord[]
+const CAPABILITY_ORDER: PluginCapability[] = [
+  'models',
+  'searches',
+  'contexts',
+  'links',
+  'dashboards',
+]
+
+const ROLE_KEYS: Record<string, MessageKey> = {
+  thread: 'plugins.usage.role.thread',
+  coordinator: 'plugins.usage.role.coordinator',
+  triage: 'plugins.usage.role.triage',
+  research: 'plugins.usage.role.research',
+  fallback: 'plugins.usage.role.fallback',
 }
 
-const GROUP_ORDER: BuiltinPluginGroupKey[] = ['models', 'searches', 'sources', 'other']
-
-/** Returns every distinct capability kind provided by a plugin. */
-export function pluginProvides(plugin: PluginRecord): string[] {
-  return [
-    ...new Set([
-      ...plugin.provides.models,
-      ...plugin.provides.contexts,
-      ...plugin.provides.dashboards,
-      ...plugin.provides.searches,
-      ...plugin.provides.links,
-    ]),
-  ]
-}
-
-/** Classifies a built-in plugin into a single display group for Settings -> Plugins. */
-export function builtinGroupOf(plugin: PluginRecord): BuiltinPluginGroupKey {
-  if (plugin.provides.models.length > 0) return 'models'
-  if (plugin.provides.searches.length > 0) return 'searches'
-  if (plugin.provides.contexts.length > 0 || plugin.provides.links.length > 0) return 'sources'
-  return 'other'
+/** Returns human-facing capability categories provided by a plugin, in display order. */
+export function pluginCapabilities(plugin: PluginRecord): PluginCapability[] {
+  return CAPABILITY_ORDER.filter((capability) => plugin.provides[capability].length > 0)
 }
 
 export function splitPlugins(records: PluginRecord[]): {
@@ -46,36 +41,49 @@ export function splitPlugins(records: PluginRecord[]): {
   return { thirdParty, builtins }
 }
 
-export function groupBuiltinPlugins(builtins: PluginRecord[]): BuiltinPluginGroup[] {
-  const buckets: Record<BuiltinPluginGroupKey, PluginRecord[]> = {
-    models: [],
-    searches: [],
-    sources: [],
-    other: [],
-  }
-  for (const plugin of builtins) {
-    buckets[builtinGroupOf(plugin)].push(plugin)
-  }
-  return GROUP_ORDER.filter((key) => buckets[key].length > 0).map((key) => ({
-    key,
-    plugins: buckets[key],
-  }))
+export function hasPluginUsage(plugin: PluginRecord): boolean {
+  const usage = plugin.usage
+  if (!usage) return false
+  return usage.modelProviders.length > 0 || usage.searches.length > 0 || usage.projects.length > 0
 }
 
-export function affectedConfigs(
-  plugin: PluginRecord,
-  modelProviders: { name: string; kind: string }[],
-  activeSearchProvider: string,
-  searchTitles: Record<string, string> = {},
-): string[] {
-  const names: string[] = []
-  for (const provider of modelProviders) {
-    if (plugin.provides.models.includes(provider.kind)) {
-      names.push(provider.name || provider.kind)
+/** Formats active usage of a plugin into a concise localized summary for rows and confirmations. */
+export function formatPluginUsage(usage?: PluginUsage): string {
+  if (!usage) return ''
+  const sep = t('plugins.listSeparator')
+  const parts: string[] = []
+
+  if (usage.modelProviders.length > 0) {
+    const names = usage.modelProviders.join(sep)
+    if (usage.modelRoles.length > 0) {
+      const roles = usage.modelRoles.map((role) => (ROLE_KEYS[role] ? t(ROLE_KEYS[role]) : role))
+      parts.push(
+        t('plugins.usage.modelProvidersWithRoles', {
+          names,
+          roles: roles.join(sep),
+        }),
+      )
+    } else {
+      parts.push(t('plugins.usage.modelProviders', { names }))
     }
   }
-  if (activeSearchProvider && plugin.provides.searches.includes(activeSearchProvider)) {
-    names.push(searchTitles[activeSearchProvider] || activeSearchProvider)
+
+  if (usage.searches.length > 0) {
+    parts.push(t('plugins.usage.search'))
   }
-  return names
+
+  if (usage.projects.length === 1) {
+    parts.push(t('plugins.usage.project', { name: usage.projects[0]! }))
+  } else if (usage.projects.length > 1 && usage.projects.length <= 3) {
+    parts.push(t('plugins.usage.projects', { names: usage.projects.join(sep) }))
+  } else if (usage.projects.length > 3) {
+    parts.push(
+      t('plugins.usage.projectsMore', {
+        names: usage.projects.slice(0, 2).join(sep),
+        count: usage.projects.length,
+      }),
+    )
+  }
+
+  return parts.join(t('plugins.partSeparator'))
 }

@@ -1,16 +1,21 @@
-import { describe, expect, test } from 'vitest'
-import type { PluginRecord } from '../api'
+// @vitest-environment happy-dom
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { api, type PluginRecord } from '../api'
+import { locale } from '../i18n'
+import PluginSettings from './PluginSettings.vue'
 import {
-  affectedConfigs,
-  builtinGroupOf,
-  groupBuiltinPlugins,
-  pluginProvides,
+  formatPluginUsage,
+  hasPluginUsage,
+  pluginCapabilities,
   splitPlugins,
 } from './plugin-settings'
 
+const wrappers: VueWrapper[] = []
+
 function record(partial: Partial<PluginRecord> & { id: string }): PluginRecord {
   return {
-    name: { 'zh-CN': partial.id },
+    name: { 'zh-CN': partial.id, en: partial.id },
     source: 'builtin',
     path: null,
     status: 'loaded',
@@ -22,9 +27,24 @@ function record(partial: Partial<PluginRecord> & { id: string }): PluginRecord {
       searches: [],
       links: [],
     },
+    usage: {
+      modelProviders: [],
+      modelRoles: [],
+      searches: [],
+      projects: [],
+    },
     ...partial,
   }
 }
+
+beforeEach(() => {
+  locale.value = 'zh-CN'
+})
+
+afterEach(() => {
+  wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  vi.restoreAllMocks()
+})
 
 describe('plugin-settings helpers', () => {
   test('splits third-party and built-in plugins cleanly', () => {
@@ -38,10 +58,103 @@ describe('plugin-settings helpers', () => {
     expect(builtins.map((p) => p.id)).toEqual(['model-openai', 'search-tavily'])
   })
 
-  test('groups built-in plugins into models, searches, sources, and other even when disabled', () => {
-    const builtins = [
+  test('derives multi-capability categories in display order', () => {
+    const github = record({
+      id: 'github',
+      provides: {
+        models: [],
+        contexts: ['github'],
+        dashboards: [],
+        searches: [],
+        links: ['github'],
+      },
+    })
+    const hybrid = record({
+      id: 'hybrid',
+      provides: {
+        models: ['custom-model'],
+        contexts: [],
+        dashboards: ['metrics'],
+        searches: ['custom-search'],
+        links: [],
+      },
+    })
+    expect(pluginCapabilities(github)).toEqual(['contexts', 'links'])
+    expect(pluginCapabilities(hybrid)).toEqual(['models', 'searches', 'dashboards'])
+  })
+
+  test('formats usage summaries across model providers, roles, search, and projects', () => {
+    expect(hasPluginUsage(record({ id: 'empty' }))).toBe(false)
+
+    const used = record({
+      id: 'multi',
+      usage: {
+        modelProviders: ['OpenAI', 'DeepSeek'],
+        modelRoles: ['thread', 'fallback'],
+        searches: ['tavily'],
+        projects: ['Ariadne', 'Demo', 'Web', 'CLI'],
+      },
+    })
+    expect(hasPluginUsage(used)).toBe(true)
+    expect(formatPluginUsage(used.usage)).toBe(
+      '模型提供方 OpenAI、DeepSeek（讨论串默认、备用）；当前联网搜索；项目 Ariadne、Demo 等 4 个项目',
+    )
+
+    locale.value = 'en'
+    expect(formatPluginUsage(used.usage)).toBe(
+      'Model provider OpenAI, DeepSeek (Thread default, Fallback); Current web search; 4 projects (Ariadne, Demo, ...)',
+    )
+    expect(
+      formatPluginUsage({
+        modelProviders: ['Claude'],
+        modelRoles: [],
+        searches: [],
+        projects: ['Ariadne'],
+      }),
+    ).toBe('Model provider Claude; Project Ariadne')
+  })
+})
+
+describe('PluginSettings component', () => {
+  test('shows readable capability tags without internal IDs and confirms before disabling in-use built-in plugins', async () => {
+    const initialPlugins: PluginRecord[] = [
+      record({
+        id: 'model-openai',
+        name: { 'zh-CN': 'OpenAI 兼容接口', en: 'OpenAI-compatible' },
+        provides: {
+          models: ['openai-compatible'],
+          contexts: [],
+          dashboards: [],
+          searches: [],
+          links: [],
+        },
+        usage: {
+          modelProviders: ['OpenAI'],
+          modelRoles: ['thread'],
+          searches: [],
+          projects: [],
+        },
+      }),
+      record({
+        id: 'search-deepseek',
+        name: { 'zh-CN': 'DeepSeek 搜索', en: 'DeepSeek Search' },
+        provides: {
+          models: [],
+          contexts: [],
+          dashboards: [],
+          searches: ['deepseek'],
+          links: [],
+        },
+        usage: {
+          modelProviders: [],
+          modelRoles: [],
+          searches: [],
+          projects: [],
+        },
+      }),
       record({
         id: 'github',
+        name: { 'zh-CN': 'GitHub', en: 'GitHub' },
         provides: {
           models: [],
           contexts: ['github'],
@@ -49,90 +162,70 @@ describe('plugin-settings helpers', () => {
           searches: [],
           links: ['github'],
         },
-      }),
-      record({
-        id: 'search-tavily',
-        status: 'disabled',
-        provides: {
-          models: [],
-          contexts: [],
-          dashboards: [],
-          searches: ['tavily'],
-          links: [],
-        },
-      }),
-      record({
-        id: 'model-anthropic',
-        status: 'disabled',
-        provides: {
-          models: ['anthropic'],
-          contexts: [],
-          dashboards: [],
+        usage: {
+          modelProviders: [],
+          modelRoles: [],
           searches: [],
-          links: [],
-        },
-      }),
-      record({
-        id: 'dash-only',
-        provides: {
-          models: [],
-          contexts: [],
-          dashboards: ['metrics'],
-          searches: [],
-          links: [],
+          projects: ['Ariadne'],
         },
       }),
     ]
 
-    expect(builtinGroupOf(builtins[0]!)).toBe('sources')
-    expect(builtinGroupOf(builtins[1]!)).toBe('searches')
-    expect(builtinGroupOf(builtins[2]!)).toBe('models')
-    expect(builtinGroupOf(builtins[3]!)).toBe('other')
+    vi.spyOn(api, 'listPlugins').mockResolvedValue({ plugins: initialPlugins })
+    const setEnabledSpy = vi
+      .spyOn(api, 'setPluginEnabled')
+      .mockImplementation(async (id, enabled) => ({
+        plugins: initialPlugins.map((plugin) =>
+          plugin.id === id ? { ...plugin, status: enabled ? 'loaded' : 'disabled' } : plugin,
+        ),
+      }))
 
-    const groups = groupBuiltinPlugins(builtins)
-    expect(groups.map((g) => g.key)).toEqual(['models', 'searches', 'sources', 'other'])
-    expect(groups[0]!.plugins.map((p) => p.id)).toEqual(['model-anthropic'])
-    expect(groups[1]!.plugins.map((p) => p.id)).toEqual(['search-tavily'])
-    expect(groups[2]!.plugins.map((p) => p.id)).toEqual(['github'])
-    expect(groups[3]!.plugins.map((p) => p.id)).toEqual(['dash-only'])
-    expect(pluginProvides(builtins[0]!)).toEqual(['github'])
-  })
+    const wrapper = mount(PluginSettings)
+    wrappers.push(wrapper)
+    await flushPromises()
 
-  test('detects affected model providers and active search service on disable', () => {
-    const modelPlugin = record({
-      id: 'model-anthropic',
-      provides: {
-        models: ['anthropic'],
-        contexts: [],
-        dashboards: [],
-        searches: [],
-        links: [],
-      },
-    })
-    const searchPlugin = record({
-      id: 'search-tavily',
-      provides: {
-        models: [],
-        contexts: [],
-        dashboards: [],
-        searches: ['tavily'],
-        links: [],
-      },
-    })
+    // Expand built-in plugins collapsible section.
+    const collapseTrigger = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('内置插件'))
+    expect(collapseTrigger).toBeTruthy()
+    await collapseTrigger!.trigger('click')
+    await flushPromises()
 
-    expect(
-      affectedConfigs(
-        modelPlugin,
-        [
-          { name: 'Claude 主力', kind: 'anthropic' },
-          { name: 'OpenAI', kind: 'openai-compatible' },
-        ],
-        'tavily',
-      ),
-    ).toEqual(['Claude 主力'])
+    const text = wrapper.text()
+    expect(text).toContain('OpenAI 兼容接口')
+    expect(text).toContain('模型')
+    expect(text).toContain('文件源')
+    expect(text).toContain('链接预览')
+    expect(text).toContain('使用中：模型提供方 OpenAI（讨论串默认）')
+    expect(text).toContain('使用中：项目 Ariadne')
+    expect(text).not.toContain('openai-compatible')
+    expect(text).not.toContain('提供：')
 
-    expect(affectedConfigs(searchPlugin, [], 'tavily', { tavily: 'Tavily' })).toEqual(['Tavily'])
+    const switches = wrapper.findAll('button[role="switch"]')
+    expect(switches).toHaveLength(3)
 
-    expect(affectedConfigs(searchPlugin, [], 'deepseek', { tavily: 'Tavily' })).toEqual([])
+    // Disabling an unused plugin applies immediately without Popconfirm.
+    await switches[1]!.trigger('click')
+    await flushPromises()
+    expect(setEnabledSpy).toHaveBeenCalledTimes(1)
+    expect(setEnabledSpy).toHaveBeenCalledWith('search-deepseek', false)
+
+    // Clicking switch on an in-use plugin opens Popconfirm and does NOT disable immediately.
+    await switches[0]!.trigger('click')
+    await flushPromises()
+    expect(setEnabledSpy).toHaveBeenCalledTimes(1)
+    expect(document.body.textContent).toContain('停用「OpenAI 兼容接口」？')
+    expect(document.body.textContent).toContain('模型提供方 OpenAI（讨论串默认）')
+
+    // Confirming disables the plugin.
+    const confirmBtn = Array.from(document.body.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('仍要停用'),
+    )
+    expect(confirmBtn).toBeTruthy()
+    confirmBtn!.click()
+    await flushPromises()
+    expect(setEnabledSpy).toHaveBeenCalledTimes(2)
+    expect(setEnabledSpy).toHaveBeenCalledWith('model-openai', false)
   })
 })

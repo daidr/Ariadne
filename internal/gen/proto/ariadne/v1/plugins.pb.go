@@ -98,6 +98,74 @@ func (x *PluginProvides) GetLinks() []string {
 	return nil
 }
 
+type PluginUsage struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ModelProviders []string               `protobuf:"bytes,1,rep,name=model_providers,json=modelProviders,proto3" json:"model_providers,omitempty"`
+	ModelRoles     []string               `protobuf:"bytes,2,rep,name=model_roles,json=modelRoles,proto3" json:"model_roles,omitempty"`
+	Searches       []string               `protobuf:"bytes,3,rep,name=searches,proto3" json:"searches,omitempty"`
+	Projects       []string               `protobuf:"bytes,4,rep,name=projects,proto3" json:"projects,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PluginUsage) Reset() {
+	*x = PluginUsage{}
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginUsage) ProtoMessage() {}
+
+func (x *PluginUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginUsage.ProtoReflect.Descriptor instead.
+func (*PluginUsage) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PluginUsage) GetModelProviders() []string {
+	if x != nil {
+		return x.ModelProviders
+	}
+	return nil
+}
+
+func (x *PluginUsage) GetModelRoles() []string {
+	if x != nil {
+		return x.ModelRoles
+	}
+	return nil
+}
+
+func (x *PluginUsage) GetSearches() []string {
+	if x != nil {
+		return x.Searches
+	}
+	return nil
+}
+
+func (x *PluginUsage) GetProjects() []string {
+	if x != nil {
+		return x.Projects
+	}
+	return nil
+}
+
 type PluginRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            *string                `protobuf:"bytes,1,opt,name=id,proto3,oneof" json:"id,omitempty"`
@@ -108,13 +176,14 @@ type PluginRecord struct {
 	Error         *string                `protobuf:"bytes,6,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	Provides      *PluginProvides        `protobuf:"bytes,7,opt,name=provides,proto3" json:"provides,omitempty"`
 	Configurable  bool                   `protobuf:"varint,8,opt,name=configurable,proto3" json:"configurable,omitempty"`
+	Usage         *PluginUsage           `protobuf:"bytes,9,opt,name=usage,proto3" json:"usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PluginRecord) Reset() {
 	*x = PluginRecord{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[1]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -126,7 +195,7 @@ func (x *PluginRecord) String() string {
 func (*PluginRecord) ProtoMessage() {}
 
 func (x *PluginRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[1]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -139,7 +208,7 @@ func (x *PluginRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginRecord.ProtoReflect.Descriptor instead.
 func (*PluginRecord) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{1}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PluginRecord) GetId() string {
@@ -198,6 +267,13 @@ func (x *PluginRecord) GetConfigurable() bool {
 	return false
 }
 
+func (x *PluginRecord) GetUsage() *PluginUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
 type PluginConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          *LocalizedText         `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -212,7 +288,7 @@ type PluginConfig struct {
 
 func (x *PluginConfig) Reset() {
 	*x = PluginConfig{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[2]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -224,7 +300,7 @@ func (x *PluginConfig) String() string {
 func (*PluginConfig) ProtoMessage() {}
 
 func (x *PluginConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[2]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -237,7 +313,7 @@ func (x *PluginConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginConfig.ProtoReflect.Descriptor instead.
 func (*PluginConfig) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{2}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *PluginConfig) GetName() *LocalizedText {
@@ -290,7 +366,7 @@ type ListPluginsRequest struct {
 
 func (x *ListPluginsRequest) Reset() {
 	*x = ListPluginsRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[3]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -302,7 +378,7 @@ func (x *ListPluginsRequest) String() string {
 func (*ListPluginsRequest) ProtoMessage() {}
 
 func (x *ListPluginsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[3]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -315,7 +391,7 @@ func (x *ListPluginsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPluginsRequest.ProtoReflect.Descriptor instead.
 func (*ListPluginsRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{3}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{4}
 }
 
 type ListPluginsResponse struct {
@@ -327,7 +403,7 @@ type ListPluginsResponse struct {
 
 func (x *ListPluginsResponse) Reset() {
 	*x = ListPluginsResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[4]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -339,7 +415,7 @@ func (x *ListPluginsResponse) String() string {
 func (*ListPluginsResponse) ProtoMessage() {}
 
 func (x *ListPluginsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[4]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -352,7 +428,7 @@ func (x *ListPluginsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPluginsResponse.ProtoReflect.Descriptor instead.
 func (*ListPluginsResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{4}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListPluginsResponse) GetPlugins() []*PluginRecord {
@@ -371,7 +447,7 @@ type GetPluginConfigRequest struct {
 
 func (x *GetPluginConfigRequest) Reset() {
 	*x = GetPluginConfigRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[5]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -383,7 +459,7 @@ func (x *GetPluginConfigRequest) String() string {
 func (*GetPluginConfigRequest) ProtoMessage() {}
 
 func (x *GetPluginConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[5]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -396,7 +472,7 @@ func (x *GetPluginConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPluginConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetPluginConfigRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{5}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetPluginConfigRequest) GetPluginId() string {
@@ -415,7 +491,7 @@ type GetPluginConfigResponse struct {
 
 func (x *GetPluginConfigResponse) Reset() {
 	*x = GetPluginConfigResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[6]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +503,7 @@ func (x *GetPluginConfigResponse) String() string {
 func (*GetPluginConfigResponse) ProtoMessage() {}
 
 func (x *GetPluginConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[6]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +516,7 @@ func (x *GetPluginConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPluginConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetPluginConfigResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{6}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetPluginConfigResponse) GetConfig() *PluginConfig {
@@ -460,7 +536,7 @@ type SavePluginConfigRequest struct {
 
 func (x *SavePluginConfigRequest) Reset() {
 	*x = SavePluginConfigRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[7]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -472,7 +548,7 @@ func (x *SavePluginConfigRequest) String() string {
 func (*SavePluginConfigRequest) ProtoMessage() {}
 
 func (x *SavePluginConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[7]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -485,7 +561,7 @@ func (x *SavePluginConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SavePluginConfigRequest.ProtoReflect.Descriptor instead.
 func (*SavePluginConfigRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{7}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SavePluginConfigRequest) GetPluginId() string {
@@ -511,7 +587,7 @@ type SavePluginConfigResponse struct {
 
 func (x *SavePluginConfigResponse) Reset() {
 	*x = SavePluginConfigResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[8]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +599,7 @@ func (x *SavePluginConfigResponse) String() string {
 func (*SavePluginConfigResponse) ProtoMessage() {}
 
 func (x *SavePluginConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[8]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +612,7 @@ func (x *SavePluginConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SavePluginConfigResponse.ProtoReflect.Descriptor instead.
 func (*SavePluginConfigResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{8}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SavePluginConfigResponse) GetConfig() *PluginConfig {
@@ -556,7 +632,7 @@ type SetPluginEnabledRequest struct {
 
 func (x *SetPluginEnabledRequest) Reset() {
 	*x = SetPluginEnabledRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[9]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +644,7 @@ func (x *SetPluginEnabledRequest) String() string {
 func (*SetPluginEnabledRequest) ProtoMessage() {}
 
 func (x *SetPluginEnabledRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[9]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +657,7 @@ func (x *SetPluginEnabledRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPluginEnabledRequest.ProtoReflect.Descriptor instead.
 func (*SetPluginEnabledRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{9}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SetPluginEnabledRequest) GetPluginId() string {
@@ -607,7 +683,7 @@ type SetPluginEnabledResponse struct {
 
 func (x *SetPluginEnabledResponse) Reset() {
 	*x = SetPluginEnabledResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[10]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -619,7 +695,7 @@ func (x *SetPluginEnabledResponse) String() string {
 func (*SetPluginEnabledResponse) ProtoMessage() {}
 
 func (x *SetPluginEnabledResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[10]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -632,7 +708,7 @@ func (x *SetPluginEnabledResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPluginEnabledResponse.ProtoReflect.Descriptor instead.
 func (*SetPluginEnabledResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{10}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SetPluginEnabledResponse) GetPlugins() []*PluginRecord {
@@ -651,7 +727,7 @@ type AddPluginRequest struct {
 
 func (x *AddPluginRequest) Reset() {
 	*x = AddPluginRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[11]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +739,7 @@ func (x *AddPluginRequest) String() string {
 func (*AddPluginRequest) ProtoMessage() {}
 
 func (x *AddPluginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[11]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +752,7 @@ func (x *AddPluginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddPluginRequest.ProtoReflect.Descriptor instead.
 func (*AddPluginRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{11}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AddPluginRequest) GetPath() string {
@@ -695,7 +771,7 @@ type AddPluginResponse struct {
 
 func (x *AddPluginResponse) Reset() {
 	*x = AddPluginResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[12]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -707,7 +783,7 @@ func (x *AddPluginResponse) String() string {
 func (*AddPluginResponse) ProtoMessage() {}
 
 func (x *AddPluginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[12]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -720,7 +796,7 @@ func (x *AddPluginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddPluginResponse.ProtoReflect.Descriptor instead.
 func (*AddPluginResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{12}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AddPluginResponse) GetPlugins() []*PluginRecord {
@@ -739,7 +815,7 @@ type DeletePluginRequest struct {
 
 func (x *DeletePluginRequest) Reset() {
 	*x = DeletePluginRequest{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[13]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +827,7 @@ func (x *DeletePluginRequest) String() string {
 func (*DeletePluginRequest) ProtoMessage() {}
 
 func (x *DeletePluginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[13]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +840,7 @@ func (x *DeletePluginRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePluginRequest.ProtoReflect.Descriptor instead.
 func (*DeletePluginRequest) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{13}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeletePluginRequest) GetPath() string {
@@ -783,7 +859,7 @@ type DeletePluginResponse struct {
 
 func (x *DeletePluginResponse) Reset() {
 	*x = DeletePluginResponse{}
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[14]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -795,7 +871,7 @@ func (x *DeletePluginResponse) String() string {
 func (*DeletePluginResponse) ProtoMessage() {}
 
 func (x *DeletePluginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_plugins_proto_msgTypes[14]
+	mi := &file_ariadne_v1_plugins_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -808,7 +884,7 @@ func (x *DeletePluginResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePluginResponse.ProtoReflect.Descriptor instead.
 func (*DeletePluginResponse) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{14}
+	return file_ariadne_v1_plugins_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeletePluginResponse) GetPlugins() []*PluginRecord {
@@ -831,7 +907,13 @@ const file_ariadne_v1_plugins_proto_rawDesc = "" +
 	"dashboards\x18\x03 \x03(\tR\n" +
 	"dashboards\x12\x1a\n" +
 	"\bsearches\x18\x04 \x03(\tR\bsearches\x12\x14\n" +
-	"\x05links\x18\x05 \x03(\tR\x05links\"\xba\x02\n" +
+	"\x05links\x18\x05 \x03(\tR\x05links\"\x8f\x01\n" +
+	"\vPluginUsage\x12'\n" +
+	"\x0fmodel_providers\x18\x01 \x03(\tR\x0emodelProviders\x12\x1f\n" +
+	"\vmodel_roles\x18\x02 \x03(\tR\n" +
+	"modelRoles\x12\x1a\n" +
+	"\bsearches\x18\x03 \x03(\tR\bsearches\x12\x1a\n" +
+	"\bprojects\x18\x04 \x03(\tR\bprojects\"\xe9\x02\n" +
 	"\fPluginRecord\x12\x13\n" +
 	"\x02id\x18\x01 \x01(\tH\x00R\x02id\x88\x01\x01\x122\n" +
 	"\x04name\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x01R\x04name\x88\x01\x01\x12\x16\n" +
@@ -840,7 +922,8 @@ const file_ariadne_v1_plugins_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12\x19\n" +
 	"\x05error\x18\x06 \x01(\tH\x03R\x05error\x88\x01\x01\x126\n" +
 	"\bprovides\x18\a \x01(\v2\x1a.ariadne.v1.PluginProvidesR\bprovides\x12\"\n" +
-	"\fconfigurable\x18\b \x01(\bR\fconfigurableB\x05\n" +
+	"\fconfigurable\x18\b \x01(\bR\fconfigurable\x12-\n" +
+	"\x05usage\x18\t \x01(\v2\x17.ariadne.v1.PluginUsageR\x05usageB\x05\n" +
 	"\x03_idB\a\n" +
 	"\x05_nameB\a\n" +
 	"\x05_pathB\b\n" +
@@ -902,57 +985,59 @@ func file_ariadne_v1_plugins_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_plugins_proto_rawDescData
 }
 
-var file_ariadne_v1_plugins_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_ariadne_v1_plugins_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_ariadne_v1_plugins_proto_goTypes = []any{
 	(*PluginProvides)(nil),           // 0: ariadne.v1.PluginProvides
-	(*PluginRecord)(nil),             // 1: ariadne.v1.PluginRecord
-	(*PluginConfig)(nil),             // 2: ariadne.v1.PluginConfig
-	(*ListPluginsRequest)(nil),       // 3: ariadne.v1.ListPluginsRequest
-	(*ListPluginsResponse)(nil),      // 4: ariadne.v1.ListPluginsResponse
-	(*GetPluginConfigRequest)(nil),   // 5: ariadne.v1.GetPluginConfigRequest
-	(*GetPluginConfigResponse)(nil),  // 6: ariadne.v1.GetPluginConfigResponse
-	(*SavePluginConfigRequest)(nil),  // 7: ariadne.v1.SavePluginConfigRequest
-	(*SavePluginConfigResponse)(nil), // 8: ariadne.v1.SavePluginConfigResponse
-	(*SetPluginEnabledRequest)(nil),  // 9: ariadne.v1.SetPluginEnabledRequest
-	(*SetPluginEnabledResponse)(nil), // 10: ariadne.v1.SetPluginEnabledResponse
-	(*AddPluginRequest)(nil),         // 11: ariadne.v1.AddPluginRequest
-	(*AddPluginResponse)(nil),        // 12: ariadne.v1.AddPluginResponse
-	(*DeletePluginRequest)(nil),      // 13: ariadne.v1.DeletePluginRequest
-	(*DeletePluginResponse)(nil),     // 14: ariadne.v1.DeletePluginResponse
-	(*LocalizedText)(nil),            // 15: ariadne.v1.LocalizedText
-	(*SettingsSchema)(nil),           // 16: ariadne.v1.SettingsSchema
-	(*structpb.Struct)(nil),          // 17: google.protobuf.Struct
+	(*PluginUsage)(nil),              // 1: ariadne.v1.PluginUsage
+	(*PluginRecord)(nil),             // 2: ariadne.v1.PluginRecord
+	(*PluginConfig)(nil),             // 3: ariadne.v1.PluginConfig
+	(*ListPluginsRequest)(nil),       // 4: ariadne.v1.ListPluginsRequest
+	(*ListPluginsResponse)(nil),      // 5: ariadne.v1.ListPluginsResponse
+	(*GetPluginConfigRequest)(nil),   // 6: ariadne.v1.GetPluginConfigRequest
+	(*GetPluginConfigResponse)(nil),  // 7: ariadne.v1.GetPluginConfigResponse
+	(*SavePluginConfigRequest)(nil),  // 8: ariadne.v1.SavePluginConfigRequest
+	(*SavePluginConfigResponse)(nil), // 9: ariadne.v1.SavePluginConfigResponse
+	(*SetPluginEnabledRequest)(nil),  // 10: ariadne.v1.SetPluginEnabledRequest
+	(*SetPluginEnabledResponse)(nil), // 11: ariadne.v1.SetPluginEnabledResponse
+	(*AddPluginRequest)(nil),         // 12: ariadne.v1.AddPluginRequest
+	(*AddPluginResponse)(nil),        // 13: ariadne.v1.AddPluginResponse
+	(*DeletePluginRequest)(nil),      // 14: ariadne.v1.DeletePluginRequest
+	(*DeletePluginResponse)(nil),     // 15: ariadne.v1.DeletePluginResponse
+	(*LocalizedText)(nil),            // 16: ariadne.v1.LocalizedText
+	(*SettingsSchema)(nil),           // 17: ariadne.v1.SettingsSchema
+	(*structpb.Struct)(nil),          // 18: google.protobuf.Struct
 }
 var file_ariadne_v1_plugins_proto_depIdxs = []int32{
-	15, // 0: ariadne.v1.PluginRecord.name:type_name -> ariadne.v1.LocalizedText
+	16, // 0: ariadne.v1.PluginRecord.name:type_name -> ariadne.v1.LocalizedText
 	0,  // 1: ariadne.v1.PluginRecord.provides:type_name -> ariadne.v1.PluginProvides
-	15, // 2: ariadne.v1.PluginConfig.name:type_name -> ariadne.v1.LocalizedText
-	16, // 3: ariadne.v1.PluginConfig.schema:type_name -> ariadne.v1.SettingsSchema
-	17, // 4: ariadne.v1.PluginConfig.values:type_name -> google.protobuf.Struct
-	1,  // 5: ariadne.v1.ListPluginsResponse.plugins:type_name -> ariadne.v1.PluginRecord
-	2,  // 6: ariadne.v1.GetPluginConfigResponse.config:type_name -> ariadne.v1.PluginConfig
-	17, // 7: ariadne.v1.SavePluginConfigRequest.values:type_name -> google.protobuf.Struct
-	2,  // 8: ariadne.v1.SavePluginConfigResponse.config:type_name -> ariadne.v1.PluginConfig
-	1,  // 9: ariadne.v1.SetPluginEnabledResponse.plugins:type_name -> ariadne.v1.PluginRecord
-	1,  // 10: ariadne.v1.AddPluginResponse.plugins:type_name -> ariadne.v1.PluginRecord
-	1,  // 11: ariadne.v1.DeletePluginResponse.plugins:type_name -> ariadne.v1.PluginRecord
-	3,  // 12: ariadne.v1.PluginService.ListPlugins:input_type -> ariadne.v1.ListPluginsRequest
-	5,  // 13: ariadne.v1.PluginService.GetPluginConfig:input_type -> ariadne.v1.GetPluginConfigRequest
-	7,  // 14: ariadne.v1.PluginService.SavePluginConfig:input_type -> ariadne.v1.SavePluginConfigRequest
-	9,  // 15: ariadne.v1.PluginService.SetPluginEnabled:input_type -> ariadne.v1.SetPluginEnabledRequest
-	11, // 16: ariadne.v1.PluginService.AddPlugin:input_type -> ariadne.v1.AddPluginRequest
-	13, // 17: ariadne.v1.PluginService.DeletePlugin:input_type -> ariadne.v1.DeletePluginRequest
-	4,  // 18: ariadne.v1.PluginService.ListPlugins:output_type -> ariadne.v1.ListPluginsResponse
-	6,  // 19: ariadne.v1.PluginService.GetPluginConfig:output_type -> ariadne.v1.GetPluginConfigResponse
-	8,  // 20: ariadne.v1.PluginService.SavePluginConfig:output_type -> ariadne.v1.SavePluginConfigResponse
-	10, // 21: ariadne.v1.PluginService.SetPluginEnabled:output_type -> ariadne.v1.SetPluginEnabledResponse
-	12, // 22: ariadne.v1.PluginService.AddPlugin:output_type -> ariadne.v1.AddPluginResponse
-	14, // 23: ariadne.v1.PluginService.DeletePlugin:output_type -> ariadne.v1.DeletePluginResponse
-	18, // [18:24] is the sub-list for method output_type
-	12, // [12:18] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	1,  // 2: ariadne.v1.PluginRecord.usage:type_name -> ariadne.v1.PluginUsage
+	16, // 3: ariadne.v1.PluginConfig.name:type_name -> ariadne.v1.LocalizedText
+	17, // 4: ariadne.v1.PluginConfig.schema:type_name -> ariadne.v1.SettingsSchema
+	18, // 5: ariadne.v1.PluginConfig.values:type_name -> google.protobuf.Struct
+	2,  // 6: ariadne.v1.ListPluginsResponse.plugins:type_name -> ariadne.v1.PluginRecord
+	3,  // 7: ariadne.v1.GetPluginConfigResponse.config:type_name -> ariadne.v1.PluginConfig
+	18, // 8: ariadne.v1.SavePluginConfigRequest.values:type_name -> google.protobuf.Struct
+	3,  // 9: ariadne.v1.SavePluginConfigResponse.config:type_name -> ariadne.v1.PluginConfig
+	2,  // 10: ariadne.v1.SetPluginEnabledResponse.plugins:type_name -> ariadne.v1.PluginRecord
+	2,  // 11: ariadne.v1.AddPluginResponse.plugins:type_name -> ariadne.v1.PluginRecord
+	2,  // 12: ariadne.v1.DeletePluginResponse.plugins:type_name -> ariadne.v1.PluginRecord
+	4,  // 13: ariadne.v1.PluginService.ListPlugins:input_type -> ariadne.v1.ListPluginsRequest
+	6,  // 14: ariadne.v1.PluginService.GetPluginConfig:input_type -> ariadne.v1.GetPluginConfigRequest
+	8,  // 15: ariadne.v1.PluginService.SavePluginConfig:input_type -> ariadne.v1.SavePluginConfigRequest
+	10, // 16: ariadne.v1.PluginService.SetPluginEnabled:input_type -> ariadne.v1.SetPluginEnabledRequest
+	12, // 17: ariadne.v1.PluginService.AddPlugin:input_type -> ariadne.v1.AddPluginRequest
+	14, // 18: ariadne.v1.PluginService.DeletePlugin:input_type -> ariadne.v1.DeletePluginRequest
+	5,  // 19: ariadne.v1.PluginService.ListPlugins:output_type -> ariadne.v1.ListPluginsResponse
+	7,  // 20: ariadne.v1.PluginService.GetPluginConfig:output_type -> ariadne.v1.GetPluginConfigResponse
+	9,  // 21: ariadne.v1.PluginService.SavePluginConfig:output_type -> ariadne.v1.SavePluginConfigResponse
+	11, // 22: ariadne.v1.PluginService.SetPluginEnabled:output_type -> ariadne.v1.SetPluginEnabledResponse
+	13, // 23: ariadne.v1.PluginService.AddPlugin:output_type -> ariadne.v1.AddPluginResponse
+	15, // 24: ariadne.v1.PluginService.DeletePlugin:output_type -> ariadne.v1.DeletePluginResponse
+	19, // [19:25] is the sub-list for method output_type
+	13, // [13:19] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_plugins_proto_init() }
@@ -961,14 +1046,14 @@ func file_ariadne_v1_plugins_proto_init() {
 		return
 	}
 	file_ariadne_v1_settings_proto_init()
-	file_ariadne_v1_plugins_proto_msgTypes[1].OneofWrappers = []any{}
+	file_ariadne_v1_plugins_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_plugins_proto_rawDesc), len(file_ariadne_v1_plugins_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { api, type ModelSettings, type ModelSettingsInput } from '../api'
 import { locale } from '../i18n'
+import { applyModelSettings, state } from '../store'
 import ModelSettingsDialog from './ModelSettings.vue'
 
 const wrappers: VueWrapper[] = []
@@ -160,5 +161,13 @@ describe('ModelSettings', () => {
     expect(savedInput).not.toBeNull()
     const anthropicProvider = savedInput!.providers.find((provider) => provider.id === 'p-anth')
     expect(anthropicProvider?.settings).toEqual({ baseUrl: 'https://proxy.anthropic.example' })
+  })
+
+  test('filters models belonging to disabled built-in providers out of chat model choices', () => {
+    applyModelSettings(makeModelSettings(false))
+    expect(state.models.map((model) => model.id)).toEqual(['m-oa'])
+
+    applyModelSettings(makeModelSettings(true))
+    expect(state.models.map((model) => model.id)).toEqual(['m-oa', 'm-anth'])
   })
 })
