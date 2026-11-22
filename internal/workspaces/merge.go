@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -95,6 +96,72 @@ func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request
 	}
 	file, err := branches.File(ctx, request)
 	return file, workError(err)
+}
+
+func (manager *Manager) ThreadFiles(ctx context.Context, threadID string, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+	if len(requests) == 0 {
+		return []sdk.FileVersions{}, nil
+	}
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	thread, err := manager.options.Repository.GetThread(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	branches, err := manager.BranchesForThread(ctx, thread)
+	if err != nil {
+		return nil, err
+	}
+	if branches == nil || (branches.Files == nil && branches.File == nil) {
+		return nil, domainerr.New("error.noBranch", nil)
+	}
+	if branches.Files != nil {
+		files, err := branches.Files(ctx, requests)
+		return files, workError(err)
+	}
+	results := make([]sdk.FileVersions, len(requests))
+	batchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, min(6, len(requests)))
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+	for i, request := range requests {
+		wg.Add(1)
+		go func(index int, req sdk.FileVersionRequest) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-batchCtx.Done():
+				return
+			}
+			file, err := branches.File(batchCtx, req)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				errMu.Unlock()
+				return
+			}
+			results[index] = file
+		}(i, request)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, workError(firstErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 type ThreadMerge struct {

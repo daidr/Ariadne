@@ -191,10 +191,21 @@ const comparisonKey = computed(() =>
 )
 const totals = computed(() => lineTotals(changes.value?.files ?? []))
 
+const PREFETCH_AHEAD = 12
+const PREFETCH_BEHIND = 2
+
+function prefetchAround(index: number) {
+  if (!from.value || !head.value || !files.value.length) return
+  const start = Math.max(0, index - PREFETCH_BEHIND)
+  const end = Math.min(files.value.length, index + PREFETCH_AHEAD)
+  loadVersions.value.prefetch(files.value.slice(start, end))
+}
+
 function goToFile(path: string | null) {
   const index = files.value.findIndex((file) => file.path === path)
   if (index < 0) return
   selected.value = path
+  prefetchAround(index)
   diffList.value?.scrollToIndex(index, 'start')
 }
 
@@ -228,15 +239,38 @@ function select(node: TreeNodeData) {
   goToFile(changed.path)
 }
 
-async function updateSelection() {
-  await nextTick()
-  const viewport = diffList.value?.el()
-  if (!viewport) return
-  const top = viewport.getBoundingClientRect().top + 1
-  const active = Array.from(viewport.querySelectorAll<HTMLElement>('[data-file-path]')).find(
-    (item) => item.getBoundingClientRect().bottom > top,
-  )
-  if (active?.dataset.filePath) selected.value = active.dataset.filePath
+watch(
+  [files, loadVersions],
+  ([list]) => {
+    if (!list.length) return
+    const index = selected.value ? list.findIndex((file) => file.path === selected.value) : 0
+    prefetchAround(index >= 0 ? index : 0)
+  },
+  { immediate: true },
+)
+
+let selectionFrame: number | null = null
+onBeforeUnmount(() => {
+  if (selectionFrame !== null) cancelAnimationFrame(selectionFrame)
+})
+
+function updateSelection() {
+  if (selectionFrame !== null) return
+  selectionFrame = requestAnimationFrame(async () => {
+    selectionFrame = null
+    await nextTick()
+    const viewport = diffList.value?.el()
+    if (!viewport) return
+    const top = viewport.getBoundingClientRect().top + 1
+    const active = Array.from(viewport.querySelectorAll<HTMLElement>('[data-file-path]')).find(
+      (item) => item.getBoundingClientRect().bottom > top,
+    )
+    if (active?.dataset.filePath) {
+      selected.value = active.dataset.filePath
+      const index = files.value.findIndex((file) => file.path === active.dataset.filePath)
+      if (index >= 0) prefetchAround(index)
+    }
+  })
 }
 
 function estimateFileHeight(file: ChangedFile) {
@@ -341,13 +375,24 @@ watch(
   },
   { immediate: true },
 )
-const reviewCount = (path: string) => notes.value.filter((n) => n.comment.path === path).length
+const reviewCountByPath = computed(() => {
+  const counts = new Map<string, number>()
+  for (const item of notes.value) {
+    counts.set(item.comment.path, (counts.get(item.comment.path) ?? 0) + 1)
+  }
+  return counts
+})
+const reviewCount = (path: string) => reviewCountByPath.value.get(path) ?? 0
 // Share the toolbar's layout choice across files.
 const diffMode = ref<'split' | 'inline' | 'auto'>('auto')
 const drafts = computed(() => draftsOf(props.threadId))
-const commentCount = (path: string) =>
-  drafts.value.filter((c) => c.path === path).length +
-  sent.value.filter((c) => c.path === path).length
+const commentCountByPath = computed(() => {
+  const counts = new Map<string, number>()
+  for (const item of drafts.value) counts.set(item.path, (counts.get(item.path) ?? 0) + 1)
+  for (const item of sent.value) counts.set(item.path, (counts.get(item.path) ?? 0) + 1)
+  return counts
+})
+const commentCount = (path: string) => commentCountByPath.value.get(path) ?? 0
 // Comments go to the thread on their own once the user stops writing them; leaving sends
 // what waits at once.
 watch(drafts, () => draftsChanged(props.threadId), { deep: true })

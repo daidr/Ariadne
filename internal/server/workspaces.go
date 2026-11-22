@@ -53,6 +53,50 @@ func (api *API) registerWorkspaces() {
 		file, err := manager.ThreadFile(r.Context(), r.PathValue("threadId"), sdk.FileVersionRequest{From: query.Get("from"), Head: query.Get("head"), Path: query.Get("path"), PreviousPath: previous})
 		return object{"file": file}, 200, err
 	})
+	api.add("POST", "/api/threads/:threadId/changes/files", func(r *http.Request) (any, int, error) {
+		if manager == nil {
+			return nil, 0, domainerr.New("error.noBranch", nil)
+		}
+		body, err := readJSON(r)
+		if err != nil {
+			return nil, 0, err
+		}
+		from, head := text(body, "from"), text(body, "head")
+		if !commitID.MatchString(from) {
+			return nil, 0, badInput("from")
+		}
+		if !commitID.MatchString(head) {
+			return nil, 0, badInput("head")
+		}
+		rawFiles, ok := body["files"].([]any)
+		if !ok || len(rawFiles) == 0 || len(rawFiles) > 64 {
+			return nil, 0, badInput("files")
+		}
+		requests := make([]sdk.FileVersionRequest, len(rawFiles))
+		for i, item := range rawFiles {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return nil, 0, badInput("files")
+			}
+			path, _ := entry["path"].(string)
+			if path == "" {
+				return nil, 0, badInput("path")
+			}
+			var previous *string
+			if rawPrev, exists := entry["previousPath"]; exists && rawPrev != nil {
+				prev, ok := rawPrev.(string)
+				if !ok {
+					return nil, 0, badInput("previousPath")
+				}
+				if prev != "" {
+					previous = &prev
+				}
+			}
+			requests[i] = sdk.FileVersionRequest{From: from, Head: head, Path: path, PreviousPath: previous}
+		}
+		files, err := manager.ThreadFiles(r.Context(), r.PathValue("threadId"), requests)
+		return object{"files": files}, 200, err
+	})
 	api.add("POST", "/api/threads/:threadId/merge", func(r *http.Request) (any, int, error) {
 		if manager == nil {
 			return nil, 0, domainerr.New("error.merge.unsupported", nil)

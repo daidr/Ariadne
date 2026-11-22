@@ -91,7 +91,7 @@ import ConversationBar from './ConversationBar.vue'
 import ConversationMarker from './ConversationMarker.vue'
 import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
-import { branchChanges } from '../review/merge-offered'
+import { branchChanges, hasOpenBranch } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
@@ -222,13 +222,16 @@ const createdArtifacts = computed(() =>
 )
 const capsuleChanges = computed(() => {
   const owner = reviewed.value ?? thread.value
-  return owner?.workspace?.branch && owner.workspace.base
-    ? { threadId: owner.id, totals: branchChanges(owner) }
-    : null
+  if (!hasOpenBranch(owner)) return null
+  const totals = branchChanges(owner)
+  if (totals ? totals.files > 0 : !!owner?.pullRequest) {
+    return { threadId: owner!.id, totals }
+  }
+  return null
 })
 const showCapsules = computed(
   () =>
-    (capsuleChanges.value?.totals?.files ?? 0) > 0 ||
+    !!capsuleChanges.value ||
     createdArtifacts.value.length > 0 ||
     background.value.length > 0 ||
     !!thread.value?.pullRequest,

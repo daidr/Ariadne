@@ -916,6 +916,21 @@ export const api = {
       signal,
     )
   },
+  getChangedFiles: (
+    threadId: string,
+    input: {
+      from: string
+      head: string
+      files: { path: string; previousPath: string | null }[]
+    },
+    signal?: AbortSignal,
+  ) =>
+    request<{ files: FileVersions[] }>(
+      'POST',
+      `/api/threads/${threadId}/changes/files`,
+      input,
+      signal,
+    ),
   mergeThread: (
     threadId: string,
     input: { method: MergeMethod; message: string; expectedHead: string },

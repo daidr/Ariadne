@@ -206,3 +206,66 @@ func TestWorkspaceHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceBatchFilesHTTP(t *testing.T) {
+	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	if _, err := repo.Store.Append(t.Context(), workspaceHTTPSeed()); err != nil {
+		t.Fatal(err)
+	}
+	batchCalls := 0
+	registry := sources.New()
+	registry.Register(sdk.ContextProvider{Info: sdk.ContextProviderInfo{Kind: "fixture", Provides: []string{"workspace"}}, Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+		return sdk.Capabilities{Workspace: &sdk.WorkspaceCapability{Isolated: true, Branches: &sdk.BranchCapability{
+			Files: func(_ context.Context, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+				batchCalls++
+				out := make([]sdk.FileVersions, len(requests))
+				for i, req := range requests {
+					after := "content:" + req.Path
+					out[i] = sdk.FileVersions{After: &after}
+				}
+				return out, nil
+			},
+		}}}, nil
+	}})
+	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Workspaces: manager, Sources: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	call := func(body object) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("POST", "/api/threads/thr_a/changes/files", strings.NewReader(encoded(body)))
+		request.Header.Set("Authorization", "Bearer test-token")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		return response
+	}
+	from, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	res := call(object{
+		"from": from,
+		"head": head,
+		"files": []object{
+			{"path": "a.go", "previousPath": nil},
+			{"path": "b.go", "previousPath": "old-b.go"},
+		},
+	})
+	if res.Code != 200 || batchCalls != 1 || !strings.Contains(res.Body.String(), `"content:a.go"`) || !strings.Contains(res.Body.String(), `"content:b.go"`) {
+		t.Fatalf("batch response: code=%d calls=%d body=%s", res.Code, batchCalls, res.Body.String())
+	}
+	if bad := call(object{"from": "invalid", "head": head, "files": []object{{"path": "a.go"}}}); bad.Code != 400 {
+		t.Fatalf("expected 400 for invalid from, got %d", bad.Code)
+	}
+	if empty := call(object{"from": from, "head": head, "files": []object{}}); empty.Code != 400 {
+		t.Fatalf("expected 400 for empty files, got %d", empty.Code)
+	}
+}

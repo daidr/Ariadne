@@ -16,12 +16,17 @@ export function mergeOffered(thread: ThreadView | null | undefined): boolean {
   return !!workspace?.branch && !!workspace.base && !gone(workspace) && !thread?.pullRequest
 }
 
+/** Whether the thread still has an openable branch (live worktree or parked while idle). */
+export function hasOpenBranch(thread: ThreadView | null | undefined): boolean {
+  const workspace = thread?.workspace
+  return !!workspace?.branch && !!workspace.base && !gone(workspace)
+}
+
 /**
  * The thread's changes on its branch while they can still be opened: none once it has no
  * branch or its workspace is gone (dropped, or removed after merging).
  */
 export function branchChanges(thread: ThreadView | null | undefined): ThreadView['changes'] {
-  const workspace = thread?.workspace
-  if (!workspace?.branch || !workspace.base || gone(workspace)) return null
+  if (!hasOpenBranch(thread)) return null
   return thread?.changes ?? null
 }
