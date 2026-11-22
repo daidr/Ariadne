@@ -235,12 +235,14 @@ export const state = reactive<State>({
 })
 
 let stopStream: (() => void) | null = null
+let streamSession: symbol | null = null
 
 export function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401
 }
 
 function markUnauthorized() {
+  streamSession = null
   stopStream?.()
   stopStream = null
   state.stream = 'unauthorized'
@@ -1582,6 +1584,7 @@ async function load(restore: () => Promise<void>): Promise<number | null> {
 }
 
 export async function start(restore: () => Promise<void>) {
+  streamSession = null
   stopStream?.()
   stopStream = null
   const lastSeq = await load(restore)
@@ -1589,11 +1592,20 @@ export async function start(restore: () => Promise<void>) {
   // Follow from the state just loaded. If loading failed (say the page opened before the
   // server), follow from the server's newest event and load once the stream is up.
   let loaded = lastSeq !== null
+  const session = (streamSession = Symbol())
   stopStream = followEvents(
     lastSeq,
     onEvent,
-    (status) => (state.stream = status),
+    (status) => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
+      if (status === 'unauthorized') {
+        markUnauthorized()
+        return
+      }
+      state.stream = status
+    },
     () => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
       // The server tells again what is running now.
       state.live = {}
       state.background = {}

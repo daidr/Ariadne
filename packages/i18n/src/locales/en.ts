@@ -454,6 +454,8 @@ export const en: Record<MessageKey, string> = {
   'auth.tokenPlaceholder': 'Paste the access token or full URL with #token=',
   'auth.tokenHelp': 'Saved in this browser so future visits sign in automatically.',
   'auth.tokenRequired': 'Enter an access token',
+  'auth.tokenInvalidChars':
+    'Access token contains invalid characters (only printable ASCII characters are allowed)',
   'auth.confirm': 'Apply and reload',
   'error.notFound': '{what} not found',
   'error.priceCatalog': 'Could not read models.dev: {detail}',

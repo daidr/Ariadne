@@ -52,10 +52,20 @@ import {
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
 } from '@ariadne/proto'
-import { ApiError, createRpcClient, getToken, initToken, parseTokenInput, setToken } from './rpc'
+import {
+  ApiError,
+  authorizationHeader,
+  createRpcClient,
+  getToken,
+  initToken,
+  isValidToken,
+  parseTokenInput,
+  saveToken,
+  setToken,
+} from './rpc'
 import { synchronizeServerClock } from './server-clock'
 
-export { ApiError, getToken, initToken, parseTokenInput, setToken }
+export { ApiError, getToken, initToken, isValidToken, parseTokenInput, saveToken, setToken }
 const token = getToken
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
@@ -171,7 +181,7 @@ async function request<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
+  const headers: Record<string, string> = { authorization: authorizationHeader() }
   // A file goes as it is, with its own type; anything else as JSON.
   const raw = body instanceof Blob
   if (body !== undefined) {
@@ -193,7 +203,7 @@ async function request<T>(
 export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal: AbortSignal) {
   const response = await fetch(`/api/files/${encodeURIComponent(id)}`, {
     method,
-    headers: { authorization: `Bearer ${token() ?? ''}` },
+    headers: { authorization: authorizationHeader() },
     signal,
   })
   if (!response.ok) throw new Error(`File request failed (${response.status})`)
@@ -201,7 +211,7 @@ export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal
 }
 
 async function download(path: string, fallbackName: string) {
-  const response = await fetch(path, { headers: { authorization: `Bearer ${token() ?? ''}` } })
+  const response = await fetch(path, { headers: { authorization: authorizationHeader() } })
   if (!response.ok) throw new ApiError(response.status, (await response.json()).error)
   const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
   return { blob: await response.blob(), name: name ?? fallbackName }
@@ -750,7 +760,7 @@ export const api = {
     void fetch(`/api/projects/${projectId}/messages`, {
       method: 'POST',
       keepalive: true,
-      headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
+      headers: { authorization: authorizationHeader(), 'content-type': 'application/json' },
       body: JSON.stringify({ conversationId, content: '', comments }),
     }).catch(() => {}),
   mentionFiles: (projectId: string, conversationId: string, query: string) =>
@@ -1009,7 +1019,7 @@ export const api = {
       ? void fetch(`/api/artifacts/${id}/feedback`, {
           method: 'POST',
           keepalive: true,
-          headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
+          headers: { authorization: authorizationHeader(), 'content-type': 'application/json' },
           body: JSON.stringify({ images: [] }),
         }).catch(() => {})
       : request<{ feedback: unknown }>('POST', `/api/artifacts/${id}/feedback`, { images }),
@@ -1079,50 +1089,62 @@ export function followEvents(
   let stopped = false
 
   const open = () => {
+    if (stopped) return
     // Without a known position the server starts at its newest event.
     const from = lastSeq === null ? '' : `afterSeq=${lastSeq}&`
     const query = `${from}token=${encodeURIComponent(token() ?? '')}`
     const current = new EventSource(`/api/events?${query}`)
     source = current
     current.addEventListener('open', () => {
+      if (stopped || source !== current) return
       delay = 500
       onStatus('open')
       onOpen?.()
     })
     current.addEventListener('ariadne', (message) => {
+      if (stopped || source !== current) return
       const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
       lastSeq = Math.max(lastSeq ?? 0, event.seq)
       onEvent(event)
     })
     // A running command's output: not part of the log, so it moves nothing forward.
     current.addEventListener('live', (message) => {
+      if (stopped || source !== current) return
       onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
     })
     // A reply as it is written: not part of the log either.
     current.addEventListener('draft', (message) => {
+      if (stopped || source !== current) return
       onDraft?.(JSON.parse((message as MessageEvent<string>).data) as DraftUpdate)
     })
     current.addEventListener('background', (message) => {
+      if (stopped || source !== current) return
       onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)
     })
     current.addEventListener('error', () => {
-      if (stopped) return
+      if (stopped || source !== current) return
       if (current.readyState !== EventSource.CLOSED) {
         onStatus('lost')
         return
       }
       // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
       void api.ping().then(
-        () => schedule('lost'),
-        (error) =>
-          schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost'),
+        () => {
+          if (source === current) schedule('lost')
+        },
+        (error) => {
+          if (source === current) {
+            schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
+          }
+        },
       )
     })
   }
 
   const schedule = (status: StreamStatus) => {
+    if (stopped) return
     onStatus(status)
-    if (stopped || status === 'unauthorized') return
+    if (status === 'unauthorized') return
     retry = setTimeout(open, delay)
     delay = Math.min(delay * 2, 10_000)
   }
@@ -1132,5 +1154,6 @@ export function followEvents(
     stopped = true
     clearTimeout(retry)
     source?.close()
+    source = null
   }
 }

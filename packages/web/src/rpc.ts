@@ -25,6 +25,14 @@ function decodeTokenValue(value: string): string {
 }
 
 /**
+ * Check that a token only uses printable ASCII (`0x20–0x7E`), so Fetch `Headers` and HTTP
+ * servers never reject `Authorization: Bearer <token>` with a ByteString / control-char error.
+ */
+export function isValidToken(value: string): boolean {
+  return value.length > 0 && /^[\x20-\x7E]+$/.test(value)
+}
+
+/**
  * Normalize a pasted access token: accepts a raw token, a `Bearer <token>` header,
  * or the server's startup URL / hash / query containing `token=...`.
  */
@@ -40,20 +48,35 @@ export function parseTokenInput(raw: string): string {
   return trimmed
 }
 
-function storeToken(next: string): string {
-  sessionToken = next || null
+/**
+ * Persist an already-normalized access token without re-parsing it.
+ * Pass `''` to clear storage; non-empty values containing invalid HTTP header characters are rejected.
+ */
+export function saveToken(next: string): string {
+  if (next === '') {
+    sessionToken = null
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+    } catch {
+      // Storage can be unavailable; clearing the in-memory token still applies.
+    }
+    return ''
+  }
+  if (!isValidToken(next)) return ''
+  sessionToken = next
   try {
-    if (next) localStorage.setItem(TOKEN_KEY, next)
-    else localStorage.removeItem(TOKEN_KEY)
+    localStorage.setItem(TOKEN_KEY, next)
   } catch {
     // Storage can be unavailable; the token then lives only for this page.
   }
   return next
 }
 
-/** Persist a manually entered access token so standalone PWA launches stay signed in. */
+/** Parse and persist a manually entered access token so standalone PWA launches stay signed in. */
 export function setToken(raw: string): string {
-  return storeToken(parseTokenInput(raw))
+  if (raw === '') return saveToken('')
+  const next = parseTokenInput(raw)
+  return next ? saveToken(next) : ''
 }
 
 /**
@@ -63,7 +86,7 @@ export function setToken(raw: string): string {
 export function initToken(): string | null {
   const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash)
   if (match?.[1]) {
-    storeToken(decodeTokenValue(match[1]))
+    saveToken(decodeTokenValue(match[1]))
     history.replaceState(null, '', location.pathname + location.search)
   }
   return getToken()
@@ -75,6 +98,11 @@ export function getToken(): string | null {
   } catch {
     return sessionToken
   }
+}
+
+/** Build a Header-safe `Authorization` value; invalid stored tokens fall back to empty so the server answers 401. */
+export function authorizationHeader(raw: string | null = getToken()): string {
+  return `Bearer ${raw && isValidToken(raw) ? raw : ''}`
 }
 
 export class ApiError extends Error {
@@ -197,7 +225,7 @@ async function* wrapStreamMessages<T>(
 export function createAriadneTransport(options: AriadneTransportOptions = {}): Transport {
   const readToken = options.getToken ?? getToken
   const authInterceptor: Interceptor = (next) => async (req) => {
-    req.header.set('authorization', `Bearer ${readToken() ?? ''}`)
+    req.header.set('authorization', authorizationHeader(readToken()))
     return next(req)
   }
   const base = createConnectTransport({

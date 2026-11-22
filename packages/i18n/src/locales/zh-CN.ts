@@ -439,6 +439,7 @@ export const zhCN = {
   'auth.tokenPlaceholder': '粘贴访问令牌或包含 #token= 的完整链接',
   'auth.tokenHelp': '设置后会保存在当前浏览器中，下次打开自动生效。',
   'auth.tokenRequired': '请输入访问令牌',
+  'auth.tokenInvalidChars': '访问令牌包含无效字符，请检查是否包含中文、全角符号或换行符',
   'auth.confirm': '确认并刷新',
   'error.notFound': '找不到 {what}',
   'error.priceCatalog': '读取 models.dev 失败：{detail}',

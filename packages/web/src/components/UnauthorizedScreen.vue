@@ -2,7 +2,7 @@
 import { KeyIcon, LockKeyholeIcon } from '@dou-ui/icons'
 import { DouButton, DouDialog, DouForm, DouFormItem, DouInput, DouResult } from 'dou-ui'
 import { nextTick, ref, useTemplateRef, watch } from 'vue'
-import { getToken, parseTokenInput, setToken } from '../api'
+import { getToken, isValidToken, parseTokenInput, saveToken } from '../api'
 import { t } from '../i18n'
 
 const props = withDefaults(
@@ -43,7 +43,12 @@ function submit() {
     tokenInput.value?.focus()
     return
   }
-  setToken(token)
+  if (!isValidToken(token)) {
+    validationError.value = t('auth.tokenInvalidChars')
+    tokenInput.value?.focus()
+    return
+  }
+  saveToken(token)
   dialogOpen.value = false
   props.reload()
 }
