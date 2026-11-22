@@ -26,6 +26,7 @@ import ShortcutSheet from './components/ShortcutSheet.vue'
 import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import PluginConfigDialog from './components/PluginConfigDialog.vue'
+import UnauthorizedScreen from './components/UnauthorizedScreen.vue'
 import WorkspaceHeader from './components/WorkspaceHeader.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
@@ -58,6 +59,7 @@ provide(openSettingsKey, openSettings)
 
 const breakpoints = useBreakpoints()
 const compact = computed(() => !breakpoints.lg)
+const unauthorized = computed(() => state.stream === 'unauthorized')
 const coordinatorVisible = computed(() => !compact.value || state.workspaceLevel === 'coordinator')
 const sideVisible = computed(() => !compact.value || state.workspaceLevel === 'side')
 
@@ -110,12 +112,16 @@ watchEffect(() => {
       <WorkspaceHeader
         :compact="compact"
         :projects-collapsed="projectsCollapsed"
+        :unauthorized="unauthorized"
         @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
         @open-settings="openSettings()"
       />
+      <DouLayoutMain v-if="unauthorized" class="body main">
+        <UnauthorizedScreen />
+      </DouLayoutMain>
       <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
       <TraceView
-        v-if="state.main.kind === 'trace' && coordinatorVisible"
+        v-else-if="state.main.kind === 'trace' && coordinatorVisible"
         :conversation-id="state.main.conversationId"
         class="body"
       />
@@ -182,12 +188,14 @@ watchEffect(() => {
         </DouSplitter>
       </div>
     </DouLayout>
-    <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
-    <PluginConfigDialog />
-    <ShortcutSheet />
-    <ProjectSettings />
-    <FullView :compact="compact" />
-    <FilePreview />
+    <template v-if="!unauthorized">
+      <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
+      <PluginConfigDialog />
+      <ShortcutSheet />
+      <ProjectSettings />
+      <FullView :compact="compact" />
+      <FilePreview />
+    </template>
     <DouToastViewport />
   </DouConfigProvider>
 </template>

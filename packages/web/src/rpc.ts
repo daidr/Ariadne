@@ -16,6 +16,69 @@ const TOKEN_KEY = 'ariadne.token'
 
 let sessionToken: string | null = null
 
+function decodeTokenValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, '%20')).trim()
+  } catch {
+    return value.trim()
+  }
+}
+
+/**
+ * Check that a token only uses printable ASCII (`0x20–0x7E`), so Fetch `Headers` and HTTP
+ * servers never reject `Authorization: Bearer <token>` with a ByteString / control-char error.
+ */
+export function isValidToken(value: string): boolean {
+  return value.length > 0 && /^[\x20-\x7E]+$/.test(value)
+}
+
+/**
+ * Normalize a pasted access token: accepts a raw token, a `Bearer <token>` header,
+ * or the server's startup URL / hash / query containing `token=...`.
+ */
+export function parseTokenInput(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (/^(?:https?:\/\/|[#?]|token=)/i.test(trimmed)) {
+    const match = /(?:^|[#&?])token=([^&#\s]*)/.exec(trimmed)
+    return match ? decodeTokenValue(match[1] ?? '') : ''
+  }
+  const bearer = /^Bearer(?:\s+(.*))?$/i.exec(trimmed)
+  if (bearer) return (bearer[1] ?? '').trim()
+  return trimmed
+}
+
+/**
+ * Persist an already-normalized access token without re-parsing it.
+ * Pass `''` to clear storage; non-empty values containing invalid HTTP header characters are rejected.
+ */
+export function saveToken(next: string): string {
+  if (next === '') {
+    sessionToken = null
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+    } catch {
+      // Storage can be unavailable; clearing the in-memory token still applies.
+    }
+    return ''
+  }
+  if (!isValidToken(next)) return ''
+  sessionToken = next
+  try {
+    localStorage.setItem(TOKEN_KEY, next)
+  } catch {
+    // Storage can be unavailable; the token then lives only for this page.
+  }
+  return next
+}
+
+/** Parse and persist a manually entered access token so standalone PWA launches stay signed in. */
+export function setToken(raw: string): string {
+  if (raw === '') return saveToken('')
+  const next = parseTokenInput(raw)
+  return next ? saveToken(next) : ''
+}
+
 /**
  * The server prints a link with `#token=…`. Take the token from there once, keep it,
  * and drop it from the address bar so it does not end up in history or screenshots.
@@ -23,12 +86,7 @@ let sessionToken: string | null = null
 export function initToken(): string | null {
   const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash)
   if (match?.[1]) {
-    try {
-      localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]))
-    } catch {
-      // Storage can be unavailable; the token then lives only for this page.
-      sessionToken = decodeURIComponent(match[1])
-    }
+    saveToken(decodeTokenValue(match[1]))
     history.replaceState(null, '', location.pathname + location.search)
   }
   return getToken()
@@ -40,6 +98,11 @@ export function getToken(): string | null {
   } catch {
     return sessionToken
   }
+}
+
+/** Build a Header-safe `Authorization` value; invalid stored tokens fall back to empty so the server answers 401. */
+export function authorizationHeader(raw: string | null = getToken()): string {
+  return `Bearer ${raw && isValidToken(raw) ? raw : ''}`
 }
 
 export class ApiError extends Error {
@@ -162,7 +225,7 @@ async function* wrapStreamMessages<T>(
 export function createAriadneTransport(options: AriadneTransportOptions = {}): Transport {
   const readToken = options.getToken ?? getToken
   const authInterceptor: Interceptor = (next) => async (req) => {
-    req.header.set('authorization', `Bearer ${readToken() ?? ''}`)
+    req.header.set('authorization', authorizationHeader(readToken()))
     return next(req)
   }
   const base = createConnectTransport({
