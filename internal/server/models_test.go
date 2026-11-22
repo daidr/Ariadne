@@ -9,34 +9,46 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestModelSettingsHTTPAndRealProviderCheck(t *testing.T) {
+func mustStruct(t *testing.T, values map[string]any) *structpb.Struct {
+	t.Helper()
+	out, err := structpb.NewStruct(values)
+	if err != nil {
+		t.Fatalf("structpb.NewStruct: %v", err)
+	}
+	return out
+}
+
+func TestModelSettingsConnectAndRealProviderCheck(t *testing.T) {
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer private" {
 			t.Error("wrong model check request", r.URL.Path, r.Header)
 		}
 		var body object
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body["model"] == "refused" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(401)
-			io.WriteString(w, `{"error":{"message":"unauthorized"}}`)
+			_, _ = io.WriteString(w, `{"error":{"message":"unauthorized"}}`)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n")
 	}))
 	defer service.Close()
-	provider := object{"id": "p", "kind": "openai-compatible", "name": "主力", "settings": object{"baseUrl": service.URL + "/v1", "apiKey": "private"}}
-	body := func(model string) object {
-		return object{"providers": []any{provider}, "models": []any{object{"id": "m", "provider": "p", "model": model}}, "roles": object{"thread": object{"model": "m"}}}
-	}
-	requests := []apiRequest{{Method: "GET", Path: "/api/settings/models"}, {Method: "PUT", Path: "/api/settings/models", Body: body("working")}, {Method: "GET", Path: "/api/settings/models"}, {Method: "PUT", Path: "/api/settings/models", Body: body("refused")}, {Method: "GET", Path: "/api/settings/models"}}
+
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
 	if err != nil {
@@ -64,20 +76,152 @@ func TestModelSettingsHTTPAndRealProviderCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+	server := httptest.NewServer(api)
+	defer server.Close()
+
+	client := ariadnev1connect.NewSettingsServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	checkNoSecretLeak := func(msg proto.Message) {
+		t.Helper()
+		raw, err := proto.Marshal(msg)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if response.Code != 200 {
-			t.Fatal(object{"status": response.Code, "body": body})
+		if strings.Contains(string(raw), "private") {
+			t.Fatal("API key leaked to settings response")
 		}
-		if strings.Contains(response.Body.String(), `"apiKey":"private"`) {
-			t.Fatal("API key leaked to settings page")
+	}
+
+	initial, err := client.GetModelSettings(t.Context(), connect.NewRequest(&ariadnev1.GetModelSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetModelSettings: %v", err)
+	}
+	if len(initial.Msg.GetSettings().GetKinds()) == 0 {
+		t.Fatal("expected built-in model kinds")
+	}
+	checkNoSecretLeak(initial.Msg)
+
+	saveReq := func(model string) *ariadnev1.SaveModelSettingsRequest {
+		modelID := "m"
+		return &ariadnev1.SaveModelSettingsRequest{
+			Providers: []*ariadnev1.ModelProviderInput{{
+				Id:       "p",
+				Kind:     "openai-compatible",
+				Name:     "主力",
+				Settings: mustStruct(t, object{"baseUrl": service.URL + "/v1", "apiKey": "private"}),
+			}},
+			Models: []*ariadnev1.ModelEntry{{
+				Id:       "m",
+				Provider: "p",
+				Model:    model,
+			}},
+			Roles: &ariadnev1.ModelRoles{
+				Thread: &ariadnev1.RoleConfig{Model: &modelID},
+			},
 		}
+	}
+
+	okRes, err := client.SaveModelSettings(t.Context(), connect.NewRequest(saveReq("working")))
+	if err != nil {
+		t.Fatalf("SaveModelSettings(working): %v", err)
+	}
+	if len(okRes.Msg.GetProblems()) != 0 {
+		t.Fatalf("expected no problems for working model, got %+v", okRes.Msg.GetProblems())
+	}
+	checkNoSecretLeak(okRes.Msg)
+
+	refusedRes, err := client.SaveModelSettings(t.Context(), connect.NewRequest(saveReq("refused")))
+	if err != nil {
+		t.Fatalf("SaveModelSettings(refused): %v", err)
+	}
+	if len(refusedRes.Msg.GetProblems()) != 1 || refusedRes.Msg.GetProblems()[0].GetProblem().GetKey() != "error.modelCheck" {
+		t.Fatalf("expected error.modelCheck problem, got %+v", refusedRes.Msg.GetProblems())
+	}
+	checkNoSecretLeak(refusedRes.Msg)
+
+	after, err := client.GetModelSettings(t.Context(), connect.NewRequest(&ariadnev1.GetModelSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetModelSettings(after): %v", err)
+	}
+	checkNoSecretLeak(after.Msg)
+}
+
+func TestSaveModelSettingsProbeTimeout(t *testing.T) {
+	originalTimeout := modelProbeTimeout
+	modelProbeTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { modelProbeTimeout = originalTimeout })
+
+	release := make(chan struct{})
+	slowService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer slowService.Close()
+	defer close(release)
+
+	directory := t.TempDir()
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	store, err := settings.Open(filepath.Join(directory, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtins, err := models.NewBuiltins(models.BuiltinOptions{DataDir: filepath.Join(directory, "providers"), Client: slowService.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer builtins.Close(context.Background())
+	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: slowService.Client()}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remove()
+	}
+	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: builtins.Registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	server := httptest.NewServer(api)
+	defer server.Close()
+
+	client := ariadnev1connect.NewSettingsServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+
+	start := time.Now()
+	res, err := client.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{{
+			Id:       "p",
+			Kind:     "openai-compatible",
+			Name:     "慢接口",
+			Settings: mustStruct(t, object{"baseUrl": slowService.URL + "/v1", "apiKey": "private"}),
+		}},
+		Models: []*ariadnev1.ModelEntry{{
+			Id:       "m",
+			Provider: "p",
+			Model:    "slow-model",
+		}},
+	}))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("SaveModelSettings(slow): %v", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("SaveModelSettings blocked too long (%v) despite modelProbeTimeout", elapsed)
+	}
+	if len(res.Msg.GetProblems()) != 1 || res.Msg.GetProblems()[0].GetProblem().GetKey() != "error.modelCheckTimeout" {
+		t.Fatalf("expected error.modelCheckTimeout, got %+v", res.Msg.GetProblems())
 	}
 }

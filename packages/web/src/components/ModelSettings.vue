@@ -461,7 +461,13 @@ function listed(provider: DraftProvider): Promise<ListedModel[]> {
       },
       (cause) => {
         // Not filled in far enough to ask (no address, no key) is no problem to show.
-        if (cause instanceof ApiError && cause.status === 502) {
+        if (
+          cause instanceof ApiError &&
+          (cause.localized.key === 'error.modelCheck' ||
+            cause.localized.key === 'error.modelCheckTimeout' ||
+            cause.status === 502 ||
+            cause.status === 503)
+        ) {
           listProblems.value[provider.id] = tm(cause.localized)
         } else delete listProblems.value[provider.id]
         // Asked again once the form changes, or the name is focused again.
