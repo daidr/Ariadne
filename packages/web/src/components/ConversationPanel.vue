@@ -1443,7 +1443,89 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation-list :deep(.dou-chat-list) {
+  --dou-chat-list-gap: 30px;
   --conversation-clearance: var(--conversation-footer-height, var(--dou-chat-list-padding));
+}
+
+/*
+ * Chat reading rhythm: wrapped lines < list items < paragraphs < heading top < consecutive messages.
+ * Suppressing the top margin of the block right after a heading keeps headings bound to their body.
+ */
+.conversation-list :deep(.dou-markdown) {
+  --dou-markdown-gap: 0.95em;
+  line-height: 1.75;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2, h3, h4, h5, h6)) {
+  margin-block: 0;
+  line-height: 1.45;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2):not(:first-child)) {
+  margin-block-start: 1.65em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2):not(:last-child)) {
+  margin-block-end: 0.45em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h3):not(:first-child)) {
+  margin-block-start: 1.5em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h3):not(:last-child)) {
+  margin-block-end: 0.35em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h4, h5, h6):not(:first-child)) {
+  margin-block-start: 1.35em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h4, h5, h6):not(:last-child)) {
+  margin-block-end: 0.3em;
+}
+
+.conversation-list
+  :deep(
+    .dou-markdown
+      :where(h1, h2, h3, h4, h5, h6)
+      + :where(
+        p,
+        ul,
+        ol,
+        blockquote,
+        .dou-markdown__table,
+        .dou-markdown__code,
+        .dou-markdown__custom,
+        .dou-markdown__callout,
+        .dou-markdown__container,
+        div.dou-markdown__trailing
+      )
+  ) {
+  margin-block-start: 0;
+}
+
+.conversation-list :deep(.dou-markdown :where(li + li)) {
+  margin-block-start: 0.5em;
+}
+
+.conversation-list :deep(.dou-markdown :where(li > ul, li > ol)) {
+  margin-block: 0.45em;
+}
+
+.conversation-list :deep(.dou-markdown :where(li > p)) {
+  margin-block: 0.55em;
+}
+
+.conversation-list :deep(.dou-markdown :where(code:not(.dou-code-block__code))) {
+  font-size: 0.875em;
+  padding: 0.1em 0.36em;
+}
+
+.conversation-list :deep(.dou-markdown .dou-link--soft) {
+  font-size: 0.93em;
+  padding-block: 0.05em;
+  padding-inline: 0.35em;
 }
 
 /* The spacer, including composer clearance, is what ChatList observes. */
