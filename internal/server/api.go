@@ -34,6 +34,7 @@ import (
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/scheduler"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -71,6 +72,7 @@ type Options struct {
 	SkillsDirs       []string
 	Dashboards       *dashboard.Registry
 	SharedDashboard  dashboard.Shared
+	Searches         *searches.Registry
 	Rooms            *collab.Rooms
 	Plugins          *plugins.Host
 }
@@ -115,6 +117,9 @@ func New(options Options) (*API, error) {
 		}
 		if err := options.Plugins.Restore(context.Background(), options.Settings); err != nil {
 			return nil, err
+		}
+		if options.Searches == nil {
+			options.Searches = options.Plugins.Searches()
 		}
 	}
 	if options.Workspaces != nil {

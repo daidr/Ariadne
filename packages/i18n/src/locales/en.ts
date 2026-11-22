@@ -364,9 +364,14 @@ export const en: Record<MessageKey, string> = {
   'settings.clearSecret': 'Clear',
   'settings.search': 'Web search',
   'settings.searchKey': 'API key',
-  'settings.searchProvider': 'Fallback search API',
-  'settings.searchSources': 'Use {sources} first; use the API below when unavailable',
-  'settings.searchNoSources': 'No model or plugin search detected; use the API below',
+  'settings.searchProvider': 'Search provider',
+  'settings.searchSources':
+    'Use the configured search provider first; fall back to model search when unavailable: {sources}',
+  'settings.searchNoSources':
+    'Current model services do not include web search; configure a search provider below',
+  'settings.searchNoSettings':
+    'This search provider needs no extra settings and is ready once selected',
+  'settings.searchNoProviders': 'No search provider plugins are currently available',
   'settings.searchBaseUrl': 'Base URL',
   'settings.searchBaseUrlHelp':
     'Leave blank for the default; include the path prefix. /search is appended',

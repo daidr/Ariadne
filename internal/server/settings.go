@@ -5,6 +5,9 @@ import (
 
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/projectsettings"
+	"github.com/daidr/Ariadne/internal/searches"
+	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func (api *API) registerSettings() {
@@ -55,24 +58,35 @@ func (api *API) registerSettings() {
 		}
 		return object{"project": project, "settings": project.Settings, "detected": project.Detected, "env": env, "tools": toolSwitches, "hostedMerge": api.options.Workspaces != nil && api.options.Workspaces.HasRepo(r.Context(), id)}, 200, nil
 	})
+	searchRegistry := func() *searches.Registry {
+		if api.options.Searches != nil {
+			return api.options.Searches
+		}
+		if api.options.Plugins != nil {
+			return api.options.Plugins.Searches()
+		}
+		return nil
+	}
+	searchKinds := func() []sdk.SearchProviderInfo {
+		if registry := searchRegistry(); registry != nil {
+			return registry.Kinds()
+		}
+		return []sdk.SearchProviderInfo{}
+	}
 	searchView := func() any {
 		var models []string
-		var plugins []any
 		if api.options.SearchAvailable != nil {
-			models, plugins = api.options.SearchAvailable()
-		} else {
-			if api.options.Models != nil {
-				for _, model := range api.options.Models.SearchModels(api.options.Settings) {
-					models = append(models, model.Label)
-				}
-			}
-			if api.options.Plugins != nil {
-				for _, search := range api.options.Plugins.SearchProviders() {
-					plugins = append(plugins, search.Title)
-				}
+			models, _ = api.options.SearchAvailable()
+		} else if api.options.Models != nil {
+			for _, model := range api.options.Models.SearchModels(api.options.Settings) {
+				models = append(models, model.Label)
 			}
 		}
-		return api.options.Settings.PublicSearch(models, plugins)
+		var ready func(string, map[string]any) bool
+		if registry := searchRegistry(); registry != nil {
+			ready = registry.Ready
+		}
+		return api.options.Settings.PublicSearch(searchKinds(), ready, models)
 	}
 	api.add("GET", "/api/settings/search", func(*http.Request) (any, int, error) {
 		if api.options.Settings == nil {
@@ -88,7 +102,11 @@ func (api *API) registerSettings() {
 		if err != nil {
 			return nil, 0, err
 		}
-		if _, err := api.options.Settings.UpdateSearch(body); err != nil {
+		var validate func(string, map[string]any) error
+		if registry := searchRegistry(); registry != nil {
+			validate = registry.Validate
+		}
+		if _, err := api.options.Settings.UpdateSearch(body, searchKinds(), validate); err != nil {
 			return nil, 0, err
 		}
 		return searchView(), 200, nil
@@ -101,7 +119,25 @@ func (api *API) registerSettings() {
 		if err != nil {
 			return nil, 0, err
 		}
-		result, err := api.options.Settings.CheckSearch(r.Context(), body, api.options.HTTPClient)
+		registry := searchRegistry()
+		if registry == nil {
+			return nil, 0, badInput("provider")
+		}
+		kinds := registry.Kinds()
+		draft, err := api.options.Settings.SearchDraft(body, kinds, registry.Validate)
+		if err != nil {
+			return nil, 0, err
+		}
+		providerKind, _ := draft["provider"].(string)
+		if providerKind == "" && len(kinds) > 0 {
+			providerKind = kinds[0].Kind
+		}
+		provider, ok := registry.Get(providerKind)
+		if !ok {
+			return nil, 0, badInput("provider")
+		}
+		values := settings.EffectiveSearchSettings(draft, provider.Info())
+		result, err := registry.Check(r.Context(), providerKind, values)
 		return result, 200, err
 	})
 	api.add("GET", "/api/settings/work", func(*http.Request) (any, int, error) {
