@@ -115,20 +115,24 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	if err != nil {
 		return nil, err
 	}
+	eventHub := realtime.NewHub()
+	addSimple(func() error { eventHub.Close(); return nil })
+	state := realtime.NewState(eventHub)
+	addSimple(func() error { state.Close(); return nil })
 	var updates *update.Service
 	version := ""
 	if options.Update != nil {
 		supplied := *options.Update
 		version = supplied.Version
 		supplied.OnError = onError
+		supplied.OnChange = func(view update.View) {
+			if data, err := json.Marshal(view); err == nil {
+				_ = state.Set(realtime.Update{Kind: "update", Data: data}, true)
+			}
+		}
 		updates = update.New(life, user, supplied)
 		add(updates.Close)
 	}
-
-	eventHub := realtime.NewHub()
-	addSimple(func() error { eventHub.Close(); return nil })
-	state := realtime.NewState(eventHub)
-	addSimple(func() error { state.Close(); return nil })
 	drafts := realtime.NewDrafts(state, realtime.LiveOptions{})
 	addSimple(func() error { drafts.Close(); return nil })
 	live := realtime.NewLive(state, realtime.LiveOptions{})

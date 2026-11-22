@@ -14,6 +14,7 @@ service ThreadService {
   rpc RemoveThreadReference(RemoveThreadReferenceRequest) returns (RemoveThreadReferenceResponse);
   rpc KeepThreadReference(KeepThreadReferenceRequest) returns (KeepThreadReferenceResponse);
   rpc GetCommandOutput(GetCommandOutputRequest) returns (GetCommandOutputResponse);
+  rpc StreamCommandOutput(StreamCommandOutputRequest) returns (stream StreamCommandOutputResponse);
   rpc StopCommand(StopCommandRequest) returns (StopCommandResponse);
   rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
   rpc ListLineComments(ListLineCommentsRequest) returns (ListLineCommentsResponse);
@@ -280,6 +281,16 @@ message GetCommandOutputRequest {
 }
 
 message GetCommandOutputResponse {
+  BackgroundCommandView command = 1;
+  string tail = 2;
+}
+
+message StreamCommandOutputRequest {
+  string thread_id = 1;
+  string command_id = 2;
+}
+
+message StreamCommandOutputResponse {
   BackgroundCommandView command = 1;
   string tail = 2;
 }

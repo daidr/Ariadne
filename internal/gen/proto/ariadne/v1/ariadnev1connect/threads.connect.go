@@ -53,6 +53,9 @@ const (
 	// ThreadServiceGetCommandOutputProcedure is the fully-qualified name of the ThreadService's
 	// GetCommandOutput RPC.
 	ThreadServiceGetCommandOutputProcedure = "/ariadne.v1.ThreadService/GetCommandOutput"
+	// ThreadServiceStreamCommandOutputProcedure is the fully-qualified name of the ThreadService's
+	// StreamCommandOutput RPC.
+	ThreadServiceStreamCommandOutputProcedure = "/ariadne.v1.ThreadService/StreamCommandOutput"
 	// ThreadServiceStopCommandProcedure is the fully-qualified name of the ThreadService's StopCommand
 	// RPC.
 	ThreadServiceStopCommandProcedure = "/ariadne.v1.ThreadService/StopCommand"
@@ -76,6 +79,7 @@ type ThreadServiceClient interface {
 	RemoveThreadReference(context.Context, *connect.Request[v1.RemoveThreadReferenceRequest]) (*connect.Response[v1.RemoveThreadReferenceResponse], error)
 	KeepThreadReference(context.Context, *connect.Request[v1.KeepThreadReferenceRequest]) (*connect.Response[v1.KeepThreadReferenceResponse], error)
 	GetCommandOutput(context.Context, *connect.Request[v1.GetCommandOutputRequest]) (*connect.Response[v1.GetCommandOutputResponse], error)
+	StreamCommandOutput(context.Context, *connect.Request[v1.StreamCommandOutputRequest]) (*connect.ServerStreamForClient[v1.StreamCommandOutputResponse], error)
 	StopCommand(context.Context, *connect.Request[v1.StopCommandRequest]) (*connect.Response[v1.StopCommandResponse], error)
 	ListReviews(context.Context, *connect.Request[v1.ListReviewsRequest]) (*connect.Response[v1.ListReviewsResponse], error)
 	ListLineComments(context.Context, *connect.Request[v1.ListLineCommentsRequest]) (*connect.Response[v1.ListLineCommentsResponse], error)
@@ -135,6 +139,12 @@ func NewThreadServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(threadServiceMethods.ByName("GetCommandOutput")),
 			connect.WithClientOptions(opts...),
 		),
+		streamCommandOutput: connect.NewClient[v1.StreamCommandOutputRequest, v1.StreamCommandOutputResponse](
+			httpClient,
+			baseURL+ThreadServiceStreamCommandOutputProcedure,
+			connect.WithSchema(threadServiceMethods.ByName("StreamCommandOutput")),
+			connect.WithClientOptions(opts...),
+		),
 		stopCommand: connect.NewClient[v1.StopCommandRequest, v1.StopCommandResponse](
 			httpClient,
 			baseURL+ThreadServiceStopCommandProcedure,
@@ -171,6 +181,7 @@ type threadServiceClient struct {
 	removeThreadReference *connect.Client[v1.RemoveThreadReferenceRequest, v1.RemoveThreadReferenceResponse]
 	keepThreadReference   *connect.Client[v1.KeepThreadReferenceRequest, v1.KeepThreadReferenceResponse]
 	getCommandOutput      *connect.Client[v1.GetCommandOutputRequest, v1.GetCommandOutputResponse]
+	streamCommandOutput   *connect.Client[v1.StreamCommandOutputRequest, v1.StreamCommandOutputResponse]
 	stopCommand           *connect.Client[v1.StopCommandRequest, v1.StopCommandResponse]
 	listReviews           *connect.Client[v1.ListReviewsRequest, v1.ListReviewsResponse]
 	listLineComments      *connect.Client[v1.ListLineCommentsRequest, v1.ListLineCommentsResponse]
@@ -212,6 +223,11 @@ func (c *threadServiceClient) GetCommandOutput(ctx context.Context, req *connect
 	return c.getCommandOutput.CallUnary(ctx, req)
 }
 
+// StreamCommandOutput calls ariadne.v1.ThreadService.StreamCommandOutput.
+func (c *threadServiceClient) StreamCommandOutput(ctx context.Context, req *connect.Request[v1.StreamCommandOutputRequest]) (*connect.ServerStreamForClient[v1.StreamCommandOutputResponse], error) {
+	return c.streamCommandOutput.CallServerStream(ctx, req)
+}
+
 // StopCommand calls ariadne.v1.ThreadService.StopCommand.
 func (c *threadServiceClient) StopCommand(ctx context.Context, req *connect.Request[v1.StopCommandRequest]) (*connect.Response[v1.StopCommandResponse], error) {
 	return c.stopCommand.CallUnary(ctx, req)
@@ -241,6 +257,7 @@ type ThreadServiceHandler interface {
 	RemoveThreadReference(context.Context, *connect.Request[v1.RemoveThreadReferenceRequest]) (*connect.Response[v1.RemoveThreadReferenceResponse], error)
 	KeepThreadReference(context.Context, *connect.Request[v1.KeepThreadReferenceRequest]) (*connect.Response[v1.KeepThreadReferenceResponse], error)
 	GetCommandOutput(context.Context, *connect.Request[v1.GetCommandOutputRequest]) (*connect.Response[v1.GetCommandOutputResponse], error)
+	StreamCommandOutput(context.Context, *connect.Request[v1.StreamCommandOutputRequest], *connect.ServerStream[v1.StreamCommandOutputResponse]) error
 	StopCommand(context.Context, *connect.Request[v1.StopCommandRequest]) (*connect.Response[v1.StopCommandResponse], error)
 	ListReviews(context.Context, *connect.Request[v1.ListReviewsRequest]) (*connect.Response[v1.ListReviewsResponse], error)
 	ListLineComments(context.Context, *connect.Request[v1.ListLineCommentsRequest]) (*connect.Response[v1.ListLineCommentsResponse], error)
@@ -296,6 +313,12 @@ func NewThreadServiceHandler(svc ThreadServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(threadServiceMethods.ByName("GetCommandOutput")),
 		connect.WithHandlerOptions(opts...),
 	)
+	threadServiceStreamCommandOutputHandler := connect.NewServerStreamHandler(
+		ThreadServiceStreamCommandOutputProcedure,
+		svc.StreamCommandOutput,
+		connect.WithSchema(threadServiceMethods.ByName("StreamCommandOutput")),
+		connect.WithHandlerOptions(opts...),
+	)
 	threadServiceStopCommandHandler := connect.NewUnaryHandler(
 		ThreadServiceStopCommandProcedure,
 		svc.StopCommand,
@@ -336,6 +359,8 @@ func NewThreadServiceHandler(svc ThreadServiceHandler, opts ...connect.HandlerOp
 			threadServiceKeepThreadReferenceHandler.ServeHTTP(w, r)
 		case ThreadServiceGetCommandOutputProcedure:
 			threadServiceGetCommandOutputHandler.ServeHTTP(w, r)
+		case ThreadServiceStreamCommandOutputProcedure:
+			threadServiceStreamCommandOutputHandler.ServeHTTP(w, r)
 		case ThreadServiceStopCommandProcedure:
 			threadServiceStopCommandHandler.ServeHTTP(w, r)
 		case ThreadServiceListReviewsProcedure:
@@ -379,6 +404,10 @@ func (UnimplementedThreadServiceHandler) KeepThreadReference(context.Context, *c
 
 func (UnimplementedThreadServiceHandler) GetCommandOutput(context.Context, *connect.Request[v1.GetCommandOutputRequest]) (*connect.Response[v1.GetCommandOutputResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ThreadService.GetCommandOutput is not implemented"))
+}
+
+func (UnimplementedThreadServiceHandler) StreamCommandOutput(context.Context, *connect.Request[v1.StreamCommandOutputRequest], *connect.ServerStream[v1.StreamCommandOutputResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ThreadService.StreamCommandOutput is not implemented"))
 }
 
 func (UnimplementedThreadServiceHandler) StopCommand(context.Context, *connect.Request[v1.StopCommandRequest]) (*connect.Response[v1.StopCommandResponse], error) {

@@ -1,28 +1,16 @@
-import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { api, ApiError, type UpdatePreferences, type UpdateStatus } from '../api'
 import { t, tm } from '../i18n'
-
-function needsPolling(view: UpdateStatus | null) {
-  if (!view) return false
-  return (
-    view.state === 'checking' ||
-    view.state === 'downloading' ||
-    view.state === 'installing' ||
-    (view.preferences.automatic &&
-      view.canInstall &&
-      view.state === 'available' &&
-      view.release?.installable &&
-      !view.failure)
-  )
-}
+import { onUpdateStatus, state } from '../store'
 
 export function useUpdatesSettings() {
   const status = shallowRef<UpdateStatus | null>(null)
   const pending = shallowRef<'load' | 'save' | 'check' | 'install' | null>('load')
   const error = shallowRef<string | null>(null)
   const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
   let sequence = 0
+  let pushGeneration = 0
+  let stopListening: (() => void) | undefined
 
   const updating = computed(
     () =>
@@ -59,21 +47,18 @@ export function useUpdatesSettings() {
     return null
   })
 
-  function poll(delay = status.value?.state === 'downloading' ? 500 : 1200) {
-    clearTimeout(timer)
-    if (!controller.signal.aborted && needsPolling(status.value)) {
-      timer = setTimeout(() => void load(), delay)
-    }
-  }
-
   async function perform(action: typeof pending.value, request: () => Promise<UpdateStatus>) {
-    clearTimeout(timer)
     const current = ++sequence
+    const startedPushGeneration = pushGeneration
     pending.value = action
     if (action) error.value = null
     try {
       const view = await request()
-      if (!controller.signal.aborted && current === sequence) {
+      if (
+        !controller.signal.aborted &&
+        current === sequence &&
+        pushGeneration === startedPushGeneration
+      ) {
         status.value = view
         error.value = null
       }
@@ -87,7 +72,6 @@ export function useUpdatesSettings() {
     } finally {
       if (current === sequence) {
         pending.value = null
-        poll(error.value ? 4000 : undefined)
       }
     }
   }
@@ -103,9 +87,12 @@ export function useUpdatesSettings() {
   function save(preferences: UpdatePreferences, refresh: boolean) {
     if (busy.value) return
     return perform('save', async () => {
+      const beforeSavePush = pushGeneration
       const view = await api.saveUpdatePreferences(preferences, controller.signal)
       if (refresh && !controller.signal.aborted) {
-        status.value = view
+        if (pushGeneration === beforeSavePush) {
+          status.value = view
+        }
         return api.checkForUpdate(controller.signal)
       }
       return view
@@ -127,10 +114,28 @@ export function useUpdatesSettings() {
     void perform('install', () => api.installUpdate(version, controller.signal))
   }
 
-  onMounted(load)
+  watch(
+    () => state.stream,
+    (next, previous) => {
+      if (next === 'open' && previous === 'lost' && !controller.signal.aborted) {
+        void load()
+      }
+    },
+  )
+
+  onMounted(() => {
+    stopListening = onUpdateStatus((view) => {
+      if (controller.signal.aborted) return
+      pushGeneration++
+      status.value = view
+      error.value = null
+    })
+    void load()
+  })
   onBeforeUnmount(() => {
     controller.abort()
-    clearTimeout(timer)
+    stopListening?.()
+    stopListening = undefined
   })
 
   return {

@@ -28,5 +28,6 @@ export function hasOpenBranch(thread: ThreadView | null | undefined): boolean {
  */
 export function branchChanges(thread: ThreadView | null | undefined): ThreadView['changes'] {
   if (!hasOpenBranch(thread)) return null
-  return thread?.changes ?? null
+  const changes = thread?.changes
+  return changes && changes.files > 0 ? changes : null
 }

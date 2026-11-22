@@ -148,13 +148,16 @@ describe('conversation draft preservation', () => {
 
   beforeEach(() => {
     localStorage.clear()
-    vi.stubGlobal(
-      'EventSource',
-      class {
-        addEventListener() {}
-        close() {}
-      },
-    )
+    vi.spyOn(api, 'streamEvents').mockImplementation((_opts, signal) => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise((resolve) => {
+            signal?.addEventListener('abort', () => resolve({ done: true, value: undefined }), {
+              once: true,
+            })
+          }),
+      }),
+    }))
 
     vi.spyOn(api, 'getSkills').mockResolvedValue({ skills: [] })
     vi.spyOn(api, 'markRead').mockResolvedValue({} as never)

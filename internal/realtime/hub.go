@@ -1,4 +1,4 @@
-// Package realtime delivers durable events by cursor and bounds transient SSE
+// Package realtime delivers durable events by cursor and bounds transient
 // updates by both count and bytes, including when a client stops reading.
 package realtime
 
@@ -6,13 +6,15 @@ import (
 	"container/list"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"sync"
 )
 
 const MaxPendingBytes = 512 * 1024
 const MaxPendingUpdates = 256
 
-var ErrSlowConsumer = errors.New("event stream consumer is too slow; reconnect with Last-Event-ID")
+var ErrSlowConsumer = errors.New("event stream consumer is too slow; reconnect with afterSeq")
 
 type Update struct {
 	Kind           string
@@ -22,8 +24,9 @@ type Update struct {
 }
 
 type queued struct {
-	key   string
-	frame []byte
+	key    string
+	update Update
+	size   int
 }
 
 type Subscription struct {
@@ -68,27 +71,58 @@ func (hub *Hub) Subscribe(project string) (*Subscription, func()) {
 	}
 }
 
-func updateFrame(update Update) []byte {
-	frame := make([]byte, 0, len(update.Kind)+len(update.Data)+16)
-	frame = append(frame, "event: "...)
-	frame = append(frame, update.Kind...)
-	frame = append(frame, "\ndata: "...)
-	// Compact before framing: RawMessage may contain newlines, which must not
-	// become extra SSE fields. Marshal also isolates the caller's mutable bytes.
-	data, _ := json.Marshal(update.Data)
-	frame = append(frame, data...)
-	return append(frame, '\n', '\n')
+func isValidKind(kind string) bool {
+	return kind == "live" || kind == "background" || kind == "draft" || kind == "update"
+}
+
+func updateKey(update Update) string {
+	if update.Kind == "update" {
+		return "update"
+	}
+	return update.Kind + ":" + update.ConversationID
+}
+
+func normalizeUpdate(update Update) (Update, int, error) {
+	if !isValidKind(update.Kind) {
+		return Update{}, 0, errors.New("unknown transient update kind")
+	}
+	if update.Kind == "update" {
+		if update.ProjectID != "" || update.ConversationID != "" || !json.Valid(update.Data) {
+			return Update{}, 0, errors.New("system transient update needs valid JSON and empty scope")
+		}
+	} else if update.ProjectID == "" || update.ConversationID == "" || !json.Valid(update.Data) {
+		return Update{}, 0, errors.New("transient update needs projectId, conversationId and valid JSON")
+	}
+	// Compact & clone caller bytes so mutations cannot leak into queued snapshots.
+	data, err := json.Marshal(update.Data)
+	if err != nil {
+		return Update{}, 0, err
+	}
+	normalized := Update{
+		Kind:           strings.Clone(update.Kind),
+		ProjectID:      strings.Clone(update.ProjectID),
+		ConversationID: strings.Clone(update.ConversationID),
+		Data:           data,
+	}
+	size := len(normalized.Kind) + len(normalized.ProjectID) + len(normalized.ConversationID) + len(normalized.Data) + 16
+	return normalized, size, nil
+}
+
+func cloneUpdate(update Update) Update {
+	return Update{
+		Kind:           update.Kind,
+		ProjectID:      update.ProjectID,
+		ConversationID: update.ConversationID,
+		Data:           slices.Clone(update.Data),
+	}
 }
 
 func (hub *Hub) Publish(update Update) error {
-	if update.Kind != "live" && update.Kind != "background" && update.Kind != "draft" {
-		return errors.New("unknown transient update kind")
+	normalized, size, err := normalizeUpdate(update)
+	if err != nil {
+		return err
 	}
-	if update.ProjectID == "" || update.ConversationID == "" || !json.Valid(update.Data) {
-		return errors.New("transient update needs projectId, conversationId and valid JSON")
-	}
-	frame := updateFrame(update)
-	key := update.Kind + ":" + update.ConversationID
+	key := updateKey(normalized)
 	hub.mu.Lock()
 	clients := make([]*Subscription, 0, len(hub.clients))
 	for _, client := range hub.clients {
@@ -96,8 +130,8 @@ func (hub *Hub) Publish(update Update) error {
 	}
 	hub.mu.Unlock()
 	for _, client := range clients {
-		if client.project == "" || client.project == update.ProjectID {
-			client.put(key, frame)
+		if client.project == "" || (normalized.ProjectID != "" && client.project == normalized.ProjectID) {
+			client.put(key, normalized, size)
 		}
 	}
 	return nil
@@ -110,56 +144,60 @@ func (sub *Subscription) signal() {
 	}
 }
 
-func (sub *Subscription) put(key string, frame []byte) {
+func (sub *Subscription) put(key string, update Update, size int) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 	if sub.closed {
 		return
 	}
 	if old := sub.byKey[key]; old != nil {
-		sub.bytes -= len(old.Value.(queued).frame)
+		sub.bytes -= old.Value.(queued).size
 		sub.queue.Remove(old)
 		delete(sub.byKey, key)
 	}
-	if sub.queue.Len() >= MaxPendingUpdates || sub.bytes+len(frame) > MaxPendingBytes {
+	if sub.queue.Len() >= MaxPendingUpdates || sub.bytes+size > MaxPendingBytes {
 		sub.finishLocked(ErrSlowConsumer)
 		return
 	}
-	sub.byKey[key] = sub.queue.PushBack(queued{key: key, frame: frame})
-	sub.bytes += len(frame)
+	sub.byKey[key] = sub.queue.PushBack(queued{key: key, update: update, size: size})
+	sub.bytes += size
 	sub.signal()
 }
 
 // takeInitial returns a newer queued snapshot when one arrived while the initial
 // state was being enumerated, avoiding a stale snapshot after a fresh update.
-func (sub *Subscription) takeInitial(update Update) []byte {
+func (sub *Subscription) takeInitial(update Update) Update {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	key := update.Kind + ":" + update.ConversationID
+	key := updateKey(update)
 	if item := sub.byKey[key]; item != nil {
 		value := item.Value.(queued)
 		sub.queue.Remove(item)
 		delete(sub.byKey, key)
-		sub.bytes -= len(value.frame)
-		return value.frame
+		sub.bytes -= value.size
+		return cloneUpdate(value.update)
 	}
-	return updateFrame(update)
+	normalized, _, err := normalizeUpdate(update)
+	if err != nil {
+		return cloneUpdate(update)
+	}
+	return normalized
 }
 
-func (sub *Subscription) next() ([]byte, bool, error) {
+func (sub *Subscription) next() (Update, bool, bool, error) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 	if sub.closed {
-		return nil, true, sub.err
+		return Update{}, false, true, sub.err
 	}
 	if item := sub.queue.Front(); item != nil {
 		value := item.Value.(queued)
 		sub.queue.Remove(item)
 		delete(sub.byKey, value.key)
-		sub.bytes -= len(value.frame)
-		return value.frame, false, nil
+		sub.bytes -= value.size
+		return cloneUpdate(value.update), true, false, nil
 	}
-	return nil, false, nil
+	return Update{}, false, false, nil
 }
 
 func (sub *Subscription) finish(err error) {

@@ -3,19 +3,12 @@ package server
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 )
 
 type projectDeletion struct {
 	done chan struct{}
 	err  error
-}
-
-func (api *API) registerProjectDeletion() {
-	api.add("DELETE", "/api/projects/:projectId", func(r *http.Request) (any, int, error) {
-		return nil, 204, api.deleteProjectQueued(r.Context(), r.PathValue("projectId"))
-	})
 }
 
 func (api *API) deleteProjectQueued(ctx context.Context, id string) error {

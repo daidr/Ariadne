@@ -1,14 +1,17 @@
 package server
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 func TestArtifactFeedbackReportsStoredEditsAndCommentsOnce(t *testing.T) {
@@ -45,30 +48,55 @@ func TestArtifactFeedbackReportsStoredEditsAndCommentsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := func(body, token string, status int) string {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/artifacts/"+a.ID+"/feedback", strings.NewReader(body))
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		res := httptest.NewRecorder()
-		api.ServeHTTP(res, req)
-		if res.Code != status {
-			t.Fatalf("feedback returned %d: %s", res.Code, res.Body.String())
-		}
-		return res.Body.String()
+
+	server := httptest.NewServer(api)
+	defer server.Close()
+	unauthClient := ariadnev1connect.NewArtifactServiceClient(server.Client(), server.URL+rpcPrefix)
+	if _, err := unauthClient.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected CodeUnauthenticated, got %v", err)
 	}
-	request("{}", "", 401)
-	request(`{"images":[8]}`, "fixture", 400)
-	request(`{"images":["fil_other_project"]}`, "fixture", 400)
-	body := request("{}", "fixture", 200)
-	for _, needle := range []string{`"kind":"edit"`, `"kind":"comment"`, "Revised first line", "Add an example", project.CoordinatorID} {
-		if !strings.Contains(body, needle) {
-			t.Fatalf("missing %s in feedback %s", needle, body)
+
+	client := ariadnev1connect.NewArtifactServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("fixture")),
+	)
+	if _, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{
+		ArtifactId: a.ID,
+		Images:     []string{"fil_other_project"},
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument for foreign image, got %v", err)
+	}
+
+	res, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatalf("SendArtifactFeedback failed: %v", err)
+	}
+	fb := res.Msg.GetFeedback()
+	if fb == nil {
+		t.Fatal("expected non-nil feedback on first send")
+	}
+	if fb.GetNotify() != project.CoordinatorID {
+		t.Fatalf("unexpected notify %q, want %q", fb.GetNotify(), project.CoordinatorID)
+	}
+	hasEdit, hasComment := false, false
+	for _, item := range fb.GetItems() {
+		if edit := item.GetEdit(); edit != nil && strings.Contains(edit.GetDiff(), "Revised first line") {
+			hasEdit = true
+		}
+		if comment := item.GetComment(); comment != nil && strings.Contains(comment.GetBody(), "Add an example") {
+			hasComment = true
 		}
 	}
-	body = request("{}", "fixture", 200)
-	if !strings.Contains(body, `"feedback":null`) {
-		t.Fatalf("unchanged feedback went out again: %s", body)
+	if !hasEdit || !hasComment {
+		t.Fatalf("expected both edit and comment items, got %+v", fb.GetItems())
+	}
+
+	second, err := client.SendArtifactFeedback(ctx, connect.NewRequest(&ariadnev1.SendArtifactFeedbackRequest{ArtifactId: a.ID}))
+	if err != nil {
+		t.Fatalf("second SendArtifactFeedback failed: %v", err)
+	}
+	if second.Msg.GetFeedback() != nil {
+		t.Fatalf("unchanged feedback went out again: %+v", second.Msg.GetFeedback())
 	}
 }

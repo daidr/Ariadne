@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
@@ -53,21 +57,26 @@ func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *
 		t.Fatal(err)
 	}
 	defer api.Close()
-	unauthorized := httptest.NewRecorder()
-	api.ServeHTTP(unauthorized, httptest.NewRequest("DELETE", "/api/projects/prj_a", nil))
-	if unauthorized.Code != 401 || removed.Load() != 0 {
-		t.Fatal("unauthorized deletion reached source")
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewProjectServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	if _, err := unauth.DeleteProject(t.Context(), connect.NewRequest(&ariadnev1.DeleteProjectRequest{ProjectId: "prj_a"})); connect.CodeOf(err) != connect.CodeUnauthenticated || removed.Load() != 0 {
+		t.Fatalf("unauthorized deletion reached source: err=%v removed=%d", err, removed.Load())
 	}
+
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
 	firstCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	invoke := func(ctx context.Context) <-chan *httptest.ResponseRecorder {
-		done := make(chan *httptest.ResponseRecorder, 1)
+	invoke := func(ctx context.Context) <-chan error {
+		done := make(chan error, 1)
 		go func() {
-			request := httptest.NewRequest("DELETE", "/api/projects/prj_a", nil).WithContext(ctx)
-			request.Header.Set("Authorization", "Bearer secret")
-			response := httptest.NewRecorder()
-			api.ServeHTTP(response, request)
-			done <- response
+			_, err := client.DeleteProject(ctx, connect.NewRequest(&ariadnev1.DeleteProjectRequest{ProjectId: "prj_a"}))
+			done <- err
 		}()
 		return done
 	}
@@ -98,9 +107,9 @@ func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *
 	}
 	close(release)
 	select {
-	case response := <-second:
-		if response.Code != 204 {
-			t.Fatal(response.Code, response.Body.String())
+	case err := <-second:
+		if err != nil {
+			t.Fatalf("shared deletion failed: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("shared deletion did not complete")
@@ -161,12 +170,15 @@ func TestProjectDeletionCallsModelProviderForget(t *testing.T) {
 	}
 	defer api.Close()
 
-	req := httptest.NewRequest("DELETE", "/api/projects/"+project.ID, nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	res := httptest.NewRecorder()
-	api.ServeHTTP(res, req)
-	if res.Code != 204 {
-		t.Fatalf("expected 204, got %d: %s", res.Code, res.Body.String())
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	client := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	if _, err := client.DeleteProject(t.Context(), connect.NewRequest(&ariadnev1.DeleteProjectRequest{ProjectId: project.ID})); err != nil {
+		t.Fatalf("DeleteProject failed: %v", err)
 	}
 
 	mu.Lock()

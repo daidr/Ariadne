@@ -11,8 +11,13 @@ import ConversationActivity from './ConversationActivity.vue'
 import ConversationBar from './ConversationBar.vue'
 
 const mocks = vi.hoisted(() => ({ openView: vi.fn() }))
-vi.mock('../api', () => ({ api: { commandOutput: vi.fn() } }))
-vi.mock('../store', () => ({ stopBackground: vi.fn(), report: vi.fn(), endWait: vi.fn() }))
+vi.mock('../api', () => ({ api: { streamCommandOutput: vi.fn() } }))
+vi.mock('../store', () => ({
+  state: { stream: 'open' },
+  stopBackground: vi.fn(),
+  report: vi.fn(),
+  endWait: vi.fn(),
+}))
 vi.mock('../opened-from', () => ({ useOpenView: () => mocks.openView }))
 
 const commands: BackgroundView[] = [
@@ -26,9 +31,27 @@ const commands: BackgroundView[] = [
   { id: 'cmd-2', command: 'bun run test --watch', startedAt: Date.now(), url: null, result: null },
 ]
 const wrappers: VueWrapper[] = []
+async function* outputStream(
+  command: BackgroundView,
+  tail: string,
+  signal?: AbortSignal,
+): AsyncGenerator<{ command: BackgroundView; tail: string }> {
+  yield { command, tail }
+  await new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve()
+      return
+    }
+    signal?.addEventListener('abort', () => resolve(), { once: true })
+  })
+}
+
 beforeEach(() => {
   locale.value = 'zh-CN'
-  vi.mocked(api.commandOutput).mockResolvedValue({ tail: 'Ready' } as never)
+  vi.mocked(api.streamCommandOutput).mockImplementation((_threadId, commandId, signal) => {
+    const command = commands.find((item) => item.id === commandId) ?? commands[0]!
+    return outputStream(command, 'Ready', signal)
+  })
 })
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
@@ -46,18 +69,22 @@ test('one task capsule opens details, switches output, and stops the selected ta
   })
   wrappers.push(wrapper)
   expect(wrapper.text()).toBe('2 个任务运行中')
-  expect(api.commandOutput).not.toHaveBeenCalled()
+  expect(api.streamCommandOutput).not.toHaveBeenCalled()
   await wrapper.get('button').trigger('click')
   await flushPromises()
-  expect(api.commandOutput).toHaveBeenCalledWith('thr-1', 'cmd-1', expect.any(AbortSignal))
-  const firstSignal = vi.mocked(api.commandOutput).mock.calls[0]![2]!
+  expect(api.streamCommandOutput).toHaveBeenCalledWith('thr-1', 'cmd-1', expect.any(AbortSignal))
+  const firstSignal = vi.mocked(api.streamCommandOutput).mock.calls[0]![2]!
   const choice = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.textContent?.trim() === 'bun run test --watch',
   )!
   choice.click()
   await flushPromises()
   expect(firstSignal.aborted).toBe(true)
-  expect(api.commandOutput).toHaveBeenLastCalledWith('thr-1', 'cmd-2', expect.any(AbortSignal))
+  expect(api.streamCommandOutput).toHaveBeenLastCalledWith(
+    'thr-1',
+    'cmd-2',
+    expect.any(AbortSignal),
+  )
   const stop = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
     (button) => button.getAttribute('aria-label') === '停止',
   )!
@@ -66,16 +93,19 @@ test('one task capsule opens details, switches output, and stops the selected ta
   expect(stopBackground).toHaveBeenCalledWith('thr-1', 'cmd-2')
   await wrapper.get('button').trigger('click')
   await flushPromises()
-  expect(vi.mocked(api.commandOutput).mock.calls.at(-1)![2]!.aborted).toBe(true)
+  expect(vi.mocked(api.streamCommandOutput).mock.calls.at(-1)![2]!.aborted).toBe(true)
 })
 
-test('task output requests never overlap and closing aborts the pending request', async () => {
+test('task output streams without polling and closing aborts the active stream', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-  let resolve!: (value: never) => void
-  vi.mocked(api.commandOutput).mockReturnValue(
-    new Promise((done) => {
-      resolve = done
-    }),
+  let push!: (value: { command: BackgroundView; tail: string }) => void
+  vi.mocked(api.streamCommandOutput).mockImplementation((_threadId, _commandId, signal) =>
+    (async function* () {
+      const next = await new Promise<{ command: BackgroundView; tail: string }>((resolve) => {
+        push = resolve
+      })
+      if (!signal?.aborted) yield next
+    })(),
   )
   const wrapper = mount(BackgroundCommand, {
     props: { threadId: 'thr-1', command: commands[0]! },
@@ -83,14 +113,14 @@ test('task output requests never overlap and closing aborts the pending request'
   })
   wrappers.push(wrapper)
   await vi.advanceTimersByTimeAsync(5000)
-  expect(api.commandOutput).toHaveBeenCalledTimes(1)
-  const signal = vi.mocked(api.commandOutput).mock.calls[0]![2]!
+  expect(api.streamCommandOutput).toHaveBeenCalledTimes(1)
+  const signal = vi.mocked(api.streamCommandOutput).mock.calls[0]![2]!
   wrapper.unmount()
   expect(signal.aborted).toBe(true)
-  resolve({ tail: 'late output' } as never)
+  push({ command: commands[0]!, tail: 'late output' })
   await flushPromises()
   await vi.advanceTimersByTimeAsync(5000)
-  expect(api.commandOutput).toHaveBeenCalledTimes(1)
+  expect(api.streamCommandOutput).toHaveBeenCalledTimes(1)
 })
 
 test('changes and artifact capsules open their corresponding views', async () => {

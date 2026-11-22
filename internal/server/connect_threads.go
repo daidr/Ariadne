@@ -7,6 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/daidr/Ariadne/internal/background"
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
@@ -162,6 +163,35 @@ func (h *threadServiceHandler) GetCommandOutput(
 		}
 	}
 	return nil, domainerr.NotFound(id)
+}
+
+func (h *threadServiceHandler) StreamCommandOutput(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.StreamCommandOutputRequest],
+	stream *connect.ServerStream[ariadnev1.StreamCommandOutputResponse],
+) error {
+	id := req.Msg.GetCommandId()
+	if h.api.options.Background == nil {
+		return domainerr.NotFound(id)
+	}
+	guard := h.api.streamWriteGuard(ctx)
+	found, err := h.api.options.Background.WatchPeek(ctx, req.Msg.GetThreadId(), id, 0, 150*time.Millisecond, func(peek background.Peek) error {
+		return guard.Send(func() error {
+			return stream.Send(&ariadnev1.StreamCommandOutputResponse{
+				Command: toProtoBackgroundCommand(peek.Command),
+				Tail:    peek.Tail,
+			})
+		})
+	})
+	if err != nil {
+		guard.ArmCloseDeadline()
+		return err
+	}
+	if !found {
+		guard.ArmCloseDeadline()
+		return domainerr.NotFound(id)
+	}
+	return nil
 }
 
 func (h *threadServiceHandler) StopCommand(
