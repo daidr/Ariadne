@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 func traceSeed() []eventstore.NewEvent {
@@ -39,9 +43,8 @@ func traceSeed() []eventstore.NewEvent {
 		event("turn.finished", object{"turnId": "turn_b", "outcome": "completed", "error": nil}),
 	}
 }
-func TestTraceTimelineHTTP(t *testing.T) {
-	no := false
-	requests := []apiRequest{{Method: "GET", Path: "/api/conversations/coo_a/trace", Auth: &no}, {Method: "GET", Path: "/api/conversations/coo_a/trace"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=15"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=0"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=1.5"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=Infinity"}, {Method: "GET", Path: "/api/conversations/missing/trace"}}
+
+func TestTraceTimelineRPC(t *testing.T) {
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "trace.sqlite"), Now: now})
 	if err != nil {
@@ -56,20 +59,25 @@ func TestTraceTimelineHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		r := httptest.NewRequest(item.Method, item.Path, nil)
-		if item.Auth == nil || *item.Auth {
-			r.Header.Set("Authorization", "Bearer test-token")
-		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err, response.Body.String())
-		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	client := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+
+	if _, err := unauth.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a"})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "missing"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	zero := int64(0)
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", From: &zero})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for from=0, got %v", err)
+	}
+	before := int64(15)
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", Before: &before})); err != nil {
+		t.Fatalf("before=15 failed: %v", err)
 	}
 	for _, limits := range []core.TurnEventOptions{{MaxEvents: 1}, {MaxBytes: 1}} {
 		if _, err := repo.ListTurnEvents(t.Context(), "coo_a", limits); err == nil {
@@ -77,27 +85,21 @@ func TestTraceTimelineHTTP(t *testing.T) {
 		}
 	}
 
-	full := func(query string) []any {
-		t.Helper()
-		r := httptest.NewRequest("GET", "/api/conversations/coo_a/trace"+query, nil)
-		r.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		var body struct {
-			Turns []any `json:"turns"`
-		}
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 {
-			t.Fatal(response.Code, response.Body.String(), err)
-		}
-		return body.Turns
+	fullResp, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a"}))
+	if err != nil {
+		t.Fatal(err)
 	}
-	turns := full("")
+	turns := fullResp.Msg.Turns
 	if len(turns) != 2 {
 		t.Fatal(turns)
 	}
-	last := turns[1].(map[string]any)
-	suffix := full("?from=" + strconv.FormatInt(int64(last["seq"].(float64)), 10))
-	if len(suffix) != 1 || encoded(suffix[0]) != encoded(last) {
-		t.Fatalf("incremental page changed the turn or request numbers: %+v", suffix)
+	last := turns[1]
+	fromSeq := last.Seq
+	suffixResp, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", From: &fromSeq}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suffixResp.Msg.Turns) != 1 || !proto.Equal(suffixResp.Msg.Turns[0], last) {
+		t.Fatalf("incremental page changed the turn or request numbers: got=%+v want=%+v", suffixResp.Msg.Turns, last)
 	}
 }

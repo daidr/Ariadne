@@ -48,11 +48,42 @@ import type {
   WorktreeInfo,
 } from '@ariadne/plugin-sdk'
 import {
+  ConversationService,
   DataService,
+  ThreadService,
+  WorkspaceService,
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
 } from '@ariadne/proto'
-import { ApiError, createRpcClient, getToken as token, initToken } from './rpc'
+import {
+  fromProtoBackgroundCommand,
+  fromProtoBranchChanges,
+  fromProtoConversationView,
+  fromProtoFileVersions,
+  fromProtoMemoryView,
+  fromProtoMergeOutcome,
+  fromProtoMessageView,
+  fromProtoNoticeView,
+  fromProtoProjectWorktrees,
+  fromProtoReviewRound,
+  fromProtoSentLineComment,
+  fromProtoSkillView,
+  fromProtoThreadView,
+  fromProtoTodoView,
+  fromProtoTraceRequestDetail,
+  fromProtoTraceTurn,
+  toProtoBlockAnswer,
+  toProtoLineComment,
+  toProtoMentionInput,
+} from './proto-mappers'
+import {
+  ApiError,
+  createAriadneTransport,
+  createRpcClient,
+  decodeLocalizedError,
+  getToken as token,
+  initToken,
+} from './rpc'
 import { synchronizeServerClock } from './server-clock'
 
 export { ApiError, initToken }
@@ -125,6 +156,22 @@ export interface UpdateStatus {
 }
 
 const dataClient = createRpcClient(DataService)
+const threadClient = createRpcClient(ThreadService)
+const conversationClient = createRpcClient(ConversationService)
+const keepaliveConversationClient = createRpcClient(
+  ConversationService,
+  createAriadneTransport({
+    fetch: (input, init) => fetch(input, { ...init, keepalive: true }),
+  }),
+)
+const workspaceClient = createRpcClient(WorkspaceService)
+
+function requireField<T>(value: T | undefined, name: string): T {
+  if (value === undefined) {
+    throw new ApiError(500, { key: 'error.invalidBody', params: { reason: name } })
+  }
+  return value
+}
 
 function fromProtoBackupInfo(item: ProtoBackupInfo): BackupInfo {
   return {
@@ -558,31 +605,54 @@ export const api = {
     request<UpdateStatus>('POST', '/api/updates/check', undefined, signal),
   installUpdate: (version: string, signal?: AbortSignal) =>
     request<UpdateStatus>('POST', '/api/updates/install', { version }, signal),
-  listMemories: (projectId: string) =>
-    request<{ memories: MemoryView[] }>('GET', `/api/projects/${projectId}/memory`),
-  addMemory: (projectId: string, text: string) =>
-    request<{ memory: MemoryView }>('POST', `/api/projects/${projectId}/memory`, { text }),
-  saveMemory: (projectId: string, memoryId: string, text: string) =>
-    request<{ memory: MemoryView }>('PUT', `/api/projects/${projectId}/memory/${memoryId}`, {
-      text,
-    }),
-  resumeThread: (threadId: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/resume`),
-  removeThreadReference: (threadId: string, referenceId: string) =>
-    request<{ thread: ThreadView }>('DELETE', `/api/threads/${threadId}/references/${referenceId}`),
-  keepThreadReference: (threadId: string, referenceId: string) =>
-    request<{ thread: ThreadView }>(
-      'POST',
-      `/api/threads/${threadId}/references/${referenceId}/keep`,
-    ),
-  completeThread: (threadId: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/complete`),
-  endAside: (threadId: string) =>
-    request<{ thread: ThreadView }>('DELETE', `/api/threads/${threadId}/aside`),
-  undoNotice: (projectId: string, noticeId: string) =>
-    request<void>('POST', `/api/projects/${projectId}/notices/${noticeId}/undo`),
-  removeMemory: (projectId: string, memoryId: string) =>
-    request<void>('DELETE', `/api/projects/${projectId}/memory/${memoryId}`),
+  listMemories: async (projectId: string): Promise<{ memories: MemoryView[] }> => {
+    const response = await conversationClient.listMemories({ projectId })
+    return { memories: response.memories.map(fromProtoMemoryView) }
+  },
+  addMemory: async (projectId: string, text: string): Promise<{ memory: MemoryView }> => {
+    const response = await conversationClient.createMemory({ projectId, text })
+    return { memory: fromProtoMemoryView(requireField(response.memory, 'memory')) }
+  },
+  saveMemory: async (
+    projectId: string,
+    memoryId: string,
+    text: string,
+  ): Promise<{ memory: MemoryView }> => {
+    const response = await conversationClient.updateMemory({ projectId, memoryId, text })
+    return { memory: fromProtoMemoryView(requireField(response.memory, 'memory')) }
+  },
+  resumeThread: async (threadId: string): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.resumeThread({ threadId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  removeThreadReference: async (
+    threadId: string,
+    referenceId: string,
+  ): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.removeThreadReference({ threadId, referenceId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  keepThreadReference: async (
+    threadId: string,
+    referenceId: string,
+  ): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.keepThreadReference({ threadId, referenceId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  completeThread: async (threadId: string): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.completeThread({ threadId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  endAside: async (threadId: string): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.endAside({ threadId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  undoNotice: async (projectId: string, noticeId: string): Promise<void> => {
+    await conversationClient.undoNotice({ projectId, noticeId })
+  },
+  removeMemory: async (projectId: string, memoryId: string): Promise<void> => {
+    await conversationClient.deleteMemory({ projectId, memoryId })
+  },
   uploadFile: (projectId: string, file: Blob, forMessage = false) =>
     request<{ file: StoredFile }>(
       'POST',
@@ -621,76 +691,159 @@ export const api = {
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.
    */
-  getConversation: (id: string, cursor: { before?: string; from?: string; since?: number } = {}) =>
-    request<{
-      conversation: ConversationView
-      messages: MessageView[]
-      notices: NoticeView[]
-      /** Last read coordinator reply, on the initial page. */
-      readThrough?: string
-      /** Earlier messages exist before the first one here; not said with `since`. */
-      more: boolean
-      /** The newest event this answer holds; changes after it come with `since`. */
-      lastSeq: number
-      todo: TodoView
-      /** The model it uses now, with how much its context holds. */
-      model: { id: string; contextTokens: number; compactAt: number } | null
-    }>(
-      'GET',
-      `/api/conversations/${id}${queryString({
-        before: cursor.before,
-        from: cursor.from,
-        since: cursor.since === undefined ? undefined : String(cursor.since),
-      })}`,
-    ),
-  getTrace: (id: string, options: { before?: number; from?: number; signal?: AbortSignal } = {}) =>
-    request<{ turns: TraceTurn[]; more: boolean }>(
-      'GET',
-      `/api/conversations/${id}/trace${queryString({
-        before: options.before?.toString(),
-        from: options.from?.toString(),
-      })}`,
-      undefined,
-      options.signal,
-    ),
-  getTraceRequest: (id: string, seq: number) =>
-    request<{ request: TraceRequestDetail }>(
-      'GET',
-      `/api/conversations/${id}/trace/requests/${seq}`,
-    ),
+  getConversation: async (
+    id: string,
+    cursor: { before?: string; from?: string; since?: number; limit?: number } = {},
+  ): Promise<{
+    conversation: ConversationView
+    messages: MessageView[]
+    notices: NoticeView[]
+    /** Last read coordinator reply, on the initial page. */
+    readThrough?: string
+    /** Earlier messages exist before the first one here; not said with `since`. */
+    more: boolean
+    /** The newest event this answer holds; changes after it come with `since`. */
+    lastSeq: number
+    todo: TodoView
+    /** The model it uses now, with how much its context holds. */
+    model: { id: string; contextTokens: number; compactAt: number } | null
+  }> => {
+    const response = await conversationClient.getConversation({
+      conversationId: id,
+      ...(cursor.before !== undefined ? { before: cursor.before } : {}),
+      ...(cursor.from !== undefined ? { from: cursor.from } : {}),
+      ...(cursor.limit !== undefined ? { limit: cursor.limit } : {}),
+      ...(cursor.since !== undefined ? { since: BigInt(cursor.since) } : {}),
+    })
+    const notices: NoticeView[] = []
+    for (const notice of response.notices) {
+      const converted = fromProtoNoticeView(notice)
+      if (converted) notices.push(converted)
+    }
+    return {
+      conversation: fromProtoConversationView(requireField(response.conversation, 'conversation')),
+      messages: response.messages.map(fromProtoMessageView),
+      notices,
+      ...(response.readThrough !== undefined ? { readThrough: response.readThrough } : {}),
+      more: response.more,
+      lastSeq: Number(response.lastSeq),
+      todo: fromProtoTodoView(response.todo),
+      model: response.model
+        ? {
+            id: response.model.id,
+            contextTokens: Number(response.model.contextTokens),
+            compactAt: Number(response.model.compactAt),
+          }
+        : null,
+    }
+  },
+  getTrace: async (
+    id: string,
+    options: { before?: number; from?: number; signal?: AbortSignal } = {},
+  ): Promise<{ turns: TraceTurn[]; more: boolean }> => {
+    const response = await conversationClient.getTrace(
+      {
+        conversationId: id,
+        ...(options.before !== undefined ? { before: BigInt(options.before) } : {}),
+        ...(options.from !== undefined ? { from: BigInt(options.from) } : {}),
+      },
+      options.signal ? { signal: options.signal } : undefined,
+    )
+    return {
+      turns: response.turns.map(fromProtoTraceTurn),
+      more: response.more,
+    }
+  },
+  getTraceRequest: async (id: string, seq: number): Promise<{ request: TraceRequestDetail }> => {
+    const response = await conversationClient.getTraceRequestDetail({
+      conversationId: id,
+      seq: BigInt(seq),
+    })
+    return {
+      request: fromProtoTraceRequestDetail(requireField(response.request, 'request')),
+    }
+  },
   exportTrace: (id: string) =>
     download(
       `/api/conversations/${encodeURIComponent(id)}/trace/export`,
       `ariadne-trace-${id}.zip`,
     ),
-  setThreadModel: (threadId: string, model: string | null) =>
-    request<{ thread: ThreadView }>('PUT', `/api/threads/${threadId}/model`, { model }),
-  stopTurn: (id: string) => request<{ stopped: boolean }>('POST', `/api/conversations/${id}/stop`),
-  wakeNow: (id: string) => request<void>('POST', `/api/conversations/${id}/wait/now`),
-  cancelWait: (id: string) => request<void>('DELETE', `/api/conversations/${id}/wait`),
-  commandOutput: (threadId: string, commandId: string, signal?: AbortSignal) =>
-    request<{ command: BackgroundView; tail: string }>(
-      'GET',
-      `/api/threads/${threadId}/commands/${commandId}`,
-      undefined,
-      signal,
-    ),
-  pullRequestChecks: (threadId: string, signal?: AbortSignal) =>
-    request<{
-      headSha: string
-      checks: { id: string; name: string; status: string; conclusion: string | null }[]
-    }>('GET', `/api/threads/${threadId}/pull-request/checks`, undefined, signal),
-  stopCommand: (threadId: string, commandId: string) =>
-    request<{ command: BackgroundView }>(
-      'POST',
-      `/api/threads/${threadId}/commands/${commandId}/stop`,
-    ),
-  retryTurn: (id: string) => request<void>('POST', `/api/conversations/${id}/retry`),
-  react: (messageId: string, emoji: string, remove: boolean) =>
-    request<{ message: MessageView }>('POST', `/api/messages/${messageId}/reactions`, {
-      emoji,
-      remove,
-    }),
+  setThreadModel: async (
+    threadId: string,
+    model: string | null,
+  ): Promise<{ thread: ThreadView }> => {
+    const response = await threadClient.setThreadModel({
+      threadId,
+      modelAction:
+        model === null ? { case: 'useDefault', value: true } : { case: 'model', value: model },
+    })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  stopTurn: async (id: string): Promise<{ stopped: boolean }> => {
+    const response = await conversationClient.stopTurn({ conversationId: id })
+    return { stopped: response.stopped }
+  },
+  wakeNow: async (id: string): Promise<void> => {
+    await conversationClient.wakeWait({ conversationId: id })
+  },
+  cancelWait: async (id: string): Promise<void> => {
+    await conversationClient.cancelWait({ conversationId: id })
+  },
+  commandOutput: async (
+    threadId: string,
+    commandId: string,
+    signal?: AbortSignal,
+  ): Promise<{ command: BackgroundView; tail: string }> => {
+    const response = await threadClient.getCommandOutput(
+      { threadId, commandId },
+      signal ? { signal } : undefined,
+    )
+    return {
+      command: fromProtoBackgroundCommand(requireField(response.command, 'command')),
+      tail: response.tail,
+    }
+  },
+  pullRequestChecks: async (
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    headSha: string
+    checks: { id: string; name: string; status: string; conclusion: string | null }[]
+  }> => {
+    const response = await threadClient.getPullRequestChecks(
+      { threadId },
+      signal ? { signal } : undefined,
+    )
+    return {
+      headSha: response.headSha,
+      checks: response.checks.map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        conclusion: c.conclusion ?? null,
+      })),
+    }
+  },
+  stopCommand: async (
+    threadId: string,
+    commandId: string,
+  ): Promise<{ command: BackgroundView }> => {
+    const response = await threadClient.stopCommand({ threadId, commandId })
+    return {
+      command: fromProtoBackgroundCommand(requireField(response.command, 'command')),
+    }
+  },
+  retryTurn: async (id: string): Promise<void> => {
+    await conversationClient.retryTurn({ conversationId: id })
+  },
+  addReaction: async (messageId: string, emoji: string): Promise<{ message: MessageView }> => {
+    const response = await conversationClient.addReaction({ messageId, emoji })
+    return { message: fromProtoMessageView(requireField(response.message, 'message')) }
+  },
+  removeReaction: async (messageId: string, emoji: string): Promise<{ message: MessageView }> => {
+    const response = await conversationClient.removeReaction({ messageId, emoji })
+    return { message: fromProtoMessageView(requireField(response.message, 'message')) }
+  },
   getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
   saveConcurrency: (input: Concurrency) =>
     request<Concurrency>('PUT', '/api/settings/concurrency', input),
@@ -731,39 +884,63 @@ export const api = {
     request<ModelSettings & { problems: ModelProblem[] }>('POST', '/api/settings/found/use', {
       id,
     }),
-  postMessage: (
+  postMessage: async (
     projectId: string,
     conversationId: string,
     content: string,
     extras: MessageExtras = {},
-  ) =>
-    request<{ message: MessageView }>('POST', `/api/projects/${projectId}/messages`, {
-      conversationId,
-      content,
-      ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
-      ...(extras.mentions?.length ? { mentions: extras.mentions } : {}),
-      ...(extras.comments?.length ? { comments: extras.comments } : {}),
-    }),
+  ): Promise<{ message: MessageView }> => {
+    const response = await conversationClient.postMessage(
+      {
+        projectId,
+        conversationId,
+        content,
+        attachments: extras.attachments ?? [],
+        mentions: (extras.mentions ?? []).map(toProtoMentionInput),
+        comments: (extras.comments ?? []).map(toProtoLineComment),
+      },
+      undefined,
+    )
+    return { message: fromProtoMessageView(requireField(response.message, 'message')) }
+  },
   /** Line comments sent as the page closes, in a request that outlives it. */
   postCommentsLeaving: (projectId: string, conversationId: string, comments: LineComment[]) =>
-    void fetch(`/api/projects/${projectId}/messages`, {
-      method: 'POST',
-      keepalive: true,
-      headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ conversationId, content: '', comments }),
-    }).catch(() => {}),
-  mentionFiles: (projectId: string, conversationId: string, query: string) =>
-    request<{ files: string[] }>(
-      'GET',
-      `/api/projects/${projectId}/mention-files?${new URLSearchParams({ conversationId, q: query })}`,
-    ),
-  markRead: (conversationId: string, upTo: string) =>
-    request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
+    void keepaliveConversationClient
+      .postMessage(
+        {
+          projectId,
+          conversationId,
+          content: '',
+          comments: comments.map(toProtoLineComment),
+        },
+        undefined,
+      )
+      .catch(() => {}),
+  mentionFiles: async (
+    projectId: string,
+    conversationId: string,
+    query: string,
+  ): Promise<{ files: string[] }> => {
+    const response = await workspaceClient.listMentionFiles({
+      projectId,
+      ...(conversationId ? { conversationId } : {}),
+      query,
+    })
+    return { files: [...response.files] }
+  },
+  markRead: async (conversationId: string, upTo: string): Promise<void> => {
+    await conversationClient.markRead({ conversationId, upTo })
+  },
   /** The user is back at the project after `away` ms without touching it. */
-  noteReturn: (projectId: string, away: number) =>
-    request<void>('POST', `/api/projects/${projectId}/return`, { away }),
-  answerAttention: (id: string, answer: BlockAnswer) =>
-    request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
+  noteReturn: async (projectId: string, away: number): Promise<void> => {
+    await conversationClient.noteReturn({ projectId, away })
+  },
+  answerAttention: async (id: string, answer: BlockAnswer): Promise<void> => {
+    await conversationClient.answerAttention({
+      attentionId: id,
+      answer: toProtoBlockAnswer(answer),
+    })
+  },
   sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
   browseSource: (
     kind: string,
@@ -806,11 +983,17 @@ export const api = {
       `/api/projects/${projectId}/references/${referenceId}`,
     ),
   /** The reference sources that cannot be read right now, with why. */
-  referenceStatus: (projectId: string) =>
-    request<{ failed: { id: string; error: LocalizedMessage }[] }>(
-      'GET',
-      `/api/projects/${projectId}/references/status`,
-    ),
+  referenceStatus: async (
+    projectId: string,
+  ): Promise<{ failed: { id: string; error: LocalizedMessage }[] }> => {
+    const response = await workspaceClient.getReferenceStatus({ projectId })
+    return {
+      failed: response.failed.map((item) => ({
+        id: item.id,
+        error: decodeLocalizedError(item.error) ?? { key: 'error.invalidBody' },
+      })),
+    }
+  },
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
   getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
@@ -881,64 +1064,126 @@ export const api = {
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/autopilot`, { paused }),
   setProjectSlots: (projectId: string, slots: number | null) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
-  getReviews: (threadId: string) =>
-    request<{ rounds: ReviewRoundView[] }>('GET', `/api/threads/${threadId}/reviews`),
-  getLineComments: (threadId: string) =>
-    request<{ comments: SentLineComment[] }>('GET', `/api/threads/${threadId}/line-comments`),
-  getSkills: (conversationId: string) =>
-    request<{ skills: SkillView[] }>('GET', `/api/conversations/${conversationId}/skills`),
-  getChanges: (
+  getReviews: async (
+    threadId: string,
+    options: { beforeId?: number; limit?: number } = {},
+  ): Promise<{ rounds: ReviewRoundView[]; hasMore: boolean; nextBeforeId?: number }> => {
+    const response = await threadClient.listReviews({
+      threadId,
+      ...(options.beforeId !== undefined ? { beforeId: BigInt(options.beforeId) } : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+    })
+    return {
+      rounds: response.rounds.map(fromProtoReviewRound),
+      hasMore: response.hasMore,
+      ...(response.nextBeforeId !== undefined
+        ? { nextBeforeId: Number(response.nextBeforeId) }
+        : {}),
+    }
+  },
+  getLineComments: async (
+    threadId: string,
+    options: { beforeMessageId?: string; limit?: number } = {},
+  ): Promise<{ comments: SentLineComment[]; hasMore: boolean; nextBeforeMessageId?: string }> => {
+    const response = await threadClient.listLineComments({
+      threadId,
+      ...(options.beforeMessageId !== undefined
+        ? { beforeMessageId: options.beforeMessageId }
+        : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+    })
+    return {
+      comments: response.comments.map(fromProtoSentLineComment),
+      hasMore: response.hasMore,
+      ...(response.nextBeforeMessageId !== undefined
+        ? { nextBeforeMessageId: response.nextBeforeMessageId }
+        : {}),
+    }
+  },
+  getSkills: async (conversationId: string): Promise<{ skills: SkillView[] }> => {
+    const response = await conversationClient.listSkills({ conversationId })
+    return { skills: response.skills.map(fromProtoSkillView) }
+  },
+  getChanges: async (
     threadId: string,
     known?: { head: string; baseHead: string },
     signal?: AbortSignal,
-  ) =>
-    request<{ changes: BranchChanges | null; mergeable: boolean; unchanged?: boolean }>(
-      'GET',
-      `/api/threads/${threadId}/changes${known ? queryString(known) : ''}`,
-      undefined,
-      signal,
-    ),
-  getChangedFile: (
+  ): Promise<{ changes: BranchChanges | null; mergeable: boolean; unchanged?: boolean }> => {
+    const response = await workspaceClient.getThreadChanges(
+      {
+        threadId,
+        ...(known ? { head: known.head, baseHead: known.baseHead } : {}),
+      },
+      signal ? { signal } : undefined,
+    )
+    return {
+      changes: fromProtoBranchChanges(response.changes),
+      mergeable: response.mergeable,
+      ...(response.unchanged ? { unchanged: true } : {}),
+    }
+  },
+  getChangedFile: async (
     threadId: string,
     input: { from: string; head: string; path: string; previousPath: string | null },
     signal?: AbortSignal,
-  ) => {
-    const query = new URLSearchParams({
-      from: input.from,
-      head: input.head,
-      path: input.path,
-      ...(input.previousPath ? { previousPath: input.previousPath } : {}),
-    })
-    return request<{ file: FileVersions }>(
-      'GET',
-      `/api/threads/${threadId}/changes/file?${query}`,
-      undefined,
-      signal,
+  ): Promise<{ file: FileVersions }> => {
+    const response = await workspaceClient.getChangedFile(
+      {
+        threadId,
+        from: input.from,
+        head: input.head,
+        path: input.path,
+        ...(input.previousPath ? { previousPath: input.previousPath } : {}),
+      },
+      signal ? { signal } : undefined,
     )
+    return { file: fromProtoFileVersions(response.file) }
   },
-  mergeThread: (
+  mergeThread: async (
     threadId: string,
     input: { method: MergeMethod; message: string; expectedHead: string },
-  ) =>
-    request<{ outcome: MergeOutcome; thread: ThreadView }>(
-      'POST',
-      `/api/threads/${threadId}/merge`,
-      input,
-    ),
-  undoMerge: (threadId: string) =>
-    request<{ thread: ThreadView }>('POST', `/api/threads/${threadId}/merge/undo`),
-  listWorktrees: (sizes: boolean, signal?: AbortSignal) =>
-    request<{ projects: ProjectWorktrees[]; windows: boolean }>(
-      'GET',
-      sizes ? '/api/worktrees' : '/api/worktrees?sizes=0',
-      undefined,
-      signal,
-    ),
-  removeWorktree: (projectId: string, threadId: string, sourceId?: string, orphaned?: boolean) =>
-    request<void>(
-      'DELETE',
-      `/api/projects/${projectId}/worktrees/${threadId}${queryString({ sourceId, orphaned: orphaned ? '1' : undefined })}`,
-    ),
+  ): Promise<{ outcome: MergeOutcome; thread: ThreadView }> => {
+    const response = await workspaceClient.mergeThread({
+      threadId,
+      method: input.method,
+      message: input.message,
+      expectedHead: input.expectedHead,
+    })
+    return {
+      outcome: fromProtoMergeOutcome(response.outcome),
+      thread: fromProtoThreadView(requireField(response.thread, 'thread')),
+    }
+  },
+  undoMerge: async (threadId: string): Promise<{ thread: ThreadView }> => {
+    const response = await workspaceClient.undoMerge({ threadId })
+    return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
+  },
+  listWorktrees: async (
+    sizes: boolean,
+    signal?: AbortSignal,
+  ): Promise<{ projects: ProjectWorktrees[]; windows: boolean }> => {
+    const response = await workspaceClient.listWorktrees(
+      { includeSizes: sizes },
+      signal ? { signal } : undefined,
+    )
+    return {
+      projects: response.projects.map(fromProtoProjectWorktrees),
+      windows: response.windows,
+    }
+  },
+  removeWorktree: async (
+    projectId: string,
+    threadId: string,
+    sourceId?: string,
+    orphaned?: boolean,
+  ): Promise<void> => {
+    await workspaceClient.removeWorktree({
+      projectId,
+      threadId,
+      ...(sourceId ? { sourceId } : {}),
+      orphaned: Boolean(orphaned),
+    })
+  },
   dismissProposal: (projectId: string, proposalId: string) =>
     request<{ plan: PlanView }>(
       'POST',

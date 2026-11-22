@@ -9,15 +9,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"github.com/daidr/Ariadne/internal/config"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -202,7 +206,23 @@ func TestNativeHTTPExecutesTurnAndRebuildsRequests(t *testing.T) {
 		t.Fatal("coordinator never reached mock model")
 	}
 	project, conversation := created.Project.ID, created.Project.Coordinator
-	request("POST", "/api/projects/"+project+"/messages", map[string]any{"conversationId": conversation, "content": newText}, cfg.Token, 201)
+	convClient := ariadnev1connect.NewConversationServiceClient(
+		httpServer.Client(),
+		httpServer.URL+"/api/rpc",
+		connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+				req.Header().Set("Authorization", "Bearer "+cfg.Token)
+				return next(ctx, req)
+			}
+		})),
+	)
+	if _, err := convClient.PostMessage(t.Context(), connect.NewRequest(&ariadnev1.PostMessageRequest{
+		ProjectId:      project,
+		ConversationId: conversation,
+		Content:        newText,
+	})); err != nil {
+		t.Fatalf("PostMessage failed: %v", err)
+	}
 	close(unblock)
 	deadline := time.Now().Add(8 * time.Second)
 	for {
@@ -241,7 +261,18 @@ func TestNativeHTTPExecutesTurnAndRebuildsRequests(t *testing.T) {
 		t.Fatal("coordinator could not save the user's requested delivery settings", settings.Settings.Delivery, err)
 	}
 	rebuild := func(seq int64) string {
-		return string(request("GET", "/api/conversations/"+conversation+"/trace/requests/"+strconv.FormatInt(seq, 10), nil, cfg.Token, 200))
+		resp, err := convClient.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{
+			ConversationId: conversation,
+			Seq:            seq,
+		}))
+		if err != nil {
+			t.Fatalf("GetTraceRequestDetail(%d) failed: %v", seq, err)
+		}
+		encoded, err := protojson.Marshal(resp.Msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
 	}
 	early, later := rebuild(seqs[0]), rebuild(seqs[1])
 	if !strings.Contains(early, userText) || strings.Contains(early, newText) || !strings.Contains(later, newText) ||
