@@ -44,6 +44,7 @@ import {
   ConversationService,
   DataService,
   EventService,
+  FileService,
   MetaService,
   PluginService,
   SettingsService,
@@ -208,6 +209,7 @@ const keepaliveConversationClient = createRpcClient(
 )
 const workspaceClient = createRpcClient(WorkspaceService)
 const eventClient = createRpcClient(EventService)
+const fileClient = createRpcClient(FileService)
 const utf8Decoder = new TextDecoder()
 
 function requireField<T>(value: T | undefined, name: string): T {
@@ -289,13 +291,28 @@ async function download(path: string, fallbackName: string) {
   return { blob: await response.blob(), name: name ?? fallbackName }
 }
 
-export function fetchSheet(id: string, index: number, signal: AbortSignal) {
-  return request<{ sheets: string[]; rows: string[][]; rowNumbers: number[]; truncated: boolean }>(
-    'GET',
-    `/api/files/${encodeURIComponent(id)}/sheet?index=${index}`,
-    undefined,
-    signal,
+export interface FileSheetPreview {
+  sheets: string[]
+  rows: string[][]
+  rowNumbers: number[]
+  truncated: boolean
+}
+
+export async function fetchSheet(
+  id: string,
+  index: number,
+  signal?: AbortSignal,
+): Promise<FileSheetPreview> {
+  const response = await fileClient.getFileSheet(
+    { fileId: id, index },
+    signal ? { signal } : undefined,
   )
+  return {
+    sheets: response.sheets,
+    rows: response.rows.map((row) => row.cells),
+    rowNumbers: response.rowNumbers.map(Number),
+    truncated: response.truncated,
+  }
 }
 
 /** One project's threads' worktrees, as the settings list them. */

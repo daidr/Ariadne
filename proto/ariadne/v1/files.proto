@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+// FileService provides structured previews of stored project file attachments.
+service FileService {
+  rpc GetFileSheet(GetFileSheetRequest) returns (GetFileSheetResponse);
+}
+
+message GetFileSheetRequest {
+  string file_id = 1;
+  int32 index = 2;
+}
+
+message FileSheetRow {
+  repeated string cells = 1;
+}
+
+message GetFileSheetResponse {
+  repeated string sheets = 1;
+  repeated FileSheetRow rows = 2;
+  repeated int64 row_numbers = 3;
+  bool truncated = 4;
+}
