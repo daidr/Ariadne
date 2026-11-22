@@ -138,14 +138,14 @@ func TestLegacyV67StaticSQLiteUpgradesAndPreservesData(t *testing.T) {
 		t.Fatalf("upgraded workspace = %+v", thread.Workspace)
 	}
 
-		var changedSeq int64
-		if err := repo.Store.DB().QueryRowContext(ctx, "SELECT changed_seq FROM threads WHERE id = 'thr_legacy'").Scan(&changedSeq); err != nil || changedSeq != 4 {
-			t.Fatalf("changed_seq = %d, want 4 (err=%v)", changedSeq, err)
-		}
-		var hasGroupCol int
-		if err := repo.Store.DB().QueryRowContext(ctx, "SELECT 1 FROM pragma_table_info('plan_nodes') WHERE name = 'group_name'").Scan(&hasGroupCol); err != nil || hasGroupCol != 1 {
-			t.Fatalf("plan_nodes.group_name missing after v67 upgrade: has=%d err=%v", hasGroupCol, err)
-		}
+	var changedSeq int64
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT changed_seq FROM threads WHERE id = 'thr_legacy'").Scan(&changedSeq); err != nil || changedSeq != 4 {
+		t.Fatalf("changed_seq = %d, want 4 (err=%v)", changedSeq, err)
+	}
+	var hasGroupCol int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT 1 FROM pragma_table_info('plan_nodes') WHERE name = 'group_name'").Scan(&hasGroupCol); err != nil || hasGroupCol != 1 {
+		t.Fatalf("plan_nodes.group_name missing after v67 upgrade: has=%d err=%v", hasGroupCol, err)
+	}
 
 	var payloadLen int
 	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT length(payload) FROM transcript WHERE seq = 4").Scan(&payloadLen); err != nil || payloadLen > 300 {

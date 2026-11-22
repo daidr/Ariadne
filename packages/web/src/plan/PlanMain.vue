@@ -17,11 +17,12 @@ import { partitionPlanNodes } from './layout'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
-import { planUi, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
+import { activePreview, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
 
 const selected = ref<string | null>(null)
 const historyOpen = ref<string[]>([])
 
+const preview = computed(() => activePreview(state.plan))
 const summary = computed(() =>
   state.plan
     ? partitionPlanNodes(state.plan.nodes)
@@ -34,17 +35,27 @@ const allHiddenAsCompleted = computed(
     !!state.plan?.nodes.length &&
     summary.value.active.length === 0 &&
     !showCompleted.value &&
-    !planUi.previewId,
+    !preview.value,
 )
+const visibleIds = computed(() => {
+  if (!state.plan) return new Set<string>()
+  if (preview.value || showCompleted.value) {
+    return new Set(state.plan.nodes.map((n) => n.id))
+  }
+  return new Set(summary.value.active.map((n) => n.id))
+})
 
-watch(
-  () => state.plan?.projectId,
-  () => {
+watch([() => state.plan?.projectId, visibleIds], ([projectId, visible], [prevProjectId]) => {
+  if (projectId !== prevProjectId || (selected.value && !visible.has(selected.value))) {
     selected.value = null
-  },
-)
+  }
+})
 
-const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
+const node = computed(() =>
+  selected.value && visibleIds.value.has(selected.value)
+    ? (state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
+    : null,
+)
 const time = (at: number) =>
   new Date(at).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 </script>

@@ -28,6 +28,7 @@ import { isGroupId, toFlowDocument, touchedBy, type PlanMark } from './layout'
 import PlanGroupNode from './PlanGroupNode.vue'
 import PlanNode from './PlanNode.vue'
 import {
+  activePreview,
   collapsedGroupsOf,
   loadSeen,
   markNodeSeen,
@@ -87,10 +88,7 @@ const edgeTypes = [
 const extensions = [flowKit({ group: true, menu: false, toolbar: false })]
 
 const openProposals = computed(() => props.plan?.proposals.filter((p) => p.status === 'open') ?? [])
-const preview = computed(() => {
-  const proposal = openProposals.value.find((p) => p.id === planUi.previewId)
-  return proposal?.preview ?? null
-})
+const preview = computed(() => activePreview(props.plan))
 watch(
   () => props.plan,
   (plan) => plan && loadSeen(plan),

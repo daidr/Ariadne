@@ -1,4 +1,4 @@
-import type { PlanView } from '@ariadne/core'
+import type { PlanPreview, PlanView } from '@ariadne/core'
 import { reactive, type InjectionKey } from 'vue'
 import { freshChanges } from './layout'
 
@@ -130,4 +130,11 @@ export function toggleGroupCollapsed(projectId: string, groupId: string): void {
     ...current,
     [groupId]: !current[groupId],
   }
+}
+
+/** The active change preview matching `plan`, or `null` when none fits or its preview is stale. */
+export function activePreview(plan: PlanView | null): PlanPreview | null {
+  if (!plan || !planUi.previewId) return null
+  const proposal = plan.proposals.find((p) => p.status === 'open' && p.id === planUi.previewId)
+  return proposal?.preview ?? null
 }

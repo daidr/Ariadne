@@ -11,12 +11,19 @@ const stale = computed(() => state.plan?.proposals.filter((p) => p.status === 's
 // The server draws each open proposal on the plan; `null` means it no longer fits.
 const unfit = (proposal: { preview: unknown }) => proposal.preview === null
 
-// A preview ends once its proposal is answered.
-watch(open, (proposals) => {
-  if (planUi.previewId && !proposals.some((p) => p.id === planUi.previewId)) {
-    planUi.previewId = null
-  }
-})
+// A preview ends once its proposal is answered, becomes stale, or another project is opened.
+watch(
+  open,
+  (proposals) => {
+    if (
+      planUi.previewId &&
+      !proposals.some((p) => p.id === planUi.previewId && p.preview !== null)
+    ) {
+      planUi.previewId = null
+    }
+  },
+  { immediate: true },
+)
 
 function togglePreview(id: string) {
   planUi.previewId = planUi.previewId === id ? null : id

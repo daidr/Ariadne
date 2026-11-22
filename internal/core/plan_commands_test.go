@@ -198,79 +198,79 @@ func TestLegacyPlanProposalsRemainSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-		if len(plan["proposals"].([]object)) != 0 || len(plan["nodes"].([]object)) != 2 {
-			t.Fatalf("unexpected plan after resolving legacy proposals: %+v", plan)
-		}
+	if len(plan["proposals"].([]object)) != 0 || len(plan["nodes"].([]object)) != 2 {
+		t.Fatalf("unexpected plan after resolving legacy proposals: %+v", plan)
+	}
+}
+
+func TestPlanNodeGroupAddUpdateClearAndRevert(t *testing.T) {
+	ctx := t.Context()
+	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "plan-groups.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Grouped plan"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "创建带分组的节点",
+		Ops: []map[string]any{
+			{"op": "add", "id": "a", "kind": "task", "title": "协议定义", "description": "", "acceptance": "", "group": " Protobuf 迁移 "},
+			{"op": "add", "id": "b", "kind": "task", "title": "独立任务", "description": "", "acceptance": ""},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := plan["nodes"].([]object)
+	if len(nodes) != 2 || nodes[0].str("group") != "Protobuf 迁移" || nodes[1].str("group") != "" {
+		t.Fatalf("unexpected initial groups: %+v", nodes)
+	}
+	brief, err := repo.PlanBrief(ctx, project.ID, "a")
+	if err != nil || brief != "协议定义\n\nGroup: Protobuf 迁移" {
+		t.Fatalf("PlanBrief = %q, err=%v", brief, err)
 	}
 
-	func TestPlanNodeGroupAddUpdateClearAndRevert(t *testing.T) {
-		ctx := t.Context()
-		repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "plan-groups.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer repo.Close()
-		project, err := repo.CreateProject(ctx, new("Grouped plan"), ProjectStart{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
-			Author: "coordinator",
-			Reason: "创建带分组的节点",
-			Ops: []map[string]any{
-				{"op": "add", "id": "a", "kind": "task", "title": "协议定义", "description": "", "acceptance": "", "group": " Protobuf 迁移 "},
-				{"op": "add", "id": "b", "kind": "task", "title": "独立任务", "description": "", "acceptance": ""},
-			},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		plan, err := repo.GetPlan(ctx, project.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		nodes := plan["nodes"].([]object)
-		if len(nodes) != 2 || nodes[0].str("group") != "Protobuf 迁移" || nodes[1].str("group") != "" {
-			t.Fatalf("unexpected initial groups: %+v", nodes)
-		}
-		brief, err := repo.PlanBrief(ctx, project.ID, "a")
-		if err != nil || brief != "协议定义\n\nGroup: Protobuf 迁移" {
-			t.Fatalf("PlanBrief = %q, err=%v", brief, err)
-		}
-
-		// Update group and clear group, then revert the clear.
-		if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
-			Author: "coordinator",
-			Reason: "归入分组",
-			Ops:    []map[string]any{{"op": "update", "id": "b", "group": "Protobuf 迁移"}},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		clearRev, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
-			Author: "coordinator",
-			Reason: "移出分组",
-			Ops:    []map[string]any{{"op": "update", "id": "a", "group": ""}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		plan, err = repo.GetPlan(ctx, project.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		nodes = plan["nodes"].([]object)
-		if nodes[0].str("group") != "" || nodes[1].str("group") != "Protobuf 迁移" {
-			t.Fatalf("unexpected updated groups: %+v", nodes)
-		}
-
-		if _, err := repo.RevertPlanRevision(ctx, project.ID, clearRev.str("revisionId"), "coordinator", "恢复分组"); err != nil {
-			t.Fatal(err)
-		}
-		plan, err = repo.GetPlan(ctx, project.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		nodes = plan["nodes"].([]object)
-		if nodes[0].str("group") != "Protobuf 迁移" {
-			t.Fatalf("reverted node did not restore group: %+v", nodes[0])
-		}
+	// Update group and clear group, then revert the clear.
+	if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "归入分组",
+		Ops:    []map[string]any{{"op": "update", "id": "b", "group": "Protobuf 迁移"}},
+	}); err != nil {
+		t.Fatal(err)
 	}
+	clearRev, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "移出分组",
+		Ops:    []map[string]any{{"op": "update", "id": "a", "group": ""}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err = repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes = plan["nodes"].([]object)
+	if nodes[0].str("group") != "" || nodes[1].str("group") != "Protobuf 迁移" {
+		t.Fatalf("unexpected updated groups: %+v", nodes)
+	}
+
+	if _, err := repo.RevertPlanRevision(ctx, project.ID, clearRev.str("revisionId"), "coordinator", "恢复分组"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes = plan["nodes"].([]object)
+	if nodes[0].str("group") != "Protobuf 迁移" {
+		t.Fatalf("reverted node did not restore group: %+v", nodes[0])
+	}
+}
