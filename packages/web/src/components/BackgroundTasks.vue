@@ -63,16 +63,7 @@ const command = computed(
   border-color: var(--dou-color-border);
 }
 :global(.background-task-popover) {
-  display: flex;
-  flex-direction: column;
-  max-height: var(--dou-floating-available);
   box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
-}
-:global(.background-task-popover > .dou-popover__content) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
 }
 .task-details {
   display: flex;

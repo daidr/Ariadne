@@ -7,7 +7,7 @@ import { markdownToBlocks } from '@dou-ui/editor/markdown'
 import '@dou-ui/editor/style.css'
 import '@dou-ui/flow/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
-import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import { api } from '../api'
@@ -65,7 +65,6 @@ const doc = shallowRef<EditorDocument<PartialBlock>>({ version: 1, blocks: [] })
 // Bumped to remount the editor when content is replaced from outside.
 const generation = ref(0)
 const editor = useTemplateRef<InstanceType<typeof DouEditor>>('editor')
-const scrollArea = useTemplateRef<HTMLElement>('scrollArea')
 
 /** The threads as the editor shows them; changes here show at once, before the server. */
 const threads = ref<CommentThread[]>([])
@@ -99,11 +98,8 @@ watch(
   },
 )
 
-// The anchors list only threads the editor was given, so a new thread's text is read once
-// `threads` has reached it.
-async function onComment(action: CommentAction) {
+function onComment(action: CommentAction) {
   if (action.type !== 'create') return emit('comment', action, '')
-  await nextTick()
   const anchor = editor.value?.getCommentAnchors()[action.thread.id]
   emit('comment', action, commentTarget(anchor), anchor?.text)
 }
@@ -128,24 +124,14 @@ function anchored(): Set<string> {
 }
 
 function revealComment(id: string) {
-  const container = scrollArea.value
-  const instance = editor.value
-  const view = instance?.view
-  if (!container || !view) return
-  const anchor = instance.getCommentAnchors()[id]
-  if (!anchor) return
-  const { top, bottom } = view.coordsAtPos(anchor.from)
-  const viewportTop = container.getBoundingClientRect().top + container.clientTop
-  if (top >= viewportTop && bottom <= viewportTop + container.clientHeight) return
-  const viewportCenter = viewportTop + container.clientHeight / 2
-  container.scrollTop += (top + bottom) / 2 - viewportCenter
+  editor.value?.scrollToComment(id)
 }
 
 defineExpose({ quotes, anchored, revealComment })
 </script>
 
 <template>
-  <div ref="scrollArea" class="document">
+  <div class="document">
     <DouEditor
       v-if="ready"
       ref="editor"
@@ -178,24 +164,7 @@ defineExpose({ quotes, anchored, revealComment })
   --dou-editor-reading-width: 48em;
   --dou-editor-block-gap: 10px;
   --dou-editor-list-gap: 4px;
-}
-
-.document-text :deep(.dou-editor-table col:not([style*='width:'])) {
-  /* DouUI budgets 96px per automatic column. Apply that minimum to each column. */
-  min-inline-size: 96px;
-}
-
-.document-text :deep(.dou-editor-table :is(th, td)) {
-  /* Limit intrinsic sizing. Explicit widths on the columns still take precedence. */
-  max-inline-size: calc(0.75 * var(--dou-editor-reading-width));
-  overflow-wrap: anywhere;
-}
-
-.document-text :deep([data-comment] .dou-editor__inline-code) {
-  /* The comment wraps the code. Keep its tint and underline visible through the code styling. */
-  padding-block: 0;
-  background-color: color-mix(in srgb, var(--dou-color-text) 6%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dou-color-text) 5%, transparent);
+  --dou-editor-table-col-max-width: calc(0.75 * var(--dou-editor-reading-width));
 }
 
 .document-text :deep([data-ai-editing] > .dou-editor__content) {

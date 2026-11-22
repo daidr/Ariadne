@@ -156,10 +156,7 @@ function select(key: string | number) {
 .recap-menu {
   align-self: stretch;
   --dou-menu-item-height: auto;
-}
-
-.recap-menu :deep(.dou-menu__actions) {
-  inset-block-start: 5px;
+  --dou-menu-actions-top: 5px;
 }
 
 .recap-ask {

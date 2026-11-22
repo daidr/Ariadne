@@ -15,7 +15,6 @@ import {
   onScopeDispose,
   provide,
   ref,
-  useTemplateRef,
   watch,
   watchEffect,
 } from 'vue'
@@ -66,14 +65,13 @@ const isWide = computed(() => layoutMode.value === 'wide')
 const compactActions = computed(() => !breakpoints.lg)
 const unauthorized = computed(() => state.stream === 'unauthorized')
 
-const projectBody = useTemplateRef<HTMLElement>('projectBody')
 const {
   size: projectSize,
   min: projectMin,
   max: projectMax,
   collapsed: projectsCollapsed,
   save: saveProjectSidebar,
-} = useSidebarLayout('projects', projectBody)
+} = useSidebarLayout('projects')
 
 const projectsPopoverOpen = ref(false)
 const mediumSideCollapsed = ref(false)
@@ -155,14 +153,15 @@ watchEffect(() => {
         :conversation-id="state.main.conversationId"
         class="body"
       />
-      <div v-else ref="projectBody" class="body">
+      <div v-else class="body">
         <DouSplitter
           v-model="projectSize"
+          unit="px"
           :collapsed="isWide && projectsCollapsed"
           :min="projectMin"
           :max="projectMax"
+          :single-pane="panes.projectSplitSinglePane"
           :aria-label="t('nav.resizeProjects')"
-          :data-single-pane="panes.projectSplitSinglePane"
           class="project-split workspace-split"
           :disabled="!isWide"
           collapsible
@@ -188,7 +187,7 @@ watchEffect(() => {
                 :min="isMedium ? '320px' : 30"
                 :max="80"
                 :min-end="isMedium ? '280px' : undefined"
-                :data-single-pane="panes.contentSplitSinglePane"
+                :single-pane="panes.contentSplitSinglePane"
                 :disabled="isNarrow || (isMedium && mediumSideCollapsed)"
                 class="split workspace-split"
               >
@@ -237,11 +236,6 @@ body,
   margin: 0;
 }
 
-/* alpha.18's copy-button base rule otherwise overrides the code block's placement. */
-.dou-code-block > .dou-code-block__copy {
-  position: absolute;
-}
-
 .app {
   height: 100%;
 }
@@ -253,14 +247,6 @@ body,
 
 .project-split {
   --dou-splitter-line: var(--dou-color-border-subtle);
-}
-
-/* A collapsed outer splitter also matches the start panes of nested splitters. */
-.project-split.is-collapsed
-  > .dou-splitter__pane.is-end
-  .dou-splitter:not(.is-collapsed)
-  > .dou-splitter__pane.is-start {
-  visibility: inherit;
 }
 
 .project-sidebar {
@@ -287,22 +273,7 @@ body,
   min-width: 0;
 }
 
-/* Keep both slots mounted so switching levels keeps the chat draft and scroll position. */
-.workspace-split[data-single-pane] {
-  display: block;
-}
-
-.workspace-split[data-single-pane] > .dou-splitter__pane {
-  height: 100%;
-}
-
-.workspace-split[data-single-pane] > .dou-splitter__bar,
-.workspace-split[data-single-pane='start'] > .dou-splitter__pane.is-end,
-.workspace-split[data-single-pane='end'] > .dou-splitter__pane.is-start {
-  display: none;
-}
-
-.workspace-split[data-single-pane] .start-panel {
+.workspace-split.is-single-pane .start-panel {
   overflow: auto;
   align-items: safe center;
   padding-block: 24px;

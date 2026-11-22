@@ -156,7 +156,9 @@ function withRoot(layout: SideLayout, root: DockNode, focused = layout.focused):
       first = original
     }
   }
-  const tabs = [...pinnedTabsOf(previous), ...first.tabs.filter((key) => !listOf(key))]
+  const nextPinned = first.tabs.filter(isPinned)
+  const pinned = nextPinned.length === LISTS.length ? nextPinned : pinnedTabsOf(previous)
+  const tabs = [...pinned, ...first.tabs.filter((key) => !listOf(key))]
   const active =
     first.active != null && tabs.includes(first.active)
       ? first.active
@@ -214,20 +216,6 @@ export function updateDock(layout: SideLayout, root: DockNode): SideLayout {
       : group
   })
   return withRoot(layout, root)
-}
-
-export function reorderPinned(layout: SideLayout, key: ListKey, index: number): SideLayout {
-  const first = groupsOf(layout.root)[0]!
-  const pinned = pinnedTabsOf(first)
-  const from = pinned.indexOf(key)
-  if (index < 0 || index >= pinned.length || from === index) return layout
-  pinned.splice(from, 1)
-  pinned.splice(index, 0, key)
-  const tabs = [...pinned, ...first.tabs.filter((tab) => !listOf(tab))]
-  return {
-    ...layout,
-    root: mapGroups(layout.root, (group) => (group === first ? { ...group, tabs } : group)),
-  }
 }
 
 /** Bring `key` to the front of its group and use that group. */

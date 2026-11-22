@@ -10,7 +10,7 @@ import {
 import { collaboration } from '@dou-ui/flow/collaboration'
 import '@dou-ui/flow/style.css'
 import type { CommentAction, CommentThread } from 'dou-ui'
-import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import type { SharedArtifact } from './shared'
@@ -70,15 +70,9 @@ watch(
 
 const anchorOf = (id: string) => editor.value?.getCommentAnchors()[id] ?? null
 
-async function onComment(action: CommentAction) {
+function onComment(action: CommentAction) {
   if (action.type !== 'create') return emit('comment', action, null)
-  let anchor = anchorOf(action.thread.id)
-  // A thread started with the comment tool is put on its item just after.
-  for (let tries = 0; !anchor && tries < 3; tries++) {
-    await nextTick()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    anchor = anchorOf(action.thread.id)
-  }
+  const anchor = anchorOf(action.thread.id)
   // Where on the item it is pinned stays in the board itself (its commentPins).
   emit(
     'comment',
