@@ -1,0 +1,657 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/common.proto";
+import "google/protobuf/struct.proto";
+
+// ProjectService manages Ariadne projects, unified project configuration updates,
+// file sources, reference sources, activity summaries, and project-wide search.
+service ProjectService {
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
+  rpc GetProjectActivity(GetProjectActivityRequest) returns (GetProjectActivityResponse);
+  rpc SearchProject(SearchProjectRequest) returns (SearchProjectResponse);
+  rpc GetProjectSettings(GetProjectSettingsRequest) returns (GetProjectSettingsResponse);
+  rpc GetFileSources(GetFileSourcesRequest) returns (GetFileSourcesResponse);
+  rpc SetFileSources(SetFileSourcesRequest) returns (SetFileSourcesResponse);
+  rpc AddProjectReference(AddProjectReferenceRequest) returns (AddProjectReferenceResponse);
+  rpc RemoveProjectReference(RemoveProjectReferenceRequest) returns (RemoveProjectReferenceResponse);
+  rpc GetReferenceStatus(GetReferenceStatusRequest) returns (GetReferenceStatusResponse);
+  rpc ListSourceKinds(ListSourceKindsRequest) returns (ListSourceKindsResponse);
+  rpc BrowseSource(BrowseSourceRequest) returns (BrowseSourceResponse);
+  rpc ListMentionFiles(ListMentionFilesRequest) returns (ListMentionFilesResponse);
+  rpc NoteProjectReturn(NoteProjectReturnRequest) returns (NoteProjectReturnResponse);
+}
+
+message ProjectStringList {
+  repeated string values = 1;
+}
+
+message ProjectUsageTotals {
+  int64 input = 1 [jstype = JS_NUMBER];
+  int64 output = 2 [jstype = JS_NUMBER];
+  int64 cached = 3 [jstype = JS_NUMBER];
+  int64 cache_write = 4 [jstype = JS_NUMBER];
+  int64 reasoning = 5 [jstype = JS_NUMBER];
+  map<string, double> cost = 6;
+}
+
+message ProjectSourcePart {
+  string kind = 1;
+  google.protobuf.Struct settings = 2;
+}
+
+message ProjectSource {
+  string kind = 1;
+  google.protobuf.Struct settings = 2;
+  optional ProjectSourcePart hosting = 3;
+}
+
+message FileSource {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  google.protobuf.Struct settings = 4;
+  optional ProjectSourcePart hosting = 5;
+}
+
+message FileSourceSet {
+  string primary_id = 1;
+  repeated FileSource sources = 2;
+}
+
+message FileSourceInput {
+  optional string id = 1;
+  string kind = 2;
+  google.protobuf.Struct settings = 3;
+  optional ProjectSourcePart hosting = 4;
+}
+
+message ProjectReference {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  google.protobuf.Struct settings = 4;
+}
+
+message ProjectDeliverySettings {
+  string mode = 1;
+  string instructions = 2;
+}
+
+message ProjectBudgetSettings {
+  optional double thread = 1;
+  optional double project = 2;
+}
+
+message ProjectWorkspaceAutoSettings {
+  bool setup = 1;
+  bool check = 2;
+}
+
+message ProjectWorkspaceSettings {
+  string retention = 1;
+  ProjectWorkspaceAutoSettings auto = 2;
+  string setup = 3;
+  string shell = 4;
+  string check = 5;
+  string branch_prefix = 6;
+}
+
+message ProjectRoutine {
+  string id = 1;
+  string prompt = 2;
+  repeated int32 days = 3;
+  string time = 4;
+  bool enabled = 5;
+}
+
+message ProjectReviewSettings {
+  bool enabled = 1;
+}
+
+message ProjectAutopilotSettings {
+  bool enabled = 1;
+  string method = 2;
+}
+
+message ProjectSettings {
+  string instructions = 1;
+  ProjectDeliverySettings delivery = 2;
+  repeated string tools = 3;
+  ProjectBudgetSettings budget = 4;
+  ProjectWorkspaceSettings workspace = 5;
+  repeated ProjectRoutine routines = 6;
+  ProjectReviewSettings review = 7;
+  ProjectAutopilotSettings autopilot = 8;
+}
+
+message ProjectDetectedCommand {
+  string command = 1;
+  string thread_id = 2;
+}
+
+message ProjectDetected {
+  optional ProjectDetectedCommand setup = 1;
+  optional ProjectDetectedCommand check = 2;
+}
+
+message ProjectEnvVar {
+  string name = 1;
+  string value = 2;
+}
+
+message ProjectEnvVarList {
+  repeated ProjectEnvVar entries = 1;
+}
+
+message ProjectSettingsView {
+  ProjectSettings settings = 1;
+  ProjectDetected detected = 2;
+  repeated string env = 3;
+  repeated string tools = 4;
+  bool hosted_merge = 5;
+}
+
+message ProjectView {
+  string id = 1;
+  string name = 2;
+  bool unnamed = 3;
+  string coordinator_id = 4;
+  int64 created_at = 5 [jstype = JS_NUMBER];
+  int64 updated_at = 6 [jstype = JS_NUMBER];
+  int32 needs_me = 7;
+  optional int32 running_turns = 8;
+  optional ProjectSource source = 9;
+  optional FileSourceSet file_sources = 10;
+  repeated ProjectReference references = 11;
+  optional int32 slots = 12;
+  repeated string mcp = 13;
+  ProjectSettings settings = 14;
+  ProjectDetected detected = 15;
+  bool autopilot_paused = 16;
+  ProjectUsageTotals usage = 17;
+}
+
+message ProjectProgress {
+  int32 done = 1;
+  int32 total = 2;
+}
+
+message ProjectThreadArtifact {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+}
+
+message ProjectWorkspaceView {
+  optional string source_id = 1;
+  string label = 2;
+  optional string branch = 3;
+  optional string base = 4;
+  bool removed = 5;
+  bool parked = 6;
+}
+
+message ProjectBranchMerge {
+  string branch = 1;
+  string base = 2;
+  string method = 3;
+  string sha = 4;
+  string head = 5;
+  bool auto = 6;
+  int64 at = 7 [jstype = JS_NUMBER];
+}
+
+message ProjectChangeTotals {
+  int32 files = 1;
+  int32 added = 2;
+  int32 removed = 3;
+}
+
+message ProjectPullRequestChecks {
+  string state = 1;
+  repeated string failed = 2;
+}
+
+message ProjectThreadPullRequest {
+  int64 number = 1 [jstype = JS_NUMBER];
+  optional string reference = 2;
+  string url = 3;
+  string title = 4;
+  string state = 5;
+  bool conflicted = 6;
+  string head_sha = 7;
+  ProjectPullRequestChecks checks = 8;
+}
+
+message ProjectAsideView {
+  int64 until = 1 [jstype = JS_NUMBER];
+  string reason = 2;
+  string by = 3;
+  bool due = 4;
+}
+
+message ProjectStoppedView {
+  string reason = 1;
+  string by = 2;
+  int64 at = 3 [jstype = JS_NUMBER];
+}
+
+message ProjectThreadReference {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  google.protobuf.Struct settings = 4;
+  bool writable = 5;
+  string attention_id = 6;
+}
+
+message ProjectEndedReference {
+  string attention_id = 1;
+  bool kept = 2;
+}
+
+message ProjectReviewView {
+  string reviewer_id = 1;
+  int64 rounds = 2 [jstype = JS_NUMBER];
+  bool reviewing = 3;
+}
+
+message ProjectThreadView {
+  string id = 1;
+  string project_id = 2;
+  string title = 3;
+  optional string node_id = 4;
+  string stage = 5;
+  optional string last_report = 6;
+  optional string last_summary = 7;
+  optional string last_headline = 8;
+  repeated ProjectThreadArtifact last_artifacts = 9;
+  optional ProjectWorkspaceView workspace = 10;
+  optional ProjectBranchMerge merged = 11;
+  bool archived = 12;
+  optional ProjectChangeTotals changes = 13;
+  optional ProjectThreadPullRequest pull_request = 14;
+  optional ProjectAsideView aside = 15;
+  optional ProjectStoppedView stopped = 16;
+  repeated ProjectThreadReference references = 17;
+  repeated ProjectEndedReference ended_references = 18;
+  optional string model = 19;
+  optional string branch_slug = 20;
+  ProjectUsageTotals usage = 21;
+  optional ProjectProgress progress = 22;
+  optional string doing = 23;
+  int64 created_at = 24 [jstype = JS_NUMBER];
+  int64 updated_at = 25 [jstype = JS_NUMBER];
+  int64 active_at = 26 [jstype = JS_NUMBER];
+  optional string review_of = 27;
+  optional ProjectReviewView review = 28;
+  bool auto = 29;
+  optional string autopilot_held = 30;
+}
+
+message ProjectChoiceOption {
+  string label = 1;
+  string consequence = 2;
+}
+
+message ProjectChoiceBlock {
+  string question = 1;
+  repeated ProjectChoiceOption options = 2;
+  optional int32 recommended = 3;
+}
+
+message ProjectConfirmBlock {
+  string title = 1;
+  optional string description = 2;
+  optional string detail = 3;
+  string tone = 4;
+  optional string approve_text = 5;
+  optional string deny_text = 6;
+  bool allow_project_reference = 7;
+}
+
+message ProjectFormOption {
+  string label = 1;
+  string value = 2;
+}
+
+message ProjectFormValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool bool_value = 3;
+    ProjectStringList string_list = 4;
+  }
+}
+
+message ProjectFormField {
+  string key = 1;
+  string label = 2;
+  string kind = 3;
+  bool required = 4;
+  optional string placeholder = 5;
+  repeated ProjectFormOption options = 6;
+  optional ProjectFormValue default_value = 7;
+  optional double min = 8;
+  optional double max = 9;
+}
+
+message ProjectFormBlock {
+  string title = 1;
+  optional string description = 2;
+  repeated ProjectFormField fields = 3;
+  optional string submit_text = 4;
+}
+
+message ProjectAskBlock {
+  oneof block {
+    ProjectChoiceBlock choice = 1;
+    ProjectConfirmBlock confirm = 2;
+    ProjectFormBlock form = 3;
+  }
+}
+
+message ProjectAttentionView {
+  string id = 1;
+  string project_id = 2;
+  optional string thread_id = 3;
+  repeated string joined_by = 4;
+  ProjectAskBlock block = 5;
+  optional string message_id = 6;
+  optional string conversation_id = 7;
+  int64 created_at = 8 [jstype = JS_NUMBER];
+}
+
+message NeedsMeAttention {
+  ProjectAttentionView attention = 1;
+  optional string thread_id = 2;
+  repeated string joined_ids = 3;
+}
+
+message NeedsMeThread {
+  string thread_id = 1;
+}
+
+message NeedsMeItem {
+  oneof item {
+    NeedsMeAttention attention = 1;
+    NeedsMeThread thread = 2;
+  }
+}
+
+message ProjectThreadSync {
+  string cursor = 1;
+  bool partial = 2;
+  optional ProjectStringList ids = 3;
+}
+
+message ProjectConversationActivity {
+  string status = 1;
+  optional ProjectProgress progress = 2;
+}
+
+message ProjectThreadActivity {
+  string id = 1;
+  string title = 2;
+  string status = 3;
+  optional ProjectProgress progress = 4;
+}
+
+message ProjectThreadSearchHit {
+  string id = 1;
+  string title = 2;
+  string snippet = 3;
+  int64 at = 4 [jstype = JS_NUMBER];
+}
+
+message ProjectArtifactSearchHit {
+  string id = 1;
+  string artifact_kind = 2;
+  string title = 3;
+  string snippet = 4;
+  int64 at = 5 [jstype = JS_NUMBER];
+}
+
+message ProjectMessageSearchHit {
+  string id = 1;
+  string conversation_id = 2;
+  optional string where = 3;
+  string snippet = 4;
+  int64 at = 5 [jstype = JS_NUMBER];
+}
+
+message SourceLocalizedText {
+  map<string, string> locales = 1;
+}
+
+message SourceSettingField {
+  string type = 1;
+  SourceLocalizedText title = 2;
+  optional SourceLocalizedText description = 3;
+  bool secret = 4;
+  bool directory = 5;
+  repeated string options = 6;
+  oneof default_value {
+    string string_default = 7;
+    double number_default = 8;
+    bool bool_default = 9;
+  }
+}
+
+message SourceSettingsSchema {
+  string type = 1;
+  map<string, SourceSettingField> properties = 2;
+  repeated string required = 3;
+  repeated string field_order = 4;
+}
+
+message SourcePluginRef {
+  string id = 1;
+  bool ready = 2;
+}
+
+message SourceKind {
+  string kind = 1;
+  SourceLocalizedText title = 2;
+  SourceSettingsSchema settings = 3;
+  bool program = 4;
+  optional SourcePluginRef plugin = 5;
+  google.protobuf.Struct defaults = 6;
+  repeated string provides = 7;
+  bool remote = 8;
+  bool hosting = 9;
+  bool browse = 10;
+  optional string summary = 11;
+}
+
+message SourceDirectoryEntry {
+  string name = 1;
+  string path = 2;
+}
+
+message SourceDirectoryListing {
+  string path = 1;
+  optional string parent = 2;
+  repeated SourceDirectoryEntry directories = 3;
+}
+
+message FailedProjectReference {
+  string id = 1;
+  LocalizedError error = 2;
+}
+
+message ListProjectsRequest {
+  repeated string ids = 1;
+}
+
+message ListProjectsResponse {
+  repeated ProjectView projects = 1;
+  int64 last_seq = 2 [jstype = JS_NUMBER];
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+  string since = 2;
+}
+
+message GetProjectResponse {
+  ProjectView project = 1;
+  repeated ProjectThreadView threads = 2;
+  repeated NeedsMeItem needs_me = 3;
+  ProjectThreadSync sync = 4;
+  bool has_tracker = 5;
+}
+
+message CreateProjectRequest {
+  optional string name = 1;
+  string message = 2;
+  optional ProjectSource source = 3;
+  repeated ProjectSourcePart references = 4;
+  repeated FileSourceInput sources = 5;
+  bool has_sources = 6;
+  optional int32 primary_index = 7;
+}
+
+message CreateProjectResponse {
+  ProjectView project = 1;
+}
+
+message UpdateProjectRequest {
+  string project_id = 1;
+  optional string name = 2;
+  optional ProjectSettings settings = 3;
+  optional ProjectEnvVarList env = 4;
+  oneof slots_action {
+    int32 set_slots = 5;
+    bool clear_slots = 6;
+  }
+  optional bool autopilot_paused = 7;
+  optional ProjectStringList mcp_servers = 8;
+}
+
+message UpdateProjectResponse {
+  ProjectView project = 1;
+  ProjectSettingsView settings_view = 2;
+}
+
+message DeleteProjectRequest {
+  string project_id = 1;
+}
+
+message DeleteProjectResponse {}
+
+message GetProjectActivityRequest {
+  string project_id = 1;
+}
+
+message GetProjectActivityResponse {
+  ProjectConversationActivity coordinator = 1;
+  repeated ProjectThreadActivity threads = 2;
+}
+
+message SearchProjectRequest {
+  string project_id = 1;
+  string query = 2;
+}
+
+message SearchProjectResponse {
+  repeated string terms = 1;
+  repeated ProjectThreadSearchHit threads = 2;
+  repeated ProjectArtifactSearchHit artifacts = 3;
+  repeated ProjectMessageSearchHit messages = 4;
+}
+
+message GetProjectSettingsRequest {
+  string project_id = 1;
+}
+
+message GetProjectSettingsResponse {
+  ProjectSettingsView settings_view = 1;
+}
+
+message GetFileSourcesRequest {
+  string project_id = 1;
+}
+
+message GetFileSourcesResponse {
+  repeated FileSource sources = 1;
+  string primary_id = 2;
+  map<string, ProjectStringList> secrets_set = 3;
+}
+
+message SetFileSourcesRequest {
+  string project_id = 1;
+  repeated FileSourceInput sources = 2;
+  optional int32 primary_index = 3;
+}
+
+message SetFileSourcesResponse {
+  ProjectView project = 1;
+}
+
+message AddProjectReferenceRequest {
+  string project_id = 1;
+  ProjectSourcePart reference = 2;
+}
+
+message AddProjectReferenceResponse {
+  ProjectView project = 1;
+}
+
+message RemoveProjectReferenceRequest {
+  string project_id = 1;
+  string reference_id = 2;
+}
+
+message RemoveProjectReferenceResponse {
+  ProjectView project = 1;
+}
+
+message GetReferenceStatusRequest {
+  string project_id = 1;
+}
+
+message GetReferenceStatusResponse {
+  repeated FailedProjectReference failed = 1;
+}
+
+message ListSourceKindsRequest {}
+
+message ListSourceKindsResponse {
+  repeated SourceKind kinds = 1;
+}
+
+message BrowseSourceRequest {
+  string kind = 1;
+  optional string project_id = 2;
+  optional string source_id = 3;
+  google.protobuf.Struct settings = 4;
+  string path = 5;
+}
+
+message BrowseSourceResponse {
+  optional SourceDirectoryListing listing = 1;
+}
+
+message ListMentionFilesRequest {
+  string project_id = 1;
+  string conversation_id = 2;
+  string query = 3;
+}
+
+message ListMentionFilesResponse {
+  repeated string files = 1;
+}
+
+message NoteProjectReturnRequest {
+  string project_id = 1;
+  double away_ms = 2;
+}
+
+message NoteProjectReturnResponse {}

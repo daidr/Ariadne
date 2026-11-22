@@ -1,0 +1,348 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+// ArtifactService manages documents, whiteboards, dashboards, paginated artifact
+// and version listings, feedback rounds, and dedicated comment lifecycle RPCs.
+service ArtifactService {
+  rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse);
+  rpc CreateArtifact(CreateArtifactRequest) returns (CreateArtifactResponse);
+  rpc GetArtifact(GetArtifactRequest) returns (GetArtifactResponse);
+  rpc ListArtifactVersions(ListArtifactVersionsRequest) returns (ListArtifactVersionsResponse);
+  rpc SaveArtifact(SaveArtifactRequest) returns (SaveArtifactResponse);
+  rpc RefreshDashboard(RefreshDashboardRequest) returns (RefreshDashboardResponse);
+  rpc SendArtifactFeedback(SendArtifactFeedbackRequest) returns (SendArtifactFeedbackResponse);
+
+  rpc CreateArtifactComment(CreateArtifactCommentRequest) returns (CreateArtifactCommentResponse);
+  rpc ReplyArtifactComment(ReplyArtifactCommentRequest) returns (ReplyArtifactCommentResponse);
+  rpc EditArtifactComment(EditArtifactCommentRequest) returns (EditArtifactCommentResponse);
+  rpc DeleteArtifactComment(DeleteArtifactCommentRequest) returns (DeleteArtifactCommentResponse);
+  rpc ResolveArtifactCommentThread(ResolveArtifactCommentThreadRequest) returns (ResolveArtifactCommentThreadResponse);
+  rpc ReopenArtifactCommentThread(ReopenArtifactCommentThreadRequest) returns (ReopenArtifactCommentThreadResponse);
+  rpc RemoveArtifactCommentThread(RemoveArtifactCommentThreadRequest) returns (RemoveArtifactCommentThreadResponse);
+}
+
+message DocumentArtifactPreview {
+  string excerpt = 1;
+  string lead = 2;
+}
+
+message WhiteboardArtifactPreview {
+  int32 items = 1;
+  int32 connectors = 2;
+  repeated string texts = 3;
+}
+
+message ArtifactPreviewTile {
+  string type = 1;
+  int32 x = 2;
+  int32 y = 3;
+  int32 w = 4;
+  int32 h = 5;
+  optional string title = 6;
+}
+
+message DashboardArtifactPreview {
+  int32 widgets = 1;
+  optional int64 taken_at = 2 [jstype = JS_NUMBER];
+  repeated string titles = 3;
+  repeated ArtifactPreviewTile tiles = 4;
+}
+
+message ArtifactPreview {
+  oneof preview {
+    DocumentArtifactPreview document = 1;
+    WhiteboardArtifactPreview whiteboard = 2;
+    DashboardArtifactPreview dashboard = 3;
+  }
+}
+
+message ArtifactSummary {
+  string id = 1;
+  string project_id = 2;
+  string kind = 3;
+  string title = 4;
+  optional string node_id = 5;
+  int64 version = 6 [jstype = JS_NUMBER];
+  string created_by = 7;
+  string updated_by = 8;
+  int64 created_at = 9 [jstype = JS_NUMBER];
+  int64 updated_at = 10 [jstype = JS_NUMBER];
+  optional ArtifactPreview preview = 11;
+  int64 open_comments = 12 [jstype = JS_NUMBER];
+  int64 commented_at = 13 [jstype = JS_NUMBER];
+}
+
+message ArtifactView {
+  string id = 1;
+  string project_id = 2;
+  string kind = 3;
+  string title = 4;
+  optional string node_id = 5;
+  int64 version = 6 [jstype = JS_NUMBER];
+  string created_by = 7;
+  string updated_by = 8;
+  int64 created_at = 9 [jstype = JS_NUMBER];
+  int64 updated_at = 10 [jstype = JS_NUMBER];
+  optional ArtifactPreview preview = 11;
+  int64 open_comments = 12 [jstype = JS_NUMBER];
+  int64 commented_at = 13 [jstype = JS_NUMBER];
+  string content = 14;
+}
+
+message ArtifactVersionView {
+  int64 version = 1 [jstype = JS_NUMBER];
+  string title = 2;
+  string author = 3;
+  string reason = 4;
+  int64 created_at = 5 [jstype = JS_NUMBER];
+}
+
+message ArtifactCommentAnchor {
+  oneof target {
+    string node = 1;
+    string edge = 2;
+  }
+  optional string block = 3;
+}
+
+message ArtifactCommentView {
+  string id = 1;
+  string author = 2;
+  string body = 3;
+  int64 created_at = 4 [jstype = JS_NUMBER];
+  optional int64 edited_at = 5 [jstype = JS_NUMBER];
+}
+
+message ArtifactCommentResolution {
+  string by = 1;
+  int64 at = 2 [jstype = JS_NUMBER];
+}
+
+message ArtifactCommentThreadView {
+  string id = 1;
+  string artifact_id = 2;
+  string quote = 3;
+  optional ArtifactCommentAnchor anchor = 4;
+  repeated ArtifactCommentView comments = 5;
+  optional ArtifactCommentResolution resolved = 6;
+  int64 created_at = 7 [jstype = JS_NUMBER];
+}
+
+message ArtifactAttachment {
+  string file_id = 1;
+  string name = 2;
+  string mime = 3;
+  int64 size = 4 [jstype = JS_NUMBER];
+}
+
+message ArtifactFeedbackEdit {
+  string diff = 1;
+}
+
+message ArtifactFeedbackChosenOption {
+  string id = 1;
+  string title = 2;
+}
+
+message ArtifactFeedbackChoice {
+  repeated ArtifactFeedbackChosenOption chosen = 1;
+}
+
+message ArtifactFeedbackComment {
+  string thread_id = 1;
+  string action = 2;
+  string body = 3;
+  string where = 4;
+}
+
+message ArtifactFeedbackMark {
+  string node_id = 1;
+  string type = 2;
+  string text = 3;
+  string where = 4;
+}
+
+message ArtifactFeedbackBoard {
+  repeated string changes = 1;
+}
+
+message ArtifactFeedbackItem {
+  oneof item {
+    ArtifactFeedbackEdit edit = 1;
+    ArtifactFeedbackChoice choice = 2;
+    ArtifactFeedbackComment comment = 3;
+    ArtifactFeedbackMark mark = 4;
+    ArtifactFeedbackBoard board = 5;
+  }
+}
+
+message ArtifactFeedbackView {
+  string artifact_id = 1;
+  int64 round = 2 [jstype = JS_NUMBER];
+  int64 version = 3 [jstype = JS_NUMBER];
+  string notify = 4;
+  repeated ArtifactFeedbackItem items = 5;
+  repeated ArtifactAttachment images = 6;
+  optional string done_by = 7;
+  optional int64 done_at = 8 [jstype = JS_NUMBER];
+  optional string summary = 9;
+  int64 created_at = 10 [jstype = JS_NUMBER];
+}
+
+message ListArtifactsRequest {
+  string project_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListArtifactsResponse {
+  repeated ArtifactSummary artifacts = 1;
+  string next_page_token = 2;
+  bool has_more = 3;
+}
+
+message CreateArtifactRequest {
+  string project_id = 1;
+  string kind = 2;
+  string title = 3;
+}
+
+message CreateArtifactResponse {
+  ArtifactView artifact = 1;
+  repeated ArtifactVersionView versions = 2;
+  repeated ArtifactCommentThreadView comments = 3;
+}
+
+message GetArtifactRequest {
+  string artifact_id = 1;
+  optional int64 version = 2 [jstype = JS_NUMBER];
+  bool include_versions = 3;
+  int32 version_page_size = 4;
+  string version_page_token = 5;
+}
+
+message GetArtifactResponse {
+  ArtifactView artifact = 1;
+  repeated ArtifactVersionView versions = 2;
+  repeated ArtifactCommentThreadView comments = 3;
+  string next_version_page_token = 4;
+  bool has_more_versions = 5;
+}
+
+message ListArtifactVersionsRequest {
+  string artifact_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListArtifactVersionsResponse {
+  repeated ArtifactVersionView versions = 1;
+  string next_page_token = 2;
+  bool has_more = 3;
+}
+
+message SaveArtifactRequest {
+  string artifact_id = 1;
+  optional string content = 2;
+  int64 base_version = 3 [jstype = JS_NUMBER];
+  string reason = 4;
+  optional string title = 5;
+  map<string, string> quotes = 6;
+  bool include_versions = 7;
+}
+
+message SaveArtifactResponse {
+  ArtifactView artifact = 1;
+  repeated ArtifactVersionView versions = 2;
+  repeated ArtifactCommentThreadView comments = 3;
+}
+
+message RefreshDashboardRequest {
+  string artifact_id = 1;
+}
+
+message RefreshDashboardResponse {
+  ArtifactView artifact = 1;
+}
+
+message SendArtifactFeedbackRequest {
+  string artifact_id = 1;
+  repeated string images = 2;
+}
+
+message SendArtifactFeedbackResponse {
+  optional ArtifactFeedbackView feedback = 1;
+}
+
+message CreateArtifactCommentRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+  string comment_id = 3;
+  string quote = 4;
+  string body = 5;
+  optional ArtifactCommentAnchor anchor = 6;
+}
+
+message CreateArtifactCommentResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message ReplyArtifactCommentRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+  string comment_id = 3;
+  string body = 4;
+}
+
+message ReplyArtifactCommentResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message EditArtifactCommentRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+  string comment_id = 3;
+  string body = 4;
+}
+
+message EditArtifactCommentResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message DeleteArtifactCommentRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+  string comment_id = 3;
+}
+
+message DeleteArtifactCommentResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message ResolveArtifactCommentThreadRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+}
+
+message ResolveArtifactCommentThreadResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message ReopenArtifactCommentThreadRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+}
+
+message ReopenArtifactCommentThreadResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}
+
+message RemoveArtifactCommentThreadRequest {
+  string artifact_id = 1;
+  string thread_id = 2;
+}
+
+message RemoveArtifactCommentThreadResponse {
+  repeated ArtifactCommentThreadView comments = 1;
+}

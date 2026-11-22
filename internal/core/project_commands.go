@@ -10,6 +10,79 @@ import (
 	"github.com/daidr/Ariadne/internal/projectsettings"
 )
 
+type ProjectPatch struct {
+	Name            *string
+	Settings        any
+	HasSettings     bool
+	Slots           *int
+	HasSlots        bool
+	MCP             []string
+	HasMCP          bool
+	AutopilotPaused *bool
+}
+
+func (repo *Repository) UpdateProject(ctx context.Context, projectID string, patch ProjectPatch, tools []string) (ProjectView, error) {
+	return repo.mutateProject(ctx, projectID, func(current ProjectView) ([]change, error) {
+		changes := []change{}
+		if patch.Name != nil {
+			clean := projectsettings.Trim(*patch.Name)
+			if clean == "" {
+				return nil, badInput("name")
+			}
+			if clean != current.Name || current.Unnamed {
+				changes = append(changes, change{"project.renamed", object{"name": clean}})
+			}
+		}
+		autopilotEnabled := current.Settings.Autopilot.Enabled
+		if patch.HasSettings {
+			next, err := projectsettings.Parse(patch.Settings, tools)
+			if err != nil {
+				return nil, err
+			}
+			autopilotEnabled = next.Autopilot.Enabled
+			if !reflect.DeepEqual(next, current.Settings) {
+				changes = append(changes, change{"project.settings.set", object{"settings": next}})
+			}
+		}
+		if patch.HasSlots {
+			if patch.Slots != nil && (*patch.Slots < 1 || *patch.Slots > 16) {
+				return nil, badInput("slots")
+			}
+			if encoded(current.Slots) != encoded(patch.Slots) {
+				changes = append(changes, change{"project.slots.set", object{"slots": patch.Slots}})
+			}
+		}
+		if patch.HasMCP {
+			if patch.MCP == nil {
+				return nil, badInput("servers")
+			}
+			unique := []string{}
+			seen := map[string]bool{}
+			for _, id := range patch.MCP {
+				if id == "" {
+					return nil, badInput("servers")
+				}
+				if !seen[id] {
+					seen[id] = true
+					unique = append(unique, id)
+				}
+			}
+			if encoded(unique) != encoded(current.MCP) {
+				changes = append(changes, change{"project.mcp.set", object{"servers": unique}})
+			}
+		}
+		if patch.AutopilotPaused != nil {
+			if !autopilotEnabled {
+				return nil, domainerr.New("error.autopilotOff", nil)
+			}
+			if current.AutopilotPaused != *patch.AutopilotPaused {
+				changes = append(changes, change{"project.autopilot.paused", object{"paused": *patch.AutopilotPaused}})
+			}
+		}
+		return changes, nil
+	})
+}
+
 type change struct {
 	kind string
 	data any

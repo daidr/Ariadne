@@ -3,7 +3,6 @@ import type {
   ArtifactCommentAction,
   ArtifactCommentThreadView,
   ArtifactKind,
-  ArtifactSummary,
   ArtifactVersionView,
   ArtifactView,
   BlockAnswer,
@@ -11,19 +10,14 @@ import type {
   LineComment,
   LiveUpdate,
   DraftUpdate,
-  FileSourceSet,
   BackgroundUpdate,
   BackgroundView,
   MessageView,
   NeedsMeItem,
   PlanOp,
-  PlanUndoPreview,
-  PlanView,
-  ProjectActivity,
   ProjectView,
   ReviewRoundView,
   SentLineComment,
-  SearchResult,
   ThreadView,
   TodoView,
   TraceRequestDetail,
@@ -53,9 +47,17 @@ import {
   type StorageSnapshot as ProtoStorageSnapshot,
 } from '@ariadne/proto'
 import { ApiError, createRpcClient, getToken as token, initToken } from './rpc'
+import {
+  domain2Api,
+  type IssueCommentView,
+  type IssueDetailView,
+  type IssueSummaryView,
+  type UpdateProjectPatch,
+} from './rpc-domain2'
 import { synchronizeServerClock } from './server-clock'
 
 export { ApiError, initToken }
+export type { IssueCommentView, IssueDetailView, IssueSummaryView, UpdateProjectPatch }
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
 export type McpToolMark = 'read' | 'ask' | 'off'
@@ -547,6 +549,8 @@ export interface ArtifactDetail {
   artifact: ArtifactView
   versions: ArtifactVersionView[]
   comments: ArtifactCommentThreadView[]
+  nextVersionPageToken?: string
+  hasMoreVersions?: boolean
 }
 
 export const api = {
@@ -590,11 +594,7 @@ export const api = {
       file,
     ),
   ping: () => request<{ ok: boolean }>('GET', '/api/ping'),
-  listProjects: (ids: readonly string[] = []) =>
-    request<{ projects: ProjectView[]; lastSeq: number }>(
-      'GET',
-      '/api/projects' + (ids.length ? '?' + new URLSearchParams(ids.map((id) => ['id', id])) : ''),
-    ),
+  listProjects: (ids: readonly string[] = []) => domain2Api.listProjects(ids),
   /**
    * A new project, with where its files are and the sources it only reads; each is
    * connected first, and the project is made only when all of them can be.
@@ -605,18 +605,19 @@ export const api = {
     references?: { kind: string; settings: Record<string, unknown> }[]
     sources?: (SourceInput & { id?: string })[]
     primaryIndex?: number
-  }) => request<{ project: ProjectView }>('POST', '/api/projects', input),
-  renameProject: (id: string, name: string) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${id}`, { name }),
-  deleteProject: (id: string) => request<void>('DELETE', `/api/projects/${id}`),
+  }) => domain2Api.createProject(input),
+  /** Unified atomic project update (name, settings, env, slots, mcp, autopilotPaused). */
+  updateProject: (id: string, patch: UpdateProjectPatch) => domain2Api.updateProject(id, patch),
+  renameProject: async (id: string, name: string): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(id, { name })
+    return { project }
+  },
+  deleteProject: (id: string) => domain2Api.deleteProject(id),
   /** With `since` (a `sync.cursor` given before), only the threads changed after it. */
-  getProject: (id: string, since?: string) =>
-    request<ProjectDetail & { sync: ThreadSync }>(
-      'GET',
-      `/api/projects/${id}${since ? `?since=${encodeURIComponent(since)}` : ''}`,
-    ),
+  getProject: (id: string, since?: string): Promise<ProjectDetail & { sync: ThreadSync }> =>
+    domain2Api.getProject(id, since),
   getProjectActivity: (id: string, signal: AbortSignal) =>
-    request<ProjectActivity>('GET', `/api/projects/${id}/activity`, undefined, signal),
+    domain2Api.getProjectActivity(id, signal),
   /**
    * The newest messages, the page before `before`, or everything from `from` on. With
    * `since` (a `lastSeq` given before), only messages and notices changed after it.
@@ -753,18 +754,14 @@ export const api = {
       body: JSON.stringify({ conversationId, content: '', comments }),
     }).catch(() => {}),
   mentionFiles: (projectId: string, conversationId: string, query: string) =>
-    request<{ files: string[] }>(
-      'GET',
-      `/api/projects/${projectId}/mention-files?${new URLSearchParams({ conversationId, q: query })}`,
-    ),
+    domain2Api.mentionFiles(projectId, conversationId, query),
   markRead: (conversationId: string, upTo: string) =>
     request<void>('POST', `/api/conversations/${conversationId}/read`, { upTo }),
   /** The user is back at the project after `away` ms without touching it. */
-  noteReturn: (projectId: string, away: number) =>
-    request<void>('POST', `/api/projects/${projectId}/return`, { away }),
+  noteReturn: (projectId: string, away: number) => domain2Api.noteReturn(projectId, away),
   answerAttention: (id: string, answer: BlockAnswer) =>
     request<void>('POST', `/api/attentions/${id}/answer`, { answer }),
-  sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
+  sourceKinds: (): Promise<{ kinds: SourceKind[] }> => domain2Api.sourceKinds(),
   browseSource: (
     kind: string,
     body: {
@@ -773,46 +770,26 @@ export const api = {
       settings: Record<string, unknown>
       path: string
     },
-  ) =>
-    request<{ listing: DirectoryListing | null }>(
-      'POST',
-      `/api/source-kinds/${encodeURIComponent(kind)}/browse`,
-      body,
-    ),
+  ) => domain2Api.browseSource(kind, body),
   browseLocal: (path: string) =>
     request<{ listing: DirectoryListing | null }>(
       'GET',
       `/api/directories${queryString({ path })}`,
     ),
-  getFileSources: (projectId: string) =>
-    request<FileSourceSet & { secretsSet: Record<string, string[]> }>(
-      'GET',
-      `/api/projects/${projectId}/sources`,
-    ),
+  getFileSources: (projectId: string) => domain2Api.getFileSources(projectId),
   setFileSources: (
     projectId: string,
     body: { sources: (SourceInput & { id?: string })[]; primaryIndex?: number },
-  ) => request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/sources`, body),
+  ) => domain2Api.setFileSources(projectId, body),
   addReference: (
     projectId: string,
     reference: { kind: string; settings: Record<string, unknown> },
-  ) =>
-    request<{ project: ProjectView }>('POST', `/api/projects/${projectId}/references`, {
-      reference,
-    }),
+  ) => domain2Api.addReference(projectId, reference),
   removeReference: (projectId: string, referenceId: string) =>
-    request<{ project: ProjectView }>(
-      'DELETE',
-      `/api/projects/${projectId}/references/${referenceId}`,
-    ),
+    domain2Api.removeReference(projectId, referenceId),
   /** The reference sources that cannot be read right now, with why. */
-  referenceStatus: (projectId: string) =>
-    request<{ failed: { id: string; error: LocalizedMessage }[] }>(
-      'GET',
-      `/api/projects/${projectId}/references/status`,
-    ),
-  refreshDashboard: (artifactId: string) =>
-    request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
+  referenceStatus: (projectId: string) => domain2Api.referenceStatus(projectId),
+  refreshDashboard: (artifactId: string) => domain2Api.refreshDashboard(artifactId),
   getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
   saveMcpSettings: (servers: McpServerInput[]) =>
     request<McpSettings>('PUT', '/api/settings/mcp', { servers }),
@@ -821,8 +798,13 @@ export const api = {
       'POST',
       `/api/settings/mcp/${encodeURIComponent(id)}/check`,
     ),
-  setProjectMcp: (projectId: string, servers: string[]) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/mcp`, { servers }),
+  setProjectMcp: async (
+    projectId: string,
+    servers: string[],
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { mcp: servers })
+    return { project }
+  },
   getWorkSettings: () => request<WorkSettings>('GET', '/api/settings/work'),
   saveWorkSettings: (input: Partial<Omit<WorkSettings, 'defaults'>>) =>
     request<WorkSettings>('PUT', '/api/settings/work', input),
@@ -863,24 +845,30 @@ export const api = {
   removeBackup: async (name: string): Promise<void> => {
     await dataClient.deleteBackup({ name })
   },
-  getProjectSettings: (projectId: string) =>
-    request<ProjectSettingsView>('GET', `/api/projects/${projectId}/settings`),
+  getProjectSettings: (projectId: string): Promise<ProjectSettingsView> =>
+    domain2Api.getProjectSettings(projectId),
   saveProjectSettings: (
     projectId: string,
     input: { settings: ProjectSettings; env?: { name: string; value: string }[] },
-  ) =>
-    request<ProjectSettingsView & { project: ProjectView }>(
-      'PUT',
-      `/api/projects/${projectId}/settings`,
-      input,
-    ),
+  ): Promise<ProjectSettingsView & { project: ProjectView }> =>
+    domain2Api.updateProject(projectId, input),
   /** The project's log as a file; the token goes in a header, so not as a plain link. */
   exportProject: (projectId: string) =>
     download(`/api/projects/${projectId}/export`, `ariadne-${projectId}.json`),
-  setAutopilotPaused: (projectId: string, paused: boolean) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/autopilot`, { paused }),
-  setProjectSlots: (projectId: string, slots: number | null) =>
-    request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/slots`, { slots }),
+  setAutopilotPaused: async (
+    projectId: string,
+    paused: boolean,
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { autopilotPaused: paused })
+    return { project }
+  },
+  setProjectSlots: async (
+    projectId: string,
+    slots: number | null,
+  ): Promise<{ project: ProjectView }> => {
+    const { project } = await domain2Api.updateProject(projectId, { slots })
+    return { project }
+  },
   getReviews: (threadId: string) =>
     request<{ rounds: ReviewRoundView[] }>('GET', `/api/threads/${threadId}/reviews`),
   getLineComments: (threadId: string) =>
@@ -940,53 +928,53 @@ export const api = {
       `/api/projects/${projectId}/worktrees/${threadId}${queryString({ sourceId, orphaned: orphaned ? '1' : undefined })}`,
     ),
   dismissProposal: (projectId: string, proposalId: string) =>
-    request<{ plan: PlanView }>(
-      'POST',
-      `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
-    ),
+    domain2Api.dismissProposal(projectId, proposalId),
   linkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/nodes/${nodeId}/issues`, {
-      number,
-    }),
+    domain2Api.linkIssue(projectId, nodeId, number),
   unlinkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>(
-      'DELETE',
-      `/api/projects/${projectId}/plan/nodes/${nodeId}/issues/${number}`,
-    ),
-  getPlan: (projectId: string) =>
-    request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
+    domain2Api.unlinkIssue(projectId, nodeId, number),
+  listIssues: (
+    projectId: string,
+    query: { state?: string; labels?: string[]; search?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => domain2Api.listIssues(projectId, query, signal),
+  getIssue: (projectId: string, number: number, signal?: AbortSignal) =>
+    domain2Api.getIssue(projectId, number, signal),
+  getPlan: (
+    projectId: string,
+    options: { revisionPageSize?: number; revisionPageToken?: string } = {},
+  ) => domain2Api.getPlan(projectId, options),
+  listPlanRevisions: (
+    projectId: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listPlanRevisions(projectId, options),
   revisePlan: (projectId: string, input: { reason: string; ops: PlanOp[] }) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/revise`, input),
+    domain2Api.revisePlan(projectId, input),
   previewPlanUndo: (projectId: string, revisionId: string) =>
-    request<{ preview: PlanUndoPreview }>(
-      'GET',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-    ),
+    domain2Api.previewPlanUndo(projectId, revisionId),
   revertPlan: (projectId: string, revisionId: string, reason: string) =>
-    request<{ plan: PlanView }>(
-      'POST',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-      { reason },
-    ),
-  search: (projectId: string, q: string) =>
-    request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
-  listArtifacts: (projectId: string) =>
-    request<{ artifacts: ArtifactSummary[] }>('GET', `/api/projects/${projectId}/artifacts`),
+    domain2Api.revertPlan(projectId, revisionId, reason),
+  search: (projectId: string, q: string) => domain2Api.searchProject(projectId, q),
+  listArtifacts: (
+    projectId: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listArtifacts(projectId, options),
   getArtifact: (
     id: string,
-    options: { version?: number; signal?: AbortSignal; versions?: boolean } = {},
-  ) =>
-    request<ArtifactDetail>(
-      'GET',
-      `/api/artifacts/${id}${queryString({
-        version: options.version === undefined ? undefined : String(options.version),
-        versions: options.versions === false ? '0' : undefined,
-      })}`,
-      undefined,
-      options.signal,
-    ),
+    options: {
+      version?: number
+      signal?: AbortSignal
+      versions?: boolean
+      versionPageSize?: number
+      versionPageToken?: string
+    } = {},
+  ) => domain2Api.getArtifact(id, options),
+  listArtifactVersions: (
+    id: string,
+    options: { pageSize?: number; pageToken?: string; signal?: AbortSignal } = {},
+  ) => domain2Api.listArtifactVersions(id, options),
   createArtifact: (projectId: string, input: { kind: ArtifactKind; title: string }) =>
-    request<ArtifactDetail>('POST', `/api/projects/${projectId}/artifacts`, input),
+    domain2Api.createArtifact(projectId, input),
   saveArtifact: (
     id: string,
     input: {
@@ -996,8 +984,9 @@ export const api = {
       reason: string
       title?: string
       quotes?: Record<string, string>
+      includeVersions?: boolean
     },
-  ) => request<ArtifactDetail>('PUT', `/api/artifacts/${id}`, input),
+  ) => domain2Api.saveArtifact(id, input),
   /**
    * The user stopped for a moment in an artifact, or left it: what they did goes to the
    * agent, with pictures of the options they marked. `leaving` lets it go out as the page
@@ -1005,25 +994,41 @@ export const api = {
    */
   sendFeedback: (id: string, images: string[], leaving = false) =>
     leaving
-      ? void fetch(`/api/artifacts/${id}/feedback`, {
+      ? void fetch('/api/rpc/ariadne.v1.ArtifactService/SendArtifactFeedback', {
           method: 'POST',
           keepalive: true,
           headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ images: [] }),
+          body: JSON.stringify({ artifactId: id, images: [] }),
         }).catch(() => {})
-      : request<{ feedback: unknown }>('POST', `/api/artifacts/${id}/feedback`, { images }),
+      : domain2Api.sendArtifactFeedback(id, images),
   /** Where a page joins an artifact's room, and the query that lets it in. */
   sharedRoom: (id: string) => ({
     server: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/artifacts`,
     room: `${id}/live`,
     params: { token: token() ?? '' },
   }),
+  createArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.createArtifactComment>[1],
+  ) => domain2Api.createArtifactComment(id, input),
+  replyArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.replyArtifactComment>[1],
+  ) => domain2Api.replyArtifactComment(id, input),
+  editArtifactComment: (id: string, input: Parameters<typeof domain2Api.editArtifactComment>[1]) =>
+    domain2Api.editArtifactComment(id, input),
+  deleteArtifactComment: (
+    id: string,
+    input: Parameters<typeof domain2Api.deleteArtifactComment>[1],
+  ) => domain2Api.deleteArtifactComment(id, input),
+  resolveArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.resolveArtifactCommentThread(id, threadId),
+  reopenArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.reopenArtifactCommentThread(id, threadId),
+  removeArtifactCommentThread: (id: string, threadId: string) =>
+    domain2Api.removeArtifactCommentThread(id, threadId),
   commentArtifact: (id: string, action: ArtifactCommentAction) =>
-    request<{ comments: ArtifactCommentThreadView[] }>(
-      'POST',
-      `/api/artifacts/${id}/comments`,
-      action,
-    ),
+    domain2Api.commentArtifact(id, action),
   summarizeLinks: (urls: string[], signal?: AbortSignal) =>
     request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }, signal),
   previewLink: (url: string, signal?: AbortSignal) =>

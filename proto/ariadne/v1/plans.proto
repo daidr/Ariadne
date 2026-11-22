@@ -1,0 +1,258 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/common.proto";
+
+// PlanService manages project plan graphs, paginated revision history, proposals,
+// undo previews/reverts, and plan node issue links.
+service PlanService {
+  rpc GetPlan(GetPlanRequest) returns (GetPlanResponse);
+  rpc ListPlanRevisions(ListPlanRevisionsRequest) returns (ListPlanRevisionsResponse);
+  rpc RevisePlan(RevisePlanRequest) returns (RevisePlanResponse);
+  rpc DismissPlanProposal(DismissPlanProposalRequest) returns (DismissPlanProposalResponse);
+  rpc PreviewPlanUndo(PreviewPlanUndoRequest) returns (PreviewPlanUndoResponse);
+  rpc RevertPlanRevision(RevertPlanRevisionRequest) returns (RevertPlanRevisionResponse);
+  rpc LinkPlanNodeIssue(LinkPlanNodeIssueRequest) returns (LinkPlanNodeIssueResponse);
+  rpc UnlinkPlanNodeIssue(UnlinkPlanNodeIssueRequest) returns (UnlinkPlanNodeIssueResponse);
+}
+
+message PlanPullRequestChecks {
+  string state = 1;
+  repeated string failed = 2;
+}
+
+message PlanNodePullRequest {
+  int64 number = 1 [jstype = JS_NUMBER];
+  optional string reference = 2;
+  string url = 3;
+  string state = 4;
+  bool conflicted = 5;
+  PlanPullRequestChecks checks = 6;
+}
+
+message PlanNodeThread {
+  string id = 1;
+  string title = 2;
+  string stage = 3;
+  optional string stopped_by = 4;
+  optional string last_headline = 5;
+  optional PlanNodePullRequest pull_request = 6;
+}
+
+message PlanLinkedIssue {
+  string tracker = 1;
+  int64 number = 2 [jstype = JS_NUMBER];
+  string title = 3;
+  string url = 4;
+  string linked_by = 5;
+}
+
+message PlanNodeView {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+  string description = 4;
+  string acceptance = 5;
+  repeated string depends_on = 6;
+  string status = 7;
+  repeated PlanNodeThread threads = 8;
+  optional string changed_in = 9;
+  repeated PlanLinkedIssue issues = 10;
+  optional string gate = 11;
+}
+
+message PlanAddNodeOp {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+  string description = 4;
+  string acceptance = 5;
+}
+
+message PlanNodeExpect {
+  optional string title = 1;
+  optional string description = 2;
+  optional string acceptance = 3;
+}
+
+message PlanUpdateNodeOp {
+  string id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  optional string acceptance = 4;
+  optional PlanNodeExpect expect = 5;
+}
+
+message PlanRemoveNodeOp {
+  string id = 1;
+}
+
+message PlanLinkNodesOp {
+  string from = 1;
+  string to = 2;
+}
+
+message PlanUnlinkNodesOp {
+  string from = 1;
+  string to = 2;
+}
+
+message PlanOp {
+  oneof op {
+    PlanAddNodeOp add = 1;
+    PlanUpdateNodeOp update = 2;
+    PlanRemoveNodeOp remove = 3;
+    PlanLinkNodesOp link = 4;
+    PlanUnlinkNodesOp unlink = 5;
+  }
+}
+
+message PlanRevisionView {
+  string id = 1;
+  string author = 2;
+  string reason = 3;
+  repeated PlanOp ops = 4;
+  optional string revert_of = 5;
+  optional string reverted_by = 6;
+  int64 created_at = 7 [jstype = JS_NUMBER];
+}
+
+message PlanPreviewNode {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+  string description = 4;
+  string acceptance = 5;
+  optional string mark = 6;
+  repeated string depends_on = 7;
+}
+
+message PlanPreviewEdge {
+  string from = 1;
+  string to = 2;
+  optional string mark = 3;
+}
+
+message PlanPreview {
+  repeated PlanPreviewNode nodes = 1;
+  repeated PlanPreviewEdge edges = 2;
+}
+
+message PlanProposalView {
+  string id = 1;
+  string attention_id = 2;
+  string reason = 3;
+  repeated PlanOp ops = 4;
+  repeated LocalizedError changes = 5;
+  optional PlanPreview preview = 6;
+  string status = 7;
+  optional string stale_reason = 8;
+  int64 created_at = 9 [jstype = JS_NUMBER];
+}
+
+message PlanUndoThread {
+  string id = 1;
+  string title = 2;
+}
+
+message PlanUndoPreview {
+  repeated LocalizedError changes = 1;
+  repeated PlanUndoThread threads = 2;
+  optional LocalizedError blocked = 3;
+}
+
+message PlanChangeResult {
+  string status = 1;
+  string revision_id = 2;
+}
+
+message PlanView {
+  string project_id = 1;
+  repeated PlanNodeView nodes = 2;
+  repeated PlanRevisionView revisions = 3;
+  repeated PlanProposalView proposals = 4;
+}
+
+message GetPlanRequest {
+  string project_id = 1;
+  int32 revision_page_size = 2;
+  string revision_page_token = 3;
+}
+
+message GetPlanResponse {
+  PlanView plan = 1;
+  string next_revision_page_token = 2;
+  bool has_more_revisions = 3;
+}
+
+message ListPlanRevisionsRequest {
+  string project_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListPlanRevisionsResponse {
+  repeated PlanRevisionView revisions = 1;
+  string next_page_token = 2;
+  bool has_more = 3;
+}
+
+message RevisePlanRequest {
+  string project_id = 1;
+  string reason = 2;
+  repeated PlanOp ops = 3;
+}
+
+message RevisePlanResponse {
+  PlanChangeResult change = 1;
+  PlanView plan = 2;
+}
+
+message DismissPlanProposalRequest {
+  string project_id = 1;
+  string proposal_id = 2;
+}
+
+message DismissPlanProposalResponse {
+  PlanView plan = 1;
+}
+
+message PreviewPlanUndoRequest {
+  string project_id = 1;
+  string revision_id = 2;
+}
+
+message PreviewPlanUndoResponse {
+  PlanUndoPreview preview = 1;
+}
+
+message RevertPlanRevisionRequest {
+  string project_id = 1;
+  string revision_id = 2;
+  string reason = 3;
+}
+
+message RevertPlanRevisionResponse {
+  PlanView plan = 1;
+}
+
+message LinkPlanNodeIssueRequest {
+  string project_id = 1;
+  string node_id = 2;
+  int64 number = 3 [jstype = JS_NUMBER];
+}
+
+message LinkPlanNodeIssueResponse {
+  PlanView plan = 1;
+}
+
+message UnlinkPlanNodeIssueRequest {
+  string project_id = 1;
+  string node_id = 2;
+  int64 number = 3 [jstype = JS_NUMBER];
+}
+
+message UnlinkPlanNodeIssueResponse {
+  PlanView plan = 1;
+}

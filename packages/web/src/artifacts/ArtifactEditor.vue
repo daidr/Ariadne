@@ -126,9 +126,9 @@ watch(historyOpen, async (open, _, onCleanup) => {
   onCleanup(() => controller.abort())
   historyStatus.value = 'loading'
   try {
-    const detail = await api.getArtifact(props.id, { signal: controller.signal })
+    const page = await api.listArtifactVersions(props.id, { signal: controller.signal })
     if (controller.signal.aborted) return
-    versions.value = detail.versions
+    versions.value = page.versions
     historyStatus.value = 'ready'
   } catch {
     if (!controller.signal.aborted) historyStatus.value = 'error'
@@ -350,7 +350,48 @@ async function comment(
   if (!sent) return
   if (sent.type === 'create' || sent.type === 'reply') touched()
   try {
-    comments.value = (await api.commentArtifact(props.id, sent)).comments
+    let result: { comments: ArtifactCommentThreadView[] }
+    switch (sent.type) {
+      case 'create':
+        result = await api.createArtifactComment(props.id, {
+          threadId: sent.threadId,
+          commentId: sent.commentId,
+          quote: sent.quote,
+          body: sent.body,
+          ...(sent.anchor ? { anchor: sent.anchor } : {}),
+        })
+        break
+      case 'reply':
+        result = await api.replyArtifactComment(props.id, {
+          threadId: sent.threadId,
+          commentId: sent.commentId,
+          body: sent.body,
+        })
+        break
+      case 'edit':
+        result = await api.editArtifactComment(props.id, {
+          threadId: sent.threadId,
+          commentId: sent.commentId,
+          body: sent.body,
+        })
+        break
+      case 'delete':
+        result = await api.deleteArtifactComment(props.id, {
+          threadId: sent.threadId,
+          commentId: sent.commentId,
+        })
+        break
+      case 'resolve':
+        result = await api.resolveArtifactCommentThread(props.id, sent.threadId)
+        break
+      case 'reopen':
+        result = await api.reopenArtifactCommentThread(props.id, sent.threadId)
+        break
+      case 'remove':
+        result = await api.removeArtifactCommentThread(props.id, sent.threadId)
+        break
+    }
+    comments.value = result.comments
   } catch (error) {
     report(error)
     void load()
@@ -371,6 +412,7 @@ async function save(
       reason: input.reason ?? t('artifact.saveReason'),
       ...(input.title ? { title: input.title } : {}),
       ...(body.value?.quotes ? { quotes: body.value.quotes() } : {}),
+      includeVersions: false,
     })
     if (props.id !== current.id) return false
     viewRequest++

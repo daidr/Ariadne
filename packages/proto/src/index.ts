@@ -1,2 +1,6 @@
 export * from './gen/ariadne/v1/common_pb'
 export * from './gen/ariadne/v1/data_pb'
+export * from './gen/ariadne/v1/projects_pb'
+export * from './gen/ariadne/v1/plans_pb'
+export * from './gen/ariadne/v1/artifacts_pb'
+export * from './gen/ariadne/v1/issues_pb'

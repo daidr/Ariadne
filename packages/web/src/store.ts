@@ -1143,7 +1143,7 @@ export async function createArtifact(kind: ArtifactKind) {
   }
 }
 
-/** Save the open project's settings; returns why they were refused, or `null`. */
+/** Save the open project's settings in one atomic update; returns why they were refused, or `null`. */
 export async function saveProjectSettings(
   input: Parameters<typeof api.saveProjectSettings>[1],
   slots: number | null,
@@ -1152,11 +1152,12 @@ export async function saveProjectSettings(
   const project = state.detail?.project
   if (!project) return null
   try {
-    await api.saveProjectSettings(project.id, input)
-    if (slots !== project.slots) await api.setProjectSlots(project.id, slots)
-    if (JSON.stringify(mcp) !== JSON.stringify(project.mcp)) {
-      await api.setProjectMcp(project.id, mcp)
-    }
+    await api.updateProject(project.id, {
+      settings: input.settings,
+      ...(input.env === undefined ? {} : { env: input.env }),
+      ...(slots !== project.slots ? { slots } : {}),
+      ...(JSON.stringify(mcp) !== JSON.stringify(project.mcp) ? { mcp } : {}),
+    })
     await refreshCurrent(['detail'])
     return null
   } catch (error) {

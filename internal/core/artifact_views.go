@@ -3,13 +3,91 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
-const artifactColumns = "id, project_id, kind, title, node_id, version, preview, created_by, updated_by, open_comments, commented_at, created_at, updated_at"
+const (
+	artifactColumns         = "id, project_id, kind, title, node_id, version, preview, created_by, updated_by, open_comments, commented_at, created_at, updated_at"
+	defaultArtifactPageSize = 100
+	defaultVersionPageSize  = 50
+	defaultRevisionPageSize = 50
+	maxPageSize             = 200
+)
+
+type ArtifactPage struct {
+	Artifacts     []ArtifactSummary
+	NextPageToken string
+	HasMore       bool
+}
+
+type ArtifactVersionPage struct {
+	Versions      []object
+	NextPageToken string
+	HasMore       bool
+}
+
+type ArtifactDetail struct {
+	Artifact             ArtifactView
+	Versions             []object
+	Comments             []object
+	NextVersionPageToken string
+	HasMoreVersions      bool
+}
+
+func normalizePageSize(pageSize, fallback int) (int, error) {
+	if pageSize < 0 {
+		return 0, badInput("pageSize")
+	}
+	if pageSize == 0 {
+		return fallback, nil
+	}
+	if pageSize > maxPageSize {
+		return maxPageSize, nil
+	}
+	return pageSize, nil
+}
+
+func encodeInt64Cursor(value int64) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(value, 10)))
+}
+
+func decodeInt64Cursor(token string) (int64, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return 0, badInput("pageToken")
+	}
+	value, err := strconv.ParseInt(string(raw), 10, 64)
+	if err != nil || value <= 0 {
+		return 0, badInput("pageToken")
+	}
+	return value, nil
+}
+
+func encodeArtifactCursor(updatedAt int64, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(updatedAt, 10) + ":" + id))
+}
+
+func decodeArtifactCursor(token string) (int64, string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return 0, "", badInput("pageToken")
+	}
+	tsPart, id, ok := strings.Cut(string(raw), ":")
+	if !ok || id == "" {
+		return 0, "", badInput("pageToken")
+	}
+	updatedAt, err := strconv.ParseInt(tsPart, 10, 64)
+	if err != nil {
+		return 0, "", badInput("pageToken")
+	}
+	return updatedAt, id, nil
+}
 
 type ArtifactSummary struct {
 	Preview      any    `json:"preview"`
@@ -53,6 +131,50 @@ func (reader Reader) ListArtifacts(ctx context.Context, projectID string) ([]Art
 	}
 	return result, nil
 }
+func (reader Reader) ListArtifactsPage(ctx context.Context, projectID string, pageSize int, pageToken string) (ArtifactPage, error) {
+	limit, err := normalizePageSize(pageSize, defaultArtifactPageSize)
+	if err != nil {
+		return ArtifactPage{}, err
+	}
+	var rows []record
+	if pageToken != "" {
+		cursorAt, cursorID, err := decodeArtifactCursor(pageToken)
+		if err != nil {
+			return ArtifactPage{}, err
+		}
+		rows, err = records(ctx, reader.DB,
+			"SELECT "+artifactColumns+" FROM artifacts WHERE project_id = ? AND (updated_at < ? OR (updated_at = ? AND id < ?)) ORDER BY updated_at DESC, id DESC LIMIT ?",
+			projectID, cursorAt, cursorAt, cursorID, limit+1)
+		if err != nil {
+			return ArtifactPage{}, err
+		}
+	} else {
+		rows, err = records(ctx, reader.DB,
+			"SELECT "+artifactColumns+" FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+			projectID, limit+1)
+		if err != nil {
+			return ArtifactPage{}, err
+		}
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]ArtifactSummary, 0, len(rows))
+	for _, row := range rows {
+		view, err := artifactSummary(row)
+		if err != nil {
+			return ArtifactPage{}, err
+		}
+		items = append(items, view)
+	}
+	nextToken := ""
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		nextToken = encodeArtifactCursor(last.UpdatedAt, last.ID)
+	}
+	return ArtifactPage{Artifacts: items, NextPageToken: nextToken, HasMore: hasMore}, nil
+}
 func getArtifact(ctx context.Context, db queryer, id string, version *int64) (ArtifactView, error) {
 	rows, err := records(ctx, db, "SELECT * FROM artifacts WHERE id = ?", id)
 	if err != nil {
@@ -88,17 +210,102 @@ func (reader Reader) GetArtifact(ctx context.Context, id string, version *int64)
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error { result, err = getArtifact(ctx, tx, id, version); return err })
 	return
 }
-func (reader Reader) ListArtifactVersions(ctx context.Context, id string) (result []object, err error) {
+func listArtifactVersionsPage(ctx context.Context, db queryer, id string, pageSize int, pageToken string) (ArtifactVersionPage, error) {
+	limit, err := normalizePageSize(pageSize, defaultVersionPageSize)
+	if err != nil {
+		return ArtifactVersionPage{}, err
+	}
+	var rows []record
+	if pageToken != "" {
+		beforeVersion, err := decodeInt64Cursor(pageToken)
+		if err != nil {
+			return ArtifactVersionPage{}, err
+		}
+		rows, err = records(ctx, db,
+			"SELECT version, title, author, reason, created_at FROM artifact_versions WHERE artifact_id = ? AND version < ? ORDER BY version DESC LIMIT ?",
+			id, beforeVersion, limit+1)
+		if err != nil {
+			return ArtifactVersionPage{}, err
+		}
+	} else {
+		rows, err = records(ctx, db,
+			"SELECT version, title, author, reason, created_at FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC LIMIT ?",
+			id, limit+1)
+		if err != nil {
+			return ArtifactVersionPage{}, err
+		}
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	versions := make([]object, 0, len(rows))
+	var lastVersion int64
+	for _, row := range rows {
+		lastVersion = row.integer("version")
+		versions = append(versions, object{"version": row["version"], "title": row["title"], "author": row["author"], "reason": row["reason"], "createdAt": row["created_at"]})
+	}
+	nextToken := ""
+	if hasMore && lastVersion > 0 {
+		nextToken = encodeInt64Cursor(lastVersion)
+	}
+	return ArtifactVersionPage{Versions: versions, NextPageToken: nextToken, HasMore: hasMore}, nil
+}
+func (reader Reader) GetArtifactDetail(ctx context.Context, id string, version *int64, includeVersions bool, versionPageSize int, versionPageToken string) (result ArtifactDetail, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
-		metadata, err := records(ctx, tx, "SELECT "+artifactColumns+" FROM artifacts WHERE id = ?", id)
+		artifact, err := getArtifact(ctx, tx, id, version)
 		if err != nil {
 			return err
 		}
-		if len(metadata) == 0 {
+		versions := []object{}
+		nextVersionPageToken := ""
+		hasMoreVersions := false
+		if includeVersions {
+			page, err := listArtifactVersionsPage(ctx, tx, id, versionPageSize, versionPageToken)
+			if err != nil {
+				return err
+			}
+			versions = page.Versions
+			nextVersionPageToken = page.NextPageToken
+			hasMoreVersions = page.HasMore
+		}
+		comments, err := artifactComments(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		result = ArtifactDetail{
+			Artifact:             artifact,
+			Versions:             versions,
+			Comments:             comments,
+			NextVersionPageToken: nextVersionPageToken,
+			HasMoreVersions:      hasMoreVersions,
+		}
+		return nil
+	})
+	return
+}
+func (reader Reader) ListArtifactVersionsPage(ctx context.Context, id string, pageSize int, pageToken string) (result ArtifactVersionPage, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		exists, err := records(ctx, tx, "SELECT 1 FROM artifacts WHERE id = ?", id)
+		if err != nil {
+			return err
+		}
+		if len(exists) == 0 {
 			return domainerr.NotFound(id)
 		}
-		if _, err := artifactSummary(metadata[0]); err != nil {
+		result, err = listArtifactVersionsPage(ctx, tx, id, pageSize, pageToken)
+		return err
+	})
+	return
+}
+func (reader Reader) ListArtifactVersions(ctx context.Context, id string) (result []object, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		exists, err := records(ctx, tx, "SELECT 1 FROM artifacts WHERE id = ?", id)
+		if err != nil {
 			return err
+		}
+		if len(exists) == 0 {
+			return domainerr.NotFound(id)
 		}
 		rows, err := records(ctx, tx, "SELECT version, title, author, reason, created_at FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC", id)
 		if err != nil {
