@@ -34,7 +34,7 @@ func Write(writer http.ResponseWriter, err error) {
 		switch localized.Key {
 		case "error.notFound", "error.priceUnknown":
 			status = http.StatusNotFound
-		case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable":
+		case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable", "updates.error.cannotRestart", "service.error.busy":
 			status = http.StatusConflict
 		case "error.modelCheck", "error.priceCatalog":
 			status = http.StatusBadGateway

@@ -161,6 +161,18 @@ func (commands *Commands) List(thread string) []Command {
 	}
 	return out
 }
+func (commands *Commands) ListRunning() []Command {
+	commands.mu.Lock()
+	defer commands.mu.Unlock()
+	out := []Command{}
+	for _, id := range commands.order {
+		job := commands.jobs[id]
+		if job != nil && job.view.Result == nil {
+			out = append(out, copyView(job.view))
+		}
+	}
+	return out
+}
 func (commands *Commands) Running(thread string) int {
 	commands.mu.Lock()
 	defer commands.mu.Unlock()

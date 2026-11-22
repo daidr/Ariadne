@@ -184,6 +184,9 @@ export interface UpdateStatus {
     | 'installing'
     | 'ready'
   downloadPercent: number
+  canRestart?: boolean
+  restarting?: boolean
+  activeTurns?: number
   failure?: 'check' | 'download' | 'downloadTimeout' | 'verification' | 'install' | 'permission'
   release: {
     version: string
@@ -697,6 +700,14 @@ export const api = {
   },
   installUpdate: async (version: string, signal?: AbortSignal): Promise<UpdateStatus> => {
     const response = await updateClient.installUpdate({ version }, signal ? { signal } : undefined)
+    return fromProtoUpdateStatus(response.status)
+  },
+  restartToApplyUpdate: async (signal?: AbortSignal): Promise<UpdateStatus> => {
+    const response = await updateClient.restartToApplyUpdate({}, signal ? { signal } : undefined)
+    return fromProtoUpdateStatus(response.status)
+  },
+  cancelRestart: async (signal?: AbortSignal): Promise<UpdateStatus> => {
+    const response = await updateClient.cancelRestart({}, signal ? { signal } : undefined)
     return fromProtoUpdateStatus(response.status)
   },
   listMemories: async (projectId: string): Promise<{ memories: MemoryView[] }> => {

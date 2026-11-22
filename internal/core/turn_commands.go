@@ -348,7 +348,7 @@ ORDER BY step.id, CAST(call.key AS INTEGER)`, id)
 		if err := appendChanges(tx, projectID, changes); err != nil {
 			return err
 		}
-		if outcome == "interrupted" {
+		if outcome == "interrupted" || outcome == "suspended" {
 			return nil
 		}
 		current, err := conversation(ctx, tx.SQL(), id)

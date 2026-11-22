@@ -158,6 +158,9 @@ type UpdateStatus struct {
 	Release         *UpdateRelease         `protobuf:"bytes,5,opt,name=release,proto3,oneof" json:"release,omitempty"`
 	Failure         *string                `protobuf:"bytes,6,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
 	DownloadPercent int32                  `protobuf:"varint,7,opt,name=download_percent,json=downloadPercent,proto3" json:"download_percent,omitempty"`
+	CanRestart      bool                   `protobuf:"varint,8,opt,name=can_restart,json=canRestart,proto3" json:"can_restart,omitempty"`
+	Restarting      bool                   `protobuf:"varint,9,opt,name=restarting,proto3" json:"restarting,omitempty"`
+	ActiveTurns     int32                  `protobuf:"varint,10,opt,name=active_turns,json=activeTurns,proto3" json:"active_turns,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -237,6 +240,27 @@ func (x *UpdateStatus) GetFailure() string {
 func (x *UpdateStatus) GetDownloadPercent() int32 {
 	if x != nil {
 		return x.DownloadPercent
+	}
+	return 0
+}
+
+func (x *UpdateStatus) GetCanRestart() bool {
+	if x != nil {
+		return x.CanRestart
+	}
+	return false
+}
+
+func (x *UpdateStatus) GetRestarting() bool {
+	if x != nil {
+		return x.Restarting
+	}
+	return false
+}
+
+func (x *UpdateStatus) GetActiveTurns() int32 {
+	if x != nil {
+		return x.ActiveTurns
 	}
 	return 0
 }
@@ -585,6 +609,166 @@ func (x *InstallUpdateResponse) GetStatus() *UpdateStatus {
 	return nil
 }
 
+type RestartToApplyUpdateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartToApplyUpdateRequest) Reset() {
+	*x = RestartToApplyUpdateRequest{}
+	mi := &file_ariadne_v1_updates_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartToApplyUpdateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartToApplyUpdateRequest) ProtoMessage() {}
+
+func (x *RestartToApplyUpdateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_updates_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartToApplyUpdateRequest.ProtoReflect.Descriptor instead.
+func (*RestartToApplyUpdateRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_updates_proto_rawDescGZIP(), []int{11}
+}
+
+type RestartToApplyUpdateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        *UpdateStatus          `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartToApplyUpdateResponse) Reset() {
+	*x = RestartToApplyUpdateResponse{}
+	mi := &file_ariadne_v1_updates_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartToApplyUpdateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartToApplyUpdateResponse) ProtoMessage() {}
+
+func (x *RestartToApplyUpdateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_updates_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartToApplyUpdateResponse.ProtoReflect.Descriptor instead.
+func (*RestartToApplyUpdateResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_updates_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RestartToApplyUpdateResponse) GetStatus() *UpdateStatus {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
+type CancelRestartRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelRestartRequest) Reset() {
+	*x = CancelRestartRequest{}
+	mi := &file_ariadne_v1_updates_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelRestartRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelRestartRequest) ProtoMessage() {}
+
+func (x *CancelRestartRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_updates_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelRestartRequest.ProtoReflect.Descriptor instead.
+func (*CancelRestartRequest) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_updates_proto_rawDescGZIP(), []int{13}
+}
+
+type CancelRestartResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        *UpdateStatus          `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelRestartResponse) Reset() {
+	*x = CancelRestartResponse{}
+	mi := &file_ariadne_v1_updates_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelRestartResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelRestartResponse) ProtoMessage() {}
+
+func (x *CancelRestartResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_updates_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelRestartResponse.ProtoReflect.Descriptor instead.
+func (*CancelRestartResponse) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_updates_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CancelRestartResponse) GetStatus() *UpdateStatus {
+	if x != nil {
+		return x.Status
+	}
+	return nil
+}
+
 var File_ariadne_v1_updates_proto protoreflect.FileDescriptor
 
 const file_ariadne_v1_updates_proto_rawDesc = "" +
@@ -601,7 +785,7 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"\n" +
 	"prerelease\x18\x04 \x01(\bR\n" +
 	"prerelease\x12 \n" +
-	"\vinstallable\x18\x05 \x01(\bR\vinstallable\"\xbc\x02\n" +
+	"\vinstallable\x18\x05 \x01(\bR\vinstallable\"\xa0\x03\n" +
 	"\fUpdateStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12?\n" +
 	"\vpreferences\x18\x02 \x01(\v2\x1d.ariadne.v1.UpdatePreferencesR\vpreferences\x12\x1f\n" +
@@ -610,7 +794,14 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"\x05state\x18\x04 \x01(\tR\x05state\x128\n" +
 	"\arelease\x18\x05 \x01(\v2\x19.ariadne.v1.UpdateReleaseH\x00R\arelease\x88\x01\x01\x12\x1d\n" +
 	"\afailure\x18\x06 \x01(\tH\x01R\afailure\x88\x01\x01\x12)\n" +
-	"\x10download_percent\x18\a \x01(\x05R\x0fdownloadPercentB\n" +
+	"\x10download_percent\x18\a \x01(\x05R\x0fdownloadPercent\x12\x1f\n" +
+	"\vcan_restart\x18\b \x01(\bR\n" +
+	"canRestart\x12\x1e\n" +
+	"\n" +
+	"restarting\x18\t \x01(\bR\n" +
+	"restarting\x12!\n" +
+	"\factive_turns\x18\n" +
+	" \x01(\x05R\vactiveTurnsB\n" +
 	"\n" +
 	"\b_releaseB\n" +
 	"\n" +
@@ -629,12 +820,20 @@ const file_ariadne_v1_updates_proto_rawDesc = "" +
 	"\x14InstallUpdateRequest\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\"I\n" +
 	"\x15InstallUpdateResponse\x120\n" +
-	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status2\x88\x03\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status\"\x1d\n" +
+	"\x1bRestartToApplyUpdateRequest\"P\n" +
+	"\x1cRestartToApplyUpdateResponse\x120\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status\"\x16\n" +
+	"\x14CancelRestartRequest\"I\n" +
+	"\x15CancelRestartResponse\x120\n" +
+	"\x06status\x18\x01 \x01(\v2\x18.ariadne.v1.UpdateStatusR\x06status2\xc9\x04\n" +
 	"\rUpdateService\x12Z\n" +
 	"\x0fGetUpdateStatus\x12\".ariadne.v1.GetUpdateStatusRequest\x1a#.ariadne.v1.GetUpdateStatusResponse\x12l\n" +
 	"\x15SaveUpdatePreferences\x12(.ariadne.v1.SaveUpdatePreferencesRequest\x1a).ariadne.v1.SaveUpdatePreferencesResponse\x12W\n" +
 	"\x0eCheckForUpdate\x12!.ariadne.v1.CheckForUpdateRequest\x1a\".ariadne.v1.CheckForUpdateResponse\x12T\n" +
-	"\rInstallUpdate\x12 .ariadne.v1.InstallUpdateRequest\x1a!.ariadne.v1.InstallUpdateResponseB\xa9\x01\n" +
+	"\rInstallUpdate\x12 .ariadne.v1.InstallUpdateRequest\x1a!.ariadne.v1.InstallUpdateResponse\x12i\n" +
+	"\x14RestartToApplyUpdate\x12'.ariadne.v1.RestartToApplyUpdateRequest\x1a(.ariadne.v1.RestartToApplyUpdateResponse\x12T\n" +
+	"\rCancelRestart\x12 .ariadne.v1.CancelRestartRequest\x1a!.ariadne.v1.CancelRestartResponseB\xa9\x01\n" +
 	"\x0ecom.ariadne.v1B\fUpdatesProtoP\x01Z@github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1;ariadnev1\xa2\x02\x03AXX\xaa\x02\n" +
 	"Ariadne.V1\xca\x02\n" +
 	"Ariadne\\V1\xe2\x02\x16Ariadne\\V1\\GPBMetadata\xea\x02\vAriadne::V1b\x06proto3"
@@ -651,7 +850,7 @@ func file_ariadne_v1_updates_proto_rawDescGZIP() []byte {
 	return file_ariadne_v1_updates_proto_rawDescData
 }
 
-var file_ariadne_v1_updates_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_ariadne_v1_updates_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_ariadne_v1_updates_proto_goTypes = []any{
 	(*UpdatePreferences)(nil),             // 0: ariadne.v1.UpdatePreferences
 	(*UpdateRelease)(nil),                 // 1: ariadne.v1.UpdateRelease
@@ -664,6 +863,10 @@ var file_ariadne_v1_updates_proto_goTypes = []any{
 	(*CheckForUpdateResponse)(nil),        // 8: ariadne.v1.CheckForUpdateResponse
 	(*InstallUpdateRequest)(nil),          // 9: ariadne.v1.InstallUpdateRequest
 	(*InstallUpdateResponse)(nil),         // 10: ariadne.v1.InstallUpdateResponse
+	(*RestartToApplyUpdateRequest)(nil),   // 11: ariadne.v1.RestartToApplyUpdateRequest
+	(*RestartToApplyUpdateResponse)(nil),  // 12: ariadne.v1.RestartToApplyUpdateResponse
+	(*CancelRestartRequest)(nil),          // 13: ariadne.v1.CancelRestartRequest
+	(*CancelRestartResponse)(nil),         // 14: ariadne.v1.CancelRestartResponse
 }
 var file_ariadne_v1_updates_proto_depIdxs = []int32{
 	0,  // 0: ariadne.v1.UpdateStatus.preferences:type_name -> ariadne.v1.UpdatePreferences
@@ -672,19 +875,25 @@ var file_ariadne_v1_updates_proto_depIdxs = []int32{
 	2,  // 3: ariadne.v1.SaveUpdatePreferencesResponse.status:type_name -> ariadne.v1.UpdateStatus
 	2,  // 4: ariadne.v1.CheckForUpdateResponse.status:type_name -> ariadne.v1.UpdateStatus
 	2,  // 5: ariadne.v1.InstallUpdateResponse.status:type_name -> ariadne.v1.UpdateStatus
-	3,  // 6: ariadne.v1.UpdateService.GetUpdateStatus:input_type -> ariadne.v1.GetUpdateStatusRequest
-	5,  // 7: ariadne.v1.UpdateService.SaveUpdatePreferences:input_type -> ariadne.v1.SaveUpdatePreferencesRequest
-	7,  // 8: ariadne.v1.UpdateService.CheckForUpdate:input_type -> ariadne.v1.CheckForUpdateRequest
-	9,  // 9: ariadne.v1.UpdateService.InstallUpdate:input_type -> ariadne.v1.InstallUpdateRequest
-	4,  // 10: ariadne.v1.UpdateService.GetUpdateStatus:output_type -> ariadne.v1.GetUpdateStatusResponse
-	6,  // 11: ariadne.v1.UpdateService.SaveUpdatePreferences:output_type -> ariadne.v1.SaveUpdatePreferencesResponse
-	8,  // 12: ariadne.v1.UpdateService.CheckForUpdate:output_type -> ariadne.v1.CheckForUpdateResponse
-	10, // 13: ariadne.v1.UpdateService.InstallUpdate:output_type -> ariadne.v1.InstallUpdateResponse
-	10, // [10:14] is the sub-list for method output_type
-	6,  // [6:10] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	2,  // 6: ariadne.v1.RestartToApplyUpdateResponse.status:type_name -> ariadne.v1.UpdateStatus
+	2,  // 7: ariadne.v1.CancelRestartResponse.status:type_name -> ariadne.v1.UpdateStatus
+	3,  // 8: ariadne.v1.UpdateService.GetUpdateStatus:input_type -> ariadne.v1.GetUpdateStatusRequest
+	5,  // 9: ariadne.v1.UpdateService.SaveUpdatePreferences:input_type -> ariadne.v1.SaveUpdatePreferencesRequest
+	7,  // 10: ariadne.v1.UpdateService.CheckForUpdate:input_type -> ariadne.v1.CheckForUpdateRequest
+	9,  // 11: ariadne.v1.UpdateService.InstallUpdate:input_type -> ariadne.v1.InstallUpdateRequest
+	11, // 12: ariadne.v1.UpdateService.RestartToApplyUpdate:input_type -> ariadne.v1.RestartToApplyUpdateRequest
+	13, // 13: ariadne.v1.UpdateService.CancelRestart:input_type -> ariadne.v1.CancelRestartRequest
+	4,  // 14: ariadne.v1.UpdateService.GetUpdateStatus:output_type -> ariadne.v1.GetUpdateStatusResponse
+	6,  // 15: ariadne.v1.UpdateService.SaveUpdatePreferences:output_type -> ariadne.v1.SaveUpdatePreferencesResponse
+	8,  // 16: ariadne.v1.UpdateService.CheckForUpdate:output_type -> ariadne.v1.CheckForUpdateResponse
+	10, // 17: ariadne.v1.UpdateService.InstallUpdate:output_type -> ariadne.v1.InstallUpdateResponse
+	12, // 18: ariadne.v1.UpdateService.RestartToApplyUpdate:output_type -> ariadne.v1.RestartToApplyUpdateResponse
+	14, // 19: ariadne.v1.UpdateService.CancelRestart:output_type -> ariadne.v1.CancelRestartResponse
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_updates_proto_init() }
@@ -699,7 +908,7 @@ func file_ariadne_v1_updates_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ariadne_v1_updates_proto_rawDesc), len(file_ariadne_v1_updates_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

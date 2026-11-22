@@ -211,6 +211,9 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
       canInstall: true,
       state: 'downloading',
       downloadPercent: 64,
+      canRestart: false,
+      restarting: false,
+      activeTurns: 0,
       release: {
         version: '1.1.0',
         notes: 'Notes',
@@ -483,6 +486,58 @@ describe('ConnectRPC EventService.StreamEvents client', () => {
     await flushPromises()
     expect(updates.status.value?.state).toBe('ready')
     expect(updates.pending.value).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  test('useUpdatesSettings triggers safe restart and cancelRestart when ready', async () => {
+    const readyStatus: UpdateStatus = {
+      version: '1.0.0',
+      preferences: { channel: 'stable', automatic: false },
+      canInstall: true,
+      canRestart: true,
+      restarting: false,
+      activeTurns: 2,
+      state: 'ready',
+      downloadPercent: 0,
+      release: {
+        version: '1.1.0',
+        notes: 'Notes',
+        url: 'https://example.com',
+        prerelease: false,
+        installable: true,
+      },
+    }
+    const drainingStatus: UpdateStatus = { ...readyStatus, restarting: true, activeTurns: 2 }
+
+    vi.spyOn(api, 'updateStatus').mockResolvedValue(readyStatus)
+    const restartSpy = vi.spyOn(api, 'restartToApplyUpdate').mockResolvedValue(drainingStatus)
+    const cancelSpy = vi.spyOn(api, 'cancelRestart').mockResolvedValue(readyStatus)
+
+    let updates!: ReturnType<typeof useUpdatesSettings>
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          updates = useUpdatesSettings()
+          return () => h('div')
+        },
+      }),
+    )
+
+    await flushPromises()
+    expect(updates.restartable.value).toBe(true)
+    expect(updates.restarting.value).toBe(false)
+
+    updates.restart()
+    await flushPromises()
+    expect(restartSpy).toHaveBeenCalledTimes(1)
+    expect(updates.restarting.value).toBe(true)
+    expect(updates.message.value).toContain('2')
+
+    updates.cancelRestart()
+    await flushPromises()
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
+    expect(updates.restarting.value).toBe(false)
 
     wrapper.unmount()
   })

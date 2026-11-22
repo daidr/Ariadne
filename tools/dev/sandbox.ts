@@ -81,7 +81,7 @@ try {
   children.pop()
   for (const reservation of reservations) reservation.stop(true)
   children.push(
-    Bun.spawn([executable], {
+    Bun.spawn([executable, 'serve'], {
       cwd: root,
       env,
       stdin: 'ignore',

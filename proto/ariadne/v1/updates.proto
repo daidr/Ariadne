@@ -8,6 +8,8 @@ service UpdateService {
   rpc SaveUpdatePreferences(SaveUpdatePreferencesRequest) returns (SaveUpdatePreferencesResponse);
   rpc CheckForUpdate(CheckForUpdateRequest) returns (CheckForUpdateResponse);
   rpc InstallUpdate(InstallUpdateRequest) returns (InstallUpdateResponse);
+  rpc RestartToApplyUpdate(RestartToApplyUpdateRequest) returns (RestartToApplyUpdateResponse);
+  rpc CancelRestart(CancelRestartRequest) returns (CancelRestartResponse);
 }
 
 message UpdatePreferences {
@@ -31,6 +33,9 @@ message UpdateStatus {
   optional UpdateRelease release = 5;
   optional string failure = 6;
   int32 download_percent = 7;
+  bool can_restart = 8;
+  bool restarting = 9;
+  int32 active_turns = 10;
 }
 
 message GetUpdateStatusRequest {}
@@ -59,5 +64,17 @@ message InstallUpdateRequest {
 }
 
 message InstallUpdateResponse {
+  UpdateStatus status = 1;
+}
+
+message RestartToApplyUpdateRequest {}
+
+message RestartToApplyUpdateResponse {
+  UpdateStatus status = 1;
+}
+
+message CancelRestartRequest {}
+
+message CancelRestartResponse {
   UpdateStatus status = 1;
 }

@@ -12,7 +12,7 @@ import type { Message } from '@bufbuild/protobuf'
 export const file_ariadne_v1_updates: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChhhcmlhZG5lL3YxL3VwZGF0ZXMucHJvdG8SCmFyaWFkbmUudjEiNwoRVXBkYXRlUHJlZmVyZW5jZXMSDwoHY2hhbm5lbBgBIAEoCRIRCglhdXRvbWF0aWMYAiABKAgiZQoNVXBkYXRlUmVsZWFzZRIPCgd2ZXJzaW9uGAEgASgJEg0KBW5vdGVzGAIgASgJEgsKA3VybBgDIAEoCRISCgpwcmVyZWxlYXNlGAQgASgIEhMKC2luc3RhbGxhYmxlGAUgASgIIvABCgxVcGRhdGVTdGF0dXMSDwoHdmVyc2lvbhgBIAEoCRIyCgtwcmVmZXJlbmNlcxgCIAEoCzIdLmFyaWFkbmUudjEuVXBkYXRlUHJlZmVyZW5jZXMSEwoLY2FuX2luc3RhbGwYAyABKAgSDQoFc3RhdGUYBCABKAkSLwoHcmVsZWFzZRgFIAEoCzIZLmFyaWFkbmUudjEuVXBkYXRlUmVsZWFzZUgAiAEBEhQKB2ZhaWx1cmUYBiABKAlIAYgBARIYChBkb3dubG9hZF9wZXJjZW50GAcgASgFQgoKCF9yZWxlYXNlQgoKCF9mYWlsdXJlIhgKFkdldFVwZGF0ZVN0YXR1c1JlcXVlc3QiQwoXR2V0VXBkYXRlU3RhdHVzUmVzcG9uc2USKAoGc3RhdHVzGAEgASgLMhguYXJpYWRuZS52MS5VcGRhdGVTdGF0dXMiQgocU2F2ZVVwZGF0ZVByZWZlcmVuY2VzUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEhEKCWF1dG9tYXRpYxgCIAEoCCJJCh1TYXZlVXBkYXRlUHJlZmVyZW5jZXNSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyIXChVDaGVja0ZvclVwZGF0ZVJlcXVlc3QiQgoWQ2hlY2tGb3JVcGRhdGVSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyInChRJbnN0YWxsVXBkYXRlUmVxdWVzdBIPCgd2ZXJzaW9uGAEgASgJIkEKFUluc3RhbGxVcGRhdGVSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1czKIAwoNVXBkYXRlU2VydmljZRJaCg9HZXRVcGRhdGVTdGF0dXMSIi5hcmlhZG5lLnYxLkdldFVwZGF0ZVN0YXR1c1JlcXVlc3QaIy5hcmlhZG5lLnYxLkdldFVwZGF0ZVN0YXR1c1Jlc3BvbnNlEmwKFVNhdmVVcGRhdGVQcmVmZXJlbmNlcxIoLmFyaWFkbmUudjEuU2F2ZVVwZGF0ZVByZWZlcmVuY2VzUmVxdWVzdBopLmFyaWFkbmUudjEuU2F2ZVVwZGF0ZVByZWZlcmVuY2VzUmVzcG9uc2USVwoOQ2hlY2tGb3JVcGRhdGUSIS5hcmlhZG5lLnYxLkNoZWNrRm9yVXBkYXRlUmVxdWVzdBoiLmFyaWFkbmUudjEuQ2hlY2tGb3JVcGRhdGVSZXNwb25zZRJUCg1JbnN0YWxsVXBkYXRlEiAuYXJpYWRuZS52MS5JbnN0YWxsVXBkYXRlUmVxdWVzdBohLmFyaWFkbmUudjEuSW5zdGFsbFVwZGF0ZVJlc3BvbnNlQqkBCg5jb20uYXJpYWRuZS52MUIMVXBkYXRlc1Byb3RvUAFaQGdpdGh1Yi5jb20vZGFpZHIvQXJpYWRuZS9pbnRlcm5hbC9nZW4vcHJvdG8vYXJpYWRuZS92MTthcmlhZG5ldjGiAgNBWFiqAgpBcmlhZG5lLlYxygIKQXJpYWRuZVxWMeICFkFyaWFkbmVcVjFcR1BCTWV0YWRhdGHqAgtBcmlhZG5lOjpWMWIGcHJvdG8z',
+    'ChhhcmlhZG5lL3YxL3VwZGF0ZXMucHJvdG8SCmFyaWFkbmUudjEiNwoRVXBkYXRlUHJlZmVyZW5jZXMSDwoHY2hhbm5lbBgBIAEoCRIRCglhdXRvbWF0aWMYAiABKAgiZQoNVXBkYXRlUmVsZWFzZRIPCgd2ZXJzaW9uGAEgASgJEg0KBW5vdGVzGAIgASgJEgsKA3VybBgDIAEoCRISCgpwcmVyZWxlYXNlGAQgASgIEhMKC2luc3RhbGxhYmxlGAUgASgIIq8CCgxVcGRhdGVTdGF0dXMSDwoHdmVyc2lvbhgBIAEoCRIyCgtwcmVmZXJlbmNlcxgCIAEoCzIdLmFyaWFkbmUudjEuVXBkYXRlUHJlZmVyZW5jZXMSEwoLY2FuX2luc3RhbGwYAyABKAgSDQoFc3RhdGUYBCABKAkSLwoHcmVsZWFzZRgFIAEoCzIZLmFyaWFkbmUudjEuVXBkYXRlUmVsZWFzZUgAiAEBEhQKB2ZhaWx1cmUYBiABKAlIAYgBARIYChBkb3dubG9hZF9wZXJjZW50GAcgASgFEhMKC2Nhbl9yZXN0YXJ0GAggASgIEhIKCnJlc3RhcnRpbmcYCSABKAgSFAoMYWN0aXZlX3R1cm5zGAogASgFQgoKCF9yZWxlYXNlQgoKCF9mYWlsdXJlIhgKFkdldFVwZGF0ZVN0YXR1c1JlcXVlc3QiQwoXR2V0VXBkYXRlU3RhdHVzUmVzcG9uc2USKAoGc3RhdHVzGAEgASgLMhguYXJpYWRuZS52MS5VcGRhdGVTdGF0dXMiQgocU2F2ZVVwZGF0ZVByZWZlcmVuY2VzUmVxdWVzdBIPCgdjaGFubmVsGAEgASgJEhEKCWF1dG9tYXRpYxgCIAEoCCJJCh1TYXZlVXBkYXRlUHJlZmVyZW5jZXNSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyIXChVDaGVja0ZvclVwZGF0ZVJlcXVlc3QiQgoWQ2hlY2tGb3JVcGRhdGVSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyInChRJbnN0YWxsVXBkYXRlUmVxdWVzdBIPCgd2ZXJzaW9uGAEgASgJIkEKFUluc3RhbGxVcGRhdGVSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyIdChtSZXN0YXJ0VG9BcHBseVVwZGF0ZVJlcXVlc3QiSAocUmVzdGFydFRvQXBwbHlVcGRhdGVSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC5hcmlhZG5lLnYxLlVwZGF0ZVN0YXR1cyIWChRDYW5jZWxSZXN0YXJ0UmVxdWVzdCJBChVDYW5jZWxSZXN0YXJ0UmVzcG9uc2USKAoGc3RhdHVzGAEgASgLMhguYXJpYWRuZS52MS5VcGRhdGVTdGF0dXMyyQQKDVVwZGF0ZVNlcnZpY2USWgoPR2V0VXBkYXRlU3RhdHVzEiIuYXJpYWRuZS52MS5HZXRVcGRhdGVTdGF0dXNSZXF1ZXN0GiMuYXJpYWRuZS52MS5HZXRVcGRhdGVTdGF0dXNSZXNwb25zZRJsChVTYXZlVXBkYXRlUHJlZmVyZW5jZXMSKC5hcmlhZG5lLnYxLlNhdmVVcGRhdGVQcmVmZXJlbmNlc1JlcXVlc3QaKS5hcmlhZG5lLnYxLlNhdmVVcGRhdGVQcmVmZXJlbmNlc1Jlc3BvbnNlElcKDkNoZWNrRm9yVXBkYXRlEiEuYXJpYWRuZS52MS5DaGVja0ZvclVwZGF0ZVJlcXVlc3QaIi5hcmlhZG5lLnYxLkNoZWNrRm9yVXBkYXRlUmVzcG9uc2USVAoNSW5zdGFsbFVwZGF0ZRIgLmFyaWFkbmUudjEuSW5zdGFsbFVwZGF0ZVJlcXVlc3QaIS5hcmlhZG5lLnYxLkluc3RhbGxVcGRhdGVSZXNwb25zZRJpChRSZXN0YXJ0VG9BcHBseVVwZGF0ZRInLmFyaWFkbmUudjEuUmVzdGFydFRvQXBwbHlVcGRhdGVSZXF1ZXN0GiguYXJpYWRuZS52MS5SZXN0YXJ0VG9BcHBseVVwZGF0ZVJlc3BvbnNlElQKDUNhbmNlbFJlc3RhcnQSIC5hcmlhZG5lLnYxLkNhbmNlbFJlc3RhcnRSZXF1ZXN0GiEuYXJpYWRuZS52MS5DYW5jZWxSZXN0YXJ0UmVzcG9uc2VCqQEKDmNvbS5hcmlhZG5lLnYxQgxVcGRhdGVzUHJvdG9QAVpAZ2l0aHViLmNvbS9kYWlkci9BcmlhZG5lL2ludGVybmFsL2dlbi9wcm90by9hcmlhZG5lL3YxO2FyaWFkbmV2MaICA0FYWKoCCkFyaWFkbmUuVjHKAgpBcmlhZG5lXFYx4gIWQXJpYWRuZVxWMVxHUEJNZXRhZGF0YeoCC0FyaWFkbmU6OlYxYgZwcm90bzM',
   )
 
 /**
@@ -114,6 +114,21 @@ export type UpdateStatus = Message<'ariadne.v1.UpdateStatus'> & {
    * @generated from field: int32 download_percent = 7;
    */
   downloadPercent: number
+
+  /**
+   * @generated from field: bool can_restart = 8;
+   */
+  canRestart: boolean
+
+  /**
+   * @generated from field: bool restarting = 9;
+   */
+  restarting: boolean
+
+  /**
+   * @generated from field: int32 active_turns = 10;
+   */
+  activeTurns: number
 }
 
 /**
@@ -264,6 +279,68 @@ export const InstallUpdateResponseSchema: GenMessage<InstallUpdateResponse> =
   messageDesc(file_ariadne_v1_updates, 10)
 
 /**
+ * @generated from message ariadne.v1.RestartToApplyUpdateRequest
+ */
+export type RestartToApplyUpdateRequest = Message<'ariadne.v1.RestartToApplyUpdateRequest'> & {}
+
+/**
+ * Describes the message ariadne.v1.RestartToApplyUpdateRequest.
+ * Use `create(RestartToApplyUpdateRequestSchema)` to create a new message.
+ */
+export const RestartToApplyUpdateRequestSchema: GenMessage<RestartToApplyUpdateRequest> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_updates, 11)
+
+/**
+ * @generated from message ariadne.v1.RestartToApplyUpdateResponse
+ */
+export type RestartToApplyUpdateResponse = Message<'ariadne.v1.RestartToApplyUpdateResponse'> & {
+  /**
+   * @generated from field: ariadne.v1.UpdateStatus status = 1;
+   */
+  status?: UpdateStatus | undefined
+}
+
+/**
+ * Describes the message ariadne.v1.RestartToApplyUpdateResponse.
+ * Use `create(RestartToApplyUpdateResponseSchema)` to create a new message.
+ */
+export const RestartToApplyUpdateResponseSchema: GenMessage<RestartToApplyUpdateResponse> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_updates, 12)
+
+/**
+ * @generated from message ariadne.v1.CancelRestartRequest
+ */
+export type CancelRestartRequest = Message<'ariadne.v1.CancelRestartRequest'> & {}
+
+/**
+ * Describes the message ariadne.v1.CancelRestartRequest.
+ * Use `create(CancelRestartRequestSchema)` to create a new message.
+ */
+export const CancelRestartRequestSchema: GenMessage<CancelRestartRequest> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_updates, 13)
+
+/**
+ * @generated from message ariadne.v1.CancelRestartResponse
+ */
+export type CancelRestartResponse = Message<'ariadne.v1.CancelRestartResponse'> & {
+  /**
+   * @generated from field: ariadne.v1.UpdateStatus status = 1;
+   */
+  status?: UpdateStatus | undefined
+}
+
+/**
+ * Describes the message ariadne.v1.CancelRestartResponse.
+ * Use `create(CancelRestartResponseSchema)` to create a new message.
+ */
+export const CancelRestartResponseSchema: GenMessage<CancelRestartResponse> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_updates, 14)
+
+/**
  * UpdateService manages software update checks, preferences, and installation.
  *
  * @generated from service ariadne.v1.UpdateService
@@ -300,5 +377,21 @@ export const UpdateService: GenService<{
     methodKind: 'unary'
     input: typeof InstallUpdateRequestSchema
     output: typeof InstallUpdateResponseSchema
+  }
+  /**
+   * @generated from rpc ariadne.v1.UpdateService.RestartToApplyUpdate
+   */
+  restartToApplyUpdate: {
+    methodKind: 'unary'
+    input: typeof RestartToApplyUpdateRequestSchema
+    output: typeof RestartToApplyUpdateResponseSchema
+  }
+  /**
+   * @generated from rpc ariadne.v1.UpdateService.CancelRestart
+   */
+  cancelRestart: {
+    methodKind: 'unary'
+    input: typeof CancelRestartRequestSchema
+    output: typeof CancelRestartResponseSchema
   }
 }> = /*@__PURE__*/ serviceDesc(file_ariadne_v1_updates, 0)

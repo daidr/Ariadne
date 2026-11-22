@@ -33,6 +33,7 @@ import (
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/scheduler"
 	"github.com/daidr/Ariadne/internal/searches"
+	"github.com/daidr/Ariadne/internal/service"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -73,6 +74,7 @@ type Options struct {
 	Searches         *searches.Registry
 	Rooms            *collab.Rooms
 	Plugins          *plugins.Host
+	ServiceControl   *service.Controller
 }
 type API struct {
 	options       Options
@@ -172,6 +174,7 @@ func New(options Options) (*API, error) {
 	api.registerIssueRPC()
 	api.registerSettings()
 	api.registerUpdates()
+	api.registerServiceControl()
 	api.registerPlugins()
 	api.registerMetaRPC()
 	api.registerThreadService()

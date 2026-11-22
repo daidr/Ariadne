@@ -53,6 +53,10 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil && !firstRun {
 		return Config{}, err
 	}
+	host := "127.0.0.1"
+	if given, exists := lookup("ARIADNE_HOST"); exists && strings.TrimSpace(given) != "" {
+		host = strings.TrimSpace(given)
+	}
 	port := 7428
 	if given, exists := lookup("ARIADNE_PORT"); exists {
 		port, err = strconv.Atoi(given)
@@ -71,7 +75,7 @@ func Load(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, errors.New("ARIADNE_TOKEN must not be empty")
 	}
 	open, _ := lookup("ARIADNE_OPEN")
-	return Config{Home: home, DatabasePath: database, Host: "127.0.0.1", Port: port, Token: token, Open: open == "1", FirstRun: firstRun}, nil
+	return Config{Home: home, DatabasePath: database, Host: host, Port: port, Token: token, Open: open == "1", FirstRun: firstRun}, nil
 }
 
 func loadToken(home string) (string, error) {

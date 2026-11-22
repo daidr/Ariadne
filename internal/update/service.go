@@ -34,6 +34,9 @@ type View struct {
 	Release         *Release                   `json:"release"`
 	Failure         string                     `json:"failure,omitempty"`
 	DownloadPercent int                        `json:"downloadPercent"`
+	CanRestart      bool                       `json:"canRestart,omitempty"`
+	Restarting      bool                       `json:"restarting,omitempty"`
+	ActiveTurns     int                        `json:"activeTurns,omitempty"`
 }
 
 func (view View) updating() bool {
@@ -123,6 +126,20 @@ func (service *Service) View() View {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	return cloneView(service.view)
+}
+
+func (service *Service) SetRestartState(canRestart, restarting bool, activeTurns int) {
+	service.mu.Lock()
+	if service.view.CanRestart == canRestart && service.view.Restarting == restarting && service.view.ActiveTurns == activeTurns {
+		service.mu.Unlock()
+		return
+	}
+	service.view.CanRestart = canRestart
+	service.view.Restarting = restarting
+	service.view.ActiveTurns = activeTurns
+	service.viewSeq++
+	service.mu.Unlock()
+	service.emitChange()
 }
 
 func (service *Service) Save(value settings.UpdatePreferences) (View, error) {

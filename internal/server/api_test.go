@@ -152,15 +152,19 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	defer api.Close()
 	parameter := regexp.MustCompile(`:[a-zA-Z]+`)
-	wantNativeRoutes := []string{
-		"GET /api/artifacts/:artifactId/live",
-		"GET /api/conversations/:conversationId/trace/export",
-		"GET /api/files/:fileId",
-		"GET /api/health",
-		"GET /api/projects/:projectId/export",
-		"HEAD /api/files/:fileId",
-		"POST /api/projects/:projectId/files",
-	}
+		wantNativeRoutes := []string{
+			"GET /api/artifacts/:artifactId/live",
+			"GET /api/conversations/:conversationId/trace/export",
+			"GET /api/files/:fileId",
+			"GET /api/health",
+			"GET /api/projects/:projectId/export",
+			"GET /api/service/status",
+			"HEAD /api/files/:fileId",
+			"POST /api/projects/:projectId/files",
+			"POST /api/service/cancel-drain",
+			"POST /api/service/drain",
+			"POST /api/service/shutdown",
+		}
 	gotNativeRoutes := slices.Clone(api.routes)
 	slices.Sort(gotNativeRoutes)
 	if !slices.Equal(gotNativeRoutes, wantNativeRoutes) {

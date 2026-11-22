@@ -38,21 +38,23 @@ import (
 )
 
 type Runner struct {
-	Repository *core.Repository
-	Settings   *settings.Store
-	Models     *models.Registry
-	Drafts     *realtime.ReplyDrafts
-	Live       *realtime.LiveCommands
-	Workspaces *workspaces.Manager
-	MCP        *mcp.Hub
-	SkillsDirs []string
-	Searches   *searches.Registry
-	HTTPClient *http.Client
-	Rooms      *collab.Rooms
-	Dashboards *dashboard.Registry
-	Browser    *browser.Pages
-	Sources    *sources.Registry
-	Home       string
+	Repository      *core.Repository
+	Settings        *settings.Store
+	Models          *models.Registry
+	Drafts          *realtime.ReplyDrafts
+	Live            *realtime.LiveCommands
+	Workspaces      *workspaces.Manager
+	MCP             *mcp.Hub
+	SkillsDirs      []string
+	Searches        *searches.Registry
+	HTTPClient      *http.Client
+	Rooms           *collab.Rooms
+	Dashboards      *dashboard.Registry
+	Browser         *browser.Pages
+	Sources         *sources.Registry
+	Home            string
+	ShouldSuspend   func() bool
+	OnModelResolved func(conversationID, modelLabel string, stateful bool)
 }
 
 type turn struct {
@@ -101,6 +103,9 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 	}
 	if model == nil {
 		return domainerr.New("error.noModel", nil)
+	}
+	if runner.OnModelResolved != nil {
+		runner.OnModelResolved(conversation.ID, model.Label, model.Provider.HasStatefulSessions())
 	}
 	id, err := runner.Repository.StartScheduledTurn(ctx, conversation.ID, model.Label)
 	if err != nil || id == "" {
@@ -402,6 +407,9 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					return err
 				}
 				model = model.Fallback
+				if turn.OnModelResolved != nil {
+					turn.OnModelResolved(conversation.ID, model.Label, model.Provider.HasStatefulSessions())
+				}
 				lastInput, compactionFailed = 0, false
 				continue
 			}
@@ -477,6 +485,13 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					return domainerr.New("error.repeating", map[string]any{"count": repeats})
 				}
 			}
+		}
+		// Safe-point handoff for stateless HTTP models: every step and tool result
+		// is durably committed in SQLite, so suspending here lets the restarted
+		// server immediately resume the next step without error or lost work.
+		if !model.Provider.HasStatefulSessions() && turn.ShouldSuspend != nil && turn.ShouldSuspend() {
+			turn.changes.record(ctx, turn.id)
+			return turn.Repository.FinishTurn(ctx, conversation.ID, turn.id, "suspended", nil)
 		}
 	}
 }
