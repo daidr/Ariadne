@@ -2,6 +2,7 @@
 import type { ArtifactSummary } from '@ariadne/core'
 import { DouAvatar, DouCard, DouText } from 'dou-ui'
 import { locale, t } from '../i18n'
+import { dragArtifact } from '../side/dock'
 import ArtifactThumb from './ArtifactThumb.vue'
 import { kindIcon } from './kinds'
 
@@ -30,6 +31,7 @@ function editedAt(at: number): string {
     class="artifact-card"
     :class="{ 'artifact-card-current': current }"
     :aria-current="current ? 'page' : undefined"
+    @pointerdown="dragArtifact($event, artifact.id)"
   >
     <ArtifactThumb :artifact="artifact" />
     <span class="card-info">
@@ -52,6 +54,7 @@ function editedAt(at: number): string {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  touch-action: pan-y;
 }
 
 .card-info {

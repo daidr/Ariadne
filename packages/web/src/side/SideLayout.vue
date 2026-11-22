@@ -83,16 +83,19 @@ function viewLabel(key: PaneKey): { label: string; icon: Component } | null {
 const labelOf = (key: PaneKey) =>
   lists[side.listOf(key) ?? '']?.label() ?? threadAt(key)?.title ?? viewLabel(key)?.label ?? ''
 
-/** The artifacts and changes open in tabs. */
+/** The non-artifact views (and any open artifact missing from `state.artifacts`) open in tabs. */
 const openViews = computed(() =>
   side
     .groupsOf(state.side.root)
     .flatMap(side.tabsOf)
-    .filter((key) => side.viewOf(key)),
+    .filter((key) => {
+      const view = side.viewOf(key)
+      return !!view && (view.kind !== 'artifact' || !artifactById.value.has(view.id))
+    }),
 )
 
-// Every thread of the project is listed, open or not, so one can be dragged in from the
-// thread list. The fixed tabs and their copies have separate dock keys.
+// Every thread and artifact of the project is listed, open or not, so one can be dragged in
+// from a list, card or message link. The fixed tabs and their copies have separate dock keys.
 const panels = computed<DockPanel[]>(() => [
   ...groups.value.flatMap((group) =>
     side.tabsOf(group).flatMap((key) => {
@@ -105,6 +108,12 @@ const panels = computed<DockPanel[]>(() => [
   ...(state.detail?.threads ?? []).map((thread) => ({
     value: side.threadKey(thread.id),
     label: thread.title,
+    closable: true,
+  })),
+  ...state.artifacts.map((artifact) => ({
+    value: side.artifactKey(artifact.id),
+    label: artifact.title,
+    icon: kindIcon[artifact.kind],
     closable: true,
   })),
   ...openViews.value.map((key) => ({ value: key, ...viewLabel(key)!, closable: true })),
@@ -328,6 +337,12 @@ function dragPinned(event: PointerEvent, key: side.ListKey) {
 
 .side-dock :deep(.dou-tabs__tab:has(.pane-pinned-label)) {
   display: none;
+}
+
+/* Keep the scrolling tab list at full tab height even when every tab inside it is hidden
+   (pinned) or empty, so the drop insertion marker is not clipped vertically. */
+.side-dock :deep(.dou-tabs__list) {
+  min-height: var(--dou-tabs-height);
 }
 
 .side-dock :deep(.side-pinned-host) {

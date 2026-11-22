@@ -3,6 +3,7 @@ import { DouLink } from 'dou-ui'
 import type { ThreadArtifact } from '@ariadne/core'
 import { kindIcon } from '../artifacts/kinds'
 import { useOpenView } from '../opened-from'
+import { dragArtifact } from '../side/dock'
 
 const openView = useOpenView()
 
@@ -19,6 +20,7 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
       class="report-artifact"
       underline="none"
       @click="openView({ kind: 'artifact', id: artifact.id })"
+      @pointerdown="dragArtifact($event, artifact.id)"
     >
       <template #leading><component :is="kindIcon[artifact.kind]" /></template>
       {{ artifact.title }}
@@ -43,5 +45,6 @@ defineProps<{ artifacts: ThreadArtifact[] }>()
   font-size: var(--dou-font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+  touch-action: pan-y;
 }
 </style>
