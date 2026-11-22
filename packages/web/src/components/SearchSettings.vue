@@ -111,6 +111,9 @@ function input(onlyActive = false): SearchSettingsInput {
     if (onlyActive && service.kind !== provider.value) continue
     services[service.kind] = payloadFor(service)
   }
+  if (!provider.value && search.value?.disabledProvider) {
+    return { services }
+  }
   return { provider: provider.value, services }
 }
 

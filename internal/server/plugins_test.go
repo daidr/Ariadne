@@ -389,22 +389,39 @@ func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
 		t.Fatal("anthropic provider still registered after disabling plugin")
 	}
 
-	// Editing OpenAI provider while Anthropic is disabled preserves Anthropic's stored config and secret.
-	if _, err := store.UpdateModels(object{
-		"providers": []any{
-			object{"id": "p-anth", "kind": "anthropic", "name": "Claude", "settings": object{}},
-			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI Updated", "settings": object{"baseUrl": "https://api.openai.com/v1", "apiKey": ""}},
+	// Editing a disabled provider's model entry and request params via ConnectRPC succeeds without probing errors
+	// and preserves its stored settings and secret.
+	timeoutSeconds := int32(45)
+	openAISettings, err := structpb.NewStruct(map[string]any{"baseUrl": "https://api.openai.com/v1", "apiKey": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptySettings, err := structpb.NewStruct(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadModelID := "m-oa"
+	saveDisabledRes, err := settingsClient.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{
+			{Id: "p-anth", Kind: "anthropic", Name: "Claude", Settings: emptySettings, TimeoutSeconds: &timeoutSeconds},
+			{Id: "p-oa", Kind: "openai-compatible", Name: "OpenAI Updated", Settings: openAISettings},
 		},
-		"models": []any{
-			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
-			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
+		Models: []*ariadnev1.ModelEntry{
+			{Id: "m-anth", Provider: "p-anth", Model: "claude-opus"},
+			{Id: "m-oa", Provider: "p-oa", Model: "gpt-5"},
 		},
-		"roles": object{"thread": object{"model": "m-oa"}},
-	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
-		t.Fatalf("saving other providers while one builtin is disabled failed: %v", err)
+		Roles: &ariadnev1.ModelRoles{
+			Thread: &ariadnev1.RoleConfig{Model: &threadModelID},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("SaveModelSettings while editing disabled provider failed: %v", err)
+	}
+	if len(saveDisabledRes.Msg.GetProblems()) != 0 {
+		t.Fatalf("unexpected probe problems for disabled provider edit: %+v", saveDisabledRes.Msg.GetProblems())
 	}
 
-	// Re-enable model-anthropic: provider returns and saved apiKey secret is still intact.
+	// Re-enable model-anthropic: provider returns with both the preserved baseUrl/apiKey and updated timeout/model.
 	reEnableRes, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
 		PluginId: "model-anthropic",
 		Enabled:  true,
@@ -423,7 +440,10 @@ func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
 	}
 	recovered := false
 	for _, p := range modelsRes.Msg.GetSettings().GetProviders() {
-		if p.GetId() == "p-anth" && p.GetKind() == "anthropic" && slices.Contains(p.GetSecretsSet(), "apiKey") {
+		if p.GetId() == "p-anth" && p.GetKind() == "anthropic" &&
+			slices.Contains(p.GetSecretsSet(), "apiKey") &&
+			p.GetSettings().AsMap()["baseUrl"] == "https://api.anthropic.com" &&
+			p.GetTimeoutSeconds() == 45 {
 			recovered = true
 		}
 	}

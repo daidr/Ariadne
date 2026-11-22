@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -70,6 +71,10 @@ func (api *API) saveModelSettings(ctx context.Context, body object) (object, []m
 		}
 		resolved, err := store.ResolveSaved(model, kinds)
 		if err != nil {
+			var domainErr *domainerr.Error
+			if errors.As(err, &domainErr) && domainErr.Key == "error.modelUnknown" {
+				return
+			}
 			errs[index] = err
 			return
 		}

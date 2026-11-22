@@ -287,9 +287,13 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 		}
 		config["models"] = Object{"providers": providers, "models": models, "roles": roleConfig, "showCost": body["showCost"] == true}
 		changed := map[string]bool{}
+		registered := map[string]bool{}
 		for _, raw := range providers {
 			provider := object(raw)
 			id := text(provider["id"])
+			if _, known := providerInfo(kinds, text(provider["kind"])); known {
+				registered[id] = true
+			}
 			before := findByID(previousProviders, id)
 			beforeData, _ := jsonutil.Encode([]any{before["kind"], before["settings"], before["request"]})
 			afterData, _ := jsonutil.Encode([]any{provider["kind"], provider["settings"], provider["request"]})
@@ -309,6 +313,9 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 				}
 			}
 			id := text(model["provider"])
+			if !registered[id] {
+				continue
+			}
 			if !exists || changed[id] {
 				delete(changed, id)
 				changedModels = append(changedModels, model)

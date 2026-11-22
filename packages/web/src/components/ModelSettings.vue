@@ -329,10 +329,26 @@ const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
 
-/** Reload the protocols only: a plugin added or removed changes them, not the draft. */
+/** Reload protocols and hydrate settings for providers whose plugin was just re-enabled. */
 async function reloadKinds() {
   try {
-    kinds.value = (await api.getModelSettings()).kinds
+    const cleanBefore = hiddenRoles.value !== null && modelDraft() === savedModelDraft
+    const previousKinds = new Set(kinds.value.map((k) => k.kind))
+    const latest = await api.getModelSettings()
+    applyModelSettings(latest)
+    kinds.value = latest.kinds
+    const latestById = new Map(latest.providers.map((p) => [p.id, p]))
+    for (const provider of providers.value) {
+      if (previousKinds.has(provider.kind)) continue
+      if (!kindOf(provider.kind)) continue
+      const saved = latestById.get(provider.id)
+      if (!saved || saved.kind !== provider.kind) continue
+      provider.settings = { ...saved.settings }
+      provider.secretsSet = [...saved.secretsSet]
+    }
+    if (cleanBefore) {
+      savedModelDraft = modelDraft()
+    }
   } catch {
     // The models tab shows the protocols it had.
   }

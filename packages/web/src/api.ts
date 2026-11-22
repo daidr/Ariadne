@@ -500,7 +500,7 @@ export interface SearchSettings {
 }
 
 export interface SearchSettingsInput {
-  provider: string
+  provider?: string
   services: Record<string, Record<string, unknown>>
 }
 

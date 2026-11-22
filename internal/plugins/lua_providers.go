@@ -343,6 +343,12 @@ func (program *luaProgram) source(provider luaProvider) sdk.ContextProvider {
 			}, nil
 		},
 	}
+	if provider.hasNetworkOrigin {
+		schema := provider.settings
+		source.ValidateSettings = func(values, _ map[string]any) error {
+			return validateNetworkOriginSettings(schema, values)
+		}
+	}
 	if provider.methods["browse"] {
 		source.Browse = func(ctx context.Context, settings map[string]any, folder string) (*sdk.DirectoryListing, error) {
 			var out *sdk.DirectoryListing

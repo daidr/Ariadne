@@ -21,7 +21,7 @@ func ValidateHTTPSettings(values map[string]any) error {
 				return domainerr.New("error.invalidBody", map[string]any{"reason": "baseUrl"})
 			}
 			parsed, err := url.Parse(trimmed)
-			if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			if err != nil || parsed.Hostname() == "" || parsed.Opaque != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
 				parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 				return domainerr.New("error.invalidBody", map[string]any{"reason": "baseUrl"})
 			}

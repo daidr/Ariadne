@@ -314,7 +314,7 @@ export function toProtoSearchInput(input: SearchSettingsInput) {
     services[kind] = toJsonObject(entry)
   }
   return {
-    provider: input.provider,
+    ...(input.provider !== undefined ? { provider: input.provider } : {}),
     services,
   }
 }

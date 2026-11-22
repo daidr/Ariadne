@@ -480,7 +480,48 @@ func TestLuaModelPluginNetworkOriginAndHTTPSSE(t *testing.T) {
 		t.Fatalf("expected blocked origin error, got %+v", parts)
 	}
 
-	// 4. Schema validation rejects networkOrigin on secret or non-string fields.
+	// 4. Context providers with networkOrigin also validate settings on save.
+	ctxPluginFile := luaFile(t, t.TempDir(), `
+local title = {["zh-CN"] = "远程文件源", en = "Remote source"}
+return {
+	version = 1,
+	id = "lua-context-origin",
+	name = title,
+	contexts = {{
+		kind = "lua-remote-ctx",
+		title = title,
+		settings = {
+			type = "object",
+			properties = {
+				baseUrl = {type = "string", title = title, networkOrigin = true},
+			},
+		},
+		list = function() return {} end,
+		read = function() return "" end,
+	}},
+}
+`)
+	if err := host.AddPath(t.Context(), store, ctxPluginFile); err != nil {
+		t.Fatalf("AddPath(context networkOrigin): %v", err)
+	}
+	ctxProvider, ok := registries.Sources.Get("lua-remote-ctx")
+	if !ok {
+		t.Fatal("lua-remote-ctx not registered")
+	}
+	if ctxProvider.ValidateSettings == nil {
+		t.Fatal("expected ValidateSettings on Lua context provider with networkOrigin")
+	}
+	if err := ctxProvider.ValidateSettings(map[string]any{"baseUrl": "file:///etc/passwd"}, nil); err == nil {
+		t.Fatal("expected invalid file:// origin to be rejected by context ValidateSettings")
+	}
+	if err := ctxProvider.ValidateSettings(map[string]any{"baseUrl": "http://:8080/v1"}, nil); err == nil {
+		t.Fatal("expected empty-host origin to be rejected by context ValidateSettings")
+	}
+	if err := ctxProvider.ValidateSettings(map[string]any{"baseUrl": "https://files.example.com/api"}, nil); err != nil {
+		t.Fatalf("expected valid context origin to pass, got %v", err)
+	}
+
+	// 5. Schema validation rejects networkOrigin on secret or non-string fields.
 	badScripts := []string{
 		`return {version=1,id="bad-secret-origin",name={["zh-CN"]="坏"},models={{kind="bad1",title={["zh-CN"]="坏"},settings={type="object",properties={u={type="string",title={["zh-CN"]="u"},secret=true,networkOrigin=true}}},stream=function() end}}}`,
 		`return {version=1,id="bad-num-origin",name={["zh-CN"]="坏"},models={{kind="bad2",title={["zh-CN"]="坏"},settings={type="object",properties={u={type="number",title={["zh-CN"]="u"},networkOrigin=true}}},stream=function() end}}}`,

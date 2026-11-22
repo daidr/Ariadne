@@ -134,6 +134,10 @@ describe('Domain 1 ConnectRPC mappers', () => {
       },
     })
 
+    expect(toProtoSearchInput({ services: { deepseek: { baseUrl: '' } } })).toEqual({
+      services: { deepseek: { baseUrl: '' } },
+    })
+
     const disabledSearch = fromProtoSearchSettings(
       create(SearchSettingsSchema, {
         provider: '',
