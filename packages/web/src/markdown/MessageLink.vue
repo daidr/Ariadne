@@ -4,6 +4,7 @@ import { DouLink } from 'dou-ui'
 import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
+import { dragArtifact, dragThread } from '../side/dock'
 import { artifactKey, threadKey } from '../side/layout'
 import { openThreadFrom, state } from '../store'
 import { linkSummary } from './link-summaries'
@@ -95,6 +96,11 @@ watch(
   { immediate: true },
 )
 
+function drag(event: PointerEvent) {
+  if (thread.value) dragThread(event, thread.value.id)
+  else if (artifact.value) dragArtifact(event, artifact.value.id)
+}
+
 function open(event?: MouseEvent) {
   if (
     event &&
@@ -125,6 +131,7 @@ function open(event?: MouseEvent) {
     variant="soft"
     class="inline-ref"
     @click="open"
+    @pointerdown="drag"
   >
     <template #leading>
       <StageIcon
