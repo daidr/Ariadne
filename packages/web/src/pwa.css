@@ -1,0 +1,37 @@
+/*
+ * PWA safe-area variables and touch/zoom ergonomics.
+ *
+ * Each edge keeps its own variable because iPhone Duo reserves an asymmetric
+ * 84pt strip on one side (folded portrait / unfolded landscape) rather than
+ * symmetric left/right insets.
+ */
+:root {
+  --ariadne-safe-top: env(safe-area-inset-top, 0px);
+  --ariadne-safe-right: env(safe-area-inset-right, 0px);
+  --ariadne-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ariadne-safe-left: env(safe-area-inset-left, 0px);
+}
+
+html,
+body {
+  background-color: var(--dou-color-bg-canvas);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+/* Keep standalone touch inputs at >= 16px so iOS does not auto-zoom on focus. */
+@media (display-mode: standalone) and (pointer: coarse) {
+  :root {
+    --dou-font-size-input-min: 16px;
+  }
+}
+
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  textarea,
+  select {
+    font-size: max(var(--dou-font-size-input-min, 16px), 1em);
+  }
+}

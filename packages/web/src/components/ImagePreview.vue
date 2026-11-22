@@ -377,7 +377,8 @@ const scalePercent = computed(() => `${Math.round(viewport.scale.value * 100)}%`
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  padding: 56px 72px 80px;
+  padding: calc(56px + var(--ariadne-safe-top)) calc(72px + var(--ariadne-safe-right))
+    calc(80px + var(--ariadne-safe-bottom)) calc(72px + var(--ariadne-safe-left));
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -472,27 +473,27 @@ const scalePercent = computed(() => `${Math.round(viewport.scale.value * 100)}%`
 }
 
 .image-preview__nav.is-prev {
-  left: 16px;
+  left: calc(16px + var(--ariadne-safe-left));
 }
 
 .image-preview__nav.is-next {
-  right: 16px;
+  right: calc(16px + var(--ariadne-safe-right));
 }
 
 .image-preview__close {
-  top: calc(16px + env(safe-area-inset-top, 0px));
-  right: calc(16px + env(safe-area-inset-right, 0px));
+  top: calc(16px + var(--ariadne-safe-top));
+  right: calc(16px + var(--ariadne-safe-right));
 }
 
 .image-preview__toolbar {
   position: absolute;
-  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-  left: 50%;
+  bottom: calc(24px + var(--ariadne-safe-bottom));
+  left: calc(50% + (var(--ariadne-safe-left) - var(--ariadne-safe-right)) / 2);
   translate: -50%;
   display: flex;
   align-items: center;
   gap: 2px;
-  max-width: calc(100vw - 24px);
+  max-width: calc(100vw - 24px - var(--ariadne-safe-left) - var(--ariadne-safe-right));
   overflow-x: auto;
   scrollbar-width: none;
   padding: 4px;
@@ -568,25 +569,38 @@ const scalePercent = computed(() => `${Math.round(viewport.scale.value * 100)}%`
 
 @media (max-width: 640px) {
   .image-preview__stage {
-    padding: calc(56px + env(safe-area-inset-top, 0px)) 12px
-      calc(76px + env(safe-area-inset-bottom, 0px));
+    padding: calc(56px + var(--ariadne-safe-top)) calc(12px + var(--ariadne-safe-right))
+      calc(76px + var(--ariadne-safe-bottom)) calc(12px + var(--ariadne-safe-left));
   }
 
   .image-preview__nav.is-prev {
-    left: 8px;
+    left: calc(8px + var(--ariadne-safe-left));
   }
 
   .image-preview__nav.is-next {
-    right: 8px;
+    right: calc(8px + var(--ariadne-safe-right));
   }
 
   .image-preview__close {
-    top: calc(12px + env(safe-area-inset-top, 0px));
-    right: calc(12px + env(safe-area-inset-right, 0px));
+    top: calc(12px + var(--ariadne-safe-top));
+    right: calc(12px + var(--ariadne-safe-right));
   }
 
   .image-preview__toolbar {
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(16px + var(--ariadne-safe-bottom));
   }
+}
+
+/* Laptop / tabletop fold pose: keep the photo on the upper screen and controls on the lower half. */
+:global(html[data-fold-mode='vertical']) .image-preview__stage {
+  bottom: calc(var(--ariadne-fold-bottom-height, 0px) + var(--ariadne-fold-gap, 0px));
+  padding-bottom: 16px;
+}
+
+:global(html[data-fold-mode='vertical']) .image-preview__toolbar {
+  bottom: calc(
+    var(--ariadne-safe-bottom) +
+      max(24px, (var(--ariadne-fold-bottom-height, 0px) - var(--ariadne-safe-bottom) - 44px) / 2)
+  );
 }
 </style>

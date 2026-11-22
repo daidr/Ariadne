@@ -329,7 +329,7 @@ function dragPinned(event: PointerEvent, key: side.ListKey) {
 .pane-list {
   box-sizing: border-box;
   height: 100%;
-  padding: 8px 8px 8px 16px;
+  padding: 8px 8px calc(8px + var(--ariadne-safe-bottom)) 16px;
 }
 
 /* The plan's canvas fills its pane. */

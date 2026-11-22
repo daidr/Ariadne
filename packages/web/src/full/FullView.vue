@@ -1,19 +1,33 @@
 <script setup lang="ts">
 import { DouDialog, DouSplitter, DouText } from 'dou-ui'
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import ConversationPanel from '../components/ConversationPanel.vue'
 import StageIcon from '../components/StageIcon.vue'
 import { t } from '../i18n'
+import { foldLayoutKey } from '../pwa'
 import { closeFull, state } from '../store'
 import OpenedView from './OpenedView.vue'
 
-defineProps<{ compact?: boolean }>()
+const props = defineProps<{ compact?: boolean }>()
 
 /**
  * An artifact or changes over the whole page. Opened from a thread, that thread stays
  * beside it, so the user can read and talk to it at once.
  */
 const split = ref(68)
+const fold = inject(foldLayoutKey, null)
+const isHorizontalFold = computed(
+  () =>
+    !props.compact &&
+    fold?.value.mode === 'horizontal' &&
+    fold.value.horizontalSplitPercent !== null,
+)
+const effectiveSplit = computed({
+  get: () => (isHorizontalFold.value ? fold!.value.horizontalSplitPercent! : split.value),
+  set: (value) => {
+    if (!isHorizontalFold.value) split.value = value
+  },
+})
 
 const full = computed(() => state.full)
 const threadId = computed(() =>
@@ -41,16 +55,18 @@ const label = computed(() => {
     :aria-label="label"
     @update:open="(open) => !open && closeFull()"
   >
-    <template v-if="full">
+    <div v-if="full" class="full-shell">
       <DouSplitter
         v-if="threadId && !compact"
-        v-model="split"
+        v-model="effectiveSplit"
         :min="40"
         :max="80"
+        :data-fold-seam="isHorizontalFold ? 'horizontal' : undefined"
+        :disabled="isHorizontalFold"
         class="full-split"
       >
         <template #start>
-          <div class="full-pane">
+          <div class="full-pane full-pane-safe-bottom">
             <OpenedView :view="full.view" place="full" />
           </div>
         </template>
@@ -64,10 +80,10 @@ const label = computed(() => {
           </div>
         </template>
       </DouSplitter>
-      <div v-else class="full-pane">
+      <div v-else class="full-pane full-pane-safe-bottom">
         <OpenedView :view="full.view" place="full" />
       </div>
-    </template>
+    </div>
   </DouDialog>
 </template>
 
@@ -79,11 +95,35 @@ const label = computed(() => {
 </style>
 
 <style scoped>
+.full-shell {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  padding-top: var(--ariadne-safe-top);
+  padding-right: var(--ariadne-safe-right);
+  padding-left: var(--ariadne-safe-left);
+}
+
 .full-split,
 .full-pane {
+  box-sizing: border-box;
   height: 100%;
   min-height: 0;
   min-width: 0;
+}
+
+.full-pane-safe-bottom {
+  padding-bottom: var(--ariadne-safe-bottom);
+}
+
+.full-split[data-fold-seam='horizontal'] > :deep(.dou-splitter__pane.is-start) {
+  box-sizing: border-box;
+  padding-right: calc(var(--ariadne-fold-gap, 0px) / 2);
+}
+
+.full-split[data-fold-seam='horizontal'] > :deep(.dou-splitter__pane.is-end) {
+  box-sizing: border-box;
+  padding-left: calc(var(--ariadne-fold-gap, 0px) / 2);
 }
 
 .full-thread {

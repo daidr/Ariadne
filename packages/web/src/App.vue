@@ -20,6 +20,7 @@ import {
   watchEffect,
 } from 'vue'
 import ConversationPanel from './components/ConversationPanel.vue'
+import DuoSafeAreaRail from './components/DuoSafeAreaRail.vue'
 import ModelSettings, { type SettingsTab } from './components/ModelSettings.vue'
 import ProjectList from './components/ProjectList.vue'
 import ShortcutSheet from './components/ShortcutSheet.vue'
@@ -38,6 +39,7 @@ import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSidebarLayout } from './sidebar-layout'
+import { foldLayoutKey, usePwaEnvironment } from './pwa'
 import { useStreamStatusToast } from './stream-toast'
 import { resolveWorkspaceLayout, resolveWorkspacePanes } from './workspace-layout'
 import { useWorkspaceRouting } from './workspace-routing'
@@ -49,6 +51,8 @@ onLiveEvent(notifyAbout)
 useWorkspaceRouting()
 useShortcuts()
 useStreamStatusToast()
+const { duoRail, fold } = usePwaEnvironment()
+provide(foldLayoutKey, fold)
 
 const settingsOpen = ref(false)
 const settingsTab = ref<SettingsTab>('models')
@@ -120,6 +124,22 @@ watch(split, (value) => {
   }
 })
 
+// Align the coordinator/side divider with the physical hinge when half-folded like a book,
+// without overwriting the user's saved flat-screen split preference.
+const isHorizontalFold = computed(
+  () =>
+    !isNarrow.value &&
+    !(isMedium.value && mediumSideCollapsed.value) &&
+    fold.value.mode === 'horizontal' &&
+    fold.value.horizontalSplitPercent !== null,
+)
+const contentSplit = computed({
+  get: () => (isHorizontalFold.value ? fold.value.horizontalSplitPercent! : split.value),
+  set: (value) => {
+    if (!isHorizontalFold.value) split.value = value
+  },
+})
+
 // The flow and document editors are large; load them when first opened.
 const PlanMain = defineAsyncComponent(() => import('./plan/PlanMain.vue'))
 const ArtifactsOverview = defineAsyncComponent(() => import('./artifacts/ArtifactsOverview.vue'))
@@ -184,12 +204,13 @@ watchEffect(() => {
               </div>
               <DouSplitter
                 v-else
-                v-model="split"
+                v-model="contentSplit"
                 :min="isMedium ? '320px' : 30"
                 :max="80"
                 :min-end="isMedium ? '280px' : undefined"
                 :data-single-pane="panes.contentSplitSinglePane"
-                :disabled="isNarrow || (isMedium && mediumSideCollapsed)"
+                :data-fold-seam="isHorizontalFold ? 'horizontal' : undefined"
+                :disabled="isNarrow || (isMedium && mediumSideCollapsed) || isHorizontalFold"
                 class="split workspace-split"
               >
                 <template #start>
@@ -217,6 +238,18 @@ watchEffect(() => {
         </DouSplitter>
       </div>
     </DouLayout>
+    <DuoSafeAreaRail
+      v-if="duoRail.active && !unauthorized"
+      :layout-mode="layoutMode"
+      :projects-collapsed="projectsCollapsed"
+      :side-collapsed="mediumSideCollapsed"
+      :compact-height="duoRail.compactHeight"
+      :unfolded-landscape="fold.mode === 'horizontal'"
+      @open-projects="projectsPopoverOpen = true"
+      @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
+      @toggle-side="toggleMediumSide()"
+      @open-settings="openSettings()"
+    />
     <template v-if="!unauthorized">
       <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
       <PluginConfigDialog />
@@ -244,6 +277,11 @@ body,
 
 .app {
   height: 100%;
+  box-sizing: border-box;
+  padding-top: var(--ariadne-safe-top);
+  padding-left: var(--ariadne-safe-left);
+  padding-right: var(--ariadne-safe-right);
+  background-color: var(--dou-color-bg-canvas);
 }
 
 .body {
@@ -278,6 +316,17 @@ body,
 .split {
   flex: 1;
   min-height: 0;
+}
+
+/* Keep both panes clear of the physical fold crease in book posture. */
+.split[data-fold-seam='horizontal'] > .dou-splitter__pane.is-start {
+  box-sizing: border-box;
+  padding-right: calc(var(--ariadne-fold-gap, 0px) / 2);
+}
+
+.split[data-fold-seam='horizontal'] > .dou-splitter__pane.is-end {
+  box-sizing: border-box;
+  padding-left: calc(var(--ariadne-fold-gap, 0px) / 2);
 }
 
 .pane {
