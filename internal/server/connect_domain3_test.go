@@ -79,6 +79,28 @@ func TestDomain3ConnectServices(t *testing.T) {
 	if err := repo.MarkRead(t.Context(), "crd_a", "msg_crd_1"); err != nil {
 		t.Fatal(err)
 	}
+	// Seed an Ask attention on msg_crd_1 and a Todo with Position to verify core.object conversion.
+	askMsgID := "msg_crd_1"
+	openedAtt, err := repo.OpenAttention(t.Context(), "prj_a", core.AttentionInput{
+		MessageID: &askMsgID,
+		Block: map[string]any{
+			"type":     "choice",
+			"question": "选择方案",
+			"options": []any{
+				map[string]any{"label": "方案 A", "consequence": "更快"},
+				map[string]any{"label": "方案 B", "consequence": "更稳"},
+			},
+			"recommended": 0,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateTodo(t.Context(), "prj_a", "crd_a", []core.TodoItem{
+		{Label: "检查转换", Status: "doing"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	convResp, err := convClient.GetConversation(t.Context(), connect.NewRequest(&ariadnev1.GetConversationRequest{
 		ConversationId: "crd_a",
 	}))
@@ -87,6 +109,41 @@ func TestDomain3ConnectServices(t *testing.T) {
 	}
 	if convResp.Msg.GetConversation().GetId() != "crd_a" || convResp.Msg.GetReadThrough() != "msg_crd_1" || convResp.Msg.GetLastSeq() == 0 {
 		t.Fatalf("unexpected conversation snapshot: %+v", convResp.Msg)
+	}
+	if len(convResp.Msg.GetMessages()) != 1 {
+		t.Fatalf("expected 1 message in crd_a, got %d", len(convResp.Msg.GetMessages()))
+	}
+	ask := convResp.Msg.GetMessages()[0].GetAsk()
+	if ask == nil || ask.GetAttentionId() != openedAtt.ID {
+		t.Fatalf("expected MessageView.Ask with attentionId=%q, got %+v", openedAtt.ID, ask)
+	}
+	choiceBlock := ask.GetBlock().GetChoice()
+	if choiceBlock == nil || choiceBlock.GetQuestion() != "选择方案" || len(choiceBlock.GetOptions()) != 2 || choiceBlock.Recommended == nil || *choiceBlock.Recommended != 0 {
+		t.Fatalf("unexpected Ask choice block: %+v", ask.GetBlock())
+	}
+	todoPos := convResp.Msg.GetTodo().GetPosition()
+	if todoPos == nil || todoPos.GetAfterMessageId() != "msg_crd_1" || todoPos.GetAt() == 0 {
+		t.Fatalf("expected TodoView.Position anchored after msg_crd_1, got %+v", todoPos)
+	}
+	// Verify AnswerAttention + GetConversation returns the decoded Ask answer.
+	if _, err := convClient.AnswerAttention(t.Context(), connect.NewRequest(&ariadnev1.AnswerAttentionRequest{
+		AttentionId: openedAtt.ID,
+		Answer: &ariadnev1.BlockAnswer{
+			Answer: &ariadnev1.BlockAnswer_Choice{
+				Choice: &ariadnev1.ChoiceAnswer{Choice: 0},
+			},
+		},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	answeredConv, err := convClient.GetConversation(t.Context(), connect.NewRequest(&ariadnev1.GetConversationRequest{
+		ConversationId: "crd_a",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answeredConv.Msg.GetMessages()[0].GetAsk().GetAnswer().GetChoice() == nil || answeredConv.Msg.GetMessages()[0].GetAsk().GetAnswer().GetChoice().GetChoice() != 0 {
+		t.Fatalf("expected answered choice 0, got %+v", answeredConv.Msg.GetMessages()[0].GetAsk())
 	}
 
 	// ConversationService: PostMessage with line comments (also sets up P-6 line-comments pagination)
@@ -133,6 +190,17 @@ func TestDomain3ConnectServices(t *testing.T) {
 	}
 
 	// Memory CRUD RPCs
+	if _, err := convClient.UpdateMemory(t.Context(), connect.NewRequest(&ariadnev1.UpdateMemoryRequest{
+		ProjectId: "prj_a",
+		MemoryId:  "",
+		Text:      "空 ID 不应写入",
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for empty memory_id, got %v", err)
+	}
+	emptyMemCheck, err := convClient.ListMemories(t.Context(), connect.NewRequest(&ariadnev1.ListMemoriesRequest{ProjectId: "prj_a"}))
+	if err != nil || len(emptyMemCheck.Msg.GetMemories()) != 0 {
+		t.Fatalf("empty memory_id must not persist any record: %+v err=%v", emptyMemCheck, err)
+	}
 	createdMem, err := convClient.CreateMemory(t.Context(), connect.NewRequest(&ariadnev1.CreateMemoryRequest{
 		ProjectId: "prj_a",
 		Text:      "常用规则",

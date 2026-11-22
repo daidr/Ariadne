@@ -429,6 +429,9 @@ func (h *conversationServiceHandler) UpdateMemory(
 		return nil, badInput("text")
 	}
 	memoryID := req.Msg.GetMemoryId()
+	if memoryID == "" {
+		return nil, badInput("memoryId")
+	}
 	memory, err := h.api.options.Repository.SaveMemory(ctx, req.Msg.GetProjectId(), core.MemoryChange{
 		MemoryID: &memoryID,
 		Text:     value,

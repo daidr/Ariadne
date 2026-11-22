@@ -85,7 +85,7 @@ func (h *threadServiceHandler) SetThreadModel(
 		found := false
 		if h.api.options.Settings != nil {
 			for _, raw := range h.api.options.Settings.ModelChoices() {
-				choice, _ := raw.(map[string]any)
+				choice := protoMap(raw)
 				if choice["id"] == value {
 					found = true
 					break
@@ -254,8 +254,8 @@ func (h *threadServiceHandler) GetPullRequestChecks(
 	if err != nil {
 		return nil, err
 	}
-	pullRequest, _ := thread.PullRequest.(map[string]any)
-	head, _ := pullRequest["headSha"].(string)
+	pullRequest := protoMap(thread.PullRequest)
+	head := protoStr(pullRequest["headSha"])
 	manager := h.api.options.Workspaces
 	if manager == nil || head == "" {
 		return nil, domainerr.New("error.noRepo", nil)

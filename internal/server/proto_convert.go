@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -17,12 +18,35 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+var mapStringAnyType = reflect.TypeFor[map[string]any]()
+
 func protoMap(raw any) map[string]any {
 	if raw == nil {
 		return nil
 	}
 	if m, ok := raw.(map[string]any); ok {
 		return m
+	}
+	rv := reflect.ValueOf(raw)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Map || rv.IsNil() {
+		return nil
+	}
+	if rv.Type().ConvertibleTo(mapStringAnyType) {
+		return rv.Convert(mapStringAnyType).Interface().(map[string]any)
+	}
+	if rv.Type().Key().Kind() == reflect.String {
+		out := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[iter.Key().String()] = iter.Value().Interface()
+		}
+		return out
 	}
 	return nil
 }
@@ -47,20 +71,51 @@ func protoSlice(raw any) []any {
 		}
 		return out
 	}
+	rv := reflect.ValueOf(raw)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		if rv.Kind() == reflect.Slice && rv.IsNil() {
+			return nil
+		}
+		out := make([]any, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			out[i] = rv.Index(i).Interface()
+		}
+		return out
+	}
 	return nil
 }
 
 func protoStr(raw any) string {
-	s, _ := raw.(string)
-	return s
+	switch v := raw.(type) {
+	case string:
+		return v
+	case *string:
+		if v != nil {
+			return *v
+		}
+	}
+	return ""
 }
 
 func protoOptStr(raw any) *string {
-	s, ok := raw.(string)
-	if !ok {
-		return nil
+	switch v := raw.(type) {
+	case string:
+		s := v
+		return &s
+	case *string:
+		if v == nil {
+			return nil
+		}
+		s := *v
+		return &s
 	}
-	return &s
+	return nil
 }
 
 func protoOptNonEmptyStr(s string) *string {
@@ -71,36 +126,82 @@ func protoOptNonEmptyStr(s string) *string {
 }
 
 func protoBool(raw any) bool {
-	b, _ := raw.(bool)
-	return b
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case *bool:
+		if v != nil {
+			return *v
+		}
+	}
+	return false
 }
 
 func protoOptBool(raw any) *bool {
-	b, ok := raw.(bool)
-	if !ok {
-		return nil
+	switch v := raw.(type) {
+	case bool:
+		b := v
+		return &b
+	case *bool:
+		if v == nil {
+			return nil
+		}
+		b := *v
+		return &b
 	}
-	return &b
+	return nil
 }
 
 func protoFloat(raw any) (float64, bool) {
 	switch v := raw.(type) {
 	case float64:
 		return v, true
+	case *float64:
+		if v != nil {
+			return *v, true
+		}
 	case float32:
 		return float64(v), true
+	case *float32:
+		if v != nil {
+			return float64(*v), true
+		}
 	case int:
 		return float64(v), true
+	case *int:
+		if v != nil {
+			return float64(*v), true
+		}
 	case int32:
 		return float64(v), true
+	case *int32:
+		if v != nil {
+			return float64(*v), true
+		}
 	case int64:
 		return float64(v), true
+	case *int64:
+		if v != nil {
+			return float64(*v), true
+		}
 	case uint:
 		return float64(v), true
+	case *uint:
+		if v != nil {
+			return float64(*v), true
+		}
 	case uint32:
 		return float64(v), true
+	case *uint32:
+		if v != nil {
+			return float64(*v), true
+		}
 	case uint64:
 		return float64(v), true
+	case *uint64:
+		if v != nil {
+			return float64(*v), true
+		}
 	case json.Number:
 		f, err := v.Float64()
 		return f, err == nil
@@ -111,6 +212,9 @@ func protoFloat(raw any) (float64, bool) {
 func protoInt64(raw any) int64 {
 	if v, ok := raw.(int64); ok {
 		return v
+	}
+	if v, ok := raw.(*int64); ok && v != nil {
+		return *v
 	}
 	if f, ok := protoFloat(raw); ok {
 		return int64(f)
@@ -124,6 +228,13 @@ func protoOptInt64(raw any) *int64 {
 	}
 	if v, ok := raw.(int64); ok {
 		return &v
+	}
+	if v, ok := raw.(*int64); ok {
+		if v == nil {
+			return nil
+		}
+		n := *v
+		return &n
 	}
 	if f, ok := protoFloat(raw); ok {
 		n := int64(f)
@@ -198,7 +309,7 @@ func toStructPB(raw any) *structpb.Struct {
 	if raw == nil {
 		return nil
 	}
-	if m, ok := raw.(map[string]any); ok {
+	if m := protoMap(raw); m != nil {
 		if st, err := structpb.NewStruct(m); err == nil {
 			return st
 		}
@@ -566,7 +677,7 @@ func toProtoTodoView(raw map[string]any) *ariadnev1.TodoView {
 		tp := &ariadnev1.TodoPosition{
 			At: protoInt64(pos["at"]),
 		}
-		if after, ok := pos["afterMessageId"].(string); ok && after != "" {
+		if after := protoStr(pos["afterMessageId"]); after != "" {
 			tp.Anchor = &ariadnev1.TodoPosition_AfterMessageId{AfterMessageId: after}
 		} else {
 			tp.Anchor = &ariadnev1.TodoPosition_BeforeFirst{BeforeFirst: true}
