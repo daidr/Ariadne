@@ -1453,7 +1453,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation {
-  --conversation-footer-padding: 16px;
+  --conversation-footer-padding: calc(16px + env(safe-area-inset-bottom, 0px));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1603,11 +1603,17 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   );
 }
 
-/* Paint inside the scrollport so its scrollbar and the floating composer stay above the fade. */
+/*
+ * Paint inside the scrollport so its scrollbar and the floating composer stay above the fade.
+ * Cover the footer padding plus the composer's 16px bottom radius (with a small buffer) in solid
+ * background so scrolled messages cannot bleed through the bottom corners, then fade softly below
+ * the composer's top edge so the last message stays clear when scrolled to the bottom.
+ */
 .conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__viewport)::after {
-  --conversation-bottom-fade: 12px;
+  --conversation-bottom-solid: calc(var(--conversation-footer-padding) + 24px);
+  --conversation-bottom-fade: 40px;
   --conversation-mask-height: calc(
-    var(--conversation-footer-padding) + var(--conversation-bottom-fade)
+    var(--conversation-bottom-solid) + var(--conversation-bottom-fade)
   );
   content: '';
   position: sticky;
