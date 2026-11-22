@@ -18,6 +18,7 @@ export const SHIKI_LANGUAGES = [
   'jsx',
   'kotlin',
   'lua',
+  'makefile',
   'markdown',
   'php',
   'powershell',
@@ -51,9 +52,13 @@ const aliases: Record<string, ShikiLanguageKey> = {
   cts: 'typescript',
   cxx: 'cpp',
   docker: 'dockerfile',
+  dotenv: 'ini',
+  editorconfig: 'ini',
   env: 'ini',
+  gnumakefile: 'makefile',
   golang: 'go',
   gql: 'graphql',
+  h: 'c',
   hh: 'cpp',
   hpp: 'cpp',
   htm: 'html',
@@ -61,8 +66,11 @@ const aliases: Record<string, ShikiLanguageKey> = {
   json5: 'jsonc',
   kt: 'kotlin',
   kts: 'kotlin',
+  make: 'makefile',
   md: 'markdown',
+  mdx: 'markdown',
   mjs: 'javascript',
+  mk: 'makefile',
   mts: 'typescript',
   patch: 'diff',
   properties: 'ini',
@@ -87,4 +95,35 @@ export function resolveShikiLanguage(raw: string): ShikiLanguageKey | null {
   if (!key) return null
   if (Object.hasOwn(aliases, key)) return aliases[key]!
   return supported.has(key) ? (key as ShikiLanguageKey) : null
+}
+
+const SPECIAL_FILENAMES: Record<string, string> = {
+  '.bashrc': 'bash',
+  '.bash_profile': 'bash',
+  '.editorconfig': 'ini',
+  '.gitconfig': 'ini',
+  '.npmrc': 'ini',
+  '.profile': 'bash',
+  '.zprofile': 'bash',
+  '.zshrc': 'bash',
+  gnumakefile: 'makefile',
+  makefile: 'makefile',
+}
+
+const EXTENSION_ALIASES: Record<string, string> = {
+  mdx: 'markdown',
+}
+
+/** Extract a language hint from a file path, handling special filenames, dotfiles and extensions. */
+export function languageHintOf(path: string): string | null {
+  const name = path.split(/[\\/]/).at(-1)?.trim().toLowerCase() ?? ''
+  if (!name) return null
+  if (Object.hasOwn(SPECIAL_FILENAMES, name)) return SPECIAL_FILENAMES[name]!
+  if (/^dockerfile(?:\.|$)/.test(name)) return 'dockerfile'
+  if (/^makefile(?:\.|$)/.test(name)) return 'makefile'
+  if (/^\.env(?:\.|$)/.test(name)) return 'ini'
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0 || dot === name.length - 1) return null
+  const ext = name.slice(dot + 1)
+  return EXTENSION_ALIASES[ext] ?? ext
 }
