@@ -124,9 +124,7 @@ func (registry *Registry) Register(provider sdk.SearchProvider) (func(), error) 
 		return nil, err
 	}
 	owned := copyProvider(provider)
-	if owned.Check != nil {
-		owned.Capabilities.SupportsCheck = true
-	}
+	owned.Capabilities.SupportsCheck = owned.Check != nil
 	if _, err := json.Marshal(owned.Info()); err != nil {
 		return nil, err
 	}

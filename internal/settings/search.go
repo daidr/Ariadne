@@ -238,6 +238,8 @@ func (store *Store) PublicSearch(kinds []sdk.SearchProviderInfo, ready func(stri
 			}
 			if value, exists := stored[key]; exists && value != nil {
 				values[key] = value
+			} else if field.Type == "boolean" && field.Default != nil {
+				values[key] = field.Default
 			}
 		}
 		if isReady {

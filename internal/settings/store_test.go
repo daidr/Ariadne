@@ -430,10 +430,14 @@ func TestSearchConfigMigrationAndDynamicPlugins(t *testing.T) {
 		Capabilities: sdk.SearchCapabilities{ReturnsAnswer: true, SupportsCheck: true},
 	})
 
-	// Legacy top-level apiKey migrates cleanly to tavily.
+	// Legacy top-level apiKey migrates cleanly to tavily, and unset boolean defaults are surfaced.
 	public := store.PublicSearch(kinds, nil, nil)
 	if text(public["provider"]) != "tavily" || public["ready"] != true || public["keySet"] != true {
 		t.Fatalf("migrated public search = %#v", public)
+	}
+	services := list(public["services"])
+	if len(services) != 3 || object(object(services[2])["values"])["strict"] != true {
+		t.Fatalf("expected unset boolean default true in PublicSearch, got %#v", services)
 	}
 	effectiveTavily := store.SearchSettings(kinds[0])
 	if text(effectiveTavily["apiKey"]) != "legacy-tavily-token" || text(effectiveTavily["baseUrl"]) != "https://api.tavily.com" {
@@ -449,7 +453,12 @@ func TestSearchConfigMigrationAndDynamicPlugins(t *testing.T) {
 	}`), kinds, nil); err != nil {
 		t.Fatal(err)
 	}
-	publicJSON, _ := json.Marshal(store.PublicSearch(kinds, nil, []string{"OpenAI / gpt-5"}))
+	updatedPublic := store.PublicSearch(kinds, nil, []string{"OpenAI / gpt-5"})
+	updatedServices := list(updatedPublic["services"])
+	if len(updatedServices) != 3 || object(object(updatedServices[2])["values"])["strict"] != false {
+		t.Fatalf("expected saved boolean false in PublicSearch, got %#v", updatedServices)
+	}
+	publicJSON, _ := json.Marshal(updatedPublic)
 	if strings.Contains(string(publicJSON), "top-secret-val") || strings.Contains(string(publicJSON), "legacy-tavily-token") {
 		t.Fatalf("secret leaked in PublicSearch: %s", string(publicJSON))
 	}

@@ -283,6 +283,9 @@ func TestLuaSearchSettingsCheckAndResponse(t *testing.T) {
 				if cfg.apiKey == "good" then
 					return { ok = true }
 				end
+				if cfg.apiKey == "malformed" then
+					return { ok = "yes" }
+				end
 				return { ok = false, status = 403, message = { ["zh-CN"] = "密钥无效", en = "Invalid key" } }
 			end,
 		}},
@@ -316,5 +319,20 @@ func TestLuaSearchSettingsCheckAndResponse(t *testing.T) {
 	badCheck, err := searchRegistry.Check(t.Context(), "custom-search", map[string]any{"apiKey": "bad"})
 	if err != nil || badCheck.OK || badCheck.Status == nil || *badCheck.Status != 403 || badCheck.Message["en"] != "Invalid key" {
 		t.Fatalf("bad check = %+v, err = %v", badCheck, err)
+	}
+	malformedCheck, err := searchRegistry.Check(t.Context(), "custom-search", map[string]any{"apiKey": "malformed"})
+	if err != nil || malformedCheck.OK {
+		t.Fatalf("malformed check = %+v, err = %v", malformedCheck, err)
+	}
+	expiredCtx, cancelExpired := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	timeoutCheck, err := searchRegistry.Check(expiredCtx, "custom-search", map[string]any{"apiKey": "good"})
+	if err != nil || timeoutCheck.OK {
+		t.Fatalf("timeout check = %+v, err = %v", timeoutCheck, err)
+	}
+	canceledCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := searchRegistry.Check(canceledCtx, "custom-search", map[string]any{"apiKey": "good"}); err == nil {
+		t.Fatal("expected canceled check to return error")
 	}
 }

@@ -144,14 +144,21 @@ func TestBuiltinRedirectsErrorsAndShape(t *testing.T) {
 func TestRegistryLegacyAndCapabilities(t *testing.T) {
 	registry := New()
 	dispose, err := registry.Register(sdk.SearchProvider{
-		Kind:  "legacy",
-		Title: sdk.LocalizedText{"zh-CN": "旧版搜索", "en": "Legacy Search"},
+		Kind:         "legacy",
+		Title:        sdk.LocalizedText{"zh-CN": "旧版搜索", "en": "Legacy Search"},
+		Capabilities: sdk.SearchCapabilities{SupportsCheck: true},
 		Search: func(_ context.Context, query string, limit int) ([]sdk.SearchResult, error) {
 			return []sdk.SearchResult{{Title: query, URL: "https://example.test", Snippet: "ok"}}, nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got, ok := registry.Get("legacy"); !ok || got.Capabilities.SupportsCheck {
+		t.Fatalf("expected SupportsCheck=false when Check is nil, got %+v", got.Capabilities)
+	}
+	if kinds := registry.Kinds(); len(kinds) != 1 || kinds[0].Capabilities.SupportsCheck {
+		t.Fatalf("expected Kinds SupportsCheck=false when Check is nil, got %+v", kinds)
 	}
 	if !registry.Ready("legacy", nil) {
 		t.Fatal("legacy provider with no required settings should be ready")

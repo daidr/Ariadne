@@ -113,4 +113,37 @@ describe('SearchSettings', () => {
       },
     })
   })
+
+  test('renders unset boolean default as enabled and saves false on first toggle', async () => {
+    const initial = makeSearchSettings()
+    initial.provider = 'custom-lua'
+    initial.services[1]!.values = {}
+    vi.spyOn(api, 'getSearchSettings').mockResolvedValue(initial)
+    let savedInput: SearchSettingsInput | null = null
+    vi.spyOn(api, 'saveSearchSettings').mockImplementation(async (input) => {
+      savedInput = input
+      return initial
+    })
+
+    const wrapper = mount(SearchSettingsView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const toggle = wrapper.find('[role="switch"]')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    const ok = await (wrapper.vm as unknown as { save: () => Promise<boolean> }).save()
+    expect(ok).toBe(true)
+    expect(savedInput).toEqual({
+      provider: 'custom-lua',
+      services: {
+        tavily: { baseUrl: '' },
+        'custom-lua': { strict: false },
+      },
+    })
+  })
 })

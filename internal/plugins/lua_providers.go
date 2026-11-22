@@ -97,15 +97,18 @@ func (program *luaProgram) search(provider luaProvider) sdk.SearchProvider {
 		searchProvider.Check = func(ctx context.Context, settings map[string]any) (sdk.SearchCheckResult, error) {
 			var raw json.RawMessage
 			if err := program.result(ctx, provider, "check", &raw, settings); err != nil {
-				if ctx.Err() != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
 					return sdk.SearchCheckResult{}, err
+				}
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+					return sdk.SearchCheckResult{OK: false}, nil
 				}
 				return sdk.SearchCheckResult{
 					OK:      false,
 					Message: sdk.LocalizedText{"zh-CN": err.Error(), "en": err.Error()},
 				}, nil
 			}
-			return decodeLuaSearchCheck(raw)
+			return decodeLuaSearchCheck(raw), nil
 		}
 	}
 	return searchProvider
@@ -145,32 +148,32 @@ func decodeLuaSearchResponse(raw json.RawMessage, limit int) (sdk.SearchResponse
 	return sdk.SearchResponse{}, errors.New("invalid Lua search response")
 }
 
-func decodeLuaSearchCheck(raw json.RawMessage) (sdk.SearchCheckResult, error) {
+func decodeLuaSearchCheck(raw json.RawMessage) sdk.SearchCheckResult {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("true")) {
-		return sdk.SearchCheckResult{OK: true}, nil
+		return sdk.SearchCheckResult{OK: true}
 	}
 	if bytes.Equal(trimmed, []byte("false")) {
-		return sdk.SearchCheckResult{OK: false}, nil
+		return sdk.SearchCheckResult{OK: false}
 	}
 	if trimmed[0] == '{' {
 		var probe map[string]json.RawMessage
 		if err := json.Unmarshal(trimmed, &probe); err != nil {
-			return sdk.SearchCheckResult{}, err
+			return sdk.SearchCheckResult{OK: false}
 		}
 		if _, hasOK := probe["ok"]; hasOK {
 			var result sdk.SearchCheckResult
 			if err := json.Unmarshal(trimmed, &result); err != nil {
-				return sdk.SearchCheckResult{}, err
+				return sdk.SearchCheckResult{OK: false}
 			}
-			return result, nil
+			return result
 		}
 		var message sdk.LocalizedText
 		if err := json.Unmarshal(trimmed, &message); err == nil && len(message) > 0 {
-			return sdk.SearchCheckResult{OK: false, Message: message}, nil
+			return sdk.SearchCheckResult{OK: false, Message: message}
 		}
 	}
-	return sdk.SearchCheckResult{OK: false}, nil
+	return sdk.SearchCheckResult{OK: false}
 }
 
 func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {
