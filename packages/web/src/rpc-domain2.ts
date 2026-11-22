@@ -1544,7 +1544,7 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
       const response = await clients.projects.browseSource({
         kind,
         ...(body.projectId ? { projectId: body.projectId } : {}),
-        ...(body.sourceId ? { sourceId: body.sourceId } : {}),
+        ...(body.sourceId === undefined ? {} : { sourceId: body.sourceId }),
         settings: toJsonObject(body.settings),
         path: body.path,
       })

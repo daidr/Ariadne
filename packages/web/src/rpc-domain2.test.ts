@@ -1,4 +1,6 @@
 import {
+  BrowseSourceRequestSchema,
+  BrowseSourceResponseSchema,
   CreateArtifactCommentResponseSchema,
   DeleteArtifactCommentResponseSchema,
   EditArtifactCommentResponseSchema,
@@ -484,5 +486,46 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
       state.detail = prevDetail
       state.currentId = prevCurrentId
     }
+  })
+
+  it('preserves explicit empty sourceId in browseSource so new sources do not reuse primary secrets', async () => {
+    const capturedRequests: Uint8Array[] = []
+    const transport = createAriadneTransport({
+      baseUrl: 'http://ariadne.test/api/rpc',
+      getToken: () => 'tok',
+      fetch: async (_input, init) => {
+        const body = init?.body
+        if (body instanceof Uint8Array) {
+          capturedRequests.push(body)
+        } else if (body instanceof ArrayBuffer) {
+          capturedRequests.push(new Uint8Array(body))
+        }
+        return protoResponse(BrowseSourceResponseSchema, {
+          listing: { path: '/', directories: [] },
+        })
+      },
+    })
+    const client = createDomain2Api(transport)
+
+    await client.browseSource('remote', {
+      projectId: 'prj_1',
+      sourceId: '',
+      settings: { host: 'new.example.test' },
+      path: '/',
+    })
+    await client.browseSource('remote', {
+      projectId: 'prj_1',
+      settings: { host: 'primary.example.test' },
+      path: '/',
+    })
+
+    expect(capturedRequests).toHaveLength(2)
+    const newSourceReq = fromBinary(BrowseSourceRequestSchema, capturedRequests[0]!)
+    expect(newSourceReq.projectId).toBe('prj_1')
+    expect(newSourceReq.sourceId).toBe('')
+
+    const primaryFallbackReq = fromBinary(BrowseSourceRequestSchema, capturedRequests[1]!)
+    expect(primaryFallbackReq.projectId).toBe('prj_1')
+    expect(primaryFallbackReq.sourceId).toBeUndefined()
   })
 })

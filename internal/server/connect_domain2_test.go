@@ -698,3 +698,125 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 	// Ensure HTTP client helper stays unused-free.
 	_ = http.StatusOK
 }
+
+func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
+	home := t.TempDir()
+	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
+	repo, err := core.Open(t.Context(), core.Options{
+		Path: filepath.Join(home, "ariadne.db"),
+		Now:  now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	settingsStore, err := settings.Open(filepath.Join(home, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var observedSecrets []string
+	registry := sources.New()
+	registry.Register(sdk.ContextProvider{
+		Info: sdk.ContextProviderInfo{
+			Kind:  "remote",
+			Title: sdk.LocalizedText{"zh-CN": "远端源", "en": "Remote"},
+			Settings: sdk.SettingsSchema{
+				Type: "object",
+				Properties: map[string]sdk.SettingField{
+					"host":  {Type: "string"},
+					"token": {Type: "string", Secret: true},
+				},
+			},
+			Provides: []string{"files"},
+		},
+		Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+			return sdk.Capabilities{}, nil
+		},
+		Browse: func(_ context.Context, values map[string]any, path string) (*sdk.DirectoryListing, error) {
+			token, _ := values["token"].(string)
+			observedSecrets = append(observedSecrets, token)
+			return &sdk.DirectoryListing{Path: path, Directories: []sdk.BrowsableDirectory{}}, nil
+		},
+	})
+
+	api, err := New(Options{
+		Repository: repo,
+		Settings:   settingsStore,
+		Sources:    registry,
+		Token:      "browse-token",
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	projects := ariadnev1connect.NewProjectServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("browse-token")),
+	)
+
+	name := "Secret Isolation Project"
+	primarySettings, err := structpb.NewStruct(map[string]any{
+		"host":  "primary.example.test",
+		"token": "primary-secret-value",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := projects.CreateProject(t.Context(), connect.NewRequest(&ariadnev1.CreateProjectRequest{
+		Name: &name,
+		Source: &ariadnev1.ProjectSource{
+			Kind:     "remote",
+			Settings: primarySettings,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	projectID := created.Msg.Project.Id
+
+	newSourceSettings, err := structpb.NewStruct(map[string]any{
+		"host": "new.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Explicit empty source_id signals a brand new source and must NOT inject primary source secrets.
+	emptySourceID := ""
+	if _, err := projects.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
+		Kind:      "remote",
+		ProjectId: &projectID,
+		SourceId:  &emptySourceID,
+		Settings:  newSourceSettings,
+		Path:      "/",
+	})); err != nil {
+		t.Fatalf("BrowseSource with empty sourceId: %v", err)
+	}
+
+	// Omitted source_id falls back to the primary source and injects its stored secret.
+	if _, err := projects.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
+		Kind:      "remote",
+		ProjectId: &projectID,
+		Settings:  newSourceSettings,
+		Path:      "/",
+	})); err != nil {
+		t.Fatalf("BrowseSource with omitted sourceId: %v", err)
+	}
+
+	if len(observedSecrets) != 2 {
+		t.Fatalf("expected 2 browse calls, got %d", len(observedSecrets))
+	}
+	if observedSecrets[0] != "" {
+		t.Fatalf("explicit empty source_id leaked primary secret: got %q, want empty", observedSecrets[0])
+	}
+	if observedSecrets[1] != "primary-secret-value" {
+		t.Fatalf("omitted source_id did not reuse primary secret: got %q, want %q", observedSecrets[1], "primary-secret-value")
+	}
+}
