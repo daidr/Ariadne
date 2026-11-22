@@ -36,6 +36,7 @@ import (
 	"github.com/daidr/Ariadne/internal/repowatch"
 	"github.com/daidr/Ariadne/internal/runner"
 	"github.com/daidr/Ariadne/internal/scheduler"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/server"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
@@ -141,10 +142,11 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	registry := sources.New()
 	dashboards := dashboard.New()
 	add(dashboards.Close)
+	searchRegistry := searches.New()
 	resolver := links.New(links.Options{})
 	addSimple(func() error { resolver.Close(); return nil })
 	host, err := plugins.New(plugins.Options{
-		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: builtins.Registry, Sources: registry, Dashboards: dashboards, Links: resolver, OnError: onError,
+		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: builtins.Registry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, OnError: onError,
 		Settings: user,
 	})
 	if err != nil {
@@ -152,6 +154,9 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	}
 	add(host.Close)
 	if err := installSources(ctx, host, home, options.Client, addSimple); err != nil {
+		return nil, err
+	}
+	if err := installSearches(ctx, host, options.Client); err != nil {
 		return nil, err
 	}
 	env := process.Environ()
@@ -199,7 +204,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	add(browsers.Close)
 	worker := &runner.Runner{
 		Repository: repo, Settings: user, Models: builtins.Registry, Drafts: drafts, Live: live,
-		Workspaces: manager, MCP: mcpHub, SkillsDirs: skillsDirs, SearchPlugins: host.SearchProviders, HTTPClient: options.Client,
+		Workspaces: manager, MCP: mcpHub, SkillsDirs: skillsDirs, Searches: searchRegistry, HTTPClient: options.Client,
 		Rooms: rooms, Dashboards: dashboards, Browser: browsers, Sources: registry, Home: home,
 	}
 	concurrency := user.Concurrency()
@@ -234,7 +239,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		Data: storage, Settings: user, Models: builtins.Registry, Sources: registry,
 		Updates: updates,
 		Links:   resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
-		Plugins: host, HTTPClient: options.Client, OnError: onError,
+		Searches: searchRegistry, Plugins: host, HTTPClient: options.Client, OnError: onError,
 		Rooms:       rooms,
 		FindContext: &sdk.FindContext{Env: env, Home: userHome, Which: func(name string) bool { _, err := exec.LookPath(name); return err == nil }},
 		ModelOf: func(r *http.Request, conversation core.ConversationView) (any, error) {
@@ -382,6 +387,15 @@ func installSources(ctx context.Context, host *plugins.Host, home string, client
 		}}
 		if err := host.Load(ctx, plugin, nil); err != nil {
 			return fmt.Errorf("load %s source: %w", entry.id, err)
+		}
+	}
+	return nil
+}
+
+func installSearches(ctx context.Context, host *plugins.Host, client *http.Client) error {
+	for _, plugin := range searches.BuiltinPlugins(client) {
+		if err := host.Load(ctx, plugin, nil); err != nil {
+			return fmt.Errorf("load %s search: %w", plugin.ID, err)
 		}
 	}
 	return nil

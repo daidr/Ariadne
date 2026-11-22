@@ -1,18 +1,23 @@
 package server
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/daidr/Ariadne/internal/core"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func TestSettingsConnectRPC(t *testing.T) {
@@ -35,7 +40,13 @@ func TestSettingsConnectRPC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store})
+	searchRegistry := searches.New()
+	for _, provider := range searches.BuiltinProviders(nil) {
+		if _, err := searchRegistry.Register(provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Searches: searchRegistry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,61 +60,103 @@ func TestSettingsConnectRPC(t *testing.T) {
 		connect.WithInterceptors(bearerClientInterceptor("test-token")),
 	)
 
+	mustStruct := func(values map[string]any) *structpb.Struct {
+		t.Helper()
+		out, err := structpb.NewStruct(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
 	// Search settings & check
 	if _, err := client.GetSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.GetSearchSettingsRequest{})); err != nil {
 		t.Fatalf("GetSearchSettings: %v", err)
 	}
 	provider := "deepseek"
-	baseURL := searchServer.URL
 	checkRes, err := client.CheckSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.CheckSearchSettingsRequest{
 		Provider: &provider,
-		Services: map[string]*ariadnev1.SearchServiceInput{
-			"deepseek": {
-				BaseUrl:      &baseURL,
-				ApiKeyAction: &ariadnev1.SearchServiceInput_ApiKey{ApiKey: "draft-secret"},
-			},
+		Services: map[string]*structpb.Struct{
+			"deepseek": mustStruct(map[string]any{
+				"baseUrl": searchServer.URL,
+				"apiKey":  "draft-secret",
+			}),
 		},
 	}))
 	if err != nil || !checkRes.Msg.GetOk() {
 		t.Fatalf("CheckSearchSettings: res=%+v err=%v", checkRes, err)
 	}
-	savedBaseURL := "https://example.test/v1/tools/"
+	if strings.Contains(checkRes.Msg.String(), "draft-secret") {
+		t.Fatalf("CheckSearchSettings leaked secret: %s", checkRes.Msg.String())
+	}
+
 	savedSearch, err := client.SaveSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveSearchSettingsRequest{
 		Provider: &provider,
-		Services: map[string]*ariadnev1.SearchServiceInput{
-			"deepseek": {
-				BaseUrl:      &savedBaseURL,
-				ApiKeyAction: &ariadnev1.SearchServiceInput_ApiKey{ApiKey: "saved-private"},
-			},
+		Services: map[string]*structpb.Struct{
+			"deepseek": mustStruct(map[string]any{
+				"baseUrl": "https://example.test/v1/tools/",
+				"apiKey":  "saved-private",
+			}),
 		},
 	}))
-	if err != nil || !savedSearch.Msg.GetSearch().GetKeySet() {
+	if err != nil || savedSearch.Msg.GetSearch().GetProvider() != "deepseek" || !savedSearch.Msg.GetSearch().GetReady() || !savedSearch.Msg.GetSearch().GetKeySet() {
 		t.Fatalf("SaveSearchSettings: res=%+v err=%v", savedSearch, err)
 	}
+	if strings.Contains(savedSearch.Msg.String(), "saved-private") {
+		t.Fatalf("SaveSearchSettings leaked secret: %s", savedSearch.Msg.String())
+	}
+
 	// Empty apiKey keeps stored secret
 	keptSearch, err := client.SaveSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveSearchSettingsRequest{
-		Services: map[string]*ariadnev1.SearchServiceInput{
-			"deepseek": {
-				ApiKeyAction: &ariadnev1.SearchServiceInput_ApiKey{ApiKey: ""},
-			},
+		Services: map[string]*structpb.Struct{
+			"deepseek": mustStruct(map[string]any{
+				"apiKey": "",
+			}),
 		},
 	}))
-	if err != nil || !keptSearch.Msg.GetSearch().GetKeySet() {
+	if err != nil || !keptSearch.Msg.GetSearch().GetKeySet() || !keptSearch.Msg.GetSearch().GetReady() {
 		t.Fatalf("SaveSearchSettings keep secret: res=%+v err=%v", keptSearch, err)
 	}
+
 	// Clear apiKey removes stored secret
 	clearedSearch, err := client.SaveSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveSearchSettingsRequest{
-		Services: map[string]*ariadnev1.SearchServiceInput{
-			"deepseek": {
-				ApiKeyAction: &ariadnev1.SearchServiceInput_ClearApiKey{ClearApiKey: true},
-			},
+		Services: map[string]*structpb.Struct{
+			"deepseek": mustStruct(map[string]any{
+				"apiKey": nil,
+			}),
 		},
 	}))
-	if err != nil || clearedSearch.Msg.GetSearch().GetKeySet() {
+	if err != nil || clearedSearch.Msg.GetSearch().GetKeySet() || clearedSearch.Msg.GetSearch().GetReady() {
 		t.Fatalf("SaveSearchSettings clear secret: res=%+v err=%v", clearedSearch, err)
 	}
+
 	if _, err := client.CheckSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.CheckSearchSettingsRequest{})); err == nil {
 		t.Fatal("expected empty search check to fail without key")
+	}
+
+	// Verify dynamic external search provider appears automatically in GetSearchSettings.
+	if _, err := searchRegistry.Register(sdk.SearchProvider{
+		Kind:  "custom-ext",
+		Title: sdk.LocalizedText{"zh-CN": "扩展搜索", "en": "Extension Search"},
+		Search: func(_ context.Context, _ string, _ int) ([]sdk.SearchResult, error) {
+			return []sdk.SearchResult{}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	extSearch, err := client.GetSearchSettings(t.Context(), connect.NewRequest(&ariadnev1.GetSearchSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetSearchSettings after dynamic register: %v", err)
+	}
+	foundExt := false
+	for _, svc := range extSearch.Msg.GetSearch().GetServices() {
+		if svc.GetKind() == "custom-ext" {
+			foundExt = true
+			break
+		}
+	}
+	if !foundExt {
+		t.Fatalf("dynamic search provider missing: %+v", extSearch.Msg.GetSearch().GetServices())
 	}
 
 	// Work settings

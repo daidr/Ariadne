@@ -99,7 +99,7 @@ func Defaults() Object {
 	for _, role := range roles {
 		roleConfig[role] = Object{"model": nil, "effort": nil, "fallback": nil}
 	}
-	return Object{"locale": "zh-CN", "plugins": []any{}, "models": Object{"providers": []any{}, "models": []any{}, "roles": roleConfig, "showCost": false}, "concurrency": Object{"slots": float64(3), "reserved": float64(1)}, "sourceSecrets": Object{}, "mcp": Object{"servers": []any{}}, "input": Object{"submitOn": "enter", "snippets": []any{}, "keys": cloneMap(defaultKeys)}, "instructions": "", "commands": Object{"rules": DefaultRules()}, "limits": cloneMap(defaultLimits), "projectEnv": Object{}, "search": Object{"provider": "tavily", "services": Object{"tavily": Object{"apiKey": "", "baseUrl": ""}, "deepseek": Object{"apiKey": "", "baseUrl": ""}}}}
+	return Object{"locale": "zh-CN", "plugins": []any{}, "models": Object{"providers": []any{}, "models": []any{}, "roles": roleConfig, "showCost": false}, "concurrency": Object{"slots": float64(3), "reserved": float64(1)}, "sourceSecrets": Object{}, "mcp": Object{"servers": []any{}}, "input": Object{"submitOn": "enter", "snippets": []any{}, "keys": cloneMap(defaultKeys)}, "instructions": "", "commands": Object{"rules": DefaultRules()}, "limits": cloneMap(defaultLimits), "projectEnv": Object{}, "search": Object{"provider": "", "services": Object{}}}
 }
 func parseKeys(raw any, strict bool) (Object, error) {
 	given := object(raw)
@@ -199,18 +199,19 @@ func storedSearch(raw any) Object {
 	given := object(raw)
 	services := object(given["services"])
 	out := Object{}
-	for _, kind := range []string{"tavily", "deepseek"} {
-		service := object(services[kind])
-		key, keyOK := service["apiKey"].(string)
-		if !keyOK && kind == "tavily" {
-			key = text(given["apiKey"])
+	for _, kind := range names(services) {
+		if entry, ok := services[kind].(map[string]any); ok {
+			out[kind] = cloneMap(entry)
 		}
-		out[kind] = Object{"apiKey": key, "baseUrl": text(service["baseUrl"])}
 	}
-	provider := "tavily"
-	if given["provider"] == "deepseek" {
-		provider = "deepseek"
+	if legacyKey := text(given["apiKey"]); legacyKey != "" {
+		entry := cloneMap(object(out["tavily"]))
+		if _, exists := entry["apiKey"]; !exists {
+			entry["apiKey"] = legacyKey
+			out["tavily"] = entry
+		}
 	}
+	provider := textutil.Trim(text(given["provider"]))
 	return Object{"provider": provider, "services": out}
 }
 func Normalize(stored Object) Object {

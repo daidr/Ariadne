@@ -168,29 +168,32 @@ message SaveWorkSettingsResponse {
 
 // --- Search ---
 
+message SearchCapabilities {
+  int32 max_query_runes = 1;
+  int32 max_results = 2;
+  bool returns_answer = 3;
+  bool supports_check = 4;
+}
+
 message SearchServiceView {
   string kind = 1;
-  string title = 2;
-  string default_base_url = 3;
-  string base_url = 4;
-  bool key_set = 5;
+  LocalizedText title = 2;
+  optional LocalizedText description = 3;
+  SettingsSchema settings = 4;
+  optional SearchCapabilities capabilities = 5;
+  google.protobuf.Struct values = 6;
+  repeated string secrets_set = 7;
+  bool ready = 8;
 }
 
 message SearchSettings {
   string provider = 1;
-  bool key_set = 2;
-  bool needed = 3;
-  repeated string models = 4;
-  repeated LocalizedText plugins = 5;
-  repeated SearchServiceView services = 6;
-}
-
-message SearchServiceInput {
-  optional string base_url = 1;
-  oneof api_key_action {
-    string api_key = 2;
-    bool clear_api_key = 3;
-  }
+  bool ready = 2;
+  bool key_set = 3;
+  bool needed = 4;
+  repeated string models = 5;
+  repeated LocalizedText plugins = 6;
+  repeated SearchServiceView services = 7;
 }
 
 message GetSearchSettingsRequest {}
@@ -201,7 +204,7 @@ message GetSearchSettingsResponse {
 
 message SaveSearchSettingsRequest {
   optional string provider = 1;
-  map<string, SearchServiceInput> services = 2;
+  map<string, google.protobuf.Struct> services = 2;
 }
 
 message SaveSearchSettingsResponse {
@@ -210,12 +213,13 @@ message SaveSearchSettingsResponse {
 
 message CheckSearchSettingsRequest {
   optional string provider = 1;
-  map<string, SearchServiceInput> services = 2;
+  map<string, google.protobuf.Struct> services = 2;
 }
 
 message CheckSearchSettingsResponse {
   bool ok = 1;
   optional int32 status = 2;
+  optional LocalizedText message = 3;
 }
 
 // --- Models & Catalog ---

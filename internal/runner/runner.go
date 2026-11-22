@@ -25,6 +25,7 @@ import (
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/internal/realtime"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/secrets"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/skills"
@@ -42,11 +43,11 @@ type Runner struct {
 	Models        *models.Registry
 	Drafts        *realtime.ReplyDrafts
 	Live          *realtime.LiveCommands
-	Workspaces    *workspaces.Manager
-	MCP           *mcp.Hub
-	SkillsDirs    []string
-	SearchPlugins func() []sdk.SearchProvider
-	HTTPClient    *http.Client
+	Workspaces *workspaces.Manager
+	MCP        *mcp.Hub
+	SkillsDirs []string
+	Searches   *searches.Registry
+	HTTPClient *http.Client
 	Rooms         *collab.Rooms
 	Dashboards    *dashboard.Registry
 	Browser       *browser.Pages

@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,18 +35,7 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 		})
 		return err
 	case "searches":
-		_, err := pc.RegisterSearch(sdk.SearchProvider{
-			Kind: provider.kind, Title: provider.title,
-			Search: func(ctx context.Context, query string, limit int) ([]sdk.SearchResult, error) {
-				var out []sdk.SearchResult
-				limit = min(max(limit, 0), 100)
-				err := program.result(ctx, provider, "search", &out, query, limit)
-				if len(out) > limit {
-					out = slices.Clone(out[:limit])
-				}
-				return out, err
-			},
-		})
+		_, err := pc.RegisterSearch(program.search(provider))
 		return err
 	case "links":
 		_, err := pc.RegisterLink(sdk.LinkProvider{
@@ -69,6 +59,121 @@ func (program *luaProgram) install(pc sdk.PluginContext, provider luaProvider) e
 		return err
 	}
 	return errors.New("unknown Lua plugin provider type")
+}
+
+func (program *luaProgram) search(provider luaProvider) sdk.SearchProvider {
+	run := func(ctx context.Context, settings map[string]any, query string, limit int) (sdk.SearchResponse, error) {
+		limit = min(max(limit, 0), 100)
+		var raw json.RawMessage
+		var err error
+		if settings != nil {
+			err = program.result(ctx, provider, "search", &raw, query, limit, settings)
+		} else {
+			err = program.result(ctx, provider, "search", &raw, query, limit)
+		}
+		if err != nil {
+			return sdk.SearchResponse{}, err
+		}
+		return decodeLuaSearchResponse(raw, limit)
+	}
+	searchProvider := sdk.SearchProvider{
+		Kind:        provider.kind,
+		Title:       provider.title,
+		Description: provider.localizedDesc,
+		Settings:    provider.settings,
+		Execute: func(ctx context.Context, settings map[string]any, query sdk.SearchQuery) (sdk.SearchResponse, error) {
+			return run(ctx, settings, query.Query, query.Limit)
+		},
+		Search: func(ctx context.Context, query string, limit int) ([]sdk.SearchResult, error) {
+			response, err := run(ctx, nil, query, limit)
+			if err != nil {
+				return nil, err
+			}
+			return response.Results, nil
+		},
+	}
+	if provider.methods["check"] {
+		searchProvider.Capabilities.SupportsCheck = true
+		searchProvider.Check = func(ctx context.Context, settings map[string]any) (sdk.SearchCheckResult, error) {
+			var raw json.RawMessage
+			if err := program.result(ctx, provider, "check", &raw, settings); err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					return sdk.SearchCheckResult{}, err
+				}
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+					return sdk.SearchCheckResult{OK: false}, nil
+				}
+				return sdk.SearchCheckResult{
+					OK:      false,
+					Message: sdk.LocalizedText{"zh-CN": err.Error(), "en": err.Error()},
+				}, nil
+			}
+			return decodeLuaSearchCheck(raw), nil
+		}
+	}
+	return searchProvider
+}
+
+func decodeLuaSearchResponse(raw json.RawMessage, limit int) (sdk.SearchResponse, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return sdk.SearchResponse{Results: []sdk.SearchResult{}}, nil
+	}
+	if trimmed[0] == '[' {
+		var out []sdk.SearchResult
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return sdk.SearchResponse{}, err
+		}
+		if len(out) > limit {
+			out = slices.Clone(out[:limit])
+		}
+		if out == nil {
+			out = []sdk.SearchResult{}
+		}
+		return sdk.SearchResponse{Results: out}, nil
+	}
+	if trimmed[0] == '{' {
+		var out sdk.SearchResponse
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return sdk.SearchResponse{}, err
+		}
+		if len(out.Results) > limit {
+			out.Results = slices.Clone(out.Results[:limit])
+		}
+		if out.Results == nil {
+			out.Results = []sdk.SearchResult{}
+		}
+		return out, nil
+	}
+	return sdk.SearchResponse{}, errors.New("invalid Lua search response")
+}
+
+func decodeLuaSearchCheck(raw json.RawMessage) sdk.SearchCheckResult {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte("true")) {
+		return sdk.SearchCheckResult{OK: true}
+	}
+	if bytes.Equal(trimmed, []byte("false")) {
+		return sdk.SearchCheckResult{OK: false}
+	}
+	if trimmed[0] == '{' {
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &probe); err != nil {
+			return sdk.SearchCheckResult{OK: false}
+		}
+		if _, hasOK := probe["ok"]; hasOK {
+			var result sdk.SearchCheckResult
+			if err := json.Unmarshal(trimmed, &result); err != nil {
+				return sdk.SearchCheckResult{OK: false}
+			}
+			return result
+		}
+		var message sdk.LocalizedText
+		if err := json.Unmarshal(trimmed, &message); err == nil && len(message) > 0 {
+			return sdk.SearchCheckResult{OK: false, Message: message}
+		}
+	}
+	return sdk.SearchCheckResult{OK: false}
 }
 
 func (program *luaProgram) model(provider luaProvider) sdk.ModelProvider {

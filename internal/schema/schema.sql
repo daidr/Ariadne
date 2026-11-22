@@ -226,6 +226,7 @@ CREATE TABLE plan_nodes (
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       acceptance TEXT NOT NULL,
+      group_name TEXT NOT NULL DEFAULT '',
       position INTEGER NOT NULL,
       changed_in TEXT,
       created_at INTEGER NOT NULL,

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = 69
+const Version = 70
 
 //go:embed schema.sql
 var ddl string

@@ -14,6 +14,8 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/mcp"
 	"github.com/daidr/Ariadne/internal/modelcatalog"
+	"github.com/daidr/Ariadne/internal/searches"
+	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -172,24 +174,37 @@ func (h *settingsServiceHandler) SaveWorkSettings(
 	}), nil
 }
 
+func (h *settingsServiceHandler) searchRegistry() *searches.Registry {
+	if h.api.options.Searches != nil {
+		return h.api.options.Searches
+	}
+	if h.api.options.Plugins != nil {
+		return h.api.options.Plugins.Searches()
+	}
+	return nil
+}
+
+func (h *settingsServiceHandler) searchKinds() []sdk.SearchProviderInfo {
+	if registry := h.searchRegistry(); registry != nil {
+		return registry.Kinds()
+	}
+	return []sdk.SearchProviderInfo{}
+}
+
 func (h *settingsServiceHandler) searchSettingsView() *ariadnev1.SearchSettings {
 	var models []string
-	var plugins []any
 	if h.api.options.SearchAvailable != nil {
-		models, plugins = h.api.options.SearchAvailable()
-	} else {
-		if h.api.options.Models != nil {
-			for _, model := range h.api.options.Models.SearchModels(h.api.options.Settings) {
-				models = append(models, model.Label)
-			}
-		}
-		if h.api.options.Plugins != nil {
-			for _, search := range h.api.options.Plugins.SearchProviders() {
-				plugins = append(plugins, search.Title)
-			}
+		models, _ = h.api.options.SearchAvailable()
+	} else if h.api.options.Models != nil {
+		for _, model := range h.api.options.Models.SearchModels(h.api.options.Settings) {
+			models = append(models, model.Label)
 		}
 	}
-	return toProtoSearchSettings(h.api.options.Settings.PublicSearch(models, plugins))
+	var ready func(string, map[string]any) bool
+	if registry := h.searchRegistry(); registry != nil {
+		ready = registry.Ready
+	}
+	return toProtoSearchSettings(h.api.options.Settings.PublicSearch(h.searchKinds(), ready, models))
 }
 
 func (h *settingsServiceHandler) GetSearchSettings(
@@ -212,7 +227,11 @@ func (h *settingsServiceHandler) SaveSearchSettings(
 		return nil, domainerr.NotFound("settings")
 	}
 	body := searchInputToObject(req.Msg.Provider, req.Msg.GetServices())
-	if _, err := h.api.options.Settings.UpdateSearch(body); err != nil {
+	var validate func(string, map[string]any) error
+	if registry := h.searchRegistry(); registry != nil {
+		validate = registry.Validate
+	}
+	if _, err := h.api.options.Settings.UpdateSearch(body, h.searchKinds(), validate); err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&ariadnev1.SaveSearchSettingsResponse{
@@ -228,15 +247,36 @@ func (h *settingsServiceHandler) CheckSearchSettings(
 		return nil, domainerr.NotFound("settings")
 	}
 	body := searchInputToObject(req.Msg.Provider, req.Msg.GetServices())
-	checkCtx, cancel := context.WithTimeout(ctx, searchCheckTimeout)
-	defer cancel()
-	result, err := h.api.options.Settings.CheckSearch(checkCtx, body, h.api.options.HTTPClient)
+	registry := h.searchRegistry()
+	if registry == nil {
+		return nil, badInput("provider")
+	}
+	kinds := registry.Kinds()
+	draft, err := h.api.options.Settings.SearchDraft(body, kinds, registry.Validate)
 	if err != nil {
 		return nil, err
 	}
-	ok, _ := result["ok"].(bool)
-	resp := &ariadnev1.CheckSearchSettingsResponse{Ok: ok}
-	if status, hasStatus := asOptionalInt32(result["status"]); hasStatus {
+	providerKind, _ := draft["provider"].(string)
+	if providerKind == "" && len(kinds) > 0 {
+		providerKind = kinds[0].Kind
+	}
+	provider, ok := registry.Get(providerKind)
+	if !ok {
+		return nil, badInput("provider")
+	}
+	values := settings.EffectiveSearchSettings(draft, provider.Info())
+	checkCtx, cancel := context.WithTimeout(ctx, searchCheckTimeout)
+	defer cancel()
+	result, err := registry.Check(checkCtx, providerKind, values)
+	if err != nil {
+		return nil, err
+	}
+	resp := &ariadnev1.CheckSearchSettingsResponse{
+		Ok:      result.OK,
+		Message: toProtoOptionalLocalizedText(result.Message),
+	}
+	if result.Status != nil {
+		status := int32(*result.Status)
 		resp.Status = &status
 	}
 	return connect.NewResponse(resp), nil
@@ -771,7 +811,7 @@ func toProtoWorkSettings(raw map[string]any) *ariadnev1.WorkSettings {
 	}
 }
 
-func searchInputToObject(provider *string, services map[string]*ariadnev1.SearchServiceInput) object {
+func searchInputToObject(provider *string, services map[string]*structpb.Struct) object {
 	body := object{}
 	if provider != nil {
 		body["provider"] = *provider
@@ -779,29 +819,38 @@ func searchInputToObject(provider *string, services map[string]*ariadnev1.Search
 	if len(services) > 0 {
 		svcMap := object{}
 		for kind, svc := range services {
-			entry := object{}
-			if svc != nil {
-				if svc.BaseUrl != nil {
-					entry["baseUrl"] = svc.GetBaseUrl()
-				}
-				switch action := svc.ApiKeyAction.(type) {
-				case *ariadnev1.SearchServiceInput_ApiKey:
-					entry["apiKey"] = action.ApiKey
-				case *ariadnev1.SearchServiceInput_ClearApiKey:
-					if action.ClearApiKey {
-						entry["apiKey"] = nil
-					}
-				}
-			}
-			svcMap[kind] = entry
+			svcMap[kind] = structToMap(svc)
 		}
 		body["services"] = svcMap
 	}
 	return body
 }
 
+func toProtoSearchCapabilities(raw any) *ariadnev1.SearchCapabilities {
+	switch caps := raw.(type) {
+	case sdk.SearchCapabilities:
+		if caps.MaxQueryRunes == 0 && caps.MaxResults == 0 && !caps.ReturnsAnswer && !caps.SupportsCheck {
+			return nil
+		}
+		return &ariadnev1.SearchCapabilities{
+			MaxQueryRunes: int32(caps.MaxQueryRunes),
+			MaxResults:    int32(caps.MaxResults),
+			ReturnsAnswer: caps.ReturnsAnswer,
+			SupportsCheck: caps.SupportsCheck,
+		}
+	case *sdk.SearchCapabilities:
+		if caps == nil {
+			return nil
+		}
+		return toProtoSearchCapabilities(*caps)
+	default:
+		return nil
+	}
+}
+
 func toProtoSearchSettings(raw map[string]any) *ariadnev1.SearchSettings {
 	provider, _ := raw["provider"].(string)
+	ready, _ := raw["ready"].(bool)
 	keySet, _ := raw["keySet"].(bool)
 	needed, _ := raw["needed"].(bool)
 	models := asStringSlice(raw["models"])
@@ -814,17 +863,35 @@ func toProtoSearchSettings(raw map[string]any) *ariadnev1.SearchSettings {
 	services := make([]*ariadnev1.SearchServiceView, 0, len(servicesRaw))
 	for _, item := range servicesRaw {
 		obj, _ := item.(map[string]any)
-		svcKeySet, _ := obj["keySet"].(bool)
+		var schema *ariadnev1.SettingsSchema
+		if rawSchema, ok := obj["settings"].(sdk.SettingsSchema); ok {
+			schema = toProtoSettingsSchema(rawSchema)
+		} else {
+			schema = toProtoSettingsSchema(sdk.SettingsSchema{Type: "object"})
+		}
+		var description *ariadnev1.LocalizedText
+		if rawDesc, exists := obj["description"]; exists && rawDesc != nil {
+			desc := anyToProtoLocalizedText(rawDesc)
+			if len(desc.GetValues()) > 0 {
+				description = desc
+			}
+		}
+		values, _ := obj["values"].(map[string]any)
+		svcReady, _ := obj["ready"].(bool)
 		services = append(services, &ariadnev1.SearchServiceView{
-			Kind:           text(obj, "kind"),
-			Title:          text(obj, "title"),
-			DefaultBaseUrl: text(obj, "defaultBaseUrl"),
-			BaseUrl:        text(obj, "baseUrl"),
-			KeySet:         svcKeySet,
+			Kind:         text(obj, "kind"),
+			Title:        anyToProtoLocalizedText(obj["title"]),
+			Description:  description,
+			Settings:     schema,
+			Capabilities: toProtoSearchCapabilities(obj["capabilities"]),
+			Values:       mapToStruct(values),
+			SecretsSet:   asStringSlice(obj["secretsSet"]),
+			Ready:        svcReady,
 		})
 	}
 	return &ariadnev1.SearchSettings{
 		Provider: provider,
+		Ready:    ready,
 		KeySet:   keySet,
 		Needed:   needed,
 		Models:   models,

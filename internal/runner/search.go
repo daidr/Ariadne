@@ -21,15 +21,43 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 	if slices.Contains(project.Settings.Tools, "search") {
 		return nil
 	}
-	var plugins []sdk.SearchProvider
-	if turn.SearchPlugins != nil {
-		plugins = turn.SearchPlugins()
+	type readySearch struct {
+		provider sdk.SearchProvider
+		settings map[string]any
 	}
-	candidates := append([]*settings.ResolvedModel{model}, turn.Models.SearchModels(turn.Settings)...)
+	var ready []readySearch
+	if turn.Searches != nil {
+		active := ""
+		if turn.Settings != nil {
+			active = turn.Settings.ActiveSearchProvider()
+		}
+		for _, provider := range turn.Searches.Providers() {
+			var values map[string]any
+			if turn.Settings != nil {
+				values = turn.Settings.SearchSettings(provider.Info())
+			}
+			if turn.Searches.Ready(provider.Kind, values) {
+				ready = append(ready, readySearch{provider: provider, settings: values})
+			}
+		}
+		if active != "" {
+			if idx := slices.IndexFunc(ready, func(item readySearch) bool { return item.provider.Kind == active }); idx > 0 {
+				chosen := ready[idx]
+				ready = append([]readySearch{chosen}, append(ready[:idx], ready[idx+1:]...)...)
+			}
+		}
+	}
+	var candidates []*settings.ResolvedModel
+	if model != nil {
+		candidates = append(candidates, model)
+	}
+	if turn.Models != nil && turn.Settings != nil {
+		candidates = append(candidates, turn.Models.SearchModels(turn.Settings)...)
+	}
 	var models []*settings.ResolvedModel
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
-		if seen[candidate.Label] {
+		if candidate == nil || seen[candidate.Label] {
 			continue
 		}
 		provider, ok := turn.Models.Get(candidate.Provider.Kind)
@@ -41,15 +69,14 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 			}
 		}
 	}
-	keyed := turn.Settings.SearchProvider(turn.HTTPClient)
-	if len(plugins) == 0 && len(models) == 0 && keyed == nil {
+	if len(ready) == 0 && len(models) == 0 {
 		return nil
 	}
 	fields := args{"query": field("string"), "limit": field("integer")}
-	if len(plugins) > 1 {
-		kinds := []string{}
-		for _, service := range plugins {
-			kinds = append(kinds, service.Kind)
+	if len(ready) > 1 {
+		kinds := make([]string, 0, len(ready))
+		for _, item := range ready {
+			kinds = append(kinds, item.provider.Kind)
 		}
 		fields["provider"] = args{"type": "string", "enum": kinds}
 	}
@@ -71,25 +98,35 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 				limit = int(max(1, min(20, asNumber(raw))))
 			}
 			service := text(input, "provider")
-			if service != "" && !slices.ContainsFunc(plugins, func(plugin sdk.SearchProvider) bool { return plugin.Kind == service }) {
+			if service != "" && !slices.ContainsFunc(ready, func(item readySearch) bool { return item.provider.Kind == service }) {
 				return "", errors.New("unknown search service")
 			}
-			use := func(search func(context.Context, string, int) ([]sdk.SearchResult, error)) (string, error) {
+			runSearch := func(item readySearch) (string, error) {
 				request, cancel := context.WithTimeout(ctx, 15*time.Second)
 				defer cancel()
-				results, err := search(request, query, limit)
-				return formatHits(results, limit), err
+				response, err := turn.Searches.Execute(request, item.provider.Kind, item.settings, sdk.SearchQuery{Query: query, Limit: limit})
+				if err != nil {
+					return "", err
+				}
+				return formatSearchResponse(response, limit), nil
 			}
-			if len(plugins) > 0 {
-				chosen := plugins[0]
-				for _, plugin := range plugins {
-					if plugin.Kind == service {
-						chosen = plugin
-						break
+			if len(ready) > 0 {
+				candidates := ready
+				if service != "" {
+					for _, item := range ready {
+						if item.provider.Kind == service {
+							candidates = []readySearch{item}
+							break
+						}
 					}
 				}
-				if hits, err := use(chosen.Search); err == nil {
-					return searchBlock(hits), nil
+				for _, item := range candidates {
+					if ctx.Err() != nil {
+						break
+					}
+					if output, err := runSearch(item); err == nil {
+						return searchBlock(output), nil
+					}
 				}
 			}
 			if service == "" {
@@ -122,11 +159,6 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 						return searchBlock(textutil.HeadUnits(answer.Text, 20000) + "\n\n" + formatHits(answer.Sources, limit)), nil
 					}
 				}
-				if fallback := turn.Settings.SearchProvider(turn.HTTPClient); fallback != nil && ctx.Err() == nil {
-					if hits, err := use(fallback.Search); err == nil {
-						return searchBlock(hits), nil
-					}
-				}
 			}
 			if err := ctx.Err(); err != nil {
 				return "", err
@@ -134,6 +166,19 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 			return "", errors.New("search failed. Check the project's available search services")
 		})
 	return &entry
+}
+
+func formatSearchResponse(response sdk.SearchResponse, limit int) string {
+	hits := formatHits(response.Results, limit)
+	answer := strings.TrimSpace(textutil.HeadUnits(response.Answer, 20000))
+	switch {
+	case answer != "" && hits != "":
+		return answer + "\n\n" + hits
+	case answer != "":
+		return answer
+	default:
+		return hits
+	}
 }
 
 func formatHits(hits []sdk.SearchResult, limit int) string {

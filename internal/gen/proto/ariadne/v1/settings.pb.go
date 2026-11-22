@@ -1374,20 +1374,91 @@ func (x *SaveWorkSettingsResponse) GetWork() *WorkSettings {
 	return nil
 }
 
+type SearchCapabilities struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MaxQueryRunes int32                  `protobuf:"varint,1,opt,name=max_query_runes,json=maxQueryRunes,proto3" json:"max_query_runes,omitempty"`
+	MaxResults    int32                  `protobuf:"varint,2,opt,name=max_results,json=maxResults,proto3" json:"max_results,omitempty"`
+	ReturnsAnswer bool                   `protobuf:"varint,3,opt,name=returns_answer,json=returnsAnswer,proto3" json:"returns_answer,omitempty"`
+	SupportsCheck bool                   `protobuf:"varint,4,opt,name=supports_check,json=supportsCheck,proto3" json:"supports_check,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchCapabilities) Reset() {
+	*x = SearchCapabilities{}
+	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchCapabilities) ProtoMessage() {}
+
+func (x *SearchCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchCapabilities.ProtoReflect.Descriptor instead.
+func (*SearchCapabilities) Descriptor() ([]byte, []int) {
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *SearchCapabilities) GetMaxQueryRunes() int32 {
+	if x != nil {
+		return x.MaxQueryRunes
+	}
+	return 0
+}
+
+func (x *SearchCapabilities) GetMaxResults() int32 {
+	if x != nil {
+		return x.MaxResults
+	}
+	return 0
+}
+
+func (x *SearchCapabilities) GetReturnsAnswer() bool {
+	if x != nil {
+		return x.ReturnsAnswer
+	}
+	return false
+}
+
+func (x *SearchCapabilities) GetSupportsCheck() bool {
+	if x != nil {
+		return x.SupportsCheck
+	}
+	return false
+}
+
 type SearchServiceView struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Kind           string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	Title          string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	DefaultBaseUrl string                 `protobuf:"bytes,3,opt,name=default_base_url,json=defaultBaseUrl,proto3" json:"default_base_url,omitempty"`
-	BaseUrl        string                 `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
-	KeySet         bool                   `protobuf:"varint,5,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Title         *LocalizedText         `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Description   *LocalizedText         `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	Settings      *SettingsSchema        `protobuf:"bytes,4,opt,name=settings,proto3" json:"settings,omitempty"`
+	Capabilities  *SearchCapabilities    `protobuf:"bytes,5,opt,name=capabilities,proto3,oneof" json:"capabilities,omitempty"`
+	Values        *structpb.Struct       `protobuf:"bytes,6,opt,name=values,proto3" json:"values,omitempty"`
+	SecretsSet    []string               `protobuf:"bytes,7,rep,name=secrets_set,json=secretsSet,proto3" json:"secrets_set,omitempty"`
+	Ready         bool                   `protobuf:"varint,8,opt,name=ready,proto3" json:"ready,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchServiceView) Reset() {
 	*x = SearchServiceView{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1399,7 +1470,7 @@ func (x *SearchServiceView) String() string {
 func (*SearchServiceView) ProtoMessage() {}
 
 func (x *SearchServiceView) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[25]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1412,7 +1483,7 @@ func (x *SearchServiceView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchServiceView.ProtoReflect.Descriptor instead.
 func (*SearchServiceView) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{25}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SearchServiceView) GetKind() string {
@@ -1422,30 +1493,51 @@ func (x *SearchServiceView) GetKind() string {
 	return ""
 }
 
-func (x *SearchServiceView) GetTitle() string {
+func (x *SearchServiceView) GetTitle() *LocalizedText {
 	if x != nil {
 		return x.Title
 	}
-	return ""
+	return nil
 }
 
-func (x *SearchServiceView) GetDefaultBaseUrl() string {
+func (x *SearchServiceView) GetDescription() *LocalizedText {
 	if x != nil {
-		return x.DefaultBaseUrl
+		return x.Description
 	}
-	return ""
+	return nil
 }
 
-func (x *SearchServiceView) GetBaseUrl() string {
+func (x *SearchServiceView) GetSettings() *SettingsSchema {
 	if x != nil {
-		return x.BaseUrl
+		return x.Settings
 	}
-	return ""
+	return nil
 }
 
-func (x *SearchServiceView) GetKeySet() bool {
+func (x *SearchServiceView) GetCapabilities() *SearchCapabilities {
 	if x != nil {
-		return x.KeySet
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *SearchServiceView) GetValues() *structpb.Struct {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *SearchServiceView) GetSecretsSet() []string {
+	if x != nil {
+		return x.SecretsSet
+	}
+	return nil
+}
+
+func (x *SearchServiceView) GetReady() bool {
+	if x != nil {
+		return x.Ready
 	}
 	return false
 }
@@ -1453,18 +1545,19 @@ func (x *SearchServiceView) GetKeySet() bool {
 type SearchSettings struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
-	KeySet        bool                   `protobuf:"varint,2,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
-	Needed        bool                   `protobuf:"varint,3,opt,name=needed,proto3" json:"needed,omitempty"`
-	Models        []string               `protobuf:"bytes,4,rep,name=models,proto3" json:"models,omitempty"`
-	Plugins       []*LocalizedText       `protobuf:"bytes,5,rep,name=plugins,proto3" json:"plugins,omitempty"`
-	Services      []*SearchServiceView   `protobuf:"bytes,6,rep,name=services,proto3" json:"services,omitempty"`
+	Ready         bool                   `protobuf:"varint,2,opt,name=ready,proto3" json:"ready,omitempty"`
+	KeySet        bool                   `protobuf:"varint,3,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
+	Needed        bool                   `protobuf:"varint,4,opt,name=needed,proto3" json:"needed,omitempty"`
+	Models        []string               `protobuf:"bytes,5,rep,name=models,proto3" json:"models,omitempty"`
+	Plugins       []*LocalizedText       `protobuf:"bytes,6,rep,name=plugins,proto3" json:"plugins,omitempty"`
+	Services      []*SearchServiceView   `protobuf:"bytes,7,rep,name=services,proto3" json:"services,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchSettings) Reset() {
 	*x = SearchSettings{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1476,7 +1569,7 @@ func (x *SearchSettings) String() string {
 func (*SearchSettings) ProtoMessage() {}
 
 func (x *SearchSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[26]
+	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1489,7 +1582,7 @@ func (x *SearchSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchSettings.ProtoReflect.Descriptor instead.
 func (*SearchSettings) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{26}
+	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SearchSettings) GetProvider() string {
@@ -1497,6 +1590,13 @@ func (x *SearchSettings) GetProvider() string {
 		return x.Provider
 	}
 	return ""
+}
+
+func (x *SearchSettings) GetReady() bool {
+	if x != nil {
+		return x.Ready
+	}
+	return false
 }
 
 func (x *SearchSettings) GetKeySet() bool {
@@ -1533,96 +1633,6 @@ func (x *SearchSettings) GetServices() []*SearchServiceView {
 	}
 	return nil
 }
-
-type SearchServiceInput struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	BaseUrl *string                `protobuf:"bytes,1,opt,name=base_url,json=baseUrl,proto3,oneof" json:"base_url,omitempty"`
-	// Types that are valid to be assigned to ApiKeyAction:
-	//
-	//	*SearchServiceInput_ApiKey
-	//	*SearchServiceInput_ClearApiKey
-	ApiKeyAction  isSearchServiceInput_ApiKeyAction `protobuf_oneof:"api_key_action"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SearchServiceInput) Reset() {
-	*x = SearchServiceInput{}
-	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SearchServiceInput) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SearchServiceInput) ProtoMessage() {}
-
-func (x *SearchServiceInput) ProtoReflect() protoreflect.Message {
-	mi := &file_ariadne_v1_settings_proto_msgTypes[27]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SearchServiceInput.ProtoReflect.Descriptor instead.
-func (*SearchServiceInput) Descriptor() ([]byte, []int) {
-	return file_ariadne_v1_settings_proto_rawDescGZIP(), []int{27}
-}
-
-func (x *SearchServiceInput) GetBaseUrl() string {
-	if x != nil && x.BaseUrl != nil {
-		return *x.BaseUrl
-	}
-	return ""
-}
-
-func (x *SearchServiceInput) GetApiKeyAction() isSearchServiceInput_ApiKeyAction {
-	if x != nil {
-		return x.ApiKeyAction
-	}
-	return nil
-}
-
-func (x *SearchServiceInput) GetApiKey() string {
-	if x != nil {
-		if x, ok := x.ApiKeyAction.(*SearchServiceInput_ApiKey); ok {
-			return x.ApiKey
-		}
-	}
-	return ""
-}
-
-func (x *SearchServiceInput) GetClearApiKey() bool {
-	if x != nil {
-		if x, ok := x.ApiKeyAction.(*SearchServiceInput_ClearApiKey); ok {
-			return x.ClearApiKey
-		}
-	}
-	return false
-}
-
-type isSearchServiceInput_ApiKeyAction interface {
-	isSearchServiceInput_ApiKeyAction()
-}
-
-type SearchServiceInput_ApiKey struct {
-	ApiKey string `protobuf:"bytes,2,opt,name=api_key,json=apiKey,proto3,oneof"`
-}
-
-type SearchServiceInput_ClearApiKey struct {
-	ClearApiKey bool `protobuf:"varint,3,opt,name=clear_api_key,json=clearApiKey,proto3,oneof"`
-}
-
-func (*SearchServiceInput_ApiKey) isSearchServiceInput_ApiKeyAction() {}
-
-func (*SearchServiceInput_ClearApiKey) isSearchServiceInput_ApiKeyAction() {}
 
 type GetSearchSettingsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1705,9 +1715,9 @@ func (x *GetSearchSettingsResponse) GetSearch() *SearchSettings {
 }
 
 type SaveSearchSettingsRequest struct {
-	state         protoimpl.MessageState         `protogen:"open.v1"`
-	Provider      *string                        `protobuf:"bytes,1,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
-	Services      map[string]*SearchServiceInput `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Provider      *string                     `protobuf:"bytes,1,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Services      map[string]*structpb.Struct `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1749,7 +1759,7 @@ func (x *SaveSearchSettingsRequest) GetProvider() string {
 	return ""
 }
 
-func (x *SaveSearchSettingsRequest) GetServices() map[string]*SearchServiceInput {
+func (x *SaveSearchSettingsRequest) GetServices() map[string]*structpb.Struct {
 	if x != nil {
 		return x.Services
 	}
@@ -1801,9 +1811,9 @@ func (x *SaveSearchSettingsResponse) GetSearch() *SearchSettings {
 }
 
 type CheckSearchSettingsRequest struct {
-	state         protoimpl.MessageState         `protogen:"open.v1"`
-	Provider      *string                        `protobuf:"bytes,1,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
-	Services      map[string]*SearchServiceInput `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Provider      *string                     `protobuf:"bytes,1,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Services      map[string]*structpb.Struct `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1845,7 +1855,7 @@ func (x *CheckSearchSettingsRequest) GetProvider() string {
 	return ""
 }
 
-func (x *CheckSearchSettingsRequest) GetServices() map[string]*SearchServiceInput {
+func (x *CheckSearchSettingsRequest) GetServices() map[string]*structpb.Struct {
 	if x != nil {
 		return x.Services
 	}
@@ -1856,6 +1866,7 @@ type CheckSearchSettingsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Status        *int32                 `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	Message       *LocalizedText         `protobuf:"bytes,3,opt,name=message,proto3,oneof" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1902,6 +1913,13 @@ func (x *CheckSearchSettingsResponse) GetStatus() int32 {
 		return *x.Status
 	}
 	return 0
+}
+
+func (x *CheckSearchSettingsResponse) GetMessage() *LocalizedText {
+	if x != nil {
+		return x.Message
+	}
+	return nil
 }
 
 type ModelPrice struct {
@@ -4400,49 +4418,59 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x06_rulesB\t\n" +
 	"\a_limits\"H\n" +
 	"\x18SaveWorkSettingsResponse\x12,\n" +
-	"\x04work\x18\x01 \x01(\v2\x18.ariadne.v1.WorkSettingsR\x04work\"\x9b\x01\n" +
+	"\x04work\x18\x01 \x01(\v2\x18.ariadne.v1.WorkSettingsR\x04work\"\xab\x01\n" +
+	"\x12SearchCapabilities\x12&\n" +
+	"\x0fmax_query_runes\x18\x01 \x01(\x05R\rmaxQueryRunes\x12\x1f\n" +
+	"\vmax_results\x18\x02 \x01(\x05R\n" +
+	"maxResults\x12%\n" +
+	"\x0ereturns_answer\x18\x03 \x01(\bR\rreturnsAnswer\x12%\n" +
+	"\x0esupports_check\x18\x04 \x01(\bR\rsupportsCheck\"\xa4\x03\n" +
 	"\x11SearchServiceView\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\x12(\n" +
-	"\x10default_base_url\x18\x03 \x01(\tR\x0edefaultBaseUrl\x12\x19\n" +
-	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x17\n" +
-	"\akey_set\x18\x05 \x01(\bR\x06keySet\"\xe5\x01\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12/\n" +
+	"\x05title\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextR\x05title\x12@\n" +
+	"\vdescription\x18\x03 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x00R\vdescription\x88\x01\x01\x126\n" +
+	"\bsettings\x18\x04 \x01(\v2\x1a.ariadne.v1.SettingsSchemaR\bsettings\x12G\n" +
+	"\fcapabilities\x18\x05 \x01(\v2\x1e.ariadne.v1.SearchCapabilitiesH\x01R\fcapabilities\x88\x01\x01\x12/\n" +
+	"\x06values\x18\x06 \x01(\v2\x17.google.protobuf.StructR\x06values\x12\x1f\n" +
+	"\vsecrets_set\x18\a \x03(\tR\n" +
+	"secretsSet\x12\x14\n" +
+	"\x05ready\x18\b \x01(\bR\x05readyB\x0e\n" +
+	"\f_descriptionB\x0f\n" +
+	"\r_capabilities\"\xfb\x01\n" +
 	"\x0eSearchSettings\x12\x1a\n" +
-	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x17\n" +
-	"\akey_set\x18\x02 \x01(\bR\x06keySet\x12\x16\n" +
-	"\x06needed\x18\x03 \x01(\bR\x06needed\x12\x16\n" +
-	"\x06models\x18\x04 \x03(\tR\x06models\x123\n" +
-	"\aplugins\x18\x05 \x03(\v2\x19.ariadne.v1.LocalizedTextR\aplugins\x129\n" +
-	"\bservices\x18\x06 \x03(\v2\x1d.ariadne.v1.SearchServiceViewR\bservices\"\x94\x01\n" +
-	"\x12SearchServiceInput\x12\x1e\n" +
-	"\bbase_url\x18\x01 \x01(\tH\x01R\abaseUrl\x88\x01\x01\x12\x19\n" +
-	"\aapi_key\x18\x02 \x01(\tH\x00R\x06apiKey\x12$\n" +
-	"\rclear_api_key\x18\x03 \x01(\bH\x00R\vclearApiKeyB\x10\n" +
-	"\x0eapi_key_actionB\v\n" +
-	"\t_base_url\"\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
+	"\x05ready\x18\x02 \x01(\bR\x05ready\x12\x17\n" +
+	"\akey_set\x18\x03 \x01(\bR\x06keySet\x12\x16\n" +
+	"\x06needed\x18\x04 \x01(\bR\x06needed\x12\x16\n" +
+	"\x06models\x18\x05 \x03(\tR\x06models\x123\n" +
+	"\aplugins\x18\x06 \x03(\v2\x19.ariadne.v1.LocalizedTextR\aplugins\x129\n" +
+	"\bservices\x18\a \x03(\v2\x1d.ariadne.v1.SearchServiceViewR\bservices\"\x1a\n" +
 	"\x18GetSearchSettingsRequest\"O\n" +
 	"\x19GetSearchSettingsResponse\x122\n" +
-	"\x06search\x18\x01 \x01(\v2\x1a.ariadne.v1.SearchSettingsR\x06search\"\xf7\x01\n" +
+	"\x06search\x18\x01 \x01(\v2\x1a.ariadne.v1.SearchSettingsR\x06search\"\xf0\x01\n" +
 	"\x19SaveSearchSettingsRequest\x12\x1f\n" +
 	"\bprovider\x18\x01 \x01(\tH\x00R\bprovider\x88\x01\x01\x12O\n" +
-	"\bservices\x18\x02 \x03(\v23.ariadne.v1.SaveSearchSettingsRequest.ServicesEntryR\bservices\x1a[\n" +
+	"\bservices\x18\x02 \x03(\v23.ariadne.v1.SaveSearchSettingsRequest.ServicesEntryR\bservices\x1aT\n" +
 	"\rServicesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x124\n" +
-	"\x05value\x18\x02 \x01(\v2\x1e.ariadne.v1.SearchServiceInputR\x05value:\x028\x01B\v\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
+	"\x05value\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x05value:\x028\x01B\v\n" +
 	"\t_provider\"P\n" +
 	"\x1aSaveSearchSettingsResponse\x122\n" +
-	"\x06search\x18\x01 \x01(\v2\x1a.ariadne.v1.SearchSettingsR\x06search\"\xf9\x01\n" +
+	"\x06search\x18\x01 \x01(\v2\x1a.ariadne.v1.SearchSettingsR\x06search\"\xf2\x01\n" +
 	"\x1aCheckSearchSettingsRequest\x12\x1f\n" +
 	"\bprovider\x18\x01 \x01(\tH\x00R\bprovider\x88\x01\x01\x12P\n" +
-	"\bservices\x18\x02 \x03(\v24.ariadne.v1.CheckSearchSettingsRequest.ServicesEntryR\bservices\x1a[\n" +
+	"\bservices\x18\x02 \x03(\v24.ariadne.v1.CheckSearchSettingsRequest.ServicesEntryR\bservices\x1aT\n" +
 	"\rServicesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x124\n" +
-	"\x05value\x18\x02 \x01(\v2\x1e.ariadne.v1.SearchServiceInputR\x05value:\x028\x01B\v\n" +
-	"\t_provider\"U\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
+	"\x05value\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x05value:\x028\x01B\v\n" +
+	"\t_provider\"\x9b\x01\n" +
 	"\x1bCheckSearchSettingsResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x1b\n" +
-	"\x06status\x18\x02 \x01(\x05H\x00R\x06status\x88\x01\x01B\t\n" +
-	"\a_status\"\xbf\x01\n" +
+	"\x06status\x18\x02 \x01(\x05H\x00R\x06status\x88\x01\x01\x128\n" +
+	"\amessage\x18\x03 \x01(\v2\x19.ariadne.v1.LocalizedTextH\x01R\amessage\x88\x01\x01B\t\n" +
+	"\a_statusB\n" +
+	"\n" +
+	"\b_message\"\xbf\x01\n" +
 	"\n" +
 	"ModelPrice\x12\x1a\n" +
 	"\bcurrency\x18\x01 \x01(\tR\bcurrency\x12\x14\n" +
@@ -4728,9 +4756,9 @@ var file_ariadne_v1_settings_proto_goTypes = []any{
 	(*GetWorkSettingsResponse)(nil),     // 22: ariadne.v1.GetWorkSettingsResponse
 	(*SaveWorkSettingsRequest)(nil),     // 23: ariadne.v1.SaveWorkSettingsRequest
 	(*SaveWorkSettingsResponse)(nil),    // 24: ariadne.v1.SaveWorkSettingsResponse
-	(*SearchServiceView)(nil),           // 25: ariadne.v1.SearchServiceView
-	(*SearchSettings)(nil),              // 26: ariadne.v1.SearchSettings
-	(*SearchServiceInput)(nil),          // 27: ariadne.v1.SearchServiceInput
+	(*SearchCapabilities)(nil),          // 25: ariadne.v1.SearchCapabilities
+	(*SearchServiceView)(nil),           // 26: ariadne.v1.SearchServiceView
+	(*SearchSettings)(nil),              // 27: ariadne.v1.SearchSettings
 	(*GetSearchSettingsRequest)(nil),    // 28: ariadne.v1.GetSearchSettingsRequest
 	(*GetSearchSettingsResponse)(nil),   // 29: ariadne.v1.GetSearchSettingsResponse
 	(*SaveSearchSettingsRequest)(nil),   // 30: ariadne.v1.SaveSearchSettingsRequest
@@ -4788,126 +4816,132 @@ var file_ariadne_v1_settings_proto_goTypes = []any{
 	(*LocalizedError)(nil),              // 82: ariadne.v1.LocalizedError
 }
 var file_ariadne_v1_settings_proto_depIdxs = []int32{
-	72, // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
-	0,  // 1: ariadne.v1.SettingField.title:type_name -> ariadne.v1.LocalizedText
-	0,  // 2: ariadne.v1.SettingField.description:type_name -> ariadne.v1.LocalizedText
-	80, // 3: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
-	73, // 4: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
-	5,  // 5: ariadne.v1.GetConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
-	5,  // 6: ariadne.v1.SaveConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
-	10, // 7: ariadne.v1.InputSettings.snippets:type_name -> ariadne.v1.Snippet
-	74, // 8: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
-	11, // 9: ariadne.v1.GetInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
-	10, // 10: ariadne.v1.SaveInputSettingsRequest.snippets:type_name -> ariadne.v1.Snippet
-	75, // 11: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
-	11, // 12: ariadne.v1.SaveInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
-	16, // 13: ariadne.v1.CommandRuleList.items:type_name -> ariadne.v1.CommandRule
-	16, // 14: ariadne.v1.WorkSettings.rules:type_name -> ariadne.v1.CommandRule
-	18, // 15: ariadne.v1.WorkSettings.limits:type_name -> ariadne.v1.WorkLimits
-	18, // 16: ariadne.v1.WorkSettings.defaults:type_name -> ariadne.v1.WorkLimits
-	20, // 17: ariadne.v1.GetWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
-	17, // 18: ariadne.v1.SaveWorkSettingsRequest.rules:type_name -> ariadne.v1.CommandRuleList
-	19, // 19: ariadne.v1.SaveWorkSettingsRequest.limits:type_name -> ariadne.v1.WorkLimitsInput
-	20, // 20: ariadne.v1.SaveWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
-	0,  // 21: ariadne.v1.SearchSettings.plugins:type_name -> ariadne.v1.LocalizedText
-	25, // 22: ariadne.v1.SearchSettings.services:type_name -> ariadne.v1.SearchServiceView
-	26, // 23: ariadne.v1.GetSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	76, // 24: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
-	26, // 25: ariadne.v1.SaveSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
-	77, // 26: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
-	0,  // 27: ariadne.v1.ModelKind.title:type_name -> ariadne.v1.LocalizedText
-	4,  // 28: ariadne.v1.ModelKind.settings:type_name -> ariadne.v1.SettingsSchema
-	81, // 29: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
-	81, // 30: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
-	81, // 31: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
-	2,  // 32: ariadne.v1.ModelProviderInput.headers:type_name -> ariadne.v1.SecretPair
-	81, // 33: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
-	34, // 34: ariadne.v1.ModelEntry.price:type_name -> ariadne.v1.ModelPrice
-	1,  // 35: ariadne.v1.ModelEntry.efforts:type_name -> ariadne.v1.StringList
-	39, // 36: ariadne.v1.ModelRoles.thread:type_name -> ariadne.v1.RoleConfig
-	39, // 37: ariadne.v1.ModelRoles.coordinator:type_name -> ariadne.v1.RoleConfig
-	39, // 38: ariadne.v1.ModelRoles.triage:type_name -> ariadne.v1.RoleConfig
-	39, // 39: ariadne.v1.ModelRoles.research:type_name -> ariadne.v1.RoleConfig
-	35, // 40: ariadne.v1.ModelSettings.kinds:type_name -> ariadne.v1.ModelKind
-	36, // 41: ariadne.v1.ModelSettings.providers:type_name -> ariadne.v1.ModelProviderView
-	38, // 42: ariadne.v1.ModelSettings.models:type_name -> ariadne.v1.ModelEntry
-	40, // 43: ariadne.v1.ModelSettings.roles:type_name -> ariadne.v1.ModelRoles
-	82, // 44: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
-	41, // 45: ariadne.v1.GetModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
-	37, // 46: ariadne.v1.SaveModelSettingsRequest.providers:type_name -> ariadne.v1.ModelProviderInput
-	38, // 47: ariadne.v1.SaveModelSettingsRequest.models:type_name -> ariadne.v1.ModelEntry
-	40, // 48: ariadne.v1.SaveModelSettingsRequest.roles:type_name -> ariadne.v1.ModelRoles
-	41, // 49: ariadne.v1.SaveModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
-	42, // 50: ariadne.v1.SaveModelSettingsResponse.problems:type_name -> ariadne.v1.ModelProblem
-	34, // 51: ariadne.v1.ModelInfo.price:type_name -> ariadne.v1.ModelPrice
-	1,  // 52: ariadne.v1.ModelInfo.efforts:type_name -> ariadne.v1.StringList
-	47, // 53: ariadne.v1.ListedModel.info:type_name -> ariadne.v1.ModelInfo
-	48, // 54: ariadne.v1.ListedModelList.items:type_name -> ariadne.v1.ListedModel
-	81, // 55: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
-	50, // 56: ariadne.v1.ListProviderModelsRequest.provider:type_name -> ariadne.v1.DraftModelProviderInput
-	49, // 57: ariadne.v1.ListProviderModelsResponse.models:type_name -> ariadne.v1.ListedModelList
-	47, // 58: ariadne.v1.GetModelInfoResponse.info:type_name -> ariadne.v1.ModelInfo
-	0,  // 59: ariadne.v1.FoundSetup.title:type_name -> ariadne.v1.LocalizedText
-	55, // 60: ariadne.v1.ListFoundSetupsResponse.found:type_name -> ariadne.v1.FoundSetup
-	41, // 61: ariadne.v1.UseFoundSetupResponse.settings:type_name -> ariadne.v1.ModelSettings
-	42, // 62: ariadne.v1.UseFoundSetupResponse.problems:type_name -> ariadne.v1.ModelProblem
-	78, // 63: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
-	2,  // 64: ariadne.v1.McpServerInput.env:type_name -> ariadne.v1.SecretPair
-	2,  // 65: ariadne.v1.McpServerInput.headers:type_name -> ariadne.v1.SecretPair
-	79, // 66: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
-	63, // 67: ariadne.v1.McpToolInfoList.items:type_name -> ariadne.v1.McpToolInfo
-	62, // 68: ariadne.v1.McpServerStatus.info:type_name -> ariadne.v1.McpServerInfo
-	64, // 69: ariadne.v1.McpServerStatus.tools:type_name -> ariadne.v1.McpToolInfoList
-	60, // 70: ariadne.v1.GetMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
-	65, // 71: ariadne.v1.GetMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
-	61, // 72: ariadne.v1.SaveMcpSettingsRequest.servers:type_name -> ariadne.v1.McpServerInput
-	60, // 73: ariadne.v1.SaveMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
-	65, // 74: ariadne.v1.SaveMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
-	65, // 75: ariadne.v1.CheckMcpServerResponse.status:type_name -> ariadne.v1.McpServerStatus
-	3,  // 76: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
-	27, // 77: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> ariadne.v1.SearchServiceInput
-	27, // 78: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> ariadne.v1.SearchServiceInput
-	6,  // 79: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
-	8,  // 80: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
-	12, // 81: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
-	14, // 82: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
-	21, // 83: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
-	23, // 84: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
-	28, // 85: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
-	30, // 86: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
-	32, // 87: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
-	43, // 88: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
-	45, // 89: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
-	51, // 90: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
-	53, // 91: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
-	56, // 92: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
-	58, // 93: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
-	66, // 94: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
-	68, // 95: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
-	70, // 96: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
-	7,  // 97: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
-	9,  // 98: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
-	13, // 99: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
-	15, // 100: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
-	22, // 101: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
-	24, // 102: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
-	29, // 103: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
-	31, // 104: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
-	33, // 105: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
-	44, // 106: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
-	46, // 107: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
-	52, // 108: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
-	54, // 109: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
-	57, // 110: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
-	59, // 111: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
-	67, // 112: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
-	69, // 113: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
-	71, // 114: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
-	97, // [97:115] is the sub-list for method output_type
-	79, // [79:97] is the sub-list for method input_type
-	79, // [79:79] is the sub-list for extension type_name
-	79, // [79:79] is the sub-list for extension extendee
-	0,  // [0:79] is the sub-list for field type_name
+	72,  // 0: ariadne.v1.LocalizedText.values:type_name -> ariadne.v1.LocalizedText.ValuesEntry
+	0,   // 1: ariadne.v1.SettingField.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 2: ariadne.v1.SettingField.description:type_name -> ariadne.v1.LocalizedText
+	80,  // 3: ariadne.v1.SettingField.default_value:type_name -> google.protobuf.Value
+	73,  // 4: ariadne.v1.SettingsSchema.properties:type_name -> ariadne.v1.SettingsSchema.PropertiesEntry
+	5,   // 5: ariadne.v1.GetConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
+	5,   // 6: ariadne.v1.SaveConcurrencyResponse.concurrency:type_name -> ariadne.v1.ConcurrencySettings
+	10,  // 7: ariadne.v1.InputSettings.snippets:type_name -> ariadne.v1.Snippet
+	74,  // 8: ariadne.v1.InputSettings.keys:type_name -> ariadne.v1.InputSettings.KeysEntry
+	11,  // 9: ariadne.v1.GetInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
+	10,  // 10: ariadne.v1.SaveInputSettingsRequest.snippets:type_name -> ariadne.v1.Snippet
+	75,  // 11: ariadne.v1.SaveInputSettingsRequest.keys:type_name -> ariadne.v1.SaveInputSettingsRequest.KeysEntry
+	11,  // 12: ariadne.v1.SaveInputSettingsResponse.input:type_name -> ariadne.v1.InputSettings
+	16,  // 13: ariadne.v1.CommandRuleList.items:type_name -> ariadne.v1.CommandRule
+	16,  // 14: ariadne.v1.WorkSettings.rules:type_name -> ariadne.v1.CommandRule
+	18,  // 15: ariadne.v1.WorkSettings.limits:type_name -> ariadne.v1.WorkLimits
+	18,  // 16: ariadne.v1.WorkSettings.defaults:type_name -> ariadne.v1.WorkLimits
+	20,  // 17: ariadne.v1.GetWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
+	17,  // 18: ariadne.v1.SaveWorkSettingsRequest.rules:type_name -> ariadne.v1.CommandRuleList
+	19,  // 19: ariadne.v1.SaveWorkSettingsRequest.limits:type_name -> ariadne.v1.WorkLimitsInput
+	20,  // 20: ariadne.v1.SaveWorkSettingsResponse.work:type_name -> ariadne.v1.WorkSettings
+	0,   // 21: ariadne.v1.SearchServiceView.title:type_name -> ariadne.v1.LocalizedText
+	0,   // 22: ariadne.v1.SearchServiceView.description:type_name -> ariadne.v1.LocalizedText
+	4,   // 23: ariadne.v1.SearchServiceView.settings:type_name -> ariadne.v1.SettingsSchema
+	25,  // 24: ariadne.v1.SearchServiceView.capabilities:type_name -> ariadne.v1.SearchCapabilities
+	81,  // 25: ariadne.v1.SearchServiceView.values:type_name -> google.protobuf.Struct
+	0,   // 26: ariadne.v1.SearchSettings.plugins:type_name -> ariadne.v1.LocalizedText
+	26,  // 27: ariadne.v1.SearchSettings.services:type_name -> ariadne.v1.SearchServiceView
+	27,  // 28: ariadne.v1.GetSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
+	76,  // 29: ariadne.v1.SaveSearchSettingsRequest.services:type_name -> ariadne.v1.SaveSearchSettingsRequest.ServicesEntry
+	27,  // 30: ariadne.v1.SaveSearchSettingsResponse.search:type_name -> ariadne.v1.SearchSettings
+	77,  // 31: ariadne.v1.CheckSearchSettingsRequest.services:type_name -> ariadne.v1.CheckSearchSettingsRequest.ServicesEntry
+	0,   // 32: ariadne.v1.CheckSearchSettingsResponse.message:type_name -> ariadne.v1.LocalizedText
+	0,   // 33: ariadne.v1.ModelKind.title:type_name -> ariadne.v1.LocalizedText
+	4,   // 34: ariadne.v1.ModelKind.settings:type_name -> ariadne.v1.SettingsSchema
+	81,  // 35: ariadne.v1.ModelProviderView.settings:type_name -> google.protobuf.Struct
+	81,  // 36: ariadne.v1.ModelProviderView.extra_body:type_name -> google.protobuf.Struct
+	81,  // 37: ariadne.v1.ModelProviderInput.settings:type_name -> google.protobuf.Struct
+	2,   // 38: ariadne.v1.ModelProviderInput.headers:type_name -> ariadne.v1.SecretPair
+	81,  // 39: ariadne.v1.ModelProviderInput.extra_body:type_name -> google.protobuf.Struct
+	34,  // 40: ariadne.v1.ModelEntry.price:type_name -> ariadne.v1.ModelPrice
+	1,   // 41: ariadne.v1.ModelEntry.efforts:type_name -> ariadne.v1.StringList
+	39,  // 42: ariadne.v1.ModelRoles.thread:type_name -> ariadne.v1.RoleConfig
+	39,  // 43: ariadne.v1.ModelRoles.coordinator:type_name -> ariadne.v1.RoleConfig
+	39,  // 44: ariadne.v1.ModelRoles.triage:type_name -> ariadne.v1.RoleConfig
+	39,  // 45: ariadne.v1.ModelRoles.research:type_name -> ariadne.v1.RoleConfig
+	35,  // 46: ariadne.v1.ModelSettings.kinds:type_name -> ariadne.v1.ModelKind
+	36,  // 47: ariadne.v1.ModelSettings.providers:type_name -> ariadne.v1.ModelProviderView
+	38,  // 48: ariadne.v1.ModelSettings.models:type_name -> ariadne.v1.ModelEntry
+	40,  // 49: ariadne.v1.ModelSettings.roles:type_name -> ariadne.v1.ModelRoles
+	82,  // 50: ariadne.v1.ModelProblem.problem:type_name -> ariadne.v1.LocalizedError
+	41,  // 51: ariadne.v1.GetModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
+	37,  // 52: ariadne.v1.SaveModelSettingsRequest.providers:type_name -> ariadne.v1.ModelProviderInput
+	38,  // 53: ariadne.v1.SaveModelSettingsRequest.models:type_name -> ariadne.v1.ModelEntry
+	40,  // 54: ariadne.v1.SaveModelSettingsRequest.roles:type_name -> ariadne.v1.ModelRoles
+	41,  // 55: ariadne.v1.SaveModelSettingsResponse.settings:type_name -> ariadne.v1.ModelSettings
+	42,  // 56: ariadne.v1.SaveModelSettingsResponse.problems:type_name -> ariadne.v1.ModelProblem
+	34,  // 57: ariadne.v1.ModelInfo.price:type_name -> ariadne.v1.ModelPrice
+	1,   // 58: ariadne.v1.ModelInfo.efforts:type_name -> ariadne.v1.StringList
+	47,  // 59: ariadne.v1.ListedModel.info:type_name -> ariadne.v1.ModelInfo
+	48,  // 60: ariadne.v1.ListedModelList.items:type_name -> ariadne.v1.ListedModel
+	81,  // 61: ariadne.v1.DraftModelProviderInput.settings:type_name -> google.protobuf.Struct
+	50,  // 62: ariadne.v1.ListProviderModelsRequest.provider:type_name -> ariadne.v1.DraftModelProviderInput
+	49,  // 63: ariadne.v1.ListProviderModelsResponse.models:type_name -> ariadne.v1.ListedModelList
+	47,  // 64: ariadne.v1.GetModelInfoResponse.info:type_name -> ariadne.v1.ModelInfo
+	0,   // 65: ariadne.v1.FoundSetup.title:type_name -> ariadne.v1.LocalizedText
+	55,  // 66: ariadne.v1.ListFoundSetupsResponse.found:type_name -> ariadne.v1.FoundSetup
+	41,  // 67: ariadne.v1.UseFoundSetupResponse.settings:type_name -> ariadne.v1.ModelSettings
+	42,  // 68: ariadne.v1.UseFoundSetupResponse.problems:type_name -> ariadne.v1.ModelProblem
+	78,  // 69: ariadne.v1.McpServerView.tools:type_name -> ariadne.v1.McpServerView.ToolsEntry
+	2,   // 70: ariadne.v1.McpServerInput.env:type_name -> ariadne.v1.SecretPair
+	2,   // 71: ariadne.v1.McpServerInput.headers:type_name -> ariadne.v1.SecretPair
+	79,  // 72: ariadne.v1.McpServerInput.tools:type_name -> ariadne.v1.McpServerInput.ToolsEntry
+	63,  // 73: ariadne.v1.McpToolInfoList.items:type_name -> ariadne.v1.McpToolInfo
+	62,  // 74: ariadne.v1.McpServerStatus.info:type_name -> ariadne.v1.McpServerInfo
+	64,  // 75: ariadne.v1.McpServerStatus.tools:type_name -> ariadne.v1.McpToolInfoList
+	60,  // 76: ariadne.v1.GetMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
+	65,  // 77: ariadne.v1.GetMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
+	61,  // 78: ariadne.v1.SaveMcpSettingsRequest.servers:type_name -> ariadne.v1.McpServerInput
+	60,  // 79: ariadne.v1.SaveMcpSettingsResponse.servers:type_name -> ariadne.v1.McpServerView
+	65,  // 80: ariadne.v1.SaveMcpSettingsResponse.status:type_name -> ariadne.v1.McpServerStatus
+	65,  // 81: ariadne.v1.CheckMcpServerResponse.status:type_name -> ariadne.v1.McpServerStatus
+	3,   // 82: ariadne.v1.SettingsSchema.PropertiesEntry.value:type_name -> ariadne.v1.SettingField
+	81,  // 83: ariadne.v1.SaveSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	81,  // 84: ariadne.v1.CheckSearchSettingsRequest.ServicesEntry.value:type_name -> google.protobuf.Struct
+	6,   // 85: ariadne.v1.SettingsService.GetConcurrency:input_type -> ariadne.v1.GetConcurrencyRequest
+	8,   // 86: ariadne.v1.SettingsService.SaveConcurrency:input_type -> ariadne.v1.SaveConcurrencyRequest
+	12,  // 87: ariadne.v1.SettingsService.GetInputSettings:input_type -> ariadne.v1.GetInputSettingsRequest
+	14,  // 88: ariadne.v1.SettingsService.SaveInputSettings:input_type -> ariadne.v1.SaveInputSettingsRequest
+	21,  // 89: ariadne.v1.SettingsService.GetWorkSettings:input_type -> ariadne.v1.GetWorkSettingsRequest
+	23,  // 90: ariadne.v1.SettingsService.SaveWorkSettings:input_type -> ariadne.v1.SaveWorkSettingsRequest
+	28,  // 91: ariadne.v1.SettingsService.GetSearchSettings:input_type -> ariadne.v1.GetSearchSettingsRequest
+	30,  // 92: ariadne.v1.SettingsService.SaveSearchSettings:input_type -> ariadne.v1.SaveSearchSettingsRequest
+	32,  // 93: ariadne.v1.SettingsService.CheckSearchSettings:input_type -> ariadne.v1.CheckSearchSettingsRequest
+	43,  // 94: ariadne.v1.SettingsService.GetModelSettings:input_type -> ariadne.v1.GetModelSettingsRequest
+	45,  // 95: ariadne.v1.SettingsService.SaveModelSettings:input_type -> ariadne.v1.SaveModelSettingsRequest
+	51,  // 96: ariadne.v1.SettingsService.ListProviderModels:input_type -> ariadne.v1.ListProviderModelsRequest
+	53,  // 97: ariadne.v1.SettingsService.GetModelInfo:input_type -> ariadne.v1.GetModelInfoRequest
+	56,  // 98: ariadne.v1.SettingsService.ListFoundSetups:input_type -> ariadne.v1.ListFoundSetupsRequest
+	58,  // 99: ariadne.v1.SettingsService.UseFoundSetup:input_type -> ariadne.v1.UseFoundSetupRequest
+	66,  // 100: ariadne.v1.SettingsService.GetMcpSettings:input_type -> ariadne.v1.GetMcpSettingsRequest
+	68,  // 101: ariadne.v1.SettingsService.SaveMcpSettings:input_type -> ariadne.v1.SaveMcpSettingsRequest
+	70,  // 102: ariadne.v1.SettingsService.CheckMcpServer:input_type -> ariadne.v1.CheckMcpServerRequest
+	7,   // 103: ariadne.v1.SettingsService.GetConcurrency:output_type -> ariadne.v1.GetConcurrencyResponse
+	9,   // 104: ariadne.v1.SettingsService.SaveConcurrency:output_type -> ariadne.v1.SaveConcurrencyResponse
+	13,  // 105: ariadne.v1.SettingsService.GetInputSettings:output_type -> ariadne.v1.GetInputSettingsResponse
+	15,  // 106: ariadne.v1.SettingsService.SaveInputSettings:output_type -> ariadne.v1.SaveInputSettingsResponse
+	22,  // 107: ariadne.v1.SettingsService.GetWorkSettings:output_type -> ariadne.v1.GetWorkSettingsResponse
+	24,  // 108: ariadne.v1.SettingsService.SaveWorkSettings:output_type -> ariadne.v1.SaveWorkSettingsResponse
+	29,  // 109: ariadne.v1.SettingsService.GetSearchSettings:output_type -> ariadne.v1.GetSearchSettingsResponse
+	31,  // 110: ariadne.v1.SettingsService.SaveSearchSettings:output_type -> ariadne.v1.SaveSearchSettingsResponse
+	33,  // 111: ariadne.v1.SettingsService.CheckSearchSettings:output_type -> ariadne.v1.CheckSearchSettingsResponse
+	44,  // 112: ariadne.v1.SettingsService.GetModelSettings:output_type -> ariadne.v1.GetModelSettingsResponse
+	46,  // 113: ariadne.v1.SettingsService.SaveModelSettings:output_type -> ariadne.v1.SaveModelSettingsResponse
+	52,  // 114: ariadne.v1.SettingsService.ListProviderModels:output_type -> ariadne.v1.ListProviderModelsResponse
+	54,  // 115: ariadne.v1.SettingsService.GetModelInfo:output_type -> ariadne.v1.GetModelInfoResponse
+	57,  // 116: ariadne.v1.SettingsService.ListFoundSetups:output_type -> ariadne.v1.ListFoundSetupsResponse
+	59,  // 117: ariadne.v1.SettingsService.UseFoundSetup:output_type -> ariadne.v1.UseFoundSetupResponse
+	67,  // 118: ariadne.v1.SettingsService.GetMcpSettings:output_type -> ariadne.v1.GetMcpSettingsResponse
+	69,  // 119: ariadne.v1.SettingsService.SaveMcpSettings:output_type -> ariadne.v1.SaveMcpSettingsResponse
+	71,  // 120: ariadne.v1.SettingsService.CheckMcpServer:output_type -> ariadne.v1.CheckMcpServerResponse
+	103, // [103:121] is the sub-list for method output_type
+	85,  // [85:103] is the sub-list for method input_type
+	85,  // [85:85] is the sub-list for extension type_name
+	85,  // [85:85] is the sub-list for extension extendee
+	0,   // [0:85] is the sub-list for field type_name
 }
 
 func init() { file_ariadne_v1_settings_proto_init() }
@@ -4919,10 +4953,7 @@ func file_ariadne_v1_settings_proto_init() {
 	file_ariadne_v1_settings_proto_msgTypes[3].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[19].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[23].OneofWrappers = []any{}
-	file_ariadne_v1_settings_proto_msgTypes[27].OneofWrappers = []any{
-		(*SearchServiceInput_ApiKey)(nil),
-		(*SearchServiceInput_ClearApiKey)(nil),
-	}
+	file_ariadne_v1_settings_proto_msgTypes[26].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[30].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[32].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[33].OneofWrappers = []any{}

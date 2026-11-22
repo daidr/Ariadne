@@ -7,6 +7,7 @@ import type {
   SettingsSchema,
 } from '@ariadne/plugin-sdk'
 import type {
+  CheckSearchSettingsResponse as ProtoCheckSearchSettingsResponse,
   ConcurrencySettings as ProtoConcurrencySettings,
   DirectoryListing as ProtoDirectoryListing,
   FoundSetup as ProtoFoundSetup,
@@ -28,6 +29,7 @@ import type {
   PluginConfig as ProtoPluginConfig,
   PluginRecord as ProtoPluginRecord,
   RoleConfig as ProtoRoleConfig,
+  SearchCapabilities as ProtoSearchCapabilities,
   SearchSettings as ProtoSearchSettings,
   SettingField as ProtoSettingField,
   SettingsSchema as ProtoSettingsSchema,
@@ -62,6 +64,8 @@ import type {
   PluginConfig,
   PluginRecord,
   RoleInput,
+  SearchCapabilities,
+  SearchCheckResult,
   SearchSettings,
   SearchSettingsInput,
   ShortcutAction,
@@ -252,46 +256,60 @@ export function fromProtoWorkSettings(value?: ProtoWorkSettings): WorkSettings {
   }
 }
 
+function fromProtoSearchCapabilities(
+  value?: ProtoSearchCapabilities,
+): SearchCapabilities | undefined {
+  if (!value) return undefined
+  return {
+    ...(value.maxQueryRunes ? { maxQueryRunes: value.maxQueryRunes } : {}),
+    ...(value.maxResults ? { maxResults: value.maxResults } : {}),
+    ...(value.returnsAnswer ? { returnsAnswer: true } : {}),
+    ...(value.supportsCheck ? { supportsCheck: true } : {}),
+  }
+}
+
 export function fromProtoSearchSettings(value?: ProtoSearchSettings): SearchSettings {
   if (!value) throw new ApiError(500, { key: 'error.invalidBody', params: { reason: 'search' } })
   return {
-    provider: value.provider === 'deepseek' ? 'deepseek' : 'tavily',
+    provider: value.provider,
+    ready: value.ready,
     keySet: value.keySet,
     needed: value.needed,
     models: [...value.models],
     plugins: value.plugins.map(fromProtoLocalizedText),
-    services: value.services.map((service) => ({
-      kind: service.kind === 'deepseek' ? 'deepseek' : 'tavily',
-      title: service.title,
-      defaultBaseUrl: service.defaultBaseUrl,
-      baseUrl: service.baseUrl,
-      keySet: service.keySet,
-    })),
+    services: value.services.map((service) => {
+      const capabilities = fromProtoSearchCapabilities(service.capabilities)
+      return {
+        kind: service.kind,
+        title: fromProtoLocalizedText(service.title),
+        ...(service.description
+          ? { description: fromProtoLocalizedText(service.description) }
+          : {}),
+        settings: fromProtoSettingsSchema(service.settings),
+        ...(capabilities ? { capabilities } : {}),
+        values: fromJsonObject(service.values),
+        secretsSet: [...service.secretsSet],
+        ready: service.ready,
+      }
+    }),
+  }
+}
+
+export function fromProtoSearchCheckResult(
+  response: ProtoCheckSearchSettingsResponse,
+): SearchCheckResult {
+  return {
+    ok: response.ok,
+    status: response.status ?? null,
+    ...(response.message ? { message: fromProtoLocalizedText(response.message) } : {}),
   }
 }
 
 export function toProtoSearchInput(input: SearchSettingsInput) {
-  const services: Record<
-    string,
-    {
-      baseUrl?: string
-      apiKeyAction:
-        | { case: 'apiKey'; value: string }
-        | { case: 'clearApiKey'; value: boolean }
-        | { case: undefined; value?: undefined }
-    }
-  > = {}
+  const services: Record<string, JsonObject> = {}
   for (const [kind, entry] of Object.entries(input.services)) {
     if (!entry) continue
-    services[kind] = {
-      ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
-      apiKeyAction:
-        entry.apiKey === null
-          ? { case: 'clearApiKey', value: true }
-          : entry.apiKey !== undefined
-            ? { case: 'apiKey', value: entry.apiKey }
-            : { case: undefined },
-    }
+    services[kind] = toJsonObject(entry)
   }
   return {
     provider: input.provider,

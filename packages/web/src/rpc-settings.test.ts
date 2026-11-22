@@ -1,4 +1,5 @@
 import {
+  CheckSearchSettingsResponseSchema,
   DeletePluginResponseSchema,
   LinkPreviewSchema,
   LocalizedErrorSchema,
@@ -7,6 +8,7 @@ import {
   PluginConfigSchema,
   PluginRecordSchema,
   PluginService,
+  SearchSettingsSchema,
   SettingsSchemaSchema,
   UpdateService,
   UpdateStatusSchema,
@@ -21,6 +23,8 @@ import {
   fromProtoModelSettings,
   fromProtoPluginConfig,
   fromProtoPluginRecord,
+  fromProtoSearchCheckResult,
+  fromProtoSearchSettings,
   fromProtoSettingsSchema,
   fromProtoUpdateStatus,
   toJsonObject,
@@ -112,29 +116,98 @@ describe('Domain 1 ConnectRPC mappers', () => {
     })
   })
 
-  it('maps SearchSettingsInput apiKey set, clear, and keep states', () => {
+  it('maps unified SearchSettings, SearchCheckResult, and dynamic SearchSettingsInput', () => {
     const mapped = toProtoSearchInput({
       provider: 'tavily',
       services: {
         tavily: { baseUrl: 'https://api.tavily.com', apiKey: 'tvly-secret' },
         deepseek: { baseUrl: 'https://api.deepseek.com', apiKey: null },
+        'custom-lua': { strict: false, ignored: undefined },
       },
     })
-    expect(mapped.provider).toBe('tavily')
-    expect(mapped.services.tavily).toEqual({
-      baseUrl: 'https://api.tavily.com',
-      apiKeyAction: { case: 'apiKey', value: 'tvly-secret' },
-    })
-    expect(mapped.services.deepseek).toEqual({
-      baseUrl: 'https://api.deepseek.com',
-      apiKeyAction: { case: 'clearApiKey', value: true },
+    expect(mapped).toEqual({
+      provider: 'tavily',
+      services: {
+        tavily: { baseUrl: 'https://api.tavily.com', apiKey: 'tvly-secret' },
+        deepseek: { baseUrl: 'https://api.deepseek.com', apiKey: null },
+        'custom-lua': { strict: false },
+      },
     })
 
-    const kept = toProtoSearchInput({
-      provider: 'tavily',
-      services: { tavily: { baseUrl: 'https://api.tavily.com' } },
+    const decoded = fromProtoSearchSettings(
+      create(SearchSettingsSchema, {
+        provider: 'custom-lua',
+        ready: true,
+        keySet: false,
+        needed: false,
+        models: ['OpenAI / gpt-5'],
+        plugins: [{ values: { 'zh-CN': '自定义搜索', en: 'Custom Search' } }],
+        services: [
+          {
+            kind: 'custom-lua',
+            title: { values: { 'zh-CN': '自定义搜索', en: 'Custom Search' } },
+            description: { values: { 'zh-CN': '外部插件', en: 'External plugin' } },
+            settings: {
+              type: 'object',
+              fieldOrder: ['strict'],
+              properties: {
+                strict: {
+                  type: 'boolean',
+                  title: { values: { 'zh-CN': '严格' } },
+                  defaultValue: create(ValueSchema, { kind: { case: 'boolValue', value: true } }),
+                },
+              },
+            },
+            capabilities: { maxResults: 10, supportsCheck: true },
+            values: { strict: true },
+            secretsSet: [],
+            ready: true,
+          },
+        ],
+      }),
+    )
+    expect(decoded).toEqual({
+      provider: 'custom-lua',
+      ready: true,
+      keySet: false,
+      needed: false,
+      models: ['OpenAI / gpt-5'],
+      plugins: [{ 'zh-CN': '自定义搜索', en: 'Custom Search' }],
+      services: [
+        {
+          kind: 'custom-lua',
+          title: { 'zh-CN': '自定义搜索', en: 'Custom Search' },
+          description: { 'zh-CN': '外部插件', en: 'External plugin' },
+          settings: {
+            type: 'object',
+            properties: {
+              strict: {
+                type: 'boolean',
+                title: { 'zh-CN': '严格' },
+                default: true,
+              },
+            },
+          },
+          capabilities: { maxResults: 10, supportsCheck: true },
+          values: { strict: true },
+          secretsSet: [],
+          ready: true,
+        },
+      ],
     })
-    expect(kept.services.tavily?.apiKeyAction).toEqual({ case: undefined })
+
+    const checked = fromProtoSearchCheckResult(
+      create(CheckSearchSettingsResponseSchema, {
+        ok: false,
+        status: 401,
+        message: { values: { 'zh-CN': '密钥无效', en: 'Invalid key' } },
+      }),
+    )
+    expect(checked).toEqual({
+      ok: false,
+      status: 401,
+      message: { 'zh-CN': '密钥无效', en: 'Invalid key' },
+    })
   })
 
   it('converts model settings, bigint token limits, empty efforts, and localized problems', () => {
