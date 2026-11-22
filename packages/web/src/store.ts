@@ -234,7 +234,23 @@ export const state = reactive<State>({
   lineComments: {},
 })
 
+let stopStream: (() => void) | null = null
+
+export function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+function markUnauthorized() {
+  stopStream?.()
+  stopStream = null
+  state.stream = 'unauthorized'
+}
+
 export function report(error: unknown) {
+  if (isUnauthorizedError(error)) {
+    markUnauthorized()
+    return
+  }
   const message = error instanceof ApiError ? tm(error.localized) : String(error)
   toast.danger(message, { duration: 7000, closable: true })
 }
@@ -1556,17 +1572,24 @@ async function load(restore: () => Promise<void>): Promise<number | null> {
     await restore()
     return lastSeq
   } catch (error) {
+    if (isUnauthorizedError(error)) {
+      markUnauthorized()
+      return null
+    }
     report(error)
     return null
   }
 }
 
 export async function start(restore: () => Promise<void>) {
+  stopStream?.()
+  stopStream = null
   const lastSeq = await load(restore)
+  if (state.stream === 'unauthorized') return
   // Follow from the state just loaded. If loading failed (say the page opened before the
   // server), follow from the server's newest event and load once the stream is up.
   let loaded = lastSeq !== null
-  followEvents(
+  stopStream = followEvents(
     lastSeq,
     onEvent,
     (status) => (state.stream = status),

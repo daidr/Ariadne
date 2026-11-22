@@ -429,6 +429,17 @@ export const zhCN = {
   'project.delete.confirm': '删除',
   'error.unauthorized': '缺少或错误的访问令牌',
   'error.reload': '重新加载',
+  'auth.missingDescription':
+    '当前窗口还没有访问令牌（例如从 PWA 打开时）。请输入服务启动后给出的令牌或访问链接。',
+  'auth.invalidDescription':
+    '当前保存的访问令牌已失效或不正确，请重新输入最新的访问令牌或访问链接。',
+  'auth.setToken': '设置访问令牌',
+  'auth.dialogTitle': '设置访问令牌',
+  'auth.tokenLabel': '访问令牌',
+  'auth.tokenPlaceholder': '粘贴访问令牌或包含 #token= 的完整链接',
+  'auth.tokenHelp': '设置后会保存在当前浏览器中，下次打开自动生效。',
+  'auth.tokenRequired': '请输入访问令牌',
+  'auth.confirm': '确认并刷新',
   'error.notFound': '找不到 {what}',
   'error.priceCatalog': '读取 models.dev 失败：{detail}',
   'error.priceUnknown': 'models.dev 中未找到 {model}',

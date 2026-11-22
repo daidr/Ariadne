@@ -11,14 +11,14 @@ import { state } from './store'
 import { RECONNECTED_DURATION_MS, useStreamStatusToast } from './stream-toast'
 import { createWorkspaceRouter } from './workspace-route'
 
-function mountHost(reload = vi.fn()) {
+function mountHost() {
   const Host = defineComponent({
     setup() {
-      useStreamStatusToast({ reload })
+      useStreamStatusToast()
       return () => h(DouToastViewport)
     },
   })
-  return { wrapper: mount(Host), reload }
+  return { wrapper: mount(Host) }
 }
 
 const toastItems = () => [...document.querySelectorAll<HTMLLIElement>('.dou-toast__item')]
@@ -119,31 +119,19 @@ describe('useStreamStatusToast', () => {
     wrapper.unmount()
   })
 
-  test('morphs into a persistent danger toast with a reload action when unauthorized', async () => {
-    const { wrapper, reload } = mountHost()
+  test('dismisses any active connection toast and stays silent when unauthorized', async () => {
+    const { wrapper } = mountHost()
     state.stream = 'lost'
-    await nextTick()
-
-    state.stream = 'unauthorized'
-    await nextTick()
-
-    const items = toastItems()
-    expect(items).toHaveLength(1)
-    expect(items[0]?.classList.contains('dou-toast--danger')).toBe(true)
-    expect(items[0]?.getAttribute('aria-busy')).toBeNull()
-    expect(items[0]?.textContent).toContain(t('error.unauthorized'))
-
-    const action = items[0]?.querySelector<HTMLButtonElement>('.dou-toast__action')
-    expect(action?.textContent).toBe(t('error.reload'))
-
-    // Stays open until acted on.
-    vi.advanceTimersByTime(60_000)
     await nextTick()
     expect(toastItems()).toHaveLength(1)
 
-    action?.click()
+    state.stream = 'unauthorized'
     await nextTick()
-    expect(reload).toHaveBeenCalledTimes(1)
+    expect(toastItems()).toHaveLength(0)
+
+    vi.advanceTimersByTime(60_000)
+    await nextTick()
+    expect(toastItems()).toHaveLength(0)
 
     wrapper.unmount()
   })

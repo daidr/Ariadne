@@ -52,10 +52,11 @@ import {
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
 } from '@ariadne/proto'
-import { ApiError, createRpcClient, getToken as token, initToken } from './rpc'
+import { ApiError, createRpcClient, getToken, initToken, parseTokenInput, setToken } from './rpc'
 import { synchronizeServerClock } from './server-clock'
 
-export { ApiError, initToken }
+export { ApiError, getToken, initToken, parseTokenInput, setToken }
+const token = getToken
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
 export type McpToolMark = 'read' | 'ask' | 'off'

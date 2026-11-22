@@ -7,20 +7,14 @@ import { state } from './store'
 /** How long the recovery confirmation stays before dismissing itself. */
 export const RECONNECTED_DURATION_MS = 2500
 
-type StreamToastKind = 'lost' | 'unauthorized' | 'reconnected'
-
-export interface StreamStatusToastOptions {
-  /** Override the page reload action (primarily for tests). */
-  reload?: () => void
-}
+type StreamToastKind = 'lost' | 'reconnected'
 
 /**
- * Mirror `state.stream` into a single persistent toast instead of a top banner,
- * so connection drops and recoveries never shift the workspace layout.
+ * Mirror connection drops and recoveries into a single persistent toast instead of a top
+ * banner, so the workspace layout never shifts. Unauthorized state has its own full-page
+ * error screen, so any active connection toast is dismissed instead of stacking on top.
  */
-export function useStreamStatusToast(options: StreamStatusToastOptions = {}) {
-  const reload = options.reload ?? (() => window.location.reload())
-
+export function useStreamStatusToast() {
   let handle: ToastHandle | null = null
   let kind: StreamToastKind | null = null
 
@@ -33,16 +27,6 @@ export function useStreamStatusToast(options: StreamStatusToastOptions = {}) {
         duration: 0,
         closable: false,
         action: undefined,
-      }
-    }
-    if (next === 'unauthorized') {
-      return {
-        message: t('error.unauthorized'),
-        tone: 'danger',
-        loading: false,
-        duration: 0,
-        closable: false,
-        action: { label: t('error.reload'), onClick: reload },
       }
     }
     return {
@@ -73,9 +57,7 @@ export function useStreamStatusToast(options: StreamStatusToastOptions = {}) {
     created =
       next === 'lost'
         ? toast.loading(message, { ...extra, onClose })
-        : next === 'unauthorized'
-          ? toast.danger(message, { ...extra, onClose })
-          : toast.success(message, { ...extra, onClose })
+        : toast.success(message, { ...extra, onClose })
     handle = created
     kind = next
   }
@@ -93,12 +75,8 @@ export function useStreamStatusToast(options: StreamStatusToastOptions = {}) {
       showOrUpdate('lost')
       return
     }
-    if (status === 'unauthorized') {
-      showOrUpdate('unauthorized')
-      return
-    }
     if (status === 'open') {
-      if (handle && (kind === 'lost' || kind === 'unauthorized')) {
+      if (handle && kind === 'lost') {
         showOrUpdate('reconnected')
       }
       return

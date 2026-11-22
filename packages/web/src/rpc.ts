@@ -16,6 +16,46 @@ const TOKEN_KEY = 'ariadne.token'
 
 let sessionToken: string | null = null
 
+function decodeTokenValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, '%20')).trim()
+  } catch {
+    return value.trim()
+  }
+}
+
+/**
+ * Normalize a pasted access token: accepts a raw token, a `Bearer <token>` header,
+ * or the server's startup URL / hash / query containing `token=...`.
+ */
+export function parseTokenInput(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (/^(?:https?:\/\/|[#?]|token=)/i.test(trimmed)) {
+    const match = /(?:^|[#&?])token=([^&#\s]*)/.exec(trimmed)
+    return match ? decodeTokenValue(match[1] ?? '') : ''
+  }
+  const bearer = /^Bearer(?:\s+(.*))?$/i.exec(trimmed)
+  if (bearer) return (bearer[1] ?? '').trim()
+  return trimmed
+}
+
+function storeToken(next: string): string {
+  sessionToken = next || null
+  try {
+    if (next) localStorage.setItem(TOKEN_KEY, next)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // Storage can be unavailable; the token then lives only for this page.
+  }
+  return next
+}
+
+/** Persist a manually entered access token so standalone PWA launches stay signed in. */
+export function setToken(raw: string): string {
+  return storeToken(parseTokenInput(raw))
+}
+
 /**
  * The server prints a link with `#token=…`. Take the token from there once, keep it,
  * and drop it from the address bar so it does not end up in history or screenshots.
@@ -23,12 +63,7 @@ let sessionToken: string | null = null
 export function initToken(): string | null {
   const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash)
   if (match?.[1]) {
-    try {
-      localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]))
-    } catch {
-      // Storage can be unavailable; the token then lives only for this page.
-      sessionToken = decodeURIComponent(match[1])
-    }
+    storeToken(decodeTokenValue(match[1]))
     history.replaceState(null, '', location.pathname + location.search)
   }
   return getToken()
