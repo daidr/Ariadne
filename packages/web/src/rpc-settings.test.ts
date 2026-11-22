@@ -33,8 +33,14 @@ describe('Domain 1 ConnectRPC mappers', () => {
     const proto = create(SettingsSchemaSchema, {
       type: 'object',
       required: ['token'],
-      fieldOrder: ['token', 'port', 'enabled', 'mode'],
+      fieldOrder: ['token', 'port', 'enabled', 'mode', 'region'],
       properties: {
+        region: {
+          type: 'select',
+          title: { values: { 'zh-CN': '区域', en: 'Region' } },
+          options: ['cn', 'us'],
+          defaultValue: create(ValueSchema, { kind: { case: 'stringValue', value: 'cn' } }),
+        },
         mode: {
           type: 'enum',
           title: { values: { 'zh-CN': '模式', en: 'Mode' } },
@@ -60,7 +66,7 @@ describe('Domain 1 ConnectRPC mappers', () => {
     })
 
     const schema = fromProtoSettingsSchema(proto)
-    expect(Object.keys(schema.properties)).toEqual(['token', 'port', 'enabled', 'mode'])
+    expect(Object.keys(schema.properties)).toEqual(['token', 'port', 'enabled', 'mode', 'region'])
     expect(schema.required).toEqual(['token'])
     expect(schema.properties.token).toEqual({
       type: 'string',
@@ -82,6 +88,12 @@ describe('Domain 1 ConnectRPC mappers', () => {
       title: { 'zh-CN': '模式', en: 'Mode' },
       options: ['fast', 'safe'],
       default: 'fast',
+    })
+    expect(schema.properties.region).toEqual({
+      type: 'enum',
+      title: { 'zh-CN': '区域', en: 'Region' },
+      options: ['cn', 'us'],
+      default: 'cn',
     })
   })
 

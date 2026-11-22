@@ -160,6 +160,7 @@ function fromProtoSettingField(field: ProtoSettingField): SettingField {
         ...(typeof defaultValue === 'boolean' ? { default: defaultValue } : {}),
       }
     case 'enum':
+    case 'select':
       return {
         type: 'enum',
         ...common,
