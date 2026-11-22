@@ -75,11 +75,26 @@ func (tc *turnChanges) record(ctx context.Context, turnID string) {
 		return
 	}
 	after, err := branches.Snapshot(recordCtx, tc.threadID)
-	if err != nil || after == nil || *after == "" || *after == tc.before {
+	if err != nil || after == nil || *after == "" {
+		return
+	}
+	if *after == tc.before {
+		if branch := tc.branchTotals(recordCtx, branches, thread, *after); branch != nil {
+			if (thread.Changes != nil || branch.Files > 0) && !core.SameChangeTotals(thread.Changes, *branch) {
+				_ = tc.repository.SyncBranchChanges(recordCtx, tc.threadID, *branch)
+			}
+		}
 		return
 	}
 	diffFiles, err := branches.Diff(recordCtx, tc.before, *after)
 	if err != nil || len(diffFiles) == 0 {
+		if err == nil {
+			if branch := tc.branchTotals(recordCtx, branches, thread, *after); branch != nil {
+				if (thread.Changes != nil || branch.Files > 0) && !core.SameChangeTotals(thread.Changes, *branch) {
+					_ = tc.repository.SyncBranchChanges(recordCtx, tc.threadID, *branch)
+				}
+			}
+		}
 		return
 	}
 	files := make([]core.TurnFile, len(diffFiles))
@@ -109,9 +124,12 @@ func (tc *turnChanges) branchTotals(ctx context.Context, branches *sdk.BranchCap
 	if err != nil || changes == nil || changes.From == "" {
 		return nil
 	}
-	files, err := branches.Diff(ctx, changes.From, to)
-	if err != nil {
-		return nil
+	files := changes.Files
+	if len(changes.Uncommitted) > 0 {
+		files, err = branches.Diff(ctx, changes.From, to)
+		if err != nil {
+			return nil
+		}
 	}
 	totals := &core.ChangeTotals{Files: int64(len(files))}
 	for _, file := range files {

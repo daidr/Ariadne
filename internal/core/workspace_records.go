@@ -305,6 +305,59 @@ type ChangeTotals struct {
 	Removed int64 `json:"removed"`
 }
 
+func changeCount(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), float64(int64(v)) == v
+	default:
+		return 0, false
+	}
+}
+
+// SameChangeTotals reports whether a stored ThreadView.Changes JSON value
+// already matches the given ChangeTotals.
+func SameChangeTotals(stored any, totals ChangeTotals) bool {
+	if stored == nil {
+		return false
+	}
+	switch v := stored.(type) {
+	case ChangeTotals:
+		return v == totals
+	case *ChangeTotals:
+		return v != nil && *v == totals
+	}
+	m := asObject(stored)
+	if m == nil {
+		return false
+	}
+	files, okF := changeCount(m["files"])
+	added, okA := changeCount(m["added"])
+	removed, okR := changeCount(m["removed"])
+	return okF && okA && okR && files == totals.Files && added == totals.Added && removed == totals.Removed
+}
+
+// SyncBranchChanges reconciles the cached thread.changes totals with a freshly
+// computed branch diff when they diverge.
+func (repo *Repository) SyncBranchChanges(ctx context.Context, id string, totals ChangeTotals) error {
+	_, err := repo.mutateThread(ctx, id, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
+		if truthy(current.ReviewOf) {
+			return nil, nil
+		}
+		if current.Changes == nil && totals.Files == 0 {
+			return nil, nil
+		}
+		if SameChangeTotals(current.Changes, totals) {
+			return nil, nil
+		}
+		return []change{{"branch.changes_synced", object{"threadId": id, "changes": totals}}}, nil
+	})
+	return err
+}
+
 func (repo *Repository) RecordTurnChanges(ctx context.Context, id, turnID, from, to string, files []TurnFile, branch *ChangeTotals) error {
 	if len(files) == 0 {
 		return nil

@@ -92,3 +92,57 @@ func LocalIdentity(directory string) Identity {
 		return &Author{Name: values[0], Email: values[1]}, nil
 	}
 }
+
+// worktreeConfigArgs reads safe line-ending settings (core.autocrlf, core.eol)
+// from git's normal config chain (system, global, local, worktree) so worktree
+// operations running under ServerGitEnv normalize CRLF/LF the same way commands
+// executed in the user's shell do.
+func worktreeConfigArgs(ctx context.Context, cwd string) []string {
+	if cwd == "" {
+		return nil
+	}
+	result := process.Run(ctx, []string{"git", "config", "--get-regexp", `^core\.(autocrlf|eol)$`}, process.RunOptions{
+		Directory: cwd,
+		ForThread: true,
+		Timeout:   5 * time.Second,
+		Env: map[string]string{
+			"GIT_ALLOW_PROTOCOL":  "",
+			"GIT_TERMINAL_PROMPT": "0",
+		},
+	})
+	if result.ExitCode != 0 || result.Stdout == "" {
+		return nil
+	}
+	var autocrlf, eol string
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		value = strings.ToLower(strings.TrimSpace(value))
+		switch strings.ToLower(key) {
+		case "core.autocrlf":
+			switch value {
+			case "true", "false", "input":
+				autocrlf = value
+			}
+		case "core.eol":
+			switch value {
+			case "lf", "crlf", "native":
+				eol = value
+			}
+		}
+	}
+	var args []string
+	if autocrlf != "" {
+		args = append(args, "-c", "core.autocrlf="+autocrlf)
+	}
+	if eol != "" {
+		args = append(args, "-c", "core.eol="+eol)
+	}
+	return args
+}
