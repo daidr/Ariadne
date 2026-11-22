@@ -28,12 +28,23 @@ func TestTransientSnapshotsCoalesceAndFilterProjects(t *testing.T) {
 	if all.queue.Len() != 1 || len(all.wake) != 1 || all.bytes > MaxPendingBytes {
 		t.Fatal("snapshot queue is unbounded")
 	}
-	frame, done, err := all.next()
-	if done || err != nil || !strings.Contains(string(frame), "step-999") {
-		t.Fatalf("latest snapshot: %s, %v, %v", frame, done, err)
+	item, ok, done, err := all.next()
+	if !ok || done || err != nil || !strings.Contains(string(item.Data), "step-999") {
+		t.Fatalf("latest snapshot: %+v, ok=%v done=%v err=%v", item, ok, done, err)
 	}
 	if other.queue.Len() != 0 {
 		t.Fatal("update crossed project filter")
+	}
+	// System update snapshots reach all-project subscribers only.
+	if err := hub.Publish(Update{Kind: "update", Data: json.RawMessage(`{"state":"downloading","downloadPercent":42}`)}); err != nil {
+		t.Fatal(err)
+	}
+	sys, ok, done, err := all.next()
+	if !ok || done || err != nil || sys.Kind != "update" || !strings.Contains(string(sys.Data), "42") {
+		t.Fatalf("unexpected system update: %+v ok=%v done=%v err=%v", sys, ok, done, err)
+	}
+	if other.queue.Len() != 0 {
+		t.Fatal("system update leaked into project-scoped subscriber")
 	}
 }
 
@@ -55,7 +66,7 @@ func TestSlowConsumerDropsPendingMemory(t *testing.T) {
 					}
 				}
 			}
-			_, done, err := sub.next()
+			_, _, done, err := sub.next()
 			if !done || !errors.Is(err, ErrSlowConsumer) {
 				t.Fatalf("overflow: done=%v err=%v", done, err)
 			}
@@ -76,8 +87,8 @@ func TestFreshUpdateReplacesInitialAndCancellationIsFinal(t *testing.T) {
 	if err := hub.Publish(update("c1", "fresh")); err != nil {
 		t.Fatal(err)
 	}
-	frame := sub.takeInitial(update("c1", "stale"))
-	if !strings.Contains(string(frame), "fresh") || sub.bytes != 0 {
+	item := sub.takeInitial(update("c1", "stale"))
+	if !strings.Contains(string(item.Data), "fresh") || sub.bytes != 0 {
 		t.Fatal("initial snapshot overwrote fresh update")
 	}
 	stop()
@@ -91,15 +102,20 @@ func TestFreshUpdateReplacesInitialAndCancellationIsFinal(t *testing.T) {
 	hub.Close()
 	closed, stopClosed := hub.Subscribe("")
 	defer stopClosed()
-	_, done, _ := closed.next()
+	_, _, done, _ := closed.next()
 	if !done {
 		t.Fatal("hub close accepted a subscriber")
 	}
 }
 
-func TestMultilineJSONDoesNotInjectSSEFields(t *testing.T) {
-	frame := string(updateFrame(Update{Kind: "draft", Data: json.RawMessage("{\n\"text\":\"one\\ntwo\"\n}")}))
-	if strings.Count(frame, "\ndata:") != 1 || strings.Count(frame, "\n") != 3 {
-		t.Fatalf("invalid frame: %q", frame)
+func TestNormalizeUpdateCompactsAndIsolatesCallerBytes(t *testing.T) {
+	raw := json.RawMessage("{\n  \"text\": \"one\\ntwo\"\n}")
+	normalized, _, err := normalizeUpdate(Update{Kind: "draft", ProjectID: "p1", ConversationID: "c1", Data: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] = 'x'
+	if !json.Valid(normalized.Data) || strings.Contains(string(normalized.Data), "\n") {
+		t.Fatalf("invalid compacted data: %q", string(normalized.Data))
 	}
 }

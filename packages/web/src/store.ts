@@ -39,6 +39,7 @@ import {
   type ModelSettings,
   type ProjectDetail,
   type StreamStatus,
+  type UpdateStatus,
 } from './api'
 import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
@@ -1294,11 +1295,18 @@ let slowTimer: ReturnType<typeof setTimeout> | undefined
 const touched = new Set<string>()
 const parts = new Set<RefreshKey>()
 const listeners = new Set<(event: AnyStoredEvent) => void>()
+const updateStatusListeners = new Set<(status: UpdateStatus) => void>()
 
 /** Hear every event as it arrives, e.g. to notify the user. */
 export function onLiveEvent(listener: (event: AnyStoredEvent) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/** Hear pushed software update status and download progress changes. */
+export function onUpdateStatus(listener: (status: UpdateStatus) => void): () => void {
+  updateStatusListeners.add(listener)
+  return () => updateStatusListeners.delete(listener)
 }
 
 /**
@@ -1570,6 +1578,10 @@ export async function start(restore: () => Promise<void>) {
     onLive,
     onBackground,
     onDraft,
+    (status) => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
+      for (const listener of updateStatusListeners) listener(status)
+    },
   )
 }
 

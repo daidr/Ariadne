@@ -23,6 +23,7 @@ type Options struct {
 	Client     *http.Client
 	Interval   time.Duration
 	OnError    func(error)
+	OnChange   func(View)
 }
 
 type View struct {
@@ -41,8 +42,11 @@ func (view View) updating() bool {
 
 type Service struct {
 	mu          sync.Mutex
+	changeMu    sync.Mutex
 	store       *settings.Store
 	view        View
+	viewSeq     uint64
+	emittedSeq  uint64
 	lastCheck   time.Time
 	checkClient *http.Client
 	assetClient *http.Client
@@ -55,6 +59,7 @@ type Service struct {
 	jobs        sync.WaitGroup
 	closed      bool
 	onError     func(error)
+	onChange    func(View)
 }
 
 func New(ctx context.Context, store *settings.Store, options Options) *Service {
@@ -71,7 +76,7 @@ func New(ctx context.Context, store *settings.Store, options Options) *Service {
 	service := &Service{
 		store: store, view: View{Version: options.Version, Preferences: store.UpdatePreferences(channel), State: "idle"},
 		checkClient: releaseClient(options.Client, false), assetClient: releaseClient(options.Client, true),
-		wake: make(chan struct{}, 1), life: life, cancel: cancel, done: make(chan struct{}), onError: options.OnError,
+		wake: make(chan struct{}, 1), life: life, cancel: cancel, done: make(chan struct{}), onError: options.OnError, onChange: options.OnChange,
 	}
 	if executable := options.Executable; tag != "" && executable != "" {
 		if path, err := filepath.EvalSymlinks(executable); err == nil {
@@ -85,31 +90,69 @@ func New(ctx context.Context, store *settings.Store, options Options) *Service {
 	return service
 }
 
+func cloneView(view View) View {
+	if view.Release != nil {
+		copy := *view.Release
+		view.Release = &copy
+	}
+	return view
+}
+
+func (service *Service) emitChange() {
+	if service.onChange == nil {
+		return
+	}
+	service.changeMu.Lock()
+	defer service.changeMu.Unlock()
+	service.mu.Lock()
+	seq := service.viewSeq
+	if seq <= service.emittedSeq {
+		service.mu.Unlock()
+		return
+	}
+	view := cloneView(service.view)
+	service.emittedSeq = seq
+	service.mu.Unlock()
+	func() {
+		defer func() { _ = recover() }()
+		service.onChange(view)
+	}()
+}
+
 func (service *Service) View() View {
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	return service.view
+	return cloneView(service.view)
 }
 
 func (service *Service) Save(value settings.UpdatePreferences) (View, error) {
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	if service.view.updating() || service.view.State == "checking" {
-		return service.view, ErrBusy
+		view := cloneView(service.view)
+		service.mu.Unlock()
+		return view, ErrBusy
 	}
 	if service.view.Preferences == value {
-		return service.view, nil
+		view := cloneView(service.view)
+		service.mu.Unlock()
+		return view, nil
 	}
 	if err := service.store.SaveUpdatePreferences(value); err != nil {
-		return service.view, err
+		view := cloneView(service.view)
+		service.mu.Unlock()
+		return view, err
 	}
 	if service.view.Preferences.Channel != value.Channel && service.view.State != "ready" {
 		service.view.State, service.view.Failure, service.view.Release = "idle", "", nil
 		service.lastCheck = time.Time{}
 	}
 	service.view.Preferences = value
+	service.viewSeq++
 	service.notify()
-	return service.view, nil
+	view := cloneView(service.view)
+	service.mu.Unlock()
+	service.emitChange()
+	return view, nil
 }
 
 func (service *Service) notify() {
@@ -125,15 +168,17 @@ func (service *Service) Check(ctx context.Context) View {
 
 func (service *Service) check(ctx context.Context, wakeAutomatic bool) View {
 	service.mu.Lock()
-	before := service.view
+	before := cloneView(service.view)
 	if service.closed || before.State == "checking" || before.updating() || before.State == "ready" ||
 		time.Since(service.lastCheck) < 5*time.Second {
 		service.mu.Unlock()
 		return before
 	}
 	service.view.State = "checking"
+	service.viewSeq++
 	service.jobs.Add(1)
 	service.mu.Unlock()
+	service.emitChange()
 	defer service.jobs.Done()
 
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
@@ -146,7 +191,6 @@ func (service *Service) check(ctx context.Context, wakeAutomatic bool) View {
 	}
 
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	if err != nil {
 		service.view.State, service.view.Failure = before.State, "check"
 		// A failed recheck leaves the last verified metadata available for display.
@@ -165,7 +209,11 @@ func (service *Service) check(ctx context.Context, wakeAutomatic bool) View {
 		}
 	}
 	service.lastCheck = time.Now()
-	return service.view
+	service.viewSeq++
+	result := cloneView(service.view)
+	service.mu.Unlock()
+	service.emitChange()
+	return result
 }
 
 func (service *Service) Install(version string) (View, error) {
@@ -174,25 +222,28 @@ func (service *Service) Install(version string) (View, error) {
 
 func (service *Service) startInstall(version string, automatic bool) (View, error) {
 	service.mu.Lock()
-	defer service.mu.Unlock()
-	view := service.view
+	view := cloneView(service.view)
 	if view.updating() {
+		service.mu.Unlock()
 		return view, nil
 	}
 	if service.closed || view.State != "available" || !view.CanInstall || view.Release == nil ||
 		!view.Release.Installable || view.Release.Version != version || (automatic && !view.Preferences.Automatic) {
+		service.mu.Unlock()
 		return view, ErrUnavailable
 	}
 	service.view.State, service.view.Failure, service.view.DownloadPercent = "downloading", "", 0
+	service.viewSeq++
+	started := cloneView(service.view)
+	release := *view.Release
 	service.jobs.Go(func() {
 		ctx, cancel := context.WithTimeout(service.life, 5*time.Minute)
 		defer cancel()
-		err := install(ctx, service.assetClient, service.executable, service.original, *view.Release, service.reportProgress)
+		err := install(ctx, service.assetClient, service.executable, service.original, release, service.reportProgress)
 		if err != nil && service.onError != nil {
 			service.onError(err)
 		}
 		service.mu.Lock()
-		defer service.mu.Unlock()
 		service.view.DownloadPercent = 0
 		if err != nil {
 			service.view.State, service.view.Failure = "available", "install"
@@ -206,20 +257,27 @@ func (service *Service) startInstall(version string, automatic bool) (View, erro
 			case errors.Is(err, os.ErrPermission):
 				service.view.Failure = "permission"
 			}
-			return
+		} else {
+			service.view.State = "ready"
 		}
-		service.view.State = "ready"
+		service.viewSeq++
+		service.mu.Unlock()
+		service.emitChange()
 	})
-	return service.view, nil
+	service.mu.Unlock()
+	service.emitChange()
+	return started, nil
 }
 
 func (service *Service) reportProgress(percent int) {
 	service.mu.Lock()
-	defer service.mu.Unlock()
 	service.view.DownloadPercent = percent
 	if percent == 100 {
 		service.view.State = "installing"
 	}
+	service.viewSeq++
+	service.mu.Unlock()
+	service.emitChange()
 }
 
 func (service *Service) run(interval time.Duration) {

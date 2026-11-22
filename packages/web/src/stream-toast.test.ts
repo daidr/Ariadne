@@ -159,13 +159,16 @@ describe('useStreamStatusToast', () => {
   })
 
   test('App renders connection status via floating toast with no top layout banner', async () => {
-    vi.stubGlobal(
-      'EventSource',
-      class {
-        addEventListener() {}
-        close() {}
-      },
-    )
+    vi.spyOn(api, 'streamEvents').mockImplementation((_opts, signal) => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise((resolve) => {
+            signal?.addEventListener('abort', () => resolve({ done: true, value: undefined }), {
+              once: true,
+            })
+          }),
+      }),
+    }))
     vi.spyOn(api, 'listProjects').mockResolvedValue({ projects: [], lastSeq: 1 })
     vi.spyOn(api, 'getModelSettings').mockResolvedValue({
       models: [],

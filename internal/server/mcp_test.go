@@ -129,19 +129,29 @@ func TestMCPSettingsCheckAndProjectSelectionConnect(t *testing.T) {
 	}
 	checkNoLeak(checked.Msg)
 
-	// Project-level MCP selection remains on REST until Domain 2 migration.
-	putProjectMCP := func(servers []string, wantStatus int) {
+	projectClient := ariadnev1connect.NewProjectServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	putProjectMCP := func(servers []string, wantCode connect.Code) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPut, "http://test.invalid/api/projects/prj_a/mcp", strings.NewReader(encoded(object{"servers": servers})))
-		req.Header.Set("Authorization", "Bearer test-token")
-		res := httptest.NewRecorder()
-		api.ServeHTTP(res, req)
-		if res.Code != wantStatus {
-			t.Fatalf("PUT project mcp returned %d: %s", res.Code, res.Body.String())
+		_, err := projectClient.UpdateProject(t.Context(), connect.NewRequest(&ariadnev1.UpdateProjectRequest{
+			ProjectId:  "prj_a",
+			McpServers: &ariadnev1.ProjectStringList{Values: servers},
+		}))
+		if wantCode == 0 {
+			if err != nil {
+				t.Fatalf("UpdateProject(mcp) failed: %v", err)
+			}
+			return
+		}
+		if connect.CodeOf(err) != wantCode {
+			t.Fatalf("UpdateProject(mcp) code = %v (err=%v), want %v", connect.CodeOf(err), err, wantCode)
 		}
 	}
-	putProjectMCP([]string{"server"}, 200)
-	putProjectMCP([]string{"unknown"}, 400)
+	putProjectMCP([]string{"server"}, 0)
+	putProjectMCP([]string{"unknown"}, connect.CodeInvalidArgument)
 
 	if _, err := client.SaveMcpSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveMcpSettingsRequest{
 		Servers: []*ariadnev1.McpServerInput{makeServer(service.URL+"/bad", "read")},
