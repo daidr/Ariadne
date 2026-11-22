@@ -44,11 +44,12 @@ type TurnFilter interface {
 // Hooks allows specialized ACP-based plugins to customize launch behavior,
 // stream filtering, and usage accounting without coupling into generic ACP.
 type Hooks struct {
-	DefaultCommand    string
-	ResolveProfile    func(argv []string) string
-	PrepareProfile    func(argv []string, directory string, profile string) ([]string, error)
-	NewTurnFilter     func() TurnFilter
-	AdjustInputTokens func(TurnUsage) int64
+	DefaultCommand      string
+	ResolveProfile      func(argv []string) string
+	PrepareProfile      func(argv []string, directory string, profile string) ([]string, error)
+	NewTurnFilter       func() TurnFilter
+	AdjustInputTokens   func(TurnUsage) int64
+	RetryableStartError func(operation string, err error) bool
 }
 
 // ListOptions controls optional behavior during ACP model catalog discovery.
@@ -540,6 +541,7 @@ func (d *acpDriver) Start(life context.Context) error {
 }
 
 func (d *acpDriver) startError(operation string, err error) error {
+	retryable := d.hooks.RetryableStartError != nil && d.hooks.RetryableStartError(operation, err)
 	var remote *rpc.Error
 	if errors.As(err, &remote) && remote.Code == -32000 {
 		err = fmt.Errorf("the agent asks to sign in first (run it once in a terminal): %w", err)
@@ -551,7 +553,9 @@ func (d *acpDriver) startError(operation string, err error) error {
 	if text := strings.Join(tail, "\n"); text != "" {
 		err = fmt.Errorf("%w: %s", err, text)
 	}
-	return d.diagnosticError(operation, err)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return &agentruntime.NativeAgentError{Err: err, Detail: d.diagnosticLocked(operation, err), Retryable: retryable}
 }
 
 func (d *acpDriver) HistoryBudget(system string) int {
