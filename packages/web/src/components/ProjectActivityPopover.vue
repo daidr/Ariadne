@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ActivityStatus, ProjectActivity } from '@ariadne/core'
 import { DouPopover, DouSkeleton, DouStatusDot, DouText } from 'dou-ui'
-import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
 import { t } from '../i18n'
@@ -13,6 +13,7 @@ const popover = useTemplateRef<{ close: () => void }>('popover')
 const touchPress = ref(false)
 const effectiveDisabled = computed(() => !!props.disabled || touchPress.value)
 let suppressOpen = false
+let releaseListening = false
 const activity = shallowRef<ProjectActivity | null>()
 const labels = {
   running: 'project.activity.running',
@@ -31,13 +32,33 @@ const groups = computed(() => {
   ]
 })
 
+function clearTouchPress() {
+  touchPress.value = false
+  if (releaseListening && typeof window !== 'undefined') {
+    window.removeEventListener('pointerup', clearTouchPress, true)
+    window.removeEventListener('pointercancel', clearTouchPress, true)
+    releaseListening = false
+  }
+}
+
+onScopeDispose(clearTouchPress)
+
 function trackPointer(event: PointerEvent) {
   if (event.type === 'pointerdown') {
-    touchPress.value = event.pointerType === 'touch' || event.pointerType === 'pen'
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      touchPress.value = true
+      if (!releaseListening && typeof window !== 'undefined') {
+        window.addEventListener('pointerup', clearTouchPress, true)
+        window.addEventListener('pointercancel', clearTouchPress, true)
+        releaseListening = true
+      }
+    } else {
+      clearTouchPress()
+    }
   } else if (event.type === 'pointercancel') {
-    touchPress.value = false
+    clearTouchPress()
   } else if (event.type === 'pointerenter' && event.pointerType === 'mouse') {
-    touchPress.value = false
+    clearTouchPress()
   }
 }
 
@@ -51,7 +72,7 @@ function dismiss() {
   suppressOpen = true
   queueMicrotask(() => {
     suppressOpen = false
-    touchPress.value = false
+    clearTouchPress()
   })
   popover.value?.close()
   open.value = false

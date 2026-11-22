@@ -181,6 +181,82 @@ describe('ProjectList activity popover behavior', () => {
     expect(visiblePopovers()).toHaveLength(1)
   })
 
+  test('does not open activity popover when touch click arrives after pointerup flushes', async () => {
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    const button = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_2"]')
+
+    button.element.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+    button.element.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }),
+    )
+    await nextTick()
+    vi.advanceTimersByTime(500)
+    await flushPromises()
+
+    expect(state.currentId).toBe('prj_2')
+    expect(getProjectActivity).not.toHaveBeenCalled()
+    expect(visiblePopovers()).toHaveLength(0)
+  })
+
+  test('restores keyboard focus and first mouse hover after a touch pointerup without click', async () => {
+    const { wrapper } = mountProjectList({ compact: false, active: true })
+    const button = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
+
+    // 1. Touch down and release on window (e.g. drag-sort or slide-off) -> first mouse hover works.
+    button.element.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+
+    button.element.dispatchEvent(
+      new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }),
+    )
+    vi.advanceTimersByTime(450)
+    await flushPromises()
+
+    expect(getProjectActivity).toHaveBeenCalledWith('prj_1', expect.any(AbortSignal))
+    expect(visiblePopovers()).toHaveLength(1)
+
+    // Dismiss via mouse leave, then repeat touch down + window pointerup -> keyboard focus works.
+    button.element.dispatchEvent(
+      new PointerEvent('pointerleave', { bubbles: false, pointerType: 'mouse' }),
+    )
+    vi.advanceTimersByTime(200)
+    await flushPromises()
+    expect(visiblePopovers()).toHaveLength(0)
+
+    getProjectActivity.mockClear()
+    button.element.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'touch' }),
+    )
+    await nextTick()
+
+    const matchesSpy = vi
+      .spyOn(button.element, 'matches')
+      .mockImplementation((selector) => selector === ':focus-visible')
+    button.element.dispatchEvent(new FocusEvent('focus'))
+    await flushPromises()
+    matchesSpy.mockRestore()
+
+    expect(getProjectActivity).toHaveBeenCalledWith('prj_1', expect.any(AbortSignal))
+    expect(visiblePopovers()).toHaveLength(1)
+  })
+
   test('cancels pending hover timer when clicking a project on desktop', async () => {
     const { wrapper } = mountProjectList({ compact: false, active: true })
     const button = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_1"]')
