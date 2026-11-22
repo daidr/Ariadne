@@ -39,6 +39,7 @@ import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSidebarLayout } from './sidebar-layout'
 import { useStreamStatusToast } from './stream-toast'
+import { resolveWorkspaceLayout, resolveWorkspacePanes } from './workspace-layout'
 import { useWorkspaceRouting } from './workspace-routing'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
@@ -58,10 +59,12 @@ function openSettings(tab: SettingsTab = 'models') {
 provide(openSettingsKey, openSettings)
 
 const breakpoints = useBreakpoints()
-const compact = computed(() => !breakpoints.lg)
+const layoutMode = computed(() => resolveWorkspaceLayout(breakpoints))
+const isNarrow = computed(() => layoutMode.value === 'narrow')
+const isMedium = computed(() => layoutMode.value === 'medium')
+const isWide = computed(() => layoutMode.value === 'wide')
+const compactActions = computed(() => !breakpoints.lg)
 const unauthorized = computed(() => state.stream === 'unauthorized')
-const coordinatorVisible = computed(() => !compact.value || state.workspaceLevel === 'coordinator')
-const sideVisible = computed(() => !compact.value || state.workspaceLevel === 'side')
 
 const projectBody = useTemplateRef<HTMLElement>('projectBody')
 const {
@@ -71,12 +74,32 @@ const {
   collapsed: projectsCollapsed,
   save: saveProjectSidebar,
 } = useSidebarLayout('projects', projectBody)
-const projectsVisible = computed(() =>
-  compact.value ? state.workspaceLevel === 'projects' : !projectsCollapsed.value,
+
+const projectsPopoverOpen = ref(false)
+const mediumSideCollapsed = ref(false)
+const panes = computed(() =>
+  resolveWorkspacePanes({
+    mode: layoutMode.value,
+    workspaceLevel: state.workspaceLevel,
+    projectsCollapsed: projectsCollapsed.value,
+    mediumSideCollapsed: mediumSideCollapsed.value,
+  }),
 )
+
 function toggleProjectSidebar(collapsed: boolean) {
-  if (!compact.value) projectsCollapsed.value = collapsed
+  if (isWide.value) projectsCollapsed.value = collapsed
 }
+
+function toggleMediumSide() {
+  if (isMedium.value) mediumSideCollapsed.value = !mediumSideCollapsed.value
+}
+
+watch(
+  () => state.sideRevealNonce,
+  () => {
+    if (isMedium.value) mediumSideCollapsed.value = false
+  },
+)
 
 // How much of the room the left pane takes; the right one holds the project or a thread.
 const SPLIT_KEY = 'ariadne.split'
@@ -113,10 +136,14 @@ watchEffect(() => {
   <DouConfigProvider :locale="douLocale">
     <DouLayout class="app">
       <WorkspaceHeader
-        :compact="compact"
+        v-model:projects-popover-open="projectsPopoverOpen"
+        :layout-mode="layoutMode"
+        :compact-actions="compactActions"
         :projects-collapsed="projectsCollapsed"
+        :side-collapsed="mediumSideCollapsed"
         :unauthorized="unauthorized"
         @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
+        @toggle-side="toggleMediumSide()"
         @open-settings="openSettings()"
       />
       <DouLayoutMain v-if="unauthorized" class="body main">
@@ -124,29 +151,27 @@ watchEffect(() => {
       </DouLayoutMain>
       <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
       <TraceView
-        v-else-if="state.main.kind === 'trace' && coordinatorVisible"
+        v-else-if="state.main.kind === 'trace' && panes.coordinatorVisible"
         :conversation-id="state.main.conversationId"
         class="body"
       />
       <div v-else ref="projectBody" class="body">
         <DouSplitter
           v-model="projectSize"
-          :collapsed="!compact && projectsCollapsed"
+          :collapsed="isWide && projectsCollapsed"
           :min="projectMin"
           :max="projectMax"
           :aria-label="t('nav.resizeProjects')"
-          :data-single-pane="
-            compact ? (state.workspaceLevel === 'projects' ? 'start' : 'end') : undefined
-          "
+          :data-single-pane="panes.projectSplitSinglePane"
           class="project-split workspace-split"
-          :disabled="compact"
+          :disabled="!isWide"
           collapsible
           @update:collapsed="toggleProjectSidebar"
           @change="saveProjectSidebar"
         >
           <template #start>
             <DouLayoutAside width="100%" :bordered="false" class="project-sidebar">
-              <ProjectList :compact="compact" :active="projectsVisible" />
+              <ProjectList :compact="isNarrow" :active="panes.projectsSidebarVisible" />
             </DouLayoutAside>
           </template>
           <template #end>
@@ -160,10 +185,11 @@ watchEffect(() => {
               <DouSplitter
                 v-else
                 v-model="split"
-                :min="30"
+                :min="isMedium ? '320px' : 30"
                 :max="80"
-                :data-single-pane="compact ? (sideVisible ? 'end' : 'start') : undefined"
-                :disabled="compact"
+                :min-end="isMedium ? '280px' : undefined"
+                :data-single-pane="panes.contentSplitSinglePane"
+                :disabled="isNarrow || (isMedium && mediumSideCollapsed)"
                 class="split workspace-split"
               >
                 <template #start>
@@ -173,15 +199,15 @@ watchEffect(() => {
                     <ConversationPanel
                       v-else
                       :key="state.currentId ?? undefined"
-                      :active="coordinatorVisible"
+                      :active="panes.coordinatorVisible"
                     />
                   </div>
                 </template>
                 <template #end>
                   <div class="pane">
                     <SideLayout
-                      :compact="compact"
-                      :active="sideVisible && (!compact || !state.full)"
+                      :compact="isNarrow"
+                      :active="panes.sideVisible && (!isNarrow || !state.full)"
                     />
                   </div>
                 </template>
@@ -196,7 +222,7 @@ watchEffect(() => {
       <PluginConfigDialog />
       <ShortcutSheet />
       <ProjectSettings />
-      <FullView :compact="compact" />
+      <FullView :compact="isNarrow" />
       <FilePreview />
     </template>
     <DouToastViewport />
