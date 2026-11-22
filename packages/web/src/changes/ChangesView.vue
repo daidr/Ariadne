@@ -12,10 +12,8 @@ import {
   DouTag,
   DouText,
   DouTextarea,
-  DouVirtualList,
   toast,
   type TreeNodeData,
-  type VirtualListExpose,
 } from 'dou-ui'
 import {
   AlertTriangleIcon,
@@ -42,6 +40,7 @@ import ThreadTools from '../components/ThreadTools.vue'
 import ViewActions from '../full/ViewActions.vue'
 import ChangedFileDiff from './ChangedFileDiff.vue'
 import ChangedFiles from './ChangedFiles.vue'
+import DiffVirtualList, { type DiffVirtualListExpose } from './DiffVirtualList.vue'
 import { fileTree, folderKeys, lineTotals, orderedFiles, type FileNode } from './files'
 import { draftsChanged, flushComments } from './comment-sender'
 import { draftsOf } from './line-comments'
@@ -207,7 +206,7 @@ const tree = computed(() => fileTree(changes.value?.files ?? []))
 const files = computed(() => orderedFiles(tree.value))
 const expanded = ref<string[]>([])
 const selected = ref<string | null>(null)
-const diffList = useTemplateRef<VirtualListExpose>('diffList')
+const diffList = useTemplateRef<DiffVirtualListExpose>('diffList')
 const comparisonKey = computed(() =>
   JSON.stringify([props.threadId, changes.value?.from, changes.value?.head]),
 )
@@ -591,7 +590,7 @@ const methodOptions = computed(() => [
               </template>
             </DouPopover>
           </div>
-          <DouVirtualList
+          <DiffVirtualList
             :key="comparisonKey"
             ref="diffList"
             class="diff-list"
@@ -614,7 +613,7 @@ const methodOptions = computed(() => [
                 :notes="notes"
               />
             </template>
-          </DouVirtualList>
+          </DiffVirtualList>
         </div>
       </template>
     </DouSplitter>
@@ -728,6 +727,7 @@ const methodOptions = computed(() => [
 
 .diff-picker {
   padding: 4px 12px;
+  border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
 .diff-list {
