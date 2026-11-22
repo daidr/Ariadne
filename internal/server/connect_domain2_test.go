@@ -557,6 +557,7 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 	}
 
 	// Create 3 plan revisions to test PlanService CRUD + P-6 revision pagination + Undo + Link/Unlink issue.
+	groupAlpha := "Phase 1"
 	rev1, err := plans.RevisePlan(t.Context(), connect.NewRequest(&ariadnev1.RevisePlanRequest{
 		ProjectId: projectID,
 		Reason:    "add node A",
@@ -567,11 +568,12 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 				Title:       "Task A",
 				Description: "First task",
 				Acceptance:  "Done A",
+				Group:       &groupAlpha,
 			}},
 		}},
 	}))
-	if err != nil || len(rev1.Msg.Plan.Nodes) != 1 {
-		t.Fatalf("RevisePlan 1: err=%v", err)
+	if err != nil || len(rev1.Msg.Plan.Nodes) != 1 || rev1.Msg.Plan.Nodes[0].Group == nil || *rev1.Msg.Plan.Nodes[0].Group != "Phase 1" {
+		t.Fatalf("RevisePlan 1: err=%v nodes=%+v", err, rev1)
 	}
 
 	rev2, err := plans.RevisePlan(t.Context(), connect.NewRequest(&ariadnev1.RevisePlanRequest{
@@ -593,6 +595,7 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 	}
 
 	updatedTitle := "Task B Updated"
+	groupBeta := "Phase 2"
 	rev3, err := plans.RevisePlan(t.Context(), connect.NewRequest(&ariadnev1.RevisePlanRequest{
 		ProjectId: projectID,
 		Reason:    "rename node B",
@@ -600,11 +603,12 @@ func TestPlanServiceAndIssueServiceEndToEnd(t *testing.T) {
 			Op: &ariadnev1.PlanOp_Update{Update: &ariadnev1.PlanUpdateNodeOp{
 				Id:    "node_b",
 				Title: &updatedTitle,
+				Group: &groupBeta,
 			}},
 		}},
 	}))
-	if err != nil {
-		t.Fatalf("RevisePlan 3: err=%v", err)
+	if err != nil || rev3.Msg.Plan.Nodes[1].Group == nil || *rev3.Msg.Plan.Nodes[1].Group != "Phase 2" {
+		t.Fatalf("RevisePlan 3: err=%v nodes=%+v", err, rev3)
 	}
 	lastRevID := rev3.Msg.Change.RevisionId
 

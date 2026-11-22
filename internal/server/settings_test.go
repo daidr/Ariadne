@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func TestSettingsHTTP(t *testing.T) {
@@ -48,12 +51,18 @@ func TestSettingsHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store})
+	searchRegistry := searches.New()
+	for _, provider := range searches.BuiltinProviders(nil) {
+		if _, err := searchRegistry.Register(provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Searches: searchRegistry})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
+	for idx, item := range requests {
 		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
 		request.Header.Set("Authorization", "Bearer test-token")
 		response := httptest.NewRecorder()
@@ -65,5 +74,37 @@ func TestSettingsHTTP(t *testing.T) {
 		if response.Code >= 500 {
 			t.Fatal(object{"status": response.Code, "body": body})
 		}
+		if strings.Contains(response.Body.String(), "saved-private") || strings.Contains(response.Body.String(), "draft-secret") {
+			t.Fatalf("request %d leaked secret: %s", idx, response.Body.String())
+		}
+		if idx == 1 {
+			result, _ := body.(map[string]any)
+			if response.Code != 200 || result["ok"] != true {
+				t.Fatalf("draft search check = %d %v", response.Code, body)
+			}
+		}
+		if idx == 3 {
+			result, _ := body.(map[string]any)
+			if response.Code != 200 || result["provider"] != "deepseek" || result["ready"] != true {
+				t.Fatalf("saved search view = %d %v", response.Code, body)
+			}
+		}
+	}
+	// Verify dynamic external search provider appears automatically in GET /api/settings/search.
+	if _, err := searchRegistry.Register(sdk.SearchProvider{
+		Kind:  "custom-ext",
+		Title: sdk.LocalizedText{"zh-CN": "扩展搜索", "en": "Extension Search"},
+		Search: func(_ context.Context, _ string, _ int) ([]sdk.SearchResult, error) {
+			return []sdk.SearchResult{}, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "http://test.invalid/api/settings/search", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"kind":"custom-ext"`) {
+		t.Fatalf("dynamic search provider missing: %d %s", rec.Code, rec.Body.String())
 	}
 }

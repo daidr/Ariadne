@@ -330,6 +330,7 @@ type PlanNodeView struct {
 	ChangedIn     *string                `protobuf:"bytes,9,opt,name=changed_in,json=changedIn,proto3,oneof" json:"changed_in,omitempty"`
 	Issues        []*PlanLinkedIssue     `protobuf:"bytes,10,rep,name=issues,proto3" json:"issues,omitempty"`
 	Gate          *string                `protobuf:"bytes,11,opt,name=gate,proto3,oneof" json:"gate,omitempty"`
+	Group         *string                `protobuf:"bytes,12,opt,name=group,proto3,oneof" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -441,6 +442,13 @@ func (x *PlanNodeView) GetGate() string {
 	return ""
 }
 
+func (x *PlanNodeView) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
+}
+
 type PlanAddNodeOp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -448,6 +456,7 @@ type PlanAddNodeOp struct {
 	Title         string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
 	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	Acceptance    string                 `protobuf:"bytes,5,opt,name=acceptance,proto3" json:"acceptance,omitempty"`
+	Group         *string                `protobuf:"bytes,6,opt,name=group,proto3,oneof" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -517,11 +526,19 @@ func (x *PlanAddNodeOp) GetAcceptance() string {
 	return ""
 }
 
+func (x *PlanAddNodeOp) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
+}
+
 type PlanNodeExpect struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Title         *string                `protobuf:"bytes,1,opt,name=title,proto3,oneof" json:"title,omitempty"`
 	Description   *string                `protobuf:"bytes,2,opt,name=description,proto3,oneof" json:"description,omitempty"`
 	Acceptance    *string                `protobuf:"bytes,3,opt,name=acceptance,proto3,oneof" json:"acceptance,omitempty"`
+	Group         *string                `protobuf:"bytes,4,opt,name=group,proto3,oneof" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -577,6 +594,13 @@ func (x *PlanNodeExpect) GetAcceptance() string {
 	return ""
 }
 
+func (x *PlanNodeExpect) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
+}
+
 type PlanUpdateNodeOp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -584,6 +608,7 @@ type PlanUpdateNodeOp struct {
 	Description   *string                `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
 	Acceptance    *string                `protobuf:"bytes,4,opt,name=acceptance,proto3,oneof" json:"acceptance,omitempty"`
 	Expect        *PlanNodeExpect        `protobuf:"bytes,5,opt,name=expect,proto3,oneof" json:"expect,omitempty"`
+	Group         *string                `protobuf:"bytes,6,opt,name=group,proto3,oneof" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -651,6 +676,13 @@ func (x *PlanUpdateNodeOp) GetExpect() *PlanNodeExpect {
 		return x.Expect
 	}
 	return nil
+}
+
+func (x *PlanUpdateNodeOp) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
 }
 
 type PlanRemoveNodeOp struct {
@@ -1032,6 +1064,7 @@ type PlanPreviewNode struct {
 	Acceptance    string                 `protobuf:"bytes,5,opt,name=acceptance,proto3" json:"acceptance,omitempty"`
 	Mark          *string                `protobuf:"bytes,6,opt,name=mark,proto3,oneof" json:"mark,omitempty"`
 	DependsOn     []string               `protobuf:"bytes,7,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	Group         *string                `protobuf:"bytes,8,opt,name=group,proto3,oneof" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1113,6 +1146,13 @@ func (x *PlanPreviewNode) GetDependsOn() []string {
 		return x.DependsOn
 	}
 	return nil
+}
+
+func (x *PlanPreviewNode) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
 }
 
 type PlanPreviewEdge struct {
@@ -2459,7 +2499,7 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"\x06number\x18\x02 \x01(\x03B\x020\x02R\x06number\x12\x14\n" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12\x10\n" +
 	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1b\n" +
-	"\tlinked_by\x18\x05 \x01(\tR\blinkedBy\"\x81\x03\n" +
+	"\tlinked_by\x18\x05 \x01(\tR\blinkedBy\"\xa6\x03\n" +
 	"\fPlanNodeView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
@@ -2476,9 +2516,11 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"changed_in\x18\t \x01(\tH\x00R\tchangedIn\x88\x01\x01\x123\n" +
 	"\x06issues\x18\n" +
 	" \x03(\v2\x1b.ariadne.v1.PlanLinkedIssueR\x06issues\x12\x17\n" +
-	"\x04gate\x18\v \x01(\tH\x01R\x04gate\x88\x01\x01B\r\n" +
+	"\x04gate\x18\v \x01(\tH\x01R\x04gate\x88\x01\x01\x12\x19\n" +
+	"\x05group\x18\f \x01(\tH\x02R\x05group\x88\x01\x01B\r\n" +
 	"\v_changed_inB\a\n" +
-	"\x05_gate\"\x8b\x01\n" +
+	"\x05_gateB\b\n" +
+	"\x06_group\"\xb0\x01\n" +
 	"\rPlanAddNodeOp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
@@ -2486,16 +2528,20 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x1e\n" +
 	"\n" +
 	"acceptance\x18\x05 \x01(\tR\n" +
-	"acceptance\"\xa0\x01\n" +
+	"acceptance\x12\x19\n" +
+	"\x05group\x18\x06 \x01(\tH\x00R\x05group\x88\x01\x01B\b\n" +
+	"\x06_group\"\xc5\x01\n" +
 	"\x0ePlanNodeExpect\x12\x19\n" +
 	"\x05title\x18\x01 \x01(\tH\x00R\x05title\x88\x01\x01\x12%\n" +
 	"\vdescription\x18\x02 \x01(\tH\x01R\vdescription\x88\x01\x01\x12#\n" +
 	"\n" +
 	"acceptance\x18\x03 \x01(\tH\x02R\n" +
-	"acceptance\x88\x01\x01B\b\n" +
+	"acceptance\x88\x01\x01\x12\x19\n" +
+	"\x05group\x18\x04 \x01(\tH\x03R\x05group\x88\x01\x01B\b\n" +
 	"\x06_titleB\x0e\n" +
 	"\f_descriptionB\r\n" +
-	"\v_acceptance\"\xf6\x01\n" +
+	"\v_acceptanceB\b\n" +
+	"\x06_group\"\x9b\x02\n" +
 	"\x10PlanUpdateNodeOp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01\x12%\n" +
@@ -2503,11 +2549,13 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"\n" +
 	"acceptance\x18\x04 \x01(\tH\x02R\n" +
 	"acceptance\x88\x01\x01\x127\n" +
-	"\x06expect\x18\x05 \x01(\v2\x1a.ariadne.v1.PlanNodeExpectH\x03R\x06expect\x88\x01\x01B\b\n" +
+	"\x06expect\x18\x05 \x01(\v2\x1a.ariadne.v1.PlanNodeExpectH\x03R\x06expect\x88\x01\x01\x12\x19\n" +
+	"\x05group\x18\x06 \x01(\tH\x04R\x05group\x88\x01\x01B\b\n" +
 	"\x06_titleB\x0e\n" +
 	"\f_descriptionB\r\n" +
 	"\v_acceptanceB\t\n" +
-	"\a_expect\"\"\n" +
+	"\a_expectB\b\n" +
+	"\x06_group\"\"\n" +
 	"\x10PlanRemoveNodeOp\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
 	"\x0fPlanLinkNodesOp\x12\x12\n" +
@@ -2535,7 +2583,7 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"created_at\x18\a \x01(\x03B\x020\x02R\tcreatedAtB\f\n" +
 	"\n" +
 	"_revert_ofB\x0e\n" +
-	"\f_reverted_by\"\xce\x01\n" +
+	"\f_reverted_by\"\xf3\x01\n" +
 	"\x0fPlanPreviewNode\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
@@ -2546,8 +2594,10 @@ const file_ariadne_v1_plans_proto_rawDesc = "" +
 	"acceptance\x12\x17\n" +
 	"\x04mark\x18\x06 \x01(\tH\x00R\x04mark\x88\x01\x01\x12\x1d\n" +
 	"\n" +
-	"depends_on\x18\a \x03(\tR\tdependsOnB\a\n" +
-	"\x05_mark\"W\n" +
+	"depends_on\x18\a \x03(\tR\tdependsOn\x12\x19\n" +
+	"\x05group\x18\b \x01(\tH\x01R\x05group\x88\x01\x01B\a\n" +
+	"\x05_markB\b\n" +
+	"\x06_group\"W\n" +
 	"\x0fPlanPreviewEdge\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
 	"\x02to\x18\x02 \x01(\tR\x02to\x12\x17\n" +
@@ -2785,6 +2835,7 @@ func file_ariadne_v1_plans_proto_init() {
 	file_ariadne_v1_plans_proto_msgTypes[1].OneofWrappers = []any{}
 	file_ariadne_v1_plans_proto_msgTypes[2].OneofWrappers = []any{}
 	file_ariadne_v1_plans_proto_msgTypes[4].OneofWrappers = []any{}
+	file_ariadne_v1_plans_proto_msgTypes[5].OneofWrappers = []any{}
 	file_ariadne_v1_plans_proto_msgTypes[6].OneofWrappers = []any{}
 	file_ariadne_v1_plans_proto_msgTypes[7].OneofWrappers = []any{}
 	file_ariadne_v1_plans_proto_msgTypes[11].OneofWrappers = []any{

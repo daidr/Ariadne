@@ -78,21 +78,22 @@ func applyOps(graph planGraph, ops []object) (planGraph, []object, error) {
 			if title == "" {
 				return planGraph{}, nil, invalidPlan(where + ": title is empty")
 			}
-			next.nodes[id] = object{"kind": op["kind"], "title": title, "description": op["description"], "acceptance": op["acceptance"]}
+			group := projectsettings.Trim(op.str("group"))
+			next.nodes[id] = object{"kind": op["kind"], "title": title, "description": op["description"], "acceptance": op["acceptance"], "group": group}
 			next.order = append(next.order, id)
 			prepend(object{"op": "remove", "id": id})
 		case "update":
 			if node == nil {
 				return planGraph{}, nil, invalidPlan(where + ": no node " + id)
 			}
-			for _, field := range []string{"title", "description", "acceptance"} {
+			for _, field := range []string{"title", "description", "acceptance", "group"} {
 				if expected, ok := op.obj("expect")[field]; ok && node[field] != expected {
 					return planGraph{}, nil, domainerr.New("error.planConflict", map[string]any{"title": node["title"], "reason": where + ": " + field + " of " + id + " changed since"})
 				}
 			}
 			restore := object{"op": "update", "id": id}
 			after := object{}
-			for _, field := range []string{"title", "description", "acceptance"} {
+			for _, field := range []string{"title", "description", "acceptance", "group"} {
 				value, ok := op[field]
 				if !ok {
 					continue
@@ -102,6 +103,8 @@ func applyOps(graph planGraph, ops []object) (planGraph, []object, error) {
 					if value == "" {
 						return planGraph{}, nil, invalidPlan(where + ": title is empty")
 					}
+				} else if field == "group" {
+					value = projectsettings.Trim(op.str("group"))
 				}
 				restore[field] = node[field]
 				node[field] = value
@@ -208,14 +211,14 @@ func parsePlanOps(raw any) ([]object, error) {
 				return nil, invalidPlan(where + ": bad kind")
 			}
 			clean := object{"op": "add", "id": id("id"), "kind": kind}
-			for _, key := range []string{"title", "description", "acceptance"} {
+			for _, key := range []string{"title", "description", "acceptance", "group"} {
 				value, _ := text(op, key)
 				clean[key] = value
 			}
 			parsed = append(parsed, clean)
 		case "update":
 			clean := object{"op": "update", "id": id("id")}
-			for _, key := range []string{"title", "description", "acceptance"} {
+			for _, key := range []string{"title", "description", "acceptance", "group"} {
 				if value, has := text(op, key); has {
 					clean[key] = value
 				}
@@ -231,7 +234,7 @@ func parsePlanOps(raw any) ([]object, error) {
 					fields = map[string]any{}
 				}
 				expect := object{}
-				for _, key := range []string{"title", "description", "acceptance"} {
+				for _, key := range []string{"title", "description", "acceptance", "group"} {
 					if value, has := text(fields, key); has {
 						expect[key] = value
 					}
@@ -340,7 +343,7 @@ func previewPlanOps(graph planGraph, ops []object) any {
 			mark = "added"
 		} else if now == nil {
 			mark = "removed"
-		} else if was["title"] != now["title"] || was["description"] != now["description"] || was["acceptance"] != now["acceptance"] {
+		} else if was["title"] != now["title"] || was["description"] != now["description"] || was["acceptance"] != now["acceptance"] || was["group"] != now["group"] {
 			mark = "changed"
 		}
 		node["mark"] = mark
@@ -403,6 +406,16 @@ func describePlanOps(graph planGraph, ops []object, threadsOn func(string) int) 
 					value = "—"
 				}
 				changes = append(changes, message("plan.op.acceptance", object{"title": name, "value": value}))
+			}
+			if _, has := op["group"]; has {
+				nextGroup := projectsettings.Trim(op.str("group"))
+				if nextGroup != node.str("group") {
+					if nextGroup == "" {
+						changes = append(changes, message("plan.op.ungroup", object{"title": name}))
+					} else {
+						changes = append(changes, message("plan.op.group", object{"title": name, "value": nextGroup}))
+					}
+				}
 			}
 			if value, has := op["description"]; has && value != node["description"] {
 				changes = append(changes, message("plan.op.update", object{"title": name}))

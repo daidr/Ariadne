@@ -60,6 +60,7 @@ message PlanNodeView {
   optional string changed_in = 9;
   repeated PlanLinkedIssue issues = 10;
   optional string gate = 11;
+  optional string group = 12;
 }
 
 message PlanAddNodeOp {
@@ -68,12 +69,14 @@ message PlanAddNodeOp {
   string title = 3;
   string description = 4;
   string acceptance = 5;
+  optional string group = 6;
 }
 
 message PlanNodeExpect {
   optional string title = 1;
   optional string description = 2;
   optional string acceptance = 3;
+  optional string group = 4;
 }
 
 message PlanUpdateNodeOp {
@@ -82,6 +85,7 @@ message PlanUpdateNodeOp {
   optional string description = 3;
   optional string acceptance = 4;
   optional PlanNodeExpect expect = 5;
+  optional string group = 6;
 }
 
 message PlanRemoveNodeOp {
@@ -126,6 +130,7 @@ message PlanPreviewNode {
   string acceptance = 5;
   optional string mark = 6;
   repeated string depends_on = 7;
+  optional string group = 8;
 }
 
 message PlanPreviewEdge {

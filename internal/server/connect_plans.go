@@ -243,6 +243,10 @@ func toProtoPlanOp(raw any) *ariadnev1.PlanOp {
 	}
 	switch anyString(m["op"]) {
 	case "add":
+		var group *string
+		if g := anyString(m["group"]); g != "" {
+			group = &g
+		}
 		return &ariadnev1.PlanOp{
 			Op: &ariadnev1.PlanOp_Add{
 				Add: &ariadnev1.PlanAddNodeOp{
@@ -251,6 +255,7 @@ func toProtoPlanOp(raw any) *ariadnev1.PlanOp {
 					Title:       anyString(m["title"]),
 					Description: anyString(m["description"]),
 					Acceptance:  anyString(m["acceptance"]),
+					Group:       group,
 				},
 			},
 		}
@@ -260,12 +265,14 @@ func toProtoPlanOp(raw any) *ariadnev1.PlanOp {
 			Title:       anyStringPtr(m["title"]),
 			Description: anyStringPtr(m["description"]),
 			Acceptance:  anyStringPtr(m["acceptance"]),
+			Group:       anyStringPtr(m["group"]),
 		}
 		if expect := asMap(m["expect"]); expect != nil {
 			upd.Expect = &ariadnev1.PlanNodeExpect{
 				Title:       anyStringPtr(expect["title"]),
 				Description: anyStringPtr(expect["description"]),
 				Acceptance:  anyStringPtr(expect["acceptance"]),
+				Group:       anyStringPtr(expect["group"]),
 			}
 		}
 		return &ariadnev1.PlanOp{Op: &ariadnev1.PlanOp_Update{Update: upd}}
@@ -307,14 +314,18 @@ func fromProtoPlanOps(ops []*ariadnev1.PlanOp) []any {
 		}
 		switch value := op.Op.(type) {
 		case *ariadnev1.PlanOp_Add:
-			out = append(out, object{
+			entry := object{
 				"op":          "add",
 				"id":          value.Add.Id,
 				"kind":        value.Add.Kind,
 				"title":       value.Add.Title,
 				"description": value.Add.Description,
 				"acceptance":  value.Add.Acceptance,
-			})
+			}
+			if value.Add.Group != nil {
+				entry["group"] = *value.Add.Group
+			}
+			out = append(out, entry)
 		case *ariadnev1.PlanOp_Update:
 			entry := object{
 				"op": "update",
@@ -329,6 +340,9 @@ func fromProtoPlanOps(ops []*ariadnev1.PlanOp) []any {
 			if value.Update.Acceptance != nil {
 				entry["acceptance"] = *value.Update.Acceptance
 			}
+			if value.Update.Group != nil {
+				entry["group"] = *value.Update.Group
+			}
 			if value.Update.Expect != nil {
 				expect := object{}
 				if value.Update.Expect.Title != nil {
@@ -339,6 +353,9 @@ func fromProtoPlanOps(ops []*ariadnev1.PlanOp) []any {
 				}
 				if value.Update.Expect.Acceptance != nil {
 					expect["acceptance"] = *value.Update.Expect.Acceptance
+				}
+				if value.Update.Expect.Group != nil {
+					expect["group"] = *value.Update.Expect.Group
 				}
 				entry["expect"] = expect
 			}
@@ -391,6 +408,10 @@ func toProtoPlanPreview(raw any) *ariadnev1.PlanPreview {
 	}
 	nodes := []*ariadnev1.PlanPreviewNode{}
 	for _, n := range asMapSlice(m["nodes"]) {
+		var group *string
+		if g := anyString(n["group"]); g != "" {
+			group = &g
+		}
 		nodes = append(nodes, &ariadnev1.PlanPreviewNode{
 			Id:          anyString(n["id"]),
 			Kind:        anyString(n["kind"]),
@@ -399,6 +420,7 @@ func toProtoPlanPreview(raw any) *ariadnev1.PlanPreview {
 			Acceptance:  anyString(n["acceptance"]),
 			Mark:        anyStringPtr(n["mark"]),
 			DependsOn:   anyStringSlice(n["dependsOn"]),
+			Group:       group,
 		})
 	}
 	edges := []*ariadnev1.PlanPreviewEdge{}
@@ -456,6 +478,10 @@ func toProtoPlanView(input any) *ariadnev1.PlanView {
 				LinkedBy: anyString(issue["linkedBy"]),
 			})
 		}
+		var group *string
+		if g := anyString(n["group"]); g != "" {
+			group = &g
+		}
 		nodes = append(nodes, &ariadnev1.PlanNodeView{
 			Id:          anyString(n["id"]),
 			Kind:        anyString(n["kind"]),
@@ -468,6 +494,7 @@ func toProtoPlanView(input any) *ariadnev1.PlanView {
 			ChangedIn:   anyStringPtr(n["changedIn"]),
 			Issues:      issues,
 			Gate:        anyStringPtr(n["gate"]),
+			Group:       group,
 		})
 	}
 	proposals := []*ariadnev1.PlanProposalView{}

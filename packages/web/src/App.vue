@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  DouAlert,
   DouConfigProvider,
   DouLayout,
   DouLayoutAside,
@@ -27,6 +26,7 @@ import ShortcutSheet from './components/ShortcutSheet.vue'
 import StartScreen from './components/StartScreen.vue'
 import ProjectSettings from './components/ProjectSettings.vue'
 import PluginConfigDialog from './components/PluginConfigDialog.vue'
+import UnauthorizedScreen from './components/UnauthorizedScreen.vue'
 import WorkspaceHeader from './components/WorkspaceHeader.vue'
 import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
@@ -38,6 +38,7 @@ import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
 import { useShortcuts } from './shortcuts'
 import { openSettingsKey } from './open-settings'
 import { useSidebarLayout } from './sidebar-layout'
+import { useStreamStatusToast } from './stream-toast'
 import { useWorkspaceRouting } from './workspace-routing'
 
 // Puts data-dou-theme on <html>, so the theme's background, text colour and font cover the page.
@@ -46,6 +47,7 @@ onScopeDispose(watchThemeColor())
 onLiveEvent(notifyAbout)
 useWorkspaceRouting()
 useShortcuts()
+useStreamStatusToast()
 
 const settingsOpen = ref(false)
 const settingsTab = ref<SettingsTab>('models')
@@ -57,6 +59,7 @@ provide(openSettingsKey, openSettings)
 
 const breakpoints = useBreakpoints()
 const compact = computed(() => !breakpoints.lg)
+const unauthorized = computed(() => state.stream === 'unauthorized')
 const coordinatorVisible = computed(() => !compact.value || state.workspaceLevel === 'coordinator')
 const sideVisible = computed(() => !compact.value || state.workspaceLevel === 'side')
 
@@ -109,18 +112,16 @@ watchEffect(() => {
       <WorkspaceHeader
         :compact="compact"
         :projects-collapsed="projectsCollapsed"
+        :unauthorized="unauthorized"
         @toggle-projects="toggleProjectSidebar(!projectsCollapsed)"
         @open-settings="openSettings()"
       />
-      <DouAlert v-if="state.stream === 'lost'" tone="warning" class="banner">
-        {{ t('error.connection') }}
-      </DouAlert>
-      <DouAlert v-else-if="state.stream === 'unauthorized'" tone="danger" class="banner">
-        {{ t('error.unauthorized') }}
-      </DouAlert>
+      <DouLayoutMain v-if="unauthorized" class="body main">
+        <UnauthorizedScreen />
+      </DouLayoutMain>
       <!-- The trace is a wide table with its details beside it: it takes the whole page. -->
       <TraceView
-        v-if="state.main.kind === 'trace' && coordinatorVisible"
+        v-else-if="state.main.kind === 'trace' && coordinatorVisible"
         :conversation-id="state.main.conversationId"
         class="body"
       />
@@ -187,12 +188,14 @@ watchEffect(() => {
         </DouSplitter>
       </div>
     </DouLayout>
-    <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
-    <PluginConfigDialog />
-    <ShortcutSheet />
-    <ProjectSettings />
-    <FullView :compact="compact" />
-    <FilePreview />
+    <template v-if="!unauthorized">
+      <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
+      <PluginConfigDialog />
+      <ShortcutSheet />
+      <ProjectSettings />
+      <FullView :compact="compact" />
+      <FilePreview />
+    </template>
     <DouToastViewport />
   </DouConfigProvider>
 </template>
@@ -212,10 +215,6 @@ body,
 
 .app {
   height: 100%;
-}
-
-.banner {
-  margin: 8px 16px 0;
 }
 
 .body {

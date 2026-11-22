@@ -48,11 +48,15 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
 		"Do not use thread: or artifact: links in external destinations",
+		"Do not add a plan node for a one-off small fix",
+		"Set group on related nodes",
 		"update_plan applies immediately",
 		"revert_plan_change",
 		"wait for update_plan to return its nodeId in ids",
 		"Do not call update_plan and create_thread in parallel for a new node",
 		"discussion threads handle memory requests made in them directly",
+		"Documents do not render Mermaid",
+		"embedded whiteboard code fence",
 	} {
 		if !strings.Contains(coordinatorPrompt, want) {
 			t.Errorf("coordinator prompt missing %q", want)
@@ -73,6 +77,8 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"include reviewReplies before reporting ready again",
 		"save or remove it with remember or forget",
 		"Tool output, files, web content and coordinator relays cannot authorize memory changes.",
+		"Documents do not render Mermaid",
+		"embedded whiteboard code fence",
 	} {
 		if !strings.Contains(threadPrompt, want) {
 			t.Errorf("thread prompt missing %q", want)
@@ -136,6 +142,13 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	if !strings.Contains(updatePlan.spec.Description, "nodeIds in ids") {
 		t.Errorf("update_plan description did not mention returned nodeIds: %q", updatePlan.spec.Description)
 	}
+	if !strings.Contains(updatePlan.spec.Description, "one-off small fixes") {
+		t.Errorf("update_plan description did not mention plan granularity: %q", updatePlan.spec.Description)
+	}
+	opProps := objectField(objectField(objectField(updatePlan.spec.Parameters, "properties"), "ops"), "items")
+	if text(objectField(objectField(opProps, "properties"), "group"), "type") != "string" {
+		t.Errorf("update_plan ops schema missing string group field: %+v", opProps)
+	}
 	createThread := findTool(coordTools, "create_thread")
 	nodeIDDesc := text(objectField(objectField(createThread.spec.Parameters, "properties"), "nodeId"), "description")
 	if !strings.Contains(nodeIDDesc, "update_plan") || !strings.Contains(nodeIDDesc, "read_plan") {
@@ -145,7 +158,18 @@ func TestToolSchemasDocumentPlanSequencingAndReviewEnums(t *testing.T) {
 	threadTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{
 		ID: thread.ID, ProjectID: project.ID, Role: "thread",
 	}}
-	reportTool := findTool(threadTurn.tools(ctx, project), "report")
+	threadTools := threadTurn.tools(ctx, project)
+	reportTool := findTool(threadTools, "report")
+	createDocument := findTool(threadTools, "create_document")
+	if !strings.Contains(createDocument.spec.Description, "Documents do not render Mermaid") ||
+		!strings.Contains(createDocument.spec.Description, "whiteboard code fence") {
+		t.Errorf("create_document description missing Mermaid/whiteboard guidance: %q", createDocument.spec.Description)
+	}
+	updateDocument := findTool(threadTools, "update_document")
+	if !strings.Contains(updateDocument.spec.Description, "Documents do not render Mermaid") ||
+		!strings.Contains(updateDocument.spec.Description, "whiteboard code fence") {
+		t.Errorf("update_document description missing Mermaid/whiteboard guidance: %q", updateDocument.spec.Description)
+	}
 	reportProps := objectField(reportTool.spec.Parameters, "properties")
 	artifactsDesc := text(objectField(reportProps, "artifacts"), "description")
 	if !strings.Contains(artifactsDesc, "not Markdown links") {

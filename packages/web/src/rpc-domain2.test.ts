@@ -296,7 +296,25 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
             })
           case 'GetPlan':
             return protoResponse(GetPlanResponseSchema, {
-              plan: { projectId: 'prj_1', nodes: [], revisions: [], proposals: [] },
+              plan: {
+                projectId: 'prj_1',
+                nodes: [
+                  {
+                    id: 'n1',
+                    kind: 'task',
+                    title: 'Grouped task',
+                    description: '',
+                    acceptance: '',
+                    group: 'Phase 1',
+                    dependsOn: [],
+                    status: 'none',
+                    threads: [],
+                    issues: [],
+                  },
+                ],
+                revisions: [],
+                proposals: [],
+              },
               nextRevisionPageToken: 'tok_rev_2',
               hasMoreRevisions: true,
             })
@@ -368,6 +386,7 @@ describe('Domain 2 ConnectRPC client (Projects, Plans, Artifacts, Issues)', () =
     const plan = await client.getPlan('prj_1', { revisionPageSize: 1 })
     expect(plan.hasMoreRevisions).toBe(true)
     expect(plan.nextRevisionPageToken).toBe('tok_rev_2')
+    expect(plan.plan.nodes[0]?.group).toBe('Phase 1')
 
     const revs = await client.listPlanRevisions('prj_1', { pageToken: 'tok_rev_2' })
     expect(revs.revisions).toHaveLength(1)

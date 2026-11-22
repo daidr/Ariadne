@@ -786,6 +786,7 @@ function fromProtoPlanOp(op: ProtoPlanOp): PlanOp | null {
         title: op.op.value.title,
         description: op.op.value.description,
         acceptance: op.op.value.acceptance,
+        ...(op.op.value.group ? { group: op.op.value.group } : {}),
       }
     case 'update':
       return {
@@ -794,6 +795,7 @@ function fromProtoPlanOp(op: ProtoPlanOp): PlanOp | null {
         ...(op.op.value.title === undefined ? {} : { title: op.op.value.title }),
         ...(op.op.value.description === undefined ? {} : { description: op.op.value.description }),
         ...(op.op.value.acceptance === undefined ? {} : { acceptance: op.op.value.acceptance }),
+        ...(op.op.value.group === undefined ? {} : { group: op.op.value.group }),
         ...(op.op.value.expect
           ? {
               expect: {
@@ -806,6 +808,9 @@ function fromProtoPlanOp(op: ProtoPlanOp): PlanOp | null {
                 ...(op.op.value.expect.acceptance === undefined
                   ? {}
                   : { acceptance: op.op.value.expect.acceptance }),
+                ...(op.op.value.expect.group === undefined
+                  ? {}
+                  : { group: op.op.value.expect.group }),
               },
             }
           : {}),
@@ -833,6 +838,7 @@ function toProtoPlanOpInput(op: PlanOp) {
             title: op.title,
             description: op.description,
             acceptance: op.acceptance,
+            ...(op.group === undefined ? {} : { group: op.group }),
           },
         },
       }
@@ -845,6 +851,7 @@ function toProtoPlanOpInput(op: PlanOp) {
             ...(op.title === undefined ? {} : { title: op.title }),
             ...(op.description === undefined ? {} : { description: op.description }),
             ...(op.acceptance === undefined ? {} : { acceptance: op.acceptance }),
+            ...(op.group === undefined ? {} : { group: op.group }),
             ...(op.expect
               ? {
                   expect: {
@@ -855,6 +862,7 @@ function toProtoPlanOpInput(op: PlanOp) {
                     ...(op.expect.acceptance === undefined
                       ? {}
                       : { acceptance: op.expect.acceptance }),
+                    ...(op.expect.group === undefined ? {} : { group: op.expect.group }),
                   },
                 }
               : {}),
@@ -906,6 +914,7 @@ function fromProtoPlanPreview(preview?: ProtoPlanPreview): PlanPreview | null {
       title: node.title,
       description: node.description,
       acceptance: node.acceptance,
+      ...(node.group ? { group: node.group } : {}),
       mark: (node.mark ?? null) as PlanPreview['nodes'][number]['mark'],
       dependsOn: [...node.dependsOn],
     })),
@@ -938,6 +947,7 @@ function fromProtoPlanNode(node: ProtoPlanNodeView): PlanNodeView {
     title: node.title,
     description: node.description,
     acceptance: node.acceptance,
+    ...(node.group ? { group: node.group } : {}),
     dependsOn: [...node.dependsOn],
     status: node.status as PlanNodeView['status'],
     threads: node.threads.map((thread) => ({
