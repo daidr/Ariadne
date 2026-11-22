@@ -69,21 +69,6 @@ const (
 	// ProjectServiceRemoveProjectReferenceProcedure is the fully-qualified name of the ProjectService's
 	// RemoveProjectReference RPC.
 	ProjectServiceRemoveProjectReferenceProcedure = "/ariadne.v1.ProjectService/RemoveProjectReference"
-	// ProjectServiceGetReferenceStatusProcedure is the fully-qualified name of the ProjectService's
-	// GetReferenceStatus RPC.
-	ProjectServiceGetReferenceStatusProcedure = "/ariadne.v1.ProjectService/GetReferenceStatus"
-	// ProjectServiceListSourceKindsProcedure is the fully-qualified name of the ProjectService's
-	// ListSourceKinds RPC.
-	ProjectServiceListSourceKindsProcedure = "/ariadne.v1.ProjectService/ListSourceKinds"
-	// ProjectServiceBrowseSourceProcedure is the fully-qualified name of the ProjectService's
-	// BrowseSource RPC.
-	ProjectServiceBrowseSourceProcedure = "/ariadne.v1.ProjectService/BrowseSource"
-	// ProjectServiceListMentionFilesProcedure is the fully-qualified name of the ProjectService's
-	// ListMentionFiles RPC.
-	ProjectServiceListMentionFilesProcedure = "/ariadne.v1.ProjectService/ListMentionFiles"
-	// ProjectServiceNoteProjectReturnProcedure is the fully-qualified name of the ProjectService's
-	// NoteProjectReturn RPC.
-	ProjectServiceNoteProjectReturnProcedure = "/ariadne.v1.ProjectService/NoteProjectReturn"
 )
 
 // ProjectServiceClient is a client for the ariadne.v1.ProjectService service.
@@ -100,11 +85,6 @@ type ProjectServiceClient interface {
 	SetFileSources(context.Context, *connect.Request[v1.SetFileSourcesRequest]) (*connect.Response[v1.SetFileSourcesResponse], error)
 	AddProjectReference(context.Context, *connect.Request[v1.AddProjectReferenceRequest]) (*connect.Response[v1.AddProjectReferenceResponse], error)
 	RemoveProjectReference(context.Context, *connect.Request[v1.RemoveProjectReferenceRequest]) (*connect.Response[v1.RemoveProjectReferenceResponse], error)
-	GetReferenceStatus(context.Context, *connect.Request[v1.GetReferenceStatusRequest]) (*connect.Response[v1.GetReferenceStatusResponse], error)
-	ListSourceKinds(context.Context, *connect.Request[v1.ListSourceKindsRequest]) (*connect.Response[v1.ListSourceKindsResponse], error)
-	BrowseSource(context.Context, *connect.Request[v1.BrowseSourceRequest]) (*connect.Response[v1.BrowseSourceResponse], error)
-	ListMentionFiles(context.Context, *connect.Request[v1.ListMentionFilesRequest]) (*connect.Response[v1.ListMentionFilesResponse], error)
-	NoteProjectReturn(context.Context, *connect.Request[v1.NoteProjectReturnRequest]) (*connect.Response[v1.NoteProjectReturnResponse], error)
 }
 
 // NewProjectServiceClient constructs a client for the ariadne.v1.ProjectService service. By
@@ -190,36 +170,6 @@ func NewProjectServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(projectServiceMethods.ByName("RemoveProjectReference")),
 			connect.WithClientOptions(opts...),
 		),
-		getReferenceStatus: connect.NewClient[v1.GetReferenceStatusRequest, v1.GetReferenceStatusResponse](
-			httpClient,
-			baseURL+ProjectServiceGetReferenceStatusProcedure,
-			connect.WithSchema(projectServiceMethods.ByName("GetReferenceStatus")),
-			connect.WithClientOptions(opts...),
-		),
-		listSourceKinds: connect.NewClient[v1.ListSourceKindsRequest, v1.ListSourceKindsResponse](
-			httpClient,
-			baseURL+ProjectServiceListSourceKindsProcedure,
-			connect.WithSchema(projectServiceMethods.ByName("ListSourceKinds")),
-			connect.WithClientOptions(opts...),
-		),
-		browseSource: connect.NewClient[v1.BrowseSourceRequest, v1.BrowseSourceResponse](
-			httpClient,
-			baseURL+ProjectServiceBrowseSourceProcedure,
-			connect.WithSchema(projectServiceMethods.ByName("BrowseSource")),
-			connect.WithClientOptions(opts...),
-		),
-		listMentionFiles: connect.NewClient[v1.ListMentionFilesRequest, v1.ListMentionFilesResponse](
-			httpClient,
-			baseURL+ProjectServiceListMentionFilesProcedure,
-			connect.WithSchema(projectServiceMethods.ByName("ListMentionFiles")),
-			connect.WithClientOptions(opts...),
-		),
-		noteProjectReturn: connect.NewClient[v1.NoteProjectReturnRequest, v1.NoteProjectReturnResponse](
-			httpClient,
-			baseURL+ProjectServiceNoteProjectReturnProcedure,
-			connect.WithSchema(projectServiceMethods.ByName("NoteProjectReturn")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
@@ -237,11 +187,6 @@ type projectServiceClient struct {
 	setFileSources         *connect.Client[v1.SetFileSourcesRequest, v1.SetFileSourcesResponse]
 	addProjectReference    *connect.Client[v1.AddProjectReferenceRequest, v1.AddProjectReferenceResponse]
 	removeProjectReference *connect.Client[v1.RemoveProjectReferenceRequest, v1.RemoveProjectReferenceResponse]
-	getReferenceStatus     *connect.Client[v1.GetReferenceStatusRequest, v1.GetReferenceStatusResponse]
-	listSourceKinds        *connect.Client[v1.ListSourceKindsRequest, v1.ListSourceKindsResponse]
-	browseSource           *connect.Client[v1.BrowseSourceRequest, v1.BrowseSourceResponse]
-	listMentionFiles       *connect.Client[v1.ListMentionFilesRequest, v1.ListMentionFilesResponse]
-	noteProjectReturn      *connect.Client[v1.NoteProjectReturnRequest, v1.NoteProjectReturnResponse]
 }
 
 // ListProjects calls ariadne.v1.ProjectService.ListProjects.
@@ -304,31 +249,6 @@ func (c *projectServiceClient) RemoveProjectReference(ctx context.Context, req *
 	return c.removeProjectReference.CallUnary(ctx, req)
 }
 
-// GetReferenceStatus calls ariadne.v1.ProjectService.GetReferenceStatus.
-func (c *projectServiceClient) GetReferenceStatus(ctx context.Context, req *connect.Request[v1.GetReferenceStatusRequest]) (*connect.Response[v1.GetReferenceStatusResponse], error) {
-	return c.getReferenceStatus.CallUnary(ctx, req)
-}
-
-// ListSourceKinds calls ariadne.v1.ProjectService.ListSourceKinds.
-func (c *projectServiceClient) ListSourceKinds(ctx context.Context, req *connect.Request[v1.ListSourceKindsRequest]) (*connect.Response[v1.ListSourceKindsResponse], error) {
-	return c.listSourceKinds.CallUnary(ctx, req)
-}
-
-// BrowseSource calls ariadne.v1.ProjectService.BrowseSource.
-func (c *projectServiceClient) BrowseSource(ctx context.Context, req *connect.Request[v1.BrowseSourceRequest]) (*connect.Response[v1.BrowseSourceResponse], error) {
-	return c.browseSource.CallUnary(ctx, req)
-}
-
-// ListMentionFiles calls ariadne.v1.ProjectService.ListMentionFiles.
-func (c *projectServiceClient) ListMentionFiles(ctx context.Context, req *connect.Request[v1.ListMentionFilesRequest]) (*connect.Response[v1.ListMentionFilesResponse], error) {
-	return c.listMentionFiles.CallUnary(ctx, req)
-}
-
-// NoteProjectReturn calls ariadne.v1.ProjectService.NoteProjectReturn.
-func (c *projectServiceClient) NoteProjectReturn(ctx context.Context, req *connect.Request[v1.NoteProjectReturnRequest]) (*connect.Response[v1.NoteProjectReturnResponse], error) {
-	return c.noteProjectReturn.CallUnary(ctx, req)
-}
-
 // ProjectServiceHandler is an implementation of the ariadne.v1.ProjectService service.
 type ProjectServiceHandler interface {
 	ListProjects(context.Context, *connect.Request[v1.ListProjectsRequest]) (*connect.Response[v1.ListProjectsResponse], error)
@@ -343,11 +263,6 @@ type ProjectServiceHandler interface {
 	SetFileSources(context.Context, *connect.Request[v1.SetFileSourcesRequest]) (*connect.Response[v1.SetFileSourcesResponse], error)
 	AddProjectReference(context.Context, *connect.Request[v1.AddProjectReferenceRequest]) (*connect.Response[v1.AddProjectReferenceResponse], error)
 	RemoveProjectReference(context.Context, *connect.Request[v1.RemoveProjectReferenceRequest]) (*connect.Response[v1.RemoveProjectReferenceResponse], error)
-	GetReferenceStatus(context.Context, *connect.Request[v1.GetReferenceStatusRequest]) (*connect.Response[v1.GetReferenceStatusResponse], error)
-	ListSourceKinds(context.Context, *connect.Request[v1.ListSourceKindsRequest]) (*connect.Response[v1.ListSourceKindsResponse], error)
-	BrowseSource(context.Context, *connect.Request[v1.BrowseSourceRequest]) (*connect.Response[v1.BrowseSourceResponse], error)
-	ListMentionFiles(context.Context, *connect.Request[v1.ListMentionFilesRequest]) (*connect.Response[v1.ListMentionFilesResponse], error)
-	NoteProjectReturn(context.Context, *connect.Request[v1.NoteProjectReturnRequest]) (*connect.Response[v1.NoteProjectReturnResponse], error)
 }
 
 // NewProjectServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -429,36 +344,6 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 		connect.WithSchema(projectServiceMethods.ByName("RemoveProjectReference")),
 		connect.WithHandlerOptions(opts...),
 	)
-	projectServiceGetReferenceStatusHandler := connect.NewUnaryHandler(
-		ProjectServiceGetReferenceStatusProcedure,
-		svc.GetReferenceStatus,
-		connect.WithSchema(projectServiceMethods.ByName("GetReferenceStatus")),
-		connect.WithHandlerOptions(opts...),
-	)
-	projectServiceListSourceKindsHandler := connect.NewUnaryHandler(
-		ProjectServiceListSourceKindsProcedure,
-		svc.ListSourceKinds,
-		connect.WithSchema(projectServiceMethods.ByName("ListSourceKinds")),
-		connect.WithHandlerOptions(opts...),
-	)
-	projectServiceBrowseSourceHandler := connect.NewUnaryHandler(
-		ProjectServiceBrowseSourceProcedure,
-		svc.BrowseSource,
-		connect.WithSchema(projectServiceMethods.ByName("BrowseSource")),
-		connect.WithHandlerOptions(opts...),
-	)
-	projectServiceListMentionFilesHandler := connect.NewUnaryHandler(
-		ProjectServiceListMentionFilesProcedure,
-		svc.ListMentionFiles,
-		connect.WithSchema(projectServiceMethods.ByName("ListMentionFiles")),
-		connect.WithHandlerOptions(opts...),
-	)
-	projectServiceNoteProjectReturnHandler := connect.NewUnaryHandler(
-		ProjectServiceNoteProjectReturnProcedure,
-		svc.NoteProjectReturn,
-		connect.WithSchema(projectServiceMethods.ByName("NoteProjectReturn")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/ariadne.v1.ProjectService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ProjectServiceListProjectsProcedure:
@@ -485,16 +370,6 @@ func NewProjectServiceHandler(svc ProjectServiceHandler, opts ...connect.Handler
 			projectServiceAddProjectReferenceHandler.ServeHTTP(w, r)
 		case ProjectServiceRemoveProjectReferenceProcedure:
 			projectServiceRemoveProjectReferenceHandler.ServeHTTP(w, r)
-		case ProjectServiceGetReferenceStatusProcedure:
-			projectServiceGetReferenceStatusHandler.ServeHTTP(w, r)
-		case ProjectServiceListSourceKindsProcedure:
-			projectServiceListSourceKindsHandler.ServeHTTP(w, r)
-		case ProjectServiceBrowseSourceProcedure:
-			projectServiceBrowseSourceHandler.ServeHTTP(w, r)
-		case ProjectServiceListMentionFilesProcedure:
-			projectServiceListMentionFilesHandler.ServeHTTP(w, r)
-		case ProjectServiceNoteProjectReturnProcedure:
-			projectServiceNoteProjectReturnHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -550,24 +425,4 @@ func (UnimplementedProjectServiceHandler) AddProjectReference(context.Context, *
 
 func (UnimplementedProjectServiceHandler) RemoveProjectReference(context.Context, *connect.Request[v1.RemoveProjectReferenceRequest]) (*connect.Response[v1.RemoveProjectReferenceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.RemoveProjectReference is not implemented"))
-}
-
-func (UnimplementedProjectServiceHandler) GetReferenceStatus(context.Context, *connect.Request[v1.GetReferenceStatusRequest]) (*connect.Response[v1.GetReferenceStatusResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.GetReferenceStatus is not implemented"))
-}
-
-func (UnimplementedProjectServiceHandler) ListSourceKinds(context.Context, *connect.Request[v1.ListSourceKindsRequest]) (*connect.Response[v1.ListSourceKindsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.ListSourceKinds is not implemented"))
-}
-
-func (UnimplementedProjectServiceHandler) BrowseSource(context.Context, *connect.Request[v1.BrowseSourceRequest]) (*connect.Response[v1.BrowseSourceResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.BrowseSource is not implemented"))
-}
-
-func (UnimplementedProjectServiceHandler) ListMentionFiles(context.Context, *connect.Request[v1.ListMentionFilesRequest]) (*connect.Response[v1.ListMentionFilesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.ListMentionFiles is not implemented"))
-}
-
-func (UnimplementedProjectServiceHandler) NoteProjectReturn(context.Context, *connect.Request[v1.NoteProjectReturnRequest]) (*connect.Response[v1.NoteProjectReturnResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.ProjectService.NoteProjectReturn is not implemented"))
 }

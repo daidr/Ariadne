@@ -320,6 +320,64 @@ func (repo *Repository) SubmitReview(ctx context.Context, reviewerID string, inp
 	})
 	return
 }
+
+type LineCommentPageOptions struct {
+	BeforeMessageID *string
+	Limit           *int
+}
+
+type LineCommentPage struct {
+	Comments          []object
+	HasMore           bool
+	NextBeforeMessage *string
+}
+
+func (reader Reader) PageLineComments(ctx context.Context, id string, options LineCommentPageOptions) (result LineCommentPage, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		if _, err := readThread(ctx, tx, id, reader.now()); err != nil {
+			return err
+		}
+		limit := 100
+		if options.Limit != nil {
+			limit = max(1, min(*options.Limit, 500))
+		}
+		var rows []record
+		if options.BeforeMessageID != nil && *options.BeforeMessageID != "" {
+			rows, err = records(ctx, tx, "SELECT id, comments, created_at FROM messages WHERE conversation_id = ? AND author = 'user' AND comments IS NOT NULL AND id < ? ORDER BY id DESC LIMIT ?", id, *options.BeforeMessageID, limit+1)
+		} else {
+			rows, err = records(ctx, tx, "SELECT id, comments, created_at FROM messages WHERE conversation_id = ? AND author = 'user' AND comments IS NOT NULL ORDER BY id DESC LIMIT ?", id, limit+1)
+		}
+		if err != nil {
+			return err
+		}
+		if len(rows) > limit {
+			result.HasMore = true
+			rows = rows[:limit]
+		}
+		slices.Reverse(rows)
+		if result.HasMore && len(rows) > 0 {
+			nextID := rows[0].text("id")
+			result.NextBeforeMessage = &nextID
+		}
+		result.Comments = []object{}
+		for _, row := range rows {
+			parsed, err := row.json("comments", []any{})
+			if err != nil {
+				return err
+			}
+			for index, raw := range objects(parsed) {
+				comment := except(raw, "")
+				comment["id"] = row.text("id") + ":" + encoded(index)
+				comment["messageId"] = row["id"]
+				comment["sentAt"] = row["created_at"]
+				result.Comments = append(result.Comments, comment)
+			}
+		}
+		return nil
+	})
+	return
+}
+
 func (reader Reader) ListLineComments(ctx context.Context, id string) (result []object, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
 		if _, err := readThread(ctx, tx, id, reader.now()); err != nil {

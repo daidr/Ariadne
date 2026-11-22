@@ -11,6 +11,8 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+const defaultModelCheckTimeout = 20 * time.Second
+
 func (registry *Registry) CheckModel(ctx context.Context, model *settings.ResolvedModel, locale string) (problem *domainerr.Error, err error) {
 	defer func() {
 		if value := recover(); value != nil {
@@ -25,9 +27,14 @@ func (registry *Registry) CheckModel(ctx context.Context, model *settings.Resolv
 	if !exists {
 		return nil, domainerr.New("error.modelUnknown", map[string]any{"provider": model.Provider.Kind})
 	}
+	ctx, cancel := context.WithTimeout(ctx, defaultModelCheckTimeout)
+	defer cancel()
 	if provider.Check != nil {
 		problem, err := provider.Check(ctx, model.Settings)
 		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
+				return domainerr.New("error.modelCheckTimeout", map[string]any{"seconds": int(defaultModelCheckTimeout / time.Second)}), nil
+			}
 			return nil, err
 		}
 		if problem == nil {
@@ -39,8 +46,6 @@ func (registry *Registry) CheckModel(ctx context.Context, model *settings.Resolv
 		}
 		return domainerr.New("error.modelCheck", map[string]any{"detail": detail}), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
 	cache := false
 	request := sdk.Request{Model: model.Model, Messages: []sdk.Message{{Role: "user", Content: "Hi"}}, Tools: []sdk.Tool{}, Cache: &cache}
 	if headers, ok := model.Request["headers"].(map[string]any); ok {
@@ -54,6 +59,9 @@ func (registry *Registry) CheckModel(ctx context.Context, model *settings.Resolv
 	request.ExtraBody, _ = model.Request["extraBody"].(map[string]any)
 	for part := range provider.Stream(ctx, model.Settings, request) {
 		if part.Type == "finish" && part.Reason == "error" {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return domainerr.New("error.modelCheckTimeout", map[string]any{"seconds": int(defaultModelCheckTimeout / time.Second)}), nil
+			}
 			return domainerr.New("error.modelCheck", map[string]any{"detail": part.Error}), nil
 		}
 		if part.Type == "alive" {
@@ -62,7 +70,7 @@ func (registry *Registry) CheckModel(ctx context.Context, model *settings.Resolv
 		return nil, nil
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
-		return domainerr.New("error.modelCheckTimeout", map[string]any{"seconds": 20}), nil
+		return domainerr.New("error.modelCheckTimeout", map[string]any{"seconds": int(defaultModelCheckTimeout / time.Second)}), nil
 	}
 	return nil, nil
 }

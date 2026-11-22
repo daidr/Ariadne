@@ -81,6 +81,13 @@ func (manager *Manager) branches(ctx context.Context, project string, selection 
 			}, selection...)
 		}
 	}
+	if raw.Files != nil {
+		proxy.Files = func(ctx context.Context, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) ([]sdk.FileVersions, error) {
+				return b.Files(ctx, requests)
+			}, selection...)
+		}
+	}
 	if raw.Merged != nil {
 		proxy.Merged = func(ctx context.Context, branch sdk.ThreadBranch, base string) (bool, error) {
 			return withBranches(ctx, manager, project, key, func(ctx context.Context, b *sdk.BranchCapability) (bool, error) { return b.Merged(ctx, branch, base) }, selection...)

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package ariadne.v1;
 
+import "ariadne/v1/conversations.proto";
+
 // ArtifactService manages documents, whiteboards, dashboards, paginated artifact
 // and version listings, feedback rounds, and dedicated comment lifecycle RPCs.
 service ArtifactService {
@@ -134,47 +136,6 @@ message ArtifactAttachment {
   string name = 2;
   string mime = 3;
   int64 size = 4 [jstype = JS_NUMBER];
-}
-
-message ArtifactFeedbackEdit {
-  string diff = 1;
-}
-
-message ArtifactFeedbackChosenOption {
-  string id = 1;
-  string title = 2;
-}
-
-message ArtifactFeedbackChoice {
-  repeated ArtifactFeedbackChosenOption chosen = 1;
-}
-
-message ArtifactFeedbackComment {
-  string thread_id = 1;
-  string action = 2;
-  string body = 3;
-  string where = 4;
-}
-
-message ArtifactFeedbackMark {
-  string node_id = 1;
-  string type = 2;
-  string text = 3;
-  string where = 4;
-}
-
-message ArtifactFeedbackBoard {
-  repeated string changes = 1;
-}
-
-message ArtifactFeedbackItem {
-  oneof item {
-    ArtifactFeedbackEdit edit = 1;
-    ArtifactFeedbackChoice choice = 2;
-    ArtifactFeedbackComment comment = 3;
-    ArtifactFeedbackMark mark = 4;
-    ArtifactFeedbackBoard board = 5;
-  }
 }
 
 message ArtifactFeedbackView {

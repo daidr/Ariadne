@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -75,6 +76,73 @@ func ParseDiff(nameStatus, numstat string) []sdk.ChangedFile {
 	}
 	return files
 }
+
+// ParseRawNumstat parses the combined output of `git diff --raw --numstat -z -M`.
+func ParseRawNumstat(output string) []sdk.ChangedFile {
+	tokens := strings.Split(output, "\x00")
+	files := []sdk.ChangedFile{}
+	i := 0
+	for i < len(tokens) {
+		entry := tokens[i]
+		if entry == "" {
+			i++
+			continue
+		}
+		if !strings.HasPrefix(entry, ":") {
+			break
+		}
+		fields := strings.Fields(entry)
+		if len(fields) < 5 || len(fields[4]) == 0 {
+			i++
+			continue
+		}
+		status := map[byte]string{'A': "added", 'M': "modified", 'D': "deleted", 'R': "renamed", 'C': "copied", 'T': "type"}[fields[4][0]]
+		if status == "" {
+			status = "modified"
+		}
+		var previous *string
+		if status == "renamed" || status == "copied" {
+			i++
+			if i >= len(tokens) {
+				break
+			}
+			previous = new(tokens[i])
+		}
+		i++
+		if i >= len(tokens) {
+			break
+		}
+		path := tokens[i]
+		i++
+		files = append(files, sdk.ChangedFile{Path: path, PreviousPath: previous, Status: status})
+	}
+	type counts struct{ added, removed *int64 }
+	byPath := make(map[string]counts, len(files))
+	for ; i < len(tokens); i++ {
+		if tokens[i] == "" {
+			continue
+		}
+		fields := strings.SplitN(tokens[i], "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		path := fields[2]
+		if path == "" {
+			if i+2 >= len(tokens) {
+				break
+			}
+			i += 2
+			path = tokens[i]
+		}
+		byPath[path] = counts{countValue(fields[0]), countValue(fields[1])}
+	}
+	for idx := range files {
+		n := byPath[files[idx].Path]
+		files[idx].Added = n.added
+		files[idx].Removed = n.removed
+	}
+	return files
+}
 func ParseStatus(output string) []string {
 	paths := []string{}
 	fields := strings.Split(output, "\x00")
@@ -94,11 +162,21 @@ func ParseStatus(output string) []string {
 type BranchInput struct{ Branch, Base, BaseRef, Worktree string }
 
 func branchRevisions(ctx context.Context, git GitRun, branch, baseRef string) (sdk.BranchRevisions, error) {
-	head := commitSHA(ctx, git, "refs/heads/"+branch, "")
+	var head, base string
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		head = commitSHA(ctx, git, "refs/heads/"+branch, "")
+	}()
+	go func() {
+		defer wg.Done()
+		base = commitSHA(ctx, git, baseRef, "")
+	}()
+	wg.Wait()
 	if head == "" {
 		return sdk.BranchRevisions{}, ctx.Err()
 	}
-	base := commitSHA(ctx, git, baseRef, "")
 	return sdk.BranchRevisions{Head: head, BaseHead: base}, ctx.Err()
 }
 
@@ -119,16 +197,42 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 	if mergeBase.ExitCode == 0 {
 		from = strings.TrimSpace(mergeBase.Stdout)
 	}
-	files, err := TreeDiff(ctx, git, from, head)
-	if err != nil {
-		return nil, err
+
+	var (
+		files       []sdk.ChangedFile
+		diffErr     error
+		logResult   sdk.ExecResult
+		uncommitted = []string{}
+		wg          sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		files, diffErr = TreeDiff(ctx, git, from, head)
+	}()
+	go func() {
+		defer wg.Done()
+		logResult = git(ctx, []string{"log", "-z", "--max-count=100", "--format=%H %s", baseSHA + ".." + head}, GitOptions{Whole: true})
+	}()
+	if input.Worktree != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status := git(ctx, []string{"status", "--porcelain=v1", "-z", "--untracked-files=normal"}, GitOptions{Directory: input.Worktree, Whole: true})
+			if status.ExitCode == 0 {
+				uncommitted = ParseStatus(status.Stdout)
+			}
+		}()
 	}
-	log := git(ctx, []string{"log", "-z", "--max-count=100", "--format=%H %s", baseSHA + ".." + head}, GitOptions{Whole: true})
+	wg.Wait()
+	if diffErr != nil {
+		return nil, diffErr
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	commits := []sdk.BranchCommit{}
-	for _, line := range strings.Split(log.Stdout, "\x00") {
+	for _, line := range strings.Split(logResult.Stdout, "\x00") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -138,13 +242,6 @@ func BranchChanges(ctx context.Context, git GitRun, input BranchInput) (*sdk.Bra
 		}
 		commits = append(commits, sdk.BranchCommit{SHA: strings.TrimSpace(sha), Subject: subject})
 	}
-	uncommitted := []string{}
-	if input.Worktree != "" {
-		status := git(ctx, []string{"status", "--porcelain=v1", "-z", "--untracked-files=normal"}, GitOptions{Directory: input.Worktree, Whole: true})
-		if status.ExitCode == 0 {
-			uncommitted = ParseStatus(status.Stdout)
-		}
-	}
 	return &sdk.BranchChanges{Branch: input.Branch, Base: input.Base, From: from, Head: head, BaseHead: baseSHA, Commits: commits, Files: files, Uncommitted: uncommitted}, nil
 }
 func TreeDiff(ctx context.Context, git GitRun, from, to string) ([]sdk.ChangedFile, error) {
@@ -152,21 +249,21 @@ func TreeDiff(ctx context.Context, git GitRun, from, to string) ([]sdk.ChangedFi
 	// accepts options; --end-of-options protects leading '-' and '--' names.
 	revisions := []string{from, to}
 	for i, ref := range revisions {
+		if isObjectID(ref) {
+			revisions[i] = ref + "^{tree}"
+			continue
+		}
 		result := git(ctx, []string{"rev-parse", "--verify", "--end-of-options", ref + "^{tree}"}, GitOptions{})
 		if result.ExitCode != 0 {
 			return nil, gitFailure(result, "git rev-parse")
 		}
 		revisions[i] = strings.TrimSpace(result.Stdout)
 	}
-	name := git(ctx, []string{"diff", "--name-status", "-z", "-M", revisions[0], revisions[1], "--"}, GitOptions{Whole: true})
-	if name.ExitCode != 0 {
-		return nil, gitFailure(name, "git diff")
+	diff := git(ctx, []string{"diff", "--raw", "--numstat", "-z", "-M", revisions[0], revisions[1], "--"}, GitOptions{Whole: true})
+	if diff.ExitCode != 0 {
+		return nil, gitFailure(diff, "git diff")
 	}
-	num := git(ctx, []string{"diff", "--numstat", "-z", "-M", revisions[0], revisions[1], "--"}, GitOptions{Whole: true})
-	if num.ExitCode != 0 {
-		return nil, gitFailure(num, "git diff")
-	}
-	return ParseDiff(name.Stdout, num.Stdout), nil
+	return ParseRawNumstat(diff.Stdout), nil
 }
 func SnapshotRefs(threadID string) string { return "refs/ariadne/turns/" + threadID + "/" }
 func validRef(ctx context.Context, git GitRun, ref string) error {

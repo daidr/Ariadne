@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/trace"
 )
@@ -53,18 +56,9 @@ func requestTraceSeed() []eventstore.NewEvent {
 	}
 	return output
 }
+
 func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
 	seed := requestTraceSeed()
-	no := false
-	requests := []apiRequest{{Method: "GET", Path: "/api/conversations/coo_a/trace/requests/1", Auth: &no}}
-	for i, event := range seed {
-		if event.Type == "turn.step" || event.Type == "research.step" || event.Type == "conversation.compacted" {
-			requests = append(requests, apiRequest{Method: "GET", Path: "/api/conversations/coo_a/trace/requests/" + strconv.Itoa(i+1)})
-		}
-	}
-	for _, path := range []string{"/api/conversations/coo_a/trace/requests/1", "/api/conversations/coo_a/trace/requests/0", "/api/conversations/coo_a/trace/requests/bad", "/api/conversations/other/trace/requests/7"} {
-		requests = append(requests, apiRequest{Method: "GET", Path: path})
-	}
 	imageHash := sha256.Sum256([]byte{0, 255, 8})
 	textHash := sha256.Sum256([]byte{239, 187, 191, 104, 101, 108, 108, 111})
 	sql := fmt.Sprintf(`INSERT INTO files VALUES ('fil_image','prj_a','image/png',3,'%s',x'00ff08',0); INSERT INTO files VALUES ('fil_text','prj_a','text/plain',8,'%s',x'efbbbf68656c6c6f',0)`, hex.EncodeToString(imageHash[:]), hex.EncodeToString(textHash[:]))
@@ -90,20 +84,37 @@ func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		r := httptest.NewRequest(item.Method, item.Path, nil)
-		if item.Auth == nil || *item.Auth {
-			r.Header.Set("Authorization", "Bearer test-token")
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	client := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+
+	if _, err := unauth.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{ConversationId: "coo_a", Seq: 1})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+	for i, event := range seed {
+		if event.Type == "turn.step" || event.Type == "research.step" || event.Type == "conversation.compacted" {
+			resp, err := client.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{
+				ConversationId: "coo_a",
+				Seq:            int64(i + 1),
+			}))
+			if err != nil {
+				t.Fatalf("seq %d (%s) failed: %v", i+1, event.Type, err)
+			}
+			if resp.Msg.GetRequest() == nil {
+				t.Fatalf("seq %d (%s) returned nil request", i+1, event.Type)
+			}
 		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err, response.Body.String())
-		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	}
+	if _, err := client.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{ConversationId: "coo_a", Seq: 0})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for seq=0, got %v", err)
+	}
+	if _, err := client.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{ConversationId: "coo_a", Seq: 1})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for non-step seq=1, got %v", err)
+	}
+	if _, err := client.GetTraceRequestDetail(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequestDetailRequest{ConversationId: "other", Seq: 7})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for unknown conversation, got %v", err)
 	}
 	for i, item := range seed {
 		if item.Type == "turn.step" {

@@ -3,15 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"maps"
 	"net/http"
 	"reflect"
-	"slices"
 	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -22,8 +16,6 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/projectsettings"
 	"github.com/daidr/Ariadne/internal/sources"
-	"github.com/daidr/Ariadne/internal/textutil"
-	"github.com/daidr/Ariadne/sdk"
 )
 
 var projectToolSwitches = []string{"fetch", "search", "commands", "research", "issueWrites"}
@@ -596,200 +588,6 @@ func (s *projectService) RemoveProjectReference(
 	return connect.NewResponse(&ariadnev1.RemoveProjectReferenceResponse{
 		Project: toProtoProjectView(project),
 	}), nil
-}
-
-func (s *projectService) GetReferenceStatus(
-	ctx context.Context,
-	req *connect.Request[ariadnev1.GetReferenceStatusRequest],
-) (*connect.Response[ariadnev1.GetReferenceStatusResponse], error) {
-	project, err := s.api.options.Repository.GetProject(ctx, req.Msg.ProjectId)
-	if err != nil {
-		return nil, err
-	}
-	failed := []*ariadnev1.FailedProjectReference{}
-	manager := s.api.options.Workspaces
-	if manager == nil {
-		return connect.NewResponse(&ariadnev1.GetReferenceStatusResponse{Failed: failed}), nil
-	}
-	references, _ := project.References.([]any)
-	failures := make([]*domainerr.Error, len(references))
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	jobs := make(chan int)
-	var group sync.WaitGroup
-	for range min(16, len(references)) {
-		group.Go(func() {
-			for index := range jobs {
-				if checkCtx.Err() != nil {
-					continue
-				}
-				ref, _ := references[index].(map[string]any)
-				view, err := manager.ReferenceView(checkCtx, project.ID, text(ref, "name"), "")
-				if err == nil {
-					_, err = view.List(checkCtx, ".")
-				}
-				if err == nil || checkCtx.Err() != nil {
-					continue
-				}
-				var known *domainerr.Error
-				if !errors.As(err, &known) {
-					known = domainerr.New("error.workspace", object{"detail": err.Error()})
-				}
-				failures[index] = known
-			}
-		})
-	}
-	for index := range references {
-		select {
-		case jobs <- index:
-		case <-checkCtx.Done():
-		}
-	}
-	close(jobs)
-	group.Wait()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	for index, failure := range failures {
-		if failure != nil {
-			ref, _ := references[index].(map[string]any)
-			failed = append(failed, &ariadnev1.FailedProjectReference{
-				Id: anyString(ref["id"]),
-				Error: &ariadnev1.LocalizedError{
-					Key:    failure.Key,
-					Params: encodeErrorParams(failure.Params),
-				},
-			})
-		}
-	}
-	return connect.NewResponse(&ariadnev1.GetReferenceStatusResponse{Failed: failed}), nil
-}
-
-func (s *projectService) ListSourceKinds(
-	ctx context.Context,
-	_ *connect.Request[ariadnev1.ListSourceKindsRequest],
-) (*connect.Response[ariadnev1.ListSourceKindsResponse], error) {
-	kinds := s.api.sourceKinds(ctx)
-	out := make([]*ariadnev1.SourceKind, 0, len(kinds))
-	for _, kind := range kinds {
-		out = append(out, toProtoSourceKind(kind))
-	}
-	return connect.NewResponse(&ariadnev1.ListSourceKindsResponse{Kinds: out}), nil
-}
-
-func (s *projectService) BrowseSource(
-	ctx context.Context,
-	req *connect.Request[ariadnev1.BrowseSourceRequest],
-) (*connect.Response[ariadnev1.BrowseSourceResponse], error) {
-	kind := req.Msg.Kind
-	if s.api.options.Sources == nil {
-		return nil, domainerr.NotFound(kind)
-	}
-	provider, exists := s.api.options.Sources.Get(kind)
-	if !exists {
-		return nil, domainerr.NotFound(kind)
-	}
-	if provider.Browse == nil {
-		return nil, badInput("kind")
-	}
-	given := object{}
-	if req.Msg.Settings != nil {
-		given = req.Msg.Settings.AsMap()
-	}
-	filled := maps.Clone(given)
-	if req.Msg.ProjectId != nil && *req.Msg.ProjectId != "" && s.api.options.Settings != nil {
-		projectID := *req.Msg.ProjectId
-		project, err := s.api.options.Repository.GetProject(ctx, projectID)
-		if err != nil {
-			return nil, err
-		}
-		previous := ""
-		prefix := ""
-		set := project.WritableSources()
-		sourceID := set.PrimaryID
-		if req.Msg.SourceId != nil {
-			sourceID = *req.Msg.SourceId
-		}
-		if source, ok := set.Get(sourceID); ok {
-			previous = source.Kind
-			prefix = sources.FileSourceSecretPrefix(source.ID)
-		} else if sourceID != "" {
-			if refs, _ := project.References.([]any); len(refs) > 0 {
-				for _, raw := range refs {
-					reference, _ := raw.(map[string]any)
-					if text(reference, "id") == sourceID {
-						previous = text(reference, "kind")
-						prefix = sources.FileSourceSecretPrefix(sourceID)
-					}
-				}
-			}
-		}
-		plain, secrets := s.api.options.Settings.SplitSourceSettings(projectID, kind, given, previous, prefix, sources.SecretFields(provider.Info))
-		filled = plain
-		for key, value := range secrets {
-			filled[strings.TrimPrefix(key, prefix)] = value
-		}
-	}
-	browseCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	listing, err := provider.Browse(browseCtx, filled, req.Msg.Path)
-	var absent *sdk.DirectoryNotFound
-	if errors.As(err, &absent) {
-		return connect.NewResponse(&ariadnev1.BrowseSourceResponse{}), nil
-	}
-	if err != nil {
-		var known *domainerr.Error
-		if errors.As(err, &known) {
-			return nil, err
-		}
-		return nil, domainerr.New("error.browse", object{"detail": err.Error()})
-	}
-	return connect.NewResponse(&ariadnev1.BrowseSourceResponse{
-		Listing: toProtoDirectoryListing(listing),
-	}), nil
-}
-
-func (s *projectService) ListMentionFiles(
-	ctx context.Context,
-	req *connect.Request[ariadnev1.ListMentionFilesRequest],
-) (*connect.Response[ariadnev1.ListMentionFilesResponse], error) {
-	project := req.Msg.ProjectId
-	repo := s.api.options.Repository
-	if _, err := repo.GetProject(ctx, project); err != nil {
-		return nil, err
-	}
-	manager := s.api.options.Workspaces
-	if manager == nil || !manager.Available(ctx, project) {
-		return connect.NewResponse(&ariadnev1.ListMentionFilesResponse{Files: []string{}}), nil
-	}
-	thread := ""
-	if id := req.Msg.ConversationId; id != "" {
-		conversation, err := repo.GetConversation(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if conversation.ProjectID != project {
-			return nil, badInput("conversationId")
-		}
-		if conversation.Role == "thread" {
-			thread = conversation.ID
-		}
-	}
-	files, err := manager.MentionFiles(ctx, project, thread, textutil.HeadUnits(req.Msg.Query, 200))
-	if err != nil {
-		files = []string{}
-	}
-	return connect.NewResponse(&ariadnev1.ListMentionFilesResponse{Files: files}), nil
-}
-
-func (s *projectService) NoteProjectReturn(
-	ctx context.Context,
-	req *connect.Request[ariadnev1.NoteProjectReturnRequest],
-) (*connect.Response[ariadnev1.NoteProjectReturnResponse], error) {
-	if err := s.api.options.Repository.NoteReturn(ctx, req.Msg.ProjectId, req.Msg.AwayMs); err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&ariadnev1.NoteProjectReturnResponse{}), nil
 }
 
 // ---- Proto conversion helpers ----
@@ -1391,7 +1189,7 @@ func toProtoProjectThreadView(thread core.ThreadView) *ariadnev1.ProjectThreadVi
 	return out
 }
 
-func toProtoAskBlock(raw any) *ariadnev1.ProjectAskBlock {
+func toProtoProjectAskBlock(raw any) *ariadnev1.ProjectAskBlock {
 	m := asMap(raw)
 	if m == nil {
 		return nil
@@ -1504,7 +1302,7 @@ func toProtoNeedsMeItem(input any) *ariadnev1.NeedsMeItem {
 				ProjectId:      value.ProjectID,
 				ThreadId:       anyStringPtr(value.ThreadID),
 				JoinedBy:       value.JoinedBy,
-				Block:          toProtoAskBlock(value.Block),
+				Block:          toProtoProjectAskBlock(value.Block),
 				MessageId:      anyStringPtr(value.MessageID),
 				ConversationId: anyStringPtr(value.ConversationID),
 				CreatedAt:      value.CreatedAt,
@@ -1516,7 +1314,7 @@ func toProtoNeedsMeItem(input any) *ariadnev1.NeedsMeItem {
 					ProjectId:      value.ProjectID,
 					ThreadId:       anyStringPtr(value.ThreadID),
 					JoinedBy:       value.JoinedBy,
-					Block:          toProtoAskBlock(value.Block),
+					Block:          toProtoProjectAskBlock(value.Block),
 					MessageId:      anyStringPtr(value.MessageID),
 					ConversationId: anyStringPtr(value.ConversationID),
 					CreatedAt:      value.CreatedAt,
@@ -1542,107 +1340,6 @@ func toProtoNeedsMeItem(input any) *ariadnev1.NeedsMeItem {
 		}
 	default:
 		return nil
-	}
-}
-
-func toProtoSourceLocalizedText(text sdk.LocalizedText) *ariadnev1.SourceLocalizedText {
-	if text == nil {
-		return nil
-	}
-	locales := make(map[string]string, len(text))
-	for k, v := range text {
-		locales[k] = v
-	}
-	return &ariadnev1.SourceLocalizedText{Locales: locales}
-}
-
-func toProtoSourceSettingsSchema(schema sdk.SettingsSchema) *ariadnev1.SourceSettingsSchema {
-	props := make(map[string]*ariadnev1.SourceSettingField, len(schema.Properties))
-	for key, field := range schema.Properties {
-		protoField := &ariadnev1.SourceSettingField{
-			Type:        field.Type,
-			Title:       toProtoSourceLocalizedText(field.Title),
-			Description: toProtoSourceLocalizedText(field.Description),
-			Secret:      field.Secret,
-			Directory:   field.Directory,
-			Options:     slices.Clone(field.Options),
-		}
-		switch def := field.Default.(type) {
-		case string:
-			protoField.DefaultValue = &ariadnev1.SourceSettingField_StringDefault{StringDefault: def}
-		case bool:
-			protoField.DefaultValue = &ariadnev1.SourceSettingField_BoolDefault{BoolDefault: def}
-		case float64:
-			protoField.DefaultValue = &ariadnev1.SourceSettingField_NumberDefault{NumberDefault: def}
-		case int:
-			protoField.DefaultValue = &ariadnev1.SourceSettingField_NumberDefault{NumberDefault: float64(def)}
-		case int64:
-			protoField.DefaultValue = &ariadnev1.SourceSettingField_NumberDefault{NumberDefault: float64(def)}
-		}
-		props[key] = protoField
-	}
-	order := []string{}
-	seen := map[string]bool{}
-	for _, key := range schema.FieldOrder {
-		if _, exists := schema.Properties[key]; exists && !seen[key] {
-			order = append(order, key)
-			seen[key] = true
-		}
-	}
-	rest := []string{}
-	for key := range schema.Properties {
-		if !seen[key] {
-			rest = append(rest, key)
-		}
-	}
-	slices.Sort(rest)
-	order = append(order, rest...)
-	return &ariadnev1.SourceSettingsSchema{
-		Type:       schema.Type,
-		Properties: props,
-		Required:   slices.Clone(schema.Required),
-		FieldOrder: order,
-	}
-}
-
-func toProtoSourceKind(info sdk.ContextProviderInfo) *ariadnev1.SourceKind {
-	out := &ariadnev1.SourceKind{
-		Kind:     info.Kind,
-		Title:    toProtoSourceLocalizedText(info.Title),
-		Settings: toProtoSourceSettingsSchema(info.Settings),
-		Provides: slices.Clone(info.Provides),
-		Remote:   info.Remote,
-		Hosting:  info.Hosting,
-		Browse:   info.Browse,
-		Summary:  info.Summary,
-	}
-	if info.Plugin != nil {
-		out.Plugin = &ariadnev1.SourcePluginRef{
-			Id:    info.Plugin.ID,
-			Ready: info.Plugin.Ready,
-		}
-	}
-	if info.Defaults != nil {
-		out.Defaults = toProtoStruct(info.Defaults)
-	}
-	return out
-}
-
-func toProtoDirectoryListing(listing *sdk.DirectoryListing) *ariadnev1.SourceDirectoryListing {
-	if listing == nil {
-		return nil
-	}
-	dirs := make([]*ariadnev1.SourceDirectoryEntry, 0, len(listing.Directories))
-	for _, entry := range listing.Directories {
-		dirs = append(dirs, &ariadnev1.SourceDirectoryEntry{
-			Name: entry.Name,
-			Path: entry.Path,
-		})
-	}
-	return &ariadnev1.SourceDirectoryListing{
-		Path:        listing.Path,
-		Parent:      listing.Parent,
-		Directories: dirs,
 	}
 }
 

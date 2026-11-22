@@ -147,10 +147,12 @@ func (api *API) toConnectError(err error) error {
 			switch localized.Key {
 			case "error.unauthorized":
 				code = connect.CodeUnauthenticated
-			case "error.notFound":
+			case "error.notFound", "error.priceUnknown":
 				code = connect.CodeNotFound
-			case "error.artifactConflict":
+			case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable":
 				code = connect.CodeAborted
+			case "error.modelCheck", "error.priceCatalog":
+				code = connect.CodeUnavailable
 			default:
 				code = connect.CodeInvalidArgument
 			}

@@ -306,7 +306,7 @@ func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
 		t.Fatalf("expected cleared slots to be nil, got %v", *cleared.Msg.Project.Slots)
 	}
 
-	// ListProjects, GetProjectActivity, SearchProject, ListSourceKinds, NoteProjectReturn, DeleteProject.
+	// ListProjects, GetProjectActivity, SearchProject, DeleteProject.
 	listed, err := projects.ListProjects(t.Context(), connect.NewRequest(&ariadnev1.ListProjectsRequest{}))
 	if err != nil || len(listed.Msg.Projects) != 1 {
 		t.Fatalf("ListProjects: err=%v count=%d", err, len(listed.Msg.Projects))
@@ -321,16 +321,6 @@ func TestProjectServiceAtomicUpdateAndCRUD(t *testing.T) {
 	}))
 	if err != nil || len(searched.Msg.Terms) == 0 {
 		t.Fatalf("SearchProject: err=%v terms=%v", err, searched.Msg.Terms)
-	}
-	kinds, err := projects.ListSourceKinds(t.Context(), connect.NewRequest(&ariadnev1.ListSourceKindsRequest{}))
-	if err != nil || len(kinds.Msg.Kinds) == 0 {
-		t.Fatalf("ListSourceKinds: err=%v len=%d", err, len(kinds.Msg.Kinds))
-	}
-	if _, err := projects.NoteProjectReturn(t.Context(), connect.NewRequest(&ariadnev1.NoteProjectReturnRequest{
-		ProjectId: projectID,
-		AwayMs:    60000,
-	})); err != nil {
-		t.Fatalf("NoteProjectReturn: %v", err)
 	}
 	if _, err := projects.DeleteProject(t.Context(), connect.NewRequest(&ariadnev1.DeleteProjectRequest{
 		ProjectId: projectID,
@@ -760,6 +750,11 @@ func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
 		srv.URL+rpcPrefix,
 		connect.WithInterceptors(bearerClientInterceptor("browse-token")),
 	)
+	meta := ariadnev1connect.NewMetaServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("browse-token")),
+	)
 
 	name := "Secret Isolation Project"
 	primarySettings, err := structpb.NewStruct(map[string]any{
@@ -790,7 +785,7 @@ func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
 
 	// Explicit empty source_id signals a brand new source and must NOT inject primary source secrets.
 	emptySourceID := ""
-	if _, err := projects.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
+	if _, err := meta.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
 		Kind:      "remote",
 		ProjectId: &projectID,
 		SourceId:  &emptySourceID,
@@ -801,7 +796,7 @@ func TestProjectServiceBrowseSourceSecretIsolation(t *testing.T) {
 	}
 
 	// Omitted source_id falls back to the primary source and injects its stored secret.
-	if _, err := projects.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
+	if _, err := meta.BrowseSource(t.Context(), connect.NewRequest(&ariadnev1.BrowseSourceRequest{
 		Kind:      "remote",
 		ProjectId: &projectID,
 		Settings:  newSourceSettings,

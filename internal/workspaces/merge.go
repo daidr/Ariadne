@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -95,6 +96,72 @@ func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request
 	}
 	file, err := branches.File(ctx, request)
 	return file, workError(err)
+}
+
+func (manager *Manager) ThreadFiles(ctx context.Context, threadID string, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+	if len(requests) == 0 {
+		return []sdk.FileVersions{}, nil
+	}
+	ctx, done, err := manager.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	thread, err := manager.options.Repository.GetThread(ctx, threadID)
+	if err != nil {
+		return nil, err
+	}
+	branches, err := manager.BranchesForThread(ctx, thread)
+	if err != nil {
+		return nil, err
+	}
+	if branches == nil || (branches.Files == nil && branches.File == nil) {
+		return nil, domainerr.New("error.noBranch", nil)
+	}
+	if branches.Files != nil {
+		files, err := branches.Files(ctx, requests)
+		return files, workError(err)
+	}
+	results := make([]sdk.FileVersions, len(requests))
+	batchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, min(6, len(requests)))
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstErr error
+	)
+	for i, request := range requests {
+		wg.Add(1)
+		go func(index int, req sdk.FileVersionRequest) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-batchCtx.Done():
+				return
+			}
+			file, err := branches.File(batchCtx, req)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				errMu.Unlock()
+				return
+			}
+			results[index] = file
+		}(i, request)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, workError(firstErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 type ThreadMerge struct {
@@ -299,6 +366,39 @@ func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]Proj
 				if err != nil {
 					return err
 				}
+				threadIDs := make([]string, 0, len(worktrees))
+				for _, worktree := range worktrees {
+					if seen[worktree.Path] || selection.owner != "" && selection.owner != worktree.ThreadID {
+						continue
+					}
+					if worktree.ThreadID != "" {
+						threadIDs = append(threadIDs, worktree.ThreadID)
+					}
+				}
+				threads, err := repo.ListThreadsByIDs(ctx, threadIDs)
+				if err != nil {
+					return err
+				}
+				var needSecondary []string
+				for _, worktree := range worktrees {
+					if seen[worktree.Path] || selection.owner != "" && selection.owner != worktree.ThreadID {
+						continue
+					}
+					thread, ok := threads[worktree.ThreadID]
+					if !ok || thread.ProjectID != project.ID {
+						continue
+					}
+					if primary := threadSourceID(project, thread); primary != selection.id {
+						needSecondary = append(needSecondary, thread.ID)
+					}
+				}
+				secondaryByThread := map[string]*core.WorkspaceView{}
+				if len(needSecondary) > 0 {
+					secondaryByThread, err = repo.SecondaryWorkspaces(ctx, project.ID, selection.id, needSecondary)
+					if err != nil {
+						return err
+					}
+				}
 				for _, worktree := range worktrees {
 					if seen[worktree.Path] || selection.owner != "" && selection.owner != worktree.ThreadID {
 						continue
@@ -306,18 +406,16 @@ func (manager *Manager) ListWorktrees(ctx context.Context, measure bool) ([]Proj
 					var own *core.ThreadView
 					var workspace *core.WorkspaceView
 					sourceID := selection.id
-					if thread, err := repo.GetThread(ctx, worktree.ThreadID); err == nil {
+					if thread, ok := threads[worktree.ThreadID]; ok {
 						if thread.ProjectID != project.ID {
 							continue
 						}
-						own = &thread
-						workspace = thread.Workspace
+						t := thread
+						own = &t
+						workspace = t.Workspace
 						// Different configured subdirectories can share the same checkout.
-						if primary := threadSourceID(project, thread); primary != selection.id {
-							extra, err := repo.SecondaryWorkspace(ctx, thread.ID, selection.id)
-							if err != nil {
-								return err
-							}
+						if primary := threadSourceID(project, t); primary != selection.id {
+							extra := secondaryByThread[t.ID]
 							if extra == nil || extra.Removed && !worktree.Orphaned {
 								continue
 							}

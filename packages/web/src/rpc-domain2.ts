@@ -32,12 +32,6 @@ import type {
   UsageTotals,
 } from '@ariadne/core'
 import type { LocalizedMessage, MessageKey, MessageParams } from '@ariadne/i18n'
-import type {
-  DirectoryListing,
-  LocalizedText,
-  SettingField,
-  SettingsSchema,
-} from '@ariadne/plugin-sdk'
 import {
   ArtifactService,
   IssueService,
@@ -73,11 +67,6 @@ import {
   type ProjectThreadView,
   type ProjectUsageTotals,
   type ProjectView as ProtoProjectView,
-  type SourceDirectoryListing,
-  type SourceKind as ProtoSourceKind,
-  type SourceLocalizedText,
-  type SourceSettingField,
-  type SourceSettingsSchema,
 } from '@ariadne/proto'
 import type { JsonObject, JsonValue } from '@bufbuild/protobuf'
 import type { Client, Transport } from '@connectrpc/connect'
@@ -112,20 +101,6 @@ export interface SourceInputData {
   kind: string
   settings: Record<string, unknown>
   hosting?: { kind: string; settings: Record<string, unknown> } | null
-}
-
-export interface SourceKindView {
-  kind: string
-  title: LocalizedText
-  settings: SettingsSchema
-  program?: boolean
-  plugin?: { id: string; ready: boolean }
-  defaults?: Record<string, unknown>
-  provides: string[]
-  remote: boolean
-  hosting: boolean
-  browse: boolean
-  summary: string | null
 }
 
 export interface ProjectSettingsDataView {
@@ -668,109 +643,6 @@ function fromProtoNeedsMeItem(item: ProtoNeedsMeItem): NeedsMeItem | null {
       return { kind: 'thread', threadId: item.item.value.threadId }
     default:
       return null
-  }
-}
-
-function fromProtoLocalizedText(text?: SourceLocalizedText): LocalizedText {
-  const locales = text?.locales ?? {}
-  return {
-    'zh-CN': locales['zh-CN'] ?? '',
-    ...locales,
-  }
-}
-
-function fromProtoSettingField(field: SourceSettingField): SettingField {
-  const title = fromProtoLocalizedText(field.title)
-  const description = field.description ? fromProtoLocalizedText(field.description) : undefined
-  switch (field.type) {
-    case 'number':
-      return {
-        type: 'number',
-        title,
-        ...(description ? { description } : {}),
-        ...(field.defaultValue.case === 'numberDefault'
-          ? { default: field.defaultValue.value }
-          : {}),
-      }
-    case 'boolean':
-      return {
-        type: 'boolean',
-        title,
-        ...(description ? { description } : {}),
-        ...(field.defaultValue.case === 'boolDefault' ? { default: field.defaultValue.value } : {}),
-      }
-    case 'enum':
-      return {
-        type: 'enum',
-        title,
-        ...(description ? { description } : {}),
-        options: [...field.options],
-        ...(field.defaultValue.case === 'stringDefault'
-          ? { default: field.defaultValue.value }
-          : {}),
-      }
-    default:
-      return {
-        type: 'string',
-        title,
-        ...(description ? { description } : {}),
-        ...(field.secret ? { secret: true } : {}),
-        ...(field.directory ? { directory: true } : {}),
-        ...(field.defaultValue.case === 'stringDefault'
-          ? { default: field.defaultValue.value }
-          : {}),
-      }
-  }
-}
-
-function fromProtoSettingsSchema(schema?: SourceSettingsSchema): SettingsSchema {
-  const properties: Record<string, SettingField> = {}
-  if (schema) {
-    const orderedKeys =
-      schema.fieldOrder.length > 0 ? schema.fieldOrder : Object.keys(schema.properties)
-    const seen = new Set<string>()
-    for (const key of orderedKeys) {
-      const field = schema.properties[key]
-      if (field && !seen.has(key)) {
-        properties[key] = fromProtoSettingField(field)
-        seen.add(key)
-      }
-    }
-    for (const [key, field] of Object.entries(schema.properties)) {
-      if (!seen.has(key)) {
-        properties[key] = fromProtoSettingField(field)
-      }
-    }
-  }
-  return {
-    type: 'object',
-    properties,
-    ...(schema?.required?.length ? { required: [...schema.required] } : {}),
-  }
-}
-
-function fromProtoSourceKind(kind: ProtoSourceKind): SourceKindView {
-  return {
-    kind: kind.kind,
-    title: fromProtoLocalizedText(kind.title),
-    settings: fromProtoSettingsSchema(kind.settings),
-    ...(kind.program ? { program: true } : {}),
-    ...(kind.plugin ? { plugin: { id: kind.plugin.id, ready: kind.plugin.ready } } : {}),
-    ...(kind.defaults ? { defaults: fromJsonObject(kind.defaults) } : {}),
-    provides: [...kind.provides],
-    remote: kind.remote,
-    hosting: kind.hosting,
-    browse: kind.browse,
-    summary: kind.summary ?? null,
-  }
-}
-
-function fromProtoDirectoryListing(listing?: SourceDirectoryListing): DirectoryListing | null {
-  if (!listing) return null
-  return {
-    path: listing.path,
-    parent: listing.parent ?? null,
-    directories: listing.directories.map((dir) => ({ name: dir.name, path: dir.path })),
   }
 }
 
@@ -1511,61 +1383,6 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
         referenceId,
       })
       return { project: fromProtoProjectView(requireField(response.project, 'project')) }
-    },
-
-    async referenceStatus(
-      projectId: string,
-    ): Promise<{ failed: { id: string; error: LocalizedMessage }[] }> {
-      const response = await clients.projects.getReferenceStatus({ projectId })
-      return {
-        failed: response.failed.map((item) => ({
-          id: item.id,
-          error: item.error
-            ? fromProtoLocalizedMessage(item.error)
-            : { key: 'error.workspace' as MessageKey },
-        })),
-      }
-    },
-
-    async sourceKinds(): Promise<{ kinds: SourceKindView[] }> {
-      const response = await clients.projects.listSourceKinds({})
-      return { kinds: response.kinds.map(fromProtoSourceKind) }
-    },
-
-    async browseSource(
-      kind: string,
-      body: {
-        projectId: string | null
-        sourceId?: string
-        settings: Record<string, unknown>
-        path: string
-      },
-    ): Promise<{ listing: DirectoryListing | null }> {
-      const response = await clients.projects.browseSource({
-        kind,
-        ...(body.projectId ? { projectId: body.projectId } : {}),
-        ...(body.sourceId === undefined ? {} : { sourceId: body.sourceId }),
-        settings: toJsonObject(body.settings),
-        path: body.path,
-      })
-      return { listing: fromProtoDirectoryListing(response.listing) }
-    },
-
-    async mentionFiles(
-      projectId: string,
-      conversationId: string,
-      query: string,
-    ): Promise<{ files: string[] }> {
-      const response = await clients.projects.listMentionFiles({
-        projectId,
-        conversationId,
-        query,
-      })
-      return { files: [...response.files] }
-    },
-
-    async noteReturn(projectId: string, away: number): Promise<void> {
-      await clients.projects.noteProjectReturn({ projectId, awayMs: away })
     },
 
     // ---- Plans ----

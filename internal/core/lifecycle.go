@@ -277,6 +277,35 @@ func activity(text string) any {
 	return line
 }
 
+func positiveNumber(value any) (any, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, v > 0
+	case int64:
+		return v, v > 0
+	case int:
+		return v, v > 0
+	case json.Number:
+		if n, err := v.Float64(); err == nil {
+			return v, n > 0
+		}
+	}
+	return 0, false
+}
+
+func contextTokens(u object) (any, bool) {
+	if u == nil {
+		return 0, false
+	}
+	if value, ok := positiveNumber(u["contextInput"]); ok {
+		return value, true
+	}
+	if u["contextInput"] != nil {
+		return 0, false
+	}
+	return positiveNumber(u["input"])
+}
+
 func cost(usage object, currency string) any {
 	if usage.obj("cost").str("currency") == currency {
 		return usage.obj("cost").number("amount")
@@ -304,6 +333,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		if d.str("finish") != "stop" && !d.yes("quiet") {
 			status = activity(d.str("text"))
 		}
+		ctxTokens, hasContext := contextTokens(u)
 		w.run(`UPDATE conversations SET
 		 pending_since = CASE WHEN pending_seq <= ?1 THEN 0 ELSE max(pending_since, ?1 + 1) END,
 		 pending_seq = CASE WHEN pending_seq <= ?1 THEN 0 ELSE pending_seq END,
@@ -311,7 +341,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 		 cached_tokens = cached_tokens + ?7, cache_write_tokens = cache_write_tokens + ?8,
 		 reasoning_tokens = reasoning_tokens + ?9, cost_usd = cost_usd + ?10, cost_cny = cost_cny + ?11,
 		 context_tokens = CASE WHEN ?5 THEN ?12 ELSE context_tokens END,
-		 activity = coalesce(?6, activity) WHERE id = ?4`, d["sawSeq"], u.number("input"), u.number("output"), id, boolean(u != nil), status, u.number("cached"), u.number("cacheWrite"), u.number("reasoning"), cost(u, "USD"), cost(u, "CNY"), fallback(u["contextInput"], u.number("input")))
+		 activity = coalesce(?6, activity) WHERE id = ?4`, d["sawSeq"], u.number("input"), u.number("output"), id, boolean(hasContext), status, u.number("cached"), u.number("cacheWrite"), u.number("reasoning"), cost(u, "USD"), cost(u, "CNY"), ctxTokens)
 		touchThread(w, e.Seq, id)
 	case "conversation.model_fallback":
 		w.run("UPDATE conversations SET model = ?, fallback = 1 WHERE id = ? AND turn_id = ?", d["to"], id, d["turnId"])

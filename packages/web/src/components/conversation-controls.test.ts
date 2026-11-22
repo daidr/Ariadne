@@ -118,6 +118,37 @@ test('changes and artifact capsules open their corresponding views', async () =>
   expect(mocks.openView).toHaveBeenCalledWith({ kind: 'artifact', id: 'art-1' })
 })
 
+test('changes capsule hides zero-file diffs and falls back to label alongside a pull request', async () => {
+  const pullRequest = {
+    number: 42,
+    url: 'https://github.com/example/repo/pull/42',
+    title: 'Fix diff entry',
+    state: 'open' as const,
+    headSha: 'abc1234',
+    checks: { state: 'success' as const, failed: [] },
+  }
+  const wrapper = mount(ConversationBar, {
+    props: {
+      conversationId: 'thr-1',
+      changes: { threadId: 'thr-1', totals: { added: 0, removed: 0, files: 0 } },
+      artifacts: [],
+      background: [],
+      thread: { id: 'thr-1', pullRequest },
+    },
+    attachTo: document.body,
+    global,
+  })
+  wrappers.push(wrapper)
+  expect(wrapper.find('button[aria-label="改动"]').exists()).toBe(false)
+  expect(wrapper.text()).toContain('#42')
+
+  await wrapper.setProps({ changes: { threadId: 'thr-1', totals: null } })
+  const diffButton = wrapper.get('button[aria-label="改动"]')
+  expect(diffButton.text()).toContain('改动')
+  await diffButton.trigger('click')
+  expect(mocks.openView).toHaveBeenCalledWith({ kind: 'changes', threadId: 'thr-1' })
+})
+
 test('the status slot survives working, queued, and idle states', async () => {
   const wrapper = mount(ConversationActivity, {
     props: {

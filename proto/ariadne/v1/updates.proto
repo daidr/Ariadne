@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+// UpdateService manages software update checks, preferences, and installation.
+service UpdateService {
+  rpc GetUpdateStatus(GetUpdateStatusRequest) returns (GetUpdateStatusResponse);
+  rpc SaveUpdatePreferences(SaveUpdatePreferencesRequest) returns (SaveUpdatePreferencesResponse);
+  rpc CheckForUpdate(CheckForUpdateRequest) returns (CheckForUpdateResponse);
+  rpc InstallUpdate(InstallUpdateRequest) returns (InstallUpdateResponse);
+}
+
+message UpdatePreferences {
+  string channel = 1;
+  bool automatic = 2;
+}
+
+message UpdateRelease {
+  string version = 1;
+  string notes = 2;
+  string url = 3;
+  bool prerelease = 4;
+  bool installable = 5;
+}
+
+message UpdateStatus {
+  string version = 1;
+  UpdatePreferences preferences = 2;
+  bool can_install = 3;
+  string state = 4;
+  optional UpdateRelease release = 5;
+  optional string failure = 6;
+  int32 download_percent = 7;
+}
+
+message GetUpdateStatusRequest {}
+
+message GetUpdateStatusResponse {
+  UpdateStatus status = 1;
+}
+
+message SaveUpdatePreferencesRequest {
+  string channel = 1;
+  bool automatic = 2;
+}
+
+message SaveUpdatePreferencesResponse {
+  UpdateStatus status = 1;
+}
+
+message CheckForUpdateRequest {}
+
+message CheckForUpdateResponse {
+  UpdateStatus status = 1;
+}
+
+message InstallUpdateRequest {
+  string version = 1;
+}
+
+message InstallUpdateResponse {
+  UpdateStatus status = 1;
+}

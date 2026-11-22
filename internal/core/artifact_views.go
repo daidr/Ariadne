@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -418,6 +419,72 @@ func writeSharedState(ctx context.Context, tx *eventstore.Transaction, projectID
 		SET version = excluded.version, state = excluded.state, updated_at = excluded.updated_at`,
 		id, projectID, shared.Version, shared.State, now)
 	return err
+}
+
+type ReviewPageOptions struct {
+	BeforeID *int64
+	Limit    *int
+}
+
+type ReviewPage struct {
+	Rounds       []object
+	HasMore      bool
+	NextBeforeID *int64
+}
+
+func (reader Reader) PageReviews(ctx context.Context, id string, options ReviewPageOptions) (result ReviewPage, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		threads, err := records(ctx, tx, threadSelect+" WHERE t.id = ?", id)
+		if err != nil {
+			return err
+		}
+		if len(threads) == 0 {
+			return domainerr.NotFound(id)
+		}
+		if _, err := toThread(threads[0], reader.now()); err != nil {
+			return err
+		}
+		author := id
+		if threads[0].present("review_of") {
+			author = threads[0].text("review_of")
+		}
+		limit := 50
+		if options.Limit != nil {
+			limit = max(1, min(*options.Limit, 200))
+		}
+		var rows []record
+		if options.BeforeID != nil {
+			rows, err = records(ctx, tx, "SELECT * FROM reviews WHERE thread_id = ? AND id < ? ORDER BY id DESC LIMIT ?", author, *options.BeforeID, limit+1)
+		} else {
+			rows, err = records(ctx, tx, "SELECT * FROM reviews WHERE thread_id = ? ORDER BY id DESC LIMIT ?", author, limit+1)
+		}
+		if err != nil {
+			return err
+		}
+		if len(rows) > limit {
+			result.HasMore = true
+			rows = rows[:limit]
+		}
+		slices.Reverse(rows)
+		if result.HasMore && len(rows) > 0 {
+			nextID := rows[0].integer("id")
+			result.NextBeforeID = &nextID
+		}
+		result.Rounds = make([]object, 0, len(rows))
+		for _, row := range rows {
+			comments, err := row.json("comments", []any{})
+			if err != nil {
+				return err
+			}
+			replies, err := row.json("replies", nil)
+			if err != nil {
+				return err
+			}
+			result.Rounds = append(result.Rounds, object{"threadId": row["thread_id"], "reviewerId": row["reviewer_id"], "round": row["round"], "head": row["head"], "requestedAt": row["requested_at"], "verdict": row["verdict"], "abandoned": row.present("abandoned_at"), "summary": row["summary"], "comments": comments, "replies": replies, "submittedAt": row["submitted_at"]})
+		}
+		return nil
+	})
+	return
 }
 
 func (reader Reader) ListReviews(ctx context.Context, id string) (result []object, err error) {

@@ -54,6 +54,7 @@ type Workspaces struct {
 	cloneMu                  chan struct{}
 	cloneChecked             bool
 	cloneRoot                string
+	catFile                  *catFileBatch
 }
 
 func NewWorkspaces(ctx context.Context, options FactoryOptions) (*Workspaces, error) {
@@ -700,6 +701,39 @@ func (factory *Workspaces) Worktrees(ctx context.Context, measure bool) ([]sdk.W
 	}
 	return result, ctx.Err()
 }
+func (factory *Workspaces) batchReader() *catFileBatch {
+	factory.mu.Lock()
+	defer factory.mu.Unlock()
+	if factory.catFile == nil && factory.repository != "" {
+		factory.catFile = newCatFileBatch(factory.repository)
+	}
+	return factory.catFile
+}
+
+func (factory *Workspaces) FileVersions(ctx context.Context, requests []sdk.FileVersionRequest) ([]sdk.FileVersions, error) {
+	ctx, done, err := factory.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	inputs := make([]VersionInput, len(requests))
+	for i, req := range requests {
+		inputs[i] = VersionInput{From: req.From, Head: req.Head, Path: req.Path, PreviousPath: req.PreviousPath}
+	}
+	if reader := factory.batchReader(); reader != nil {
+		return reader.ReadVersions(ctx, factory.git, inputs)
+	}
+	results := make([]sdk.FileVersions, len(inputs))
+	for i, input := range inputs {
+		file, err := FileVersions(ctx, factory.git, input)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = file
+	}
+	return results, nil
+}
+
 func (factory *Workspaces) Close() error {
 	factory.mu.Lock()
 	if factory.closed {
@@ -717,8 +751,12 @@ func (factory *Workspaces) Close() error {
 	for workspace := range factory.active {
 		active = append(active, workspace)
 	}
+	catFile := factory.catFile
 	factory.mu.Unlock()
 	var err error
+	if catFile != nil {
+		err = errors.Join(err, catFile.Close())
+	}
 	for _, workspace := range active {
 		err = errors.Join(err, workspace.Close())
 	}

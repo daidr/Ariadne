@@ -633,54 +633,8 @@ func toProtoArtifactFeedbackView(input any) *ariadnev1.ArtifactFeedbackView {
 	}
 	items := []*ariadnev1.ArtifactFeedbackItem{}
 	for _, m := range asMapSlice(raw["items"]) {
-		switch anyString(m["kind"]) {
-		case "edit":
-			items = append(items, &ariadnev1.ArtifactFeedbackItem{
-				Item: &ariadnev1.ArtifactFeedbackItem_Edit{
-					Edit: &ariadnev1.ArtifactFeedbackEdit{Diff: anyString(m["diff"])},
-				},
-			})
-		case "choice":
-			chosen := []*ariadnev1.ArtifactFeedbackChosenOption{}
-			for _, opt := range asMapSlice(m["chosen"]) {
-				chosen = append(chosen, &ariadnev1.ArtifactFeedbackChosenOption{
-					Id:    anyString(opt["id"]),
-					Title: anyString(opt["title"]),
-				})
-			}
-			items = append(items, &ariadnev1.ArtifactFeedbackItem{
-				Item: &ariadnev1.ArtifactFeedbackItem_Choice{
-					Choice: &ariadnev1.ArtifactFeedbackChoice{Chosen: chosen},
-				},
-			})
-		case "comment":
-			items = append(items, &ariadnev1.ArtifactFeedbackItem{
-				Item: &ariadnev1.ArtifactFeedbackItem_Comment{
-					Comment: &ariadnev1.ArtifactFeedbackComment{
-						ThreadId: anyString(m["threadId"]),
-						Action:   anyString(m["action"]),
-						Body:     anyString(m["body"]),
-						Where:    anyString(m["where"]),
-					},
-				},
-			})
-		case "mark":
-			items = append(items, &ariadnev1.ArtifactFeedbackItem{
-				Item: &ariadnev1.ArtifactFeedbackItem_Mark{
-					Mark: &ariadnev1.ArtifactFeedbackMark{
-						NodeId: anyString(m["nodeId"]),
-						Type:   anyString(m["type"]),
-						Text:   anyString(m["text"]),
-						Where:  anyString(m["where"]),
-					},
-				},
-			})
-		case "board":
-			items = append(items, &ariadnev1.ArtifactFeedbackItem{
-				Item: &ariadnev1.ArtifactFeedbackItem_Board{
-					Board: &ariadnev1.ArtifactFeedbackBoard{Changes: anyStringSlice(m["changes"])},
-				},
-			})
+		if converted := toProtoArtifactFeedbackItem(m); converted != nil {
+			items = append(items, converted)
 		}
 	}
 	images := []*ariadnev1.ArtifactAttachment{}

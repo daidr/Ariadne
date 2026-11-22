@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package ariadne.v1;
 
-import "ariadne/v1/common.proto";
 import "google/protobuf/struct.proto";
 
 // ProjectService manages Ariadne projects, unified project configuration updates,
@@ -20,11 +19,6 @@ service ProjectService {
   rpc SetFileSources(SetFileSourcesRequest) returns (SetFileSourcesResponse);
   rpc AddProjectReference(AddProjectReferenceRequest) returns (AddProjectReferenceResponse);
   rpc RemoveProjectReference(RemoveProjectReferenceRequest) returns (RemoveProjectReferenceResponse);
-  rpc GetReferenceStatus(GetReferenceStatusRequest) returns (GetReferenceStatusResponse);
-  rpc ListSourceKinds(ListSourceKindsRequest) returns (ListSourceKindsResponse);
-  rpc BrowseSource(BrowseSourceRequest) returns (BrowseSourceResponse);
-  rpc ListMentionFiles(ListMentionFilesRequest) returns (ListMentionFilesResponse);
-  rpc NoteProjectReturn(NoteProjectReturnRequest) returns (NoteProjectReturnResponse);
 }
 
 message ProjectStringList {
@@ -426,66 +420,6 @@ message ProjectMessageSearchHit {
   int64 at = 5 [jstype = JS_NUMBER];
 }
 
-message SourceLocalizedText {
-  map<string, string> locales = 1;
-}
-
-message SourceSettingField {
-  string type = 1;
-  SourceLocalizedText title = 2;
-  optional SourceLocalizedText description = 3;
-  bool secret = 4;
-  bool directory = 5;
-  repeated string options = 6;
-  oneof default_value {
-    string string_default = 7;
-    double number_default = 8;
-    bool bool_default = 9;
-  }
-}
-
-message SourceSettingsSchema {
-  string type = 1;
-  map<string, SourceSettingField> properties = 2;
-  repeated string required = 3;
-  repeated string field_order = 4;
-}
-
-message SourcePluginRef {
-  string id = 1;
-  bool ready = 2;
-}
-
-message SourceKind {
-  string kind = 1;
-  SourceLocalizedText title = 2;
-  SourceSettingsSchema settings = 3;
-  bool program = 4;
-  optional SourcePluginRef plugin = 5;
-  google.protobuf.Struct defaults = 6;
-  repeated string provides = 7;
-  bool remote = 8;
-  bool hosting = 9;
-  bool browse = 10;
-  optional string summary = 11;
-}
-
-message SourceDirectoryEntry {
-  string name = 1;
-  string path = 2;
-}
-
-message SourceDirectoryListing {
-  string path = 1;
-  optional string parent = 2;
-  repeated SourceDirectoryEntry directories = 3;
-}
-
-message FailedProjectReference {
-  string id = 1;
-  LocalizedError error = 2;
-}
-
 message ListProjectsRequest {
   repeated string ids = 1;
 }
@@ -612,46 +546,3 @@ message RemoveProjectReferenceRequest {
 message RemoveProjectReferenceResponse {
   ProjectView project = 1;
 }
-
-message GetReferenceStatusRequest {
-  string project_id = 1;
-}
-
-message GetReferenceStatusResponse {
-  repeated FailedProjectReference failed = 1;
-}
-
-message ListSourceKindsRequest {}
-
-message ListSourceKindsResponse {
-  repeated SourceKind kinds = 1;
-}
-
-message BrowseSourceRequest {
-  string kind = 1;
-  optional string project_id = 2;
-  optional string source_id = 3;
-  google.protobuf.Struct settings = 4;
-  string path = 5;
-}
-
-message BrowseSourceResponse {
-  optional SourceDirectoryListing listing = 1;
-}
-
-message ListMentionFilesRequest {
-  string project_id = 1;
-  string conversation_id = 2;
-  string query = 3;
-}
-
-message ListMentionFilesResponse {
-  repeated string files = 1;
-}
-
-message NoteProjectReturnRequest {
-  string project_id = 1;
-  double away_ms = 2;
-}
-
-message NoteProjectReturnResponse {}

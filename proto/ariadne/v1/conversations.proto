@@ -1,0 +1,984 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/common.proto";
+import "ariadne/v1/threads.proto";
+import "google/protobuf/struct.proto";
+
+// ConversationService manages conversations, messages, attentions, reactions,
+// notices, skills, traces, and project memories.
+service ConversationService {
+  rpc GetConversation(GetConversationRequest) returns (GetConversationResponse);
+  rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+  rpc NoteReturn(NoteReturnRequest) returns (NoteReturnResponse);
+  rpc AnswerAttention(AnswerAttentionRequest) returns (AnswerAttentionResponse);
+  rpc AddReaction(AddReactionRequest) returns (AddReactionResponse);
+  rpc RemoveReaction(RemoveReactionRequest) returns (RemoveReactionResponse);
+  rpc StopTurn(StopTurnRequest) returns (StopTurnResponse);
+  rpc RetryTurn(RetryTurnRequest) returns (RetryTurnResponse);
+  rpc WakeWait(WakeWaitRequest) returns (WakeWaitResponse);
+  rpc CancelWait(CancelWaitRequest) returns (CancelWaitResponse);
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
+  rpc GetTraceRequestDetail(GetTraceRequestDetailRequest) returns (GetTraceRequestDetailResponse);
+  rpc UndoNotice(UndoNoticeRequest) returns (UndoNoticeResponse);
+  rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
+  rpc CreateMemory(CreateMemoryRequest) returns (CreateMemoryResponse);
+  rpc UpdateMemory(UpdateMemoryRequest) returns (UpdateMemoryResponse);
+  rpc DeleteMemory(DeleteMemoryRequest) returns (DeleteMemoryResponse);
+}
+
+message ConversationTurn {
+  string id = 1;
+  int64 started_at = 2 [jstype = JS_NUMBER];
+  optional string model = 3;
+  optional string activity = 4;
+  bool fallback = 5;
+}
+
+message ConversationWait {
+  string id = 1;
+  int64 until = 2 [jstype = JS_NUMBER];
+  string note = 3;
+}
+
+message ConversationView {
+  string id = 1;
+  string project_id = 2;
+  string role = 3;
+  int64 pending_seq = 4 [jstype = JS_NUMBER];
+  optional ConversationTurn turn = 5;
+  optional string last_outcome = 6;
+  optional LocalizedError last_error = 7;
+  TokenUsageTotals usage = 8;
+  int64 context_tokens = 9 [jstype = JS_NUMBER];
+  int32 compactions = 10;
+  optional ConversationWait wait = 11;
+}
+
+message ConversationModelInfo {
+  string id = 1;
+  int64 context_tokens = 2 [jstype = JS_NUMBER];
+  int64 compact_at = 3 [jstype = JS_NUMBER];
+}
+
+message TodoItem {
+  string label = 1;
+  string status = 2;
+  optional string detail = 3;
+}
+
+message TodoPosition {
+  int64 at = 1 [jstype = JS_NUMBER];
+  oneof anchor {
+    string after_message_id = 2;
+    bool before_first = 3;
+  }
+}
+
+message TodoView {
+  string conversation_id = 1;
+  repeated TodoItem items = 2;
+  int64 updated_at = 3 [jstype = JS_NUMBER];
+  optional TodoPosition position = 4;
+}
+
+// Structured UI blocks
+
+message ChoiceOption {
+  string label = 1;
+  string consequence = 2;
+}
+
+message ChoiceBlock {
+  string question = 1;
+  repeated ChoiceOption options = 2;
+  optional int32 recommended = 3;
+}
+
+message ConfirmBlock {
+  string title = 1;
+  optional string description = 2;
+  optional string detail = 3;
+  string tone = 4;
+  optional string approve_text = 5;
+  optional string deny_text = 6;
+  bool allow_project_reference = 7;
+}
+
+message FormSelectOption {
+  string label = 1;
+  string value = 2;
+}
+
+message StringListValue {
+  repeated string values = 1;
+}
+
+message FormFieldValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool bool_value = 3;
+    StringListValue string_list_value = 4;
+    bool null_value = 5;
+  }
+}
+
+message FormField {
+  string key = 1;
+  string label = 2;
+  string kind = 3;
+  bool required = 4;
+  optional string placeholder = 5;
+  repeated FormSelectOption options = 6;
+  FormFieldValue default_value = 7;
+  optional double min = 8;
+  optional double max = 9;
+}
+
+message FormBlock {
+  string title = 1;
+  optional string description = 2;
+  repeated FormField fields = 3;
+  optional string submit_text = 4;
+}
+
+message AskBlock {
+  oneof block {
+    ChoiceBlock choice = 1;
+    ConfirmBlock confirm = 2;
+    FormBlock form = 3;
+  }
+}
+
+message ChoiceAnswer {
+  int32 choice = 1;
+}
+
+message ConfirmAnswer {
+  bool approved = 1;
+  optional string scope = 2;
+}
+
+message FormAnswer {
+  map<string, FormFieldValue> values = 1;
+}
+
+message BlockAnswer {
+  oneof answer {
+    ChoiceAnswer choice = 1;
+    ConfirmAnswer confirm = 2;
+    FormAnswer form = 3;
+  }
+}
+
+message TableColumn {
+  string key = 1;
+  string title = 2;
+  string align = 3;
+}
+
+message TableCellValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool bool_value = 3;
+    bool null_value = 4;
+  }
+}
+
+message TableRow {
+  map<string, TableCellValue> cells = 1;
+}
+
+message TableBlock {
+  optional string title = 1;
+  repeated TableColumn columns = 2;
+  repeated TableRow rows = 3;
+}
+
+message ChartCellValue {
+  oneof value {
+    string string_value = 1;
+    double number_value = 2;
+    bool null_value = 3;
+  }
+}
+
+message ChartRow {
+  map<string, ChartCellValue> cells = 1;
+}
+
+message ChartBlock {
+  optional string title = 1;
+  string kind = 2;
+  string x = 3;
+  repeated string y = 4;
+  map<string, string> labels = 5;
+  repeated ChartRow rows = 6;
+  bool stacked = 7;
+  bool horizontal = 8;
+}
+
+message StepItem {
+  string title = 1;
+  optional string description = 2;
+  string status = 3;
+}
+
+message StepsBlock {
+  optional string title = 1;
+  repeated StepItem items = 2;
+}
+
+message ThreadBlock {
+  string thread_id = 1;
+}
+
+message ConnectorBlock {
+  string name = 1;
+  optional string why = 2;
+  string transport = 3;
+  optional string command = 4;
+  repeated string args = 5;
+  optional string url = 6;
+  repeated string secrets = 7;
+}
+
+message ShowBlock {
+  oneof block {
+    TableBlock table = 1;
+    ChartBlock chart = 2;
+    StepsBlock steps = 3;
+    ThreadBlock thread = 4;
+    ConnectorBlock connector = 5;
+  }
+}
+
+// Messages & attachments
+
+message MessageAttachment {
+  string file_id = 1;
+  string name = 2;
+  string mime = 3;
+  int64 size = 4 [jstype = JS_NUMBER];
+}
+
+message AttachmentInput {
+  string file_id = 1;
+  string name = 2;
+}
+
+message ThreadMention {
+  string id = 1;
+  string title = 2;
+}
+
+message ArtifactMention {
+  string id = 1;
+  string title = 2;
+}
+
+message FileMention {
+  string path = 1;
+}
+
+message SkillMention {
+  string name = 1;
+}
+
+message MessageMention {
+  oneof mention {
+    ThreadMention thread = 1;
+    ArtifactMention artifact = 2;
+    FileMention file = 3;
+    SkillMention skill = 4;
+  }
+}
+
+message MentionInput {
+  oneof mention {
+    string thread_id = 1;
+    string artifact_id = 2;
+    string file_path = 3;
+    string skill_name = 4;
+  }
+}
+
+message CitedMessage {
+  string message_id = 1;
+  string conversation_id = 2;
+  string content = 3;
+  int64 at = 4 [jstype = JS_NUMBER];
+  repeated MessageAttachment attachments = 5;
+  repeated MessageMention mentions = 6;
+}
+
+message MessageRelay {
+  string thread_id = 1;
+  string message_id = 2;
+}
+
+message QuotedMessage {
+  string message_id = 1;
+  string author = 2;
+  string text = 3;
+}
+
+message MessageReaction {
+  string emoji = 1;
+  string by = 2;
+}
+
+message MessageAsk {
+  string attention_id = 1;
+  AskBlock block = 2;
+  optional BlockAnswer answer = 3;
+  optional string withdrawn = 4;
+}
+
+message MessageView {
+  string id = 1;
+  string conversation_id = 2;
+  string author = 3;
+  string kind = 4;
+  string content = 5;
+  repeated ShowBlock blocks = 6;
+  optional MessageAsk ask = 7;
+  repeated MessageAttachment attachments = 8;
+  repeated MessageMention mentions = 9;
+  repeated LineComment comments = 10;
+  repeated CitedMessage cites = 11;
+  repeated MessageRelay relayed_to = 12;
+  optional QuotedMessage reply_to = 13;
+  repeated MessageReaction reactions = 14;
+  int64 created_at = 15 [jstype = JS_NUMBER];
+  optional int64 edited_at = 16 [jstype = JS_NUMBER];
+  optional string edit_reason = 17;
+  optional string original_content = 18;
+  bool edited_since_read = 19;
+}
+
+// Notices
+
+message ApprovalNotice {
+  AskBlock block = 1;
+  optional BlockAnswer answer = 2;
+  optional string withdrawn = 3;
+}
+
+message MemoryNotice {
+  string action = 1;
+  string memory_id = 2;
+  string text = 3;
+  optional string previous = 4;
+  bool undone = 5;
+}
+
+message MemoryEverywhereNotice {
+  string action = 1;
+  string text = 2;
+  bool undone = 3;
+}
+
+message CompactionFailedNotice {
+  string detail = 1;
+}
+
+message RoutineChangeNotice {
+  string action = 1;
+  string prompt = 2;
+}
+
+message RecapNotice {
+  int64 since = 1 [jstype = JS_NUMBER];
+  repeated string done = 2;
+  repeated string merged = 3;
+  repeated string waiting = 4;
+  repeated string asks = 5;
+}
+
+message ModelRetryNotice {
+  int32 attempt = 1;
+  int64 delay_ms = 2 [jstype = JS_NUMBER];
+  string detail = 3;
+}
+
+message ModelFallbackNotice {
+  string from = 1;
+  string to = 2;
+  string detail = 3;
+}
+
+message WokenNotice {
+  string how = 1;
+  string note = 2;
+}
+
+message RoutineNotice {
+  string routine_id = 1;
+  string prompt = 2;
+  int64 due_at = 3 [jstype = JS_NUMBER];
+}
+
+message IssueLinkedNotice {
+  string node_id = 1;
+  string node_title = 2;
+  string tracker = 3;
+  int32 number = 4;
+  bool linked = 5;
+}
+
+message IssueWrittenNotice {
+  string tracker = 1;
+  int32 number = 2;
+  string action = 3;
+  string text = 4;
+  optional string url = 5;
+}
+
+message MergedNotice {
+  string base = 1;
+  string method = 2;
+  string sha = 3;
+  bool auto = 4;
+  optional int32 pull_request = 5;
+  bool undone = 6;
+}
+
+message AutopilotHeldNotice {
+  string reason = 1;
+  string detail = 2;
+}
+
+message ArtifactEditedNotice {
+  string artifact_id = 1;
+  string title = 2;
+  int32 version = 3;
+}
+
+message ArtifactFeedbackEditItem {
+  string diff = 1;
+}
+
+message ArtifactFeedbackChoiceOption {
+  string id = 1;
+  string title = 2;
+}
+
+message ArtifactFeedbackChoiceItem {
+  repeated ArtifactFeedbackChoiceOption chosen = 1;
+}
+
+message ArtifactFeedbackCommentItem {
+  string thread_id = 1;
+  string action = 2;
+  string body = 3;
+  string where = 4;
+}
+
+message ArtifactFeedbackMarkItem {
+  string node_id = 1;
+  string type = 2;
+  string text = 3;
+  string where = 4;
+}
+
+message ArtifactFeedbackBoardItem {
+  repeated string changes = 1;
+}
+
+message ArtifactFeedbackItem {
+  oneof item {
+    ArtifactFeedbackEditItem edit = 1;
+    ArtifactFeedbackChoiceItem choice = 2;
+    ArtifactFeedbackCommentItem comment = 3;
+    ArtifactFeedbackMarkItem mark = 4;
+    ArtifactFeedbackBoardItem board = 5;
+  }
+}
+
+message ArtifactFeedbackNotice {
+  string artifact_id = 1;
+  string title = 2;
+  int32 round = 3;
+  repeated ArtifactFeedbackItem items = 4;
+  bool done = 5;
+  optional string summary = 6;
+}
+
+message ArtifactCommentNotice {
+  string artifact_id = 1;
+  string title = 2;
+  string by = 3;
+  string action = 4;
+  string body = 5;
+}
+
+message MergeConflictNotice {
+  string base = 1;
+  repeated string files = 2;
+  optional int32 pull_request = 3;
+}
+
+message WorktreeRemovedNotice {
+  string reason = 1;
+}
+
+message PlanChangedNotice {
+  string revision_id = 1;
+  string reason = 2;
+  int32 added = 3;
+  bool revert = 4;
+}
+
+message ThreadAutoStartedNotice {
+  string thread_id = 1;
+  string title = 2;
+}
+
+message ReviewNotice {
+  string thread_id = 1;
+  string reviewer_id = 2;
+  int32 round = 3;
+  string state = 4;
+  int32 count = 5;
+}
+
+message TurnFile {
+  string path = 1;
+  optional string previous_path = 2;
+  string status = 3;
+  optional int32 added = 4;
+  optional int32 removed = 5;
+}
+
+message TurnChangesNotice {
+  string turn_id = 1;
+  string from = 2;
+  string to = 3;
+  repeated TurnFile files = 4;
+  ThreadChangeTotals total = 5;
+  optional int64 started_at = 6 [jstype = JS_NUMBER];
+}
+
+message NoticeView {
+  string id = 1;
+  string conversation_id = 2;
+  int64 created_at = 3 [jstype = JS_NUMBER];
+  oneof payload {
+    ApprovalNotice approval = 4;
+    MemoryNotice memory = 5;
+    MemoryEverywhereNotice memory_everywhere = 6;
+    CompactionFailedNotice compaction_failed = 7;
+    RoutineChangeNotice routine_change = 8;
+    RecapNotice recap = 9;
+    ModelRetryNotice model_retry = 10;
+    ModelFallbackNotice model_fallback = 11;
+    WokenNotice woken = 12;
+    RoutineNotice routine = 13;
+    IssueLinkedNotice issue_linked = 14;
+    IssueWrittenNotice issue_written = 15;
+    MergedNotice merged = 16;
+    AutopilotHeldNotice autopilot_held = 17;
+    ArtifactEditedNotice artifact_edited = 18;
+    ArtifactFeedbackNotice artifact_feedback = 19;
+    ArtifactCommentNotice artifact_comment = 20;
+    MergeConflictNotice merge_conflict = 21;
+    WorktreeRemovedNotice worktree_removed = 22;
+    PlanChangedNotice plan_changed = 23;
+    ThreadAutoStartedNotice thread_auto_started = 24;
+    ReviewNotice review = 25;
+    TurnChangesNotice turn_changes = 26;
+  }
+}
+
+// Memory & skills
+
+message MemoryView {
+  string id = 1;
+  string project_id = 2;
+  string text = 3;
+  string author = 4;
+  int64 created_at = 5 [jstype = JS_NUMBER];
+  int64 updated_at = 6 [jstype = JS_NUMBER];
+}
+
+message SkillView {
+  string name = 1;
+  string when = 2;
+  string source = 3;
+}
+
+// Trace
+
+message TraceCost {
+  double amount = 1;
+  string currency = 2;
+}
+
+message TraceTokenUsage {
+  optional int64 context_input = 1 [jstype = JS_NUMBER];
+  int64 input = 2 [jstype = JS_NUMBER];
+  int64 output = 3 [jstype = JS_NUMBER];
+  optional int64 cached = 4 [jstype = JS_NUMBER];
+  optional int64 cache_write = 5 [jstype = JS_NUMBER];
+  optional int64 reasoning = 6 [jstype = JS_NUMBER];
+  optional TraceCost cost = 7;
+}
+
+message TraceReasoning {
+  string text = 1;
+  bool redacted = 2;
+}
+
+message TraceToolCallResult {
+  string content = 1;
+  bool is_error = 2;
+  int64 finished_at = 3 [jstype = JS_NUMBER];
+  repeated MessageAttachment files = 4;
+}
+
+message TraceToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments = 3;
+  int64 started_at = 4 [jstype = JS_NUMBER];
+  optional TraceToolCallResult result = 5;
+  repeated TraceRequest research = 6;
+}
+
+message TraceRequest {
+  int64 seq = 1 [jstype = JS_NUMBER];
+  int32 number = 2;
+  string purpose = 3;
+  optional string provider = 4;
+  optional string model = 5;
+  optional string effort = 6;
+  int64 started_at = 7 [jstype = JS_NUMBER];
+  optional int64 first_output_at = 8 [jstype = JS_NUMBER];
+  int64 finished_at = 9 [jstype = JS_NUMBER];
+  optional TraceTokenUsage usage = 10;
+  string finish = 11;
+  string text = 12;
+  repeated TraceReasoning reasoning = 13;
+  repeated TraceToolCall tool_calls = 14;
+}
+
+message TraceAgentError {
+  string operation = 1;
+  optional string executable = 2;
+  optional string name = 3;
+  optional string version = 4;
+  optional int32 protocol_version = 5;
+  optional string session_method = 6;
+  optional int32 rpc_code = 7;
+  optional string rpc_data = 8;
+  optional string stop_reason = 9;
+  optional string stderr = 10;
+}
+
+message TraceRequestFailure {
+  int64 seq = 1 [jstype = JS_NUMBER];
+  string purpose = 2;
+  optional string provider = 3;
+  optional string model = 4;
+  int32 attempt = 5;
+  int64 started_at = 6 [jstype = JS_NUMBER];
+  int64 finished_at = 7 [jstype = JS_NUMBER];
+  string detail = 8;
+  bool retryable = 9;
+  bool will_retry = 10;
+  optional TraceAgentError agent_error = 11;
+}
+
+message TraceRetry {
+  int64 at = 1 [jstype = JS_NUMBER];
+  int32 attempt = 2;
+  int64 delay_ms = 3 [jstype = JS_NUMBER];
+  string detail = 4;
+}
+
+message TraceFallback {
+  int64 at = 1 [jstype = JS_NUMBER];
+  string from = 2;
+  string to = 3;
+  string detail = 4;
+}
+
+message TraceCompactionFailed {
+  int64 at = 1 [jstype = JS_NUMBER];
+  string detail = 2;
+}
+
+message TraceResultsCleared {
+  int64 at = 1 [jstype = JS_NUMBER];
+}
+
+message TraceInstructions {
+  int64 at = 1 [jstype = JS_NUMBER];
+  string path = 2;
+  bool changed = 3;
+  bool removed = 4;
+  bool uncommitted = 5;
+}
+
+message TraceItem {
+  oneof item {
+    TraceRequest request = 1;
+    TraceRequestFailure request_failed = 2;
+    TraceRetry retry = 3;
+    TraceFallback fallback = 4;
+    TraceCompactionFailed compaction_failed = 5;
+    TraceResultsCleared results_cleared = 6;
+    TraceInstructions instructions = 7;
+  }
+}
+
+message TraceTurn {
+  string turn_id = 1;
+  int64 seq = 2 [jstype = JS_NUMBER];
+  string model = 3;
+  int64 started_at = 4 [jstype = JS_NUMBER];
+  optional int64 finished_at = 5 [jstype = JS_NUMBER];
+  optional string outcome = 6;
+  optional LocalizedError error = 7;
+  TraceTokenUsage usage = 8;
+  repeated TraceItem items = 9;
+}
+
+message TraceToolCallRecord {
+  string id = 1;
+  string name = 2;
+  string arguments = 3;
+}
+
+message TraceReasoningRecord {
+  string text = 1;
+  optional string signature = 2;
+  optional bool redacted = 3;
+}
+
+message TraceSystemMessage {
+  string content = 1;
+}
+
+message TraceUserMessage {
+  string content = 1;
+  repeated MessageAttachment images = 2;
+}
+
+message TraceAssistantMessage {
+  string content = 1;
+  repeated TraceToolCallRecord tool_calls = 2;
+  repeated TraceReasoningRecord reasoning = 3;
+}
+
+message TraceToolMessage {
+  string tool_call_id = 1;
+  string content = 2;
+  optional bool is_error = 3;
+  repeated MessageAttachment images = 4;
+}
+
+message TraceMessage {
+  oneof message {
+    TraceSystemMessage system = 1;
+    TraceUserMessage user = 2;
+    TraceAssistantMessage assistant = 3;
+    TraceToolMessage tool = 4;
+  }
+}
+
+message TraceToolDefinition {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct parameters = 3;
+}
+
+message TraceRequestCall {
+  string provider = 1;
+  string model = 2;
+  google.protobuf.Struct settings = 3;
+}
+
+message TraceRequestDetail {
+  repeated TraceMessage messages = 1;
+  repeated TraceToolDefinition tools = 2;
+  optional string effort = 3;
+  optional TraceRequestCall call = 4;
+  optional google.protobuf.Value body = 5;
+  int32 new_from = 6;
+  bool system_changed = 7;
+}
+
+// RPC Requests & Responses
+
+message GetConversationRequest {
+  string conversation_id = 1;
+  optional string before = 2;
+  optional string from = 3;
+  optional int32 limit = 4;
+  optional int64 since = 5 [jstype = JS_NUMBER];
+}
+
+message GetConversationResponse {
+  ConversationView conversation = 1;
+  repeated MessageView messages = 2;
+  repeated NoticeView notices = 3;
+  optional string read_through = 4;
+  bool more = 5;
+  int64 last_seq = 6 [jstype = JS_NUMBER];
+  TodoView todo = 7;
+  optional ConversationModelInfo model = 8;
+}
+
+message PostMessageRequest {
+  string project_id = 1;
+  string conversation_id = 2;
+  string content = 3;
+  repeated AttachmentInput attachments = 4;
+  repeated MentionInput mentions = 5;
+  repeated LineComment comments = 6;
+}
+
+message PostMessageResponse {
+  MessageView message = 1;
+}
+
+message MarkReadRequest {
+  string conversation_id = 1;
+  string up_to = 2;
+}
+
+message MarkReadResponse {}
+
+message NoteReturnRequest {
+  string project_id = 1;
+  double away = 2;
+}
+
+message NoteReturnResponse {}
+
+message AnswerAttentionRequest {
+  string attention_id = 1;
+  BlockAnswer answer = 2;
+}
+
+message AnswerAttentionResponse {}
+
+message AddReactionRequest {
+  string message_id = 1;
+  string emoji = 2;
+}
+
+message AddReactionResponse {
+  MessageView message = 1;
+}
+
+message RemoveReactionRequest {
+  string message_id = 1;
+  string emoji = 2;
+}
+
+message RemoveReactionResponse {
+  MessageView message = 1;
+}
+
+message StopTurnRequest {
+  string conversation_id = 1;
+}
+
+message StopTurnResponse {
+  bool stopped = 1;
+}
+
+message RetryTurnRequest {
+  string conversation_id = 1;
+}
+
+message RetryTurnResponse {}
+
+message WakeWaitRequest {
+  string conversation_id = 1;
+}
+
+message WakeWaitResponse {}
+
+message CancelWaitRequest {
+  string conversation_id = 1;
+}
+
+message CancelWaitResponse {}
+
+message ListSkillsRequest {
+  string conversation_id = 1;
+}
+
+message ListSkillsResponse {
+  repeated SkillView skills = 1;
+}
+
+message GetTraceRequest {
+  string conversation_id = 1;
+  optional int64 before = 2 [jstype = JS_NUMBER];
+  optional int64 from = 3 [jstype = JS_NUMBER];
+}
+
+message GetTraceResponse {
+  repeated TraceTurn turns = 1;
+  bool more = 2;
+}
+
+message GetTraceRequestDetailRequest {
+  string conversation_id = 1;
+  int64 seq = 2 [jstype = JS_NUMBER];
+}
+
+message GetTraceRequestDetailResponse {
+  TraceRequestDetail request = 1;
+}
+
+message UndoNoticeRequest {
+  string project_id = 1;
+  string notice_id = 2;
+}
+
+message UndoNoticeResponse {}
+
+message ListMemoriesRequest {
+  string project_id = 1;
+}
+
+message ListMemoriesResponse {
+  repeated MemoryView memories = 1;
+}
+
+message CreateMemoryRequest {
+  string project_id = 1;
+  string text = 2;
+}
+
+message CreateMemoryResponse {
+  MemoryView memory = 1;
+}
+
+message UpdateMemoryRequest {
+  string project_id = 1;
+  string memory_id = 2;
+  string text = 3;
+}
+
+message UpdateMemoryResponse {
+  MemoryView memory = 1;
+}
+
+message DeleteMemoryRequest {
+  string project_id = 1;
+  string memory_id = 2;
+}
+
+message DeleteMemoryResponse {}
