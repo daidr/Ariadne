@@ -85,7 +85,8 @@ func (runner *Runner) Resolve(ctx context.Context, conversation core.Conversatio
 			return nil, err
 		}
 		model, _ := thread.Model.(string)
-		return runner.Settings.ResolveModel("thread", model, kinds)
+		effort, _ := thread.Effort.(string)
+		return runner.Settings.ResolveModel("thread", model, effort, kinds)
 	}
 	triage, err := runner.Repository.PendingIsTriage(ctx, conversation.ID)
 	if err != nil {
@@ -395,14 +396,6 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				// enough history, then resume the same discussion with a fresh session.
 				recoveredContext = true
 				lastInput = max(lastInput, threshold)
-				continue
-			}
-			if ctx.Err() == nil && model.Fallback != nil && failure != nil && failure.Exhausted != nil {
-				if err := turn.Repository.RecordModelFallback(ctx, conversation.ID, turn.id, model.Label, model.Fallback.Label, *failure.Exhausted); err != nil {
-					return err
-				}
-				model = model.Fallback
-				lastInput, compactionFailed = 0, false
 				continue
 			}
 			return err

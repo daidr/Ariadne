@@ -162,6 +162,8 @@ export interface ThreadView {
   endedReferences: { attentionId: string; kept: boolean }[]
   /** The model setting it was given; `null` uses the default for threads. */
   model: string | null
+  /** The thinking effort it was given; `null` uses the model's default (or thread default when `model` is also `null`). */
+  effort: string | null
   /** The readable part of its branch name the coordinator gave it, e.g. `fix-export`. */
   branchSlug: string | null
   /** Tokens its turns have used. */
@@ -472,13 +474,11 @@ export interface ConversationView {
   /** Newest input that no model response has seen yet; 0 when none. */
   pendingSeq: number
   /** `activity`: what the model said it is doing beside its latest tool calls this turn. */
-  /** `fallback`: the main model failed and the turn goes on with the role's fallback, `model`. */
   turn: {
     id: string
     startedAt: number
     model: string | null
     activity: string | null
-    fallback: boolean
   } | null
   lastOutcome: TurnOutcome | null
   lastError: LocalizedMessage | null

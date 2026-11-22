@@ -20,7 +20,6 @@ type TurnView struct {
 	StartedAt int64  `json:"startedAt"`
 	Model     any    `json:"model"`
 	Activity  any    `json:"activity"`
-	Fallback  bool   `json:"fallback"`
 }
 type WaitView struct {
 	ID    string `json:"id"`
@@ -48,7 +47,7 @@ func toConversation(row record) (ConversationView, error) {
 	}
 	view := ConversationView{ID: row.text("id"), ProjectID: row.text("project_id"), Role: row.text("role"), PendingSeq: row.integer("pending_seq"), LastOutcome: row["last_outcome"], LastError: lastError, Usage: usage(row), ContextTokens: row.integer("context_tokens"), Compactions: row.integer("compactions")}
 	if row.present("turn_id") {
-		view.Turn = &TurnView{ID: row.text("turn_id"), StartedAt: row.integer("turn_started_at"), Model: row["model"], Activity: row["activity"], Fallback: row.flag("fallback")}
+		view.Turn = &TurnView{ID: row.text("turn_id"), StartedAt: row.integer("turn_started_at"), Model: row["model"], Activity: row["activity"]}
 	}
 	if row.present("wait_id") {
 		view.Wait = &WaitView{ID: row.text("wait_id"), Until: row.integer("wait_until"), Note: row.text("wait_note")}
@@ -434,6 +433,7 @@ type ConversationSnapshot struct {
 	Todo         object
 	ReadThrough  string
 	ThreadModel  string
+	ThreadEffort string
 }
 
 func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cursor MessageCursor) (result ConversationSnapshot, err error) {
@@ -462,13 +462,15 @@ func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cur
 			}
 		}
 		threadModel := ""
+		threadEffort := ""
 		if conv.Role == "thread" {
-			rows, err := records(ctx, tx, "SELECT model FROM threads WHERE id = ?", id)
+			rows, err := records(ctx, tx, "SELECT model, effort FROM threads WHERE id = ?", id)
 			if err != nil {
 				return err
 			}
 			if len(rows) > 0 {
 				threadModel = rows[0].text("model")
+				threadEffort = rows[0].text("effort")
 			}
 		}
 		result = ConversationSnapshot{
@@ -480,6 +482,7 @@ func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cur
 			Todo:         todo,
 			ReadThrough:  readThrough,
 			ThreadModel:  threadModel,
+			ThreadEffort: threadEffort,
 		}
 		return nil
 	})

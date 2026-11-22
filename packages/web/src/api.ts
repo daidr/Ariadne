@@ -653,8 +653,6 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export interface RoleInput {
   model: string | null
   effort: Effort | null
-  /** Goes on with this when the model keeps being turned away; research has none. */
-  fallback: string | null
 }
 
 export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
@@ -800,7 +798,7 @@ export const api = {
     lastSeq: number
     todo: TodoView
     /** The model it uses now, with how much its context holds. */
-    model: { id: string; contextTokens: number; compactAt: number } | null
+    model: { id: string; contextTokens: number; compactAt: number; effort?: Effort | null } | null
   }> => {
     const response = await conversationClient.getConversation({
       conversationId: id,
@@ -827,6 +825,9 @@ export const api = {
             id: response.model.id,
             contextTokens: Number(response.model.contextTokens),
             compactAt: Number(response.model.compactAt),
+            ...(response.model.effort !== undefined
+              ? { effort: response.model.effort as Effort }
+              : {}),
           }
         : null,
     }
@@ -865,11 +866,13 @@ export const api = {
   setThreadModel: async (
     threadId: string,
     model: string | null,
+    effort: Effort | null = null,
   ): Promise<{ thread: ThreadView }> => {
     const response = await threadClient.setThreadModel({
       threadId,
       modelAction:
         model === null ? { case: 'useDefault', value: true } : { case: 'model', value: model },
+      ...(model !== null && effort !== null ? { effort } : {}),
     })
     return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
   },

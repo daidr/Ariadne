@@ -485,6 +485,7 @@ export interface EventMap {
     title: string
     nodeId: string | null
     model: string | null
+    effort?: string | null
     branch: string | null
     /**
      * Set for a thread that reviews another's changes before they reach the user: the
@@ -504,8 +505,8 @@ export interface EventMap {
      */
     ended?: { attentionId: string; name: string; now: string | null }
   }
-  /** The thread's model changed; `null` goes back to the default for threads. */
-  'thread.model_set': { threadId: string; model: string | null; by: string }
+  /** The thread's model or effort changed; `null` goes back to the default for threads. */
+  'thread.model_set': { threadId: string; model: string | null; effort?: string | null; by: string }
   /** The thread's linked plan node changed; `null` removes the link. */
   'thread.node.set': { threadId: string; nodeId: string | null; by: string }
   /** The thread was given a new title: by itself, or by the coordinator (`by` is its id). */

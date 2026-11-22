@@ -411,6 +411,7 @@ func toProtoThreadView(v core.ThreadView) *ariadnev1.ThreadView {
 		LastHeadline:  protoOptStr(v.LastHeadline),
 		Archived:      v.Archived,
 		Model:         protoOptStr(v.Model),
+		Effort:        protoOptStr(v.Effort),
 		BranchSlug:    protoOptStr(v.BranchSlug),
 		Usage:         toProtoTokenUsageTotals(v.Usage),
 		Doing:         protoOptStr(v.Doing),
@@ -625,7 +626,6 @@ func toProtoConversationView(v core.ConversationView) *ariadnev1.ConversationVie
 			StartedAt: v.Turn.StartedAt,
 			Model:     protoOptStr(v.Turn.Model),
 			Activity:  protoOptStr(v.Turn.Activity),
-			Fallback:  v.Turn.Fallback,
 		}
 	}
 	if v.Wait != nil {
@@ -651,6 +651,7 @@ func toProtoConversationModel(raw any) *ariadnev1.ConversationModelInfo {
 		Id:            id,
 		ContextTokens: protoInt64(m["contextTokens"]),
 		CompactAt:     protoInt64(m["compactAt"]),
+		Effort:        protoOptNonEmptyStr(protoStr(m["effort"])),
 	}
 }
 

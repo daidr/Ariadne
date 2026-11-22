@@ -355,6 +355,7 @@ CREATE TABLE threads (
       stopped_at INTEGER,
       reviewed_at INTEGER,
       model TEXT,
+      effort TEXT,
       branch_slug TEXT,
       -- For a reviewing thread: the author it reviews.
       review_of TEXT,

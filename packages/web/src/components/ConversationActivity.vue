@@ -12,7 +12,6 @@ defineProps<{
   live: Command | null
   activity: string
   elapsed: string
-  fallback: string | null
   escArmed: boolean
   wait: { id: string; until: number; note: string } | null
 }>()
@@ -30,15 +29,6 @@ defineProps<{
       </DouText>
       <DouText v-if="escArmed" variant="tertiary" size="sm" class="activity-extra">
         {{ t('conversation.escAgain') }}
-      </DouText>
-      <DouText
-        v-else-if="fallback"
-        variant="tertiary"
-        size="sm"
-        class="activity-extra"
-        :title="t('conversation.fallback', { model: fallback })"
-      >
-        {{ t('conversation.fallback', { model: fallback }) }}
       </DouText>
     </div>
     <DouText v-else-if="queued" variant="secondary" size="sm" role="status">

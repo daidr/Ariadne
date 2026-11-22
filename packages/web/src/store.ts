@@ -33,6 +33,7 @@ import {
   ApiError,
   DEFAULT_KEYS,
   followEvents,
+  type Effort,
   type InputSettings,
   type MentionInput,
   type MessageExtras,
@@ -92,7 +93,7 @@ export interface ConversationState {
   notices: NoticeView[]
   todo: TodoView | null
   /** The model it uses now, with how much its context holds. */
-  model: { id: string; contextTokens: number; compactAt: number } | null
+  model: { id: string; contextTokens: number; compactAt: number; effort?: Effort | null } | null
   /** Earlier messages exist than the first one loaded. */
   more: boolean
   /**
@@ -141,6 +142,8 @@ export interface MessageFocus {
 export interface ModelOption {
   id: string
   label: string
+  /** The efforts it accepts, least first; empty when none, omitted when unknown. */
+  efforts?: Effort[]
 }
 
 interface State {
@@ -175,6 +178,8 @@ interface State {
   models: ModelOption[]
   /** The model threads use unless given another. */
   threadDefault: string | null
+  /** The default thinking effort threads use unless overridden. */
+  threadDefaultEffort: Effort | null
   /** Usage shows the estimated cost too. */
   showCost: boolean
   /** The user is making a new project: its form shows in place of the open one. */
@@ -224,6 +229,7 @@ export const state = reactive<State>({
   modelReady: null,
   models: [],
   threadDefault: null,
+  threadDefaultEffort: null,
   showCost: false,
   starting: false,
   focus: null,
@@ -1514,14 +1520,24 @@ export function applyModelSettings(settings: ModelSettings) {
     : settings.models
   state.modelReady = !!settings.roles.thread.model
   state.threadDefault = settings.roles.thread.model
+  state.threadDefaultEffort = settings.roles.thread.effort
   state.showCost = settings.showCost
-  state.models = modelLabels(activeModels, activeProviders)
+  const labels = modelLabels(activeModels, activeProviders)
+  state.models = activeModels.map((model, index) => ({
+    id: model.id,
+    label: labels[index]!.label,
+    ...(model.efforts !== undefined ? { efforts: model.efforts } : {}),
+  }))
 }
 
-/** Give a thread another model, or back the default with `null`. */
-export async function setThreadModel(threadId: string, model: string | null) {
+/** Give a thread another model/effort, or back to the default with `model = null`. */
+export async function setThreadModel(
+  threadId: string,
+  model: string | null,
+  effort: Effort | null = null,
+) {
   try {
-    await api.setThreadModel(threadId, model)
+    await api.setThreadModel(threadId, model, effort)
     await refreshCurrent()
   } catch (error) {
     report(error)

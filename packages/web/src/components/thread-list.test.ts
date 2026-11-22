@@ -29,6 +29,7 @@ function makeThread(over: Partial<ThreadView> & { id: string; title: string }): 
     references: [],
     endedReferences: [],
     model: null,
+    effort: null,
     branchSlug: null,
     usage: {
       input: 0,

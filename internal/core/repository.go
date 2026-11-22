@@ -70,7 +70,12 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 {
+	if version == 67 || version == 68 || version == 69 || version == 70 {
+		if err := addColumnIfMissing(ctx, tx, "threads", "effort", "TEXT"); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

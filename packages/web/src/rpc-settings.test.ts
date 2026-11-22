@@ -251,10 +251,10 @@ describe('Domain 1 ConnectRPC mappers', () => {
         },
       ],
       roles: {
-        thread: { model: 'm1', effort: 'high', fallback: null },
-        coordinator: { model: null, effort: null, fallback: null },
-        triage: { model: null, effort: null, fallback: null },
-        research: { model: null, effort: null, fallback: null },
+        thread: { model: 'm1', effort: 'high' },
+        coordinator: { model: null, effort: null },
+        triage: { model: null, effort: null },
+        research: { model: null, effort: 'low' },
       },
       showCost: true,
     })
@@ -304,7 +304,7 @@ describe('Domain 1 ConnectRPC mappers', () => {
       images: false,
       efforts: [],
     })
-    expect(decoded.roles.coordinator).toEqual({ model: null, effort: null, fallback: null })
+    expect(decoded.roles.coordinator).toEqual({ model: null, effort: null })
 
     const problems = fromProtoModelProblems([
       create(ModelProblemSchema, {

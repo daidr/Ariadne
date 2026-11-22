@@ -11,6 +11,7 @@ import {
   DouDropdown,
   DouDropdownItem,
   DouDropdownRadioGroup,
+  DouDropdownSub,
   DouEmpty,
   DouInput,
   DouLink,
@@ -45,7 +46,8 @@ import {
   watchEffect,
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
-import { api } from '../api'
+import { api, type Effort } from '../api'
+import { effortsOf, effortWithin } from '../effort'
 import { openFilePreview } from '../files/preview'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
@@ -293,11 +295,6 @@ const showCapsules = computed(
     !!thread.value?.pullRequest,
 )
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
-// The main model kept failing: this turn goes on with the role's fallback.
-const fallback = computed(() => {
-  const turn = view.value.conversation?.turn
-  return turn?.fallback ? turn.model : null
-})
 // What it is doing, shown after the last message: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
@@ -316,21 +313,71 @@ const elapsed = computed(() => {
   const startedAt = view.value.conversation?.turn?.startedAt
   return startedAt ? elapsedText(now.value - startedAt) : ''
 })
-// The model it uses now; a thread's picker also offers going back to the default.
+// The model it uses now; a thread's picker also offers choosing thinking effort and returning to default.
+function formatModelEffort(label: string, effort: Effort | null | undefined): string {
+  return effort ? `${label} · ${t(`settings.effort.${effort}`)}` : label
+}
+const modelChoices = computed(() =>
+  state.models.map((model) => ({
+    ...model,
+    acceptedEfforts: effortsOf(model.efforts),
+  })),
+)
+const canSwitchModel = computed(
+  () =>
+    !!thread.value &&
+    (modelChoices.value.length > 1 ||
+      (modelChoices.value.length === 1 && modelChoices.value[0]!.acceptedEfforts.length > 0)),
+)
 const modelLabel = computed(() => {
   const id = view.value.model?.id
-  return state.models.find((model) => model.id === id)?.label ?? null
+  const model = state.models.find((item) => item.id === id)
+  if (!model) return null
+  return formatModelEffort(model.label, view.value.model?.effort ?? null)
 })
-const defaultLabel = computed(
-  () => state.models.find((model) => model.id === state.threadDefault)?.label ?? '',
-)
+const defaultLabel = computed(() => {
+  const model = state.models.find((item) => item.id === state.threadDefault)
+  if (!model) return ''
+  const defaultEffort = state.threadDefaultEffort
+    ? effortWithin(state.threadDefaultEffort, effortsOf(model.efforts))
+    : null
+  return formatModelEffort(model.label, defaultEffort)
+})
 // A model since removed from the settings falls back to the default, so that is shown.
-const pickedModel = computed(() => {
+const pickedModelId = computed(() => {
   const id = thread.value?.model
   return id && state.models.some((model) => model.id === id) ? id : ''
 })
+const pickedEffort = computed<Effort | ''>(() => {
+  if (!pickedModelId.value) return ''
+  const model = modelChoices.value.find((item) => item.id === pickedModelId.value)
+  const raw = thread.value?.effort as Effort | null | undefined
+  if (!model || !raw) return ''
+  return effortWithin(raw, model.acceptedEfforts) ?? ''
+})
+const pickedEffortLabel = computed(() =>
+  pickedEffort.value ? t(`settings.effort.${pickedEffort.value}`) : t('settings.effort.default'),
+)
+function encodeModelChoice(modelId: string, effort: Effort | ''): string {
+  return JSON.stringify([modelId, effort])
+}
+const pickedChoice = computed(() =>
+  pickedModelId.value ? encodeModelChoice(pickedModelId.value, pickedEffort.value) : '',
+)
 function pickModel(value: string | number | undefined) {
-  if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
+  if (!thread.value) return
+  if (!value) {
+    void setThreadModel(thread.value.id, null, null)
+    return
+  }
+  try {
+    const [modelId, effort] = JSON.parse(String(value)) as [string, Effort | '']
+    if (typeof modelId === 'string' && modelId) {
+      void setThreadModel(thread.value.id, modelId, effort || null)
+    }
+  } catch {
+    // Ignore malformed choice values.
+  }
 }
 const todo = computed(() => todoPlan(view.value.todo, working.value))
 // New input is waiting for a free slot.
@@ -859,7 +906,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           :live="live"
           :activity="activity"
           :elapsed="elapsed"
-          :fallback="fallback"
           :esc-armed="escArmed"
           :wait="wait"
         />
@@ -1332,21 +1378,43 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             >
               <PaperclipIcon />
             </DouButton>
-            <!-- Which model answers here, and how full its context is. -->
-            <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
+            <!-- Which model & effort answers here, and how full its context is. -->
+            <DouDropdown v-if="canSwitchModel" placement="top-start">
               <DouButton variant="ghost" size="sm" :title="t('thread.model')">
                 <template #leading><CpuIcon /></template>
                 <span class="conversation-model">{{ modelLabel ?? t('thread.noModel') }}</span>
                 <template #trailing><ChevronDownIcon /></template>
               </DouButton>
               <template #menu>
-                <DouDropdownRadioGroup :model-value="pickedModel" @update:model-value="pickModel">
+                <DouDropdownRadioGroup :model-value="pickedChoice" @update:model-value="pickModel">
                   <DouDropdownItem value="">
                     {{ t('thread.modelDefault', { label: defaultLabel }) }}
                   </DouDropdownItem>
-                  <DouDropdownItem v-for="model in state.models" :key="model.id" :value="model.id">
-                    {{ model.label }}
-                  </DouDropdownItem>
+                  <template v-for="model in modelChoices" :key="model.id">
+                    <DouDropdownSub v-if="model.acceptedEfforts.length" :title="model.label">
+                      <template #title>
+                        <span class="model-option-title">
+                          <span class="model-option-name">{{ model.label }}</span>
+                          <span v-if="pickedModelId === model.id" class="model-option-effort">
+                            {{ pickedEffortLabel }}
+                          </span>
+                        </span>
+                      </template>
+                      <DouDropdownItem :value="encodeModelChoice(model.id, '')">
+                        {{ t('settings.effort.default') }}
+                      </DouDropdownItem>
+                      <DouDropdownItem
+                        v-for="effort in model.acceptedEfforts"
+                        :key="effort"
+                        :value="encodeModelChoice(model.id, effort)"
+                      >
+                        {{ t(`settings.effort.${effort}`) }}
+                      </DouDropdownItem>
+                    </DouDropdownSub>
+                    <DouDropdownItem v-else :value="encodeModelChoice(model.id, '')">
+                      {{ model.label }}
+                    </DouDropdownItem>
+                  </template>
                 </DouDropdownRadioGroup>
               </template>
             </DouDropdown>
@@ -1699,10 +1767,32 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation-model {
-  max-width: 200px;
+  max-width: min(240px, 44vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-option-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.model-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option-effort {
+  flex: none;
+  font-size: var(--dou-font-size-xs);
+  color: var(--dou-color-primary);
+  font-weight: var(--dou-font-weight-medium);
 }
 
 /* A folded message from the coordinator the search led to, marked like a chat message. */

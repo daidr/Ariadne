@@ -188,7 +188,6 @@ test('the status slot survives working, queued, and idle states', async () => {
       live: null,
       activity: '正在检查',
       elapsed: '0:02',
-      fallback: null,
       escArmed: false,
       wait: null,
     },
