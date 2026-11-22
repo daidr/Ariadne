@@ -424,9 +424,18 @@ func (d *acpDriver) notification(method string, raw json.RawMessage) {
 		d.thoughtOption = (acpSession{Options: update.Options}).option("thought_level")
 	}
 	if update.Type == "usage_update" && update.Used != nil && *update.Used >= 0 {
-		d.contextUsed = update.Used
+		used := *update.Used
+		d.contextUsed = &used
 	}
 	if !d.active {
+		return
+	}
+	if update.Type == "usage_update" {
+		if update.Used != nil && *update.Used > 0 {
+			used := *update.Used
+			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: &used}})
+		}
+		d.emitLocked(Event{Type: "alive"})
 		return
 	}
 	if update.Type == "agent_thought_chunk" {
@@ -685,6 +694,11 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 		if pending != "" {
 			d.emitLocked(Event{Type: "text", Text: pending})
 		}
+		var contextInput *int64
+		if d.contextUsed != nil {
+			used := *d.contextUsed
+			contextInput = &used
+		}
 		if u := result.Usage; u != nil {
 			input := u.Input
 			// agy reports uncached input separately. Its total includes cached
@@ -692,9 +706,9 @@ func (d *acpDriver) Prompt(ctx context.Context, input Input, effort string) erro
 			if d.antigravity && (u.Total == nil || *u.Total-u.Output != u.Input) {
 				input += u.Cached + u.Written
 			}
-			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought, ContextInput: d.contextUsed}})
-		} else if d.contextUsed != nil {
-			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: d.contextUsed}})
+			d.emitLocked(Event{Type: "usage", Usage: Usage{Input: input, Output: u.Output, Cached: &u.Cached, CacheWrite: &u.Written, Reasoning: &u.Thought, ContextInput: contextInput}})
+		} else if contextInput != nil {
+			d.emitLocked(Event{Type: "usage", Usage: Usage{ContextInput: contextInput}})
 		}
 		var failure string
 		switch result.Stop {

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -298,6 +300,52 @@ func TestACPAntigravityUsageSeparatesTotalsFromContext(t *testing.T) {
 	check(codexParts(t, m, settings, request))
 }
 
+func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
+	command, _ := acpChildCommand(t, "agy-midturn-usage")
+	bridge := newTestBridge(t)
+	m := newTestSessions(t, ACPKind(bridge, nil), SessionOptions{})
+	settings := map[string]any{"command": command}
+	tools := []sdk.Tool{{Name: "read_file", Description: "Read a file", Parameters: map[string]any{"properties": map[string]any{"path": map[string]any{"type": "string"}}}}}
+	request := sdk.Request{Conversation: "thread-midturn", Messages: []sdk.Message{user("inspect repo")}, Tools: tools}
+
+	first := codexParts(t, m, settings, request)
+	lastPart(t, first, "tool-calls")
+	var call *sdk.Part
+	var firstUsage *sdk.Part
+	for i := range first {
+		switch first[i].Type {
+		case "tool-call":
+			call = &first[i]
+		case "usage":
+			firstUsage = &first[i]
+		}
+	}
+	if call == nil || call.Name != "read_file" {
+		t.Fatalf("expected tool-call read_file before first message, got %+v", first)
+	}
+	if firstUsage == nil || tokenValue(firstUsage.ContextInput) != 42000 || tokenValue(firstUsage.Input) != 0 || tokenValue(firstUsage.Output) != 0 {
+		t.Fatalf("expected mid-turn context usage on tool-call step, got %+v", firstUsage)
+	}
+
+	request.Messages = append(request.Messages,
+		sdk.Message{Role: "assistant", Content: textParts(first), ToolCalls: []sdk.ToolCall{{ID: call.ID, Name: call.Name, Arguments: call.Arguments}}},
+		sdk.Message{Role: "tool", ToolCallID: call.ID, Content: "file body"},
+	)
+	second := codexParts(t, m, settings, request)
+	lastPart(t, second, "stop")
+	var finalUsage *sdk.Part
+	for i := range second {
+		if second[i].Type == "usage" {
+			finalUsage = &second[i]
+		}
+	}
+	if finalUsage == nil || tokenValue(finalUsage.Input) != 170000 || tokenValue(finalUsage.Cached) != 167000 ||
+		tokenValue(finalUsage.Output) != 47 || tokenValue(finalUsage.Reasoning) != 7 ||
+		tokenValue(finalUsage.ContextInput) != 55000 {
+		t.Fatalf("unexpected final ACP usage after mid-turn update: %+v", finalUsage)
+	}
+}
+
 func TestACPModernProtocolAndRestart(t *testing.T) {
 	for _, restore := range []string{"session/resume", "session/load", "rejected"} {
 		t.Run(restore, func(t *testing.T) {
@@ -379,6 +427,7 @@ func TestACPChild(t *testing.T) {
 	restore := args[len(args)-1]
 	model, effort := "base", "high"
 	resumed := false
+	mcpURL := ""
 	options := func() json.RawMessage {
 		modelOption := fmt.Sprintf(`{"id":"model-picker","type":"select","category":"model","currentValue":%q,"options":[{"group":"test","name":"Test","options":[{"value":"base","name":"Base"},{"value":"alternate","name":"Alternate"},{"value":"fixed","name":"Fixed"}]}]}`, model)
 		if model == "fixed" {
@@ -399,7 +448,12 @@ func TestACPChild(t *testing.T) {
 		var request struct {
 			ID     json.RawMessage
 			Method string
-			Params struct{ ConfigID, Value string }
+			Params struct {
+				ConfigID, Value string
+				MCPServers      []struct {
+					URL string `json:"url"`
+				} `json:"mcpServers"`
+			}
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
 			t.Fatal(err)
@@ -414,12 +468,18 @@ func TestACPChild(t *testing.T) {
 			if restore != "session/load" {
 				capabilities["sessionCapabilities"] = map[string]any{"resume": map[string]any{}}
 			}
+			if restore == "agy-midturn-usage" {
+				capabilities["mcpCapabilities"] = map[string]any{"http": true}
+			}
 			hello := map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities}
 			if strings.HasPrefix(restore, "agy-") {
 				hello["agentInfo"] = map[string]any{"name": antigravityACPName, "version": "test-1"}
 			}
 			result = hello
 		case "session/new":
+			if len(request.Params.MCPServers) > 0 {
+				mcpURL = request.Params.MCPServers[0].URL
+			}
 			result = map[string]any{"sessionId": "test-session", "configOptions": options()}
 		case "session/load", "session/resume":
 			if restore == "rejected" {
@@ -444,6 +504,22 @@ func TestACPChild(t *testing.T) {
 			if restore == "agy-rpc-error" {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
 				continue
+			}
+			if restore == "agy-midturn-usage" {
+				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":42000,"size":400000}}}`))
+				resp, err := http.Post(mcpURL, "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"README.md"}}}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.ReadAll(resp.Body)
+				resp.Body.Close()
+				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":55000,"size":400000}}}`))
+				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}`))
+				result = map[string]any{
+					"stopReason": "end_turn",
+					"usage":      map[string]any{"inputTokens": 3000, "outputTokens": 47, "cachedReadTokens": 167000, "thoughtTokens": 7, "totalTokens": 170047},
+				}
+				break
 			}
 			type childUpdate struct{ kind, text string }
 			updates := []childUpdate{{kind: "agent_message_chunk", text: "answer"}}
