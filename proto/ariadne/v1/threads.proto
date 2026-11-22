@@ -1,0 +1,327 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "google/protobuf/struct.proto";
+
+// ThreadService manages discussion threads, their background commands, reviews,
+// line comments, and pull request check statuses.
+service ThreadService {
+  rpc ResumeThread(ResumeThreadRequest) returns (ResumeThreadResponse);
+  rpc CompleteThread(CompleteThreadRequest) returns (CompleteThreadResponse);
+  rpc EndAside(EndAsideRequest) returns (EndAsideResponse);
+  rpc SetThreadModel(SetThreadModelRequest) returns (SetThreadModelResponse);
+  rpc RemoveThreadReference(RemoveThreadReferenceRequest) returns (RemoveThreadReferenceResponse);
+  rpc KeepThreadReference(KeepThreadReferenceRequest) returns (KeepThreadReferenceResponse);
+  rpc GetCommandOutput(GetCommandOutputRequest) returns (GetCommandOutputResponse);
+  rpc StopCommand(StopCommandRequest) returns (StopCommandResponse);
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc ListLineComments(ListLineCommentsRequest) returns (ListLineCommentsResponse);
+  rpc GetPullRequestChecks(GetPullRequestChecksRequest) returns (GetPullRequestChecksResponse);
+}
+
+message TokenUsageTotals {
+  int64 input = 1 [jstype = JS_NUMBER];
+  int64 output = 2 [jstype = JS_NUMBER];
+  int64 cached = 3 [jstype = JS_NUMBER];
+  int64 cache_write = 4 [jstype = JS_NUMBER];
+  int64 reasoning = 5 [jstype = JS_NUMBER];
+  map<string, double> cost = 6;
+}
+
+message TodoProgress {
+  int32 done = 1;
+  int32 total = 2;
+}
+
+message ThreadArtifactRef {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+}
+
+message ThreadWorkspace {
+  optional string source_id = 1;
+  string label = 2;
+  optional string branch = 3;
+  optional string base = 4;
+  bool removed = 5;
+  bool parked = 6;
+}
+
+message ThreadBranchMerge {
+  string branch = 1;
+  string base = 2;
+  string method = 3;
+  string sha = 4;
+  string head = 5;
+  bool auto = 6;
+  int64 at = 7 [jstype = JS_NUMBER];
+}
+
+message ThreadChangeTotals {
+  int32 files = 1;
+  int32 added = 2;
+  int32 removed = 3;
+}
+
+message PullRequestChecksSummary {
+  string state = 1;
+  repeated string failed = 2;
+}
+
+message ThreadPullRequest {
+  int32 number = 1;
+  optional string reference = 2;
+  string url = 3;
+  string title = 4;
+  string state = 5;
+  bool conflicted = 6;
+  string head_sha = 7;
+  PullRequestChecksSummary checks = 8;
+}
+
+message ThreadAside {
+  int64 until = 1 [jstype = JS_NUMBER];
+  string reason = 2;
+  string by = 3;
+  bool due = 4;
+}
+
+message ThreadStopped {
+  string reason = 1;
+  string by = 2;
+  int64 at = 3 [jstype = JS_NUMBER];
+}
+
+message ThreadReference {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  google.protobuf.Struct settings = 4;
+  optional bool writable = 5;
+  string attention_id = 6;
+}
+
+message ThreadEndedReference {
+  string attention_id = 1;
+  bool kept = 2;
+}
+
+message ThreadReviewStatus {
+  string reviewer_id = 1;
+  int32 rounds = 2;
+  bool reviewing = 3;
+}
+
+message ThreadView {
+  string id = 1;
+  string project_id = 2;
+  string title = 3;
+  optional string node_id = 4;
+  string stage = 5;
+  optional string last_report = 6;
+  optional string last_summary = 7;
+  optional string last_headline = 8;
+  repeated ThreadArtifactRef last_artifacts = 9;
+  optional ThreadWorkspace workspace = 10;
+  optional ThreadBranchMerge merged = 11;
+  bool archived = 12;
+  optional ThreadChangeTotals changes = 13;
+  optional ThreadPullRequest pull_request = 14;
+  optional ThreadAside aside = 15;
+  optional ThreadStopped stopped = 16;
+  repeated ThreadReference references = 17;
+  repeated ThreadEndedReference ended_references = 18;
+  optional string model = 19;
+  optional string branch_slug = 20;
+  TokenUsageTotals usage = 21;
+  optional TodoProgress progress = 22;
+  optional string doing = 23;
+  int64 created_at = 24 [jstype = JS_NUMBER];
+  int64 updated_at = 25 [jstype = JS_NUMBER];
+  int64 active_at = 26 [jstype = JS_NUMBER];
+  optional string review_of = 27;
+  optional ThreadReviewStatus review = 28;
+  bool auto = 29;
+  optional string autopilot_held = 30;
+}
+
+message BackgroundCommandResult {
+  int32 exit_code = 1;
+  int64 ended_at = 2 [jstype = JS_NUMBER];
+  bool stopped = 3;
+}
+
+message BackgroundCommandView {
+  string id = 1;
+  string command = 2;
+  int64 started_at = 3 [jstype = JS_NUMBER];
+  optional string url = 4;
+  optional BackgroundCommandResult result = 5;
+}
+
+message LineComment {
+  string path = 1;
+  int32 line = 2;
+  string quote = 3;
+  string body = 4;
+  optional string side = 5;
+}
+
+message SentLineComment {
+  string id = 1;
+  string message_id = 2;
+  int64 sent_at = 3 [jstype = JS_NUMBER];
+  string path = 4;
+  int32 line = 5;
+  string quote = 6;
+  string body = 7;
+  optional string side = 8;
+}
+
+message ReviewComment {
+  string path = 1;
+  int32 line = 2;
+  string quote = 3;
+  string body = 4;
+  optional string side = 5;
+  string kind = 6;
+}
+
+message ReviewReply {
+  int32 comment = 1;
+  string outcome = 2;
+  string note = 3;
+}
+
+message ReviewReplyList {
+  repeated ReviewReply items = 1;
+}
+
+message ReviewRoundView {
+  string thread_id = 1;
+  string reviewer_id = 2;
+  int32 round = 3;
+  optional string head = 4;
+  int64 requested_at = 5 [jstype = JS_NUMBER];
+  optional string verdict = 6;
+  bool abandoned = 7;
+  optional string summary = 8;
+  repeated ReviewComment comments = 9;
+  optional ReviewReplyList replies = 10;
+  optional int64 submitted_at = 11 [jstype = JS_NUMBER];
+}
+
+message PullRequestCheck {
+  string id = 1;
+  string name = 2;
+  string status = 3;
+  optional string conclusion = 4;
+}
+
+message ResumeThreadRequest {
+  string thread_id = 1;
+}
+
+message ResumeThreadResponse {
+  ThreadView thread = 1;
+}
+
+message CompleteThreadRequest {
+  string thread_id = 1;
+}
+
+message CompleteThreadResponse {
+  ThreadView thread = 1;
+}
+
+message EndAsideRequest {
+  string thread_id = 1;
+}
+
+message EndAsideResponse {
+  ThreadView thread = 1;
+}
+
+message SetThreadModelRequest {
+  string thread_id = 1;
+  oneof model_action {
+    string model = 2;
+    bool use_default = 3;
+  }
+}
+
+message SetThreadModelResponse {
+  ThreadView thread = 1;
+}
+
+message RemoveThreadReferenceRequest {
+  string thread_id = 1;
+  string reference_id = 2;
+}
+
+message RemoveThreadReferenceResponse {
+  ThreadView thread = 1;
+}
+
+message KeepThreadReferenceRequest {
+  string thread_id = 1;
+  string reference_id = 2;
+}
+
+message KeepThreadReferenceResponse {
+  ThreadView thread = 1;
+}
+
+message GetCommandOutputRequest {
+  string thread_id = 1;
+  string command_id = 2;
+}
+
+message GetCommandOutputResponse {
+  BackgroundCommandView command = 1;
+  string tail = 2;
+}
+
+message StopCommandRequest {
+  string thread_id = 1;
+  string command_id = 2;
+}
+
+message StopCommandResponse {
+  BackgroundCommandView command = 1;
+}
+
+message ListReviewsRequest {
+  string thread_id = 1;
+  optional int64 before_id = 2 [jstype = JS_NUMBER];
+  optional int32 limit = 3;
+}
+
+message ListReviewsResponse {
+  repeated ReviewRoundView rounds = 1;
+  bool has_more = 2;
+  optional int64 next_before_id = 3 [jstype = JS_NUMBER];
+}
+
+message ListLineCommentsRequest {
+  string thread_id = 1;
+  optional string before_message_id = 2;
+  optional int32 limit = 3;
+}
+
+message ListLineCommentsResponse {
+  repeated SentLineComment comments = 1;
+  bool has_more = 2;
+  optional string next_before_message_id = 3;
+}
+
+message GetPullRequestChecksRequest {
+  string thread_id = 1;
+}
+
+message GetPullRequestChecksResponse {
+  string head_sha = 1;
+  repeated PullRequestCheck checks = 2;
+}

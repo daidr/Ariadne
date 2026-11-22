@@ -1,2 +1,5 @@
 export * from './gen/ariadne/v1/common_pb'
+export * from './gen/ariadne/v1/conversations_pb'
 export * from './gen/ariadne/v1/data_pb'
+export * from './gen/ariadne/v1/threads_pb'
+export * from './gen/ariadne/v1/workspaces_pb'

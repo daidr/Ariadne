@@ -33,6 +33,55 @@ func (reader Reader) SecondaryWorkspace(ctx context.Context, thread, source stri
 	return secondaryWorkspace(ctx, reader.DB, thread, source)
 }
 
+// SecondaryWorkspaces batch-loads the latest secondary workspace state for the
+// given thread IDs under a project and source in a single query.
+func (reader Reader) SecondaryWorkspaces(ctx context.Context, projectID, source string, threadIDs []string) (map[string]*WorkspaceView, error) {
+	result := map[string]*WorkspaceView{}
+	if len(threadIDs) == 0 {
+		return result, nil
+	}
+	wanted := make(map[string]bool, len(threadIDs))
+	for _, id := range threadIDs {
+		if id != "" {
+			wanted[id] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return result, nil
+	}
+	rows, err := records(ctx, reader.DB, `SELECT type, data FROM events WHERE project_id = ?
+	 AND type IN ('workspace.source.opened', 'workspace.source.removed')
+	 AND json_extract(data, '$.sourceId') = ? ORDER BY seq DESC`, projectID, source)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		value, err := row.json("data", nil)
+		if err != nil {
+			return nil, err
+		}
+		data := asObject(value)
+		tid := data.str("threadId")
+		if !wanted[tid] {
+			continue
+		}
+		if _, exists := result[tid]; exists {
+			continue
+		}
+		result[tid] = &WorkspaceView{
+			SourceID: source,
+			Label:    data.str("label"),
+			Branch:   data["branch"],
+			Base:     data["base"],
+			Removed:  row.text("type") == "workspace.source.removed",
+		}
+		if len(result) == len(wanted) {
+			break
+		}
+	}
+	return result, nil
+}
+
 func secondaryWorkspace(ctx context.Context, db queryer, thread, source string) (*WorkspaceView, error) {
 	rows, err := records(ctx, db, `SELECT type, data FROM events WHERE type IN ('workspace.source.opened', 'workspace.source.removed')
 	 AND json_extract(data, '$.threadId') = ? AND json_extract(data, '$.sourceId') = ? ORDER BY seq DESC LIMIT 1`, thread, source)
