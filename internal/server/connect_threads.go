@@ -12,6 +12,7 @@ import (
 	"github.com/daidr/Ariadne/internal/domainerr"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -76,10 +77,14 @@ func (h *threadServiceHandler) SetThreadModel(
 	req *connect.Request[ariadnev1.SetThreadModelRequest],
 ) (*connect.Response[ariadnev1.SetThreadModelResponse], error) {
 	var model *string
+	var effort *string
 	switch action := req.Msg.ModelAction.(type) {
 	case *ariadnev1.SetThreadModelRequest_UseDefault:
 		if !action.UseDefault {
 			return nil, badInput("model")
+		}
+		if req.Msg.Effort != nil && *req.Msg.Effort != "" {
+			return nil, badInput("effort")
 		}
 	case *ariadnev1.SetThreadModelRequest_Model:
 		value := action.Model
@@ -101,10 +106,17 @@ func (h *threadServiceHandler) SetThreadModel(
 			return nil, badInput("model")
 		}
 		model = &value
+		if req.Msg.Effort != nil && *req.Msg.Effort != "" {
+			e := *req.Msg.Effort
+			if !settings.ValidEffort(e) {
+				return nil, badInput("effort")
+			}
+			effort = &e
+		}
 	default:
 		return nil, badInput("model")
 	}
-	thread, err := h.api.options.Repository.SetThreadModel(ctx, req.Msg.GetThreadId(), model, "user")
+	thread, err := h.api.options.Repository.SetThreadModel(ctx, req.Msg.GetThreadId(), model, effort, "user")
 	if err != nil {
 		return nil, err
 	}

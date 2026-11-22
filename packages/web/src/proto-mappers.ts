@@ -225,6 +225,7 @@ export function fromProtoThreadView(t: ProtoThreadView): ThreadView {
       kept: e.kept,
     })),
     model: t.model ?? null,
+    effort: t.effort ?? null,
     branchSlug: t.branchSlug ?? null,
     usage: fromProtoUsageTotals(t.usage),
     progress: t.progress ? { done: t.progress.done, total: t.progress.total } : null,
@@ -323,7 +324,6 @@ export function fromProtoConversationView(c: ProtoConversationView): Conversatio
           startedAt: Number(c.turn.startedAt),
           model: c.turn.model ?? null,
           activity: c.turn.activity ?? null,
-          fallback: c.turn.fallback,
         }
       : null,
     lastOutcome: (c.lastOutcome ?? null) as TurnOutcome | null,

@@ -526,7 +526,7 @@ func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
 			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
 			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
 		},
-		"roles": object{"thread": object{"model": "m-oa", "fallback": "m-anth"}},
+		"roles": object{"thread": object{"model": "m-oa"}, "research": object{"model": "m-anth"}},
 	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +582,7 @@ func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
 	if usage := byID["model-openai"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"OpenAI"}) || !slices.Equal(usage.GetModelRoles(), []string{"thread"}) {
 		t.Fatalf("model-openai usage = %+v", usage)
 	}
-	if usage := byID["model-anthropic"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"Claude"}) || !slices.Equal(usage.GetModelRoles(), []string{"fallback"}) {
+	if usage := byID["model-anthropic"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"Claude"}) || !slices.Equal(usage.GetModelRoles(), []string{"research"}) {
 		t.Fatalf("model-anthropic usage = %+v", usage)
 	}
 	if usage := byID["search-tavily"].GetUsage(); !slices.Equal(usage.GetSearches(), []string{"tavily"}) {

@@ -1080,6 +1080,7 @@ func toProtoProjectThreadView(thread core.ThreadView) *ariadnev1.ProjectThreadVi
 		LastHeadline:  anyStringPtr(thread.LastHeadline),
 		Archived:      thread.Archived,
 		Model:         anyStringPtr(thread.Model),
+		Effort:        anyStringPtr(thread.Effort),
 		BranchSlug:    anyStringPtr(thread.BranchSlug),
 		Usage:         toProtoUsageTotals(thread.Usage),
 		Progress:      toProtoProjectProgress(thread.Progress),

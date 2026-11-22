@@ -314,11 +314,6 @@ func (repo *Repository) RecordModelRetry(ctx context.Context, id, turnID string,
 		return appendChanges(tx, projectID, []change{{"conversation.model_retry", object{"conversationId": id, "attempt": attempt, "delayMs": delayMS, "detail": detail}}})
 	})
 }
-func (repo *Repository) RecordModelFallback(ctx context.Context, id, turnID, from, to, detail string) error {
-	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
-		return appendChanges(tx, projectID, []change{{"conversation.model_fallback", object{"conversationId": id, "turnId": turnID, "from": from, "to": to, "detail": detail}}})
-	})
-}
 
 func UnknownResult(outcome string) string {
 	return fmt.Sprintf("The result of this call is unknown: the turn ended (%s) before it was recorded. It may already have taken effect; check before calling it again.", outcome)

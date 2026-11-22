@@ -28,7 +28,6 @@ type ConversationTurn struct {
 	StartedAt     int64                  `protobuf:"varint,2,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	Model         *string                `protobuf:"bytes,3,opt,name=model,proto3,oneof" json:"model,omitempty"`
 	Activity      *string                `protobuf:"bytes,4,opt,name=activity,proto3,oneof" json:"activity,omitempty"`
-	Fallback      bool                   `protobuf:"varint,5,opt,name=fallback,proto3" json:"fallback,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,13 +88,6 @@ func (x *ConversationTurn) GetActivity() string {
 		return *x.Activity
 	}
 	return ""
-}
-
-func (x *ConversationTurn) GetFallback() bool {
-	if x != nil {
-		return x.Fallback
-	}
-	return false
 }
 
 type ConversationWait struct {
@@ -287,6 +279,7 @@ type ConversationModelInfo struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	ContextTokens int64                  `protobuf:"varint,2,opt,name=context_tokens,json=contextTokens,proto3" json:"context_tokens,omitempty"`
 	CompactAt     int64                  `protobuf:"varint,3,opt,name=compact_at,json=compactAt,proto3" json:"compact_at,omitempty"`
+	Effort        *string                `protobuf:"bytes,4,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -340,6 +333,13 @@ func (x *ConversationModelInfo) GetCompactAt() int64 {
 		return x.CompactAt
 	}
 	return 0
+}
+
+func (x *ConversationModelInfo) GetEffort() string {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
+	}
+	return ""
 }
 
 type TodoItem struct {
@@ -9885,14 +9885,13 @@ var File_ariadne_v1_conversations_proto protoreflect.FileDescriptor
 const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\n" +
 	"\x1eariadne/v1/conversations.proto\x12\n" +
-	"ariadne.v1\x1a\x17ariadne/v1/common.proto\x1a\x18ariadne/v1/threads.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xb4\x01\n" +
+	"ariadne.v1\x1a\x17ariadne/v1/common.proto\x1a\x18ariadne/v1/threads.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x98\x01\n" +
 	"\x10ConversationTurn\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\n" +
 	"started_at\x18\x02 \x01(\x03B\x020\x02R\tstartedAt\x12\x19\n" +
 	"\x05model\x18\x03 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1f\n" +
-	"\bactivity\x18\x04 \x01(\tH\x01R\bactivity\x88\x01\x01\x12\x1a\n" +
-	"\bfallback\x18\x05 \x01(\bR\bfallbackB\b\n" +
+	"\bactivity\x18\x04 \x01(\tH\x01R\bactivity\x88\x01\x01B\b\n" +
 	"\x06_modelB\v\n" +
 	"\t_activity\"P\n" +
 	"\x10ConversationWait\x12\x0e\n" +
@@ -9918,12 +9917,14 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x05_turnB\x0f\n" +
 	"\r_last_outcomeB\r\n" +
 	"\v_last_errorB\a\n" +
-	"\x05_wait\"u\n" +
+	"\x05_wait\"\x9d\x01\n" +
 	"\x15ConversationModelInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12)\n" +
 	"\x0econtext_tokens\x18\x02 \x01(\x03B\x020\x02R\rcontextTokens\x12!\n" +
 	"\n" +
-	"compact_at\x18\x03 \x01(\x03B\x020\x02R\tcompactAt\"`\n" +
+	"compact_at\x18\x03 \x01(\x03B\x020\x02R\tcompactAt\x12\x1b\n" +
+	"\x06effort\x18\x04 \x01(\tH\x00R\x06effort\x88\x01\x01B\t\n" +
+	"\a_effort\"`\n" +
 	"\bTodoItem\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1b\n" +
@@ -11107,6 +11108,7 @@ func file_ariadne_v1_conversations_proto_init() {
 	file_ariadne_v1_threads_proto_init()
 	file_ariadne_v1_conversations_proto_msgTypes[0].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[2].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[3].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[4].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[5].OneofWrappers = []any{
 		(*TodoPosition_AfterMessageId)(nil),

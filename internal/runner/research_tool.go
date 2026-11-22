@@ -40,12 +40,9 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 		if question == "" || len(question) > 32000 || textutil.HeadUnits(question, 8000) != question {
 			return "", errors.New("give a research question of at most 8000 characters")
 		}
-		model, err := turn.Settings.ResolveModel("research", "", turn.Models.Kinds())
+		model, err := turn.Settings.ResolveResearch(parent, turn.Models.Kinds())
 		if err != nil {
 			return "", err
-		}
-		if model == nil {
-			model = parent
 		}
 		return turn.research(ctx, id, question, system, model, specs, readable, limits)
 	}

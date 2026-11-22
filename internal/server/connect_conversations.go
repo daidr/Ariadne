@@ -59,8 +59,7 @@ func (h *conversationServiceHandler) GetConversation(
 	}
 	var model any
 	if h.api.options.Settings != nil {
-		fallback := snapshot.Conversation.Turn != nil && snapshot.Conversation.Turn.Fallback
-		model = map[string]any(h.api.options.Settings.ConversationModel(snapshot.Conversation.Role, snapshot.ThreadModel, fallback))
+		model = map[string]any(h.api.options.Settings.ConversationModel(snapshot.Conversation.Role, snapshot.ThreadModel, snapshot.ThreadEffort))
 	} else if h.api.options.ModelOf != nil {
 		dummyReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 		if reqErr == nil {

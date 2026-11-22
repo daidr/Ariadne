@@ -85,7 +85,8 @@ func (runner *Runner) Resolve(ctx context.Context, conversation core.Conversatio
 			return nil, err
 		}
 		model, _ := thread.Model.(string)
-		return runner.Settings.ResolveModel("thread", model, kinds)
+		effort, _ := thread.Effort.(string)
+		return runner.Settings.ResolveModel("thread", model, effort, kinds)
 	}
 	triage, err := runner.Repository.PendingIsTriage(ctx, conversation.ID)
 	if err != nil {
@@ -388,25 +389,17 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 
 		request.Messages = turn.withImages(ctx, messages)
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
-		if err != nil {
-			var failure *modelstep.Failure
-			if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.HasStatefulSessions() && failure.ContextLimit && !recoveredContext {
-				// The failed native session has been released. Compact if there is
-				// enough history, then resume the same discussion with a fresh session.
-				recoveredContext = true
-				lastInput = max(lastInput, threshold)
-				continue
-			}
-			if ctx.Err() == nil && model.Fallback != nil && failure != nil && failure.Exhausted != nil {
-				if err := turn.Repository.RecordModelFallback(ctx, conversation.ID, turn.id, model.Label, model.Fallback.Label, *failure.Exhausted); err != nil {
-					return err
+			if err != nil {
+				var failure *modelstep.Failure
+				if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.HasStatefulSessions() && failure.ContextLimit && !recoveredContext {
+					// The failed native session has been released. Compact if there is
+					// enough history, then resume the same discussion with a fresh session.
+					recoveredContext = true
+					lastInput = max(lastInput, threshold)
+					continue
 				}
-				model = model.Fallback
-				lastInput, compactionFailed = 0, false
-				continue
+				return err
 			}
-			return err
-		}
 		if answer.Usage != nil {
 			if answer.Usage.ContextInput != nil {
 				if *answer.Usage.ContextInput > 0 {

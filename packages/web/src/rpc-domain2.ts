@@ -519,6 +519,7 @@ function fromProtoProjectThreadView(thread: ProjectThreadView): ThreadView {
       kept: ref.kept,
     })),
     model: thread.model ?? null,
+    effort: thread.effort ?? null,
     branchSlug: thread.branchSlug ?? null,
     usage: fromProtoUsageTotals(thread.usage),
     progress: thread.progress ? { done: thread.progress.done, total: thread.progress.total } : null,

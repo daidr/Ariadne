@@ -55,6 +55,7 @@ type NewThread struct {
 	Title  string
 	NodeID *string
 	Model  *string
+	Effort *string
 	Branch *string
 	Auto   bool
 }
@@ -95,7 +96,7 @@ func (repo *Repository) createThread(ctx context.Context, tx *eventstore.Transac
 	if input.Branch != nil {
 		branch = *input.Branch
 	}
-	data := object{"threadId": id, "title": title, "nodeId": input.NodeID, "model": input.Model, "branch": projectsettings.BranchSlug(branch)}
+	data := object{"threadId": id, "title": title, "nodeId": input.NodeID, "model": input.Model, "effort": input.Effort, "branch": projectsettings.BranchSlug(branch)}
 	if input.Auto {
 		data["auto"] = true
 	}
@@ -130,12 +131,12 @@ func (repo *Repository) CreateBriefedThread(ctx context.Context, projectID strin
 	})
 	return
 }
-func (repo *Repository) SetThreadModel(ctx context.Context, threadID string, model *string, by string) (ThreadView, error) {
+func (repo *Repository) SetThreadModel(ctx context.Context, threadID string, model, effort *string, by string) (ThreadView, error) {
 	return repo.mutateThread(ctx, threadID, func(_ *eventstore.Transaction, current ThreadView) ([]change, error) {
-		if encoded(current.Model) == encoded(model) {
+		if encoded(current.Model) == encoded(model) && encoded(current.Effort) == encoded(effort) {
 			return nil, nil
 		}
-		return []change{{"thread.model_set", object{"threadId": threadID, "model": model, "by": by}}}, nil
+		return []change{{"thread.model_set", object{"threadId": threadID, "model": model, "effort": effort, "by": by}}}, nil
 	})
 }
 

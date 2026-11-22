@@ -384,7 +384,6 @@ function fromProtoRole(role?: ProtoRoleConfig): RoleInput {
   return {
     model: role?.model ?? null,
     effort: (role?.effort as Effort | undefined) ?? null,
-    fallback: role?.fallback ?? null,
   }
 }
 
@@ -392,7 +391,6 @@ function toProtoRole(role: RoleInput) {
   return {
     ...(role.model !== null ? { model: role.model } : {}),
     ...(role.effort !== null ? { effort: role.effort } : {}),
-    ...(role.fallback !== null ? { fallback: role.fallback } : {}),
   }
 }
 

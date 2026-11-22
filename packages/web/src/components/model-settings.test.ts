@@ -68,10 +68,10 @@ function makeModelSettings(anthropicEnabled: boolean): ModelSettings {
       },
     ],
     roles: {
-      thread: { model: 'm-oa', effort: null, fallback: null },
-      coordinator: { model: null, effort: null, fallback: null },
-      triage: { model: null, effort: null, fallback: null },
-      research: { model: null, effort: null, fallback: null },
+      thread: { model: 'm-oa', effort: null },
+      coordinator: { model: null, effort: null },
+      triage: { model: null, effort: null },
+      research: { model: null, effort: null },
     },
     showCost: false,
   }
@@ -169,5 +169,69 @@ describe('ModelSettings', () => {
 
     applyModelSettings(makeModelSettings(true))
     expect(state.models.map((model) => model.id)).toEqual(['m-oa', 'm-anth'])
+  })
+
+  test('removes fallback field and lets research model pick model and effort via DouCascader', async () => {
+    const initial = makeModelSettings(true)
+    initial.models[0]!.efforts = ['low', 'medium', 'high']
+    initial.models[1]!.efforts = ['low', 'medium', 'high', 'max']
+    initial.roles.research = { model: null, effort: 'low' }
+
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(initial)
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    vi.spyOn(api, 'saveConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+    let savedInput: ModelSettingsInput | null = null
+    vi.spyOn(api, 'saveModelSettings').mockImplementation(async (input) => {
+      savedInput = input
+      return {
+        ...initial,
+        roles: input.roles,
+        problems: [],
+      }
+    })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: false, tab: 'models' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+
+    // Fallback field is no longer rendered.
+    expect(wrapper.text()).not.toContain('备用模型')
+
+    // All three visible roles (thread, coordinator, research) use DouCascader.
+    const cascaders = wrapper.findAllComponents({ name: 'DouCascader' })
+    expect(cascaders).toHaveLength(3)
+    const researchCascader = cascaders[2]!
+    expect(researchCascader.props('modelValue')).toEqual(['', 'low'])
+
+    // Update research role to explicit model + effort and save.
+    await researchCascader.vm.$emit('update:modelValue', ['m-anth', 'max'])
+    await flushPromises()
+
+    const saveButton = wrapper.findAll('button').find((button) => button.text().trim() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(savedInput).not.toBeNull()
+    expect(savedInput!.roles.research).toEqual({ model: 'm-anth', effort: 'max' })
+    expect('fallback' in savedInput!.roles.thread).toBe(false)
+    expect('fallback' in savedInput!.roles.coordinator).toBe(false)
+    expect('fallback' in savedInput!.roles.research).toBe(false)
   })
 })

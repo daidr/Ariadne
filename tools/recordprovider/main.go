@@ -189,7 +189,7 @@ func run(ctx context.Context, raw []string) error {
 		}
 		defer remove()
 	}
-	resolved, err := user.ResolveModel("thread", id, modelReg.Kinds())
+	resolved, err := user.ResolveModel("thread", id, "", modelReg.Kinds())
 	if err != nil {
 		return err
 	}

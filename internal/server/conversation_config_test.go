@@ -82,19 +82,42 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 		t.Fatalf("expected invalid argument for unknown model, got %v", err)
 	}
 
-	// Setting valid model and resetting to default succeed.
+	// Setting valid model with effort, rejecting invalid effort or effort with use_default, and resetting to default.
+	badEffort := "turbo"
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m"},
+		Effort:      &badEffort,
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for bad effort, got %v", err)
+	}
+	highEffort := "high"
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_UseDefault{UseDefault: true},
+		Effort:      &highEffort,
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for effort with use_default, got %v", err)
+	}
 	setResp, err := threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
 		ThreadId:    "thr_a",
 		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m"},
+		Effort:      &highEffort,
 	}))
-	if err != nil || setResp.Msg.Thread.Model == nil || *setResp.Msg.Thread.Model != "m" {
-		t.Fatalf("set model failed: resp=%+v err=%v", setResp, err)
+	if err != nil || setResp.Msg.Thread.Model == nil || *setResp.Msg.Thread.Model != "m" || setResp.Msg.Thread.Effort == nil || *setResp.Msg.Thread.Effort != "high" {
+		t.Fatalf("set model+effort failed: resp=%+v err=%v", setResp, err)
+	}
+	convResp, err := convClient.GetConversation(t.Context(), connect.NewRequest(&ariadnev1.GetConversationRequest{ConversationId: "thr_a"}))
+	if err != nil || convResp.Msg.Model == nil || convResp.Msg.Model.Id != "m" || convResp.Msg.Model.Effort == nil || *convResp.Msg.Model.Effort != "high" {
+		t.Fatalf("GetConversation model+effort = %+v, err=%v", convResp.Msg.Model, err)
 	}
 	resetResp, err := threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
 		ThreadId:    "thr_a",
 		ModelAction: &ariadnev1.SetThreadModelRequest_UseDefault{UseDefault: true},
 	}))
-	if err != nil || resetResp.Msg.Thread.Model != nil {
+	if err != nil || resetResp.Msg.Thread.Model != nil || resetResp.Msg.Thread.Effort != nil {
 		t.Fatalf("reset model failed: resp=%+v err=%v", resetResp, err)
 	}
 	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{

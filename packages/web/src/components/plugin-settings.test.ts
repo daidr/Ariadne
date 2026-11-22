@@ -90,19 +90,19 @@ describe('plugin-settings helpers', () => {
       id: 'multi',
       usage: {
         modelProviders: ['OpenAI', 'DeepSeek'],
-        modelRoles: ['thread', 'fallback'],
+        modelRoles: ['thread', 'research'],
         searches: ['tavily'],
         projects: ['Ariadne', 'Demo', 'Web', 'CLI'],
       },
     })
     expect(hasPluginUsage(used)).toBe(true)
     expect(formatPluginUsage(used.usage)).toBe(
-      '模型提供方 OpenAI、DeepSeek（讨论串默认、备用）；当前联网搜索；项目 Ariadne、Demo 等 4 个项目',
+      '模型提供方 OpenAI、DeepSeek（讨论串默认、子调研）；当前联网搜索；项目 Ariadne、Demo 等 4 个项目',
     )
 
     locale.value = 'en'
     expect(formatPluginUsage(used.usage)).toBe(
-      'Model provider OpenAI, DeepSeek (Thread default, Fallback); Current web search; 4 projects (Ariadne, Demo, ...)',
+      'Model provider OpenAI, DeepSeek (Thread default, Research); Current web search; 4 projects (Ariadne, Demo, ...)',
     )
     expect(
       formatPluginUsage({

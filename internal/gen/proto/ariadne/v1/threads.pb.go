@@ -962,6 +962,7 @@ type ThreadView struct {
 	Review          *ThreadReviewStatus     `protobuf:"bytes,28,opt,name=review,proto3,oneof" json:"review,omitempty"`
 	Auto            bool                    `protobuf:"varint,29,opt,name=auto,proto3" json:"auto,omitempty"`
 	AutopilotHeld   *string                 `protobuf:"bytes,30,opt,name=autopilot_held,json=autopilotHeld,proto3,oneof" json:"autopilot_held,omitempty"`
+	Effort          *string                 `protobuf:"bytes,31,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1202,6 +1203,13 @@ func (x *ThreadView) GetAuto() bool {
 func (x *ThreadView) GetAutopilotHeld() string {
 	if x != nil && x.AutopilotHeld != nil {
 		return *x.AutopilotHeld
+	}
+	return ""
+}
+
+func (x *ThreadView) GetEffort() string {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
 	}
 	return ""
 }
@@ -2170,6 +2178,7 @@ type SetThreadModelRequest struct {
 	//	*SetThreadModelRequest_Model
 	//	*SetThreadModelRequest_UseDefault
 	ModelAction   isSetThreadModelRequest_ModelAction `protobuf_oneof:"model_action"`
+	Effort        *string                             `protobuf:"bytes,4,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2234,6 +2243,13 @@ func (x *SetThreadModelRequest) GetUseDefault() bool {
 		}
 	}
 	return false
+}
+
+func (x *SetThreadModelRequest) GetEffort() string {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
+	}
+	return ""
 }
 
 type isSetThreadModelRequest_ModelAction interface {
@@ -3215,7 +3231,7 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\vreviewer_id\x18\x01 \x01(\tR\n" +
 	"reviewerId\x12\x16\n" +
 	"\x06rounds\x18\x02 \x01(\x05R\x06rounds\x12\x1c\n" +
-	"\treviewing\x18\x03 \x01(\bR\treviewing\"\x92\f\n" +
+	"\treviewing\x18\x03 \x01(\bR\treviewing\"\xba\f\n" +
 	"\n" +
 	"ThreadView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
@@ -3256,7 +3272,8 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\treview_of\x18\x1b \x01(\tH\x0eR\breviewOf\x88\x01\x01\x12;\n" +
 	"\x06review\x18\x1c \x01(\v2\x1e.ariadne.v1.ThreadReviewStatusH\x0fR\x06review\x88\x01\x01\x12\x12\n" +
 	"\x04auto\x18\x1d \x01(\bR\x04auto\x12*\n" +
-	"\x0eautopilot_held\x18\x1e \x01(\tH\x10R\rautopilotHeld\x88\x01\x01B\n" +
+	"\x0eautopilot_held\x18\x1e \x01(\tH\x10R\rautopilotHeld\x88\x01\x01\x12\x1b\n" +
+	"\x06effort\x18\x1f \x01(\tH\x11R\x06effort\x88\x01\x01B\n" +
 	"\n" +
 	"\b_node_idB\x0e\n" +
 	"\f_last_reportB\x0f\n" +
@@ -3278,7 +3295,8 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\n" +
 	"_review_ofB\t\n" +
 	"\a_reviewB\x11\n" +
-	"\x0f_autopilot_held\"o\n" +
+	"\x0f_autopilot_heldB\t\n" +
+	"\a_effort\"o\n" +
 	"\x17BackgroundCommandResult\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x1d\n" +
 	"\bended_at\x18\x02 \x01(\x03B\x020\x02R\aendedAt\x12\x18\n" +
@@ -3365,13 +3383,15 @@ const file_ariadne_v1_threads_proto_rawDesc = "" +
 	"\x0fEndAsideRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"B\n" +
 	"\x10EndAsideResponse\x12.\n" +
-	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.ThreadViewR\x06thread\"\x7f\n" +
+	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.ThreadViewR\x06thread\"\xa7\x01\n" +
 	"\x15SetThreadModelRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\x16\n" +
 	"\x05model\x18\x02 \x01(\tH\x00R\x05model\x12!\n" +
 	"\vuse_default\x18\x03 \x01(\bH\x00R\n" +
-	"useDefaultB\x0e\n" +
-	"\fmodel_action\"H\n" +
+	"useDefault\x12\x1b\n" +
+	"\x06effort\x18\x04 \x01(\tH\x01R\x06effort\x88\x01\x01B\x0e\n" +
+	"\fmodel_actionB\t\n" +
+	"\a_effort\"H\n" +
 	"\x16SetThreadModelResponse\x12.\n" +
 	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.ThreadViewR\x06thread\"^\n" +
 	"\x1cRemoveThreadReferenceRequest\x12\x1b\n" +

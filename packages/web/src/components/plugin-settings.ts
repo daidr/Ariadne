@@ -17,7 +17,6 @@ const ROLE_KEYS: Record<string, MessageKey> = {
   coordinator: 'plugins.usage.role.coordinator',
   triage: 'plugins.usage.role.triage',
   research: 'plugins.usage.role.research',
-  fallback: 'plugins.usage.role.fallback',
 }
 
 /** Returns human-facing capability categories provided by a plugin, in display order. */

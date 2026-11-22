@@ -35,7 +35,6 @@ message ConversationTurn {
   int64 started_at = 2 [jstype = JS_NUMBER];
   optional string model = 3;
   optional string activity = 4;
-  bool fallback = 5;
 }
 
 message ConversationWait {
@@ -62,6 +61,7 @@ message ConversationModelInfo {
   string id = 1;
   int64 context_tokens = 2 [jstype = JS_NUMBER];
   int64 compact_at = 3 [jstype = JS_NUMBER];
+  optional string effort = 4;
 }
 
 message TodoItem {
