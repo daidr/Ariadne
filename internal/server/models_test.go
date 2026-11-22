@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
@@ -59,19 +59,15 @@ func TestModelSettingsConnectAndRealProviderCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{DataDir: filepath.Join(directory, "providers"), Client: service.Client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer builtins.Close(context.Background())
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: service.Client()}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(service.Client()) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer remove()
 	}
-	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: builtins.Registry})
+	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: modelReg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,19 +170,15 @@ func TestSaveModelSettingsProbeTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{DataDir: filepath.Join(directory, "providers"), Client: slowService.Client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer builtins.Close(context.Background())
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: slowService.Client()}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(slowService.Client()) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer remove()
 	}
-	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: builtins.Registry})
+	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: modelReg})
 	if err != nil {
 		t.Fatal(err)
 	}

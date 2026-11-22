@@ -2,114 +2,21 @@ package models
 
 import (
 	"context"
+	"errors"
 	"iter"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestBuiltinProviderMetadataDiscoveryAndTracing(t *testing.T) {
-	home := t.TempDir()
-	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte("{}"), 0600)
-	env := map[string]string{"OPENAI_API_KEY": " first ", "OPENAI_BASE_URL": " https://example.test/v1 ", "DEEPSEEK_API_KEY": "second", "OPENROUTER_API_KEY": "third", "ANTHROPIC_API_KEY": "fourth", "CLAUDE_CODE_OAUTH_TOKEN": "oauth"}
-	request := sdk.Request{Model: "model", Effort: "high", Messages: []sdk.Message{{Role: "system", Content: "instructions"}, {Role: "user", Content: "hello"}}, Tools: []sdk.Tool{{Name: "read", Description: "Read", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}}}}
-	config := map[string]any{"baseUrl": "https://example.test/v1", "apiKey": "key"}
-	builtins, err := NewBuiltins(BuiltinOptions{DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer builtins.Close(context.Background())
-	for _, provider := range HTTPBuiltinProviders(HTTPOptions{}) {
-		remove, err := builtins.Registry.Register(provider)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer remove()
-	}
-	native := []any{}
-	for _, provider := range builtins.Registry.Providers() {
-		found := []sdk.FoundProvider{}
-		if provider.Find != nil {
-			found = append(found, provider.Find(sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return true }})...)
-		}
-		describe := provider.Describe(config, request)
-		if provider.Info.Kind == "codex" {
-			trace, _ := describe.(map[string]any)
-			argv, _ := trace["argv"].([]string)
-			for _, setting := range []string{
-				"features.hooks=false", "tools.experimental_request_user_input.enabled=false",
-				"tools.update_plan.enabled=false", "features.multi_agent_v2=false",
-				"features.code_mode=false", "features.code_mode_only=false", "features.deferred_executor=false",
-				"features.request_permissions_tool=false", "features.send_message_to_user_async=false",
-				"features.token_budget=false", "features.current_time_reminder=false",
-			} {
-				index := slices.Index(argv, setting)
-				if index < 1 || argv[index-1] != "-c" {
-					t.Fatalf("Codex launch missing %s: %v", setting, argv)
-				}
-			}
-		}
-		native = append(native, map[string]any{"info": provider.Info, "found": found, "describe": describe})
-	}
-	if len(native) < 6 {
-		t.Fatalf("missing builtins: got %d", len(native))
-	}
-}
-
-func TestAntigravityBuiltinDiscoveryAndDefaultCommand(t *testing.T) {
-	ctx := t.Context()
-	builtins, err := NewBuiltins(BuiltinOptions{DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
-	provider, ok := builtins.Registry.Get("antigravity")
-	if !ok || !provider.Info.Program {
-		t.Fatal("Antigravity program provider missing")
-	}
-	command := provider.Info.Settings.Properties["command"].Default
-	if command != "agy acp --process-per-session --disable-telemetry" || len(provider.Info.Settings.Required) != 0 {
-		t.Fatal("unexpected Antigravity default command", command)
-	}
-	request := sdk.Request{Model: "fixture", Effort: "high"}
-	trace := provider.Describe(nil, request).(map[string]any)
-	if !slices.Equal(trace["argv"].([]string), strings.Fields(command.(string))) {
-		t.Fatal("the preset and runtime command diverged", trace)
-	}
-	override := provider.Describe(map[string]any{"command": "my-agy acp"}, request).(map[string]any)
-	if !slices.Equal(override["argv"].([]string), []string{"my-agy", "acp"}) {
-		t.Fatal("the command override was ignored", override)
-	}
-	found := provider.Find(sdk.FindContext{Which: func(command string) bool { return command == "agy" }})
-	if len(found) != 1 || found[0].From["program"] != "agy" {
-		t.Fatal("installed CLI was not discovered", found)
-	}
-	if found := provider.Find(sdk.FindContext{Which: func(string) bool { return false }}); len(found) > 0 {
-		t.Fatal("missing CLI was offered", found)
-	}
-	if details, err := provider.Check(ctx, map[string]any{"command": "missing-agy-fixture acp"}); err != nil || details["en"] != "command not found: missing-agy-fixture" {
-		t.Fatal("missing CLI check", details, err)
-	}
-}
-func TestRegistryLifecycleAndModelCheck(t *testing.T) {
+func TestModelRegistryCheckAndLifecycle(t *testing.T) {
 	registry := New()
 	closed := false
-	provider := sdk.ModelProvider{Info: sdk.ModelProviderInfo{Kind: "test"}, Stream: func(ctx context.Context, config map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+	provider := sdk.ModelProvider{Info: sdk.ModelProviderInfo{Kind: "fixture", Title: sdk.LocalizedText{"zh-CN": "测试", "en": "Test"}, Settings: sdk.SettingsSchema{Type: "object", Properties: map[string]sdk.SettingField{}}}, Stream: func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
 		return func(yield func(sdk.Part) bool) {
 			defer func() { closed = true }()
-			if request.Cache == nil || *request.Cache || len(request.Tools) != 0 || request.Messages[0].Content != "Hi" {
-				t.Error("wrong check request", request)
-			}
-			yield(sdk.Part{Type: "alive"})
 			if !yield(sdk.Part{Type: "text", Text: "hi"}) {
 				return
 			}
@@ -158,79 +65,79 @@ func TestRegistryLifecycleAndModelCheck(t *testing.T) {
 	}
 	remove()
 }
-func TestBuiltinCloseReleasesProgramsAndRegistry(t *testing.T) {
-	builtins, err := NewBuiltins(BuiltinOptions{DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = builtins.Close(context.Background()) })
-	if len(builtins.Registry.Kinds()) != 4 {
-		t.Fatalf("missing builtins: got %d", len(builtins.Registry.Kinds()))
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	if err := builtins.Close(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if len(builtins.Registry.Kinds()) != 0 || builtins.bridge.Count() != 0 {
-		t.Fatal("closed builtins retained registrations")
-	}
-	for _, sessions := range builtins.sessions {
-		if sessions.Count() != 0 {
-			t.Fatal("closed builtins retained sessions")
-		}
-	}
-}
 
-func TestRegistryMetadataOwnershipAndFoundSetupFiltering(t *testing.T) {
-	builtins, err := NewBuiltins(BuiltinOptions{DataDir: t.TempDir()})
+func TestRegistryForgetAndValidateSettings(t *testing.T) {
+	registry := New()
+	var forgotten []string
+	wantErr := errors.New("cleanup failed")
+
+	noopStream := func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
+		return func(func(sdk.Part) bool) {}
+	}
+	removeA, err := registry.Register(sdk.ModelProvider{
+		Info: sdk.ModelProviderInfo{
+			Kind: "alpha",
+			Capabilities: sdk.ModelProviderCapabilities{
+				StatefulSessions:   true,
+				PreserveModelOrder: true,
+				PreferDefaultModel: true,
+			},
+		},
+		Stream: noopStream,
+		ValidateSettings: func(values map[string]any) error {
+			if values["command"] == "" {
+				return errors.New("empty command")
+			}
+			return nil
+		},
+		Forget: func(_ context.Context, conversation string) error {
+			forgotten = append(forgotten, "alpha:"+conversation)
+			return nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer builtins.Close(context.Background())
-	for _, provider := range HTTPBuiltinProviders(HTTPOptions{}) {
-		remove, err := builtins.Registry.Register(provider)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer remove()
-	}
-	providers := builtins.Registry.Providers()
-	openAIIndex := -1
-	for i, p := range providers {
-		if p.Info.Kind == "openai-compatible" {
-			openAIIndex = i
-			break
-		}
-	}
-	if openAIIndex < 0 {
-		t.Fatal("missing openai-compatible provider")
-	}
-	providers[openAIIndex].Info.Title["zh-CN"] = "changed"
-	field := providers[openAIIndex].Info.Settings.Properties["apiKey"]
-	field.Secret = false
-	providers[openAIIndex].Info.Settings.Properties["apiKey"] = field
-	provider, _ := builtins.Registry.Get("openai-compatible")
-	if provider.Info.Title["zh-CN"] == "changed" || !provider.Info.Settings.Properties["apiKey"].Secret {
-		t.Fatal("caller changed registered provider metadata")
-	}
-	store, err := settings.Open(filepath.Join(t.TempDir(), "config.json"))
+	defer removeA()
+
+	removeB, err := registry.Register(sdk.ModelProvider{
+		Info:   sdk.ModelProviderInfo{Kind: "beta"},
+		Stream: noopStream,
+		Forget: func(_ context.Context, conversation string) error {
+			forgotten = append(forgotten, "beta:"+conversation)
+			return wantErr
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	context := sdk.FindContext{Env: map[string]string{"OPENAI_API_KEY": "key"}, Home: t.TempDir(), Which: func(string) bool { return false }}
-	found := store.FoundSetups(context, builtins.Registry.Providers())
-	if len(found) != 1 || found[0].ID != "openai-compatible:OPENAI_API_KEY" {
-		t.Fatal(found)
+	defer removeB()
+
+	alpha, ok := registry.Get("alpha")
+	if !ok || !alpha.Info.HasStatefulSessions() || !alpha.Info.PreservesModelOrder() || !alpha.Info.PrefersDefaultModel() {
+		t.Fatalf("expected capability helpers to reflect Capabilities: %+v", alpha.Info)
 	}
-	if _, err := store.UseFound(found[0], "model", nil, time.Now()); err != nil {
-		t.Fatal(err)
+	if err := registry.ValidateSettings("alpha", map[string]any{"command": ""}); err == nil {
+		t.Fatal("expected ValidateSettings to fail for empty command")
 	}
-	if found := store.FoundSetups(context, builtins.Registry.Providers()); len(found) != 0 {
-		t.Fatal("already used provider offered again", found)
+	if err := registry.ValidateSettings("alpha", map[string]any{"command": "echo"}); err != nil {
+		t.Fatalf("unexpected ValidateSettings error: %v", err)
 	}
-	panicProvider := sdk.ModelProvider{Info: sdk.ModelProviderInfo{Kind: "broken"}, Find: func(sdk.FindContext) []sdk.FoundProvider { panic("broken plugin") }}
-	if found := store.FoundSetups(context, []sdk.ModelProvider{panicProvider}); len(found) != 0 {
-		t.Fatal(found)
+	if err := registry.ValidateSettings("unknown", map[string]any{}); err != nil {
+		t.Fatalf("unknown kind should not fail ValidateSettings: %v", err)
+	}
+
+	if err := registry.Forget(t.Context(), ""); err != nil {
+		t.Fatalf("empty conversation forget should be a no-op: %v", err)
+	}
+	if len(forgotten) != 0 {
+		t.Fatalf("unexpected forget calls: %v", forgotten)
+	}
+	err = registry.Forget(t.Context(), "thr_123")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected joined forget error, got %v", err)
+	}
+	if !slices.Equal(forgotten, []string{"alpha:thr_123", "beta:thr_123"}) {
+		t.Fatalf("expected both providers to receive Forget, got %v", forgotten)
 	}
 }

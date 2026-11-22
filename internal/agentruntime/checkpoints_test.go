@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"encoding/json"

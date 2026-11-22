@@ -86,8 +86,32 @@ func (api *API) deleteProject(ctx context.Context, id string) error {
 			}
 		}()
 	}
+	var conversations []string
+	if api.options.Models != nil {
+		if project, err := api.options.Repository.GetProject(ctx, id); err == nil {
+			if project.CoordinatorID != "" {
+				conversations = append(conversations, project.CoordinatorID)
+			}
+		}
+		if threads, err := api.options.Repository.ListThreads(ctx, id); err == nil {
+			for _, thread := range threads {
+				if thread.ID != "" {
+					conversations = append(conversations, thread.ID)
+				}
+			}
+		}
+	}
 	if err := api.options.Repository.DeleteProject(ctx, id); err != nil {
 		return err
+	}
+	if api.options.Models != nil && len(conversations) > 0 {
+		forgetCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		for _, conversation := range conversations {
+			if err := api.options.Models.Forget(forgetCtx, conversation); err != nil {
+				api.report(err)
+			}
+		}
+		cancel()
 	}
 	api.syncer.Forget(id)
 	api.state.DropProject(id)

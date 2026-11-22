@@ -1,4 +1,4 @@
-package agents
+package codex
 
 import (
 	"bufio"
@@ -13,8 +13,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/sdk"
 )
+
+func newTestSessions(t *testing.T, kind agentruntime.Kind, options agentruntime.SessionOptions) *agentruntime.Sessions {
+	t.Helper()
+	if options.DataDir == "" {
+		options.DataDir = t.TempDir()
+	}
+	if options.Quiet == 0 {
+		options.Quiet = 5 * time.Millisecond
+	}
+	m, err := agentruntime.NewSessions(kind, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := m.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	return m
+}
+
+func lastPart(t *testing.T, items []sdk.Part, reason string) {
+	t.Helper()
+	if len(items) == 0 || items[len(items)-1].Reason != reason {
+		t.Fatalf("wanted finish %s, got %#v", reason, items)
+	}
+}
+
+func user(text string) sdk.Message      { return sdk.Message{Role: "user", Content: text} }
+func assistant(text string) sdk.Message { return sdk.Message{Role: "assistant", Content: text} }
 
 // A native executable, not a shell mock: exercises pipes, process lifetime,
 // bidirectional requests and the Windows Job Object used in production.
@@ -230,7 +263,7 @@ func codexTestCommand(t *testing.T, extra ...string) (string, string) {
 	}
 	return strings.Join(args, " "), log
 }
-func codexParts(t *testing.T, m *Sessions, settings map[string]any, request sdk.Request) []sdk.Part {
+func codexParts(t *testing.T, m *agentruntime.Sessions, settings map[string]any, request sdk.Request) []sdk.Part {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -287,7 +320,7 @@ func methodCount(messages []map[string]any, method string) int {
 func TestCodexNativeProtocolAndConversationReuse(t *testing.T) {
 	command, log := codexTestCommand(t)
 	settings := map[string]any{"command": command}
-	m := newTestSessions(t, CodexKind(), SessionOptions{})
+	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
 	request := sdk.Request{Conversation: "native", Messages: []sdk.Message{user("hello")}, Tools: []sdk.Tool{{Name: "read", Description: "Read a file", Parameters: map[string]any{"properties": map[string]any{"path": map[string]any{"type": "string"}}}}}}
 	first := codexParts(t, m, settings, request)
 	lastPart(t, first, "stop")
@@ -325,7 +358,7 @@ func TestCodexNativeProtocolAndConversationReuse(t *testing.T) {
 			if server["enabled"] != false {
 				t.Fatal(server)
 			}
-			if len(params["environments"].([]any)) != 0 || params["ephemeral"] != false || params["baseInstructions"] != PlaceNote || params["sandbox"] != "read-only" {
+			if len(params["environments"].([]any)) != 0 || params["ephemeral"] != false || params["baseInstructions"] != agentruntime.PlaceNote || params["sandbox"] != "read-only" {
 				t.Fatal(params)
 			}
 			if _, ok := params["model"]; ok {
@@ -343,7 +376,7 @@ func TestCodexToolReturnAndMutableEffort(t *testing.T) {
 				extra = append(extra, "--fallback")
 			}
 			command, log := codexTestCommand(t, extra...)
-			m := newTestSessions(t, CodexKind(), SessionOptions{})
+			m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
 			settings := map[string]any{"command": command}
 			request := sdk.Request{Conversation: "tools", Effort: "low", Messages: []sdk.Message{user("CALL read")}, Tools: []sdk.Tool{{Name: "read"}}}
 			first := codexParts(t, m, settings, request)
@@ -380,14 +413,14 @@ func TestCodexCheckpointAcrossProcessRestart(t *testing.T) {
 	command, log := codexTestCommand(t)
 	home := t.TempDir()
 	settings := map[string]any{"command": command}
-	m := newTestSessions(t, CodexKind(), SessionOptions{DataDir: home})
+	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{DataDir: home})
 	request := sdk.Request{Conversation: "persist", Messages: []sdk.Message{user("first")}}
 	first := codexParts(t, m, settings, request)
 	lastPart(t, first, "stop")
 	if err := m.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	m = newTestSessions(t, CodexKind(), SessionOptions{DataDir: home})
+	m = newTestSessions(t, Kind(), agentruntime.SessionOptions{DataDir: home})
 	request.Messages = append(request.Messages, assistant(textParts(first)), user("second"))
 	second := codexParts(t, m, settings, request)
 	lastPart(t, second, "stop")
@@ -404,14 +437,14 @@ func TestCodexCheckpointAcrossProcessRestart(t *testing.T) {
 
 func TestCodexNativeHistoryAndModels(t *testing.T) {
 	command, log := codexTestCommand(t)
-	models, err := ListCodexModels(t.Context(), CodexSettings{Command: command}, t.TempDir())
+	models, err := ListModels(t.Context(), Settings{Command: command}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(models) != 3 || models[1].ID != "big" || models[1].Efforts == nil || strings.Join(*models[1].Efforts, ",") != "low,high" || models[2].Efforts == nil || len(*models[2].Efforts) != 0 {
 		t.Fatal(models)
 	}
-	m := newTestSessions(t, CodexKind(), SessionOptions{})
+	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
 	request := sdk.Request{Conversation: "history", Messages: []sdk.Message{user("old"), {Role: "assistant", Content: "answer", ToolCalls: []sdk.ToolCall{{ID: "call_old", Name: "read", Arguments: `{"a":1}`}}}, {Role: "tool", ToolCallID: "call_old", Content: "result", Images: []sdk.Image{{MIME: "image/png", Data: "AAAA"}}}, user("new")}}
 	lastPart(t, codexParts(t, m, map[string]any{"command": command}, request), "stop")
 	messages := readCodexLog(t, log)
@@ -431,7 +464,7 @@ func TestCodexNativeHistoryAndModels(t *testing.T) {
 
 func TestCodexErrorsAndCancellation(t *testing.T) {
 	command, _ := codexTestCommand(t, "--old")
-	m := newTestSessions(t, CodexKind(), SessionOptions{})
+	m := newTestSessions(t, Kind(), agentruntime.SessionOptions{})
 	request := sdk.Request{Conversation: "old", Messages: []sdk.Message{user("hello")}}
 	result := codexParts(t, m, map[string]any{"command": command}, request)
 	lastPart(t, result, "error")
@@ -456,9 +489,9 @@ func TestCodexErrorsAndCancellation(t *testing.T) {
 }
 
 func TestCodexTokenUsageEmitsContextInputWithoutTotalGrowth(t *testing.T) {
-	var events []Event
+	var events []agentruntime.Event
 	d := &codexDriver{
-		ctx:     DriverContext{Emit: func(event Event) { events = append(events, event) }},
+		ctx:     agentruntime.DriverContext{Emit: func(event agentruntime.Event) { events = append(events, event) }},
 		started: true,
 		total:   tokenBreakdown{Input: new(int64(20000)), Output: new(int64(100))},
 	}

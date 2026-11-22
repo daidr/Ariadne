@@ -2,13 +2,17 @@ package server
 
 import (
 	"context"
+	"iter"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
+	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
@@ -112,5 +116,66 @@ func TestConcurrentProjectDeletionSharesCleanupAndSurvivesDisconnectedWaiter(t *
 	api.deletionMu.Unlock()
 	if retained != 0 {
 		t.Fatal("deletion metadata retained")
+	}
+}
+
+func TestProjectDeletionCallsModelProviderForget(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "delete-forget.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	name := "Forget Project"
+	project, err := repo.CreateProject(t.Context(), &name, core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "Thread 1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var forgotten []string
+	modelReg := models.New()
+	remove, err := modelReg.Register(sdk.ModelProvider{
+		Info: sdk.ModelProviderInfo{Kind: "stateful-fixture", Program: true},
+		Stream: func(context.Context, map[string]any, sdk.Request) iter.Seq[sdk.Part] {
+			return func(func(sdk.Part) bool) {}
+		},
+		Forget: func(_ context.Context, conversation string) error {
+			mu.Lock()
+			forgotten = append(forgotten, conversation)
+			mu.Unlock()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+
+	api, err := New(Options{Repository: repo, Token: "secret", Models: modelReg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	req := httptest.NewRequest("DELETE", "/api/projects/"+project.ID, nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res := httptest.NewRecorder()
+	api.ServeHTTP(res, req)
+	if res.Code != 204 {
+		t.Fatalf("expected 204, got %d: %s", res.Code, res.Body.String())
+	}
+
+	mu.Lock()
+	got := slices.Clone(forgotten)
+	mu.Unlock()
+	slices.Sort(got)
+	want := []string{project.CoordinatorID, thread.ID}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("expected Forget for %v, got %v", want, got)
 	}
 }

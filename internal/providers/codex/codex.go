@@ -1,4 +1,4 @@
-package agents
+package codex
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/jsonutil"
 	"github.com/daidr/Ariadne/internal/process"
 	"github.com/daidr/Ariadne/internal/rpc"
@@ -20,7 +21,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-type CodexSettings struct {
+type Settings struct {
 	Command string `json:"command,omitempty"`
 }
 
@@ -31,18 +32,16 @@ var codexOwnTools = []string{
 	"request_permissions_tool", "send_message_to_user_async", "token_budget", "current_time_reminder",
 }
 var codexLocalContext = []string{"include_environment_context=false", "include_permissions_instructions=false", "include_apps_instructions=false", "skills.include_instructions=false", "skills.bundled.enabled=false", "project_doc_max_bytes=0"}
-var codexClient = map[string]any{"name": "ariadne", "title": "Ariadne", "version": "1.0.0"}
-var efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
-func codexCommand(settings CodexSettings) []string {
+func codexCommand(settings Settings) []string {
 	command := textutil.Trim(settings.Command)
 	if command == "" {
-		command = "codex"
+		command = DefaultCommand
 	}
 	return process.SplitCommand(command)
 }
 
-func CodexArgv(settings CodexSettings) []string {
+func Argv(settings Settings) []string {
 	argv := append(codexCommand(settings), "app-server",
 		"-c", `web_search="disabled"`,
 		"-c", "mcp_servers={}",
@@ -60,7 +59,7 @@ func CodexArgv(settings CodexSettings) []string {
 	return argv
 }
 
-func writeCodexToolFreeCatalog(ctx context.Context, settings CodexSettings, directory string, env map[string]string) (string, error) {
+func writeCodexToolFreeCatalog(ctx context.Context, settings Settings, directory string, env map[string]string) (string, error) {
 	argv := append(codexCommand(settings), "debug", "models")
 	result := process.Run(ctx, argv, process.RunOptions{Directory: directory, Env: env, ReplaceEnv: true, Whole: true, Timeout: time.Minute})
 	if result.ExitCode != 0 {
@@ -141,29 +140,22 @@ type codexModel struct {
 	Efforts     json.RawMessage `json:"supportedReasoningEfforts"`
 }
 
-func trimmedJSON(raw json.RawMessage) string {
-	var value string
-	if json.Unmarshal(raw, &value) != nil {
-		return ""
-	}
-	return textutil.Trim(value)
-}
-func CodexModels(data json.RawMessage) []sdk.ListedModel {
+func ParseModels(data json.RawMessage) []sdk.ListedModel {
 	var entries []codexModel
 	if json.Unmarshal(data, &entries) != nil {
 		return nil
 	}
 	models := []sdk.ListedModel{}
 	for _, entry := range entries {
-		id := trimmedJSON(entry.Model)
+		id := agentruntime.TrimmedJSON(entry.Model)
 		if id == "" {
-			id = trimmedJSON(entry.ID)
+			id = agentruntime.TrimmedJSON(entry.ID)
 		}
 		if id == "" {
 			continue
 		}
 		model := sdk.ListedModel{ID: id}
-		title := trimmedJSON(entry.DisplayName)
+		title := agentruntime.TrimmedJSON(entry.DisplayName)
 		if title != id {
 			model.Title = title
 		}
@@ -183,7 +175,7 @@ func CodexModels(data json.RawMessage) []sdk.ListedModel {
 				names[name] = true
 			}
 			valid := []string{}
-			for _, effort := range efforts {
+			for _, effort := range sdk.Efforts {
 				if names[effort] {
 					valid = append(valid, effort)
 				}
@@ -194,10 +186,10 @@ func CodexModels(data json.RawMessage) []sdk.ListedModel {
 	}
 	return models
 }
-func ListCodexModels(ctx context.Context, settings CodexSettings, directory string) ([]sdk.ListedModel, error) {
+func ListModels(ctx context.Context, settings Settings, directory string) ([]sdk.ListedModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: CodexArgv(settings), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true}, rpc.Options{})
+	stdio, err := rpc.StartStdio(ctx, process.JSONOptions{Argv: Argv(settings), Directory: directory, Env: process.AgentEnv(nil), ReplaceEnv: true}, rpc.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +198,7 @@ func ListCodexModels(ctx context.Context, settings CodexSettings, directory stri
 		defer cancel()
 		_ = stdio.Close(cleanup)
 	}()
-	if err := stdio.Peer.Request(ctx, "initialize", map[string]any{"clientInfo": codexClient}, nil); err != nil {
+	if err := stdio.Peer.Request(ctx, "initialize", map[string]any{"clientInfo": agentruntime.ClientInfo}, nil); err != nil {
 		return nil, err
 	}
 	if err := stdio.Peer.Notify(ctx, "initialized", nil); err != nil {
@@ -226,7 +218,7 @@ func ListCodexModels(ctx context.Context, settings CodexSettings, directory stri
 		if err := stdio.Peer.Request(ctx, "model/list", params, &result); err != nil {
 			return nil, err
 		}
-		models = append(models, CodexModels(result.Data)...)
+		models = append(models, ParseModels(result.Data)...)
 		cursor = result.NextCursor
 		if cursor == "" {
 			break
@@ -234,9 +226,9 @@ func ListCodexModels(ctx context.Context, settings CodexSettings, directory stri
 	}
 	return models, nil
 }
-func CodexKind() Kind {
-	return Kind{Name: "codex", Persistent: true, MutableEffort: true, Fingerprint: NativeFingerprint, Create: func(ctx DriverContext) (Driver, error) {
-		settings := CodexSettings{}
+func Kind() agentruntime.Kind {
+	return agentruntime.Kind{Name: ProviderKind, Persistent: true, MutableEffort: true, Fingerprint: agentruntime.NativeFingerprint, Create: func(ctx agentruntime.DriverContext) (agentruntime.Driver, error) {
+		settings := Settings{}
 		if command, ok := ctx.Settings["command"].(string); ok {
 			settings.Command = command
 		}
@@ -257,8 +249,8 @@ type codexSaved struct {
 	DefaultEffort string          `json:"defaultEffort,omitempty"`
 }
 type codexDriver struct {
-	ctx                                 DriverContext
-	settings                            CodexSettings
+	ctx                                 agentruntime.DriverContext
+	settings                            Settings
 	mu                                  sync.Mutex
 	stdio                               *rpc.Stdio
 	threadID, defaultEffort, activeTurn string
@@ -327,14 +319,14 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 		if params.Delta != "" {
 			if params.ItemID != "" {
 				if len(d.streamed) >= 1024 && !d.streamed[params.ItemID] {
-					emit(Event{Type: "failed", Detail: "Codex streamed items exceeded their limit"})
+					emit(agentruntime.Event{Type: "failed", Detail: "Codex streamed items exceeded their limit"})
 					return
 				}
 				d.streamed[params.ItemID] = true
 			}
-			emit(Event{Type: "text", Text: params.Delta})
+			emit(agentruntime.Event{Type: "text", Text: params.Delta})
 		} else {
-			emit(Event{Type: "alive"})
+			emit(agentruntime.Event{Type: "alive"})
 		}
 	case "item/completed":
 		var params struct {
@@ -350,17 +342,17 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 		if item.Type == "agentMessage" && item.Text != "" {
 			if item.ID != "" && d.streamed[item.ID] {
 				delete(d.streamed, item.ID)
-				emit(Event{Type: "alive"})
+				emit(agentruntime.Event{Type: "alive"})
 			} else {
-				emit(Event{Type: "text", Text: item.Text})
+				emit(agentruntime.Event{Type: "text", Text: item.Text})
 			}
 		} else if item.Type == "reasoning" {
 			text := textutil.Trim(strings.Join(append(item.Summary, item.Content...), "\n"))
 			if text != "" {
-				emit(Event{Type: "reasoning", Text: text})
+				emit(agentruntime.Event{Type: "reasoning", Text: text})
 			}
 		} else {
-			emit(Event{Type: "alive"})
+			emit(agentruntime.Event{Type: "alive"})
 		}
 	case "thread/tokenUsage/updated":
 		var params struct {
@@ -373,10 +365,10 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 			return
 		}
 		now := params.TokenUsage.Total
-		usage := Usage{Input: *tokenGrowth(now.Input, d.total.Input), Output: *tokenGrowth(now.Output, d.total.Output), Cached: tokenGrowth(now.Cached, d.total.Cached), CacheWrite: tokenGrowth(now.CacheWrite, d.total.CacheWrite), Reasoning: tokenGrowth(now.Reasoning, d.total.Reasoning), ContextInput: params.TokenUsage.Last.Input}
+		usage := agentruntime.Usage{Input: *tokenGrowth(now.Input, d.total.Input), Output: *tokenGrowth(now.Output, d.total.Output), Cached: tokenGrowth(now.Cached, d.total.Cached), CacheWrite: tokenGrowth(now.CacheWrite, d.total.CacheWrite), Reasoning: tokenGrowth(now.Reasoning, d.total.Reasoning), ContextInput: params.TokenUsage.Last.Input}
 		d.total = now
 		if d.started && (usage.Input != 0 || usage.Output != 0 || tokenValue(usage.ContextInput) > 0) {
-			emit(Event{Type: "usage", Usage: usage})
+			emit(agentruntime.Event{Type: "usage", Usage: usage})
 		}
 	case "turn/completed":
 		d.activeTurn = ""
@@ -395,7 +387,7 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 			return
 		}
 		if params.Turn.Status == "completed" {
-			emit(Event{Type: "done"})
+			emit(agentruntime.Event{Type: "done"})
 		} else {
 			detail := ""
 			if params.Turn.Error != nil {
@@ -417,10 +409,10 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 			quota := rpc.QuotaText(detail)
 			busy := quota || rpc.BusyText(detail)
 			retryable := !quota && rpc.BusyText(detail)
-			emit(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
+			emit(agentruntime.Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
 		}
 	default:
-		emit(Event{Type: "alive"})
+		emit(agentruntime.Event{Type: "alive"})
 	}
 }
 func (d *codexDriver) Start(life context.Context) error {
@@ -429,7 +421,7 @@ func (d *codexDriver) Start(life context.Context) error {
 	if err != nil {
 		return err
 	}
-	argv := append(CodexArgv(d.settings), "-c", "model_catalog_json="+strconv.Quote(filepath.ToSlash(catalog)))
+	argv := append(Argv(d.settings), "-c", "model_catalog_json="+strconv.Quote(filepath.ToSlash(catalog)))
 	lines := process.NewJSONLines(process.JSONOptions{Argv: argv, Directory: d.ctx.Directory, Env: env, ReplaceEnv: true})
 	peer, err := rpc.New(rpc.Options{Context: life, Send: lines.SendJSON, Request: d.request, Notification: d.notification})
 	if err != nil {
@@ -442,7 +434,7 @@ func (d *codexDriver) Start(life context.Context) error {
 		started, closing := d.started, d.closing
 		d.mu.Unlock()
 		if !closing {
-			d.ctx.Emit(Event{Type: "failed", Detail: err.Error(), Retryable: started})
+			d.ctx.Emit(agentruntime.Event{Type: "failed", Detail: err.Error(), Retryable: started})
 		}
 	}); err != nil {
 		return err
@@ -452,7 +444,7 @@ func (d *codexDriver) Start(life context.Context) error {
 	var init struct {
 		UserAgent string `json:"userAgent"`
 	}
-	if err = peer.Request(ctx, "initialize", map[string]any{"clientInfo": codexClient, "capabilities": map[string]any{"experimentalApi": true}}, &init); err != nil {
+	if err = peer.Request(ctx, "initialize", map[string]any{"clientInfo": agentruntime.ClientInfo, "capabilities": map[string]any{"experimentalApi": true}}, &init); err != nil {
 		return d.startError(err)
 	}
 	if old := CodexTooOld(init.UserAgent); old != "" {
@@ -545,7 +537,7 @@ func (d *codexDriver) startError(err error) error {
 	return err
 }
 
-func CodexHistory(messages []sdk.Message) ([]any, Input) {
+func History(messages []sdk.Message) ([]any, agentruntime.Input) {
 	history := messages
 	var last *sdk.Message
 	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
@@ -580,20 +572,20 @@ func CodexHistory(messages []sdk.Message) ([]any, Input) {
 		if images == nil {
 			images = []sdk.Image{}
 		}
-		return items, Input{Text: last.Content, Images: images}
+		return items, agentruntime.Input{Text: last.Content, Images: images}
 	}
-	return items, Input{Text: "Continue from the latest tool results. All recorded tool calls have already run.", Images: []sdk.Image{}}
+	return items, agentruntime.Input{Text: "Continue from the latest tool results. All recorded tool calls have already run.", Images: []sdk.Image{}}
 }
-func (d *codexDriver) Seed(ctx context.Context, messages []sdk.Message) (Input, error) {
-	items, input := CodexHistory(messages)
+func (d *codexDriver) Seed(ctx context.Context, messages []sdk.Message) (agentruntime.Input, error) {
+	items, input := History(messages)
 	if len(items) > 0 {
 		if err := d.stdio.Peer.Request(ctx, "thread/inject_items", map[string]any{"threadId": d.threadID, "items": items}, nil); err != nil {
-			return Input{}, err
+			return agentruntime.Input{}, err
 		}
 	}
 	return input, nil
 }
-func (d *codexDriver) Prompt(ctx context.Context, input Input, effort string) error {
+func (d *codexDriver) Prompt(ctx context.Context, input agentruntime.Input, effort string) error {
 	parts := []any{map[string]any{"type": "text", "text": input.Text, "text_elements": []any{}}}
 	for _, image := range input.Images {
 		parts = append(parts, map[string]any{"type": "image", "url": dataURL(image)})

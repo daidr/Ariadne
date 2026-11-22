@@ -33,6 +33,7 @@ type ModelProvider struct {
 	Describe         func(map[string]any, Request) any
 	Check            func(context.Context, map[string]any) (LocalizedText, error)
 	Find             func(FindContext) []FoundProvider
+	Forget           func(context.Context, string) error
 	SearchAvailable  func(map[string]any) bool
 	Search           func(context.Context, map[string]any, SearchRequest) (SearchAnswer, error)
 }

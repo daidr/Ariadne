@@ -18,6 +18,7 @@ import (
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/modelcatalog"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -59,13 +60,9 @@ func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{DataDir: filepath.Join(directory, "providers"), Client: service.Client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer builtins.Close(context.Background())
-	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: service.Client()}) {
-		remove, err := builtins.Registry.Register(provider)
+	modelReg := models.New()
+	for _, provider := range providers.HTTPProviders(service.Client()) {
+		remove, err := modelReg.Register(provider)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +74,7 @@ func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
 		Repository:  repo,
 		Token:       "test-token",
 		Settings:    store,
-		Models:      builtins.Registry,
+		Models:      modelReg,
 		Catalog:     catalog,
 		FindContext: &sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return false }},
 		Now:         func() time.Time { return time.UnixMilli(1800000000000) },

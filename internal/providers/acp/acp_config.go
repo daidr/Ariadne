@@ -1,4 +1,4 @@
-package agents
+package acp
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/rpc"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/sdk"
@@ -56,10 +57,10 @@ func (session acpSession) option(category string) acpConfigOption {
 	return acpConfigOption{}
 }
 
-func (session acpSession) listedModels(ctx context.Context, peer *rpc.Peer, agentName string) []sdk.ListedModel {
+func (session acpSession) listedModels(ctx context.Context, peer *rpc.Peer, alwaysProbeThoughtLevels bool) []sdk.ListedModel {
 	option := session.option("model")
-	models := ACPModels(session.Models)
-	current := trimmedJSON(option.Current)
+	models := ParseModels(session.Models)
+	current := agentruntime.TrimmedJSON(option.Current)
 	choices := option.values()
 	if len(choices) > 0 {
 		// The older model field can omit models or drift from configOptions.
@@ -78,8 +79,7 @@ func (session acpSession) listedModels(ctx context.Context, peer *rpc.Peer, agen
 	if session.Options != nil {
 		thought := session.option("thought_level")
 		levels := thought.efforts()
-		// Antigravity omits thought_level when a fixed-effort model is selected.
-		probe := len(choices) > 0 && (thought.ID != "" || agentName == antigravityACPName)
+		probe := len(choices) > 0 && (thought.ID != "" || alwaysProbeThoughtLevels)
 		// Keep catalog discovery responsive even if a model selection is slow.
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
@@ -130,7 +130,7 @@ func setACPConfig(ctx context.Context, peer *rpc.Peer, sessionID, id, value stri
 	err := peer.Request(ctx, "session/set_config_option", params, &result)
 	if err == nil {
 		for _, option := range result.Options {
-			if option.ID == id && trimmedJSON(option.Current) == value {
+			if option.ID == id && agentruntime.TrimmedJSON(option.Current) == value {
 				return result, nil
 			}
 		}
@@ -145,7 +145,7 @@ func (d *acpDriver) selectModel(ctx context.Context, session acpSession) (acpSes
 		return session, nil
 	}
 	if option := session.option("model"); option.ID != "" {
-		if trimmedJSON(option.Current) == model {
+		if agentruntime.TrimmedJSON(option.Current) == model {
 			return session, nil
 		}
 		for _, choice := range option.values() {
@@ -155,7 +155,7 @@ func (d *acpDriver) selectModel(ctx context.Context, session acpSession) (acpSes
 		}
 	}
 	if len(session.Models) != 0 {
-		for _, listed := range ACPModels(session.Models)[1:] {
+		for _, listed := range ParseModels(session.Models)[1:] {
 			if listed.ID != model {
 				continue
 			}
@@ -182,7 +182,7 @@ func (d *acpDriver) Configure(ctx context.Context, effort string) error {
 		accepted := option.efforts()
 		value = levels[sdk.EffortWithin(effort, &accepted)]
 	}
-	if value == "" || value == trimmedJSON(option.Current) {
+	if value == "" || value == agentruntime.TrimmedJSON(option.Current) {
 		return nil
 	}
 	result, err := setACPConfig(ctx, d.stdio.Peer, d.sessionID, option.ID, value)

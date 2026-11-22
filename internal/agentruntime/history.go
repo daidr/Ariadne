@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"crypto/sha256"
@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	// defaultHistoryReplayBytes bounds the rendered replay prompt text so
+	// DefaultHistoryReplayBytes bounds the rendered replay prompt text so
 	// external CLI / ACP agents do not truncate the tail of an oversized single
 	// prompt (which would drop the newest turns and the triggering user message).
-	defaultHistoryReplayBytes = 48 * 1024
+	DefaultHistoryReplayBytes = 48 * 1024
 	maxReplayToolResultBytes  = 3 * 1024
 	maxReplayToolArgsBytes    = 2 * 1024
 	maxReplayOldMessageBytes  = 6 * 1024
@@ -240,7 +240,7 @@ func renderReplayItems(messages []sdk.Message, names map[string]string, capConte
 }
 
 func RenderHistory(messages []sdk.Message) Input {
-	return RenderHistoryWithBudget(messages, defaultHistoryReplayBytes)
+	return RenderHistoryWithBudget(messages, DefaultHistoryReplayBytes)
 }
 
 func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {

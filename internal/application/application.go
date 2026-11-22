@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/daidr/Ariadne/internal/agentruntime"
 	"github.com/daidr/Ariadne/internal/autopilot"
 	"github.com/daidr/Ariadne/internal/browser"
 	"github.com/daidr/Ariadne/internal/collab"
@@ -31,7 +32,7 @@ import (
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/process"
-	"github.com/daidr/Ariadne/internal/providers/agents"
+	"github.com/daidr/Ariadne/internal/providers"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/repowatch"
 	"github.com/daidr/Ariadne/internal/runner"
@@ -52,7 +53,7 @@ type Options struct {
 	Client        *http.Client
 	OnError       func(error)
 	Ledger        *process.Ledger
-	StdioLauncher agents.StdioLauncher
+	StdioLauncher agentruntime.StdioLauncher
 	Update        *update.Options
 }
 
@@ -139,6 +140,8 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	searchRegistry := searches.New()
 	resolver := links.New(links.Options{})
 	addSimple(func() error { resolver.Close(); return nil })
+	agentBridge := agentruntime.NewToolBridge()
+	add(agentBridge.Close)
 	host, err := plugins.New(plugins.Options{
 		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: modelRegistry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, OnError: onError,
 		Settings: user,
@@ -153,16 +156,14 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	if err := installSearches(ctx, host, options.Client); err != nil {
 		return nil, err
 	}
-	if err := installModels(ctx, host, options.Client); err != nil {
+	if err := installModels(ctx, host, providers.BuiltinOptions{
+		Client:        options.Client,
+		Bridge:        agentBridge,
+		AgentDataDir:  filepath.Join(home, "plugins", "agents"),
+		StdioLauncher: options.StdioLauncher,
+	}); err != nil {
 		return nil, err
 	}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{
-		Registry: modelRegistry, DataDir: filepath.Join(home, "plugins"), Context: life, Client: options.Client, StdioLauncher: options.StdioLauncher,
-	})
-	if err != nil {
-		return nil, err
-	}
-	add(builtins.Close)
 	env := process.Environ()
 	mcpHub, err := mcp.NewHub(mcp.HubOptions{Servers: user.MCPServers, Env: func() map[string]string { return process.ThreadEnv(env) }, Context: life, Client: options.Client})
 	if err != nil {
@@ -207,7 +208,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	browsers := browser.New(life, filepath.Join(home, "browser"), trackBrowser)
 	add(browsers.Close)
 	worker := &runner.Runner{
-		Repository: repo, Settings: user, Models: builtins.Registry, Drafts: drafts, Live: live,
+		Repository: repo, Settings: user, Models: modelRegistry, Drafts: drafts, Live: live,
 		Workspaces: manager, MCP: mcpHub, SkillsDirs: skillsDirs, Searches: searchRegistry, HTTPClient: options.Client,
 		Rooms: rooms, Dashboards: dashboards, Browser: browsers, Sources: registry, Home: home,
 	}
@@ -240,7 +241,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	janitor := workspaces.NewJanitor(manager, workspaces.JanitorOptions{OnError: onError})
 	api, err := server.New(server.Options{
 		Repository: repo, Token: cfg.Token, Version: version, Web: options.Web, Scheduler: schedule, State: state,
-		Data: storage, Settings: user, Models: builtins.Registry, Sources: registry,
+		Data: storage, Settings: user, Models: modelRegistry, Sources: registry,
 		Updates: updates,
 		Links:   resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
 		Searches: searchRegistry, Plugins: host, HTTPClient: options.Client, OnError: onError,
@@ -406,8 +407,8 @@ func installSearches(ctx context.Context, host *plugins.Host, client *http.Clien
 	return nil
 }
 
-func installModels(ctx context.Context, host *plugins.Host, client *http.Client) error {
-	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{Client: client}) {
+func installModels(ctx context.Context, host *plugins.Host, opts providers.BuiltinOptions) error {
+	for _, plugin := range providers.BuiltinPlugins(opts) {
 		if err := host.Load(ctx, plugin, nil); err != nil {
 			return fmt.Errorf("load %s model: %w", plugin.ID, err)
 		}

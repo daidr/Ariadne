@@ -1,4 +1,4 @@
-package agents
+package agentruntime
 
 import (
 	"context"
@@ -467,9 +467,9 @@ func (m *Sessions) continuation(s *session, rest []sdk.Message, fps []string, sy
 }
 func failure(err error, retryable, busy bool) sdk.Part {
 	part := sdk.Part{Type: "finish", Reason: "error", Error: err.Error(), Retryable: retryable, Busy: busy}
-	var native *nativeAgentError
+	var native *NativeAgentError
 	if errors.As(err, &native) {
-		part.AgentError = native.detail
+		part.AgentError = native.Detail
 	}
 	return part
 }

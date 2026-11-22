@@ -142,12 +142,13 @@ func asNumber(value any) float64 {
 
 func recordCall(model *settings.ResolvedModel, effort string) *trace.RecordedCall {
 	record := &trace.RecordedCall{
-		Provider:       model.Provider.Kind,
-		Model:          model.Model,
-		Settings:       map[string]any{},
-		Program:        model.Provider.Program,
-		ReasoningScope: model.Provider.Capabilities.ReasoningScope,
-		MaxTokens:      int64(asNumber(model.Request["maxTokens"])),
+		Provider:         model.Provider.Kind,
+		Model:            model.Model,
+		Settings:         map[string]any{},
+		Program:          model.Provider.Program,
+		StatefulSessions: model.Provider.HasStatefulSessions(),
+		ReasoningScope:   model.Provider.Capabilities.ReasoningScope,
+		MaxTokens:        int64(asNumber(model.Request["maxTokens"])),
 	}
 	record.ExtraBody, _ = model.Request["extraBody"].(map[string]any)
 	if effort != "" {
@@ -287,7 +288,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if err != nil {
 			return err
 		}
-		prompt, changed, err := turn.prompt(ctx, model.Provider.Program, tools, sections, entries)
+		prompt, changed, err := turn.prompt(ctx, model.Provider.HasStatefulSessions(), tools, sections, entries)
 		if err != nil {
 			return err
 		}
@@ -389,7 +390,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
 		if err != nil {
 			var failure *modelstep.Failure
-			if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.Program && failure.ContextLimit && !recoveredContext {
+			if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.HasStatefulSessions() && failure.ContextLimit && !recoveredContext {
 				// The failed native session has been released. Compact if there is
 				// enough history, then resume the same discussion with a fresh session.
 				recoveredContext = true

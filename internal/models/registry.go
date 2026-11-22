@@ -3,6 +3,7 @@
 package models
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -110,4 +111,19 @@ func (registry *Registry) ValidateSettings(kind string, values map[string]any) e
 		return nil
 	}
 	return provider.ValidateSettings(values)
+}
+
+// Forget notifies all registered providers to release stateful sessions and
+// checkpoints belonging to the given conversation.
+func (registry *Registry) Forget(ctx context.Context, conversation string) error {
+	if conversation == "" {
+		return nil
+	}
+	var combined error
+	for _, provider := range registry.Providers() {
+		if provider.Forget != nil {
+			combined = errors.Join(combined, provider.Forget(ctx, conversation))
+		}
+	}
+	return combined
 }
