@@ -17,13 +17,22 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/daidr/Ariadne/internal/config"
 	"github.com/daidr/Ariadne/internal/eventstore"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
-	"github.com/daidr/Ariadne/sdk"
 )
+
+func bearerInterceptor(token string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	}
+}
 
 func TestGitHubSourceUsesAutomaticCredentials(t *testing.T) {
 	const token = "fixture-github-token"
@@ -35,38 +44,36 @@ func TestGitHubSourceUsesAutomaticCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app.Close(context.Background())
-	get := func(path string) []byte {
-		t.Helper()
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-		request.Header.Set("Authorization", "Bearer "+cfg.Token)
-		response := httptest.NewRecorder()
-		app.Handler.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || bytes.Contains(response.Body.Bytes(), []byte(token)) {
-			t.Fatalf("unexpected or unredacted response from %s (HTTP %d)", path, response.Code)
-		}
-		return response.Body.Bytes()
-	}
-	var catalog struct{ Kinds []sdk.ContextProviderInfo }
-	if err := json.Unmarshal(get("/api/source-kinds"), &catalog); err != nil {
+	httpServer := httptest.NewServer(app.Handler)
+	defer httpServer.Close()
+	auth := connect.WithInterceptors(bearerInterceptor(cfg.Token))
+	metaClient := ariadnev1connect.NewMetaServiceClient(httpServer.Client(), httpServer.URL+"/api/rpc", auth)
+	pluginClient := ariadnev1connect.NewPluginServiceClient(httpServer.Client(), httpServer.URL+"/api/rpc", auth)
+
+	kindsRes, err := metaClient.ListSourceKinds(t.Context(), connect.NewRequest(&ariadnev1.ListSourceKindsRequest{}))
+	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(kindsRes.Msg.String(), token) {
+		t.Fatal("unredacted response from ListSourceKinds")
+	}
 	available := map[string]bool{}
-	for _, kind := range catalog.Kinds {
-		if kind.Plugin != nil {
-			available[kind.Kind] = kind.Plugin.Ready
+	for _, kind := range kindsRes.Msg.GetKinds() {
+		if kind.GetPlugin() != nil {
+			available[kind.GetKind()] = kind.GetPlugin().GetReady()
 		}
 	}
 	if !available["github"] || available["gitlab"] {
 		t.Fatal("the GitHub credential should enable only the GitHub source")
 	}
-	var settings struct {
-		Ready      bool
-		SecretsSet []string
-	}
-	if err := json.Unmarshal(get("/api/plugins/github/settings"), &settings); err != nil {
+	cfgRes, err := pluginClient.GetPluginConfig(t.Context(), connect.NewRequest(&ariadnev1.GetPluginConfigRequest{PluginId: "github"}))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !settings.Ready || len(settings.SecretsSet) > 0 {
+	if strings.Contains(cfgRes.Msg.String(), token) {
+		t.Fatal("unredacted response from GetPluginConfig")
+	}
+	if !cfgRes.Msg.GetConfig().GetReady() || len(cfgRes.Msg.GetConfig().GetSecretsSet()) > 0 {
 		t.Fatal("automatic token was missed or displayed as a stored secret")
 	}
 }
@@ -183,12 +190,31 @@ func TestNativeHTTPExecutesTurnAndRebuildsRequests(t *testing.T) {
 	if string(request("GET", "/", nil, "", 200)) != "web shell" {
 		t.Fatal("native server did not serve configured frontend assets")
 	}
-	credentials := map[string]any{"baseUrl": model.URL + "/v1", "apiKey": secret}
-	providers := []any{map[string]any{"id": "p", "kind": "openai-compatible", "name": "Mock", "settings": credentials}}
-	models := []any{map[string]any{"id": "m", "provider": "p", "model": "fixture"}}
-	roles := map[string]any{"thread": map[string]any{"model": "m"}}
-	config := request("PUT", "/api/settings/models", map[string]any{"providers": providers, "models": models, "roles": roles}, cfg.Token, 200)
-	if bytes.Contains(config, []byte(secret)) {
+	credentials, err := structpb.NewStruct(map[string]any{"baseUrl": model.URL + "/v1", "apiKey": secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(
+		httpServer.Client(),
+		httpServer.URL+"/api/rpc",
+		connect.WithInterceptors(bearerInterceptor(cfg.Token)),
+	)
+	threadModel := "m"
+	savedModels, err := settingsClient.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{
+			{Id: "p", Kind: "openai-compatible", Name: "Mock", Settings: credentials},
+		},
+		Models: []*ariadnev1.ModelEntry{
+			{Id: "m", Provider: "p", Model: "fixture"},
+		},
+		Roles: &ariadnev1.ModelRoles{
+			Thread: &ariadnev1.RoleConfig{Model: &threadModel},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("SaveModelSettings: %v", err)
+	}
+	if strings.Contains(savedModels.Msg.String(), secret) {
 		t.Fatal("native settings included the provider secret")
 	}
 	var created struct {

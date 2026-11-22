@@ -48,7 +48,11 @@ import type {
 import {
   ConversationService,
   DataService,
+  MetaService,
+  PluginService,
+  SettingsService,
   ThreadService,
+  UpdateService,
   WorkspaceService,
   type BackupInfo as ProtoBackupInfo,
   type StorageSnapshot as ProtoStorageSnapshot,
@@ -87,6 +91,31 @@ import {
   saveToken,
   setToken,
 } from './rpc'
+import {
+  fromProtoConcurrency,
+  fromProtoDirectoryListing,
+  fromProtoFoundSetup,
+  fromProtoInputSettings,
+  fromProtoLinkPreview,
+  fromProtoLinkSummary,
+  fromProtoListedModel,
+  fromProtoMcpServerStatus,
+  fromProtoMcpServerView,
+  fromProtoModelInfo,
+  fromProtoModelProblems,
+  fromProtoModelSettings,
+  fromProtoPluginConfig,
+  fromProtoPluginRecord,
+  fromProtoSearchCheckResult,
+  fromProtoSearchSettings,
+  fromProtoSourceKind,
+  fromProtoUpdateStatus,
+  fromProtoWorkSettings,
+  toJsonObject,
+  toProtoMcpServerInput,
+  toProtoSaveModelSettingsRequest,
+  toProtoSearchInput,
+} from './rpc-settings'
 import { synchronizeServerClock } from './server-clock'
 
 export { ApiError, getToken, initToken, isValidToken, parseTokenInput, saveToken, setToken }
@@ -160,6 +189,10 @@ export interface UpdateStatus {
 }
 
 const dataClient = createRpcClient(DataService)
+const settingsClient = createRpcClient(SettingsService)
+const pluginClient = createRpcClient(PluginService)
+const updateClient = createRpcClient(UpdateService)
+const metaClient = createRpcClient(MetaService)
 const threadClient = createRpcClient(ThreadService)
 const conversationClient = createRpcClient(ConversationService)
 const keepaliveConversationClient = createRpcClient(
@@ -617,14 +650,28 @@ export interface ArtifactDetail {
 }
 
 export const api = {
-  updateStatus: (signal?: AbortSignal) =>
-    request<UpdateStatus>('GET', '/api/updates', undefined, signal),
-  saveUpdatePreferences: (preferences: UpdatePreferences, signal?: AbortSignal) =>
-    request<UpdateStatus>('PUT', '/api/updates', preferences, signal),
-  checkForUpdate: (signal?: AbortSignal) =>
-    request<UpdateStatus>('POST', '/api/updates/check', undefined, signal),
-  installUpdate: (version: string, signal?: AbortSignal) =>
-    request<UpdateStatus>('POST', '/api/updates/install', { version }, signal),
+  updateStatus: async (signal?: AbortSignal): Promise<UpdateStatus> => {
+    const response = await updateClient.getUpdateStatus({}, signal ? { signal } : undefined)
+    return fromProtoUpdateStatus(response.status)
+  },
+  saveUpdatePreferences: async (
+    preferences: UpdatePreferences,
+    signal?: AbortSignal,
+  ): Promise<UpdateStatus> => {
+    const response = await updateClient.saveUpdatePreferences(
+      { channel: preferences.channel, automatic: preferences.automatic },
+      signal ? { signal } : undefined,
+    )
+    return fromProtoUpdateStatus(response.status)
+  },
+  checkForUpdate: async (signal?: AbortSignal): Promise<UpdateStatus> => {
+    const response = await updateClient.checkForUpdate({}, signal ? { signal } : undefined)
+    return fromProtoUpdateStatus(response.status)
+  },
+  installUpdate: async (version: string, signal?: AbortSignal): Promise<UpdateStatus> => {
+    const response = await updateClient.installUpdate({ version }, signal ? { signal } : undefined)
+    return fromProtoUpdateStatus(response.status)
+  },
   listMemories: async (projectId: string): Promise<{ memories: MemoryView[] }> => {
     const response = await conversationClient.listMemories({ projectId })
     return { memories: response.memories.map(fromProtoMemoryView) }
@@ -679,7 +726,10 @@ export const api = {
       `/api/projects/${projectId}/files${forMessage ? '?for=message' : ''}`,
       file,
     ),
-  ping: () => request<{ ok: boolean }>('GET', '/api/ping'),
+  ping: async (): Promise<{ ok: boolean }> => {
+    const response = await metaClient.ping({})
+    return { ok: response.ok }
+  },
   listProjects: (ids: readonly string[] = []) =>
     request<{ projects: ProjectView[]; lastSeq: number }>(
       'GET',
@@ -864,46 +914,100 @@ export const api = {
     const response = await conversationClient.removeReaction({ messageId, emoji })
     return { message: fromProtoMessageView(requireField(response.message, 'message')) }
   },
-  getConcurrency: () => request<Concurrency>('GET', '/api/settings/concurrency'),
-  saveConcurrency: (input: Concurrency) =>
-    request<Concurrency>('PUT', '/api/settings/concurrency', input),
-  getInputSettings: () => request<InputSettings>('GET', '/api/settings/input'),
-  saveInputSettings: (input: InputSettings) =>
-    request<InputSettings>('PUT', '/api/settings/input', input),
-  getModelSettings: () => request<ModelSettings>('GET', '/api/settings/models'),
-  getSearchSettings: () => request<SearchSettings>('GET', '/api/settings/search'),
-  /** `null` clears the stored key. */
-  saveSearchSettings: (input: SearchSettingsInput) =>
-    request<SearchSettings>('PUT', '/api/settings/search', input),
-  checkSearchSettings: (input: SearchSettingsInput) =>
-    request<SearchCheckResult>('POST', '/api/settings/search/check', input),
-  listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
-  getPluginConfig: (id: string) =>
-    request<PluginConfig>('GET', `/api/plugins/${encodeURIComponent(id)}/settings`),
-  savePluginConfig: (id: string, values: Record<string, unknown>) =>
-    request<PluginConfig>('PUT', `/api/plugins/${encodeURIComponent(id)}/settings`, { values }),
-  addPlugin: (path: string) =>
-    request<{ plugins: PluginRecord[] }>('POST', '/api/plugins', { path }),
-  removePlugin: (path: string) =>
-    request<{ plugins: PluginRecord[] }>('POST', '/api/plugins/remove', { path }),
-  /** What the public catalog knows of a model, by the name typed. */
-  modelInfo: (model: string, hint: string) =>
-    request<{ info: ModelInfo }>(
-      'GET',
-      `/api/settings/model-info?${new URLSearchParams({ model, hint })}`,
+  getConcurrency: async (): Promise<Concurrency> =>
+    fromProtoConcurrency((await settingsClient.getConcurrency({})).concurrency),
+  saveConcurrency: async (input: Concurrency): Promise<Concurrency> =>
+    fromProtoConcurrency(
+      (await settingsClient.saveConcurrency({ slots: input.slots, reserved: input.reserved }))
+        .concurrency,
     ),
+  getInputSettings: async (): Promise<InputSettings> =>
+    fromProtoInputSettings((await settingsClient.getInputSettings({})).input),
+  saveInputSettings: async (input: InputSettings): Promise<InputSettings> =>
+    fromProtoInputSettings(
+      (
+        await settingsClient.saveInputSettings({
+          submitOn: input.submitOn,
+          snippets: input.snippets.map((snippet) => ({
+            id: snippet.id,
+            name: snippet.name,
+            text: snippet.text,
+          })),
+          keys: { ...input.keys },
+        })
+      ).input,
+    ),
+  getModelSettings: async (): Promise<ModelSettings> =>
+    fromProtoModelSettings((await settingsClient.getModelSettings({})).settings),
+  getSearchSettings: async (): Promise<SearchSettings> =>
+    fromProtoSearchSettings((await settingsClient.getSearchSettings({})).search),
+  /** `null` clears the stored key. */
+  saveSearchSettings: async (input: SearchSettingsInput): Promise<SearchSettings> =>
+    fromProtoSearchSettings(
+      (await settingsClient.saveSearchSettings(toProtoSearchInput(input))).search,
+    ),
+  checkSearchSettings: async (input: SearchSettingsInput): Promise<SearchCheckResult> =>
+    fromProtoSearchCheckResult(await settingsClient.checkSearchSettings(toProtoSearchInput(input))),
+  listPlugins: async (): Promise<{ plugins: PluginRecord[] }> => {
+    const response = await pluginClient.listPlugins({})
+    return { plugins: response.plugins.map(fromProtoPluginRecord) }
+  },
+  getPluginConfig: async (id: string): Promise<PluginConfig> =>
+    fromProtoPluginConfig((await pluginClient.getPluginConfig({ pluginId: id })).config),
+  savePluginConfig: async (id: string, values: Record<string, unknown>): Promise<PluginConfig> =>
+    fromProtoPluginConfig(
+      (await pluginClient.savePluginConfig({ pluginId: id, values: toJsonObject(values) })).config,
+    ),
+  addPlugin: async (path: string): Promise<{ plugins: PluginRecord[] }> => {
+    const response = await pluginClient.addPlugin({ path })
+    return { plugins: response.plugins.map(fromProtoPluginRecord) }
+  },
+  removePlugin: async (path: string): Promise<{ plugins: PluginRecord[] }> => {
+    const response = await pluginClient.deletePlugin({ path })
+    return { plugins: response.plugins.map(fromProtoPluginRecord) }
+  },
+  /** What the public catalog knows of a model, by the name typed. */
+  modelInfo: async (model: string, hint: string): Promise<{ info: ModelInfo }> => {
+    const response = await settingsClient.getModelInfo({ model, hint })
+    return { info: fromProtoModelInfo(response.info) }
+  },
   /** The models a provider in the form can use; `null` when it cannot say. */
-  listModels: (provider: Pick<ModelProviderInput, 'id' | 'kind' | 'settings'>) =>
-    request<{ models: ListedModel[] | null }>('POST', '/api/settings/model-list', { provider }),
+  listModels: async (
+    provider: Pick<ModelProviderInput, 'id' | 'kind' | 'settings'>,
+  ): Promise<{ models: ListedModel[] | null }> => {
+    const response = await settingsClient.listProviderModels({
+      provider: {
+        id: provider.id,
+        kind: provider.kind,
+        settings: toJsonObject(provider.settings),
+      },
+    })
+    return {
+      models: response.models ? response.models.items.map(fromProtoListedModel) : null,
+    }
+  },
   /** Saved as sent; `problems` names the new models that did not answer. */
-  saveModelSettings: (input: ModelSettingsInput) =>
-    request<ModelSettings & { problems: ModelProblem[] }>('PUT', '/api/settings/models', input),
+  saveModelSettings: async (
+    input: ModelSettingsInput,
+  ): Promise<ModelSettings & { problems: ModelProblem[] }> => {
+    const response = await settingsClient.saveModelSettings(toProtoSaveModelSettingsRequest(input))
+    return {
+      ...fromProtoModelSettings(response.settings),
+      problems: fromProtoModelProblems(response.problems),
+    }
+  },
   /** Setups already on this machine that no provider uses yet. */
-  foundSetups: () => request<{ found: FoundSetup[] }>('GET', '/api/settings/found'),
-  useFoundSetup: (id: string) =>
-    request<ModelSettings & { problems: ModelProblem[] }>('POST', '/api/settings/found/use', {
-      id,
-    }),
+  foundSetups: async (): Promise<{ found: FoundSetup[] }> => {
+    const response = await settingsClient.listFoundSetups({})
+    return { found: response.found.map(fromProtoFoundSetup) }
+  },
+  useFoundSetup: async (id: string): Promise<ModelSettings & { problems: ModelProblem[] }> => {
+    const response = await settingsClient.useFoundSetup({ id })
+    return {
+      ...fromProtoModelSettings(response.settings),
+      problems: fromProtoModelProblems(response.problems),
+    }
+  },
   postMessage: async (
     projectId: string,
     conversationId: string,
@@ -961,8 +1065,11 @@ export const api = {
       answer: toProtoBlockAnswer(answer),
     })
   },
-  sourceKinds: () => request<{ kinds: SourceKind[] }>('GET', '/api/source-kinds'),
-  browseSource: (
+  sourceKinds: async (): Promise<{ kinds: SourceKind[] }> => {
+    const response = await metaClient.listSourceKinds({})
+    return { kinds: response.kinds.map(fromProtoSourceKind) }
+  },
+  browseSource: async (
     kind: string,
     body: {
       projectId: string | null
@@ -970,17 +1077,20 @@ export const api = {
       settings: Record<string, unknown>
       path: string
     },
-  ) =>
-    request<{ listing: DirectoryListing | null }>(
-      'POST',
-      `/api/source-kinds/${encodeURIComponent(kind)}/browse`,
-      body,
-    ),
-  browseLocal: (path: string) =>
-    request<{ listing: DirectoryListing | null }>(
-      'GET',
-      `/api/directories${queryString({ path })}`,
-    ),
+  ): Promise<{ listing: DirectoryListing | null }> => {
+    const response = await metaClient.browseSource({
+      kind,
+      ...(body.projectId ? { projectId: body.projectId } : {}),
+      ...(body.sourceId !== undefined ? { sourceId: body.sourceId } : {}),
+      settings: toJsonObject(body.settings),
+      path: body.path,
+    })
+    return { listing: fromProtoDirectoryListing(response.listing) }
+  },
+  browseLocal: async (path: string): Promise<{ listing: DirectoryListing | null }> => {
+    const response = await metaClient.browseLocal({ path })
+    return { listing: fromProtoDirectoryListing(response.listing) }
+  },
   getFileSources: (projectId: string) =>
     request<FileSourceSet & { secretsSet: Record<string, string[]> }>(
       'GET',
@@ -1016,19 +1126,51 @@ export const api = {
   },
   refreshDashboard: (artifactId: string) =>
     request<{ artifact: unknown }>('POST', `/api/artifacts/${artifactId}/refresh`),
-  getMcpSettings: () => request<McpSettings>('GET', '/api/settings/mcp'),
-  saveMcpSettings: (servers: McpServerInput[]) =>
-    request<McpSettings>('PUT', '/api/settings/mcp', { servers }),
-  checkMcpServer: (id: string) =>
-    request<{ status: McpServerStatus }>(
-      'POST',
-      `/api/settings/mcp/${encodeURIComponent(id)}/check`,
-    ),
+  getMcpSettings: async (): Promise<McpSettings> => {
+    const response = await settingsClient.getMcpSettings({})
+    return {
+      servers: response.servers.map(fromProtoMcpServerView),
+      status: response.status.map(fromProtoMcpServerStatus),
+    }
+  },
+  saveMcpSettings: async (servers: McpServerInput[]): Promise<McpSettings> => {
+    const response = await settingsClient.saveMcpSettings({
+      servers: servers.map(toProtoMcpServerInput),
+    })
+    return {
+      servers: response.servers.map(fromProtoMcpServerView),
+      status: response.status.map(fromProtoMcpServerStatus),
+    }
+  },
+  checkMcpServer: async (id: string): Promise<{ status: McpServerStatus }> => {
+    const response = await settingsClient.checkMcpServer({ serverId: id })
+    return { status: fromProtoMcpServerStatus(response.status) }
+  },
   setProjectMcp: (projectId: string, servers: string[]) =>
     request<{ project: ProjectView }>('PUT', `/api/projects/${projectId}/mcp`, { servers }),
-  getWorkSettings: () => request<WorkSettings>('GET', '/api/settings/work'),
-  saveWorkSettings: (input: Partial<Omit<WorkSettings, 'defaults'>>) =>
-    request<WorkSettings>('PUT', '/api/settings/work', input),
+  getWorkSettings: async (): Promise<WorkSettings> =>
+    fromProtoWorkSettings((await settingsClient.getWorkSettings({})).work),
+  saveWorkSettings: async (input: Partial<Omit<WorkSettings, 'defaults'>>): Promise<WorkSettings> =>
+    fromProtoWorkSettings(
+      (
+        await settingsClient.saveWorkSettings({
+          ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+          ...(input.rules !== undefined ? { rules: { items: input.rules } } : {}),
+          ...(input.limits !== undefined
+            ? {
+                limits: {
+                  commandTimeout: input.limits.commandTimeout,
+                  commandTimeoutMax: input.limits.commandTimeoutMax,
+                  commandOutput: input.limits.commandOutput,
+                  compactShare: input.limits.compactShare,
+                  modelRetries: input.limits.modelRetries,
+                  loopRepeats: input.limits.loopRepeats,
+                },
+              }
+            : {}),
+        })
+      ).work,
+    ),
   getDataUsage: async (sizes: boolean, signal?: AbortSignal): Promise<DataUsage> => {
     const response = await dataClient.getDataUsage(
       { includeSizes: sizes },
@@ -1267,15 +1409,24 @@ export const api = {
       `/api/artifacts/${id}/comments`,
       action,
     ),
-  summarizeLinks: (urls: string[], signal?: AbortSignal) =>
-    request<{ links: Record<string, LinkSummary | null> }>('POST', '/api/links', { urls }, signal),
-  previewLink: (url: string, signal?: AbortSignal) =>
-    request<{ preview: LinkPreview | null }>(
-      'GET',
-      `/api/links/preview?url=${encodeURIComponent(url)}`,
-      undefined,
-      signal,
-    ),
+  summarizeLinks: async (
+    urls: string[],
+    signal?: AbortSignal,
+  ): Promise<{ links: Record<string, LinkSummary | null> }> => {
+    const response = await metaClient.summarizeLinks({ urls }, signal ? { signal } : undefined)
+    const links: Record<string, LinkSummary | null> = {}
+    for (const [url, entry] of Object.entries(response.links)) {
+      links[url] = entry.summary ? fromProtoLinkSummary(entry.summary) : null
+    }
+    return { links }
+  },
+  previewLink: async (
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<{ preview: LinkPreview | null }> => {
+    const response = await metaClient.previewLink({ url }, signal ? { signal } : undefined)
+    return { preview: fromProtoLinkPreview(response.preview) }
+  },
 }
 
 /** What a message carries besides its text. */

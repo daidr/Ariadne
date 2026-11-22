@@ -15,8 +15,12 @@ import (
 	"testing/fstest"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 type apiRequest struct {
@@ -331,18 +335,26 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	}
 	defer api.Close()
 
-	unauth := httptest.NewRecorder()
-	api.ServeHTTP(unauth, httptest.NewRequest("GET", "http://test.invalid/api/ping", nil))
-	if unauth.Code != 401 {
-		t.Fatalf("unauthenticated /api/ping returned %d", unauth.Code)
+	server := httptest.NewServer(api)
+	defer server.Close()
+	unauthClient := ariadnev1connect.NewMetaServiceClient(server.Client(), server.URL+rpcPrefix)
+	if _, err := unauthClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{})); err == nil {
+		t.Fatal("expected unauthenticated Ping to fail")
+	} else if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("unexpected unauthenticated Ping error: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "http://test.invalid/api/ping", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	auth := httptest.NewRecorder()
-	api.ServeHTTP(auth, req)
-	if auth.Code != 200 || strings.TrimSpace(auth.Body.String()) != `{"ok":true}` {
-		t.Fatalf("authenticated /api/ping returned %d %s", auth.Code, auth.Body.String())
+	authClient := ariadnev1connect.NewMetaServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	res, err := authClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{}))
+	if err != nil {
+		t.Fatalf("authenticated Ping failed: %v", err)
+	}
+	if !res.Msg.GetOk() {
+		t.Fatalf("authenticated Ping returned ok=false")
 	}
 }
 

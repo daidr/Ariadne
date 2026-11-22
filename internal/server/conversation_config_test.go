@@ -54,6 +54,7 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 	defer srv.Close()
 
 	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
 	threadClient := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
 	unauthThread := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix)
 	convClient := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
@@ -104,7 +105,7 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 		t.Fatalf("expected not found for missing thread, got %v", err)
 	}
 
-	// Undo local memory notice twice (idempotent), undo global instruction notices, and check missing project.
+	// Undo local memory notice twice (idempotent), then global saved notice twice.
 	for _, call := range []struct {
 		project string
 		notice  string
@@ -114,6 +115,29 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 		{"prj_a", "notice_local", false},
 		{"prj_a", "notice_all", false},
 		{"prj_a", "notice_all", false},
+	} {
+		_, err := convClient.UndoNotice(t.Context(), connect.NewRequest(&ariadnev1.UndoNoticeRequest{
+			ProjectId: call.project,
+			NoticeId:  call.notice,
+		}))
+		if call.wantErr && err == nil {
+			t.Fatalf("expected error for undo %s/%s", call.project, call.notice)
+		}
+		if !call.wantErr && err != nil {
+			t.Fatalf("unexpected error for undo %s/%s: %v", call.project, call.notice, err)
+		}
+	}
+	workBefore, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workBefore.Msg.GetWork().GetInstructions() != "" {
+		t.Fatalf("unexpected work settings after removing global memory: %+v %v", workBefore, err)
+	}
+
+	// Undo global removed notice and verify missing project error.
+	for _, call := range []struct {
+		project string
+		notice  string
+		wantErr bool
+	}{
 		{"prj_a", "notice_removed", false},
 		{"other", "notice_removed", true},
 	} {
@@ -128,6 +152,10 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 			t.Fatalf("unexpected error for undo %s/%s: %v", call.project, call.notice, err)
 		}
 	}
+	workAfter, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workAfter.Msg.GetWork().GetInstructions() != "restore line" {
+		t.Fatalf("unexpected work settings after restoring global memory: %+v %v", workAfter, err)
+	}
 
 	// Reference status for valid and missing project.
 	statusResp, err := wsClient.GetReferenceStatus(t.Context(), connect.NewRequest(&ariadnev1.GetReferenceStatusRequest{ProjectId: "prj_a"}))
@@ -138,7 +166,6 @@ func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected not found for missing project, got %v", err)
 	}
-
 	memories, err := repo.ListMemories(t.Context(), "prj_a")
 	if err != nil || len(memories) != 0 {
 		t.Fatal("memory undo did not release row", memories, err)

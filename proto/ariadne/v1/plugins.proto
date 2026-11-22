@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/settings.proto";
+import "google/protobuf/struct.proto";
+
+// PluginService manages installed plugins and their configuration.
+service PluginService {
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  rpc GetPluginConfig(GetPluginConfigRequest) returns (GetPluginConfigResponse);
+  rpc SavePluginConfig(SavePluginConfigRequest) returns (SavePluginConfigResponse);
+  rpc AddPlugin(AddPluginRequest) returns (AddPluginResponse);
+  rpc DeletePlugin(DeletePluginRequest) returns (DeletePluginResponse);
+}
+
+message PluginProvides {
+  repeated string models = 1;
+  repeated string contexts = 2;
+  repeated string dashboards = 3;
+  repeated string searches = 4;
+  repeated string links = 5;
+}
+
+message PluginRecord {
+  optional string id = 1;
+  optional LocalizedText name = 2;
+  string source = 3;
+  optional string path = 4;
+  string status = 5;
+  optional string error = 6;
+  PluginProvides provides = 7;
+  bool configurable = 8;
+}
+
+message PluginConfig {
+  LocalizedText name = 1;
+  SettingsSchema schema = 2;
+  repeated string field_order = 3;
+  google.protobuf.Struct values = 4;
+  repeated string secrets_set = 5;
+  bool ready = 6;
+}
+
+message ListPluginsRequest {}
+
+message ListPluginsResponse {
+  repeated PluginRecord plugins = 1;
+}
+
+message GetPluginConfigRequest {
+  string plugin_id = 1;
+}
+
+message GetPluginConfigResponse {
+  PluginConfig config = 1;
+}
+
+message SavePluginConfigRequest {
+  string plugin_id = 1;
+  google.protobuf.Struct values = 2;
+}
+
+message SavePluginConfigResponse {
+  PluginConfig config = 1;
+}
+
+message AddPluginRequest {
+  string path = 1;
+}
+
+message AddPluginResponse {
+  repeated PluginRecord plugins = 1;
+}
+
+message DeletePluginRequest {
+  string path = 1;
+}
+
+message DeletePluginResponse {
+  repeated PluginRecord plugins = 1;
+}
