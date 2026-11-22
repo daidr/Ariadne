@@ -5,15 +5,45 @@ import { artifactKey, threadKey } from './layout'
 /** The dock on the right side, once it is on the page. */
 export const sideDock = shallowRef<DockInstance | null>(null)
 
+const MULTI_CLICK_MS = 400
+const MULTI_CLICK_DISTANCE = 8
+
+let lastPress: {
+  time: number
+  x: number
+  y: number
+  pointerType: string
+  target: EventTarget
+} | null = null
+
+function isRapidRepeat(event: PointerEvent) {
+  const time = performance.now()
+  const target = event.currentTarget ?? event.target
+  if (!target) {
+    lastPress = null
+    return false
+  }
+  const repeat =
+    lastPress !== null &&
+    lastPress.target === target &&
+    lastPress.pointerType === event.pointerType &&
+    time - lastPress.time <= MULTI_CLICK_MS &&
+    Math.hypot(event.clientX - lastPress.x, event.clientY - lastPress.y) <= MULTI_CLICK_DISTANCE
+  lastPress = {
+    time,
+    x: event.clientX,
+    y: event.clientY,
+    pointerType: event.pointerType,
+    target,
+  }
+  return repeat
+}
+
 function canDrag(event: PointerEvent) {
-  return (
-    event.button === 0 &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    !event.shiftKey &&
-    !event.altKey &&
-    event.detail <= 1
-  )
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+    return false
+  }
+  return !isRapidRepeat(event)
 }
 
 /**
