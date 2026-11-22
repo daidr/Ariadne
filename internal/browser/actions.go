@@ -317,33 +317,34 @@ func (p *Page) selectOption(ctx context.Context, ref int, option string) (Result
 }
 
 func (p *Page) screenshot(ctx context.Context, action Action) (Result, error) {
-	params := page.CaptureScreenshotParams{}
-	if action.Ref != 0 || action.FullPage {
+	params := page.CaptureScreenshotParams{FromSurface: new(true)}
+	if action.Ref != 0 {
+		clip, err := p.box(ctx, action.Ref)
+		if err != nil {
+			return Result{}, err
+		}
 		layout, err := chromium(ctx, page.GetLayoutMetrics, cdp.Empty{})
 		if err != nil {
 			return Result{}, err
 		}
-		if action.Ref != 0 {
-			clip, err := p.box(ctx, action.Ref)
-			if err != nil {
-				return Result{}, err
-			}
-			layout, err = chromium(ctx, page.GetLayoutMetrics, cdp.Empty{})
-			if err != nil {
-				return Result{}, err
-			}
-			if visible := layout.CSSVisualViewport; visible != nil {
-				clip.X, clip.Y = clip.X+visible.PageX, clip.Y+visible.PageY
-			}
-			params.Clip = &clip
-		} else if size := layout.CSSContentSize; size != nil {
+		if visible := layout.CSSVisualViewport; visible != nil {
+			clip.X, clip.Y = clip.X+visible.PageX, clip.Y+visible.PageY
+		}
+		params.Clip = &clip
+		params.CaptureBeyondViewport = new(true)
+	} else if action.FullPage {
+		layout, err := chromium(ctx, page.GetLayoutMetrics, cdp.Empty{})
+		if err != nil {
+			return Result{}, err
+		}
+		if size := layout.CSSContentSize; size != nil && size.Width > 0 && size.Height > 0 {
 			params.Clip = &page.Viewport{X: size.X, Y: size.Y, Width: size.Width, Height: size.Height, Scale: 1}
 		}
 		params.CaptureBeyondViewport = new(true)
-		if params.Clip != nil {
-			params.Clip.Width = min(3840, params.Clip.Width)
-			params.Clip.Height = min(8000, params.Clip.Height)
-		}
+	}
+	if params.Clip != nil {
+		params.Clip.Width = min(3840, params.Clip.Width)
+		params.Clip.Height = min(8000, params.Clip.Height)
 	}
 	image, err := chromium(ctx, page.CaptureScreenshot, params)
 	mime := "image/png"

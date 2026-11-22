@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -121,7 +122,13 @@ func (pages *Pages) Use(ctx context.Context, id string, open bool, work func(con
 			return err
 		}
 	}
-	call, cancel := context.WithCancel(p.ctx)
+	var call context.Context
+	var cancel context.CancelFunc
+	if deadline, ok := ctx.Deadline(); ok {
+		call, cancel = context.WithDeadline(p.ctx, deadline)
+	} else {
+		call, cancel = context.WithCancel(p.ctx)
+	}
 	defer cancel()
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
@@ -146,9 +153,7 @@ func (p *Page) start(ctx context.Context, pages *Pages) error {
 	if err != nil {
 		return err
 	}
-	opts := slices.Clone(chromedp.DefaultExecAllocatorOptions[:])
-	opts = append(opts, chromedp.ExecPath(executable), chromedp.Flag("disable-extensions", true))
-	processLife, stopAllocator := chromedp.NewExecAllocator(p.life, opts...)
+	processLife, stopAllocator := chromedp.NewExecAllocator(p.life, execOptions(executable, goruntime.GOOS)...)
 	tab, stopTab := chromedp.NewContext(processLife, chromedp.WithErrorf(func(string, ...any) {}))
 	stop := context.AfterFunc(boot, p.stop)
 	_, err = chromedp.Run(tab, chromedp.Location())
@@ -329,6 +334,37 @@ func (pages *Pages) Close(ctx context.Context) error {
 	case <-done:
 		return nil
 	}
+}
+
+type browserFlag struct {
+	name  string
+	value any
+}
+
+func browserFlags(goos string) []browserFlag {
+	flags := []browserFlag{
+		{name: "disable-extensions", value: true},
+		// Keep chromedp's default features while enabling CDPScreenshotNewSurface so
+		// Page.captureScreenshot repaints onto a fresh surface instead of waiting on
+		// WidgetBase::ForceRedraw presentation callbacks, which can stall in headless
+		// Chromium (crbug.com/377715191).
+		{name: "enable-features", value: "NetworkService,NetworkServiceInProcess,CDPScreenshotNewSurface"},
+	}
+	if goos == "windows" {
+		// Headless Windows runners without hardware GPUs can stall or incur heavy
+		// D3D11/ANGLE fallback overhead during Page.captureScreenshot.
+		flags = append(flags, browserFlag{name: "disable-gpu", value: true})
+	}
+	return flags
+}
+
+func execOptions(executable, goos string) []chromedp.ExecAllocatorOption {
+	opts := slices.Clone(chromedp.DefaultExecAllocatorOptions[:])
+	opts = append(opts, chromedp.ExecPath(executable))
+	for _, flag := range browserFlags(goos) {
+		opts = append(opts, chromedp.Flag(flag.name, flag.value))
+	}
+	return opts
 }
 
 func chromium[P, R any](ctx context.Context, cmd cdp.Command[P, R], params P) (R, error) {

@@ -22,11 +22,11 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 		fmt.Fprint(w, `<!doctype html><input aria-label="Example input" value="Before"><button onclick="document.querySelector('p').textContent=document.querySelector('input').value;console.error('example log')">Apply</button><p>Waiting</p>`)
 	}))
 	defer site.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	browserCtx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	pages := New(ctx, t.TempDir(), nil)
+	pages := New(browserCtx, t.TempDir(), nil)
 	defer func() {
-		cleanup, stop := context.WithTimeout(context.Background(), 8*time.Second)
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
 		defer stop()
 		if err := pages.Close(cleanup); err != nil {
 			t.Error(err)
@@ -34,9 +34,12 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 	}()
 	do := func(action Action) Result {
 		t.Helper()
-		result, err := pages.Do(ctx, "project/thread", action)
+		start := time.Now()
+		stepCtx, stopStep := context.WithTimeout(browserCtx, 25*time.Second)
+		defer stopStep()
+		result, err := pages.Do(stepCtx, "project/thread", action)
 		if err != nil {
-			t.Fatalf("%s: %v", action.Name, err)
+			t.Fatalf("%s (after %s): %v", action.Name, time.Since(start).Round(time.Millisecond), err)
 		}
 		return result
 	}
@@ -51,9 +54,10 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 		id, _ := strconv.Atoi(matches[1])
 		return id
 	}
+	buttonRef := ref(`\[(\d+)\] button Apply`)
 	do(Action{Name: "type", Ref: ref(`\[(\d+)\] textbox Example input`), Text: "验证 👋"})
-	do(Action{Name: "click", Ref: ref(`\[(\d+)\] button Apply`)})
-	do(Action{Name: "wait", Text: "验证 👋", Millis: 1500})
+	do(Action{Name: "click", Ref: buttonRef})
+	do(Action{Name: "wait", Text: "验证 👋", Millis: 5000})
 	if console := do(Action{Name: "console", All: true}); !strings.Contains(console.Text, "example log") {
 		t.Fatal("console event was not collected", console)
 	}
@@ -61,8 +65,45 @@ func TestBrowserInteractsWithLocalPageAndCloses(t *testing.T) {
 	if shot.MIME != "image/png" || !bytes.HasPrefix(shot.Data, []byte{137, 80, 78, 71}) {
 		t.Fatal("invalid screenshot")
 	}
+	elementShot := do(Action{Name: "screenshot", Ref: buttonRef})
+	if elementShot.MIME != "image/png" || !bytes.HasPrefix(elementShot.Data, []byte{137, 80, 78, 71}) {
+		t.Fatal("invalid element screenshot")
+	}
 	pages.DropThread("thread")
-	if _, err := pages.Do(ctx, "project/thread", Action{Name: "snapshot"}); err == nil {
+	if _, err := pages.Do(browserCtx, "project/thread", Action{Name: "snapshot"}); err == nil {
 		t.Fatal("previous page still responds after dropping its thread")
+	}
+}
+
+func TestBrowserFlagsEnableScreenshotSurfaceAndDisableGPUOnWindows(t *testing.T) {
+	findFlag := func(flags []browserFlag, name string) (any, bool) {
+		for _, flag := range flags {
+			if flag.name == name {
+				return flag.value, true
+			}
+		}
+		return nil, false
+	}
+
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		flags := browserFlags(goos)
+		features, ok := findFlag(flags, "enable-features")
+		if !ok {
+			t.Fatalf("%s: missing enable-features flag", goos)
+		}
+		featureList, _ := features.(string)
+		for _, want := range []string{"NetworkService", "NetworkServiceInProcess", "CDPScreenshotNewSurface"} {
+			if !strings.Contains(featureList, want) {
+				t.Fatalf("%s: enable-features=%q missing %q", goos, featureList, want)
+			}
+		}
+		disableGPU, hasDisableGPU := findFlag(flags, "disable-gpu")
+		if goos == "windows" {
+			if !hasDisableGPU || disableGPU != true {
+				t.Fatalf("windows: expected disable-gpu=true, got present=%v value=%v", hasDisableGPU, disableGPU)
+			}
+		} else if hasDisableGPU {
+			t.Fatalf("%s: unexpected disable-gpu flag (%v)", goos, disableGPU)
+		}
 	}
 }
