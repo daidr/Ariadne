@@ -175,6 +175,7 @@ type SettingField struct {
 	Directory     bool                   `protobuf:"varint,5,opt,name=directory,proto3" json:"directory,omitempty"`
 	DefaultValue  *structpb.Value        `protobuf:"bytes,6,opt,name=default_value,json=defaultValue,proto3" json:"default_value,omitempty"`
 	Options       []string               `protobuf:"bytes,7,rep,name=options,proto3" json:"options,omitempty"`
+	NetworkOrigin bool                   `protobuf:"varint,8,opt,name=network_origin,json=networkOrigin,proto3" json:"network_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -256,6 +257,13 @@ func (x *SettingField) GetOptions() []string {
 		return x.Options
 	}
 	return nil
+}
+
+func (x *SettingField) GetNetworkOrigin() bool {
+	if x != nil {
+		return x.NetworkOrigin
+	}
+	return false
 }
 
 type SettingsSchema struct {
@@ -1543,16 +1551,17 @@ func (x *SearchServiceView) GetReady() bool {
 }
 
 type SearchSettings struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
-	Ready         bool                   `protobuf:"varint,2,opt,name=ready,proto3" json:"ready,omitempty"`
-	KeySet        bool                   `protobuf:"varint,3,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
-	Needed        bool                   `protobuf:"varint,4,opt,name=needed,proto3" json:"needed,omitempty"`
-	Models        []string               `protobuf:"bytes,5,rep,name=models,proto3" json:"models,omitempty"`
-	Plugins       []*LocalizedText       `protobuf:"bytes,6,rep,name=plugins,proto3" json:"plugins,omitempty"`
-	Services      []*SearchServiceView   `protobuf:"bytes,7,rep,name=services,proto3" json:"services,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Provider         string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Ready            bool                   `protobuf:"varint,2,opt,name=ready,proto3" json:"ready,omitempty"`
+	KeySet           bool                   `protobuf:"varint,3,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
+	Needed           bool                   `protobuf:"varint,4,opt,name=needed,proto3" json:"needed,omitempty"`
+	Models           []string               `protobuf:"bytes,5,rep,name=models,proto3" json:"models,omitempty"`
+	Plugins          []*LocalizedText       `protobuf:"bytes,6,rep,name=plugins,proto3" json:"plugins,omitempty"`
+	Services         []*SearchServiceView   `protobuf:"bytes,7,rep,name=services,proto3" json:"services,omitempty"`
+	DisabledProvider *string                `protobuf:"bytes,8,opt,name=disabled_provider,json=disabledProvider,proto3,oneof" json:"disabled_provider,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SearchSettings) Reset() {
@@ -1632,6 +1641,13 @@ func (x *SearchSettings) GetServices() []*SearchServiceView {
 		return x.Services
 	}
 	return nil
+}
+
+func (x *SearchSettings) GetDisabledProvider() string {
+	if x != nil && x.DisabledProvider != nil {
+		return *x.DisabledProvider
+	}
+	return ""
 }
 
 type GetSearchSettingsRequest struct {
@@ -4321,7 +4337,7 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\n" +
 	"SecretPair\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xb2\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\xd9\x02\n" +
 	"\fSettingField\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12/\n" +
 	"\x05title\x18\x02 \x01(\v2\x19.ariadne.v1.LocalizedTextR\x05title\x12@\n" +
@@ -4329,7 +4345,8 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x06secret\x18\x04 \x01(\bR\x06secret\x12\x1c\n" +
 	"\tdirectory\x18\x05 \x01(\bR\tdirectory\x12;\n" +
 	"\rdefault_value\x18\x06 \x01(\v2\x16.google.protobuf.ValueR\fdefaultValue\x12\x18\n" +
-	"\aoptions\x18\a \x03(\tR\aoptionsB\x0e\n" +
+	"\aoptions\x18\a \x03(\tR\aoptions\x12%\n" +
+	"\x0enetwork_origin\x18\b \x01(\bR\rnetworkOriginB\x0e\n" +
 	"\f_description\"\x86\x02\n" +
 	"\x0eSettingsSchema\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12J\n" +
@@ -4436,7 +4453,7 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"secretsSet\x12\x14\n" +
 	"\x05ready\x18\b \x01(\bR\x05readyB\x0e\n" +
 	"\f_descriptionB\x0f\n" +
-	"\r_capabilities\"\xfb\x01\n" +
+	"\r_capabilities\"\xc3\x02\n" +
 	"\x0eSearchSettings\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05ready\x18\x02 \x01(\bR\x05ready\x12\x17\n" +
@@ -4444,7 +4461,9 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\x06needed\x18\x04 \x01(\bR\x06needed\x12\x16\n" +
 	"\x06models\x18\x05 \x03(\tR\x06models\x123\n" +
 	"\aplugins\x18\x06 \x03(\v2\x19.ariadne.v1.LocalizedTextR\aplugins\x129\n" +
-	"\bservices\x18\a \x03(\v2\x1d.ariadne.v1.SearchServiceViewR\bservices\"\x1a\n" +
+	"\bservices\x18\a \x03(\v2\x1d.ariadne.v1.SearchServiceViewR\bservices\x120\n" +
+	"\x11disabled_provider\x18\b \x01(\tH\x00R\x10disabledProvider\x88\x01\x01B\x14\n" +
+	"\x12_disabled_provider\"\x1a\n" +
 	"\x18GetSearchSettingsRequest\"O\n" +
 	"\x19GetSearchSettingsResponse\x122\n" +
 	"\x06search\x18\x01 \x01(\v2\x1a.ariadne.v1.SearchSettingsR\x06search\"\xf0\x01\n" +
@@ -4954,6 +4973,7 @@ func file_ariadne_v1_settings_proto_init() {
 	file_ariadne_v1_settings_proto_msgTypes[19].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[23].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[26].OneofWrappers = []any{}
+	file_ariadne_v1_settings_proto_msgTypes[27].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[30].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[32].OneofWrappers = []any{}
 	file_ariadne_v1_settings_proto_msgTypes[33].OneofWrappers = []any{}

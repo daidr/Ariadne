@@ -7,6 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
@@ -25,24 +26,88 @@ func (api *API) registerPluginsRPC() {
 	})
 }
 
-func (h *pluginServiceHandler) pluginRecordsProto() []*ariadnev1.PluginRecord {
+func (h *pluginServiceHandler) pluginRecordsProto(ctx context.Context) []*ariadnev1.PluginRecord {
 	var records []plugins.Record
 	if host := h.api.options.Plugins; host != nil {
 		records = host.Records()
 	}
+	var projects []core.ProjectView
+	if h.api.options.Repository != nil {
+		for _, record := range records {
+			if len(record.Provides.Contexts) > 0 {
+				if listed, err := h.api.options.Repository.ListProjects(ctx); err == nil {
+					projects = listed
+				}
+				break
+			}
+		}
+	}
+	activeSearch := ""
+	if h.api.options.Settings != nil {
+		activeSearch = h.api.options.Settings.ActiveSearchProvider()
+	}
 	out := make([]*ariadnev1.PluginRecord, 0, len(records))
 	for _, record := range records {
-		out = append(out, toProtoPluginRecord(record))
+		proto := toProtoPluginRecord(record)
+		proto.Usage = h.pluginUsageProto(record.Provides, activeSearch, projects)
+		out = append(out, proto)
 	}
 	return out
 }
 
+func (h *pluginServiceHandler) pluginUsageProto(
+	provides plugins.Provides,
+	activeSearch string,
+	projects []core.ProjectView,
+) *ariadnev1.PluginUsage {
+	usage := &ariadnev1.PluginUsage{}
+	if h.api.options.Settings != nil && len(provides.Models) > 0 {
+		usage.ModelProviders, usage.ModelRoles = h.api.options.Settings.ModelUsageByKinds(provides.Models)
+	}
+	if activeSearch != "" && slices.Contains(provides.Searches, activeSearch) {
+		usage.Searches = []string{activeSearch}
+	}
+	if len(provides.Contexts) > 0 && len(projects) > 0 {
+		for _, project := range projects {
+			if projectUsesContextKind(project, provides.Contexts) {
+				name := project.Name
+				if name == "" {
+					name = project.ID
+				}
+				usage.Projects = append(usage.Projects, name)
+			}
+		}
+	}
+	return usage
+}
+
+func projectUsesContextKind(project core.ProjectView, kinds []string) bool {
+	for _, source := range project.WritableSources().Sources {
+		if slices.Contains(kinds, source.Kind) {
+			return true
+		}
+		if hostingKind, _ := source.Hosting["kind"].(string); hostingKind != "" && slices.Contains(kinds, hostingKind) {
+			return true
+		}
+	}
+	if refs, ok := project.References.([]any); ok {
+		for _, raw := range refs {
+			if ref, ok := raw.(map[string]any); ok {
+				if kind, _ := ref["kind"].(string); kind != "" && slices.Contains(kinds, kind) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (h *pluginServiceHandler) ListPlugins(
-	_ context.Context,
+	ctx context.Context,
 	_ *connect.Request[ariadnev1.ListPluginsRequest],
 ) (*connect.Response[ariadnev1.ListPluginsResponse], error) {
 	return connect.NewResponse(&ariadnev1.ListPluginsResponse{
-		Plugins: h.pluginRecordsProto(),
+		Plugins: h.pluginRecordsProto(ctx),
 	}), nil
 }
 
@@ -85,6 +150,26 @@ func (h *pluginServiceHandler) SavePluginConfig(
 	}), nil
 }
 
+func (h *pluginServiceHandler) SetPluginEnabled(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.SetPluginEnabledRequest],
+) (*connect.Response[ariadnev1.SetPluginEnabledResponse], error) {
+	id := req.Msg.GetPluginId()
+	host := h.api.options.Plugins
+	if host == nil {
+		return nil, domainerr.NotFound(id)
+	}
+	if err := host.SetBuiltinEnabled(ctx, h.api.options.Settings, id, req.Msg.GetEnabled()); err != nil {
+		return nil, err
+	}
+	if h.api.options.Data != nil {
+		h.api.options.Data.InvalidateUsage()
+	}
+	return connect.NewResponse(&ariadnev1.SetPluginEnabledResponse{
+		Plugins: h.pluginRecordsProto(ctx),
+	}), nil
+}
+
 func (h *pluginServiceHandler) AddPlugin(
 	ctx context.Context,
 	req *connect.Request[ariadnev1.AddPluginRequest],
@@ -100,7 +185,7 @@ func (h *pluginServiceHandler) AddPlugin(
 		h.api.options.Data.InvalidateUsage()
 	}
 	return connect.NewResponse(&ariadnev1.AddPluginResponse{
-		Plugins: h.pluginRecordsProto(),
+		Plugins: h.pluginRecordsProto(ctx),
 	}), nil
 }
 
@@ -119,7 +204,7 @@ func (h *pluginServiceHandler) DeletePlugin(
 		h.api.options.Data.InvalidateUsage()
 	}
 	return connect.NewResponse(&ariadnev1.DeletePluginResponse{
-		Plugins: h.pluginRecordsProto(),
+		Plugins: h.pluginRecordsProto(ctx),
 	}), nil
 }
 

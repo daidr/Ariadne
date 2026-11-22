@@ -27,9 +27,18 @@ func validValue(field sdk.SettingField, raw any) bool {
 	switch field.Type {
 	case "string":
 		value, ok := raw.(string)
-		return ok && len(value) <= 32768 && !strings.ContainsRune(value, 0) &&
-			(!field.Directory || strings.TrimSpace(value) == "" || filepath.IsAbs(strings.TrimSpace(value))) &&
-			(len(field.Options) == 0 || slices.Contains(field.Options, value))
+		if !ok || len(value) > 32768 || strings.ContainsRune(value, 0) {
+			return false
+		}
+		if field.Directory && strings.TrimSpace(value) != "" && !filepath.IsAbs(strings.TrimSpace(value)) {
+			return false
+		}
+		if field.NetworkOrigin && strings.TrimSpace(value) != "" {
+			if _, ok := parseNetworkOrigin(value); !ok {
+				return false
+			}
+		}
+		return len(field.Options) == 0 || slices.Contains(field.Options, value)
 	case "number":
 		_, ok := raw.(float64)
 		return ok
@@ -63,6 +72,7 @@ func checkedSettingsSchema(schema *sdk.SettingsSchema) (*sdk.SettingsSchema, err
 	}
 	for _, field := range owned.Properties {
 		if field.Secret && (field.Type != "string" || field.Default != nil || len(field.Options) > 0) ||
+			field.NetworkOrigin && (field.Type != "string" || field.Secret || field.Directory) ||
 			field.Default != nil && !validValue(field, field.Default) {
 			return nil, errors.New("invalid plugin setting default or secret")
 		}

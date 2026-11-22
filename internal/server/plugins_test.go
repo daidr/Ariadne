@@ -19,8 +19,10 @@ import (
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/plugins"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
+	"github.com/daidr/Ariadne/sdk"
 )
 
 func TestLuaPluginsThroughSettingsAPI(t *testing.T) {
@@ -256,5 +258,356 @@ func TestLuaPluginsThroughSettingsAPI(t *testing.T) {
 	config, err := settings.Open(settingsPath)
 	if err != nil || len(config.PluginPaths()) != 0 {
 		t.Fatal("settings retained removed paths", err)
+	}
+}
+
+func TestBuiltinHTTPModelPluginsTogglePreservesSavedConfig(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	store, err := settings.Open(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelReg, sourceReg, dashReg, linkReg := models.New(), sources.New(), dashboard.New(), links.New(links.Options{})
+	defer dashReg.Close(context.Background())
+	defer linkReg.Close()
+
+	host, err := plugins.New(plugins.Options{
+		DataRoot:    filepath.Join(dir, "plugins"),
+		ManagedRoot: dir,
+		Models:      modelReg,
+		Sources:     sourceReg,
+		Dashboards:  dashReg,
+		Links:       linkReg,
+		Settings:    store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{}) {
+		if err := host.Load(t.Context(), plugin, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "fixture-token",
+		Settings:   store,
+		Plugins:    host,
+		Models:     modelReg,
+		Sources:    sourceReg,
+		Dashboards: dashReg,
+		Links:      linkReg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	auth := connect.WithInterceptors(bearerClientInterceptor("fixture-token"))
+	pluginClient := ariadnev1connect.NewPluginServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	// Both built-in HTTP model plugins load enabled by default.
+	listRes, err := pluginClient.ListPlugins(t.Context(), connect.NewRequest(&ariadnev1.ListPluginsRequest{}))
+	if err != nil {
+		t.Fatalf("ListPlugins: %v", err)
+	}
+	hasOpenAI, hasAnthropic := false, false
+	for _, record := range listRes.Msg.Plugins {
+		if record.GetId() == "model-openai" && record.GetStatus() == "loaded" {
+			hasOpenAI = true
+		}
+		if record.GetId() == "model-anthropic" && record.GetStatus() == "loaded" {
+			hasAnthropic = true
+		}
+	}
+	if !hasOpenAI || !hasAnthropic {
+		t.Fatalf("missing builtin HTTP model plugins: %+v", listRes.Msg.Plugins)
+	}
+
+	// Save an Anthropic provider and an OpenAI-compatible provider directly in settings.
+	if _, err := store.UpdateModels(object{
+		"providers": []any{
+			object{"id": "p-anth", "kind": "anthropic", "name": "Claude", "settings": object{"baseUrl": "https://api.anthropic.com", "apiKey": "sk-anthropic-secret"}},
+			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI", "settings": object{"baseUrl": "https://api.openai.com/v1", "apiKey": "sk-openai-secret"}},
+		},
+		"models": []any{
+			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
+			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
+		},
+		"roles": object{"thread": object{"model": "m-oa"}},
+	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid HTTP baseUrl is rejected by ValidateSettings through ConnectRPC.
+	badSettings, err := structpb.NewStruct(map[string]any{"baseUrl": "file:///etc/passwd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = settingsClient.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{
+			{Id: "p-oa", Kind: "openai-compatible", Name: "OpenAI", Settings: badSettings},
+		},
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("SaveModelSettings(invalid baseUrl): want InvalidArgument, got %v", err)
+	}
+
+	// Disable model-anthropic via ConnectRPC.
+	_, err = pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "nonexistent",
+		Enabled:  false,
+	}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("SetPluginEnabled(nonexistent): want NotFound, got %v", err)
+	}
+	toggleRes, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "model-anthropic",
+		Enabled:  false,
+	}))
+	if err != nil {
+		t.Fatalf("SetPluginEnabled(false): %v", err)
+	}
+	disabledFound := false
+	for _, record := range toggleRes.Msg.Plugins {
+		if record.GetId() == "model-anthropic" && record.GetStatus() == "disabled" {
+			disabledFound = true
+		}
+	}
+	if !disabledFound {
+		t.Fatalf("expected model-anthropic disabled: %+v", toggleRes.Msg.Plugins)
+	}
+	if _, ok := modelReg.Get("anthropic"); ok {
+		t.Fatal("anthropic provider still registered after disabling plugin")
+	}
+
+	// Editing a disabled provider's model entry and request params via ConnectRPC succeeds without probing errors
+	// and preserves its stored settings and secret.
+	timeoutSeconds := int32(45)
+	openAISettings, err := structpb.NewStruct(map[string]any{"baseUrl": "https://api.openai.com/v1", "apiKey": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptySettings, err := structpb.NewStruct(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadModelID := "m-oa"
+	saveDisabledRes, err := settingsClient.SaveModelSettings(t.Context(), connect.NewRequest(&ariadnev1.SaveModelSettingsRequest{
+		Providers: []*ariadnev1.ModelProviderInput{
+			{Id: "p-anth", Kind: "anthropic", Name: "Claude", Settings: emptySettings, TimeoutSeconds: &timeoutSeconds},
+			{Id: "p-oa", Kind: "openai-compatible", Name: "OpenAI Updated", Settings: openAISettings},
+		},
+		Models: []*ariadnev1.ModelEntry{
+			{Id: "m-anth", Provider: "p-anth", Model: "claude-opus"},
+			{Id: "m-oa", Provider: "p-oa", Model: "gpt-5"},
+		},
+		Roles: &ariadnev1.ModelRoles{
+			Thread: &ariadnev1.RoleConfig{Model: &threadModelID},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("SaveModelSettings while editing disabled provider failed: %v", err)
+	}
+	if len(saveDisabledRes.Msg.GetProblems()) != 0 {
+		t.Fatalf("unexpected probe problems for disabled provider edit: %+v", saveDisabledRes.Msg.GetProblems())
+	}
+
+	// Re-enable model-anthropic: provider returns with both the preserved baseUrl/apiKey and updated timeout/model.
+	reEnableRes, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "model-anthropic",
+		Enabled:  true,
+	}))
+	if err != nil {
+		t.Fatalf("SetPluginEnabled(true): %v", err)
+	}
+	for _, record := range reEnableRes.Msg.Plugins {
+		if record.GetStatus() == "disabled" {
+			t.Fatalf("expected all loaded after re-enable: %+v", reEnableRes.Msg.Plugins)
+		}
+	}
+	modelsRes, err := settingsClient.GetModelSettings(t.Context(), connect.NewRequest(&ariadnev1.GetModelSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetModelSettings: %v", err)
+	}
+	recovered := false
+	for _, p := range modelsRes.Msg.GetSettings().GetProviders() {
+		if p.GetId() == "p-anth" && p.GetKind() == "anthropic" &&
+			slices.Contains(p.GetSecretsSet(), "apiKey") &&
+			p.GetSettings().AsMap()["baseUrl"] == "https://api.anthropic.com" &&
+			p.GetTimeoutSeconds() == 45 {
+			recovered = true
+		}
+	}
+	if !recovered {
+		t.Fatalf("re-enabled anthropic did not recover saved config: %+v", modelsRes.Msg.GetSettings().GetProviders())
+	}
+}
+
+func TestPluginUsageAndDisabledModelSelection(t *testing.T) {
+	dir := t.TempDir()
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "app.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	store, err := settings.Open(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelReg := models.New()
+	sourceReg := sources.New()
+	dashReg := dashboard.New()
+	searchReg := searches.New()
+	linkReg := links.New(links.Options{})
+	host, err := plugins.New(plugins.Options{
+		DataRoot:    filepath.Join(dir, "plugins"),
+		ManagedRoot: dir,
+		Models:      modelReg,
+		Sources:     sourceReg,
+		Dashboards:  dashReg,
+		Searches:    searchReg,
+		Links:       linkReg,
+		Settings:    store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close(context.Background())
+
+	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{}) {
+		if err := host.Load(t.Context(), plugin, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, plugin := range searches.BuiltinPlugins(nil) {
+		if err := host.Load(t.Context(), plugin, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := host.Load(t.Context(), sdk.Plugin{
+		ID:       "local",
+		Name:     sdk.LocalizedText{"zh-CN": "本地目录", "en": "Local directory"},
+		Provides: sdk.PluginProvides{Contexts: []string{"local-directory"}},
+		Setup: func(_ context.Context, pluginCtx sdk.PluginContext) (func(context.Context) error, error) {
+			if _, err := pluginCtx.RegisterContext(sdk.ContextProvider{
+				Info: sdk.ContextProviderInfo{Kind: "local-directory", Title: sdk.LocalizedText{"zh-CN": "本地目录"}},
+				Connect: func(context.Context, map[string]any) (sdk.Capabilities, error) {
+					return sdk.Capabilities{}, nil
+				},
+			}); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.UpdateModels(object{
+		"providers": []any{
+			object{"id": "p-anth", "kind": "anthropic", "name": "Claude", "settings": object{"baseUrl": "https://api.anthropic.com", "apiKey": "sk-anth"}},
+			object{"id": "p-oa", "kind": "openai-compatible", "name": "OpenAI", "settings": object{"baseUrl": "https://api.openai.com/v1", "apiKey": "sk-oa"}},
+		},
+		"models": []any{
+			object{"id": "m-anth", "provider": "p-anth", "model": "claude-sonnet"},
+			object{"id": "m-oa", "provider": "p-oa", "model": "gpt-5"},
+		},
+		"roles": object{"thread": object{"model": "m-oa", "fallback": "m-anth"}},
+	}, modelReg.Kinds(), modelReg.ValidateSettings); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateSearch(object{
+		"provider": "tavily",
+		"services": object{"tavily": object{"apiKey": "tvly-secret"}},
+	}, searchReg.Kinds(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	projectName := "Demo Project"
+	project, err := repo.CreateProject(t.Context(), &projectName, core.ProjectStart{
+		Source: map[string]any{"kind": "local-directory", "settings": map[string]any{"path": dir}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(t.Context(), project.ID, core.NewThread{Title: "Check model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "fixture-token",
+		Settings:   store,
+		Plugins:    host,
+		Models:     modelReg,
+		Sources:    sourceReg,
+		Dashboards: dashReg,
+		Searches:   searchReg,
+		Links:      linkReg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	auth := connect.WithInterceptors(bearerClientInterceptor("fixture-token"))
+	pluginClient := ariadnev1connect.NewPluginServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	threadClient := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	listRes, err := pluginClient.ListPlugins(t.Context(), connect.NewRequest(&ariadnev1.ListPluginsRequest{}))
+	if err != nil {
+		t.Fatalf("ListPlugins: %v", err)
+	}
+	byID := map[string]*ariadnev1.PluginRecord{}
+	for _, record := range listRes.Msg.GetPlugins() {
+		byID[record.GetId()] = record
+	}
+	if usage := byID["model-openai"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"OpenAI"}) || !slices.Equal(usage.GetModelRoles(), []string{"thread"}) {
+		t.Fatalf("model-openai usage = %+v", usage)
+	}
+	if usage := byID["model-anthropic"].GetUsage(); !slices.Equal(usage.GetModelProviders(), []string{"Claude"}) || !slices.Equal(usage.GetModelRoles(), []string{"fallback"}) {
+		t.Fatalf("model-anthropic usage = %+v", usage)
+	}
+	if usage := byID["search-tavily"].GetUsage(); !slices.Equal(usage.GetSearches(), []string{"tavily"}) {
+		t.Fatalf("search-tavily usage = %+v", usage)
+	}
+	if usage := byID["local"].GetUsage(); !slices.Equal(usage.GetProjects(), []string{"Demo Project"}) {
+		t.Fatalf("local usage = %+v", usage)
+	}
+
+	// Disable model-anthropic: SetThreadModel must reject m-anth while still allowing m-oa.
+	if _, err := pluginClient.SetPluginEnabled(t.Context(), connect.NewRequest(&ariadnev1.SetPluginEnabledRequest{
+		PluginId: "model-anthropic",
+		Enabled:  false,
+	})); err != nil {
+		t.Fatalf("SetPluginEnabled(false): %v", err)
+	}
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    thread.ID,
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m-anth"},
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("SetThreadModel(disabled m-anth): want InvalidArgument, got %v", err)
+	}
+	if _, err := threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    thread.ID,
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m-oa"},
+	})); err != nil {
+		t.Fatalf("SetThreadModel(active m-oa): %v", err)
 	}
 }

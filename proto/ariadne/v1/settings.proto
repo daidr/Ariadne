@@ -53,6 +53,7 @@ message SettingField {
   bool directory = 5;
   google.protobuf.Value default_value = 6;
   repeated string options = 7;
+  bool network_origin = 8;
 }
 
 message SettingsSchema {
@@ -194,6 +195,7 @@ message SearchSettings {
   repeated string models = 5;
   repeated LocalizedText plugins = 6;
   repeated SearchServiceView services = 7;
+  optional string disabled_provider = 8;
 }
 
 message GetSearchSettingsRequest {}

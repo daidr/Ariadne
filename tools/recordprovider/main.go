@@ -179,7 +179,8 @@ func run(ctx context.Context, raw []string) error {
 		return fmt.Errorf("unknown model ID %q", id)
 	}
 	recorder := &capture{}
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{Context: ctx, DataDir: filepath.Join(cfg.Home, "plugins"), Client: &http.Client{Transport: recorder}})
+	httpClient := &http.Client{Transport: recorder}
+	builtins, err := models.NewBuiltins(models.BuiltinOptions{Context: ctx, DataDir: filepath.Join(cfg.Home, "plugins"), Client: httpClient})
 	if err != nil {
 		return err
 	}
@@ -188,6 +189,13 @@ func run(ctx context.Context, raw []string) error {
 		defer cancel()
 		_ = builtins.Close(stop)
 	}()
+	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{Client: httpClient}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			return err
+		}
+		defer remove()
+	}
 	resolved, err := user.ResolveModel("thread", id, builtins.Registry.Kinds())
 	if err != nil {
 		return err

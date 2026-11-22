@@ -134,6 +134,21 @@ describe('Domain 1 ConnectRPC mappers', () => {
       },
     })
 
+    expect(toProtoSearchInput({ services: { deepseek: { baseUrl: '' } } })).toEqual({
+      services: { deepseek: { baseUrl: '' } },
+    })
+
+    const disabledSearch = fromProtoSearchSettings(
+      create(SearchSettingsSchema, {
+        provider: '',
+        disabledProvider: 'tavily',
+        ready: false,
+        keySet: false,
+        needed: true,
+      }),
+    )
+    expect(disabledSearch.disabledProvider).toBe('tavily')
+
     const decoded = fromProtoSearchSettings(
       create(SearchSettingsSchema, {
         provider: 'custom-lua',
@@ -338,6 +353,30 @@ describe('Domain 1 ConnectRPC mappers', () => {
         searches: [],
         links: ['github'],
       },
+    })
+
+    const disabledRecord = fromProtoPluginRecord(
+      create(PluginRecordSchema, {
+        id: 'model-anthropic',
+        name: { values: { 'zh-CN': 'Anthropic 接口' } },
+        source: 'builtin',
+        status: 'disabled',
+        provides: { models: ['anthropic'] },
+        usage: {
+          modelProviders: ['Claude'],
+          modelRoles: ['thread'],
+          searches: [],
+          projects: [],
+        },
+      }),
+    )
+    expect(disabledRecord.status).toBe('disabled')
+    expect(disabledRecord.provides.models).toEqual(['anthropic'])
+    expect(disabledRecord.usage).toEqual({
+      modelProviders: ['Claude'],
+      modelRoles: ['thread'],
+      searches: [],
+      projects: [],
     })
 
     const cfg = fromProtoPluginConfig(

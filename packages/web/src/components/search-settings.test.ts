@@ -146,4 +146,31 @@ describe('SearchSettings', () => {
       },
     })
   })
+
+  test('omits provider on save when previously selected search provider is disabled', async () => {
+    const initial = makeSearchSettings()
+    initial.provider = ''
+    initial.disabledProvider = 'tavily'
+    initial.services = [initial.services[1]!]
+    vi.spyOn(api, 'getSearchSettings').mockResolvedValue(initial)
+    let savedInput: SearchSettingsInput | null = null
+    vi.spyOn(api, 'saveSearchSettings').mockImplementation(async (input) => {
+      savedInput = input
+      return initial
+    })
+
+    const wrapper = mount(SearchSettingsView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('tavily')
+    const ok = await (wrapper.vm as unknown as { save: () => Promise<boolean> }).save()
+    expect(ok).toBe(true)
+    expect(savedInput).toEqual({
+      services: {
+        'custom-lua': { region: 'cn', strict: true },
+      },
+    })
+    expect(Object.prototype.hasOwnProperty.call(savedInput, 'provider')).toBe(false)
+  })
 })

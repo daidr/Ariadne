@@ -15,7 +15,7 @@ import type { JsonObject, Message } from '@bufbuild/protobuf'
 export const file_ariadne_v1_plugins: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'ChhhcmlhZG5lL3YxL3BsdWdpbnMucHJvdG8SCmFyaWFkbmUudjEiZwoOUGx1Z2luUHJvdmlkZXMSDgoGbW9kZWxzGAEgAygJEhAKCGNvbnRleHRzGAIgAygJEhIKCmRhc2hib2FyZHMYAyADKAkSEAoIc2VhcmNoZXMYBCADKAkSDQoFbGlua3MYBSADKAki+wEKDFBsdWdpblJlY29yZBIPCgJpZBgBIAEoCUgAiAEBEiwKBG5hbWUYAiABKAsyGS5hcmlhZG5lLnYxLkxvY2FsaXplZFRleHRIAYgBARIOCgZzb3VyY2UYAyABKAkSEQoEcGF0aBgEIAEoCUgCiAEBEg4KBnN0YXR1cxgFIAEoCRISCgVlcnJvchgGIAEoCUgDiAEBEiwKCHByb3ZpZGVzGAcgASgLMhouYXJpYWRuZS52MS5QbHVnaW5Qcm92aWRlcxIUCgxjb25maWd1cmFibGUYCCABKAhCBQoDX2lkQgcKBV9uYW1lQgcKBV9wYXRoQggKBl9lcnJvciLFAQoMUGx1Z2luQ29uZmlnEicKBG5hbWUYASABKAsyGS5hcmlhZG5lLnYxLkxvY2FsaXplZFRleHQSKgoGc2NoZW1hGAIgASgLMhouYXJpYWRuZS52MS5TZXR0aW5nc1NjaGVtYRITCgtmaWVsZF9vcmRlchgDIAMoCRInCgZ2YWx1ZXMYBCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhMKC3NlY3JldHNfc2V0GAUgAygJEg0KBXJlYWR5GAYgASgIIhQKEkxpc3RQbHVnaW5zUmVxdWVzdCJAChNMaXN0UGx1Z2luc1Jlc3BvbnNlEikKB3BsdWdpbnMYASADKAsyGC5hcmlhZG5lLnYxLlBsdWdpblJlY29yZCIrChZHZXRQbHVnaW5Db25maWdSZXF1ZXN0EhEKCXBsdWdpbl9pZBgBIAEoCSJDChdHZXRQbHVnaW5Db25maWdSZXNwb25zZRIoCgZjb25maWcYASABKAsyGC5hcmlhZG5lLnYxLlBsdWdpbkNvbmZpZyJVChdTYXZlUGx1Z2luQ29uZmlnUmVxdWVzdBIRCglwbHVnaW5faWQYASABKAkSJwoGdmFsdWVzGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCJEChhTYXZlUGx1Z2luQ29uZmlnUmVzcG9uc2USKAoGY29uZmlnGAEgASgLMhguYXJpYWRuZS52MS5QbHVnaW5Db25maWciIAoQQWRkUGx1Z2luUmVxdWVzdBIMCgRwYXRoGAEgASgJIj4KEUFkZFBsdWdpblJlc3BvbnNlEikKB3BsdWdpbnMYASADKAsyGC5hcmlhZG5lLnYxLlBsdWdpblJlY29yZCIjChNEZWxldGVQbHVnaW5SZXF1ZXN0EgwKBHBhdGgYASABKAkiQQoURGVsZXRlUGx1Z2luUmVzcG9uc2USKQoHcGx1Z2lucxgBIAMoCzIYLmFyaWFkbmUudjEuUGx1Z2luUmVjb3JkMrcDCg1QbHVnaW5TZXJ2aWNlEk4KC0xpc3RQbHVnaW5zEh4uYXJpYWRuZS52MS5MaXN0UGx1Z2luc1JlcXVlc3QaHy5hcmlhZG5lLnYxLkxpc3RQbHVnaW5zUmVzcG9uc2USWgoPR2V0UGx1Z2luQ29uZmlnEiIuYXJpYWRuZS52MS5HZXRQbHVnaW5Db25maWdSZXF1ZXN0GiMuYXJpYWRuZS52MS5HZXRQbHVnaW5Db25maWdSZXNwb25zZRJdChBTYXZlUGx1Z2luQ29uZmlnEiMuYXJpYWRuZS52MS5TYXZlUGx1Z2luQ29uZmlnUmVxdWVzdBokLmFyaWFkbmUudjEuU2F2ZVBsdWdpbkNvbmZpZ1Jlc3BvbnNlEkgKCUFkZFBsdWdpbhIcLmFyaWFkbmUudjEuQWRkUGx1Z2luUmVxdWVzdBodLmFyaWFkbmUudjEuQWRkUGx1Z2luUmVzcG9uc2USUQoMRGVsZXRlUGx1Z2luEh8uYXJpYWRuZS52MS5EZWxldGVQbHVnaW5SZXF1ZXN0GiAuYXJpYWRuZS52MS5EZWxldGVQbHVnaW5SZXNwb25zZUKpAQoOY29tLmFyaWFkbmUudjFCDFBsdWdpbnNQcm90b1ABWkBnaXRodWIuY29tL2RhaWRyL0FyaWFkbmUvaW50ZXJuYWwvZ2VuL3Byb3RvL2FyaWFkbmUvdjE7YXJpYWRuZXYxogIDQVhYqgIKQXJpYWRuZS5WMcoCCkFyaWFkbmVcVjHiAhZBcmlhZG5lXFYxXEdQQk1ldGFkYXRh6gILQXJpYWRuZTo6VjFiBnByb3RvMw',
+    'ChhhcmlhZG5lL3YxL3BsdWdpbnMucHJvdG8SCmFyaWFkbmUudjEiZwoOUGx1Z2luUHJvdmlkZXMSDgoGbW9kZWxzGAEgAygJEhAKCGNvbnRleHRzGAIgAygJEhIKCmRhc2hib2FyZHMYAyADKAkSEAoIc2VhcmNoZXMYBCADKAkSDQoFbGlua3MYBSADKAkiXwoLUGx1Z2luVXNhZ2USFwoPbW9kZWxfcHJvdmlkZXJzGAEgAygJEhMKC21vZGVsX3JvbGVzGAIgAygJEhAKCHNlYXJjaGVzGAMgAygJEhAKCHByb2plY3RzGAQgAygJIqMCCgxQbHVnaW5SZWNvcmQSDwoCaWQYASABKAlIAIgBARIsCgRuYW1lGAIgASgLMhkuYXJpYWRuZS52MS5Mb2NhbGl6ZWRUZXh0SAGIAQESDgoGc291cmNlGAMgASgJEhEKBHBhdGgYBCABKAlIAogBARIOCgZzdGF0dXMYBSABKAkSEgoFZXJyb3IYBiABKAlIA4gBARIsCghwcm92aWRlcxgHIAEoCzIaLmFyaWFkbmUudjEuUGx1Z2luUHJvdmlkZXMSFAoMY29uZmlndXJhYmxlGAggASgIEiYKBXVzYWdlGAkgASgLMhcuYXJpYWRuZS52MS5QbHVnaW5Vc2FnZUIFCgNfaWRCBwoFX25hbWVCBwoFX3BhdGhCCAoGX2Vycm9yIsUBCgxQbHVnaW5Db25maWcSJwoEbmFtZRgBIAEoCzIZLmFyaWFkbmUudjEuTG9jYWxpemVkVGV4dBIqCgZzY2hlbWEYAiABKAsyGi5hcmlhZG5lLnYxLlNldHRpbmdzU2NoZW1hEhMKC2ZpZWxkX29yZGVyGAMgAygJEicKBnZhbHVlcxgEIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEwoLc2VjcmV0c19zZXQYBSADKAkSDQoFcmVhZHkYBiABKAgiFAoSTGlzdFBsdWdpbnNSZXF1ZXN0IkAKE0xpc3RQbHVnaW5zUmVzcG9uc2USKQoHcGx1Z2lucxgBIAMoCzIYLmFyaWFkbmUudjEuUGx1Z2luUmVjb3JkIisKFkdldFBsdWdpbkNvbmZpZ1JlcXVlc3QSEQoJcGx1Z2luX2lkGAEgASgJIkMKF0dldFBsdWdpbkNvbmZpZ1Jlc3BvbnNlEigKBmNvbmZpZxgBIAEoCzIYLmFyaWFkbmUudjEuUGx1Z2luQ29uZmlnIlUKF1NhdmVQbHVnaW5Db25maWdSZXF1ZXN0EhEKCXBsdWdpbl9pZBgBIAEoCRInCgZ2YWx1ZXMYAiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IkQKGFNhdmVQbHVnaW5Db25maWdSZXNwb25zZRIoCgZjb25maWcYASABKAsyGC5hcmlhZG5lLnYxLlBsdWdpbkNvbmZpZyI9ChdTZXRQbHVnaW5FbmFibGVkUmVxdWVzdBIRCglwbHVnaW5faWQYASABKAkSDwoHZW5hYmxlZBgCIAEoCCJFChhTZXRQbHVnaW5FbmFibGVkUmVzcG9uc2USKQoHcGx1Z2lucxgBIAMoCzIYLmFyaWFkbmUudjEuUGx1Z2luUmVjb3JkIiAKEEFkZFBsdWdpblJlcXVlc3QSDAoEcGF0aBgBIAEoCSI+ChFBZGRQbHVnaW5SZXNwb25zZRIpCgdwbHVnaW5zGAEgAygLMhguYXJpYWRuZS52MS5QbHVnaW5SZWNvcmQiIwoTRGVsZXRlUGx1Z2luUmVxdWVzdBIMCgRwYXRoGAEgASgJIkEKFERlbGV0ZVBsdWdpblJlc3BvbnNlEikKB3BsdWdpbnMYASADKAsyGC5hcmlhZG5lLnYxLlBsdWdpblJlY29yZDKWBAoNUGx1Z2luU2VydmljZRJOCgtMaXN0UGx1Z2lucxIeLmFyaWFkbmUudjEuTGlzdFBsdWdpbnNSZXF1ZXN0Gh8uYXJpYWRuZS52MS5MaXN0UGx1Z2luc1Jlc3BvbnNlEloKD0dldFBsdWdpbkNvbmZpZxIiLmFyaWFkbmUudjEuR2V0UGx1Z2luQ29uZmlnUmVxdWVzdBojLmFyaWFkbmUudjEuR2V0UGx1Z2luQ29uZmlnUmVzcG9uc2USXQoQU2F2ZVBsdWdpbkNvbmZpZxIjLmFyaWFkbmUudjEuU2F2ZVBsdWdpbkNvbmZpZ1JlcXVlc3QaJC5hcmlhZG5lLnYxLlNhdmVQbHVnaW5Db25maWdSZXNwb25zZRJdChBTZXRQbHVnaW5FbmFibGVkEiMuYXJpYWRuZS52MS5TZXRQbHVnaW5FbmFibGVkUmVxdWVzdBokLmFyaWFkbmUudjEuU2V0UGx1Z2luRW5hYmxlZFJlc3BvbnNlEkgKCUFkZFBsdWdpbhIcLmFyaWFkbmUudjEuQWRkUGx1Z2luUmVxdWVzdBodLmFyaWFkbmUudjEuQWRkUGx1Z2luUmVzcG9uc2USUQoMRGVsZXRlUGx1Z2luEh8uYXJpYWRuZS52MS5EZWxldGVQbHVnaW5SZXF1ZXN0GiAuYXJpYWRuZS52MS5EZWxldGVQbHVnaW5SZXNwb25zZUKpAQoOY29tLmFyaWFkbmUudjFCDFBsdWdpbnNQcm90b1ABWkBnaXRodWIuY29tL2RhaWRyL0FyaWFkbmUvaW50ZXJuYWwvZ2VuL3Byb3RvL2FyaWFkbmUvdjE7YXJpYWRuZXYxogIDQVhYqgIKQXJpYWRuZS5WMcoCCkFyaWFkbmVcVjHiAhZBcmlhZG5lXFYxXEdQQk1ldGFkYXRh6gILQXJpYWRuZTo6VjFiBnByb3RvMw',
     [file_ariadne_v1_settings, file_google_protobuf_struct],
   )
 
@@ -56,6 +56,39 @@ export type PluginProvides = Message<'ariadne.v1.PluginProvides'> & {
 export const PluginProvidesSchema: GenMessage<PluginProvides> =
   /*@__PURE__*/
   messageDesc(file_ariadne_v1_plugins, 0)
+
+/**
+ * @generated from message ariadne.v1.PluginUsage
+ */
+export type PluginUsage = Message<'ariadne.v1.PluginUsage'> & {
+  /**
+   * @generated from field: repeated string model_providers = 1;
+   */
+  modelProviders: string[]
+
+  /**
+   * @generated from field: repeated string model_roles = 2;
+   */
+  modelRoles: string[]
+
+  /**
+   * @generated from field: repeated string searches = 3;
+   */
+  searches: string[]
+
+  /**
+   * @generated from field: repeated string projects = 4;
+   */
+  projects: string[]
+}
+
+/**
+ * Describes the message ariadne.v1.PluginUsage.
+ * Use `create(PluginUsageSchema)` to create a new message.
+ */
+export const PluginUsageSchema: GenMessage<PluginUsage> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_plugins, 1)
 
 /**
  * @generated from message ariadne.v1.PluginRecord
@@ -100,6 +133,11 @@ export type PluginRecord = Message<'ariadne.v1.PluginRecord'> & {
    * @generated from field: bool configurable = 8;
    */
   configurable: boolean
+
+  /**
+   * @generated from field: ariadne.v1.PluginUsage usage = 9;
+   */
+  usage?: PluginUsage | undefined
 }
 
 /**
@@ -108,7 +146,7 @@ export type PluginRecord = Message<'ariadne.v1.PluginRecord'> & {
  */
 export const PluginRecordSchema: GenMessage<PluginRecord> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 1)
+  messageDesc(file_ariadne_v1_plugins, 2)
 
 /**
  * @generated from message ariadne.v1.PluginConfig
@@ -151,7 +189,7 @@ export type PluginConfig = Message<'ariadne.v1.PluginConfig'> & {
  */
 export const PluginConfigSchema: GenMessage<PluginConfig> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 2)
+  messageDesc(file_ariadne_v1_plugins, 3)
 
 /**
  * @generated from message ariadne.v1.ListPluginsRequest
@@ -164,7 +202,7 @@ export type ListPluginsRequest = Message<'ariadne.v1.ListPluginsRequest'> & {}
  */
 export const ListPluginsRequestSchema: GenMessage<ListPluginsRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 3)
+  messageDesc(file_ariadne_v1_plugins, 4)
 
 /**
  * @generated from message ariadne.v1.ListPluginsResponse
@@ -182,7 +220,7 @@ export type ListPluginsResponse = Message<'ariadne.v1.ListPluginsResponse'> & {
  */
 export const ListPluginsResponseSchema: GenMessage<ListPluginsResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 4)
+  messageDesc(file_ariadne_v1_plugins, 5)
 
 /**
  * @generated from message ariadne.v1.GetPluginConfigRequest
@@ -200,7 +238,7 @@ export type GetPluginConfigRequest = Message<'ariadne.v1.GetPluginConfigRequest'
  */
 export const GetPluginConfigRequestSchema: GenMessage<GetPluginConfigRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 5)
+  messageDesc(file_ariadne_v1_plugins, 6)
 
 /**
  * @generated from message ariadne.v1.GetPluginConfigResponse
@@ -218,7 +256,7 @@ export type GetPluginConfigResponse = Message<'ariadne.v1.GetPluginConfigRespons
  */
 export const GetPluginConfigResponseSchema: GenMessage<GetPluginConfigResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 6)
+  messageDesc(file_ariadne_v1_plugins, 7)
 
 /**
  * @generated from message ariadne.v1.SavePluginConfigRequest
@@ -241,7 +279,7 @@ export type SavePluginConfigRequest = Message<'ariadne.v1.SavePluginConfigReques
  */
 export const SavePluginConfigRequestSchema: GenMessage<SavePluginConfigRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 7)
+  messageDesc(file_ariadne_v1_plugins, 8)
 
 /**
  * @generated from message ariadne.v1.SavePluginConfigResponse
@@ -259,7 +297,48 @@ export type SavePluginConfigResponse = Message<'ariadne.v1.SavePluginConfigRespo
  */
 export const SavePluginConfigResponseSchema: GenMessage<SavePluginConfigResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 8)
+  messageDesc(file_ariadne_v1_plugins, 9)
+
+/**
+ * @generated from message ariadne.v1.SetPluginEnabledRequest
+ */
+export type SetPluginEnabledRequest = Message<'ariadne.v1.SetPluginEnabledRequest'> & {
+  /**
+   * @generated from field: string plugin_id = 1;
+   */
+  pluginId: string
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled: boolean
+}
+
+/**
+ * Describes the message ariadne.v1.SetPluginEnabledRequest.
+ * Use `create(SetPluginEnabledRequestSchema)` to create a new message.
+ */
+export const SetPluginEnabledRequestSchema: GenMessage<SetPluginEnabledRequest> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_plugins, 10)
+
+/**
+ * @generated from message ariadne.v1.SetPluginEnabledResponse
+ */
+export type SetPluginEnabledResponse = Message<'ariadne.v1.SetPluginEnabledResponse'> & {
+  /**
+   * @generated from field: repeated ariadne.v1.PluginRecord plugins = 1;
+   */
+  plugins: PluginRecord[]
+}
+
+/**
+ * Describes the message ariadne.v1.SetPluginEnabledResponse.
+ * Use `create(SetPluginEnabledResponseSchema)` to create a new message.
+ */
+export const SetPluginEnabledResponseSchema: GenMessage<SetPluginEnabledResponse> =
+  /*@__PURE__*/
+  messageDesc(file_ariadne_v1_plugins, 11)
 
 /**
  * @generated from message ariadne.v1.AddPluginRequest
@@ -277,7 +356,7 @@ export type AddPluginRequest = Message<'ariadne.v1.AddPluginRequest'> & {
  */
 export const AddPluginRequestSchema: GenMessage<AddPluginRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 9)
+  messageDesc(file_ariadne_v1_plugins, 12)
 
 /**
  * @generated from message ariadne.v1.AddPluginResponse
@@ -295,7 +374,7 @@ export type AddPluginResponse = Message<'ariadne.v1.AddPluginResponse'> & {
  */
 export const AddPluginResponseSchema: GenMessage<AddPluginResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 10)
+  messageDesc(file_ariadne_v1_plugins, 13)
 
 /**
  * @generated from message ariadne.v1.DeletePluginRequest
@@ -313,7 +392,7 @@ export type DeletePluginRequest = Message<'ariadne.v1.DeletePluginRequest'> & {
  */
 export const DeletePluginRequestSchema: GenMessage<DeletePluginRequest> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 11)
+  messageDesc(file_ariadne_v1_plugins, 14)
 
 /**
  * @generated from message ariadne.v1.DeletePluginResponse
@@ -331,7 +410,7 @@ export type DeletePluginResponse = Message<'ariadne.v1.DeletePluginResponse'> & 
  */
 export const DeletePluginResponseSchema: GenMessage<DeletePluginResponse> =
   /*@__PURE__*/
-  messageDesc(file_ariadne_v1_plugins, 12)
+  messageDesc(file_ariadne_v1_plugins, 15)
 
 /**
  * PluginService manages installed plugins and their configuration.
@@ -362,6 +441,14 @@ export const PluginService: GenService<{
     methodKind: 'unary'
     input: typeof SavePluginConfigRequestSchema
     output: typeof SavePluginConfigResponseSchema
+  }
+  /**
+   * @generated from rpc ariadne.v1.PluginService.SetPluginEnabled
+   */
+  setPluginEnabled: {
+    methodKind: 'unary'
+    input: typeof SetPluginEnabledRequestSchema
+    output: typeof SetPluginEnabledResponseSchema
   }
   /**
    * @generated from rpc ariadne.v1.PluginService.AddPlugin

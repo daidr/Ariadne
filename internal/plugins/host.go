@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/daidr/Ariadne/internal/dashboard"
+	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/searches"
@@ -71,12 +72,18 @@ type loaded struct {
 	ready    func(context.Context, map[string]any) bool
 	validate func(map[string]any) error
 }
+type builtinEntry struct {
+	plugin   sdk.Plugin
+	provides Provides
+	loaded   *loaded
+}
 type Host struct {
 	options   Options
 	mu        sync.Mutex
 	serial    chan struct{}
 	life      context.Context
 	cancel    context.CancelFunc
+	builtins  []*builtinEntry
 	loaded    []*loaded
 	failed    []Record
 	closing   bool
@@ -112,6 +119,40 @@ func (host *Host) lock(ctx context.Context) (func(), error) {
 	}
 	return func() { <-host.serial }, nil
 }
+func cloneLocalized(value sdk.LocalizedText) sdk.LocalizedText {
+	if value == nil {
+		return nil
+	}
+	out := make(sdk.LocalizedText, len(value))
+	for key, text := range value {
+		out[key] = text
+	}
+	return out
+}
+func copyStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return slices.Clone(values)
+}
+func copyProvides(provides Provides) Provides {
+	return Provides{
+		Models:     copyStrings(provides.Models),
+		Contexts:   copyStrings(provides.Contexts),
+		Dashboards: copyStrings(provides.Dashboards),
+		Searches:   copyStrings(provides.Searches),
+		Links:      copyStrings(provides.Links),
+	}
+}
+func providesFromPlugin(provides sdk.PluginProvides) Provides {
+	return Provides{
+		Models:     copyStrings(provides.Models),
+		Contexts:   copyStrings(provides.Contexts),
+		Dashboards: copyStrings(provides.Dashboards),
+		Searches:   copyStrings(provides.Searches),
+		Links:      copyStrings(provides.Links),
+	}
+}
 func copyRecord(record Record) Record {
 	data, _ := json.Marshal(record)
 	var out Record
@@ -122,7 +163,23 @@ func (host *Host) Records() []Record {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	out := []Record{}
+	for _, entry := range host.builtins {
+		if entry.loaded != nil {
+			out = append(out, copyRecord(entry.loaded.record))
+		} else {
+			out = append(out, copyRecord(Record{
+				ID:       new(entry.plugin.ID),
+				Name:     cloneLocalized(entry.plugin.Name),
+				Source:   "builtin",
+				Status:   "disabled",
+				Provides: copyProvides(entry.provides),
+			}))
+		}
+	}
 	for _, entry := range host.loaded {
+		if entry.record.Source == "builtin" {
+			continue
+		}
 		out = append(out, copyRecord(entry.record))
 	}
 	for _, entry := range host.failed {
@@ -211,15 +268,82 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 		return errors.New("plugin name metadata is too large")
 	}
 	host.mu.Lock()
-	if len(host.loaded) >= MaxPlugins {
-		host.mu.Unlock()
-		return errors.New("too many loaded plugins")
-	}
 	for _, entry := range host.loaded {
 		if entry.record.ID != nil && *entry.record.ID == plugin.ID {
 			host.mu.Unlock()
 			return fmt.Errorf("plugin %s is already loaded", plugin.ID)
 		}
+	}
+	for _, entry := range host.builtins {
+		if entry.plugin.ID == plugin.ID {
+			host.mu.Unlock()
+			return fmt.Errorf("plugin %s is already loaded", plugin.ID)
+		}
+	}
+	host.mu.Unlock()
+
+	if path == nil {
+		owned := plugin
+		owned.Name = cloneLocalized(plugin.Name)
+		owned.Settings = schema
+		if host.options.Settings != nil && host.options.Settings.IsPluginDisabled(plugin.ID) {
+			host.mu.Lock()
+			defer host.mu.Unlock()
+			if host.closing {
+				return errors.New("plugin host is closed")
+			}
+			host.builtins = append(host.builtins, &builtinEntry{plugin: owned, provides: providesFromPlugin(owned.Provides)})
+			return nil
+		}
+		entry, err := host.start(ctx, owned, schema, nil)
+		if err != nil {
+			return err
+		}
+		host.mu.Lock()
+		if host.closing {
+			host.mu.Unlock()
+			host.disposeLoaded(entry)
+			return errors.New("plugin host is closed")
+		}
+		host.loaded = append(host.loaded, entry)
+		host.builtins = append(host.builtins, &builtinEntry{plugin: owned, provides: copyProvides(entry.record.Provides), loaded: entry})
+		host.mu.Unlock()
+		return nil
+	}
+
+	entry, err := host.start(ctx, plugin, schema, path)
+	if err != nil {
+		return err
+	}
+	host.mu.Lock()
+	if host.closing {
+		host.mu.Unlock()
+		host.disposeLoaded(entry)
+		return errors.New("plugin host is closed")
+	}
+	host.loaded = append(host.loaded, entry)
+	host.mu.Unlock()
+	return nil
+}
+
+func (host *Host) disposeLoaded(entry *loaded) error {
+	if entry == nil {
+		return nil
+	}
+	entry.cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := dispose(ctx, entry.dispose)
+	entry.dispose = nil
+	entry.record = Record{}
+	return err
+}
+
+func (host *Host) start(ctx context.Context, plugin sdk.Plugin, schema *sdk.SettingsSchema, path *string) (entry *loaded, err error) {
+	host.mu.Lock()
+	if len(host.loaded) >= MaxPlugins {
+		host.mu.Unlock()
+		return nil, errors.New("too many loaded plugins")
 	}
 	host.mu.Unlock()
 	life, cancel := context.WithCancel(host.life)
@@ -228,6 +352,7 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	defer func() {
 		if cause := recover(); cause != nil {
 			err = fmt.Errorf("plugin startup failed: %v", cause)
+			entry = nil
 		}
 		if !complete {
 			cancel()
@@ -243,7 +368,7 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	}()
 	dataDir := filepath.Join(host.options.DataRoot, plugin.ID)
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		return err
+		return nil, err
 	}
 	pc := sdk.PluginContext{Context: life, DataDir: dataDir}
 	store := host.options.Settings
@@ -300,24 +425,100 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	}
 	state.mu.Unlock()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := startup.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	record := Record{ID: new(plugin.ID), Name: plugin.Name, Source: "builtin", Status: "loaded", Provides: state.provides, Configurable: schema != nil}
+	record := Record{ID: new(plugin.ID), Name: cloneLocalized(plugin.Name), Source: "builtin", Status: "loaded", Provides: state.provides, Configurable: schema != nil}
 	if path != nil {
 		record.Source = "path"
 		record.Path = new(*path)
 	}
-	host.mu.Lock()
-	defer host.mu.Unlock()
-	if host.closing {
-		return errors.New("plugin host is closed")
-	}
-	host.loaded = append(host.loaded, &loaded{record: copyRecord(record), dispose: state.disposers, cancel: cancel, schema: schema, ready: plugin.SettingsReady, validate: plugin.ValidateSettings})
+	entry = &loaded{record: copyRecord(record), dispose: state.disposers, cancel: cancel, schema: schema, ready: plugin.SettingsReady, validate: plugin.ValidateSettings}
 	state.disposers = nil
 	complete = true
+	return entry, nil
+}
+
+func (host *Host) SetBuiltinEnabled(ctx context.Context, store *settings.Store, id string, enabled bool) error {
+	if !pluginID.MatchString(id) {
+		return domainerr.NotFound(id)
+	}
+	unlock, err := host.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	host.mu.Lock()
+	var target *builtinEntry
+	for _, entry := range host.builtins {
+		if entry.plugin.ID == id {
+			target = entry
+			break
+		}
+	}
+	host.mu.Unlock()
+	if target == nil {
+		return domainerr.NotFound(id)
+	}
+	if enabled {
+		if target.loaded != nil {
+			if store != nil {
+				return store.SetPluginDisabled(id, false)
+			}
+			return nil
+		}
+		started, err := host.start(ctx, target.plugin, target.plugin.Settings, nil)
+		if err != nil {
+			var localized *domainerr.Error
+			if errors.As(err, &localized) {
+				return localized
+			}
+			return domainerr.New("error.pluginLoad", map[string]any{"detail": strings.Clone(textutil.HeadUnits(err.Error(), 1024))})
+		}
+		if err := ctx.Err(); err != nil {
+			host.report(host.disposeLoaded(started))
+			return err
+		}
+		if store != nil {
+			if err := store.SetPluginDisabled(id, false); err != nil {
+				host.report(host.disposeLoaded(started))
+				return err
+			}
+		}
+		host.mu.Lock()
+		if host.closing {
+			host.mu.Unlock()
+			host.report(host.disposeLoaded(started))
+			return errors.New("plugin host is closed")
+		}
+		target.loaded = started
+		target.provides = copyProvides(started.record.Provides)
+		host.loaded = append(host.loaded, started)
+		host.mu.Unlock()
+		return nil
+	}
+	if target.loaded == nil {
+		if store != nil {
+			return store.SetPluginDisabled(id, true)
+		}
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if store != nil {
+		if err := store.SetPluginDisabled(id, true); err != nil {
+			return err
+		}
+	}
+	host.mu.Lock()
+	removed := target.loaded
+	target.loaded = nil
+	host.loaded = slices.DeleteFunc(host.loaded, func(item *loaded) bool { return item == removed })
+	host.mu.Unlock()
+	host.report(host.disposeLoaded(removed))
 	return nil
 }
 func (host *Host) Searches() *searches.Registry {
@@ -376,6 +577,7 @@ func (host *Host) Close(ctx context.Context) error {
 			host.mu.Lock()
 			loaded := host.loaded
 			host.loaded = nil
+			host.builtins = nil
 			host.failed = nil
 			host.mu.Unlock()
 			for i := len(loaded) - 1; i >= 0; i-- {

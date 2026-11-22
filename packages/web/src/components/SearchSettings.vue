@@ -111,6 +111,9 @@ function input(onlyActive = false): SearchSettingsInput {
     if (onlyActive && service.kind !== provider.value) continue
     services[service.kind] = payloadFor(service)
   }
+  if (!provider.value && search.value?.disabledProvider) {
+    return { services }
+  }
   return { provider: provider.value, services }
 }
 
@@ -168,6 +171,9 @@ defineExpose({ save, checking, reload })
             ? t('settings.searchSources', { sources: modelSources })
             : t('settings.searchNoSources')
         }}
+      </DouText>
+      <DouText v-if="search.disabledProvider" size="sm" variant="secondary">
+        {{ t('settings.searchProviderDisabled', { kind: search.disabledProvider }) }}
       </DouText>
       <DouText v-if="!search.services.length" size="sm" variant="secondary">
         {{ t('settings.searchNoProviders') }}

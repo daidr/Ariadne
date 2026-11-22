@@ -13,6 +13,7 @@ import (
 	"github.com/daidr/Ariadne/internal/dashboard"
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -167,5 +168,129 @@ func TestPluginSafeIDsAndBoundedFailureRecords(t *testing.T) {
 	}
 	if len(host.Records()) != MaxPlugins {
 		t.Fatal("failed plugin records unbounded")
+	}
+}
+
+func TestBuiltinPluginEnableDisableLifecycleAndRestart(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	store, err := settings.Open(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCalls := 0
+	disposeCalls := 0
+	builtin := sdk.Plugin{
+		ID:       "model-fixture",
+		Name:     sdk.LocalizedText{"zh-CN": "测试模型", "en": "Test model"},
+		Provides: sdk.PluginProvides{Models: []string{"fixture-model"}},
+		Setup: func(_ context.Context, ctx sdk.PluginContext) (func(context.Context) error, error) {
+			setupCalls++
+			if _, err := ctx.RegisterModel(model("fixture-model")); err != nil {
+				return nil, err
+			}
+			return func(context.Context) error {
+				disposeCalls++
+				return nil
+			}, nil
+		},
+	}
+
+	makeHost := func(s *settings.Store) (*Host, Options) {
+		options := Options{
+			DataRoot:   filepath.Join(dir, "plugins"),
+			Models:     models.New(),
+			Sources:    sources.New(),
+			Dashboards: dashboard.New(),
+			Links:      links.New(links.Options{}),
+			Settings:   s,
+		}
+		h, err := New(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h, options
+	}
+
+	host, options := makeHost(store)
+	if err := host.Load(t.Context(), builtin, nil); err != nil {
+		t.Fatal(err)
+	}
+	if setupCalls != 1 {
+		t.Fatalf("expected 1 setup call, got %d", setupCalls)
+	}
+	if _, ok := options.Models.Get("fixture-model"); !ok {
+		t.Fatal("builtin model not registered on initial load")
+	}
+	records := host.Records()
+	if len(records) != 1 || records[0].Status != "loaded" || records[0].Source != "builtin" {
+		t.Fatalf("unexpected initial records: %+v", records)
+	}
+
+	// Disable the built-in plugin: provider unregisters, disposer runs, config records disabledPlugins.
+	if err := host.SetBuiltinEnabled(t.Context(), store, "model-fixture", false); err != nil {
+		t.Fatal(err)
+	}
+	if disposeCalls != 1 {
+		t.Fatalf("expected 1 dispose call, got %d", disposeCalls)
+	}
+	if _, ok := options.Models.Get("fixture-model"); ok {
+		t.Fatal("disabled builtin model remained registered")
+	}
+	if !store.IsPluginDisabled("model-fixture") {
+		t.Fatal("disabled plugin not persisted in settings")
+	}
+	records = host.Records()
+	if len(records) != 1 || records[0].Status != "disabled" || !reflect.DeepEqual(records[0].Provides.Models, []string{"fixture-model"}) {
+		t.Fatalf("unexpected disabled records: %+v", records)
+	}
+	if err := host.SetBuiltinEnabled(t.Context(), store, "unknown-plugin", false); err == nil {
+		t.Fatal("expected error when toggling unknown plugin")
+	}
+	_ = host.Close(t.Context())
+	options.Dashboards.Close(t.Context())
+	options.Links.Close()
+
+	// Restart with persisted config.json: built-in starts disabled without running Setup, preserving Provides.
+	restartedStore, err := settings.Open(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host2, options2 := makeHost(restartedStore)
+	defer func() {
+		_ = host2.Close(t.Context())
+		options2.Dashboards.Close(t.Context())
+		options2.Links.Close()
+	}()
+	if err := host2.Load(t.Context(), builtin, nil); err != nil {
+		t.Fatal(err)
+	}
+	if setupCalls != 1 {
+		t.Fatalf("disabled builtin ran Setup on restart: setupCalls=%d", setupCalls)
+	}
+	if _, ok := options2.Models.Get("fixture-model"); ok {
+		t.Fatal("disabled builtin registered provider on restart")
+	}
+	records = host2.Records()
+	if len(records) != 1 || records[0].Status != "disabled" || !reflect.DeepEqual(records[0].Provides.Models, []string{"fixture-model"}) {
+		t.Fatalf("unexpected restarted disabled records: %+v", records)
+	}
+
+	// Re-enable the built-in plugin: Setup runs again and provider becomes available.
+	if err := host2.SetBuiltinEnabled(t.Context(), restartedStore, "model-fixture", true); err != nil {
+		t.Fatal(err)
+	}
+	if setupCalls != 2 {
+		t.Fatalf("expected 2 setup calls after re-enable, got %d", setupCalls)
+	}
+	if _, ok := options2.Models.Get("fixture-model"); !ok {
+		t.Fatal("re-enabled builtin model not registered")
+	}
+	if restartedStore.IsPluginDisabled("model-fixture") {
+		t.Fatal("re-enabled plugin remained in disabledPlugins")
+	}
+	records = host2.Records()
+	if len(records) != 1 || records[0].Status != "loaded" {
+		t.Fatalf("unexpected re-enabled records: %+v", records)
 	}
 }

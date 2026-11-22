@@ -380,13 +380,20 @@ export interface ModelProviderInput {
   timeoutSeconds?: number | null
 }
 
+export interface PluginUsage {
+  modelProviders: string[]
+  modelRoles: string[]
+  searches: string[]
+  projects: string[]
+}
+
 /** A plugin as the server reports it; see `PluginRecord` in the agent package. */
 export interface PluginRecord {
   id: string | null
   name: LocalizedText | null
   source: 'builtin' | 'path'
   path: string | null
-  status: 'loaded' | 'failed'
+  status: 'loaded' | 'failed' | 'disabled'
   error: string | null
   configurable?: boolean
   provides: {
@@ -396,6 +403,7 @@ export interface PluginRecord {
     searches: string[]
     links: string[]
   }
+  usage?: PluginUsage
 }
 
 export interface PluginConfig {
@@ -485,6 +493,7 @@ export interface SearchServiceView {
 /** Web search in the settings: registered search plugins, active selection, and fallback models. */
 export interface SearchSettings {
   provider: string
+  disabledProvider?: string
   ready: boolean
   keySet: boolean
   needed: boolean
@@ -494,7 +503,7 @@ export interface SearchSettings {
 }
 
 export interface SearchSettingsInput {
-  provider: string
+  provider?: string
   services: Record<string, Record<string, unknown>>
 }
 
@@ -952,6 +961,10 @@ export const api = {
     fromProtoPluginConfig(
       (await pluginClient.savePluginConfig({ pluginId: id, values: toJsonObject(values) })).config,
     ),
+  setPluginEnabled: async (id: string, enabled: boolean): Promise<{ plugins: PluginRecord[] }> => {
+    const response = await pluginClient.setPluginEnabled({ pluginId: id, enabled })
+    return { plugins: response.plugins.map(fromProtoPluginRecord) }
+  },
   addPlugin: async (path: string): Promise<{ plugins: PluginRecord[] }> => {
     const response = await pluginClient.addPlugin({ path })
     return { plugins: response.plugins.map(fromProtoPluginRecord) }

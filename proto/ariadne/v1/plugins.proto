@@ -10,6 +10,7 @@ service PluginService {
   rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
   rpc GetPluginConfig(GetPluginConfigRequest) returns (GetPluginConfigResponse);
   rpc SavePluginConfig(SavePluginConfigRequest) returns (SavePluginConfigResponse);
+  rpc SetPluginEnabled(SetPluginEnabledRequest) returns (SetPluginEnabledResponse);
   rpc AddPlugin(AddPluginRequest) returns (AddPluginResponse);
   rpc DeletePlugin(DeletePluginRequest) returns (DeletePluginResponse);
 }
@@ -22,6 +23,13 @@ message PluginProvides {
   repeated string links = 5;
 }
 
+message PluginUsage {
+  repeated string model_providers = 1;
+  repeated string model_roles = 2;
+  repeated string searches = 3;
+  repeated string projects = 4;
+}
+
 message PluginRecord {
   optional string id = 1;
   optional LocalizedText name = 2;
@@ -31,6 +39,7 @@ message PluginRecord {
   optional string error = 6;
   PluginProvides provides = 7;
   bool configurable = 8;
+  PluginUsage usage = 9;
 }
 
 message PluginConfig {
@@ -63,6 +72,15 @@ message SavePluginConfigRequest {
 
 message SavePluginConfigResponse {
   PluginConfig config = 1;
+}
+
+message SetPluginEnabledRequest {
+  string plugin_id = 1;
+  bool enabled = 2;
+}
+
+message SetPluginEnabledResponse {
+  repeated PluginRecord plugins = 1;
 }
 
 message AddPluginRequest {

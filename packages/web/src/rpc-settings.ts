@@ -177,6 +177,7 @@ function fromProtoSettingField(field: ProtoSettingField): SettingField {
         ...common,
         ...(field.secret ? { secret: true } : {}),
         ...(field.directory ? { directory: true } : {}),
+        ...(field.networkOrigin ? { networkOrigin: true } : {}),
         ...(typeof defaultValue === 'string' ? { default: defaultValue } : {}),
       }
   }
@@ -272,6 +273,7 @@ export function fromProtoSearchSettings(value?: ProtoSearchSettings): SearchSett
   if (!value) throw new ApiError(500, { key: 'error.invalidBody', params: { reason: 'search' } })
   return {
     provider: value.provider,
+    ...(value.disabledProvider ? { disabledProvider: value.disabledProvider } : {}),
     ready: value.ready,
     keySet: value.keySet,
     needed: value.needed,
@@ -312,7 +314,7 @@ export function toProtoSearchInput(input: SearchSettingsInput) {
     services[kind] = toJsonObject(entry)
   }
   return {
-    provider: input.provider,
+    ...(input.provider !== undefined ? { provider: input.provider } : {}),
     services,
   }
 }
@@ -566,7 +568,8 @@ export function fromProtoPluginRecord(record: ProtoPluginRecord): PluginRecord {
     name: record.name ? fromProtoLocalizedText(record.name) : null,
     source: record.source === 'builtin' ? 'builtin' : 'path',
     path: record.path ?? null,
-    status: record.status === 'loaded' ? 'loaded' : 'failed',
+    status:
+      record.status === 'loaded' ? 'loaded' : record.status === 'disabled' ? 'disabled' : 'failed',
     error: record.error ?? null,
     ...(record.configurable ? { configurable: true } : {}),
     provides: {
@@ -576,6 +579,16 @@ export function fromProtoPluginRecord(record: ProtoPluginRecord): PluginRecord {
       searches: [...(record.provides?.searches ?? [])],
       links: [...(record.provides?.links ?? [])],
     },
+    ...(record.usage
+      ? {
+          usage: {
+            modelProviders: [...record.usage.modelProviders],
+            modelRoles: [...record.usage.modelRoles],
+            searches: [...record.usage.searches],
+            projects: [...record.usage.projects],
+          },
+        }
+      : {}),
   }
 }
 

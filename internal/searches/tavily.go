@@ -53,8 +53,9 @@ func TavilyProvider(client *http.Client) sdk.SearchProvider {
 
 func TavilyPlugin(client *http.Client) sdk.Plugin {
 	return sdk.Plugin{
-		ID:   "search-tavily",
-		Name: sdk.LocalizedText{"zh-CN": "Tavily 搜索", "en": "Tavily Search"},
+		ID:       "search-tavily",
+		Name:     sdk.LocalizedText{"zh-CN": "Tavily 搜索", "en": "Tavily Search"},
+		Provides: sdk.PluginProvides{Searches: []string{"tavily"}},
 		Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
 			if _, err := pc.RegisterSearch(TavilyProvider(client)); err != nil {
 				return nil, err

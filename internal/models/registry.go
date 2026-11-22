@@ -104,3 +104,10 @@ func (registry *Registry) Kinds() []sdk.ModelProviderInfo {
 	}
 	return result
 }
+func (registry *Registry) ValidateSettings(kind string, values map[string]any) error {
+	provider, exists := registry.Get(kind)
+	if !exists || provider.ValidateSettings == nil {
+		return nil
+	}
+	return provider.ValidateSettings(values)
+}

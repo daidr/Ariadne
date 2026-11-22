@@ -38,21 +38,21 @@ import (
 )
 
 type Runner struct {
-	Repository    *core.Repository
-	Settings      *settings.Store
-	Models        *models.Registry
-	Drafts        *realtime.ReplyDrafts
-	Live          *realtime.LiveCommands
+	Repository *core.Repository
+	Settings   *settings.Store
+	Models     *models.Registry
+	Drafts     *realtime.ReplyDrafts
+	Live       *realtime.LiveCommands
 	Workspaces *workspaces.Manager
 	MCP        *mcp.Hub
 	SkillsDirs []string
 	Searches   *searches.Registry
 	HTTPClient *http.Client
-	Rooms         *collab.Rooms
-	Dashboards    *dashboard.Registry
-	Browser       *browser.Pages
-	Sources       *sources.Registry
-	Home          string
+	Rooms      *collab.Rooms
+	Dashboards *dashboard.Registry
+	Browser    *browser.Pages
+	Sources    *sources.Registry
+	Home       string
 }
 
 type turn struct {
@@ -141,7 +141,14 @@ func asNumber(value any) float64 {
 }
 
 func recordCall(model *settings.ResolvedModel, effort string) *trace.RecordedCall {
-	record := &trace.RecordedCall{Provider: model.Provider.Kind, Model: model.Model, Settings: map[string]any{}, Program: model.Provider.Program, MaxTokens: int64(asNumber(model.Request["maxTokens"]))}
+	record := &trace.RecordedCall{
+		Provider:       model.Provider.Kind,
+		Model:          model.Model,
+		Settings:       map[string]any{},
+		Program:        model.Provider.Program,
+		ReasoningScope: model.Provider.Capabilities.ReasoningScope,
+		MaxTokens:      int64(asNumber(model.Request["maxTokens"])),
+	}
 	record.ExtraBody, _ = model.Request["extraBody"].(map[string]any)
 	if effort != "" {
 		record.Effort = new(effort)

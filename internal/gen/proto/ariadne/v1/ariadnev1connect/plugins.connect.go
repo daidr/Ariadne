@@ -42,6 +42,9 @@ const (
 	// PluginServiceSavePluginConfigProcedure is the fully-qualified name of the PluginService's
 	// SavePluginConfig RPC.
 	PluginServiceSavePluginConfigProcedure = "/ariadne.v1.PluginService/SavePluginConfig"
+	// PluginServiceSetPluginEnabledProcedure is the fully-qualified name of the PluginService's
+	// SetPluginEnabled RPC.
+	PluginServiceSetPluginEnabledProcedure = "/ariadne.v1.PluginService/SetPluginEnabled"
 	// PluginServiceAddPluginProcedure is the fully-qualified name of the PluginService's AddPlugin RPC.
 	PluginServiceAddPluginProcedure = "/ariadne.v1.PluginService/AddPlugin"
 	// PluginServiceDeletePluginProcedure is the fully-qualified name of the PluginService's
@@ -54,6 +57,7 @@ type PluginServiceClient interface {
 	ListPlugins(context.Context, *connect.Request[v1.ListPluginsRequest]) (*connect.Response[v1.ListPluginsResponse], error)
 	GetPluginConfig(context.Context, *connect.Request[v1.GetPluginConfigRequest]) (*connect.Response[v1.GetPluginConfigResponse], error)
 	SavePluginConfig(context.Context, *connect.Request[v1.SavePluginConfigRequest]) (*connect.Response[v1.SavePluginConfigResponse], error)
+	SetPluginEnabled(context.Context, *connect.Request[v1.SetPluginEnabledRequest]) (*connect.Response[v1.SetPluginEnabledResponse], error)
 	AddPlugin(context.Context, *connect.Request[v1.AddPluginRequest]) (*connect.Response[v1.AddPluginResponse], error)
 	DeletePlugin(context.Context, *connect.Request[v1.DeletePluginRequest]) (*connect.Response[v1.DeletePluginResponse], error)
 }
@@ -87,6 +91,12 @@ func NewPluginServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(pluginServiceMethods.ByName("SavePluginConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		setPluginEnabled: connect.NewClient[v1.SetPluginEnabledRequest, v1.SetPluginEnabledResponse](
+			httpClient,
+			baseURL+PluginServiceSetPluginEnabledProcedure,
+			connect.WithSchema(pluginServiceMethods.ByName("SetPluginEnabled")),
+			connect.WithClientOptions(opts...),
+		),
 		addPlugin: connect.NewClient[v1.AddPluginRequest, v1.AddPluginResponse](
 			httpClient,
 			baseURL+PluginServiceAddPluginProcedure,
@@ -107,6 +117,7 @@ type pluginServiceClient struct {
 	listPlugins      *connect.Client[v1.ListPluginsRequest, v1.ListPluginsResponse]
 	getPluginConfig  *connect.Client[v1.GetPluginConfigRequest, v1.GetPluginConfigResponse]
 	savePluginConfig *connect.Client[v1.SavePluginConfigRequest, v1.SavePluginConfigResponse]
+	setPluginEnabled *connect.Client[v1.SetPluginEnabledRequest, v1.SetPluginEnabledResponse]
 	addPlugin        *connect.Client[v1.AddPluginRequest, v1.AddPluginResponse]
 	deletePlugin     *connect.Client[v1.DeletePluginRequest, v1.DeletePluginResponse]
 }
@@ -126,6 +137,11 @@ func (c *pluginServiceClient) SavePluginConfig(ctx context.Context, req *connect
 	return c.savePluginConfig.CallUnary(ctx, req)
 }
 
+// SetPluginEnabled calls ariadne.v1.PluginService.SetPluginEnabled.
+func (c *pluginServiceClient) SetPluginEnabled(ctx context.Context, req *connect.Request[v1.SetPluginEnabledRequest]) (*connect.Response[v1.SetPluginEnabledResponse], error) {
+	return c.setPluginEnabled.CallUnary(ctx, req)
+}
+
 // AddPlugin calls ariadne.v1.PluginService.AddPlugin.
 func (c *pluginServiceClient) AddPlugin(ctx context.Context, req *connect.Request[v1.AddPluginRequest]) (*connect.Response[v1.AddPluginResponse], error) {
 	return c.addPlugin.CallUnary(ctx, req)
@@ -141,6 +157,7 @@ type PluginServiceHandler interface {
 	ListPlugins(context.Context, *connect.Request[v1.ListPluginsRequest]) (*connect.Response[v1.ListPluginsResponse], error)
 	GetPluginConfig(context.Context, *connect.Request[v1.GetPluginConfigRequest]) (*connect.Response[v1.GetPluginConfigResponse], error)
 	SavePluginConfig(context.Context, *connect.Request[v1.SavePluginConfigRequest]) (*connect.Response[v1.SavePluginConfigResponse], error)
+	SetPluginEnabled(context.Context, *connect.Request[v1.SetPluginEnabledRequest]) (*connect.Response[v1.SetPluginEnabledResponse], error)
 	AddPlugin(context.Context, *connect.Request[v1.AddPluginRequest]) (*connect.Response[v1.AddPluginResponse], error)
 	DeletePlugin(context.Context, *connect.Request[v1.DeletePluginRequest]) (*connect.Response[v1.DeletePluginResponse], error)
 }
@@ -170,6 +187,12 @@ func NewPluginServiceHandler(svc PluginServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(pluginServiceMethods.ByName("SavePluginConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	pluginServiceSetPluginEnabledHandler := connect.NewUnaryHandler(
+		PluginServiceSetPluginEnabledProcedure,
+		svc.SetPluginEnabled,
+		connect.WithSchema(pluginServiceMethods.ByName("SetPluginEnabled")),
+		connect.WithHandlerOptions(opts...),
+	)
 	pluginServiceAddPluginHandler := connect.NewUnaryHandler(
 		PluginServiceAddPluginProcedure,
 		svc.AddPlugin,
@@ -190,6 +213,8 @@ func NewPluginServiceHandler(svc PluginServiceHandler, opts ...connect.HandlerOp
 			pluginServiceGetPluginConfigHandler.ServeHTTP(w, r)
 		case PluginServiceSavePluginConfigProcedure:
 			pluginServiceSavePluginConfigHandler.ServeHTTP(w, r)
+		case PluginServiceSetPluginEnabledProcedure:
+			pluginServiceSetPluginEnabledHandler.ServeHTTP(w, r)
 		case PluginServiceAddPluginProcedure:
 			pluginServiceAddPluginHandler.ServeHTTP(w, r)
 		case PluginServiceDeletePluginProcedure:
@@ -213,6 +238,10 @@ func (UnimplementedPluginServiceHandler) GetPluginConfig(context.Context, *conne
 
 func (UnimplementedPluginServiceHandler) SavePluginConfig(context.Context, *connect.Request[v1.SavePluginConfigRequest]) (*connect.Response[v1.SavePluginConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.PluginService.SavePluginConfig is not implemented"))
+}
+
+func (UnimplementedPluginServiceHandler) SetPluginEnabled(context.Context, *connect.Request[v1.SetPluginEnabledRequest]) (*connect.Response[v1.SetPluginEnabledResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.PluginService.SetPluginEnabled is not implemented"))
 }
 
 func (UnimplementedPluginServiceHandler) AddPlugin(context.Context, *connect.Request[v1.AddPluginRequest]) (*connect.Response[v1.AddPluginResponse], error) {

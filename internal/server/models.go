@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -29,6 +30,12 @@ func (api *API) modelKinds() []sdk.ModelProviderInfo {
 	}
 	return api.options.Models.Kinds()
 }
+func (api *API) modelValidate() func(string, map[string]any) error {
+	if api.options.Models == nil {
+		return nil
+	}
+	return api.options.Models.ValidateSettings
+}
 
 func (api *API) saveModelSettings(ctx context.Context, body object) (object, []modelProblem, error) {
 	store := api.options.Settings
@@ -36,7 +43,7 @@ func (api *API) saveModelSettings(ctx context.Context, body object) (object, []m
 		return nil, nil, domainerr.NotFound("settings")
 	}
 	kinds := api.modelKinds()
-	changed, err := store.UpdateModels(body, kinds)
+	changed, err := store.UpdateModels(body, kinds, api.modelValidate())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -64,6 +71,10 @@ func (api *API) saveModelSettings(ctx context.Context, body object) (object, []m
 		}
 		resolved, err := store.ResolveSaved(model, kinds)
 		if err != nil {
+			var domainErr *domainerr.Error
+			if errors.As(err, &domainErr) && domainErr.Key == "error.modelUnknown" {
+				return
+			}
 			errs[index] = err
 			return
 		}

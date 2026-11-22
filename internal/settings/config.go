@@ -99,7 +99,7 @@ func Defaults() Object {
 	for _, role := range roles {
 		roleConfig[role] = Object{"model": nil, "effort": nil, "fallback": nil}
 	}
-	return Object{"locale": "zh-CN", "plugins": []any{}, "models": Object{"providers": []any{}, "models": []any{}, "roles": roleConfig, "showCost": false}, "concurrency": Object{"slots": float64(3), "reserved": float64(1)}, "sourceSecrets": Object{}, "mcp": Object{"servers": []any{}}, "input": Object{"submitOn": "enter", "snippets": []any{}, "keys": cloneMap(defaultKeys)}, "instructions": "", "commands": Object{"rules": DefaultRules()}, "limits": cloneMap(defaultLimits), "projectEnv": Object{}, "search": Object{"provider": "", "services": Object{}}}
+	return Object{"locale": "zh-CN", "plugins": []any{}, "disabledPlugins": []any{}, "models": Object{"providers": []any{}, "models": []any{}, "roles": roleConfig, "showCost": false}, "concurrency": Object{"slots": float64(3), "reserved": float64(1)}, "sourceSecrets": Object{}, "mcp": Object{"servers": []any{}}, "input": Object{"submitOn": "enter", "snippets": []any{}, "keys": cloneMap(defaultKeys)}, "instructions": "", "commands": Object{"rules": DefaultRules()}, "limits": cloneMap(defaultLimits), "projectEnv": Object{}, "search": Object{"provider": "", "services": Object{}}}
 }
 func parseKeys(raw any, strict bool) (Object, error) {
 	given := object(raw)
@@ -260,6 +260,11 @@ func Normalize(stored Object) Object {
 	config["commands"] = Object{"rules": rules}
 	config["limits"], _ = parseLimits(stored["limits"], false)
 	config["search"] = storedSearch(stored["search"])
+	disabled := []any{}
+	for _, id := range disabledPlugins(stored) {
+		disabled = append(disabled, id)
+	}
+	config["disabledPlugins"] = disabled
 	return config
 }
 func Load(path string) (Object, error) {

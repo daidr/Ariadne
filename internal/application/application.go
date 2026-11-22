@@ -132,13 +132,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	addSimple(func() error { drafts.Close(); return nil })
 	live := realtime.NewLive(state, realtime.LiveOptions{})
 	addSimple(func() error { live.Close(); return nil })
-	builtins, err := models.NewBuiltins(models.BuiltinOptions{
-		DataDir: filepath.Join(home, "plugins"), Context: life, Client: options.Client, StdioLauncher: options.StdioLauncher,
-	})
-	if err != nil {
-		return nil, err
-	}
-	add(builtins.Close)
+	modelRegistry := models.New()
 	registry := sources.New()
 	dashboards := dashboard.New()
 	add(dashboards.Close)
@@ -146,7 +140,7 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	resolver := links.New(links.Options{})
 	addSimple(func() error { resolver.Close(); return nil })
 	host, err := plugins.New(plugins.Options{
-		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: builtins.Registry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, OnError: onError,
+		DataRoot: filepath.Join(home, "plugins"), ManagedRoot: home, Models: modelRegistry, Sources: registry, Dashboards: dashboards, Searches: searchRegistry, Links: resolver, OnError: onError,
 		Settings: user,
 	})
 	if err != nil {
@@ -159,6 +153,16 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	if err := installSearches(ctx, host, options.Client); err != nil {
 		return nil, err
 	}
+	if err := installModels(ctx, host, options.Client); err != nil {
+		return nil, err
+	}
+	builtins, err := models.NewBuiltins(models.BuiltinOptions{
+		Registry: modelRegistry, DataDir: filepath.Join(home, "plugins"), Context: life, Client: options.Client, StdioLauncher: options.StdioLauncher,
+	})
+	if err != nil {
+		return nil, err
+	}
+	add(builtins.Close)
 	env := process.Environ()
 	mcpHub, err := mcp.NewHub(mcp.HubOptions{Servers: user.MCPServers, Env: func() map[string]string { return process.ThreadEnv(env) }, Context: life, Client: options.Client})
 	if err != nil {
@@ -349,6 +353,7 @@ func installSources(ctx context.Context, host *plugins.Host, home string, client
 	entries := []struct {
 		id        string
 		name      sdk.LocalizedText
+		provides  sdk.PluginProvides
 		settings  *sdk.SettingsSchema
 		ready     func(context.Context, map[string]any) bool
 		validate  func(map[string]any) error
@@ -356,18 +361,18 @@ func installSources(ctx context.Context, host *plugins.Host, home string, client
 		link      func() sdk.LinkProvider
 		configure func(func() map[string]any)
 	}{
-		{id: "local", name: localProvider.Info.Title, source: func() sdk.ContextProvider { return localProvider }},
-		{id: "github", name: sdk.LocalizedText{"zh-CN": "GitHub", "en": "GitHub"}, settings: github.PluginSchema(),
+		{id: "local", name: localProvider.Info.Title, provides: sdk.PluginProvides{Contexts: []string{localProvider.Info.Kind}}, source: func() sdk.ContextProvider { return localProvider }},
+		{id: "github", name: sdk.LocalizedText{"zh-CN": "GitHub", "en": "GitHub"}, provides: sdk.PluginProvides{Contexts: []string{"github"}, Links: []string{"github"}}, settings: github.PluginSchema(),
 			ready:  githubReady,
 			source: func() sdk.ContextProvider { return github.Provider(githubOptions) }, link: func() sdk.LinkProvider { return github.Links(githubOptions) },
 			configure: func(values func() map[string]any) { githubOptions.PluginSettings = values }},
-		{id: "gitlab", name: sdk.LocalizedText{"zh-CN": "GitLab", "en": "GitLab"}, settings: gitlab.PluginSchema(),
+		{id: "gitlab", name: sdk.LocalizedText{"zh-CN": "GitLab", "en": "GitLab"}, provides: sdk.PluginProvides{Contexts: []string{"gitlab"}, Links: []string{"gitlab"}}, settings: gitlab.PluginSchema(),
 			validate: gitlab.ValidatePluginSettings,
 			source:   func() sdk.ContextProvider { return gitlab.Provider(gitlabOptions) }, link: func() sdk.LinkProvider { return gitlab.Links(gitlabOptions) },
 			configure: func(values func() map[string]any) { gitlabOptions.PluginSettings = values }},
 	}
 	for _, entry := range entries {
-		plugin := sdk.Plugin{ID: entry.id, Name: entry.name, Settings: entry.settings, SettingsReady: entry.ready, ValidateSettings: entry.validate, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
+		plugin := sdk.Plugin{ID: entry.id, Name: entry.name, Provides: entry.provides, Settings: entry.settings, SettingsReady: entry.ready, ValidateSettings: entry.validate, Setup: func(_ context.Context, pc sdk.PluginContext) (func(context.Context) error, error) {
 			if entry.configure != nil {
 				entry.configure(pc.Settings)
 			}
@@ -396,6 +401,15 @@ func installSearches(ctx context.Context, host *plugins.Host, client *http.Clien
 	for _, plugin := range searches.BuiltinPlugins(client) {
 		if err := host.Load(ctx, plugin, nil); err != nil {
 			return fmt.Errorf("load %s search: %w", plugin.ID, err)
+		}
+	}
+	return nil
+}
+
+func installModels(ctx context.Context, host *plugins.Host, client *http.Client) error {
+	for _, plugin := range models.HTTPBuiltinPlugins(models.HTTPOptions{Client: client}) {
+		if err := host.Load(ctx, plugin, nil); err != nil {
+			return fmt.Errorf("load %s model: %w", plugin.ID, err)
 		}
 	}
 	return nil

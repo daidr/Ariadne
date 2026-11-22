@@ -376,7 +376,11 @@ func (turn *turn) createThread(ctx context.Context, input args) (string, error) 
 	model := optional(input, "model")
 	if model != nil {
 		known := false
-		for _, raw := range turn.Settings.ModelChoices() {
+		var kinds []sdk.ModelProviderInfo
+		if turn.Models != nil {
+			kinds = turn.Models.Kinds()
+		}
+		for _, raw := range turn.Settings.ModelChoices(kinds) {
 			if choice, ok := raw.(map[string]any); ok && choice["id"] == *model {
 				known = true
 				break

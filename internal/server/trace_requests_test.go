@@ -79,6 +79,13 @@ func TestTraceRequestBodiesWithoutCallingModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer builtins.Close(context.Background())
+	for _, provider := range models.HTTPBuiltinProviders(models.HTTPOptions{}) {
+		remove, err := builtins.Registry.Register(provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remove()
+	}
 	api, err := New(Options{Repository: repo, Token: "test-token", Now: now, Models: builtins.Registry})
 	if err != nil {
 		t.Fatal(err)

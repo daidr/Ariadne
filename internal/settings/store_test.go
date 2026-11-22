@@ -284,7 +284,7 @@ func TestSettingsStoreLifecycle(t *testing.T) {
 				}
 				result = stableResolved(resolved)
 			case "choices":
-				result = store.ModelChoices()
+				result = store.ModelChoices(nil)
 			case "useFound":
 				value := object(action.Value)
 				data, _ := json.Marshal(value["setup"])
@@ -466,5 +466,55 @@ func TestSearchConfigMigrationAndDynamicPlugins(t *testing.T) {
 	if text(effectiveCustom["endpoint"]) != "https://override.test" || text(effectiveCustom["token"]) != "top-secret-val" ||
 		effectiveCustom["maxAge"] != float64(14) || effectiveCustom["strict"] != false || text(effectiveCustom["region"]) != "us" {
 		t.Fatalf("effective custom = %#v", effectiveCustom)
+	}
+}
+
+func TestModelChoicesFilterDisabledKindsAndUsageSummary(t *testing.T) {
+	store := newStore(t)
+	allKinds := []sdk.ModelProviderInfo{
+		testModelKinds()[0],
+		{
+			Kind:  "openai-compatible",
+			Title: sdk.LocalizedText{"zh-CN": "OpenAI"},
+			Settings: sdk.SettingsSchema{
+				Type: "object",
+				Properties: map[string]sdk.SettingField{
+					"baseUrl": {Type: "string", Default: "https://api.openai.com/v1"},
+					"apiKey":  {Type: "string", Secret: true},
+				},
+			},
+		},
+	}
+	input := jsonObject(`{
+		"providers":[
+			{"id":"p-anth","kind":"anthropic","name":"Claude","settings":{"apiKey":"s1"}},
+			{"id":"p-oa","kind":"openai-compatible","name":"OpenAI","settings":{"apiKey":"s2"}}
+		],
+		"models":[
+			{"id":"m-anth","provider":"p-anth","model":"claude-sonnet"},
+			{"id":"m-oa","provider":"p-oa","model":"gpt-5"}
+		],
+		"roles":{
+			"thread":{"model":"m-oa","fallback":"m-anth"},
+			"coordinator":{"model":"m-anth"}
+		}
+	}`)
+	if _, err := store.UpdateModels(input, allKinds); err != nil {
+		t.Fatal(err)
+	}
+
+	// Filtering by only openai-compatible hides anthropic model from ModelChoices.
+	filtered := store.ModelChoices(allKinds[1:])
+	if len(filtered) != 1 || text(object(filtered[0])["id"]) != "m-oa" {
+		t.Fatalf("expected only m-oa when anthropic is disabled, got %#v", filtered)
+	}
+
+	// ModelUsageByKinds reports provider names and active roles including fallback.
+	providers, usedRoles := store.ModelUsageByKinds([]string{"anthropic"})
+	if len(providers) != 1 || providers[0] != "Claude" {
+		t.Fatalf("anthropic providers = %#v", providers)
+	}
+	if len(usedRoles) != 2 || usedRoles[0] != "coordinator" || usedRoles[1] != "fallback" {
+		t.Fatalf("anthropic roles = %#v", usedRoles)
 	}
 }
