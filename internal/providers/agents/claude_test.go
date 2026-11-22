@@ -71,6 +71,42 @@ func TestClaudeStreamCountingAndLimits(t *testing.T) {
 	}
 }
 
+func TestClaudeMessageStartAndContextInputUsage(t *testing.T) {
+	var events []Event
+	d := &claudeDriver{ctx: DriverContext{Emit: func(event Event) { events = append(events, event) }}, seen: map[string]claudeTokens{}, streamed: map[string]bool{}}
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":10,"cache_read_input_tokens":8000,"cache_creation_input_tokens":500,"output_tokens":1}}}}`,
+		`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use"}],"usage":{"input_tokens":10,"cache_read_input_tokens":8000,"cache_creation_input_tokens":500,"output_tokens":45}}}`,
+		`{"type":"result","subtype":"success","total_cost_usd":0.12,"usage":{"input_tokens":10,"cache_read_input_tokens":8000,"cache_creation_input_tokens":500,"output_tokens":47}}`,
+	}
+	for _, line := range lines {
+		if err := d.onLine([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var usages []Usage
+	for _, event := range events {
+		if event.Type == "usage" {
+			usages = append(usages, event.Usage)
+		}
+	}
+	if len(usages) != 4 {
+		t.Fatalf("expected 4 usage events (message_start, assistant delta, result delta, cost), got %+v", usages)
+	}
+	if usages[0].Input != 8510 || usages[0].Output != 1 || tokenValue(usages[0].ContextInput) != 8510 {
+		t.Fatalf("message_start usage mismatch: %+v", usages[0])
+	}
+	if usages[1].Input != 0 || usages[1].Output != 44 || tokenValue(usages[1].ContextInput) != 8510 {
+		t.Fatalf("assistant follow-up must keep ContextInput without double counting input: %+v", usages[1])
+	}
+	if usages[2].Input != 0 || usages[2].Output != 2 || usages[2].ContextInput != nil {
+		t.Fatalf("result delta must not set ContextInput: %+v", usages[2])
+	}
+	if usages[3].CostUSD == nil || *usages[3].CostUSD < .1199 || usages[3].ContextInput != nil {
+		t.Fatalf("cost-only usage must not set ContextInput: %+v", usages[3])
+	}
+}
+
 func TestClaudeModelsAndPromptShape(t *testing.T) {
 	models := ClaudeModels(json.RawMessage(`[{"value":"default","displayName":"Default","resolvedModel":"real","supportedEffortLevels":["max","minimal","low"]},{"value":"alias","displayName":"Real Name","resolvedModel":"real","supportedEffortLevels":["low","high"]},{"value":"other","supportsEffort":false}]`))
 	if len(models) != 3 || models[0].Title != "Real Name" || models[0].Resolves != "real" || !reflect.DeepEqual(*models[0].Efforts, []string{"low", "max"}) || models[2].Efforts == nil || len(*models[2].Efforts) != 0 {

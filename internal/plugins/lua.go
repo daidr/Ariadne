@@ -27,6 +27,7 @@ type luaProvider struct {
 	index               int
 	methods             map[string]bool
 	title               sdk.LocalizedText
+	localizedDesc       sdk.LocalizedText
 	settings            sdk.SettingsSchema
 	description         string
 	needsPluginSettings bool
@@ -127,7 +128,7 @@ var luaGroups = []struct {
 	{"models", []string{"stream"}, []string{"models", "check", "describe", "search"}},
 	{"contexts", []string{"list", "read"}, []string{"check", "browse"}},
 	{"dashboards", []string{"fetch"}, nil},
-	{"searches", []string{"search"}, nil},
+	{"searches", []string{"search"}, []string{"check"}},
 	{"links", []string{"match", "preview"}, nil},
 }
 
@@ -249,6 +250,15 @@ func luaProviders(values luaValues, definition *lua.LTable) ([]luaProvider, erro
 			}
 			if text, ok := entry.RawGetString("description").(lua.LString); ok {
 				provider.description = string(text)
+			} else if raw := entry.RawGetString("description"); raw != lua.LNil {
+				var localized sdk.LocalizedText
+				if err := values.decode(raw, &localized); err != nil {
+					return nil, fmt.Errorf("%s has an invalid description", kind)
+				}
+				provider.localizedDesc = localized
+				for locale, text := range localized {
+					metadataBytes += len(locale) + len(text)
+				}
 			}
 			for locale, title := range provider.title {
 				metadataBytes += len(locale) + len(title)

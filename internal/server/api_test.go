@@ -15,8 +15,12 @@ import (
 	"testing/fstest"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 type apiRequest struct {
@@ -100,22 +104,7 @@ func TestDomainHTTPResponses(t *testing.T) {
 	add("PUT", "/api/projects/prj_a/slots", object{"slots": 0})
 	add("PUT", "/api/projects/prj_a/slots", object{"slots": nil})
 	add("PUT", "/api/projects/prj_a/autopilot", object{"paused": true})
-	add("GET", "/api/conversations/crd_a", nil)
-	for _, query := range []string{"limit=0", "limit=1000", "since=-1", "since=1.5", "limit=500", "before=missing", "since=0"} {
-		add("GET", "/api/conversations/crd_a?"+query, nil)
-	}
-	add("GET", "/api/conversations/missing", nil)
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "crd_a", "content": "用户消息", "mentions": []object{{"kind": "thread", "id": "thr_a"}}})
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "thr_a", "attachments": "invalid"})
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "thr_a", "content": "附件", "attachments": []object{{"fileId": "fil_text", "name": "资料.txt"}}})
-	add("GET", "/api/conversations/thr_a", nil)
-	add("POST", "/api/conversations/thr_a/read", object{"upTo": "msg_agent"})
-	add("POST", "/api/messages/msg_agent/reactions", object{"emoji": " 👍 "})
-	add("POST", "/api/messages/msg_agent/reactions", object{"emoji": " 👍 ", "remove": true})
 	add("GET", "/api/projects/prj_a/search?q=代理", nil)
-	add("POST", "/api/projects/prj_a/memory", object{"text": " "})
-	add("POST", "/api/projects/prj_a/memory", object{"text": " 常用规则 "})
-	add("GET", "/api/projects/prj_a/memory", nil)
 	add("GET", "/api/files/fil_text", nil)
 	raw := "abc"
 	requests = append(requests, apiRequest{Method: "POST", Path: "/api/projects/prj_a/files?for=message", Raw: &raw, Headers: map[string]string{"Content-Type": "text/plain"}})
@@ -134,13 +123,6 @@ func TestDomainHTTPResponses(t *testing.T) {
 	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_a", "commentId": "board_item", "anchor": object{"node": "a"}, "body": "画板意见"})
 	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_bad", "commentId": "board_item", "anchor": nil, "body": "无效"})
 	add("GET", "/api/projects/prj_a/artifacts", nil)
-	add("POST", "/api/threads/thr_a/stop", object{"reason": " 暂停 "})
-	add("POST", "/api/threads/thr_a/resume", object{})
-	add("GET", "/api/threads/thr_a/reviews", nil)
-	add("GET", "/api/threads/thr_a/line-comments", nil)
-	add("POST", "/api/conversations/crd_a/stop", nil)
-	add("POST", "/api/conversations/crd_a/retry", nil)
-	add("POST", "/api/projects/prj_a/return", object{"away": 600000})
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	invalid := "[]"
 	requests = append(requests, apiRequest{Method: "PUT", Path: "/api/projects/prj_a", Raw: &invalid})
@@ -353,68 +335,26 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	}
 	defer api.Close()
 
-	unauth := httptest.NewRecorder()
-	api.ServeHTTP(unauth, httptest.NewRequest("GET", "http://test.invalid/api/ping", nil))
-	if unauth.Code != 401 {
-		t.Fatalf("unauthenticated /api/ping returned %d", unauth.Code)
+	server := httptest.NewServer(api)
+	defer server.Close()
+	unauthClient := ariadnev1connect.NewMetaServiceClient(server.Client(), server.URL+rpcPrefix)
+	if _, err := unauthClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{})); err == nil {
+		t.Fatal("expected unauthenticated Ping to fail")
+	} else if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("unexpected unauthenticated Ping error: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "http://test.invalid/api/ping", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	auth := httptest.NewRecorder()
-	api.ServeHTTP(auth, req)
-	if auth.Code != 200 || strings.TrimSpace(auth.Body.String()) != `{"ok":true}` {
-		t.Fatalf("authenticated /api/ping returned %d %s", auth.Code, auth.Body.String())
-	}
-}
-
-func TestSetThreadNodeRoute(t *testing.T) {
-	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "thread-node.sqlite")})
+	authClient := ariadnev1connect.NewMetaServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	res, err := authClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("authenticated Ping failed: %v", err)
 	}
-	defer repo.Close()
-
-	project, err := repo.CreateProject(ctx, new("A"), core.ProjectStart{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.RevisePlan(ctx, project.ID, core.PlanRevision{Author: "user", Reason: "计划", Ops: []map[string]any{
-		{"op": "add", "id": "nod_1", "kind": "task", "title": "任务一", "description": "", "acceptance": ""},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "讨论串"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	api, err := New(Options{Repository: repo, Token: "secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer api.Close()
-
-	put := func(body string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest("PUT", "http://test.invalid/api/threads/"+thread.ID+"/node", strings.NewReader(body))
-		request.Header.Set("Authorization", "Bearer secret")
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		return response
-	}
-
-	if res := put(`{}`); res.Code != 400 {
-		t.Fatalf("missing nodeId: %d %s", res.Code, res.Body.String())
-	}
-	if res := put(`{"nodeId":"nod_missing"}`); res.Code != 404 {
-		t.Fatalf("unknown nodeId: %d %s", res.Code, res.Body.String())
-	}
-	if res := put(`{"nodeId":"nod_1"}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":"nod_1"`) {
-		t.Fatalf("link thread node: %d %s", res.Code, res.Body.String())
-	}
-	if res := put(`{"nodeId":null}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":null`) {
-		t.Fatalf("unlink thread node: %d %s", res.Code, res.Body.String())
+	if !res.Msg.GetOk() {
+		t.Fatalf("authenticated Ping returned ok=false")
 	}
 }
 

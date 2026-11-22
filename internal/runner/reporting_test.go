@@ -316,3 +316,96 @@ func TestAgentContextLimitCompactsAndContinuesSameDiscussion(t *testing.T) {
 	}
 	t.Fatal("the failed request must be in the trace even after recovery")
 }
+
+func TestThreadContextUsageUpdatesBeforeFirstVisibleMessage(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	project, err := repo.CreateProject(ctx, new("Context meter"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Inspect context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.StartTurn(ctx, thread.ID, "fixture")
+	if err != nil || id == "" {
+		t.Fatalf("expected turn, got %q: %v", id, err)
+	}
+	conversation, err := repo.GetConversation(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := models.New()
+	info := sdk.ModelProviderInfo{Kind: "fixture", Program: true}
+	requests := 0
+	if _, err := registry.Register(sdk.ModelProvider{Info: info, Stream: func(_ context.Context, _ map[string]any, _ sdk.Request) iter.Seq[sdk.Part] {
+		return func(yield func(sdk.Part) bool) {
+			requests++
+			switch requests {
+			case 1:
+				if !yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: `{"items":[{"label":"Check context","status":"doing"}]}`}) {
+					return
+				}
+				if !yield(sdk.Part{Type: "usage", Input: new(int64(0)), Output: new(int64(0)), ContextInput: new(int64(42000))}) {
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+			case 2:
+				conv, err := repo.GetConversation(ctx, thread.ID)
+				if err != nil {
+					t.Errorf("load conversation before first message: %v", err)
+				} else if conv.ContextTokens != 42000 {
+					t.Errorf("expected contextTokens 42000 after first tool step before first message, got %d", conv.ContextTokens)
+				}
+				messages, err := repo.ListMessages(ctx, thread.ID)
+				if err != nil || len(messages) != 0 {
+					t.Errorf("expected no visible messages yet, got %d (err=%v)", len(messages), err)
+				}
+				if !yield(sdk.Part{Type: "tool-call", ID: "report-1", Name: "report", Arguments: `{"kind":"done","headline":"Checked","summary":"Done."}`}) {
+					return
+				}
+				if !yield(sdk.Part{Type: "usage", Input: new(int64(0)), Output: new(int64(35))}) {
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+			case 3:
+				conv, err := repo.GetConversation(ctx, thread.ID)
+				if err != nil {
+					t.Errorf("load conversation after output-only step: %v", err)
+				} else if conv.ContextTokens != 42000 {
+					t.Errorf("output-only step must preserve contextTokens 42000, got %d", conv.ContextTokens)
+				}
+				if !yield(sdk.Part{Type: "usage", Input: new(int64(170000)), Output: new(int64(47)), ContextInput: new(int64(55000))}) {
+					return
+				}
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			default:
+				t.Errorf("unexpected extra request %d", requests)
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, id: id, conversation: conversation}
+	if err := active.run(ctx, &settings.ResolvedModel{Provider: info, Model: "fixture", Label: "fixture", ContextTokens: new(200_000.0)}); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := repo.GetConversation(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.ContextTokens != 55000 {
+		t.Fatalf("expected final contextTokens 55000, got %d", conv.ContextTokens)
+	}
+}

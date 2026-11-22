@@ -454,3 +454,18 @@ func TestCodexErrorsAndCancellation(t *testing.T) {
 		t.Fatal("cancelled Codex process retained")
 	}
 }
+
+func TestCodexTokenUsageEmitsContextInputWithoutTotalGrowth(t *testing.T) {
+	var events []Event
+	d := &codexDriver{
+		ctx:     DriverContext{Emit: func(event Event) { events = append(events, event) }},
+		started: true,
+		total:   tokenBreakdown{Input: new(int64(20000)), Output: new(int64(100))},
+	}
+	raw := json.RawMessage(`{"tokenUsage":{"total":{"inputTokens":20000,"outputTokens":100},"last":{"inputTokens":24500}}}`)
+	d.notification("thread/tokenUsage/updated", raw)
+	if len(events) != 1 || events[0].Type != "usage" || tokenValue(events[0].Usage.ContextInput) != 24500 ||
+		events[0].Usage.Input != 0 || events[0].Usage.Output != 0 {
+		t.Fatalf("expected contextInput-only usage event, got %+v", events)
+	}
+}

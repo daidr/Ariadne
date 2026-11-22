@@ -62,7 +62,7 @@ const isSet = (key: string | number) => props.secretsSet.includes(String(key))
       />
       <DouSwitch
         v-else-if="field.type === 'boolean'"
-        :model-value="values[key] === true"
+        :model-value="values[key] === undefined ? field.default === true : values[key] === true"
         @update:model-value="(value) => (values[key] = value)"
       />
       <DouSelect

@@ -2,20 +2,22 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/background"
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestBackgroundCommandHTTP(t *testing.T) {
-	no := false
-	requests := []apiRequest{{Method: "GET", Path: "/api/threads/thread/commands/cmd-1"}, {Method: "GET", Path: "/api/threads/other/commands/cmd-1"}, {Method: "POST", Path: "/api/threads/thread/commands/cmd-1/stop", Auth: &no}, {Method: "GET", Path: "/api/threads/thread/commands/cmd-1"}, {Method: "POST", Path: "/api/threads/thread/commands/cmd-1/stop"}, {Method: "GET", Path: "/api/threads/thread/commands/cmd-1"}, {Method: "POST", Path: "/api/threads/thread/commands/missing/stop"}}
+func TestBackgroundCommandRPC(t *testing.T) {
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite")})
 	if err != nil {
 		t.Fatal(err)
@@ -38,20 +40,39 @@ func TestBackgroundCommandHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	wantCodes := []int{200, 404, 401, 200, 200, 200, 404}
-	for i, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, nil)
-		if item.Auth == nil || *item.Auth {
-			request.Header.Set("Authorization", "Bearer test-token")
-		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		if response.Code != wantCodes[i] {
-			t.Fatalf("request %d %s status = %d, want %d (body=%s)", i, item.Path, response.Code, wantCodes[i], response.Body.String())
-		}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+	unauth := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix)
+
+	out, err := client.GetCommandOutput(t.Context(), connect.NewRequest(&ariadnev1.GetCommandOutputRequest{ThreadId: "thread", CommandId: "cmd-1"}))
+	if err != nil || out.Msg.Command == nil || out.Msg.Command.Id != "cmd-1" || !strings.Contains(out.Msg.Tail, "ready") {
+		t.Fatalf("get command output failed: resp=%+v err=%v", out, err)
+	}
+
+	_, err = client.GetCommandOutput(t.Context(), connect.NewRequest(&ariadnev1.GetCommandOutputRequest{ThreadId: "other", CommandId: "cmd-1"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for wrong thread, got %v", err)
+	}
+
+	_, err = unauth.StopCommand(t.Context(), connect.NewRequest(&ariadnev1.StopCommandRequest{ThreadId: "thread", CommandId: "cmd-1"}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+
+	stopped, err := client.StopCommand(t.Context(), connect.NewRequest(&ariadnev1.StopCommandRequest{ThreadId: "thread", CommandId: "cmd-1"}))
+	if err != nil || stopped.Msg.Command == nil || stopped.Msg.Command.Result == nil || !stopped.Msg.Command.Result.Stopped {
+		t.Fatalf("stop command failed: resp=%+v err=%v", stopped, err)
+	}
+
+	after, err := client.GetCommandOutput(t.Context(), connect.NewRequest(&ariadnev1.GetCommandOutputRequest{ThreadId: "thread", CommandId: "cmd-1"}))
+	if err != nil || after.Msg.Command == nil || after.Msg.Command.Result == nil {
+		t.Fatalf("get output after stop failed: resp=%+v err=%v", after, err)
+	}
+
+	_, err = client.StopCommand(t.Context(), connect.NewRequest(&ariadnev1.StopCommandRequest{ThreadId: "thread", CommandId: "missing"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for missing command, got %v", err)
 	}
 }

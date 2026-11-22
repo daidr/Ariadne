@@ -1,10 +1,15 @@
-import type { PlanView } from '@ariadne/core'
-import { reactive } from 'vue'
-import { freshChanges, type Positions } from './layout'
+import type { PlanPreview, PlanView } from '@ariadne/core'
+import { reactive, type InjectionKey } from 'vue'
+import { freshChanges } from './layout'
+
+/** Injection key allowing PlanGroupNode to toggle local collapse state inside PlanGraph. */
+export const PLAN_GROUP_TOGGLE: InjectionKey<(groupId: string) => void> =
+  Symbol('plan-group-toggle')
 
 /**
  * What the plan views share in this browser: the change being previewed on the graph, the
- * revision the user last acknowledged, and how far they moved nodes. Kept per project.
+ * revision the user last acknowledged, whether completed items are shown, and which visual
+ * groups are folded locally. Kept per project.
  */
 export const planUi = reactive({
   /** The open proposal shown on the graph instead of the plan as it is. */
@@ -13,13 +18,14 @@ export const planUi = reactive({
   seen: {} as Record<string, string | null>,
   /** Per project: nodes looked at since, with the newest revision touching each then. */
   seenNodes: {} as Record<string, Record<string, string>>,
-  /** Bumped when saved offsets change outside a drag, so graphs lay out again. */
-  layoutVersion: 0,
+  /** Per project: whether auto-hidden completed nodes and groups are shown. Defaults to false. */
+  showCompleted: {} as Record<string, boolean>,
+  /** Per project: visual group container IDs folded locally by the user. */
+  collapsedGroups: {} as Record<string, Record<string, boolean>>,
 })
 
 const SEEN_KEY = (projectId: string) => `ariadne.planSeen.${projectId}`
 const SEEN_NODES_KEY = (projectId: string) => `ariadne.planSeenNodes.${projectId}`
-const LAYOUT_KEY = (projectId: string) => `ariadne.planOffsets.${projectId}`
 
 function read(key: string): string | null {
   try {
@@ -96,36 +102,39 @@ export function markNodeSeen(plan: PlanView, nodeId: string): void {
   write(SEEN_NODES_KEY(plan.projectId), JSON.stringify(looked))
 }
 
-/**
- * How far the user moved nodes from where the layout puts them. Kept as offsets, not as
- * places: the layout moves whole parts of the plan when another part grows, and a moved
- * node has to go along with its part. Not reactive on purpose: moving a node must not
- * rebuild the document under the pointer, so graphs read it only when they rebuild for
- * another reason.
- */
-const positions = new Map<string, Positions>()
+export function showingCompleted(projectId: string): boolean {
+  return !!planUi.showCompleted[projectId]
+}
 
-export function savedOffsets(projectId: string): Positions {
-  let saved = positions.get(projectId)
-  if (!saved) {
-    try {
-      saved = JSON.parse(read(LAYOUT_KEY(projectId)) ?? '{}') as Positions
-    } catch {
-      saved = {}
-    }
-    positions.set(projectId, saved)
+export function setShowCompleted(projectId: string, show: boolean): void {
+  planUi.showCompleted[projectId] = show
+}
+
+export function toggleShowCompleted(projectId: string): void {
+  planUi.showCompleted[projectId] = !planUi.showCompleted[projectId]
+}
+
+export function collapsedGroupsOf(projectId: string): Set<string> {
+  const map = planUi.collapsedGroups[projectId]
+  const out = new Set<string>()
+  if (!map) return out
+  for (const [id, collapsed] of Object.entries(map)) {
+    if (collapsed) out.add(id)
   }
-  return saved
+  return out
 }
 
-export function saveOffsets(projectId: string, moved: Positions): void {
-  const saved = savedOffsets(projectId)
-  Object.assign(saved, moved)
-  write(LAYOUT_KEY(projectId), JSON.stringify(saved))
+export function toggleGroupCollapsed(projectId: string, groupId: string): void {
+  const current = planUi.collapsedGroups[projectId] ?? {}
+  planUi.collapsedGroups[projectId] = {
+    ...current,
+    [groupId]: !current[groupId],
+  }
 }
 
-export function clearPositions(projectId: string): void {
-  positions.set(projectId, {})
-  write(LAYOUT_KEY(projectId), null)
-  planUi.layoutVersion += 1
+/** The active change preview matching `plan`, or `null` when none fits or its preview is stale. */
+export function activePreview(plan: PlanView | null): PlanPreview | null {
+  if (!plan || !planUi.previewId) return null
+  const proposal = plan.proposals.find((p) => p.status === 'open' && p.id === planUi.previewId)
+  return proposal?.preview ?? null
 }

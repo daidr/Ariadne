@@ -25,6 +25,7 @@ import (
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/internal/realtime"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/secrets"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/skills"
@@ -42,11 +43,11 @@ type Runner struct {
 	Models        *models.Registry
 	Drafts        *realtime.ReplyDrafts
 	Live          *realtime.LiveCommands
-	Workspaces    *workspaces.Manager
-	MCP           *mcp.Hub
-	SkillsDirs    []string
-	SearchPlugins func() []sdk.SearchProvider
-	HTTPClient    *http.Client
+	Workspaces *workspaces.Manager
+	MCP        *mcp.Hub
+	SkillsDirs []string
+	Searches   *searches.Registry
+	HTTPClient *http.Client
 	Rooms         *collab.Rooms
 	Dashboards    *dashboard.Registry
 	Browser       *browser.Pages
@@ -399,9 +400,12 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			return err
 		}
 		if answer.Usage != nil {
-			lastInput = int(answer.Usage.Input)
 			if answer.Usage.ContextInput != nil {
-				lastInput = int(*answer.Usage.ContextInput)
+				if *answer.Usage.ContextInput > 0 {
+					lastInput = int(*answer.Usage.ContextInput)
+				}
+			} else if answer.Usage.Input > 0 {
+				lastInput = int(answer.Usage.Input)
 			}
 		}
 		if err := turn.Repository.RecordStep(ctx, conversation.ID, turn.id, core.Step{

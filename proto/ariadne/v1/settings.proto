@@ -1,0 +1,463 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/common.proto";
+import "google/protobuf/struct.proto";
+
+// SettingsService manages application-wide settings, models, search, work rules,
+// input shortcuts, concurrency, and MCP server configuration.
+service SettingsService {
+  rpc GetConcurrency(GetConcurrencyRequest) returns (GetConcurrencyResponse);
+  rpc SaveConcurrency(SaveConcurrencyRequest) returns (SaveConcurrencyResponse);
+  rpc GetInputSettings(GetInputSettingsRequest) returns (GetInputSettingsResponse);
+  rpc SaveInputSettings(SaveInputSettingsRequest) returns (SaveInputSettingsResponse);
+  rpc GetWorkSettings(GetWorkSettingsRequest) returns (GetWorkSettingsResponse);
+  rpc SaveWorkSettings(SaveWorkSettingsRequest) returns (SaveWorkSettingsResponse);
+  rpc GetSearchSettings(GetSearchSettingsRequest) returns (GetSearchSettingsResponse);
+  rpc SaveSearchSettings(SaveSearchSettingsRequest) returns (SaveSearchSettingsResponse);
+  rpc CheckSearchSettings(CheckSearchSettingsRequest) returns (CheckSearchSettingsResponse);
+  rpc GetModelSettings(GetModelSettingsRequest) returns (GetModelSettingsResponse);
+  rpc SaveModelSettings(SaveModelSettingsRequest) returns (SaveModelSettingsResponse);
+  rpc ListProviderModels(ListProviderModelsRequest) returns (ListProviderModelsResponse);
+  rpc GetModelInfo(GetModelInfoRequest) returns (GetModelInfoResponse);
+  rpc ListFoundSetups(ListFoundSetupsRequest) returns (ListFoundSetupsResponse);
+  rpc UseFoundSetup(UseFoundSetupRequest) returns (UseFoundSetupResponse);
+  rpc GetMcpSettings(GetMcpSettingsRequest) returns (GetMcpSettingsResponse);
+  rpc SaveMcpSettings(SaveMcpSettingsRequest) returns (SaveMcpSettingsResponse);
+  rpc CheckMcpServer(CheckMcpServerRequest) returns (CheckMcpServerResponse);
+}
+
+// LocalizedText maps BCP-47 locale tags (e.g. "zh-CN", "en") to display text.
+message LocalizedText {
+  map<string, string> values = 1;
+}
+
+// StringList wraps a repeated string field so callers can distinguish omitted vs empty.
+message StringList {
+  repeated string values = 1;
+}
+
+// SecretPair represents a named secret entry (header or env var).
+// An empty value instructs the server to keep the existing stored value.
+message SecretPair {
+  string name = 1;
+  string value = 2;
+}
+
+message SettingField {
+  string type = 1;
+  LocalizedText title = 2;
+  optional LocalizedText description = 3;
+  bool secret = 4;
+  bool directory = 5;
+  google.protobuf.Value default_value = 6;
+  repeated string options = 7;
+}
+
+message SettingsSchema {
+  string type = 1;
+  map<string, SettingField> properties = 2;
+  repeated string required = 3;
+  repeated string field_order = 4;
+}
+
+// --- Concurrency ---
+
+message ConcurrencySettings {
+  int32 slots = 1;
+  int32 reserved = 2;
+}
+
+message GetConcurrencyRequest {}
+
+message GetConcurrencyResponse {
+  ConcurrencySettings concurrency = 1;
+}
+
+message SaveConcurrencyRequest {
+  int32 slots = 1;
+  int32 reserved = 2;
+}
+
+message SaveConcurrencyResponse {
+  ConcurrencySettings concurrency = 1;
+}
+
+// --- Input ---
+
+message Snippet {
+  string id = 1;
+  string name = 2;
+  string text = 3;
+}
+
+message InputSettings {
+  string submit_on = 1;
+  repeated Snippet snippets = 2;
+  map<string, string> keys = 3;
+}
+
+message GetInputSettingsRequest {}
+
+message GetInputSettingsResponse {
+  InputSettings input = 1;
+}
+
+message SaveInputSettingsRequest {
+  string submit_on = 1;
+  repeated Snippet snippets = 2;
+  map<string, string> keys = 3;
+}
+
+message SaveInputSettingsResponse {
+  InputSettings input = 1;
+}
+
+// --- Work ---
+
+message CommandRule {
+  string pattern = 1;
+  string action = 2;
+}
+
+message CommandRuleList {
+  repeated CommandRule items = 1;
+}
+
+message WorkLimits {
+  int32 command_timeout = 1;
+  int32 command_timeout_max = 2;
+  int32 command_output = 3;
+  double compact_share = 4;
+  int32 model_retries = 5;
+  int32 loop_repeats = 6;
+}
+
+message WorkLimitsInput {
+  optional int32 command_timeout = 1;
+  optional int32 command_timeout_max = 2;
+  optional int32 command_output = 3;
+  optional double compact_share = 4;
+  optional int32 model_retries = 5;
+  optional int32 loop_repeats = 6;
+}
+
+message WorkSettings {
+  string instructions = 1;
+  repeated CommandRule rules = 2;
+  WorkLimits limits = 3;
+  WorkLimits defaults = 4;
+}
+
+message GetWorkSettingsRequest {}
+
+message GetWorkSettingsResponse {
+  WorkSettings work = 1;
+}
+
+message SaveWorkSettingsRequest {
+  optional string instructions = 1;
+  optional CommandRuleList rules = 2;
+  optional WorkLimitsInput limits = 3;
+}
+
+message SaveWorkSettingsResponse {
+  WorkSettings work = 1;
+}
+
+// --- Search ---
+
+message SearchCapabilities {
+  int32 max_query_runes = 1;
+  int32 max_results = 2;
+  bool returns_answer = 3;
+  bool supports_check = 4;
+}
+
+message SearchServiceView {
+  string kind = 1;
+  LocalizedText title = 2;
+  optional LocalizedText description = 3;
+  SettingsSchema settings = 4;
+  optional SearchCapabilities capabilities = 5;
+  google.protobuf.Struct values = 6;
+  repeated string secrets_set = 7;
+  bool ready = 8;
+}
+
+message SearchSettings {
+  string provider = 1;
+  bool ready = 2;
+  bool key_set = 3;
+  bool needed = 4;
+  repeated string models = 5;
+  repeated LocalizedText plugins = 6;
+  repeated SearchServiceView services = 7;
+}
+
+message GetSearchSettingsRequest {}
+
+message GetSearchSettingsResponse {
+  SearchSettings search = 1;
+}
+
+message SaveSearchSettingsRequest {
+  optional string provider = 1;
+  map<string, google.protobuf.Struct> services = 2;
+}
+
+message SaveSearchSettingsResponse {
+  SearchSettings search = 1;
+}
+
+message CheckSearchSettingsRequest {
+  optional string provider = 1;
+  map<string, google.protobuf.Struct> services = 2;
+}
+
+message CheckSearchSettingsResponse {
+  bool ok = 1;
+  optional int32 status = 2;
+  optional LocalizedText message = 3;
+}
+
+// --- Models & Catalog ---
+
+message ModelPrice {
+  string currency = 1;
+  double input = 2;
+  double output = 3;
+  optional double cache_read = 4;
+  optional double cache_write = 5;
+}
+
+message ModelKind {
+  string kind = 1;
+  LocalizedText title = 2;
+  SettingsSchema settings = 3;
+  bool program = 4;
+}
+
+message ModelProviderView {
+  string id = 1;
+  string kind = 2;
+  string name = 3;
+  google.protobuf.Struct settings = 4;
+  repeated string secrets_set = 5;
+  repeated string headers = 6;
+  google.protobuf.Struct extra_body = 7;
+  optional int32 timeout_seconds = 8;
+}
+
+message ModelProviderInput {
+  string id = 1;
+  string kind = 2;
+  string name = 3;
+  google.protobuf.Struct settings = 4;
+  repeated SecretPair headers = 5;
+  google.protobuf.Struct extra_body = 6;
+  optional int32 timeout_seconds = 7;
+}
+
+message ModelEntry {
+  string id = 1;
+  string provider = 2;
+  string model = 3;
+  optional int64 context_tokens = 4 [jstype = JS_NUMBER];
+  optional string note = 5;
+  optional bool images = 6;
+  optional int64 max_tokens = 7 [jstype = JS_NUMBER];
+  optional ModelPrice price = 8;
+  optional StringList efforts = 9;
+}
+
+message RoleConfig {
+  optional string model = 1;
+  optional string effort = 2;
+  optional string fallback = 3;
+}
+
+message ModelRoles {
+  RoleConfig thread = 1;
+  RoleConfig coordinator = 2;
+  RoleConfig triage = 3;
+  RoleConfig research = 4;
+}
+
+message ModelSettings {
+  repeated ModelKind kinds = 1;
+  repeated ModelProviderView providers = 2;
+  repeated ModelEntry models = 3;
+  ModelRoles roles = 4;
+  bool show_cost = 5;
+}
+
+message ModelProblem {
+  string model = 1;
+  string provider = 2;
+  LocalizedError problem = 3;
+}
+
+message GetModelSettingsRequest {}
+
+message GetModelSettingsResponse {
+  ModelSettings settings = 1;
+}
+
+message SaveModelSettingsRequest {
+  repeated ModelProviderInput providers = 1;
+  repeated ModelEntry models = 2;
+  ModelRoles roles = 3;
+  bool show_cost = 4;
+}
+
+message SaveModelSettingsResponse {
+  ModelSettings settings = 1;
+  repeated ModelProblem problems = 2;
+}
+
+message ModelInfo {
+  optional int64 context_tokens = 1 [jstype = JS_NUMBER];
+  optional int64 max_tokens = 2 [jstype = JS_NUMBER];
+  optional bool images = 3;
+  optional ModelPrice price = 4;
+  optional bool tools = 5;
+  optional string released = 6;
+  optional StringList efforts = 7;
+}
+
+message ListedModel {
+  string id = 1;
+  optional string title = 2;
+  optional ModelInfo info = 3;
+}
+
+message ListedModelList {
+  repeated ListedModel items = 1;
+}
+
+message DraftModelProviderInput {
+  string id = 1;
+  string kind = 2;
+  google.protobuf.Struct settings = 3;
+}
+
+message ListProviderModelsRequest {
+  DraftModelProviderInput provider = 1;
+}
+
+message ListProviderModelsResponse {
+  optional ListedModelList models = 1;
+}
+
+message GetModelInfoRequest {
+  string model = 1;
+  string hint = 2;
+}
+
+message GetModelInfoResponse {
+  ModelInfo info = 1;
+}
+
+message FoundSetup {
+  string id = 1;
+  string kind = 2;
+  LocalizedText title = 3;
+  oneof source {
+    string env = 4;
+    string program = 5;
+  }
+}
+
+message ListFoundSetupsRequest {}
+
+message ListFoundSetupsResponse {
+  repeated FoundSetup found = 1;
+}
+
+message UseFoundSetupRequest {
+  string id = 1;
+}
+
+message UseFoundSetupResponse {
+  ModelSettings settings = 1;
+  repeated ModelProblem problems = 2;
+}
+
+// --- MCP ---
+
+message McpServerView {
+  string id = 1;
+  string name = 2;
+  string transport = 3;
+  optional string command = 4;
+  repeated string args = 5;
+  optional string cwd = 6;
+  optional string url = 7;
+  repeated string env = 8;
+  repeated string headers = 9;
+  map<string, string> tools = 10;
+}
+
+message McpServerInput {
+  string id = 1;
+  string name = 2;
+  string transport = 3;
+  optional string command = 4;
+  repeated string args = 5;
+  optional string cwd = 6;
+  optional string url = 7;
+  repeated SecretPair env = 8;
+  repeated SecretPair headers = 9;
+  map<string, string> tools = 10;
+}
+
+message McpServerInfo {
+  string name = 1;
+  string version = 2;
+  string protocol_version = 3;
+}
+
+message McpToolInfo {
+  string name = 1;
+  optional string title = 2;
+  optional string description = 3;
+}
+
+message McpToolInfoList {
+  repeated McpToolInfo items = 1;
+}
+
+message McpServerStatus {
+  string id = 1;
+  string state = 2;
+  optional string error = 3;
+  optional string log = 4;
+  optional McpServerInfo info = 5;
+  optional McpToolInfoList tools = 6;
+}
+
+message GetMcpSettingsRequest {}
+
+message GetMcpSettingsResponse {
+  repeated McpServerView servers = 1;
+  repeated McpServerStatus status = 2;
+}
+
+message SaveMcpSettingsRequest {
+  repeated McpServerInput servers = 1;
+}
+
+message SaveMcpSettingsResponse {
+  repeated McpServerView servers = 1;
+  repeated McpServerStatus status = 2;
+}
+
+message CheckMcpServerRequest {
+  string server_id = 1;
+}
+
+message CheckMcpServerResponse {
+  McpServerStatus status = 1;
+}

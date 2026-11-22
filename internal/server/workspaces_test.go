@@ -9,8 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
 	"github.com/daidr/Ariadne/sdk"
@@ -64,18 +68,15 @@ func TestPullRequestChecksReadTrackedCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	request := httptest.NewRequest("GET", "/api/threads/thr_a/pull-request/checks?headSha=other", nil)
-	request.Header.Set("Authorization", "Bearer test-token")
-	response := httptest.NewRecorder()
-	api.ServeHTTP(response, request)
-	var result struct {
-		HeadSHA string          `json:"headSha"`
-		Checks  []sdk.CheckInfo `json:"checks"`
-	}
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil ||
-		result.HeadSHA != head || len(result.Checks) != 2 || result.Checks[0].Status != "in_progress" ||
-		result.Checks[1].Conclusion == nil || *result.Checks[1].Conclusion != "success" {
-		t.Fatalf("checks: %d %s", response.Code, response.Body)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+	resp, err := client.GetPullRequestChecks(ctx, connect.NewRequest(&ariadnev1.GetPullRequestChecksRequest{ThreadId: "thr_a"}))
+	if err != nil ||
+		resp.Msg.HeadSha != head || len(resp.Msg.Checks) != 2 || resp.Msg.Checks[0].Status != "in_progress" ||
+		resp.Msg.Checks[1].Conclusion == nil || *resp.Msg.Checks[1].Conclusion != "success" {
+		t.Fatalf("checks: resp=%+v err=%v", resp, err)
 	}
 }
 
@@ -102,13 +103,13 @@ func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
 				},
 				Changes: func(context.Context, sdk.ThreadBranch, string) (*sdk.BranchChanges, error) {
 					diffs++
-					return &sdk.BranchChanges{Head: revisions.Head, BaseHead: revisions.BaseHead}, nil
+					return &sdk.BranchChanges{Head: revisions.Head, BaseHead: revisions.BaseHead, Branch: "work/thread", Base: "integration", From: revisions.BaseHead}, nil
 				},
 				Merge: func(_ context.Context, input sdk.MergeRequest) (sdk.MergeOutcome, error) {
-					if input.ExpectedHead != initial {
-						t.Fatalf("expected head = %q", input.ExpectedHead)
+					if input.ExpectedHead != "" && input.ExpectedHead != revisions.Head {
+						return sdk.MergeOutcome{Kind: "moved", Head: revisions.Head}, nil
 					}
-					return sdk.MergeOutcome{Kind: "moved"}, nil
+					return sdk.MergeOutcome{Kind: "merged", SHA: strings.Repeat("e", 40), Head: revisions.Head}, nil
 				},
 			}}}, nil
 		},
@@ -123,39 +124,40 @@ func TestChangesProbeAndMergeExpectedHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	call := func(method, path, body string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(method, "/api/threads/thr_a"+path, strings.NewReader(body))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		return response
-	}
-	probe := "/changes?head=" + initial + "&baseHead=" + base
-	if response := call("GET", probe, ""); response.Code != 200 || !strings.Contains(response.Body.String(), `"unchanged":true`) || diffs != 0 {
-		t.Fatalf("unchanged refs: %d %s; diff calls: %d", response.Code, response.Body, diffs)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+
+	resp, err := client.GetThreadChanges(ctx, connect.NewRequest(&ariadnev1.GetThreadChangesRequest{
+		ThreadId: "thr_a",
+		Head:     &initial,
+		BaseHead: &base,
+	}))
+	if err != nil || !resp.Msg.Unchanged || diffs != 0 {
+		t.Fatalf("unchanged refs: resp=%+v err=%v; diff calls: %d", resp, err, diffs)
 	}
 	revisions.BaseHead = strings.Repeat("d", 40)
-	if response := call("GET", probe, ""); response.Code != 200 || !strings.Contains(response.Body.String(), revisions.BaseHead) || diffs != 1 {
-		t.Fatalf("changed base: %d %s; diff calls: %d", response.Code, response.Body, diffs)
+	resp, err = client.GetThreadChanges(ctx, connect.NewRequest(&ariadnev1.GetThreadChangesRequest{
+		ThreadId: "thr_a",
+		Head:     &initial,
+		BaseHead: &base,
+	}))
+	if err != nil || resp.Msg.Changes == nil || resp.Msg.Changes.BaseHead == nil || *resp.Msg.Changes.BaseHead != revisions.BaseHead || diffs != 1 {
+		t.Fatalf("changed base: resp=%+v err=%v; diff calls: %d", resp, err, diffs)
 	}
 	revisions.Head = strings.Repeat("c", 40)
-	if response := call("POST", "/merge", encoded(object{"method": "squash", "expectedHead": initial})); response.Code != 200 || !strings.Contains(response.Body.String(), `"kind":"moved"`) {
-		t.Fatalf("merge of older comparison: %d %s", response.Code, response.Body)
+	mergeResp, err := client.MergeThread(ctx, connect.NewRequest(&ariadnev1.MergeThreadRequest{
+		ThreadId:     "thr_a",
+		Method:       "squash",
+		ExpectedHead: &initial,
+	}))
+	if err != nil || mergeResp.Msg.Outcome == nil || mergeResp.Msg.Outcome.Kind != "moved" {
+		t.Fatalf("merge of older comparison: resp=%+v err=%v", mergeResp, err)
 	}
 }
 
-func TestWorkspaceHTTP(t *testing.T) {
-	no := false
-	file := "/api/threads/thr_a/changes/file?from=" + strings.Repeat("a", 40) + "&head=" + strings.Repeat("b", 40) + "&path=file.txt"
-	requests := []apiRequest{
-		{Method: "GET", Path: "/api/threads/thr_a/changes"}, {Method: "GET", Path: file}, {Method: "GET", Path: "/api/threads/thr_a/changes/file?from=invalid"},
-		{Method: "GET", Path: "/api/worktrees"}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{}, Auth: &no}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{"method": "bad"}},
-		{Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{"message": "conflict"}}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{"method": "merge"}}, {Method: "POST", Path: "/api/threads/thr_a/merge/undo"},
-		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{"settings": object{"delivery": object{"mode": "external", "instructions": "submit to platform"}}}},
-		{Method: "GET", Path: "/api/threads/thr_a/changes"}, {Method: "POST", Path: "/api/threads/thr_a/merge", Body: object{}},
-		{Method: "PUT", Path: "/api/projects/prj_a/settings", Body: object{}}, {Method: "GET", Path: "/api/projects/prj_a/settings"},
-		{Method: "DELETE", Path: "/api/projects/prj_a/worktrees/thr_a"}, {Method: "DELETE", Path: "/api/projects/prj_a"}, {Method: "GET", Path: "/api/projects/prj_a"},
-	}
+func TestWorkspaceRPC(t *testing.T) {
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
 	if err != nil {
@@ -181,7 +183,11 @@ func TestWorkspaceHTTP(t *testing.T) {
 				}
 				return sdk.MergeOutcome{Kind: "merged", SHA: strings.Repeat("c", 40), Head: strings.Repeat("b", 40)}, nil
 			},
-			UndoMerge: func(context.Context, sdk.UndoMergeRequest) error { return nil }, Remove: func(context.Context, string, sdk.WorktreeRemoveOptions) (bool, error) { return true, nil }, Worktrees: func(context.Context, bool) ([]sdk.WorktreeInfo, error) { return []sdk.WorktreeInfo{}, nil },
+			UndoMerge: func(context.Context, sdk.UndoMergeRequest) error { return nil },
+			Remove:    func(context.Context, string, sdk.WorktreeRemoveOptions) (bool, error) { return true, nil },
+			Worktrees: func(context.Context, bool) ([]sdk.WorktreeInfo, error) {
+				return []sdk.WorktreeInfo{{ThreadID: "thr_a", Path: "/tmp/wt/thr_a"}}, nil
+			},
 		}}}, nil
 	}})
 	manager, err := workspaces.New(workspaces.Options{Repository: repo, Sources: registry})
@@ -194,20 +200,64 @@ func TestWorkspaceHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for _, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
-		if item.Auth == nil || *item.Auth {
-			request.Header.Set("Authorization", "Bearer test-token")
-		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	client := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	unauth := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix)
+
+	changesResp, err := client.GetThreadChanges(t.Context(), connect.NewRequest(&ariadnev1.GetThreadChangesRequest{ThreadId: "thr_a"}))
+	if err != nil || changesResp.Msg.Changes == nil || !changesResp.Msg.Mergeable {
+		t.Fatalf("get changes failed: resp=%+v err=%v", changesResp, err)
+	}
+
+	fileResp, err := client.GetChangedFile(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFileRequest{
+		ThreadId: "thr_a",
+		From:     strings.Repeat("a", 40),
+		Head:     strings.Repeat("b", 40),
+		Path:     "file.txt",
+	}))
+	if err != nil || fileResp.Msg.File == nil || fileResp.Msg.File.GetBefore() != "before" || fileResp.Msg.File.GetAfter() != "after" {
+		t.Fatalf("get changed file failed: resp=%+v err=%v", fileResp, err)
+	}
+
+	if _, err := client.GetChangedFile(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFileRequest{
+		ThreadId: "thr_a", From: "invalid", Head: strings.Repeat("b", 40), Path: "file.txt",
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for bad from, got %v", err)
+	}
+
+	wtResp, err := client.ListWorktrees(t.Context(), connect.NewRequest(&ariadnev1.ListWorktreesRequest{IncludeSizes: true}))
+	if err != nil || len(wtResp.Msg.Projects) != 1 || len(wtResp.Msg.Projects[0].Worktrees) != 1 || wtResp.Msg.Projects[0].Worktrees[0].Thread == nil {
+		t.Fatalf("list worktrees failed: resp=%+v err=%v", wtResp, err)
+	}
+
+	if _, err := unauth.MergeThread(t.Context(), connect.NewRequest(&ariadnev1.MergeThreadRequest{ThreadId: "thr_a"})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated merge, got %v", err)
+	}
+	if _, err := client.MergeThread(t.Context(), connect.NewRequest(&ariadnev1.MergeThreadRequest{ThreadId: "thr_a", Method: "bad"})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for bad method, got %v", err)
+	}
+	conflictResp, err := client.MergeThread(t.Context(), connect.NewRequest(&ariadnev1.MergeThreadRequest{ThreadId: "thr_a", Message: "conflict"}))
+	if err != nil || conflictResp.Msg.Outcome.Kind != "conflict" {
+		t.Fatalf("expected conflict outcome, got resp=%+v err=%v", conflictResp, err)
+	}
+	mergedResp, err := client.MergeThread(t.Context(), connect.NewRequest(&ariadnev1.MergeThreadRequest{ThreadId: "thr_a", Method: "merge"}))
+	if err != nil || mergedResp.Msg.Outcome.Kind != "merged" || mergedResp.Msg.Thread.Merged == nil {
+		t.Fatalf("expected merged outcome, got resp=%+v err=%v", mergedResp, err)
+	}
+	undoResp, err := client.UndoMerge(t.Context(), connect.NewRequest(&ariadnev1.UndoMergeRequest{ThreadId: "thr_a"}))
+	if err != nil || undoResp.Msg.Thread.Merged != nil {
+		t.Fatalf("undo merge failed: resp=%+v err=%v", undoResp, err)
+	}
+
+	if _, err := client.RemoveWorktree(t.Context(), connect.NewRequest(&ariadnev1.RemoveWorktreeRequest{ProjectId: "prj_a", ThreadId: "thr_a"})); err != nil {
+		t.Fatalf("remove worktree failed: %v", err)
 	}
 }
 
-func TestWorkspaceBatchFilesHTTP(t *testing.T) {
+func TestWorkspaceBatchFilesRPC(t *testing.T) {
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "data.sqlite"), Now: now})
 	if err != nil {
@@ -226,6 +276,9 @@ func TestWorkspaceBatchFilesHTTP(t *testing.T) {
 				out := make([]sdk.FileVersions, len(requests))
 				for i, req := range requests {
 					after := "content:" + req.Path
+					if req.PreviousPath != nil {
+						after += "<-" + *req.PreviousPath
+					}
 					out[i] = sdk.FileVersions{After: &after}
 				}
 				return out, nil
@@ -242,30 +295,39 @@ func TestWorkspaceBatchFilesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
+	srv := httptest.NewServer(api)
+	defer srv.Close()
 
-	call := func(body object) *httptest.ResponseRecorder {
-		request := httptest.NewRequest("POST", "/api/threads/thr_a/changes/files", strings.NewReader(encoded(body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		return response
-	}
+	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	client := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
 	from, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	res := call(object{
-		"from": from,
-		"head": head,
-		"files": []object{
-			{"path": "a.go", "previousPath": nil},
-			{"path": "b.go", "previousPath": "old-b.go"},
+	prev := "old-b.go"
+	resp, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+		Files: []*ariadnev1.ChangedFileRef{
+			{Path: "a.go"},
+			{Path: "b.go", PreviousPath: &prev},
 		},
-	})
-	if res.Code != 200 || batchCalls != 1 || !strings.Contains(res.Body.String(), `"content:a.go"`) || !strings.Contains(res.Body.String(), `"content:b.go"`) {
-		t.Fatalf("batch response: code=%d calls=%d body=%s", res.Code, batchCalls, res.Body.String())
+	}))
+	if err != nil || batchCalls != 1 || len(resp.Msg.Files) != 2 || resp.Msg.Files[0].GetAfter() != "content:a.go" || resp.Msg.Files[1].GetAfter() != "content:b.go<-old-b.go" {
+		t.Fatalf("batch response: calls=%d resp=%+v err=%v", batchCalls, resp, err)
 	}
-	if bad := call(object{"from": "invalid", "head": head, "files": []object{{"path": "a.go"}}}); bad.Code != 400 {
-		t.Fatalf("expected 400 for invalid from, got %d", bad.Code)
+	if _, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     "invalid",
+		Head:     head,
+		Files:    []*ariadnev1.ChangedFileRef{{Path: "a.go"}},
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for bad from, got %v", err)
 	}
-	if empty := call(object{"from": from, "head": head, "files": []object{}}); empty.Code != 400 {
-		t.Fatalf("expected 400 for empty files, got %d", empty.Code)
+	if _, err := client.GetChangedFiles(t.Context(), connect.NewRequest(&ariadnev1.GetChangedFilesRequest{
+		ThreadId: "thr_a",
+		From:     from,
+		Head:     head,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for empty files, got %v", err)
 	}
 }
