@@ -75,7 +75,26 @@ func (manager *Manager) ThreadChangesSince(ctx context.Context, threadID string,
 		}
 	}
 	changes, err := branches.Changes(ctx, owner, *base)
+	if err == nil && changes != nil && len(changes.Uncommitted) == 0 && thread.ReviewOf == nil {
+		totals := summarizeChangedFiles(changes.Files)
+		if (thread.Changes != nil || totals.Files > 0) && !core.SameChangeTotals(thread.Changes, totals) {
+			_ = manager.options.Repository.SyncBranchChanges(ctx, threadID, totals)
+		}
+	}
 	return ThreadChanges{Changes: changes, Mergeable: mergeable}, workError(err)
+}
+
+func summarizeChangedFiles(files []sdk.ChangedFile) core.ChangeTotals {
+	totals := core.ChangeTotals{Files: int64(len(files))}
+	for _, file := range files {
+		if file.Added != nil {
+			totals.Added += *file.Added
+		}
+		if file.Removed != nil {
+			totals.Removed += *file.Removed
+		}
+	}
+	return totals
 }
 func (manager *Manager) ThreadFile(ctx context.Context, threadID string, request sdk.FileVersionRequest) (sdk.FileVersions, error) {
 	ctx, done, err := manager.begin(ctx)

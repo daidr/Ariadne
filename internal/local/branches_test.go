@@ -401,18 +401,145 @@ func BenchmarkFileVersions40Files(b *testing.B) {
 			}
 		}
 	})
-	b.Run("CatFileBatch", func(b *testing.B) {
-		batch := newCatFileBatch(root)
-		defer batch.Close()
-		// Warm up the persistent reader once before timing steady-state batches.
-		if _, err := batch.ReadVersions(b.Context(), git, inputs[:1]); err != nil {
-			b.Fatal(err)
-		}
-		b.ResetTimer()
-		for b.Loop() {
-			if _, err := batch.ReadVersions(b.Context(), git, inputs); err != nil {
+		b.Run("CatFileBatch", func(b *testing.B) {
+			batch := newCatFileBatch(root)
+			defer batch.Close()
+			// Warm up the persistent reader once before timing steady-state batches.
+			if _, err := batch.ReadVersions(b.Context(), git, inputs[:1]); err != nil {
 				b.Fatal(err)
 			}
-		}
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := batch.ReadVersions(b.Context(), git, inputs); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+
+func TestWorktreeSnapshotNormalizesCRLFWithGlobalAutocrlf(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[core]\n\tautocrlf = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	root, git := initGit(t)
+	lines := strings.Repeat("line\n", 40)
+	writeGit(t, root, "large.txt", lines)
+	head := gitCommit(t, git, "add lf file")
+	headTree := gitOK(t, git, "rev-parse", head+"^{tree}")
+
+	// Simulate a shell git merge/checkout under core.autocrlf=true writing CRLF
+	// line endings onto disk while the committed blob and index remain LF.
+	if err := os.Remove(filepath.Join(root, "large.txt")); err != nil {
+		t.Fatal(err)
+	}
+	checkout := exec.CommandContext(t.Context(), "git", "checkout", "--", "large.txt")
+	checkout.Dir = root
+	if out, err := checkout.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -- large.txt: %v\n%s", err, string(out))
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "large.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "\r\n") {
+		t.Fatalf("expected shell git checkout under core.autocrlf=true to write CRLF")
+	}
+	// Advance mtime so git cannot rely on stat-cache matching alone.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(filepath.Join(root, "large.txt"), future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := WorktreeSnapshot(t.Context(), git, root, "thread_crlf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot != headTree {
+		diff, _ := TreeDiff(t.Context(), git, head, snapshot)
+		t.Fatalf("clean CRLF worktree snapshot differed from HEAD tree: diff=%+v", diff)
+	}
+
+	changes, err := BranchChanges(t.Context(), git, BranchInput{Branch: "main", Base: "main", BaseRef: "refs/heads/main", Worktree: root})
+	if err != nil || changes == nil {
+		t.Fatal(changes, err)
+	}
+	if len(changes.Uncommitted) != 0 {
+		t.Fatalf("expected clean uncommitted list for CRLF-normalized file, got %v", changes.Uncommitted)
+	}
+
+	// Modify one line while keeping CRLF line endings: diff should be +1 -0, not +41 -40.
+	writeGit(t, root, "large.txt", string(raw)+"added\r\n")
+	editedSnapshot, err := WorktreeSnapshot(t.Context(), git, root, "thread_crlf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := TreeDiff(t.Context(), git, head, editedSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diff) != 1 || diff[0].Path != "large.txt" || diff[0].Added == nil || *diff[0].Added != 1 || diff[0].Removed == nil || *diff[0].Removed != 0 {
+		t.Fatalf("expected +1 -0 for single-line CRLF edit, got %+v", diff)
+	}
+}
+
+func TestBranchChangesPrefersNewerOriginBaseWhenLocalBaseLags(t *testing.T) {
+	t.Parallel()
+	root, git := initGit(t)
+	oldMain := gitOK(t, git, "rev-parse", "HEAD")
+
+	// Simulate origin/main advancing ahead of stale local main with a large commit.
+	gitOK(t, git, "checkout", "-qb", "upstream-tmp")
+	writeGit(t, root, "upstream.txt", strings.Repeat("upstream line\n", 100))
+	newOriginMain := gitCommit(t, git, "large upstream commit")
+	gitOK(t, git, "update-ref", "refs/remotes/origin/main", newOriginMain)
+
+	// Create feature branch from oldMain, make its own change, and merge origin/main
+	// while local refs/heads/main remains behind at oldMain.
+	gitOK(t, git, "checkout", "-qb", "ariadne/feature", oldMain)
+	gitOK(t, git, "branch", "-D", "upstream-tmp")
+	writeGit(t, root, "feature.txt", "feat 1\nfeat 2\n")
+	gitCommit(t, git, "feature work")
+	gitOK(t, git, "merge", "--no-ff", "-m", "Merge origin/main", "refs/remotes/origin/main")
+	head := gitOK(t, git, "rev-parse", "HEAD")
+
+	if got := gitOK(t, git, "rev-parse", "refs/heads/main"); got != oldMain {
+		t.Fatalf("expected local main to remain behind at %s, got %s", oldMain, got)
+	}
+
+	changes, err := BranchChanges(t.Context(), git, BranchInput{
+		Branch:        "ariadne/feature",
+		Base:          "main",
+		BaseRef:       "refs/heads/main",
+		RemoteBaseRef: "refs/remotes/origin/main",
+		Worktree:      root,
 	})
+	if err != nil || changes == nil {
+		t.Fatal(changes, err)
+	}
+	if changes.BaseHead != newOriginMain || changes.From != newOriginMain || changes.Head != head {
+		t.Fatalf("expected base/from=%s head=%s, got %+v", newOriginMain, head, changes)
+	}
+	if len(changes.Files) != 1 || changes.Files[0].Path != "feature.txt" || changes.Files[0].Added == nil || *changes.Files[0].Added != 2 || changes.Files[0].Removed == nil || *changes.Files[0].Removed != 0 {
+		t.Fatalf("expected only feature.txt (+2 -0), got %+v", changes.Files)
+	}
+	revs, err := branchRevisions(t.Context(), git, "ariadne/feature", "refs/heads/main", "refs/remotes/origin/main")
+	if err != nil || revs.BaseHead != newOriginMain || revs.Head != head {
+		t.Fatalf("unexpected branchRevisions: %+v err=%v", revs, err)
+	}
+
+	// If local main diverges with unpushed commits, local main must be preserved.
+	gitOK(t, git, "checkout", "-q", "main")
+	writeGit(t, root, "local-only.txt", "unpushed\n")
+	localAhead := gitCommit(t, git, "local unpushed commit")
+	if got := resolveBaseSHA(t.Context(), git, "refs/heads/main", "refs/remotes/origin/main"); got != localAhead {
+		t.Fatalf("expected diverged local main %s to be preserved, got %s", localAhead, got)
+	}
 }

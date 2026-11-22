@@ -1287,6 +1287,7 @@ const HIGH_FREQ_EVENTS = new Set<string>([
   'research.step',
   'search.answered',
   'turn.changed',
+  'branch.changes_synced',
 ])
 let rafPending = false
 let slowTimer: ReturnType<typeof setTimeout> | undefined
@@ -1334,11 +1335,12 @@ export function partsOf(type: AnyStoredEvent['type']): readonly Part[] {
     case 'message':
       // Reading only clears marks on the messages themselves.
       return type === 'message.read' ? ['conversations'] : ['detail', 'conversations', 'plan']
+    case 'branch':
+      return type === 'branch.changes_synced' ? ['detail'] : ['detail', 'conversations', 'plan']
     case 'plan':
     case 'thread':
     case 'attention':
     case 'workspace':
-    case 'branch':
     case 'pull_request':
     case 'checks':
     case 'autopilot':
@@ -1366,6 +1368,8 @@ export function affectsProjectList(type: AnyStoredEvent['type']): boolean {
       return type === 'message.posted'
     case 'turn':
       return type !== 'turn.changed'
+    case 'branch':
+      return type !== 'branch.changes_synced'
     case 'conversation':
       return (
         type === 'conversation.wait_set' ||
