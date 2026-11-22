@@ -40,6 +40,9 @@ describe('code language resolution and highlighting', () => {
     expect(languageHintOf('.gitignore')).toBeNull()
     expect(languageHintOf('trailing.')).toBeNull()
     expect(languageHintOf('')).toBeNull()
+    expect(languageHintOf('foo.constructor')).toBe('constructor')
+    expect(languageHintOf('bar.__proto__')).toBe('__proto__')
+    expect(languageHintOf('baz.toString')).toBe('tostring')
   })
 
   test('resolves built-in @dou-ui/code languages synchronously without invoking Shiki', async () => {
@@ -74,9 +77,13 @@ describe('code language resolution and highlighting', () => {
 
   test('skips Shiki loading for unsupported or plain files', async () => {
     const loader = vi.fn(async () => null)
+    expect(builtInCodeLanguage('foo.constructor')).toBeNull()
+    expect(builtInCodeLanguage('bar.__proto__')).toBeNull()
     expect(await loadCodeLanguage('notes.txt', loader)).toBeNull()
     expect(await loadCodeLanguage('LICENSE', loader)).toBeNull()
     expect(await loadCodeLanguage('go.sum', loader)).toBeNull()
+    expect(await loadCodeLanguage('foo.constructor', loader)).toBeNull()
+    expect(await loadCodeLanguage('bar.__proto__', loader)).toBeNull()
     expect(loader).not.toHaveBeenCalled()
   })
 
