@@ -247,52 +247,54 @@ function dragPinned(event: PointerEvent, key: side.ListKey) {
           :thread="threadAt(active as PaneKey)"
           :label="t(threadAt(active as PaneKey) ? 'thread.more' : 'side.more')"
         >
-          <DouDropdownItem
-            v-if="canSplit(group, 'right')"
-            value="split-right"
-            @click="splitPane(active as PaneKey, 'horizontal')"
-          >
-            <template #prefix><LayoutColumnsIcon /></template>
-            {{ t('side.splitRight') }}
-          </DouDropdownItem>
-          <DouDropdownItem
-            v-if="canSplit(group, 'bottom')"
-            value="split-down"
-            @click="splitPane(active as PaneKey, 'vertical')"
-          >
-            <template #prefix><LayoutRowsIcon /></template>
-            {{ t('side.splitDown') }}
-          </DouDropdownItem>
-          <DouDropdownSub v-if="!compact && othersThan(group).length" :title="t('side.moveTo')">
+          <template v-if="!compact">
             <DouDropdownItem
-              v-for="other in othersThan(group)"
-              :key="other.id"
-              :value="other.id"
-              @click="setSide(side.move(state.side, active as PaneKey, other.id))"
+              v-if="canSplit(group, 'right')"
+              value="split-right"
+              @click="splitPane(active as PaneKey, 'horizontal')"
             >
-              {{ t('side.groupOf', { label: labelOf(side.activeOf(other)) }) }}
+              <template #prefix><LayoutColumnsIcon /></template>
+              {{ t('side.splitRight') }}
             </DouDropdownItem>
-          </DouDropdownSub>
-          <DouDropdownSub v-if="!compact" :title="t('side.open')">
             <DouDropdownItem
-              v-for="key in side.LISTS"
-              :key="key"
-              :value="key"
-              :disabled="group.tabs.some((tab) => side.listOf(tab) === key)"
-              @click="bring(group, key)"
+              v-if="canSplit(group, 'bottom')"
+              value="split-down"
+              @click="splitPane(active as PaneKey, 'vertical')"
             >
-              <template #prefix><component :is="lists[key]!.icon" /></template>
-              {{ lists[key]!.label() }}
+              <template #prefix><LayoutRowsIcon /></template>
+              {{ t('side.splitDown') }}
             </DouDropdownItem>
-          </DouDropdownSub>
-          <DouDropdownItem
-            v-if="!compact && group.tabs.some((key) => key !== active && !side.isPinned(key))"
-            value="close-others"
-            divided
-            @click="setSide(side.closeOthers(state.side, active as PaneKey))"
-          >
-            {{ t('side.closeOthers') }}
-          </DouDropdownItem>
+            <DouDropdownSub v-if="othersThan(group).length" :title="t('side.moveTo')">
+              <DouDropdownItem
+                v-for="other in othersThan(group)"
+                :key="other.id"
+                :value="other.id"
+                @click="setSide(side.move(state.side, active as PaneKey, other.id))"
+              >
+                {{ t('side.groupOf', { label: labelOf(side.activeOf(other)) }) }}
+              </DouDropdownItem>
+            </DouDropdownSub>
+            <DouDropdownSub :title="t('side.open')">
+              <DouDropdownItem
+                v-for="key in side.LISTS"
+                :key="key"
+                :value="key"
+                :disabled="group.tabs.some((tab) => side.listOf(tab) === key)"
+                @click="bring(group, key)"
+              >
+                <template #prefix><component :is="lists[key]!.icon" /></template>
+                {{ lists[key]!.label() }}
+              </DouDropdownItem>
+            </DouDropdownSub>
+            <DouDropdownItem
+              v-if="group.tabs.some((key) => key !== active && !side.isPinned(key))"
+              value="close-others"
+              divided
+              @click="setSide(side.closeOthers(state.side, active as PaneKey))"
+            >
+              {{ t('side.closeOthers') }}
+            </DouDropdownItem>
+          </template>
         </ThreadTools>
       </template>
     </DouDock>
