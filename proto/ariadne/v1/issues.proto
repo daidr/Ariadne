@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+// IssueService exposes read access to the project's configured issue tracker.
+service IssueService {
+  rpc ListIssues(ListIssuesRequest) returns (ListIssuesResponse);
+  rpc GetIssue(GetIssueRequest) returns (GetIssueResponse);
+}
+
+message IssueSummary {
+  int64 number = 1 [jstype = JS_NUMBER];
+  string url = 2;
+  string title = 3;
+  string state = 4;
+  optional string author = 5;
+  repeated string labels = 6;
+  int32 comments = 7;
+  string updated_at = 8;
+}
+
+message IssueComment {
+  string id = 1;
+  optional string author = 2;
+  string body = 3;
+  string created_at = 4;
+  string url = 5;
+}
+
+message IssueDetail {
+  IssueSummary summary = 1;
+  string body = 2;
+  string created_at = 3;
+  repeated IssueComment recent = 4;
+}
+
+message ListIssuesRequest {
+  string project_id = 1;
+  string state = 2;
+  repeated string labels = 3;
+  string search = 4;
+  int32 limit = 5;
+}
+
+message ListIssuesResponse {
+  string tracker = 1;
+  string web_url = 2;
+  repeated IssueSummary issues = 3;
+}
+
+message GetIssueRequest {
+  string project_id = 1;
+  int64 number = 2 [jstype = JS_NUMBER];
+}
+
+message GetIssueResponse {
+  string tracker = 1;
+  string web_url = 2;
+  IssueDetail issue = 3;
+}

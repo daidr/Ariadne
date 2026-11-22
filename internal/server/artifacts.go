@@ -70,11 +70,12 @@ func (api *API) registerArtifacts() {
 			n := int64(value)
 			version = &n
 		}
-		artifact, err := repo.GetArtifact(r.Context(), r.PathValue("artifactId"), version)
+		includeVersions := r.URL.Query().Get("versions") != "0"
+		detail, err := repo.GetArtifactDetail(r.Context(), r.PathValue("artifactId"), version, includeVersions, 0, "")
 		if err != nil {
 			return nil, 0, err
 		}
-		return api.artifactResponse(r, artifact)
+		return object{"artifact": detail.Artifact, "versions": detail.Versions, "comments": detail.Comments}, 200, nil
 	})
 	api.add("PUT", "/api/artifacts/:artifactId", func(r *http.Request) (any, int, error) {
 		body, err := readJSON(r)

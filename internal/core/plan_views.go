@@ -67,12 +67,69 @@ func objects(raw any) []object {
 	}
 	return result
 }
+
+type PlanPage struct {
+	Plan                  object
+	NextRevisionPageToken string
+	HasMoreRevisions      bool
+}
+
+type PlanRevisionPage struct {
+	Revisions     []object
+	NextPageToken string
+	HasMore       bool
+}
+
+func listPlanRevisions(w *projectionWriter, projectID string, pageSize int, pageToken string) (PlanRevisionPage, error) {
+	limit, err := normalizePageSize(pageSize, defaultRevisionPageSize)
+	if err != nil {
+		return PlanRevisionPage{}, err
+	}
+	var rows []record
+	if pageToken != "" {
+		beforeSeq, err := decodeInt64Cursor(pageToken)
+		if err != nil {
+			return PlanRevisionPage{}, err
+		}
+		rows = w.all("SELECT * FROM plan_revisions WHERE project_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?", projectID, beforeSeq, limit+1)
+	} else {
+		rows = w.all("SELECT * FROM plan_revisions WHERE project_id = ? ORDER BY seq DESC LIMIT ?", projectID, limit+1)
+	}
+	if w.err != nil {
+		return PlanRevisionPage{}, w.err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	revisions := make([]object, 0, len(rows))
+	var lastSeq int64
+	for _, row := range rows {
+		lastSeq = row.integer("seq")
+		ops := w.parsed(row, "ops", []any{})
+		revisions = append(revisions, object{"id": row["id"], "author": row["author"], "reason": row["reason"], "ops": ops, "revertOf": row["revert_of"], "revertedBy": row["reverted_by"], "createdAt": row["created_at"]})
+	}
+	if w.err != nil {
+		return PlanRevisionPage{}, w.err
+	}
+	nextToken := ""
+	if hasMore && lastSeq > 0 {
+		nextToken = encodeInt64Cursor(lastSeq)
+	}
+	return PlanRevisionPage{Revisions: revisions, NextPageToken: nextToken, HasMore: hasMore}, nil
+}
+
 func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
+	page, err := getPlanPage(w, projectID, now, defaultRevisionPageSize, "")
+	return page.Plan, err
+}
+
+func getPlanPage(w *projectionWriter, projectID string, now int64, revisionPageSize int, revisionPageToken string) (PlanPage, error) {
 	if project := w.one("SELECT id FROM projects WHERE id = ?", projectID); project == nil {
 		if w.err != nil {
-			return nil, w.err
+			return PlanPage{}, w.err
 		}
-		return nil, domainerr.NotFound(projectID)
+		return PlanPage{}, domainerr.NotFound(projectID)
 	}
 	graph := loadPlanGraph(w, projectID)
 	changed := map[string]any{}
@@ -81,7 +138,7 @@ func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
 	}
 	threads, err := listThreads(w.ctx, w.tx, projectID, now)
 	if err != nil {
-		return nil, err
+		return PlanPage{}, err
 	}
 	onNodes := map[string][]ThreadView{}
 	for _, thread := range threads {
@@ -145,10 +202,9 @@ func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
 		node["status"] = nodeStatus(stages, node["gate"])
 		nodes = append(nodes, node)
 	}
-	revisions := []object{}
-	for _, row := range w.all("SELECT * FROM plan_revisions WHERE project_id = ? ORDER BY seq DESC LIMIT 50", projectID) {
-		ops := w.parsed(row, "ops", []any{})
-		revisions = append(revisions, object{"id": row["id"], "author": row["author"], "reason": row["reason"], "ops": ops, "revertOf": row["revert_of"], "revertedBy": row["reverted_by"], "createdAt": row["created_at"]})
+	revPage, err := listPlanRevisions(w, projectID, revisionPageSize, revisionPageToken)
+	if err != nil {
+		return PlanPage{}, err
 	}
 	proposals := []object{}
 	for _, row := range w.all("SELECT * FROM plan_proposals WHERE project_id = ? AND status IN ('open', 'stale') ORDER BY id", projectID) {
@@ -169,12 +225,38 @@ func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
 		}
 		proposals = append(proposals, object{"id": row["id"], "attentionId": row["attention_id"], "reason": row["reason"], "ops": rawOps, "changes": describePlanOps(graph, ops, counts), "preview": preview, "status": row["status"], "staleReason": row["stale_reason"], "createdAt": row["created_at"]})
 	}
-	return object{"projectId": projectID, "nodes": nodes, "revisions": revisions, "proposals": proposals}, w.err
+	return PlanPage{
+		Plan:                  object{"projectId": projectID, "nodes": nodes, "revisions": revPage.Revisions, "proposals": proposals},
+		NextRevisionPageToken: revPage.NextPageToken,
+		HasMoreRevisions:      revPage.HasMore,
+	}, w.err
 }
 func (reader Reader) GetPlan(ctx context.Context, projectID string) (result object, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
 		w := &projectionWriter{ctx: ctx, tx: tx}
 		result, err = getPlan(w, projectID, reader.now())
+		return err
+	})
+	return
+}
+func (reader Reader) GetPlanPage(ctx context.Context, projectID string, revisionPageSize int, revisionPageToken string) (result PlanPage, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		w := &projectionWriter{ctx: ctx, tx: tx}
+		result, err = getPlanPage(w, projectID, reader.now(), revisionPageSize, revisionPageToken)
+		return err
+	})
+	return
+}
+func (reader Reader) ListPlanRevisionsPage(ctx context.Context, projectID string, pageSize int, pageToken string) (result PlanRevisionPage, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		w := &projectionWriter{ctx: ctx, tx: tx}
+		if project := w.one("SELECT id FROM projects WHERE id = ?", projectID); project == nil {
+			if w.err != nil {
+				return w.err
+			}
+			return domainerr.NotFound(projectID)
+		}
+		result, err = listPlanRevisions(w, projectID, pageSize, pageToken)
 		return err
 	})
 	return
