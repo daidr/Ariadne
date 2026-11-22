@@ -1,6 +1,6 @@
 # Go 后端迁移
 
-开发沙箱、默认启动和发布产物均使用 Go 后端。旧 Bun 后端从源码树移除。兼容测试从迁移前的固定 Git 提交提取旧实现，并在独立目录运行。
+开发沙箱、默认启动和发布产物均使用 Go 后端。旧 Bun 后端与历史 TS 对照工具已移除，保留静态 SQLite 结构与路由基线测试。
 
 ## 已确认的约束
 
@@ -13,7 +13,7 @@
 
 ## 功能对照
 
-`internal/compat/testdata/backend-contract.json` 与 `schema.sql` 记录了迁移前的路由、事件类型和空库结构。`go run ./tools/legacyoracle` 准备对照目录。兼容 CI 从固定提交重新生成并核对这两份文件。
+`internal/compat/testdata/backend-contract.json` 与 `schema.sql` 记录了迁移前的路由基线和旧版空库结构，分别用于路由鉴权检查和老库静态 SQLite 升级兼容测试。
 
 | 部分        | 需要保持的行为                                                         | 状态                                                                                                                                            |
 | ----------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -33,9 +33,8 @@
 ```sh
 go version
 go test -count=1 -parallel=4 -timeout=180s ./...
+go test -race -count=1 -parallel=4 -timeout=300s ./...
 go vet ./...
-go run ./tools/legacyoracle
-go test -count=1 -parallel=4 -timeout=180s ./...
 bun run check
 ```
 
@@ -57,8 +56,7 @@ go build -tags ariadne_web -trimpath -ldflags "-s -w" -o dist/ariadne ./cmd/aria
 内嵌构建提供 `--version`、`self-check` 和 `mcp-stdio` 命令，运行时只需要 Go 产物及所配置的外部工具。
 同一套前端的 Windows x64 产物约 25 MiB（Go）和 151 MiB（旧 Bun），均关闭 UPX。
 
-Go 模块最低版本和 CI 都固定为 1.27.4。原生测试可单独运行。准备好 `dist/legacy-oracle` 后，测试会额外检查 SQLite 双向读取、dou-ui 协作状态与模型协议。
-CI 的 compatibility job 设置 `ARIADNE_REQUIRE_LEGACY=1`，缺少对照环境时会失败。
+Go 模块最低版本和 CI 都固定为 1.27.4。CI 包含全平台原生测试（`native`）和 Linux 轻量竞态检测（`race`）。
 
 Go 数据访问使用 `modernc.org/sqlite`，无需 CGO；Yjs 协议使用固定版本的
 `github.com/antst/go-yjs`。文档、画板、仪表盘已验证状态往返和 Go 修改后的同步消息，
@@ -194,7 +192,7 @@ POSIX 文件命令、路径/链接、默认超时和目录清理。这不能作�
 Windows 本机普通回归和无 CGO 交叉编译已通过。尝试本机 race 检查时，运行时初始化因
 ThreadSanitizer 内存分配错误（系统错误 87）失败，尚不能提供 Windows race 通过的结果；
 本机 WSL 上的 Linux 定向 race 测试已覆盖协作连接、版本保存、协调器模型调用及托管推进。
-Linux compatibility CI 已配置全量 race 检查，尚未在远程运行。
+Linux `race` CI 已配置全量竞态检查。
 工作区测试会产生大量有边界的文件访问记录；Windows 实测单个托管仓库用例记录约 2.4 万次访问，
 默认测试结果缓存会在测试结束后长时间计算文件依赖。CI 使用 `-count=1` 实际重跑测试，
 限制测试并发为 4，并配置单包和任务超时；本机完整无缓存回归与 vet 已通过。

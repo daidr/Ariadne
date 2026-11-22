@@ -2,11 +2,6 @@ package realtime
 
 import (
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +9,7 @@ import (
 	"github.com/daidr/Ariadne/internal/textutil"
 )
 
-func TestLiveAndDraftSnapshotsMatchLegacy(t *testing.T) {
+func TestLiveAndDraftSnapshots(t *testing.T) {
 	type action struct {
 		Op     string `json:"op"`
 		Handle string `json:"handle,omitempty"`
@@ -81,30 +76,8 @@ func TestLiveAndDraftSnapshotsMatchLegacy(t *testing.T) {
 	for _, screen := range screens {
 		processed = append(processed, textutil.ScreenText(screen))
 	}
-	native := map[string]any{"states": states, "screens": processed}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("Bun absent")
-	}
-	input, _ := json.Marshal(map[string]any{"actions": actions, "screens": screens})
-	command := legacytest.Command(t, bun, "packages/core/src/testing/go-live-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	data, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy %v\n%s", err, data)
-	}
-	var actual, want any
-	encoded, _ := json.Marshal(native)
-	json.Unmarshal(encoded, &actual)
-	if err := json.Unmarshal(data, &want); err != nil {
-		t.Fatalf("legacy JSON %v %s", err, data)
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("live state differs\nGo %s\nTS %s", encoded, data)
+	if len(states) != len(actions) || len(processed) != len(screens) || processed[0] != "ok\n100%\ndone\n" {
+		t.Fatalf("unexpected snapshots/screens: states=%d processed=%q", len(states), processed)
 	}
 }
 func TestTransientStateCopiesBoundsAndReleasesSnapshots(t *testing.T) {

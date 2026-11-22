@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/domainerr"
@@ -281,6 +282,54 @@ func (reader Reader) GetThread(ctx context.Context, threadID string) (ThreadView
 		return ThreadView{}, domainerr.NotFound(threadID)
 	}
 	return toThread(rows[0], reader.now())
+}
+
+// ListThreadsByIDs loads a batch of threads in a single read-only snapshot,
+// avoiding per-thread N+1 lookups across worktree and listing flows.
+func (reader Reader) ListThreadsByIDs(ctx context.Context, ids []string) (map[string]ThreadView, error) {
+	result := map[string]ThreadView{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return result, nil
+	}
+	const chunkSize = 200
+	now := reader.now()
+	err := reader.snapshot(ctx, func(tx *sql.Tx) error {
+		for start := 0; start < len(unique); start += chunkSize {
+			end := min(start+chunkSize, len(unique))
+			chunk := unique[start:end]
+			placeholders := make([]string, len(chunk))
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				placeholders[i] = "?"
+				args[i] = id
+			}
+			rows, err := records(ctx, tx, threadSelect+" WHERE t.id IN ("+strings.Join(placeholders, ",")+")", args...)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				view, err := toThread(row, now)
+				if err != nil {
+					return err
+				}
+				result[view.ID] = view
+			}
+		}
+		return nil
+	})
+	return result, err
 }
 
 func openAttentions(ctx context.Context, db queryer, projectID string) ([]AttentionView, error) {

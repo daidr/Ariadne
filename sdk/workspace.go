@@ -68,6 +68,9 @@ type WorkspaceFiles interface {
 	FileExists(context.Context, string) (bool, error)
 	RemoveFile(context.Context, string) error
 }
+type WorkspaceBytes interface {
+	WriteBytes(context.Context, string, []byte) error
+}
 type WorkspacePathError struct{ Path, Reason string }
 
 func (err *WorkspacePathError) Error() string {

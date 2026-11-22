@@ -93,3 +93,80 @@ func TestCompactionPreservesFractionalModelPosition(t *testing.T) {
 		t.Fatal("missing compaction records")
 	}
 }
+
+func TestTurnStepUpdatesContextTokensWithoutZeroOverwrite(t *testing.T) {
+	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "context.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	name := "project"
+	project, err := repo.CreateProject(t.Context(), &name, ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(t.Context(), project.ID, NewThread{Title: "Investigate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := repo.StartTurn(t.Context(), thread.ID, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Step 1: tool-only step before any visible message reports mid-turn contextInput only (ACP style).
+	if err := repo.RecordStep(t.Context(), thread.ID, turnID, Step{
+		SawSeq: 1,
+		Usage:  &TokenUsage{Input: 0, Output: 0, ContextInput: new(int64(42000))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := repo.GetConversation(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.ContextTokens != 42000 {
+		t.Fatalf("expected contextTokens 42000 after first tool step, got %d", conv.ContextTokens)
+	}
+	// Step 2: output/cost-only delta without contextInput must NOT overwrite contextTokens with 0.
+	if err := repo.RecordStep(t.Context(), thread.ID, turnID, Step{
+		SawSeq: 2,
+		Usage:  &TokenUsage{Input: 0, Output: 20, Cost: &Cost{Currency: "USD", Amount: 0.05}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conv, err = repo.GetConversation(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.ContextTokens != 42000 {
+		t.Fatalf("output/cost-only step wiped contextTokens: got %d, want 42000", conv.ContextTokens)
+	}
+	// Step 3: explicit zero contextInput must not overwrite contextTokens or fall back to cumulative input.
+	if err := repo.RecordStep(t.Context(), thread.ID, turnID, Step{
+		SawSeq: 3,
+		Usage:  &TokenUsage{Input: 150000, Output: 10, ContextInput: new(int64(0))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conv, err = repo.GetConversation(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.ContextTokens != 42000 {
+		t.Fatalf("explicit zero contextInput changed contextTokens: got %d, want 42000", conv.ContextTokens)
+	}
+	// Step 4: direct API style usage without ContextInput updates contextTokens from Input.
+	if err := repo.RecordStep(t.Context(), thread.ID, turnID, Step{
+		SawSeq: 4,
+		Usage:  &TokenUsage{Input: 61000, Output: 120},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conv, err = repo.GetConversation(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conv.ContextTokens != 61000 {
+		t.Fatalf("expected contextTokens 61000 from direct input, got %d", conv.ContextTokens)
+	}
+}

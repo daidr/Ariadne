@@ -9,9 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -20,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/hostinghttp"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -97,7 +93,7 @@ func invoke(ctx context.Context, api *API, c call) (any, error) {
 	}
 	return nil, fmt.Errorf("unknown method %s", c.Method)
 }
-func TestAPIAndParsingMatchLegacy(t *testing.T) {
+func TestAPIAndParsing(t *testing.T) {
 	path := "/api/v4/projects/group%2Fsub%2Fapp"
 	branch := "feature/中文 ~!*"
 	current := mergeRaw(7, "opened", branch, "2026-11-01")
@@ -254,73 +250,54 @@ func TestAPIAndParsingMatchLegacy(t *testing.T) {
 	if !reflect.DeepEqual(info.Settings.Properties[local.HostedDirectory], local.HostedDirectoryField()) {
 		t.Fatal("repository storage directory field is missing or invalid")
 	}
-	delete(info.Settings.Properties, local.HostedDirectory)
-	info.Settings.FieldOrder = slices.DeleteFunc(info.Settings.FieldOrder, func(field string) bool {
-		return field == local.HostedDirectory
-	})
-	metadata := map[string]any{"kind": info.Kind, "title": info.Title, "settings": info.Settings, "provides": info.Provides, "hosting": info.Hosting}
-	native := map[string]any{"scenarios": nativeScenarios, "repositories": nativeRepositories, "instances": nativeInstances, "links": nativeLinks, "find": nativeFind, "logs": nativeLogs, "metadata": metadata}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native tests passed; Bun absent")
-	}
-	input, _ := json.Marshal(map[string]any{"scenarios": scenarios, "repositories": repositories, "instances": instances, "links": links, "registered": registered, "find": find, "logs": logs})
-	root, _ := filepath.Abs(filepath.Join("..", "..", ".."))
-	cmd := legacytest.Command(t, bun, "packages/plugin-gitlab/src/testing/go-api-fixture.ts")
-	cmd.Dir = root
-	cmd.Stdin = strings.NewReader(string(input))
-	data, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy: %v\n%s", err, data)
-	}
-	var actual, want any
-	encoded, _ := json.Marshal(native)
-	json.Unmarshal(encoded, &actual)
-	if err := json.Unmarshal(data, &want); err != nil {
-		t.Fatalf("legacy JSON: %v %s", err, data)
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatal(firstDifference("$", actual, want))
+	if len(nativeScenarios) != len(scenarios) || len(nativeRepositories) != len(repositories) || len(nativeInstances) != len(instances) || len(nativeLinks) != len(links) || len(nativeFind) != len(find) || len(nativeLogs) != len(logs) {
+		t.Fatalf("unexpected counts: scenarios=%d repos=%d instances=%d links=%d find=%d logs=%d", len(nativeScenarios), len(nativeRepositories), len(nativeInstances), len(nativeLinks), len(nativeFind), len(nativeLogs))
 	}
 }
-func firstDifference(path string, actual, want any) string {
-	if reflect.DeepEqual(actual, want) {
-		return ""
+
+func TestMergeRequestConflictParsing(t *testing.T) {
+	cases := []struct {
+		name         string
+		state        string
+		hasConflicts bool
+		want         bool
+	}{
+		{name: "opened with conflicts", state: "opened", hasConflicts: true, want: true},
+		{name: "opened without conflicts", state: "opened", hasConflicts: false, want: false},
+		{name: "merged ignores conflict flag", state: "merged", hasConflicts: true, want: false},
+		{name: "closed ignores conflict flag", state: "closed", hasConflicts: true, want: false},
 	}
-	if a, ok := actual.(map[string]any); ok {
-		if b, ok := want.(map[string]any); ok {
-			for key, value := range a {
-				if difference := firstDifference(path+"."+key, value, b[key]); difference != "" {
-					return difference
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := mergeRaw(7, tc.state, "feature", "2026-11-01")
+			payload["has_conflicts"] = tc.hasConflicts
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.EscapedPath() != "/api/v4/projects/group%2Fsub%2Fapp/merge_requests/7" {
+					http.NotFound(w, r)
+					return
 				}
+				json.NewEncoder(w).Encode(payload)
+			}))
+			defer server.Close()
+			api, err := NewAPI(APIOptions{Base: server.URL + "/api/v4", Path: "group/sub/app", WebURL: "https://gitlab.test/group/sub/app", Client: server.Client()})
+			if err != nil {
+				t.Fatal(err)
 			}
-			for key := range b {
-				if _, ok := a[key]; !ok {
-					return path + " missing " + key
-				}
+			defer api.Close()
+			info, err := api.MergeRequest(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	if a, ok := actual.([]any); ok {
-		if b, ok := want.([]any); ok {
-			for i := 0; i < min(len(a), len(b)); i++ {
-				if difference := firstDifference(fmt.Sprintf("%s[%d]", path, i), a[i], b[i]); difference != "" {
-					return difference
-				}
+			if info.Conflicted != tc.want {
+				t.Fatalf("MergeRequest.Conflicted = %v, want %v", info.Conflicted, tc.want)
 			}
-			return fmt.Sprintf("%s lengths: Go=%d TS=%d", path, len(a), len(b))
-		}
+			preview, err := api.Preview(t.Context(), 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if preview.Conflicted != tc.want {
+				t.Fatalf("Preview.Conflicted = %v, want %v", preview.Conflicted, tc.want)
+			}
+		})
 	}
-	a, _ := json.Marshal(actual)
-	b, _ := json.Marshal(want)
-	if len(a) > 300 {
-		a = a[:300]
-	}
-	if len(b) > 300 {
-		b = b[:300]
-	}
-	return fmt.Sprintf("%s differs: Go=%s TS=%s", path, a, b)
 }

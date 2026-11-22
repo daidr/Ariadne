@@ -29,8 +29,8 @@ func (PlanningProjection) Apply(ctx context.Context, tx *sql.Tx, e eventstore.Ev
 
 func loadPlanGraph(w *projectionWriter, projectID string) planGraph {
 	graph := emptyGraph()
-	for _, row := range w.all("SELECT id, kind, title, description, acceptance FROM plan_nodes WHERE project_id = ? ORDER BY position", projectID) {
-		graph.nodes[row.text("id")] = object{"kind": row["kind"], "title": row["title"], "description": row["description"], "acceptance": row["acceptance"]}
+	for _, row := range w.all("SELECT id, kind, title, description, acceptance, group_name FROM plan_nodes WHERE project_id = ? ORDER BY position", projectID) {
+		graph.nodes[row.text("id")] = object{"kind": row["kind"], "title": row["title"], "description": row["description"], "acceptance": row["acceptance"], "group": row.text("group_name")}
 		graph.order = append(graph.order, row.text("id"))
 	}
 	for _, row := range w.all("SELECT from_id, to_id FROM plan_edges WHERE project_id = ?", projectID) {
@@ -47,10 +47,10 @@ func storePlanGraph(w *projectionWriter, projectID string, before, next planGrap
 	for position, id := range next.order {
 		node, old := next.nodes[id], before.nodes[id]
 		if old == nil {
-			w.run("INSERT INTO plan_nodes (id, project_id, kind, title, description, acceptance, position, changed_in, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, projectID, node["kind"], node["title"], node["description"], node["acceptance"], position, revisionID, at, at)
+			w.run("INSERT INTO plan_nodes (id, project_id, kind, title, description, acceptance, group_name, position, changed_in, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, projectID, node["kind"], node["title"], node["description"], node["acceptance"], node.str("group"), position, revisionID, at, at)
 		} else {
-			changed := boolean(old["title"] != node["title"] || old["description"] != node["description"] || old["acceptance"] != node["acceptance"])
-			w.run("UPDATE plan_nodes SET title = ?, description = ?, acceptance = ?, position = ?, changed_in = CASE WHEN ? THEN ? ELSE changed_in END, updated_at = CASE WHEN ? THEN ? ELSE updated_at END WHERE project_id = ? AND id = ?", node["title"], node["description"], node["acceptance"], position, changed, revisionID, changed, at, projectID, id)
+			changed := boolean(old["title"] != node["title"] || old["description"] != node["description"] || old["acceptance"] != node["acceptance"] || old["group"] != node["group"])
+			w.run("UPDATE plan_nodes SET title = ?, description = ?, acceptance = ?, group_name = ?, position = ?, changed_in = CASE WHEN ? THEN ? ELSE changed_in END, updated_at = CASE WHEN ? THEN ? ELSE updated_at END WHERE project_id = ? AND id = ?", node["title"], node["description"], node["acceptance"], node.str("group"), position, changed, revisionID, changed, at, projectID, id)
 		}
 	}
 	w.run("DELETE FROM plan_edges WHERE project_id = ?", projectID)

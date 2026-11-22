@@ -81,6 +81,7 @@ export function threadOrder(): string[] {
   return threadGroups.flatMap((group) =>
     sortThreads(
       threads.filter((thread) => groupOfThread(thread, actions) === group && !nested(thread)),
+      group,
     ).flatMap((thread) => {
       const reviewer = thread.review?.reviewerId
       return reviewer && ids.has(reviewer) ? [thread.id, reviewer] : [thread.id]
@@ -112,6 +113,7 @@ function typingElsewhere(event: KeyboardEvent) {
  * there belong to it, and switching or focusing what is behind it would pull the user out.
  */
 function layerOpen() {
+  if (state.stream === 'unauthorized') return true
   const modal = [...document.querySelectorAll('[aria-modal="true"]')].some(
     (el) => el.getClientRects().length > 0,
   )

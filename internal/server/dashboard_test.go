@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,31 +15,7 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
-// A Go source returns data sets as a map. Compare dashboard JSON semantically;
-// object member order in its stored JSON string is not part of the wire contract.
-func dashboardJSON(value any) any {
-	switch value := value.(type) {
-	case map[string]any:
-		for key, child := range value {
-			if key == "content" {
-				if text, ok := child.(string); ok {
-					var content map[string]any
-					if json.Unmarshal([]byte(text), &content) == nil && content["dashboard"] != nil {
-						value[key] = content
-						continue
-					}
-				}
-			}
-			value[key] = dashboardJSON(child)
-		}
-	case []any:
-		for i, child := range value {
-			value[i] = dashboardJSON(child)
-		}
-	}
-	return value
-}
-func TestDashboardRefreshHTTPMatchesLegacy(t *testing.T) {
+func TestDashboardRefreshHTTP(t *testing.T) {
 	content := func(source any) string {
 		value := object{"version": 1, "dashboard": object{"version": 1, "widgets": []any{}}, "data": object{"keep": []any{1}}}
 		if source != nil {
@@ -62,18 +35,6 @@ func TestDashboardRefreshHTTPMatchesLegacy(t *testing.T) {
 	add("fail", "dashboard", content(object{"kind": "fixture", "settings": object{"query": "fail"}}))
 	add("document", "document", "# Text")
 	requests = append(requests, apiRequest{Method: "POST", Path: "/api/artifacts/missing/refresh"})
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": traceSeed()[:1], "sql": "SELECT 1", "dashboards": true, "requests": requests}))
-		output, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(output, &expected) != nil {
-			t.Fatal(err, string(output))
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1800000000000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "dashboard.sqlite"), Now: now})
@@ -104,7 +65,7 @@ func TestDashboardRefreshHTTPMatchesLegacy(t *testing.T) {
 	}
 	defer api.Close()
 	aliases := map[string]string{}
-	for i, item := range requests {
+	for _, item := range requests {
 		path := item.Path
 		for key, value := range aliases {
 			path = strings.ReplaceAll(path, "@"+key+"@", value)
@@ -119,10 +80,6 @@ func TestDashboardRefreshHTTPMatchesLegacy(t *testing.T) {
 		}
 		if item.Save != "" {
 			aliases[item.Save] = body.(map[string]any)["artifact"].(map[string]any)["id"].(string)
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(dashboardJSON(actual))) != encoded(canonical(dashboardJSON(expected[i]))) {
-			t.Fatalf("%s\nGo %s\nTS %s", path, encoded(actual), encoded(expected[i]))
 		}
 		if response.Code >= 500 {
 			t.Fatal(response.Body.String())

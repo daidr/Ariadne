@@ -87,3 +87,11 @@ func (repo *Repository) ReactAsUser(ctx context.Context, id, emoji string, remov
 	})
 	return
 }
+
+func (repo *Repository) AddReactionAsUser(ctx context.Context, id, emoji string) (MessageView, error) {
+	return repo.ReactAsUser(ctx, id, emoji, false)
+}
+
+func (repo *Repository) RemoveReactionAsUser(ctx context.Context, id, emoji string) (MessageView, error) {
+	return repo.ReactAsUser(ctx, id, emoji, true)
+}

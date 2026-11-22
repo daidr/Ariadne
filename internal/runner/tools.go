@@ -14,12 +14,21 @@ import (
 	"github.com/daidr/Ariadne/sdk"
 )
 
+type repeatEffect uint8
+
+const (
+	repeatTrack repeatEffect = iota
+	repeatWait
+	repeatProgress
+)
+
 type args = map[string]any
 type tool struct {
 	spec       sdk.Tool
 	run        func(context.Context, args) (string, error)
 	call       func(context.Context, args) (string, []any, error)
 	withCallID func(context.Context, string, args) (string, error)
+	poll       func(context.Context, args) (string, repeatEffect, error)
 }
 
 func specification(name, description string, fields args, required []string, run func(context.Context, args) (string, error)) tool {
@@ -168,8 +177,9 @@ func reply(value any, err error) (string, error) {
 func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 	conversation := turn.conversation
 	specs := []tool{
-		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID. Supported attachments are images, MP4, WebM, XLSX (up to 10 MiB each), and UTF-8 text including source code and CSV (up to 1 MiB each).",
+		specification("send_message", "Send the user a message in this conversation. Use Markdown and the user's language. Attach files by workspace path or existing file ID (up to 50 MiB each).",
 			args{"text": field("string"), "replyTo": field("string"), "files": arrayOf(field("string"))}, []string{"text"}, turn.sendMessage),
+		turn.readAttachmentTool(),
 		specification("update_todo", "Replace your live checklist. Keep completed items and put next steps in order.",
 			args{"items": arrayOf(args{"type": "object", "properties": args{"label": field("string"), "status": args{"type": "string", "enum": []string{"doing", "next", "waiting", "done"}}, "detail": field("string")}, "required": []string{"label", "status"}})}, []string{"items"}, turn.updateTodo),
 		specification("search_messages", "Search messages and thread titles in the current project.",
@@ -201,6 +211,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				specs = append(specs, turn.interactionTools()...)
 				specs = append(specs, turn.threadManagementTools(false)...)
 				specs = append(specs, turn.readPlanTool())
+				specs = append(specs, turn.memoryTools()...)
 				specs = append(specs, turn.artifactTools()...)
 			}
 		}
@@ -213,12 +224,12 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 		specs = append(specs, turn.threadManagementTools(true)...)
 		specs = append(specs, turn.coordinatorTools()...)
 		specs = append(specs,
-			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Read the threadId from this result before using it in message_thread or post_ui.",
-				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by read_plan."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
-			specification("link_thread_node", "Link an existing discussion thread to a plan node, move it to another node, or unlink it. Pass an existing nodeId from read_plan to link or move, or omit nodeId or set unlink to true to remove the link.",
+			specification("create_thread", "Create a discussion thread and send its initial brief. Returns a JSON object with threadId and stage. Wait for this result before using threadId in message_thread, post_ui, or thread links.",
+				args{"title": field("string"), "brief": field("string"), "nodeId": args{"type": "string", "description": "Optional existing plan node ID returned by update_plan (ids) or read_plan. If you are adding a new node, wait for update_plan to return its nodeId first."}, "branch": field("string"), "model": field("string"), "userMessages": userMessagesField("brief")}, []string{"title", "brief"}, turn.createThread),
+			specification("link_thread_node", "Link an existing discussion thread to a plan node, move it to another node, or unlink it. Pass an existing nodeId from update_plan (ids) or read_plan to link or move, or omit nodeId or set unlink to true to remove the link.",
 				args{
 					"threadId": threadIDField(),
-					"nodeId":   args{"type": "string", "description": "Existing plan node ID returned by read_plan. Omit or leave empty to unlink."},
+					"nodeId":   args{"type": "string", "description": "Existing plan node ID returned by update_plan (ids) or read_plan. Omit or leave empty to unlink."},
 					"unlink":   args{"type": "boolean", "description": "Set to true to remove the thread's plan node link."},
 				}, []string{"threadId"}, turn.linkThreadNode),
 			specification("message_thread", "Send instructions or relay the user's messages to a thread of this project.",
@@ -295,6 +306,7 @@ func (turn *turn) tools(ctx context.Context, project core.ProjectView) []tool {
 				}
 				specs = append(specs, specification("write_file", "Create or replace a text file. Pass source to select a writable source.",
 					args{"path": field("string"), "content": field("string"), "source": field("string")}, []string{"path", "content"}, turn.writeFile))
+				specs = append(specs, turn.saveAttachmentTool())
 				specs = append(specs, turn.editorTools()...)
 				if !slices.Contains(project.Settings.Tools, "commands") {
 					specs = append(specs, turn.commandTools()...)

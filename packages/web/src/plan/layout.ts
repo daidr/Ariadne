@@ -7,14 +7,26 @@ import type {
   PlanRevisionView,
   PlanView,
 } from '@ariadne/core'
-import type { FlowDocument } from '@dou-ui/flow'
+import type { FlowDocument, FlowNode } from '@dou-ui/flow'
 import { layoutGraph } from 'dou-ui'
 import { showsHeadline } from '../stage'
 
 /** Room between dependency levels, between nodes on one level, and between unrelated parts. */
 const RANK_GAP = 56
 const LANE_GAP = 32
-const PART_GAP = 96
+const PART_GAP = 72
+const COMPACT_PART_GAP = 48
+const INNER_PART_GAP = 40
+const COMPACT_INNER_PART_GAP = 24
+const GROUP_PAD = { side: 24, top: 52, bottom: 24 } as const
+const COMPACT_GROUP_PAD = { side: 16, top: 44, bottom: 16 } as const
+
+/** Prefix for visual group container node IDs in the flow document. */
+export const GROUP_PREFIX = 'grp:'
+export const isGroupId = (id: string) => id.startsWith(GROUP_PREFIX)
+export const groupIdOf = (name: string) => `${GROUP_PREFIX}${name}`
+export const groupNameOf = (node: Pick<PlanNodeView, 'group'>) => (node.group ?? '').trim()
+
 /**
  * Plan nodes are drawn this wide (PlanNode.vue: 248px of text plus 12px padding each side);
  * their height is estimated from what they show.
@@ -31,6 +43,7 @@ export interface PlanNodeData {
   kind: PlanNodeKind
   description: string
   acceptance: string
+  group?: string
   status: PlanNodeStatus
   threads: PlanNodeView['threads']
   /** In a previewed change: what it does to this node. */
@@ -41,12 +54,23 @@ export interface PlanNodeData {
   proposed: boolean
   /** Drawn small, with its status and title only. */
   compact: boolean
+  /** Part of a fully completed node/group shown only when "Show completed" is enabled. */
+  archived?: boolean
   /** Its dependencies that are not done, by title, while work on it started anyway. */
   ahead: string[]
   [key: string]: unknown
 }
 
-export type Positions = Record<string, { x: number; y: number }>
+export interface PlanGroupData {
+  label: string
+  collapsed?: boolean
+  doneCount: number
+  totalCount: number
+  allDone: boolean
+  archived: boolean
+  compact: boolean
+  [key: string]: unknown
+}
 
 /** The coordinator's changes that still stand, newest first. */
 function standing(plan: PlanView | null): PlanRevisionView[] {
@@ -102,6 +126,65 @@ export function freshChanges(plan: PlanView | null, seen: string | null) {
   return { revisions, nodes, truncated: !!seen && !found && revisions.length > 0 }
 }
 
+export interface PlanCompletionSummary {
+  /** Nodes belonging to an active (not-all-done) group or connected subgraph. */
+  active: PlanNodeView[]
+  /** IDs of nodes in fully completed lone nodes, groups, or connected subgraphs. */
+  completedIds: Set<string>
+}
+
+/**
+ * Partition plan nodes into active work and auto-completed items.
+ * Two nodes belong to the same completion unit if they share a non-empty `group` OR are
+ * linked by a dependency edge. A unit is completed only when every node in it is `done`,
+ * so partially completed groups and dependency chains keep their full context visible.
+ */
+export function partitionPlanNodes(
+  nodes: PlanNodeView[],
+  edges: { from: string; to: string }[] = nodes.flatMap((node) =>
+    node.dependsOn.map((from) => ({ from, to: node.id })),
+  ),
+): PlanCompletionSummary {
+  const root = new Map(nodes.map((node) => [node.id, node.id]))
+  const find = (id: string): string => {
+    let at = id
+    while (root.get(at) !== at) at = root.get(at)!
+    root.set(id, at)
+    return at
+  }
+  const unite = (a: string, b: string) => {
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) root.set(ra, rb)
+  }
+  for (const { from, to } of edges) {
+    if (root.has(from) && root.has(to)) unite(from, to)
+  }
+  const groupLeader = new Map<string, string>()
+  for (const node of nodes) {
+    const group = groupNameOf(node)
+    if (!group) continue
+    const leader = groupLeader.get(group)
+    if (leader) unite(leader, node.id)
+    else groupLeader.set(group, node.id)
+  }
+  const units = new Map<string, PlanNodeView[]>()
+  for (const node of nodes) {
+    const key = find(node.id)
+    const list = units.get(key)
+    if (list) list.push(node)
+    else units.set(key, [node])
+  }
+  const completedIds = new Set<string>()
+  for (const unit of units.values()) {
+    if (unit.length && unit.every((node) => node.status === 'done')) {
+      for (const node of unit) completedIds.add(node.id)
+    }
+  }
+  const active = nodes.filter((node) => !completedIds.has(node.id))
+  return { active, completedIds }
+}
+
 /** How wide a title runs at the node's text size: CJK and other wide characters count double. */
 function textWidth(text: string): number {
   let width = 0
@@ -124,9 +207,9 @@ export function nodeHeight(node: Pick<PlanNodeView, 'title' | 'threads'>, compac
   return 44 + lines * 22 + (threads ? 10 + threads * 22 : 0) + headlines * 18
 }
 
-/** Groups of nodes linked to each other through dependencies, in planned order. */
-function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): string[][] {
-  const root = new Map(nodes.map((node) => [node.id, node.id]))
+/** Connected components of items by undirected edges, in input order. */
+function connectedParts(ids: string[], edges: { from: string; to: string }[]): string[][] {
+  const root = new Map(ids.map((id) => [id, id]))
   const find = (id: string): string => {
     let at = id
     while (root.get(at) !== at) at = root.get(at)!
@@ -138,9 +221,11 @@ function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): st
     root.set(find(from), find(to))
   }
   const groups = new Map<string, string[]>()
-  for (const node of nodes) {
-    const key = find(node.id)
-    groups.set(key, [...(groups.get(key) ?? []), node.id])
+  for (const id of ids) {
+    const key = find(id)
+    const list = groups.get(key)
+    if (list) list.push(id)
+    else groups.set(key, [id])
   }
   return [...groups.values()]
 }
@@ -148,37 +233,44 @@ function parts(nodes: PlanNodeView[], edges: { from: string; to: string }[]): st
 interface Block {
   width: number
   height: number
-  /** Node positions inside the block, from its top left corner. */
+  /** Item positions inside the block, from its top left corner. */
   nodes: Map<string, { x: number; y: number }>
-  /** Where long edges pass between the nodes in their way, keyed `from>to`. */
+  /** Where long edges pass between the items in their way, keyed `from>to`. */
   edges: Map<string, { x: number; y: number }[]>
+}
+
+export interface GroupLayout {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  nodeIds: string[]
 }
 
 export interface PlanLayout {
   nodes: Map<string, { x: number; y: number }>
+  groups: GroupLayout[]
   /** The points an edge spanning several levels runs through, keyed `from>to`. */
   edges: Map<string, { x: number; y: number }[]>
 }
 
-/**
- * Lay the graph out top to bottom in dependency levels (a node sits below everything it
- * depends on), ordered to cross as few edges as possible. Parts of the plan that don't
- * depend on each other are laid out apart and placed side by side, wrapping into rows so
- * the whole stays about as wide as it is tall; lone nodes come last, in a grid.
- */
-export function layoutPlan(
+/** Lay out a flat subset of plan nodes (such as the members of one group) into a compact block. */
+function layoutSubset(
   nodes: PlanNodeView[],
-  edges: { from: string; to: string }[] = nodes.flatMap((node) =>
-    node.dependsOn.map((from) => ({ from, to: node.id })),
-  ),
-  compact = false,
-): PlanLayout {
-  const nodeWidth = compact ? COMPACT_WIDTH : NODE_WIDTH
-  const heightOfNode = (node: PlanNodeView) => nodeHeight(node, compact)
+  edges: { from: string; to: string }[],
+  nodeWidth: number,
+  heightOfNode: (node: PlanNodeView) => number,
+  compact: boolean,
+): Block {
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const blocks: Block[] = []
   const lone: string[] = []
-  for (const ids of parts(nodes, edges)) {
+  for (const ids of connectedParts(
+    nodes.map((node) => node.id),
+    edges,
+  )) {
     if (ids.length === 1) {
       lone.push(ids[0]!)
       continue
@@ -189,7 +281,6 @@ export function layoutPlan(
         id,
         width: nodeWidth,
         height: heightOfNode(byId.get(id)!),
-        // Ports sit in the middle of the top and bottom edges.
         anchor: nodeWidth / 2,
       })),
       edges.filter((edge) => inside.has(edge.from) && inside.has(edge.to)),
@@ -211,16 +302,10 @@ export function layoutPlan(
     blocks.push({ width: layout.width, height: layout.height, nodes: placed, edges: routed })
   }
 
-  const area =
-    blocks.reduce((sum, block) => sum + block.width * block.height, 0) +
-    lone.reduce(
-      (sum, id) => sum + (nodeWidth + LANE_GAP) * (heightOfNode(byId.get(id)!) + RANK_GAP),
-      0,
-    )
-  const rowWidth = Math.max(nodeWidth, ...blocks.map((block) => block.width), Math.sqrt(area))
-
   if (lone.length) {
-    const columns = Math.max(1, Math.floor((rowWidth + LANE_GAP) / (nodeWidth + LANE_GAP)))
+    const maxCols = compact ? 2 : 3
+    const columns =
+      lone.length <= 3 ? Math.min(lone.length, maxCols) : lone.length === 4 ? 2 : maxCols
     const placed = new Map<string, { x: number; y: number }>()
     let y = 0
     for (let i = 0; i < lone.length; i += columns) {
@@ -229,19 +314,25 @@ export function layoutPlan(
       y += Math.max(...row.map((id) => heightOfNode(byId.get(id)!))) + LANE_GAP
     }
     const width = Math.min(lone.length, columns) * (nodeWidth + LANE_GAP) - LANE_GAP
-    blocks.push({ width, height: y - LANE_GAP, nodes: placed, edges: new Map() })
+    blocks.push({ width, height: Math.max(0, y - LANE_GAP), nodes: placed, edges: new Map() })
   }
 
-  // Rows of blocks, each as wide as the widest block or the square root of the whole.
+  if (blocks.length === 1) return blocks[0]!
+
+  const gap = compact ? COMPACT_INNER_PART_GAP : INNER_PART_GAP
+  const area = blocks.reduce((sum, block) => sum + block.width * block.height, 0)
+  const rowWidth = Math.max(nodeWidth, ...blocks.map((block) => block.width), Math.sqrt(area))
   const positions = new Map<string, { x: number; y: number }>()
   const routes = new Map<string, { x: number; y: number }[]>()
   let x = 0
   let y = 0
   let rowHeight = 0
+  let totalWidth = 0
   for (const block of blocks) {
     if (x > 0 && x + block.width > rowWidth) {
+      totalWidth = Math.max(totalWidth, x - gap)
       x = 0
-      y += rowHeight + PART_GAP
+      y += rowHeight + gap
       rowHeight = 0
     }
     for (const [id, at] of block.nodes) {
@@ -253,40 +344,286 @@ export function layoutPlan(
         points.map((point) => ({ x: Math.round(x + point.x), y: Math.round(y + point.y) })),
       )
     }
-    x += block.width + PART_GAP
+    x += block.width + gap
     rowHeight = Math.max(rowHeight, block.height)
   }
-  return { nodes: positions, edges: routes }
+  totalWidth = Math.max(totalWidth, x - gap)
+  return {
+    width: Math.max(0, totalWidth),
+    height: Math.max(0, y + rowHeight),
+    nodes: positions,
+    edges: routes,
+  }
 }
 
-function place(auto: { x: number; y: number } | undefined, offset?: { x: number; y: number }) {
-  const at = auto ?? { x: 0, y: 0 }
-  return offset ? { x: at.x + offset.x, y: at.y + offset.y } : at
+/** Check whether `start` reaches `target` in a directed adjacency map. */
+function reaches(adj: Map<string, Set<string>>, start: string, target: string): boolean {
+  const seen = new Set<string>()
+  const stack = [start]
+  while (stack.length) {
+    const current = stack.pop()!
+    if (current === target) return true
+    if (seen.has(current)) continue
+    seen.add(current)
+    for (const next of adj.get(current) ?? []) stack.push(next)
+  }
+  return false
 }
 
 /**
- * Where nodes were moved to, as offsets from where the layout of `plan` puts them. A node
- * the layout doesn't have yet keeps its place as its offset, from the origin.
+ * Lay the graph out top to bottom in dependency levels (a node sits below everything it
+ * depends on), ordered to cross as few edges as possible. Nodes sharing a `group` are laid
+ * out together inside a titled container box, and groups participate in the outer dependency
+ * layout as compound blocks; unrelated parts are placed side by side in balanced rows, and
+ * ungrouped lone nodes come last in a grid.
  */
-export function offsetsOf(plan: PlanView, moved: Positions): Positions {
-  const auto = layoutPlan(plan.nodes).nodes
-  const offsets: Positions = {}
-  for (const [id, at] of Object.entries(moved)) {
-    const from = auto.get(id) ?? { x: 0, y: 0 }
-    offsets[id] = { x: at.x - from.x, y: at.y - from.y }
+export function layoutPlan(
+  nodes: PlanNodeView[],
+  edges: { from: string; to: string }[] = nodes.flatMap((node) =>
+    node.dependsOn.map((from) => ({ from, to: node.id })),
+  ),
+  compact = false,
+): PlanLayout {
+  const nodeWidth = compact ? COMPACT_WIDTH : NODE_WIDTH
+  const heightOfNode = (node: PlanNodeView) => nodeHeight(node, compact)
+  const pad = compact ? COMPACT_GROUP_PAD : GROUP_PAD
+  const partGap = compact ? COMPACT_PART_GAP : PART_GAP
+
+  // 1. Build inner layouts for every named group, preserving first-seen order.
+  const groupedMembers = new Map<string, PlanNodeView[]>()
+  for (const node of nodes) {
+    const group = groupNameOf(node)
+    if (!group) continue
+    const list = groupedMembers.get(group)
+    if (list) list.push(node)
+    else groupedMembers.set(group, [node])
   }
-  return offsets
+
+  interface MacroGroup {
+    id: string
+    label: string
+    width: number
+    height: number
+    extraX: number
+    nodeIds: string[]
+    inner: Block
+  }
+  const macroGroups = new Map<string, MacroGroup>()
+  const macroIdOf = new Map<string, string>()
+
+  for (const [label, members] of groupedMembers) {
+    const id = groupIdOf(label)
+    const inside = new Set(members.map((node) => node.id))
+    const innerEdges = edges.filter((edge) => inside.has(edge.from) && inside.has(edge.to))
+    const inner = layoutSubset(members, innerEdges, nodeWidth, heightOfNode, compact)
+    const titleWidth = Math.min(compact ? 260 : 360, Math.ceil(textWidth(label) + 96))
+    const minWidth = Math.max(compact ? 200 : 280, titleWidth)
+    const width = Math.max(minWidth, inner.width + pad.side * 2)
+    const height = inner.height + pad.top + pad.bottom
+    const extraX = Math.round((width - pad.side * 2 - inner.width) / 2)
+    macroGroups.set(id, {
+      id,
+      label,
+      width,
+      height,
+      extraX,
+      nodeIds: members.map((node) => node.id),
+      inner,
+    })
+    for (const member of members) macroIdOf.set(member.id, id)
+  }
+
+  // 2. Build outer macro-items (one per group, one per ungrouped node) in plan order.
+  interface MacroItem {
+    id: string
+    width: number
+    height: number
+    isGroup: boolean
+  }
+  const macroItems: MacroItem[] = []
+  const macroById = new Map<string, MacroItem>()
+  const addedGroup = new Set<string>()
+  for (const node of nodes) {
+    const gid = macroIdOf.get(node.id)
+    if (gid) {
+      if (addedGroup.has(gid)) continue
+      addedGroup.add(gid)
+      const g = macroGroups.get(gid)!
+      const item: MacroItem = { id: gid, width: g.width, height: g.height, isGroup: true }
+      macroItems.push(item)
+      macroById.set(gid, item)
+    } else {
+      macroIdOf.set(node.id, node.id)
+      const item: MacroItem = {
+        id: node.id,
+        width: nodeWidth,
+        height: heightOfNode(node),
+        isGroup: false,
+      }
+      macroItems.push(item)
+      macroById.set(node.id, item)
+    }
+  }
+
+  // Deduplicated acyclic macro-edges between distinct macro-items.
+  const macroEdges: { from: string; to: string }[] = []
+  const macroAdj = new Map<string, Set<string>>()
+  const seenMacroEdge = new Set<string>()
+  for (const edge of edges) {
+    const from = macroIdOf.get(edge.from)
+    const to = macroIdOf.get(edge.to)
+    if (!from || !to || from === to) continue
+    const key = `${from}>${to}`
+    if (seenMacroEdge.has(key)) continue
+    // Skip any reverse macro-edge that would introduce a cycle at the group level.
+    if (reaches(macroAdj, to, from)) continue
+    seenMacroEdge.add(key)
+    macroEdges.push({ from, to })
+    const set = macroAdj.get(from)
+    if (set) set.add(to)
+    else macroAdj.set(from, new Set([to]))
+  }
+
+  // 3. Lay out each macro-component; standalone groups stay as their own blocks, lone ungrouped nodes form a grid.
+  const blocks: Block[] = []
+  const lone: MacroItem[] = []
+  for (const ids of connectedParts(
+    macroItems.map((item) => item.id),
+    macroEdges,
+  )) {
+    if (ids.length === 1) {
+      const item = macroById.get(ids[0]!)!
+      if (item.isGroup) {
+        blocks.push({
+          width: item.width,
+          height: item.height,
+          nodes: new Map([[item.id, { x: 0, y: 0 }]]),
+          edges: new Map(),
+        })
+      } else {
+        lone.push(item)
+      }
+      continue
+    }
+    const inside = new Set(ids)
+    const layout = layoutGraph(
+      ids.map((id) => {
+        const item = macroById.get(id)!
+        return {
+          id,
+          width: item.width,
+          height: item.height,
+          anchor: item.width / 2,
+        }
+      }),
+      macroEdges.filter((edge) => inside.has(edge.from) && inside.has(edge.to)),
+      {
+        direction: 'vertical',
+        rankGap: RANK_GAP,
+        laneGap: LANE_GAP,
+        equalWidth: false,
+        straightChains: true,
+        grid: 8,
+      },
+    )
+    const placed = new Map([...layout.nodes].map(([id, node]) => [id, { x: node.x, y: node.y }]))
+    const routed = new Map(
+      layout.edges
+        .filter(
+          (edge) => edge.points.length && !macroGroups.has(edge.from) && !macroGroups.has(edge.to),
+        )
+        .map((edge) => [`${edge.from}>${edge.to}`, edge.points]),
+    )
+    blocks.push({ width: layout.width, height: layout.height, nodes: placed, edges: routed })
+  }
+
+  const area =
+    blocks.reduce((sum, block) => sum + block.width * block.height, 0) +
+    lone.reduce((sum, item) => sum + (nodeWidth + LANE_GAP) * (item.height + RANK_GAP), 0)
+  const rowWidth = Math.max(
+    nodeWidth,
+    ...blocks.map((block) => block.width),
+    Math.sqrt(area * (compact ? 1 : 1.6)),
+  )
+
+  if (lone.length) {
+    const columns = Math.max(1, Math.floor((rowWidth + LANE_GAP) / (nodeWidth + LANE_GAP)))
+    const placed = new Map<string, { x: number; y: number }>()
+    let y = 0
+    for (let i = 0; i < lone.length; i += columns) {
+      const row = lone.slice(i, i + columns)
+      row.forEach((item, k) => placed.set(item.id, { x: k * (nodeWidth + LANE_GAP), y }))
+      y += Math.max(...row.map((item) => item.height)) + LANE_GAP
+    }
+    const width = Math.min(lone.length, columns) * (nodeWidth + LANE_GAP) - LANE_GAP
+    blocks.push({ width, height: y - LANE_GAP, nodes: placed, edges: new Map() })
+  }
+
+  // 4. Pack blocks into rows and expand each group macro-item into container + world child coordinates.
+  const positions = new Map<string, { x: number; y: number }>()
+  const groups: GroupLayout[] = []
+  const routes = new Map<string, { x: number; y: number }[]>()
+  let x = 0
+  let y = 0
+  let rowHeight = 0
+  for (const block of blocks) {
+    if (x > 0 && x + block.width > rowWidth) {
+      x = 0
+      y += rowHeight + partGap
+      rowHeight = 0
+    }
+    for (const [id, at] of block.nodes) {
+      const gx = Math.round(x + at.x)
+      const gy = Math.round(y + at.y)
+      const group = macroGroups.get(id)
+      if (group) {
+        groups.push({
+          id: group.id,
+          label: group.label,
+          x: gx,
+          y: gy,
+          width: group.width,
+          height: group.height,
+          nodeIds: group.nodeIds,
+        })
+        const ox = gx + pad.side + group.extraX
+        const oy = gy + pad.top
+        for (const [childId, childAt] of group.inner.nodes) {
+          positions.set(childId, { x: Math.round(ox + childAt.x), y: Math.round(oy + childAt.y) })
+        }
+        for (const [key, points] of group.inner.edges) {
+          routes.set(
+            key,
+            points.map((point) => ({ x: Math.round(ox + point.x), y: Math.round(oy + point.y) })),
+          )
+        }
+      } else {
+        positions.set(id, { x: gx, y: gy })
+      }
+    }
+    for (const [key, points] of block.edges) {
+      routes.set(
+        key,
+        points.map((point) => ({ x: Math.round(x + point.x), y: Math.round(y + point.y) })),
+      )
+    }
+    x += block.width + partGap
+    rowHeight = Math.max(rowHeight, block.height)
+  }
+  return { nodes: positions, groups, edges: routes }
 }
 
 export interface GraphOptions {
-  /** How far the user moved nodes from where the layout puts them. */
-  offsets?: Positions
   /** A change to show on the graph instead of the plan as it is, as the server drew it. */
   preview?: PlanPreview | null
   fresh?: Set<string>
   proposed?: Set<string>
-  /** Drawn for a narrow pane: small nodes, laid out as they come, without moved offsets. */
+  /** Drawn for a narrow pane: small nodes, tighter group containers. */
   compact?: boolean
+  /** Whether to include fully completed lone nodes, groups, and subgraphs. Defaults to false. */
+  showCompleted?: boolean
+  /** Visual group container IDs folded locally by the user. */
+  collapsedGroups?: ReadonlySet<string>
 }
 
 /**
@@ -328,7 +665,7 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
   const { preview } = options
   const current = new Map((plan?.nodes ?? []).map((node) => [node.id, node]))
   // A previewed node keeps the threads and status of the node it is now, if any.
-  const nodes: (PlanNodeView & { mark: PlanMark })[] = preview
+  const allNodes: (PlanNodeView & { mark: PlanMark })[] = preview
     ? preview.nodes.map((node) => ({
         ...node,
         status: current.get(node.id)?.status ?? 'none',
@@ -338,56 +675,95 @@ export function toFlowDocument(plan: PlanView | null, options: GraphOptions = {}
         changedIn: null,
       }))
     : (plan?.nodes ?? []).map((node) => ({ ...node, mark: null }))
-  const edges: { from: string; to: string; mark: PlanMark }[] =
+  const allEdges: { from: string; to: string; mark: PlanMark }[] =
     preview?.edges ??
-    nodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
+    allNodes.flatMap((node) => node.dependsOn.map((from) => ({ from, to: node.id, mark: null })))
+
+  const { completedIds } = preview
+    ? { completedIds: new Set<string>() }
+    : partitionPlanNodes(allNodes, allEdges)
+  const nodes =
+    preview || options.showCompleted
+      ? allNodes
+      : allNodes.filter((node) => !completedIds.has(node.id))
+  const visibleIds = new Set(nodes.map((node) => node.id))
+  const edges = allEdges.filter((edge) => visibleIds.has(edge.from) && visibleIds.has(edge.to))
+
   const compact = !!options.compact
   const auto = layoutPlan(nodes, edges, compact)
-  const offsets = compact ? {} : (options.offsets ?? {})
-  const offset = (id: string) => offsets[id] ?? { x: 0, y: 0 }
+  const byId = new Map(nodes.map((node) => [node.id, node]))
   const through = preview ? new Map<string, Map<string, string[]>>() : aheadOf(nodes)
   // An edge from a dependency not done into work already under way.
   const skipped = (from: string, to: string) => !!through.get(to)?.has(from)
-  /**
-   * A long edge passes between the nodes in its way, as laid out. Once the user moved one
-   * of its ends on its own the route no longer fits, and the edge goes straight there.
-   */
-  const route = (from: string, to: string) => {
-    const points = auto.edges.get(`${from}>${to}`)
-    const [a, b] = [offset(from), offset(to)]
-    if (!points || a.x !== b.x || a.y !== b.y) return {}
-    return { points: points.map((point) => ({ x: point.x + a.x, y: point.y + a.y })) }
-  }
+
+  const parentOf = new Map<string, string>()
+  const groupNodes: FlowNode[] = auto.groups.map((group) => {
+    for (const nodeId of group.nodeIds) parentOf.set(nodeId, group.id)
+    const doneCount = group.nodeIds.filter((id) => byId.get(id)?.status === 'done').length
+    const totalCount = group.nodeIds.length
+    const allDone = totalCount > 0 && doneCount === totalCount
+    const archived = !preview && group.nodeIds.every((id) => completedIds.has(id))
+    const data: PlanGroupData = {
+      label: group.label,
+      collapsed: options.collapsedGroups?.has(group.id) || undefined,
+      doneCount,
+      totalCount,
+      allDone,
+      archived,
+      compact,
+    }
+    return {
+      id: group.id,
+      type: 'group',
+      x: group.x,
+      y: group.y,
+      width: group.width,
+      height: group.height,
+      data,
+    }
+  })
+
+  const planNodes: FlowNode[] = nodes.map((node) => {
+    const at = auto.nodes.get(node.id) ?? { x: 0, y: 0 }
+    const parent = parentOf.get(node.id)
+    const data: PlanNodeData = {
+      title: node.title,
+      kind: node.kind,
+      description: node.description,
+      acceptance: node.acceptance,
+      group: groupNameOf(node),
+      status: node.status,
+      threads: node.threads,
+      mark: node.mark,
+      fresh: !preview && !!options.fresh?.has(node.id),
+      proposed: !preview && !!options.proposed?.has(node.id),
+      compact,
+      archived: !preview && completedIds.has(node.id),
+      ahead: [...new Set([...(through.get(node.id)?.values() ?? [])].flat())],
+    }
+    return {
+      id: node.id,
+      type: 'plan',
+      x: at.x,
+      y: at.y,
+      ...(parent ? { parent } : {}),
+      data,
+    }
+  })
+
   return {
     version: 1,
-    nodes: nodes.map((node) => {
-      const data: PlanNodeData = {
-        title: node.title,
-        kind: node.kind,
-        description: node.description,
-        acceptance: node.acceptance,
-        status: node.status,
-        threads: node.threads,
-        mark: node.mark,
-        fresh: !preview && !!options.fresh?.has(node.id),
-        proposed: !preview && !!options.proposed?.has(node.id),
-        compact,
-        ahead: [...new Set([...(through.get(node.id)?.values() ?? [])].flat())],
-      }
+    nodes: [...groupNodes, ...planNodes],
+    edges: edges.map(({ from, to, mark }) => {
+      const points = auto.edges.get(`${from}>${to}`)
       return {
-        id: node.id,
-        type: 'plan',
-        ...place(auto.nodes.get(node.id), offsets[node.id]),
-        data,
+        id: `${from}>${to}`,
+        source: { node: from, port: 'out' },
+        target: { node: to, port: 'in' },
+        data: { mark, skipped: !mark && skipped(from, to) },
+        ...(points ? { points } : {}),
+        ...(mark === 'added' ? { animated: true } : {}),
       }
     }),
-    edges: edges.map(({ from, to, mark }) => ({
-      id: `${from}>${to}`,
-      source: { node: from, port: 'out' },
-      target: { node: to, port: 'in' },
-      data: { mark, skipped: !mark && skipped(from, to) },
-      ...route(from, to),
-      ...(mark === 'added' ? { animated: true } : {}),
-    })),
   }
 }

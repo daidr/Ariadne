@@ -2,23 +2,24 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/local"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/workspaces"
 )
 
-func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
+func TestMentionFilesAndReferenceStatusRPC(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
 	if err := os.MkdirAll(filepath.Join(source, "src"), 0700); err != nil {
@@ -32,25 +33,6 @@ func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
 	definition := object{"kind": "local-directory", "settings": object{"path": source}}
 	refs := []any{object{"id": "ref_a", "name": "reference", "kind": "local-directory", "settings": object{"path": source}}}
 	sql := `UPDATE projects SET source='` + strings.ReplaceAll(encoded(definition), "'", "''") + `',reference_sources='` + strings.ReplaceAll(encoded(refs), "'", "''") + `' WHERE id='prj_a';`
-	requests := []apiRequest{
-		{Method: "GET", Path: "/api/projects/prj_a/mention-files"},
-		{Method: "GET", Path: "/api/projects/prj_a/mention-files?q=file"},
-		{Method: "GET", Path: "/api/projects/prj_a/mention-files?q=not-found&conversationId=coo_a"},
-		{Method: "GET", Path: "/api/projects/prj_a/mention-files?conversationId=missing"},
-		{Method: "GET", Path: "/api/projects/prj_a/references/status"},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": traceSeed()[:1], "sql": sql, "local": true, "workspaces": true, "requests": requests}))
-		output, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(output, &expected) != nil {
-			t.Fatal(err, string(output))
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "files.sqlite")})
 	if err != nil {
 		t.Fatal(err)
@@ -80,21 +62,48 @@ func TestMentionFilesAndReferenceStatusHTTPMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, nil)
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%s\nGo %s\nTS %s", item.Path, encoded(actual), encoded(expected[i]))
-		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewWorkspaceServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+
+	allResp, err := client.ListMentionFiles(t.Context(), connect.NewRequest(&ariadnev1.ListMentionFilesRequest{
+		ProjectId: "prj_a",
+	}))
+	if err != nil || len(allResp.Msg.GetFiles()) != 3 {
+		t.Fatalf("unexpected mention files: %+v err=%v", allResp, err)
+	}
+	filteredResp, err := client.ListMentionFiles(t.Context(), connect.NewRequest(&ariadnev1.ListMentionFilesRequest{
+		ProjectId: "prj_a",
+		Query:     "file",
+	}))
+	if err != nil || len(filteredResp.Msg.GetFiles()) != 2 {
+		t.Fatalf("unexpected filtered mention files: %+v err=%v", filteredResp, err)
+	}
+	cooID := "coo_a"
+	noneResp, err := client.ListMentionFiles(t.Context(), connect.NewRequest(&ariadnev1.ListMentionFilesRequest{
+		ProjectId:      "prj_a",
+		ConversationId: &cooID,
+		Query:          "not-found",
+	}))
+	if err != nil || len(noneResp.Msg.GetFiles()) != 0 {
+		t.Fatalf("expected 0 files, got %+v err=%v", noneResp, err)
+	}
+	missingID := "missing"
+	if _, err := client.ListMentionFiles(t.Context(), connect.NewRequest(&ariadnev1.ListMentionFilesRequest{
+		ProjectId:      "prj_a",
+		ConversationId: &missingID,
+	})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for missing conversation, got %v", err)
+	}
+	statusResp, err := client.GetReferenceStatus(t.Context(), connect.NewRequest(&ariadnev1.GetReferenceStatusRequest{
+		ProjectId: "prj_a",
+	}))
+	if err != nil || len(statusResp.Msg.GetFailed()) != 0 {
+		t.Fatalf("unexpected reference status: %+v err=%v", statusResp, err)
 	}
 }

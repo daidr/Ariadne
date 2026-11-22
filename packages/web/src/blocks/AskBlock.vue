@@ -5,8 +5,6 @@ import {
   DouChatConfirm,
   DouChatQuestion,
   DouCodeBlock,
-  DouDescriptions,
-  DouDescriptionsItem,
   DouForm,
   DouFormItem,
   DouInput,
@@ -22,8 +20,8 @@ import {
   type ChatQuestionStatus,
   type RadioValue,
 } from 'dou-ui'
-import { CheckIcon } from '@dou-ui/icons'
-import { computed, inject, reactive, ref, shallowRef, watch } from 'vue'
+import { CheckIcon, ClipboardListIcon } from '@dou-ui/icons'
+import { computed, inject, reactive, ref, shallowRef, useId, watch } from 'vue'
 import { t } from '../i18n'
 import { answerAttention } from '../store'
 import { askDraftsKey, type AskDraft } from './ask-drafts'
@@ -41,9 +39,7 @@ const props = defineProps<{
 }>()
 defineSlots<{ after?: () => unknown }>()
 
-const title = computed(() =>
-  props.block.type === 'choice' ? props.block.question : props.block.title,
-)
+const formTitleId = useId()
 
 const sending = ref(false)
 // What the user sent, until the stored answer arrives with the next refresh: without it
@@ -134,6 +130,14 @@ watch(
   { immediate: true },
 )
 const submitted = computed(() => (answered.value?.type === 'form' ? answered.value.values : null))
+function isBlank(value: FormValue | undefined): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  )
+}
 /** A submitted value as the user would say it: option labels, yes or no. */
 function shown(field: FormBlock['fields'][number], value: FormValue | undefined): string {
   const label = (v: string) => field.options.find((option) => option.value === v)?.label ?? v
@@ -153,12 +157,17 @@ function submit() {
 
 <template>
   <div class="ask-block">
-    <template v-if="withdrawn && block.type === 'form'">
-      <DouText weight="medium" class="ask-title">{{ title }}</DouText>
-      <DouText variant="tertiary" size="sm">{{
-        t('block.withdrawn', { reason: withdrawn })
-      }}</DouText>
-    </template>
+    <section v-if="withdrawn && form" class="ask-form is-withdrawn" :aria-labelledby="formTitleId">
+      <div class="ask-form-head">
+        <span class="ask-form-icon" aria-hidden="true"><ClipboardListIcon /></span>
+        <div class="ask-form-heading">
+          <div :id="formTitleId" class="ask-form-title">{{ form.title }}</div>
+          <div class="ask-form-description">
+            {{ t('block.withdrawn', { reason: withdrawn }) }}
+          </div>
+        </div>
+      </div>
+    </section>
     <DouChatQuestion
       v-else-if="block.type === 'choice'"
       :options="questionOptions"
@@ -212,83 +221,93 @@ function submit() {
       </DouRadioGroup>
     </DouChatConfirm>
 
-    <template v-else-if="form && submitted">
-      <div class="ask-head">
-        <DouText weight="medium" class="ask-title">{{ form.title }}</DouText>
-        <DouText variant="secondary" size="sm" class="ask-answer">
-          <CheckIcon />{{ t('block.submitted') }}
-        </DouText>
+    <section
+      v-else-if="form && submitted"
+      class="ask-form is-submitted"
+      :aria-labelledby="formTitleId"
+    >
+      <div class="ask-form-head">
+        <span class="ask-form-icon" aria-hidden="true"><ClipboardListIcon /></span>
+        <div class="ask-form-heading">
+          <div :id="formTitleId" class="ask-form-title">{{ form.title }}</div>
+        </div>
+        <span class="ask-form-status">
+          <CheckIcon aria-hidden="true" />
+          <span>{{ t('block.submitted') }}</span>
+        </span>
       </div>
-      <DouDescriptions :columns="1" layout="horizontal" label-width="96px" class="ask-values">
-        <DouDescriptionsItem v-for="field in form.fields" :key="field.key" :label="field.label">
-          <DouText
-            :variant="
-              shown(field, submitted[field.key]) === t('block.blank') ? 'tertiary' : undefined
-            "
-            size="sm"
-            class="ask-value"
-          >
+      <dl v-if="form.fields.length" class="ask-form-values">
+        <div v-for="field in form.fields" :key="field.key" class="ask-form-field">
+          <dt class="ask-form-label">{{ field.label }}</dt>
+          <dd class="ask-form-value" :class="{ 'is-blank': isBlank(submitted[field.key]) }">
             {{ shown(field, submitted[field.key]) }}
-          </DouText>
-        </DouDescriptionsItem>
-      </DouDescriptions>
-    </template>
+          </dd>
+        </div>
+      </dl>
+    </section>
 
-    <template v-else-if="form">
-      <DouText weight="medium" class="ask-title">{{ form.title }}</DouText>
-      <DouText v-if="form.description" variant="secondary" size="sm" class="ask-title">
-        {{ form.description }}
-      </DouText>
-      <DouForm :model="values" :disabled="sending" size="sm" @submit="submit">
-        <DouFormItem
-          v-for="field in form.fields"
-          :key="field.key"
-          :label="field.label"
-          :prop="field.key"
-          :required="field.required"
-        >
-          <DouTextarea
-            v-if="field.kind === 'textarea'"
-            :model-value="text(field.key)"
-            :placeholder="field.placeholder ?? undefined"
-            autosize
-            @update:model-value="(value) => (values[field.key] = value)"
-          />
-          <DouInputNumber
-            v-else-if="field.kind === 'number'"
-            :model-value="numberOf(field.key)"
-            :min="field.min ?? undefined"
-            :max="field.max ?? undefined"
-            :placeholder="field.placeholder ?? undefined"
-            @update:model-value="(value) => (values[field.key] = value ?? null)"
-          />
-          <DouSelect
-            v-else-if="field.kind === 'select' || field.kind === 'multiselect'"
-            v-model="values[field.key] as never"
-            :options="options(field)"
-            :multiple="field.kind === 'multiselect'"
-            :placeholder="field.placeholder ?? undefined"
-            clearable
-          />
-          <DouSwitch
-            v-else-if="field.kind === 'switch'"
-            :model-value="values[field.key] === true"
-            @update:model-value="(value) => (values[field.key] = value)"
-          />
-          <DouInput
-            v-else
-            :model-value="text(field.key)"
-            :placeholder="field.placeholder ?? undefined"
-            @update:model-value="(value) => (values[field.key] = value)"
-          />
-        </DouFormItem>
-        <div class="ask-actions">
+    <section v-else-if="form" class="ask-form is-waiting" :aria-labelledby="formTitleId">
+      <div class="ask-form-head">
+        <span class="ask-form-icon" aria-hidden="true"><ClipboardListIcon /></span>
+        <div class="ask-form-heading">
+          <div :id="formTitleId" class="ask-form-title">{{ form.title }}</div>
+          <div v-if="form.description" class="ask-form-description">
+            {{ form.description }}
+          </div>
+        </div>
+      </div>
+      <DouForm :model="values" :disabled="sending" size="sm" class="ask-form-body" @submit="submit">
+        <div class="ask-form-inputs">
+          <DouFormItem
+            v-for="field in form.fields"
+            :key="field.key"
+            :label="field.label"
+            :prop="field.key"
+            :required="field.required"
+          >
+            <DouTextarea
+              v-if="field.kind === 'textarea'"
+              :model-value="text(field.key)"
+              :placeholder="field.placeholder ?? undefined"
+              autosize
+              @update:model-value="(value) => (values[field.key] = value)"
+            />
+            <DouInputNumber
+              v-else-if="field.kind === 'number'"
+              :model-value="numberOf(field.key)"
+              :min="field.min ?? undefined"
+              :max="field.max ?? undefined"
+              :placeholder="field.placeholder ?? undefined"
+              @update:model-value="(value) => (values[field.key] = value ?? null)"
+            />
+            <DouSelect
+              v-else-if="field.kind === 'select' || field.kind === 'multiselect'"
+              v-model="values[field.key] as never"
+              :options="options(field)"
+              :multiple="field.kind === 'multiselect'"
+              :placeholder="field.placeholder ?? undefined"
+              clearable
+            />
+            <DouSwitch
+              v-else-if="field.kind === 'switch'"
+              :model-value="values[field.key] === true"
+              @update:model-value="(value) => (values[field.key] = value)"
+            />
+            <DouInput
+              v-else
+              :model-value="text(field.key)"
+              :placeholder="field.placeholder ?? undefined"
+              @update:model-value="(value) => (values[field.key] = value)"
+            />
+          </DouFormItem>
+        </div>
+        <div class="ask-form-actions">
           <DouButton native-type="submit" size="sm" tone="primary" :loading="sending">
             {{ form.submitText ?? t('block.submit') }}
           </DouButton>
         </div>
       </DouForm>
-    </template>
+    </section>
     <slot v-if="answered && !withdrawn" name="after" />
   </div>
 </template>
@@ -306,27 +325,145 @@ function submit() {
   overflow-wrap: anywhere;
 }
 
-.ask-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+.ask-form {
+  overflow: hidden;
+  border: 1px solid var(--dou-color-border);
+  border-radius: var(--dou-radius-container);
+  background-color: var(--dou-color-bg-surface);
+  color: var(--dou-color-text);
+  font-size: var(--dou-font-size-sm);
+  line-height: 20px;
 }
 
-.ask-value {
+.ask-form.is-waiting {
+  border-color: var(--dou-color-border-strong);
+  box-shadow: var(--dou-shadow-sm);
+}
+
+.ask-form-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+}
+
+.ask-form-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  font-size: 16px;
+  color: var(--dou-color-text-secondary);
+}
+
+.ask-form.is-withdrawn .ask-form-icon {
+  color: var(--dou-color-text-tertiary);
+}
+
+.ask-form-heading {
+  display: flex;
+  flex: auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ask-form-title {
+  font-weight: var(--dou-font-weight-medium);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.ask-answer {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.ask-form.is-withdrawn .ask-form-title {
+  color: var(--dou-color-text-secondary);
 }
 
-.ask-actions {
+.ask-form-description {
+  color: var(--dou-color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-form.is-withdrawn .ask-form-description {
+  color: var(--dou-color-text-tertiary);
+}
+
+.ask-form-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  color: var(--dou-color-text-secondary);
+  white-space: nowrap;
+}
+
+.ask-form-status > svg {
+  flex: none;
+}
+
+.ask-form-values {
+  margin: 0;
+  border-top: 1px solid var(--dou-color-border-subtle);
+}
+
+.ask-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.ask-form-field + .ask-form-field {
+  border-top: 1px solid var(--dou-color-border-subtle);
+}
+
+.ask-form-label {
+  color: var(--dou-color-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-form-value {
+  margin: 0;
+  color: var(--dou-color-text);
+  font-size: var(--dou-font-size-sm);
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-form-value.is-blank {
+  color: var(--dou-color-text-tertiary);
+}
+
+.ask-form-body {
+  --dou-form-gap: 0;
+  border-top: 1px solid var(--dou-color-border-subtle);
+}
+
+.ask-form-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+}
+
+.ask-form-inputs :deep(.dou-form-item__label) {
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+
+.ask-form-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--dou-color-border-subtle);
+  background-color: color-mix(in oklab, var(--dou-color-text) 2%, var(--dou-color-bg-surface));
 }
 
 .ask-option {

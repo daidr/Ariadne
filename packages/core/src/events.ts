@@ -241,6 +241,8 @@ export interface PlanNodeFields {
   description: string
   /** How the user will judge the node finished. */
   acceptance: string
+  /** Optional topic or phase group name shared by related nodes. */
+  group?: string
 }
 
 /**
@@ -396,6 +398,8 @@ export interface ThreadPullRequest {
   url: string
   title: string
   state: 'open' | 'closed' | 'merged'
+  /** True when the host reports merge conflicts on an open pull request. */
+  conflicted?: boolean
   headSha: string
   checks: { state: ChecksState; failed: string[] }
 }

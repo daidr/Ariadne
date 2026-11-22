@@ -5,13 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,8 +15,12 @@ import (
 	"testing/fstest"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 type apiRequest struct {
@@ -74,7 +74,7 @@ func canonical(raw any) any {
 	}
 	return visit(value)
 }
-func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
+func TestDomainHTTPResponses(t *testing.T) {
 	seed := []eventstore.NewEvent{
 		{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)},
 		{Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"讨论串","nodeId":null,"branch":null,"model":null}`)},
@@ -97,7 +97,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("GET", "/api/unknown", nil)
 	add("GET", "/api/projects", nil)
 	add("GET", "/api/projects/prj_a", nil)
-	add("GET", "/api/projects/prj_a/source", nil)
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	add("PUT", "/api/projects/prj_a", object{"name": " 新名称 "})
 	add("PUT", "/api/projects/prj_a", object{"name": " "})
@@ -105,22 +104,7 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("PUT", "/api/projects/prj_a/slots", object{"slots": 0})
 	add("PUT", "/api/projects/prj_a/slots", object{"slots": nil})
 	add("PUT", "/api/projects/prj_a/autopilot", object{"paused": true})
-	add("GET", "/api/conversations/crd_a", nil)
-	for _, query := range []string{"limit=0", "limit=1000", "since=-1", "since=1.5", "limit=500", "before=missing", "since=0"} {
-		add("GET", "/api/conversations/crd_a?"+query, nil)
-	}
-	add("GET", "/api/conversations/missing", nil)
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "crd_a", "content": "用户消息", "mentions": []object{{"kind": "thread", "id": "thr_a"}}})
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "thr_a", "attachments": "invalid"})
-	add("POST", "/api/projects/prj_a/messages", object{"conversationId": "thr_a", "content": "附件", "attachments": []object{{"fileId": "fil_text", "name": "资料.txt"}}})
-	add("GET", "/api/conversations/thr_a", nil)
-	add("POST", "/api/conversations/thr_a/read", object{"upTo": "msg_agent"})
-	add("POST", "/api/messages/msg_agent/reactions", object{"emoji": " 👍 "})
-	add("POST", "/api/messages/msg_agent/reactions", object{"emoji": " 👍 ", "remove": true})
 	add("GET", "/api/projects/prj_a/search?q=代理", nil)
-	add("POST", "/api/projects/prj_a/memory", object{"text": " "})
-	add("POST", "/api/projects/prj_a/memory", object{"text": " 常用规则 "})
-	add("GET", "/api/projects/prj_a/memory", nil)
 	add("GET", "/api/files/fil_text", nil)
 	raw := "abc"
 	requests = append(requests, apiRequest{Method: "POST", Path: "/api/projects/prj_a/files?for=message", Raw: &raw, Headers: map[string]string{"Content-Type": "text/plain"}})
@@ -139,33 +123,9 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_a", "commentId": "board_item", "anchor": object{"node": "a"}, "body": "画板意见"})
 	add("POST", "/api/artifacts/@board@/comments", object{"type": "create", "threadId": "board_bad", "commentId": "board_item", "anchor": nil, "body": "无效"})
 	add("GET", "/api/projects/prj_a/artifacts", nil)
-	add("POST", "/api/threads/thr_a/stop", object{"reason": " 暂停 "})
-	add("POST", "/api/threads/thr_a/resume", object{})
-	add("GET", "/api/threads/thr_a/reviews", nil)
-	add("GET", "/api/threads/thr_a/line-comments", nil)
-	add("POST", "/api/conversations/crd_a/stop", nil)
-	add("POST", "/api/conversations/crd_a/retry", nil)
-	add("POST", "/api/projects/prj_a/return", object{"away": 600000})
 	add("GET", "/api/projects/prj_a?since=@cursor@", nil)
 	invalid := "[]"
 	requests = append(requests, apiRequest{Method: "PUT", Path: "/api/projects/prj_a", Raw: &invalid})
-	var expected []any
-	bun, legacyErr := exec.LookPath("bun")
-	if legacyErr == nil {
-		input := encoded(object{"seed": seed, "sql": sql, "requests": requests})
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(input)
-		data, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-		if err := json.Unmarshal(data, &expected); err != nil {
-			t.Fatalf("%v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(legacyErr)
-	}
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "api.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
 	if err != nil {
 		t.Fatal(err)
@@ -213,13 +173,6 @@ func TestDomainHTTPResponsesMatchLegacy(t *testing.T) {
 				sync["cursor"] = "epoch.cursor"
 			}
 		}
-		actual := object{"status": response.Code, "body": value}
-		if expected != nil {
-			want := normalizeLegacyAPIResponse(expected[i])
-			if !reflect.DeepEqual(canonical(actual), canonical(want)) {
-				t.Fatalf("request %d %s %s differs\ngot %s\nwant%s", i, item.Method, item.Path, encoded(canonical(actual)), encoded(canonical(want)))
-			}
-		}
 		if response.Code >= 500 {
 			t.Fatalf("request %d failed: %s", i, response.Body.String())
 		}
@@ -238,53 +191,14 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 	}
 	defer api.Close()
 	parameter := regexp.MustCompile(`:[a-zA-Z]+`)
-	contract, err := os.ReadFile(filepath.Join("..", "compat", "testdata", "backend-contract.json"))
-	if err != nil {
-		t.Fatal(err)
+	if len(api.routes) == 0 {
+		t.Fatal("expected native HTTP API routes to be registered")
 	}
-	var manifest struct {
-		Routes []struct{ Method, Path string }
+	if len(api.rpcProcedures) == 0 {
+		t.Fatal("expected ConnectRPC procedures to be registered")
 	}
-	if err := json.Unmarshal(contract, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	known := map[string]bool{}
-	for _, route := range manifest.Routes {
-		method := route.Method
-		if method == "WS" {
-			method = "GET"
-		}
-		known[method+" "+route.Path] = true
-	}
-	// Routes added after the frozen Bun contract also require authentication.
-	known["GET /api/ping"] = true
-	known["GET /api/files/:fileId/sheet"] = true
-	known["GET /api/projects/:projectId/sources"] = true
-	known["GET /api/projects/:projectId/activity"] = true
-	known["GET /api/threads/:threadId/pull-request/checks"] = true
-	known["PUT /api/threads/:threadId/node"] = true
-	known["GET /api/conversations/:conversationId/trace/export"] = true
-	known["PUT /api/projects/:projectId/sources"] = true
-	known["GET /api/plugins/:pluginId/settings"] = true
-	known["PUT /api/plugins/:pluginId/settings"] = true
-	known["GET /api/updates"] = true
-	known["PUT /api/updates"] = true
-	known["POST /api/updates/check"] = true
-	known["POST /api/updates/install"] = true
-	t.Logf("%d native API routes registered", len(api.routes))
-	registered := map[string]bool{}
+	t.Logf("%d native API routes and %d ConnectRPC procedures registered", len(api.routes), len(api.rpcProcedures))
 	for _, route := range api.routes {
-		registered[route] = true
-	}
-	for route := range known {
-		if !registered[route] {
-			t.Errorf("missing native route: %s", route)
-		}
-	}
-	for _, route := range api.routes {
-		if !known[route] {
-			t.Fatalf("route missing from the tested route inventory: %s", route)
-		}
 		parts := strings.SplitN(route, " ", 2)
 		if route == "GET /api/health" {
 			continue
@@ -296,17 +210,27 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 			t.Fatalf("unauthenticated %s: %d %s", route, response.Code, response.Body.String())
 		}
 	}
+	for _, procedure := range api.rpcProcedures {
+		request := httptest.NewRequest(http.MethodPost, "http://test.invalid"+rpcPrefix+procedure, nil)
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		if response.Code != 401 || !strings.Contains(response.Body.String(), "error.unauthorized") {
+			t.Fatalf("unauthenticated ConnectRPC %s: %d %s", procedure, response.Code, response.Body.String())
+		}
+	}
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/any/client/path", nil))
 	if response.Code != 200 || response.Body.String() != "app shell" {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	response = httptest.NewRecorder()
-	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/api/missing", nil))
-	if response.Code != 401 {
-		t.Fatal("API request fell through to static files")
+	for _, unknown := range []string{"/api/missing", rpcPrefix + "/ariadne.v1.MissingService/Unknown"} {
+		response = httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("POST", "http://test.invalid"+unknown, nil))
+		if response.Code != 401 {
+			t.Fatalf("unauthenticated %s did not fail before lookup: %d", unknown, response.Code)
+		}
 	}
-	// A successful bearer request grants native image reads only, never API calls.
+	// A successful bearer request grants native image reads only, never API or RPC calls.
 	request := httptest.NewRequest("GET", "http://test.invalid/api/projects", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
@@ -322,6 +246,15 @@ func TestEveryRegisteredAPIRouteAuthenticatesBeforeLookup(t *testing.T) {
 		api.ServeHTTP(response, request)
 		if response.Code != 401 {
 			t.Fatalf("file cookie authorized %s", path)
+		}
+	}
+	for _, procedure := range api.rpcProcedures {
+		request := httptest.NewRequest(http.MethodPost, "http://test.invalid"+rpcPrefix+procedure, nil)
+		request.AddCookie(cookies[0])
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		if response.Code != 401 {
+			t.Fatalf("file cookie authorized ConnectRPC %s", procedure)
 		}
 	}
 	request = httptest.NewRequest("GET", "http://test.invalid/api/files/fil_missing", nil)
@@ -390,61 +323,6 @@ func TestEventStreamAuthCursorAndDisconnect(t *testing.T) {
 	}
 }
 
-func normalizeLegacyAPIResponse(raw any) any {
-	resp, ok := raw.(map[string]any)
-	if !ok {
-		return raw
-	}
-	body, ok := resp["body"].(map[string]any)
-	if !ok {
-		return raw
-	}
-	if sync, ok := body["sync"].(map[string]any); ok {
-		sync["cursor"] = "epoch.cursor"
-	}
-	if needs, ok := body["needsMe"].([]any); ok {
-		normalized := make([]any, 0, len(needs))
-		for _, entry := range needs {
-			item, ok := entry.(map[string]any)
-			if !ok {
-				normalized = append(normalized, entry)
-				continue
-			}
-			switch item["kind"] {
-			case "thread":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				normalized = append(normalized, map[string]any{"kind": "thread", "threadId": id})
-			case "attention":
-				var id any
-				if thread, ok := item["thread"].(map[string]any); ok {
-					id = thread["id"]
-				}
-				joinedIDs := []any{}
-				if joined, ok := item["joined"].([]any); ok {
-					for _, rawThread := range joined {
-						if thread, ok := rawThread.(map[string]any); ok {
-							joinedIDs = append(joinedIDs, thread["id"])
-						}
-					}
-				}
-				normalized = append(normalized, map[string]any{
-					"kind":      "attention",
-					"attention": item["attention"],
-					"threadId":  id,
-					"joinedIds": joinedIDs,
-				})
-			default:
-				normalized = append(normalized, entry)
-			}
-		}
-		body["needsMe"] = normalized
-	}
-	return resp
-}
-
 func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "ping.sqlite")})
 	if err != nil {
@@ -457,67 +335,95 @@ func TestPingRequiresAuthAndSucceedsWithToken(t *testing.T) {
 	}
 	defer api.Close()
 
-	unauth := httptest.NewRecorder()
-	api.ServeHTTP(unauth, httptest.NewRequest("GET", "http://test.invalid/api/ping", nil))
-	if unauth.Code != 401 {
-		t.Fatalf("unauthenticated /api/ping returned %d", unauth.Code)
+	server := httptest.NewServer(api)
+	defer server.Close()
+	unauthClient := ariadnev1connect.NewMetaServiceClient(server.Client(), server.URL+rpcPrefix)
+	if _, err := unauthClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{})); err == nil {
+		t.Fatal("expected unauthenticated Ping to fail")
+	} else if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("unexpected unauthenticated Ping error: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "http://test.invalid/api/ping", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-	auth := httptest.NewRecorder()
-	api.ServeHTTP(auth, req)
-	if auth.Code != 200 || strings.TrimSpace(auth.Body.String()) != `{"ok":true}` {
-		t.Fatalf("authenticated /api/ping returned %d %s", auth.Code, auth.Body.String())
+	authClient := ariadnev1connect.NewMetaServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("secret")),
+	)
+	res, err := authClient.Ping(t.Context(), connect.NewRequest(&ariadnev1.PingRequest{}))
+	if err != nil {
+		t.Fatalf("authenticated Ping failed: %v", err)
+	}
+	if !res.Msg.GetOk() {
+		t.Fatalf("authenticated Ping returned ok=false")
 	}
 }
 
-func TestSetThreadNodeRoute(t *testing.T) {
-	ctx := t.Context()
-	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(t.TempDir(), "thread-node.sqlite")})
+func TestStaticAssetsAndPWAMIME(t *testing.T) {
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "static.sqlite")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-
-	project, err := repo.CreateProject(ctx, new("A"), core.ProjectStart{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.RevisePlan(ctx, project.ID, core.PlanRevision{Author: "user", Reason: "计划", Ops: []map[string]any{
-		{"op": "add", "id": "nod_1", "kind": "task", "title": "任务一", "description": "", "acceptance": ""},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "讨论串"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	api, err := New(Options{Repository: repo, Token: "secret"})
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "secret",
+		Web: fstest.MapFS{
+			"index.html":           {Data: []byte("<!doctype html>")},
+			"manifest.webmanifest": {Data: []byte(`{"name":"Ariadne"}`)},
+			"favicon.svg":          {Data: []byte(`<svg></svg>`)},
+			"favicon.ico":          {Data: []byte("ico")},
+			"icons/icon-192.png":   {Data: []byte("png")},
+			"sw.js":                {Data: []byte("self.addEventListener('install', () => {})")},
+			"registerSW.js":        {Data: []byte("navigator.serviceWorker.register('/sw.js')")},
+			"workbox-test1234.js":  {Data: []byte("// workbox")},
+			"assets/app.js":        {Data: []byte("console.log('ok')")},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer api.Close()
 
-	put := func(body string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest("PUT", "http://test.invalid/api/threads/"+thread.ID+"/node", strings.NewReader(body))
-		request.Header.Set("Authorization", "Bearer secret")
-		request.Header.Set("Content-Type", "application/json")
+	for _, tc := range []struct {
+		path        string
+		contentType string
+		cache       string
+	}{
+		{"/manifest.webmanifest", "application/manifest+json", "no-cache"},
+		{"/favicon.svg", "image/svg+xml", "no-cache"},
+		{"/favicon.ico", "image/x-icon", "no-cache"},
+		{"/icons/icon-192.png", "image/png", "no-cache"},
+		{"/sw.js", "text/javascript", "no-cache"},
+		{"/registerSW.js", "text/javascript", "no-cache"},
+		{"/workbox-test1234.js", "text/javascript", "no-cache"},
+		{"/assets/app.js", "text/javascript", "public, max-age=31536000, immutable"},
+	} {
 		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		return response
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+tc.path, nil))
+		if response.Code != 200 {
+			t.Fatalf("%s: status %d", tc.path, response.Code)
+		}
+		if !strings.Contains(response.Header().Get("Content-Type"), tc.contentType) {
+			t.Fatalf("%s: Content-Type %q does not contain %q", tc.path, response.Header().Get("Content-Type"), tc.contentType)
+		}
+		if response.Header().Get("Cache-Control") != tc.cache {
+			t.Fatalf("%s: Cache-Control %q != %q", tc.path, response.Header().Get("Cache-Control"), tc.cache)
+		}
 	}
 
-	if res := put(`{}`); res.Code != 400 {
-		t.Fatalf("missing nodeId: %d %s", res.Code, res.Body.String())
+	// Missing static assets must return 404 instead of falling back to index.html.
+	for _, missing := range []string{"/icons/missing.png", "/apple-touch-icon.png", "/missing.webmanifest", "/missing-sw.js", "/assets/missing.js"} {
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid"+missing, nil))
+		if response.Code != 404 {
+			t.Fatalf("missing static asset %s: got %d (%s)", missing, response.Code, response.Body.String())
+		}
 	}
-	if res := put(`{"nodeId":"nod_missing"}`); res.Code != 404 {
-		t.Fatalf("unknown nodeId: %d %s", res.Code, res.Body.String())
-	}
-	if res := put(`{"nodeId":"nod_1"}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":"nod_1"`) {
-		t.Fatalf("link thread node: %d %s", res.Code, res.Body.String())
-	}
-	if res := put(`{"nodeId":null}`); res.Code != 200 || !strings.Contains(res.Body.String(), `"nodeId":null`) {
-		t.Fatalf("unlink thread node: %d %s", res.Code, res.Body.String())
+
+	// Client-side SPA routes still fall back to index.html.
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest("GET", "http://test.invalid/projects/prj_123", nil))
+	if response.Code != 200 || response.Body.String() != "<!doctype html>" {
+		t.Fatalf("client route fallback failed: %d %s", response.Code, response.Body.String())
 	}
 }

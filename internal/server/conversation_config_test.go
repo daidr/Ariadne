@@ -1,21 +1,21 @@
 package server
 
 import (
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/settings"
 )
 
-func TestModelSelectionMemoryUndoAndReferenceStatusMatchLegacy(t *testing.T) {
+func TestModelSelectionMemoryUndoAndReferenceStatus(t *testing.T) {
 	config := object{"instructions": "keep line", "models": object{"providers": []any{object{"id": "p", "kind": "fixture", "settings": object{}}}, "models": []any{object{"id": "m", "provider": "p", "model": "fixture"}}, "roles": object{}}}
 	sql := `INSERT INTO conversations(id,project_id,role) VALUES('thr_a','prj_a','thread');
  INSERT INTO threads(id,project_id,title,created_at,updated_at) VALUES('thr_a','prj_a','work',0,0);
@@ -24,38 +24,6 @@ func TestModelSelectionMemoryUndoAndReferenceStatusMatchLegacy(t *testing.T) {
  ('notice_local','prj_a','coo_a','memory','{"memoryId":"mem_a","action":"saved","previous":null}',0),
  ('notice_all','prj_a','coo_a','memory-everywhere','{"action":"saved","text":"keep line"}',0),
  ('notice_removed','prj_a','coo_a','memory-everywhere','{"action":"removed","text":"restore line"}',0);`
-	no := false
-	requests := []apiRequest{
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": "m"}, Auth: &no},
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{}},
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": 42}},
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": "missing"}},
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": "m"}},
-		{Method: "PUT", Path: "/api/threads/thr_a/model", Body: object{"model": nil}},
-		{Method: "PUT", Path: "/api/threads/missing/model", Body: object{"model": nil}},
-		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_local/undo"},
-		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_local/undo"},
-		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_all/undo"},
-		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_all/undo"},
-		{Method: "GET", Path: "/api/settings/work"},
-		{Method: "POST", Path: "/api/projects/prj_a/notices/notice_removed/undo"},
-		{Method: "GET", Path: "/api/settings/work"},
-		{Method: "POST", Path: "/api/projects/other/notices/notice_removed/undo"},
-		{Method: "GET", Path: "/api/projects/prj_a/references/status"},
-		{Method: "GET", Path: "/api/projects/missing/references/status"},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": traceSeed()[:1], "sql": sql, "settings": true, "initialSettings": config, "requests": requests}))
-		output, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(output, &expected) != nil {
-			t.Fatal(err, string(output))
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	dir := t.TempDir()
 	now := func() time.Time { return time.UnixMilli(1800000000000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(dir, "config.sqlite"), Now: now})
@@ -82,22 +50,121 @@ func TestModelSelectionMemoryUndoAndReferenceStatusMatchLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
-		request := httptest.NewRequest(item.Method, item.Path, strings.NewReader(encoded(item.Body)))
-		if item.Auth == nil || *item.Auth {
-			request.Header.Set("Authorization", "Bearer test-token")
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	auth := connect.WithInterceptors(bearerClientInterceptor("test-token"))
+	settingsClient := ariadnev1connect.NewSettingsServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	threadClient := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	unauthThread := ariadnev1connect.NewThreadServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	convClient := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+	wsClient := ariadnev1connect.NewWorkspaceServiceClient(srv.Client(), srv.URL+rpcPrefix, auth)
+
+	// Unauthenticated SetThreadModel fails.
+	_, err = unauthThread.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m"},
+	}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+
+	// Missing action or unknown model fails with InvalidArgument.
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{ThreadId: "thr_a"}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for empty action, got %v", err)
+	}
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "missing"},
+	}))
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for unknown model, got %v", err)
+	}
+
+	// Setting valid model and resetting to default succeed.
+	setResp, err := threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_Model{Model: "m"},
+	}))
+	if err != nil || setResp.Msg.Thread.Model == nil || *setResp.Msg.Thread.Model != "m" {
+		t.Fatalf("set model failed: resp=%+v err=%v", setResp, err)
+	}
+	resetResp, err := threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "thr_a",
+		ModelAction: &ariadnev1.SetThreadModelRequest_UseDefault{UseDefault: true},
+	}))
+	if err != nil || resetResp.Msg.Thread.Model != nil {
+		t.Fatalf("reset model failed: resp=%+v err=%v", resetResp, err)
+	}
+	_, err = threadClient.SetThreadModel(t.Context(), connect.NewRequest(&ariadnev1.SetThreadModelRequest{
+		ThreadId:    "missing",
+		ModelAction: &ariadnev1.SetThreadModelRequest_UseDefault{UseDefault: true},
+	}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for missing thread, got %v", err)
+	}
+
+	// Undo local memory notice twice (idempotent), then global saved notice twice.
+	for _, call := range []struct {
+		project string
+		notice  string
+		wantErr bool
+	}{
+		{"prj_a", "notice_local", false},
+		{"prj_a", "notice_local", false},
+		{"prj_a", "notice_all", false},
+		{"prj_a", "notice_all", false},
+	} {
+		_, err := convClient.UndoNotice(t.Context(), connect.NewRequest(&ariadnev1.UndoNoticeRequest{
+			ProjectId: call.project,
+			NoticeId:  call.notice,
+		}))
+		if call.wantErr && err == nil {
+			t.Fatalf("expected error for undo %s/%s", call.project, call.notice)
 		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any = response.Body.String()
-		json.Unmarshal(response.Body.Bytes(), &body)
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%d %s\nGo %s\nTS %s", i, item.Path, encoded(actual), encoded(expected[i]))
+		if !call.wantErr && err != nil {
+			t.Fatalf("unexpected error for undo %s/%s: %v", call.project, call.notice, err)
 		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
+	}
+	workBefore, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workBefore.Msg.GetWork().GetInstructions() != "" {
+		t.Fatalf("unexpected work settings after removing global memory: %+v %v", workBefore, err)
+	}
+
+	// Undo global removed notice and verify missing project error.
+	for _, call := range []struct {
+		project string
+		notice  string
+		wantErr bool
+	}{
+		{"prj_a", "notice_removed", false},
+		{"other", "notice_removed", true},
+	} {
+		_, err := convClient.UndoNotice(t.Context(), connect.NewRequest(&ariadnev1.UndoNoticeRequest{
+			ProjectId: call.project,
+			NoticeId:  call.notice,
+		}))
+		if call.wantErr && err == nil {
+			t.Fatalf("expected error for undo %s/%s", call.project, call.notice)
 		}
+		if !call.wantErr && err != nil {
+			t.Fatalf("unexpected error for undo %s/%s: %v", call.project, call.notice, err)
+		}
+	}
+	workAfter, err := settingsClient.GetWorkSettings(t.Context(), connect.NewRequest(&ariadnev1.GetWorkSettingsRequest{}))
+	if err != nil || workAfter.Msg.GetWork().GetInstructions() != "restore line" {
+		t.Fatalf("unexpected work settings after restoring global memory: %+v %v", workAfter, err)
+	}
+
+	// Reference status for valid and missing project.
+	statusResp, err := wsClient.GetReferenceStatus(t.Context(), connect.NewRequest(&ariadnev1.GetReferenceStatusRequest{ProjectId: "prj_a"}))
+	if err != nil || len(statusResp.Msg.Failed) != 0 {
+		t.Fatalf("reference status failed: resp=%+v err=%v", statusResp, err)
+	}
+	_, err = wsClient.GetReferenceStatus(t.Context(), connect.NewRequest(&ariadnev1.GetReferenceStatusRequest{ProjectId: "missing"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found for missing project, got %v", err)
 	}
 	memories, err := repo.ListMemories(t.Context(), "prj_a")
 	if err != nil || len(memories) != 0 {

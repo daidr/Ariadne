@@ -67,6 +67,7 @@ type BranchCapability struct {
 	// Revisions can check the refs without computing a diff or scanning the worktree.
 	Revisions func(context.Context, ThreadBranch, string) (BranchRevisions, error)
 	File      func(context.Context, FileVersionRequest) (FileVersions, error)
+	Files     func(context.Context, []FileVersionRequest) ([]FileVersions, error)
 	Merged    func(context.Context, ThreadBranch, string) (bool, error)
 	Merge     func(context.Context, MergeRequest) (MergeOutcome, error)
 	UndoMerge func(context.Context, UndoMergeRequest) error
@@ -115,14 +116,15 @@ type Capabilities struct {
 	Close     func() error
 }
 type PullRequestInfo struct {
-	Number    int    `json:"number"`
-	Reference string `json:"reference,omitempty"`
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	State     string `json:"state"`
-	Draft     bool   `json:"draft"`
-	HeadSHA   string `json:"headSha"`
-	Base      string `json:"base"`
+	Number     int    `json:"number"`
+	Reference  string `json:"reference,omitempty"`
+	URL        string `json:"url"`
+	Title      string `json:"title"`
+	State      string `json:"state"`
+	Draft      bool   `json:"draft"`
+	Conflicted bool   `json:"conflicted,omitempty"`
+	HeadSHA    string `json:"headSha"`
+	Base       string `json:"base"`
 }
 type PullRequestMergeOutcome struct {
 	Kind   string  `json:"kind"`

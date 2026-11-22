@@ -54,6 +54,8 @@ export interface PullRequestPreview {
   title: string
   state: 'open' | 'closed' | 'merged'
   draft: boolean
+  /** True when the host reports merge conflicts on an open pull request. */
+  conflicted?: boolean
   author: string | null
   /** Lines added and removed; `null` when the host does not say (GitLab). */
   additions: number | null

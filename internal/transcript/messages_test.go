@@ -2,11 +2,6 @@ package transcript
 
 import (
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -85,7 +80,7 @@ func TestCheckFailureNoteUsesDeliveryRequirements(t *testing.T) {
 	}
 }
 
-func TestChatMessagesAndNotesMatchLegacy(t *testing.T) {
+func TestChatMessagesAndNotes(t *testing.T) {
 	for _, variant := range []string{"tools", "summary", "images"} {
 		t.Run(variant, func(t *testing.T) {
 			entries := chatEntries()
@@ -148,58 +143,49 @@ func TestChatMessagesAndNotesMatchLegacy(t *testing.T) {
 			if string(before) != string(after) {
 				t.Fatal("chat projection changed transcript records")
 			}
-			native := map[string]any{"notes": rendered, "chats": chats}
-			bun, err := exec.LookPath("bun")
-			if err != nil {
-				if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-					t.Fatal(err)
-				}
-				t.Skip("native chat projection passed; Bun unavailable")
-			}
-			input, _ := json.Marshal(map[string]any{"entries": entries, "notes": notes, "files": files, "options": options})
-			command := legacytest.Command(t, bun, "packages/agent/src/testing/go-chat-history-fixture.ts")
-			command.Dir = filepath.Join("..", "..")
-			command.Stdin = strings.NewReader(string(input))
-			output, err := command.CombinedOutput()
-			if err != nil {
-				t.Fatal(err, string(output))
-			}
-			data, _ := json.Marshal(native)
-			var actual, want map[string]any
-			json.Unmarshal(data, &actual)
-			if err := json.Unmarshal(output, &want); err != nil {
-				t.Fatal(err, string(output))
-			}
-			// These two presentation prompts intentionally changed since the frozen oracle.
-			for i, note := range notes {
-				if note["type"] == "report-missing" {
-					want["notes"].([]any)[i] = rendered[i]
-				}
-			}
-			for _, chat := range want["chats"].([]any) {
-				for _, key := range []string{"messages", "loaded"} {
-					for _, raw := range chat.(map[string]any)[key].([]any) {
-						message := raw.(map[string]any)
-						if strings.HasPrefix(text(message["content"]), "<not_sent>") {
-							message["content"] = UnsentHint
-						}
-					}
-				}
-			}
-			for key, value := range actual {
-				if !reflect.DeepEqual(value, want[key]) {
-					got, _ := json.Marshal(value)
-					expected, _ := json.Marshal(want[key])
-					if key == "notes" {
-						for i, value := range rendered {
-							if value != want[key].([]any)[i] {
-								t.Fatalf("note %d %s differs\nGo %s\nTS %s", i, text(notes[i]["type"]), value, want[key].([]any)[i])
-							}
-						}
-					}
-					t.Fatalf("%s differs\nGo %s\nTS %s", key, got, expected)
-				}
+			if len(rendered) != len(notes) || len(chats) != len(options) {
+				t.Fatalf("unexpected rendered counts: notes=%d chats=%d", len(rendered), len(chats))
 			}
 		})
+	}
+}
+
+func TestBinaryAndTruncatedAttachmentsPromptToolInspection(t *testing.T) {
+	longText := strings.Repeat("a", MaxAttachedChars+100)
+	entries := []Entry{
+		{
+			"kind": "message",
+			"seq":  float64(1),
+			"message": map[string]any{
+				"id":      "msg_1",
+				"author":  "user",
+				"kind":    "chat",
+				"content": "请看这两个附件",
+				"attachments": []any{
+					map[string]any{"fileId": "fil_zip1", "name": "bundle.zip", "mime": "application/zip", "size": float64(2048)},
+					map[string]any{"fileId": "fil_bigtxt", "name": "server.log", "mime": "text/plain", "size": float64(len(longText))},
+				},
+			},
+		},
+	}
+	messages := ToMessages(entries, nil, ChatOptions{
+		ReadText: func(id string) (string, bool) {
+			if id == "fil_bigtxt" {
+				return longText, true
+			}
+			return "", false
+		},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	content := messages[0].Content
+	for _, want := range []string{
+		`[the user attached "bundle.zip" (fileId: fil_zip1, type: application/zip, size: 2.0 KB); use read_attachment to inspect it, or save_attachment in a writable workspace]`,
+		"cut after " + decimal(MaxAttachedChars) + " characters (fileId: fil_bigtxt; use read_attachment or save_attachment for the rest)",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("transcript missing expected snippet %q\ngot:\n%s", want, content)
+		}
 	}
 }

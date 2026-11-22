@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package ariadne.v1;
+
+import "ariadne/v1/common.proto";
+import "ariadne/v1/threads.proto";
+
+// WorkspaceService manages thread branch changes, merges, worktree listings,
+// mention file autocomplete, and reference source availability checks.
+service WorkspaceService {
+  rpc GetThreadChanges(GetThreadChangesRequest) returns (GetThreadChangesResponse);
+  rpc GetChangedFile(GetChangedFileRequest) returns (GetChangedFileResponse);
+  rpc GetChangedFiles(GetChangedFilesRequest) returns (GetChangedFilesResponse);
+  rpc MergeThread(MergeThreadRequest) returns (MergeThreadResponse);
+  rpc UndoMerge(UndoMergeRequest) returns (UndoMergeResponse);
+  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
+  rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  rpc ListMentionFiles(ListMentionFilesRequest) returns (ListMentionFilesResponse);
+  rpc GetReferenceStatus(GetReferenceStatusRequest) returns (GetReferenceStatusResponse);
+}
+
+message BranchCommit {
+  string sha = 1;
+  string subject = 2;
+}
+
+message ChangedFile {
+  string path = 1;
+  optional string previous_path = 2;
+  string status = 3;
+  optional int64 added = 4 [jstype = JS_NUMBER];
+  optional int64 removed = 5 [jstype = JS_NUMBER];
+}
+
+message BranchChanges {
+  string branch = 1;
+  string base = 2;
+  string from = 3;
+  string head = 4;
+  optional string base_head = 5;
+  repeated BranchCommit commits = 6;
+  repeated ChangedFile files = 7;
+  repeated string uncommitted = 8;
+}
+
+message FileVersions {
+  optional string before = 1;
+  optional string after = 2;
+  optional string skipped = 3;
+}
+
+message MergeOutcome {
+  string kind = 1;
+  optional string sha = 2;
+  optional string head = 3;
+  repeated string files = 4;
+}
+
+message ListedWorktree {
+  string thread_id = 1;
+  string path = 2;
+  optional int64 bytes = 3 [jstype = JS_NUMBER];
+  bool orphaned = 4;
+  optional ThreadView thread = 5;
+  optional string source_id = 6;
+}
+
+message ProjectWorktrees {
+  string id = 1;
+  string name = 2;
+  repeated ListedWorktree worktrees = 3;
+  optional bool shared = 4;
+  optional LocalizedError error = 5;
+}
+
+message FailedReference {
+  string id = 1;
+  LocalizedError error = 2;
+}
+
+message GetThreadChangesRequest {
+  string thread_id = 1;
+  optional string head = 2;
+  optional string base_head = 3;
+}
+
+message GetThreadChangesResponse {
+  optional BranchChanges changes = 1;
+  bool mergeable = 2;
+  bool unchanged = 3;
+}
+
+message GetChangedFileRequest {
+  string thread_id = 1;
+  string from = 2;
+  string head = 3;
+  string path = 4;
+  optional string previous_path = 5;
+}
+
+message GetChangedFileResponse {
+  FileVersions file = 1;
+}
+
+message ChangedFileRef {
+  string path = 1;
+  optional string previous_path = 2;
+}
+
+message GetChangedFilesRequest {
+  string thread_id = 1;
+  string from = 2;
+  string head = 3;
+  repeated ChangedFileRef files = 4;
+}
+
+message GetChangedFilesResponse {
+  repeated FileVersions files = 1;
+}
+
+message MergeThreadRequest {
+  string thread_id = 1;
+  string method = 2;
+  string message = 3;
+  optional string expected_head = 4;
+}
+
+message MergeThreadResponse {
+  MergeOutcome outcome = 1;
+  ThreadView thread = 2;
+}
+
+message UndoMergeRequest {
+  string thread_id = 1;
+}
+
+message UndoMergeResponse {
+  ThreadView thread = 1;
+}
+
+message ListWorktreesRequest {
+  bool include_sizes = 1;
+}
+
+message ListWorktreesResponse {
+  repeated ProjectWorktrees projects = 1;
+  bool windows = 2;
+}
+
+message RemoveWorktreeRequest {
+  string project_id = 1;
+  string thread_id = 2;
+  optional string source_id = 3;
+  bool orphaned = 4;
+}
+
+message RemoveWorktreeResponse {}
+
+message ListMentionFilesRequest {
+  string project_id = 1;
+  optional string conversation_id = 2;
+  string query = 3;
+}
+
+message ListMentionFilesResponse {
+  repeated string files = 1;
+}
+
+message GetReferenceStatusRequest {
+  string project_id = 1;
+}
+
+message GetReferenceStatusResponse {
+  repeated FailedReference failed = 1;
+}

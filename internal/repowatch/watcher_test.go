@@ -97,3 +97,60 @@ func TestPollingRecordsFailureAndClosureOnceAndIgnoresStaleResponse(t *testing.T
 		t.Fatalf("checks failures %d, closes %d, polls %d", failed, closed, lookup)
 	}
 }
+
+func TestPollingSyncsAndClearsPullRequestConflict(t *testing.T) {
+	repository, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "ariadne.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	project, err := repository.CreateProject(t.Context(), new("Fixture"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repository.CreateThread(t.Context(), project.ID, core.NewThread{Title: "Resolve conflict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := map[string]any{"number": 12, "url": "https://github.com/acme/app/pull/12", "title": "Fix", "state": "open", "headSha": "sha1", "checks": workspaces.SummarizeChecks(nil)}
+	if err := repository.SyncPullRequest(t.Context(), thread.ID, initial, nil); err != nil {
+		t.Fatal(err)
+	}
+	conflicted := true
+	state := "open"
+	watch := Watcher{
+		Repository: repository,
+		OnError:    func(err error) { t.Error(err) },
+		Repo: func(context.Context, string) (*sdk.RepoCapability, error) {
+			return &sdk.RepoCapability{
+				PullRequest: func(_ context.Context, number int) (sdk.PullRequestInfo, error) {
+					return sdk.PullRequestInfo{Number: number, URL: "https://github.com/acme/app/pull/12", Title: "Fix", State: state, Conflicted: conflicted, HeadSHA: "sha1"}, nil
+				},
+				Checks: func(context.Context, string) ([]sdk.CheckInfo, error) {
+					return []sdk.CheckInfo{}, nil
+				},
+			}, nil
+		},
+	}
+	if err := watch.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repository.GetThread(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr, _ := got.PullRequest.(map[string]any); pr["conflicted"] != true {
+		t.Fatalf("expected conflicted=true after poll, got %#v", got.PullRequest)
+	}
+	conflicted = false
+	if err := watch.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repository.GetThread(t.Context(), thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr, _ := got.PullRequest.(map[string]any); pr["conflicted"] != nil {
+		t.Fatalf("expected conflicted cleared after resolution, got %#v", got.PullRequest)
+	}
+}

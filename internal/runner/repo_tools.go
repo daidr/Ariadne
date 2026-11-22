@@ -110,6 +110,7 @@ func (turn *turn) recordPullRequestMerge(ctx context.Context, threadID string, p
 	next := maps.Clone(previous)
 	next["state"] = "merged"
 	next["title"] = current.Title
+	delete(next, "conflicted")
 	if err := turn.Repository.SyncPullRequestIfCurrent(ctx, threadID, previous, next); err != nil {
 		return "", fmt.Errorf("the host merged PR #%d, but the discussion status could not be updated: %w", current.Number, err)
 	}
@@ -125,6 +126,7 @@ func (turn *turn) repoWorkspace(ctx context.Context) (core.ThreadView, sdk.Works
 	if err != nil {
 		return thread, nil, "", err
 	}
+	turn.changes.begin(ctx, thread)
 	turn.instructionsDirty = turn.instructionsDirty || thread.Workspace == nil
 	branch := workspace.Info().Branch
 	if branch == nil || *branch == "" {

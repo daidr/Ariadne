@@ -200,7 +200,7 @@ type claudeDriver struct {
 	cost               float64
 }
 
-func (d *claudeDriver) count(now, before claudeTokens) {
+func (d *claudeDriver) count(now, before claudeTokens, contextInput *int64) {
 	var grew claudeTokens
 	any := false
 	for i := range grew {
@@ -209,8 +209,27 @@ func (d *claudeDriver) count(now, before claudeTokens) {
 		any = any || grew[i] != 0
 	}
 	if any {
-		d.ctx.Emit(Event{Type: "usage", Usage: Usage{Input: grew[0], Output: grew[1], Cached: new(grew[2]), CacheWrite: new(grew[3]), Reasoning: new(grew[4])}})
+		d.ctx.Emit(Event{Type: "usage", Usage: Usage{Input: grew[0], Output: grew[1], ContextInput: contextInput, Cached: new(grew[2]), CacheWrite: new(grew[3]), Reasoning: new(grew[4])}})
 	}
+}
+func (d *claudeDriver) recordMessageUsage(id string, raw claudeAPIUsage) error {
+	if id == "" {
+		return nil
+	}
+	if len(d.seen) >= 1024 {
+		if _, ok := d.seen[id]; !ok {
+			return errors.New("Claude usage messages exceeded their limit")
+		}
+	}
+	now := claudeUsage(raw)
+	var contextInput *int64
+	if now[0] > 0 {
+		value := now[0]
+		contextInput = &value
+	}
+	d.count(now, d.seen[id], contextInput)
+	d.seen[id] = now
+	return nil
 }
 func (d *claudeDriver) onLine(data []byte) error {
 	var line struct {
@@ -218,7 +237,8 @@ func (d *claudeDriver) onLine(data []byte) error {
 		Event *struct {
 			Type    string `json:"type"`
 			Message struct {
-				ID string `json:"id"`
+				ID    string          `json:"id"`
+				Usage *claudeAPIUsage `json:"usage"`
 			} `json:"message"`
 			Block struct {
 				Type string `json:"type"`
@@ -252,6 +272,11 @@ func (d *claudeDriver) onLine(data []byte) error {
 		switch {
 		case event.Type == "message_start":
 			d.writing = event.Message.ID
+			if event.Message.Usage != nil {
+				if err := d.recordMessageUsage(event.Message.ID, *event.Message.Usage); err != nil {
+					return err
+				}
+			}
 		case event.Type == "content_block_start" && event.Block.Type == "tool_use":
 			emit(Event{Type: "alive"})
 		case event.Type == "content_block_delta" && event.Delta.Type == "text_delta":
@@ -282,23 +307,17 @@ func (d *claudeDriver) onLine(data []byte) error {
 				emit(Event{Type: "reasoning", Text: block.Thinking})
 			}
 		}
-		id := line.Message.ID
-		if id != "" && line.Message.Usage != nil {
-			if len(d.seen) >= 1024 {
-				if _, ok := d.seen[id]; !ok {
-					return errors.New("Claude usage messages exceeded their limit")
-				}
+		if line.Message.Usage != nil {
+			if err := d.recordMessageUsage(line.Message.ID, *line.Message.Usage); err != nil {
+				return err
 			}
-			now := claudeUsage(*line.Message.Usage)
-			d.count(now, d.seen[id])
-			d.seen[id] = now
 		}
 		emit(Event{Type: "alive"})
 		return nil
 	}
 	if line.Type == "result" {
 		if line.Usage != nil {
-			d.count(claudeUsage(*line.Usage), d.turn)
+			d.count(claudeUsage(*line.Usage), d.turn, nil)
 		}
 		d.turn = claudeTokens{}
 		clear(d.seen)
@@ -325,8 +344,10 @@ func (d *claudeDriver) onLine(data []byte) error {
 			if detail == "" {
 				detail = "error"
 			}
-			busy := rpc.BusyText(detail)
-			emit(Event{Type: "failed", Detail: detail, Retryable: busy, Busy: busy})
+			quota := rpc.QuotaText(detail)
+			busy := quota || rpc.BusyText(detail)
+			retryable := !quota && rpc.BusyText(detail)
+			emit(Event{Type: "failed", Detail: detail, Retryable: retryable, Busy: busy})
 		} else {
 			emit(Event{Type: "done"})
 		}

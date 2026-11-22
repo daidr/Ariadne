@@ -20,6 +20,7 @@ type LinkPreview struct {
 	Title        string   `json:"title"`
 	State        string   `json:"state"`
 	Draft        bool     `json:"draft"`
+	Conflicted   bool     `json:"conflicted,omitempty"`
 	Author       *string  `json:"author"`
 	Additions    *int     `json:"additions"`
 	Deletions    *int     `json:"deletions"`

@@ -708,6 +708,8 @@ export interface PlanNodeView {
   title: string
   description: string
   acceptance: string
+  /** Optional topic or phase group name shared by related nodes. */
+  group?: string
   /** Nodes this one depends on. */
   dependsOn: string[]
   status: PlanNodeStatus
@@ -718,7 +720,10 @@ export interface PlanNodeView {
     /** Who holds it stopped, while it is. */
     stoppedBy: string | null
     lastHeadline: string | null
-    pullRequest: Pick<ThreadPullRequest, 'number' | 'reference' | 'url' | 'state' | 'checks'> | null
+    pullRequest: Pick<
+      ThreadPullRequest,
+      'number' | 'reference' | 'url' | 'state' | 'conflicted' | 'checks'
+    > | null
   }[]
   /** The revision that last changed the node, to highlight what the coordinator changed. */
   changedIn: string | null

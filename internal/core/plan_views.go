@@ -135,6 +135,9 @@ func getPlan(w *projectionWriter, projectID string, now int64) (object, error) {
 				if truthy(pr["reference"]) {
 					asObject(pullRequest)["reference"] = pr["reference"]
 				}
+				if truthy(pr["conflicted"]) && pr.str("state") == "open" {
+					asObject(pullRequest)["conflicted"] = true
+				}
 			}
 			onNode = append(onNode, object{"id": thread.ID, "title": thread.Title, "stage": thread.Stage, "stoppedBy": stoppedBy, "lastHeadline": thread.LastHeadline, "pullRequest": pullRequest})
 		}
@@ -182,11 +185,14 @@ func (reader Reader) GetPlan(ctx context.Context, projectID string) (result obje
 func (reader Reader) PlanBrief(ctx context.Context, projectID, nodeID string) (brief string, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
 		w := &projectionWriter{ctx: ctx, tx: tx}
-		node := w.one("SELECT title, description, acceptance FROM plan_nodes WHERE project_id = ? AND id = ?", projectID, nodeID)
+		node := w.one("SELECT title, description, acceptance, group_name FROM plan_nodes WHERE project_id = ? AND id = ?", projectID, nodeID)
 		if node == nil {
 			return w.err
 		}
 		brief = node.text("title") + "\n" + node.text("description")
+		if group := node.text("group_name"); group != "" {
+			brief += "\nGroup: " + group
+		}
 		if accepted := node.text("acceptance"); accepted != "" {
 			brief += "\nAcceptance: " + accepted
 		}
@@ -212,7 +218,7 @@ func (reader Reader) ModelPlan(ctx context.Context, projectID string) (map[strin
 	}
 	nodes, waiting, stale, revisions := []object{}, []object{}, []object{}, []object{}
 	for _, node := range plan["nodes"].([]object) {
-		item := pick(node, "id", "kind", "title", "description", "acceptance", "dependsOn", "status", "threads")
+		item := pick(node, "id", "kind", "title", "description", "acceptance", "group", "dependsOn", "status", "threads")
 		issues := []any{}
 		for _, issue := range node["issues"].([]object) {
 			issues = append(issues, issue["number"])

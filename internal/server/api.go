@@ -34,6 +34,7 @@ import (
 	"github.com/daidr/Ariadne/internal/plugins"
 	"github.com/daidr/Ariadne/internal/realtime"
 	"github.com/daidr/Ariadne/internal/scheduler"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -71,6 +72,7 @@ type Options struct {
 	SkillsDirs       []string
 	Dashboards       *dashboard.Registry
 	SharedDashboard  dashboard.Shared
+	Searches         *searches.Registry
 	Rooms            *collab.Rooms
 	Plugins          *plugins.Host
 }
@@ -82,8 +84,10 @@ type API struct {
 	hub           *realtime.Hub
 	ownedHub      bool
 	mux           *http.ServeMux
+	rpcMux        *http.ServeMux
 	handler       http.Handler
 	routes        []string
+	rpcProcedures []string
 	closeOnce     sync.Once
 	catalog       *modelcatalog.Catalog
 	ownedCatalog  bool
@@ -114,6 +118,9 @@ func New(options Options) (*API, error) {
 		if err := options.Plugins.Restore(context.Background(), options.Settings); err != nil {
 			return nil, err
 		}
+		if options.Searches == nil {
+			options.Searches = options.Plugins.Searches()
+		}
 	}
 	if options.Workspaces != nil {
 		if options.Background == nil {
@@ -129,7 +136,7 @@ func New(options Options) (*API, error) {
 		}
 		options.Hub = options.State.Hub()
 	}
-	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux()}
+	api := &API{options: options, auth: httpauth.Auth{Token: options.Token, Now: options.Now}, files: files.Store{Events: options.Repository.Store, Now: options.Now}, syncer: NewThreadSync(), hub: options.Hub, mux: http.NewServeMux(), rpcMux: http.NewServeMux()}
 	api.rooms = options.Rooms
 	if api.rooms == nil {
 		api.rooms = collab.NewRooms(options.Repository, api.report)
@@ -156,8 +163,8 @@ func New(options Options) (*API, error) {
 		api.ownedState = true
 	}
 	api.mux.HandleFunc("/", api.static)
+	api.mux.Handle(rpcPrefix+"/", api.rpcHandler())
 	api.add("GET", "/api/health", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
-	api.add("GET", "/api/ping", func(*http.Request) (any, int, error) { return object{"ok": true}, 200, nil })
 	api.registerReads()
 	api.registerWrites()
 	api.registerArtifacts()
@@ -166,20 +173,15 @@ func New(options Options) (*API, error) {
 	api.registerSettings()
 	api.registerUpdates()
 	api.registerPlugins()
-	api.registerModels()
-	api.registerModelCatalog()
 	api.registerMCP()
-	api.registerDirectories()
-	api.registerSources()
+	api.registerMetaRPC()
 	api.registerSourceConfig()
-	api.registerLinks()
-	api.registerBackground()
-	api.registerWorkspaces()
+	api.registerThreadService()
+	api.registerConversationService()
+	api.registerWorkspaceService()
 	api.registerProjectDeletion()
 	api.registerExport()
 	api.registerTrace()
-	api.registerSkills()
-	api.registerConversationConfig()
 	api.addRaw("GET", "/api/events", api.events)
 	for _, method := range []string{"GET", "HEAD"} {
 		api.addRaw(method, "/api/files/:fileId", func(w http.ResponseWriter, r *http.Request) error {
@@ -234,6 +236,12 @@ func (api *API) Close() {
 			_ = api.catalog.Close(ctx)
 		}
 	})
+}
+func (api *API) now() time.Time {
+	if api.options.Now != nil {
+		return api.options.Now()
+	}
+	return time.Now()
 }
 func badInput(reason string) error {
 	return domainerr.New("error.invalidBody", object{"reason": reason})
@@ -326,6 +334,35 @@ func prefix(text string, length int) string {
 	units := utf16.Encode([]rune(text))
 	return string(utf16.Decode(units[:min(length, len(units))]))
 }
+func staticContentType(name string) string {
+	ext := strings.ToLower(path.Ext(name))
+	switch ext {
+	case ".webmanifest":
+		return "application/manifest+json"
+	case ".js", ".mjs":
+		return "text/javascript; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	}
+	return mime.TypeByExtension(ext)
+}
+
+func isStaticAssetPath(name string) bool {
+	if strings.HasPrefix(name, "assets/") || strings.HasPrefix(name, "icons/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs", ".css", ".map", ".webmanifest", ".json", ".svg", ".png", ".ico", ".webp", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".ttf", ".otf", ".txt", ".xml":
+		return true
+	default:
+		return false
+	}
+}
+
 func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") || api.options.Web == nil {
 		domainerr.Write(w, domainerr.NotFound(r.URL.Path))
@@ -337,6 +374,10 @@ func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := fs.ReadFile(api.options.Web, name)
 	if err != nil {
+		if isStaticAssetPath(name) {
+			domainerr.Write(w, domainerr.NotFound(r.URL.Path))
+			return
+		}
 		name = "index.html"
 		data, err = fs.ReadFile(api.options.Web, name)
 	}
@@ -349,8 +390,7 @@ func (api *API) static(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(name, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	contentType := mime.TypeByExtension(path.Ext(name))
-	if contentType != "" {
+	if contentType := staticContentType(name); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -430,86 +470,8 @@ func (api *API) registerReads() {
 		value, err := repo.Search(r.Context(), r.PathValue("projectId"), prefix(r.URL.Query().Get("q"), 200))
 		return value, 200, err
 	})
-	api.add("GET", "/api/projects/:projectId/memory", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListMemories(r.Context(), r.PathValue("projectId"))
-		return object{"memories": value}, 200, err
-	})
 	api.add("GET", "/api/projects/:projectId/artifacts", func(r *http.Request) (any, int, error) {
 		value, err := repo.ListArtifacts(r.Context(), r.PathValue("projectId"))
 		return object{"artifacts": value}, 200, err
 	})
-	api.add("GET", "/api/threads/:threadId/reviews", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListReviews(r.Context(), r.PathValue("threadId"))
-		return object{"rounds": value}, 200, err
-	})
-	api.add("GET", "/api/threads/:threadId/line-comments", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListLineComments(r.Context(), r.PathValue("threadId"))
-		return object{"comments": value}, 200, err
-	})
-	api.add("GET", "/api/conversations/:conversationId", api.conversation)
-}
-
-var pageLimit = regexp.MustCompile(`^[1-9]\d{0,2}$`)
-var pageSince = regexp.MustCompile(`^\d{1,15}$`)
-
-func (api *API) conversation(r *http.Request) (any, int, error) {
-	repo := api.options.Repository
-	id := r.PathValue("conversationId")
-	conversation, err := repo.GetConversation(r.Context(), id)
-	if err != nil {
-		return nil, 0, err
-	}
-	query := r.URL.Query()
-	cursor := core.MessageCursor{}
-	if query.Has("before") {
-		value := query.Get("before")
-		cursor.Before = &value
-	}
-	if query.Has("from") {
-		value := query.Get("from")
-		cursor.From = &value
-	}
-	if query.Has("limit") {
-		raw := query.Get("limit")
-		if !pageLimit.MatchString(raw) {
-			return nil, 0, badInput("limit")
-		}
-		value, _ := strconv.Atoi(raw)
-		cursor.Limit = &value
-	}
-	if query.Has("since") {
-		raw := query.Get("since")
-		if !pageSince.MatchString(raw) {
-			return nil, 0, badInput("since")
-		}
-		value, _ := strconv.ParseInt(raw, 10, 64)
-		cursor.Since = &value
-	}
-	page, err := repo.PageMessages(r.Context(), id, cursor)
-	if err != nil {
-		return nil, 0, err
-	}
-	seq, err := repo.Store.LastSeq(r.Context())
-	if err != nil {
-		return nil, 0, err
-	}
-	todo, err := repo.GetTodo(r.Context(), id)
-	if err != nil {
-		return nil, 0, err
-	}
-	var model any
-	if api.options.ModelOf != nil {
-		model, err = api.options.ModelOf(r, conversation)
-	}
-	result := object{"conversation": conversation, "messages": page.Messages, "notices": page.Notices, "more": page.More, "lastSeq": seq, "todo": todo, "model": model}
-	if err == nil && conversation.Role == "coordinator" && cursor.Since == nil && cursor.Before == nil {
-		readThrough, readErr := repo.LastReadMessage(r.Context(), id)
-		if readErr != nil {
-			return nil, 0, readErr
-		}
-		if readThrough != "" {
-			result["readThrough"] = readThrough
-		}
-	}
-	return result, 200, err
 }

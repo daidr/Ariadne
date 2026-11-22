@@ -1,19 +1,14 @@
 package workspaces
 
 import (
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestReferenceRefusalsMatchLegacy(t *testing.T) {
+func TestReferenceRefusals(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	own := []string{filepath.Join(home, "app-data")}
 	if err := os.MkdirAll(filepath.Join(home, "work"), 0700); err != nil {
@@ -36,30 +31,6 @@ func TestReferenceRefusalsMatchLegacy(t *testing.T) {
 	}
 	if locals[0] == nil || locals[2] == nil || locals[5] != nil || remotes[4] != nil || remotes[5] == nil {
 		t.Fatal("reference credential boundary failed")
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native guard checks passed; Bun unavailable")
-	}
-	data, _ := json.Marshal(map[string]any{"home": home, "own": own, "local": local, "remote": remote})
-	command := legacytest.Command(t, bun, "packages/agent/src/testing/go-reference-guard-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(data))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("legacy: %v %s", err, output)
-	}
-	native, _ := json.Marshal(map[string]any{"local": locals, "remote": remotes})
-	var actual, want any
-	json.Unmarshal(native, &actual)
-	if err := json.Unmarshal(output, &want); err != nil {
-		t.Fatal(err, string(output))
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("guard differs\nGo %s\nTS %s", native, output)
 	}
 }
 func TestMissingDescendantOfSymlinkCannotBypassReferenceGuard(t *testing.T) {

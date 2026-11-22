@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    .ariadne-stroke {
+      stroke: #171717;
+    }
+    .ariadne-fill {
+      fill: #171717;
+    }
+    .ariadne-cap {
+      fill: #737373;
+    }
+    @media (prefers-color-scheme: dark) {
+      .ariadne-stroke {
+        stroke: #ededed;
+      }
+      .ariadne-fill {
+        fill: #ededed;
+      }
+      .ariadne-cap {
+        fill: #858585;
+      }
+    }
+  </style>
+  <defs>
+    <mask id="ariadne-mark-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#ffffff" />
+      <g transform="translate(32 35) rotate(-16)">
+        <path d="M -22 -5.8 H 13.4 L 23.4 0 L 13.4 5.8 H -22 Z" fill="#000000" />
+      </g>
+    </mask>
+  </defs>
+  <path
+    class="ariadne-stroke"
+    d="M 17.5 50.5 L 30.5 16 Q 32 12.2 33.5 16 L 46.5 50.5"
+    stroke-width="5.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    mask="url(#ariadne-mark-cut)"
+  />
+  <g transform="translate(32 35) rotate(-16)">
+    <path
+      class="ariadne-cap"
+      d="M -17.4 -3.4 H -16 V 3.4 H -17.4 A 2.6 2.6 0 0 1 -20 0.8 V -0.8 A 2.6 2.6 0 0 1 -17.4 -3.4 Z"
+    />
+    <rect class="ariadne-fill" x="-14" y="-3.4" width="25.4" height="6.8" rx="0.5" />
+    <path class="ariadne-fill" d="M 13.4 -3.35 L 21.2 0 L 13.4 3.35 Z" />
+  </g>
+</svg>

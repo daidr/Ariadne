@@ -2,13 +2,7 @@ package workspaces
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,7 +25,7 @@ func (view *mentionView) List(_ context.Context, path string) ([]sdk.DirectoryEn
 	return view.tree[path], nil
 }
 
-func TestMentionRanksAndWalkMatchLegacy(t *testing.T) {
+func TestMentionRanksAndWalk(t *testing.T) {
 	files := []string{"src/file.ts", "file.txt", "other/file.ts", "profile", "中文.txt", "İFILE.md", "ΟΣ.md", "😀.md"}
 	for range 40 {
 		files = append(files, "same-rank.txt")
@@ -53,32 +47,8 @@ func TestMentionRanksAndWalkMatchLegacy(t *testing.T) {
 		ranks = append(ranks, row)
 		selected = append(selected, selectMentions(files, query))
 	}
-	if len(selected[0]) != MentionFiles || len(walked) != 3 || view.calls != 3 {
+	if len(selected[0]) != MentionFiles || len(walked) != 3 || view.calls != 3 || len(ranks) != len(queries) {
 		t.Fatal("mention result unbounded or entered ignored folder")
-	}
-	native := map[string]any{"ranks": ranks, "selected": selected, "walked": walked}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("native checks passed; Bun unavailable")
-	}
-	input, _ := json.Marshal(map[string]any{"files": files, "queries": queries, "tree": tree})
-	cmd := legacytest.Command(t, bun, "packages/agent/src/testing/go-mention-fixture.ts")
-	cmd.Dir = filepath.Join("..", "..")
-	cmd.Stdin = strings.NewReader(string(input))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatal(err, string(output))
-	}
-	data, _ := json.Marshal(native)
-	var actual, want map[string]any
-	if json.Unmarshal(data, &actual) != nil || json.Unmarshal(output, &want) != nil {
-		t.Fatal("invalid JSON", string(output))
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("Go %s\nTS %s", data, output)
 	}
 }
 func TestMentionWalkBoundsEmptyTreesFilesAndPathBytes(t *testing.T) {

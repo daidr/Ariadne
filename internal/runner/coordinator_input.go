@@ -12,7 +12,10 @@ func (turn *turn) trackThreadInput(entries []transcript.Entry) {
 			continue
 		}
 		if message.Author == "user" {
-			turn.userSpoke = turn.userSpoke || asNumber(entry["seq"]) > float64(turn.handledBefore)
+			if asNumber(entry["seq"]) > float64(turn.handledBefore) {
+				turn.userSpoke = true
+				turn.directUserInput = true
+			}
 			turn.mergeRequestID = message.ID
 		}
 		if message.Author == "coordinator" && message.Kind == "relay" {
@@ -42,6 +45,7 @@ func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 			message, _ := entry["message"].(*core.MessageView)
 			if message != nil && message.Author == "user" {
 				turn.userSpoke = true
+				turn.directUserInput = true
 				independent = true
 			}
 		case "note":
@@ -52,6 +56,7 @@ func (turn *turn) trackCoordinatorInput(entries []transcript.Entry) {
 				turn.userSpoke = turn.userSpoke || note["type"] == "user-in-thread"
 			case "answer":
 				turn.userSpoke = true
+				turn.directUserInput = true
 				independent = true
 			case "report":
 				if note["report"] != "progress" {

@@ -112,5 +112,8 @@ func (watcher Watcher) refresh(ctx context.Context, item core.OpenPullRequest) e
 	if info.Reference != "" {
 		next["reference"] = info.Reference
 	}
+	if info.State == "open" && info.Conflicted {
+		next["conflicted"] = true
+	}
 	return watcher.Repository.SyncPullRequestIfCurrent(ctx, item.ThreadID, item.Request, next)
 }

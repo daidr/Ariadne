@@ -14,7 +14,6 @@ import type {
   MemoryView,
   MessageView,
   NoticeView,
-  PlanOp,
   PlanView,
   ProjectView,
   TodoView,
@@ -23,6 +22,7 @@ import type {
 } from '@ariadne/core'
 import { toast } from 'dou-ui'
 import { computed, reactive, ref, toRaw, type Ref } from 'vue'
+import type { AskDraft } from './blocks/ask-drafts'
 import type { Draft } from './components/attachments'
 import { reuse } from './reuse'
 import { coalescedRefresh } from './coalesced-refresh'
@@ -38,7 +38,6 @@ import {
   type MessageExtras,
   type ModelSettings,
   type ProjectDetail,
-  type SourceInput,
   type StreamStatus,
 } from './api'
 import { t, tm } from './i18n'
@@ -234,7 +233,25 @@ export const state = reactive<State>({
   lineComments: {},
 })
 
+let stopStream: (() => void) | null = null
+let streamSession: symbol | null = null
+
+export function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+function markUnauthorized() {
+  streamSession = null
+  stopStream?.()
+  stopStream = null
+  state.stream = 'unauthorized'
+}
+
 export function report(error: unknown) {
+  if (isUnauthorizedError(error)) {
+    markUnauthorized()
+    return
+  }
   const message = error instanceof ApiError ? tm(error.localized) : String(error)
   toast.danger(message, { duration: 7000, closable: true })
 }
@@ -451,6 +468,7 @@ function validateWorkspace(
     !threads.has(state.main.conversationId)
   )
     resetMain()
+  pruneThreadComposers()
 }
 
 /**
@@ -675,13 +693,12 @@ function settleSide() {
   if (side.activeOf(side.focusedGroup(state.side)) !== front) state.side = side.defaultLayout(front)
 }
 
-/** Show another project's right side: nothing of the last one's threads stays. */
+/** Show another project's right side: its loaded thread conversations start fresh. */
 function showSide(layout: SideLayout) {
   state.side = layout
   state.paneParams = {}
   state.full = null
   state.threads = {}
-  for (const threadId of composers.keys()) dropComposer(threadId)
 }
 
 /** Show the right side as `next`, remembered for the project; closed threads let go. */
@@ -715,7 +732,7 @@ function syncThreads() {
   for (const threadId of Object.keys(state.threads)) {
     if (!open.has(threadId)) delete state.threads[threadId]
   }
-  for (const threadId of composers.keys()) if (!open.has(threadId)) dropComposer(threadId)
+  pruneThreadComposers(open)
   // A thread dragged in from the thread list has nothing loaded yet.
   const opened = [...open].filter((threadId) => !state.threads[threadId])
   for (const threadId of opened) state.threads[threadId] = emptyConversation()
@@ -729,32 +746,74 @@ function setFull(full: FullView | null) {
 }
 
 /**
- * What the user is writing to an open thread and has not sent: kept here rather than in
- * its panel, so moving the thread's tab to another group, which builds the panel anew,
- * keeps it. Closing the tab lets it go.
+ * What the user is writing to a conversation and has not sent: kept here rather than in
+ * its panel, so opening trace/plan/artifacts or moving a thread's tab to another group,
+ * which builds the panel anew, keeps it. Closing a thread tab or deleting a project lets it go.
  */
 export interface Composer {
   draft: Ref<string>
   files: Ref<Draft[]>
   mentions: Map<string, MentionInput>
   skills: Set<string>
+  askDrafts: Map<string, AskDraft>
 }
-const composers = new Map<string, Composer>()
+const composers = new Map<string, { projectId: string | null; composer: Composer }>()
+const coordinatorComposers = new Map<string, Composer>()
+
+function makeComposer(): Composer {
+  return {
+    draft: ref(''),
+    files: ref([]),
+    mentions: new Map(),
+    skills: new Set(),
+    askDrafts: new Map(),
+  }
+}
+
+function releaseComposerFiles(composer: Composer | undefined) {
+  for (const file of composer?.files.value ?? []) {
+    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }
+}
 
 export function composerFor(threadId: string): Composer {
-  let composer = composers.get(threadId)
+  const projectId = state.currentId ?? state.detail?.project.id ?? null
+  let entry = composers.get(threadId)
+  if (!entry) {
+    entry = { projectId, composer: makeComposer() }
+    composers.set(threadId, entry)
+  } else if (entry.projectId === null && projectId !== null) {
+    entry.projectId = projectId
+  }
+  return entry.composer
+}
+
+export function coordinatorComposerFor(projectId: string): Composer {
+  let composer = coordinatorComposers.get(projectId)
   if (!composer) {
-    composer = { draft: ref(''), files: ref([]), mentions: new Map(), skills: new Set() }
-    composers.set(threadId, composer)
+    composer = makeComposer()
+    coordinatorComposers.set(projectId, composer)
   }
   return composer
 }
 
 function dropComposer(threadId: string) {
-  for (const file of composers.get(threadId)?.files.value ?? []) {
-    if (file.url?.startsWith('blob:')) URL.revokeObjectURL(file.url)
-  }
+  releaseComposerFiles(composers.get(threadId)?.composer)
   composers.delete(threadId)
+}
+
+function pruneThreadComposers(open = new Set(shownThreads())) {
+  for (const [threadId, entry] of composers) {
+    if (entry.projectId === state.currentId && !open.has(threadId)) dropComposer(threadId)
+  }
+}
+
+function dropProjectComposers(projectId: string) {
+  releaseComposerFiles(coordinatorComposers.get(projectId))
+  coordinatorComposers.delete(projectId)
+  for (const [threadId, entry] of composers) {
+    if (entry.projectId === projectId) dropComposer(threadId)
+  }
 }
 
 /** The thread in front of the group on the right the user last used. */
@@ -840,6 +899,7 @@ export async function deleteProject(id: string) {
 /** Let go of a project that is gone; if it was open, the next one opens. */
 function forgetProject(id: string) {
   deletedDuringRefresh?.add(id)
+  dropProjectComposers(id)
   clearBoardThumbnails()
   clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)
@@ -876,7 +936,9 @@ export async function stopTurn(conversationId: string) {
 
 /** The user's emoji on a message, or theirs taken back. */
 export async function react(messageId: string, emoji: string, remove: boolean) {
-  await api.react(messageId, emoji, remove).catch(report)
+  await (remove ? api.removeReaction(messageId, emoji) : api.addReaction(messageId, emoji)).catch(
+    report,
+  )
 }
 
 export async function retryTurn(conversationId: string) {
@@ -1153,21 +1215,6 @@ export function saveDownload({ blob, name }: { blob: Blob; name: string }) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Save the project's working directory; returns why it was refused, or `null`. */
-export async function setSource(source: SourceInput | null): Promise<string | null> {
-  const project = state.detail?.project
-  if (!project) return null
-  try {
-    await api.setSource(project.id, source)
-    await refreshCurrent()
-    return null
-  } catch (error) {
-    if (error instanceof ApiError) return tm(error.localized)
-    report(error)
-    return null
-  }
-}
-
 export async function saveFileSources(
   projectId: string,
   input: Parameters<typeof api.setFileSources>[1],
@@ -1215,71 +1262,6 @@ export async function dismissProposal(proposalId: string) {
   if (!project) return
   try {
     state.plan = (await api.dismissProposal(project.id, proposalId)).plan
-  } catch (error) {
-    report(error)
-  }
-}
-
-/** Apply the user's own edit of the plan; returns whether it took effect. */
-/**
- * Change the plan as the user. `conflict` means someone changed a field the edit expected
- * unchanged; the caller shows that next to the edit instead of as an error.
- */
-export async function editPlan(
-  reason: string,
-  ops: PlanOp[],
-): Promise<'ok' | 'conflict' | 'failed'> {
-  const project = state.detail?.project
-  if (!project || !ops.length) return 'failed'
-  try {
-    const { plan } = await api.revisePlan(project.id, { reason, ops })
-    // The user may have opened another project while this was on its way.
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
-    return 'ok'
-  } catch (error) {
-    if (error instanceof ApiError && error.localized.key === 'error.planConflict') {
-      // The plan here may lag behind (the event stream dropped for a moment): fetch it, so
-      // the edit shows what changed.
-      try {
-        const { plan } = await api.getPlan(project.id)
-        if (state.detail?.project.id === plan.projectId) state.plan = plan
-      } catch {
-        // The next event brings it.
-      }
-      return 'conflict'
-    }
-    report(error)
-    return 'failed'
-  }
-}
-
-/** Link an issue to a plan node, or unlink it; returns why it was refused, or `null`. */
-export async function setNodeIssue(
-  nodeId: string,
-  number: number,
-  linked: boolean,
-): Promise<string | null> {
-  const project = state.detail?.project
-  if (!project) return null
-  try {
-    const { plan } = linked
-      ? await api.linkIssue(project.id, nodeId, number)
-      : await api.unlinkIssue(project.id, nodeId, number)
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
-    return null
-  } catch (error) {
-    if (error instanceof ApiError) return tm(error.localized)
-    report(error)
-    return null
-  }
-}
-
-export async function revertPlan(revisionId: string, reason: string) {
-  const project = state.detail?.project
-  if (!project) return
-  try {
-    const { plan } = await api.revertPlan(project.id, revisionId, reason)
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
   } catch (error) {
     report(error)
   }
@@ -1517,16 +1499,6 @@ export async function setThreadModel(threadId: string, model: string | null) {
   }
 }
 
-/** Link a thread to a plan node, move it to another node, or unlink it with `null`. */
-export async function setThreadNode(threadId: string, nodeId: string | null) {
-  try {
-    await api.setThreadNode(threadId, nodeId)
-    await refreshCurrent(['detail', 'plan'])
-  } catch (error) {
-    report(error)
-  }
-}
-
 async function load(restore: () => Promise<void>): Promise<number | null> {
   api.getModelSettings().then(applyModelSettings, () => {})
   api.getInputSettings().then(
@@ -1538,21 +1510,38 @@ async function load(restore: () => Promise<void>): Promise<number | null> {
     await restore()
     return lastSeq
   } catch (error) {
+    if (isUnauthorizedError(error)) {
+      markUnauthorized()
+      return null
+    }
     report(error)
     return null
   }
 }
 
 export async function start(restore: () => Promise<void>) {
+  streamSession = null
+  stopStream?.()
+  stopStream = null
   const lastSeq = await load(restore)
+  if (state.stream === 'unauthorized') return
   // Follow from the state just loaded. If loading failed (say the page opened before the
   // server), follow from the server's newest event and load once the stream is up.
   let loaded = lastSeq !== null
-  followEvents(
+  const session = (streamSession = Symbol())
+  stopStream = followEvents(
     lastSeq,
     onEvent,
-    (status) => (state.stream = status),
+    (status) => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
+      if (status === 'unauthorized') {
+        markUnauthorized()
+        return
+      }
+      state.stream = status
+    },
     () => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
       // The server tells again what is running now.
       state.live = {}
       state.background = {}
@@ -1696,10 +1685,6 @@ export async function endAside(threadId: string) {
 }
 
 /** The user is through with what the thread put up for review. */
-export async function reviewThread(threadId: string) {
-  await api.reviewThread(threadId).catch(report)
-}
-
 export async function completeThread(threadId: string) {
   await api.completeThread(threadId).catch(report)
 }

@@ -54,9 +54,10 @@ import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
 import ThreadTools from './ThreadTools.vue'
 import { placeTodo, todoPlan } from './todo'
-import { shownAttachments, useAttachments } from './attachments'
+import { isInlineImage, shownAttachments, useAttachments } from './attachments'
 import {
   composerFor,
+  coordinatorComposerFor,
   emptyConversation,
   loadEarlier,
   openMain,
@@ -77,7 +78,6 @@ import {
   undoNotice,
 } from '../store'
 import WorkspaceTag from './WorkspaceTag.vue'
-import ThreadNodeTag from './ThreadNodeTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
 import ReviewMark from '../review/ReviewMark.vue'
@@ -91,7 +91,7 @@ import ConversationBar from './ConversationBar.vue'
 import ConversationMarker from './ConversationMarker.vue'
 import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
-import { branchChanges } from '../review/merge-offered'
+import { branchChanges, hasOpenBranch } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
 import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
@@ -99,7 +99,6 @@ import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
 import RecapNotice from './RecapNotice.vue'
-import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import DraftBlock from '../blocks/DraftBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
@@ -126,8 +125,13 @@ provideFromThread(() => props.threadId ?? null)
 const openView = (view: OpenedView) => openFrom(view, { from: props.threadId ?? null })
 const openSettings = inject(openSettingsKey, () => {})
 
-// A thread's input is kept in the store, so moving its tab to another group keeps it.
-const composer = props.threadId ? composerFor(props.threadId) : null
+// Unsent input is kept in the store, so opening trace/plan/artifacts or moving tabs keeps it.
+const projectId = state.currentId ?? state.detail?.project.id ?? null
+const composer = props.threadId
+  ? composerFor(props.threadId)
+  : projectId
+    ? coordinatorComposerFor(projectId)
+    : null
 const draft = composer?.draft ?? ref('')
 const attachments = useAttachments(() => state.detail?.project.id ?? null, composer?.files)
 const picker = useTemplateRef<HTMLInputElement>('picker')
@@ -154,13 +158,14 @@ const preview = ref<{ open: boolean; images: string[]; index: number }>({
   index: 0,
 })
 function openAttachment(message: MessageView, file: ChatAttachment) {
-  if (!file.url) return
-  if (!file.type?.startsWith('image/')) {
+  if (!file.uid) return
+  if (!isInlineImage(file.type)) {
     openFilePreview({ id: String(file.uid), name: file.name, mime: file.type, size: file.size })
     return
   }
-  const images = shownAttachments(message.attachments).filter((item) =>
-    item.type?.startsWith('image/'),
+  if (!file.url) return
+  const images = shownAttachments(message.attachments).filter(
+    (item) => item.url && isInlineImage(item.type),
   )
   preview.value = {
     open: true,
@@ -216,13 +221,16 @@ const createdArtifacts = computed(() =>
 )
 const capsuleChanges = computed(() => {
   const owner = reviewed.value ?? thread.value
-  return owner?.workspace?.branch && owner.workspace.base
-    ? { threadId: owner.id, totals: branchChanges(owner) }
-    : null
+  if (!hasOpenBranch(owner)) return null
+  const totals = branchChanges(owner)
+  if (totals ? totals.files > 0 : !!owner?.pullRequest) {
+    return { threadId: owner!.id, totals }
+  }
+  return null
 })
 const showCapsules = computed(
   () =>
-    (capsuleChanges.value?.totals?.files ?? 0) > 0 ||
+    !!capsuleChanges.value ||
     createdArtifacts.value.length > 0 ||
     background.value.length > 0 ||
     !!thread.value?.pullRequest,
@@ -384,9 +392,9 @@ const entries = computed(() => [
   { id: 'conversation-activity', activity: true as const },
 ])
 const times = computed(() => messageTimes(shown.value.items))
-const askDrafts = new Map<string, AskDraft>()
+const askDrafts = composer?.askDrafts ?? new Map<string, AskDraft>()
 provide(askDraftsKey, askDrafts)
-watch(conversationId, () => askDrafts.clear())
+if (!composer) watch(conversationId, () => askDrafts.clear())
 
 function issueNotice(notice: Extract<NoticeView, { kind: 'issue-written' }>) {
   const issue = `${notice.tracker}#${notice.number}`
@@ -449,7 +457,6 @@ function planNotice(notice: Extract<NoticeView, { kind: 'plan-changed' }>) {
   })
   return notice.added ? `${text} · ${t('notice.planAdded', { count: notice.added })}` : text
 }
-const revisionOf = (id: string) => state.plan?.revisions.find((revision) => revision.id === id)
 // Narrowed where they are called; the template cannot narrow inside a handler.
 const threadIdOf = (notice: NoticeView) =>
   notice.kind === 'thread-auto-started' ? notice.threadId : ''
@@ -582,6 +589,14 @@ const sent = computed(() =>
 )
 let recall: Recall | null = null
 watch(conversationId, () => (recall = null))
+function onInputPaste(event: ClipboardEvent) {
+  if (event.defaultPrevented) return
+  const files = [...(event.clipboardData?.files ?? [])]
+  if (!files.length) return
+  event.preventDefault()
+  attachments.add(files)
+}
+
 function onInputKeydown(event: KeyboardEvent) {
   // The `/` menu moves through its entries with the arrows and has already taken them.
   if (event.defaultPrevented || event.isComposing) return
@@ -753,7 +768,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             {{ t('review.underway', { round: thread.review.rounds }) }}
           </DouShimmer>
           <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <ThreadNodeTag v-if="!thread.reviewOf" :thread="thread" />
           <ReviewMark :thread="thread" />
           <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
           <template v-if="reviewed">
@@ -950,16 +964,14 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             :notice="item.notice"
           />
           <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />
-          <!-- A change the coordinator made to the plan without asking, to undo from here. -->
-          <template v-else-if="item.notice.kind === 'plan-changed'">
-            <DouText variant="tertiary" size="sm" class="notice-text">
-              {{ planNotice(item.notice) }}
-            </DouText>
-            <PlanUndoButton
-              v-if="revisionOf(item.notice.revisionId)"
-              :revision="revisionOf(item.notice.revisionId)!"
-            />
-          </template>
+          <DouText
+            v-else-if="item.notice.kind === 'plan-changed'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ planNotice(item.notice) }}
+          </DouText>
           <DouText
             v-else-if="item.notice.kind === 'thread-auto-started'"
             variant="tertiary"
@@ -1220,6 +1232,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
         class="conversation-input"
         data-message-input
         @keydown="onInputKeydown"
+        @paste="onInputPaste"
       >
         <ConversationBar
           v-if="conversationId && showCapsules"
@@ -1429,7 +1442,89 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation-list :deep(.dou-chat-list) {
+  --dou-chat-list-gap: 30px;
   --conversation-clearance: var(--conversation-footer-height, var(--dou-chat-list-padding));
+}
+
+/*
+ * Chat reading rhythm: wrapped lines < list items < paragraphs < heading top < consecutive messages.
+ * Suppressing the top margin of the block right after a heading keeps headings bound to their body.
+ */
+.conversation-list :deep(.dou-markdown) {
+  --dou-markdown-gap: 0.95em;
+  line-height: 1.75;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2, h3, h4, h5, h6)) {
+  margin-block: 0;
+  line-height: 1.45;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2):not(:first-child)) {
+  margin-block-start: 1.65em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h1, h2):not(:last-child)) {
+  margin-block-end: 0.45em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h3):not(:first-child)) {
+  margin-block-start: 1.5em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h3):not(:last-child)) {
+  margin-block-end: 0.35em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h4, h5, h6):not(:first-child)) {
+  margin-block-start: 1.35em;
+}
+
+.conversation-list :deep(.dou-markdown :where(h4, h5, h6):not(:last-child)) {
+  margin-block-end: 0.3em;
+}
+
+.conversation-list
+  :deep(
+    .dou-markdown
+      :where(h1, h2, h3, h4, h5, h6)
+      + :where(
+        p,
+        ul,
+        ol,
+        blockquote,
+        .dou-markdown__table,
+        .dou-markdown__code,
+        .dou-markdown__custom,
+        .dou-markdown__callout,
+        .dou-markdown__container,
+        div.dou-markdown__trailing
+      )
+  ) {
+  margin-block-start: 0;
+}
+
+.conversation-list :deep(.dou-markdown :where(li + li)) {
+  margin-block-start: 0.5em;
+}
+
+.conversation-list :deep(.dou-markdown :where(li > ul, li > ol)) {
+  margin-block: 0.45em;
+}
+
+.conversation-list :deep(.dou-markdown :where(li > p)) {
+  margin-block: 0.55em;
+}
+
+.conversation-list :deep(.dou-markdown :where(code:not(.dou-code-block__code))) {
+  font-size: 0.875em;
+  padding: 0.1em 0.36em;
+}
+
+.conversation-list :deep(.dou-markdown .dou-link--soft) {
+  font-size: 0.93em;
+  padding-block: 0.05em;
+  padding-inline: 0.35em;
 }
 
 /* The spacer, including composer clearance, is what ChatList observes. */

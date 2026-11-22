@@ -2,31 +2,32 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/modelcatalog"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/sdk"
 )
 
-func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
+func TestModelListingCatalogAndFoundSetupConnect(t *testing.T) {
 	catalogJSON := `{"openai":{"models":{"big":{"cost":{"input":1,"output":2},"limit":{"context":128000,"output":4096},"modalities":{"input":["text","image"]},"tool_call":true,"reasoning":false,"release_date":"2026-11-01"},"old":{"tool_call":true,"release_date":"2025-01-01"},"embedding":{"tool_call":false,"release_date":"2026-11-02"}}}}`
 	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/catalog" {
 			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, catalogJSON)
+			_, _ = io.WriteString(w, catalogJSON)
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer private" {
@@ -34,42 +35,20 @@ func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
 		}
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"data":[{"id":"unknown","created":5},{"id":"old","created":2},{"id":"big","created":1},{"id":"embedding","created":6},{"id":"big","created":0}]}`)
+			_, _ = io.WriteString(w, `{"data":[{"id":"unknown","created":5},{"id":"old","created":2},{"id":"big","created":1},{"id":"embedding","created":6},{"id":"big","created":0}]}`)
 			return
 		}
 		if r.URL.Path == "/v1/chat/completions" {
 			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer service.Close()
+
 	home := t.TempDir()
 	env := map[string]string{"OPENAI_API_KEY": "private", "OPENAI_BASE_URL": service.URL + "/v1"}
-	requests := []apiRequest{
-		{Method: "POST", Path: "/api/settings/model-list", Body: object{"provider": object{"kind": "openai-compatible", "settings": object{"baseUrl": service.URL + "/v1", "apiKey": "private"}}}},
-		{Method: "GET", Path: "/api/settings/model-info?model=big"},
-		{Method: "GET", Path: "/api/settings/model-info?model=unknown"},
-		{Method: "GET", Path: "/api/settings/model-info?model="},
-		{Method: "GET", Path: "/api/settings/found"},
-		{Method: "POST", Path: "/api/settings/found/use", Body: object{"id": "openai-compatible:OPENAI_API_KEY"}},
-		{Method: "GET", Path: "/api/settings/found"},
-		{Method: "GET", Path: "/api/settings/models"},
-	}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		input := object{"settings": true, "models": true, "catalog": json.RawMessage(catalogJSON), "find": object{"env": env, "home": home, "available": []string{}}, "seed": []any{}, "sql": "SELECT 1", "requests": requests}
-		command := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		command.Dir = filepath.Join("..", "..")
-		command.Stdin = strings.NewReader(encoded(input))
-		data, err := command.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy: %v\n%s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
 	directory := t.TempDir()
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(directory, "data.sqlite")})
 	if err != nil {
@@ -87,29 +66,91 @@ func TestModelListingCatalogAndFoundSetupHTTPMatchLegacy(t *testing.T) {
 	defer builtins.Close(context.Background())
 	catalog := modelcatalog.New(modelcatalog.Options{URL: service.URL + "/catalog", Client: service.Client()})
 	defer catalog.Close(context.Background())
-	api, err := New(Options{Repository: repo, Token: "test-token", Settings: store, Models: builtins.Registry, Catalog: catalog, FindContext: &sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return false }}, Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	api, err := New(Options{
+		Repository:  repo,
+		Token:       "test-token",
+		Settings:    store,
+		Models:      builtins.Registry,
+		Catalog:     catalog,
+		FindContext: &sdk.FindContext{Env: env, Home: home, Which: func(string) bool { return false }},
+		Now:         func() time.Time { return time.UnixMilli(1800000000000) },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for index, item := range requests {
-		request := httptest.NewRequest(item.Method, "http://test.invalid"+item.Path, strings.NewReader(encoded(item.Body)))
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+	server := httptest.NewServer(api)
+	defer server.Close()
+
+	client := ariadnev1connect.NewSettingsServiceClient(
+		server.Client(),
+		server.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	checkNoLeak := func(msg proto.Message) {
+		t.Helper()
+		raw, err := proto.Marshal(msg)
+		if err != nil {
 			t.Fatal(err)
 		}
-		actual := object{"status": response.Code, "body": legacyModelSettingsResponse(body)}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[index])) {
-			t.Fatalf("%s %s\ngot %s\nwant %s", item.Method, item.Path, encoded(actual), encoded(expected[index]))
-		}
-		if response.Code >= 500 {
-			t.Fatal(actual)
-		}
-		if strings.Contains(response.Body.String(), `"apiKey":"private"`) {
+		if strings.Contains(string(raw), "private") {
 			t.Fatal("discovery leaked credentials")
 		}
+	}
+
+	listedRes, err := client.ListProviderModels(t.Context(), connect.NewRequest(&ariadnev1.ListProviderModelsRequest{
+		Provider: &ariadnev1.DraftModelProviderInput{
+			Kind:     "openai-compatible",
+			Settings: mustStruct(t, object{"baseUrl": service.URL + "/v1", "apiKey": "private"}),
+		},
+	}))
+	if err != nil {
+		t.Fatalf("ListProviderModels: %v", err)
+	}
+	if len(listedRes.Msg.GetModels().GetItems()) == 0 {
+		t.Fatalf("expected listed models, got %+v", listedRes.Msg)
+	}
+	checkNoLeak(listedRes.Msg)
+
+	infoRes, err := client.GetModelInfo(t.Context(), connect.NewRequest(&ariadnev1.GetModelInfoRequest{Model: "big"}))
+	if err != nil {
+		t.Fatalf("GetModelInfo(big): %v", err)
+	}
+	if infoRes.Msg.GetInfo().GetContextTokens() != 128000 || infoRes.Msg.GetInfo().GetPrice().GetInput() != 1 {
+		t.Fatalf("unexpected model info: %+v", infoRes.Msg.GetInfo())
+	}
+
+	if _, err := client.GetModelInfo(t.Context(), connect.NewRequest(&ariadnev1.GetModelInfoRequest{Model: "unknown"})); err == nil {
+		t.Fatal("expected unknown model info to fail")
+	} else if connectErr, localized := extractLocalizedError(t, err); connectErr.Code() != connect.CodeNotFound || localized == nil || localized.Key != "error.priceUnknown" {
+		t.Fatalf("unexpected unknown model error: code=%v localized=%v", connectErr.Code(), localized)
+	}
+
+	if _, err := client.GetModelInfo(t.Context(), connect.NewRequest(&ariadnev1.GetModelInfoRequest{})); err == nil {
+		t.Fatal("expected empty model info to fail")
+	} else if connectErr, _ := extractLocalizedError(t, err); connectErr.Code() != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v", connectErr.Code())
+	}
+
+	foundRes, err := client.ListFoundSetups(t.Context(), connect.NewRequest(&ariadnev1.ListFoundSetupsRequest{}))
+	if err != nil || len(foundRes.Msg.GetFound()) == 0 {
+		t.Fatalf("ListFoundSetups: %+v %v", foundRes, err)
+	}
+	checkNoLeak(foundRes.Msg)
+
+	useRes, err := client.UseFoundSetup(t.Context(), connect.NewRequest(&ariadnev1.UseFoundSetupRequest{
+		Id: "openai-compatible:OPENAI_API_KEY",
+	}))
+	if err != nil {
+		t.Fatalf("UseFoundSetup: %v", err)
+	}
+	if len(useRes.Msg.GetProblems()) != 0 || len(useRes.Msg.GetSettings().GetModels()) != 1 {
+		t.Fatalf("unexpected UseFoundSetup result: %+v", useRes.Msg)
+	}
+	checkNoLeak(useRes.Msg)
+
+	foundAfter, err := client.ListFoundSetups(t.Context(), connect.NewRequest(&ariadnev1.ListFoundSetupsRequest{}))
+	if err != nil || len(foundAfter.Msg.GetFound()) != 0 {
+		t.Fatalf("expected found setups to be empty after use: %+v %v", foundAfter, err)
 	}
 }

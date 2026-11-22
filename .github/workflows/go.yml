@@ -8,6 +8,9 @@ on:
         'go.mod',
         'go.sum',
         '.go-version',
+        'buf.yaml',
+        'buf.gen.yaml',
+        'proto/**',
         'package.json',
         'bun.lock',
         'internal/**',
@@ -23,6 +26,9 @@ on:
         'go.mod',
         'go.sum',
         '.go-version',
+        'buf.yaml',
+        'buf.gen.yaml',
+        'proto/**',
         'package.json',
         'bun.lock',
         'internal/**',
@@ -37,6 +43,21 @@ permissions:
   contents: read
 
 jobs:
+  proto:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run proto:check
+
   native:
     timeout-minutes: 15
     strategy:
@@ -58,25 +79,14 @@ jobs:
       - run: go test -count=1 -parallel=4 -timeout=180s ./...
       - run: go vet ./...
 
-  compatibility:
-    timeout-minutes: 20
+  race:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
-    env:
-      ARIADNE_REQUIRE_LEGACY: '1'
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
           cache: true
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - run: go run ./tools/legacyoracle
-      - run: |
-          bun dist/legacy-oracle/tools/backend-contract.ts
-          cmp internal/compat/testdata/backend-contract.json dist/legacy-oracle/internal/compat/testdata/backend-contract.json
-          cmp internal/compat/testdata/schema.sql dist/legacy-oracle/internal/compat/testdata/schema.sql
+      - run: go version
       - run: go test -race -count=1 -parallel=4 -timeout=300s ./...

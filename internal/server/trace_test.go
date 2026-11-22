@@ -2,18 +2,18 @@ package server
 
 import (
 	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/eventstore"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
 func traceSeed() []eventstore.NewEvent {
@@ -43,21 +43,8 @@ func traceSeed() []eventstore.NewEvent {
 		event("turn.finished", object{"turnId": "turn_b", "outcome": "completed", "error": nil}),
 	}
 }
-func TestTraceTimelineHTTPMatchesLegacy(t *testing.T) {
-	no := false
-	requests := []apiRequest{{Method: "GET", Path: "/api/conversations/coo_a/trace", Auth: &no}, {Method: "GET", Path: "/api/conversations/coo_a/trace"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=15"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=0"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=1.5"}, {Method: "GET", Path: "/api/conversations/coo_a/trace?before=Infinity"}, {Method: "GET", Path: "/api/conversations/missing/trace"}}
-	var expected []any
-	if bun, err := exec.LookPath("bun"); err == nil {
-		cmd := legacytest.Command(t, bun, "packages/server/src/testing/go-api-fixture.ts")
-		cmd.Dir = filepath.Join("..", "..")
-		cmd.Stdin = strings.NewReader(encoded(object{"seed": traceSeed(), "sql": "SELECT 1", "requests": requests}))
-		data, err := cmd.CombinedOutput()
-		if err != nil || json.Unmarshal(data, &expected) != nil {
-			t.Fatalf("legacy %v %s", err, data)
-		}
-	} else if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-		t.Fatal(err)
-	}
+
+func TestTraceTimelineRPC(t *testing.T) {
 	now := func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "trace.sqlite"), Now: now})
 	if err != nil {
@@ -72,24 +59,25 @@ func TestTraceTimelineHTTPMatchesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	for i, item := range requests {
-		r := httptest.NewRequest(item.Method, item.Path, nil)
-		if item.Auth == nil || *item.Auth {
-			r.Header.Set("Authorization", "Bearer test-token")
-		}
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		var body any
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-			t.Fatal(err, response.Body.String())
-		}
-		actual := object{"status": response.Code, "body": body}
-		if expected != nil && encoded(canonical(actual)) != encoded(canonical(expected[i])) {
-			t.Fatalf("%s\nGo %s\nTS %s", item.Path, encoded(actual), encoded(expected[i]))
-		}
-		if response.Code >= 500 {
-			t.Fatal(response.Body.String())
-		}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	unauth := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix)
+	client := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor("test-token")))
+
+	if _, err := unauth.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a"})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated, got %v", err)
+	}
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "missing"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected not found, got %v", err)
+	}
+	zero := int64(0)
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", From: &zero})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected invalid argument for from=0, got %v", err)
+	}
+	before := int64(15)
+	if _, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", Before: &before})); err != nil {
+		t.Fatalf("before=15 failed: %v", err)
 	}
 	for _, limits := range []core.TurnEventOptions{{MaxEvents: 1}, {MaxBytes: 1}} {
 		if _, err := repo.ListTurnEvents(t.Context(), "coo_a", limits); err == nil {
@@ -97,27 +85,92 @@ func TestTraceTimelineHTTPMatchesLegacy(t *testing.T) {
 		}
 	}
 
-	full := func(query string) []any {
-		t.Helper()
-		r := httptest.NewRequest("GET", "/api/conversations/coo_a/trace"+query, nil)
-		r.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, r)
-		var body struct {
-			Turns []any `json:"turns"`
-		}
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != 200 {
-			t.Fatal(response.Code, response.Body.String(), err)
-		}
-		return body.Turns
+	fullResp, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a"}))
+	if err != nil {
+		t.Fatal(err)
 	}
-	turns := full("")
+	turns := fullResp.Msg.Turns
 	if len(turns) != 2 {
 		t.Fatal(turns)
 	}
-	last := turns[1].(map[string]any)
-	suffix := full("?from=" + strconv.FormatInt(int64(last["seq"].(float64)), 10))
-	if len(suffix) != 1 || encoded(suffix[0]) != encoded(last) {
-		t.Fatalf("incremental page changed the turn or request numbers: %+v", suffix)
+	var sawStepReq, sawResearchReq, sawSummaryReq bool
+	for _, item := range turns[0].GetItems() {
+		req := item.GetRequest()
+		if req == nil {
+			continue
+		}
+		if req.Provider == nil || *req.Provider != "openai-compatible" || req.Model == nil || *req.Model != "gpt-6.1" {
+			t.Fatalf("expected provider=openai-compatible and model=gpt-6.1 on %s request, got provider=%v model=%v", req.GetPurpose(), req.Provider, req.Model)
+		}
+		switch req.GetPurpose() {
+		case "step":
+			sawStepReq = true
+			for _, tc := range req.GetToolCalls() {
+				for _, r := range tc.GetResearch() {
+					sawResearchReq = true
+					if r.Provider == nil || *r.Provider != "openai-compatible" || r.Model == nil || *r.Model != "gpt-6.1" {
+						t.Fatalf("expected provider/model on research request, got provider=%v model=%v", r.Provider, r.Model)
+					}
+				}
+			}
+		case "summary":
+			sawSummaryReq = true
+		}
+	}
+	if !sawStepReq || !sawResearchReq || !sawSummaryReq {
+		t.Fatalf("expected step/research/summary requests, got step=%v research=%v summary=%v", sawStepReq, sawResearchReq, sawSummaryReq)
+	}
+	last := turns[1]
+	fromSeq := last.Seq
+	suffixResp, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a", From: &fromSeq}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suffixResp.Msg.Turns) != 1 || !proto.Equal(suffixResp.Msg.Turns[0], last) {
+		t.Fatalf("incremental page changed the turn or request numbers: got=%+v want=%+v", suffixResp.Msg.Turns, last)
+	}
+
+	// Verify TraceRequestFailure also preserves *string provider & model fields.
+	failedEvents := []eventstore.NewEvent{
+		{ProjectID: "prj_a", Type: "turn.started", Data: json.RawMessage(encoded(object{"conversationId": "coo_a", "turnId": "turn_fail", "model": "fixture"}))},
+		{ProjectID: "prj_a", Type: "conversation.model_failed", Data: json.RawMessage(encoded(object{
+			"conversationId": "coo_a",
+			"turnId":         "turn_fail",
+			"purpose":        "step",
+			"input":          object{"call": "call"},
+			"failure": object{
+				"attempt":    1,
+				"startedAt":  200,
+				"finishedAt": 210,
+				"detail":     "rate limited",
+				"retryable":  true,
+				"willRetry":  false,
+			},
+		}))},
+		{ProjectID: "prj_a", Type: "turn.finished", Data: json.RawMessage(encoded(object{"conversationId": "coo_a", "turnId": "turn_fail", "outcome": "failed", "error": nil}))},
+	}
+	if _, err := repo.Store.Append(t.Context(), failedEvents); err != nil {
+		t.Fatal(err)
+	}
+	failResp, err := client.GetTrace(t.Context(), connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: "coo_a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawFailure bool
+	for _, turn := range failResp.Msg.GetTurns() {
+		if turn.GetTurnId() != "turn_fail" {
+			continue
+		}
+		for _, item := range turn.GetItems() {
+			if f := item.GetRequestFailed(); f != nil {
+				sawFailure = true
+				if f.Provider == nil || *f.Provider != "openai-compatible" || f.Model == nil || *f.Model != "gpt-6.1" {
+					t.Fatalf("expected provider=openai-compatible and model=gpt-6.1 on failed request, got provider=%v model=%v", f.Provider, f.Model)
+				}
+			}
+		}
+	}
+	if !sawFailure {
+		t.Fatalf("expected request-failed item in turn_fail: %+v", failResp.Msg.GetTurns())
 	}
 }

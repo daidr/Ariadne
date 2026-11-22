@@ -2,22 +2,59 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/data"
+	"github.com/daidr/Ariadne/internal/domainerr"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 )
 
-func TestDataSummaryDoesNotWaitForWorkspaceScan(t *testing.T) {
+func bearerClientInterceptor(token string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			if token != "" {
+				req.Header().Set("Authorization", "Bearer "+token)
+			}
+			return next(ctx, req)
+		}
+	}
+}
+
+func extractLocalizedError(t *testing.T, err error) (*connect.Error, *ariadnev1.LocalizedError) {
+	t.Helper()
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		t.Fatalf("expected *connect.Error, got %T: %v", err, err)
+	}
+	for _, detail := range connectErr.Details() {
+		value, valueErr := detail.Value()
+		if valueErr != nil {
+			t.Fatalf("decode error detail: %v", valueErr)
+		}
+		if localized, ok := value.(*ariadnev1.LocalizedError); ok {
+			return connectErr, localized
+		}
+	}
+	return connectErr, nil
+}
+
+func TestDataServiceConnectEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "ariadne.db")
-	repo, err := core.Open(t.Context(), core.Options{Path: path})
+	now := time.UnixMilli(1_800_000_000_000)
+	repo, err := core.Open(t.Context(), core.Options{Path: path, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +65,7 @@ func TestDataSummaryDoesNotWaitForWorkspaceScan(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	storage, err := data.New(data.Options{
 		Events: repo.Store, Home: home, DatabasePath: path,
+		Now: func() time.Time { return now },
 		Scan: func(ctx context.Context, _ string) *int64 {
 			close(entered)
 			select {
@@ -42,53 +80,187 @@ func TestDataSummaryDoesNotWaitForWorkspaceScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer storage.Close()
-	api, err := New(Options{Repository: repo, Data: storage, Token: "test-token"})
+	api, err := New(Options{
+		Repository: repo,
+		Data:       storage,
+		Token:      "test-token",
+		Now:        func() time.Time { return now },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer api.Close()
-	get := func(ctx context.Context, path string) *httptest.ResponseRecorder {
-		request := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
-		request.Header.Set("Authorization", "Bearer test-token")
-		response := httptest.NewRecorder()
-		api.ServeHTTP(response, request)
-		return response
+
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+
+	client := ariadnev1connect.NewDataServiceClient(
+		srv.Client(),
+		srv.URL+rpcPrefix,
+		connect.WithInterceptors(bearerClientInterceptor("test-token")),
+	)
+	unauthClient := ariadnev1connect.NewDataServiceClient(srv.Client(), srv.URL+rpcPrefix)
+
+	// Unauthenticated request is rejected before service execution.
+	_, err = unauthClient.GetDataUsage(t.Context(), connect.NewRequest(&ariadnev1.GetDataUsageRequest{}))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("expected unauthenticated error, got %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	measured := make(chan *httptest.ResponseRecorder, 1)
-	go func() { measured <- get(ctx, "/api/settings/data") }()
+	type usageResult struct {
+		resp *connect.Response[ariadnev1.GetDataUsageResponse]
+		err  error
+	}
+	measured := make(chan usageResult, 1)
+	go func() {
+		resp, callErr := client.GetDataUsage(ctx, connect.NewRequest(&ariadnev1.GetDataUsageRequest{IncludeSizes: true}))
+		measured <- usageResult{resp: resp, err: callErr}
+	}()
 	select {
 	case <-entered:
 	case <-ctx.Done():
 		t.Fatal("disk scan did not start")
 	}
 
-	summary := get(ctx, "/api/settings/data?sizes=0")
-	var usage data.Usage
-	if err := json.Unmarshal(summary.Body.Bytes(), &usage); err != nil ||
-		summary.Code != http.StatusOK || usage.Home != home || usage.Database == 0 || usage.Plugins != nil {
-		t.Fatalf("summary failed while scan was blocked: %d %s", summary.Code, summary.Body)
+	// Summary succeeds immediately while full size scan is blocked.
+	summaryResp, err := client.GetDataUsage(ctx, connect.NewRequest(&ariadnev1.GetDataUsageRequest{IncludeSizes: false}))
+	if err != nil {
+		t.Fatalf("summary failed while scan was blocked: %v", err)
+	}
+	if summaryResp.Msg.Home != home || summaryResp.Msg.Database == 0 || summaryResp.Msg.Plugins != nil {
+		t.Fatalf("unexpected summary payload: %+v", summaryResp.Msg)
+	}
+	if got := summaryResp.Header().Get("X-Ariadne-Server-Time"); got != strconv.FormatInt(now.UnixMilli(), 10) {
+		t.Fatalf("unexpected X-Ariadne-Server-Time: %q", got)
+	}
+	if got := summaryResp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("unexpected Cache-Control: %q", got)
+	}
+	if len(summaryResp.Header().Values("Set-Cookie")) != 1 {
+		t.Fatalf("expected file session Set-Cookie header, got %v", summaryResp.Header().Values("Set-Cookie"))
 	}
 
 	close(release)
-	response := <-measured
-	if err := json.Unmarshal(response.Body.Bytes(), &usage); err != nil ||
-		response.Code != http.StatusOK || usage.Plugins == nil || *usage.Plugins != 123 {
-		t.Fatalf("measurement failed: %d %s", response.Code, response.Body)
+	full := <-measured
+	if full.err != nil || full.resp.Msg.Plugins == nil || *full.resp.Msg.Plugins != 123 {
+		t.Fatalf("full measurement failed: resp=%+v err=%v", full.resp, full.err)
 	}
 
-	combined := get(ctx, "/api/settings/data?sizes=storage")
-	var result struct {
-		Storage *data.StorageSnapshot
+	// Measure storage snapshot and verify cached read matches.
+	combined, err := client.GetStorageSnapshot(ctx, connect.NewRequest(&ariadnev1.GetStorageSnapshotRequest{CachedOnly: false}))
+	if err != nil || combined.Msg.Storage == nil || combined.Msg.Storage.MeasuredAt == 0 {
+		t.Fatalf("storage snapshot failed: resp=%+v err=%v", combined, err)
 	}
-	if err := json.Unmarshal(combined.Body.Bytes(), &result); err != nil ||
-		combined.Code != http.StatusOK || result.Storage == nil || result.Storage.MeasuredAt == 0 {
-		t.Fatalf("combined measurement failed: %d %s", combined.Code, combined.Body)
+	cached, err := client.GetStorageSnapshot(ctx, connect.NewRequest(&ariadnev1.GetStorageSnapshotRequest{CachedOnly: true}))
+	if err != nil || !proto.Equal(cached.Msg.Storage, combined.Msg.Storage) {
+		t.Fatalf("cached snapshot differed: got=%+v want=%+v err=%v", cached, combined, err)
 	}
-	cached := get(ctx, "/api/settings/data?sizes=cached")
-	if cached.Code != http.StatusOK || cached.Body.String() != combined.Body.String() {
-		t.Fatalf("cached measurement differed: %d %s", cached.Code, cached.Body)
+
+	// Create and delete a database backup via write RPCs.
+	created, err := client.CreateBackup(ctx, connect.NewRequest(&ariadnev1.CreateBackupRequest{}))
+	if err != nil || created.Msg.Backup == nil || created.Msg.Backup.Name == "" || created.Msg.Backup.Size == 0 {
+		t.Fatalf("create backup failed: resp=%+v err=%v", created, err)
 	}
+	if _, err := client.DeleteBackup(ctx, connect.NewRequest(&ariadnev1.DeleteBackupRequest{Name: created.Msg.Backup.Name})); err != nil {
+		t.Fatalf("delete backup failed: %v", err)
+	}
+
+	// Invalid backup name maps domainerr into Connect InvalidArgument + LocalizedError detail.
+	_, err = client.DeleteBackup(ctx, connect.NewRequest(&ariadnev1.DeleteBackupRequest{Name: "../bad"}))
+	connectErr, detail := extractLocalizedError(t, err)
+	if connectErr.Code() != connect.CodeInvalidArgument || detail == nil || detail.Key == "" {
+		t.Fatalf("expected invalid argument with localized detail, got code=%v detail=%+v", connectErr.Code(), detail)
+	}
+
+	// Invalid worktree path returns error.invalidBody with reason=path and response metadata headers.
+	_, err = client.MeasureWorktreeReclaimable(ctx, connect.NewRequest(&ariadnev1.MeasureWorktreeReclaimableRequest{Path: "relative/path"}))
+	connectErr, detail = extractLocalizedError(t, err)
+	if connectErr.Code() != connect.CodeInvalidArgument || detail == nil || detail.Key != "error.invalidBody" || detail.Params["reason"].GetStringValue() != "path" {
+		t.Fatalf("unexpected reclaimable error: code=%v detail=%+v", connectErr.Code(), detail)
+	}
+	if got := connectErr.Meta().Get("X-Ariadne-Server-Time"); got != strconv.FormatInt(now.UnixMilli(), 10) {
+		t.Fatalf("unexpected error X-Ariadne-Server-Time: %q", got)
+	}
+	if got := connectErr.Meta().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("unexpected error Cache-Control: %q", got)
+	}
+}
+
+func TestConnectErrorMappingAndDirectAuthInterceptor(t *testing.T) {
+	var reported []error
+	repo, err := core.Open(t.Context(), core.Options{Path: filepath.Join(t.TempDir(), "rpc.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	api, err := New(Options{
+		Repository: repo,
+		Token:      "secret",
+		OnError:    func(err error) { reported = append(reported, err) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+
+	// Verify connectAuthInterceptor protects direct rpcMux calls even without httpauth.Middleware.
+	directSrv := httptest.NewServer(api.rpcMux)
+	defer directSrv.Close()
+	directClient := ariadnev1connect.NewDataServiceClient(directSrv.Client(), directSrv.URL)
+	_, err = directClient.GetDataUsage(t.Context(), connect.NewRequest(&ariadnev1.GetDataUsageRequest{}))
+	connectErr, detail := extractLocalizedError(t, err)
+	if connectErr.Code() != connect.CodeUnauthenticated || detail == nil || detail.Key != "error.unauthorized" {
+		t.Fatalf("direct auth interceptor failed: code=%v detail=%+v", connectErr.Code(), detail)
+	}
+
+	// Verify domainerr -> Connect code mappings.
+	cases := []struct {
+		name     string
+		err      error
+		wantCode connect.Code
+		wantKey  string
+	}{
+		{
+			name:     "notFound",
+			err:      domainerr.NotFound("item"),
+			wantCode: connect.CodeNotFound,
+			wantKey:  "error.notFound",
+		},
+		{
+			name:     "conflict",
+			err:      domainerr.New("error.artifactConflict", object{"currentVersion": 3}),
+			wantCode: connect.CodeAborted,
+			wantKey:  "error.artifactConflict",
+		},
+		{
+			name:     "internal",
+			err:      errors.New("boom"),
+			wantCode: connect.CodeInternal,
+			wantKey:  "error.invalidBody",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mapped := api.toConnectError(tc.err)
+			ce, det := extractLocalizedError(t, mapped)
+			if ce.Code() != tc.wantCode || det == nil || det.Key != tc.wantKey {
+				t.Fatalf("got code=%v detail=%+v, want code=%v key=%s", ce.Code(), det, tc.wantCode, tc.wantKey)
+			}
+		})
+	}
+	if len(reported) != 1 || reported[0].Error() != "boom" {
+		t.Fatalf("expected unexpected error to be reported once, got %v", reported)
+	}
+
+	// Verify mountConnect fails fast if service descriptor lookup returned nil.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected mountConnect(nil, ...) to panic")
+		}
+	}()
+	api.mountConnect(nil, func(...connect.HandlerOption) (string, http.Handler) {
+		return "/invalid/", http.NotFoundHandler()
+	})
 }

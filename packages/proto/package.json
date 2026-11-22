@@ -1,0 +1,13 @@
+{
+  "name": "@ariadne/proto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./v1/*": "./src/gen/ariadne/v1/*_pb.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.17.0"
+  }
+}

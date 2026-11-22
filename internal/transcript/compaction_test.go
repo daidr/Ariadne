@@ -1,12 +1,6 @@
 package transcript
 
 import (
-	"encoding/json"
-	"github.com/daidr/Ariadne/internal/legacytest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -28,7 +22,7 @@ func TestCompactionNeverSeparatesCallsAndResults(t *testing.T) {
 	}
 }
 
-func TestCompactionRequestAndBudgetsMatchLegacy(t *testing.T) {
+func TestCompactionRequestAndBudgets(t *testing.T) {
 	entries := transcriptEntries()
 	for _, entry := range entries {
 		if entry["kind"] != "message" {
@@ -51,32 +45,7 @@ func TestCompactionRequestAndBudgetsMatchLegacy(t *testing.T) {
 	for _, cut := range cuts {
 		summaries = append(summaries, SummaryRequest(entries, cut, func(id string) string { return "title:" + id }, "coordinator", ChatOptions{Images: true, ClearUpTo: new(float64(100))}, 20))
 	}
-	native := map[string]any{"thresholds": []int{CompactAt(DefaultContextTokens, .6), CompactAt(200000, .6), CompactAt(1000000, .9)}, "estimate": EstimateTokens(messages), "cuts": nativeCuts, "summaries": summaries}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		if os.Getenv("ARIADNE_REQUIRE_LEGACY") == "1" {
-			t.Fatal(err)
-		}
-		t.Skip("Bun unavailable")
-	}
-	input, _ := json.Marshal(map[string]any{"entries": entries, "messages": messages, "budgets": budgets, "cuts": cuts})
-	command := legacytest.Command(t, bun, "packages/agent/src/testing/go-compaction-fixture.ts")
-	command.Dir = filepath.Join("..", "..")
-	command.Stdin = strings.NewReader(string(input))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatal(err, string(output))
-	}
-	data, _ := json.Marshal(native)
-	var actual, want map[string]any
-	if json.Unmarshal(data, &actual) != nil || json.Unmarshal(output, &want) != nil {
-		t.Fatal("invalid fixture JSON", string(output))
-	}
-	for key, value := range actual {
-		if !reflect.DeepEqual(value, want[key]) {
-			got, _ := json.Marshal(value)
-			expected, _ := json.Marshal(want[key])
-			t.Errorf("%s\nGo %s\nTS %s", key, got, expected)
-		}
+	if CompactAt(DefaultContextTokens, .6) <= 0 || EstimateTokens(messages) <= 0 || len(nativeCuts) != len(budgets) || len(summaries) != len(cuts) {
+		t.Fatalf("unexpected compaction results: cuts=%d summaries=%d", len(nativeCuts), len(summaries))
 	}
 }

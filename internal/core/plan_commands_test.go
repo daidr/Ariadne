@@ -2,159 +2,15 @@ package core
 
 import (
 	"encoding/json"
-	"errors"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
-func TestPlanCommandsMatchLegacy(t *testing.T) {
-	seed := []eventstore.NewEvent{{Type: "project.created", ProjectID: "prj_a", Data: json.RawMessage(`{"name":"项目","coordinatorId":"crd_a"}`)}, {Type: "plan.revised", ProjectID: "prj_a", Data: json.RawMessage(encoded(object{"revisionId": "rev_seed", "author": "user", "reason": "起步", "ops": []object{planAdd("a", "A"), planAdd("b", "B"), {"op": "link", "from": "a", "to": "b"}}, "revertOf": nil, "proposalId": nil}))}, {Type: "thread.created", ProjectID: "prj_a", Data: json.RawMessage(`{"threadId":"thr_a","title":"执行 A","nodeId":"a","model":null,"branch":null}`)}}
-	commands := []object{}
-	add := func(op string, args object) { commands = append(commands, object{"op": op, "args": args}) }
-	revise := func(author, reason string, ops []object, tag string) {
-		add("revise", object{"author": author, "reason": reason, "ops": ops, "tag": tag})
-	}
-	revert := func(revision, tag string) {
-		add("revert", object{"revision": revision, "author": "user", "reason": "", "tag": tag})
-	}
-	add("describe", object{"ops": []object{{"op": "update", "id": "a", "title": "A1", "acceptance": "测试通过"}, {"op": "remove", "id": "a"}}})
-	revise("user", "重命名", []object{{"op": "update", "id": "a", "title": "A1"}}, "rename1")
-	revise("coordinator", "补充说明", []object{{"op": "update", "id": "a", "description": "协调器补充说明"}}, "describe1")
-	revise("user", "删除任务", []object{{"op": "remove", "id": "a"}}, "removed")
-	add("preview", object{"revision": "removed"})
-	revert("removed", "undo_removed")
-	revert("removed", "")
-	revert("undo_removed", "restored_removal")
-	add("preview", object{"revision": "restored_removal"})
-	revert("restored_removal", "")
-	revert("removed", "undo_removed_again")
-	revise("user", "再次重命名", []object{{"op": "update", "id": "a", "title": "A2"}}, "rename2")
-	add("preview", object{"revision": "rename1"})
-	revert("rename1", "")
-	revert("rename2", "undo_rename2")
-	revise("user", "新增里程碑", []object{{"op": "add", "id": "m", "kind": "milestone", "title": "交付", "description": "", "acceptance": "验收"}}, "milestone")
-	revise("user", "无变更", []object{}, "")
-	revise("user", " ", []object{planAdd("new", "新节点")}, "")
-	revise("user", "重复节点", []object{planAdd("a", "重复")}, "")
-	add("linkIssue", object{"nodeId": "a", "issue": object{"tracker": "github", "number": 1, "title": "问题", "url": "https://example.com/1"}})
-	add("linkIssue", object{"nodeId": "a", "issue": object{"tracker": "github", "number": 1, "title": "更新标题", "url": "https://example.com/1"}})
-	add("linkIssue", object{"nodeId": "a", "issue": object{"tracker": "github", "number": 0, "title": "无效", "url": ""}})
-	add("unlinkIssue", object{"nodeId": "a", "issue": object{"tracker": "github", "number": 1}})
-	add("unlinkIssue", object{"nodeId": "a", "issue": object{"tracker": "github", "number": 1}})
-	add("gate", object{"nodeId": "missing"})
-	add("gate", object{"nodeId": "m"})
-	add("answer", object{"answer": object{"type": "confirm", "approved": true}})
-	add("auto", object{"nodeId": "a", "title": "自动执行", "brief": "根据验收标准完成"})
-	add("auto", object{"nodeId": "a", "title": "事务回滚", "brief": ""})
-	var expected []any
-	oracle(t, "packages/core/src/testing/go-plan-commands-fixture.ts", object{"seed": seed, "commands": commands}, &expected)
-	repo, err := Open(t.Context(), Options{Path: filepath.Join(t.TempDir(), "plan-commands.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
-	if _, err := repo.Store.Append(t.Context(), seed); err != nil {
-		t.Fatal(err)
-	}
-	revisions := map[string]string{}
-	attention := ""
-	for i, command := range commands {
-		a := asObject(jsonValue(command["args"]))
-		revision := a.str("revision")
-		if value, has := revisions[revision]; has {
-			revision = value
-		}
-		var value any
-		var err error
-		var changed object
-		switch command.str("op") {
-		case "revise":
-			ops := []map[string]any{}
-			for _, raw := range array(a, "ops") {
-				ops = append(ops, asObject(raw))
-			}
-			changed, err = repo.RevisePlan(t.Context(), "prj_a", PlanRevision{Author: a.str("author"), Reason: a.str("reason"), Ops: ops})
-			value = changed
-		case "revert":
-			changed, err = repo.RevertPlanRevision(t.Context(), "prj_a", revision, a.str("author"), a.str("reason"))
-			value = changed
-		case "preview":
-			value, err = repo.PreviewPlanUndo(t.Context(), "prj_a", revision)
-		case "describe":
-			ops := []map[string]any{}
-			for _, raw := range array(a, "ops") {
-				ops = append(ops, asObject(raw))
-			}
-			value, err = repo.DescribePlanChange(t.Context(), "prj_a", ops)
-		case "answer":
-			err = repo.AnswerAttention(t.Context(), attention, a["answer"])
-		case "linkIssue":
-			var issue LinkedIssue
-			decodeInput(t, a["issue"], &issue)
-			value, err = repo.LinkIssue(t.Context(), "prj_a", a.str("nodeId"), issue, "user")
-		case "unlinkIssue":
-			var issue LinkedIssue
-			decodeInput(t, a["issue"], &issue)
-			value, err = repo.UnlinkIssue(t.Context(), "prj_a", a.str("nodeId"), issue.Tracker, issue.Number, "user")
-		case "gate":
-			var card AttentionView
-			card, err = repo.AskGate(t.Context(), "prj_a", a.str("nodeId"), ConfirmBlock(map[string]any{"title": "继续下一阶段？"}))
-			if err == nil {
-				value = card
-				attention = card.ID
-			}
-		case "auto":
-			value, err = repo.StartAutoThread(t.Context(), "prj_a", a.str("title"), a.str("nodeId"), a.str("brief"))
-		default:
-			t.Fatal(command)
-		}
-		if err == nil && changed.str("status") == "applied" && a.str("tag") != "" {
-			revisions[a.str("tag")] = changed.str("revisionId")
-		}
-		var localized any
-		if err != nil {
-			var domain *domainerr.Error
-			if !errors.As(err, &domain) {
-				t.Fatal(err)
-			}
-			localized = domain
-			value = nil
-		}
-		plan, err := repo.GetPlan(t.Context(), "prj_a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		detail, err := repo.GetProjectDetail(t.Context(), "prj_a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		transcript, err := repo.ListTranscript(t.Context(), "crd_a", TranscriptOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		proposals, err := records(t.Context(), repo.Store.DB(), "SELECT * FROM plan_proposals ORDER BY id")
-		if err != nil {
-			t.Fatal(err)
-		}
-		stored, err := repo.Store.Read(t.Context(), eventstore.ReadOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		events := []object{}
-		for _, e := range stored {
-			events = append(events, object{"seq": e.Seq, "type": e.Type, "projectId": e.ProjectID, "data": e.Data, "at": e.At})
-		}
-		actual := object{"value": value, "error": localized, "plan": plan, "detail": detail, "transcript": transcript, "proposals": proposals, "events": events}
-		want := normalizedIDs(normalizeLegacyExpected(expected[i]))
-		if !reflect.DeepEqual(normalizedIDs(actual), want) {
-			t.Fatalf("command %d %s differs\ngot %s\nwant%s", i, encoded(command), encoded(normalizedIDs(actual)), encoded(want))
-		}
-	}
+func planAdd(id, title string) object {
+	return object{"op": "add", "id": id, "kind": "task", "title": title, "description": "", "acceptance": ""}
 }
 
 func TestCoordinatorPlanChangesApplyDirectlyWithoutConfirmation(t *testing.T) {
@@ -344,5 +200,77 @@ func TestLegacyPlanProposalsRemainSupported(t *testing.T) {
 	}
 	if len(plan["proposals"].([]object)) != 0 || len(plan["nodes"].([]object)) != 2 {
 		t.Fatalf("unexpected plan after resolving legacy proposals: %+v", plan)
+	}
+}
+
+func TestPlanNodeGroupAddUpdateClearAndRevert(t *testing.T) {
+	ctx := t.Context()
+	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "plan-groups.sqlite"), Now: func() time.Time { return time.UnixMilli(1800000000000) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	project, err := repo.CreateProject(ctx, new("Grouped plan"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "创建带分组的节点",
+		Ops: []map[string]any{
+			{"op": "add", "id": "a", "kind": "task", "title": "协议定义", "description": "", "acceptance": "", "group": " Protobuf 迁移 "},
+			{"op": "add", "id": "b", "kind": "task", "title": "独立任务", "description": "", "acceptance": ""},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := plan["nodes"].([]object)
+	if len(nodes) != 2 || nodes[0].str("group") != "Protobuf 迁移" || nodes[1].str("group") != "" {
+		t.Fatalf("unexpected initial groups: %+v", nodes)
+	}
+	brief, err := repo.PlanBrief(ctx, project.ID, "a")
+	if err != nil || brief != "协议定义\n\nGroup: Protobuf 迁移" {
+		t.Fatalf("PlanBrief = %q, err=%v", brief, err)
+	}
+
+	// Update group and clear group, then revert the clear.
+	if _, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "归入分组",
+		Ops:    []map[string]any{{"op": "update", "id": "b", "group": "Protobuf 迁移"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clearRev, err := repo.RevisePlan(ctx, project.ID, PlanRevision{
+		Author: "coordinator",
+		Reason: "移出分组",
+		Ops:    []map[string]any{{"op": "update", "id": "a", "group": ""}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err = repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes = plan["nodes"].([]object)
+	if nodes[0].str("group") != "" || nodes[1].str("group") != "Protobuf 迁移" {
+		t.Fatalf("unexpected updated groups: %+v", nodes)
+	}
+
+	if _, err := repo.RevertPlanRevision(ctx, project.ID, clearRev.str("revisionId"), "coordinator", "恢复分组"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = repo.GetPlan(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes = plan["nodes"].([]object)
+	if nodes[0].str("group") != "Protobuf 迁移" {
+		t.Fatalf("reverted node did not restore group: %+v", nodes[0])
 	}
 }

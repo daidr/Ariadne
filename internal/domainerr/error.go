@@ -31,11 +31,13 @@ func Write(writer http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	if errors.As(err, &localized) {
 		status = http.StatusBadRequest
-		if localized.Key == "error.notFound" {
+		switch localized.Key {
+		case "error.notFound", "error.priceUnknown":
 			status = http.StatusNotFound
-		}
-		if localized.Key == "error.artifactConflict" {
+		case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable":
 			status = http.StatusConflict
+		case "error.modelCheck", "error.priceCatalog":
+			status = http.StatusBadGateway
 		}
 	} else {
 		localized = New("error.invalidBody", map[string]any{"reason": "internal"})

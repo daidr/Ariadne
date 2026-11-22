@@ -44,6 +44,17 @@ func viewable(files []Attachment, options ChatOptions) ([]Attachment, string) {
 	}
 	return shown, ""
 }
+func formatByteSize(size int64) string {
+	switch {
+	case size >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(size)/float64(1<<20))
+	case size >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(size)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", size)
+	}
+}
+
 func attachedFiles(files []Attachment, options ChatOptions) (string, []Attachment) {
 	parts := []string{}
 	for _, file := range files {
@@ -65,9 +76,20 @@ func attachedFiles(files []Attachment, options ChatOptions) (string, []Attachmen
 		block := Fenced("attached_file", body, `name="`+attributeText.Replace(file.Name)+`"`)
 		extra := ""
 		if cut {
-			extra = ", cut after " + decimal(MaxAttachedChars) + " characters"
+			extra = ", cut after " + decimal(MaxAttachedChars) + " characters (fileId: " + file.FileID + "; use read_attachment or save_attachment for the rest)"
 		}
 		parts = append(parts, `The user attached "`+file.Name+`"; its text is inside <`+block.Tag+">"+extra+".\n"+block.Text)
+	}
+	for _, file := range files {
+		if file.MIME == "text/plain" || strings.HasPrefix(file.MIME, "image/") {
+			continue
+		}
+		mimeType := file.MIME
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		parts = append(parts, fmt.Sprintf(`[the user attached "%s" (fileId: %s, type: %s, size: %s); use read_attachment to inspect it, or save_attachment in a writable workspace]`,
+			Defang(file.Name), file.FileID, mimeType, formatByteSize(file.Size)))
 	}
 	shown, notes := viewable(files, options)
 	if notes != "" {

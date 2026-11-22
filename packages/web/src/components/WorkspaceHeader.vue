@@ -11,11 +11,16 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import { useSourceStatus } from '../source-status'
 import { openProjectSettings, showWorkspace, state } from '../store'
+import AriadneLogo from './AriadneLogo.vue'
 import AttentionBar from './AttentionBar.vue'
 import AutopilotSwitch from './AutopilotSwitch.vue'
 import ProjectSearch from './ProjectSearch.vue'
 
-const props = defineProps<{ compact: boolean; projectsCollapsed: boolean }>()
+const props = defineProps<{
+  compact: boolean
+  projectsCollapsed: boolean
+  unauthorized?: boolean
+}>()
 const emit = defineEmits<{ toggleProjects: []; openSettings: [] }>()
 
 const { summary } = useSourceStatus()
@@ -26,7 +31,7 @@ const atProjects = computed(() => state.workspaceLevel === 'projects')
 const atSide = computed(() => state.workspaceLevel === 'side')
 const backLabel = computed(() => t(atSide.value ? 'nav.backToCoordinator' : 'nav.backToProjects'))
 const title = computed(() => {
-  if (!props.compact || atProjects.value) return t('app.name')
+  if (props.unauthorized || !props.compact || atProjects.value) return t('app.name')
   if (state.starting) return t('nav.newProject')
   return state.projects.find((project) => project.id === state.currentId)?.name ?? t('app.name')
 })
@@ -37,7 +42,7 @@ const title = computed(() => {
     <div class="workspace-header">
       <div class="header-brand">
         <DouButton
-          v-if="compact && !atProjects"
+          v-if="!unauthorized && compact && !atProjects"
           variant="ghost"
           size="sm"
           class="header-navigation"
@@ -48,7 +53,7 @@ const title = computed(() => {
           <ChevronLeftIcon aria-hidden="true" />
         </DouButton>
         <DouButton
-          v-else-if="!compact && state.main.kind !== 'trace'"
+          v-else-if="!unauthorized && !compact && state.main.kind !== 'trace'"
           variant="ghost"
           size="sm"
           :aria-label="desktopSidebarLabel"
@@ -58,9 +63,10 @@ const title = computed(() => {
         >
           <PanelLeftIcon aria-hidden="true" />
         </DouButton>
+        <AriadneLogo v-if="unauthorized || !compact || atProjects" class="header-logo" />
         <DouText weight="medium" truncate>{{ title }}</DouText>
       </div>
-      <div class="header-actions">
+      <div v-if="!unauthorized" class="header-actions">
         <ProjectSearch />
         <template v-if="state.detail && (!compact || !atProjects)">
           <AutopilotSwitch :compact="compact" />

@@ -51,7 +51,8 @@ const imagesOf = (message: Message) =>
   message.role === 'user' || message.role === 'tool' ? (message.images ?? []) : []
 
 function openFile(file: ChatAttachment) {
-  if (file.url) window.open(file.url, '_blank', 'noopener')
+  const url = file.url || (file.uid ? `/api/files/${file.uid}` : '')
+  if (url) window.open(url, '_blank', 'noopener')
 }
 
 const tools = computed(() => JSON.stringify(input.value.tools, null, 2))
