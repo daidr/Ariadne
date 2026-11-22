@@ -35,27 +35,38 @@ import {
 } from '../store'
 import ProjectActivityPopover from './ProjectActivityPopover.vue'
 
-defineProps<{ compact?: boolean }>()
+const props = withDefaults(defineProps<{ compact?: boolean; active?: boolean }>(), {
+  active: true,
+})
 
 const dialog = useDialog()
 const canReorder = computed(() => state.projects.length > 1)
 const menuOpen = ref(false)
 const inspecting = ref<string>()
+const activityDisabled = computed(() => !!props.compact || !props.active || menuOpen.value)
 
 function inspectProject(id: string, open: boolean) {
-  if (open && !menuOpen.value) inspecting.value = id
+  if (open && !activityDisabled.value) inspecting.value = id
   else if (inspecting.value === id) inspecting.value = undefined
 }
 
-function selectProject(id: string) {
+function selectProject(id: string, dismiss?: () => void) {
+  dismiss?.()
   inspecting.value = undefined
   if (state.detail?.project.id === id) openMain({ kind: 'conversation' })
   else void openProject(id)
 }
 
-watch(menuOpen, (open) => {
-  if (open) inspecting.value = undefined
+watch(activityDisabled, (disabled) => {
+  if (disabled) inspecting.value = undefined
 })
+
+watch(
+  () => props.active,
+  (active) => {
+    if (!active) menuOpen.value = false
+  },
+)
 
 async function moveProject(event: KeyboardEvent, id: string, offset: number) {
   if (!canReorder.value) return
@@ -174,11 +185,11 @@ async function confirmDelete(id: string) {
         >
           <template #default="{ item }">
             <ProjectActivityPopover
-              v-slot="{ inspect, dismiss }"
+              v-slot="{ inspect, dismiss, trackPointer }"
               :project-id="item.id"
               :name="item.name"
               :open="inspecting === item.id"
-              :disabled="menuOpen"
+              :disabled="activityDisabled"
               @update:open="(open) => inspectProject(item.id, open)"
             >
               <button
@@ -187,9 +198,12 @@ async function confirmDelete(id: string) {
                 :data-project-id="item.id"
                 :data-dou-sortable-handle="canReorder ? '' : undefined"
                 :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
-                :aria-expanded="inspecting === item.id"
+                :aria-expanded="activityDisabled ? undefined : inspecting === item.id"
                 :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-                @click="selectProject(item.id)"
+                @pointerdown="trackPointer"
+                @pointercancel="trackPointer"
+                @pointerenter="trackPointer"
+                @click="selectProject(item.id, dismiss)"
                 @focus="inspect"
                 @blur="dismiss"
                 @keydown.esc="dismiss"

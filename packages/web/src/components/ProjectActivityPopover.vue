@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ActivityStatus, ProjectActivity } from '@ariadne/core'
 import { DouPopover, DouSkeleton, DouStatusDot, DouText } from 'dou-ui'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { api } from '../api'
 import { coalescedRefresh } from '../coalesced-refresh'
 import { t } from '../i18n'
@@ -9,6 +9,10 @@ import { onLiveEvent, partsOf } from '../store'
 
 const props = defineProps<{ projectId: string; name: string; disabled?: boolean }>()
 const open = defineModel<boolean>('open', { required: true })
+const popover = useTemplateRef<{ close: () => void }>('popover')
+const touchPress = ref(false)
+const effectiveDisabled = computed(() => !!props.disabled || touchPress.value)
+let suppressOpen = false
 const activity = shallowRef<ProjectActivity | null>()
 const labels = {
   running: 'project.activity.running',
@@ -27,15 +31,46 @@ const groups = computed(() => {
   ]
 })
 
+function trackPointer(event: PointerEvent) {
+  if (event.type === 'pointerdown') {
+    touchPress.value = event.pointerType === 'touch' || event.pointerType === 'pen'
+  } else if (event.type === 'pointercancel') {
+    touchPress.value = false
+  } else if (event.type === 'pointerenter' && event.pointerType === 'mouse') {
+    touchPress.value = false
+  }
+}
+
 function inspect(event: FocusEvent) {
-  if (!props.disabled && (event.currentTarget as HTMLElement).matches(':focus-visible')) {
+  if (!effectiveDisabled.value && (event.currentTarget as HTMLElement).matches(':focus-visible')) {
     open.value = true
   }
 }
 
 function dismiss() {
+  suppressOpen = true
+  queueMicrotask(() => {
+    suppressOpen = false
+    touchPress.value = false
+  })
+  popover.value?.close()
   open.value = false
 }
+
+function updateOpen(value: boolean) {
+  if (value && (effectiveDisabled.value || suppressOpen)) {
+    popover.value?.close()
+    open.value = false
+    return
+  }
+  open.value = value
+}
+
+watch(effectiveDisabled, (disabled) => {
+  if (!disabled) return
+  popover.value?.close()
+  open.value = false
+})
 
 watch([open, () => props.projectId], ([visible, id], _, onCleanup) => {
   if (!visible) return
@@ -71,8 +106,9 @@ watch([open, () => props.projectId], ([visible, id], _, onCleanup) => {
 
 <template>
   <DouPopover
-    v-model:open="open"
-    :disabled="disabled"
+    ref="popover"
+    :open="open"
+    :disabled="effectiveDisabled"
     trigger="hover"
     placement="right-start"
     :width="308"
@@ -80,8 +116,9 @@ watch([open, () => props.projectId], ([visible, id], _, onCleanup) => {
     :hide-delay="150"
     :title="name"
     :aria-label="t('project.activity')"
+    @update:open="updateOpen"
   >
-    <slot :inspect="inspect" :dismiss="dismiss" />
+    <slot :inspect="inspect" :dismiss="dismiss" :track-pointer="trackPointer" />
     <template #content>
       <div v-if="groups" class="project-activity">
         <div v-for="group in groups" :key="group.key" class="activity-group">

@@ -71,6 +71,9 @@ const {
   collapsed: projectsCollapsed,
   save: saveProjectSidebar,
 } = useSidebarLayout('projects', projectBody)
+const projectsVisible = computed(() =>
+  compact.value ? state.workspaceLevel === 'projects' : !projectsCollapsed.value,
+)
 function toggleProjectSidebar(collapsed: boolean) {
   if (!compact.value) projectsCollapsed.value = collapsed
 }
@@ -143,7 +146,7 @@ watchEffect(() => {
         >
           <template #start>
             <DouLayoutAside width="100%" :bordered="false" class="project-sidebar">
-              <ProjectList :compact="compact" />
+              <ProjectList :compact="compact" :active="projectsVisible" />
             </DouLayoutAside>
           </template>
           <template #end>
