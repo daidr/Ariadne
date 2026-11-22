@@ -256,7 +256,7 @@ async function confirmDelete(id: string) {
 }
 
 .projects-popover {
-  --project-row-base: var(--dou-color-bg-surface);
+  --project-row-base: var(--dou-popover-bg, var(--dou-color-bg-surface));
 }
 
 .projects-popover nav {
