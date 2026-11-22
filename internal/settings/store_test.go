@@ -277,11 +277,11 @@ func TestSettingsStoreLifecycle(t *testing.T) {
 			case "resolve":
 				value := object(action.Value)
 				var resolved *ResolvedModel
-					if size, exists := value["contextTokens"]; exists {
-						resolved, err = store.ResolveCoordinator(value["triage"] == true, size.(float64), testModelKinds())
-					} else {
-						resolved, err = store.ResolveModel(text(value["role"]), text(value["given"]), text(value["effort"]), testModelKinds())
-					}
+				if size, exists := value["contextTokens"]; exists {
+					resolved, err = store.ResolveCoordinator(value["triage"] == true, size.(float64), testModelKinds())
+				} else {
+					resolved, err = store.ResolveModel(text(value["role"]), text(value["given"]), text(value["effort"]), testModelKinds())
+				}
 				result = stableResolved(resolved)
 			case "choices":
 				result = store.ModelChoices(nil)
@@ -573,6 +573,15 @@ func TestLegacyFallbackIgnoredAndEffortResolution(t *testing.T) {
 	}
 	if conv := store.ConversationModel("thread", "m-fast", "max"); conv["id"] != "m-fast" || conv["effort"] != "medium" {
 		t.Fatalf("override ConversationModel = %#v", conv)
+	}
+
+	// A thread override referencing a deleted model falls back to both the default thread model and default thread effort.
+	deletedResolved, err := store.ResolveModel("thread", "m-deleted", "low", kinds)
+	if err != nil || deletedResolved == nil || deletedResolved.Model != "claude-opus" || deletedResolved.Effort != "high" {
+		t.Fatalf("deleted thread override resolved = %+v, err=%v", deletedResolved, err)
+	}
+	if conv := store.ConversationModel("thread", "m-deleted", "low"); conv["id"] != "m-main" || conv["effort"] != "high" {
+		t.Fatalf("deleted thread override ConversationModel = %#v", conv)
 	}
 
 	// ResolveResearch with model=null inherits parent model but applies roles.research.effort without mutating parent.

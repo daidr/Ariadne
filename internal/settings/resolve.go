@@ -76,14 +76,9 @@ func acceptedEfforts(chosen Object) *[]string {
 	return &values
 }
 func resolveEffort(config Object, role, givenEffort string, chosen Object, matchedGiven bool) string {
-	var wanted string
-	switch {
-	case role == "thread" && matchedGiven:
+	wanted := effortFor(config, role)
+	if role == "thread" && matchedGiven {
 		wanted = givenEffort
-	case role == "thread" && givenEffort != "":
-		wanted = givenEffort
-	default:
-		wanted = effortFor(config, role)
 	}
 	if wanted == "" {
 		return ""

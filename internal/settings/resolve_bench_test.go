@@ -23,11 +23,11 @@ func BenchmarkResolveModelCatalogSize(b *testing.B) {
 			kinds := testModelKinds()
 			b.ReportAllocs()
 			b.ResetTimer()
-				for range b.N {
-					if resolved, err := store.ResolveModel("thread", "", "", kinds); err != nil || resolved == nil {
-						b.Fatal(resolved, err)
-					}
+			for range b.N {
+				if resolved, err := store.ResolveModel("thread", "", "", kinds); err != nil || resolved == nil {
+					b.Fatal(resolved, err)
 				}
+			}
 		})
 	}
 }

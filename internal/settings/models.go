@@ -267,21 +267,21 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 		}
 		roleConfig := Object{}
 		givenRoles := object(body["roles"])
-			for _, role := range roles {
-				given := object(givenRoles[role])
-				entry := Object{"model": nil, "effort": nil}
-				for _, field := range []string{"model", "effort"} {
-					raw := given[field]
-					if raw != nil {
-						value, ok := raw.(string)
-						if !ok || field == "effort" && !hasString(efforts, value) || field != "effort" && !ids[value] {
-							return bad("roles." + role + "." + field)
-						}
-						entry[field] = value
+		for _, role := range roles {
+			given := object(givenRoles[role])
+			entry := Object{"model": nil, "effort": nil}
+			for _, field := range []string{"model", "effort"} {
+				raw := given[field]
+				if raw != nil {
+					value, ok := raw.(string)
+					if !ok || field == "effort" && !hasString(efforts, value) || field != "effort" && !ids[value] {
+						return bad("roles." + role + "." + field)
 					}
+					entry[field] = value
 				}
-				roleConfig[role] = entry
 			}
+			roleConfig[role] = entry
+		}
 		config["models"] = Object{"providers": providers, "models": models, "roles": roleConfig, "showCost": body["showCost"] == true}
 		changed := map[string]bool{}
 		registered := map[string]bool{}

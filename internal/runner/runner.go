@@ -389,17 +389,17 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 
 		request.Messages = turn.withImages(ctx, messages)
 		answer, err := modelstep.Request(ctx, provider, model.Settings, request, options)
-			if err != nil {
-				var failure *modelstep.Failure
-				if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.HasStatefulSessions() && failure.ContextLimit && !recoveredContext {
-					// The failed native session has been released. Compact if there is
-					// enough history, then resume the same discussion with a fresh session.
-					recoveredContext = true
-					lastInput = max(lastInput, threshold)
-					continue
-				}
-				return err
+		if err != nil {
+			var failure *modelstep.Failure
+			if ctx.Err() == nil && errors.As(err, &failure) && model.Provider.HasStatefulSessions() && failure.ContextLimit && !recoveredContext {
+				// The failed native session has been released. Compact if there is
+				// enough history, then resume the same discussion with a fresh session.
+				recoveredContext = true
+				lastInput = max(lastInput, threshold)
+				continue
 			}
+			return err
+		}
 		if answer.Usage != nil {
 			if answer.Usage.ContextInput != nil {
 				if *answer.Usage.ContextInput > 0 {
