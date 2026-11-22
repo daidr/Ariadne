@@ -79,6 +79,20 @@ export function useUpdatesSettings() {
       }
     } catch (cause) {
       if (!controller.signal.aborted && current === sequence) {
+        if (action === 'restart') {
+          const isBusinessError =
+            cause instanceof ApiError &&
+            cause.localized &&
+            cause.status < 500 &&
+            cause.status !== 499
+          if (isBusinessError) {
+            error.value = tm(cause.localized)
+          } else if (status.value) {
+            status.value = { ...status.value, restarting: true }
+            error.value = null
+          }
+          return
+        }
         error.value =
           cause instanceof ApiError && cause.localized
             ? tm(cause.localized)

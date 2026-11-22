@@ -149,7 +149,9 @@ func serveWithOptions(ctx context.Context, cfg config.Config, listener net.Liste
 		log.SetOutput(rotatingLog)
 		defer func() {
 			log.SetOutput(prevLogOutput)
-			_ = rotatingLog.Close()
+			if rotatingLog != nil {
+				_ = rotatingLog.Close()
+			}
 		}()
 	}
 
@@ -195,7 +197,10 @@ func serveWithOptions(ctx context.Context, cfg config.Config, listener net.Liste
 	serveCtx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
 
-	var restartRequested atomic.Bool
+	var (
+		restartRequested atomic.Bool
+		stopRequested    atomic.Bool
+	)
 	canRestart := opts.ManagedBy != service.ManagedDirect && executableErr == nil && executable != ""
 
 	app, err := application.Open(serveCtx, application.Options{
@@ -208,6 +213,8 @@ func serveWithOptions(ctx context.Context, cfg config.Config, listener net.Liste
 		OnShutdown: func(restart bool) {
 			if restart {
 				restartRequested.Store(true)
+			} else {
+				stopRequested.Store(true)
 			}
 			cancelServe()
 		},
@@ -292,6 +299,14 @@ func serveWithOptions(ctx context.Context, cfg config.Config, listener net.Liste
 
 	totalErr := errors.Join(serveErr, shutdownErr, closeErr)
 	if !restartRequested.Load() {
+		// When explicitly asked to stop (or terminated by a supervising service manager),
+		// exit with code 0 even if cleanup hit a timeout so launchd/systemd do not relaunch.
+		if stopRequested.Load() || ((opts.ManagedBy == service.ManagedLaunchd || opts.ManagedBy == service.ManagedSystemd) && ctx.Err() != nil) {
+			if totalErr != nil {
+				log.Printf("ariadne: cleanup warning during stop: %v", totalErr)
+			}
+			return nil
+		}
 		return totalErr
 	}
 

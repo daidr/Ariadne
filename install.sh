@@ -112,7 +112,7 @@ need_downloader() {
   fi
 }
 
-http_get() {
+http_api_get() {
   url="$1"
   out="$2"
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
@@ -142,6 +142,22 @@ http_get() {
         --header="User-Agent: ariadne-installer" \
         "$url" -O "$out"
     fi
+  fi
+}
+
+# Download public release assets without Authorization headers so credentials
+# are never forwarded across cross-origin redirects to object storage.
+http_download() {
+  url="$1"
+  out="$2"
+  if [ "$DOWNLOADER" = "curl" ]; then
+    curl -fsSL \
+      -H "User-Agent: ariadne-installer" \
+      "$url" -o "$out"
+  else
+    wget -q \
+      --header="User-Agent: ariadne-installer" \
+      "$url" -O "$out"
   fi
 }
 
@@ -239,12 +255,41 @@ process.exit(ok ? 0 : 1);
       sub(/"$/, "", s)
       return s
     }
-    /"tag_name"[ \t]*:/ {
-      if (in_rel && found_url != "" && draft != "true") {
-        if ((mode == "stable" && pre != "true") || mode != "stable") {
-          print tag; print pre; print found_url; print found_digest; exit 0
+    function emit(t, p, u, d) {
+      print t
+      print p
+      print u
+      print d
+      emitted = 1
+      exit 0
+    }
+    function consider() {
+      if (!in_rel || found_url == "" || draft == "true") {
+        return
+      }
+      if (mode == "stable") {
+        if (pre != "true") {
+          emit(tag, pre, found_url, found_digest)
+        }
+        return
+      }
+      if (mode == "tag" || mode == "preview") {
+        emit(tag, pre, found_url, found_digest)
+      }
+      if (mode == "auto") {
+        if (pre != "true") {
+          emit(tag, pre, found_url, found_digest)
+        } else if (!has_preview) {
+          has_preview = 1
+          preview_tag = tag
+          preview_pre = pre
+          preview_url = found_url
+          preview_digest = found_digest
         }
       }
+    }
+    /"tag_name"[ \t]*:/ {
+      consider()
       in_rel = 1; tag = unquote($0); draft = "false"; pre = "false"; cur_name = ""; cur_digest = ""; found_url = ""; found_digest = ""
     }
     /"draft"[ \t]*:/ { draft = unquote($0) }
@@ -263,10 +308,12 @@ process.exit(ok ? 0 : 1);
       }
     }
     END {
-      if (in_rel && found_url != "" && draft != "true") {
-        if ((mode == "stable" && pre != "true") || mode != "stable") {
-          print tag; print pre; print found_url; print found_digest; exit 0
-        }
+      if (emitted) {
+        exit 0
+      }
+      consider()
+      if (mode == "auto" && has_preview) {
+        emit(preview_tag, preview_pre, preview_url, preview_digest)
       }
       exit 1
     }
@@ -351,12 +398,12 @@ main() {
       *) tag="v$tag" ;;
     esac
     say "Fetching Ariadne release $tag..."
-    http_get "${API_BASE%/}/repos/${REPO}/releases/tags/${tag}" "$META_JSON" \
+    http_api_get "${API_BASE%/}/repos/${REPO}/releases/tags/${tag}" "$META_JSON" \
       || die "Failed to fetch release $tag from GitHub"
     resolve_mode="tag"
   else
     say "Checking latest Ariadne release for $ASSET_NAME..."
-    http_get "${API_BASE%/}/repos/${REPO}/releases?per_page=30" "$META_JSON" \
+    http_api_get "${API_BASE%/}/repos/${REPO}/releases?per_page=30" "$META_JSON" \
       || die "Failed to query GitHub Releases (set GITHUB_TOKEN if rate-limited)"
     if [ -n "$CHANNEL" ]; then
       resolve_mode="$CHANNEL"
@@ -382,7 +429,7 @@ main() {
   fi
 
   STAGED="$TMP_DIR/$ASSET_NAME"
-  http_get "$DOWNLOAD_URL" "$STAGED" || die "Failed to download $DOWNLOAD_URL"
+  http_download "$DOWNLOAD_URL" "$STAGED" || die "Failed to download $DOWNLOAD_URL"
 
   if [ -n "$EXPECTED_SHA" ]; then
     actual_sha="$(compute_sha256 "$STAGED")"

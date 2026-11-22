@@ -53,13 +53,21 @@ func openRotatingLog(path string, maxBytes int64, maxBackups int) (*RotatingFile
 }
 
 func (r *RotatingFile) Write(p []byte) (int, error) {
+	if r == nil {
+		return 0, os.ErrInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.file == nil {
 		return 0, os.ErrClosed
 	}
 	if r.maxBytes > 0 && r.size+int64(len(p)) > r.maxBytes && r.size > 0 {
-		_ = r.rotateLocked()
+		if err := r.rotateLocked(); err != nil && r.file == nil {
+			return 0, err
+		}
+	}
+	if r.file == nil {
+		return 0, os.ErrClosed
 	}
 	n, err := r.file.Write(p)
 	r.size += int64(n)
@@ -84,6 +92,15 @@ func (r *RotatingFile) rotateLocked() error {
 	}
 	file, err := os.OpenFile(r.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
+		// Best-effort fallback to append mode if truncation failed (for example, sharing lock).
+		fallback, fbErr := os.OpenFile(r.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if fbErr != nil {
+			return err
+		}
+		r.file = fallback
+		if info, statErr := fallback.Stat(); statErr == nil {
+			r.size = info.Size()
+		}
 		return err
 	}
 	r.file = file
@@ -92,6 +109,9 @@ func (r *RotatingFile) rotateLocked() error {
 }
 
 func (r *RotatingFile) Close() error {
+	if r == nil {
+		return nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.file == nil {
@@ -115,7 +135,11 @@ func TailLog(ctx context.Context, path string, lines int, follow bool, out io.Wr
 		}
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
 
 	ring := make([]string, 0, lines)
 	scanner := bufio.NewScanner(file)
@@ -156,9 +180,12 @@ func TailLog(ctx context.Context, path string, lines int, follow bool, out io.Wr
 			if statErr != nil {
 				continue
 			}
-			// Reopen if rotated or truncated.
-			if info.Size() < offset {
-				_ = file.Close()
+			// Reopen if rotated, truncated, or temporarily closed during rotation.
+			if file == nil || info.Size() < offset {
+				if file != nil {
+					_ = file.Close()
+					file = nil
+				}
 				reopened, openErr := os.Open(path)
 				if openErr != nil {
 					continue

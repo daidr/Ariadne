@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const launchdLabel = "me.daidr.ariadne"
@@ -154,14 +155,28 @@ func (m *darwinManager) Start(ctx context.Context, opts InstallOptions) error {
 			return err
 		}
 	}
-	// Check if already bootstrapped; if not, bootstrap first.
-	if err := exec.CommandContext(ctx, "launchctl", "print", m.serviceTarget()).Run(); err != nil {
-		if out, bootErr := exec.CommandContext(ctx, "launchctl", "bootstrap", m.domainTarget(), path).CombinedOutput(); bootErr != nil {
-			// Ignore "already loaded" race; kickstart next.
-			if !strings.Contains(string(out), "already") {
-				return fmt.Errorf("launchctl bootstrap: %w (%s)", bootErr, strings.TrimSpace(string(out)))
-			}
+	// Always bootout any cached in-memory launchd definition before bootstrapping
+	// so plist updates written by `service install` take effect immediately.
+	_ = m.Stop(ctx)
+
+	var lastOut string
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		out, bootErr := exec.CommandContext(ctx, "launchctl", "bootstrap", m.domainTarget(), path).CombinedOutput()
+		if bootErr == nil || strings.Contains(strings.ToLower(string(out)), "already") {
+			lastErr = nil
+			break
 		}
+		lastOut = strings.TrimSpace(string(out))
+		lastErr = bootErr
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("launchctl bootstrap: %w (%s)", lastErr, lastOut)
 	}
 	if out, err := exec.CommandContext(ctx, "launchctl", "kickstart", "-k", m.serviceTarget()).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl kickstart: %w (%s)", err, strings.TrimSpace(string(out)))

@@ -129,13 +129,12 @@ New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 try {
   $Staged = Join-Path $TempDir $AssetName
+  # Download public release assets without Authorization headers so credentials
+  # are never forwarded across cross-origin redirects to object storage.
   $dlParams = @{
     Uri     = $DownloadUrl
     OutFile = $Staged
     Headers = @{ 'User-Agent' = 'ariadne-installer' }
-  }
-  if ($Token) {
-    $dlParams.Headers['Authorization'] = "Bearer $Token"
   }
   Invoke-WebRequest @dlParams -UseBasicParsing
 

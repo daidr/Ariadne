@@ -310,6 +310,21 @@ func startServiceIfStopped(ctx context.Context, cfg config.Config, mgr service.M
 	return nil
 }
 
+func buildStartOptions(exe string, cfg config.Config, explicitHost string, explicitPort int) service.InstallOptions {
+	opts := service.InstallOptions{
+		Executable: exe,
+		Home:       cfg.Home,
+		Autostart:  true,
+	}
+	if explicitHost != "" || os.Getenv("ARIADNE_HOST") != "" {
+		opts.Host = cfg.Host
+	}
+	if explicitPort > 0 || os.Getenv("ARIADNE_PORT") != "" {
+		opts.Port = cfg.Port
+	}
+	return opts
+}
+
 func cmdServiceStart(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("service start", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -346,14 +361,7 @@ func cmdServiceStart(ctx context.Context, args []string, stdout, stderr io.Write
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
 	mgr := service.NewManager(cfg.Home)
-	opts := service.InstallOptions{
-		Executable: exe,
-		Home:       cfg.Home,
-		Host:       cfg.Host,
-		Port:       cfg.Port,
-		Autostart:  true,
-		LogPath:    service.LogPath(cfg.Home),
-	}
+	opts := buildStartOptions(exe, cfg, host, port)
 	if err := startServiceIfStopped(ctx, cfg, mgr, opts, stdout); err != nil {
 		return err
 	}
@@ -673,14 +681,7 @@ func cmdServiceRestart(ctx context.Context, args []string, stdout, stderr io.Wri
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
 	mgr := service.NewManager(cfg.Home)
-	installOpts := service.InstallOptions{
-		Executable: exe,
-		Home:       cfg.Home,
-		Host:       cfg.Host,
-		Port:       cfg.Port,
-		Autostart:  true,
-		LogPath:    service.LogPath(cfg.Home),
-	}
+	installOpts := buildStartOptions(exe, cfg, "", 0)
 	_, err = restartRunningService(ctx, cfg, mgr, installOpts, drainControlOptions{
 		Mode:           mode,
 		WhenIdle:       whenIdle,

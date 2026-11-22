@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/service"
@@ -52,6 +53,9 @@ func cmdUpgrade(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q (run 'ariadne upgrade --help')", fs.Arg(0))
+	}
+	if !checkOnly && os.Getenv("ARIADNE_DISABLE_SELF_UPDATE") == "1" {
+		return errors.New("self-update is disabled by ARIADNE_DISABLE_SELF_UPDATE=1 (update via your package manager, or run 'ariadne upgrade --check' to check for updates)")
 	}
 
 	var (
@@ -150,14 +154,7 @@ func cmdUpgrade(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 
 	mgr := service.NewManager(cfg.Home)
-	installOpts := service.InstallOptions{
-		Executable: exe,
-		Home:       cfg.Home,
-		Host:       cfg.Host,
-		Port:       cfg.Port,
-		Autostart:  true,
-		LogPath:    service.LogPath(cfg.Home),
-	}
+	installOpts := buildStartOptions(exe, cfg, "", 0)
 
 	restarted, err := restartRunningService(ctx, cfg, mgr, installOpts, drainControlOptions{
 		Mode:           mode,

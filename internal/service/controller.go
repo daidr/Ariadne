@@ -17,7 +17,10 @@ var (
 	ErrInvalidDrainReq = errors.New("invalid drain mode or action")
 )
 
-const defaultIdleQuietWindow = 3 * time.Second
+const (
+	defaultIdleQuietWindow = 3 * time.Second
+	defaultShutdownDelay   = 250 * time.Millisecond
+)
 
 type ControllerOptions struct {
 	Runtime         RuntimeInfo
@@ -26,6 +29,7 @@ type ControllerOptions struct {
 	Background      *background.Commands
 	Repository      *core.Repository
 	IdleQuietWindow time.Duration
+	ShutdownDelay   time.Duration
 	OnShutdown      func(restart bool)
 	OnStateChange   func(canRestart, restarting bool, activeTurns int)
 }
@@ -40,6 +44,7 @@ type Controller struct {
 	background      *background.Commands
 	repository      *core.Repository
 	idleQuietWindow time.Duration
+	shutdownDelay   time.Duration
 	onShutdown      func(restart bool)
 	onStateChange   func(canRestart, restarting bool, activeTurns int)
 
@@ -57,6 +62,10 @@ func NewController(opts ControllerOptions) *Controller {
 	if quiet <= 0 {
 		quiet = defaultIdleQuietWindow
 	}
+	delay := opts.ShutdownDelay
+	if delay <= 0 {
+		delay = defaultShutdownDelay
+	}
 	c := &Controller{
 		runtime:         opts.Runtime,
 		canRestart:      opts.CanRestart,
@@ -64,6 +73,7 @@ func NewController(opts ControllerOptions) *Controller {
 		background:      opts.Background,
 		repository:      opts.Repository,
 		idleQuietWindow: quiet,
+		shutdownDelay:   delay,
 		onShutdown:      opts.OnShutdown,
 		onStateChange:   opts.OnStateChange,
 	}
@@ -340,6 +350,16 @@ func (c *Controller) watchAndShutdown(ctx context.Context, mode, action string, 
 	}
 	if ctx.Err() != nil {
 		return
+	}
+	// Give the triggering RPC/HTTP response a brief window to flush before cancelling HTTP contexts.
+	if c.shutdownDelay > 0 {
+		timer := time.NewTimer(c.shutdownDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 	}
 	c.triggerShutdown(restart)
 }
