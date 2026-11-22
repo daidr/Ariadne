@@ -8,7 +8,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { ApiError } from '../api'
 import { t, tm } from '../i18n'
 import { useReviewComments, type ReviewNote } from '../review/review-comments'
-import { languageOf } from './languages'
+import { useCodeLanguage } from './languages'
 import { useLineComments } from './line-comments'
 
 const props = defineProps<{
@@ -70,6 +70,7 @@ const review = useReviewComments(
 const gutters = computed(() => [line.gutter.value, review.gutter.value])
 const widgets = computed(() => [...line.widgets.value, ...review.widgets.value])
 const oneSided = computed(() => !versions.value?.before || !versions.value?.after)
+const { language } = useCodeLanguage(() => props.file.path)
 </script>
 
 <template>
@@ -91,7 +92,7 @@ const oneSided = computed(() => !versions.value?.before || !versions.value?.afte
       class="diff"
       :original="versions.before ?? ''"
       :model-value="versions.after ?? ''"
-      :language="languageOf(file.path)"
+      :language="language"
       :gutters="gutters"
       :widgets="widgets"
       :mode="oneSided ? 'inline' : mode"
