@@ -48,12 +48,12 @@ const innerHref = computed(() => {
   const projectId = state.currentId
   if (thread.value) {
     return projectId
-      ? `/projects/${encodeURIComponent(projectId)}?tab=${encodeURIComponent(threadKey(thread.value.id))}`
+      ? `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(threadKey(thread.value.id))}`
       : '#'
   }
   if (artifact.value) {
     return projectId
-      ? `/projects/${encodeURIComponent(projectId)}?tab=${encodeURIComponent(artifactKey(artifact.value.id))}`
+      ? `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(artifactKey(artifact.value.id))}`
       : '#'
   }
   if (file.value) return fileSrc(file.value)

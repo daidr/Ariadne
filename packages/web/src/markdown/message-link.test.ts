@@ -32,7 +32,7 @@ test('renders thread, artifact and file references as inline anchors so long tit
   const threadLink = threadWrapper.find('a.inline-ref')
   expect(threadLink.exists()).toBe(true)
   expect(threadWrapper.find('button.inline-ref').exists()).toBe(false)
-  expect(threadLink.attributes('href')).toBe('/projects/prj_1?tab=thread%3Athr_1')
+  expect(threadLink.attributes('href')).toBe('/projects/prj_1?pane=side&tab=thread%3Athr_1')
 
   const artifactWrapper = mount(MessageLink, {
     props: {
@@ -44,7 +44,7 @@ test('renders thread, artifact and file references as inline anchors so long tit
   })
   const artifactLink = artifactWrapper.find('a.inline-ref')
   expect(artifactLink.exists()).toBe(true)
-  expect(artifactLink.attributes('href')).toBe('/projects/prj_1?tab=artifact%3Aart_1')
+  expect(artifactLink.attributes('href')).toBe('/projects/prj_1?pane=side&tab=artifact%3Aart_1')
 
   const fileWrapper = mount(MessageLink, {
     props: {
