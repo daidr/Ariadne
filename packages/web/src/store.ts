@@ -161,6 +161,8 @@ interface State {
   main: MainView
   /** The part of the workspace in front on narrow screens. */
   workspaceLevel: WorkspaceLevel
+  /** Incremented whenever an action explicitly opens the side pane, so collapsible layouts reveal it. */
+  sideRevealNonce: number
   /** What a changes tab compares and opens first; not remembered with the layout. */
   paneParams: Record<string, { turn?: TurnChangesRef; path?: string }>
   /** The view shown full screen, if one is. */
@@ -215,6 +217,7 @@ export const state = reactive<State>({
   memories: [],
   main: { kind: 'conversation' },
   workspaceLevel: 'projects',
+  sideRevealNonce: 0,
   paneParams: {},
   full: null,
   planWide: false,
@@ -955,7 +958,10 @@ const sameView = (a: MainView, b: MainView) => JSON.stringify(a) === JSON.string
 
 export function showWorkspace(level: WorkspaceLevel) {
   if (level !== 'coordinator') state.starting = false
-  if (level === 'side') state.planWide = false
+  if (level === 'side') {
+    state.planWide = false
+    state.sideRevealNonce += 1
+  }
   state.workspaceLevel = level
 }
 

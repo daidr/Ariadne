@@ -1,48 +1,92 @@
 <script setup lang="ts">
 import {
+  ChevronDownIcon,
   ChevronLeftIcon,
   FolderCogIcon,
   PanelLeftIcon,
   PanelRightIcon,
   SettingsIcon,
 } from '@dou-ui/icons'
-import { DouButton, DouDivider, DouLayoutHeader, DouText } from 'dou-ui'
-import { computed } from 'vue'
+import { DouBadge, DouButton, DouDivider, DouLayoutHeader, DouPopover, DouText } from 'dou-ui'
+import { computed, watch } from 'vue'
 import { t } from '../i18n'
 import { useSourceStatus } from '../source-status'
 import { openProjectSettings, showWorkspace, state } from '../store'
+import type { WorkspaceLayoutMode } from '../workspace-layout'
 import AriadneLogo from './AriadneLogo.vue'
 import AttentionBar from './AttentionBar.vue'
 import AutopilotSwitch from './AutopilotSwitch.vue'
+import ProjectList from './ProjectList.vue'
 import ProjectSearch from './ProjectSearch.vue'
 
 const props = defineProps<{
-  compact: boolean
+  layoutMode: WorkspaceLayoutMode
+  compactActions?: boolean
   projectsCollapsed: boolean
+  sideCollapsed?: boolean
   unauthorized?: boolean
 }>()
-const emit = defineEmits<{ toggleProjects: []; openSettings: [] }>()
+const emit = defineEmits<{ toggleProjects: []; toggleSide: []; openSettings: [] }>()
+const projectsPopoverOpen = defineModel<boolean>('projectsPopoverOpen', { default: false })
 
 const { summary } = useSourceStatus()
+const isNarrow = computed(() => props.layoutMode === 'narrow')
+const isMedium = computed(() => props.layoutMode === 'medium')
+const isWide = computed(() => props.layoutMode === 'wide')
+const actionsCompact = computed(() => props.compactActions ?? isNarrow.value)
+
 const desktopSidebarLabel = computed(() =>
   t(props.projectsCollapsed ? 'nav.expandProjects' : 'nav.collapseProjects'),
+)
+const mediumSideLabel = computed(() =>
+  t(props.sideCollapsed ? 'nav.expandProjectPanel' : 'nav.collapseProjectPanel'),
 )
 const atProjects = computed(() => state.workspaceLevel === 'projects')
 const atSide = computed(() => state.workspaceLevel === 'side')
 const backLabel = computed(() => t(atSide.value ? 'nav.backToCoordinator' : 'nav.backToProjects'))
+const currentProjectName = computed(
+  () => state.projects.find((project) => project.id === state.currentId)?.name ?? null,
+)
 const title = computed(() => {
-  if (props.unauthorized || !props.compact || atProjects.value) return t('app.name')
+  if (props.unauthorized || !isNarrow.value || atProjects.value) return t('app.name')
   if (state.starting) return t('nav.newProject')
-  return state.projects.find((project) => project.id === state.currentId)?.name ?? t('app.name')
+  return currentProjectName.value ?? t('app.name')
+})
+const mediumProjectTitle = computed(() => {
+  if (state.starting) return t('nav.newProject')
+  return currentProjectName.value ?? t('nav.projects')
+})
+const projectTriggerLabel = computed(
+  () => `${t('nav.switchProject')} · ${mediumProjectTitle.value}`,
+)
+const otherNeedsMe = computed(() =>
+  state.projects.reduce(
+    (sum, project) => sum + (project.id === state.currentId ? 0 : project.needsMe),
+    0,
+  ),
+)
+const showMediumProjectPopover = computed(
+  () => !props.unauthorized && isMedium.value && state.main.kind !== 'trace',
+)
+const hasSidePane = computed(
+  () =>
+    !!state.currentId &&
+    !state.starting &&
+    state.main.kind !== 'trace' &&
+    !(state.main.kind === 'plan' && state.planWide),
+)
+
+watch(showMediumProjectPopover, (allowed) => {
+  if (!allowed) projectsPopoverOpen.value = false
 })
 </script>
 
 <template>
-  <DouLayoutHeader :height="48" :class="{ 'workspace-header-compact': compact }">
+  <DouLayoutHeader :height="48" :class="{ 'workspace-header-compact': isNarrow }">
     <div class="workspace-header">
       <div class="header-brand">
         <DouButton
-          v-if="!unauthorized && compact && !atProjects"
+          v-if="!unauthorized && isNarrow && !atProjects"
           variant="ghost"
           size="sm"
           class="header-navigation"
@@ -53,7 +97,7 @@ const title = computed(() => {
           <ChevronLeftIcon aria-hidden="true" />
         </DouButton>
         <DouButton
-          v-else-if="!unauthorized && !compact && state.main.kind !== 'trace'"
+          v-else-if="!unauthorized && isWide && state.main.kind !== 'trace'"
           variant="ghost"
           size="sm"
           :aria-label="desktopSidebarLabel"
@@ -63,14 +107,52 @@ const title = computed(() => {
         >
           <PanelLeftIcon aria-hidden="true" />
         </DouButton>
-        <AriadneLogo v-if="unauthorized || !compact || atProjects" class="header-logo" />
-        <DouText weight="medium" truncate>{{ title }}</DouText>
+        <AriadneLogo v-if="unauthorized || !isNarrow || atProjects" class="header-logo" />
+        <DouPopover
+          v-if="showMediumProjectPopover"
+          v-model:open="projectsPopoverOpen"
+          trigger="click"
+          placement="bottom-start"
+          :width="280"
+          :aria-label="t('nav.projects')"
+        >
+          <DouButton
+            variant="ghost"
+            size="sm"
+            class="header-project-trigger"
+            :aria-label="projectTriggerLabel"
+            :title="projectTriggerLabel"
+            :aria-expanded="projectsPopoverOpen"
+          >
+            <template #leading>
+              <PanelLeftIcon aria-hidden="true" />
+            </template>
+            <span class="header-project-name">{{ mediumProjectTitle }}</span>
+            <DouBadge
+              v-if="otherNeedsMe"
+              class="header-project-badge"
+              :value="otherNeedsMe"
+              tone="warning"
+            />
+            <template #trailing>
+              <ChevronDownIcon class="header-project-chevron" aria-hidden="true" />
+            </template>
+          </DouButton>
+          <template #content>
+            <ProjectList
+              surface="popover"
+              :active="projectsPopoverOpen"
+              @select="projectsPopoverOpen = false"
+            />
+          </template>
+        </DouPopover>
+        <DouText v-else weight="medium" truncate>{{ title }}</DouText>
       </div>
       <div v-if="!unauthorized" class="header-actions">
         <ProjectSearch />
-        <template v-if="state.detail && (!compact || !atProjects)">
-          <AutopilotSwitch :compact="compact" />
-          <AttentionBar :compact="compact" />
+        <template v-if="state.detail && (!isNarrow || !atProjects)">
+          <AutopilotSwitch :compact="actionsCompact" />
+          <AttentionBar :compact="actionsCompact" />
           <DouButton
             variant="ghost"
             size="sm"
@@ -82,7 +164,7 @@ const title = computed(() => {
           >
             <FolderCogIcon aria-hidden="true" />
           </DouButton>
-          <DouDivider v-if="!compact" direction="vertical" />
+          <DouDivider v-if="!isNarrow" direction="vertical" />
         </template>
         <DouButton
           variant="ghost"
@@ -95,7 +177,7 @@ const title = computed(() => {
         </DouButton>
         <DouButton
           v-if="
-            compact &&
+            isNarrow &&
             !atProjects &&
             !atSide &&
             state.currentId &&
@@ -108,6 +190,17 @@ const title = computed(() => {
           :aria-label="t('nav.openProjectPanel')"
           :title="t('nav.openProjectPanel')"
           @click="showWorkspace('side')"
+        >
+          <PanelRightIcon aria-hidden="true" />
+        </DouButton>
+        <DouButton
+          v-else-if="isMedium && hasSidePane"
+          variant="ghost"
+          size="sm"
+          :aria-label="mediumSideLabel"
+          :title="mediumSideLabel"
+          :aria-expanded="!sideCollapsed"
+          @click="emit('toggleSide')"
         >
           <PanelRightIcon aria-hidden="true" />
         </DouButton>
@@ -137,6 +230,34 @@ const title = computed(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.header-logo {
+  flex: none;
+}
+
+.header-project-trigger {
+  max-width: min(280px, 44vw);
+  min-width: 0;
+}
+
+.header-project-trigger :deep(.dou-button__label) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.header-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-project-badge,
+.header-project-chevron {
+  flex: none;
 }
 
 .workspace-header-compact {
