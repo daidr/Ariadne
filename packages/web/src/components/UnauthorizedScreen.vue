@@ -96,12 +96,7 @@ function onEnter(event: KeyboardEvent) {
         @keydown.enter="onEnter"
         @submit.prevent="submit"
       >
-        <DouFormItem
-          :label="t('auth.tokenLabel')"
-          :help="t('auth.tokenHelp')"
-          :error="validationError ?? undefined"
-          required
-        >
+        <DouFormItem :label="t('auth.tokenLabel')" :error="validationError ?? undefined" required>
           <DouInput
             ref="tokenInput"
             v-model="draft"

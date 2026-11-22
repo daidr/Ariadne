@@ -444,18 +444,14 @@ export const en: Record<MessageKey, string> = {
   'project.delete.confirm': 'Delete',
   'error.unauthorized': 'Missing or invalid access token',
   'error.reload': 'Reload',
-  'auth.missingDescription':
-    'This window does not have an access token yet (for example, when opened as a PWA). Enter the token or link printed when Ariadne starts.',
-  'auth.invalidDescription':
-    'The saved access token is invalid or out of date. Enter the current access token or link.',
+  'auth.missingDescription': 'Enter an access token or link to continue.',
+  'auth.invalidDescription': 'The access token is invalid or expired. Enter a new one.',
   'auth.setToken': 'Set access token',
   'auth.dialogTitle': 'Set access token',
   'auth.tokenLabel': 'Access token',
-  'auth.tokenPlaceholder': 'Paste the access token or full URL with #token=',
-  'auth.tokenHelp': 'Saved in this browser so future visits sign in automatically.',
+  'auth.tokenPlaceholder': 'Access token or link',
   'auth.tokenRequired': 'Enter an access token',
-  'auth.tokenInvalidChars':
-    'Access token contains invalid characters (only printable ASCII characters are allowed)',
+  'auth.tokenInvalidChars': 'Access token contains invalid characters',
   'auth.confirm': 'Apply and reload',
   'error.notFound': '{what} not found',
   'error.priceCatalog': 'Could not read models.dev: {detail}',
