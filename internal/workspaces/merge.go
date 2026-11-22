@@ -112,7 +112,7 @@ func (manager *Manager) syncBranchChanges(ctx context.Context, thread core.Threa
 				}
 			}
 		}
-		if totals == nil {
+		if totals == nil && len(changes.Files) > 0 {
 			value := changeTotals(changes.Files)
 			totals = &value
 		}

@@ -2,6 +2,7 @@ package workspaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -219,5 +220,72 @@ func TestThreadChangesAndSyncPullRequestBackfillTotals(t *testing.T) {
 	totals3, ok := synced3.Changes.(map[string]any)
 	if !ok || totals3["files"] != float64(2) || totals3["added"] != float64(4) || totals3["removed"] != float64(1) {
 		t.Fatalf("expected SyncPullRequest head change to refresh totals, got %#v", synced3.Changes)
+	}
+}
+
+func TestSyncBranchChangesSkipsZeroFallbackWhenUncommittedSnapshotFails(t *testing.T) {
+	ctx := t.Context()
+	repo, manager, project, _ := initHostedChangesRepo(t)
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Uncommitted only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changes := &sdk.BranchChanges{
+		Branch:      "ariadne/wip",
+		Base:        "main",
+		From:        "0000000000000000000000000000000000000001",
+		Head:        "0000000000000000000000000000000000000001",
+		BaseHead:    "0000000000000000000000000000000000000001",
+		Files:       nil,
+		Uncommitted: []string{"draft.txt"},
+	}
+
+	failingBranches := &sdk.BranchCapability{
+		Snapshot: func(context.Context, string) (*string, error) {
+			return nil, errors.New("snapshot unavailable")
+		},
+		Diff: func(context.Context, string, string) ([]sdk.ChangedFile, error) {
+			return nil, errors.New("diff unavailable")
+		},
+	}
+	manager.syncBranchChanges(ctx, thread, failingBranches, changes)
+
+	afterFailure, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFailure.Changes != nil {
+		t.Fatalf("expected nil thread.Changes after snapshot failure with only uncommitted files, got %#v", afterFailure.Changes)
+	}
+	var syncedCount int
+	if err := repo.Store.DB().QueryRowContext(ctx, "SELECT count(*) FROM events WHERE type = 'branch.changes_synced'").Scan(&syncedCount); err != nil {
+		t.Fatal(err)
+	}
+	if syncedCount != 0 {
+		t.Fatalf("expected 0 branch.changes_synced events after snapshot failure, got %d", syncedCount)
+	}
+
+	// Once snapshot and diff succeed on a later attempt, thread.Changes is populated.
+	snap := "0000000000000000000000000000000000000002"
+	added := int64(3)
+	removed := int64(0)
+	workingBranches := &sdk.BranchCapability{
+		Snapshot: func(context.Context, string) (*string, error) {
+			return &snap, nil
+		},
+		Diff: func(context.Context, string, string) ([]sdk.ChangedFile, error) {
+			return []sdk.ChangedFile{{Path: "draft.txt", Status: "added", Added: &added, Removed: &removed}}, nil
+		},
+	}
+	manager.syncBranchChanges(ctx, afterFailure, workingBranches, changes)
+
+	afterRetry, err := repo.GetThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	totals, ok := afterRetry.Changes.(map[string]any)
+	if !ok || totals["files"] != float64(1) || totals["added"] != float64(3) || totals["removed"] != float64(0) {
+		t.Fatalf("expected uncommitted snapshot retry to populate totals, got %#v", afterRetry.Changes)
 	}
 }

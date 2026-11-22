@@ -222,7 +222,17 @@ const createdArtifacts = computed(() =>
 const backfilledChanges = ref<{ threadId: string; totals: ChangeTotals } | null>(null)
 const attemptedBackfill = new Set<string>()
 let backfillController: AbortController | null = null
-onBeforeUnmount(() => backfillController?.abort())
+let backfillKey: string | null = null
+const abortBackfill = () => {
+  if (!backfillController) return
+  if (backfillKey !== null) {
+    attemptedBackfill.delete(backfillKey)
+    backfillKey = null
+  }
+  backfillController.abort()
+  backfillController = null
+}
+onBeforeUnmount(abortBackfill)
 watch(
   () => {
     const owner = reviewed.value ?? thread.value
@@ -230,13 +240,13 @@ watch(
     return `${owner!.id}\0${owner!.pullRequest?.headSha ?? ''}`
   },
   (key) => {
-    backfillController?.abort()
-    backfillController = null
+    abortBackfill()
     if (!key || attemptedBackfill.has(key)) return
     attemptedBackfill.add(key)
     const threadId = key.slice(0, key.indexOf('\0'))
     const controller = new AbortController()
     backfillController = controller
+    backfillKey = key
     void api
       .getChanges(threadId, undefined, controller.signal)
       .then((result) => {
@@ -254,6 +264,12 @@ watch(
       })
       .catch(() => {
         // Keep the pull-request fallback capsule if branch changes cannot be read right now.
+      })
+      .finally(() => {
+        if (backfillController === controller) {
+          backfillController = null
+          backfillKey = null
+        }
       })
   },
   { immediate: true },

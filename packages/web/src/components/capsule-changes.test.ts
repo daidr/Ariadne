@@ -170,4 +170,64 @@ describe('ConversationPanel capsule changes backfill', () => {
     expect(bar.find('button[aria-label="改动"]').exists()).toBe(false)
     expect(bar.text()).toContain('#179')
   })
+
+  test('retries backfill after switching away aborts an in-flight request on a reused panel', async () => {
+    const resolvers = new Map<string, (value: Awaited<ReturnType<typeof api.getChanges>>) => void>()
+    const signals: Array<{ threadId: string; signal: AbortSignal }> = []
+    const getChangesSpy = vi
+      .spyOn(api, 'getChanges')
+      .mockImplementation((threadId, _since, signal) => {
+        signals.push({ threadId, signal: signal! })
+        return new Promise((resolve) => {
+          resolvers.set(`${threadId}:${signals.length}`, resolve)
+        })
+      })
+
+    const wrapper = mount(ConversationPanel, {
+      props: { threadId: 'thr_legacy' },
+      attachTo: document.body,
+    })
+    wrappers.push(wrapper)
+    await nextTick()
+
+    expect(getChangesSpy).toHaveBeenCalledTimes(1)
+    expect(signals[0]!.threadId).toBe('thr_legacy')
+    expect(signals[0]!.signal.aborted).toBe(false)
+
+    // Switch to another thread before the first request settles, aborting it on the reused instance.
+    await wrapper.setProps({ threadId: 'thr_empty' })
+    await nextTick()
+    expect(signals[0]!.signal.aborted).toBe(true)
+    expect(getChangesSpy).toHaveBeenCalledTimes(2)
+    expect(signals[1]!.threadId).toBe('thr_empty')
+
+    // Switch back to the original thread; the aborted key must be retried.
+    await wrapper.setProps({ threadId: 'thr_legacy' })
+    await nextTick()
+    expect(signals[1]!.signal.aborted).toBe(true)
+    expect(getChangesSpy).toHaveBeenCalledTimes(3)
+    expect(signals[2]!.threadId).toBe('thr_legacy')
+    expect(signals[2]!.signal.aborted).toBe(false)
+
+    resolvers.get('thr_legacy:3')!({
+      changes: {
+        branch: 'ariadne/legacy',
+        base: 'main',
+        from: '0000000000000000000000000000000000000001',
+        head: '0000000000000000000000000000000000000002',
+        baseHead: '0000000000000000000000000000000000000001',
+        commits: [],
+        files: [{ path: 'a.ts', previousPath: null, status: 'modified', added: 18, removed: 4 }],
+        uncommitted: [],
+      },
+      mergeable: false,
+    })
+    await flushPromises()
+    await nextTick()
+
+    const bar = wrapper.findComponent(ConversationBar)
+    const diffButton = bar.get('button[aria-label="改动"]')
+    expect(diffButton.text()).toContain('+18')
+    expect(diffButton.text()).toContain('−4')
+  })
 })
