@@ -19,9 +19,30 @@ interface QueuedRequest {
   key: string
   path: string
   previousPath: string | null
-  signal?: AbortSignal
   resolve: (file: FileVersions) => void
   reject: (error: unknown) => void
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Aborted', 'AbortError')
+}
+
+function awaitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
 }
 
 /** A cache belongs to one immutable comparison in one view. */
@@ -85,13 +106,14 @@ export function fileVersionsFor(threadId: string, from: string, head: string): F
       if (chunk.length === 1) {
         const item = chunk[0]!
         void api
-          .getChangedFile(
-            threadId,
-            { from, head, path: item.path, previousPath: item.previousPath },
-            item.signal,
-          )
+          .getChangedFile(threadId, {
+            from,
+            head,
+            path: item.path,
+            previousPath: item.previousPath,
+          })
           .then(({ file }) => {
-            if (!item.signal?.aborted) remember(item.key, file)
+            remember(item.key, file)
             item.resolve(file)
           })
           .catch((error) => {
@@ -125,13 +147,13 @@ export function fileVersionsFor(threadId: string, from: string, head: string): F
     }
   }
 
-  function enqueue(path: string, previousPath: string | null, signal?: AbortSignal) {
+  function enqueue(path: string, previousPath: string | null) {
     const key = JSON.stringify([path, previousPath])
     const existing = inFlight.get(key)
     if (existing) return existing
 
     const promise = new Promise<FileVersions>((resolve, reject) => {
-      pending.push({ key, path, previousPath, signal, resolve, reject })
+      pending.push({ key, path, previousPath, resolve, reject })
       scheduleFlush()
     })
     inFlight.set(key, promise)
@@ -139,10 +161,10 @@ export function fileVersionsFor(threadId: string, from: string, head: string): F
   }
 
   const load = (async (path: string, previousPath: string | null, signal: AbortSignal) => {
+    if (signal.aborted) throw abortReason(signal)
     const cached = peek(path, previousPath)
     if (cached) return cached
-    const promise = enqueue(path, previousPath, signal)
-    return await promise
+    return await awaitWithSignal(enqueue(path, previousPath), signal)
   }) as FileVersionLoader
 
   load.peek = peek

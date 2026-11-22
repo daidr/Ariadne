@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -297,6 +299,50 @@ func TestCatFileBatchReadVersions(t *testing.T) {
 	})
 	if err != nil || len(second) != 1 || second[0].After == nil || *second[0].After != "fresh commit\n" {
 		t.Fatalf("fresh commit mismatch: %+v, err=%v", second, err)
+	}
+}
+
+func TestCatFileBatchLarge64FileBatchDoesNotDeadlock(t *testing.T) {
+	t.Parallel()
+	root, git := initGit(t)
+	const count = 64
+	beforeBody := strings.Repeat("before-line-0123456789abcdef\n", 300) // > 8 KiB per blob
+	afterBody := strings.Repeat("after-line-fedcba9876543210\n", 300)
+	paths := make([]string, count)
+	for i := range count {
+		rel := "dir/nested/deep/path/for/pipe/pressure/file_" + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".txt"
+		paths[i] = rel
+		writeGit(t, root, rel, beforeBody+rel+"\n")
+	}
+	base := gitCommit(t, git, "base 64 files")
+	for _, rel := range paths {
+		writeGit(t, root, rel, afterBody+rel+"\n")
+	}
+	head := gitCommit(t, git, "updated 64 files")
+
+	batch := newCatFileBatch(root)
+	defer batch.Close()
+
+	inputs := make([]VersionInput, count)
+	for i, rel := range paths {
+		inputs[i] = VersionInput{From: base, Head: head, Path: rel}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	results, err := batch.ReadVersions(ctx, git, inputs)
+	if err != nil {
+		t.Fatalf("large 64-file batch failed: %v", err)
+	}
+	if len(results) != count {
+		t.Fatalf("len(results) = %d, want %d", len(results), count)
+	}
+	for i, rel := range paths {
+		if results[i].Before == nil || *results[i].Before != beforeBody+rel+"\n" {
+			t.Fatalf("file %d before mismatch", i)
+		}
+		if results[i].After == nil || *results[i].After != afterBody+rel+"\n" {
+			t.Fatalf("file %d after mismatch", i)
+		}
 	}
 }
 

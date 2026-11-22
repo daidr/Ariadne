@@ -86,3 +86,30 @@ it('prefetches uncached files in a batch without re-fetching cached entries', as
   await Promise.resolve()
   expect(batch).toHaveBeenCalledTimes(1)
 })
+
+it('isolates caller aborts so aborting one caller does not break concurrent subscribers', async () => {
+  const file = { before: 'v0', after: 'v1', skipped: null }
+  let resolveFetch!: (value: { file: typeof file }) => void
+  const single = vi.spyOn(api, 'getChangedFile').mockImplementation(
+    (_threadId, _input, signal) =>
+      new Promise((resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        resolveFetch = resolve
+      }),
+  )
+  const versions = fileVersionsFor('thread', 'base', 'head')
+  const first = new AbortController()
+  const second = new AbortController()
+
+  const p1 = versions('shared.ts', null, first.signal)
+  const p2 = versions('shared.ts', null, second.signal)
+  await Promise.resolve()
+  expect(single).toHaveBeenCalledTimes(1)
+
+  first.abort()
+  await expect(p1).rejects.toThrow(/abort/i)
+
+  resolveFetch({ file })
+  expect(await p2).toBe(file)
+  expect(versions.peek('shared.ts', null)).toBe(file)
+})

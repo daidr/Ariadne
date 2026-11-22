@@ -253,6 +253,29 @@ func (b *catFileBatch) ReadVersions(ctx context.Context, git GitRun, inputs []Ve
 	return results, nil
 }
 
+func (b *catFileBatch) writeAndReadLocked(payload string, read func() error) error {
+	stdin, stdout := b.stdin, b.stdout
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, payload)
+		if err != nil {
+			_ = stdout.Close()
+		}
+		writeDone <- err
+	}()
+	readErr := read()
+	if readErr != nil {
+		b.resetLocked()
+		<-writeDone
+		return readErr
+	}
+	if writeErr := <-writeDone; writeErr != nil {
+		b.resetLocked()
+		return writeErr
+	}
+	return nil
+}
+
 func (b *catFileBatch) readPrepared(ctx context.Context, preps []preparedVersion, results []sdk.FileVersions) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -305,29 +328,27 @@ func (b *catFileBatch) readPrepared(ctx context.Context, preps []preparedVersion
 		return nil
 	}
 	query.WriteString("flush\n")
-	if _, err := io.WriteString(b.stdin, query.String()); err != nil {
-		b.resetLocked()
-		return err
-	}
-
 	beforeMeta := make([]blobMeta, len(preps))
 	afterMeta := make([]blobMeta, len(preps))
-	for _, slot := range slots {
-		line, err := b.reader.ReadString('\n')
-		if err != nil {
-			b.resetLocked()
-			return err
+	if err := b.writeAndReadLocked(query.String(), func() error {
+		for _, slot := range slots {
+			line, err := b.reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+			meta, err := parseBatchInfoLine(line)
+			if err != nil {
+				return err
+			}
+			if slot.before {
+				beforeMeta[slot.index] = meta
+			} else {
+				afterMeta[slot.index] = meta
+			}
 		}
-		meta, err := parseBatchInfoLine(line)
-		if err != nil {
-			b.resetLocked()
-			return err
-		}
-		if slot.before {
-			beforeMeta[slot.index] = meta
-		} else {
-			afterMeta[slot.index] = meta
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Collect unique blob OIDs for files that are not skipped as large.
@@ -356,31 +377,28 @@ func (b *catFileBatch) readPrepared(ctx context.Context, preps []preparedVersion
 	blobs := make(map[string]string, len(oidOrder))
 	if len(oidOrder) > 0 {
 		contentsQuery.WriteString("flush\n")
-		if _, err := io.WriteString(b.stdin, contentsQuery.String()); err != nil {
-			b.resetLocked()
+		if err := b.writeAndReadLocked(contentsQuery.String(), func() error {
+			for _, oid := range oidOrder {
+				header, err := b.reader.ReadString('\n')
+				if err != nil {
+					return err
+				}
+				meta, err := parseBatchInfoLine(header)
+				if err != nil || !meta.found {
+					return fmt.Errorf("missing expected blob %s", oid)
+				}
+				if meta.size > MaxShownBytes {
+					return fmt.Errorf("blob %s exceeded max size", oid)
+				}
+				buf := make([]byte, meta.size+1)
+				if _, err := io.ReadFull(b.reader, buf); err != nil {
+					return err
+				}
+				blobs[oid] = string(buf[:meta.size])
+			}
+			return nil
+		}); err != nil {
 			return err
-		}
-		for _, oid := range oidOrder {
-			header, err := b.reader.ReadString('\n')
-			if err != nil {
-				b.resetLocked()
-				return err
-			}
-			meta, err := parseBatchInfoLine(header)
-			if err != nil || !meta.found {
-				b.resetLocked()
-				return fmt.Errorf("missing expected blob %s", oid)
-			}
-			if meta.size > MaxShownBytes {
-				b.resetLocked()
-				return fmt.Errorf("blob %s exceeded max size", oid)
-			}
-			buf := make([]byte, meta.size+1)
-			if _, err := io.ReadFull(b.reader, buf); err != nil {
-				b.resetLocked()
-				return err
-			}
-			blobs[oid] = string(buf[:meta.size])
 		}
 	}
 
