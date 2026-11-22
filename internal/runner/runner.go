@@ -241,7 +241,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 	const maxCycle = 3
 	var recent [][32]byte
 	cuts, lastInput := 0, 0
-	hintedUnsent, compactionFailed := false, false
+	hintedUnsent, compactionFailed, compactedBeforeStep := false, false, false
 	remindedFeedback := false
 	recoveredContext := false
 
@@ -337,52 +337,33 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		estimate := transcript.EstimateTokens(messages)
 		if size := max(lastInput, estimate); size >= threshold {
 			cut := transcript.CompactionCut(entries, float64(threshold)/4)
-			if cut != nil {
-				cleared := false
-				if *cut > latestCleared(entries) {
-					trial := chat
-					trial.ClearUpTo = cut
-					after := transcript.EstimateTokens(append([]transcript.Message{{Role: "system", Content: prompt.system}}, transcript.ToMessages(entries, title, trial)...))
-					if float64(after) < float64(estimate)*.75 && float64(size)*float64(after)/float64(estimate) < float64(threshold)*.8 {
-						err = turn.Repository.ClearToolResults(ctx, conversation.ID, turn.id, *cut, saw)
-						cleared = true
-					}
-				}
+			if cut != nil && !compactionFailed && !compactedBeforeStep {
+				budget := transcript.UserWordBudget(float64(threshold))
+				ask := requestFor(model, "")
+				ask.Effort = ""
+				ask.Messages = turn.withImages(ctx, transcript.SummaryRequest(entries, *cut, title, conversation.Role, chat, float64(budget)))
+				encoded, err := json.Marshal(recordCall(model, ""))
 				if err != nil {
 					return err
 				}
-				if cleared {
+				summaryOptions := options
+				summaryInput := core.StepInput{System: ask.Messages[0].Content, Tools: "[]", Call: string(encoded), Images: model.Images}
+				summaryOptions.OnFailure = turn.recordModelFailure(ctx, saw, summaryInput, "summary", "")
+				summary, err := modelstep.Summarise(ctx, provider, model.Settings, ask, summaryOptions)
+				if err != nil {
+					return err
+				}
+				if summary.OK {
+					if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
+						return err
+					}
 					lastInput = 0
+					compactedBeforeStep = true
 					continue
 				}
-				if !compactionFailed {
-					budget := transcript.UserWordBudget(float64(threshold))
-					ask := requestFor(model, "")
-					ask.Effort = ""
-					ask.Messages = turn.withImages(ctx, transcript.SummaryRequest(entries, *cut, title, conversation.Role, chat, float64(budget)))
-					encoded, err := json.Marshal(recordCall(model, ""))
-					if err != nil {
-						return err
-					}
-					summaryOptions := options
-					summaryInput := core.StepInput{System: ask.Messages[0].Content, Tools: "[]", Call: string(encoded), Images: model.Images}
-					summaryOptions.OnFailure = turn.recordModelFailure(ctx, saw, summaryInput, "summary", "")
-					summary, err := modelstep.Summarise(ctx, provider, model.Settings, ask, summaryOptions)
-					if err != nil {
-						return err
-					}
-					if summary.OK {
-						if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
-							return err
-						}
-						lastInput = 0
-						compactionFailed = true
-						continue
-					}
-					compactionFailed = true
-					if err := turn.Repository.RecordCompactionFailure(ctx, conversation.ID, turn.id, textutil.HeadUnits(summary.Detail, 500)); err != nil {
-						return err
-					}
+				compactionFailed = true
+				if err := turn.Repository.RecordCompactionFailure(ctx, conversation.ID, turn.id, textutil.HeadUnits(summary.Detail, 500)); err != nil {
+					return err
 				}
 			}
 		}
@@ -395,11 +376,13 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				// The failed native session has been released. Compact if there is
 				// enough history, then resume the same discussion with a fresh session.
 				recoveredContext = true
+				compactedBeforeStep = false
 				lastInput = max(lastInput, threshold)
 				continue
 			}
 			return err
 		}
+		compactedBeforeStep = false
 		if answer.Usage != nil {
 			if answer.Usage.ContextInput != nil {
 				if *answer.Usage.ContextInput > 0 {
@@ -485,16 +468,6 @@ func (turn *turn) recordModelFailure(ctx context.Context, saw int64, input core.
 		}
 		return turn.Repository.RecordModelFailure(ctx, turn.conversation.ID, turn.id, saw, input, purpose, toolCallID, failure)
 	}
-}
-
-func latestCleared(entries []transcript.Entry) float64 {
-	latest := -1.0
-	for _, entry := range entries {
-		if entry["kind"] == "cleared" {
-			latest = max(latest, asNumber(entry["upTo"]))
-		}
-	}
-	return latest
 }
 
 func compactThreshold(model *settings.ResolvedModel, limits map[string]any) int {

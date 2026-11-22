@@ -242,11 +242,6 @@ func (repo *Repository) UpdatePrompt(ctx context.Context, id, turnID string, bas
 		return appendChanges(tx, projectID, append(keeper.pieces, change{"conversation.prompt_updated", data}))
 	})
 }
-func (repo *Repository) ClearToolResults(ctx context.Context, id, turnID string, upTo float64, sawSeq int64) error {
-	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
-		return appendChanges(tx, projectID, []change{{"conversation.results_cleared", object{"conversationId": id, "upTo": upTo, "sawSeq": sawSeq}}})
-	})
-}
 func (repo *Repository) CompactConversation(ctx context.Context, id, turnID string, input Compaction) error {
 	return repo.withTurn(ctx, id, turnID, func(tx *eventstore.Transaction, projectID string) error {
 		summary := projectsettings.Trim(input.Summary)

@@ -409,3 +409,106 @@ func TestThreadContextUsageUpdatesBeforeFirstVisibleMessage(t *testing.T) {
 		t.Fatalf("expected final contextTokens 55000, got %d", conv.ContextTokens)
 	}
 }
+
+func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	project, err := repo.CreateProject(ctx, new("Append-only context"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Long tool session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.StartTurn(ctx, thread.ID, "fixture")
+	if err != nil || id == "" {
+		t.Fatalf("expected turn, got %q: %v", id, err)
+	}
+	conversation, err := repo.GetConversation(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := models.New()
+	info := sdk.ModelProviderInfo{Kind: "fixture", Program: true}
+	requests, summaries := 0, 0
+	if _, err := registry.Register(sdk.ModelProvider{Info: info, Stream: func(_ context.Context, _ map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+		return func(yield func(sdk.Part) bool) {
+			if request.Conversation == "" {
+				summaries++
+				if yield(sdk.Part{Type: "text", Text: fmt.Sprintf("Compacted summary #%d.", summaries)}) {
+					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				}
+				return
+			}
+			requests++
+			// Report ContextInput above threshold (20000 * 0.6 = 12000) after building
+			// enough tool steps so CompactionCut has a valid cut point twice in one turn.
+			switch requests {
+			case 1, 2:
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("x", 9000))}) {
+					if requests == 2 {
+						yield(sdk.Part{Type: "usage", Input: new(int64(15000)), Output: new(int64(50)), ContextInput: new(int64(15000))})
+					}
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 3, 4:
+				if requests == 3 && summaries != 1 {
+					t.Errorf("expected first compaction before step 3, got %d summaries", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("y", 9000))}) {
+					if requests == 4 {
+						yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
+					}
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 5:
+				if summaries != 2 {
+					t.Errorf("expected second compaction before step 5 in the same long turn, got %d summaries", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: "report-done", Name: "report", Arguments: `{"kind":"done","headline":"Finished","summary":"Completed long turn."}`}) {
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 6:
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			default:
+				t.Errorf("unexpected extra request %d", requests)
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, id: id, conversation: conversation}
+	if err := active.run(ctx, &settings.ResolvedModel{Provider: info, Model: "fixture", Label: "fixture", ContextTokens: new(20_000.0)}); err != nil {
+		t.Fatal(err)
+	}
+	if summaries != 2 {
+		t.Fatalf("expected 2 direct compactions in one turn, got %d", summaries)
+	}
+	page, err := repo.ListTurnEvents(ctx, thread.ID, core.TurnEventOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compacted := 0
+	for _, event := range page.Events {
+		if event.Type == "conversation.results_cleared" {
+			t.Fatalf("unexpected conversation.results_cleared event: %s", string(event.Data))
+		}
+		if event.Type == "conversation.compacted" {
+			compacted++
+		}
+	}
+	if compacted != 2 {
+		t.Fatalf("expected 2 conversation.compacted events, got %d", compacted)
+	}
+}

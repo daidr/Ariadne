@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -195,12 +196,28 @@ func (f *turnFilter) OnTurnComplete(rpcErr error) (string, string) {
 	return pending, ""
 }
 
+// agy's --process-per-session workers share the antigravity-cli conversations
+// directory. Under concurrent workers, session/new can hit a transient SQLite
+// trajectory initialization race ("its database was initialized by another
+// opener") and return JSON-RPC -32603 "Failed to start Antigravity conversation".
+func retryableStartError(operation string, err error) bool {
+	if operation != "session/new" {
+		return false
+	}
+	var remote *rpc.Error
+	if !errors.As(err, &remote) || remote.Code != -32603 {
+		return false
+	}
+	return strings.Contains(remote.Message, "Failed to start Antigravity conversation")
+}
+
 func Kind(bridge *agentruntime.ToolBridge, shim agentruntime.StdioLauncher) agentruntime.Kind {
 	return acp.NewKind(ProviderKind, bridge, shim, acp.Hooks{
-		DefaultCommand:    DefaultCommand,
-		ResolveProfile:    resolveToolProfile,
-		PrepareProfile:    prepareToolProfile,
-		NewTurnFilter:     newTurnFilter,
-		AdjustInputTokens: adjustInputTokens,
+		DefaultCommand:      DefaultCommand,
+		ResolveProfile:      resolveToolProfile,
+		PrepareProfile:      prepareToolProfile,
+		NewTurnFilter:       newTurnFilter,
+		AdjustInputTokens:   adjustInputTokens,
+		RetryableStartError: retryableStartError,
 	})
 }

@@ -586,7 +586,12 @@ func (m *Sessions) Stream(ctx context.Context, settings map[string]any, request 
 			}
 			if err != nil {
 				if ctx.Err() == nil {
-					yield(failure(err, false, false))
+					retryable := false
+					var native *NativeAgentError
+					if errors.As(err, &native) {
+						retryable = native.Retryable
+					}
+					yield(failure(err, retryable, false))
 				}
 				return
 			}

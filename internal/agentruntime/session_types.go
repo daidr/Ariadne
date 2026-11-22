@@ -72,8 +72,9 @@ const PlaceNote = "You run through a helper program on the user's own computer. 
 
 // NativeAgentError wraps an agent driver error with structured diagnostic metadata.
 type NativeAgentError struct {
-	Err    error
-	Detail *sdk.AgentError
+	Err       error
+	Detail    *sdk.AgentError
+	Retryable bool
 }
 
 func (failure *NativeAgentError) Error() string { return failure.Err.Error() }

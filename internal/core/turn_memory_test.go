@@ -67,7 +67,9 @@ func TestCompactionPreservesFractionalModelPosition(t *testing.T) {
 	if err := repo.CompactConversation(t.Context(), project.CoordinatorID, turn, Compaction{Summary: "notes", UpTo: 1.5, SawSeq: 2, Call: "{}"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ClearToolResults(t.Context(), project.CoordinatorID, turn, 2.5, 3); err != nil {
+	// Historical conversation.results_cleared events remain readable when replaying older databases.
+	clearedData, _ := json.Marshal(map[string]any{"conversationId": project.CoordinatorID, "upTo": 2.5, "sawSeq": 3})
+	if _, err := repo.Store.Append(t.Context(), []eventstore.NewEvent{{Type: "conversation.results_cleared", ProjectID: project.ID, Data: clearedData}}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := repo.ListTranscript(t.Context(), project.CoordinatorID, TranscriptOptions{})
