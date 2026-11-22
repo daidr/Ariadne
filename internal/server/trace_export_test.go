@@ -11,8 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"connectrpc.com/connect"
+
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
+	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
+	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
 	"github.com/daidr/Ariadne/internal/modelstep"
 	"github.com/daidr/Ariadne/sdk"
 )
@@ -82,8 +86,23 @@ func TestTraceExportIncludesFailedRequestsAndRedactsCredentials(t *testing.T) {
 	if w := get("/api/conversations/missing/trace/export", true); w.Code != 404 {
 		t.Fatalf("missing conversation: %d", w.Code)
 	}
-	if w := get(route, true); w.Code != 200 || !strings.Contains(w.Body.String(), `"kind":"request-failed"`) {
-		t.Fatalf("failed requests absent from the trace: %d", w.Code)
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	convClient := ariadnev1connect.NewConversationServiceClient(srv.Client(), srv.URL+rpcPrefix, connect.WithInterceptors(bearerClientInterceptor(token)))
+	traceResp, err := convClient.GetTrace(ctx, connect.NewRequest(&ariadnev1.GetTraceRequest{ConversationId: id}))
+	if err != nil {
+		t.Fatalf("get trace failed: %v", err)
+	}
+	hasFailed := false
+	for _, turn := range traceResp.Msg.Turns {
+		for _, item := range turn.Items {
+			if item.GetRequestFailed() != nil {
+				hasFailed = true
+			}
+		}
+	}
+	if !hasFailed {
+		t.Fatalf("failed requests absent from the trace: %+v", traceResp.Msg)
 	}
 	w := get(route+"/export", true)
 	if w.Code != 200 || w.Header().Get("Content-Type") != "application/zip" || w.Header().Get("Cache-Control") != "no-store" {

@@ -73,7 +73,7 @@ import type {
   UpdateStatus,
   WorkSettings,
 } from './api'
-import { ApiError, fromProtoLocalizedError } from './rpc'
+import { ApiError, decodeLocalizedError } from './rpc'
 
 const SHORTCUT_KEYS: readonly ShortcutAction[] = [
   'search',
@@ -457,9 +457,10 @@ export function fromProtoModelProblems(problems: ProtoModelProblem[]): ModelProb
   return problems.map((item) => ({
     model: item.model,
     provider: item.provider,
-    problem: item.problem
-      ? fromProtoLocalizedError(item.problem)
-      : { key: 'error.modelCheck', params: { detail: 'unknown' } },
+    problem: decodeLocalizedError(item.problem) ?? {
+      key: 'error.modelCheck',
+      params: { detail: 'unknown' },
+    },
   }))
 }
 

@@ -176,13 +176,12 @@ func New(options Options) (*API, error) {
 	api.registerMCP()
 	api.registerMetaRPC()
 	api.registerSourceConfig()
-	api.registerBackground()
-	api.registerWorkspaces()
+	api.registerThreadService()
+	api.registerConversationService()
+	api.registerWorkspaceService()
 	api.registerProjectDeletion()
 	api.registerExport()
 	api.registerTrace()
-	api.registerSkills()
-	api.registerConversationConfig()
 	api.addRaw("GET", "/api/events", api.events)
 	for _, method := range []string{"GET", "HEAD"} {
 		api.addRaw(method, "/api/files/:fileId", func(w http.ResponseWriter, r *http.Request) error {
@@ -471,86 +470,8 @@ func (api *API) registerReads() {
 		value, err := repo.Search(r.Context(), r.PathValue("projectId"), prefix(r.URL.Query().Get("q"), 200))
 		return value, 200, err
 	})
-	api.add("GET", "/api/projects/:projectId/memory", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListMemories(r.Context(), r.PathValue("projectId"))
-		return object{"memories": value}, 200, err
-	})
 	api.add("GET", "/api/projects/:projectId/artifacts", func(r *http.Request) (any, int, error) {
 		value, err := repo.ListArtifacts(r.Context(), r.PathValue("projectId"))
 		return object{"artifacts": value}, 200, err
 	})
-	api.add("GET", "/api/threads/:threadId/reviews", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListReviews(r.Context(), r.PathValue("threadId"))
-		return object{"rounds": value}, 200, err
-	})
-	api.add("GET", "/api/threads/:threadId/line-comments", func(r *http.Request) (any, int, error) {
-		value, err := repo.ListLineComments(r.Context(), r.PathValue("threadId"))
-		return object{"comments": value}, 200, err
-	})
-	api.add("GET", "/api/conversations/:conversationId", api.conversation)
-}
-
-var pageLimit = regexp.MustCompile(`^[1-9]\d{0,2}$`)
-var pageSince = regexp.MustCompile(`^\d{1,15}$`)
-
-func (api *API) conversation(r *http.Request) (any, int, error) {
-	repo := api.options.Repository
-	id := r.PathValue("conversationId")
-	conversation, err := repo.GetConversation(r.Context(), id)
-	if err != nil {
-		return nil, 0, err
-	}
-	query := r.URL.Query()
-	cursor := core.MessageCursor{}
-	if query.Has("before") {
-		value := query.Get("before")
-		cursor.Before = &value
-	}
-	if query.Has("from") {
-		value := query.Get("from")
-		cursor.From = &value
-	}
-	if query.Has("limit") {
-		raw := query.Get("limit")
-		if !pageLimit.MatchString(raw) {
-			return nil, 0, badInput("limit")
-		}
-		value, _ := strconv.Atoi(raw)
-		cursor.Limit = &value
-	}
-	if query.Has("since") {
-		raw := query.Get("since")
-		if !pageSince.MatchString(raw) {
-			return nil, 0, badInput("since")
-		}
-		value, _ := strconv.ParseInt(raw, 10, 64)
-		cursor.Since = &value
-	}
-	page, err := repo.PageMessages(r.Context(), id, cursor)
-	if err != nil {
-		return nil, 0, err
-	}
-	seq, err := repo.Store.LastSeq(r.Context())
-	if err != nil {
-		return nil, 0, err
-	}
-	todo, err := repo.GetTodo(r.Context(), id)
-	if err != nil {
-		return nil, 0, err
-	}
-	var model any
-	if api.options.ModelOf != nil {
-		model, err = api.options.ModelOf(r, conversation)
-	}
-	result := object{"conversation": conversation, "messages": page.Messages, "notices": page.Notices, "more": page.More, "lastSeq": seq, "todo": todo, "model": model}
-	if err == nil && conversation.Role == "coordinator" && cursor.Since == nil && cursor.Before == nil {
-		readThrough, readErr := repo.LastReadMessage(r.Context(), id)
-		if readErr != nil {
-			return nil, 0, readErr
-		}
-		if readThrough != "" {
-			result["readThrough"] = readThrough
-		}
-	}
-	return result, 200, err
 }

@@ -237,12 +237,16 @@ func (reader Reader) ListMessages(ctx context.Context, id string) ([]MessageView
 	return readMessages(ctx, reader.DB, messageSelect+" WHERE m.conversation_id = ? ORDER BY m.id", id)
 }
 
-func (reader Reader) LastReadMessage(ctx context.Context, id string) (string, error) {
-	rows, err := records(ctx, reader.DB, "SELECT id FROM messages WHERE conversation_id = ? AND read_at IS NOT NULL ORDER BY id DESC LIMIT 1", id)
+func lastReadMessage(ctx context.Context, db queryer, id string) (string, error) {
+	rows, err := records(ctx, db, "SELECT id FROM messages WHERE conversation_id = ? AND read_at IS NOT NULL ORDER BY id DESC LIMIT 1", id)
 	if err != nil || len(rows) == 0 {
 		return "", err
 	}
 	return rows[0].text("id"), nil
+}
+
+func (reader Reader) LastReadMessage(ctx context.Context, id string) (string, error) {
+	return lastReadMessage(ctx, reader.DB, id)
 }
 func toNotice(row record) (object, error) {
 	payload, err := row.json("payload", nil)
@@ -350,66 +354,134 @@ type MessagePage struct {
 	More     bool          `json:"more"`
 }
 
+func pageMessages(ctx context.Context, tx *sql.Tx, id string, cursor MessageCursor) (result MessagePage, err error) {
+	if cursor.Since != nil {
+		from := ""
+		if cursor.From != nil {
+			from = *cursor.From
+		}
+		result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id >= ? AND (m.changed_seq > ? OR coalesce(a.changed_seq, 0) > ?) ORDER BY m.id", id, from, *cursor.Since, *cursor.Since)
+		if err != nil {
+			return result, err
+		}
+		result.Notices, err = pageNotices(ctx, tx, id, NoticeRange{}, cursor.Since)
+		return result, err
+	}
+	limit := 40
+	if cursor.Limit != nil {
+		limit = max(1, min(*cursor.Limit, 500))
+	}
+	if cursor.From != nil {
+		result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id >= ? ORDER BY m.id", id, *cursor.From)
+	} else {
+		before := "\uffff"
+		if cursor.Before != nil {
+			before = *cursor.Before
+		}
+		result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?", id, before, limit)
+		slices.Reverse(result.Messages)
+	}
+	if err != nil {
+		return result, err
+	}
+	first := ""
+	if len(result.Messages) > 0 {
+		first = result.Messages[0].ID
+	} else if cursor.Before != nil {
+		first = *cursor.Before
+	} else if cursor.From != nil {
+		first = *cursor.From
+	}
+	previous, err := records(ctx, tx, "SELECT 1 AS one FROM messages WHERE conversation_id = ? AND id < ? LIMIT 1", id, first)
+	if err != nil {
+		return result, err
+	}
+	result.More = len(previous) > 0
+	bounds := NoticeRange{}
+	if result.More && len(result.Messages) > 0 {
+		bounds.From = &result.Messages[0].CreatedAt
+	}
+	if cursor.Before != nil {
+		end, err := records(ctx, tx, "SELECT created_at FROM messages WHERE id = ?", *cursor.Before)
+		if err != nil {
+			return result, err
+		}
+		if len(end) > 0 {
+			at := end[0].integer("created_at")
+			bounds.To = &at
+		}
+	}
+	result.Notices, err = pageNotices(ctx, tx, id, bounds, nil)
+	return result, err
+}
+
 func (reader Reader) PageMessages(ctx context.Context, id string, cursor MessageCursor) (result MessagePage, err error) {
 	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
-		if cursor.Since != nil {
-			from := ""
-			if cursor.From != nil {
-				from = *cursor.From
-			}
-			result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id >= ? AND (m.changed_seq > ? OR coalesce(a.changed_seq, 0) > ?) ORDER BY m.id", id, from, *cursor.Since, *cursor.Since)
-			if err != nil {
-				return err
-			}
-			result.Notices, err = pageNotices(ctx, tx, id, NoticeRange{}, cursor.Since)
-			return err
-		}
-		limit := 40
-		if cursor.Limit != nil {
-			limit = max(1, min(*cursor.Limit, 500))
-		}
-		if cursor.From != nil {
-			result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id >= ? ORDER BY m.id", id, *cursor.From)
-		} else {
-			before := "\uffff"
-			if cursor.Before != nil {
-				before = *cursor.Before
-			}
-			result.Messages, err = readMessages(ctx, tx, messageSelect+" WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?", id, before, limit)
-			slices.Reverse(result.Messages)
-		}
-		if err != nil {
-			return err
-		}
-		first := ""
-		if len(result.Messages) > 0 {
-			first = result.Messages[0].ID
-		} else if cursor.Before != nil {
-			first = *cursor.Before
-		} else if cursor.From != nil {
-			first = *cursor.From
-		}
-		previous, err := records(ctx, tx, "SELECT 1 AS one FROM messages WHERE conversation_id = ? AND id < ? LIMIT 1", id, first)
-		if err != nil {
-			return err
-		}
-		result.More = len(previous) > 0
-		bounds := NoticeRange{}
-		if result.More && len(result.Messages) > 0 {
-			bounds.From = &result.Messages[0].CreatedAt
-		}
-		if cursor.Before != nil {
-			end, err := records(ctx, tx, "SELECT created_at FROM messages WHERE id = ?", *cursor.Before)
-			if err != nil {
-				return err
-			}
-			if len(end) > 0 {
-				at := end[0].integer("created_at")
-				bounds.To = &at
-			}
-		}
-		result.Notices, err = pageNotices(ctx, tx, id, bounds, nil)
+		result, err = pageMessages(ctx, tx, id, cursor)
 		return err
+	})
+	return
+}
+
+// ConversationSnapshot bundles all SQLite reads for GetConversation into one
+// consistent read-only snapshot transaction.
+type ConversationSnapshot struct {
+	Conversation ConversationView
+	Messages     []MessageView
+	Notices      []object
+	More         bool
+	LastSeq      int64
+	Todo         object
+	ReadThrough  string
+	ThreadModel  string
+}
+
+func (reader Reader) GetConversationSnapshot(ctx context.Context, id string, cursor MessageCursor) (result ConversationSnapshot, err error) {
+	err = reader.snapshot(ctx, func(tx *sql.Tx) error {
+		conv, err := conversation(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		page, err := pageMessages(ctx, tx, id, cursor)
+		if err != nil {
+			return err
+		}
+		var seq int64
+		if err := tx.QueryRowContext(ctx, "SELECT coalesce(max(seq), 0) FROM events").Scan(&seq); err != nil {
+			return err
+		}
+		todo, err := readTodo(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		readThrough := ""
+		if conv.Role == "coordinator" && cursor.Since == nil && cursor.Before == nil {
+			readThrough, err = lastReadMessage(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+		}
+		threadModel := ""
+		if conv.Role == "thread" {
+			rows, err := records(ctx, tx, "SELECT model FROM threads WHERE id = ?", id)
+			if err != nil {
+				return err
+			}
+			if len(rows) > 0 {
+				threadModel = rows[0].text("model")
+			}
+		}
+		result = ConversationSnapshot{
+			Conversation: conv,
+			Messages:     page.Messages,
+			Notices:      page.Notices,
+			More:         page.More,
+			LastSeq:      seq,
+			Todo:         todo,
+			ReadThrough:  readThrough,
+			ThreadModel:  threadModel,
+		}
+		return nil
 	})
 	return
 }

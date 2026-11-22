@@ -1,5 +1,9 @@
 import type { LocalizedMessage, MessageKey, MessageParams } from '@ariadne/i18n'
-import { LocalizedErrorSchema, type ErrorParamValue, type LocalizedError } from '@ariadne/proto'
+import {
+  LocalizedErrorSchema,
+  type ErrorParamValue,
+  type LocalizedError as ProtoLocalizedError,
+} from '@ariadne/proto'
 import type { DescService } from '@bufbuild/protobuf'
 import {
   Code,
@@ -160,7 +164,8 @@ function decodeErrorParams(entries: Record<string, ErrorParamValue>): MessagePar
   return Object.keys(params).length > 0 ? params : undefined
 }
 
-export function fromProtoLocalizedError(detail: LocalizedError): LocalizedMessage {
+export function decodeLocalizedError(detail?: ProtoLocalizedError | null): LocalizedMessage | null {
+  if (!detail?.key) return null
   const params = decodeErrorParams(detail.params)
   return {
     key: detail.key as MessageKey,
@@ -171,8 +176,9 @@ export function fromProtoLocalizedError(detail: LocalizedError): LocalizedMessag
 export function connectErrorToApiError(error: ConnectError): ApiError {
   const status = connectCodeToHttpStatus(error.code)
   const [detail] = error.findDetails(LocalizedErrorSchema)
-  if (detail?.key) {
-    return new ApiError(status, fromProtoLocalizedError(detail))
+  const localized = decodeLocalizedError(detail)
+  if (localized) {
+    return new ApiError(status, localized)
   }
   if (error.code === Code.Unauthenticated) {
     return new ApiError(401, { key: 'error.unauthorized' })
