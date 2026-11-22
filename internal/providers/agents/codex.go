@@ -375,7 +375,7 @@ func (d *codexDriver) notification(method string, raw json.RawMessage) {
 		now := params.TokenUsage.Total
 		usage := Usage{Input: *tokenGrowth(now.Input, d.total.Input), Output: *tokenGrowth(now.Output, d.total.Output), Cached: tokenGrowth(now.Cached, d.total.Cached), CacheWrite: tokenGrowth(now.CacheWrite, d.total.CacheWrite), Reasoning: tokenGrowth(now.Reasoning, d.total.Reasoning), ContextInput: params.TokenUsage.Last.Input}
 		d.total = now
-		if d.started && (usage.Input != 0 || usage.Output != 0) {
+		if d.started && (usage.Input != 0 || usage.Output != 0 || tokenValue(usage.ContextInput) > 0) {
 			emit(Event{Type: "usage", Usage: usage})
 		}
 	case "turn/completed":

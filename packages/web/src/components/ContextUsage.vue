@@ -64,7 +64,7 @@ const hitRate = computed(() => cacheHitRate(props.usage))
               <span>{{ t('context.compactions') }}</span>
               <span class="context-value">{{ t('context.times', { count: compactions }) }}</span>
             </li>
-            <li>
+            <li v-if="tokens">
               <span>{{ t('usage.total') }}</span>
               <span class="context-value">{{ count(tokens) }}</span>
             </li>
@@ -72,7 +72,7 @@ const hitRate = computed(() => cacheHitRate(props.usage))
               <span>{{ t('usage.cost') }}</span>
               <span class="context-value">{{ cost }}</span>
             </li>
-            <li>
+            <li v-if="tokens">
               <span>{{ t('usage.hitRate') }}</span>
               <span class="context-value">{{ hitRate }}</span>
             </li>

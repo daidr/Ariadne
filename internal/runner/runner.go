@@ -395,9 +395,12 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			return err
 		}
 		if answer.Usage != nil {
-			lastInput = int(answer.Usage.Input)
 			if answer.Usage.ContextInput != nil {
-				lastInput = int(*answer.Usage.ContextInput)
+				if *answer.Usage.ContextInput > 0 {
+					lastInput = int(*answer.Usage.ContextInput)
+				}
+			} else if answer.Usage.Input > 0 {
+				lastInput = int(answer.Usage.Input)
 			}
 		}
 		if err := turn.Repository.RecordStep(ctx, conversation.ID, turn.id, core.Step{
