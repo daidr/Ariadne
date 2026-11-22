@@ -48,6 +48,7 @@ function lineOf(id: string): string | null {
       'plan-node-compact': data.compact,
       'plan-node-wait': waiting,
       'plan-node-proposed': data.proposed,
+      'plan-node-archived': data.archived,
       [`plan-node-${data.mark}`]: !!data.mark,
       [`plan-node-${data.kind}`]: true,
     }"
@@ -146,6 +147,11 @@ function lineOf(id: string): string | null {
 /* A node waiting on the user stands out at a glance, before any text is read. */
 .plan-node-wait {
   background: var(--dou-color-warning-soft);
+}
+
+/* Auto-completed nodes revealed via "Show completed" stay legible while visually secondary. */
+.plan-node-archived {
+  opacity: 0.76;
 }
 
 /* Touched by a change that waits on the user's yes. */

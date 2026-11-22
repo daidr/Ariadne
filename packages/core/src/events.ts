@@ -241,6 +241,8 @@ export interface PlanNodeFields {
   description: string
   /** How the user will judge the node finished. */
   acceptance: string
+  /** Optional topic or phase group name shared by related nodes. */
+  group?: string
 }
 
 /**

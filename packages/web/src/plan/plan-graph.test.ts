@@ -1,13 +1,12 @@
 import type { PlanNodeView, PlanRevisionView, PlanView } from '@ariadne/core'
-import type { FlowDocument } from '@dou-ui/flow'
 import { describe, expect, test } from 'vitest'
-import { editOf, mergeIntoForm, reasonOf } from './edit'
 import {
   freshChanges,
+  groupIdOf,
   layoutPlan,
   NODE_WIDTH,
   nodeHeight,
-  offsetsOf,
+  partitionPlanNodes,
   startedAhead,
   toFlowDocument,
 } from './layout'
@@ -39,91 +38,11 @@ const revision = (id: string, extra: Partial<PlanRevisionView> = {}): PlanRevisi
   ...extra,
 })
 
-const title = (id: string) => id.toUpperCase()
-const translate = (key: string, params?: Record<string, unknown>) =>
-  `${key}${params ? JSON.stringify(params) : ''}`
-
 const plan = (nodes: PlanNodeView[], revisions: PlanRevisionView[] = []): PlanView => ({
   projectId: 'p',
   nodes,
   revisions,
   proposals: [],
-})
-
-describe('editOf', () => {
-  const before: FlowDocument = toFlowDocument(plan([node('a'), node('b', ['a']), node('c')]))
-
-  test('a drawn edge makes its target depend on its source', () => {
-    const edge = { id: 'e1', source: { node: 'b', port: 'out' }, target: { node: 'c', port: 'in' } }
-    expect(editOf([{ type: 'addEdge', edge }], before, 'New').ops).toEqual([
-      { op: 'link', from: 'b', to: 'c' },
-    ])
-  })
-
-  test('removing a node drops its edges with it, without unlinking them again', () => {
-    const { ops } = editOf(
-      [
-        { type: 'removeEdge', id: 'a>b' },
-        { type: 'removeNode', id: 'a' },
-      ],
-      before,
-      'New',
-    )
-    expect(ops).toEqual([{ op: 'remove', id: 'a' }])
-    expect(editOf([{ type: 'removeEdge', id: 'a>b' }], before, 'New').ops).toEqual([
-      { op: 'unlink', from: 'a', to: 'b' },
-    ])
-  })
-
-  test('an edge moved to another node swaps the dependency', () => {
-    const { ops } = editOf(
-      [{ type: 'updateEdge', id: 'a>b', patch: { target: { node: 'c', port: 'in' } } }],
-      before,
-      'New',
-    )
-    expect(ops).toEqual([
-      { op: 'unlink', from: 'a', to: 'b' },
-      { op: 'link', from: 'a', to: 'c' },
-    ])
-  })
-
-  test('moves are remembered, not sent; a pasted node is added with a title', () => {
-    const edit = editOf(
-      [
-        { type: 'updateNode', id: 'a', patch: { x: 40 } },
-        { type: 'addNode', node: { id: 'n', type: 'plan', x: 5, y: 6, data: { title: ' ' } } },
-      ],
-      before,
-      'New',
-    )
-    expect(edit.ops).toEqual([
-      { op: 'add', id: 'n', kind: 'task', title: 'New', description: '', acceptance: '' },
-    ])
-    expect(edit.moved).toEqual({ a: { x: 40, y: 0 }, n: { x: 5, y: 6 } })
-  })
-
-  test('the reason names each change, then counts the rest', () => {
-    expect(reasonOf([{ op: 'link', from: 'a', to: 'b' }], title, translate)).toBe(
-      'plan.reason.link{"from":"A","to":"B"}',
-    )
-    const swap = reasonOf(
-      [
-        { op: 'unlink', from: 'a', to: 'b' },
-        { op: 'link', from: 'a', to: 'c' },
-      ],
-      title,
-      translate,
-    )
-    expect(swap).toBe(
-      'plan.reason.unlink{"from":"A","to":"B"}plan.reason.joinplan.reason.link{"from":"A","to":"C"}',
-    )
-    const many = reasonOf(
-      ['a', 'b', 'c', 'd', 'e'].map((id) => ({ op: 'remove' as const, id })),
-      title,
-      translate,
-    )
-    expect(many).toMatch(/^plan\.reason\.more\{"first":".*plan\.reason\.remove.*","count":5\}$/)
-  })
 })
 
 describe('previews', () => {
@@ -173,79 +92,50 @@ describe('freshChanges', () => {
     expect(lost.truncated).toBe(true)
     expect(lost.revisions.map((r) => r.id)).toEqual(['r5', 'r2', 'r1'])
   })
+})
 
-  test('a moved node keeps its offset from the layout', () => {
-    const auto = toFlowDocument(plan([node('a'), node('b', ['a'])]))
-    const b = auto.nodes.find((n) => n.id === 'b')!
-    const doc = toFlowDocument(plan([node('a'), node('b', ['a'])]), {
-      offsets: { b: { x: 9, y: 9 } },
-      fresh: new Set(['b']),
-    })
-    expect(doc.nodes.map((n) => [n.x, n.y, n.data?.fresh])).toEqual([
-      [0, 0, false],
-      [b.x + 9, b.y + 9, true],
+describe('partitionPlanNodes', () => {
+  test('hides lone done nodes, all-done groups, and all-done connected subgraphs', () => {
+    const nodes = [
+      node('lone-done', [], { status: 'done' }),
+      node('lone-active', [], { status: 'running' }),
+      node('chain-1', [], { status: 'done' }),
+      node('chain-2', ['chain-1'], { status: 'done' }),
+      node('partial-1', [], { status: 'done' }),
+      node('partial-2', ['partial-1'], { status: 'running' }),
+      node('grp-done-1', [], { group: '已完成专题', status: 'done' }),
+      node('grp-done-2', [], { group: '已完成专题', status: 'done' }),
+      node('grp-open-1', [], { group: '进行中专题', status: 'done' }),
+      node('grp-open-2', [], { group: '进行中专题', status: 'none' }),
+    ]
+    const { active, completedIds } = partitionPlanNodes(nodes)
+    expect([...completedIds].toSorted()).toEqual([
+      'chain-1',
+      'chain-2',
+      'grp-done-1',
+      'grp-done-2',
+      'lone-done',
+    ])
+    expect(active.map((n) => n.id)).toEqual([
+      'lone-active',
+      'partial-1',
+      'partial-2',
+      'grp-open-1',
+      'grp-open-2',
     ])
   })
 
-  test('a moved node goes along when its part of the plan is moved by another', () => {
-    // Two parts side by side; `y` is moved a little. Then the first part grows, which
-    // pushes the second part over: `y` must stay beside `x`, as the user put it.
-    const before = plan([node('a'), node('b', ['a']), node('x'), node('y', ['x'])])
-    const start = toFlowDocument(before)
-    const moved = { y: { x: nodeIn(start, 'y').x + 40, y: nodeIn(start, 'y').y + 16 } }
-    const offsets = offsetsOf(before, moved)
-    const grown = plan([
-      node('a'),
-      node('b', ['a']),
-      node('c', ['a']),
-      node('d', ['a']),
-      node('e', ['b', 'c', 'd']),
-      node('x'),
-      node('y', ['x']),
-    ])
-    const after = toFlowDocument(grown, { offsets })
-    const plain = toFlowDocument(grown)
-    expect(where(plain, 'x')).not.toEqual(where(start, 'x'))
-    expect(nodeIn(after, 'y').x - nodeIn(after, 'x').x).toBe(moved.y.x - nodeIn(start, 'x').x)
-    expect(nodeIn(after, 'y').y - nodeIn(after, 'x').y).toBe(moved.y.y - nodeIn(start, 'x').y)
-  })
-
-  test('a node added on the graph stays where it was dropped', () => {
-    const grown = plan([node('a'), node('b', ['a']), node('n')])
-    const offsets = offsetsOf(grown, { n: { x: 500, y: 40 } })
-    const doc = toFlowDocument(grown, { offsets })
-    expect(doc.nodes.find((n) => n.id === 'n')).toMatchObject({ x: 500, y: 40 })
+  test('keeps an all-done group visible when a downstream active node depends on it', () => {
+    const nodes = [
+      node('g1', [], { group: '前置阶段', status: 'done' }),
+      node('g2', ['g1'], { group: '前置阶段', status: 'done' }),
+      node('next', ['g2'], { status: 'running' }),
+    ]
+    const { active, completedIds } = partitionPlanNodes(nodes)
+    expect(completedIds.size).toBe(0)
+    expect(active.map((n) => n.id)).toEqual(['g1', 'g2', 'next'])
   })
 })
-
-const fields = (name: string, description: string, acceptance = '') => ({
-  title: name,
-  description,
-  acceptance,
-})
-
-describe('mergeIntoForm', () => {
-  test('takes newer values of fields the user left alone, keeps theirs where they typed', () => {
-    const base = fields('实现', '')
-    const form = fields('实现计划图', '')
-    const next = mergeIntoForm(form, base, fields('实现', '协调器写的说明', '要有测试'))
-    // The description the coordinator wrote comes in; the user's title stays.
-    expect(form).toEqual(fields('实现计划图', '协调器写的说明', '要有测试'))
-    expect(next).toEqual(fields('实现', '协调器写的说明', '要有测试'))
-  })
-
-  test('a field both sides changed keeps the user text and its old starting point', () => {
-    const form = fields('甲', '我的说明')
-    const next = mergeIntoForm(form, fields('甲', ''), fields('甲', '协调器的说明'))
-    expect(form.description).toBe('我的说明')
-    // Saving from here sends only the user's field, expecting the newer value to be kept
-    // out of it until they choose.
-    expect(next.description).toBe('')
-  })
-})
-
-const nodeIn = (doc: FlowDocument, id: string) => doc.nodes.find((n) => n.id === id)!
-const where = (doc: FlowDocument, id: string) => ({ x: nodeIn(doc, id).x, y: nodeIn(doc, id).y })
 
 const overlaps = (nodes: PlanNodeView[], at: Map<string, { x: number; y: number }>) =>
   nodes.some((a, i) =>
@@ -313,20 +203,89 @@ describe('layoutPlan', () => {
     expect(overlaps(nodes, at)).toBe(false)
   })
 
-  test('a long edge runs between the nodes in its way, until one end is moved alone', () => {
+  test('a long edge runs between the nodes in its way', () => {
     // a → b → c → d, and a → d skips two levels.
     const nodes = [node('a'), node('b', ['a']), node('c', ['b']), node('d', ['c', 'a'])]
     const doc = toFlowDocument(plan(nodes))
     const long = doc.edges.find((edge) => edge.id === 'a>d')!
     expect(long.points?.length).toBeGreaterThan(0)
     expect(doc.edges.find((edge) => edge.id === 'a>b')!.points).toBeUndefined()
-    const moved = toFlowDocument(plan(nodes), { offsets: { d: { x: 300, y: 0 } } })
-    expect(moved.edges.find((edge) => edge.id === 'a>d')!.points).toBeUndefined()
-    const both = { x: 40, y: 16 }
-    const together = toFlowDocument(plan(nodes), { offsets: { a: both, d: both } })
-    expect(together.edges.find((edge) => edge.id === 'a>d')!.points).toEqual(
-      long.points!.map((point) => ({ x: point.x + 40, y: point.y + 16 })),
-    )
+  })
+
+  test('grouped nodes sit inside their container and cross-group dependencies flow top to bottom', () => {
+    const nodes = [
+      node('p1', [], { group: 'Protobuf 迁移' }),
+      node('p2', [], { group: 'Protobuf 迁移' }),
+      node('p3', ['p1', 'p2'], { group: 'Protobuf 迁移' }),
+      node('k1', ['p3'], { group: '插件化改造' }),
+      node('k2', ['k1'], { group: '插件化改造' }),
+      node('solo'),
+    ]
+    const layout = layoutPlan(nodes)
+    expect(overlaps(nodes, layout.nodes)).toBe(false)
+    expect(layout.groups.map((g) => g.label)).toEqual(['Protobuf 迁移', '插件化改造'])
+
+    const protoGroup = layout.groups[0]!
+    const pluginGroup = layout.groups[1]!
+    // Every member lies strictly inside its group container.
+    for (const id of protoGroup.nodeIds) {
+      const pos = layout.nodes.get(id)!
+      const n = nodes.find((item) => item.id === id)!
+      expect(pos.x).toBeGreaterThanOrEqual(protoGroup.x)
+      expect(pos.y).toBeGreaterThanOrEqual(protoGroup.y)
+      expect(pos.x + NODE_WIDTH).toBeLessThanOrEqual(protoGroup.x + protoGroup.width)
+      expect(pos.y + nodeHeight(n)).toBeLessThanOrEqual(protoGroup.y + protoGroup.height)
+    }
+    // Downstream group sits below upstream group.
+    expect(pluginGroup.y).toBeGreaterThanOrEqual(protoGroup.y + protoGroup.height)
+  })
+
+  test('toFlowDocument hides completed items by default and reveals them with showCompleted', () => {
+    const nodes = [
+      node('done-1', [], { group: '旧专题', status: 'done' }),
+      node('done-2', [], { group: '旧专题', status: 'done' }),
+      node('active-1', [], { group: '当前专题', status: 'done' }),
+      node('active-2', [], { group: '当前专题', status: 'running' }),
+      node('solo-done', [], { status: 'done' }),
+    ]
+    const activeDoc = toFlowDocument(plan(nodes))
+    expect(activeDoc.nodes.map((n) => n.id)).toEqual([
+      groupIdOf('当前专题'),
+      'active-1',
+      'active-2',
+    ])
+    expect(activeDoc.nodes.find((n) => n.id === 'active-1')?.parent).toBe(groupIdOf('当前专题'))
+    expect(activeDoc.nodes.find((n) => n.id === groupIdOf('当前专题'))?.data).toMatchObject({
+      label: '当前专题',
+      doneCount: 1,
+      totalCount: 2,
+      allDone: false,
+      archived: false,
+    })
+
+    const fullDoc = toFlowDocument(plan(nodes), {
+      showCompleted: true,
+      collapsedGroups: new Set([groupIdOf('旧专题')]),
+    })
+    expect(fullDoc.nodes.map((n) => n.id)).toEqual([
+      groupIdOf('旧专题'),
+      groupIdOf('当前专题'),
+      'done-1',
+      'done-2',
+      'active-1',
+      'active-2',
+      'solo-done',
+    ])
+    expect(fullDoc.nodes.find((n) => n.id === groupIdOf('旧专题'))?.data).toMatchObject({
+      label: '旧专题',
+      collapsed: true,
+      doneCount: 2,
+      totalCount: 2,
+      allDone: true,
+      archived: true,
+    })
+    expect(fullDoc.nodes.find((n) => n.id === 'solo-done')?.data?.archived).toBe(true)
+    expect(fullDoc.nodes.find((n) => n.id === 'active-1')?.data?.archived).toBe(false)
   })
 
   test('a previewed change is laid out with its own edges', () => {

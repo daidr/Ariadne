@@ -16,8 +16,6 @@ import type {
   BackgroundView,
   MessageView,
   NeedsMeItem,
-  PlanOp,
-  PlanUndoPreview,
   PlanView,
   ProjectActivity,
   ProjectView,
@@ -78,15 +76,21 @@ import {
 } from './proto-mappers'
 import {
   ApiError,
+  authorizationHeader,
   createAriadneTransport,
   createRpcClient,
   decodeLocalizedError,
-  getToken as token,
+  getToken,
   initToken,
+  isValidToken,
+  parseTokenInput,
+  saveToken,
+  setToken,
 } from './rpc'
 import { synchronizeServerClock } from './server-clock'
 
-export { ApiError, initToken }
+export { ApiError, getToken, initToken, isValidToken, parseTokenInput, saveToken, setToken }
+const token = getToken
 
 /** How a tool of an external server may be used; unmarked tools are `ask`. */
 export type McpToolMark = 'read' | 'ask' | 'off'
@@ -217,7 +221,7 @@ async function request<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const headers: Record<string, string> = { authorization: `Bearer ${token() ?? ''}` }
+  const headers: Record<string, string> = { authorization: authorizationHeader() }
   // A file goes as it is, with its own type; anything else as JSON.
   const raw = body instanceof Blob
   if (body !== undefined) {
@@ -239,7 +243,7 @@ async function request<T>(
 export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal: AbortSignal) {
   const response = await fetch(`/api/files/${encodeURIComponent(id)}`, {
     method,
-    headers: { authorization: `Bearer ${token() ?? ''}` },
+    headers: { authorization: authorizationHeader() },
     signal,
   })
   if (!response.ok) throw new Error(`File request failed (${response.status})`)
@@ -247,7 +251,7 @@ export async function fetchStoredFile(id: string, method: 'GET' | 'HEAD', signal
 }
 
 async function download(path: string, fallbackName: string) {
-  const response = await fetch(path, { headers: { authorization: `Bearer ${token() ?? ''}` } })
+  const response = await fetch(path, { headers: { authorization: authorizationHeader() } })
   if (!response.ok) throw new ApiError(response.status, (await response.json()).error)
   const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1]
   return { blob: await response.blob(), name: name ?? fallbackName }
@@ -432,28 +436,44 @@ export interface Limits {
   loopRepeats: number
 }
 
-/** How the work is done everywhere: the user's instructions, command rules, limits. */
-/** Web search in the settings: whether a key is stored, and whether search waits for one. */
+export interface SearchCapabilities {
+  maxQueryRunes?: number
+  maxResults?: number
+  returnsAnswer?: boolean
+  supportsCheck?: boolean
+}
+
+export interface SearchServiceView {
+  kind: string
+  title: LocalizedText
+  description?: LocalizedText
+  settings: SettingsSchema
+  capabilities?: SearchCapabilities
+  values: Record<string, unknown>
+  secretsSet: string[]
+  ready: boolean
+}
+
+/** Web search in the settings: registered search plugins, active selection, and fallback models. */
 export interface SearchSettings {
-  provider: 'tavily' | 'deepseek'
+  provider: string
+  ready: boolean
   keySet: boolean
   needed: boolean
   models: string[]
   plugins: LocalizedText[]
-  services: {
-    kind: 'tavily' | 'deepseek'
-    title: string
-    defaultBaseUrl: string
-    baseUrl: string
-    keySet: boolean
-  }[]
+  services: SearchServiceView[]
 }
 
 export interface SearchSettingsInput {
-  provider: SearchSettings['provider']
-  services: Partial<
-    Record<SearchSettings['provider'], { baseUrl?: string; apiKey?: string | null }>
-  >
+  provider: string
+  services: Record<string, Record<string, unknown>>
+}
+
+export interface SearchCheckResult {
+  ok: boolean
+  status: number | null
+  message?: LocalizedText
 }
 
 export interface WorkSettings {
@@ -856,7 +876,7 @@ export const api = {
   saveSearchSettings: (input: SearchSettingsInput) =>
     request<SearchSettings>('PUT', '/api/settings/search', input),
   checkSearchSettings: (input: SearchSettingsInput) =>
-    request<{ ok: boolean; status: number | null }>('POST', '/api/settings/search/check', input),
+    request<SearchCheckResult>('POST', '/api/settings/search/check', input),
   listPlugins: () => request<{ plugins: PluginRecord[] }>('GET', '/api/plugins'),
   getPluginConfig: (id: string) =>
     request<PluginConfig>('GET', `/api/plugins/${encodeURIComponent(id)}/settings`),
@@ -1189,30 +1209,8 @@ export const api = {
       'POST',
       `/api/projects/${projectId}/plan/proposals/${proposalId}/dismiss`,
     ),
-  linkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/nodes/${nodeId}/issues`, {
-      number,
-    }),
-  unlinkIssue: (projectId: string, nodeId: string, number: number) =>
-    request<{ plan: PlanView }>(
-      'DELETE',
-      `/api/projects/${projectId}/plan/nodes/${nodeId}/issues/${number}`,
-    ),
   getPlan: (projectId: string) =>
     request<{ plan: PlanView }>('GET', `/api/projects/${projectId}/plan`),
-  revisePlan: (projectId: string, input: { reason: string; ops: PlanOp[] }) =>
-    request<{ plan: PlanView }>('POST', `/api/projects/${projectId}/plan/revise`, input),
-  previewPlanUndo: (projectId: string, revisionId: string) =>
-    request<{ preview: PlanUndoPreview }>(
-      'GET',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-    ),
-  revertPlan: (projectId: string, revisionId: string, reason: string) =>
-    request<{ plan: PlanView }>(
-      'POST',
-      `/api/projects/${projectId}/plan/revisions/${revisionId}/revert`,
-      { reason },
-    ),
   search: (projectId: string, q: string) =>
     request<SearchResult>('GET', `/api/projects/${projectId}/search${queryString({ q })}`),
   listArtifacts: (projectId: string) =>
@@ -1253,7 +1251,7 @@ export const api = {
       ? void fetch(`/api/artifacts/${id}/feedback`, {
           method: 'POST',
           keepalive: true,
-          headers: { authorization: `Bearer ${token() ?? ''}`, 'content-type': 'application/json' },
+          headers: { authorization: authorizationHeader(), 'content-type': 'application/json' },
           body: JSON.stringify({ images: [] }),
         }).catch(() => {})
       : request<{ feedback: unknown }>('POST', `/api/artifacts/${id}/feedback`, { images }),
@@ -1323,50 +1321,62 @@ export function followEvents(
   let stopped = false
 
   const open = () => {
+    if (stopped) return
     // Without a known position the server starts at its newest event.
     const from = lastSeq === null ? '' : `afterSeq=${lastSeq}&`
     const query = `${from}token=${encodeURIComponent(token() ?? '')}`
     const current = new EventSource(`/api/events?${query}`)
     source = current
     current.addEventListener('open', () => {
+      if (stopped || source !== current) return
       delay = 500
       onStatus('open')
       onOpen?.()
     })
     current.addEventListener('ariadne', (message) => {
+      if (stopped || source !== current) return
       const event: AnyStoredEvent = JSON.parse((message as MessageEvent<string>).data)
       lastSeq = Math.max(lastSeq ?? 0, event.seq)
       onEvent(event)
     })
     // A running command's output: not part of the log, so it moves nothing forward.
     current.addEventListener('live', (message) => {
+      if (stopped || source !== current) return
       onLive?.(JSON.parse((message as MessageEvent<string>).data) as LiveUpdate)
     })
     // A reply as it is written: not part of the log either.
     current.addEventListener('draft', (message) => {
+      if (stopped || source !== current) return
       onDraft?.(JSON.parse((message as MessageEvent<string>).data) as DraftUpdate)
     })
     current.addEventListener('background', (message) => {
+      if (stopped || source !== current) return
       onBackground?.(JSON.parse((message as MessageEvent<string>).data) as BackgroundUpdate)
     })
     current.addEventListener('error', () => {
-      if (stopped) return
+      if (stopped || source !== current) return
       if (current.readyState !== EventSource.CLOSED) {
         onStatus('lost')
         return
       }
       // EventSource hides the status code; ask a lightweight authenticated endpoint whether the token is the reason.
       void api.ping().then(
-        () => schedule('lost'),
-        (error) =>
-          schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost'),
+        () => {
+          if (source === current) schedule('lost')
+        },
+        (error) => {
+          if (source === current) {
+            schedule(error instanceof ApiError && error.status === 401 ? 'unauthorized' : 'lost')
+          }
+        },
       )
     })
   }
 
   const schedule = (status: StreamStatus) => {
+    if (stopped) return
     onStatus(status)
-    if (stopped || status === 'unauthorized') return
+    if (status === 'unauthorized') return
     retry = setTimeout(open, delay)
     delay = Math.min(delay * 2, 10_000)
   }
@@ -1376,5 +1386,6 @@ export function followEvents(
     stopped = true
     clearTimeout(retry)
     source?.close()
+    source = null
   }
 }

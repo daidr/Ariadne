@@ -65,7 +65,12 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 {
+	if version == 67 || version == 68 || version == 69 {
+		if err := addColumnIfMissing(ctx, tx, "plan_nodes", "group_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if version == schema.Version || version == 67 || version == 68 || version == 69 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

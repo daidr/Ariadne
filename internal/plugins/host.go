@@ -18,6 +18,7 @@ import (
 	"github.com/daidr/Ariadne/internal/dashboard"
 	"github.com/daidr/Ariadne/internal/links"
 	"github.com/daidr/Ariadne/internal/models"
+	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -56,6 +57,7 @@ type Options struct {
 	Models      *models.Registry
 	Sources     *sources.Registry
 	Dashboards  *dashboard.Registry
+	Searches    *searches.Registry
 	Links       *links.Resolver
 	OnError     func(error)
 	Settings    *settings.Store
@@ -70,29 +72,30 @@ type loaded struct {
 	validate func(map[string]any) error
 }
 type Host struct {
-	options     Options
-	mu          sync.Mutex
-	serial      chan struct{}
-	life        context.Context
-	cancel      context.CancelFunc
-	loaded      []*loaded
-	failed      []Record
-	searches    map[string]*sdk.SearchProvider
-	searchOrder []string
-	closing     bool
-	done        chan struct{}
-	closeOnce   sync.Once
+	options   Options
+	mu        sync.Mutex
+	serial    chan struct{}
+	life      context.Context
+	cancel    context.CancelFunc
+	loaded    []*loaded
+	failed    []Record
+	closing   bool
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func New(options Options) (*Host, error) {
 	if options.DataRoot == "" || !filepath.IsAbs(options.DataRoot) || options.Models == nil || options.Sources == nil || options.Dashboards == nil || options.Links == nil {
 		return nil, errors.New("plugin host needs an absolute data root and provider registries")
 	}
+	if options.Searches == nil {
+		options.Searches = searches.New()
+	}
 	if err := os.MkdirAll(options.DataRoot, 0700); err != nil {
 		return nil, err
 	}
 	life, cancel := context.WithCancel(context.Background())
-	return &Host{options: options, serial: make(chan struct{}, 1), life: life, cancel: cancel, searches: map[string]*sdk.SearchProvider{}, done: make(chan struct{})}, nil
+	return &Host{options: options, serial: make(chan struct{}, 1), life: life, cancel: cancel, done: make(chan struct{})}, nil
 }
 func (host *Host) lock(ctx context.Context) (func(), error) {
 	select {
@@ -277,7 +280,7 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 		return register(state, provider, provider.Info.Kind, &state.provides.Dashboards, host.options.Dashboards.Register)
 	}
 	pc.RegisterSearch = func(provider sdk.SearchProvider) (func(), error) {
-		return register(state, provider, provider.Kind, &state.provides.Searches, host.registerSearch)
+		return register(state, provider, provider.Kind, &state.provides.Searches, host.options.Searches.Register)
 	}
 	pc.RegisterLink = func(provider sdk.LinkProvider) (func(), error) {
 		return register(state, provider, provider.Kind, &state.provides.Links, host.options.Links.Register)
@@ -317,48 +320,17 @@ func (host *Host) load(ctx context.Context, plugin sdk.Plugin, path *string) (er
 	complete = true
 	return nil
 }
-func (host *Host) registerSearch(provider sdk.SearchProvider) (func(), error) {
-	if provider.Kind == "" || provider.Search == nil {
-		return nil, errors.New("search provider needs kind and search")
-	}
-	data, err := json.Marshal(provider.Title)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal(data, &provider.Title)
+func (host *Host) Searches() *searches.Registry {
 	host.mu.Lock()
 	defer host.mu.Unlock()
-	if host.searches[provider.Kind] != nil {
-		return nil, fmt.Errorf("search provider is already registered: %s", provider.Kind)
-	}
-	entry := &provider
-	host.searches[provider.Kind] = entry
-	host.searchOrder = append(host.searchOrder, provider.Kind)
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			host.mu.Lock()
-			defer host.mu.Unlock()
-			if host.searches[provider.Kind] == entry {
-				delete(host.searches, provider.Kind)
-				host.searchOrder = slices.DeleteFunc(host.searchOrder, func(kind string) bool { return kind == provider.Kind })
-			}
-		})
-	}, nil
+	return host.options.Searches
 }
 func (host *Host) SearchProviders() []sdk.SearchProvider {
-	host.mu.Lock()
-	defer host.mu.Unlock()
-	out := []sdk.SearchProvider{}
-	for _, kind := range host.searchOrder {
-		provider := *host.searches[kind]
-		provider.Title = map[string]string{}
-		for key, value := range host.searches[kind].Title {
-			provider.Title[key] = value
-		}
-		out = append(out, provider)
+	registry := host.Searches()
+	if registry == nil {
+		return []sdk.SearchProvider{}
 	}
-	return out
+	return registry.Providers()
 }
 func (host *Host) UnloadPath(ctx context.Context, path string) error {
 	unlock, err := host.lock(ctx)
@@ -416,8 +388,6 @@ func (host *Host) Close(ctx context.Context) error {
 				entry.record = Record{}
 			}
 			host.mu.Lock()
-			clear(host.searches)
-			host.searchOrder = nil
 			host.options = Options{}
 			host.mu.Unlock()
 		}()

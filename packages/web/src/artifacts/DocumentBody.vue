@@ -12,6 +12,7 @@ import { anchoredIds, anchorQuotes, commentTarget } from './comment-anchors'
 import { commentAuthor, toCommentThread } from './comment-threads'
 import { api } from '../api'
 import { t } from '../i18n'
+import { documentCodeLanguages, highlightDocumentCode } from './document-code'
 import { documentLocks } from './document-locks'
 import { pendingDocumentBlock } from './pending-block'
 import type { SharedArtifact } from './shared'
@@ -39,7 +40,16 @@ const me = commentAuthor('user')
 // The same blocks as the server's (`documentExtensions`): a block one side does not know
 // is lost when the other writes the document. Images on a whiteboard are uploaded as files.
 const upload = async (file: File) => (await api.uploadFile(props.projectId, file)).file.url
-const blocks = [editorKit(), whiteboardBlock({ upload, commentable: true }), pendingDocumentBlock]
+const blocks = [
+  editorKit({
+    codeBlock: {
+      highlight: highlightDocumentCode,
+      languages: documentCodeLanguages,
+    },
+  }),
+  whiteboardBlock({ upload, commentable: true }),
+  pendingDocumentBlock,
+]
 const extensions = props.shared
   ? [
       ...blocks,

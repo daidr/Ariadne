@@ -14,7 +14,6 @@ import type {
   MemoryView,
   MessageView,
   NoticeView,
-  PlanOp,
   PlanView,
   ProjectView,
   TodoView,
@@ -234,7 +233,25 @@ export const state = reactive<State>({
   lineComments: {},
 })
 
+let stopStream: (() => void) | null = null
+let streamSession: symbol | null = null
+
+export function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}
+
+function markUnauthorized() {
+  streamSession = null
+  stopStream?.()
+  stopStream = null
+  state.stream = 'unauthorized'
+}
+
 export function report(error: unknown) {
+  if (isUnauthorizedError(error)) {
+    markUnauthorized()
+    return
+  }
   const message = error instanceof ApiError ? tm(error.localized) : String(error)
   toast.danger(message, { duration: 7000, closable: true })
 }
@@ -1250,71 +1267,6 @@ export async function dismissProposal(proposalId: string) {
   }
 }
 
-/** Apply the user's own edit of the plan; returns whether it took effect. */
-/**
- * Change the plan as the user. `conflict` means someone changed a field the edit expected
- * unchanged; the caller shows that next to the edit instead of as an error.
- */
-export async function editPlan(
-  reason: string,
-  ops: PlanOp[],
-): Promise<'ok' | 'conflict' | 'failed'> {
-  const project = state.detail?.project
-  if (!project || !ops.length) return 'failed'
-  try {
-    const { plan } = await api.revisePlan(project.id, { reason, ops })
-    // The user may have opened another project while this was on its way.
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
-    return 'ok'
-  } catch (error) {
-    if (error instanceof ApiError && error.localized.key === 'error.planConflict') {
-      // The plan here may lag behind (the event stream dropped for a moment): fetch it, so
-      // the edit shows what changed.
-      try {
-        const { plan } = await api.getPlan(project.id)
-        if (state.detail?.project.id === plan.projectId) state.plan = plan
-      } catch {
-        // The next event brings it.
-      }
-      return 'conflict'
-    }
-    report(error)
-    return 'failed'
-  }
-}
-
-/** Link an issue to a plan node, or unlink it; returns why it was refused, or `null`. */
-export async function setNodeIssue(
-  nodeId: string,
-  number: number,
-  linked: boolean,
-): Promise<string | null> {
-  const project = state.detail?.project
-  if (!project) return null
-  try {
-    const { plan } = linked
-      ? await api.linkIssue(project.id, nodeId, number)
-      : await api.unlinkIssue(project.id, nodeId, number)
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
-    return null
-  } catch (error) {
-    if (error instanceof ApiError) return tm(error.localized)
-    report(error)
-    return null
-  }
-}
-
-export async function revertPlan(revisionId: string, reason: string) {
-  const project = state.detail?.project
-  if (!project) return
-  try {
-    const { plan } = await api.revertPlan(project.id, revisionId, reason)
-    if (state.detail?.project.id === plan.projectId) state.plan = plan
-  } catch (error) {
-    report(error)
-  }
-}
-
 /** Whether the answer was taken; a refusal is reported to the user. */
 export async function answerAttention(id: string, answer: BlockAnswer): Promise<boolean> {
   return api.answerAttention(id, answer).then(
@@ -1558,21 +1510,38 @@ async function load(restore: () => Promise<void>): Promise<number | null> {
     await restore()
     return lastSeq
   } catch (error) {
+    if (isUnauthorizedError(error)) {
+      markUnauthorized()
+      return null
+    }
     report(error)
     return null
   }
 }
 
 export async function start(restore: () => Promise<void>) {
+  streamSession = null
+  stopStream?.()
+  stopStream = null
   const lastSeq = await load(restore)
+  if (state.stream === 'unauthorized') return
   // Follow from the state just loaded. If loading failed (say the page opened before the
   // server), follow from the server's newest event and load once the stream is up.
   let loaded = lastSeq !== null
-  followEvents(
+  const session = (streamSession = Symbol())
+  stopStream = followEvents(
     lastSeq,
     onEvent,
-    (status) => (state.stream = status),
+    (status) => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
+      if (status === 'unauthorized') {
+        markUnauthorized()
+        return
+      }
+      state.stream = status
+    },
     () => {
+      if (streamSession !== session || state.stream === 'unauthorized') return
       // The server tells again what is running now.
       state.live = {}
       state.background = {}

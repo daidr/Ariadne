@@ -30,7 +30,7 @@ return {
 }
 ```
 
-各组都是数组。每个 provider 需要 `kind` 和 `title`。模型、来源和仪表盘可以声明
+各组都是数组。每个 provider 需要 `kind` 和 `title`。模型、搜索、来源和仪表盘可以声明
 `settings = { type = "object", properties = { ... }, required = { ... } }`，字段可用
 `secret = true` 标记密钥，密钥字段不能提供默认值。
 
@@ -38,13 +38,13 @@ return {
 的独立设置窗口里。回调使用 `ariadne.settings()` 读取该插件当前的设置。来源若依赖必填的插件
 配置，可以声明 `requiresPluginSettings = true`，设置齐全后即可在来源选择器里选用。
 
-| 组           | 回调                                                                                                                                                                                                                  |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `searches`   | `search(query, limit)` 返回 `{title, url, snippet}` 组成的数组。                                                                                                                                                      |
-| `models`     | `stream(settings, request, emit)` 调用 `emit(part)`，结束时发送 `{type="finish", reason="stop"}`。可选 `models(settings, headers)`、`check(settings)`、`describe(settings, request)` 和 `search(settings, request)`。 |
-| `dashboards` | `fetch(settings, projectId)` 返回键名对应各组数据的表。                                                                                                                                                               |
-| `links`      | `match(url)` 返回标签或 `nil`，`preview(url)` 返回预览对象或 `nil`。                                                                                                                                                  |
-| `contexts`   | 提供只读引用来源。`list(settings, path)` 返回 `{name, kind}` 数组，`kind` 为 `file` 或 `directory`。`read(settings, path, maxBytes)` 返回 Lua 字节串。可选 `check(settings)`、`browse(settings, folder)`。            |
+| 组           | 回调                                                                                                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `searches`   | `search(query, limit, settings)` 返回 `{title, url, snippet}` 组成的数组或 `{answer, results}` 对象；可选 `check(settings)` 用于连接测试（返回布尔值或 `{ok, status, message}`）。支持声明 `settings` 与 `description`。 |
+| `models`     | `stream(settings, request, emit)` 调用 `emit(part)`，结束时发送 `{type="finish", reason="stop"}`。可选 `models(settings, headers)`、`check(settings)`、`describe(settings, request)` 和 `search(settings, request)`。    |
+| `dashboards` | `fetch(settings, projectId)` 返回键名对应各组数据的表。                                                                                                                                                                  |
+| `links`      | `match(url)` 返回标签或 `nil`，`preview(url)` 返回预览对象或 `nil`。                                                                                                                                                     |
+| `contexts`   | 提供只读引用来源。`list(settings, path)` 返回 `{name, kind}` 数组，`kind` 为 `file` 或 `directory`。`read(settings, path, maxBytes)` 返回 Lua 字节串。可选 `check(settings)`、`browse(settings, folder)`。               |
 
 模型请求、流式事件和返回对象字段沿用 [Go SDK 的 JSON 字段](../sdk/model.go)。
 `describe` 的结果会进入请求追踪，应省略密钥。使用 `ariadne.array()` 表示空数组，
