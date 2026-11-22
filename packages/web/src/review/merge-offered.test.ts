@@ -29,4 +29,13 @@ describe('what a removed worktree leaves to do', () => {
     expect(hasOpenBranch(thread({ removed: true, parked: true }))).toBe(true)
     expect(branchChanges(thread({ removed: true, parked: true }))).toBe(changes)
   })
+
+  test('zero changed files hides branch change totals', () => {
+    const empty = {
+      ...thread({}),
+      changes: { files: 0, added: 0, removed: 0 },
+    } as unknown as ThreadView
+    expect(hasOpenBranch(empty)).toBe(true)
+    expect(branchChanges(empty)).toBeNull()
+  })
 })
