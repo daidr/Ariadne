@@ -130,6 +130,14 @@ function updateMeasured(
 
   for (const { element, key, index } of entries) {
     if (seen.has(key)) continue
+    if (
+      !element.isConnected ||
+      index < 0 ||
+      index >= props.items.length ||
+      keyOf(props.items[index]!, index) !== key
+    ) {
+      continue
+    }
     seen.add(key)
     const measured = element.offsetHeight
     if (measured <= 0) continue
@@ -282,6 +290,7 @@ defineExpose<DiffVirtualListExpose>({
 .diff-virtual-list {
   position: relative;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   outline: none;
   scroll-padding-top: var(--file-diff-header-height, 40px);

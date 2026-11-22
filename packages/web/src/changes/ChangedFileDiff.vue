@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { SentLineComment } from '@ariadne/core'
 import type { ChangedFile, FileVersions } from '@ariadne/plugin-sdk'
-import { codeLocales, DouCodeDiff, type CodeDiffHunk } from '@dou-ui/code'
+import {
+  codeLocales,
+  DouCodeDiff,
+  splitLines,
+  type CodeDiffGutter,
+  type CodeDiffHunk,
+  type CodeDiffWidget,
+} from '@dou-ui/code'
 import '@dou-ui/code/style.css'
 import {
   ArrowDownIcon,
@@ -21,6 +28,7 @@ import {
   shallowRef,
   useTemplateRef,
   watch,
+  watchPostEffect,
 } from 'vue'
 import { ApiError } from '../api'
 import { locale, t, tm } from '../i18n'
@@ -162,25 +170,60 @@ const statsSummary = computed(() => {
     .replace('{removed}', String(stats.value.removed))
 })
 
-function hasCollapsibleUnchanged(original: string, hunkList: readonly CodeDiffHunk[]): boolean {
+function canHideRun(count: number, before: boolean, after: boolean): boolean {
+  if (count <= 0) return false
+  const from = before ? 3 : 0
+  const to = count - (after ? 3 : 0)
+  return to - from >= 4
+}
+
+function hasCollapsibleUnchanged(
+  original: string,
+  hunkList: readonly CodeDiffHunk[],
+  gutterList: readonly CodeDiffGutter[],
+  widgetList: readonly CodeDiffWidget[],
+): boolean {
   if (!hunkList.length || !original) return false
-  const total = original.split(/\r\n?|\n/).length
+  const total = splitLines(original).length
+  const kept = { a: new Set<number>(), b: new Set<number>() }
+  const keep = (side: 'original' | 'modified', lineNumber: number) =>
+    kept[side === 'original' ? 'a' : 'b'].add(lineNumber)
+  for (const gutter of gutterList) {
+    for (const marker of gutter.markers ?? []) {
+      if (marker.visible !== 'hover') keep(marker.side, marker.line)
+    }
+  }
+  for (const widget of widgetList) keep(widget.side, widget.line)
+
+  const cut = (a: number, b: number, count: number, before: boolean, after: boolean) => {
+    let from = 0
+    for (let i = 0; i < count; i++) {
+      if (!kept.a.has(a + i) && !kept.b.has(b + i)) continue
+      if (i > from && canHideRun(i - from, from > 0 || before, true)) return true
+      from = Math.max(from, i)
+    }
+    return canHideRun(count - from, from > 0 || before, after)
+  }
+
   let a = 1
+  let b = 1
   for (let i = 0; i < hunkList.length; i++) {
     const hunk = hunkList[i]!
-    const count = hunk.originalStart - a
-    const from = i > 0 ? 3 : 0
-    const to = count - 3
-    if (to - from >= 4) return true
+    if (cut(a, b, hunk.originalStart - a, i > 0, true)) return true
     a = hunk.originalStart + hunk.originalCount
+    b = hunk.modifiedStart + hunk.modifiedCount
   }
-  const tail = total - a + 1
-  return tail - 3 >= 4
+  return cut(a, b, total - a + 1, hunkList.length > 0, false)
 }
 
 const hasCollapsible = computed(() =>
   showDiff.value && versions.value?.before
-    ? hasCollapsibleUnchanged(versions.value.before, hunks.value ?? [])
+    ? hasCollapsibleUnchanged(
+        versions.value.before,
+        hunks.value ?? [],
+        gutters.value,
+        widgets.value,
+      )
     : false,
 )
 const hasHiddenLines = ref(true)
@@ -202,11 +245,36 @@ function syncHiddenBars() {
   if (diffEl) hasHiddenLines.value = !!diffEl.querySelector('.dou-code-diff__bar')
 }
 
-function onDiffClick(event: MouseEvent) {
-  if ((event.target as Element | null)?.closest('.dou-code-diff__bar')) {
-    void nextTick(syncHiddenBars)
-  }
+let barObserver: MutationObserver | null = null
+let barSyncQueued = false
+function stopBarObserver() {
+  barObserver?.disconnect()
+  barObserver = null
+  barSyncQueued = false
 }
+
+function scheduleBarSync() {
+  if (barSyncQueued) return
+  barSyncQueued = true
+  queueMicrotask(() => {
+    barSyncQueued = false
+    syncHiddenBars()
+  })
+}
+
+watchPostEffect(() => {
+  stopBarObserver()
+  const visible = showDiff.value
+  void versions.value
+  void diffRef.value
+  const rootEl = rootRef.value
+  if (!visible || !rootEl || typeof MutationObserver === 'undefined') return
+  const diffEl = rootEl.querySelector('.dou-code-diff')
+  if (!diffEl) return
+  barObserver = new MutationObserver(scheduleBarSync)
+  barObserver.observe(diffEl, { childList: true, subtree: true })
+})
+onBeforeUnmount(stopBarObserver)
 
 function previousChange() {
   diffRef.value?.previous()
@@ -332,7 +400,6 @@ function toggleCollapse() {
       :toolbar="false"
       :bordered="false"
       wrap
-      @click="onDiffClick"
     />
   </section>
 </template>

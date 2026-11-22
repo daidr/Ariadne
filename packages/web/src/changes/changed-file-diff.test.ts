@@ -215,4 +215,101 @@ describe('ChangedFileDiff single-line sticky header', () => {
 
     wrapper.unmount()
   })
+
+  test('hides collapse button when line comments split unchanged runs below the collapse threshold', async () => {
+    // 10 lines: line 1 changed, lines 2..10 unchanged (9 lines -> would hide 6 lines without comments).
+    // A comment on line 6 splits [2..10] into [2..5] (4 lines with context 3+3) and [6..10] (5 lines with context 3),
+    // leaving 0 collapsible lines in DouCodeDiff.
+    const before = Array.from({ length: 10 }, (_, i) => `const line${i + 1} = ${i + 1}`).join('\n')
+    const after = before.replace('const line1 = 1', 'const line1 = 100')
+    const file: ChangedFile = {
+      path: 'annotated.ts',
+      previousPath: null,
+      status: 'modified',
+      added: 1,
+      removed: 1,
+    }
+    const loadVersions = Object.assign(
+      async (): Promise<FileVersions> => ({ before, after, skipped: null }),
+      {
+        peek: (): FileVersions => ({ before, after, skipped: null }),
+      },
+    )
+
+    const wrapper = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-annotated',
+        file,
+        loadVersions,
+        sent: [
+          {
+            id: 'c1',
+            messageId: 'm1',
+            path: 'annotated.ts',
+            line: 6,
+            quote: 'const line6 = 6',
+            body: 'keep visible',
+            sentAt: 1,
+          },
+        ],
+        notes: [],
+        mode: 'split',
+      },
+      attachTo: document.body,
+    })
+
+    await nextTick()
+    expect(wrapper.findAll('.dou-code-diff__bar')).toHaveLength(0)
+    expect(wrapper.find('button[aria-label="展开全部"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="折叠未改动的行"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  test('syncs collapse button state when DouCodeDiff reveals collapsed lines via editor cursor movement', async () => {
+    // Change on line 1, followed by 15 unchanged lines (single collapsed bar for lines 5..16).
+    const before = Array.from({ length: 16 }, (_, i) => `const row${i + 1} = ${i + 1}`).join('\n')
+    const after = before.replace('const row1 = 1', 'const row1 = 999')
+    const file: ChangedFile = {
+      path: 'reveal.ts',
+      previousPath: null,
+      status: 'modified',
+      added: 1,
+      removed: 1,
+    }
+    const loadVersions = Object.assign(
+      async (): Promise<FileVersions> => ({ before, after, skipped: null }),
+      {
+        peek: (): FileVersions => ({ before, after, skipped: null }),
+      },
+    )
+
+    const wrapper = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-reveal',
+        file,
+        loadVersions,
+        sent: [],
+        notes: [],
+        mode: 'split',
+      },
+      attachTo: document.body,
+    })
+
+    await nextTick()
+    expect(wrapper.find('button[aria-label="展开全部"]').exists()).toBe(true)
+    expect(wrapper.findAll('.dou-code-diff__bar').length).toBeGreaterThan(0)
+
+    // Move cursor to hidden line 10 inside modified editor (simulating keyboard/search revealAt).
+    const diffVm = wrapper.findComponent({ name: 'DouCodeDiff' }).vm as unknown as {
+      modified?: { doc: { line: (n: number) => { from: number } }; select: (pos: number) => void }
+    }
+    const targetPos = diffVm.modified!.doc.line(10).from
+    diffVm.modified!.select(targetPos)
+    await nextTick()
+    await new Promise((done) => setTimeout(done, 20))
+
+    expect(wrapper.findAll('.dou-code-diff__bar')).toHaveLength(0)
+    expect(wrapper.find('button[aria-label="折叠未改动的行"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

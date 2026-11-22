@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
-import { describe, expect, test } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, test, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import DiffVirtualList, { type DiffVirtualListExpose } from './DiffVirtualList.vue'
 
@@ -9,7 +11,14 @@ interface Row {
   height: number
 }
 
+const sfcSource = readFileSync(resolve(import.meta.dirname, 'DiffVirtualList.vue'), 'utf8')
+const styleBlock = sfcSource.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ''
+
 describe('DiffVirtualList', () => {
+  test('disables native scroll anchoring to avoid double compensation with manual scroll shifts', () => {
+    expect(styleBlock).toMatch(/\.diff-virtual-list\s*\{[^}]*overflow-anchor:\s*none;/s)
+  })
+
   test('renders items in normal flow with padding spacers instead of transforms so sticky headers work', async () => {
     const items: Row[] = Array.from({ length: 12 }, (_, i) => ({
       path: `src/file-${i}.ts`,
@@ -63,5 +72,63 @@ describe('DiffVirtualList', () => {
     expect(indices).toContain(6)
 
     wrapper.unmount()
+  })
+
+  test('ignores stale ResizeObserver callbacks after items shrink or detach', async () => {
+    const callbacks: ResizeObserverCallback[] = []
+    class FakeResizeObserver {
+      callback: ResizeObserverCallback
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback
+        callbacks.push(callback)
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+    try {
+      const items = ref<Row[]>([
+        { path: 'a.ts', height: 200 },
+        { path: 'b.ts', height: 200 },
+        { path: 'c.ts', height: 200 },
+      ])
+      const Host = defineComponent({
+        setup() {
+          return () =>
+            h(
+              DiffVirtualList<Row>,
+              {
+                items: items.value,
+                itemKey: 'path',
+                estimateSize: (item: Row) => item.height,
+                overscan: 2,
+              },
+              {
+                default: ({ item }: { item: Row }) => h('div', { class: 'row' }, item.path),
+              },
+            )
+        },
+      })
+
+      const wrapper = mount(Host, { attachTo: document.body })
+      const staleNode = wrapper.findAll('.diff-virtual-list-item')[2]!.element as HTMLElement
+      Object.defineProperty(staleNode, 'offsetHeight', { value: 320, configurable: true })
+
+      // Shrink list so index 2 is now out of bounds and detached.
+      items.value = [{ path: 'a.ts', height: 200 }]
+      await nextTick()
+
+      expect(() => {
+        for (const cb of callbacks) {
+          cb([{ target: staleNode } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+        }
+      }).not.toThrow()
+
+      wrapper.unmount()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
