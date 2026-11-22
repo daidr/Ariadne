@@ -1,14 +1,39 @@
 <script setup lang="ts">
-import { DouEmpty } from 'dou-ui'
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { EyeIcon, EyeOffIcon } from '@dou-ui/icons'
+import { DouButton, DouEmpty } from 'dou-ui'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { state } from '../store'
+import { partitionPlanNodes } from './layout'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
+import { planUi, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
 
 const PlanGraph = defineAsyncComponent(() => import('./PlanGraph.vue'))
 
 const selected = ref<string | null>(null)
+const summary = computed(() =>
+  state.plan
+    ? partitionPlanNodes(state.plan.nodes)
+    : { active: [], completedIds: new Set<string>() },
+)
+const completedCount = computed(() => summary.value.completedIds.size)
+const showCompleted = computed(() => (state.plan ? showingCompleted(state.plan.projectId) : false))
+const allHiddenAsCompleted = computed(
+  () =>
+    !!state.plan?.nodes.length &&
+    summary.value.active.length === 0 &&
+    !showCompleted.value &&
+    !planUi.previewId,
+)
+
+watch(
+  () => state.plan?.projectId,
+  () => {
+    selected.value = null
+  },
+)
+
 const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
 </script>
 
@@ -16,8 +41,40 @@ const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.valu
   <div class="plan-panel">
     <template v-if="state.plan?.nodes.length">
       <PlanChangeBar />
+      <div v-if="completedCount > 0" class="plan-panel-bar">
+        <DouButton
+          size="xs"
+          :variant="showCompleted ? 'soft' : 'ghost'"
+          :aria-pressed="showCompleted"
+          @click="toggleShowCompleted(state.plan.projectId)"
+        >
+          <template #leading>
+            <EyeOffIcon v-if="showCompleted" />
+            <EyeIcon v-else />
+          </template>
+          {{
+            showCompleted
+              ? t('plan.hideCompleted', { count: completedCount })
+              : t('plan.showCompleted', { count: completedCount })
+          }}
+        </DouButton>
+      </div>
       <div class="plan-panel-graph">
-        <PlanGraph v-model:selected="selected" :plan="state.plan" compact />
+        <DouEmpty
+          v-if="allHiddenAsCompleted"
+          size="sm"
+          :description="t('plan.allCompleted', { count: completedCount })"
+        >
+          <DouButton
+            size="sm"
+            variant="outline"
+            @click="state.plan && setShowCompleted(state.plan.projectId, true)"
+          >
+            <template #leading><EyeIcon /></template>
+            {{ t('plan.showCompleted', { count: completedCount }) }}
+          </DouButton>
+        </DouEmpty>
+        <PlanGraph v-else v-model:selected="selected" :plan="state.plan" compact />
       </div>
       <div v-if="node" class="plan-panel-detail">
         <PlanNodeDetail :node="node" />
@@ -40,6 +97,13 @@ const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.valu
 /* The canvas runs to the pane's edges; what is written around it keeps the pane's inset. */
 .plan-panel > :not(.plan-panel-graph) {
   margin: 8px 8px 8px 16px;
+}
+
+.plan-panel > .plan-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 4px 8px 0 16px;
 }
 
 .plan-panel > .plan-panel-detail {

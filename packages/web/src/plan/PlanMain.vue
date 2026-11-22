@@ -9,40 +9,40 @@ import {
   DouTimeline,
   DouTimelineItem,
 } from 'dou-ui'
-import { ChevronLeftIcon, LayoutIcon, PencilIcon, PlusIcon } from '@dou-ui/icons'
-import type { PlanOp } from '@ariadne/core'
-import { computed, ref } from 'vue'
-import { locale, t, tm } from '../i18n'
-import { editPlan, backMain, state } from '../store'
-import { reasonOf } from './edit'
+import { ChevronLeftIcon, EyeIcon, EyeOffIcon } from '@dou-ui/icons'
+import { computed, ref, watch } from 'vue'
+import { locale, t } from '../i18n'
+import { backMain, state } from '../store'
+import { partitionPlanNodes } from './layout'
 import PlanChangeBar from './PlanChangeBar.vue'
 import PlanGraph from './PlanGraph.vue'
 import PlanNodeDetail from './PlanNodeDetail.vue'
-import PlanUndoButton from './PlanUndoButton.vue'
-import { clearPositions } from './ui'
+import { planUi, setShowCompleted, showingCompleted, toggleShowCompleted } from './ui'
 
 const selected = ref<string | null>(null)
 const historyOpen = ref<string[]>([])
-const editing = ref(false)
-const canEdit = computed(() => !!state.plan)
 
-async function addNode() {
-  const op: PlanOp = {
-    op: 'add',
-    id: `nod_${crypto.randomUUID()}`,
-    kind: 'task',
-    title: t('plan.newNode'),
-    description: '',
-    acceptance: '',
-  }
-  if (
-    (await editPlan(
-      reasonOf([op], () => op.title, t),
-      [op],
-    )) === 'ok'
-  )
-    selected.value = op.id
-}
+const summary = computed(() =>
+  state.plan
+    ? partitionPlanNodes(state.plan.nodes)
+    : { active: [], completedIds: new Set<string>() },
+)
+const completedCount = computed(() => summary.value.completedIds.size)
+const showCompleted = computed(() => (state.plan ? showingCompleted(state.plan.projectId) : false))
+const allHiddenAsCompleted = computed(
+  () =>
+    !!state.plan?.nodes.length &&
+    summary.value.active.length === 0 &&
+    !showCompleted.value &&
+    !planUi.previewId,
+)
+
+watch(
+  () => state.plan?.projectId,
+  () => {
+    selected.value = null
+  },
+)
 
 const node = computed(() => state.plan?.nodes.find((n) => n.id === selected.value) ?? null)
 const time = (at: number) =>
@@ -58,51 +58,46 @@ const time = (at: number) =>
       </DouButton>
       <DouText weight="medium">{{ t('plan.title') }}</DouText>
       <div class="plan-main-tools">
-        <template v-if="canEdit && editing">
-          <DouButton size="sm" variant="ghost" @click="addNode">
-            <template #leading><PlusIcon /></template>
-            {{ t('plan.edit.add') }}
-          </DouButton>
-          <DouButton
-            size="sm"
-            variant="ghost"
-            @click="state.plan && clearPositions(state.plan.projectId)"
-          >
-            <template #leading><LayoutIcon /></template>
-            {{ t('plan.edit.relayout') }}
-          </DouButton>
-        </template>
         <DouButton
-          v-if="canEdit"
+          v-if="state.plan && completedCount > 0"
           size="sm"
-          :variant="editing ? 'solid' : 'outline'"
-          :tone="editing ? 'primary' : 'neutral'"
-          :aria-pressed="editing"
-          @click="editing = !editing"
+          :variant="showCompleted ? 'soft' : 'ghost'"
+          :aria-pressed="showCompleted"
+          @click="toggleShowCompleted(state.plan.projectId)"
         >
-          <template #leading><PencilIcon /></template>
-          {{ editing ? t('plan.edit.done') : t('plan.edit.start') }}
+          <template #leading>
+            <EyeOffIcon v-if="showCompleted" />
+            <EyeIcon v-else />
+          </template>
+          {{
+            showCompleted
+              ? t('plan.hideCompleted', { count: completedCount })
+              : t('plan.showCompleted', { count: completedCount })
+          }}
         </DouButton>
       </div>
     </div>
     <div class="plan-main-body">
       <div class="plan-main-graph">
-        <PlanGraph
-          v-if="state.plan?.nodes.length"
-          v-model:selected="selected"
-          :plan="state.plan"
-          :editable="editing"
-        />
-        <DouEmpty v-else :description="t('plan.empty')" />
+        <DouEmpty v-if="!state.plan?.nodes.length" :description="t('plan.empty')" />
+        <DouEmpty
+          v-else-if="allHiddenAsCompleted"
+          :description="t('plan.allCompleted', { count: completedCount })"
+        >
+          <DouButton
+            size="sm"
+            variant="outline"
+            @click="state.plan && setShowCompleted(state.plan.projectId, true)"
+          >
+            <template #leading><EyeIcon /></template>
+            {{ t('plan.showCompleted', { count: completedCount }) }}
+          </DouButton>
+        </DouEmpty>
+        <PlanGraph v-else v-model:selected="selected" :plan="state.plan" />
       </div>
       <aside class="plan-main-side">
         <PlanChangeBar />
-        <PlanNodeDetail
-          v-if="node"
-          :node="node"
-          :editable="canEdit && editing"
-          @removed="selected = null"
-        />
+        <PlanNodeDetail v-if="node" :node="node" />
         <!-- The history is there when looked for; the graph and the node come first. -->
         <DouCollapse v-model="historyOpen" class="plan-main-history">
           <DouCollapseItem value="history" :title="t('plan.history')">
@@ -123,7 +118,6 @@ const time = (at: number) =>
                     }}
                   </DouText>
                   <DouTag v-if="revision.revertedBy" size="sm">{{ t('plan.reverted') }}</DouTag>
-                  <PlanUndoButton v-if="!revision.revertOf" :revision="revision" />
                 </div>
               </DouTimelineItem>
             </DouTimeline>

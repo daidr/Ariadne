@@ -78,35 +78,38 @@ func applyOps(graph planGraph, ops []object) (planGraph, []object, error) {
 			if title == "" {
 				return planGraph{}, nil, invalidPlan(where + ": title is empty")
 			}
-			next.nodes[id] = object{"kind": op["kind"], "title": title, "description": op["description"], "acceptance": op["acceptance"]}
-			next.order = append(next.order, id)
-			prepend(object{"op": "remove", "id": id})
-		case "update":
-			if node == nil {
-				return planGraph{}, nil, invalidPlan(where + ": no node " + id)
-			}
-			for _, field := range []string{"title", "description", "acceptance"} {
-				if expected, ok := op.obj("expect")[field]; ok && node[field] != expected {
-					return planGraph{}, nil, domainerr.New("error.planConflict", map[string]any{"title": node["title"], "reason": where + ": " + field + " of " + id + " changed since"})
+				group := projectsettings.Trim(op.str("group"))
+				next.nodes[id] = object{"kind": op["kind"], "title": title, "description": op["description"], "acceptance": op["acceptance"], "group": group}
+				next.order = append(next.order, id)
+				prepend(object{"op": "remove", "id": id})
+			case "update":
+				if node == nil {
+					return planGraph{}, nil, invalidPlan(where + ": no node " + id)
 				}
-			}
-			restore := object{"op": "update", "id": id}
-			after := object{}
-			for _, field := range []string{"title", "description", "acceptance"} {
-				value, ok := op[field]
-				if !ok {
-					continue
-				}
-				if field == "title" {
-					value = projectsettings.Trim(op.str("title"))
-					if value == "" {
-						return planGraph{}, nil, invalidPlan(where + ": title is empty")
+				for _, field := range []string{"title", "description", "acceptance", "group"} {
+					if expected, ok := op.obj("expect")[field]; ok && node[field] != expected {
+						return planGraph{}, nil, domainerr.New("error.planConflict", map[string]any{"title": node["title"], "reason": where + ": " + field + " of " + id + " changed since"})
 					}
 				}
-				restore[field] = node[field]
-				node[field] = value
-				after[field] = value
-			}
+				restore := object{"op": "update", "id": id}
+				after := object{}
+				for _, field := range []string{"title", "description", "acceptance", "group"} {
+					value, ok := op[field]
+					if !ok {
+						continue
+					}
+					if field == "title" {
+						value = projectsettings.Trim(op.str("title"))
+						if value == "" {
+							return planGraph{}, nil, invalidPlan(where + ": title is empty")
+						}
+					} else if field == "group" {
+						value = projectsettings.Trim(op.str("group"))
+					}
+					restore[field] = node[field]
+					node[field] = value
+					after[field] = value
+				}
 			restore["expect"] = map[string]any(after)
 			prepend(restore)
 		case "remove":
@@ -207,37 +210,37 @@ func parsePlanOps(raw any) ([]object, error) {
 			if kind != "task" && kind != "milestone" && kind != "decision" {
 				return nil, invalidPlan(where + ": bad kind")
 			}
-			clean := object{"op": "add", "id": id("id"), "kind": kind}
-			for _, key := range []string{"title", "description", "acceptance"} {
-				value, _ := text(op, key)
-				clean[key] = value
-			}
-			parsed = append(parsed, clean)
-		case "update":
-			clean := object{"op": "update", "id": id("id")}
-			for _, key := range []string{"title", "description", "acceptance"} {
-				if value, has := text(op, key); has {
+				clean := object{"op": "add", "id": id("id"), "kind": kind}
+				for _, key := range []string{"title", "description", "acceptance", "group"} {
+					value, _ := text(op, key)
 					clean[key] = value
 				}
-			}
-			if value, has := op["expect"]; has {
-				fields, ok := value.(map[string]any)
-				if !ok {
-					if _, array := value.([]any); !array {
-						if err == nil {
-							err = invalidPlan(where + ": bad expect")
+				parsed = append(parsed, clean)
+			case "update":
+				clean := object{"op": "update", "id": id("id")}
+				for _, key := range []string{"title", "description", "acceptance", "group"} {
+					if value, has := text(op, key); has {
+						clean[key] = value
+					}
+				}
+				if value, has := op["expect"]; has {
+					fields, ok := value.(map[string]any)
+					if !ok {
+						if _, array := value.([]any); !array {
+							if err == nil {
+								err = invalidPlan(where + ": bad expect")
+							}
+						}
+						fields = map[string]any{}
+					}
+					expect := object{}
+					for _, key := range []string{"title", "description", "acceptance", "group"} {
+						if value, has := text(fields, key); has {
+							expect[key] = value
 						}
 					}
-					fields = map[string]any{}
+					clean["expect"] = map[string]any(expect)
 				}
-				expect := object{}
-				for _, key := range []string{"title", "description", "acceptance"} {
-					if value, has := text(fields, key); has {
-						expect[key] = value
-					}
-				}
-				clean["expect"] = map[string]any(expect)
-			}
 			parsed = append(parsed, clean)
 		case "remove":
 			parsed = append(parsed, object{"op": "remove", "id": id("id")})
@@ -340,9 +343,9 @@ func previewPlanOps(graph planGraph, ops []object) any {
 			mark = "added"
 		} else if now == nil {
 			mark = "removed"
-		} else if was["title"] != now["title"] || was["description"] != now["description"] || was["acceptance"] != now["acceptance"] {
-			mark = "changed"
-		}
+			} else if was["title"] != now["title"] || was["description"] != now["description"] || was["acceptance"] != now["acceptance"] || was["group"] != now["group"] {
+				mark = "changed"
+			}
 		node["mark"] = mark
 		depends := []string{}
 		for _, edge := range edges {
@@ -404,7 +407,17 @@ func describePlanOps(graph planGraph, ops []object, threadsOn func(string) int) 
 				}
 				changes = append(changes, message("plan.op.acceptance", object{"title": name, "value": value}))
 			}
-			if value, has := op["description"]; has && value != node["description"] {
+				if _, has := op["group"]; has {
+					nextGroup := projectsettings.Trim(op.str("group"))
+					if nextGroup != node.str("group") {
+						if nextGroup == "" {
+							changes = append(changes, message("plan.op.ungroup", object{"title": name}))
+						} else {
+							changes = append(changes, message("plan.op.group", object{"title": name, "value": nextGroup}))
+						}
+					}
+				}
+				if value, has := op["description"]; has && value != node["description"] {
 				changes = append(changes, message("plan.op.update", object{"title": name}))
 			}
 			if len(changes) == 0 {

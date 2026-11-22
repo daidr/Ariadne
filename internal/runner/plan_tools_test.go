@@ -37,23 +37,23 @@ func TestCoordinatorUpdatesAndRevertsPlanDirectly(t *testing.T) {
 		return out
 	}
 
-	add := func(title string) args { return args{"op": "add", "ref": "work", "title": title} }
-	initialReply, err := turn.updatePlan(ctx, args{"reason": "提出计划", "ops": []any{
-		args{"op": "add", "title": "验收", "dependsOn": []any{"work"}}, add("实现接口"),
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	initial := decodeReply(initialReply)
-	workID := initial["ids"].(map[string]any)["work"].(string)
-	plan, err := repo.GetPlan(ctx, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodes, err := repo.ModelPlan(ctx, project.ID)
-	if err != nil || !strings.Contains(mustJSON(t, nodes), "实现接口") {
-		t.Fatal("model read did not include the implementation node", plan, err)
-	}
+		add := func(title string) args { return args{"op": "add", "ref": "work", "title": title, "group": "核心改造"} }
+		initialReply, err := turn.updatePlan(ctx, args{"reason": "提出计划", "ops": []any{
+			args{"op": "add", "title": "验收", "group": "核心改造", "dependsOn": []any{"work"}}, add("实现接口"),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		initial := decodeReply(initialReply)
+		workID := initial["ids"].(map[string]any)["work"].(string)
+		plan, err := repo.GetPlan(ctx, project.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes, err := repo.ModelPlan(ctx, project.ID)
+		if err != nil || !strings.Contains(mustJSON(t, nodes), "实现接口") || !strings.Contains(mustJSON(t, nodes), "核心改造") {
+			t.Fatal("model read did not include the implementation node or group", plan, err)
+		}
 	if _, err := turn.updatePlan(ctx, args{"reason": "重复", "ops": []any{add("实 现接口！")}}); err == nil {
 		t.Fatal("created a duplicate title")
 	}

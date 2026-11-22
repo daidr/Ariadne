@@ -708,6 +708,8 @@ export interface PlanNodeView {
   title: string
   description: string
   acceptance: string
+  /** Optional topic or phase group name shared by related nodes. */
+  group?: string
   /** Nodes this one depends on. */
   dependsOn: string[]
   status: PlanNodeStatus

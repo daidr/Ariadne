@@ -99,7 +99,6 @@ import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
 import ArtifactNotice from './ArtifactNotice.vue'
 import RecapNotice from './RecapNotice.vue'
-import PlanUndoButton from '../plan/PlanUndoButton.vue'
 import AskBlock from '../blocks/AskBlock.vue'
 import DraftBlock from '../blocks/DraftBlock.vue'
 import ShowBlock from '../blocks/ShowBlock.vue'
@@ -455,7 +454,6 @@ function planNotice(notice: Extract<NoticeView, { kind: 'plan-changed' }>) {
   })
   return notice.added ? `${text} · ${t('notice.planAdded', { count: notice.added })}` : text
 }
-const revisionOf = (id: string) => state.plan?.revisions.find((revision) => revision.id === id)
 // Narrowed where they are called; the template cannot narrow inside a handler.
 const threadIdOf = (notice: NoticeView) =>
   notice.kind === 'thread-auto-started' ? notice.threadId : ''
@@ -963,16 +961,14 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             :notice="item.notice"
           />
           <TurnChanges v-else-if="item.notice.kind === 'turn-changes'" :notice="item.notice" />
-          <!-- A change the coordinator made to the plan without asking, to undo from here. -->
-          <template v-else-if="item.notice.kind === 'plan-changed'">
-            <DouText variant="tertiary" size="sm" class="notice-text">
-              {{ planNotice(item.notice) }}
-            </DouText>
-            <PlanUndoButton
-              v-if="revisionOf(item.notice.revisionId)"
-              :revision="revisionOf(item.notice.revisionId)!"
-            />
-          </template>
+          <DouText
+            v-else-if="item.notice.kind === 'plan-changed'"
+            variant="tertiary"
+            size="sm"
+            class="notice-text"
+          >
+            {{ planNotice(item.notice) }}
+          </DouText>
           <DouText
             v-else-if="item.notice.kind === 'thread-auto-started'"
             variant="tertiary"
