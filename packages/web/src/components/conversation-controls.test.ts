@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../api'
 import { locale } from '../i18n'
-import { stopBackground } from '../store'
+import { openThread, state, stopBackground } from '../store'
 import BackgroundCommand from './BackgroundCommand.vue'
 import BackgroundTasks from './BackgroundTasks.vue'
 import ConversationActivity from './ConversationActivity.vue'
@@ -12,12 +12,16 @@ import ConversationBar from './ConversationBar.vue'
 
 const mocks = vi.hoisted(() => ({ openView: vi.fn() }))
 vi.mock('../api', () => ({ api: { streamCommandOutput: vi.fn() } }))
-vi.mock('../store', () => ({
-  state: { stream: 'open' },
-  stopBackground: vi.fn(),
-  report: vi.fn(),
-  endWait: vi.fn(),
-}))
+vi.mock('../store', async () => {
+  const { reactive } = await import('vue')
+  return {
+    state: reactive({ stream: 'open', detail: null as { threads: { id: string }[] } | null }),
+    stopBackground: vi.fn(),
+    report: vi.fn(),
+    endWait: vi.fn(),
+    openThread: vi.fn(),
+  }
+})
 vi.mock('../opened-from', () => ({ useOpenView: () => mocks.openView }))
 
 const commands: BackgroundView[] = [
@@ -55,6 +59,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount())
+  state.detail = null
   document.body.innerHTML = ''
   vi.useRealTimers()
   vi.clearAllMocks()
@@ -201,4 +206,46 @@ test('the status slot survives working, queued, and idle states', async () => {
   await wrapper.setProps({ queued: false })
   expect(wrapper.text()).toBe('')
   expect(wrapper.element).toBe(slot)
+})
+
+test('shows reviewing status in the activity slot with reviewer shortcut and lower priority than active states', async () => {
+  state.detail = { threads: [{ id: 'thr-rev' }] } as never
+  const reviewing = { reviewerId: 'thr-rev', rounds: 2, reviewing: true }
+  const wrapper = mount(ConversationActivity, {
+    props: {
+      conversationId: 'thr-1',
+      working: false,
+      queued: false,
+      live: null,
+      activity: '正在检查',
+      elapsed: '0:02',
+      escArmed: false,
+      wait: null,
+      reviewing,
+    },
+    global,
+  })
+  wrappers.push(wrapper)
+
+  expect(wrapper.text()).toContain('AI 审阅中 · 第 2 轮')
+  const openBtn = wrapper.get('button')
+  expect(openBtn.text()).toBe('看审阅')
+  await openBtn.trigger('click')
+  expect(openThread).toHaveBeenCalledWith('thr-rev')
+
+  // Active turn takes priority over reviewing indicator.
+  await wrapper.setProps({ working: true })
+  expect(wrapper.text()).toContain('正在检查')
+  expect(wrapper.text()).not.toContain('AI 审阅中')
+
+  // Queued state also takes priority over reviewing indicator.
+  await wrapper.setProps({ working: false, queued: true })
+  expect(wrapper.text()).toContain('排队中')
+  expect(wrapper.text()).not.toContain('AI 审阅中')
+
+  // Hides shortcut button when the reviewer thread is not listed.
+  state.detail = { threads: [] } as never
+  await wrapper.setProps({ queued: false })
+  expect(wrapper.text()).toContain('AI 审阅中 · 第 2 轮')
+  expect(wrapper.find('button').exists()).toBe(false)
 })

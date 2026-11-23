@@ -203,7 +203,6 @@ function bring(group: DockGroup, key: side.ListKey) {
           v-else-if="side.threadOf(value as PaneKey)"
           :thread-id="side.threadOf(value as PaneKey)!"
           :active="props.active && (!compact || value === compactGroup.active)"
-          tabbed
         />
         <OpenedView
           v-else-if="openedViewOf(value as PaneKey)"

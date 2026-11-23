@@ -17,7 +17,6 @@ import {
   DouInput,
   DouLink,
   DouPopover,
-  DouShimmer,
   DouText,
   type ChatAttachment,
   type ChatInputOption,
@@ -33,7 +32,6 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
-  MessagesIcon,
 } from '@dou-ui/icons'
 import {
   computed,
@@ -55,7 +53,6 @@ import RelayedTo from './RelayedTo.vue'
 import MessageQuote from './MessageQuote.vue'
 import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
-import ThreadTools from './ThreadTools.vue'
 import { placeTodo, todoPlan } from './todo'
 import { isInlineImage, shownAttachments, useAttachments } from './attachments'
 import {
@@ -66,7 +63,6 @@ import {
   openMain,
   openView as openFrom,
   type OpenedView,
-  openThread,
   openThreadFrom,
   react,
   retryTurn,
@@ -80,10 +76,8 @@ import {
   undoMerge,
   undoNotice,
 } from '../store'
-import WorkspaceTag from './WorkspaceTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
-import ReviewMark from '../review/ReviewMark.vue'
 import ReviewNotice from '../review/ReviewNotice.vue'
 import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
@@ -113,13 +107,9 @@ import { stepHistory, type Recall } from './input-history'
 import { provideFromThread } from '../opened-from'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
-// `tabbed`: in a side tab group, whose own menu holds the thread's.
-const props = withDefaults(
-  defineProps<{ threadId?: string; tabbed?: boolean; active?: boolean }>(),
-  {
-    active: true,
-  },
-)
+const props = withDefaults(defineProps<{ threadId?: string; active?: boolean }>(), {
+  active: true,
+})
 const active = computed(() => props.active)
 
 // What opens from a thread shows full screen, with this thread beside it.
@@ -295,6 +285,7 @@ const showCapsules = computed(
     !!thread.value?.pullRequest,
 )
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
+const reviewing = computed(() => (thread.value?.review?.reviewing ? thread.value.review : null))
 // What it is doing, shown after the last message: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
@@ -857,30 +848,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
     @focusin="lastPanel = kind"
     @pointerdown="lastPanel = kind"
   >
-    <div v-if="thread" class="conversation-header">
-      <div class="conversation-meta">
-        <div class="conversation-meta-main">
-          <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
-            {{ t('review.underway', { round: thread.review.rounds }) }}
-          </DouShimmer>
-          <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <ReviewMark :thread="thread" />
-          <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
-          <template v-if="reviewed">
-            <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
-              <template #leading><MessagesIcon /></template>
-              {{ t('review.author') }}
-            </DouButton>
-          </template>
-        </div>
-        <div v-if="!tabbed" class="conversation-tools">
-          <ThreadTools :thread="thread" :label="t('thread.more')" />
-        </div>
-      </div>
-    </div>
-
     <ConversationLog
-      v-if="timeline.length || todo.length || working || queued || wait"
+      v-if="timeline.length || todo.length || working || queued || wait || reviewing"
       :key="conversationId ?? undefined"
       ref="list"
       class="conversation-list"
@@ -902,6 +871,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           :elapsed="elapsed"
           :esc-armed="escArmed"
           :wait="wait"
+          :reviewing="reviewing"
         />
         <DouChatPlan
           v-else-if="'todo' in item"
@@ -1513,43 +1483,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   min-height: 0;
 }
 
-.conversation-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px 8px 16px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
-}
-
-/* The menu keeps its corner however far the rest wraps. */
-.conversation-meta {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* With no branch, review or menu to show, the bar is not drawn at all. */
-.conversation-header:has(.conversation-meta-main:empty):not(:has(.conversation-tools)) {
-  display: none;
-}
-
-.conversation-meta-main {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  min-width: 0;
-}
-
-/* The first line is as tall as the menu beside it, so a lone chip centres on it. */
-.conversation-meta-main::before {
-  content: '';
-  height: 28px;
-  margin-inline-end: -8px;
-}
-
 .conversation-list :deep(.dou-chat-list) {
   --dou-chat-list-gap: 30px;
 }
@@ -1683,14 +1616,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   box-shadow: none;
 }
 
-.conversation-tools {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 4px;
-  margin-left: auto;
-}
-
 .conversation-model {
   max-width: min(240px, 44vw);
   overflow: hidden;
@@ -1736,10 +1661,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .relay-content {
-  font-size: var(--dou-font-size-sm);
-}
-
-.conversation-reviewing {
   font-size: var(--dou-font-size-sm);
 }
 </style>
