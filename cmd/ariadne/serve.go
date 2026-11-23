@@ -323,7 +323,7 @@ func serveWithOptions(ctx context.Context, cfg config.Config, listener net.Liste
 		// Supervisors configured with KeepAlive.SuccessfulExit=false / Restart=on-failure
 		// relaunch Ariadne immediately upon this dedicated non-zero exit code.
 		return &exitError{code: service.ExitCodeRestart}
-	case service.ManagedWindowsTask, service.ManagedDetached:
+	case service.ManagedWindowsRun, service.ManagedWindowsTask, service.ManagedDetached:
 		if executableErr == nil && executable != "" {
 			respawnArgs := service.BuildServeArgs(service.InstallOptions{
 				Executable: executable,

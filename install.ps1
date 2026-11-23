@@ -127,6 +127,14 @@ if ($FallbackToPreview) {
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ariadne-install-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
+$prevOutputEncoding = $null
+try {
+  $prevOutputEncoding = [Console]::OutputEncoding
+  [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+} catch {
+  $prevOutputEncoding = $null
+}
+
 try {
   $Staged = Join-Path $TempDir $AssetName
   # Download public release assets without Authorization headers so credentials
@@ -255,9 +263,26 @@ try {
     & $Target service install --start
   }
   if ($LASTEXITCODE -ne 0) {
-    throw "Ariadne service setup exited with code $LASTEXITCODE"
+    $exitCode = $LASTEXITCODE
+    Write-Warning "Ariadne binary was installed at '$Target', but background service setup failed (exit code $exitCode)."
+    Write-Host "You can retry or inspect the failure with:"
+    if ($isRunning) {
+      Write-Host "  & `"$Target`" service restart"
+    } else {
+      Write-Host "  & `"$Target`" service install --start"
+      Write-Host "  & `"$Target`" service install --no-autostart --start   # if startup registration is blocked by policy"
+    }
+    Write-Host "  & `"$Target`" service logs"
+    throw "Ariadne service setup exited with code $exitCode"
   }
 } finally {
+  if ($null -ne $prevOutputEncoding) {
+    try {
+      [Console]::OutputEncoding = $prevOutputEncoding
+    } catch {
+      # Ignore if console handle is unavailable.
+    }
+  }
   if (Test-Path $TempDir) {
     Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
   }
