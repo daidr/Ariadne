@@ -17,12 +17,27 @@ import {
   DouTabs,
   DouText,
   DouTextarea,
+  useBreakpoints,
   type AutocompleteOption,
   type CascaderOption,
   type CascaderValue,
 } from 'dou-ui'
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon } from '@dou-ui/icons'
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CpuIcon,
+  DatabaseIcon,
+  GlobeIcon,
+  McpServerIcon,
+  PlugIcon,
+  PlusIcon,
+  RefreshIcon,
+  ScrollTextIcon,
+  SlidersIcon,
+  TerminalIcon,
+  TrashIcon,
+} from '@dou-ui/icons'
+import { computed, ref, watch, type Component, type ComputedRef, type Ref } from 'vue'
 import {
   api,
   ApiError,
@@ -50,8 +65,18 @@ import SettingsFields from './SettingsFields.vue'
 import SettingsLabelHelp from './SettingsLabelHelp.vue'
 import SecretPairs, { pairsInput, storedPairs, type DraftPair } from './SecretPairs.vue'
 import { modelLabels } from '../model-label'
+import { resolveWorkspaceLayout, type WorkspaceLayoutMode } from '../workspace-layout'
 
+const props = defineProps<{ layoutMode?: WorkspaceLayoutMode }>()
 const open = defineModel<boolean>('open', { default: false })
+const breakpoints = useBreakpoints()
+const mode = computed<WorkspaceLayoutMode>(
+  () => props.layoutMode ?? resolveWorkspaceLayout(breakpoints),
+)
+const isNarrow = computed(() => mode.value === 'narrow')
+const fullscreen = computed(() => mode.value !== 'wide')
+const tabsPlacement = computed(() => (isNarrow.value ? 'top' : 'start'))
+const tabsHeight = computed(() => (fullscreen.value ? '100%' : 560))
 
 interface DraftProvider {
   id: string
@@ -375,6 +400,10 @@ const input = ref<InstanceType<typeof InputSettings> | null>(null)
 const search = ref<InstanceType<typeof SearchSettings> | null>(null)
 const work = ref<Partial<Record<WorkPart, InstanceType<typeof WorkSettings> | null>>>({})
 const WORK_PARTS: WorkPart[] = ['instructions', 'commands']
+const WORK_PART_ICONS: Record<WorkPart, Component> = {
+  instructions: ScrollTextIcon,
+  commands: TerminalIcon,
+}
 
 /** Reload protocols and hydrate settings for providers whose plugin was just re-enabled. */
 async function reloadKinds() {
@@ -775,9 +804,15 @@ async function saveModels(): Promise<boolean> {
 </script>
 
 <template>
-  <DouDialog v-model:open="open" :title="t('settings.title')" :width="760">
-    <DouTabs v-model="tab" placement="start" :height="560" class="settings-tabs">
-      <DouTabPanel value="models" :label="t('settings.tab.models')">
+  <DouDialog
+    v-model:open="open"
+    :title="t('settings.title')"
+    :width="760"
+    :fullscreen="fullscreen"
+    :class="{ 'settings-dialog-fullscreen': fullscreen, 'settings-dialog-narrow': isNarrow }"
+  >
+    <DouTabs v-model="tab" :placement="tabsPlacement" :height="tabsHeight" class="settings-tabs">
+      <DouTabPanel value="models" :label="t('settings.tab.models')" :icon="CpuIcon">
         <!-- A provider with its models, then who uses which. -->
         <div class="settings">
           <section class="settings-section">
@@ -1034,7 +1069,7 @@ async function saveModels(): Promise<boolean> {
           <DouAlert v-if="error" tone="danger">{{ error }}</DouAlert>
         </div>
       </DouTabPanel>
-      <DouTabPanel value="search" :label="t('settings.tab.search')">
+      <DouTabPanel value="search" :label="t('settings.tab.search')" :icon="GlobeIcon">
         <SearchSettings v-if="open" ref="search" />
       </DouTabPanel>
       <DouTabPanel
@@ -1042,6 +1077,7 @@ async function saveModels(): Promise<boolean> {
         :key="part"
         :value="part"
         :label="t(`settings.tab.${part}`)"
+        :icon="WORK_PART_ICONS[part]"
       >
         <WorkSettings
           v-if="open"
@@ -1049,19 +1085,19 @@ async function saveModels(): Promise<boolean> {
           :part="part"
         />
       </DouTabPanel>
-      <DouTabPanel value="input" :label="t('settings.tab.input')">
+      <DouTabPanel value="input" :label="t('settings.tab.input')" :icon="SlidersIcon">
         <InputSettings v-if="open" ref="input" />
       </DouTabPanel>
-      <DouTabPanel value="mcp" :label="t('settings.tab.mcp')">
+      <DouTabPanel value="mcp" :label="t('settings.tab.mcp')" :icon="McpServerIcon">
         <McpSettings v-if="open" ref="mcp" />
       </DouTabPanel>
-      <DouTabPanel value="plugins" :label="t('settings.tab.plugins')">
+      <DouTabPanel value="plugins" :label="t('settings.tab.plugins')" :icon="PlugIcon">
         <PluginSettings v-if="open && tab === 'plugins'" @changed="reloadKinds" />
       </DouTabPanel>
-      <DouTabPanel value="data" :label="t('settings.tab.data')">
+      <DouTabPanel value="data" :label="t('settings.tab.data')" :icon="DatabaseIcon">
         <DataTab v-if="open" />
       </DouTabPanel>
-      <DouTabPanel value="updates" :label="t('settings.tab.updates')">
+      <DouTabPanel value="updates" :label="t('settings.tab.updates')" :icon="RefreshIcon">
         <UpdatesSettings v-if="open && tab === 'updates'" />
       </DouTabPanel>
     </DouTabs>
@@ -1078,6 +1114,20 @@ async function saveModels(): Promise<boolean> {
     </template>
   </DouDialog>
 </template>
+
+<style>
+/* The dialog panel teleports outside this component, so safe-area padding stays unscoped. */
+.settings-dialog-fullscreen {
+  padding-top: var(--ariadne-safe-top);
+  padding-right: var(--ariadne-safe-right);
+  padding-bottom: var(--ariadne-safe-bottom);
+  padding-left: var(--ariadne-safe-left);
+}
+
+.settings-dialog-narrow {
+  --dou-dialog-padding: 16px;
+}
+</style>
 
 <style scoped>
 .settings {

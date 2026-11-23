@@ -338,4 +338,54 @@ describe('ModelSettings', () => {
     await flushPromises()
     expect(savedInput!.roles.coordinator).toEqual({ model: 'm-medhigh', effort: null })
   })
+
+  test('renders icons for every tab and adapts dialog fullscreen and tab placement by layoutMode', async () => {
+    vi.spyOn(api, 'getModelSettings').mockResolvedValue(makeModelSettings(false))
+    vi.spyOn(api, 'getConcurrency').mockResolvedValue({ slots: 3, reserved: 0 })
+
+    const wrapper = mount(ModelSettingsDialog, {
+      props: { open: false, tab: 'models', layoutMode: 'wide' },
+      global: {
+        stubs: {
+          PluginSettings: true,
+          SearchSettings: true,
+          WorkSettings: true,
+          InputSettings: true,
+          McpSettings: true,
+          DataTab: true,
+          UpdatesSettings: true,
+          teleport: true,
+        },
+      },
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(9)
+    for (const tab of tabs) {
+      expect(tab.find('.dou-tabs__icon').exists()).toBe(true)
+    }
+
+    const dialog = () => wrapper.findComponent({ name: 'DouDialog' })
+    const tabBar = () => wrapper.findComponent({ name: 'DouTabs' })
+
+    expect(dialog().props('fullscreen')).toBe(false)
+    expect(tabBar().props('placement')).toBe('start')
+    expect(tabBar().props('height')).toBe(560)
+
+    await wrapper.setProps({ layoutMode: 'medium' })
+    await flushPromises()
+    expect(dialog().props('fullscreen')).toBe(true)
+    expect(tabBar().props('placement')).toBe('start')
+    expect(tabBar().props('height')).toBe('100%')
+
+    await wrapper.setProps({ layoutMode: 'narrow' })
+    await flushPromises()
+    expect(dialog().props('fullscreen')).toBe(true)
+    expect(tabBar().props('placement')).toBe('top')
+    expect(tabBar().props('height')).toBe('100%')
+  })
 })

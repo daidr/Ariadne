@@ -260,10 +260,14 @@ watchEffect(() => {
       @open-settings="openSettings()"
     />
     <template v-if="!unauthorized">
-      <ModelSettings v-model:open="settingsOpen" v-model:tab="settingsTab" />
+      <ModelSettings
+        v-model:open="settingsOpen"
+        v-model:tab="settingsTab"
+        :layout-mode="layoutMode"
+      />
       <PluginConfigDialog />
       <ShortcutSheet />
-      <ProjectSettings />
+      <ProjectSettings :layout-mode="layoutMode" />
       <FullView :compact="isNarrow" />
       <FilePreview />
     </template>
