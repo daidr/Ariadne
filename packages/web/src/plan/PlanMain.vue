@@ -184,7 +184,7 @@ const time = (at: number) =>
   flex-direction: column;
   gap: 16px;
   width: 320px;
-  padding: 12px 16px calc(12px + var(--ariadne-safe-bottom));
+  padding: 12px 16px max(12px, var(--ariadne-safe-bottom));
   overflow-y: auto;
   border-left: 1px solid var(--dou-color-border-subtle);
 }

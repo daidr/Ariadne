@@ -281,7 +281,7 @@ watch(
   justify-content: flex-end;
   /* Clear iPhone Duo's top-right 84x170 status + camera strip and bottom home indicator. */
   padding: max(180px, calc(16px + var(--ariadne-safe-top))) 8px
-    calc(20px + var(--ariadne-safe-bottom));
+    max(20px, var(--ariadne-safe-bottom));
   border-left: 1px solid var(--dou-color-border-subtle);
   background-color: var(--dou-color-bg-canvas);
   user-select: none;
@@ -297,7 +297,7 @@ watch(
 .duo-safe-rail.is-compact-height {
   justify-content: flex-start;
   padding-top: max(20px, var(--ariadne-safe-top));
-  padding-bottom: max(120px, calc(16px + var(--ariadne-safe-bottom)));
+  padding-bottom: max(120px, var(--ariadne-safe-bottom));
 }
 
 .duo-rail-actions {

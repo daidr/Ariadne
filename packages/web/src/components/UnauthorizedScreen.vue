@@ -126,7 +126,7 @@ function onEnter(event: KeyboardEvent) {
   min-height: 0;
   padding: 24px;
   /* A little above the middle, matching StartScreen. */
-  padding-bottom: max(12vh, calc(24px + var(--ariadne-safe-bottom)));
+  padding-bottom: max(12vh, 24px, var(--ariadne-safe-bottom));
   overflow: auto;
 }
 

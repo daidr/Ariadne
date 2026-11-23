@@ -126,7 +126,7 @@ const form = useTemplateRef<InstanceType<typeof NewProjectForm>>('form')
   min-height: 0;
   padding: 24px;
   /* A little above the middle, where the eye rests. */
-  padding-bottom: max(12vh, calc(24px + var(--ariadne-safe-bottom)));
+  padding-bottom: max(12vh, 24px, var(--ariadne-safe-bottom));
 }
 
 /* Keep centered setup cards on the upper half when folded into a tabletop pose. */
