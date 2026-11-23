@@ -719,6 +719,7 @@ export const en: Record<MessageKey, string> = {
   'trace.outcome.failed': 'Failed',
   'trace.outcome.cancelled': 'Stopped',
   'trace.outcome.interrupted': 'Interrupted',
+  'trace.outcome.suspended': 'Paused for restart',
   'trace.col.event': 'Event',
   'trace.col.content': 'Content',
   'trace.col.input': 'Input',
@@ -883,6 +884,11 @@ export const en: Record<MessageKey, string> = {
   'updates.noRelease': 'No releases available',
   'updates.available': 'Version {version} is available',
   'updates.ready': 'Version {version} installed. Restart Ariadne to use it.',
+  'updates.restart': 'Restart safely to apply',
+  'updates.cancelRestart': 'Cancel restart',
+  'updates.restarting': 'Restarting Ariadne…',
+  'updates.restartingDraining':
+    'Waiting for {count} active session(s) to reach a safe checkpoint before restarting…',
   'updates.notes': 'What’s new in {version}',
   'updates.releasePage': 'Release page',
   'updates.error.check': 'Could not check for updates. Try again later.',
@@ -896,6 +902,8 @@ export const en: Record<MessageKey, string> = {
     'The program folder is not writable. Check permissions or download from the release page.',
   'updates.error.busy': 'Wait for the update to finish before changing settings.',
   'updates.error.unavailable': 'This update is no longer available. Check for updates again.',
+  'updates.error.cannotRestart':
+    'This Ariadne instance cannot self-restart. Restart it from your terminal or service manager.',
   'settings.request': 'Request options',
   'settings.headers': 'Headers',
   'settings.extraBody': 'Extra body fields (JSON)',

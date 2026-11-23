@@ -364,7 +364,7 @@ func conversationEvent(w *projectionWriter, e eventstore.Event, d object) {
 	case "turn.finished":
 		end := "turn_id = NULL, turn_started_at = NULL, activity = NULL, last_outcome = ?, last_error = ?"
 		switch d.str("outcome") {
-		case "interrupted":
+		case "interrupted", "suspended":
 			w.run("UPDATE conversations SET "+end+", pending_seq = ?, pending_since = CASE WHEN pending_since = 0 THEN ? ELSE pending_since END WHERE id = ?", d["outcome"], nullableJSON(d["error"]), e.Seq, e.Seq, id)
 		case "completed":
 			w.run("UPDATE conversations SET "+end+" WHERE id = ?", d["outcome"], nullableJSON(d["error"]), id)

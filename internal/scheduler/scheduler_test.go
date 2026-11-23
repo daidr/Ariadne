@@ -309,3 +309,116 @@ func TestCancellationBeforeModelTurnDoesNotBecomeNoModelOrRestart(t *testing.T) 
 		t.Fatalf("%+v %v", conversation, err)
 	}
 }
+
+func TestSchedulerDrainBlocksNewTurnsAndWaitIdle(t *testing.T) {
+	repo := testRepository(t)
+	p := project(t, repo, "Drain")
+	post(t, repo, p.ID, p.CoordinatorID, "user")
+
+	entered := make(chan started, 4)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	activeChanges := []int{}
+
+	sched, err := New(Options{
+		Repository:    repo,
+		Slots:         intPointer(2),
+		ReservedSlots: intPointer(0),
+		Run: func(ctx context.Context, conversation core.ConversationView) error {
+			turn, err := repo.StartTurn(ctx, conversation.ID, "model")
+			if err != nil {
+				return err
+			}
+			entered <- started{conversation.ID, turn, conversation.LastOutcome}
+			if conversation.ID == p.CoordinatorID {
+				<-release
+			}
+			return repo.FinishTurn(ctx, conversation.ID, turn, "cancelled", nil)
+		},
+		OnError: func(err error) { t.Error(err) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched.SetOnActiveChange(func(count int) {
+		mu.Lock()
+		activeChanges = append(activeChanges, count)
+		mu.Unlock()
+	})
+	if err := sched.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sched.Stop(ctx)
+	})
+
+	await(t, entered, 1)
+	if sched.ActiveCount() != 1 {
+		t.Fatalf("expected 1 active turn, got %d", sched.ActiveCount())
+	}
+	if sched.TryDrainIfIdle(DrainSafePoint) {
+		t.Fatal("TryDrainIfIdle must fail while a turn is running")
+	}
+
+	sched.BeginDrain(DrainSafePoint)
+	if sched.DrainMode() != DrainSafePoint {
+		t.Fatalf("expected drain mode %q, got %q", DrainSafePoint, sched.DrainMode())
+	}
+
+	// Queue a second worker while draining: it must not start yet.
+	second := worker(t, repo, p.ID, "user")
+	select {
+	case startedTurn := <-entered:
+		t.Fatalf("turn %s started while draining", startedTurn.id)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	waitDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		waitDone <- sched.WaitIdle(ctx)
+	}()
+
+	close(release)
+	if err := <-waitDone; err != nil {
+		t.Fatalf("WaitIdle failed: %v", err)
+	}
+	if sched.ActiveCount() != 0 {
+		t.Fatalf("expected 0 active turns after WaitIdle, got %d", sched.ActiveCount())
+	}
+
+	// Cancelling drain must immediately schedule the waiting worker.
+	sched.CancelDrain()
+	if sched.DrainMode() != "" {
+		t.Fatalf("expected empty drain mode after cancel, got %q", sched.DrainMode())
+	}
+	foundSecond := false
+	deadline := time.After(5 * time.Second)
+	for !foundSecond {
+		select {
+		case item := <-entered:
+			if item.id == second.ID {
+				foundSecond = true
+			}
+		case <-deadline:
+			t.Fatalf("expected second worker %s to run after CancelDrain", second.ID)
+		}
+	}
+	eventually(t, func() bool { return sched.ActiveCount() == 0 })
+
+	if !sched.TryDrainIfIdle(DrainSafePoint) {
+		t.Fatal("TryDrainIfIdle should succeed when idle")
+	}
+	if sched.DrainMode() != DrainSafePoint {
+		t.Fatalf("expected drain mode after TryDrainIfIdle, got %q", sched.DrainMode())
+	}
+	mu.Lock()
+	if len(activeChanges) == 0 {
+		mu.Unlock()
+		t.Fatal("expected OnActiveChange callback to fire")
+	}
+	mu.Unlock()
+}

@@ -7,12 +7,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/domainerr"
 	"github.com/daidr/Ariadne/internal/eventstore"
 )
+
+const (
+	DrainSafePoint = "safe-point"
+	DrainTurn      = "turn"
+)
+
+type ActiveTurn struct {
+	ConversationID string
+	ProjectID      string
+	Role           string
+	Model          string
+	Stateful       bool
+	StartedAt      int64
+}
 
 var ErrCancelled = errors.New("cancelled")
 var ErrInterrupted = errors.New("interrupted")
@@ -29,7 +45,11 @@ type Options struct {
 	OnThreadFinished func(threadID string, keepAsked bool)
 }
 type running struct {
+	conversationID  string
 	projectID, role string
+	model           string
+	stateful        bool
+	startedAt       int64
 	reserved        bool
 	cancel          context.CancelCauseFunc
 	done            chan struct{}
@@ -41,6 +61,9 @@ type Scheduler struct {
 	held                 map[string]int
 	slots, reservedSlots int
 	started, stopped     bool
+	drainMode            string
+	changed              chan struct{}
+	onActiveChange       func(int)
 	ctx                  context.Context
 	cancel               context.CancelCauseFunc
 	wake                 chan struct{}
@@ -62,7 +85,17 @@ func New(options Options) (*Scheduler, error) {
 	if slots < 0 || reserved < 0 {
 		return nil, errors.New("scheduler slots must not be negative")
 	}
-	return &Scheduler{options: options, running: map[string]*running{}, held: map[string]int{}, slots: slots, reservedSlots: reserved, wake: make(chan struct{}, 1), done: make(chan struct{})}, nil
+	return &Scheduler{options: options, running: map[string]*running{}, held: map[string]int{}, slots: slots, reservedSlots: reserved, changed: make(chan struct{}), wake: make(chan struct{}, 1), done: make(chan struct{})}, nil
+}
+func (scheduler *Scheduler) broadcastChangeLocked() (func(int), int) {
+	close(scheduler.changed)
+	scheduler.changed = make(chan struct{})
+	return scheduler.onActiveChange, len(scheduler.running)
+}
+func (scheduler *Scheduler) SetOnActiveChange(fn func(int)) {
+	scheduler.mu.Lock()
+	scheduler.onActiveChange = fn
+	scheduler.mu.Unlock()
 }
 func (scheduler *Scheduler) report(err error) {
 	if err != nil && scheduler.options.OnError != nil {
@@ -203,6 +236,10 @@ func (scheduler *Scheduler) fill() error {
 	// Skip every turn that owned its slot before the snapshot. Finishing the
 	// run wakes the scheduler, which can then read the current pending state.
 	scheduler.mu.Lock()
+	if scheduler.drainMode != "" {
+		scheduler.mu.Unlock()
+		return nil
+	}
 	active := make(map[string]bool, len(scheduler.running))
 	for id := range scheduler.running {
 		active[id] = true
@@ -248,7 +285,7 @@ func (scheduler *Scheduler) fill() error {
 			}
 		}
 		scheduler.mu.Lock()
-		if scheduler.stopped || scheduler.ctx.Err() != nil {
+		if scheduler.stopped || scheduler.drainMode != "" || scheduler.ctx.Err() != nil {
 			scheduler.mu.Unlock()
 			return nil
 		}
@@ -282,10 +319,14 @@ func (scheduler *Scheduler) fill() error {
 			}
 		}
 		runCtx, cancel := context.WithCancelCause(scheduler.ctx)
-		run := &running{projectID: conversation.ProjectID, role: conversation.Role, reserved: reserved, cancel: cancel, done: make(chan struct{})}
+		run := &running{conversationID: conversation.ID, projectID: conversation.ProjectID, role: conversation.Role, startedAt: time.Now().UnixMilli(), reserved: reserved, cancel: cancel, done: make(chan struct{})}
 		scheduler.running[conversation.ID] = run
 		scheduler.turns.Add(1)
+		cb, count := scheduler.broadcastChangeLocked()
 		scheduler.mu.Unlock()
+		if cb != nil {
+			cb(count)
+		}
 		go scheduler.launch(runCtx, conversation, run)
 	}
 	return nil
@@ -296,7 +337,11 @@ func (scheduler *Scheduler) launch(ctx context.Context, conversation core.Conver
 		scheduler.mu.Lock()
 		delete(scheduler.running, conversation.ID)
 		close(run.done)
+		cb, count := scheduler.broadcastChangeLocked()
 		scheduler.mu.Unlock()
+		if cb != nil {
+			cb(count)
+		}
 		scheduler.signal()
 		scheduler.turns.Done()
 	}()
@@ -347,6 +392,114 @@ func (scheduler *Scheduler) IsRunning(id string) bool {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
 	return scheduler.running[id] != nil
+}
+func (scheduler *Scheduler) SetTurnModel(conversationID, model string, stateful bool) {
+	scheduler.mu.Lock()
+	if run := scheduler.running[conversationID]; run != nil {
+		run.model = model
+		run.stateful = stateful
+	}
+	scheduler.mu.Unlock()
+}
+func (scheduler *Scheduler) BeginDrain(mode string) {
+	if mode != DrainTurn {
+		mode = DrainSafePoint
+	}
+	scheduler.mu.Lock()
+	scheduler.drainMode = mode
+	cb, count := scheduler.broadcastChangeLocked()
+	scheduler.mu.Unlock()
+	if cb != nil {
+		cb(count)
+	}
+}
+func (scheduler *Scheduler) TryDrainIfIdle(mode string) bool {
+	if mode != DrainTurn {
+		mode = DrainSafePoint
+	}
+	scheduler.mu.Lock()
+	if len(scheduler.running) > 0 {
+		scheduler.mu.Unlock()
+		return false
+	}
+	scheduler.drainMode = mode
+	cb, count := scheduler.broadcastChangeLocked()
+	scheduler.mu.Unlock()
+	if cb != nil {
+		cb(count)
+	}
+	return true
+}
+func (scheduler *Scheduler) CancelDrain() {
+	scheduler.mu.Lock()
+	was := scheduler.drainMode != ""
+	scheduler.drainMode = ""
+	var cb func(int)
+	var count int
+	if was {
+		cb, count = scheduler.broadcastChangeLocked()
+	}
+	scheduler.mu.Unlock()
+	if was {
+		if cb != nil {
+			cb(count)
+		}
+		scheduler.signal()
+	}
+}
+func (scheduler *Scheduler) DrainMode() string {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	return scheduler.drainMode
+}
+func (scheduler *Scheduler) IsDraining() bool {
+	return scheduler.DrainMode() != ""
+}
+func (scheduler *Scheduler) ShouldSuspendStep() bool {
+	return scheduler.DrainMode() == DrainSafePoint
+}
+func (scheduler *Scheduler) ActiveCount() int {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	return len(scheduler.running)
+}
+func (scheduler *Scheduler) Active() []ActiveTurn {
+	scheduler.mu.Lock()
+	out := make([]ActiveTurn, 0, len(scheduler.running))
+	for _, run := range scheduler.running {
+		out = append(out, ActiveTurn{
+			ConversationID: run.conversationID,
+			ProjectID:      run.projectID,
+			Role:           run.role,
+			Model:          run.model,
+			Stateful:       run.stateful,
+			StartedAt:      run.startedAt,
+		})
+	}
+	scheduler.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartedAt != out[j].StartedAt {
+			return out[i].StartedAt < out[j].StartedAt
+		}
+		return out[i].ConversationID < out[j].ConversationID
+	})
+	return out
+}
+func (scheduler *Scheduler) WaitIdle(ctx context.Context) error {
+	for {
+		scheduler.mu.Lock()
+		if len(scheduler.running) == 0 {
+			scheduler.mu.Unlock()
+			return nil
+		}
+		ch := scheduler.changed
+		scheduler.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+		}
+	}
 }
 func (scheduler *Scheduler) Cancel(id string) bool {
 	scheduler.mu.Lock()

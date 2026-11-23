@@ -39,6 +39,7 @@ import (
 	"github.com/daidr/Ariadne/internal/scheduler"
 	"github.com/daidr/Ariadne/internal/searches"
 	"github.com/daidr/Ariadne/internal/server"
+	"github.com/daidr/Ariadne/internal/service"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/sources"
 	"github.com/daidr/Ariadne/internal/timers"
@@ -48,23 +49,27 @@ import (
 )
 
 type Options struct {
-	Config        config.Config
-	Web           fs.FS
-	Client        *http.Client
-	OnError       func(error)
-	Ledger        *process.Ledger
-	StdioLauncher agentruntime.StdioLauncher
-	Update        *update.Options
+	Config         config.Config
+	Web            fs.FS
+	Client         *http.Client
+	OnError        func(error)
+	Ledger         *process.Ledger
+	StdioLauncher  agentruntime.StdioLauncher
+	Update         *update.Options
+	ServiceRuntime *service.RuntimeInfo
+	CanRestart     bool
+	OnShutdown     func(restart bool)
 }
 
 type Application struct {
-	Handler    http.Handler
-	Repository *core.Repository
-	cleanups   []func(context.Context) error
-	cancel     context.CancelFunc
-	closeOnce  sync.Once
-	done       chan struct{}
-	closeErr   error
+	Handler        http.Handler
+	Repository     *core.Repository
+	ServiceControl *service.Controller
+	cleanups       []func(context.Context) error
+	cancel         context.CancelFunc
+	closeOnce      sync.Once
+	done           chan struct{}
+	closeErr       error
 }
 
 func Open(ctx context.Context, options Options) (_ *Application, err error) {
@@ -237,6 +242,34 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	if err != nil {
 		return nil, err
 	}
+	worker.ShouldSuspend = schedule.ShouldSuspendStep
+	worker.OnModelResolved = schedule.SetTurnModel
+	runtimeMeta := service.RuntimeInfo{
+		PID:       os.Getpid(),
+		Version:   version,
+		Host:      cfg.Host,
+		Port:      cfg.Port,
+		StartedAt: time.Now().UnixMilli(),
+		ManagedBy: service.ManagedDirect,
+	}
+	if options.ServiceRuntime != nil {
+		runtimeMeta = *options.ServiceRuntime
+	}
+	serviceControl := service.NewController(service.ControllerOptions{
+		Runtime:    runtimeMeta,
+		CanRestart: options.CanRestart,
+		Scheduler:  schedule,
+		Background: manager.Background,
+		Repository: repo,
+		OnShutdown: options.OnShutdown,
+		OnStateChange: func(canRestart, restarting bool, activeTurns int) {
+			if updates != nil {
+				updates.SetRestartState(canRestart, restarting, activeTurns)
+			}
+		},
+	})
+	app.ServiceControl = serviceControl
+	addSimple(func() error { serviceControl.Close(); return nil })
 	daily := &data.Daily{Store: storage, OnError: onError}
 	alarms, err := timers.New(timers.Options{Repository: repo, OnError: onError})
 	if err != nil {
@@ -246,8 +279,8 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 	api, err := server.New(server.Options{
 		Repository: repo, Token: cfg.Token, Version: version, Web: options.Web, Scheduler: schedule, State: state,
 		Data: storage, Settings: user, Models: modelRegistry, Sources: registry,
-		Updates: updates,
-		Links:   resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
+		Updates: updates, ServiceControl: serviceControl,
+		Links: resolver, MCP: mcpHub, Workspaces: manager, SkillsDirs: skillsDirs, Dashboards: dashboards,
 		Searches: searchRegistry, Plugins: host, HTTPClient: options.Client, OnError: onError,
 		Rooms:       rooms,
 		FindContext: &sdk.FindContext{Env: env, Home: userHome, Which: func(name string) bool { _, err := exec.LookPath(name); return err == nil }},

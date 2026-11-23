@@ -22,10 +22,14 @@ const {
   message,
   installable,
   installLabel,
+  restartable,
+  restarting,
   check,
   setChannel,
   setAutomatic,
   install,
+  restart,
+  cancelRestart,
   load,
 } = useUpdatesSettings()
 const channels = computed(() => [
@@ -95,6 +99,28 @@ function releaseNoteURL(address: string, kind: MarkdownUrlKind) {
           @click="install"
         >
           <span aria-live="polite">{{ installLabel }}</span>
+        </DouButton>
+      </div>
+      <div v-else-if="restartable" class="update-actions">
+        <DouButton
+          v-if="!restarting"
+          class="update-action"
+          size="sm"
+          tone="primary"
+          :disabled="busy"
+          @click="restart"
+        >
+          {{ t('updates.restart') }}
+        </DouButton>
+        <DouButton
+          v-else
+          class="update-action"
+          size="sm"
+          :disabled="pending === 'cancelRestart'"
+          :loading="pending === 'cancelRestart'"
+          @click="cancelRestart"
+        >
+          {{ t('updates.cancelRestart') }}
         </DouButton>
       </div>
     </template>

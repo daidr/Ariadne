@@ -201,8 +201,8 @@ func (api *API) toConnectError(err error) error {
 				code = connect.CodeUnauthenticated
 			case "error.notFound", "error.priceUnknown":
 				code = connect.CodeNotFound
-			case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable":
-				code = connect.CodeAborted
+		case "error.artifactConflict", "updates.error.busy", "updates.error.unavailable", "updates.error.cannotRestart", "service.error.busy":
+			code = connect.CodeAborted
 			case "error.modelCheck", "error.priceCatalog":
 				code = connect.CodeUnavailable
 			default:

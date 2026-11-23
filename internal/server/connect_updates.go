@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -9,6 +10,7 @@ import (
 	"github.com/daidr/Ariadne/internal/domainerr"
 	ariadnev1 "github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1"
 	"github.com/daidr/Ariadne/internal/gen/proto/ariadne/v1/ariadnev1connect"
+	"github.com/daidr/Ariadne/internal/service"
 	"github.com/daidr/Ariadne/internal/settings"
 	"github.com/daidr/Ariadne/internal/textutil"
 	"github.com/daidr/Ariadne/internal/update"
@@ -104,6 +106,53 @@ func (h *updateServiceHandler) InstallUpdate(
 	}), nil
 }
 
+func (h *updateServiceHandler) RestartToApplyUpdate(
+	ctx context.Context,
+	_ *connect.Request[ariadnev1.RestartToApplyUpdateRequest],
+) (*connect.Response[ariadnev1.RestartToApplyUpdateResponse], error) {
+	updates, err := h.service()
+	if err != nil {
+		return nil, err
+	}
+	ctrl := h.api.options.ServiceControl
+	if ctrl == nil || !ctrl.CanRestart() {
+		return nil, domainerr.New("updates.error.cannotRestart", nil)
+	}
+	view := updates.View()
+	if view.State != "ready" {
+		return nil, updateDomainError(update.ErrUnavailable)
+	}
+	if _, err := ctrl.BeginDrain(ctx, service.DrainRequest{
+		Mode:         service.DrainModeSafePoint,
+		Action:       service.ActionRestart,
+		AutoShutdown: true,
+	}); err != nil {
+		if errors.Is(err, service.ErrCannotRestart) {
+			return nil, domainerr.New("updates.error.cannotRestart", nil)
+		}
+		return nil, err
+	}
+	return connect.NewResponse(&ariadnev1.RestartToApplyUpdateResponse{
+		Status: toProtoUpdateStatus(updates.View()),
+	}), nil
+}
+
+func (h *updateServiceHandler) CancelRestart(
+	ctx context.Context,
+	_ *connect.Request[ariadnev1.CancelRestartRequest],
+) (*connect.Response[ariadnev1.CancelRestartResponse], error) {
+	updates, err := h.service()
+	if err != nil {
+		return nil, err
+	}
+	if ctrl := h.api.options.ServiceControl; ctrl != nil {
+		ctrl.CancelDrain(ctx)
+	}
+	return connect.NewResponse(&ariadnev1.CancelRestartResponse{
+		Status: toProtoUpdateStatus(updates.View()),
+	}), nil
+}
+
 func toProtoUpdateStatus(view update.View) *ariadnev1.UpdateStatus {
 	out := &ariadnev1.UpdateStatus{
 		Version: view.Version,
@@ -114,6 +163,9 @@ func toProtoUpdateStatus(view update.View) *ariadnev1.UpdateStatus {
 		CanInstall:      view.CanInstall,
 		State:           view.State,
 		DownloadPercent: int32(view.DownloadPercent),
+		CanRestart:      view.CanRestart,
+		Restarting:      view.Restarting,
+		ActiveTurns:     int32(view.ActiveTurns),
 	}
 	if view.Release != nil {
 		out.Release = &ariadnev1.UpdateRelease{

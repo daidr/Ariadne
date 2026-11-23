@@ -5,7 +5,9 @@ import { onUpdateStatus, state } from '../store'
 
 export function useUpdatesSettings() {
   const status = shallowRef<UpdateStatus | null>(null)
-  const pending = shallowRef<'load' | 'save' | 'check' | 'install' | null>('load')
+  const pending = shallowRef<
+    'load' | 'save' | 'check' | 'install' | 'restart' | 'cancelRestart' | null
+  >('load')
   const error = shallowRef<string | null>(null)
   const controller = new AbortController()
   let sequence = 0
@@ -26,6 +28,12 @@ export function useUpdatesSettings() {
   const installable = computed(
     () => available.value && status.value?.canInstall && release.value?.installable,
   )
+  const restartable = computed(
+    () => status.value?.state === 'ready' && Boolean(status.value?.canRestart),
+  )
+  const restarting = computed(
+    () => pending.value === 'restart' || Boolean(status.value?.restarting),
+  )
   const installLabel = computed(() => {
     if (status.value?.state === 'installing') return t('updates.installing')
     if (updating.value)
@@ -43,7 +51,14 @@ export function useUpdatesSettings() {
       return t(view.preferences.channel === 'stable' ? 'updates.noStable' : 'updates.noRelease')
     }
     if (view.state === 'current') return t('updates.current')
-    if (view.state === 'ready') return t('updates.ready', { version: view.release?.version ?? '' })
+    if (view.state === 'ready') {
+      if (view.restarting) {
+        const count = view.activeTurns ?? 0
+        if (count > 0) return t('updates.restartingDraining', { count })
+        return t('updates.restarting')
+      }
+      return t('updates.ready', { version: view.release?.version ?? '' })
+    }
     return null
   })
 
@@ -64,6 +79,20 @@ export function useUpdatesSettings() {
       }
     } catch (cause) {
       if (!controller.signal.aborted && current === sequence) {
+        if (action === 'restart') {
+          const isBusinessError =
+            cause instanceof ApiError &&
+            cause.localized &&
+            cause.status < 500 &&
+            cause.status !== 499
+          if (isBusinessError) {
+            error.value = tm(cause.localized)
+          } else if (status.value) {
+            status.value = { ...status.value, restarting: true }
+            error.value = null
+          }
+          return
+        }
         error.value =
           cause instanceof ApiError && cause.localized
             ? tm(cause.localized)
@@ -114,6 +143,16 @@ export function useUpdatesSettings() {
     void perform('install', () => api.installUpdate(version, controller.signal))
   }
 
+  function restart() {
+    if (!restartable.value || restarting.value) return
+    void perform('restart', () => api.restartToApplyUpdate(controller.signal))
+  }
+
+  function cancelRestart() {
+    if (!restarting.value || pending.value === 'cancelRestart') return
+    void perform('cancelRestart', () => api.cancelRestart(controller.signal))
+  }
+
   watch(
     () => state.stream,
     (next, previous) => {
@@ -148,10 +187,14 @@ export function useUpdatesSettings() {
     message,
     installable,
     installLabel,
+    restartable,
+    restarting,
     check,
     setChannel,
     setAutomatic,
     install,
+    restart,
+    cancelRestart,
     load,
   }
 }

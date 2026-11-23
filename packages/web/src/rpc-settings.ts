@@ -614,6 +614,9 @@ export function fromProtoUpdateStatus(status?: ProtoUpdateStatus): UpdateStatus 
     canInstall: status.canInstall,
     state: status.state as UpdateStatus['state'],
     downloadPercent: status.downloadPercent,
+    canRestart: status.canRestart,
+    restarting: status.restarting,
+    activeTurns: status.activeTurns,
     ...(status.failure ? { failure: status.failure as UpdateStatus['failure'] } : {}),
     release: status.release
       ? {

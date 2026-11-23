@@ -6,6 +6,62 @@
 
 > 早期开发中，目前只能在本机浏览器里使用。
 
+## 安装与使用
+
+### 一键安装
+
+**macOS / Linux**：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/daidr/Ariadne/master/install.sh | sh
+```
+
+**Windows (PowerShell)**：
+
+```powershell
+irm https://raw.githubusercontent.com/daidr/Ariadne/master/install.ps1 | iex
+```
+
+安装脚本会自动完成以下工作（全程无需管理员/sudo 权限）：
+
+- 识别平台架构并下载对应发布版本（优先正式版；暂无正式版时自动安装最新 `preview` 并提示），核验 SHA-256 与自检后安装到用户目录（Unix：`~/.local/bin/ariadne`；Windows：`%LOCALAPPDATA%\Ariadne\bin\ariadne.exe`）。
+- 默认创建 3 字母短别名 `ard` 并将安装目录加入 `PATH`。
+- 默认注册用户级后台服务并启动（macOS `launchd`、Linux `systemd --user` 或后台进程、Windows 登录任务），如果已有服务在运行则执行安全重启。
+
+可通过参数或环境变量按需跳过服务注册或指定渠道：
+
+```sh
+# 仅安装 CLI，不注册后台服务（Unix）
+curl -fsSL https://raw.githubusercontent.com/daidr/Ariadne/master/install.sh | sh -s -- --no-service
+
+# 仅安装 CLI（Windows PowerShell）
+$env:ARIADNE_NO_SERVICE='1'; irm https://raw.githubusercontent.com/daidr/Ariadne/master/install.ps1 | iex
+```
+
+### 常用命令
+
+安装后可直接使用 `ariadne` 或短别名 `ard`，直接输入 `ariadne` 等同于 `ariadne --help`：
+
+```sh
+ariadne dashboard                 # 打印带访问令牌的页面链接（加 --open 自动打开浏览器）
+ariadne service status            # 查看后台服务状态、活跃 AI 会话与后台命令
+ariadne service start             # 启动后台服务
+ariadne service stop              # 安全排空活跃会话后停止服务
+ariadne service restart           # 安全排空活跃会话后重启服务
+ariadne service logs -f           # 实时查看服务日志
+ariadne upgrade                   # 检查、核验更新并安全重启服务
+ariadne serve                     # 前台运行服务（支持 --host / --port / --home）
+ariadne --version                 # 查看当前版本
+```
+
+### 会话保护与无损重启
+
+执行 `ariadne service restart`、`ariadne service stop`、`ariadne upgrade` 或在 Web「设置 → 更新」点击安全重启时，Ariadne 会保护正在进行的会话：
+
+- **HTTP 模型会话**：在当前单个模型步骤（Step）结束后干净挂起，不报错，新进程拉起后自动无缝续跑。
+- **Agent CLI 会话**：等待当前回合（Turn）写完 Checkpoint 后再重启，新进程继续后续排队任务。
+- **空闲自动重启**：传入 `--when-idle` 可立即返回，等所有活跃会话自然空闲后再自动重启或停止；如需等待讨论串启动的后台命令，可追加 `--wait-background`；紧急情况可加 `--force` 立即重启。
+
 ## 开发
 
 需要 Go 1.27.4 和 [Bun](https://bun.sh) 1.4.4。Go 运行后端，Bun 用于前端开发和构建。
@@ -34,9 +90,9 @@ bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
 
 构建程序将前端嵌入 Go 可执行文件，输出到 `dist/release/ariadne-<平台>`。支持 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64` 和 `windows-x64`，所有平台禁用 UPX。构建当前平台时会执行 `self-check`，发版流程会在每个目标平台上运行产物自检。
 
-在「设置 → 更新」可检查新版本、查看更新日志，并选择正式或测试渠道。发布的测试版默认跟随测试渠道，正式渠道暂无发布时会保留当前版本。独立程序可以手动更新，也可以开启自动更新，下载核验通过后会替换程序，下一次启动生效。由包管理器管理的安装可设 `ARIADNE_DISABLE_SELF_UPDATE=1`，继续使用应用内的版本检查和更新日志。
+在「设置 → 更新」可检查新版本、查看更新日志，并选择正式或测试渠道。发布的测试版默认跟随测试渠道，正式渠道暂无发布时会保留当前版本。独立程序可以手动更新，也可以开启自动更新，下载核验通过后会替换程序；如果以服务方式运行，可直接点击「安全重启并生效」（存在活跃会话时自动等待安全切点，期间可随时取消）。由包管理器管理的安装可设 `ARIADNE_DISABLE_SELF_UPDATE=1`，继续使用应用内的版本检查和更新日志。
 
-这个程序不需要装 bun，运行起来和 `bun run start` 一样：数据在 `~/.ariadne`，环境变量相同，启动后自动打开页面。
+这个程序不需要装 bun，运行 `ariadne serve`（或通过 `ariadne service start` 以后台服务启动）即可：数据在 `~/.ariadne`，环境变量相同。
 
 `ariadne --version` 打印版本号，版本号来自根目录 `package.json`。
 
@@ -76,6 +132,7 @@ bun run release --target linux-x64,windows-x64 # 指定平台，或 --target all
 | 环境变量                 | 作用                                         | 默认值                   |
 | ------------------------ | -------------------------------------------- | ------------------------ |
 | `ARIADNE_HOME`           | 数据库与令牌所在的目录                       | `~/.ariadne`             |
+| `ARIADNE_HOST`           | 本地服务监听地址                             | `127.0.0.1`              |
 | `ARIADNE_PORT`           | 本地服务的端口                               | `7428`                   |
 | `ARIADNE_TOKEN`          | 指定访问令牌，不读文件                       | —                        |
 | `ARIADNE_OPEN`           | 设为 `0` 时 `bun run start` 不自动打开浏览器 | `1`                      |

@@ -26,7 +26,7 @@ const build = run(['go', 'build', '-o', binary, './cmd/ariadne'])
 if ((await build.exited) !== 0) process.exit(1)
 
 const children = [
-  run([binary], root, {
+  run([binary, 'serve'], root, {
     ...process.env,
     ARIADNE_OPEN: process.env.ARIADNE_OPEN ?? (dev ? '0' : '1'),
   }),

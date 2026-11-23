@@ -45,6 +45,12 @@ const (
 	// UpdateServiceInstallUpdateProcedure is the fully-qualified name of the UpdateService's
 	// InstallUpdate RPC.
 	UpdateServiceInstallUpdateProcedure = "/ariadne.v1.UpdateService/InstallUpdate"
+	// UpdateServiceRestartToApplyUpdateProcedure is the fully-qualified name of the UpdateService's
+	// RestartToApplyUpdate RPC.
+	UpdateServiceRestartToApplyUpdateProcedure = "/ariadne.v1.UpdateService/RestartToApplyUpdate"
+	// UpdateServiceCancelRestartProcedure is the fully-qualified name of the UpdateService's
+	// CancelRestart RPC.
+	UpdateServiceCancelRestartProcedure = "/ariadne.v1.UpdateService/CancelRestart"
 )
 
 // UpdateServiceClient is a client for the ariadne.v1.UpdateService service.
@@ -53,6 +59,8 @@ type UpdateServiceClient interface {
 	SaveUpdatePreferences(context.Context, *connect.Request[v1.SaveUpdatePreferencesRequest]) (*connect.Response[v1.SaveUpdatePreferencesResponse], error)
 	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
+	RestartToApplyUpdate(context.Context, *connect.Request[v1.RestartToApplyUpdateRequest]) (*connect.Response[v1.RestartToApplyUpdateResponse], error)
+	CancelRestart(context.Context, *connect.Request[v1.CancelRestartRequest]) (*connect.Response[v1.CancelRestartResponse], error)
 }
 
 // NewUpdateServiceClient constructs a client for the ariadne.v1.UpdateService service. By default,
@@ -90,6 +98,18 @@ func NewUpdateServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(updateServiceMethods.ByName("InstallUpdate")),
 			connect.WithClientOptions(opts...),
 		),
+		restartToApplyUpdate: connect.NewClient[v1.RestartToApplyUpdateRequest, v1.RestartToApplyUpdateResponse](
+			httpClient,
+			baseURL+UpdateServiceRestartToApplyUpdateProcedure,
+			connect.WithSchema(updateServiceMethods.ByName("RestartToApplyUpdate")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelRestart: connect.NewClient[v1.CancelRestartRequest, v1.CancelRestartResponse](
+			httpClient,
+			baseURL+UpdateServiceCancelRestartProcedure,
+			connect.WithSchema(updateServiceMethods.ByName("CancelRestart")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -99,6 +119,8 @@ type updateServiceClient struct {
 	saveUpdatePreferences *connect.Client[v1.SaveUpdatePreferencesRequest, v1.SaveUpdatePreferencesResponse]
 	checkForUpdate        *connect.Client[v1.CheckForUpdateRequest, v1.CheckForUpdateResponse]
 	installUpdate         *connect.Client[v1.InstallUpdateRequest, v1.InstallUpdateResponse]
+	restartToApplyUpdate  *connect.Client[v1.RestartToApplyUpdateRequest, v1.RestartToApplyUpdateResponse]
+	cancelRestart         *connect.Client[v1.CancelRestartRequest, v1.CancelRestartResponse]
 }
 
 // GetUpdateStatus calls ariadne.v1.UpdateService.GetUpdateStatus.
@@ -121,12 +143,24 @@ func (c *updateServiceClient) InstallUpdate(ctx context.Context, req *connect.Re
 	return c.installUpdate.CallUnary(ctx, req)
 }
 
+// RestartToApplyUpdate calls ariadne.v1.UpdateService.RestartToApplyUpdate.
+func (c *updateServiceClient) RestartToApplyUpdate(ctx context.Context, req *connect.Request[v1.RestartToApplyUpdateRequest]) (*connect.Response[v1.RestartToApplyUpdateResponse], error) {
+	return c.restartToApplyUpdate.CallUnary(ctx, req)
+}
+
+// CancelRestart calls ariadne.v1.UpdateService.CancelRestart.
+func (c *updateServiceClient) CancelRestart(ctx context.Context, req *connect.Request[v1.CancelRestartRequest]) (*connect.Response[v1.CancelRestartResponse], error) {
+	return c.cancelRestart.CallUnary(ctx, req)
+}
+
 // UpdateServiceHandler is an implementation of the ariadne.v1.UpdateService service.
 type UpdateServiceHandler interface {
 	GetUpdateStatus(context.Context, *connect.Request[v1.GetUpdateStatusRequest]) (*connect.Response[v1.GetUpdateStatusResponse], error)
 	SaveUpdatePreferences(context.Context, *connect.Request[v1.SaveUpdatePreferencesRequest]) (*connect.Response[v1.SaveUpdatePreferencesResponse], error)
 	CheckForUpdate(context.Context, *connect.Request[v1.CheckForUpdateRequest]) (*connect.Response[v1.CheckForUpdateResponse], error)
 	InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error)
+	RestartToApplyUpdate(context.Context, *connect.Request[v1.RestartToApplyUpdateRequest]) (*connect.Response[v1.RestartToApplyUpdateResponse], error)
+	CancelRestart(context.Context, *connect.Request[v1.CancelRestartRequest]) (*connect.Response[v1.CancelRestartResponse], error)
 }
 
 // NewUpdateServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -160,6 +194,18 @@ func NewUpdateServiceHandler(svc UpdateServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(updateServiceMethods.ByName("InstallUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	updateServiceRestartToApplyUpdateHandler := connect.NewUnaryHandler(
+		UpdateServiceRestartToApplyUpdateProcedure,
+		svc.RestartToApplyUpdate,
+		connect.WithSchema(updateServiceMethods.ByName("RestartToApplyUpdate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	updateServiceCancelRestartHandler := connect.NewUnaryHandler(
+		UpdateServiceCancelRestartProcedure,
+		svc.CancelRestart,
+		connect.WithSchema(updateServiceMethods.ByName("CancelRestart")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/ariadne.v1.UpdateService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UpdateServiceGetUpdateStatusProcedure:
@@ -170,6 +216,10 @@ func NewUpdateServiceHandler(svc UpdateServiceHandler, opts ...connect.HandlerOp
 			updateServiceCheckForUpdateHandler.ServeHTTP(w, r)
 		case UpdateServiceInstallUpdateProcedure:
 			updateServiceInstallUpdateHandler.ServeHTTP(w, r)
+		case UpdateServiceRestartToApplyUpdateProcedure:
+			updateServiceRestartToApplyUpdateHandler.ServeHTTP(w, r)
+		case UpdateServiceCancelRestartProcedure:
+			updateServiceCancelRestartHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -193,4 +243,12 @@ func (UnimplementedUpdateServiceHandler) CheckForUpdate(context.Context, *connec
 
 func (UnimplementedUpdateServiceHandler) InstallUpdate(context.Context, *connect.Request[v1.InstallUpdateRequest]) (*connect.Response[v1.InstallUpdateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.UpdateService.InstallUpdate is not implemented"))
+}
+
+func (UnimplementedUpdateServiceHandler) RestartToApplyUpdate(context.Context, *connect.Request[v1.RestartToApplyUpdateRequest]) (*connect.Response[v1.RestartToApplyUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.UpdateService.RestartToApplyUpdate is not implemented"))
+}
+
+func (UnimplementedUpdateServiceHandler) CancelRestart(context.Context, *connect.Request[v1.CancelRestartRequest]) (*connect.Response[v1.CancelRestartResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ariadne.v1.UpdateService.CancelRestart is not implemented"))
 }

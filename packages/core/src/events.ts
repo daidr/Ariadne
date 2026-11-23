@@ -231,7 +231,7 @@ export interface CallTiming {
  * How a turn ended. `interrupted` means the process stopped mid-turn; `cancelled` means
  * the user stopped it.
  */
-export type TurnOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted'
+export type TurnOutcome = 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'suspended'
 
 export type PlanNodeKind = 'task' | 'milestone' | 'decision'
 
