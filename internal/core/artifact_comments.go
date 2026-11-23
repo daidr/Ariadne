@@ -285,14 +285,28 @@ func (repo *Repository) WithdrawArtifactFeedback(ctx context.Context, artifactID
 		if eventSeq <= 0 || notify == "" {
 			return nil
 		}
-		conv := w.one("SELECT turn_started_seq FROM conversations WHERE id = ?", notify)
-		if w.err != nil {
-			return w.err
-		}
-		if conv != nil && conv.integer("turn_started_seq") >= eventSeq {
-			return nil
-		}
-		reminded := w.one("SELECT 1 AS one FROM transcript WHERE conversation_id = ? AND seq > ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback-reminder' LIMIT 1", notify, eventSeq)
+			conv := w.one("SELECT turn_started_seq, pending_seq, pending_since FROM conversations WHERE id = ?", notify)
+			if w.err != nil {
+				return w.err
+			}
+			if conv != nil {
+				if conv.integer("turn_started_seq") >= eventSeq {
+					return nil
+				}
+				pendingSeq := conv.integer("pending_seq")
+				pendingSince := conv.integer("pending_since")
+				if pendingSeq < eventSeq || (pendingSince > 0 && pendingSince > eventSeq) {
+					return nil
+				}
+			}
+			seen := w.one("SELECT coalesce(max(CAST(json_extract(payload, '$.sawSeq') AS INTEGER)), 0) AS saw FROM transcript WHERE conversation_id = ? AND kind = 'step'", notify)
+			if w.err != nil {
+				return w.err
+			}
+			if seen != nil && seen.integer("saw") >= eventSeq {
+				return nil
+			}
+			reminded := w.one("SELECT 1 AS one FROM transcript WHERE conversation_id = ? AND seq > ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback-reminder' LIMIT 1", notify, eventSeq)
 		if w.err != nil {
 			return w.err
 		}
@@ -322,10 +336,18 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 		if len(feedback) != 0 {
 			result = feedback[0]
 		}
-		if result == nil {
-			return domainerr.NotFound(fmt.Sprintf("%s round %d", artifactID, round))
-		}
-		if result["doneAt"] != nil {
+			if result == nil {
+				return domainerr.NotFound(fmt.Sprintf("%s round %d", artifactID, round))
+			}
+			w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
+			statusRow := w.one("SELECT withdrawn_at FROM artifact_feedback WHERE artifact_id = ? AND round = ?", artifactID, round)
+			if w.err != nil {
+				return w.err
+			}
+			if statusRow != nil && statusRow["withdrawn_at"] != nil {
+				return domainerr.New("error.invalidBody", map[string]any{"reason": "feedback round was withdrawn"})
+			}
+			if result["doneAt"] != nil {
 			return nil
 		}
 		clean := textutil.Trim(summary)

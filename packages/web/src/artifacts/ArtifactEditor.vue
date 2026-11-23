@@ -67,6 +67,9 @@ const body = ref<{
   revealComment?: (id: string) => void
   markedPictures?: () => Promise<Blob[]>
   markHeard?: () => void
+  getHeard?: () => string
+  setHeard?: (snapshot: string) => void
+  currentSnapshot?: () => string
   applyRecommendedPicks?: () => number
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
@@ -153,7 +156,16 @@ const pendingNotes = ref(0)
 /** A round is being sent with pictures, which takes a moment. */
 const sending = ref(false)
 const withdrawing = ref(false)
-const sentRound = ref<{ artifactId: string; round: number; hadPending: number } | null>(null)
+/** Synchronous guard around applyRecommendedPicks() so real concurrent user edits are never dropped. */
+let applyingRecommended = false
+let localMutationSeq = 0
+const sentRound = ref<{
+  artifactId: string
+  round: number
+  hadPending: number
+  hadNotes: number
+  previousHeard?: string
+} | null>(null)
 const decisionSummary = ref<DecisionGroupSummary | null>(null)
 
 const hasActiveDecisionGroups = computed(
@@ -230,7 +242,7 @@ function join(id: string) {
   shared.value = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
   roomGeneration.value++
   shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
-    if (origin !== shared.value?.provider.value && !sending.value) touched()
+    if (origin !== shared.value?.provider.value && !applyingRecommended) touched()
   })
 }
 
@@ -251,6 +263,7 @@ function scheduleQuietSend() {
 }
 
 function touched(kind: 'edit' | 'comment' = 'edit') {
+  localMutationSeq++
   clearSentRound()
   waiting.value = true
   pendingChanges.value++
@@ -281,16 +294,27 @@ async function sendFeedback(leaving = false, explicit = false) {
   if (!explicit && (!waiting.value || hasActiveDecisionGroups.value)) return
 
   const id = room.id
-  const hadPending = Math.max(1, pendingChanges.value)
+  const initialPending = pendingChanges.value
+  const hadPending = Math.max(1, initialPending)
+  const hadNotes = pendingNotes.value
+  let applied = 0
   sending.value = true
   try {
     if (explicit && hasActiveDecisionGroups.value) {
-      const applied = body.value?.applyRecommendedPicks?.() ?? 0
+      applyingRecommended = true
+      try {
+        applied = body.value?.applyRecommendedPicks?.() ?? 0
+      } finally {
+        applyingRecommended = false
+      }
       if (applied > 0) {
         await nextTick()
         await new Promise((resolve) => setTimeout(resolve, 120))
       }
     }
+    const previousHeard = body.value?.getHeard?.()
+    const boardAtSend = body.value?.currentSnapshot?.()
+    const sentMutationSeq = localMutationSeq
     waiting.value = false
     pendingChanges.value = 0
     pendingNotes.value = 0
@@ -299,17 +323,40 @@ async function sendFeedback(leaving = false, explicit = false) {
     const images = await Promise.all(
       pictures.map(async (picture) => (await api.uploadFile(projectId, picture)).file.id),
     )
-    const result = await api.sendFeedback(id, images)
-    body.value?.markHeard?.()
+    let result = await api.sendFeedback(id, images)
+    // If recommended picks were just written to Yjs and the first flush raced WebSocket delivery,
+    // wait briefly and try once more before restoring pending state.
+    if (explicit && applied > 0 && !result?.feedback) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      result = await api.sendFeedback(id, images)
+    }
+    const editedDuringSend = localMutationSeq !== sentMutationSeq
     if (result?.feedback && result.feedback.round > 0) {
-      clearSentRound()
-      sentRound.value = { artifactId: id, round: result.feedback.round, hadPending }
-      sentRoundTimer = setTimeout(clearSentRound, WITHDRAW_WINDOW_MS)
+      if (boardAtSend !== undefined) body.value?.setHeard?.(boardAtSend)
+      else body.value?.markHeard?.()
+      if (!editedDuringSend) {
+        clearSentRound()
+        sentRound.value = {
+          artifactId: id,
+          round: result.feedback.round,
+          hadPending,
+          hadNotes,
+          previousHeard,
+        }
+        sentRoundTimer = setTimeout(clearSentRound, WITHDRAW_WINDOW_MS)
+      }
+    } else if (explicit && !editedDuringSend && (initialPending > 0 || applied > 0)) {
+      waiting.value = true
+      pendingChanges.value = Math.max(initialPending, applied)
+      pendingNotes.value = hadNotes
     }
   } catch (error) {
     if (explicit) {
-      waiting.value = true
-      pendingChanges.value = hadPending
+      if (initialPending > 0 || applied > 0) {
+        waiting.value = true
+        pendingChanges.value += Math.max(initialPending, applied)
+        pendingNotes.value += hadNotes
+      }
       report(error)
     } else {
       // The server sends what waits on its own a little later, without the pictures.
@@ -328,8 +375,10 @@ async function withdrawSentFeedback() {
     const { withdrawn } = await api.withdrawFeedback(target.artifactId, target.round)
     clearSentRound()
     if (withdrawn) {
+      if (target.previousHeard !== undefined) body.value?.setHeard?.(target.previousHeard)
       waiting.value = true
-      pendingChanges.value = target.hadPending
+      pendingChanges.value += target.hadPending
+      pendingNotes.value += target.hadNotes
       scheduleQuietSend()
     } else {
       report(t('artifact.feedback.withdrawTooLate'))

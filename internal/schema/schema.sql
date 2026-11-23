@@ -399,7 +399,8 @@ CREATE TABLE transcript (
       seq INTEGER NOT NULL,
       kind TEXT NOT NULL,
       ref TEXT,
-      payload TEXT
+      payload TEXT,
+      woke INTEGER NOT NULL DEFAULT 0
     );
 
 CREATE TABLE used_approvals (

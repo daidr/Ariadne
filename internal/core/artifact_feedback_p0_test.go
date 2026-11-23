@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/daidr/Ariadne/internal/eventstore"
 )
 
 func feedbackRoundOf(t *testing.T, fb object) int64 {
@@ -326,4 +328,271 @@ func TestArtifactFeedbackDecisionGroupsAndChoice(t *testing.T) {
 	if !foundChoice {
 		t.Fatalf("expected choice item in feedback, got %+v", fb["items"])
 	}
+}
+
+func TestArtifactFeedbackWithdrawBlockedByInFlightStepSawSeqAndFinishRejected(t *testing.T) {
+	ctx := t.Context()
+	clock := time.UnixMilli(1900000000000)
+	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := repo.CreateArtifact(ctx, project.ID, NewArtifact{
+		Kind:    "document",
+		Title:   "Spec",
+		Author:  project.CoordinatorID,
+		Content: "Initial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First check that FinishArtifactFeedback rejects an already-withdrawn round.
+	clock = clock.Add(time.Second)
+	v2, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Author:      "user",
+		BaseVersion: &artifact.Version,
+		Content:     "Edit 1",
+		Shared:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	withdrawn, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 1)
+	if err != nil || !withdrawn {
+		t.Fatalf("expected round 1 withdraw to succeed, got %v, err=%v", withdrawn, err)
+	}
+	if _, err := repo.FinishArtifactFeedback(ctx, artifact.ID, 1, project.CoordinatorID, "Should fail"); err == nil {
+		t.Fatal("expected FinishArtifactFeedback to reject a withdrawn round")
+	}
+
+	// Start a turn BEFORE feedback round 2 is submitted (turn_started_seq < event_seq).
+	clock = clock.Add(time.Second)
+	turnID, err := repo.StartTurn(ctx, project.CoordinatorID, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Author:      "user",
+		BaseVersion: &v2.Version,
+		Content:     "Edit 2 during turn",
+		Shared:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fb2, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil)
+	if err != nil || feedbackRoundOf(t, fb2) != 2 {
+		t.Fatalf("expected round 2 feedback, got %+v, err=%v", fb2, err)
+	}
+
+	var eventSeq int64
+	if err := repo.DB.QueryRowContext(ctx, "SELECT event_seq FROM artifact_feedback WHERE artifact_id = ? AND round = 2", artifact.ID).Scan(&eventSeq); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record a turn.step that saw eventSeq while the original turn is still running.
+	stepData, _ := json.Marshal(map[string]any{
+		"conversationId": project.CoordinatorID,
+		"turnId":         turnID,
+		"text":           "Saw feedback round 2",
+		"reasoning":      []any{},
+		"toolCalls":      []any{},
+		"finish":         "tool_calls",
+		"sawSeq":         eventSeq,
+		"usage":          map[string]any{},
+		"input":          map[string]any{"call": "test"},
+	})
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "turn.step",
+		ProjectID: project.ID,
+		Data:      stepData,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Withdraw must return false because the in-flight turn step already consumed eventSeq.
+	withdrawn2, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn2 {
+		t.Fatal("expected withdraw to return false after an in-flight turn.step saw eventSeq")
+	}
+	var transcriptCount int
+	if err := repo.DB.QueryRowContext(ctx, "SELECT count(*) FROM transcript WHERE conversation_id = ? AND seq = ?", project.CoordinatorID, eventSeq).Scan(&transcriptCount); err != nil {
+		t.Fatal(err)
+	}
+	if transcriptCount != 1 {
+		t.Fatalf("expected transcript entry for consumed feedback to remain intact, count=%d", transcriptCount)
+	}
+}
+
+func TestArtifactFeedbackWithdrawPreservesNonTranscriptWakeAndSkipsNonWakingEntries(t *testing.T) {
+	ctx := t.Context()
+	clock := time.UnixMilli(1900000000000)
+	repo, err := Open(ctx, Options{Path: filepath.Join(t.TempDir(), "test.sqlite"), Now: func() time.Time { return clock }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	project, err := repo.CreateProject(ctx, new("Fixture"), ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := repo.CreateArtifact(ctx, project.ID, NewArtifact{
+		Kind:    "document",
+		Title:   "Draft",
+		Author:  project.CoordinatorID,
+		Content: "Base",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. A turn.requested wake does not insert a transcript row; withdrawing later feedback must preserve it.
+	reqData, _ := json.Marshal(map[string]any{"conversationId": project.CoordinatorID})
+	reqEvents, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "turn.requested",
+		ProjectID: project.ID,
+		Data:      reqData,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqSeq := reqEvents[0].Seq
+
+	clock = clock.Add(time.Second)
+	v2, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Author:      "user",
+		BaseVersion: &artifact.Version,
+		Content:     "Edit A",
+		Shared:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	withdrawn, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 1)
+	if err != nil || !withdrawn {
+		t.Fatalf("expected round 1 withdraw to succeed, got %v, err=%v", withdrawn, err)
+	}
+	var pendingSeq, pendingSince int64
+	if err := repo.DB.QueryRowContext(ctx, "SELECT pending_seq, pending_since FROM conversations WHERE id = ?", project.CoordinatorID).Scan(&pendingSeq, &pendingSince); err != nil {
+		t.Fatal(err)
+	}
+	if pendingSeq != reqSeq || pendingSince != reqSeq {
+		t.Fatalf("expected pending_seq/pending_since restored to turn.requested seq %d, got (%d, %d)", reqSeq, pendingSeq, pendingSince)
+	}
+
+	// 2. Clear turn.requested by starting+completing a turn, then verify non-waking entries between two feedback rounds are skipped.
+	turnID, err := repo.StartTurn(ctx, project.CoordinatorID, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepData, _ := json.Marshal(map[string]any{
+		"conversationId": project.CoordinatorID,
+		"turnId":         turnID,
+		"text":           "done",
+		"reasoning":      []any{},
+		"toolCalls":      []any{},
+		"finish":         "stop",
+		"sawSeq":         reqSeq,
+		"usage":          map[string]any{},
+		"input":          map[string]any{"call": "test"},
+	})
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{Type: "turn.step", ProjectID: project.ID, Data: stepData}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.FinishTurn(ctx, project.CoordinatorID, turnID, "completed", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Feedback round 2 (woke = 1).
+	clock = clock.Add(time.Second)
+	v3, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Author:      "user",
+		BaseVersion: &v2.Version,
+		Content:     "Edit B",
+		Shared:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	var fb2Seq int64
+	if err := repo.DB.QueryRowContext(ctx, "SELECT event_seq FROM artifact_feedback WHERE artifact_id = ? AND round = 2", artifact.ID).Scan(&fb2Seq); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a non-waking transcript note (user-reacted, woke = 0) between round 2 and round 3.
+	reactData, _ := json.Marshal(map[string]any{
+		"conversationId": project.CoordinatorID,
+		"messageId":      "msg_1",
+		"emoji":          "👍",
+		"by":             "user",
+	})
+	if _, err := repo.Store.Append(ctx, []eventstore.NewEvent{{
+		Type:      "message.reacted",
+		ProjectID: project.ID,
+		Data:      reactData,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Feedback round 3 (woke = 1).
+	clock = clock.Add(time.Second)
+	if _, err := repo.ReviseArtifact(ctx, artifact.ID, ArtifactRevision{
+		Author:      "user",
+		BaseVersion: &v3.Version,
+		Content:     "Edit C",
+		Shared:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SendPendingArtifactFeedback(ctx, artifact.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	var fb3Seq int64
+	if err := repo.DB.QueryRowContext(ctx, "SELECT event_seq FROM artifact_feedback WHERE artifact_id = ? AND round = 3", artifact.ID).Scan(&fb3Seq); err != nil {
+		t.Fatal(err)
+	}
+
+	// Withdraw round 3 -> pending_seq must roll back to fb2Seq (skipping the non-waking message.reacted entry).
+	if ok, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 3); err != nil || !ok {
+		t.Fatalf("expected round 3 withdraw to succeed, got %v, err=%v", ok, err)
+	}
+	if err := repo.DB.QueryRowContext(ctx, "SELECT pending_seq, pending_since FROM conversations WHERE id = ?", project.CoordinatorID).Scan(&pendingSeq, &pendingSince); err != nil {
+		t.Fatal(err)
+	}
+	if pendingSeq != fb2Seq || pendingSince != fb2Seq {
+		t.Fatalf("expected rollback to fb2Seq (%d), got (%d, %d)", fb2Seq, pendingSeq, pendingSince)
+	}
+
+	// Withdraw round 2 -> must clear to (0, 0) instead of landing on the non-waking reaction entry.
+	if ok, err := repo.WithdrawArtifactFeedback(ctx, artifact.ID, 2); err != nil || !ok {
+		t.Fatalf("expected round 2 withdraw to succeed, got %v, err=%v", ok, err)
+	}
+	if err := repo.DB.QueryRowContext(ctx, "SELECT pending_seq, pending_since FROM conversations WHERE id = ?", project.CoordinatorID).Scan(&pendingSeq, &pendingSince); err != nil {
+		t.Fatal(err)
+	}
+	if pendingSeq != 0 || pendingSince != 0 {
+		t.Fatalf("expected cleared pending cursor (0, 0), got (%d, %d)", pendingSeq, pendingSince)
+	}
+	_ = fb3Seq
 }

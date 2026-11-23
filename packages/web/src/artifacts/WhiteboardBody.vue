@@ -208,6 +208,18 @@ const nodesOf = (doc: FlowDocument) => new Map(doc.nodes.map((n) => [n.id, JSON.
 function markHeard() {
   heard = JSON.stringify(board.value)
 }
+
+function getHeard() {
+  return heard
+}
+
+function setHeard(snapshot: string) {
+  heard = snapshot
+}
+
+function currentSnapshot() {
+  return JSON.stringify(board.value)
+}
 watch(ready, (now) => now && markHeard(), { immediate: true })
 
 const inside = (x: number, y: number, n: FlowNode) =>
@@ -252,7 +264,14 @@ async function markedPictures(): Promise<Blob[]> {
   return pictures
 }
 
-defineExpose({ markedPictures, markHeard, applyRecommendedPicks })
+defineExpose({
+  markedPictures,
+  markHeard,
+  getHeard,
+  setHeard,
+  currentSnapshot,
+  applyRecommendedPicks,
+})
 </script>
 
 <template>
