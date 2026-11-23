@@ -238,6 +238,40 @@ func transcriptEvent(w *projectionWriter, e eventstore.Event, d object) {
 		payload["title"] = artifact["title"]
 		payload["kind"] = artifact["kind"]
 		note(d["notify"], payload, true)
+	case "artifact.feedback_withdrawn":
+		notify := d["notify"]
+		eventSeq, _ := number(d["eventSeq"])
+		seq := int64(eventSeq)
+		if notify == nil || seq <= 0 {
+			return
+		}
+		w.run("DELETE FROM transcript WHERE conversation_id = ? AND seq = ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback'", notify, seq)
+		conv := w.one("SELECT pending_seq, pending_since FROM conversations WHERE id = ?", notify)
+		if conv != nil {
+			pendingSeq := conv.integer("pending_seq")
+			pendingSince := conv.integer("pending_since")
+			switch {
+			case pendingSeq == seq && pendingSince == seq:
+				w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
+			case pendingSeq == seq:
+				prev := w.one("SELECT coalesce(max(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND seq >= ? AND seq < ?", notify, pendingSince, seq)
+				nextSeq := prev.integer("seq")
+				if nextSeq > 0 {
+					w.run("UPDATE conversations SET pending_seq = ? WHERE id = ?", nextSeq, notify)
+				} else {
+					w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
+				}
+			case pendingSince == seq:
+				next := w.one("SELECT coalesce(min(seq), 0) AS seq FROM transcript WHERE conversation_id = ? AND seq > ? AND seq <= ?", notify, seq, pendingSeq)
+				nextSince := next.integer("seq")
+				if nextSince > 0 {
+					w.run("UPDATE conversations SET pending_since = ? WHERE id = ?", nextSince, notify)
+				} else {
+					w.run("UPDATE conversations SET pending_seq = 0, pending_since = 0 WHERE id = ?", notify)
+				}
+			}
+		}
+		touchThread(w, e.Seq, notify)
 	case "conversation.feedback_reminder":
 		note(d["conversationId"], object{"type": "artifact-feedback-reminder", "rounds": d["rounds"]}, false)
 	case "plan.proposal.stale":

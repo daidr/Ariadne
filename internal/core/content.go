@@ -328,6 +328,7 @@ func noticeEvent(w *projectionWriter, e eventstore.Event, d object) {
 		payload["title"] = title
 		payload["done"] = false
 		payload["summary"] = nil
+		payload["withdrawn"] = false
 		add(d["notify"], "artifact-feedback", payload)
 	case "artifact.feedback_done":
 		row := w.one("SELECT id, payload FROM notices WHERE kind = 'artifact-feedback' AND project_id = ? AND json_extract(payload, '$.artifactId') = ? AND json_extract(payload, '$.round') = ?", e.ProjectID, d["artifactId"], d["round"])
@@ -344,6 +345,17 @@ func noticeEvent(w *projectionWriter, e eventstore.Event, d object) {
 			payload["summary"] = d["summary"]
 		}
 		w.run("UPDATE notices SET payload = ?, changed_seq = ? WHERE id = ?", encoded(payload), e.Seq, row["id"])
+	case "artifact.feedback_withdrawn":
+		row := w.one("SELECT id, payload FROM notices WHERE kind = 'artifact-feedback' AND project_id = ? AND json_extract(payload, '$.artifactId') = ? AND json_extract(payload, '$.round') = ?", e.ProjectID, d["artifactId"], d["round"])
+		if row == nil {
+			return
+		}
+		payload, _ := w.parsed(row, "payload", map[string]any{}).(map[string]any)
+		if w.err != nil {
+			return
+		}
+		payload["withdrawn"] = true
+		w.run("UPDATE notices SET payload = ?, undone = 1, changed_seq = ? WHERE id = ?", encoded(payload), e.Seq, row["id"])
 	case "user.returned":
 		if id := coordinator(w, e.ProjectID); id != nil {
 			w.run("DELETE FROM notices WHERE project_id = ? AND kind = 'recap'", e.ProjectID)

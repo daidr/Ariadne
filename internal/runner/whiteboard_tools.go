@@ -19,8 +19,8 @@ type whiteboard struct {
 }
 
 func (turn *turn) createWhiteboard(ctx context.Context, input args) (string, error) {
-	if input["items"] == nil && input["options"] == nil {
-		return "", errors.New("give items or options for the new whiteboard")
+	if input["items"] == nil && input["options"] == nil && input["groups"] == nil {
+		return "", errors.New("give items, groups or options for the new whiteboard")
 	}
 	change, err := turn.whiteboardChange(ctx, input)
 	if err != nil {
@@ -72,6 +72,10 @@ func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string
 	if pick != "" && pick != "one" && pick != "many" {
 		return nil, errors.New("pick must be one or many")
 	}
+	groups, err := boardGroups(input["groups"])
+	if err != nil {
+		return nil, err
+	}
 	options, err := turn.boardOptions(ctx, input["options"])
 	if err != nil {
 		return nil, err
@@ -84,7 +88,7 @@ func (turn *turn) whiteboardChange(ctx context.Context, input args) (func(string
 		if err := board.change(items, connectors, removeItems, removeEdges, direction, input["relayout"] == true); err != nil {
 			return "", err
 		}
-		if err := board.placeOptions(options, pick); err != nil {
+		if err := board.placeGroupsAndOptions(groups, options, pick); err != nil {
 			return "", err
 		}
 		encoded, err := jsonutil.Encode(board)

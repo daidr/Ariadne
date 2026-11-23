@@ -1,5 +1,6 @@
 import { defineFlowExtension, flowKit } from '@dou-ui/flow'
 import { whiteboardKit, type WhiteboardUpload } from '@dou-ui/flow/whiteboard'
+import { decisionGroupNode } from './decision-group-node'
 import { optionNode } from './option-node'
 import { pendingNode } from './pending-node'
 
@@ -15,5 +16,8 @@ const options = defineFlowExtension({
  * into the address the board keeps.
  */
 export function whiteboardExtensions(upload?: WhiteboardUpload) {
-  return [flowKit(), whiteboardKit(upload ? { upload } : {}), options]
+  const kit = flowKit().map((extension) =>
+    extension.name === 'groups' ? { ...extension, nodeTypes: [decisionGroupNode] } : extension,
+  )
+  return [kit, whiteboardKit(upload ? { upload } : {}), options]
 }

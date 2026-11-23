@@ -259,6 +259,24 @@ func (s *artifactService) SendArtifactFeedback(
 	}), nil
 }
 
+func (s *artifactService) WithdrawArtifactFeedback(
+	ctx context.Context,
+	req *connect.Request[ariadnev1.WithdrawArtifactFeedbackRequest],
+) (*connect.Response[ariadnev1.WithdrawArtifactFeedbackResponse], error) {
+	id := req.Msg.ArtifactId
+	round := req.Msg.Round
+	if id == "" || round <= 0 {
+		return nil, badInput("round")
+	}
+	withdrawn, err := s.api.options.Repository.WithdrawArtifactFeedback(ctx, id, round)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&ariadnev1.WithdrawArtifactFeedbackResponse{
+		Withdrawn: withdrawn,
+	}), nil
+}
+
 // ---- D-5: Dedicated comment lifecycle RPCs ----
 
 func (s *artifactService) CreateArtifactComment(

@@ -15,6 +15,8 @@ import {
   MoreHorizontalIcon,
   PencilIcon,
   RotateCcwIcon,
+  SendIcon,
+  UndoIcon,
 } from '@dou-ui/icons'
 import {
   computed,
@@ -33,6 +35,7 @@ import { report, state } from '../store'
 import ViewActions from '../full/ViewActions.vue'
 import ArtifactHistory from './ArtifactHistory.vue'
 import CommentList from './CommentList.vue'
+import type { DecisionGroupSummary } from './decision-groups'
 import { kindIcon } from './kinds'
 import { useSharedArtifact, type SharedArtifact } from './shared'
 
@@ -64,6 +67,7 @@ const body = ref<{
   revealComment?: (id: string) => void
   markedPictures?: () => Promise<Blob[]>
   markHeard?: () => void
+  applyRecommendedPicks?: () => number
 } | null>(null)
 /** The newest version; an older one is shown read-only. */
 const latest = ref(0)
@@ -135,21 +139,57 @@ watch(historyOpen, async (open, _, onCleanup) => {
   }
 })
 
+/**
+ * What the user does here reaches the agent either when they click send/submit or after a
+ * 15-second idle pause (paused while active decision groups await explicit submission).
+ */
+const QUIET_MS = 15_000
+const WITHDRAW_WINDOW_MS = 60_000
+let quiet: ReturnType<typeof setTimeout> | null = null
+let sentRoundTimer: ReturnType<typeof setTimeout> | null = null
+const waiting = ref(false)
+const pendingChanges = ref(0)
+const pendingNotes = ref(0)
+/** A round is being sent with pictures, which takes a moment. */
+const sending = ref(false)
+const withdrawing = ref(false)
+const sentRound = ref<{ artifactId: string; round: number; hadPending: number } | null>(null)
+const decisionSummary = ref<DecisionGroupSummary | null>(null)
+
+const hasActiveDecisionGroups = computed(
+  () =>
+    artifact.value?.kind === 'whiteboard' &&
+    !viewingOld.value &&
+    !!decisionSummary.value?.hasActiveDecisionGroups,
+)
+
+function clearSentRound() {
+  if (sentRoundTimer) clearTimeout(sentRoundTimer)
+  sentRoundTimer = null
+  sentRound.value = null
+}
+
 watch(
   () => props.id,
   () => {
     renaming.value = false
     menu.value = null
     artifact.value = null
+    decisionSummary.value = null
+    clearSentRound()
     void load()
   },
   { immediate: true },
 )
 // Keep the live view in sync while the user is editing.
 watch(
-  () => state.artifacts.find((a) => a.id === props.id)?.version,
-  (version) => {
-    if (version && version !== latest.value && !viewingOld.value && !switchingVersion.value) {
+  () => {
+    const summary = state.artifacts.find((a) => a.id === props.id)
+    return summary ? { version: summary.version, updatedBy: summary.updatedBy } : null
+  },
+  (next) => {
+    if (next && next.version !== latest.value && !viewingOld.value && !switchingVersion.value) {
+      if (next.updatedBy !== 'user') clearSentRound()
       void load()
     }
   },
@@ -190,7 +230,7 @@ function join(id: string) {
   shared.value = scope.run(() => useSharedArtifact(id, onLockedEdit)) ?? null
   roomGeneration.value++
   shared.value?.doc.on('update', (_update: Uint8Array, origin: unknown) => {
-    if (origin !== shared.value?.provider.value) touched()
+    if (origin !== shared.value?.provider.value && !sending.value) touched()
   })
 }
 
@@ -203,49 +243,154 @@ watch(
   },
 )
 
-/**
- * What the user does here reaches the agent on its own, a moment after they stop: the
- * changes, comments and picks together, with pictures of the options they marked.
- */
-const QUIET_MS = 10_000
-let quiet: ReturnType<typeof setTimeout> | null = null
-let waiting = false
-/** A round is being sent with pictures, which takes a moment. */
-let sending = false
-
-function touched() {
-  waiting = true
+function scheduleQuietSend() {
   if (quiet) clearTimeout(quiet)
+  quiet = null
+  if (hasActiveDecisionGroups.value) return
   quiet = setTimeout(() => void sendFeedback(), QUIET_MS)
 }
 
-async function sendFeedback(leaving = false) {
+function touched(kind: 'edit' | 'comment' = 'edit') {
+  clearSentRound()
+  waiting.value = true
+  pendingChanges.value++
+  if (kind === 'comment') pendingNotes.value++
+  scheduleQuietSend()
+}
+
+function onDecisionSummary(summary: DecisionGroupSummary) {
+  decisionSummary.value = summary
+  if (summary.hasActiveDecisionGroups && quiet) {
+    clearTimeout(quiet)
+    quiet = null
+  }
+}
+
+async function sendFeedback(leaving = false, explicit = false) {
   if (quiet) clearTimeout(quiet)
   quiet = null
-  if (!waiting || !room) return
-  waiting = false
+  if (!room) return
+  if (leaving) {
+    if (!waiting.value || hasActiveDecisionGroups.value) return
+    waiting.value = false
+    pendingChanges.value = 0
+    pendingNotes.value = 0
+    return api.sendFeedback(room.id, [], true)
+  }
+  if (sending.value) return
+  if (!explicit && (!waiting.value || hasActiveDecisionGroups.value)) return
+
   const id = room.id
-  if (leaving) return api.sendFeedback(id, [], true)
-  sending = true
+  const hadPending = Math.max(1, pendingChanges.value)
+  sending.value = true
   try {
+    if (explicit && hasActiveDecisionGroups.value) {
+      const applied = body.value?.applyRecommendedPicks?.() ?? 0
+      if (applied > 0) {
+        await nextTick()
+        await new Promise((resolve) => setTimeout(resolve, 120))
+      }
+    }
+    waiting.value = false
+    pendingChanges.value = 0
+    pendingNotes.value = 0
     const pictures = (await body.value?.markedPictures?.()) ?? []
     const projectId = artifact.value?.projectId ?? ''
     const images = await Promise.all(
       pictures.map(async (picture) => (await api.uploadFile(projectId, picture)).file.id),
     )
-    await api.sendFeedback(id, images)
+    const result = await api.sendFeedback(id, images)
     body.value?.markHeard?.()
+    if (result?.feedback && result.feedback.round > 0) {
+      clearSentRound()
+      sentRound.value = { artifactId: id, round: result.feedback.round, hadPending }
+      sentRoundTimer = setTimeout(clearSentRound, WITHDRAW_WINDOW_MS)
+    }
   } catch (error) {
-    // The server sends what waits on its own a little later, without the pictures.
-    console.warn('feedback not sent', error)
+    if (explicit) {
+      waiting.value = true
+      pendingChanges.value = hadPending
+      report(error)
+    } else {
+      // The server sends what waits on its own a little later, without the pictures.
+      console.warn('feedback not sent', error)
+    }
   } finally {
-    sending = false
+    sending.value = false
   }
 }
 
+async function withdrawSentFeedback() {
+  const target = sentRound.value
+  if (!target || withdrawing.value) return
+  withdrawing.value = true
+  try {
+    const { withdrawn } = await api.withdrawFeedback(target.artifactId, target.round)
+    clearSentRound()
+    if (withdrawn) {
+      waiting.value = true
+      pendingChanges.value = target.hadPending
+      scheduleQuietSend()
+    } else {
+      report(t('artifact.feedback.withdrawTooLate'))
+    }
+  } catch (error) {
+    report(error)
+  } finally {
+    withdrawing.value = false
+  }
+}
+
+const feedbackBarState = computed<'sent' | 'decision' | 'pending' | null>(() => {
+  if (!artifact.value || viewingOld.value || artifact.value.kind === 'dashboard') return null
+  if (sentRound.value && sentRound.value.artifactId === artifact.value.id) return 'sent'
+  if (hasActiveDecisionGroups.value) return 'decision'
+  if (waiting.value && pendingChanges.value > 0) return 'pending'
+  return null
+})
+
+const decisionBarText = computed(() => {
+  const s = decisionSummary.value
+  if (!s) return ''
+  let base: string
+  if (s.remainingGroups === 0 && s.pickedGroups === s.totalGroups) {
+    base = t('artifact.feedback.decisionAllPicked', {
+      picked: s.pickedGroups,
+      total: s.totalGroups,
+    })
+  } else if (s.remainingGroups === 0 && s.pickedGroups > 0) {
+    base = t('artifact.feedback.decisionWithRecommended', {
+      picked: s.pickedGroups,
+      total: s.totalGroups,
+    })
+  } else if (s.remainingGroups === 0) {
+    base = t('artifact.feedback.decisionAllRecommended', { total: s.totalGroups })
+  } else {
+    base = t('artifact.feedback.decisionRemaining', {
+      picked: s.pickedGroups,
+      total: s.totalGroups,
+      remaining: s.remainingGroups,
+    })
+  }
+  if (pendingNotes.value > 0) {
+    base += t('artifact.feedback.withNotes', { count: pendingNotes.value })
+  }
+  return base
+})
+
+const canSubmitDecision = computed(() => {
+  const s = decisionSummary.value
+  if (!s || sending.value) return false
+  return s.pickedGroups > 0 || s.recommendedFallbackGroups > 0 || waiting.value
+})
+
 function leave() {
+  clearSentRound()
   if (!room) return
   void sendFeedback(true)
+  waiting.value = false
+  pendingChanges.value = 0
+  pendingNotes.value = 0
   room.scope.stop()
   room = null
   shared.value = null
@@ -260,8 +405,10 @@ document.addEventListener('visibilitychange', hidden)
 // Closing the page cancels what is still being sent: what waits goes at once, without
 // pictures, in a request that outlives the page.
 function closing() {
-  if (!room || (!waiting && !sending)) return
-  waiting = false
+  if (!room || hasActiveDecisionGroups.value || (!waiting.value && !sending.value)) return
+  waiting.value = false
+  pendingChanges.value = 0
+  pendingNotes.value = 0
   void api.sendFeedback(room.id, [], true)
 }
 window.addEventListener('pagehide', closing)
@@ -348,7 +495,14 @@ async function comment(
 ) {
   const sent = toAction(action, quote, label)
   if (!sent) return
-  if (sent.type === 'create' || sent.type === 'reply') touched()
+  if (
+    sent.type === 'create' ||
+    sent.type === 'reply' ||
+    sent.type === 'edit' ||
+    sent.type === 'reopen'
+  ) {
+    touched('comment')
+  }
   try {
     let result: { comments: ArtifactCommentThreadView[] }
     switch (sent.type) {
@@ -605,7 +759,54 @@ async function rename() {
         :artifact-id="artifact.id"
         :readonly="viewingOld"
         :label="artifact.title"
+        @decision-summary="onDecisionSummary"
       />
+    </div>
+    <div v-if="feedbackBarState" class="artifact-feedback-bar" role="status" aria-live="polite">
+      <template v-if="feedbackBarState === 'sent' && sentRound">
+        <DouText size="sm" variant="secondary" truncate class="artifact-feedback-text">
+          {{ t('artifact.feedback.sentRound', { round: sentRound.round }) }}
+        </DouText>
+        <DouButton size="sm" variant="ghost" :loading="withdrawing" @click="withdrawSentFeedback">
+          <template #leading><UndoIcon /></template>
+          {{ t('artifact.feedback.withdraw') }}
+        </DouButton>
+      </template>
+      <template v-else-if="feedbackBarState === 'decision'">
+        <DouText size="sm" variant="secondary" truncate class="artifact-feedback-text">
+          {{ decisionBarText }}
+        </DouText>
+        <DouButton
+          size="sm"
+          variant="soft"
+          tone="primary"
+          :loading="sending"
+          :disabled="!canSubmitDecision"
+          @click="sendFeedback(false, true)"
+        >
+          <template #leading><SendIcon /></template>
+          {{ t('artifact.feedback.submitRound') }}
+        </DouButton>
+      </template>
+      <template v-else-if="feedbackBarState === 'pending'">
+        <DouText size="sm" variant="secondary" truncate class="artifact-feedback-text">
+          {{
+            pendingChanges === 1
+              ? t('artifact.feedback.pendingChanges')
+              : t('artifact.feedback.pendingCount', { count: pendingChanges })
+          }}
+        </DouText>
+        <DouButton
+          size="sm"
+          variant="soft"
+          tone="primary"
+          :loading="sending"
+          @click="sendFeedback(false, true)"
+        >
+          <template #leading><SendIcon /></template>
+          {{ t('artifact.feedback.sendNow') }}
+        </DouButton>
+      </template>
     </div>
   </div>
 </template>
@@ -673,5 +874,22 @@ async function rename() {
 .artifact-body {
   flex: 1;
   min-height: 0;
+}
+
+.artifact-feedback-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px 6px 16px;
+  border-top: 1px solid var(--dou-color-border);
+  background: var(--dou-color-surface-subtle, var(--dou-color-surface, var(--dou-color-bg)));
+}
+
+.artifact-feedback-text {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
 }
 </style>

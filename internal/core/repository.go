@@ -75,7 +75,22 @@ func (projection DomainProjection) Setup(ctx context.Context, tx *sql.Tx) error 
 			return err
 		}
 	}
-	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 {
+	if version == 67 || version == 68 || version == 69 || version == 70 || version == 71 {
+		for _, col := range []struct {
+			table, name, def string
+		}{
+			{"artifact_comments", "reopened_by", "TEXT"},
+			{"artifact_comments", "reopened_at", "INTEGER"},
+			{"artifact_feedback", "fingerprints", "TEXT NOT NULL DEFAULT '[]'"},
+			{"artifact_feedback", "withdrawn_at", "INTEGER"},
+			{"artifact_feedback", "event_seq", "INTEGER NOT NULL DEFAULT 0"},
+		} {
+			if err := addColumnIfMissing(ctx, tx, col.table, col.name, col.def); err != nil {
+				return err
+			}
+		}
+	}
+	if version == schema.Version || version == 67 || version == 68 || version == 69 || version == 70 || version == 71 {
 		return schema.Create(ctx, tx)
 	}
 	if err := dropProjectionTables(ctx, tx); err != nil {

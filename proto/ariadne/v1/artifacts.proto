@@ -14,6 +14,7 @@ service ArtifactService {
   rpc SaveArtifact(SaveArtifactRequest) returns (SaveArtifactResponse);
   rpc RefreshDashboard(RefreshDashboardRequest) returns (RefreshDashboardResponse);
   rpc SendArtifactFeedback(SendArtifactFeedbackRequest) returns (SendArtifactFeedbackResponse);
+  rpc WithdrawArtifactFeedback(WithdrawArtifactFeedbackRequest) returns (WithdrawArtifactFeedbackResponse);
 
   rpc CreateArtifactComment(CreateArtifactCommentRequest) returns (CreateArtifactCommentResponse);
   rpc ReplyArtifactComment(ReplyArtifactCommentRequest) returns (ReplyArtifactCommentResponse);
@@ -234,6 +235,15 @@ message SendArtifactFeedbackRequest {
 
 message SendArtifactFeedbackResponse {
   optional ArtifactFeedbackView feedback = 1;
+}
+
+message WithdrawArtifactFeedbackRequest {
+  string artifact_id = 1;
+  int64 round = 2 [jstype = JS_NUMBER];
+}
+
+message WithdrawArtifactFeedbackResponse {
+  bool withdrawn = 1;
 }
 
 message CreateArtifactCommentRequest {

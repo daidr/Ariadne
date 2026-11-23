@@ -21,7 +21,8 @@ func (turn *turn) artifactTools() []tool {
 	widgets := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "type": field("string"), "title": field("string"), "props": field("object"), "w": field("integer"), "h": field("integer")}, "required": []string{"id"}})
 	items := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "kind": field("string"), "text": field("string"), "tone": field("string"), "x": field("number"), "y": field("number"), "width": field("number"), "height": field("number")}, "required": []string{"id"}})
 	connectors := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "from": field("string"), "to": field("string"), "label": field("string"), "route": field("string"), "dash": field("string"), "arrow": field("string")}})
-	options := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "title": field("string"), "note": field("string"), "text": field("string"), "revises": field("string"), "images": arrayOf(field("object"))}, "required": []string{"id", "title"}})
+	groups := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "title": field("string"), "note": field("string"), "pick": field("string"), "round": field("integer"), "mode": field("string"), "confirmed": field("boolean")}, "required": []string{"id", "title"}})
+	options := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "title": field("string"), "note": field("string"), "text": field("string"), "revises": field("string"), "group": field("string"), "recommended": field("boolean"), "images": arrayOf(field("object"))}, "required": []string{"id", "title"}})
 	return []tool{
 		readOnlySpec("list_artifacts", "List the documents, whiteboards and dashboards of this project.", args{}, nil, turn.listArtifacts),
 		readOnlySpec("read_artifact", "Read an artifact of this project. Omit version for the current content, comments and feedback.",
@@ -46,11 +47,11 @@ func (turn *turn) artifactTools() []tool {
 			args{"artifactId": field("string"), "baseVersion": field("integer"), "reason": field("string"), "title": field("string"), "widgets": widgets,
 				"data": field("object"), "removeWidgets": arrayOf(field("string")), "removeData": arrayOf(field("string")), "source": args{"type": []string{"object", "null"}}},
 			[]string{"artifactId", "baseVersion", "reason"}, turn.updateDashboard),
-		specification("create_whiteboard", "Create a whiteboard of shapes, sticky notes, text and connectors, or options for the user to compare. Items without coordinates are placed automatically.",
-			args{"title": field("string"), "nodeId": field("string"), "items": items, "connectors": connectors, "options": options, "direction": field("string"), "pick": field("string")}, []string{"title"}, turn.createWhiteboard),
-		specification("update_whiteboard", "Add, change or remove whiteboard items, connectors and options by ID. Omitted items and their positions are kept. Set relayout to arrange the board again.",
+		specification("create_whiteboard", "Create a whiteboard of shapes, sticky notes, text and connectors, or grouped decision options for the user to compare. Use groups (with optional round, pick, note) and option group/recommended fields for multi-dimensional decisions. Items without coordinates are placed automatically.",
+			args{"title": field("string"), "nodeId": field("string"), "items": items, "connectors": connectors, "groups": groups, "options": options, "direction": field("string"), "pick": field("string")}, []string{"title"}, turn.createWhiteboard),
+		specification("update_whiteboard", "Add, change or remove whiteboard items, connectors, decision groups and options by ID. Omitted items and their positions are kept. Appending groups with a higher round marks earlier rounds as confirmed and places the new round below. Set relayout to arrange the board again.",
 			args{"artifactId": field("string"), "baseVersion": field("integer"), "title": field("string"), "reason": field("string"), "items": items, "connectors": connectors,
-				"removeItems": arrayOf(field("string")), "removeConnectors": arrayOf(field("string")), "options": options, "direction": field("string"), "pick": field("string"), "relayout": field("boolean")},
+				"removeItems": arrayOf(field("string")), "removeConnectors": arrayOf(field("string")), "groups": groups, "options": options, "direction": field("string"), "pick": field("string"), "relayout": field("boolean")},
 			[]string{"artifactId", "reason"}, turn.updateWhiteboard),
 		specification("finish_feedback_round", "Mark an artifact feedback round as handled after addressing its edits and comments. Give the user a short summary.",
 			args{"artifactId": field("string"), "round": field("integer"), "summary": field("string")},

@@ -1034,14 +1034,19 @@ function fromProtoArtifactFeedback(
       case 'choice':
         items.push({
           kind: 'choice',
-          chosen: item.item.value.chosen.map((opt) => ({ id: opt.id, title: opt.title })),
+          chosen: item.item.value.chosen.map((opt) => ({
+            id: opt.id,
+            title: opt.title,
+            ...(opt.group ? { group: opt.group } : {}),
+            ...(opt.groupTitle ? { groupTitle: opt.groupTitle } : {}),
+          })),
         })
         break
       case 'comment':
         items.push({
           kind: 'comment',
           threadId: item.item.value.threadId,
-          action: item.item.value.action as 'create' | 'reply',
+          action: item.item.value.action as 'create' | 'reply' | 'edit' | 'reopen',
           body: item.item.value.body,
           where: item.item.value.where,
         })
@@ -1607,6 +1612,14 @@ export function createDomain2Api(transport: Transport = rpcTransport) {
         images: [...images],
       })
       return { feedback: fromProtoArtifactFeedback(response.feedback) }
+    },
+
+    async withdrawArtifactFeedback(id: string, round: number): Promise<{ withdrawn: boolean }> {
+      const response = await clients.artifacts.withdrawArtifactFeedback({
+        artifactId: id,
+        round: BigInt(round),
+      })
+      return { withdrawn: response.withdrawn }
     },
 
     // D-5: Dedicated comment RPCs

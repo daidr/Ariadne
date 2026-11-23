@@ -183,8 +183,8 @@ type ArtifactFeedback struct {
 }
 
 func (repo *Repository) SendArtifactFeedback(ctx context.Context, artifactID string, input ArtifactFeedback) (result object, err error) {
-	return repo.sendArtifactFeedback(ctx, artifactID, input.Images, func(_ *projectionWriter, _ ArtifactView) ([]any, error) {
-		return input.Items, nil
+	return repo.sendArtifactFeedback(ctx, artifactID, input.Images, func(_ *projectionWriter, _ ArtifactView) ([]any, []string, error) {
+		return input.Items, nil, nil
 	})
 }
 
@@ -192,7 +192,18 @@ func (repo *Repository) SendPendingArtifactFeedback(ctx context.Context, artifac
 	return repo.sendArtifactFeedback(ctx, artifactID, images, pendingArtifactFeedback)
 }
 
-func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID string, fileIDs []string, itemsOf func(*projectionWriter, ArtifactView) ([]any, error)) (result object, err error) {
+// SendAutoPendingArtifactFeedback is used by background idle fallback; it skips
+// whiteboards with active decision groups so structured rounds are submitted explicitly.
+func (repo *Repository) SendAutoPendingArtifactFeedback(ctx context.Context, artifactID string, images []string) (object, error) {
+	return repo.sendArtifactFeedback(ctx, artifactID, images, func(w *projectionWriter, artifact ArtifactView) ([]any, []string, error) {
+		if artifact.Kind == "whiteboard" && HasPendingDecisionGroups(artifact.Content) {
+			return nil, nil, nil
+		}
+		return pendingArtifactFeedback(w, artifact)
+	})
+}
+
+func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID string, fileIDs []string, itemsOf func(*projectionWriter, ArtifactView) ([]any, []string, error)) (result object, err error) {
 	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
 		artifact, err := getArtifact(ctx, tx.SQL(), artifactID, nil)
 		if err != nil {
@@ -206,7 +217,7 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if notify == nil {
 			return nil
 		}
-		items, err := itemsOf(w, artifact)
+		items, fingerprints, err := itemsOf(w, artifact)
 		if err != nil || len(items) == 0 {
 			return err
 		}
@@ -227,7 +238,10 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if w.err != nil {
 			return w.err
 		}
-		data := object{"artifactId": artifactID, "round": latest.integer("round") + 1, "version": artifact.Version, "notify": notify, "items": items, "images": images}
+		if fingerprints == nil {
+			fingerprints = []string{}
+		}
+		data := object{"artifactId": artifactID, "round": latest.integer("round") + 1, "version": artifact.Version, "notify": notify, "items": items, "images": images, "fingerprints": fingerprints}
 		if err := appendChanges(tx, artifact.ProjectID, []change{{"artifact.feedback", data}}); err != nil {
 			return err
 		}
@@ -238,6 +252,58 @@ func (repo *Repository) sendArtifactFeedback(ctx context.Context, artifactID str
 		if len(feedback) > 0 {
 			result = feedback[0]
 		}
+		return nil
+	})
+	return
+}
+
+// WithdrawArtifactFeedback cancels a submitted feedback round if the notified
+// conversation has not yet started a turn that consumes it.
+func (repo *Repository) WithdrawArtifactFeedback(ctx context.Context, artifactID string, round int64) (withdrawn bool, err error) {
+	err = repo.Store.Within(ctx, func(tx *eventstore.Transaction) error {
+		artifact, err := getArtifact(ctx, tx.SQL(), artifactID, nil)
+		if err != nil {
+			return err
+		}
+		w := &projectionWriter{ctx: ctx, tx: tx.SQL()}
+		row := w.one("SELECT round, notify, done_at, withdrawn_at, event_seq FROM artifact_feedback WHERE artifact_id = ? AND round = ?", artifactID, round)
+		if w.err != nil {
+			return w.err
+		}
+		if row == nil {
+			return domainerr.NotFound(fmt.Sprintf("%s round %d", artifactID, round))
+		}
+		if row["withdrawn_at"] != nil {
+			withdrawn = true
+			return nil
+		}
+		if row["done_at"] != nil {
+			return nil
+		}
+		eventSeq := row.integer("event_seq")
+		notify := row.text("notify")
+		if eventSeq <= 0 || notify == "" {
+			return nil
+		}
+		conv := w.one("SELECT turn_started_seq FROM conversations WHERE id = ?", notify)
+		if w.err != nil {
+			return w.err
+		}
+		if conv != nil && conv.integer("turn_started_seq") >= eventSeq {
+			return nil
+		}
+		reminded := w.one("SELECT 1 AS one FROM transcript WHERE conversation_id = ? AND seq > ? AND kind = 'note' AND json_extract(payload, '$.type') = 'artifact-feedback-reminder' LIMIT 1", notify, eventSeq)
+		if w.err != nil {
+			return w.err
+		}
+		if reminded != nil {
+			return nil
+		}
+		data := object{"artifactId": artifactID, "round": round, "notify": notify, "eventSeq": eventSeq}
+		if err := appendChanges(tx, artifact.ProjectID, []change{{"artifact.feedback_withdrawn", data}}); err != nil {
+			return err
+		}
+		withdrawn = true
 		return nil
 	})
 	return
@@ -288,7 +354,7 @@ func (repo *Repository) FinishArtifactFeedback(ctx context.Context, artifactID s
 func requireFeedbackReplies(ctx context.Context, db queryer, artifactID string, round object) error {
 	items := map[string][]object{}
 	for _, item := range objects(round["items"]) {
-		if id := item.str("threadId"); item.str("kind") == "comment" && id != "" {
+		if id := item.str("threadId"); item.str("kind") == "comment" && id != "" && item.str("action") != "reopen" {
 			items[id] = append(items[id], item)
 		}
 	}

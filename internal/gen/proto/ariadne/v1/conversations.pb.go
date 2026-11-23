@@ -4440,6 +4440,8 @@ type ArtifactFeedbackChoiceOption struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Group         *string                `protobuf:"bytes,3,opt,name=group,proto3,oneof" json:"group,omitempty"`
+	GroupTitle    *string                `protobuf:"bytes,4,opt,name=group_title,json=groupTitle,proto3,oneof" json:"group_title,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4484,6 +4486,20 @@ func (x *ArtifactFeedbackChoiceOption) GetId() string {
 func (x *ArtifactFeedbackChoiceOption) GetTitle() string {
 	if x != nil {
 		return x.Title
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackChoiceOption) GetGroup() string {
+	if x != nil && x.Group != nil {
+		return *x.Group
+	}
+	return ""
+}
+
+func (x *ArtifactFeedbackChoiceOption) GetGroupTitle() string {
+	if x != nil && x.GroupTitle != nil {
+		return *x.GroupTitle
 	}
 	return ""
 }
@@ -4850,6 +4866,7 @@ type ArtifactFeedbackNotice struct {
 	Items         []*ArtifactFeedbackItem `protobuf:"bytes,4,rep,name=items,proto3" json:"items,omitempty"`
 	Done          bool                    `protobuf:"varint,5,opt,name=done,proto3" json:"done,omitempty"`
 	Summary       *string                 `protobuf:"bytes,6,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
+	Withdrawn     bool                    `protobuf:"varint,7,opt,name=withdrawn,proto3" json:"withdrawn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4924,6 +4941,13 @@ func (x *ArtifactFeedbackNotice) GetSummary() string {
 		return *x.Summary
 	}
 	return ""
+}
+
+func (x *ArtifactFeedbackNotice) GetWithdrawn() bool {
+	if x != nil {
+		return x.Withdrawn
+	}
+	return false
 }
 
 type ArtifactCommentNotice struct {
@@ -10270,10 +10294,15 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\x05R\aversion\".\n" +
 	"\x18ArtifactFeedbackEditItem\x12\x12\n" +
-	"\x04diff\x18\x01 \x01(\tR\x04diff\"D\n" +
+	"\x04diff\x18\x01 \x01(\tR\x04diff\"\x9f\x01\n" +
 	"\x1cArtifactFeedbackChoiceOption\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\"^\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x19\n" +
+	"\x05group\x18\x03 \x01(\tH\x00R\x05group\x88\x01\x01\x12$\n" +
+	"\vgroup_title\x18\x04 \x01(\tH\x01R\n" +
+	"groupTitle\x88\x01\x01B\b\n" +
+	"\x06_groupB\x0e\n" +
+	"\f_group_title\"^\n" +
 	"\x1aArtifactFeedbackChoiceItem\x12@\n" +
 	"\x06chosen\x18\x01 \x03(\v2(.ariadne.v1.ArtifactFeedbackChoiceOptionR\x06chosen\"|\n" +
 	"\x1bArtifactFeedbackCommentItem\x12\x1b\n" +
@@ -10294,7 +10323,7 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\acomment\x18\x03 \x01(\v2'.ariadne.v1.ArtifactFeedbackCommentItemH\x00R\acomment\x12:\n" +
 	"\x04mark\x18\x04 \x01(\v2$.ariadne.v1.ArtifactFeedbackMarkItemH\x00R\x04mark\x12=\n" +
 	"\x05board\x18\x05 \x01(\v2%.ariadne.v1.ArtifactFeedbackBoardItemH\x00R\x05boardB\x06\n" +
-	"\x04item\"\xdc\x01\n" +
+	"\x04item\"\xfa\x01\n" +
 	"\x16ArtifactFeedbackNotice\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
 	"artifactId\x12\x14\n" +
@@ -10302,7 +10331,8 @@ const file_ariadne_v1_conversations_proto_rawDesc = "" +
 	"\x05round\x18\x03 \x01(\x05R\x05round\x126\n" +
 	"\x05items\x18\x04 \x03(\v2 .ariadne.v1.ArtifactFeedbackItemR\x05items\x12\x12\n" +
 	"\x04done\x18\x05 \x01(\bR\x04done\x12\x1d\n" +
-	"\asummary\x18\x06 \x01(\tH\x00R\asummary\x88\x01\x01B\n" +
+	"\asummary\x18\x06 \x01(\tH\x00R\asummary\x88\x01\x01\x12\x1c\n" +
+	"\twithdrawn\x18\a \x01(\bR\twithdrawnB\n" +
 	"\n" +
 	"\b_summary\"\x8a\x01\n" +
 	"\x15ArtifactCommentNotice\x12\x1f\n" +
@@ -11178,6 +11208,7 @@ func file_ariadne_v1_conversations_proto_init() {
 	file_ariadne_v1_conversations_proto_msgTypes[47].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[57].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[58].OneofWrappers = []any{}
+	file_ariadne_v1_conversations_proto_msgTypes[62].OneofWrappers = []any{}
 	file_ariadne_v1_conversations_proto_msgTypes[67].OneofWrappers = []any{
 		(*ArtifactFeedbackItem_Edit)(nil),
 		(*ArtifactFeedbackItem_Choice)(nil),

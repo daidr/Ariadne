@@ -373,11 +373,14 @@ export type ArtifactFeedbackItem =
   /** A document's changed lines (- removed, + added), cut to a bounded length. */
   | { kind: 'edit'; diff: string }
   /** The options picked on a whiteboard now, by id and title; empty when none is. */
-  | { kind: 'choice'; chosen: { id: string; title: string }[] }
+  | {
+      kind: 'choice'
+      chosen: { id: string; title: string; group?: string; groupTitle?: string }[]
+    }
   | {
       kind: 'comment'
       threadId: string
-      action: 'create' | 'reply'
+      action: 'create' | 'reply' | 'edit' | 'reopen'
       body: string
       /** The document's text or, on a whiteboard, where the item is. */
       where: string
@@ -1080,6 +1083,13 @@ export interface EventMap {
     round: number
     by: string
     summary: string
+  }
+  /** The user withdrew a feedback round before the agent started consuming it. */
+  'artifact.feedback_withdrawn': {
+    artifactId: string
+    round: number
+    notify: string
+    eventSeq: number
   }
 }
 

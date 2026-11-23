@@ -1176,8 +1176,10 @@ func toProtoArtifactFeedbackItem(raw any) *ariadnev1.ArtifactFeedbackItem {
 				continue
 			}
 			choice.Chosen = append(choice.Chosen, &ariadnev1.ArtifactFeedbackChoiceOption{
-				Id:    protoStr(cm["id"]),
-				Title: protoStr(cm["title"]),
+				Id:         protoStr(cm["id"]),
+				Title:      protoStr(cm["title"]),
+				Group:      protoOptStr(cm["group"]),
+				GroupTitle: protoOptStr(cm["groupTitle"]),
 			})
 		}
 		return &ariadnev1.ArtifactFeedbackItem{Item: &ariadnev1.ArtifactFeedbackItem_Choice{Choice: choice}}
@@ -1355,6 +1357,7 @@ func toProtoNoticeView(raw map[string]any) *ariadnev1.NoticeView {
 			Round:      protoInt32(raw["round"]),
 			Done:       protoBool(raw["done"]),
 			Summary:    protoOptStr(raw["summary"]),
+			Withdrawn:  protoBool(raw["withdrawn"]),
 		}
 		for _, item := range protoSlice(raw["items"]) {
 			if converted := toProtoArtifactFeedbackItem(item); converted != nil {

@@ -717,13 +717,18 @@ function fromProtoFeedbackItem(item: ProtoArtifactFeedbackItem): ArtifactFeedbac
     case 'choice':
       return {
         kind: 'choice',
-        chosen: item.item.value.chosen.map((c) => ({ id: c.id, title: c.title })),
+        chosen: item.item.value.chosen.map((c) => ({
+          id: c.id,
+          title: c.title,
+          ...(c.group ? { group: c.group } : {}),
+          ...(c.groupTitle ? { groupTitle: c.groupTitle } : {}),
+        })),
       }
     case 'comment':
       return {
         kind: 'comment',
         threadId: item.item.value.threadId,
-        action: item.item.value.action as 'create' | 'reply',
+        action: item.item.value.action as 'create' | 'reply' | 'edit' | 'reopen',
         body: item.item.value.body,
         where: item.item.value.where,
       }
@@ -911,6 +916,7 @@ export function fromProtoNoticeView(n: ProtoNoticeView): NoticeView | null {
         items,
         done: p.done,
         summary: p.summary ?? null,
+        ...(p.withdrawn ? { withdrawn: true } : {}),
       }
     }
     case 'artifactComment': {

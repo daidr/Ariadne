@@ -35,10 +35,16 @@ function line(item: ArtifactFeedbackItem): string[] {
     case 'choice':
       return [
         item.chosen.length
-          ? t('notice.feedback.choice', { titles: list(item.chosen.map((c) => c.title)) })
+          ? t('notice.feedback.choice', {
+              titles: list(
+                item.chosen.map((c) => (c.groupTitle ? `${c.groupTitle}：${c.title}` : c.title)),
+              ),
+            })
           : t('notice.feedback.noChoice'),
       ]
     case 'comment':
+      if (item.action === 'reopen') return [t('notice.feedback.commentReopen')]
+      if (item.action === 'edit') return [t('notice.feedback.commentEdit', { body: item.body })]
       return [t('notice.feedback.comment', { body: item.body })]
     case 'mark':
       return [t('notice.feedback.mark')]

@@ -239,16 +239,29 @@ func describeFeedback(note map[string]any) string {
 				chosen := []string{}
 				for _, raw := range arr(item["chosen"]) {
 					value := obj(raw)
-					chosen = append(chosen, `"`+text(value["title"])+`" (`+text(value["id"])+`)`)
+					label := `"` + text(value["title"]) + `" (` + text(value["id"]) + `)`
+					if groupTitle := text(value["groupTitle"]); groupTitle != "" {
+						label = "[" + groupTitle + "] " + label
+					} else if groupID := text(value["group"]); groupID != "" {
+						label = "[" + groupID + "] " + label
+					}
+					chosen = append(chosen, label)
 				}
 				lines = append(lines, "- They picked: "+strings.Join(chosen, ", "))
 			}
 		case "comment":
-			kind := "Reply"
-			if item["action"] == "create" {
-				kind = "New comment"
+			switch item["action"] {
+			case "reopen":
+				lines = append(lines, fmt.Sprintf("- Reopened comment_thread %s, %s.", text(item["threadId"]), text(item["where"])))
+			case "edit":
+				lines = append(lines, fmt.Sprintf("- Edited comment in comment_thread %s, %s: %s", text(item["threadId"]), text(item["where"]), text(item["body"])))
+			default:
+				kind := "Reply"
+				if item["action"] == "create" {
+					kind = "New comment"
+				}
+				lines = append(lines, fmt.Sprintf("- %s in comment_thread %s, %s: %s", kind, text(item["threadId"]), text(item["where"]), text(item["body"])))
 			}
-			lines = append(lines, fmt.Sprintf("- %s in comment_thread %s, %s: %s", kind, text(item["threadId"]), text(item["where"]), text(item["body"])))
 		case "mark":
 			extra := ""
 			if yes(item["text"]) {
