@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/core"
@@ -17,6 +18,7 @@ const stoppedChangesTimeout = 5 * time.Second
 // taking a git tree snapshot before the first workspace edit and diffing it
 // against a second snapshot right before the turn finishes.
 type turnChanges struct {
+	mu          sync.Mutex
 	threadID    string
 	workspaces  *workspaces.Manager
 	repository  *core.Repository
@@ -37,7 +39,12 @@ func newTurnChanges(runner *Runner, conversation core.ConversationView) *turnCha
 }
 
 func (tc *turnChanges) begin(ctx context.Context, thread core.ThreadView) {
-	if tc == nil || tc.before != "" || tc.unavailable || thread.ReviewOf != nil {
+	if tc == nil || thread.ReviewOf != nil {
+		return
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.before != "" || tc.unavailable {
 		return
 	}
 	branches, err := tc.workspaces.BranchesForThread(ctx, thread)
@@ -56,7 +63,12 @@ func (tc *turnChanges) begin(ctx context.Context, thread core.ThreadView) {
 }
 
 func (tc *turnChanges) record(ctx context.Context, turnID string) {
-	if tc == nil || tc.recorded || tc.before == "" {
+	if tc == nil {
+		return
+	}
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if tc.recorded || tc.before == "" {
 		return
 	}
 	tc.recorded = true

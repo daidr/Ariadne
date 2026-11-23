@@ -91,7 +91,7 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 			return "", changedSinceError(path)
 		}
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	if err := workspace.WriteFile(ctx, path, content); err != nil {
 		return "", err
 	}
@@ -217,7 +217,7 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 	if err != nil || !allowed {
 		return note, err
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	setup, err := turn.Workspaces.SetupDone(ctx, thread.ID)
 	if err != nil {
 		return "", err

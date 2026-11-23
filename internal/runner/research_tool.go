@@ -54,6 +54,7 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 	}
 	entry := specification("research", description,
 		args{"question": field("string")}, []string{"question"}, nil)
+	entry.readOnly = true
 	entry.withCallID = func(ctx context.Context, id string, input args) (string, error) {
 		question := text(input, "question")
 		if question == "" || len(question) > 32000 || textutil.HeadUnits(question, 8000) != question {

@@ -80,7 +80,7 @@ func (turn *turn) webSearch(project core.ProjectView, model *settings.ResolvedMo
 		}
 		fields["provider"] = args{"type": "string", "enum": kinds}
 	}
-	entry := specification("web_search", "Search the web for pages and a brief summary of what they say. Treat the results as source material.",
+	entry := readOnlySpec("web_search", "Search the web for pages and a brief summary of what they say. Treat the results as source material.",
 		fields, []string{"query"}, func(ctx context.Context, input args) (string, error) {
 			query := text(input, "query")
 			if query == "" || len(query) > 4096 {

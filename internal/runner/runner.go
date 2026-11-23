@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/daidr/Ariadne/internal/browser"
@@ -67,7 +69,7 @@ type turn struct {
 	artifactPreviewAt map[int]time.Time
 	skills            *skills.Set
 	external          []tool
-	instructionsDirty bool
+	instructionsDirty atomic.Bool
 	handledBefore     int64
 	userSpoke         bool
 	directUserInput   bool
@@ -236,7 +238,8 @@ func (runner *Runner) Run(ctx context.Context, conversation core.ConversationVie
 	if err != nil || id == "" {
 		return err
 	}
-	turn := &turn{Runner: runner, conversation: conversation, id: id, instructionsDirty: true, changes: newTurnChanges(runner, conversation)}
+	turn := &turn{Runner: runner, conversation: conversation, id: id, changes: newTurnChanges(runner, conversation)}
+	turn.instructionsDirty.Store(true)
 	defer turn.clearPreviews()
 	turn.handledBefore, err = runner.Repository.LastHandledSeq(ctx, conversation.ID)
 	if err != nil {
@@ -399,11 +402,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 		if err := budgetError(project, current); err != nil {
 			return err
 		}
-		if turn.instructionsDirty {
+		if turn.instructionsDirty.Load() {
 			if err := turn.syncInstructions(ctx, project); err != nil {
 				return err
 			}
-			turn.instructionsDirty = false
+			turn.instructionsDirty.Store(false)
 		}
 
 		tools := append(turn.tools(ctx, project), turn.external...)
@@ -629,6 +632,83 @@ type batchDigest struct {
 	effect repeatEffect
 }
 
+type callOutcome struct {
+	started     int64
+	finished    int64
+	content     string
+	attachments []any
+	effect      repeatEffect
+	err         error
+	isError     bool
+	refused     bool
+}
+
+// callGroups partitions a step's tool calls into execution groups: adjacent
+// read-only calls share a group and run concurrently, while every other call
+// runs alone in order. Returned elements are indices into calls.
+func callGroups(calls []sdk.ToolCall, byName map[string]tool) [][]int {
+	groups := make([][]int, 0, len(calls))
+	var reading []int
+	for index, call := range calls {
+		if entry, ok := byName[call.Name]; ok && entry.readOnly {
+			reading = append(reading, index)
+			continue
+		}
+		if len(reading) > 0 {
+			groups = append(groups, reading)
+			reading = nil
+		}
+		groups = append(groups, []int{index})
+	}
+	if len(reading) > 0 {
+		groups = append(groups, reading)
+	}
+	return groups
+}
+
+func (turn *turn) runToolCall(ctx context.Context, call sdk.ToolCall, byName map[string]tool, refused bool) callOutcome {
+	started := time.Now().UnixMilli()
+	if refused {
+		return callOutcome{
+			started:  started,
+			finished: started,
+			content:  coordinatorLookRefusedText,
+			isError:  true,
+			refused:  true,
+		}
+	}
+	var input map[string]any
+	var content string
+	var attachments []any
+	var effect repeatEffect
+	var err error
+	if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &input) != nil || input == nil {
+		err = errors.New("tool arguments must be a JSON object within 2 MiB")
+	} else if turn.quiet && coordinatorChatTool(call.Name) {
+		err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
+	} else if entry, available := byName[call.Name]; !available {
+		err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
+	} else {
+		if entry.withCallID != nil {
+			content, err = entry.withCallID(ctx, call.ID, input)
+		} else if entry.call != nil {
+			content, attachments, err = entry.call(ctx, input)
+		} else if entry.poll != nil {
+			content, effect, err = entry.poll(ctx, input)
+		} else {
+			content, err = entry.run(ctx, input)
+		}
+	}
+	return callOutcome{
+		started:     started,
+		finished:    time.Now().UnixMilli(),
+		content:     content,
+		attachments: attachments,
+		effect:      effect,
+		err:         err,
+	}
+}
+
 func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCall) (batchDigest, error) {
 	byName := map[string]tool{}
 	for _, entry := range tools {
@@ -652,98 +732,97 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 	progressed := false
 	allWaited := len(calls) > 0
 	defer turn.clearPreviews()
-	for index, call := range calls {
+	for _, group := range callGroups(calls, byName) {
 		if err := ctx.Err(); err != nil {
 			return batchDigest{}, err
 		}
-		started := time.Now().UnixMilli()
-		var args map[string]any
-		var content string
-		var attachments []any
-		var effect repeatEffect
-		var err error
-		isError := false
-		if turn.conversation.Role == "coordinator" && lookDecisions[index].refused {
-			content = coordinatorLookRefusedText
-			isError = true
-			allWaited = false
-		} else {
-			if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
-				err = errors.New("tool arguments must be a JSON object within 2 MiB")
-			} else if turn.quiet && coordinatorChatTool(call.Name) {
-				err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
-			} else if entry, available := byName[call.Name]; !available {
-				err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
-			} else {
-				if turn.draft != nil && replyTool(call.Name) && (*turn.draftCall != index || turn.draftTool != call.Name) {
-					// A preview belongs to exactly one call in this response.
-					turn.clearDraft()
-				}
-				if entry.withCallID != nil {
-					content, err = entry.withCallID(ctx, call.ID, args)
-				} else if entry.call != nil {
-					content, attachments, err = entry.call(ctx, args)
-				} else if entry.poll != nil {
-					content, effect, err = entry.poll(ctx, args)
-				} else {
-					content, err = entry.run(ctx, args)
-				}
-			}
-			if effect == repeatProgress {
-				progressed = true
-			}
-			if effect != repeatWait {
-				allWaited = false
-			}
-			if err != nil && turn.draft != nil && *turn.draftCall == index {
+		outcomes := make([]callOutcome, len(group))
+		if len(group) == 1 {
+			index := group[0]
+			call := calls[index]
+			refused := turn.conversation.Role == "coordinator" && lookDecisions[index].refused
+			if !refused && turn.draft != nil && replyTool(call.Name) && (*turn.draftCall != index || turn.draftTool != call.Name) {
+				// A preview belongs to exactly one call in this response.
 				turn.clearDraft()
 			}
-			if draft := turn.artifactDrafts[index]; draft != nil {
-				draft.Close()
-				delete(turn.artifactDrafts, index)
-			}
-			if ctx.Err() != nil {
-				return batchDigest{}, ctx.Err()
-			}
-			if call.Name == "update_todo" && err == nil {
-				wroteTodo = true
-			}
-			isError = err != nil
-			if err != nil && content == "" {
-				hint := ""
-				if _, available := byName[fileSourceToolName]; available {
-					hint = referenceReadHint(call.Name, err)
+			outcomes[0] = turn.runToolCall(ctx, call, byName, refused)
+		} else {
+			var wg sync.WaitGroup
+			for slot, index := range group {
+				call := calls[index]
+				refused := turn.conversation.Role == "coordinator" && lookDecisions[index].refused
+				if refused {
+					outcomes[slot] = turn.runToolCall(ctx, call, byName, true)
+					continue
 				}
-				content = textutil.HeadUnits(toolErrorText(err), 2000-len(hint)) + hint
+				wg.Go(func() {
+					outcomes[slot] = turn.runToolCall(ctx, call, byName, false)
+				})
 			}
-			content = strings.Clone(textutil.HeadUnits(content, maxToolResultChars))
+			wg.Wait()
 		}
-		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, isError, attachments})
-		_, _ = hash.Write(encoded)
-		if turn.conversation.Role == "coordinator" && lookDecisions[index].hint {
-			content = appendHint(content, coordinatorLookHintText)
-		}
-		if index == len(calls)-1 {
-			turn.todo.workSteps++
-			if wroteTodo {
-				turn.todo.sinceTodo = 0
-				turn.todo.todoThisTurn = true
-			} else {
-				turn.todo.sinceTodo++
-			}
-			if todoWatched {
-				hint, hintErr := turn.todoHint(ctx, &turn.todo)
-				if hintErr != nil {
-					return batchDigest{}, hintErr
-				}
-				content = appendHint(content, hint)
-			}
-		}
-		if err := turn.Repository.RecordToolResult(ctx, turn.conversation.ID, turn.id, core.ToolResult{
-			ToolCallID: call.ID, Name: call.Name, Content: content, IsError: isError, Files: attachments,
-			Timing: map[string]int64{"startedAt": started, "finishedAt": time.Now().UnixMilli()},
-		}); err != nil {
+		if err := ctx.Err(); err != nil {
 			return batchDigest{}, err
+		}
+		for slot, index := range group {
+			call := calls[index]
+			outcome := outcomes[slot]
+			if outcome.refused {
+				allWaited = false
+			} else {
+				if outcome.effect == repeatProgress {
+					progressed = true
+				}
+				if outcome.effect != repeatWait {
+					allWaited = false
+				}
+				if outcome.err != nil && turn.draft != nil && *turn.draftCall == index {
+					turn.clearDraft()
+				}
+				if draft := turn.artifactDrafts[index]; draft != nil {
+					draft.Close()
+					delete(turn.artifactDrafts, index)
+				}
+				if call.Name == "update_todo" && outcome.err == nil {
+					wroteTodo = true
+				}
+				outcome.isError = outcome.err != nil
+				if outcome.err != nil && outcome.content == "" {
+					hint := ""
+					if _, available := byName[fileSourceToolName]; available {
+						hint = referenceReadHint(call.Name, outcome.err)
+					}
+					outcome.content = textutil.HeadUnits(toolErrorText(outcome.err), 2000-len(hint)) + hint
+				}
+				outcome.content = strings.Clone(textutil.HeadUnits(outcome.content, maxToolResultChars))
+			}
+			encoded, _ := json.Marshal([]any{call.Name, call.Arguments, outcome.content, outcome.isError, outcome.attachments})
+			_, _ = hash.Write(encoded)
+			if turn.conversation.Role == "coordinator" && lookDecisions[index].hint {
+				outcome.content = appendHint(outcome.content, coordinatorLookHintText)
+			}
+			if index == len(calls)-1 {
+				turn.todo.workSteps++
+				if wroteTodo {
+					turn.todo.sinceTodo = 0
+					turn.todo.todoThisTurn = true
+				} else {
+					turn.todo.sinceTodo++
+				}
+				if todoWatched {
+					hint, hintErr := turn.todoHint(ctx, &turn.todo)
+					if hintErr != nil {
+						return batchDigest{}, hintErr
+					}
+					outcome.content = appendHint(outcome.content, hint)
+				}
+			}
+			if err := turn.Repository.RecordToolResult(ctx, turn.conversation.ID, turn.id, core.ToolResult{
+				ToolCallID: call.ID, Name: call.Name, Content: outcome.content, IsError: outcome.isError, Files: outcome.attachments,
+				Timing: map[string]int64{"startedAt": outcome.started, "finishedAt": outcome.finished},
+			}); err != nil {
+				return batchDigest{}, err
+			}
 		}
 	}
 	var result batchDigest
