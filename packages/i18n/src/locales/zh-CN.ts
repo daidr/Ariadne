@@ -12,6 +12,8 @@ export const zhCN = {
   'nav.expandProjectPanel': '展开项目面板',
   'nav.switchProject': '切换项目',
   'nav.newProject': '新建项目',
+  'nav.menu': '菜单',
+  'nav.duoRail': '侧边导航',
   'start.model': '先接上一个模型',
   'start.signedIn': '本机已登录',
   'start.fromEnv': '环境变量 {name}',

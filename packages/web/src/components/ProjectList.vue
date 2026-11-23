@@ -252,6 +252,10 @@ async function confirmDelete(id: string) {
   gap: 8px;
 }
 
+.projects:not(.projects-popover) {
+  padding-bottom: var(--ariadne-safe-bottom);
+}
+
 .projects-popover {
   --project-row-base: var(--dou-popover-bg, var(--dou-color-bg-surface));
 }

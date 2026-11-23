@@ -13,6 +13,8 @@ export const en: Record<MessageKey, string> = {
   'nav.expandProjectPanel': 'Expand project panel',
   'nav.switchProject': 'Switch project',
   'nav.newProject': 'New project',
+  'nav.menu': 'Menu',
+  'nav.duoRail': 'Side navigation',
   'start.model': 'Connect a model first',
   'start.signedIn': 'signed in on this machine',
   'start.fromEnv': 'environment variable {name}',

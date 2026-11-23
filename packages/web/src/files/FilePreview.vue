@@ -179,10 +179,15 @@ watch(previewFile, async (file, _previous, cleanup) => {
 
 <style scoped>
 .file-preview {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  padding-top: var(--ariadne-safe-top);
+  padding-right: var(--ariadne-safe-right);
+  padding-bottom: var(--ariadne-safe-bottom);
+  padding-left: var(--ariadne-safe-left);
 }
 
 .file-heading {

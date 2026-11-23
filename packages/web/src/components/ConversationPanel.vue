@@ -1505,7 +1505,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation {
-  --conversation-footer-padding: calc(16px + env(safe-area-inset-bottom, 0px));
+  --conversation-footer-padding: calc(16px + var(--ariadne-safe-bottom));
   position: relative;
   display: flex;
   flex-direction: column;
