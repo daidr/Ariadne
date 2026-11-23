@@ -970,14 +970,11 @@ func toProtoRoleConfig(raw any) *ariadnev1.RoleConfig {
 	if value, ok := obj["effort"].(string); ok {
 		out.Effort = &value
 	}
-	if value, ok := obj["fallback"].(string); ok {
-		out.Fallback = &value
-	}
 	return out
 }
 
 func roleConfigToObject(role *ariadnev1.RoleConfig) object {
-	out := object{"model": nil, "effort": nil, "fallback": nil}
+	out := object{"model": nil, "effort": nil}
 	if role == nil {
 		return out
 	}
@@ -986,9 +983,6 @@ func roleConfigToObject(role *ariadnev1.RoleConfig) object {
 	}
 	if role.Effort != nil {
 		out["effort"] = role.GetEffort()
-	}
-	if role.Fallback != nil {
-		out["fallback"] = role.GetFallback()
 	}
 	return out
 }

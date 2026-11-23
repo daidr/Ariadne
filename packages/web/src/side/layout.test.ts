@@ -16,7 +16,6 @@ import {
   openThreads,
   parseLayout,
   prune,
-  reorderPinned,
   split,
   threadKey,
   updateDock,
@@ -178,15 +177,13 @@ describe('side layout', () => {
     expect(parseLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout)
   })
 
-  test('keeps the fixed tab order across copies, compact mode and a restored layout', () => {
+  test('keeps the fixed tab order across native reorder, copies, compact mode and a restored layout', () => {
     let layout = open(defaultLayout(), threadKey('a'))
-    layout = reorderPinned(layout, 'artifacts', 0)
-    expect(tabs(layout)).toEqual([['artifacts', 'plan', 'threads', 'thread:a']])
-    expect(focusedGroup(layout).active).toBe('thread:a')
-    expect(reorderPinned(layout, 'artifacts', 3)).toBe(layout)
-
     const first = focusedGroup(layout).id
-    layout = updateDock(layout, moveDockTab(layout.root, 'plan', first, 0))
+    layout = updateDock(layout, moveDockTab(layout.root, 'artifacts', first, 0))
+    expect(tabs(layout)).toEqual([['artifacts', 'plan', 'threads', 'thread:a']])
+    expect(focusedGroup(layout).active).toBe('artifacts')
+
     layout = updateDock(layout, splitDockTab(layout.root, 'artifacts', first, 'right'))
     layout = parseLayout(JSON.parse(JSON.stringify(layout)))!
     expect(tabs(layout)).toEqual([

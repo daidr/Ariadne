@@ -167,14 +167,11 @@ const noteBeside = (event: MouseEvent | KeyboardEvent) => (beside = event.altKey
 .thread-menu {
   align-self: stretch;
   --dou-menu-item-height: auto;
+  --dou-menu-actions-top: 5px;
 }
 
-.thread-menu :deep(.dou-menu__actions) {
-  inset-block-start: 5px;
-}
-
-.thread-menu :deep(.dou-menu__entry:has(> .dou-menu__item .row-nested) > .dou-menu__actions) {
-  inset-block-start: 2px;
+.thread-menu :deep(.dou-menu__entry:has(> .dou-menu__item .row-nested)) {
+  --dou-menu-actions-top: 2px;
 }
 
 /* A row can be dragged onto the side; a swipe still scrolls the list. */

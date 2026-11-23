@@ -317,6 +317,76 @@ func TestAntigravityMidTurnUsageBeforeFirstMessage(t *testing.T) {
 	}
 }
 
+func TestAntigravitySessionNewRaceRetriesAndSucceeds(t *testing.T) {
+	command, _ := agyChildCommand(t, "agy-session-new-race-once")
+	m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
+	provider := sdk.ModelProvider{Stream: m.Stream}
+	retries := 0
+	var recorded []modelstep.AttemptFailure
+	result, err := modelstep.Request(t.Context(), provider, map[string]any{"command": command}, sdk.Request{
+		Conversation: "race-step",
+		Messages:     []sdk.Message{user("hello")},
+	}, modelstep.Options{
+		Retries:   new(2),
+		BaseDelay: new(time.Duration(0)),
+		OnRetry: func(modelstep.Retry) error {
+			retries++
+			return nil
+		},
+		OnFailure: func(attempt modelstep.AttemptFailure) error {
+			recorded = append(recorded, attempt)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected retry to recover from transient session/new failure, got err=%v", err)
+	}
+	if result == nil || result.Text != "answer" {
+		t.Fatalf("unexpected result after retry: %+v", result)
+	}
+	if retries != 1 {
+		t.Fatalf("expected 1 retry, got %d", retries)
+	}
+	if len(recorded) != 1 || !recorded[0].Retryable || !recorded[0].WillRetry ||
+		recorded[0].AgentError == nil || recorded[0].AgentError.Operation != "session/new" ||
+		recorded[0].AgentError.RPCCode == nil || *recorded[0].AgentError.RPCCode != -32603 {
+		t.Fatalf("unexpected recorded start failure: %+v", recorded)
+	}
+}
+
+func TestAntigravitySessionNewOtherErrorsDoNotRetry(t *testing.T) {
+	for _, scenario := range []string{"agy-session-new-auth-error", "agy-session-new-other-32603"} {
+		t.Run(scenario, func(t *testing.T) {
+			command, _ := agyChildCommand(t, scenario)
+			m := newTestSessions(t, Kind(nil, nil), agentruntime.SessionOptions{})
+			provider := sdk.ModelProvider{Stream: m.Stream}
+			retries := 0
+			var recorded []modelstep.AttemptFailure
+			result, err := modelstep.Request(t.Context(), provider, map[string]any{"command": command}, sdk.Request{
+				Conversation: "non-retryable-start",
+				Messages:     []sdk.Message{user("hello")},
+			}, modelstep.Options{
+				Retries:   new(2),
+				BaseDelay: new(time.Duration(0)),
+				OnRetry: func(modelstep.Retry) error {
+					retries++
+					return nil
+				},
+				OnFailure: func(attempt modelstep.AttemptFailure) error {
+					recorded = append(recorded, attempt)
+					return nil
+				},
+			})
+			if result != nil || err == nil {
+				t.Fatalf("expected start failure, got result=%+v err=%v", result, err)
+			}
+			if retries != 0 || len(recorded) != 1 || recorded[0].Retryable || recorded[0].WillRetry {
+				t.Fatalf("unexpected retry for %s: retries=%d recorded=%+v", scenario, retries, recorded)
+			}
+		})
+	}
+}
+
 func TestAntigravityChild(t *testing.T) {
 	args := os.Args
 	if len(args) < 4 || args[len(args)-3] != "--" {
@@ -368,6 +438,27 @@ func TestAntigravityChild(t *testing.T) {
 				"agentInfo":         map[string]any{"name": testACPName, "version": "test-1"},
 			}
 		case "session/new":
+			if restore == "agy-session-new-race-once" {
+				data, _ := os.ReadFile(args[len(args)-2])
+				if strings.Count(string(data), `"method":"session/new"`) == 1 {
+					if err := output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "Failed to start Antigravity conversation"}}); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+			}
+			if restore == "agy-session-new-auth-error" {
+				if err := output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32000, "message": "Authentication required"}}); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			if restore == "agy-session-new-other-32603" {
+				if err := output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "other internal failure"}}); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
 			if len(request.Params.MCPServers) > 0 {
 				mcpURL = request.Params.MCPServers[0].URL
 			}

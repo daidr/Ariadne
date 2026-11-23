@@ -126,8 +126,14 @@ function onEnter(event: KeyboardEvent) {
   min-height: 0;
   padding: 24px;
   /* A little above the middle, matching StartScreen. */
-  padding-bottom: 12vh;
+  padding-bottom: max(12vh, calc(24px + var(--ariadne-safe-bottom)));
   overflow: auto;
+}
+
+:global(html[data-fold-mode='vertical']) .unauthorized-screen {
+  padding-bottom: calc(
+    var(--ariadne-fold-bottom-height, 0px) + var(--ariadne-fold-gap, 0px) + 16px
+  );
 }
 
 .unauthorized-result {

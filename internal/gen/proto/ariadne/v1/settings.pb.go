@@ -2386,7 +2386,6 @@ type RoleConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Model         *string                `protobuf:"bytes,1,opt,name=model,proto3,oneof" json:"model,omitempty"`
 	Effort        *string                `protobuf:"bytes,2,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
-	Fallback      *string                `protobuf:"bytes,3,opt,name=fallback,proto3,oneof" json:"fallback,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2431,13 +2430,6 @@ func (x *RoleConfig) GetModel() string {
 func (x *RoleConfig) GetEffort() string {
 	if x != nil && x.Effort != nil {
 		return *x.Effort
-	}
-	return ""
-}
-
-func (x *RoleConfig) GetFallback() string {
-	if x != nil && x.Fallback != nil {
-		return *x.Fallback
 	}
 	return ""
 }
@@ -4546,15 +4538,13 @@ const file_ariadne_v1_settings_proto_rawDesc = "" +
 	"\v_max_tokensB\b\n" +
 	"\x06_priceB\n" +
 	"\n" +
-	"\b_efforts\"\x87\x01\n" +
+	"\b_efforts\"Y\n" +
 	"\n" +
 	"RoleConfig\x12\x19\n" +
 	"\x05model\x18\x01 \x01(\tH\x00R\x05model\x88\x01\x01\x12\x1b\n" +
-	"\x06effort\x18\x02 \x01(\tH\x01R\x06effort\x88\x01\x01\x12\x1f\n" +
-	"\bfallback\x18\x03 \x01(\tH\x02R\bfallback\x88\x01\x01B\b\n" +
+	"\x06effort\x18\x02 \x01(\tH\x01R\x06effort\x88\x01\x01B\b\n" +
 	"\x06_modelB\t\n" +
-	"\a_effortB\v\n" +
-	"\t_fallback\"\xda\x01\n" +
+	"\a_effort\"\xda\x01\n" +
 	"\n" +
 	"ModelRoles\x12.\n" +
 	"\x06thread\x18\x01 \x01(\v2\x16.ariadne.v1.RoleConfigR\x06thread\x128\n" +

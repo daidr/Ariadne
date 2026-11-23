@@ -11,7 +11,9 @@ import {
   DouDropdown,
   DouDropdownItem,
   DouDropdownRadioGroup,
+  DouDropdownSub,
   DouEmpty,
+  DouImagePreview,
   DouInput,
   DouLink,
   DouPopover,
@@ -45,7 +47,8 @@ import {
   watchEffect,
 } from 'vue'
 import { openSettingsKey } from '../open-settings'
-import { api } from '../api'
+import { api, type Effort } from '../api'
+import { effortsOf, effortWithin } from '../effort'
 import { openFilePreview } from '../files/preview'
 import { relayIdOf, shownAs } from '../relays'
 import RelayedTo from './RelayedTo.vue'
@@ -93,7 +96,6 @@ import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
 import { hasOpenBranch } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
-import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
@@ -293,11 +295,6 @@ const showCapsules = computed(
     !!thread.value?.pullRequest,
 )
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
-// The main model kept failing: this turn goes on with the role's fallback.
-const fallback = computed(() => {
-  const turn = view.value.conversation?.turn
-  return turn?.fallback ? turn.model : null
-})
 // What it is doing, shown after the last message: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
@@ -316,21 +313,71 @@ const elapsed = computed(() => {
   const startedAt = view.value.conversation?.turn?.startedAt
   return startedAt ? elapsedText(now.value - startedAt) : ''
 })
-// The model it uses now; a thread's picker also offers going back to the default.
+// The model it uses now; a thread's picker also offers choosing thinking effort and returning to default.
+function formatModelEffort(label: string, effort: Effort | null | undefined): string {
+  return effort ? `${label} · ${t(`settings.effort.${effort}`)}` : label
+}
+const modelChoices = computed(() =>
+  state.models.map((model) => ({
+    ...model,
+    acceptedEfforts: effortsOf(model.efforts),
+  })),
+)
+const canSwitchModel = computed(
+  () =>
+    !!thread.value &&
+    (modelChoices.value.length > 1 ||
+      (modelChoices.value.length === 1 && modelChoices.value[0]!.acceptedEfforts.length > 0)),
+)
 const modelLabel = computed(() => {
   const id = view.value.model?.id
-  return state.models.find((model) => model.id === id)?.label ?? null
+  const model = state.models.find((item) => item.id === id)
+  if (!model) return null
+  return formatModelEffort(model.label, view.value.model?.effort ?? null)
 })
-const defaultLabel = computed(
-  () => state.models.find((model) => model.id === state.threadDefault)?.label ?? '',
-)
+const defaultLabel = computed(() => {
+  const model = state.models.find((item) => item.id === state.threadDefault)
+  if (!model) return ''
+  const defaultEffort = state.threadDefaultEffort
+    ? effortWithin(state.threadDefaultEffort, effortsOf(model.efforts))
+    : null
+  return formatModelEffort(model.label, defaultEffort)
+})
 // A model since removed from the settings falls back to the default, so that is shown.
-const pickedModel = computed(() => {
+const pickedModelId = computed(() => {
   const id = thread.value?.model
   return id && state.models.some((model) => model.id === id) ? id : ''
 })
+const pickedEffort = computed<Effort | ''>(() => {
+  if (!pickedModelId.value) return ''
+  const model = modelChoices.value.find((item) => item.id === pickedModelId.value)
+  const raw = thread.value?.effort as Effort | null | undefined
+  if (!model || !raw) return ''
+  return effortWithin(raw, model.acceptedEfforts) ?? ''
+})
+const pickedEffortLabel = computed(() =>
+  pickedEffort.value ? t(`settings.effort.${pickedEffort.value}`) : t('settings.effort.default'),
+)
+function encodeModelChoice(modelId: string, effort: Effort | ''): string {
+  return JSON.stringify([modelId, effort])
+}
+const pickedChoice = computed(() =>
+  pickedModelId.value ? encodeModelChoice(pickedModelId.value, pickedEffort.value) : '',
+)
 function pickModel(value: string | number | undefined) {
-  if (thread.value) void setThreadModel(thread.value.id, value ? String(value) : null)
+  if (!thread.value) return
+  if (!value) {
+    void setThreadModel(thread.value.id, null, null)
+    return
+  }
+  try {
+    const [modelId, effort] = JSON.parse(String(value)) as [string, Effort | '']
+    if (typeof modelId === 'string' && modelId) {
+      void setThreadModel(thread.value.id, modelId, effort || null)
+    }
+  } catch {
+    // Ignore malformed choice values.
+  }
 }
 const todo = computed(() => todoPlan(view.value.todo, working.value))
 // New input is waiting for a free slot.
@@ -646,13 +693,6 @@ const sent = computed(() =>
 )
 let recall: Recall | null = null
 watch(conversationId, () => (recall = null))
-function onInputPaste(event: ClipboardEvent) {
-  if (event.defaultPrevented) return
-  const files = [...(event.clipboardData?.files ?? [])]
-  if (!files.length) return
-  event.preventDefault()
-  attachments.add(files)
-}
 
 function onInputKeydown(event: KeyboardEvent) {
   // The `/` menu moves through its entries with the arrows and has already taken them.
@@ -694,7 +734,7 @@ function useSnippet(option: ChatInputOption) {
   const named = skills.pick(option)
   if (named) {
     draft.value = `${named} ${draft.value}`
-    setTimeout(() => {
+    void nextTick(() => {
       const el = input.value?.textarea
       el?.setSelectionRange(named.length + 1, named.length + 1)
     })
@@ -703,8 +743,7 @@ function useSnippet(option: ChatInputOption) {
   const snippet = state.input.snippets.find((item) => item.id === option.value)
   if (!snippet) return
   draft.value = snippet.text + draft.value
-  // After the input has put its caret where the `/` was.
-  setTimeout(() => {
+  void nextTick(() => {
     const el = input.value?.textarea
     el?.setSelectionRange(snippet.text.length, snippet.text.length)
   })
@@ -847,6 +886,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       class="conversation-list"
       :items="entries"
       :loading-earlier="view.loadingEarlier"
+      :bottom-inset="footerHeight || undefined"
+      :bottom-fade="Boolean(state.detail)"
       @bottom-change="unread?.onBottomChange($event)"
       @earlier="earlier"
     >
@@ -859,7 +900,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           :live="live"
           :activity="activity"
           :elapsed="elapsed"
-          :fallback="fallback"
           :esc-armed="escArmed"
           :wait="wait"
         />
@@ -867,9 +907,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           v-else-if="'todo' in item"
           :items="todo"
           :title="t('todo.title')"
-          :collapsible="false"
+          :show-header="false"
           :live="working"
-          class="todo"
         />
         <div v-else-if="item.notice" class="notice">
           <AskBlock
@@ -1238,7 +1277,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
-    <ImagePreview
+    <DouImagePreview
       v-model:open="preview.open"
       v-model:index="preview.index"
       :images="preview.images"
@@ -1289,7 +1328,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
         class="conversation-input"
         data-message-input
         @keydown="onInputKeydown"
-        @paste="onInputPaste"
       >
         <ConversationBar
           v-if="conversationId && showCapsules"
@@ -1332,21 +1370,43 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             >
               <PaperclipIcon />
             </DouButton>
-            <!-- Which model answers here, and how full its context is. -->
-            <DouDropdown v-if="thread && state.models.length > 1" placement="top-start">
+            <!-- Which model & effort answers here, and how full its context is. -->
+            <DouDropdown v-if="canSwitchModel" placement="top-start">
               <DouButton variant="ghost" size="sm" :title="t('thread.model')">
                 <template #leading><CpuIcon /></template>
                 <span class="conversation-model">{{ modelLabel ?? t('thread.noModel') }}</span>
                 <template #trailing><ChevronDownIcon /></template>
               </DouButton>
               <template #menu>
-                <DouDropdownRadioGroup :model-value="pickedModel" @update:model-value="pickModel">
+                <DouDropdownRadioGroup :model-value="pickedChoice" @update:model-value="pickModel">
                   <DouDropdownItem value="">
                     {{ t('thread.modelDefault', { label: defaultLabel }) }}
                   </DouDropdownItem>
-                  <DouDropdownItem v-for="model in state.models" :key="model.id" :value="model.id">
-                    {{ model.label }}
-                  </DouDropdownItem>
+                  <template v-for="model in modelChoices" :key="model.id">
+                    <DouDropdownSub v-if="model.acceptedEfforts.length" :title="model.label">
+                      <template #title>
+                        <span class="model-option-title">
+                          <span class="model-option-name">{{ model.label }}</span>
+                          <span v-if="pickedModelId === model.id" class="model-option-effort">
+                            {{ pickedEffortLabel }}
+                          </span>
+                        </span>
+                      </template>
+                      <DouDropdownItem :value="encodeModelChoice(model.id, '')">
+                        {{ t('settings.effort.default') }}
+                      </DouDropdownItem>
+                      <DouDropdownItem
+                        v-for="effort in model.acceptedEfforts"
+                        :key="effort"
+                        :value="encodeModelChoice(model.id, effort)"
+                      >
+                        {{ t(`settings.effort.${effort}`) }}
+                      </DouDropdownItem>
+                    </DouDropdownSub>
+                    <DouDropdownItem v-else :value="encodeModelChoice(model.id, '')">
+                      {{ model.label }}
+                    </DouDropdownItem>
+                  </template>
                 </DouDropdownRadioGroup>
               </template>
             </DouDropdown>
@@ -1368,14 +1428,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 </template>
 
 <style scoped>
-.todo :deep(.dou-chat-plan__header) {
-  display: none;
-}
-
-.todo :deep(.dou-chat-plan__list) {
-  padding-block-start: 10px;
-}
-
 .notice {
   display: flex;
   align-items: center;
@@ -1453,7 +1505,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation {
-  --conversation-footer-padding: calc(16px + env(safe-area-inset-bottom, 0px));
+  --conversation-footer-padding: calc(16px + var(--ariadne-safe-bottom));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1500,7 +1552,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 
 .conversation-list :deep(.dou-chat-list) {
   --dou-chat-list-gap: 30px;
-  --conversation-clearance: var(--conversation-footer-height, var(--dou-chat-list-padding));
 }
 
 /*
@@ -1584,64 +1635,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   padding-inline: 0.35em;
 }
 
-/* The spacer, including composer clearance, is what ChatList observes. */
-.conversation-list :deep(.dou-virtual-list__spacer) {
-  padding-block-end: var(--conversation-clearance);
-}
-
-.conversation-list :deep(.dou-chat-list__viewport) {
-  scroll-padding-block-end: var(--conversation-footer-height, 0px);
-}
-
-.conversation:has(.conversation-input) .conversation-list :deep(.dou-virtual-list__spacer) {
-  min-block-size: max(
-    0px,
-    calc(
-      100% - var(--conversation-clearance) - var(--dou-chat-list-padding-top) +
-        var(--dou-chat-list-gap)
-    )
-  );
-}
-
-/*
- * Paint inside the scrollport so its scrollbar and the floating composer stay above the fade.
- * Cover the footer padding plus the composer's 16px bottom radius (with a small buffer) in solid
- * background so scrolled messages cannot bleed through the bottom corners, then fade softly below
- * the composer's top edge so the last message stays clear when scrolled to the bottom.
- */
-.conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__viewport)::after {
-  --conversation-bottom-solid: calc(var(--conversation-footer-padding) + 24px);
-  --conversation-bottom-fade: 40px;
-  --conversation-mask-height: calc(
-    var(--conversation-bottom-solid) + var(--conversation-bottom-fade)
-  );
-  content: '';
-  position: sticky;
-  inset-block-end: 0;
-  z-index: 2;
-  display: block;
-  block-size: var(--conversation-mask-height);
-  margin-block-start: calc(-1 * var(--conversation-mask-height));
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--dou-dialog-bg, var(--dou-color-bg-canvas)) var(--conversation-bottom-fade)
-  );
-  pointer-events: none;
-}
-
-.conversation:has(.conversation-input)
-  .conversation-list
-  :deep(.dou-chat-list__viewport:focus-visible)::after {
-  inset-block-end: 2px;
-  margin-inline: 2px;
-}
-
-.conversation-list :deep(.dou-chat-list__scroll) {
-  inset-block-end: calc(var(--conversation-footer-height, 0px) + 12px);
-  z-index: 2;
-}
-
 .reaction-picker {
   display: flex;
   gap: 2px;
@@ -1699,10 +1692,32 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .conversation-model {
-  max-width: 200px;
+  max-width: min(240px, 44vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-option-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.model-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option-effort {
+  flex: none;
+  font-size: var(--dou-font-size-xs);
+  color: var(--dou-color-primary);
+  font-weight: var(--dou-font-weight-medium);
 }
 
 /* A folded message from the coordinator the search led to, marked like a chat message. */

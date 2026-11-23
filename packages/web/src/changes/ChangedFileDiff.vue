@@ -8,7 +8,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { ApiError } from '../api'
 import { t, tm } from '../i18n'
 import { useReviewComments, type ReviewNote } from '../review/review-comments'
-import { languageOf } from './languages'
+import { useCodeLanguage } from './languages'
 import { useLineComments } from './line-comments'
 
 const props = defineProps<{
@@ -70,11 +70,12 @@ const review = useReviewComments(
 const gutters = computed(() => [line.gutter.value, review.gutter.value])
 const widgets = computed(() => [...line.widgets.value, ...review.widgets.value])
 const oneSided = computed(() => !versions.value?.before || !versions.value?.after)
+const { language } = useCodeLanguage(() => props.file.path)
 </script>
 
 <template>
   <section class="file-diff" :aria-label="file.path">
-    <header class="file-diff-header">
+    <header v-if="problem || !versions || versions.skipped" class="file-diff-header">
       <DouText size="sm" weight="medium" truncate :title="file.path">{{ file.path }}</DouText>
       <DouText v-if="file.previousPath" variant="tertiary" size="sm" truncate>
         {{ t('changes.renamed', { path: file.previousPath }) }}
@@ -91,24 +92,53 @@ const oneSided = computed(() => !versions.value?.before || !versions.value?.afte
       class="diff"
       :original="versions.before ?? ''"
       :model-value="versions.after ?? ''"
-      :language="languageOf(file.path)"
+      :language="language"
       :gutters="gutters"
       :widgets="widgets"
       :mode="oneSided ? 'inline' : mode"
       :bordered="false"
+      :scroll-y="false"
+      sticky-toolbar
       wrap
       @update:mode="mode = $event"
-    />
+    >
+      <template #title>
+        <span class="file-diff-title">
+          <DouText size="sm" weight="medium" truncate :title="file.path">{{ file.path }}</DouText>
+          <DouText v-if="file.previousPath" variant="tertiary" size="sm" truncate>
+            {{ t('changes.renamed', { path: file.previousPath }) }}
+          </DouText>
+        </span>
+      </template>
+    </DouCodeDiff>
   </section>
 </template>
 
 <style scoped>
 .file-diff-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 6px;
-  border-block: 1px solid var(--dou-color-border-subtle);
+  min-height: 36px;
+  padding: 0 12px;
+  background-color: var(--dou-color-bg-surface);
+  border-bottom: 1px solid var(--dou-color-border);
+}
+
+@media (pointer: coarse) {
+  .file-diff-header {
+    min-height: 44px;
+  }
+}
+
+.file-diff-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .file-diff-loading {
@@ -119,12 +149,6 @@ const oneSided = computed(() => !versions.value?.before || !versions.value?.afte
 
 .file-diff-problem {
   margin: 8px 12px;
-}
-
-/* Let the outer virtual list own vertical scrolling while keeping horizontal scroll for long lines. */
-.diff :deep(.dou-code-editor__scroller) {
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 
 .diff :deep(.line-comment-mark) {

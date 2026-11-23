@@ -286,14 +286,16 @@ func Open(ctx context.Context, options Options) (_ *Application, err error) {
 		FindContext: &sdk.FindContext{Env: env, Home: userHome, Which: func(name string) bool { _, err := exec.LookPath(name); return err == nil }},
 		ModelOf: func(r *http.Request, conversation core.ConversationView) (any, error) {
 			model := ""
+			effort := ""
 			if conversation.Role == "thread" {
 				thread, err := repo.GetThread(r.Context(), conversation.ID)
 				if err != nil {
 					return nil, err
 				}
 				model, _ = thread.Model.(string)
+				effort, _ = thread.Effort.(string)
 			}
-			return user.ConversationModel(conversation.Role, model, conversation.Turn != nil && conversation.Turn.Fallback), nil
+			return user.ConversationModel(conversation.Role, model, effort), nil
 		},
 		OnProjectDeleted: func(id string) {
 			drafts.DropProject(id)

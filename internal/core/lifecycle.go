@@ -182,7 +182,7 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 	id := d["threadId"]
 	switch e.Type {
 	case "thread.created":
-		w.run("INSERT INTO threads (id, project_id, title, node_id, model, branch_slug, review_of, auto, created_at, updated_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, e.ProjectID, d["title"], d["nodeId"], d["model"], d["branch"], d["reviewOf"], boolean(d.yes("auto")), e.At, e.At, e.Seq)
+		w.run("INSERT INTO threads (id, project_id, title, node_id, model, effort, branch_slug, review_of, auto, created_at, updated_at, changed_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, e.ProjectID, d["title"], d["nodeId"], d["model"], d["effort"], d["branch"], d["reviewOf"], boolean(d.yes("auto")), e.At, e.At, e.Seq)
 		if d["reviewOf"] != nil {
 			w.run("UPDATE threads SET reviewer_id = ?, changed_seq = ? WHERE id = ?", id, e.Seq, d["reviewOf"])
 		}
@@ -199,7 +199,7 @@ func threadEvent(w *projectionWriter, e eventstore.Event, d object) {
 			addEntry(w, e, id, "note", nil, object{"type": "reference-ended", "name": ended["name"], "now": ended["now"]}, false)
 		}
 	case "thread.model_set":
-		w.run("UPDATE threads SET model = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["model"], e.At, e.Seq, id)
+		w.run("UPDATE threads SET model = ?, effort = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["model"], d["effort"], e.At, e.Seq, id)
 	case "thread.node.set":
 		w.run("UPDATE threads SET node_id = ?, updated_at = ?, changed_seq = ? WHERE id = ?", d["nodeId"], e.At, e.Seq, id)
 	case "thread.started":

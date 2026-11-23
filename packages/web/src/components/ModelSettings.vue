@@ -27,6 +27,7 @@ import {
   api,
   ApiError,
   type Concurrency,
+  type CoordinatorEffort,
   type Currency,
   type Effort,
   type ListedModel,
@@ -35,8 +36,8 @@ import {
   type ModelProblem,
   type ModelSettings,
 } from '../api'
-import { applyModelSettings } from '../store'
-import { EFFORTS, effortsOf, effortWithin } from '../effort'
+import { applyModelSettings, refreshConversationModels } from '../store'
+import { coordinatorDefaultEffort, EFFORTS, effortsOf, effortWithin } from '../effort'
 import { lt, t, tm } from '../i18n'
 import InputSettings from './InputSettings.vue'
 import McpSettings from './McpSettings.vue'
@@ -101,16 +102,14 @@ const models = ref<DraftModel[]>([])
 // Threads come first: they do the work. The coordinator may use another model, and think less.
 const threadModel = ref('')
 const threadEffort = ref<Effort | ''>('')
-const coordinatorEffort = ref<Effort | ''>('')
+const coordinatorEffort = ref<CoordinatorEffort | ''>('')
 // An empty value means the coordinator inherits the discussion thread's model.
 const coordinatorModel = ref('')
 // Questions a conversation hands to a research; `''` is the asking conversation's own model.
 const researchModel = ref<string>('')
-// What a turn goes on with when its model keeps being turned away, for every role; '' is none.
-const fallback = ref('')
-// What the page no longer shows is saved back as it was: the triage role and how hard a
-// research thinks.
-const hiddenRoles = ref<Pick<ModelSettings['roles'], 'triage' | 'research'> | null>(null)
+const researchEffort = ref<Effort | ''>('')
+// What the page no longer shows is saved back as it was: the triage role.
+const hiddenRoles = ref<Pick<ModelSettings['roles'], 'triage'> | null>(null)
 // Usage also shows the estimated cost.
 const showCost = ref(false)
 // What the scheduler may run at once; null until loaded, then saved with the models.
@@ -145,7 +144,7 @@ function modelDraft() {
     coordinatorModel.value,
     coordinatorEffort.value,
     researchModel.value,
-    fallback.value,
+    researchEffort.value,
     hiddenRoles.value,
     showCost.value,
     concurrency.value,
@@ -179,14 +178,6 @@ const modelOptions = computed(() =>
   ).map(({ id, label }) => ({ value: id, label })),
 )
 const several = computed(() => modelOptions.value.length > 1)
-const researchOptions = computed(() => [
-  { value: '', label: t('settings.sameAsAsking') },
-  ...modelOptions.value,
-])
-const fallbackOptions = computed(() => [
-  { value: '', label: t('settings.fallbackNone') },
-  ...modelOptions.value,
-])
 /** The efforts the model `id` accepts, as its service or the catalog said; `null` unknown. */
 const toldOf = (id: string | undefined): readonly Effort[] | null =>
   models.value.find((model) => model.id === id)?.efforts ?? null
@@ -201,6 +192,21 @@ const coordinatorTold = computed(() =>
   modelOptions.value.some((model) => model.value === coordinatorModel.value)
     ? toldOf(coordinatorModel.value)
     : threadTold.value,
+)
+// When research inherits the asking conversation's model, any effort accepted by a configured model
+// can be asked for; the server clamps to the nearest effort the asking model supports.
+const askingTold = computed<readonly Effort[]>(() => {
+  const accepted = new Set<Effort>()
+  for (const model of models.value) {
+    if (!model.model.trim()) continue
+    for (const effort of effortsOf(model.efforts)) accepted.add(effort)
+  }
+  return EFFORTS.filter((effort) => accepted.has(effort))
+})
+const researchTold = computed<readonly Effort[] | null>(() =>
+  modelOptions.value.some((model) => model.value === researchModel.value)
+    ? toldOf(researchModel.value)
+    : askingTold.value,
 )
 function modelBranch(option: CascaderOption, told: readonly Effort[] | null): CascaderOption {
   const efforts = effortsOf(told)
@@ -218,6 +224,10 @@ const threadOptions = computed(() =>
 )
 const coordinatorOptions = computed(() => [
   modelBranch({ value: '', label: t('settings.sameAsThreads') }, threadTold.value),
+  ...threadOptions.value,
+])
+const researchOptions = computed(() => [
+  modelBranch({ value: '', label: t('settings.sameAsAsking') }, askingTold.value),
   ...threadOptions.value,
 ])
 
@@ -245,7 +255,38 @@ function rolePath(
   })
 }
 const threadPath = rolePath(threadOptions, threadModel, threadEffort)
-const coordinatorPath = rolePath(coordinatorOptions, coordinatorModel, coordinatorEffort)
+const coordinatorPath = computed({
+  get() {
+    const current =
+      coordinatorOptions.value.find((option) => option.value === coordinatorModel.value) ??
+      coordinatorOptions.value[0]
+    if (!current) return null
+    const wanted =
+      current.value === ''
+        ? coordinatorEffort.value === 'default'
+          ? ''
+          : coordinatorEffort.value || (coordinatorDefaultEffort(threadTold.value) ?? '')
+        : coordinatorEffort.value === 'default'
+          ? ''
+          : coordinatorEffort.value
+    const depth = current.children?.find((child) => child.value === wanted) ?? current.children?.[0]
+    return depth ? [current.value, depth.value] : [current.value]
+  },
+  set(path: CascaderValue[] | CascaderValue[][] | null) {
+    const [id, depth] = path ?? []
+    if (typeof id !== 'string') return
+    coordinatorModel.value = id
+    const explicit = EFFORTS.find((value) => value === depth)
+    if (explicit) {
+      coordinatorEffort.value = explicit
+    } else if (id === '' && depth === '') {
+      coordinatorEffort.value = 'default'
+    } else {
+      coordinatorEffort.value = ''
+    }
+  },
+})
+const researchPath = rolePath(researchOptions, researchModel, researchEffort)
 // A model that does not take what was picked: the nearest it does, as the server asks.
 watch([threadTold, threadEffort], ([told, effort]) => {
   const accepted = effortsOf(told)
@@ -254,8 +295,14 @@ watch([threadTold, threadEffort], ([told, effort]) => {
 })
 watch([coordinatorTold, coordinatorEffort], ([told, effort]) => {
   const accepted = effortsOf(told)
-  if (effort && !accepted.includes(effort)) {
+  if (effort && effort !== 'default' && !accepted.includes(effort)) {
     coordinatorEffort.value = effortWithin(effort, accepted) ?? ''
+  }
+})
+watch([researchTold, researchEffort], ([told, effort]) => {
+  const accepted = effortsOf(told)
+  if (effort && !accepted.includes(effort)) {
+    researchEffort.value = effortWithin(effort, accepted) ?? ''
   }
 })
 
@@ -302,8 +349,8 @@ function load(settings: ModelSettings) {
   coordinatorModel.value = settings.roles.coordinator.model ?? ''
   coordinatorEffort.value = settings.roles.coordinator.effort ?? ''
   researchModel.value = settings.roles.research.model ?? ''
-  fallback.value = settings.roles.thread.fallback ?? settings.roles.coordinator.fallback ?? ''
-  hiddenRoles.value = { triage: settings.roles.triage, research: settings.roles.research }
+  researchEffort.value = settings.roles.research.effort ?? ''
+  hiddenRoles.value = { triage: settings.roles.triage }
 }
 
 /** Some model has a price, so usage can show what it cost. */
@@ -651,6 +698,7 @@ async function saveModels(): Promise<boolean> {
       }
       return body as Record<string, unknown>
     })
+    const keptCoordinatorModel = keep(coordinatorModel.value || null)
     const saved = await api.saveModelSettings({
       providers: providers.value.map((provider, at) => ({
         id: provider.id,
@@ -687,26 +735,28 @@ async function saveModels(): Promise<boolean> {
         thread: {
           model: keep(threadModel.value) ?? kept[0]?.id ?? null,
           effort: threadEffort.value || null,
-          fallback: keep(fallback.value || null),
         },
         coordinator: {
-          model: keep(coordinatorModel.value || null),
-          effort: coordinatorEffort.value || null,
-          fallback: keep(fallback.value || null),
+          model: keptCoordinatorModel,
+          effort:
+            coordinatorEffort.value === 'default'
+              ? keptCoordinatorModel
+                ? null
+                : 'default'
+              : coordinatorEffort.value || null,
         },
         triage: {
           model: keep(hidden?.triage.model ?? null),
           effort: hidden?.triage.effort ?? null,
-          fallback: keep(hidden?.triage.fallback ?? null),
         },
         research: {
           model: keep(researchModel.value || null),
-          effort: hidden?.research.effort ?? null,
-          fallback: null,
+          effort: researchEffort.value || null,
         },
       },
     })
     load(saved)
+    void refreshConversationModels()
     problems.value = saved.problems
     if (concurrency.value) concurrency.value = await api.saveConcurrency(concurrency.value)
     savedModelDraft = modelDraft()
@@ -966,26 +1016,15 @@ async function saveModels(): Promise<boolean> {
                     separator=" · "
                   />
                 </DouFormItem>
-                <template v-if="several">
-                  <DouFormItem>
-                    <template #label>
-                      <SettingsLabelHelp
-                        :label="t('settings.researchModel')"
-                        :content="t('settings.researchModelHelp')"
-                      />
-                    </template>
-                    <DouSelect v-model="researchModel" :options="researchOptions" />
-                  </DouFormItem>
-                  <DouFormItem>
-                    <template #label>
-                      <SettingsLabelHelp
-                        :label="t('settings.fallbackModel')"
-                        :content="t('settings.fallbackModelHelp')"
-                      />
-                    </template>
-                    <DouSelect v-model="fallback" :options="fallbackOptions" />
-                  </DouFormItem>
-                </template>
+                <DouFormItem>
+                  <template #label>
+                    <SettingsLabelHelp
+                      :label="t('settings.researchModel')"
+                      :content="t('settings.researchModelHelp')"
+                    />
+                  </template>
+                  <DouCascader v-model="researchPath" :options="researchOptions" separator=" · " />
+                </DouFormItem>
               </div>
               <DouFormItem v-if="concurrency" :label="t('settings.slots')" class="settings-narrow">
                 <DouInputNumber v-model="concurrency.slots" :min="1" :max="16" :step="1" />

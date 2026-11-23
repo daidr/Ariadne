@@ -33,6 +33,12 @@ var limitRanges = map[string][2]float64{"commandTimeout": {5, 3600}, "commandTim
 var limitKeys = []string{"commandTimeout", "commandTimeoutMax", "commandOutput", "compactShare", "modelRetries", "loopRepeats"}
 var roles = []string{"thread", "coordinator", "triage", "research"}
 var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+const defaultEffort = "default"
+
+func validRoleEffort(role, value string) bool {
+	return hasString(efforts, value) || (role == "coordinator" && value == defaultEffort)
+}
 var snippetID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var headerName = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -97,7 +103,7 @@ func DefaultRules() []any {
 func Defaults() Object {
 	roleConfig := Object{}
 	for _, role := range roles {
-		roleConfig[role] = Object{"model": nil, "effort": nil, "fallback": nil}
+		roleConfig[role] = Object{"model": nil, "effort": nil}
 	}
 	return Object{"locale": "zh-CN", "plugins": []any{}, "disabledPlugins": []any{}, "models": Object{"providers": []any{}, "models": []any{}, "roles": roleConfig, "showCost": false}, "concurrency": Object{"slots": float64(3), "reserved": float64(1)}, "sourceSecrets": Object{}, "mcp": Object{"servers": []any{}}, "input": Object{"submitOn": "enter", "snippets": []any{}, "keys": cloneMap(defaultKeys)}, "instructions": "", "commands": Object{"rules": DefaultRules()}, "limits": cloneMap(defaultLimits), "projectEnv": Object{}, "search": Object{"provider": "", "services": Object{}}}
 }
@@ -224,15 +230,16 @@ func Normalize(stored Object) Object {
 	normalizedRoles := Object{}
 	for _, role := range roles {
 		given := object(roleConfig[role])
-		value := Object{"model": nil, "effort": nil, "fallback": nil}
-		for _, field := range []string{"model", "fallback"} {
-			if text, ok := given[field].(string); ok {
-				value[field] = text
+		value := Object{"model": nil, "effort": nil}
+		if model, ok := given["model"].(string); ok {
+			value["model"] = model
+		}
+			if effort, ok := given["effort"].(string); ok && validRoleEffort(role, effort) {
+				value["effort"] = effort
 			}
-		}
-		if effort, ok := given["effort"].(string); ok && hasString(efforts, effort) {
-			value["effort"] = effort
-		}
+			if value["model"] != nil && value["effort"] == defaultEffort {
+				value["effort"] = nil
+			}
 		normalizedRoles[role] = value
 	}
 	config["models"] = Object{"providers": fallback(models["providers"], []any{}), "models": fallback(models["models"], []any{}), "roles": normalizedRoles, "showCost": models["showCost"] == true}

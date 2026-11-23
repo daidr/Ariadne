@@ -49,3 +49,20 @@ func TestCompactionRequestAndBudgets(t *testing.T) {
 		t.Fatalf("unexpected compaction results: cuts=%d summaries=%d", len(nativeCuts), len(summaries))
 	}
 }
+
+func TestEstimateTokensDistinguishesASCIIAndCJK(t *testing.T) {
+	asciiBody := strings.Repeat("export function renderChart(data) { return data.length; }\n", 200)
+	asciiEst := EstimateTokens([]Message{{Role: "tool", ToolCallID: "c1", Content: asciiBody}})
+	// ~11,600 ASCII chars plus small JSON framing should estimate near ~3,300-3,600,
+	// not ~4,700+ as a flat /2.5 divisor produced.
+	if asciiEst < 3000 || asciiEst > 3800 {
+		t.Fatalf("unexpected ASCII token estimate: %d (body len=%d)", asciiEst, len(asciiBody))
+	}
+
+	cjkBody := strings.Repeat("这是中文性能分析报告正文内容。", 200)
+	cjkEst := EstimateTokens([]Message{{Role: "user", Content: cjkBody}})
+	// 3,000 CJK runes should stay conservative (~1 token per CJK rune).
+	if cjkEst < 2800 || cjkEst > 3600 {
+		t.Fatalf("unexpected CJK token estimate: %d", cjkEst)
+	}
+}

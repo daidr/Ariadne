@@ -280,7 +280,7 @@ func TestSettingsStoreLifecycle(t *testing.T) {
 				if size, exists := value["contextTokens"]; exists {
 					resolved, err = store.ResolveCoordinator(value["triage"] == true, size.(float64), testModelKinds())
 				} else {
-					resolved, err = store.ResolveModel(text(value["role"]), text(value["given"]), testModelKinds())
+					resolved, err = store.ResolveModel(text(value["role"]), text(value["given"]), text(value["effort"]), testModelKinds())
 				}
 				result = stableResolved(resolved)
 			case "choices":
@@ -342,9 +342,6 @@ func stableResolved(model *ResolvedModel) any {
 	var value Object
 	json.Unmarshal(data, &value)
 	value["provider"] = model.Provider.Kind
-	if model.Fallback != nil {
-		value["fallback"] = stableResolved(model.Fallback)
-	}
 	return value
 }
 
@@ -387,7 +384,7 @@ func TestResolvedSettingsCannotMutatePrivateConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := store.Current()
-	resolved, err := store.ResolveModel("thread", "", kinds)
+	resolved, err := store.ResolveModel("thread", "", "", kinds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,12 +506,248 @@ func TestModelChoicesFilterDisabledKindsAndUsageSummary(t *testing.T) {
 		t.Fatalf("expected only m-oa when anthropic is disabled, got %#v", filtered)
 	}
 
-	// ModelUsageByKinds reports provider names and active roles including fallback.
+	// ModelUsageByKinds reports provider names and active roles (fallback is ignored).
 	providers, usedRoles := store.ModelUsageByKinds([]string{"anthropic"})
 	if len(providers) != 1 || providers[0] != "Claude" {
 		t.Fatalf("anthropic providers = %#v", providers)
 	}
-	if len(usedRoles) != 2 || usedRoles[0] != "coordinator" || usedRoles[1] != "fallback" {
+	if len(usedRoles) != 1 || usedRoles[0] != "coordinator" {
 		t.Fatalf("anthropic roles = %#v", usedRoles)
 	}
+}
+
+func TestLegacyFallbackIgnoredAndEffortResolution(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	legacy := `{
+		"models": {
+			"providers": [{"id": "p", "kind": "anthropic", "name": "Claude", "settings": {"apiKey": "k"}}],
+			"models": [
+				{"id": "m-main", "provider": "p", "model": "claude-opus", "efforts": ["low", "medium", "high", "max"]},
+				{"id": "m-fast", "provider": "p", "model": "claude-haiku", "efforts": ["low", "medium"]},
+				{"id": "m-plain", "provider": "p", "model": "claude-plain", "efforts": []}
+			],
+			"roles": {
+				"thread": {"model": "m-main", "effort": "high", "fallback": "m-fast"},
+				"coordinator": {"model": null, "effort": "low", "fallback": "m-fast"},
+				"research": {"model": null, "effort": "low", "fallback": "m-fast"}
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open legacy config with fallback failed: %v", err)
+	}
+	kinds := testModelKinds()
+	rolesCfg := object(object(store.Current()["models"])["roles"])
+	for _, role := range roles {
+		if _, hasFallback := object(rolesCfg[role])["fallback"]; hasFallback {
+			t.Fatalf("role %s unexpectedly retained fallback: %#v", role, rolesCfg[role])
+		}
+	}
+
+	// Default thread uses roles.thread.model and roles.thread.effort.
+	parent, err := store.ResolveModel("thread", "", "", kinds)
+	if err != nil || parent == nil || parent.Model != "claude-opus" || parent.Effort != "high" {
+		t.Fatalf("default thread resolved = %+v, err=%v", parent, err)
+	}
+
+	// Explicit thread model + effort overrides both; explicit model + empty effort uses model default.
+	overrideHigh, err := store.ResolveModel("thread", "m-fast", "max", kinds)
+	if err != nil || overrideHigh == nil || overrideHigh.Model != "claude-haiku" || overrideHigh.Effort != "medium" {
+		t.Fatalf("clamped thread override = %+v, err=%v", overrideHigh, err)
+	}
+	overrideDefaultEffort, err := store.ResolveModel("thread", "m-main", "", kinds)
+	if err != nil || overrideDefaultEffort == nil || overrideDefaultEffort.Model != "claude-opus" || overrideDefaultEffort.Effort != "" {
+		t.Fatalf("explicit model with default effort = %+v, err=%v", overrideDefaultEffort, err)
+	}
+
+	// ConversationModel returns the resolved effective effort.
+	if conv := store.ConversationModel("thread", "", ""); conv["id"] != "m-main" || conv["effort"] != "high" {
+		t.Fatalf("default ConversationModel = %#v", conv)
+	}
+	if conv := store.ConversationModel("thread", "m-main", ""); conv["id"] != "m-main" || conv["effort"] != nil {
+		t.Fatalf("explicit model default effort ConversationModel = %#v", conv)
+	}
+	if conv := store.ConversationModel("thread", "m-fast", "max"); conv["id"] != "m-fast" || conv["effort"] != "medium" {
+		t.Fatalf("override ConversationModel = %#v", conv)
+	}
+
+	// A thread override referencing a deleted model falls back to both the default thread model and default thread effort.
+	deletedResolved, err := store.ResolveModel("thread", "m-deleted", "low", kinds)
+	if err != nil || deletedResolved == nil || deletedResolved.Model != "claude-opus" || deletedResolved.Effort != "high" {
+		t.Fatalf("deleted thread override resolved = %+v, err=%v", deletedResolved, err)
+	}
+	if conv := store.ConversationModel("thread", "m-deleted", "low"); conv["id"] != "m-main" || conv["effort"] != "high" {
+		t.Fatalf("deleted thread override ConversationModel = %#v", conv)
+	}
+
+	// ResolveResearch with model=null inherits parent model but applies roles.research.effort without mutating parent.
+	researchModel, err := store.ResolveResearch(parent, kinds)
+	if err != nil || researchModel == nil || researchModel.Model != "claude-opus" || researchModel.Effort != "low" {
+		t.Fatalf("ResolveResearch(same as asking + low) = %+v, err=%v", researchModel, err)
+	}
+	if parent.Effort != "high" {
+		t.Fatalf("ResolveResearch mutated parent effort: %q", parent.Effort)
+	}
+
+	// ResolveResearch with explicit research model + effort uses that model and effort.
+	if _, err := store.UpdateModels(jsonObject(`{
+		"providers": [{"id": "p", "kind": "anthropic", "name": "Claude", "settings": {"apiKey": "k"}}],
+		"models": [
+			{"id": "m-main", "provider": "p", "model": "claude-opus", "efforts": ["low", "medium", "high", "max"]},
+			{"id": "m-fast", "provider": "p", "model": "claude-haiku", "efforts": ["low", "medium"]}
+		],
+		"roles": {
+			"thread": {"model": "m-main", "effort": "high"},
+			"research": {"model": "m-fast", "effort": "high"}
+		}
+	}`), kinds); err != nil {
+		t.Fatal(err)
+	}
+	researchExplicit, err := store.ResolveResearch(parent, kinds)
+	if err != nil || researchExplicit == nil || researchExplicit.Model != "claude-haiku" || researchExplicit.Effort != "medium" {
+		t.Fatalf("ResolveResearch(explicit model) = %+v, err=%v", researchExplicit, err)
+	}
+}
+
+func TestCoordinatorDefaultLowEffortResolution(t *testing.T) {
+	store := newStore(t)
+	kinds := testModelKinds()
+	baseProviders := `[{"id":"p","kind":"anthropic","name":"Claude","settings":{"apiKey":"k"}}]`
+	baseModels := `[
+		{"id":"m-opus","provider":"p","model":"claude-opus","efforts":["low","medium","high","max"]},
+		{"id":"m-unknown","provider":"p","model":"claude-unknown"},
+		{"id":"m-medhigh","provider":"p","model":"claude-medhigh","efforts":["medium","high"]},
+		{"id":"m-plain","provider":"p","model":"claude-plain","efforts":[]},
+		{"id":"m-haiku","provider":"p","model":"claude-haiku","efforts":["low","medium"]}
+	]`
+
+	updateRoles := func(rolesJSON string) {
+		t.Helper()
+		input := jsonObject(`{"providers":` + baseProviders + `,"models":` + baseModels + `,"roles":` + rolesJSON + `}`)
+		if _, err := store.UpdateModels(input, kinds); err != nil {
+			t.Fatalf("UpdateModels(%s): %v", rolesJSON, err)
+		}
+	}
+
+	// 1. Inherited thread model supports low -> coordinator and triage default to low.
+	updateRoles(`{"thread":{"model":"m-opus","effort":"high"},"coordinator":{"model":null,"effort":null}}`)
+	for _, tc := range []struct {
+		name string
+		got  *ResolvedModel
+	}{
+		{"ResolveModel(coordinator)", mustResolve(t, store, "coordinator", kinds)},
+		{"ResolveCoordinator(false)", mustResolveCoordinator(t, store, false, 0, kinds)},
+		{"ResolveCoordinator(true)", mustResolveCoordinator(t, store, true, 1000, kinds)},
+	} {
+		if tc.got == nil || tc.got.Model != "claude-opus" || tc.got.Effort != "low" {
+			t.Fatalf("%s = %+v, want claude-opus/low", tc.name, tc.got)
+		}
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-opus" || conv["effort"] != "low" {
+		t.Fatalf("ConversationModel(coordinator, supports low) = %#v", conv)
+	}
+
+	// 2. Inherited thread model with omitted efforts (unknown -> common low/medium/high) -> defaults to low.
+	updateRoles(`{"thread":{"model":"m-unknown","effort":null},"coordinator":{"model":null,"effort":null}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-unknown" || got.Effort != "low" {
+		t.Fatalf("ResolveModel(coordinator, unknown efforts) = %+v", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-unknown" || conv["effort"] != "low" {
+		t.Fatalf("ConversationModel(coordinator, unknown efforts) = %#v", conv)
+	}
+
+	// 3. Inherited thread model supports efforts but NOT low -> stays model default (not clamped to medium).
+	updateRoles(`{"thread":{"model":"m-medhigh","effort":"high"},"coordinator":{"model":null,"effort":null}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-medhigh" || got.Effort != "" {
+		t.Fatalf("ResolveModel(coordinator, no low) = %+v, want empty effort", got)
+	}
+	if got := mustResolveCoordinator(t, store, true, 1000, kinds); got == nil || got.Model != "claude-medhigh" || got.Effort != "" {
+		t.Fatalf("ResolveCoordinator(triage, no low) = %+v, want empty effort", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-medhigh" || conv["effort"] != nil {
+		t.Fatalf("ConversationModel(coordinator, no low) = %#v", conv)
+	}
+
+	// 4. Inherited thread model supports no efforts -> stays empty.
+	updateRoles(`{"thread":{"model":"m-plain","effort":null},"coordinator":{"model":null,"effort":null}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-plain" || got.Effort != "" {
+		t.Fatalf("ResolveModel(coordinator, empty efforts) = %+v", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-plain" || conv["effort"] != nil {
+		t.Fatalf("ConversationModel(coordinator, empty efforts) = %#v", conv)
+	}
+
+	// 5. Explicit coordinator effort="default" while inheriting thread model keeps model default and persists across reopen.
+	updateRoles(`{"thread":{"model":"m-opus","effort":"high"},"coordinator":{"model":null,"effort":"default"}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-opus" || got.Effort != "" {
+		t.Fatalf("ResolveModel(coordinator, explicit default) = %+v", got)
+	}
+	if got := mustResolveCoordinator(t, store, true, 1000, kinds); got == nil || got.Model != "claude-opus" || got.Effort != "" {
+		t.Fatalf("ResolveCoordinator(triage, coordinator explicit default) = %+v", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-opus" || conv["effort"] != nil {
+		t.Fatalf("ConversationModel(coordinator, explicit default) = %#v", conv)
+	}
+	reopened, err := Open(store.path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	if got := mustResolve(t, reopened, "coordinator", kinds); got == nil || got.Effort != "" {
+		t.Fatalf("reopened explicit default coordinator = %+v", got)
+	}
+
+	// "default" is rejected on non-coordinator roles.
+	if _, err := store.UpdateModels(jsonObject(`{"providers":`+baseProviders+`,"models":`+baseModels+`,"roles":{"thread":{"model":"m-opus","effort":"default"}}}`), kinds); err == nil {
+		t.Fatal("expected thread effort=default to be rejected")
+	}
+
+	// 6. Explicit coordinator effort override on inherited model uses the chosen effort.
+	updateRoles(`{"thread":{"model":"m-opus","effort":"medium"},"coordinator":{"model":null,"effort":"high"}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-opus" || got.Effort != "high" {
+		t.Fatalf("ResolveModel(coordinator, explicit high) = %+v", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-opus" || conv["effort"] != "high" {
+		t.Fatalf("ConversationModel(coordinator, explicit high) = %#v", conv)
+	}
+
+	// 7. Explicit coordinator model with default effort does NOT force low, and canonicalizes "default" to nil.
+	updateRoles(`{"thread":{"model":"m-opus","effort":"high"},"coordinator":{"model":"m-haiku","effort":"default"}}`)
+	coordCfg := object(object(object(store.Current()["models"])["roles"])["coordinator"])
+	if coordCfg["model"] != "m-haiku" || coordCfg["effort"] != nil {
+		t.Fatalf("explicit coordinator model should canonicalize default effort to nil, got %#v", coordCfg)
+	}
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-haiku" || got.Effort != "" {
+		t.Fatalf("ResolveModel(coordinator, explicit model) = %+v", got)
+	}
+	if conv := store.ConversationModel("coordinator", "", ""); conv["id"] != "m-haiku" || conv["effort"] != nil {
+		t.Fatalf("ConversationModel(coordinator, explicit model) = %#v", conv)
+	}
+
+	// 8. Explicit coordinator model with explicit effort uses that effort.
+	updateRoles(`{"thread":{"model":"m-opus","effort":"high"},"coordinator":{"model":"m-haiku","effort":"medium"}}`)
+	if got := mustResolve(t, store, "coordinator", kinds); got == nil || got.Model != "claude-haiku" || got.Effort != "medium" {
+		t.Fatalf("ResolveModel(coordinator, explicit model+medium) = %+v", got)
+	}
+}
+
+func mustResolve(t *testing.T, store *Store, role string, kinds []sdk.ModelProviderInfo) *ResolvedModel {
+	t.Helper()
+	got, err := store.ResolveModel(role, "", "", kinds)
+	if err != nil {
+		t.Fatalf("ResolveModel(%s): %v", role, err)
+	}
+	return got
+}
+
+func mustResolveCoordinator(t *testing.T, store *Store, triage bool, tokens float64, kinds []sdk.ModelProviderInfo) *ResolvedModel {
+	t.Helper()
+	got, err := store.ResolveCoordinator(triage, tokens, kinds)
+	if err != nil {
+		t.Fatalf("ResolveCoordinator(%v): %v", triage, err)
+	}
+	return got
 }

@@ -52,7 +52,10 @@ export async function seedSandbox(home: string, baseUrl: string) {
             model,
             contextTokens: 128_000,
           })),
-          roles: { thread: { model: 'mock', effort: null, fallback: null } },
+          roles: {
+            thread: { model: 'mock', effort: 'high' },
+            research: { model: null, effort: 'low' },
+          },
         },
       },
       null,

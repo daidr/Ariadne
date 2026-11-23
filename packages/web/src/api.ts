@@ -642,22 +642,33 @@ export interface ModelSettingsInput {
   providers: ModelProviderInput[]
   models: ModelEntry[]
   /**
-   * `coordinator.model: null` uses the threads' model, `triage.model: null` the
-   * coordinator's, `research.model: null` the asking conversation's; `effort: null` asks
-   * nothing.
+   * `coordinator.model: null` uses the threads' model (and `'low'` effort when `effort` is
+   * `null` and the model accepts `'low'`, or the model's own default when `effort` is
+   * `'default'`), `triage.model: null` the coordinator's, `research.model: null` the asking
+   * conversation's; `effort: null` asks nothing for other roles.
    */
-  roles: { thread: RoleInput; coordinator: RoleInput; triage: RoleInput; research: RoleInput }
+  roles: {
+    thread: RoleInput
+    coordinator: RoleInput<CoordinatorEffort>
+    triage: RoleInput
+    research: RoleInput
+  }
   /** Usage also shows the estimated cost. */
   showCost: boolean
 }
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-export interface RoleInput {
+/**
+ * Effort stored on the coordinator role: a thinking level, `'default'` when the user
+ * explicitly chose the model's own default while inheriting the threads' model, or `null`
+ * when untouched (which defaults to `'low'` if the inherited model accepts it).
+ */
+export type CoordinatorEffort = Effort | 'default'
+
+export interface RoleInput<E extends string = Effort> {
   model: string | null
-  effort: Effort | null
-  /** Goes on with this when the model keeps being turned away; research has none. */
-  fallback: string | null
+  effort: E | null
 }
 
 export interface ModelSettings extends Omit<ModelSettingsInput, 'providers'> {
@@ -811,7 +822,7 @@ export const api = {
     lastSeq: number
     todo: TodoView
     /** The model it uses now, with how much its context holds. */
-    model: { id: string; contextTokens: number; compactAt: number } | null
+    model: { id: string; contextTokens: number; compactAt: number; effort?: Effort | null } | null
   }> => {
     const response = await conversationClient.getConversation({
       conversationId: id,
@@ -838,6 +849,9 @@ export const api = {
             id: response.model.id,
             contextTokens: Number(response.model.contextTokens),
             compactAt: Number(response.model.compactAt),
+            ...(response.model.effort !== undefined
+              ? { effort: response.model.effort as Effort }
+              : {}),
           }
         : null,
     }
@@ -876,11 +890,13 @@ export const api = {
   setThreadModel: async (
     threadId: string,
     model: string | null,
+    effort: Effort | null = null,
   ): Promise<{ thread: ThreadView }> => {
     const response = await threadClient.setThreadModel({
       threadId,
       modelAction:
         model === null ? { case: 'useDefault', value: true } : { case: 'model', value: model },
+      ...(model !== null && effort !== null ? { effort } : {}),
     })
     return { thread: fromProtoThreadView(requireField(response.thread, 'thread')) }
   },

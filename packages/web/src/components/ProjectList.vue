@@ -35,15 +35,23 @@ import {
 } from '../store'
 import ProjectActivityPopover from './ProjectActivityPopover.vue'
 
-const props = withDefaults(defineProps<{ compact?: boolean; active?: boolean }>(), {
-  active: true,
-})
+const props = withDefaults(
+  defineProps<{ compact?: boolean; active?: boolean; surface?: 'sidebar' | 'popover' }>(),
+  {
+    active: true,
+    surface: 'sidebar',
+  },
+)
+const emit = defineEmits<{ select: [] }>()
 
 const dialog = useDialog()
 const canReorder = computed(() => state.projects.length > 1)
 const menuOpen = ref(false)
 const inspecting = ref<string>()
-const activityDisabled = computed(() => !!props.compact || !props.active || menuOpen.value)
+const inPopover = computed(() => props.surface === 'popover')
+const activityDisabled = computed(
+  () => !!props.compact || inPopover.value || !props.active || menuOpen.value,
+)
 
 function inspectProject(id: string, open: boolean) {
   if (open && !activityDisabled.value) inspecting.value = id
@@ -55,6 +63,12 @@ function selectProject(id: string, dismiss?: () => void) {
   inspecting.value = undefined
   if (state.detail?.project.id === id) openMain({ kind: 'conversation' })
   else void openProject(id)
+  emit('select')
+}
+
+function createProject() {
+  startNewProject()
+  emit('select')
 }
 
 watch(activityDisabled, (disabled) => {
@@ -116,6 +130,7 @@ async function openSettings(id: string) {
 }
 
 function act(key: unknown, id: string) {
+  emit('select')
   if (key === 'settings') void openSettings(id)
   else if (key === 'rename') void rename(id)
   else if (key === 'trace') void openTrace(id)
@@ -154,7 +169,7 @@ async function confirmDelete(id: string) {
 </script>
 
 <template>
-  <div class="projects" :class="{ 'projects-compact': compact }">
+  <div class="projects" :class="{ 'projects-compact': compact, 'projects-popover': inPopover }">
     <div class="projects-head">
       <DouText variant="secondary" size="sm">{{ t('nav.projects') }}</DouText>
       <DouButton
@@ -162,7 +177,7 @@ async function confirmDelete(id: string) {
         size="sm"
         :aria-label="t('nav.newProject')"
         :title="t('nav.newProject')"
-        @click="startNewProject"
+        @click="createProject"
       >
         <PlusIcon />
       </DouButton>
@@ -185,7 +200,7 @@ async function confirmDelete(id: string) {
         >
           <template #default="{ item }">
             <ProjectActivityPopover
-              v-slot="{ inspect, dismiss, trackPointer }"
+              v-slot="{ inspect, dismiss }"
               :project-id="item.id"
               :name="item.name"
               :open="inspecting === item.id"
@@ -200,9 +215,6 @@ async function confirmDelete(id: string) {
                 :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
                 :aria-expanded="activityDisabled ? undefined : inspecting === item.id"
                 :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-                @pointerdown="trackPointer"
-                @pointercancel="trackPointer"
-                @pointerenter="trackPointer"
                 @click="selectProject(item.id, dismiss)"
                 @focus="inspect"
                 @blur="dismiss"
@@ -234,9 +246,23 @@ async function confirmDelete(id: string) {
 
 <style scoped>
 .projects {
+  --project-row-base: var(--dou-color-bg-canvas);
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.projects:not(.projects-popover) {
+  padding-bottom: var(--ariadne-safe-bottom);
+}
+
+.projects-popover {
+  --project-row-base: var(--dou-popover-bg, var(--dou-color-bg-surface));
+}
+
+.projects-popover nav {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
 }
 
 .projects-head {
@@ -250,8 +276,12 @@ async function confirmDelete(id: string) {
   min-height: 44px;
 }
 
+.projects-popover .projects-open {
+  min-height: 36px;
+}
+
 .projects-open {
-  --project-row-bg: var(--dou-color-bg-canvas);
+  --project-row-bg: var(--project-row-base);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -272,12 +302,12 @@ async function confirmDelete(id: string) {
 }
 
 .projects-open:hover {
-  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 6%, var(--dou-color-bg-canvas));
+  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 6%, var(--project-row-base));
   color: var(--dou-color-text);
 }
 
 .projects-open[aria-current] {
-  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 8%, var(--dou-color-bg-canvas));
+  --project-row-bg: color-mix(in oklab, var(--dou-color-text) 8%, var(--project-row-base));
   color: var(--dou-color-text);
   font-weight: var(--dou-font-weight-medium);
 }

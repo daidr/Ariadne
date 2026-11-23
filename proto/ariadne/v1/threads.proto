@@ -146,6 +146,7 @@ message ThreadView {
   optional ThreadReviewStatus review = 28;
   bool auto = 29;
   optional string autopilot_held = 30;
+  optional string effort = 31;
 }
 
 message BackgroundCommandResult {
@@ -251,6 +252,7 @@ message SetThreadModelRequest {
     string model = 2;
     bool use_default = 3;
   }
+  optional string effort = 4;
 }
 
 message SetThreadModelResponse {

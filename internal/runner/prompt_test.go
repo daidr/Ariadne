@@ -45,6 +45,7 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	}}
 	coordinatorPrompt := joinSections(coordinatorTurn.sections(ctx, project, nil))
 	for _, want := range []string{
+		"delegate code investigation, solution design, and implementation to discussion threads",
 		"[Title](thread:<threadId>)",
 		"[Title](artifact:<artifactId>)",
 		"Do not use thread: or artifact: links in external destinations",
@@ -54,6 +55,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"revert_plan_change",
 		"wait for update_plan to return its nodeId in ids",
 		"Do not call update_plan and create_thread in parallel for a new node",
+		"investigate code, analyze implementation details, review current behavior, propose changes",
+		"Do not inspect source code or draft technical proposals directly in the coordinator with read_file, search, find_files, or list_dir",
+		"Use research only for a lightweight, single-point read-only lookup",
 		"discussion threads handle memory requests made in them directly",
 		"Documents do not render Mermaid",
 		"embedded whiteboard code fence",
@@ -64,6 +68,9 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 	}
 	if strings.Contains(coordinatorPrompt, "cards that open threads or artifacts") {
 		t.Error("coordinator prompt still claims post_ui supports artifact cards")
+	}
+	if strings.Contains(coordinatorPrompt, "delegate implementation to discussion threads") {
+		t.Error("coordinator prompt still limits delegation to implementation")
 	}
 
 	threadTurn := &turn{Runner: &Runner{Repository: repo}, conversation: core.ConversationView{

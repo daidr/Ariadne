@@ -269,19 +269,19 @@ func (store *Store) UpdateModels(input any, kinds []sdk.ModelProviderInfo, valid
 		givenRoles := object(body["roles"])
 		for _, role := range roles {
 			given := object(givenRoles[role])
-			entry := Object{"model": nil, "effort": nil, "fallback": nil}
-			for _, field := range []string{"model", "effort", "fallback"} {
+			entry := Object{"model": nil, "effort": nil}
+			for _, field := range []string{"model", "effort"} {
 				raw := given[field]
-				if role == "research" && field == "fallback" {
-					raw = nil
-				}
 				if raw != nil {
 					value, ok := raw.(string)
-					if !ok || field == "effort" && !hasString(efforts, value) || field != "effort" && !ids[value] {
+					if !ok || field == "effort" && !validRoleEffort(role, value) || field != "effort" && !ids[value] {
 						return bad("roles." + role + "." + field)
 					}
 					entry[field] = value
 				}
+			}
+			if entry["model"] != nil && entry["effort"] == defaultEffort {
+				entry["effort"] = nil
 			}
 			roleConfig[role] = entry
 		}

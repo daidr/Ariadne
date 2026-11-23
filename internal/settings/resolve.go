@@ -10,19 +10,23 @@ import (
 )
 
 type ResolvedModel struct {
-	Provider      sdk.ModelProviderInfo `json:"provider"`
-	Settings      Object                `json:"settings"`
-	Model         string                `json:"model"`
-	Label         string                `json:"label"`
-	ContextTokens *float64              `json:"contextTokens,omitempty"`
-	Images        bool                  `json:"images"`
-	Price         Object                `json:"price,omitempty"`
-	Effort        string                `json:"effort,omitempty"`
-	Request       Object                `json:"request,omitempty"`
-	Fallback      *ResolvedModel        `json:"fallback,omitempty"`
+	Provider        sdk.ModelProviderInfo `json:"provider"`
+	Settings        Object                `json:"settings"`
+	Model           string                `json:"model"`
+	Label           string                `json:"label"`
+	ContextTokens   *float64              `json:"contextTokens,omitempty"`
+	Images          bool                  `json:"images"`
+	Price           Object                `json:"price,omitempty"`
+	Effort          string                `json:"effort,omitempty"`
+	Request         Object                `json:"request,omitempty"`
+	acceptedEfforts *[]string
 }
 
-func modelFor(config Object, role, given string) Object {
+func ValidEffort(value string) bool {
+	return hasString(efforts, value)
+}
+
+func modelFor(config Object, role, given string) (Object, bool) {
 	models := object(config["models"])
 	items := list(models["models"])
 	configured := object(models["roles"])
@@ -30,48 +34,90 @@ func modelFor(config Object, role, given string) Object {
 	switch role {
 	case "triage":
 		if own := find("triage"); own != nil {
-			return own
+			return own, false
 		}
 		if coordinator := find("coordinator"); coordinator != nil {
-			return coordinator
+			return coordinator, false
 		}
-		return find("thread")
+		return find("thread"), false
 	case "research":
-		return find("research")
+		return find("research"), false
 	case "coordinator":
 		if own := find("coordinator"); own != nil {
-			return own
+			return own, false
 		}
-		return find("thread")
+		return find("thread"), false
 	default:
 		if given != "" {
 			if own := findByID(items, given); own != nil {
-				return own
+				return own, true
 			}
 		}
-		return find("thread")
+		return find("thread"), false
 	}
-}
-func fallbackFor(config Object, role string) Object {
-	models := object(config["models"])
-	configured := object(models["roles"])
-	own := object(configured[role])
-	fallback := findByID(list(models["models"]), text(own["fallback"]))
-	if fallback != nil || role == "research" || role == "thread" || truthy(own["model"]) {
-		return fallback
-	}
-	if role == "triage" {
-		return fallbackFor(config, "coordinator")
-	}
-	return fallbackFor(config, "thread")
 }
 func effortFor(config Object, role string) string {
-	configured := object(object(config["models"])["roles"])
+	models := object(config["models"])
+	items := list(models["models"])
+	configured := object(models["roles"])
 	own := object(configured[role])
-	if role == "triage" && !truthy(own["model"]) && !truthy(own["effort"]) {
+	if role == "triage" && findByID(items, text(own["model"])) == nil && !truthy(own["effort"]) {
 		return text(object(configured["coordinator"])["effort"])
 	}
 	return text(own["effort"])
+}
+func roleUsesCoordinatorDefault(config Object, role string) bool {
+	models := object(config["models"])
+	items := list(models["models"])
+	configured := object(models["roles"])
+	hasModel := func(role string) bool { return findByID(items, text(object(configured[role])["model"])) != nil }
+	switch role {
+	case "triage":
+		own := object(configured["triage"])
+		if hasModel("triage") || truthy(own["effort"]) {
+			return false
+		}
+		fallthrough
+	case "coordinator":
+		coord := object(configured["coordinator"])
+		return !hasModel("coordinator") && !truthy(coord["effort"])
+	default:
+		return false
+	}
+}
+func acceptedEfforts(chosen Object) *[]string {
+	raw, exists := chosen["efforts"]
+	if !exists || raw == nil {
+		return nil
+	}
+	values := []string{}
+	for _, item := range list(raw) {
+		values = append(values, text(item))
+	}
+	return &values
+}
+func acceptsEffort(chosen Object, wanted string) bool {
+	accepted := acceptedEfforts(chosen)
+	if accepted == nil {
+		return hasString([]string{"low", "medium", "high"}, wanted)
+	}
+	return hasString(*accepted, wanted)
+}
+func resolveEffort(config Object, role, givenEffort string, chosen Object, matchedGiven bool) string {
+	wanted := effortFor(config, role)
+	if role == "thread" && matchedGiven {
+		wanted = givenEffort
+	}
+	if wanted == defaultEffort {
+		return ""
+	}
+	if wanted == "" {
+		if roleUsesCoordinatorDefault(config, role) && acceptsEffort(chosen, "low") {
+			return "low"
+		}
+		return ""
+	}
+	return sdk.EffortWithin(wanted, acceptedEfforts(chosen))
 }
 func modelLabel(config, model Object) string {
 	provider := findByID(list(object(config["models"])["providers"]), text(model["provider"]))
@@ -81,7 +127,7 @@ func modelLabel(config, model Object) string {
 	}
 	return name + " / " + text(model["model"])
 }
-func resolveConfig(config Object, role string, chosen Object, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+func resolveConfig(config Object, role, givenEffort string, chosen Object, matchedGiven bool, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	if chosen == nil {
 		return nil, nil
 	}
@@ -93,24 +139,14 @@ func resolveConfig(config Object, role string, chosen Object, kinds []sdk.ModelP
 	if !exists {
 		return nil, domainerr.New("error.modelUnknown", Object{"provider": provider["kind"]})
 	}
-	var accepted *[]string
-	if raw, exists := chosen["efforts"]; exists {
-		values := []string{}
-		for _, raw := range list(raw) {
-			values = append(values, text(raw))
-		}
-		accepted = &values
-	}
-	effort := ""
-	if wanted := effortFor(config, role); wanted != "" {
-		effort = sdk.EffortWithin(wanted, accepted)
-	}
+	accepted := acceptedEfforts(chosen)
+	effort := resolveEffort(config, role, givenEffort, chosen, matchedGiven)
 	request, _ := clone(object(provider["request"]))
 	if truthy(chosen["maxTokens"]) {
 		request["maxTokens"] = chosen["maxTokens"]
 	}
 	ownedSettings, _ := clone(effective(info, object(provider["settings"])))
-	result := &ResolvedModel{Provider: info, Settings: ownedSettings, Model: text(chosen["model"]), Label: modelLabel(config, chosen), Images: chosen["images"] != false, Effort: effort, Request: request}
+	result := &ResolvedModel{Provider: info, Settings: ownedSettings, Model: text(chosen["model"]), Label: modelLabel(config, chosen), Images: chosen["images"] != false, Effort: effort, Request: request, acceptedEfforts: accepted}
 	if size, ok := number(chosen["contextTokens"]); ok && size != 0 {
 		result.ContextTokens = &size
 	}
@@ -119,52 +155,65 @@ func resolveConfig(config Object, role string, chosen Object, kinds []sdk.ModelP
 	}
 	return result, nil
 }
-func resolveModel(config Object, role, given string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	chosen := modelFor(config, role, given)
-	resolved, err := resolveConfig(config, role, chosen, kinds)
-	if err != nil || resolved == nil {
-		return resolved, err
-	}
-	if backup := fallbackFor(config, role); backup != nil && backup["id"] != chosen["id"] {
-		resolved.Fallback, err = resolveConfig(config, role, backup, kinds)
-	}
-	return resolved, err
+func resolveModel(config Object, role, given, givenEffort string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+	chosen, matchedGiven := modelFor(config, role, given)
+	return resolveConfig(config, role, givenEffort, chosen, matchedGiven, kinds)
 }
-func (store *Store) ResolveModel(role, given string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
+func (store *Store) ResolveModel(role, given, givenEffort string, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	if !hasString(roles, role) {
 		return nil, bad("role")
 	}
-	return resolveModel(store.snapshot(), role, given, kinds)
+	return resolveModel(store.snapshot(), role, given, givenEffort, kinds)
 }
 
-func (store *Store) ConversationModel(role, given string, fallback bool) Object {
+func (store *Store) ResolveResearch(parent *ResolvedModel, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	config := store.snapshot()
-	chosen := modelFor(config, role, given)
+	model, err := resolveModel(config, "research", "", "", kinds)
+	if err != nil {
+		return nil, err
+	}
+	if model != nil {
+		return model, nil
+	}
+	if parent == nil {
+		return nil, nil
+	}
+	wanted := effortFor(config, "research")
+	if wanted == "" {
+		return parent, nil
+	}
+	cloned := *parent
+	cloned.Effort = sdk.EffortWithin(wanted, parent.acceptedEfforts)
+	return &cloned, nil
+}
+
+func (store *Store) ConversationModel(role, given, givenEffort string) Object {
+	config := store.snapshot()
+	chosen, matchedGiven := modelFor(config, role, given)
 	if chosen == nil {
 		return nil
-	}
-	if fallback {
-		if backup := fallbackFor(config, role); backup != nil {
-			chosen = backup
-		}
 	}
 	size, ok := number(chosen["contextTokens"])
 	if !ok || size <= 0 {
 		size = 128000
 	}
 	share, _ := number(object(config["limits"])["compactShare"])
-	return Object{"id": chosen["id"], "contextTokens": size, "compactAt": transcript.CompactAt(size, share)}
+	out := Object{"id": chosen["id"], "contextTokens": size, "compactAt": transcript.CompactAt(size, share)}
+	if effort := resolveEffort(config, role, givenEffort, chosen, matchedGiven); effort != "" {
+		out["effort"] = effort
+	}
+	return out
 }
 func (store *Store) ResolveSaved(model Object, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
-	return resolveConfig(store.snapshot(), "thread", model, kinds)
+	return resolveConfig(store.snapshot(), "thread", "", model, false, kinds)
 }
 func (store *Store) ResolveCoordinator(triage bool, contextTokens float64, kinds []sdk.ModelProviderInfo) (*ResolvedModel, error) {
 	config := store.snapshot()
-	coordinator, err := resolveModel(config, "coordinator", "", kinds)
+	coordinator, err := resolveModel(config, "coordinator", "", "", kinds)
 	if !triage || err != nil {
 		return coordinator, err
 	}
-	quick, err := resolveModel(config, "triage", "", kinds)
+	quick, err := resolveModel(config, "triage", "", "", kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +235,7 @@ func (store *Store) ModelChoices(kinds []sdk.ModelProviderInfo) []any {
 	config := store.snapshot()
 	models := object(config["models"])
 	providers := list(models["providers"])
-	thread := modelFor(config, "thread", "")
+	thread, _ := modelFor(config, "thread", "")
 	choices := []any{}
 	for _, raw := range list(models["models"]) {
 		model := object(raw)
@@ -243,18 +292,11 @@ func (store *Store) ModelUsageByKinds(kinds []string) ([]string, []string) {
 	}
 	roleMap := object(models["roles"])
 	var usedRoles []string
-	fallbackUsed := false
 	for _, role := range roles {
 		entry := object(roleMap[role])
 		if modelIDs[text(entry["model"])] {
 			usedRoles = append(usedRoles, role)
 		}
-		if modelIDs[text(entry["fallback"])] {
-			fallbackUsed = true
-		}
-	}
-	if fallbackUsed {
-		usedRoles = append(usedRoles, "fallback")
 	}
 	return providerNames, usedRoles
 }
@@ -266,7 +308,7 @@ func (store *Store) ResolvedModels(role string, kinds []sdk.ModelProviderInfo) [
 	config := store.snapshot()
 	result := []*ResolvedModel{}
 	for _, raw := range list(object(config["models"])["models"]) {
-		model, err := resolveConfig(config, role, object(raw), kinds)
+		model, err := resolveConfig(config, role, "", object(raw), false, kinds)
 		if err == nil && model != nil {
 			result = append(result, model)
 		}

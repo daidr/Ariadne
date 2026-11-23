@@ -59,20 +59,29 @@ function tapElement(el: HTMLElement) {
 
 const wrappers: VueWrapper[] = []
 
-function mountProjectList(options: { compact?: boolean; active?: boolean } = {}) {
+function mountProjectList(
+  options: { compact?: boolean; active?: boolean; surface?: 'sidebar' | 'popover' } = {},
+) {
   const compact = ref(options.compact ?? false)
   const active = ref(options.active ?? true)
+  const surface = ref<'sidebar' | 'popover'>(options.surface ?? 'sidebar')
+  const onSelect = vi.fn()
   const Host = defineComponent({
     setup() {
       return () =>
         h(DouConfigProvider, { locale: douLocale.value }, () =>
-          h(ProjectList, { compact: compact.value, active: active.value }),
+          h(ProjectList, {
+            compact: compact.value,
+            active: active.value,
+            surface: surface.value,
+            onSelect,
+          }),
         )
     },
   })
   const wrapper = mount(Host, { attachTo: document.body })
   wrappers.push(wrapper)
-  return { wrapper, compact, active }
+  return { wrapper, compact, active, surface, onSelect }
 }
 
 describe('ProjectList activity popover behavior', () => {
@@ -313,5 +322,28 @@ describe('ProjectList activity popover behavior', () => {
     await flushPromises()
 
     expect(visiblePopovers()).toHaveLength(0)
+  })
+
+  test('disables hover activity popover and emits select when rendered inside a popover', async () => {
+    const { wrapper, onSelect } = mountProjectList({
+      compact: false,
+      active: true,
+      surface: 'popover',
+    })
+    const button = wrapper.find<HTMLButtonElement>('button[data-project-id="prj_2"]')
+
+    expect(button.attributes('aria-expanded')).toBeUndefined()
+    button.element.dispatchEvent(
+      new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }),
+    )
+    vi.advanceTimersByTime(600)
+    await flushPromises()
+
+    expect(getProjectActivity).not.toHaveBeenCalled()
+    expect(visiblePopovers()).toHaveLength(0)
+
+    await button.trigger('click')
+    await nextTick()
+    expect(onSelect).toHaveBeenCalledTimes(1)
   })
 })

@@ -44,11 +44,12 @@ type TurnFilter interface {
 // Hooks allows specialized ACP-based plugins to customize launch behavior,
 // stream filtering, and usage accounting without coupling into generic ACP.
 type Hooks struct {
-	DefaultCommand    string
-	ResolveProfile    func(argv []string) string
-	PrepareProfile    func(argv []string, directory string, profile string) ([]string, error)
-	NewTurnFilter     func() TurnFilter
-	AdjustInputTokens func(TurnUsage) int64
+	DefaultCommand      string
+	ResolveProfile      func(argv []string) string
+	PrepareProfile      func(argv []string, directory string, profile string) ([]string, error)
+	NewTurnFilter       func() TurnFilter
+	AdjustInputTokens   func(TurnUsage) int64
+	RetryableStartError func(operation string, err error) bool
 }
 
 // ListOptions controls optional behavior during ACP model catalog discovery.
@@ -260,6 +261,8 @@ type acpDriver struct {
 	defaultLevel                    string
 	removeTools                     func()
 	requests                        sync.WaitGroup
+	promptDone                      chan struct{}
+	settledUsage                    *agentruntime.Usage
 }
 
 type acpCheckpoint struct {
@@ -540,6 +543,7 @@ func (d *acpDriver) Start(life context.Context) error {
 }
 
 func (d *acpDriver) startError(operation string, err error) error {
+	retryable := d.hooks.RetryableStartError != nil && d.hooks.RetryableStartError(operation, err)
 	var remote *rpc.Error
 	if errors.As(err, &remote) && remote.Code == -32000 {
 		err = fmt.Errorf("the agent asks to sign in first (run it once in a terminal): %w", err)
@@ -551,12 +555,61 @@ func (d *acpDriver) startError(operation string, err error) error {
 	if text := strings.Join(tail, "\n"); text != "" {
 		err = fmt.Errorf("%w: %s", err, text)
 	}
-	return d.diagnosticError(operation, err)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return &agentruntime.NativeAgentError{Err: err, Detail: d.diagnosticLocked(operation, err), Retryable: retryable}
 }
 
 func (d *acpDriver) HistoryBudget(system string) int {
 	overhead := len("<instructions>\n") + len(system) + len("\n</instructions>\n\n")
-	return max(0, agentruntime.DefaultHistoryReplayBytes-overhead)
+	return max(agentruntime.MinHistoryReplayBytes, agentruntime.DefaultHistoryReplayBytes-overhead)
+}
+
+func (d *acpDriver) recordSettledUsageLocked(u *TurnUsage) {
+	if u == nil {
+		return
+	}
+	input := u.Input
+	if d.hooks.AdjustInputTokens != nil {
+		input = d.hooks.AdjustInputTokens(*u)
+	}
+	if input <= 0 && u.Output <= 0 && u.Cached <= 0 && u.Written <= 0 && u.Thought <= 0 {
+		return
+	}
+	if d.settledUsage == nil {
+		d.settledUsage = &agentruntime.Usage{}
+	}
+	d.settledUsage.Input += input
+	d.settledUsage.Output += u.Output
+	if u.Cached > 0 {
+		if d.settledUsage.Cached == nil {
+			d.settledUsage.Cached = new(int64)
+		}
+		*d.settledUsage.Cached += u.Cached
+	}
+	if u.Written > 0 {
+		if d.settledUsage.CacheWrite == nil {
+			d.settledUsage.CacheWrite = new(int64)
+		}
+		*d.settledUsage.CacheWrite += u.Written
+	}
+	if u.Thought > 0 {
+		if d.settledUsage.Reasoning == nil {
+			d.settledUsage.Reasoning = new(int64)
+		}
+		*d.settledUsage.Reasoning += u.Thought
+	}
+}
+
+func (d *acpDriver) DrainUsage() *agentruntime.Usage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.settledUsage == nil {
+		return nil
+	}
+	usage := *d.settledUsage
+	d.settledUsage = nil
+	return &usage
 }
 
 func (d *acpDriver) Prompt(ctx context.Context, input agentruntime.Input, effort string) error {
@@ -584,11 +637,14 @@ func (d *acpDriver) Prompt(ctx context.Context, input agentruntime.Input, effort
 			prompt = append(prompt, map[string]any{"type": "image", "mimeType": image.MIME, "data": image.Data})
 		}
 	}
+	done := make(chan struct{})
+	d.promptDone = done
 	d.requests.Add(1)
 	d.mu.Unlock()
 	// session/prompt returns only after the whole turn. Its lifetime spans the
 	// Ariadne steps that separately execute its pending tool calls.
 	go func() {
+		defer close(done)
 		defer d.requests.Done()
 		var result struct {
 			Stop  string     `json:"stopReason"`
@@ -599,6 +655,9 @@ func (d *acpDriver) Prompt(ctx context.Context, input agentruntime.Input, effort
 		defer d.mu.Unlock()
 		d.active = false
 		if d.closing {
+			if err == nil && result.Usage != nil {
+				d.recordSettledUsageLocked(result.Usage)
+			}
 			return
 		}
 		var pending, filterDetail string
@@ -683,7 +742,7 @@ func (d *acpDriver) Checkpoint() (json.RawMessage, error) {
 func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 	d.mu.Lock()
 	d.closing = true
-	active, sessionID := d.active, d.sessionID
+	active, sessionID, promptDone := d.active, d.sessionID, d.promptDone
 	d.mu.Unlock()
 	if d.removeTools != nil {
 		d.removeTools()
@@ -694,6 +753,15 @@ func (d *acpDriver) Close(ctx context.Context, discard bool) error {
 			notify, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			_ = d.stdio.Peer.Notify(notify, "session/cancel", map[string]any{"sessionId": sessionID})
 			cancel()
+			if promptDone != nil {
+				wait := time.NewTimer(time.Second)
+				select {
+				case <-promptDone:
+				case <-wait.C:
+				case <-ctx.Done():
+				}
+				wait.Stop()
+			}
 		}
 		err = d.stdio.Close(ctx)
 	}

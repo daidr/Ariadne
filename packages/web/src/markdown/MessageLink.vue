@@ -4,11 +4,12 @@ import { DouLink } from 'dou-ui'
 import { computed, ref, watch, type VNode } from 'vue'
 import { kindIcon } from '../artifacts/kinds'
 import StageIcon from '../components/StageIcon.vue'
+import { dragArtifact, dragThread } from '../side/dock'
 import { artifactKey, threadKey } from '../side/layout'
 import { openThreadFrom, state } from '../store'
 import { linkSummary } from './link-summaries'
 import type { LinkSummary } from '@ariadne/plugin-sdk'
-import { fileSrc, innerLink, sameHostedRepository } from './links'
+import { innerLink, sameHostedRepository } from './links'
 import { openFilePreview } from '../files/preview'
 import PullRequestLink from './PullRequestLink.vue'
 import { pullRequestLabel, trackedPullRequestForUrl } from './tracked-pull-requests'
@@ -42,21 +43,15 @@ const artifact = computed(() =>
     : null,
 )
 const file = computed(() => (inner.value?.kind === 'file' ? inner.value.id : null))
-// Pass an href so DouLink renders a true inline <a> that wraps across lines with surrounding text
-// (a <button> stays an atomic inline box and pushes long titles and trailing punctuation onto new lines).
 const innerHref = computed(() => {
   const projectId = state.currentId
+  if (!projectId) return undefined
   if (thread.value) {
-    return projectId
-      ? `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(threadKey(thread.value.id))}`
-      : '#'
+    return `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(threadKey(thread.value.id))}`
   }
   if (artifact.value) {
-    return projectId
-      ? `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(artifactKey(artifact.value.id))}`
-      : '#'
+    return `/projects/${encodeURIComponent(projectId)}?pane=side&tab=${encodeURIComponent(artifactKey(artifact.value.id))}`
   }
-  if (file.value) return fileSrc(file.value)
   return undefined
 })
 
@@ -95,14 +90,13 @@ watch(
   { immediate: true },
 )
 
+function drag(event: PointerEvent) {
+  if (thread.value) dragThread(event, thread.value.id)
+  else if (artifact.value) dragArtifact(event, artifact.value.id)
+}
+
 function open(event?: MouseEvent) {
-  if (
-    event &&
-    (event.metaKey || event.ctrlKey || event.shiftKey) &&
-    !file.value &&
-    innerHref.value &&
-    innerHref.value !== '#'
-  ) {
+  if (event && (event.metaKey || event.ctrlKey || event.shiftKey) && innerHref.value) {
     return
   }
   event?.preventDefault()
@@ -125,6 +119,7 @@ function open(event?: MouseEvent) {
     variant="soft"
     class="inline-ref"
     @click="open"
+    @pointerdown="drag"
   >
     <template #leading>
       <StageIcon

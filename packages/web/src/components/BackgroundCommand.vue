@@ -2,7 +2,7 @@
 import type { BackgroundView } from '@ariadne/core'
 import { DouButton, DouCodeBlock, DouLink, DouText } from 'dou-ui'
 import { StopIcon } from '@dou-ui/icons'
-import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../api'
 import { t } from '../i18n'
 import { report, state, stopBackground } from '../store'
@@ -80,24 +80,6 @@ async function stop() {
     stopping.value = false
   }
 }
-
-// The newest output stays in view, unless the user scrolled up to read.
-const box = useTemplateRef<HTMLElement>('box')
-let pinned = true
-function onScroll(event: Event) {
-  const el = event.target
-  if (el instanceof HTMLElement && el.matches('.dou-code-block__body')) {
-    pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-  }
-}
-watch(
-  tail,
-  () => {
-    const el = box.value?.querySelector<HTMLElement>('.dou-code-block__body')
-    if (el && pinned) el.scrollTop = el.scrollHeight
-  },
-  { flush: 'post' },
-)
 </script>
 
 <template>
@@ -122,8 +104,8 @@ watch(
     <DouLink v-if="command.url" :href="command.url" external class="background-url">{{
       served
     }}</DouLink>
-    <div ref="box" class="background-output" @scroll.capture="onScroll">
-      <DouCodeBlock v-if="tail" :code="tail" wrap streaming />
+    <div class="background-output">
+      <DouCodeBlock v-if="tail" :code="tail" wrap streaming :max-height="240" />
       <DouText v-else variant="tertiary" size="sm" class="background-empty">{{
         t('command.noOutput')
       }}</DouText>
@@ -168,23 +150,8 @@ watch(
   white-space: nowrap;
 }
 
-.background-output,
-.background-output :deep(.dou-code-block) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.background-output :deep(.dou-code-block__body) {
-  box-sizing: border-box;
-  max-height: 240px;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-width: thin;
-}
-
-.background-output :deep(.dou-code-block__copy) {
-  right: var(--dou-code-block-padding-x);
+.background-output {
+  min-width: 0;
 }
 
 .background-empty {

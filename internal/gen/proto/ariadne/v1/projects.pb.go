@@ -2342,6 +2342,7 @@ type ProjectThreadView struct {
 	Review          *ProjectReviewView        `protobuf:"bytes,28,opt,name=review,proto3,oneof" json:"review,omitempty"`
 	Auto            bool                      `protobuf:"varint,29,opt,name=auto,proto3" json:"auto,omitempty"`
 	AutopilotHeld   *string                   `protobuf:"bytes,30,opt,name=autopilot_held,json=autopilotHeld,proto3,oneof" json:"autopilot_held,omitempty"`
+	Effort          *string                   `protobuf:"bytes,31,opt,name=effort,proto3,oneof" json:"effort,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2582,6 +2583,13 @@ func (x *ProjectThreadView) GetAuto() bool {
 func (x *ProjectThreadView) GetAutopilotHeld() string {
 	if x != nil && x.AutopilotHeld != nil {
 		return *x.AutopilotHeld
+	}
+	return ""
+}
+
+func (x *ProjectThreadView) GetEffort() string {
+	if x != nil && x.Effort != nil {
+		return *x.Effort
 	}
 	return ""
 }
@@ -5450,7 +5458,7 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\vreviewer_id\x18\x01 \x01(\tR\n" +
 	"reviewerId\x12\x1a\n" +
 	"\x06rounds\x18\x02 \x01(\x03B\x020\x02R\x06rounds\x12\x1c\n" +
-	"\treviewing\x18\x03 \x01(\bR\treviewing\"\xc1\f\n" +
+	"\treviewing\x18\x03 \x01(\bR\treviewing\"\xe9\f\n" +
 	"\x11ProjectThreadView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -5490,7 +5498,8 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\treview_of\x18\x1b \x01(\tH\x0eR\breviewOf\x88\x01\x01\x12:\n" +
 	"\x06review\x18\x1c \x01(\v2\x1d.ariadne.v1.ProjectReviewViewH\x0fR\x06review\x88\x01\x01\x12\x12\n" +
 	"\x04auto\x18\x1d \x01(\bR\x04auto\x12*\n" +
-	"\x0eautopilot_held\x18\x1e \x01(\tH\x10R\rautopilotHeld\x88\x01\x01B\n" +
+	"\x0eautopilot_held\x18\x1e \x01(\tH\x10R\rautopilotHeld\x88\x01\x01\x12\x1b\n" +
+	"\x06effort\x18\x1f \x01(\tH\x11R\x06effort\x88\x01\x01B\n" +
 	"\n" +
 	"\b_node_idB\x0e\n" +
 	"\f_last_reportB\x0f\n" +
@@ -5512,7 +5521,8 @@ const file_ariadne_v1_projects_proto_rawDesc = "" +
 	"\n" +
 	"_review_ofB\t\n" +
 	"\a_reviewB\x11\n" +
-	"\x0f_autopilot_held\"M\n" +
+	"\x0f_autopilot_heldB\t\n" +
+	"\a_effort\"M\n" +
 	"\x13ProjectChoiceOption\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12 \n" +
 	"\vconsequence\x18\x02 \x01(\tR\vconsequence\"\xa2\x01\n" +

@@ -32,6 +32,7 @@ const grammars: Record<ShikiLanguageKey, () => Promise<GrammarModule>> = {
   jsx: () => import('shiki/langs/jsx.mjs'),
   kotlin: () => import('shiki/langs/kotlin.mjs'),
   lua: () => import('shiki/langs/lua.mjs'),
+  makefile: () => import('shiki/langs/make.mjs'),
   markdown: () => import('shiki/langs/markdown.mjs'),
   php: () => import('shiki/langs/php.mjs'),
   powershell: () => import('shiki/langs/powershell.mjs'),

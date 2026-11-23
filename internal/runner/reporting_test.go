@@ -14,6 +14,7 @@ import (
 	"github.com/daidr/Ariadne/internal/eventstore"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -407,5 +408,214 @@ func TestThreadContextUsageUpdatesBeforeFirstVisibleMessage(t *testing.T) {
 	}
 	if conv.ContextTokens != 55000 {
 		t.Fatalf("expected final contextTokens 55000, got %d", conv.ContextTokens)
+	}
+}
+
+func TestLongTurnCompactsDirectlyWithoutClearingOldToolResults(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	project, err := repo.CreateProject(ctx, new("Append-only context"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Long tool session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.StartTurn(ctx, thread.ID, "fixture")
+	if err != nil || id == "" {
+		t.Fatalf("expected turn, got %q: %v", id, err)
+	}
+	conversation, err := repo.GetConversation(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := models.New()
+	info := sdk.ModelProviderInfo{Kind: "fixture", Program: true}
+	requests, summaries := 0, 0
+	if _, err := registry.Register(sdk.ModelProvider{Info: info, Stream: func(_ context.Context, _ map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+		return func(yield func(sdk.Part) bool) {
+			if request.Conversation == "" {
+				summaries++
+				if yield(sdk.Part{Type: "text", Text: fmt.Sprintf("Compacted summary #%d.", summaries)}) {
+					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				}
+				return
+			}
+			requests++
+			// Report ContextInput above threshold (20000 * 0.6 = 12000) after building
+			// enough tool steps so CompactionCut has a valid cut point twice in one turn.
+			switch requests {
+			case 1, 2:
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("x", 12000))}) {
+					if requests == 2 {
+						yield(sdk.Part{Type: "usage", Input: new(int64(15000)), Output: new(int64(50)), ContextInput: new(int64(15000))})
+					}
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 3, 4:
+				if requests == 3 && summaries != 1 {
+					t.Errorf("expected first compaction before step 3, got %d summaries", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: fmt.Sprintf("todo-%d", requests), Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step %d","detail":%q,"status":"doing"}]}`, requests, strings.Repeat("y", 12000))}) {
+					if requests == 4 {
+						yield(sdk.Part{Type: "usage", Input: new(int64(16000)), Output: new(int64(50)), ContextInput: new(int64(16000))})
+					}
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 5:
+				if summaries != 2 {
+					t.Errorf("expected second compaction before step 5 in the same long turn, got %d summaries", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: "report-done", Name: "report", Arguments: `{"kind":"done","headline":"Finished","summary":"Completed long turn."}`}) {
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 6:
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			default:
+				t.Errorf("unexpected extra request %d", requests)
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, id: id, conversation: conversation}
+	if err := active.run(ctx, &settings.ResolvedModel{Provider: info, Model: "fixture", Label: "fixture", ContextTokens: new(20_000.0)}); err != nil {
+		t.Fatal(err)
+	}
+	if summaries != 2 {
+		t.Fatalf("expected 2 direct compactions in one turn, got %d", summaries)
+	}
+	page, err := repo.ListTurnEvents(ctx, thread.ID, core.TurnEventOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compacted := 0
+	for _, event := range page.Events {
+		if event.Type == "conversation.results_cleared" {
+			t.Fatalf("unexpected conversation.results_cleared event: %s", string(event.Data))
+		}
+		if event.Type == "conversation.compacted" {
+			compacted++
+		}
+	}
+	if compacted != 2 {
+		t.Fatalf("expected 2 conversation.compacted events, got %d", compacted)
+	}
+}
+
+func TestEffectiveContextSizePreventsFalseCompactionFromEstimateInflation(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "test.sqlite")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	project, err := repo.CreateProject(ctx, new("Estimate calibration"), core.ProjectStart{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Estimate calibration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := repo.StartTurn(ctx, thread.ID, "fixture")
+	if err != nil || id == "" {
+		t.Fatalf("expected turn, got %q: %v", id, err)
+	}
+	conversation, err := repo.GetConversation(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(filepath.Join(home, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := models.New()
+	info := sdk.ModelProviderInfo{Kind: "fixture", Program: true}
+	requests, summaries := 0, 0
+	if _, err := registry.Register(sdk.ModelProvider{Info: info, Stream: func(_ context.Context, _ map[string]any, request sdk.Request) iter.Seq[sdk.Part] {
+		return func(yield func(sdk.Part) bool) {
+			if request.Conversation == "" {
+				summaries++
+				if yield(sdk.Part{Type: "text", Text: fmt.Sprintf("Compacted summary #%d.", summaries)}) {
+					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				}
+				return
+			}
+			requests++
+			// Threshold is 20,000 * 0.6 = 12,000 tokens.
+			switch requests {
+			case 1:
+				// Add ~35,000 ASCII chars (~10,000 estimated tokens) to history.
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-1", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 1","detail":%q,"status":"doing"}]}`, strings.Repeat("a", 35000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(4000)), Output: new(int64(20)), ContextInput: new(int64(4000))})
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 2:
+				// Before step 2, estimate is ~10,500 (< 12,000). Report true provider
+				// ContextInput = 6,000, and add ~7,000 ASCII chars (~2,000 est tokens)
+				// so raw estimate before step 3 crosses 12,500 (> 12,000), while
+				// calibrated effectiveContextSize stays ~8,000 (< 12,000).
+				if summaries != 0 {
+					t.Errorf("unexpected compaction before step 2: %d", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-2", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 2","detail":%q,"status":"doing"}]}`, strings.Repeat("b", 7000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(6000)), Output: new(int64(20)), ContextInput: new(int64(6000))})
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 3:
+				// Must NOT compact here even though raw EstimateTokens(messages) >= 12,000.
+				tmsgs := make([]transcript.Message, len(request.Messages))
+				for i, m := range request.Messages {
+					tmsgs[i] = transcript.Message{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+				}
+				if est := transcript.EstimateTokens(tmsgs); est < 12000 {
+					t.Errorf("test precondition failed: expected raw EstimateTokens >= 12000 at step 3, got %d", est)
+				}
+				if summaries != 0 {
+					t.Errorf("false compaction triggered before step 3 despite calibrated context below threshold (summaries=%d)", summaries)
+				}
+				// Now emit a genuinely large delta (~24,000 ASCII chars ≈ ~6,900 est tokens)
+				// with ContextInput=6,500 so effectiveContextSize (~13,400) crosses 12,000.
+				if yield(sdk.Part{Type: "tool-call", ID: "todo-3", Name: "update_todo", Arguments: fmt.Sprintf(`{"items":[{"label":"Step 3","detail":%q,"status":"doing"}]}`, strings.Repeat("c", 24000))}) {
+					yield(sdk.Part{Type: "usage", Input: new(int64(6500)), Output: new(int64(20)), ContextInput: new(int64(6500))})
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 4:
+				// Real compaction must trigger before step 4.
+				if summaries != 1 {
+					t.Errorf("expected compaction before step 4 after large delta, got %d summaries", summaries)
+				}
+				if yield(sdk.Part{Type: "tool-call", ID: "report-done", Name: "report", Arguments: `{"kind":"done","headline":"Finished","summary":"Verified calibrated compaction."}`}) {
+					yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+				}
+			case 5:
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			default:
+				t.Errorf("unexpected extra request %d", requests)
+				yield(sdk.Part{Type: "finish", Reason: "stop"})
+			}
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, id: id, conversation: conversation}
+	if err := active.run(ctx, &settings.ResolvedModel{Provider: info, Model: "fixture", Label: "fixture", ContextTokens: new(20_000.0)}); err != nil {
+		t.Fatal(err)
+	}
+	if summaries != 1 {
+		t.Fatalf("expected exactly 1 compaction, got %d", summaries)
 	}
 }

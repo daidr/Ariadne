@@ -382,10 +382,12 @@ function pick(key: string) {
 
 <style scoped>
 .trace {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  padding-bottom: var(--ariadne-safe-bottom);
 }
 
 .trace-header {

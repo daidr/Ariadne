@@ -1,5 +1,6 @@
 import { shallowRef } from 'vue'
 import type { SheetData, SheetRow } from '@dou-ui/sheet'
+import { languageHintOf } from '../highlighting/languages'
 
 export interface PreviewFile {
   id: string
@@ -27,19 +28,7 @@ export function previewKind(mime: string, name: string) {
 }
 
 export function codeLanguage(name: string) {
-  const basename = name.split(/[\\/]/).at(-1)?.toLowerCase()
-  if (basename?.match(/^dockerfile(?:\.|$)/)) return 'dockerfile'
-  if (basename?.match(/^\.env(?:\.|$)/)) return 'ini'
-  const extension = basename?.includes('.') ? basename.split('.').at(-1) : undefined
-  const aliases: Record<string, string> = {
-    cjs: 'javascript',
-    mjs: 'javascript',
-    md: 'markdown',
-    yml: 'yaml',
-    env: 'ini',
-    conf: 'ini',
-  }
-  return extension ? (aliases[extension] ?? extension) : undefined
+  return languageHintOf(name) ?? undefined
 }
 
 export interface SheetPreviewRows {

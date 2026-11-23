@@ -82,6 +82,7 @@ type ThreadView struct {
 	References      any            `json:"references"`
 	EndedReferences any            `json:"endedReferences"`
 	Model           any            `json:"model"`
+	Effort          any            `json:"effort"`
 	BranchSlug      any            `json:"branchSlug"`
 	Usage           map[string]any `json:"usage"`
 	Progress        *Progress      `json:"progress"`
@@ -167,7 +168,7 @@ const threadSelect = `SELECT t.*, c.turn_id, c.pending_seq, c.last_outcome, c.la
 
 func toThread(row record, now int64) (ThreadView, error) {
 	view := ThreadView{
-		ID: row.text("id"), ProjectID: row.text("project_id"), Title: row.text("title"), NodeID: row["node_id"], LastReport: row["last_report"], LastSummary: row["last_summary"], LastHeadline: row["last_headline"], Model: row["model"], BranchSlug: row["branch_slug"], Usage: usage(row), CreatedAt: row.integer("created_at"), UpdatedAt: row.integer("updated_at"), ReviewOf: row["review_of"], Auto: row.flag("auto"), AutopilotHeld: row["autopilot_held"],
+		ID: row.text("id"), ProjectID: row.text("project_id"), Title: row.text("title"), NodeID: row["node_id"], LastReport: row["last_report"], LastSummary: row["last_summary"], LastHeadline: row["last_headline"], Model: row["model"], Effort: row["effort"], BranchSlug: row["branch_slug"], Usage: usage(row), CreatedAt: row.integer("created_at"), UpdatedAt: row.integer("updated_at"), ReviewOf: row["review_of"], Auto: row.flag("auto"), AutopilotHeld: row["autopilot_held"],
 	}
 	for _, field := range []struct {
 		key      string

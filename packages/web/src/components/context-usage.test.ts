@@ -28,7 +28,6 @@ function makeConversation(id: string, overrides: Partial<ConversationView> = {})
     turn: {
       turnId: 'trn_1',
       model: 'model-1',
-      fallback: false,
       startedAt: Date.now() - 5_000,
       activity: '读取文件',
     },

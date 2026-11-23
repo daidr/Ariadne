@@ -2,7 +2,12 @@
 import { DouChatList, DouSpinner, type ChatListExpose } from 'dou-ui'
 import { useTemplateRef } from 'vue'
 
-defineProps<{ items: T[]; loadingEarlier: boolean }>()
+defineProps<{
+  items: T[]
+  loadingEarlier: boolean
+  bottomInset?: number | string
+  bottomFade?: boolean
+}>()
 const emit = defineEmits<{
   bottomChange: [atBottom: boolean]
   earlier: []
@@ -30,6 +35,8 @@ defineExpose({
       class="messages"
       :items="items"
       item-key="id"
+      :bottom-inset="bottomInset"
+      :bottom-fade="bottomFade"
       @at-bottom-change="emit('bottomChange', $event)"
       @top-reached="emit('earlier')"
     >

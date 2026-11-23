@@ -277,7 +277,6 @@ message ModelEntry {
 message RoleConfig {
   optional string model = 1;
   optional string effort = 2;
-  optional string fallback = 3;
 }
 
 message ModelRoles {

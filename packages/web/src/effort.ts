@@ -24,3 +24,14 @@ export function effortWithin(wanted: Effort, efforts: readonly Effort[]): Effort
   const ranked = EFFORTS.filter((e) => efforts.includes(e))
   return ranked.filter((e) => EFFORTS.indexOf(e) < rank).at(-1) ?? ranked[0] ?? null
 }
+
+/**
+ * The thinking effort the coordinator uses when it inherits the threads' model and no
+ * explicit effort was chosen: `'low'` if the model accepts it, else `null` (model default).
+ * Matches the server's resolution rule.
+ */
+export function coordinatorDefaultEffort(
+  told: readonly Effort[] | null | undefined,
+): Effort | null {
+  return effortsOf(told).includes('low') ? 'low' : null
+}

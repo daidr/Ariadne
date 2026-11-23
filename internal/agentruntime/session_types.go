@@ -59,6 +59,14 @@ type EffortConfigurer interface {
 type Checkpointer interface {
 	Checkpoint() (json.RawMessage, error)
 }
+
+// UsageDrainer allows a stateful driver whose billing totals arrive only when
+// an active turn ends (such as ACP session/prompt) to hand back unrecorded
+// usage settled during Close so the session manager can report it on the next
+// step instead of dropping it.
+type UsageDrainer interface {
+	DrainUsage() *Usage
+}
 type Kind struct {
 	Name            string
 	Persistent      bool
@@ -72,8 +80,9 @@ const PlaceNote = "You run through a helper program on the user's own computer. 
 
 // NativeAgentError wraps an agent driver error with structured diagnostic metadata.
 type NativeAgentError struct {
-	Err    error
-	Detail *sdk.AgentError
+	Err       error
+	Detail    *sdk.AgentError
+	Retryable bool
 }
 
 func (failure *NativeAgentError) Error() string { return failure.Err.Error() }
