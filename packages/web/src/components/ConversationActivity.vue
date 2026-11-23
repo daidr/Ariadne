@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type { LiveCommand as Command } from '@ariadne/core'
-import { DouShimmer, DouStatusDot, DouText } from 'dou-ui'
+import type { LiveCommand as Command, ThreadView } from '@ariadne/core'
+import { DouButton, DouShimmer, DouStatusDot, DouText } from 'dou-ui'
+import { computed } from 'vue'
 import { t } from '../i18n'
+import { openThread, state } from '../store'
 import LiveCommand from './LiveCommand.vue'
 import WaitStatus from './WaitStatus.vue'
 
-defineProps<{
+const props = defineProps<{
   conversationId: string | null
   working: boolean
   queued: boolean
@@ -14,7 +16,16 @@ defineProps<{
   elapsed: string
   escArmed: boolean
   wait: { id: string; until: number; note: string } | null
+  reviewing?: ThreadView['review'] | null
 }>()
+
+const reviewingText = computed(() =>
+  props.reviewing?.reviewing ? t('review.underway', { round: props.reviewing.rounds }) : '',
+)
+const reviewerId = computed(() => {
+  const id = props.reviewing?.reviewing ? props.reviewing.reviewerId : null
+  return id && state.detail?.threads.some((item) => item.id === id) ? id : null
+})
 </script>
 
 <template>
@@ -35,6 +46,21 @@ defineProps<{
       {{ t('conversation.queued') }}
     </DouText>
     <WaitStatus v-else-if="wait && conversationId" :conversation-id="conversationId" :wait="wait" />
+    <div v-else-if="reviewing?.reviewing" class="activity-row" role="status">
+      <DouText variant="secondary" size="sm" class="activity-main">
+        <DouStatusDot tone="primary" ripple />
+        <DouShimmer class="activity-text" :title="reviewingText">{{ reviewingText }}</DouShimmer>
+      </DouText>
+      <DouButton
+        v-if="reviewerId"
+        variant="ghost"
+        size="sm"
+        class="activity-action"
+        @click="openThread(reviewerId)"
+      >
+        {{ t('review.openReviewer') }}
+      </DouButton>
+    </div>
   </div>
 </template>
 
@@ -76,5 +102,8 @@ defineProps<{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.activity-action {
+  flex: none;
 }
 </style>

@@ -3,6 +3,7 @@ import { DouDialog, DouSplitter, DouText } from 'dou-ui'
 import { computed, inject, ref } from 'vue'
 import ConversationPanel from '../components/ConversationPanel.vue'
 import StageIcon from '../components/StageIcon.vue'
+import ThreadTools from '../components/ThreadTools.vue'
 import { t } from '../i18n'
 import { foldLayoutKey } from '../pwa'
 import { closeFull, state } from '../store'
@@ -72,9 +73,12 @@ const label = computed(() => {
         </template>
         <template #end>
           <div class="full-pane full-thread">
-            <div v-if="thread" class="full-thread-title">
-              <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
-              <DouText size="sm" weight="medium" truncate>{{ thread.title }}</DouText>
+            <div v-if="thread" class="full-thread-header">
+              <div class="full-thread-title">
+                <StageIcon :stage="thread.stage" :pull-request-state="thread.pullRequest?.state" />
+                <DouText size="sm" weight="medium" truncate>{{ thread.title }}</DouText>
+              </div>
+              <ThreadTools :thread="thread" :label="t('thread.more')" />
             </div>
             <ConversationPanel :key="threadId" :thread-id="threadId" class="full-conversation" />
           </div>
@@ -132,13 +136,23 @@ const label = computed(() => {
   border-left: 1px solid var(--dou-color-border);
 }
 
-.full-thread-title {
+.full-thread-header {
   display: flex;
   flex: none;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px 4px 16px;
+  border-bottom: 1px solid var(--dou-color-border);
+}
+
+.full-thread-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 12px 16px 0;
 }
 
 .full-conversation {
