@@ -8,6 +8,7 @@ import {
   DouToastViewport,
   useBreakpoints,
   useColorMode,
+  type ComponentDefaults,
 } from 'dou-ui'
 import {
   computed,
@@ -31,6 +32,7 @@ import SideLayout from './side/SideLayout.vue'
 import FullView from './full/FullView.vue'
 import FilePreview from './files/FilePreview.vue'
 import { douLocale, t } from './i18n'
+import { highlightCodeBlock } from './highlighting/code-block'
 import { onLiveEvent, state } from './store'
 import { notifyAbout } from './notify'
 import { COLOR_MODE_KEY, watchThemeColor } from './color-mode'
@@ -48,6 +50,12 @@ onLiveEvent(notifyAbout)
 useWorkspaceRouting()
 useShortcuts()
 useStreamStatusToast()
+
+const douDefaults: ComponentDefaults = {
+  DouCodeBlock: {
+    highlight: highlightCodeBlock,
+  },
+}
 
 const settingsOpen = ref(false)
 const settingsTab = ref<SettingsTab>('models')
@@ -131,7 +139,7 @@ watchEffect(() => {
 </script>
 
 <template>
-  <DouConfigProvider :locale="douLocale">
+  <DouConfigProvider :locale="douLocale" :defaults="douDefaults">
     <DouLayout class="app">
       <WorkspaceHeader
         v-model:projects-popover-open="projectsPopoverOpen"
