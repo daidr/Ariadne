@@ -9,7 +9,7 @@ import {
   reconcilePendingMessages,
   type PendingUserMessage,
 } from './optimistic-messages'
-import { emptyConversation, renderKeyOf, sendMessage, state, upsertMessage } from './store'
+import { emptyConversation, merge, renderKeyOf, sendMessage, state, upsertMessage } from './store'
 
 function makeMessage(
   id: string,
@@ -178,17 +178,76 @@ describe('store optimistic send and upsertMessage', () => {
     state.pendingMessages = {}
   })
 
-  test('upsertMessage inserts and replaces without mutating seq', () => {
-    const first = makeMessage('msg_002', 'hello')
-    const afterInsert = upsertMessage(state.coordinator, first)
-    expect(afterInsert.messages).toEqual([first])
+  test('upsertMessage keeps from unchanged so an earlier concurrent message is not skipped on merge', () => {
+    const sent = makeMessage('msg_002', 'hello', { createdAt: 2000 })
+    const afterInsert = upsertMessage(state.coordinator, sent)
+    expect(afterInsert.messages).toEqual([sent])
     expect(afterInsert.seq).toBe(1)
-    expect(afterInsert.from).toBe('msg_002')
+    expect(afterInsert.from).toBeNull()
 
-    const updated = makeMessage('msg_002', 'hello edited')
-    const afterReplace = upsertMessage(afterInsert, updated)
-    expect(afterReplace.messages).toEqual([updated])
-    expect(afterReplace.seq).toBe(1)
+    const earlier = makeMessage('msg_001', 'concurrent earlier', { createdAt: 1500 })
+    const afterMerge = merge(afterInsert, {
+      conversation,
+      messages: [earlier, sent],
+      notices: [],
+      todo: { conversationId: 'crd_1', items: [], updatedAt: 2 },
+      model: null,
+      more: false,
+      lastSeq: 3,
+    })
+    expect(afterMerge.messages.map((item) => item.id)).toEqual(['msg_001', 'msg_002'])
+    expect(afterMerge.from).toBe('msg_001')
+
+    const updated = makeMessage('msg_002', 'hello edited', { createdAt: 2000 })
+    const afterReplace = upsertMessage(afterMerge, updated)
+    expect(afterReplace.messages.map((item) => item.content)).toEqual([
+      'concurrent earlier',
+      'hello edited',
+    ])
+    expect(afterReplace.from).toBe('msg_001')
+    expect(afterReplace.seq).toBe(3)
+  })
+
+  test('concurrent duplicate sends exclude already-claimed server ids from remaining pending entries', async () => {
+    const resolvers: Array<(value: { message: MessageView }) => void> = []
+    vi.spyOn(api, 'postMessage').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+
+    const firstSend = sendMessage('crd_1', '重复内容')
+    const secondSend = sendMessage('crd_1', '重复内容')
+    expect(state.pendingMessages['crd_1']).toHaveLength(2)
+    const [firstClientId, secondClientId] = state.pendingMessages['crd_1']!.map(
+      (item) => item.clientId,
+    )
+
+    const confirmed1 = makeMessage('msg_dup_1', '重复内容', { createdAt: 2000 })
+    resolvers[0]!({ message: confirmed1 })
+    expect(await firstSend).toBe(true)
+
+    expect(renderKeyOf('msg_dup_1')).toBe(firstClientId)
+    expect(state.pendingMessages['crd_1']).toHaveLength(1)
+    expect(state.pendingMessages['crd_1']![0]!.clientId).toBe(secondClientId)
+    expect(state.pendingMessages['crd_1']![0]!.baselineIds).toContain('msg_dup_1')
+
+    const mid = reconcilePendingMessages(
+      state.pendingMessages['crd_1']!,
+      state.coordinator.messages,
+    )
+    expect(mid.visible.map((item) => item.clientId)).toEqual([secondClientId])
+    expect(mid.matchedKeys.size).toBe(0)
+
+    const confirmed2 = makeMessage('msg_dup_2', '重复内容', { createdAt: 2001 })
+    resolvers[1]!({ message: confirmed2 })
+    expect(await secondSend).toBe(true)
+
+    expect(state.pendingMessages['crd_1']).toBeUndefined()
+    expect(state.coordinator.messages.map((item) => item.id)).toEqual(['msg_dup_1', 'msg_dup_2'])
+    expect(renderKeyOf('msg_dup_1')).toBe(firstClientId)
+    expect(renderKeyOf('msg_dup_2')).toBe(secondClientId)
   })
 
   test('sendMessage queues an optimistic message immediately and reconciles on resolution', async () => {

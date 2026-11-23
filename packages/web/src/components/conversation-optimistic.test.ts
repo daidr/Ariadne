@@ -245,4 +245,62 @@ describe('ConversationPanel optimistic user messages', () => {
 
     wrapper.unmount()
   })
+
+  test('keeps the second identical pending bubble visible and preserves both DOM nodes across confirmation', async () => {
+    const resolvers: Array<(value: { message: MessageView }) => void> = []
+    vi.spyOn(api, 'postMessage').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+
+    const wrapper = mount(ConversationPanel, { attachTo: document.body })
+    const textarea = wrapper.get('textarea')
+
+    await textarea.setValue('相同的消息')
+    await textarea.trigger('keydown', { key: 'Enter' })
+    await nextTick()
+
+    await textarea.setValue('相同的消息')
+    await textarea.trigger('keydown', { key: 'Enter' })
+    await nextTick()
+
+    const initialNodes = wrapper.findAll('[data-message-id]')
+    expect(initialNodes).toHaveLength(2)
+    const firstEl = initialNodes[0]!.element
+    const secondEl = initialNodes[1]!.element
+    expect(initialNodes[0]!.attributes('data-pending')).toBe('')
+    expect(initialNodes[1]!.attributes('data-pending')).toBe('')
+
+    // First message confirms while the second is still in flight: both stay rendered, neither remounts.
+    resolvers[0]!({ message: makeMessage('msg_same_1', '相同的消息', { createdAt: 2000 }) })
+    await flushPromises()
+    await nextTick()
+
+    const midNodes = wrapper.findAll('[data-message-id]')
+    expect(midNodes).toHaveLength(2)
+    expect(midNodes[0]!.element).toBe(firstEl)
+    expect(midNodes[0]!.attributes('data-message-id')).toBe('msg_same_1')
+    expect(midNodes[0]!.attributes('data-pending')).toBeUndefined()
+    expect(midNodes[1]!.element).toBe(secondEl)
+    expect(midNodes[1]!.attributes('data-message-id')).toMatch(/^pending:/)
+    expect(midNodes[1]!.attributes('data-pending')).toBe('')
+
+    // Second message confirms: both keep their exact DOM nodes.
+    resolvers[1]!({ message: makeMessage('msg_same_2', '相同的消息', { createdAt: 2001 }) })
+    await flushPromises()
+    await nextTick()
+
+    const finalNodes = wrapper.findAll('[data-message-id]')
+    expect(finalNodes).toHaveLength(2)
+    expect(finalNodes[0]!.element).toBe(firstEl)
+    expect(finalNodes[0]!.attributes('data-message-id')).toBe('msg_same_1')
+    expect(finalNodes[0]!.attributes('data-pending')).toBeUndefined()
+    expect(finalNodes[1]!.element).toBe(secondEl)
+    expect(finalNodes[1]!.attributes('data-message-id')).toBe('msg_same_2')
+    expect(finalNodes[1]!.attributes('data-pending')).toBeUndefined()
+
+    wrapper.unmount()
+  })
 })

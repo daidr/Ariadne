@@ -109,6 +109,7 @@ function matchesServerMessage(pending: PendingUserMessage, candidate: MessageVie
 export function reconcilePendingMessages(
   pending: readonly PendingUserMessage[],
   messages: readonly MessageView[],
+  claimedIds?: ReadonlySet<string>,
 ): {
   visible: PendingUserMessage[]
   matchedKeys: Map<string, string>
@@ -118,7 +119,10 @@ export function reconcilePendingMessages(
   const visible: PendingUserMessage[] = []
   for (const entry of pending) {
     const match = messages.find(
-      (candidate) => !matchedKeys.has(candidate.id) && matchesServerMessage(entry, candidate),
+      (candidate) =>
+        !claimedIds?.has(candidate.id) &&
+        !matchedKeys.has(candidate.id) &&
+        matchesServerMessage(entry, candidate),
     )
     if (match) matchedKeys.set(match.id, entry.clientId)
     else visible.push(entry)

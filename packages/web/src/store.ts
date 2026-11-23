@@ -588,7 +588,7 @@ export function merge(current: ConversationState, page: ConversationPage): Conve
   }
 }
 
-/** Insert or replace a single confirmed message without disturbing `seq` or initial pagination. */
+/** Insert or replace a single confirmed message without disturbing `seq` or pagination bounds. */
 export function upsertMessage(current: ConversationState, message: MessageView): ConversationState {
   const messages = [...current.messages]
   const at = messages.findIndex((shown) => shown.id === message.id)
@@ -599,7 +599,6 @@ export function upsertMessage(current: ConversationState, message: MessageView):
   return {
     ...current,
     messages,
-    from: current.seq !== null ? (current.from ?? messages[0]?.id ?? null) : current.from,
   }
 }
 
@@ -959,10 +958,16 @@ export function renderKeyOf(messageId: string): string {
   return messageRenderKeys.get(messageId) ?? messageId
 }
 
-function removePendingMessage(conversationId: string, clientId: string) {
+function removePendingMessage(conversationId: string, clientId: string, confirmedId?: string) {
   const list = state.pendingMessages[conversationId]
   if (!list) return
-  const next = list.filter((item) => item.clientId !== clientId)
+  const next = list
+    .filter((item) => item.clientId !== clientId)
+    .map((item) =>
+      confirmedId && !item.baselineIds.includes(confirmedId)
+        ? { ...item, baselineIds: [...item.baselineIds, confirmedId] }
+        : item,
+    )
   if (next.length) state.pendingMessages[conversationId] = next
   else delete state.pendingMessages[conversationId]
 }
@@ -1014,7 +1019,7 @@ async function postUserMessageOptimistic(
       const now = conversationState(conversationId)
       if (now) setConversation(conversationId, upsertMessage(now, confirmed))
     }
-    removePendingMessage(conversationId, clientId)
+    removePendingMessage(conversationId, clientId, confirmed?.id)
     return true
   } catch (error) {
     removePendingMessage(conversationId, clientId)
