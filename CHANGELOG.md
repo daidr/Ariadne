@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.1.0-alpha.17 (2026-11-23)
+
+- fix(runner,acp): 校准压缩触发判断、保底重放摘要并回收取消会话的 ACP 用量 (#202)
+- refactor(runner): tighten coordinator delegation prompt (#201)
+- feat(web): enable Shiki syntax highlighting for chat Markdown code blocks (#199)
+- Merge pull request #147 from daidr/release/alpha
+
 ## 0.1.0-alpha.16 (2026-11-23)
 
 - feat(web): 优化 PWA 安全区、缩放体验及 iPhone Duo 右侧导航栏与折叠屏适配 (#197)
