@@ -1140,6 +1140,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             :sender="sender(message)"
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
+            :status="item.pending ? 'sending' : undefined"
             :data-message-id="message.id"
             :data-pending="item.pending ? '' : undefined"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
