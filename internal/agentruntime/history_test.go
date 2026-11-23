@@ -297,3 +297,65 @@ func TestRenderHistorySingleFallbackMessageDoesNotEmitOmittedNote(t *testing.T) 
 		t.Fatalf("omission note must not appear when the only message was kept: %s", out.Text)
 	}
 }
+
+func TestRenderHistoryPreservesLeadingCompactionSummary(t *testing.T) {
+	summaryLead := "<history_summarised>Earlier turns in this conversation were summarised.</history_summarised>"
+	summaryNotes := "<your_notes>Key findings: root cause is in internal/runner/runner.go and internal/providers/acp/acp.go.</your_notes>"
+	messages := []sdk.Message{
+		{Role: "user", Content: summaryLead},
+		{Role: "assistant", Content: summaryNotes},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_old", Name: "read_file", Arguments: `{"path":"old.go"}`}}},
+		{Role: "tool", ToolCallID: "call_old", Content: "OLD_PAYLOAD_" + strings.Repeat("A", 8000)},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_mid", Name: "read_file", Arguments: `{"path":"mid.go"}`}}},
+		{Role: "tool", ToolCallID: "call_mid", Content: "MID_PAYLOAD_" + strings.Repeat("B", 8000)},
+		{Role: "assistant", Content: "RECENT_TAIL_NOTE"},
+		{Role: "user", Content: "CURRENT_USER_PROMPT"},
+	}
+
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, summaryLead) {
+		t.Fatalf("leading compaction summary lead was dropped: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, summaryNotes) {
+		t.Fatalf("leading compaction summary notes were dropped: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatalf("expected omission note for dropped middle turns: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, "CURRENT_USER_PROMPT") {
+		t.Fatalf("current user prompt was dropped: %s", out.Text)
+	}
+	if strings.Index(out.Text, summaryNotes) > strings.Index(out.Text, historyOmittedNote) {
+		t.Fatalf("summary notes should appear before omission note: %s", out.Text)
+	}
+	if strings.Contains(out.Text, "OLD_PAYLOAD_") {
+		t.Fatalf("expected old oversized middle payload to be trimmed, got: %s", out.Text)
+	}
+}
+
+func TestRenderHistoryMidTurnCompactionKeepsLatestToolResultWhenSummaryFillsBudget(t *testing.T) {
+	summaryLead := "<history_summarised>" + strings.Repeat("S", 3000) + "</history_summarised>"
+	summaryNotes := "<your_notes>Summary notes before mid-turn tool results.</your_notes>"
+	messages := []sdk.Message{
+		{Role: "user", Content: summaryLead},
+		{Role: "assistant", Content: summaryNotes},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_1", Name: "read_file", Arguments: `{"path":"a.go"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Content: "OLDER_RESULT_" + strings.Repeat("A", 1000)},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_2", Name: "read_file", Arguments: `{"path":"b.go"}`}}},
+		{Role: "tool", ToolCallID: "call_2", Content: "LATEST_RESULT_MARKER"},
+	}
+
+	// Budget smaller than pinned summary alone, with no trailing user message
+	// (mid-turn compaction ending on a tool result). Must still preserve both
+	// the summary AND at least the latest tool result.
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, summaryLead) || !strings.Contains(out.Text, summaryNotes) {
+		t.Fatalf("leading compaction summary was dropped: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, "LATEST_RESULT_MARKER") {
+		t.Fatalf("latest unsummarised tool result was dropped when summary filled budget: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatalf("expected omission note for dropped earlier tool calls: %s", out.Text)
+	}
+}

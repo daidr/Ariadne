@@ -240,7 +240,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 	repeats := max(2, int(asNumber(limits["loopRepeats"])))
 	const maxCycle = 3
 	var recent [][32]byte
-	cuts, lastInput := 0, 0
+	cuts, lastInput, lastInputEstimate := 0, 0, 0
 	hintedUnsent, compactionFailed, compactedBeforeStep := false, false, false
 	remindedFeedback := false
 	recoveredContext := false
@@ -335,7 +335,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			_ = json.Unmarshal(priceJSON, price)
 		}
 		estimate := transcript.EstimateTokens(messages)
-		if size := max(lastInput, estimate); size >= threshold {
+		if size := effectiveContextSize(lastInput, lastInputEstimate, estimate); size >= threshold {
 			cut := transcript.CompactionCut(entries, float64(threshold)/4)
 			if cut != nil && !compactionFailed && !compactedBeforeStep {
 				budget := transcript.UserWordBudget(float64(threshold))
@@ -357,7 +357,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
 						return err
 					}
-					lastInput = 0
+					lastInput, lastInputEstimate = 0, 0
 					compactedBeforeStep = true
 					continue
 				}
@@ -378,6 +378,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 				recoveredContext = true
 				compactedBeforeStep = false
 				lastInput = max(lastInput, threshold)
+				lastInputEstimate = estimate
 				continue
 			}
 			return err
@@ -387,9 +388,11 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 			if answer.Usage.ContextInput != nil {
 				if *answer.Usage.ContextInput > 0 {
 					lastInput = int(*answer.Usage.ContextInput)
+					lastInputEstimate = estimate
 				}
 			} else if answer.Usage.Input > 0 {
 				lastInput = int(answer.Usage.Input)
+				lastInputEstimate = estimate
 			}
 		}
 		if err := turn.Repository.RecordStep(ctx, conversation.ID, turn.id, core.Step{
@@ -468,6 +471,13 @@ func (turn *turn) recordModelFailure(ctx context.Context, saw int64, input core.
 		}
 		return turn.Repository.RecordModelFailure(ctx, turn.conversation.ID, turn.id, saw, input, purpose, toolCallID, failure)
 	}
+}
+
+func effectiveContextSize(lastInput, lastInputEstimate, estimate int) int {
+	if lastInput <= 0 {
+		return estimate
+	}
+	return lastInput + max(0, estimate-lastInputEstimate)
 }
 
 func compactThreshold(model *settings.ResolvedModel, limits map[string]any) int {
