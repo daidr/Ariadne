@@ -17,6 +17,10 @@ export function synchronizeServerClock(value: string | null) {
   if (Math.abs(sample - origin.value) >= 1_000) origin.value = sample
 }
 
+export function currentServerNow(): number {
+  return Math.floor(origin.value + performance.now())
+}
+
 export function useServerNow() {
   if (++readers === 1) {
     tick.value++
