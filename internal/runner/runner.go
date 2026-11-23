@@ -62,27 +62,30 @@ type Runner struct {
 
 type turn struct {
 	*Runner
-	conversation      core.ConversationView
-	id                string
-	draft             *realtime.DraftHandle
-	draftCall         *int
-	draftTool         string
-	artifactDrafts    map[int]*collab.Draft
-	artifactPreviewAt map[int]time.Time
-	skills            *skills.Set
-	external          []tool
-	instructionsDirty atomic.Bool
-	handledBefore     int64
-	userSpoke         bool
-	directUserInput   bool
-	mergeRequestID    string
-	quiet             bool
-	statefulSession   bool
-	changes           *turnChanges
-	looks             coordinatorLookState
-	todo              todoHintState
-	reviewChecked     bool
-	isReview          bool
+	conversation        core.ConversationView
+	id                  string
+	draft               *realtime.DraftHandle
+	draftCall           *int
+	draftTool           string
+	artifactDrafts      map[int]*collab.Draft
+	artifactPreviewAt   map[int]time.Time
+	skills              *skills.Set
+	external            []tool
+	instructionsDirty   atomic.Bool
+	handledBefore       int64
+	userSpoke           bool
+	directUserInput     bool
+	mergeRequestID      string
+	quiet               bool
+	quietThreads        map[string]bool
+	quietMessageThreads map[string]string
+	routedToOtherThread bool
+	statefulSession     bool
+	changes             *turnChanges
+	looks               coordinatorLookState
+	todo                todoHintState
+	reviewChecked       bool
+	isReview            bool
 }
 
 const (
@@ -697,7 +700,7 @@ func (turn *turn) runToolCall(ctx context.Context, call sdk.ToolCall, byName map
 	if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &input) != nil || input == nil {
 		err = errors.New("tool arguments must be a JSON object within 2 MiB")
 	} else if turn.quiet && coordinatorChatTool(call.Name) {
-		err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
+		err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, route unrelated work with create_thread or message_thread to another thread before notifying the user, or end the turn silently")
 	} else if entry, available := byName[call.Name]; !available {
 		err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
 	} else {
