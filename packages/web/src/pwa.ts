@@ -229,16 +229,13 @@ export function readNativeFoldInput(
     postureFoldedQuery ||
     postureContinuousQuery
 
-  const posture: DevicePostureType =
-    postureFromJs === 'folded' || postureFoldedQuery ? 'folded' : 'continuous'
-
   const rawSegments = win.viewport?.segments
   let segments: ViewportSegmentRect[] = []
   let hasSegmentsApi = false
 
-  if (Array.isArray(rawSegments) && rawSegments.length > 0) {
+  if (rawSegments && rawSegments.length > 0) {
     hasSegmentsApi = true
-    segments = rawSegments.map((rect) => ({
+    segments = Array.from(rawSegments, (rect) => ({
       left: rect.left,
       top: rect.top,
       right: rect.right,
@@ -286,6 +283,17 @@ export function readNativeFoldInput(
       ]
     }
   }
+
+  // Respect explicit Device Posture API when exposed; otherwise treat two or more viewport
+  // segments (e.g. Safari 27.1+ where window.viewport.segments exists without devicePosture)
+  // as a folded posture so hinge-aware layout activates automatically.
+  const posture: DevicePostureType = hasPostureApi
+    ? postureFromJs === 'folded' || postureFoldedQuery
+      ? 'folded'
+      : 'continuous'
+    : segments.length >= 2
+      ? 'folded'
+      : 'continuous'
 
   return {
     supported: hasPostureApi || hasSegmentsApi,

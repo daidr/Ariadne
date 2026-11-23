@@ -423,6 +423,132 @@ describe('readNativeFoldInput & syncFoldCssState', () => {
     expect(input.segments[1]!.top).toBe(475.5)
   })
 
+  test('infers folded posture from Viewport Segments when Device Posture API is absent', () => {
+    const singleSegment = readNativeFoldInput({
+      innerWidth: 382,
+      innerHeight: 678,
+      matchMedia: vi.fn().mockReturnValue({ matches: false }),
+      navigator: {} as Navigator,
+      viewport: {
+        segments: [
+          {
+            left: 0,
+            top: 0,
+            right: 382,
+            bottom: 678,
+            width: 382,
+            height: 678,
+          } as DOMRectReadOnly,
+        ],
+      },
+    })
+
+    expect(singleSegment.supported).toBe(true)
+    expect(singleSegment.posture).toBe('continuous')
+    expect(
+      resolveFoldLayout({
+        ...singleSegment,
+        insets: { top: 0, right: 0, bottom: 34, left: 0 },
+      }).mode,
+    ).toBe('none')
+
+    const twoSegments = readNativeFoldInput({
+      innerWidth: 951,
+      innerHeight: 669,
+      matchMedia: vi.fn().mockReturnValue({ matches: false }),
+      navigator: {} as Navigator,
+      viewport: {
+        segments: [
+          {
+            left: 0,
+            top: 0,
+            right: 455.5,
+            bottom: 669,
+            width: 455.5,
+            height: 669,
+          } as DOMRectReadOnly,
+          {
+            left: 495.5,
+            top: 0,
+            right: 951,
+            bottom: 669,
+            width: 455.5,
+            height: 669,
+          } as DOMRectReadOnly,
+        ],
+      },
+    })
+
+    expect(twoSegments.supported).toBe(true)
+    expect(twoSegments.posture).toBe('folded')
+    expect(
+      resolveFoldLayout({
+        ...twoSegments,
+        insets: { top: 0, right: 84, bottom: 34, left: 0 },
+      }),
+    ).toEqual({
+      supported: true,
+      posture: 'folded',
+      mode: 'horizontal',
+      hingeGap: 40,
+      horizontalSplitPercent: 54.84,
+      verticalTopHeight: null,
+      verticalBottomHeight: null,
+    })
+
+    const mediaQueryOnly = readNativeFoldInput({
+      innerWidth: 951,
+      innerHeight: 669,
+      matchMedia: vi.fn((query: string) => ({
+        matches: query === '(horizontal-viewport-segments: 2)',
+      })) as unknown as Window['matchMedia'],
+      navigator: {} as Navigator,
+    })
+    expect(mediaQueryOnly.supported).toBe(true)
+    expect(mediaQueryOnly.posture).toBe('folded')
+    expect(mediaQueryOnly.segments).toHaveLength(2)
+  })
+
+  test('keeps continuous posture when Device Posture API explicitly reports flat despite two segments', () => {
+    const input = readNativeFoldInput({
+      innerWidth: 951,
+      innerHeight: 669,
+      matchMedia: vi.fn().mockReturnValue({ matches: false }),
+      navigator: {
+        devicePosture: { type: 'continuous' },
+      } as unknown as Navigator,
+      viewport: {
+        segments: [
+          {
+            left: 0,
+            top: 0,
+            right: 455.5,
+            bottom: 669,
+            width: 455.5,
+            height: 669,
+          } as DOMRectReadOnly,
+          {
+            left: 495.5,
+            top: 0,
+            right: 951,
+            bottom: 669,
+            width: 455.5,
+            height: 669,
+          } as DOMRectReadOnly,
+        ],
+      },
+    })
+
+    expect(input.supported).toBe(true)
+    expect(input.posture).toBe('continuous')
+    expect(
+      resolveFoldLayout({
+        ...input,
+        insets: { top: 0, right: 84, bottom: 34, left: 0 },
+      }).mode,
+    ).toBe('none')
+  })
+
   test('writes and clears CSS variables and data attributes cleanly', () => {
     syncFoldCssState(
       {
