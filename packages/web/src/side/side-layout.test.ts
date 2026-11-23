@@ -83,6 +83,12 @@ test('registers project artifacts in dock panels so unopened artifacts drag with
     } finally {
       source.remove()
     }
+
+    const pinnedButtons = wrapper.findAll('.dou-tabs__pinned [role="tab"]')
+    expect(pinnedButtons).toHaveLength(3)
+    expect(pinnedButtons.every((btn) => btn.classes().includes('is-pinned'))).toBe(true)
+    expect(pinnedButtons.every((btn) => btn.classes().includes('is-icon-alone'))).toBe(true)
+    expect(pinnedButtons.every((btn) => !btn.find('.dou-tabs__close').exists())).toBe(true)
   } finally {
     wrapper.unmount()
   }

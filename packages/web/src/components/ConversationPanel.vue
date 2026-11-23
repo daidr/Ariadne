@@ -13,6 +13,7 @@ import {
   DouDropdownRadioGroup,
   DouDropdownSub,
   DouEmpty,
+  DouImagePreview,
   DouInput,
   DouLink,
   DouPopover,
@@ -95,7 +96,6 @@ import { messageTimes } from './conversation-timeline'
 import { useCoordinatorUnread } from './coordinator-unread'
 import { hasOpenBranch } from '../review/merge-offered'
 import TurnChanges from './TurnChanges.vue'
-import ImagePreview from './ImagePreview.vue'
 import { useMentions } from './mentions'
 import { elapsedText } from './command-text'
 import ArtifactFeedbackNotice from './ArtifactFeedbackNotice.vue'
@@ -693,13 +693,6 @@ const sent = computed(() =>
 )
 let recall: Recall | null = null
 watch(conversationId, () => (recall = null))
-function onInputPaste(event: ClipboardEvent) {
-  if (event.defaultPrevented) return
-  const files = [...(event.clipboardData?.files ?? [])]
-  if (!files.length) return
-  event.preventDefault()
-  attachments.add(files)
-}
 
 function onInputKeydown(event: KeyboardEvent) {
   // The `/` menu moves through its entries with the arrows and has already taken them.
@@ -741,7 +734,7 @@ function useSnippet(option: ChatInputOption) {
   const named = skills.pick(option)
   if (named) {
     draft.value = `${named} ${draft.value}`
-    setTimeout(() => {
+    void nextTick(() => {
       const el = input.value?.textarea
       el?.setSelectionRange(named.length + 1, named.length + 1)
     })
@@ -750,8 +743,7 @@ function useSnippet(option: ChatInputOption) {
   const snippet = state.input.snippets.find((item) => item.id === option.value)
   if (!snippet) return
   draft.value = snippet.text + draft.value
-  // After the input has put its caret where the `/` was.
-  setTimeout(() => {
+  void nextTick(() => {
     const el = input.value?.textarea
     el?.setSelectionRange(snippet.text.length, snippet.text.length)
   })
@@ -894,6 +886,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       class="conversation-list"
       :items="entries"
       :loading-earlier="view.loadingEarlier"
+      :bottom-inset="footerHeight || undefined"
+      :bottom-fade="Boolean(state.detail)"
       @bottom-change="unread?.onBottomChange($event)"
       @earlier="earlier"
     >
@@ -913,9 +907,8 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           v-else-if="'todo' in item"
           :items="todo"
           :title="t('todo.title')"
-          :collapsible="false"
+          :show-header="false"
           :live="working"
-          class="todo"
         />
         <div v-else-if="item.notice" class="notice">
           <AskBlock
@@ -1284,7 +1277,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
       <DouEmpty v-else :title="t('coordinator.title')" :description="t('coordinator.empty')" />
     </div>
 
-    <ImagePreview
+    <DouImagePreview
       v-model:open="preview.open"
       v-model:index="preview.index"
       :images="preview.images"
@@ -1335,7 +1328,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
         class="conversation-input"
         data-message-input
         @keydown="onInputKeydown"
-        @paste="onInputPaste"
       >
         <ConversationBar
           v-if="conversationId && showCapsules"
@@ -1436,14 +1428,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 </template>
 
 <style scoped>
-.todo :deep(.dou-chat-plan__header) {
-  display: none;
-}
-
-.todo :deep(.dou-chat-plan__list) {
-  padding-block-start: 10px;
-}
-
 .notice {
   display: flex;
   align-items: center;
@@ -1568,7 +1552,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 
 .conversation-list :deep(.dou-chat-list) {
   --dou-chat-list-gap: 30px;
-  --conversation-clearance: var(--conversation-footer-height, var(--dou-chat-list-padding));
 }
 
 /*
@@ -1650,64 +1633,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   font-size: 0.93em;
   padding-block: 0.05em;
   padding-inline: 0.35em;
-}
-
-/* The spacer, including composer clearance, is what ChatList observes. */
-.conversation-list :deep(.dou-virtual-list__spacer) {
-  padding-block-end: var(--conversation-clearance);
-}
-
-.conversation-list :deep(.dou-chat-list__viewport) {
-  scroll-padding-block-end: var(--conversation-footer-height, 0px);
-}
-
-.conversation:has(.conversation-input) .conversation-list :deep(.dou-virtual-list__spacer) {
-  min-block-size: max(
-    0px,
-    calc(
-      100% - var(--conversation-clearance) - var(--dou-chat-list-padding-top) +
-        var(--dou-chat-list-gap)
-    )
-  );
-}
-
-/*
- * Paint inside the scrollport so its scrollbar and the floating composer stay above the fade.
- * Cover the footer padding plus the composer's 16px bottom radius (with a small buffer) in solid
- * background so scrolled messages cannot bleed through the bottom corners, then fade softly below
- * the composer's top edge so the last message stays clear when scrolled to the bottom.
- */
-.conversation:has(.conversation-input) .conversation-list :deep(.dou-chat-list__viewport)::after {
-  --conversation-bottom-solid: calc(var(--conversation-footer-padding) + 24px);
-  --conversation-bottom-fade: 40px;
-  --conversation-mask-height: calc(
-    var(--conversation-bottom-solid) + var(--conversation-bottom-fade)
-  );
-  content: '';
-  position: sticky;
-  inset-block-end: 0;
-  z-index: 2;
-  display: block;
-  block-size: var(--conversation-mask-height);
-  margin-block-start: calc(-1 * var(--conversation-mask-height));
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--dou-dialog-bg, var(--dou-color-bg-canvas)) var(--conversation-bottom-fade)
-  );
-  pointer-events: none;
-}
-
-.conversation:has(.conversation-input)
-  .conversation-list
-  :deep(.dou-chat-list__viewport:focus-visible)::after {
-  inset-block-end: 2px;
-  margin-inline: 2px;
-}
-
-.conversation-list :deep(.dou-chat-list__scroll) {
-  inset-block-end: calc(var(--conversation-footer-height, 0px) + 12px);
-  z-index: 2;
 }
 
 .reaction-picker {

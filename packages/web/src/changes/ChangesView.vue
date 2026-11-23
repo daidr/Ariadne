@@ -14,6 +14,7 @@ import {
   DouTextarea,
   DouVirtualList,
   toast,
+  useElementSize,
   type TreeNodeData,
   type VirtualListExpose,
 } from 'dou-ui'
@@ -75,14 +76,19 @@ const thread = computed(
 )
 
 const root = useTemplateRef<HTMLElement>('root')
+const { width: containerWidth } = useElementSize(root)
 const {
-  containerWidth,
   size: fileSize,
   min: fileMin,
-  max: fileMax,
+  max: fileMaxLimit,
   collapsed: filesCollapsed,
   save: saveFilesSidebar,
-} = useSidebarLayout('files', root)
+} = useSidebarLayout('files')
+const fileMax = computed(() =>
+  containerWidth.value > 0
+    ? Math.max(fileMin, Math.min(fileMaxLimit, Math.floor(containerWidth.value * 0.45)))
+    : fileMaxLimit,
+)
 // In a narrow pane, the existing file picker takes the place of the sidebar.
 const narrow = computed(() => containerWidth.value > 0 && containerWidth.value < NARROW_PX)
 const filesHidden = computed({
@@ -543,6 +549,7 @@ const methodOptions = computed(() => [
       v-else
       v-model="fileSize"
       v-model:collapsed="filesHidden"
+      unit="px"
       :min="fileMin"
       :max="fileMax"
       :disabled="narrow"
@@ -605,7 +612,8 @@ const methodOptions = computed(() => [
             <template #default="{ item, index }">
               <ChangedFileDiff
                 v-model:mode="diffMode"
-                :class="{ 'diff-last': index === files.length - 1 }"
+                class="diff-item"
+                :class="{ 'diff-first': index === 0, 'diff-last': index === files.length - 1 }"
                 :data-file-path="item.path"
                 :thread-id="threadId"
                 :file="item"
@@ -728,12 +736,24 @@ const methodOptions = computed(() => [
 
 .diff-picker {
   padding: 4px 12px;
+  border-bottom: 1px solid var(--dou-color-border-subtle);
 }
 
 .diff-list {
   flex: 1;
   min-height: 0;
   container-type: size;
+  scroll-padding-top: 36px;
+}
+
+@media (pointer: coarse) {
+  .diff-list {
+    scroll-padding-top: 44px;
+  }
+}
+
+.diff-item:not(.diff-first) {
+  border-top: 1px solid var(--dou-color-border);
 }
 
 /* Let the last file jump to the top, even when its diff is short. */

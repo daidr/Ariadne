@@ -200,7 +200,7 @@ async function confirmDelete(id: string) {
         >
           <template #default="{ item }">
             <ProjectActivityPopover
-              v-slot="{ inspect, dismiss, trackPointer }"
+              v-slot="{ inspect, dismiss }"
               :project-id="item.id"
               :name="item.name"
               :open="inspecting === item.id"
@@ -215,9 +215,6 @@ async function confirmDelete(id: string) {
                 :aria-current="state.currentId === item.id && !state.starting ? 'page' : undefined"
                 :aria-expanded="activityDisabled ? undefined : inspecting === item.id"
                 :aria-keyshortcuts="canReorder ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-                @pointerdown="trackPointer"
-                @pointercancel="trackPointer"
-                @pointerenter="trackPointer"
                 @click="selectProject(item.id, dismiss)"
                 @focus="inspect"
                 @blur="dismiss"

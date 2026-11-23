@@ -1,5 +1,4 @@
-import { useElementSize } from 'dou-ui'
-import { computed, reactive, type Ref } from 'vue'
+import { computed, reactive } from 'vue'
 
 function sidebar(key: string, width: number, minWidth: number) {
   const maxWidth = 480
@@ -34,19 +33,13 @@ const sidebars = {
   files: sidebar('ariadne.diff-files-sidebar', 240, 144),
 }
 
-/** Keep the preferred width in pixels when the splitter moves between containers. */
-export function useSidebarLayout(name: keyof typeof sidebars, container: Ref<HTMLElement | null>) {
+/** Remember a sidebar's pixel width and collapsed state for `DouSplitter` in `unit="px"` mode. */
+export function useSidebarLayout(name: keyof typeof sidebars) {
   const { state, minWidth, maxWidth, constrain, save } = sidebars[name]
-  const { width: containerWidth } = useElementSize(container)
-  // DouSplitter divides the space on either side of its 1px divider.
-  const available = computed(() => Math.max(1, containerWidth.value - 1))
-  const percent = (pixels: number) => (pixels / available.value) * 100
-  const max = computed(() => Math.min(45, percent(maxWidth)))
-  const min = computed(() => Math.min(max.value, percent(minWidth)))
   const size = computed({
-    get: () => Math.min(max.value, Math.max(min.value, percent(state.width))),
+    get: () => state.width,
     set: (value) => {
-      state.width = constrain((available.value * value) / 100)
+      state.width = constrain(value)
     },
   })
   const collapsed = computed({
@@ -57,5 +50,5 @@ export function useSidebarLayout(name: keyof typeof sidebars, container: Ref<HTM
     },
   })
 
-  return { containerWidth, size, min, max, collapsed, save }
+  return { size, min: minWidth, max: maxWidth, collapsed, save }
 }

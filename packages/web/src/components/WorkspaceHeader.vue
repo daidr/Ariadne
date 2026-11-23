@@ -127,13 +127,15 @@ watch(showMediumProjectPopover, (allowed) => {
             <template #leading>
               <PanelLeftIcon aria-hidden="true" />
             </template>
-            <span class="header-project-name">{{ mediumProjectTitle }}</span>
-            <DouBadge
-              v-if="otherNeedsMe"
-              class="header-project-badge"
-              :value="otherNeedsMe"
-              tone="warning"
-            />
+            <span class="header-project-content">
+              <span class="header-project-name">{{ mediumProjectTitle }}</span>
+              <DouBadge
+                v-if="otherNeedsMe"
+                class="header-project-badge"
+                :value="otherNeedsMe"
+                tone="warning"
+              />
+            </span>
             <template #trailing>
               <ChevronDownIcon class="header-project-chevron" aria-hidden="true" />
             </template>
@@ -241,11 +243,12 @@ watch(showMediumProjectPopover, (allowed) => {
   min-width: 0;
 }
 
-.header-project-trigger :deep(.dou-button__label) {
+.header-project-content {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .header-project-name {

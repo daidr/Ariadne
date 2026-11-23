@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { LiveCommand } from '@ariadne/core'
 import { DouCodeBlock, DouPopover, DouShimmer, DouStatusDot, DouText } from 'dou-ui'
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
 import { elapsedText, firstLine } from './command-text'
 
@@ -19,22 +19,7 @@ onBeforeUnmount(() => clearInterval(timer))
 const elapsed = computed(() => elapsedText(now.value - props.command.startedAt))
 const shown = computed(() => firstLine(props.command.command))
 
-// The newest output stays in view, unless the user scrolled up to read.
 const open = ref(false)
-const box = useTemplateRef<HTMLElement>('box')
-let pinned = true
-function onScroll() {
-  const el = box.value
-  if (el) pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24
-}
-watch(
-  () => [props.command.tail, open.value],
-  async () => {
-    await nextTick()
-    const el = box.value
-    if (el && pinned) el.scrollTop = el.scrollHeight
-  },
-)
 </script>
 
 <template>
@@ -56,10 +41,8 @@ watch(
       <DouText size="sm" class="live-command" :title="command.command">
         {{ command.cwd === '.' ? '' : `${command.cwd} ` }}$ {{ command.command }}
       </DouText>
-      <div ref="box" class="live-output" @scroll="onScroll">
-        <DouCodeBlock v-if="command.tail" :code="command.tail" wrap streaming />
-        <DouText v-else variant="tertiary" size="sm">{{ t('command.noOutput') }}</DouText>
-      </div>
+      <DouCodeBlock v-if="command.tail" :code="command.tail" wrap streaming :max-height="360" />
+      <DouText v-else variant="tertiary" size="sm">{{ t('command.noOutput') }}</DouText>
     </template>
   </DouPopover>
 </template>
@@ -93,10 +76,5 @@ watch(
   font-family: var(--dou-font-family-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.live-output {
-  max-height: 360px;
-  overflow: auto;
 }
 </style>

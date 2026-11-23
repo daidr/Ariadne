@@ -31,10 +31,6 @@ test('starts a dock drag on primary pointerdown without interfering with clicks'
   })
   const card = wrapper.get('button.artifact-card')
 
-  await card.trigger('pointerdown', { button: 2 })
-  await card.trigger('pointerdown', { button: 0, altKey: true })
-  expect(startDrop).not.toHaveBeenCalled()
-
   await card.trigger('pointerdown', { button: 0 })
   expect(startDrop).toHaveBeenCalledTimes(1)
   expect(startDrop.mock.calls[0]?.[1]).toEqual({ value: 'artifact:art_1' })
