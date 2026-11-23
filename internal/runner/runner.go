@@ -53,6 +53,7 @@ type Runner struct {
 	Browser    *browser.Pages
 	Sources    *sources.Registry
 	Home       string
+	files      fileState
 }
 
 type turn struct {
@@ -72,6 +73,7 @@ type turn struct {
 	directUserInput   bool
 	mergeRequestID    string
 	quiet             bool
+	statefulSession   bool
 	changes           *turnChanges
 }
 
@@ -235,6 +237,12 @@ func (turn *turn) withImages(ctx context.Context, messages []transcript.Message)
 
 func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error {
 	conversation := turn.conversation
+	turn.statefulSession = model != nil && model.Provider.HasStatefulSessions()
+	defer func() {
+		if ctx.Err() != nil {
+			turn.fileTracker().forgetReads(conversation.ID)
+		}
+	}()
 	config := turn.Settings.TurnSettings(conversation.ProjectID)
 	limits, _ := config["limits"].(map[string]any)
 	repeats := max(2, int(asNumber(limits["loopRepeats"])))
@@ -357,6 +365,7 @@ func (turn *turn) run(ctx context.Context, model *settings.ResolvedModel) error 
 					if err := turn.Repository.CompactConversation(ctx, conversation.ID, turn.id, core.Compaction{Summary: summary.Text, UpTo: *cut, SawSeq: saw, Usage: modelstep.WithCost(summary.Usage, price), Call: string(encoded), Timing: summary.Timing, Reasoning: summary.Reasoning, UserTokens: int64(budget)}); err != nil {
 						return err
 					}
+					turn.fileTracker().forgetReads(conversation.ID)
 					lastInput, lastInputEstimate = 0, 0
 					compactedBeforeStep = true
 					continue
