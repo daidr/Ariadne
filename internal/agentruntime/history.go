@@ -18,15 +18,24 @@ const (
 	// external CLI / ACP agents do not truncate the tail of an oversized single
 	// prompt (which would drop the newest turns and the triggering user message).
 	DefaultHistoryReplayBytes = 48 * 1024
-	maxReplayToolResultBytes  = 3 * 1024
-	maxReplayToolArgsBytes    = 2 * 1024
-	maxReplayOldMessageBytes  = 6 * 1024
+	// MinHistoryReplayBytes guarantees a minimum budget for replayed history
+	// even when system instructions alone exceed DefaultHistoryReplayBytes.
+	MinHistoryReplayBytes = 24 * 1024
+	// DefaultStatelessReplayBytes gives stateless, tool-free requests (such as
+	// conversation summarisation) enough room to include the conversation being
+	// summarised instead of truncating most of it away.
+	DefaultStatelessReplayBytes = 256 * 1024
+	maxReplayToolResultBytes    = 3 * 1024
+	maxReplayToolArgsBytes      = 2 * 1024
+	maxReplayOldMessageBytes    = 6 * 1024
 
 	historyHeader         = "<history>\nThe conversation so far, from before this session started. Your earlier replies and tool calls are shown as they were; call the tools again yourself when you need them.\n\n"
 	historyFooter         = "\n</history>\n\n"
 	historyOmittedNote    = "[Earlier messages were omitted to stay within the history replay limit.]"
 	historyContinueEnding = "Go on from where it ends; the calls above have already run."
 	historyAnswerEnding   = "Answer the last user message."
+	summaryLeadPrefix     = "<history_summarised>"
+	summaryNotesPrefix    = "<your_notes>"
 )
 
 type Input struct {
@@ -239,6 +248,16 @@ func renderReplayItems(messages []sdk.Message, names map[string]string, capConte
 	return items
 }
 
+func splitSummaryPrefix(messages []sdk.Message) ([]sdk.Message, []sdk.Message) {
+	if len(messages) == 0 || messages[0].Role != "user" || !strings.HasPrefix(messages[0].Content, summaryLeadPrefix) {
+		return nil, messages
+	}
+	if len(messages) > 1 && messages[1].Role == "assistant" && strings.HasPrefix(messages[1].Content, summaryNotesPrefix) {
+		return messages[:2], messages[2:]
+	}
+	return messages[:1], messages[1:]
+}
+
 func RenderHistory(messages []sdk.Message) Input {
 	return RenderHistoryWithBudget(messages, DefaultHistoryReplayBytes)
 }
@@ -282,16 +301,25 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 			currentMessages = relevant
 		}
 	}
+	// Preserve a leading compaction summary pair (<history_summarised> +
+	// <your_notes>) verbatim so trimming older middle turns never causes
+	// amnesia after compaction.
+	pinnedMessages, tailMessages := splitSummaryPrefix(historyMessages)
+	pinnedItems := renderReplayItems(pinnedMessages, names, false)
 	currentItems := renderReplayItems(currentMessages, names, false)
-	historyItems := renderReplayItems(historyMessages, names, false)
+	historyItems := renderReplayItems(tailMessages, names, false)
 	ending := historyContinueEnding
 	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
 		ending = historyAnswerEnding
 	}
 	wrapperBytes := len(historyHeader) + len(historyFooter) + len(ending)
+	pinnedBytes := joinedReplayBytes(pinnedItems)
 	currentBytes := joinedReplayBytes(currentItems)
-	available := maxBytes - wrapperBytes - currentBytes
-	if len(currentItems) > 0 && len(historyItems) > 0 {
+	available := maxBytes - wrapperBytes - pinnedBytes - currentBytes
+	if len(pinnedItems) > 0 && len(historyItems) > 0 {
+		available -= 2
+	}
+	if len(currentItems) > 0 && (len(pinnedItems) > 0 || len(historyItems) > 0) {
 		available -= 2
 	}
 
@@ -301,7 +329,7 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 	} else {
 		// Only tighten oversized historical entries when the full replay would
 		// otherwise exceed the budget; keep short histories completely verbatim.
-		historyItems = renderReplayItems(historyMessages, names, true)
+		historyItems = renderReplayItems(tailMessages, names, true)
 		if joinedReplayBytes(historyItems) <= available {
 			keptHistory = historyItems
 		} else {
@@ -330,7 +358,7 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 				}
 				break
 			}
-			if len(currentItems) == 0 && len(keptReversed) == 0 {
+			if len(currentItems) == 0 && len(pinnedItems) == 0 && len(keptReversed) == 0 {
 				keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
 			}
 			slices.Reverse(keptReversed)
@@ -339,8 +367,12 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 	}
 	omitted := len(keptHistory) < len(historyItems)
 
-	parts := make([]string, 0, len(keptHistory)+len(currentItems)+1)
+	parts := make([]string, 0, len(pinnedItems)+len(keptHistory)+len(currentItems)+1)
 	images := []sdk.Image{}
+	for _, item := range pinnedItems {
+		parts = append(parts, item.text)
+		images = append(images, item.images...)
+	}
 	if omitted {
 		parts = append(parts, historyOmittedNote)
 	}

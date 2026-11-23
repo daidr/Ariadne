@@ -4,6 +4,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/daidr/Ariadne/internal/jsonutil"
 	"github.com/daidr/Ariadne/internal/textutil"
@@ -18,6 +19,24 @@ var whitespace = regexp.MustCompile("[" + spaces + "]+")
 func CompactAt(contextTokens, share float64) int {
 	return int(math.Floor(math.Min(contextTokens, WorkingContextTokens) * share))
 }
+
+// estimateSerializedTokens estimates tokens for JSON-serialized messages or
+// transcript entries without systematically over-counting ASCII code and JSON
+// markup while keeping CJK characters conservative (~1 token per character).
+func estimateSerializedTokens(text string) float64 {
+	dense, length := 0, 0
+	for _, r := range text {
+		length++
+		if r > 0xffff {
+			length++
+		}
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
+			dense++
+		}
+	}
+	return float64(dense) + float64(length-dense)/3.5
+}
+
 func EstimateTokens(messages []Message) int {
 	data, _ := jsonutil.Encode(messages)
 	images := 0
@@ -26,7 +45,7 @@ func EstimateTokens(messages []Message) int {
 			images += len(message.Images)
 		}
 	}
-	return int(math.Ceil(float64(unitLength(string(data)))/2.5)) + images*ImageTokens
+	return int(math.Ceil(estimateSerializedTokens(string(data)))) + images*ImageTokens
 }
 func sizeOf(entry Entry) float64 {
 	data, _ := jsonutil.Encode(entry)
@@ -41,7 +60,7 @@ func sizeOf(entry Entry) float64 {
 	case "tool":
 		images = len(arr(entry["files"]))
 	}
-	return float64(unitLength(string(data)))/2.5 + float64(images*ImageTokens)
+	return estimateSerializedTokens(string(data)) + float64(images*ImageTokens)
 }
 
 // CompactionCut only folds complete call/result groups and always leaves some

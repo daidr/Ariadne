@@ -455,3 +455,125 @@ func TestSessionForgetActiveAndCloseActive(t *testing.T) {
 		})
 	}
 }
+
+type budgetedDrainingDriver struct {
+	*fakeDriver
+	budget  int
+	drained *Usage
+}
+
+func (d *budgetedDrainingDriver) HistoryBudget(string) int { return d.budget }
+func (d *budgetedDrainingDriver) DrainUsage() *Usage {
+	u := d.drained
+	d.drained = nil
+	return u
+}
+
+func TestStatelessToolFreeRequestUsesExpandedReplayBudget(t *testing.T) {
+	var seen Input
+	m := newTestSessions(t, Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+		fd := &fakeDriver{ctx: ctx, onPrompt: func(f *fakeDriver, input Input) {
+			seen = input
+			f.ctx.Emit(Event{Type: "text", Text: "summary"})
+			f.ctx.Emit(Event{Type: "done"})
+		}}
+		// Tight stateful budget (4 KiB) would drop an 80 KiB payload if applied
+		// to a stateless tool-free request like compaction summarisation.
+		return &budgetedDrainingDriver{fakeDriver: fd, budget: 4 * 1024}, nil
+	}}, SessionOptions{})
+
+	largeConversation := "SUMMARY_START " + strings.Repeat("x", 80*1024) + " SUMMARY_END"
+	req := sdk.Request{
+		Messages: []sdk.Message{
+			{Role: "system", Content: "Summarise this conversation."},
+			{Role: "user", Content: largeConversation},
+		},
+	}
+	lastPart(t, parts(m, req), "stop")
+	if !strings.Contains(seen.Text, "SUMMARY_START") || !strings.Contains(seen.Text, "SUMMARY_END") {
+		t.Fatalf("stateless summary payload was truncated (len=%d)", len(seen.Text))
+	}
+	if strings.Contains(seen.Text, historyOmittedNote) {
+		t.Fatalf("unexpected omission note in stateless summary payload")
+	}
+}
+
+func TestPendingUsageDrainedOnSessionRebuildDoesNotPolluteContextInput(t *testing.T) {
+	created := 0
+	m := newTestSessions(t, Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+		created++
+		id := created
+		fd := &fakeDriver{ctx: ctx, onPrompt: func(f *fakeDriver, _ Input) {
+			switch id {
+			case 1:
+				// Hold turn open with a pending tool call (like ACP session/prompt).
+				go func() { _ = f.ctx.Tools.Call(f.life, "read_file", nil) }()
+			case 2:
+				// Next step after rebuild is a mid-turn tool call without its own
+				// ContextInput yet; drained billing totals must not become ContextInput.
+				go func() { _ = f.ctx.Tools.Call(f.life, "read_file", nil) }()
+			case 3:
+				// Third session reports its own ContextInput and billing totals.
+				f.ctx.Emit(Event{Type: "usage", Usage: Usage{Input: 10000, Output: 50, ContextInput: new(int64(18000))}})
+				f.ctx.Emit(Event{Type: "done"})
+			}
+		}}
+		var drained *Usage
+		if id == 1 {
+			drained = &Usage{Input: 120000, Output: 300, Cached: new(int64(90000))}
+		} else if id == 2 {
+			drained = &Usage{Input: 50000, Output: 120, Reasoning: new(int64(15))}
+		}
+		return &budgetedDrainingDriver{fakeDriver: fd, budget: DefaultHistoryReplayBytes, drained: drained}, nil
+	}}, SessionOptions{})
+
+	// Step 1: start session 1 and leave it awaiting tool result.
+	lastPart(t, parts(m, sdk.Request{
+		Conversation: "conv-drain",
+		Messages:     []sdk.Message{user("initial prompt")},
+	}), "tool-calls")
+
+	// Step 2: rewritten history (simulating compaction) forces rebuild -> drains session 1.
+	step2 := parts(m, sdk.Request{
+		Conversation: "conv-drain",
+		Messages:     []sdk.Message{user("<history_summarised>compacted</history_summarised>")},
+	})
+	lastPart(t, step2, "tool-calls")
+	var u2 *sdk.Part
+	for i := range step2 {
+		if step2[i].Type == "usage" {
+			u2 = &step2[i]
+		}
+	}
+	if u2 == nil {
+		t.Fatal("expected drained usage part on step 2")
+	}
+	if *u2.Input != 120000 || *u2.Output != 300 || u2.Cached == nil || *u2.Cached != 90000 {
+		t.Fatalf("unexpected step 2 billing totals: %#v", u2)
+	}
+	if u2.ContextInput == nil || *u2.ContextInput != 0 {
+		t.Fatalf("expected explicit 0 ContextInput to prevent context pollution, got %#v", u2.ContextInput)
+	}
+
+	// Step 3: rebuild again -> drains session 2 and merges with session 3's own ContextInput.
+	step3 := parts(m, sdk.Request{
+		Conversation: "conv-drain",
+		Messages:     []sdk.Message{user("<history_summarised>compacted again</history_summarised>")},
+	})
+	lastPart(t, step3, "stop")
+	var u3 *sdk.Part
+	for i := range step3 {
+		if step3[i].Type == "usage" {
+			u3 = &step3[i]
+		}
+	}
+	if u3 == nil {
+		t.Fatal("expected merged usage part on step 3")
+	}
+	if *u3.Input != 60000 || *u3.Output != 170 || u3.Reasoning == nil || *u3.Reasoning != 15 {
+		t.Fatalf("unexpected step 3 billing totals: %#v", u3)
+	}
+	if u3.ContextInput == nil || *u3.ContextInput != 18000 {
+		t.Fatalf("expected step 3 ContextInput to stay 18000, got %#v", u3.ContextInput)
+	}
+}

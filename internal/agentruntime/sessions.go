@@ -27,20 +27,21 @@ type SessionOptions struct {
 	MaxIdle           int
 }
 type Sessions struct {
-	mu          sync.Mutex
-	kind        Kind
-	options     SessionOptions
-	root        string
-	pool        map[string]*session
-	checkpoints *Checkpoints
-	ctx         context.Context
-	cancel      context.CancelFunc
-	closed      bool
-	closeOnce   sync.Once
-	closeDone   chan struct{}
-	reapDone    chan struct{}
-	streams     sync.WaitGroup
-	next        uint64
+	mu           sync.Mutex
+	kind         Kind
+	options      SessionOptions
+	root         string
+	pool         map[string]*session
+	pendingUsage map[string]Usage
+	checkpoints  *Checkpoints
+	ctx          context.Context
+	cancel       context.CancelFunc
+	closed       bool
+	closeOnce    sync.Once
+	closeDone    chan struct{}
+	reapDone     chan struct{}
+	streams      sync.WaitGroup
+	next         uint64
 }
 type session struct {
 	key, config, dir, system string
@@ -55,6 +56,7 @@ type session struct {
 	queue                    *eventQueue
 	mu                       sync.Mutex // tool callbacks run concurrently with stream delivery
 	pending                  map[string]chan ToolOutput
+	orphanedUsage            Usage
 	closed                   bool
 	closeOnce                sync.Once
 	closeErr                 error
@@ -91,7 +93,7 @@ func NewSessions(kind Kind, options SessionOptions) (*Sessions, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(options.Context)
-	manager := &Sessions{kind: kind, options: options, root: root, pool: map[string]*session{}, ctx: ctx, cancel: cancel, closeDone: make(chan struct{}), reapDone: make(chan struct{})}
+	manager := &Sessions{kind: kind, options: options, root: root, pool: map[string]*session{}, pendingUsage: map[string]Usage{}, ctx: ctx, cancel: cancel, closeDone: make(chan struct{}), reapDone: make(chan struct{})}
 	if kind.Persistent {
 		var err error
 		manager.checkpoints, err = NewCheckpoints(options.DataDir, kind.Name, 256)
@@ -178,6 +180,85 @@ func (s *session) close(root string, suspend bool) error {
 	})
 	return s.closeErr
 }
+func hasBillingUsage(u Usage) bool {
+	return u.Input > 0 || u.Output > 0 ||
+		(u.Cached != nil && *u.Cached > 0) ||
+		(u.CacheWrite != nil && *u.CacheWrite > 0) ||
+		(u.Reasoning != nil && *u.Reasoning > 0) ||
+		(u.CostUSD != nil && *u.CostUSD > 0)
+}
+
+func addUsageCount(dst **int64, value *int64) {
+	if value == nil || *value == 0 {
+		return
+	}
+	if *dst == nil {
+		*dst = new(int64)
+	}
+	**dst += *value
+}
+
+func accumulateUsage(dst *Usage, src Usage) {
+	dst.Input += src.Input
+	dst.Output += src.Output
+	addUsageCount(&dst.Cached, src.Cached)
+	addUsageCount(&dst.CacheWrite, src.CacheWrite)
+	addUsageCount(&dst.Reasoning, src.Reasoning)
+	if src.CostUSD != nil && *src.CostUSD > 0 {
+		if dst.CostUSD == nil {
+			dst.CostUSD = new(float64)
+		}
+		*dst.CostUSD += *src.CostUSD
+	}
+}
+
+func (s *session) recordOrphanedUsage(u Usage) {
+	if !hasBillingUsage(u) {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		accumulateUsage(&s.orphanedUsage, u)
+	}
+	s.mu.Unlock()
+}
+
+func (s *session) takeOrphanedUsage() *Usage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !hasBillingUsage(s.orphanedUsage) {
+		return nil
+	}
+	u := s.orphanedUsage
+	s.orphanedUsage = Usage{}
+	return &u
+}
+
+func (m *Sessions) addPendingUsage(key string, u Usage) {
+	if key == "" || !hasBillingUsage(u) {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acc := m.pendingUsage[key]
+	accumulateUsage(&acc, u)
+	m.pendingUsage[key] = acc
+}
+
+func (m *Sessions) takePendingUsage(key string) *Usage {
+	if key == "" {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.pendingUsage[key]
+	if !ok {
+		return nil
+	}
+	delete(m.pendingUsage, key)
+	return &u
+}
+
 func (m *Sessions) forget(s *session, suspend bool) {
 	if s == nil {
 		return
@@ -192,12 +273,23 @@ func (m *Sessions) forget(s *session, suspend bool) {
 	}
 	m.mu.Unlock()
 	_ = s.close(m.root, suspend)
+	if !suspend && s.key != "" {
+		if orphaned := s.takeOrphanedUsage(); orphaned != nil {
+			m.addPendingUsage(s.key, *orphaned)
+		}
+		if drainer, ok := s.driver.(UsageDrainer); ok {
+			if drained := drainer.DrainUsage(); drained != nil {
+				m.addPendingUsage(s.key, *drained)
+			}
+		}
+	}
 }
 
 // Forget releases deleted or explicitly stopped conversations, including tools
 // waiting between steps. Other conversations continue independently.
 func (m *Sessions) Forget(ctx context.Context, key string) error {
 	m.mu.Lock()
+	delete(m.pendingUsage, key)
 	s := m.pool[key]
 	if s == nil {
 		defer m.mu.Unlock()
@@ -365,7 +457,20 @@ func (m *Sessions) open(ctx context.Context, s *session, settings map[string]any
 		return err
 	}
 	s.dir, s.dirOwned = directory, true
-	driverContext := DriverContext{Settings: settings, Model: request.Model, Effort: request.Effort, System: system, Directory: s.dir, Persistent: m.checkpoints != nil && s.key != "", Tools: AgentTools{Specs: request.Tools, Call: s.call}, Emit: func(event Event) { s.queue.push(event) }}
+	driverContext := DriverContext{
+		Settings:   settings,
+		Model:      request.Model,
+		Effort:     request.Effort,
+		System:     system,
+		Directory:  s.dir,
+		Persistent: m.checkpoints != nil && s.key != "",
+		Tools:      AgentTools{Specs: request.Tools, Call: s.call},
+		Emit: func(event Event) {
+			if !s.queue.push(event) && event.Type == "usage" && s.key != "" {
+				s.recordOrphanedUsage(event.Usage)
+			}
+		},
+	}
 	if saved != nil {
 		driverContext.Resume = saved.Driver
 		s.fps = append([]string{}, saved.FPS...)
@@ -602,6 +707,8 @@ func (m *Sessions) Stream(ctx context.Context, settings map[string]any, request 
 				var input Input
 				if seeder, ok := s.driver.(HistorySeeder); ok {
 					input, err = seeder.Seed(ctx, rest)
+				} else if request.Conversation == "" && len(request.Tools) == 0 {
+					input = RenderHistoryWithBudget(rest, DefaultStatelessReplayBytes)
 				} else if budgeter, ok := s.driver.(HistoryBudgeter); ok {
 					input = RenderHistoryWithBudget(rest, budgeter.HistoryBudget(system))
 				} else {
@@ -648,6 +755,33 @@ func (m *Sessions) consume(ctx context.Context, s *session, request sdk.Request,
 		}
 	}
 	usagePart := func() bool {
+		if pending := m.takePendingUsage(s.key); pending != nil {
+			if usage.ContextInput == nil {
+				// Pending usage is billing settled from a previously closed
+				// session, not the current step's context size. Preserve any
+				// step-local direct Input as ContextInput, or mark ContextInput
+				// explicitly as 0 so callers do not mistake merged prior totals
+				// for the active context window.
+				if counted && *usage.Input > 0 {
+					cur := *usage.Input
+					usage.ContextInput = &cur
+				} else {
+					usage.ContextInput = new(int64(0))
+				}
+			}
+			counted = true
+			*usage.Input += pending.Input
+			*usage.Output += pending.Output
+			add(&usage.Cached, pending.Cached)
+			add(&usage.CacheWrite, pending.CacheWrite)
+			add(&usage.Reasoning, pending.Reasoning)
+			if pending.CostUSD != nil {
+				if usage.CostUSD == nil {
+					usage.CostUSD = new(float64)
+				}
+				*usage.CostUSD += *pending.CostUSD
+			}
+		}
 		if !counted {
 			return true
 		}

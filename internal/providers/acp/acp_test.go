@@ -295,6 +295,58 @@ func TestACPMidTurnUsageBeforeFirstMessage(t *testing.T) {
 	}
 }
 
+func TestACPHistoryBudgetMinimumFloor(t *testing.T) {
+	d := &acpDriver{}
+	hugeSystem := strings.Repeat("S", agentruntime.DefaultHistoryReplayBytes+8192)
+	if got := d.HistoryBudget(hugeSystem); got != agentruntime.MinHistoryReplayBytes {
+		t.Fatalf("expected MinHistoryReplayBytes (%d) when system prompt exceeds default replay budget, got %d", agentruntime.MinHistoryReplayBytes, got)
+	}
+}
+
+func TestACPRebuildAfterCancelDrainsSettledTurnUsage(t *testing.T) {
+	command, _ := acpChildCommand(t, "cancel-usage")
+	bridge := newTestBridge(t)
+	m := newTestSessions(t, Kind(bridge, nil), agentruntime.SessionOptions{})
+	settings := map[string]any{"command": command}
+	tools := []sdk.Tool{{Name: "read_file", Description: "Read a file", Parameters: map[string]any{"properties": map[string]any{"path": map[string]any{"type": "string"}}}}}
+
+	// Step 1 starts an ACP session and pauses mid-turn on a tool call.
+	first := collectParts(t, m, settings, sdk.Request{
+		Conversation: "thread-cancel-usage",
+		Messages:     []sdk.Message{user("inspect repo")},
+		Tools:        tools,
+	})
+	lastPart(t, first, "tool-calls")
+
+	// Step 2 rewrites history (simulating compaction). Sessions cancels and
+	// closes the old ACP process, drains its settled TurnUsage, and merges it
+	// into the rebuilt session's usage without polluting ContextInput.
+	second := collectParts(t, m, settings, sdk.Request{
+		Conversation: "thread-cancel-usage",
+		Messages: []sdk.Message{
+			user("<history_summarised>Earlier turns summarised.</history_summarised>"),
+			{Role: "assistant", Content: "<your_notes>Summary notes.</your_notes>"},
+			user("continue after compaction"),
+		},
+		Tools: tools,
+	})
+	lastPart(t, second, "stop")
+	var finalUsage *sdk.Part
+	for i := range second {
+		if second[i].Type == "usage" {
+			finalUsage = &second[i]
+		}
+	}
+	if finalUsage == nil ||
+		tokenValue(finalUsage.Input) != 140000 ||
+		tokenValue(finalUsage.Output) != 430 ||
+		tokenValue(finalUsage.Cached) != 115000 ||
+		tokenValue(finalUsage.Reasoning) != 25 ||
+		tokenValue(finalUsage.ContextInput) != 18000 {
+		t.Fatalf("expected drained pre-cancel usage merged with new session usage and ContextInput=18000, got %+v", finalUsage)
+	}
+}
+
 func TestACPModernProtocolAndRestart(t *testing.T) {
 	for _, restore := range []string{"session/resume", "session/load", "rejected"} {
 		t.Run(restore, func(t *testing.T) {
@@ -497,7 +549,10 @@ func TestACPChild(t *testing.T) {
 			Method string
 			Params struct {
 				ConfigID, Value string
-				MCPServers      []struct {
+				Prompt          []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+				MCPServers []struct {
 					URL string `json:"url"`
 				} `json:"mcpServers"`
 			}
@@ -518,7 +573,7 @@ func TestACPChild(t *testing.T) {
 			if restore == "rejected-replay" {
 				capabilities["promptCapabilities"] = map[string]any{"image": true}
 			}
-			if restore == "midturn-usage" {
+			if restore == "midturn-usage" || restore == "cancel-usage" {
 				capabilities["mcpCapabilities"] = map[string]any{"http": true}
 			}
 			hello := map[string]any{"protocolVersion": 1, "agentCapabilities": capabilities}
@@ -553,6 +608,32 @@ func TestACPChild(t *testing.T) {
 			if restore == "rpc-error" {
 				_ = output.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32603, "message": "synthetic ACP failure", "data": map[string]any{"requestId": "request-id-42"}}})
 				continue
+			}
+			if restore == "cancel-usage" {
+				promptText := ""
+				for _, block := range request.Params.Prompt {
+					promptText += block.Text
+				}
+				if !strings.Contains(promptText, "<history_summarised>") {
+					_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":42000,"size":400000}}}`))
+					resp, err := http.Post(mcpURL, "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"README.md"}}}`))
+					if err == nil {
+						_, _ = io.ReadAll(resp.Body)
+						resp.Body.Close()
+					}
+					result = map[string]any{
+						"stopReason": "cancelled",
+						"usage":      map[string]any{"inputTokens": 120000, "outputTokens": 350, "cachedReadTokens": 100000, "thoughtTokens": 25},
+					}
+					break
+				}
+				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":18000,"size":400000}}}`))
+				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"compacted reply"}}}}`))
+				result = map[string]any{
+					"stopReason": "end_turn",
+					"usage":      map[string]any{"inputTokens": 20000, "outputTokens": 80, "cachedReadTokens": 15000},
+				}
+				break
 			}
 			if restore == "midturn-usage" {
 				_ = output.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session","update":{"sessionUpdate":"usage_update","used":42000,"size":400000}}}`))
