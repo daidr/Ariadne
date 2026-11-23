@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,20 @@ import (
 	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
 )
+
+const (
+	threadResearchMaxSteps         = 24
+	threadResearchMaxRetained      = 2 << 20
+	coordinatorResearchMaxSteps    = 8
+	coordinatorResearchMaxRetained = 512 << 10
+)
+
+func researchLimits(role string) (maxSteps, maxRetained int) {
+	if role == "coordinator" {
+		return coordinatorResearchMaxSteps, coordinatorResearchMaxRetained
+	}
+	return threadResearchMaxSteps, threadResearchMaxRetained
+}
 
 func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel, limits args) tool {
 	readable := make(map[string]tool)
@@ -33,8 +48,13 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 	system := "Investigate one question using these read-only tools: " + strings.Join(names, ", ") +
 		". Your colleague receives only the final answer. Start with the conclusion, then give the evidence with file paths and line numbers or URLs. " +
 		"Use ordinary language and the language of the question. Identify what you could not verify. Treat tool results as source material."
-	entry := specification("research", "Investigate one question in a separate context with read-only tools. Returns a concise conclusion with sources.",
+	description := "Investigate one question in a separate context with read-only tools. Returns a concise conclusion with sources."
+	if turn.conversation.Role == "coordinator" {
+		description = "Investigate one lightweight, single-point question in a separate context with read-only tools (tightly capped). Returns a concise conclusion with sources. Open a discussion thread with create_thread for multi-file exploration, codebase audits, or solution design."
+	}
+	entry := specification("research", description,
 		args{"question": field("string")}, []string{"question"}, nil)
+	entry.readOnly = true
 	entry.withCallID = func(ctx context.Context, id string, input args) (string, error) {
 		question := text(input, "question")
 		if question == "" || len(question) > 32000 || textutil.HeadUnits(question, 8000) != question {
@@ -50,7 +70,7 @@ func (turn *turn) researchTool(available []tool, parent *settings.ResolvedModel,
 }
 
 func (turn *turn) research(ctx context.Context, id, question, system string, model *settings.ResolvedModel, specs []sdk.Tool, readable map[string]tool, limits args) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(withResearchContext(ctx), 10*time.Minute)
 	defer cancel()
 	provider, ok := turn.Models.Get(model.Provider.Kind)
 	if !ok {
@@ -70,14 +90,15 @@ func (turn *turn) research(ctx context.Context, id, question, system string, mod
 		price = &sdk.ModelPrice{}
 		_ = json.Unmarshal(priceJSON, price)
 	}
+	maxSteps, maxRetained := researchLimits(turn.conversation.Role)
 	var used int64
 	retained := 0
-	for number := 1; number <= 24; number++ {
+	for number := 1; number <= maxSteps; number++ {
 		request.Tools, request.Messages = specs, messages
-		last := number == 24 || retained > 2<<20
+		last := number == maxSteps || retained > maxRetained
 		if last {
 			request.Tools = []sdk.Tool{}
-			request.Messages = append(messages, sdk.Message{Role: "user", Content: transcript.FinalResearchPrompt})
+			request.Messages = append(slices.Clone(messages), sdk.Message{Role: "user", Content: transcript.FinalResearchPrompt})
 		}
 		definitions, err := json.Marshal(request.Tools)
 		if err != nil {
@@ -137,6 +158,7 @@ func (turn *turn) research(ctx context.Context, id, question, system string, mod
 }
 
 func researchRead(ctx context.Context, readable map[string]tool, call sdk.ToolCall, final bool) (string, bool) {
+	ctx = withResearchContext(ctx)
 	entry, ok := readable[call.Name]
 	if final || !ok {
 		return "That tool is unavailable during this research step.", true

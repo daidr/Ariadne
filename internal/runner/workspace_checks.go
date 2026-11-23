@@ -67,7 +67,7 @@ func (turn *turn) noteWorkspaceCommand(ctx context.Context, input args, kind str
 	if err != nil {
 		return "", err
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	if _, err := turn.Workspaces.SetupDone(ctx, thread.ID); err != nil {
 		return "", err
 	}
@@ -109,7 +109,15 @@ func (turn *turn) checkAfterEdit(ctx context.Context, thread core.ThreadView, wo
 	if err != nil {
 		return "\nWorkspace check: " + err.Error()
 	}
-	return "\nWorkspace check: " + workspaceCommandOutput(result)
+	if result.ExitCode == 0 {
+		turn.fileTracker().noteCheckFailure(turn.conversation.ID, "", false)
+		return "\nWorkspace check: Passed."
+	}
+	output := workspaceCommandOutput(result)
+	if turn.keepsResults() && turn.fileTracker().noteCheckFailure(turn.conversation.ID, output, true) {
+		return fmt.Sprintf("\nWorkspace check: Failed (exit %d) with the same output as after your previous edit.", result.ExitCode)
+	}
+	return "\nWorkspace check: " + output
 }
 
 func (turn *turn) tryWorkspaceCommand(ctx context.Context, thread core.ThreadView, workspace sdk.Workspace, command string, paths []string, kind string) (sdk.ExecResult, error) {

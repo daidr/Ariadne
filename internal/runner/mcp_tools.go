@@ -122,7 +122,8 @@ func (turn *turn) mcpTools(ctx context.Context, project core.ProjectView) []tool
 				schema = args{"type": "object", "properties": args{}}
 			}
 			entry := tool{
-				spec: sdk.Tool{Name: name, Description: "External tool " + name + ". " + description, Parameters: schema},
+				spec:     sdk.Tool{Name: name, Description: "External tool " + name + ". " + description, Parameters: schema},
+				readOnly: mark == "read",
 				call: func(ctx context.Context, input args) (string, []any, error) {
 					return turn.callMCP(ctx, page.config, spec.Name, mark, input)
 				},
@@ -138,7 +139,7 @@ func (turn *turn) mcpTools(ctx context.Context, project core.ProjectView) []tool
 	if specBytes <= 20000 {
 		return tools
 	}
-	describe := specification("mcp_describe", "Read the parameters of external tools listed by mcp_call.",
+	describe := readOnlySpec("mcp_describe", "Read the parameters of external tools listed by mcp_call.",
 		args{"names": arrayOf(field("string"))}, []string{"names"}, func(_ context.Context, input args) (string, error) {
 			names, err := stringsOf(input["names"])
 			if err != nil || len(names) == 0 {

@@ -2,13 +2,17 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/daidr/Ariadne/internal/core"
 	"github.com/daidr/Ariadne/internal/models"
 	"github.com/daidr/Ariadne/internal/settings"
+	"github.com/daidr/Ariadne/internal/transcript"
 	"github.com/daidr/Ariadne/sdk"
 )
 
@@ -149,4 +153,172 @@ func TestResearchAndThreadEffort(t *testing.T) {
 	if len(seenRequests) != 2 || seenRequests[1].Model != "claude-haiku" || seenRequests[1].Effort != "medium" {
 		t.Fatalf("research request (explicit model) = %+v", seenRequests)
 	}
+}
+
+func TestResearchRoleLimitsAndDescription(t *testing.T) {
+	setup := func(t *testing.T, role string, stream func(req sdk.Request) iter.Seq[sdk.Part], available []tool) (tool, *[]sdk.Request) {
+		t.Helper()
+		ctx := t.Context()
+		home := t.TempDir()
+		repo, err := core.Open(ctx, core.Options{Path: filepath.Join(home, "research.sqlite")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = repo.Close() })
+		store, err := settings.Open(filepath.Join(home, "config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var requests []sdk.Request
+		info := sdk.ModelProviderInfo{Kind: "mock", Program: true}
+		registry := models.New()
+		if _, err := registry.Register(sdk.ModelProvider{
+			Info: info,
+			Stream: func(_ context.Context, _ map[string]any, req sdk.Request) iter.Seq[sdk.Part] {
+				captured := req
+				captured.Messages = slices.Clone(req.Messages)
+				captured.Tools = slices.Clone(req.Tools)
+				requests = append(requests, captured)
+				return stream(req)
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		project, err := repo.CreateProject(ctx, new("Research Limits"), core.ProjectStart{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		convID := project.CoordinatorID
+		if role == "thread" {
+			thread, err := repo.CreateThread(ctx, project.ID, core.NewThread{Title: "Deep Dive"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			convID = thread.ID
+		}
+		if _, err := repo.PostMessage(ctx, project.ID, core.MessageInput{ConversationID: convID, Author: "user", Content: "check"}); err != nil {
+			t.Fatal(err)
+		}
+		turnID, err := repo.StartScheduledTurn(ctx, convID, "mock")
+		if err != nil || turnID == "" {
+			t.Fatalf("StartScheduledTurn: id=%q err=%v", turnID, err)
+		}
+		conv := core.ConversationView{ID: convID, ProjectID: project.ID, Role: role}
+		parent := &settings.ResolvedModel{Provider: info, Model: "mock", Label: "mock"}
+		active := &turn{Runner: &Runner{Repository: repo, Settings: store, Models: registry}, conversation: conv, id: turnID}
+		entry := active.researchTool(available, parent, args{"modelRetries": float64(0)})
+		return entry, &requests
+	}
+
+	t.Run("step caps: coordinator 8 vs thread 24", func(t *testing.T) {
+		for _, tc := range []struct {
+			role      string
+			wantSteps int
+		}{
+			{role: "coordinator", wantSteps: coordinatorResearchMaxSteps},
+			{role: "thread", wantSteps: threadResearchMaxSteps},
+		} {
+			t.Run(tc.role, func(t *testing.T) {
+				readStub := specification("read_file", "read", args{"path": field("string")}, nil, func(_ context.Context, input args) (string, error) {
+					return "snippet " + text(input, "path"), nil
+				})
+				callNum := 0
+				entry, requests := setup(t, tc.role, func(req sdk.Request) iter.Seq[sdk.Part] {
+					return func(yield func(sdk.Part) bool) {
+						if len(req.Tools) == 0 {
+							yield(sdk.Part{Type: "text", Text: "Final conclusion."})
+							yield(sdk.Part{Type: "finish", Reason: "stop"})
+							return
+						}
+						callNum++
+						yield(makeCall(fmt.Sprintf("rc%d", callNum), "read_file", args{"path": fmt.Sprintf("f%d.go", callNum)}))
+						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+					}
+				}, []tool{readStub})
+
+				if tc.role == "coordinator" {
+					if !strings.Contains(entry.spec.Description, "create_thread") || !strings.Contains(entry.spec.Description, "single-point") {
+						t.Errorf("coordinator research description should guide lightweight single-point usage: %q", entry.spec.Description)
+					}
+				} else if strings.Contains(entry.spec.Description, "create_thread") {
+					t.Errorf("thread research description should not mention coordinator create_thread guidance: %q", entry.spec.Description)
+				}
+
+				out, err := entry.withCallID(t.Context(), "call_steps", args{"question": "Check cap"})
+				if err != nil {
+					t.Fatalf("research failed: %v", err)
+				}
+				if !strings.Contains(out, fmt.Sprintf("[Research: %d requests", tc.wantSteps)) {
+					t.Fatalf("output = %q, want %d requests", out, tc.wantSteps)
+				}
+				if len(*requests) != tc.wantSteps {
+					t.Fatalf("saw %d requests, want %d", len(*requests), tc.wantSteps)
+				}
+				for i := 0; i < tc.wantSteps-1; i++ {
+					if len((*requests)[i].Tools) == 0 {
+						t.Fatalf("step %d unexpectedly had empty tools", i+1)
+					}
+				}
+				lastReq := (*requests)[tc.wantSteps-1]
+				if len(lastReq.Tools) != 0 {
+					t.Fatalf("final step %d should have empty tools, got %d", tc.wantSteps, len(lastReq.Tools))
+				}
+				lastMsg := lastReq.Messages[len(lastReq.Messages)-1]
+				if lastMsg.Role != "user" || lastMsg.Content != transcript.FinalResearchPrompt {
+					t.Fatalf("final step prompt = %+v, want FinalResearchPrompt", lastMsg)
+				}
+			})
+		}
+	})
+
+	t.Run("retained buffer cap: coordinator 512 KiB vs thread 2 MiB", func(t *testing.T) {
+		chunk := strings.Repeat("a", 20_000)
+		readStub := specification("read_file", "read", args{"path": field("string")}, nil, func(_ context.Context, _ args) (string, error) {
+			return chunk, nil
+		})
+
+		// 28 calls x 20,000 bytes = 560,000 bytes (> 512 KiB, < 2 MiB).
+		runOnce := func(role string) []sdk.Request {
+			step := 0
+			entry, requests := setup(t, role, func(req sdk.Request) iter.Seq[sdk.Part] {
+				step++
+				return func(yield func(sdk.Part) bool) {
+					if step == 1 {
+						for i := 0; i < 28; i++ {
+							if !yield(makeCall(fmt.Sprintf("big_%d", i), "read_file", args{"path": fmt.Sprintf("big%d.txt", i)})) {
+								return
+							}
+						}
+						yield(sdk.Part{Type: "finish", Reason: "tool-calls"})
+						return
+					}
+					yield(sdk.Part{Type: "text", Text: "Wrapped up."})
+					yield(sdk.Part{Type: "finish", Reason: "stop"})
+				}
+			}, []tool{readStub})
+			if _, err := entry.withCallID(t.Context(), "call_buf", args{"question": "Check buffer cap"}); err != nil {
+				t.Fatalf("%s research failed: %v", role, err)
+			}
+			return *requests
+		}
+
+		coordReqs := runOnce("coordinator")
+		if len(coordReqs) != 2 {
+			t.Fatalf("coordinator requests = %d, want 2", len(coordReqs))
+		}
+		if len(coordReqs[1].Tools) != 0 {
+			t.Fatalf("coordinator step 2 should hit 512 KiB cap and clear tools, got %d tools", len(coordReqs[1].Tools))
+		}
+		if last := coordReqs[1].Messages[len(coordReqs[1].Messages)-1]; last.Content != transcript.FinalResearchPrompt {
+			t.Fatalf("coordinator step 2 should append FinalResearchPrompt, got %q", last.Content)
+		}
+
+		threadReqs := runOnce("thread")
+		if len(threadReqs) != 2 {
+			t.Fatalf("thread requests = %d, want 2", len(threadReqs))
+		}
+		if len(threadReqs[1].Tools) == 0 {
+			t.Fatalf("thread step 2 should still have tools under 2 MiB cap")
+		}
+	})
 }

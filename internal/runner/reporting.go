@@ -19,7 +19,7 @@ const reportGuide = "Use ready for checked changes ready for review or when the 
 func (turn *turn) reportingTools(thread core.ThreadView) []tool {
 	if author, ok := thread.ReviewOf.(string); ok && author != "" {
 		return []tool{
-			specification("read_changes", "List the author's changes. Give a path to see the text changes in one file.",
+			readOnlySpec("read_changes", "List the author's changes. Give a path to see the text changes in one file.",
 				args{"path": field("string")}, nil, func(ctx context.Context, input args) (string, error) {
 					return turn.readChanges(ctx, author, text(input, "path"))
 				}),

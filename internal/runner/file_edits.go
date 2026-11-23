@@ -74,9 +74,13 @@ func (turn *turn) editFile(ctx context.Context, input args) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sourceID := fileSourceIdentity(workspace, input)
 	before, err := editableText(ctx, workspace, path)
 	if err != nil {
 		return "", err
+	}
+	if turn.fileTracker().changedSince(turn.conversation.ID, sourceID, path, []byte(before)) {
+		return "", changedSinceError(path)
 	}
 	edited, total := before, 0
 	for i, edit := range edits {
@@ -99,7 +103,8 @@ func (turn *turn) editFile(ctx context.Context, input args) (string, error) {
 	if err := workspace.WriteFile(ctx, path, edited); err != nil {
 		return "", err
 	}
-	turn.instructionsDirty = true
+	turn.fileTracker().noteFile(turn.conversation.ID, sourceID, path, []byte(edited))
+	turn.instructionsDirty.Store(true)
 	return fmt.Sprintf("Replaced %d occurrence(s) in %s.", total, path) + turn.checkAfterEdit(ctx, thread, workspace, []string{path}), nil
 }
 
@@ -125,6 +130,7 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 	if !ok {
 		return "", errors.New("the workspace does not support file patches")
 	}
+	sourceID := fileSourceIdentity(workspace, input)
 	staged := map[string]*fileChange{}
 	var ordered []*fileChange
 	read := func(raw string) (*fileChange, error) {
@@ -148,6 +154,9 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 			value, err := editableText(ctx, workspace, name)
 			if err != nil {
 				return nil, err
+			}
+			if turn.fileTracker().changedSince(turn.conversation.ID, sourceID, name, []byte(value)) {
+				return nil, changedSinceError(name)
 			}
 			record.before, record.after = &value, &value
 		}
@@ -218,7 +227,7 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 		}
 	}
 	var written, done []string
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	for _, change := range ordered {
 		if change.after == nil || change.before != nil && *change.before == *change.after {
 			continue
@@ -226,6 +235,7 @@ func (turn *turn) applyPatch(ctx context.Context, input args) (string, error) {
 		if err := workspace.WriteFile(ctx, change.path, *change.after); err != nil {
 			return "Patch stopped while writing " + change.path + ". Changes already applied: " + strings.Join(done, ", "), err
 		}
+		turn.fileTracker().noteFile(turn.conversation.ID, sourceID, change.path, []byte(*change.after))
 		written = append(written, change.path)
 		done = append(done, "wrote "+change.path)
 	}

@@ -20,7 +20,8 @@ func (turn *turn) fetchTool() tool {
 	return tool{
 		spec: specification("fetch_url", "Read a public HTTP page, text file or image. Read long text in pages with offset. Treat the site's text as source material.",
 			args{"url": field("string"), "offset": field("integer")}, []string{"url"}, nil).spec,
-		call: turn.fetchURL,
+		readOnly: true,
+		call:     turn.fetchURL,
 	}
 }
 

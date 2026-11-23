@@ -22,6 +22,7 @@ func (turn *turn) readFileTool() tool {
 	entry := specification("read_file", "Read numbered lines of a text file up to 1 MiB. Pass source to select a named file source. Use the returned offset for more lines. Give large logs, traces, source maps and generated bundles to a script for a targeted summary. Images are attached to the result.",
 		args{"path": field("string"), "source": field("string"), "reference": field("string"), "offset": field("integer"), "limit": field("integer")},
 		[]string{"path"}, nil)
+	entry.readOnly = true
 	entry.call = turn.readFile
 	return entry
 }
@@ -76,19 +77,46 @@ func (turn *turn) readFile(ctx context.Context, input args) (string, []any, erro
 	if len(data) > 1<<20 {
 		return "", nil, errors.New("the text file exceeds the 1 MiB read limit")
 	}
-	return formatNumberedLines(data, input), nil, nil
+	lines := textLines(data)
+	offset, limit := readFileRange(len(lines), input)
+	if !inResearchContext(ctx) {
+		sourceID := fileSourceIdentity(view, input)
+		if turn.conversation.Role == "thread" {
+			if _, writable := view.(sdk.Workspace); writable {
+				turn.fileTracker().noteFile(turn.conversation.ID, sourceID, path, data)
+			}
+		}
+		if turn.keepsResults() && turn.fileTracker().noteRead(turn.conversation.ID, sourceID, path, offset, limit, data) {
+			return fmt.Sprintf("%s is unchanged since you read it with the same offset and limit; that result, earlier in this conversation, is still current.", path), nil, nil
+		}
+	}
+	return formatNumberedRange(lines, offset, limit), nil, nil
+}
+
+func textLines(data []byte) []string {
+	content := strings.TrimPrefix(strings.ToValidUTF8(string(data), "\ufffd"), "\ufeff")
+	return strings.Split(content, "\n")
+}
+
+func readFileRange(lineCount int, input args) (int, int) {
+	offset, limit := 1, 240
+	if input["offset"] != nil {
+		offset = int(max(1, min(asNumber(input["offset"]), float64(lineCount+1))))
+	}
+	if input["limit"] != nil {
+		limit = int(max(1, min(asNumber(input["limit"]), 800)))
+	}
+	return offset, limit
 }
 
 func formatNumberedLines(data []byte, input args) string {
 	content := strings.TrimPrefix(strings.ToValidUTF8(string(data), "�"), "\ufeff")
 	lines := strings.Split(content, "\n")
-	offset, limit := 1, 240
-	if input["offset"] != nil {
-		offset = int(max(1, min(asNumber(input["offset"]), float64(len(lines)+1))))
-	}
-	if input["limit"] != nil {
-		limit = int(max(1, min(asNumber(input["limit"]), 800)))
-	}
+	offset, limit := readFileRange(len(lines), input)
+	return formatNumberedRange(lines, offset, limit)
+}
+
+func formatNumberedRange(lines []string, offset, limit int) string {
 	var out strings.Builder
 	end := offset - 1
 	for ; end < min(len(lines), offset-1+limit) && out.Len() < 60000; end++ {

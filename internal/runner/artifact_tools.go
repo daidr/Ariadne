@@ -23,8 +23,8 @@ func (turn *turn) artifactTools() []tool {
 	connectors := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "from": field("string"), "to": field("string"), "label": field("string"), "route": field("string"), "dash": field("string"), "arrow": field("string")}})
 	options := arrayOf(args{"type": "object", "properties": args{"id": field("string"), "title": field("string"), "note": field("string"), "text": field("string"), "revises": field("string"), "images": arrayOf(field("object"))}, "required": []string{"id", "title"}})
 	return []tool{
-		specification("list_artifacts", "List the documents, whiteboards and dashboards of this project.", args{}, nil, turn.listArtifacts),
-		specification("read_artifact", "Read an artifact of this project. Omit version for the current content, comments and feedback.",
+		readOnlySpec("list_artifacts", "List the documents, whiteboards and dashboards of this project.", args{}, nil, turn.listArtifacts),
+		readOnlySpec("read_artifact", "Read an artifact of this project. Omit version for the current content, comments and feedback.",
 			args{"artifactId": field("string"), "version": field("integer")}, []string{"artifactId"}, turn.readArtifact),
 		specification("create_document", "Create a Markdown document in this project. Documents do not render Mermaid; for flowcharts, architecture diagrams or relationship graphs, put a JSON object with items and connectors in an embedded whiteboard code fence (or use a standalone whiteboard) instead. Share the artifact in chat as [Title](artifact:<artifactId>). Use <pending>description</pending> on its own line for an unfinished section.",
 			args{"title": field("string"), "content": field("string"), "nodeId": field("string")}, []string{"title", "content"}, turn.createDocument),
@@ -36,7 +36,7 @@ func (turn *turn) artifactTools() []tool {
 				"at": args{"type": "object", "properties": args{"x": field("number"), "y": field("number")}, "required": []string{"x", "y"}}}, []string{"artifactId", "body"}, turn.commentArtifact),
 		specification("resolve_artifact_comment", "Resolve a comment thread after addressing the feedback.",
 			args{"artifactId": field("string"), "commentThread": field("string")}, []string{"artifactId", "commentThread"}, turn.resolveArtifactComment),
-		specification("list_dashboard_sources", "List dashboard data sources offered by installed plugins.",
+		readOnlySpec("list_dashboard_sources", "List dashboard data sources offered by installed plugins.",
 			args{}, nil, func(context.Context, args) (string, error) { return reply(turn.Dashboards.Describe(), nil) }),
 		specification("refresh_dashboard", "Fetch the latest data for a live dashboard.",
 			args{"artifactId": field("string")}, []string{"artifactId"}, turn.refreshDashboard),

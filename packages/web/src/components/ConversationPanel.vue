@@ -17,7 +17,6 @@ import {
   DouInput,
   DouLink,
   DouPopover,
-  DouShimmer,
   DouText,
   type ChatAttachment,
   type ChatInputOption,
@@ -33,7 +32,6 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCwIcon,
-  MessagesIcon,
 } from '@dou-ui/icons'
 import {
   computed,
@@ -55,7 +53,6 @@ import RelayedTo from './RelayedTo.vue'
 import MessageQuote from './MessageQuote.vue'
 import { commonEmojis, shownReactions } from './reactions'
 import { clockText, t, tm } from '../i18n'
-import ThreadTools from './ThreadTools.vue'
 import { placeTodo, todoPlan } from './todo'
 import { isInlineImage, shownAttachments, useAttachments } from './attachments'
 import {
@@ -66,9 +63,9 @@ import {
   openMain,
   openView as openFrom,
   type OpenedView,
-  openThread,
   openThreadFrom,
   react,
+  renderKeyOf,
   retryTurn,
   sendMessage,
   state,
@@ -80,10 +77,8 @@ import {
   undoMerge,
   undoNotice,
 } from '../store'
-import WorkspaceTag from './WorkspaceTag.vue'
 import { offerNotifications } from '../notify'
 import ContextUsage from './ContextUsage.vue'
-import ReviewMark from '../review/ReviewMark.vue'
 import ReviewNotice from '../review/ReviewNotice.vue'
 import { useSkills } from '../review/skills'
 import LineComments from './LineComments.vue'
@@ -111,15 +106,12 @@ import { isBare, sanitizeUrl } from '../markdown/links'
 import { lastPanel, registerPanel } from '../shortcuts'
 import { stepHistory, type Recall } from './input-history'
 import { provideFromThread } from '../opened-from'
+import { reconcilePendingMessages } from '../optimistic-messages'
 
 /** `threadId` shows that thread's conversation; otherwise the coordinator's. */
-// `tabbed`: in a side tab group, whose own menu holds the thread's.
-const props = withDefaults(
-  defineProps<{ threadId?: string; tabbed?: boolean; active?: boolean }>(),
-  {
-    active: true,
-  },
-)
+const props = withDefaults(defineProps<{ threadId?: string; active?: boolean }>(), {
+  active: true,
+})
 const active = computed(() => props.active)
 
 // What opens from a thread shows full screen, with this thread beside it.
@@ -295,6 +287,7 @@ const showCapsules = computed(
     !!thread.value?.pullRequest,
 )
 const wait = computed(() => (working.value ? null : (view.value.conversation?.wait ?? null)))
+const reviewing = computed(() => (thread.value?.review?.reviewing ? thread.value.review : null))
 // What it is doing, shown after the last message: what the model said beside its latest tool
 // calls, else the todo it marked as under way. A thread needs no name for it; the
 // coordinator does, as its column sits beside threads that work too.
@@ -425,6 +418,16 @@ const writing = computed<MessageView | null>(() => {
 })
 
 const recap = computed(() => view.value.notices.findLast((notice) => notice.kind === 'recap')?.id)
+const pendingEntries = computed(() => {
+  const id = conversationId.value
+  return id ? (state.pendingMessages[id] ?? []) : []
+})
+const reconciledPending = computed(() =>
+  reconcilePendingMessages(pendingEntries.value, view.value.messages),
+)
+function messageRenderKey(id: string): string {
+  return reconciledPending.value.matchedKeys.get(id) ?? renderKeyOf(id)
+}
 
 // Messages and notices in the order they happened. A worktree removed after a merge goes
 // unsaid: the merge's own line says what happened.
@@ -435,6 +438,14 @@ const timeline = computed(() =>
       at: message.createdAt,
       message,
       notice: null,
+      pending: false,
+    })),
+    ...reconciledPending.value.visible.map((entry) => ({
+      id: entry.clientId,
+      at: entry.message.createdAt,
+      message: entry.message,
+      notice: null,
+      pending: true,
     })),
     ...view.value.notices
       // Only a removal the user made is worth a line: the others follow from what they see.
@@ -446,6 +457,7 @@ const timeline = computed(() =>
         at: notice.createdAt,
         message: null,
         notice,
+        pending: false,
       })),
     ...(writing.value
       ? [
@@ -454,6 +466,7 @@ const timeline = computed(() =>
             at: writing.value.createdAt,
             message: writing.value,
             notice: null,
+            pending: false,
           },
         ]
       : []),
@@ -495,6 +508,8 @@ const entries = computed(() => [
   ),
   { id: 'conversation-activity', activity: true as const },
 ])
+const entryKey = (item: (typeof entries.value)[number]) =>
+  'message' in item && item.message ? messageRenderKey(item.id) : item.id
 const times = computed(() => messageTimes(shown.value.items))
 const askDrafts = composer?.askDrafts ?? new Map<string, AskDraft>()
 provide(askDraftsKey, askDrafts)
@@ -628,10 +643,17 @@ async function submit(value: string) {
   offerNotifications()
   draft.value = ''
   const files = attachments.take()
-  const sent = await sendMessage(id, value, {
-    attachments: files.attachments,
-    mentions: [...mentions.inText(value), ...skills.inText(value)],
-  })
+  const request = sendMessage(
+    id,
+    value,
+    {
+      attachments: files.attachments,
+      mentions: [...mentions.inText(value), ...skills.inText(value)],
+    },
+    { attachments: files.previews },
+  )
+  void nextTick(() => list.value?.scrollToBottom())
+  const sent = await request
   files.settle(sent)
   if (sent) {
     mentions.reset()
@@ -686,7 +708,7 @@ watchEffect(
 
 // ↑ in an empty input brings back what the user sent here before, newest first.
 const sent = computed(() =>
-  view.value.messages
+  [...view.value.messages, ...reconciledPending.value.visible.map((entry) => entry.message)]
     .filter((message) => message.author === 'user' && message.content.trim())
     .map((message) => message.content)
     .toReversed(),
@@ -755,9 +777,11 @@ function retry() {
 
 // Scrolled to the top: the page before. A first page too short to scroll fetches the
 // next one by itself, since there is no top to reach.
-const list = useTemplateRef<{ viewport: HTMLElement | null; scrollToMessage(id: string): void }>(
-  'list',
-)
+const list = useTemplateRef<{
+  viewport: HTMLElement | null
+  scrollToBottom(behavior?: ScrollBehavior): void
+  scrollToMessage(id: string): void
+}>('list')
 const unread = props.threadId
   ? undefined
   : useCoordinatorUnread(
@@ -830,7 +854,7 @@ watch(
     }
     await nextTick()
     if (list.value !== chat || conversationId.value !== id) return
-    chat.scrollToMessage(focus.messageId)
+    chat.scrollToMessage(messageRenderKey(focus.messageId))
     focused.value = focus.messageId
     clearTimeout(unmark)
     unmark = setTimeout(() => (focused.value = null), 2000)
@@ -857,34 +881,13 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
     @focusin="lastPanel = kind"
     @pointerdown="lastPanel = kind"
   >
-    <div v-if="thread" class="conversation-header">
-      <div class="conversation-meta">
-        <div class="conversation-meta-main">
-          <DouShimmer v-if="thread.review?.reviewing" class="conversation-reviewing">
-            {{ t('review.underway', { round: thread.review.rounds }) }}
-          </DouShimmer>
-          <WorkspaceTag v-if="thread.workspace?.branch" :workspace="thread.workspace" />
-          <ReviewMark :thread="thread" />
-          <!-- A reviewing thread reads its author's changes: they open from here, as does the author. -->
-          <template v-if="reviewed">
-            <DouButton variant="ghost" size="sm" @click="openThread(reviewed.id)">
-              <template #leading><MessagesIcon /></template>
-              {{ t('review.author') }}
-            </DouButton>
-          </template>
-        </div>
-        <div v-if="!tabbed" class="conversation-tools">
-          <ThreadTools :thread="thread" :label="t('thread.more')" />
-        </div>
-      </div>
-    </div>
-
     <ConversationLog
-      v-if="timeline.length || todo.length || working || queued || wait"
+      v-if="timeline.length || todo.length || working || queued || wait || reviewing"
       :key="conversationId ?? undefined"
       ref="list"
       class="conversation-list"
       :items="entries"
+      :item-key="entryKey"
       :loading-earlier="view.loadingEarlier"
       :bottom-inset="footerHeight || undefined"
       :bottom-fade="Boolean(state.detail)"
@@ -902,6 +905,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
           :elapsed="elapsed"
           :esc-armed="escArmed"
           :wait="wait"
+          :reviewing="reviewing"
         />
         <DouChatPlan
           v-else-if="'todo' in item"
@@ -1105,7 +1109,11 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             {{ t('notice.compactionFailed', { detail: item.notice.detail }) }}
           </DouText>
         </div>
-        <div v-for="message in item.message ? [item.message] : []" v-else :key="message.id">
+        <div
+          v-for="message in item.message ? [item.message] : []"
+          v-else
+          :key="messageRenderKey(message.id)"
+        >
           <ConversationMarker
             v-if="message.id === newMessagesAt || times.has(message.id)"
             :at="message.createdAt"
@@ -1133,6 +1141,7 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
             :parts="partsOf(message)"
             :markdown="sender(message) === 'assistant' && markdown"
             :data-message-id="message.id"
+            :data-pending="item.pending ? '' : undefined"
             :highlighted="!!focused && focused === relayIdOf(message.id)"
             :reactions="shownReactions(message.reactions)"
             :reactable="reactable(message)"
@@ -1513,43 +1522,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   min-height: 0;
 }
 
-.conversation-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px 8px 16px;
-  border-bottom: 1px solid var(--dou-color-border-subtle);
-}
-
-/* The menu keeps its corner however far the rest wraps. */
-.conversation-meta {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* With no branch, review or menu to show, the bar is not drawn at all. */
-.conversation-header:has(.conversation-meta-main:empty):not(:has(.conversation-tools)) {
-  display: none;
-}
-
-.conversation-meta-main {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  min-width: 0;
-}
-
-/* The first line is as tall as the menu beside it, so a lone chip centres on it. */
-.conversation-meta-main::before {
-  content: '';
-  height: 28px;
-  margin-inline-end: -8px;
-}
-
 .conversation-list :deep(.dou-chat-list) {
   --dou-chat-list-gap: 30px;
 }
@@ -1683,14 +1655,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
   box-shadow: none;
 }
 
-.conversation-tools {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 4px;
-  margin-left: auto;
-}
-
 .conversation-model {
   max-width: min(240px, 44vw);
   overflow: hidden;
@@ -1736,10 +1700,6 @@ watch([() => view.value.messages.at(-1)?.id, active], ([last, visible]) => {
 }
 
 .relay-content {
-  font-size: var(--dou-font-size-sm);
-}
-
-.conversation-reviewing {
   font-size: var(--dou-font-size-sm);
 }
 </style>

@@ -17,7 +17,7 @@ import (
 
 func (turn *turn) repoTools(repo *sdk.RepoCapability, canMerge bool) []tool {
 	tools := []tool{
-		specification("repo_status", "Read the current branch's pull request and the checks for its latest commit.",
+		readOnlySpec("repo_status", "Read the current branch's pull request and the checks for its latest commit.",
 			args{}, nil, func(ctx context.Context, _ args) (string, error) { return turn.repoStatus(ctx, repo) }),
 		specification("sync_branch", "Fetch remote changes and report how far the workspace branch is ahead or behind.",
 			args{}, nil, func(ctx context.Context, _ args) (string, error) { return turn.syncBranch(ctx, repo) }),
@@ -36,7 +36,7 @@ func (turn *turn) repoTools(repo *sdk.RepoCapability, canMerge bool) []tool {
 			}))
 	}
 	if repo.CheckLog != nil {
-		tools = append(tools, specification("read_check_log", "Read the end of a CI check log using its ID from repo_status.",
+		tools = append(tools, readOnlySpec("read_check_log", "Read the end of a CI check log using its ID from repo_status.",
 			args{"checkId": field("string")}, []string{"checkId"}, func(ctx context.Context, input args) (string, error) {
 				log, err := repo.CheckLog(ctx, text(input, "checkId"))
 				if err != nil {
@@ -127,7 +127,9 @@ func (turn *turn) repoWorkspace(ctx context.Context) (core.ThreadView, sdk.Works
 		return thread, nil, "", err
 	}
 	turn.changes.begin(ctx, thread)
-	turn.instructionsDirty = turn.instructionsDirty || thread.Workspace == nil
+	if thread.Workspace == nil {
+		turn.instructionsDirty.Store(true)
+	}
 	branch := workspace.Info().Branch
 	if branch == nil || *branch == "" {
 		return thread, nil, "", domainerr.New("error.noRepo", nil)

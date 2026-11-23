@@ -77,10 +77,25 @@ func (turn *turn) writeFile(ctx context.Context, input args) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	turn.instructionsDirty = true
+	sourceID := fileSourceIdentity(workspace, input)
+	if turn.fileTracker().hasSeen(turn.conversation.ID, sourceID, path) {
+		before, exists, err := readExistingBytes(ctx, workspace, path)
+		if err != nil {
+			var tooLarge *sdk.FileTooLargeError
+			if errors.As(err, &tooLarge) {
+				return "", changedSinceError(path)
+			}
+			return "", err
+		}
+		if exists && turn.fileTracker().changedSince(turn.conversation.ID, sourceID, path, before) {
+			return "", changedSinceError(path)
+		}
+	}
+	turn.instructionsDirty.Store(true)
 	if err := workspace.WriteFile(ctx, path, content); err != nil {
 		return "", err
 	}
+	turn.fileTracker().noteFile(turn.conversation.ID, sourceID, path, []byte(content))
 	return "Wrote " + path + "." + turn.checkAfterEdit(ctx, thread, workspace, []string{path}), nil
 }
 
@@ -202,7 +217,7 @@ func (turn *turn) runCommand(ctx context.Context, input args) (string, error) {
 	if err != nil || !allowed {
 		return note, err
 	}
-	turn.instructionsDirty = true
+	turn.instructionsDirty.Store(true)
 	setup, err := turn.Workspaces.SetupDone(ctx, thread.ID)
 	if err != nil {
 		return "", err

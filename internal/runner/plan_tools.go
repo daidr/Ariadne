@@ -29,7 +29,7 @@ func (turn *turn) planTools() []tool {
 }
 
 func (turn *turn) readPlanTool() tool {
-	return specification("read_plan", "Read the project's plan, dependencies, status, related threads and recent changes.", args{}, nil, turn.readPlan)
+	return readOnlySpec("read_plan", "Read the project's plan, dependencies, status, related threads and recent changes.", args{}, nil, turn.readPlan)
 }
 
 func (turn *turn) readPlan(ctx context.Context, _ args) (string, error) {
