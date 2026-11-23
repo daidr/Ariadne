@@ -17,8 +17,17 @@ import {
   DouText,
   DouTextarea,
   DouTimePicker,
+  useBreakpoints,
 } from 'dou-ui'
-import { PlusIcon, TrashIcon } from '@dou-ui/icons'
+import {
+  CoinsIcon,
+  FolderGitIcon,
+  PlusIcon,
+  RocketIcon,
+  ScrollTextIcon,
+  TrashIcon,
+  WrenchIcon,
+} from '@dou-ui/icons'
 import { computed, inject, ref, watch } from 'vue'
 import { api, ApiError, type McpServerView } from '../api'
 import { clockText, t, tm } from '../i18n'
@@ -31,6 +40,7 @@ import SourceNotes from './SourceNotes.vue'
 import MemoryList from './MemoryList.vue'
 import ProjectUsage from './ProjectUsage.vue'
 import SettingsLabelHelp from './SettingsLabelHelp.vue'
+import { resolveWorkspaceLayout, type WorkspaceLayoutMode } from '../workspace-layout'
 
 /**
  * The open project's own settings: where its files are, instructions, workspaces and MCP,
@@ -38,6 +48,16 @@ import SettingsLabelHelp from './SettingsLabelHelp.vue'
  * switches, the shell, the branch prefix, the project's own concurrency) is saved back as
  * it was.
  */
+
+const props = defineProps<{ layoutMode?: WorkspaceLayoutMode }>()
+const breakpoints = useBreakpoints()
+const mode = computed<WorkspaceLayoutMode>(
+  () => props.layoutMode ?? resolveWorkspaceLayout(breakpoints),
+)
+const isNarrow = computed(() => mode.value === 'narrow')
+const fullscreen = computed(() => mode.value !== 'wide')
+const tabsPlacement = computed(() => (isNarrow.value ? 'top' : 'start'))
+const tabsHeight = computed(() => (fullscreen.value ? '100%' : 560))
 
 const tab = computed({
   get: () => state.projectSettingsTab,
@@ -240,214 +260,243 @@ async function save() {
     v-model:open="state.projectSettingsOpen"
     :title="t('projectSettings.title', { name: state.detail?.project.name ?? '' })"
     :width="760"
+    :fullscreen="fullscreen"
+    :class="{
+      'project-settings-dialog-fullscreen': fullscreen,
+      'project-settings-dialog-narrow': isNarrow,
+    }"
   >
-    <DouTabs v-if="settings" v-model="tab" placement="start" :height="560">
-      <DouTabPanel value="source" :label="t('projectSettings.tab.source')">
-        <div class="project-stack">
-          <FileSourcesForm
-            v-if="state.detail"
-            :key="state.detail.project.id"
-            :project-id="state.detail.project.id"
-            ref="source"
-          />
-          <SourceNotes />
-        </div>
-      </DouTabPanel>
-      <DouTabPanel value="instructions" :label="t('projectSettings.tab.instructions')">
-        <div class="project-stack">
-          <DouTextarea
-            v-model="settings.instructions"
-            :autosize="{ minRows: 6, maxRows: 14 }"
-            :maxlength="16000"
-            :placeholder="t('projectSettings.instructionsPlaceholder')"
-            :aria-label="t('projectSettings.tab.instructions')"
-          />
-          <DouText weight="medium" size="sm">{{ t('memory.title') }}</DouText>
-          <MemoryList />
-        </div>
-      </DouTabPanel>
-      <DouTabPanel value="workspace" :label="t('projectSettings.tab.workspace')">
-        <DouForm layout="vertical" size="sm">
-          <DouFormItem :label="t('projectSettings.retention')">
-            <DouSelect v-model="settings.workspace.retention" :options="retentionOptions" />
-          </DouFormItem>
-          <DouFormItem :label="t('projectSettings.setup')">
+    <div :class="['project-settings-body', { 'is-fullscreen': fullscreen }]">
+      <DouTabs
+        v-if="settings"
+        v-model="tab"
+        :placement="tabsPlacement"
+        :height="tabsHeight"
+        class="project-settings-tabs"
+      >
+        <DouTabPanel value="source" :label="t('projectSettings.tab.source')" :icon="FolderGitIcon">
+          <div class="project-stack">
+            <FileSourcesForm
+              v-if="state.detail"
+              :key="state.detail.project.id"
+              :project-id="state.detail.project.id"
+              ref="source"
+            />
+            <SourceNotes />
+          </div>
+        </DouTabPanel>
+        <DouTabPanel
+          value="instructions"
+          :label="t('projectSettings.tab.instructions')"
+          :icon="ScrollTextIcon"
+        >
+          <div class="project-stack">
             <DouTextarea
-              v-model="setup"
-              :autosize="{ minRows: 2, maxRows: 8 }"
-              :maxlength="8000"
-              placeholder="bun install"
-              class="project-code"
-            />
-          </DouFormItem>
-          <DouFormItem :label="t('projectSettings.check')">
-            <template #label>
-              <SettingsLabelHelp
-                :label="t('projectSettings.check')"
-                :content="t('projectSettings.checkHelp', { placeholder: '{file}' })"
-              />
-            </template>
-            <DouInput
-              v-model="check"
-              :maxlength="2000"
-              placeholder="bunx tsc --noEmit"
-              class="project-code"
-            />
-          </DouFormItem>
-          <DouFormItem :label="t('projectSettings.env')">
-            <SecretPairs v-model="env" />
-          </DouFormItem>
-          <DouFormItem :label="t('project.mcp')">
-            <DouSelect
-              v-if="mcpOptions.length"
-              v-model="mcp"
-              multiple
-              clearable
-              :options="mcpOptions"
-              :placeholder="t('project.mcpNone')"
-            />
-            <!-- Servers are set up for all projects at once; a project picks from them. -->
-            <DouButton v-else size="sm" variant="outline" @click="openMcp">
-              {{ t('project.mcpAdd') }}
-            </DouButton>
-          </DouFormItem>
-        </DouForm>
-      </DouTabPanel>
-      <DouTabPanel value="autopilot" :label="t('projectSettings.tab.autopilot')">
-        <DouForm layout="vertical" size="sm">
-          <DouFormItem
-            :label="t('projectSettings.delivery')"
-            :help="
-              settings.delivery.mode === 'external'
-                ? t('projectSettings.deliveryExternalHelp')
-                : undefined
-            "
-          >
-            <DouSelect v-model="settings.delivery.mode" :options="deliveryOptions" />
-          </DouFormItem>
-          <DouFormItem
-            v-if="settings.delivery.mode === 'external'"
-            :label="t('projectSettings.deliveryInstructions')"
-          >
-            <DouTextarea
-              v-model="settings.delivery.instructions"
-              :autosize="{ minRows: 3, maxRows: 8 }"
+              v-model="settings.instructions"
+              :autosize="{ minRows: 6, maxRows: 14 }"
               :maxlength="16000"
-              :placeholder="t('projectSettings.deliveryPlaceholder')"
+              :placeholder="t('projectSettings.instructionsPlaceholder')"
+              :aria-label="t('projectSettings.tab.instructions')"
             />
-          </DouFormItem>
-          <div class="project-switch">
-            <span>{{ t('projectSettings.review') }}</span>
-            <DouSwitch
-              :model-value="settings.review.enabled"
-              :aria-label="t('projectSettings.review')"
-              @update:model-value="setReview"
-            />
+            <DouText weight="medium" size="sm">{{ t('memory.title') }}</DouText>
+            <MemoryList />
           </div>
-          <div class="project-switch">
-            <SettingsLabelHelp
-              :label="t('projectSettings.autopilot')"
-              :content="
-                t(
-                  settings.delivery.mode === 'external'
-                    ? 'projectSettings.autopilotExternalHelp'
-                    : 'projectSettings.autopilotHelp',
-                )
-              "
-            />
-            <DouSwitch
-              :model-value="settings.autopilot.enabled"
-              :aria-label="t('projectSettings.autopilot')"
-              @update:model-value="setAutopilot"
-            />
-          </div>
-          <!-- Switching it on starts work at once: which, is said before saving. -->
-          <DouText
-            v-if="settings.autopilot.enabled && !state.detail?.project.settings.autopilot.enabled"
-            size="sm"
-            variant="secondary"
-          >
-            {{
-              startsNow.length
-                ? t('projectSettings.autopilotStarts', { titles: startsNow.join('、') })
-                : t('projectSettings.autopilotStartsNone')
-            }}
-          </DouText>
-          <DouFormItem
-            v-if="hostedMerge && settings.autopilot.enabled && settings.delivery.mode === 'merge'"
-            :label="t('projectSettings.autopilotMethod')"
-          >
-            <DouSelect v-model="settings.autopilot.method" :options="methodOptions" />
-          </DouFormItem>
-          <div class="project-row">
-            <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
-              <DouInputNumber
-                v-model="threadK"
-                :min="1"
-                :max="1000000"
-                :step="100"
-                :placeholder="t('projectSettings.noCap')"
+        </DouTabPanel>
+        <DouTabPanel
+          value="workspace"
+          :label="t('projectSettings.tab.workspace')"
+          :icon="WrenchIcon"
+        >
+          <DouForm layout="vertical" size="sm">
+            <DouFormItem :label="t('projectSettings.retention')">
+              <DouSelect v-model="settings.workspace.retention" :options="retentionOptions" />
+            </DouFormItem>
+            <DouFormItem :label="t('projectSettings.setup')">
+              <DouTextarea
+                v-model="setup"
+                :autosize="{ minRows: 2, maxRows: 8 }"
+                :maxlength="8000"
+                placeholder="bun install"
+                class="project-code"
               />
             </DouFormItem>
-            <DouFormItem :label="t('projectSettings.budgetProject')" class="project-grow">
-              <DouInputNumber
-                v-model="projectK"
-                :min="1"
-                :max="100000000"
-                :step="1000"
-                :placeholder="t('projectSettings.noCap')"
-              />
-            </DouFormItem>
-          </div>
-        </DouForm>
-        <div class="project-routines">
-          <DouText weight="medium" size="sm">{{ t('projectSettings.tab.routines') }}</DouText>
-          <DouEmpty v-if="!settings.routines.length" size="sm" :description="t('routine.empty')" />
-          <div v-for="routine in settings.routines" :key="routine.id" class="project-routine">
-            <DouTextarea
-              v-model="routine.prompt"
-              :autosize="{ minRows: 2, maxRows: 6 }"
-              :maxlength="2000"
-              :placeholder="t('routine.placeholder')"
-              :aria-label="t('routine.prompt')"
-            />
-            <div class="project-routine-when">
-              <DouCheckTagGroup
-                v-model="routine.days as number[]"
-                :options="dayOptions"
-                multiple
-                size="sm"
-              />
-              <div class="project-routine-time">
-                <DouTimePicker
-                  v-model="routine.time as string"
-                  format="HH:mm"
-                  size="sm"
-                  :minute-step="5"
+            <DouFormItem :label="t('projectSettings.check')">
+              <template #label>
+                <SettingsLabelHelp
+                  :label="t('projectSettings.check')"
+                  :content="t('projectSettings.checkHelp', { placeholder: '{file}' })"
                 />
-              </div>
-              <DouText variant="tertiary" size="sm" class="project-routine-next">
-                {{ nextText(routine) }}
-              </DouText>
-              <DouSwitch v-model="routine.enabled" size="sm" :aria-label="t('routine.enabled')" />
-              <DouButton
-                variant="ghost"
-                size="sm"
-                :aria-label="t('routine.remove')"
-                :title="t('routine.remove')"
-                @click="removeRoutine(routine.id)"
-              >
-                <TrashIcon />
+              </template>
+              <DouInput
+                v-model="check"
+                :maxlength="2000"
+                placeholder="bunx tsc --noEmit"
+                class="project-code"
+              />
+            </DouFormItem>
+            <DouFormItem :label="t('projectSettings.env')">
+              <SecretPairs v-model="env" />
+            </DouFormItem>
+            <DouFormItem :label="t('project.mcp')">
+              <DouSelect
+                v-if="mcpOptions.length"
+                v-model="mcp"
+                multiple
+                clearable
+                :options="mcpOptions"
+                :placeholder="t('project.mcpNone')"
+              />
+              <!-- Servers are set up for all projects at once; a project picks from them. -->
+              <DouButton v-else size="sm" variant="outline" @click="openMcp">
+                {{ t('project.mcpAdd') }}
               </DouButton>
+            </DouFormItem>
+          </DouForm>
+        </DouTabPanel>
+        <DouTabPanel
+          value="autopilot"
+          :label="t('projectSettings.tab.autopilot')"
+          :icon="RocketIcon"
+        >
+          <DouForm layout="vertical" size="sm">
+            <DouFormItem
+              :label="t('projectSettings.delivery')"
+              :help="
+                settings.delivery.mode === 'external'
+                  ? t('projectSettings.deliveryExternalHelp')
+                  : undefined
+              "
+            >
+              <DouSelect v-model="settings.delivery.mode" :options="deliveryOptions" />
+            </DouFormItem>
+            <DouFormItem
+              v-if="settings.delivery.mode === 'external'"
+              :label="t('projectSettings.deliveryInstructions')"
+            >
+              <DouTextarea
+                v-model="settings.delivery.instructions"
+                :autosize="{ minRows: 3, maxRows: 8 }"
+                :maxlength="16000"
+                :placeholder="t('projectSettings.deliveryPlaceholder')"
+              />
+            </DouFormItem>
+            <div class="project-switch">
+              <span>{{ t('projectSettings.review') }}</span>
+              <DouSwitch
+                :model-value="settings.review.enabled"
+                :aria-label="t('projectSettings.review')"
+                @update:model-value="setReview"
+              />
+            </div>
+            <div class="project-switch">
+              <SettingsLabelHelp
+                :label="t('projectSettings.autopilot')"
+                :content="
+                  t(
+                    settings.delivery.mode === 'external'
+                      ? 'projectSettings.autopilotExternalHelp'
+                      : 'projectSettings.autopilotHelp',
+                  )
+                "
+              />
+              <DouSwitch
+                :model-value="settings.autopilot.enabled"
+                :aria-label="t('projectSettings.autopilot')"
+                @update:model-value="setAutopilot"
+              />
+            </div>
+            <!-- Switching it on starts work at once: which, is said before saving. -->
+            <DouText
+              v-if="settings.autopilot.enabled && !state.detail?.project.settings.autopilot.enabled"
+              size="sm"
+              variant="secondary"
+            >
+              {{
+                startsNow.length
+                  ? t('projectSettings.autopilotStarts', { titles: startsNow.join('、') })
+                  : t('projectSettings.autopilotStartsNone')
+              }}
+            </DouText>
+            <DouFormItem
+              v-if="hostedMerge && settings.autopilot.enabled && settings.delivery.mode === 'merge'"
+              :label="t('projectSettings.autopilotMethod')"
+            >
+              <DouSelect v-model="settings.autopilot.method" :options="methodOptions" />
+            </DouFormItem>
+            <div class="project-row">
+              <DouFormItem :label="t('projectSettings.budgetThread')" class="project-grow">
+                <DouInputNumber
+                  v-model="threadK"
+                  :min="1"
+                  :max="1000000"
+                  :step="100"
+                  :placeholder="t('projectSettings.noCap')"
+                />
+              </DouFormItem>
+              <DouFormItem :label="t('projectSettings.budgetProject')" class="project-grow">
+                <DouInputNumber
+                  v-model="projectK"
+                  :min="1"
+                  :max="100000000"
+                  :step="1000"
+                  :placeholder="t('projectSettings.noCap')"
+                />
+              </DouFormItem>
+            </div>
+          </DouForm>
+          <div class="project-routines">
+            <DouText weight="medium" size="sm">{{ t('projectSettings.tab.routines') }}</DouText>
+            <DouEmpty
+              v-if="!settings.routines.length"
+              size="sm"
+              :description="t('routine.empty')"
+            />
+            <div v-for="routine in settings.routines" :key="routine.id" class="project-routine">
+              <DouTextarea
+                v-model="routine.prompt"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                :maxlength="2000"
+                :placeholder="t('routine.placeholder')"
+                :aria-label="t('routine.prompt')"
+              />
+              <div class="project-routine-when">
+                <DouCheckTagGroup
+                  v-model="routine.days as number[]"
+                  :options="dayOptions"
+                  multiple
+                  size="sm"
+                />
+                <div class="project-routine-time">
+                  <DouTimePicker
+                    v-model="routine.time as string"
+                    format="HH:mm"
+                    size="sm"
+                    :minute-step="5"
+                  />
+                </div>
+                <DouText variant="tertiary" size="sm" class="project-routine-next">
+                  {{ nextText(routine) }}
+                </DouText>
+                <DouSwitch v-model="routine.enabled" size="sm" :aria-label="t('routine.enabled')" />
+                <DouButton
+                  variant="ghost"
+                  size="sm"
+                  :aria-label="t('routine.remove')"
+                  :title="t('routine.remove')"
+                  @click="removeRoutine(routine.id)"
+                >
+                  <TrashIcon />
+                </DouButton>
+              </div>
             </div>
           </div>
-        </div>
-      </DouTabPanel>
-      <DouTabPanel value="usage" :label="t('usage.title')">
-        <ProjectUsage />
-      </DouTabPanel>
-    </DouTabs>
-    <DouAlert v-if="error" tone="danger" class="project-error">{{ error }}</DouAlert>
+        </DouTabPanel>
+        <DouTabPanel value="usage" :label="t('usage.title')" :icon="CoinsIcon">
+          <ProjectUsage />
+        </DouTabPanel>
+      </DouTabs>
+      <DouAlert v-if="error" tone="danger" class="project-error">{{ error }}</DouAlert>
+    </div>
     <template #footer="{ close }">
       <DouButton variant="ghost" @click="close">{{ t('settings.cancel') }}</DouButton>
       <DouButton tone="primary" :loading="saving" :disabled="!settings" @click="save">
@@ -457,7 +506,33 @@ async function save() {
   </DouDialog>
 </template>
 
+<style>
+/* The dialog panel teleports outside this component, so safe-area padding stays unscoped. */
+.project-settings-dialog-fullscreen {
+  padding-top: var(--ariadne-safe-top);
+  padding-right: var(--ariadne-safe-right);
+  padding-bottom: var(--ariadne-safe-bottom);
+  padding-left: var(--ariadne-safe-left);
+}
+
+.project-settings-dialog-narrow {
+  --dou-dialog-padding: 16px;
+}
+</style>
+
 <style scoped>
+.project-settings-body.is-fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.project-settings-body.is-fullscreen .project-settings-tabs {
+  flex: 1;
+  min-height: 0;
+}
+
 .project-stack {
   display: flex;
   flex-direction: column;
