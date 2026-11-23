@@ -1,4 +1,4 @@
-import { IMAGE_TYPES, type Attachment, type ImageType } from '@ariadne/core'
+import { IMAGE_TYPES, type Attachment, type FileType, type ImageType } from '@ariadne/core'
 import type { ChatAttachment } from 'dou-ui'
 import { onBeforeUnmount, ref, type Ref } from 'vue'
 import { api } from '../api'
@@ -121,6 +121,19 @@ export function useAttachments(
     return {
       attachments: taken.flatMap((file) =>
         file.fileId ? [{ fileId: file.fileId, name: file.name }] : [],
+      ),
+      /** Uploaded attachment metadata for immediate display on an optimistic message. */
+      previews: taken.flatMap((file): Attachment[] =>
+        file.fileId
+          ? [
+              {
+                fileId: file.fileId,
+                name: file.name,
+                mime: (file.type || 'text/plain') as FileType,
+                size: file.size ?? 0,
+              },
+            ]
+          : [],
       ),
       /** Sent: let go of their previews. Not sent: back in the list for another try. */
       settle(sent: boolean) {

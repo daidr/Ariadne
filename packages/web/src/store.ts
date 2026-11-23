@@ -46,6 +46,14 @@ import { t, tm } from './i18n'
 import { modelLabels } from './model-label'
 import { clearBoardThumbnails } from './artifacts/board-thumbnail'
 import { clearLinkCaches } from './markdown/link-summaries'
+import {
+  buildOptimisticMessage,
+  nextOptimisticTimestamp,
+  optimisticAttachmentsOf,
+  type OptimisticMessageOptions,
+  type PendingUserMessage,
+} from './optimistic-messages'
+import { currentServerNow } from './server-clock'
 import type { WorkspaceLocation, WorkspaceSnapshot } from './workspace-route'
 
 /** What the middle column shows. */
@@ -200,6 +208,8 @@ interface State {
    * until its message is loaded, so it goes on showing in the same place.
    */
   writing: Record<string, ReplyDraft>
+  /** User messages shown optimistically while `postMessage` is still in flight, by conversation. */
+  pendingMessages: Record<string, PendingUserMessage[]>
   /** Threads' background commands by conversation, as the server last told them. */
   background: Record<string, BackgroundView[]>
   /**
@@ -239,6 +249,7 @@ export const state = reactive<State>({
   input: { submitOn: 'enter', snippets: [], keys: { ...DEFAULT_KEYS } },
   live: {},
   writing: {},
+  pendingMessages: {},
   background: {},
   lineComments: {},
 })
@@ -577,6 +588,21 @@ export function merge(current: ConversationState, page: ConversationPage): Conve
   }
 }
 
+/** Insert or replace a single confirmed message without disturbing `seq` or initial pagination. */
+export function upsertMessage(current: ConversationState, message: MessageView): ConversationState {
+  const messages = [...current.messages]
+  const at = messages.findIndex((shown) => shown.id === message.id)
+  if (at !== -1) messages[at] = message
+  else if (!current.from || message.id >= current.from) messages.push(message)
+  else return current
+  messages.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return {
+    ...current,
+    messages,
+    from: current.seq !== null ? (current.from ?? messages[0]?.id ?? null) : current.from,
+  }
+}
+
 /** The conversation on screen with this id: the coordinator's or an open thread's. */
 export function conversationState(conversationId: string): ConversationState | null {
   if (state.detail?.project.coordinatorId === conversationId) return state.coordinator
@@ -656,6 +682,7 @@ function prepareProject(id: string | null) {
   parts.clear()
   clearBoardThumbnails()
   clearLinkCaches()
+  messageRenderKeys.clear()
   state.starting = false
   state.currentId = id
   if (!id) sideUntouched = true
@@ -910,6 +937,7 @@ export async function deleteProject(id: string) {
 function forgetProject(id: string) {
   deletedDuringRefresh?.add(id)
   dropProjectComposers(id)
+  dropProjectPendingMessages(id)
   clearBoardThumbnails()
   clearLinkCaches()
   state.projects = state.projects.filter((project) => project.id !== id)
@@ -923,21 +951,88 @@ function forgetProject(id: string) {
   showWorkspace('projects')
 }
 
+let pendingMessageSeq = 0
+const messageRenderKeys = new Map<string, string>()
+
+/** The stable render key kept for a confirmed message that started as an optimistic entry. */
+export function renderKeyOf(messageId: string): string {
+  return messageRenderKeys.get(messageId) ?? messageId
+}
+
+function removePendingMessage(conversationId: string, clientId: string) {
+  const list = state.pendingMessages[conversationId]
+  if (!list) return
+  const next = list.filter((item) => item.clientId !== clientId)
+  if (next.length) state.pendingMessages[conversationId] = next
+  else delete state.pendingMessages[conversationId]
+}
+
+function dropProjectPendingMessages(projectId: string) {
+  for (const [conversationId, list] of Object.entries(state.pendingMessages)) {
+    const next = list.filter((item) => item.projectId !== projectId)
+    if (next.length) state.pendingMessages[conversationId] = next
+    else delete state.pendingMessages[conversationId]
+  }
+}
+
+async function postUserMessageOptimistic(
+  projectId: string,
+  conversationId: string,
+  content: string,
+  extras: MessageExtras = {},
+  optimistic?: OptimisticMessageOptions,
+): Promise<boolean> {
+  const clientId = `pending:${++pendingMessageSeq}`
+  const current = conversationState(conversationId)
+  const existingPending = state.pendingMessages[conversationId] ?? []
+  const createdAt = nextOptimisticTimestamp(
+    currentServerNow(),
+    current?.messages ?? [],
+    current?.notices ?? [],
+    existingPending,
+  )
+  const pending: PendingUserMessage = {
+    clientId,
+    projectId,
+    conversationId,
+    baselineIds: (current?.messages ?? []).map((item) => item.id),
+    message: buildOptimisticMessage({
+      clientId,
+      conversationId,
+      content,
+      attachments: optimisticAttachmentsOf(extras, optimistic),
+      comments: extras.comments,
+      createdAt,
+    }),
+  }
+  state.pendingMessages[conversationId] = [...existingPending, pending]
+  try {
+    const result = await api.postMessage(projectId, conversationId, content, extras)
+    const confirmed = result?.message
+    if (confirmed?.id) {
+      messageRenderKeys.set(confirmed.id, clientId)
+      const now = conversationState(conversationId)
+      if (now) setConversation(conversationId, upsertMessage(now, confirmed))
+    }
+    removePendingMessage(conversationId, clientId)
+    return true
+  } catch (error) {
+    removePendingMessage(conversationId, clientId)
+    report(error)
+    return false
+  }
+}
+
 /** Whether it was sent; a failure is reported, and the draft is kept for another try. */
 export async function sendMessage(
   conversationId: string,
   content: string,
   extras: MessageExtras = {},
+  optimistic?: OptimisticMessageOptions,
 ): Promise<boolean> {
   const project = state.detail?.project
   if (!project) return false
-  try {
-    await api.postMessage(project.id, conversationId, content, extras)
-    return true
-  } catch (error) {
-    report(error)
-    return false
-  }
+  return postUserMessageOptimistic(project.id, conversationId, content, extras, optimistic)
 }
 
 export async function stopTurn(conversationId: string) {
@@ -1663,13 +1758,7 @@ export async function sendLineComments(
 ): Promise<boolean> {
   if (!comments.length) return false
   // The thread's own project, which need not be the one open now.
-  const sent = await api
-    .postMessage(projectId, threadId, '', { comments })
-    .then(() => true)
-    .catch((error: unknown) => {
-      report(error)
-      return false
-    })
+  const sent = await postUserMessageOptimistic(projectId, threadId, '', { comments })
   if (sent) {
     // Only those sent: one written while they went stays a draft.
     const left = (state.lineComments[threadId] ?? []).filter(

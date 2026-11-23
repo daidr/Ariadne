@@ -2,12 +2,16 @@
 import { DouChatList, DouSpinner, type ChatListExpose } from 'dou-ui'
 import { useTemplateRef } from 'vue'
 
-defineProps<{
-  items: T[]
-  loadingEarlier: boolean
-  bottomInset?: number | string
-  bottomFade?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    items: T[]
+    itemKey?: string | ((item: T, index: number) => string | number)
+    loadingEarlier: boolean
+    bottomInset?: number | string
+    bottomFade?: boolean
+  }>(),
+  { itemKey: 'id' },
+)
 const emit = defineEmits<{
   bottomChange: [atBottom: boolean]
   earlier: []
@@ -18,6 +22,9 @@ const list = useTemplateRef<ChatListExpose>('list')
 defineExpose({
   get viewport() {
     return list.value?.viewport ?? null
+  },
+  scrollToBottom(behavior?: ScrollBehavior) {
+    list.value?.scrollToBottom(behavior)
   },
   scrollToMessage(id: string) {
     list.value?.scrollToMessage(id)
@@ -34,7 +41,7 @@ defineExpose({
       ref="list"
       class="messages"
       :items="items"
-      item-key="id"
+      :item-key="itemKey"
       :bottom-inset="bottomInset"
       :bottom-fade="bottomFade"
       @at-bottom-change="emit('bottomChange', $event)"
