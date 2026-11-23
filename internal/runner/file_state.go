@@ -250,21 +250,21 @@ func changedSinceError(filePath string) error {
 }
 
 func readExistingBytes(ctx context.Context, workspace sdk.Workspace, filePath string) ([]byte, bool, error) {
-	if files, ok := workspace.(sdk.WorkspaceFiles); ok {
-		exists, err := files.FileExists(ctx, filePath)
-		if err != nil {
-			return nil, false, err
-		}
-		if !exists {
-			return nil, false, nil
-		}
-	}
 	data, err := workspace.ReadBytes(ctx, filePath, maxEditBytes)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, false, nil
-		}
+	if err == nil {
+		return data, true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	var tooLarge *sdk.FileTooLargeError
+	if errors.As(err, &tooLarge) {
 		return nil, false, err
 	}
-	return data, true, nil
+	if files, ok := workspace.(sdk.WorkspaceFiles); ok {
+		if exists, existsErr := files.FileExists(ctx, filePath); existsErr == nil && !exists {
+			return nil, false, nil
+		}
+	}
+	return nil, false, err
 }

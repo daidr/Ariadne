@@ -646,3 +646,79 @@ func TestFileStateConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+type stubPatchlessWorkspace struct {
+	sdk.Workspace
+	readBytes  func(ctx context.Context, path string, max int64) ([]byte, error)
+	fileExists func(ctx context.Context, path string) (bool, error)
+}
+
+func (w stubPatchlessWorkspace) ReadBytes(ctx context.Context, path string, max int64) ([]byte, error) {
+	return w.readBytes(ctx, path, max)
+}
+func (w stubPatchlessWorkspace) FileExists(ctx context.Context, path string) (bool, error) {
+	return w.fileExists(ctx, path)
+}
+func (w stubPatchlessWorkspace) RemoveFile(context.Context, string) error {
+	return errors.New("the workspace source does not support file deletion")
+}
+
+func TestReadExistingBytesWithoutWorkspaceFilesSupport(t *testing.T) {
+	ctx := t.Context()
+	unsupported := errors.New("the workspace source does not support file patches")
+
+	// Existing file succeeds directly via ReadBytes even when FileExists is unsupported.
+	fileExistsCalled := false
+	ws := stubPatchlessWorkspace{
+		readBytes: func(context.Context, string, int64) ([]byte, error) {
+			return []byte("current"), nil
+		},
+		fileExists: func(context.Context, string) (bool, error) {
+			fileExistsCalled = true
+			return false, unsupported
+		},
+	}
+	data, exists, err := readExistingBytes(ctx, ws, "notes.txt")
+	if err != nil || !exists || string(data) != "current" || fileExistsCalled {
+		t.Fatalf("expected direct ReadBytes hit without FileExists call, got data=%q exists=%v err=%v fileExistsCalled=%v", data, exists, err, fileExistsCalled)
+	}
+
+	// Missing file returning os.ErrNotExist succeeds without calling FileExists.
+	ws.readBytes = func(context.Context, string, int64) ([]byte, error) {
+		return nil, fmt.Errorf("open notes.txt: %w", os.ErrNotExist)
+	}
+	data, exists, err = readExistingBytes(ctx, ws, "notes.txt")
+	if err != nil || exists || data != nil || fileExistsCalled {
+		t.Fatalf("expected missing file on os.ErrNotExist without FileExists call, got data=%q exists=%v err=%v fileExistsCalled=%v", data, exists, err, fileExistsCalled)
+	}
+
+	// FileTooLargeError is preserved directly without calling FileExists.
+	tooLargeErr := &sdk.FileTooLargeError{Path: "notes.txt", Size: maxEditBytes + 1, Max: maxEditBytes}
+	ws.readBytes = func(context.Context, string, int64) ([]byte, error) {
+		return nil, tooLargeErr
+	}
+	_, exists, err = readExistingBytes(ctx, ws, "notes.txt")
+	var gotTooLarge *sdk.FileTooLargeError
+	if !errors.As(err, &gotTooLarge) || exists || fileExistsCalled {
+		t.Fatalf("expected FileTooLargeError without FileExists call, got exists=%v err=%v fileExistsCalled=%v", exists, err, fileExistsCalled)
+	}
+
+	// Non-ErrNotExist read error falls back to FileExists and preserves the original ReadBytes error when FileExists fails.
+	readFailure := errors.New("permission denied")
+	ws.readBytes = func(context.Context, string, int64) ([]byte, error) {
+		return nil, readFailure
+	}
+	_, exists, err = readExistingBytes(ctx, ws, "notes.txt")
+	if !errors.Is(err, readFailure) || exists || !fileExistsCalled {
+		t.Fatalf("expected original ReadBytes error to be preserved, got exists=%v err=%v fileExistsCalled=%v", exists, err, fileExistsCalled)
+	}
+
+	// Non-ErrNotExist read error treats file as missing when FileExists reports (false, nil).
+	ws.fileExists = func(context.Context, string) (bool, error) {
+		return false, nil
+	}
+	data, exists, err = readExistingBytes(ctx, ws, "notes.txt")
+	if err != nil || exists || data != nil {
+		t.Fatalf("expected fallback FileExists=(false,nil) to report missing file, got data=%q exists=%v err=%v", data, exists, err)
+	}
+}
