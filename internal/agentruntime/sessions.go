@@ -48,6 +48,7 @@ type session struct {
 	dirOwned                 bool
 	fps, awaiting            []string
 	busy                     bool // protected by Sessions.mu, including startup and stream delivery
+	discardUsage             bool // protected by Sessions.mu; set when Forget discards this session
 	lastUsed                 time.Time
 	order                    uint64
 	driver                   Driver
@@ -234,15 +235,18 @@ func (s *session) takeOrphanedUsage() *Usage {
 	return &u
 }
 
-func (m *Sessions) addPendingUsage(key string, u Usage) {
-	if key == "" || !hasBillingUsage(u) {
+func (m *Sessions) addPendingUsage(s *session, u Usage) {
+	if s == nil || s.key == "" || !hasBillingUsage(u) {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	acc := m.pendingUsage[key]
+	if m.closed || s.discardUsage {
+		return
+	}
+	acc := m.pendingUsage[s.key]
 	accumulateUsage(&acc, u)
-	m.pendingUsage[key] = acc
+	m.pendingUsage[s.key] = acc
 }
 
 func (m *Sessions) takePendingUsage(key string) *Usage {
@@ -274,12 +278,17 @@ func (m *Sessions) forget(s *session, suspend bool) {
 	m.mu.Unlock()
 	_ = s.close(m.root, suspend)
 	if !suspend && s.key != "" {
-		if orphaned := s.takeOrphanedUsage(); orphaned != nil {
-			m.addPendingUsage(s.key, *orphaned)
-		}
-		if drainer, ok := s.driver.(UsageDrainer); ok {
-			if drained := drainer.DrainUsage(); drained != nil {
-				m.addPendingUsage(s.key, *drained)
+		m.mu.Lock()
+		skip := m.closed || s.discardUsage
+		m.mu.Unlock()
+		if !skip {
+			if orphaned := s.takeOrphanedUsage(); orphaned != nil {
+				m.addPendingUsage(s, *orphaned)
+			}
+			if drainer, ok := s.driver.(UsageDrainer); ok {
+				if drained := drainer.DrainUsage(); drained != nil {
+					m.addPendingUsage(s, *drained)
+				}
 			}
 		}
 	}
@@ -299,6 +308,7 @@ func (m *Sessions) Forget(ctx context.Context, key string) error {
 		return nil
 	}
 	delete(m.pool, key)
+	s.discardUsage = true
 	busy := s.busy
 	if busy {
 		s.cancel()
@@ -375,6 +385,7 @@ func (m *Sessions) Close(ctx context.Context) error {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
 		m.closed = true
+		clear(m.pendingUsage)
 		m.cancel()
 		m.mu.Unlock()
 		go func() {

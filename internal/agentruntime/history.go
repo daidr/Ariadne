@@ -358,7 +358,7 @@ func RenderHistoryWithBudget(messages []sdk.Message, maxBytes int) Input {
 				}
 				break
 			}
-			if len(currentItems) == 0 && len(pinnedItems) == 0 && len(keptReversed) == 0 {
+			if len(currentItems) == 0 && len(keptReversed) == 0 {
 				keptReversed = append(keptReversed, historyItems[len(historyItems)-1])
 			}
 			slices.Reverse(keptReversed)

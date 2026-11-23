@@ -332,3 +332,30 @@ func TestRenderHistoryPreservesLeadingCompactionSummary(t *testing.T) {
 		t.Fatalf("expected old oversized middle payload to be trimmed, got: %s", out.Text)
 	}
 }
+
+func TestRenderHistoryMidTurnCompactionKeepsLatestToolResultWhenSummaryFillsBudget(t *testing.T) {
+	summaryLead := "<history_summarised>" + strings.Repeat("S", 3000) + "</history_summarised>"
+	summaryNotes := "<your_notes>Summary notes before mid-turn tool results.</your_notes>"
+	messages := []sdk.Message{
+		{Role: "user", Content: summaryLead},
+		{Role: "assistant", Content: summaryNotes},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_1", Name: "read_file", Arguments: `{"path":"a.go"}`}}},
+		{Role: "tool", ToolCallID: "call_1", Content: "OLDER_RESULT_" + strings.Repeat("A", 1000)},
+		{Role: "assistant", ToolCalls: []sdk.ToolCall{{ID: "call_2", Name: "read_file", Arguments: `{"path":"b.go"}`}}},
+		{Role: "tool", ToolCallID: "call_2", Content: "LATEST_RESULT_MARKER"},
+	}
+
+	// Budget smaller than pinned summary alone, with no trailing user message
+	// (mid-turn compaction ending on a tool result). Must still preserve both
+	// the summary AND at least the latest tool result.
+	out := RenderHistoryWithBudget(messages, 2048)
+	if !strings.Contains(out.Text, summaryLead) || !strings.Contains(out.Text, summaryNotes) {
+		t.Fatalf("leading compaction summary was dropped: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, "LATEST_RESULT_MARKER") {
+		t.Fatalf("latest unsummarised tool result was dropped when summary filled budget: %s", out.Text)
+	}
+	if !strings.Contains(out.Text, historyOmittedNote) {
+		t.Fatalf("expected omission note for dropped earlier tool calls: %s", out.Text)
+	}
+}

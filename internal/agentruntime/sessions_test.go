@@ -577,3 +577,60 @@ func TestPendingUsageDrainedOnSessionRebuildDoesNotPolluteContextInput(t *testin
 		t.Fatalf("expected step 3 ContextInput to stay 18000, got %#v", u3.ContextInput)
 	}
 }
+
+func TestSessionForgetActiveDoesNotLeakDrainedUsage(t *testing.T) {
+	started := make(chan struct{})
+	created := 0
+	m := newTestSessions(t, Kind{Name: "fake", Create: func(ctx DriverContext) (Driver, error) {
+		created++
+		id := created
+		fd := &fakeDriver{ctx: ctx, onPrompt: func(f *fakeDriver, _ Input) {
+			if id == 1 {
+				close(started)
+				return
+			}
+			f.ctx.Emit(Event{Type: "text", Text: "fresh reply"})
+			f.ctx.Emit(Event{Type: "done"})
+		}}
+		var drained *Usage
+		if id == 1 {
+			drained = &Usage{Input: 99000, Output: 250}
+		}
+		return &budgetedDrainingDriver{fakeDriver: fd, budget: DefaultHistoryReplayBytes, drained: drained}, nil
+	}}, SessionOptions{})
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		parts(m, sdk.Request{Conversation: "conv-forget-active", Messages: []sdk.Message{user("start")}})
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := m.Forget(ctx, "conv-forget-active"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("active stream did not finish after Forget")
+	}
+
+	m.mu.Lock()
+	leaked, exists := m.pendingUsage["conv-forget-active"]
+	m.mu.Unlock()
+	if exists {
+		t.Fatalf("forgotten active session leaked drained usage into pendingUsage: %+v", leaked)
+	}
+
+	// Reusing the same conversation key must not receive any usage from the
+	// explicitly forgotten session.
+	next := parts(m, sdk.Request{Conversation: "conv-forget-active", Messages: []sdk.Message{user("new start")}})
+	lastPart(t, next, "stop")
+	for _, part := range next {
+		if part.Type == "usage" {
+			t.Fatalf("unexpected leaked usage part after Forget: %#v", part)
+		}
+	}
+}
