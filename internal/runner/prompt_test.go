@@ -61,6 +61,12 @@ func TestSystemPromptsIncludeLinkSyntaxPlanSequencingAndRoleContracts(t *testing
 		"discussion threads handle memory requests made in them directly",
 		"Use update_todo as an active work list",
 		"remove completed or merged items on later updates",
+		"When what the user wrote is relevant to that thread, the thread owns the reply",
+		"clearly raises an unrelated new request or bug",
+		"passing the original message ID (from message=\"...\") in userMessages",
+		"tell the original thread that you routed that message to [Title](thread:<threadId>)",
+		"does not need to handle or reply to it and should stay focused on its current task",
+		"briefly let the user know in the coordinator chat where it was routed using post_ui with threadIds",
 		"Documents do not render Mermaid",
 		"embedded whiteboard code fence",
 	} {
