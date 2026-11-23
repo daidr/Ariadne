@@ -70,6 +70,12 @@ func TestDashboardURLAndBuildServeArgs(t *testing.T) {
 	if got := DashboardURL("::", 8080, "abc"); got != "http://[::1]:8080/#token=abc" {
 		t.Fatalf("unexpected :: dashboard URL: %s", got)
 	}
+	if got := (RuntimeInfo{Host: "0.0.0.0", Port: 7428}).BaseURL(); got != "http://127.0.0.1:7428" {
+		t.Fatalf("unexpected 0.0.0.0 BaseURL: %s", got)
+	}
+	if got := (RuntimeInfo{Host: "::", Port: 8080}).BaseURL(); got != "http://[::1]:8080" {
+		t.Fatalf("unexpected :: BaseURL: %s", got)
+	}
 
 	args := BuildServeArgs(InstallOptions{
 		Executable: "/bin/ariadne",

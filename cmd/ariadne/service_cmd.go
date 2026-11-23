@@ -223,7 +223,7 @@ func cmdServiceInstall(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 	info, err := mgr.Install(ctx, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("install Ariadne service: %w", err)
 	}
 
 	fmt.Fprintf(stdout, "Installed Ariadne service (%s)\n", info.ManagedBy)
@@ -284,7 +284,7 @@ func cmdServiceUninstall(ctx context.Context, args []string, stdout, stderr io.W
 	}
 
 	if err := mgr.Uninstall(ctx); err != nil {
-		return err
+		return fmt.Errorf("uninstall Ariadne service: %w", err)
 	}
 	fmt.Fprintln(stdout, "Uninstalled Ariadne background service.")
 	return nil
@@ -298,7 +298,7 @@ func startServiceIfStopped(ctx context.Context, cfg config.Config, mgr service.M
 		return nil
 	}
 	if err := mgr.Start(ctx, opts); err != nil {
-		return err
+		return fmt.Errorf("start Ariadne service: %w", err)
 	}
 	snap, err := waitForServerReady(ctx, cfg, 0, 15*time.Second)
 	if err != nil {
