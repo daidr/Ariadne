@@ -25,11 +25,43 @@ const sfcSource = readFileSync(resolve(import.meta.dirname, 'ChangedFileDiff.vue
 const styleBlock = sfcSource.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? ''
 
 describe('ChangedFileDiff vertical scrolling', () => {
-  test('does not cap diff height and disables inner editor vertical scrollbar while keeping horizontal scroll', () => {
+  test('does not cap diff height and uses native scroll-y=false with sticky single-line toolbar', () => {
     expect(styleBlock).not.toMatch(/\bmax-(?:block-size|height)\s*:/)
-    expect(styleBlock).toMatch(
-      /\.diff\s+:deep\(\.dou-code-editor__scroller\)\s*\{[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;/s,
-    )
+    expect(styleBlock).not.toContain('.dou-code-editor__scroller')
+    expect(sfcSource).toContain(':scroll-y="false"')
+    expect(sfcSource).toContain('sticky-toolbar')
+  })
+
+  test('renders single-line sticky toolbar with file path and rename label inside DouCodeDiff', () => {
+    const file: ChangedFile = {
+      path: 'packages/web/src/changes/ChangedFileDiff.vue',
+      previousPath: 'packages/web/src/changes/OldDiff.vue',
+      status: 'renamed',
+      added: 1,
+      removed: 1,
+    }
+    const wrapper = mount(ChangedFileDiff, {
+      props: {
+        threadId: 'thr-diff-header',
+        file,
+        loadVersions: cachedLoader('const a = 1\n', 'const a = 2\n'),
+        sent: [],
+        notes: [],
+        mode: 'split',
+      },
+      attachTo: document.body,
+    })
+
+    expect(wrapper.find('.file-diff-header').exists()).toBe(false)
+    const diff = wrapper.find('.dou-code-diff')
+    expect(diff.exists()).toBe(true)
+    expect(diff.classes()).not.toContain('is-scroll-y')
+    const toolbar = wrapper.find('.dou-code-diff__toolbar')
+    expect(toolbar.exists()).toBe(true)
+    expect(toolbar.classes()).toContain('is-sticky')
+    expect(toolbar.find('.dou-code-diff__title').text()).toContain(file.path)
+    expect(toolbar.find('.dou-code-diff__title').text()).toContain('OldDiff.vue')
+    wrapper.unmount()
   })
 
   test('expands unchanged sections and preserves editor scrollers without height cap', async () => {

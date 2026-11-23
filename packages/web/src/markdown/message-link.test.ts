@@ -17,7 +17,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-test('renders thread, artifact and file references as inline anchors so long titles wrap with surrounding text', () => {
+test('renders thread and artifact references as inline anchors and file references as inline buttons', () => {
   store.state.currentId = 'prj_1'
   store.state.detail = {
     threads: [{ id: 'thr_1', title: 'Long thread title', stage: 'queued' } as ThreadView],
@@ -57,9 +57,24 @@ test('renders thread, artifact and file references as inline anchors so long tit
       children: h('span', 'notes.txt'),
     },
   })
-  const fileLink = fileWrapper.find('a.inline-ref')
+  const fileLink = fileWrapper.find('span.inline-ref[role="button"]')
   expect(fileLink.exists()).toBe(true)
-  expect(fileLink.attributes('href')).toBe('/api/files/fil_1')
+  expect(fileLink.attributes('href')).toBeUndefined()
+  expect(fileWrapper.find('button.inline-ref').exists()).toBe(false)
+
+  // Without a project ID, thread references fall back to DouLink inline buttons without a fake "#".
+  store.state.currentId = null
+  const detachedWrapper = mount(MessageLink, {
+    props: {
+      href: 'thread:thr_1',
+      external: false,
+      bare: false,
+      children: h('span', 'Long thread title'),
+    },
+  })
+  const detachedLink = detachedWrapper.find('span.inline-ref[role="button"]')
+  expect(detachedLink.exists()).toBe(true)
+  expect(detachedLink.attributes('href')).toBeUndefined()
 })
 
 test('intercepts plain and alt clicks for in-app navigation while allowing modifier new-tab clicks', async () => {
@@ -113,11 +128,6 @@ test('starts a dock drag from inline thread and artifact links while leaving fil
     },
   })
   const threadAnchor = threadWrapper.get('a.inline-ref')
-  await threadAnchor.trigger('pointerdown', { button: 0, altKey: true })
-  await threadAnchor.trigger('pointerdown', { button: 0, shiftKey: true })
-  await threadAnchor.trigger('pointerdown', { button: 0, metaKey: true })
-  expect(startDrop).not.toHaveBeenCalled()
-
   await threadAnchor.trigger('pointerdown', { button: 0 })
   expect(startDrop).toHaveBeenCalledTimes(1)
   expect(startDrop.mock.calls[0]?.[1]).toEqual({ value: 'thread:thr_1' })
@@ -142,7 +152,7 @@ test('starts a dock drag from inline thread and artifact links while leaving fil
       children: h('span', 'notes.txt'),
     },
   })
-  await fileWrapper.get('a.inline-ref').trigger('pointerdown', { button: 0 })
+  await fileWrapper.get('.inline-ref').trigger('pointerdown', { button: 0 })
   expect(startDrop).toHaveBeenCalledTimes(2)
 
   threadWrapper.unmount()

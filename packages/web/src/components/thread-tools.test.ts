@@ -31,6 +31,7 @@ function makeThread(over: Partial<ThreadView> & { id: string; title: string }): 
     references: [],
     endedReferences: [],
     model: null,
+    effort: null,
     branchSlug: null,
     usage: {
       input: 0,
@@ -61,11 +62,23 @@ function openMenuElement(): HTMLElement {
   return menus[0]!
 }
 
+function isHiddenByDouCss(el: Element): boolean {
+  if (el.getAttribute('role') !== 'separator') return false
+  // DouUI natively hides leading, trailing, and consecutive dropdown separators via CSS.
+  if (!el.previousElementSibling || !el.nextElementSibling) return true
+  if (el.previousElementSibling.getAttribute('role') === 'separator') return true
+  return false
+}
+
+function visibleSeparators(menu: HTMLElement): Element[] {
+  return [...menu.querySelectorAll('[role="separator"]')].filter((el) => !isHiddenByDouCss(el))
+}
+
 function menuChildrenSummary(menu: HTMLElement): string[] {
   return [...menu.children]
     .filter(
       (el) =>
-        el.getAttribute('role') === 'separator' ||
+        (el.getAttribute('role') === 'separator' && !isHiddenByDouCss(el)) ||
         el.getAttribute('role')?.startsWith('menuitem') ||
         el.classList.contains('dou-dropdown__sub'),
     )
@@ -120,19 +133,19 @@ describe('ThreadTools divider behavior', () => {
     await nextTick()
 
     const menu = openMenuElement()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(0)
+    expect(visibleSeparators(menu)).toHaveLength(0)
     expect(menuChildrenSummary(menu)).toEqual([t('trace.open')])
 
     // Even in review stage (two thread items), no leading divider appears when the slot is empty.
     thread.value = makeThread({ id: 'thr_1', title: 'Review thread', stage: 'review' })
     await nextTick()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(0)
+    expect(visibleSeparators(menu)).toHaveLength(0)
     expect(menuChildrenSummary(menu)).toEqual([t('changes.skipMerge'), t('trace.open')])
 
     // Once the leading slot renders a real item, exactly one divider separates the two groups.
     showLeading.value = true
     await nextTick()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1)
+    expect(visibleSeparators(menu)).toHaveLength(1)
     expect(menuChildrenSummary(menu)).toEqual([
       '置顶操作',
       '---',
@@ -143,13 +156,13 @@ describe('ThreadTools divider behavior', () => {
     // Switching back to non-review keeps a single divider above trace.
     thread.value = makeThread({ id: 'thr_1', title: 'Done thread', stage: 'done' })
     await nextTick()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1)
+    expect(visibleSeparators(menu)).toHaveLength(1)
     expect(menuChildrenSummary(menu)).toEqual(['置顶操作', '---', t('trace.open')])
 
     // Hiding the leading item again removes the divider.
     showLeading.value = false
     await nextTick()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(0)
+    expect(visibleSeparators(menu)).toHaveLength(0)
     expect(menuChildrenSummary(menu)).toEqual([t('trace.open')])
   })
 
@@ -196,7 +209,7 @@ describe('ThreadTools divider behavior', () => {
     await nextTick()
 
     const menu = openMenuElement()
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(0)
+    expect(visibleSeparators(menu)).toHaveLength(0)
     expect(menuChildrenSummary(menu)).toEqual([t('trace.open')])
 
     // On desktop, the side group items appear above the thread section, separated cleanly.

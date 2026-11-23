@@ -452,11 +452,6 @@ function submit() {
   padding: 12px;
 }
 
-.ask-form-inputs :deep(.dou-form-item__label) {
-  align-items: baseline;
-  overflow-wrap: anywhere;
-}
-
 .ask-form-actions {
   display: flex;
   justify-content: flex-end;
