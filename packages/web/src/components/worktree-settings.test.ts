@@ -232,4 +232,62 @@ describe('WorktreeSettings', () => {
 
     expect(rows[3]!.find('.worktree-status').text()).toBe('已合并')
   })
+
+  test('hides total size while loading, when empty, or when loading fails', async () => {
+    const storage: StorageSnapshot = {
+      managed: 500_000,
+      total: 0,
+      logical: false,
+      measuredAt: Date.now(),
+      worktrees: {},
+    }
+
+    // 1. Loading (projects is still null): must not flash cached total.
+    let resolveList!: (value: { projects: ProjectWorktrees[]; windows: boolean }) => void
+    vi.spyOn(api, 'listWorktrees').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve
+        }),
+    )
+    const loadingWrapper = mount(WorktreeSettings, {
+      props: { storage: { ...storage, total: 1_300_000_000 }, measuring: false },
+    })
+    wrappers.push(loadingWrapper)
+    expect(loadingWrapper.find('.worktrees-total').exists()).toBe(false)
+
+    // 2. Empty after loading resolves with no worktrees: must not render "0 B".
+    resolveList({ projects: [], windows: true })
+    await flushPromises()
+    expect(loadingWrapper.find('.worktrees-total').exists()).toBe(false)
+
+    // 3. Request failure: must not render stale cached total.
+    vi.spyOn(api, 'listWorktrees').mockRejectedValueOnce(new Error('network failed'))
+    const failedWrapper = mount(WorktreeSettings, {
+      props: { storage: { ...storage, total: 1_300_000_000 }, measuring: false },
+    })
+    wrappers.push(failedWrapper)
+    await flushPromises()
+    expect(failedWrapper.find('.worktrees-total').exists()).toBe(false)
+
+    // 4. Project-level error: must also stay hidden.
+    vi.spyOn(api, 'listWorktrees').mockResolvedValueOnce({
+      windows: true,
+      projects: [
+        {
+          id: 'proj_err',
+          name: 'Broken',
+          shared: null,
+          worktrees: [],
+          error: { key: 'error.connection' },
+        },
+      ],
+    })
+    const projectErrorWrapper = mount(WorktreeSettings, {
+      props: { storage: { ...storage, total: 1_300_000_000 }, measuring: false },
+    })
+    wrappers.push(projectErrorWrapper)
+    await flushPromises()
+    expect(projectErrorWrapper.find('.worktrees-total').exists()).toBe(false)
+  })
 })

@@ -54,7 +54,9 @@ async function load() {
 onMounted(load)
 
 const total = computed(() =>
-  props.storage?.total == null || projects.value?.some((project) => project.error)
+  props.storage?.total == null ||
+  !projects.value?.length ||
+  projects.value.some((project) => project.error)
     ? null
     : t(props.storage.logical ? 'data.logicalSize' : 'data.allocatedSize', {
         size: formatBytes(props.storage.total),
