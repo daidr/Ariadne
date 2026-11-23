@@ -383,6 +383,13 @@ func TestDetachedManagerLifecycleAndNote(t *testing.T) {
 	if err := mgr.Start(context.Background(), InstallOptions{}); err == nil {
 		t.Fatal("expected error when starting without executable")
 	}
+	if _, err := os.Stat(serviceConfigPath(home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed Start should not write service.json, stat err=%v", err)
+	}
+	info, err = mgr.Info(context.Background())
+	if err != nil || info.Installed {
+		t.Fatalf("expected Installed=false after failed Start, got %+v err=%v", info, err)
+	}
 
 	info, err = mgr.Install(context.Background(), InstallOptions{
 		Executable: "/usr/local/bin/ariadne",

@@ -139,6 +139,9 @@ func (m *detachedManager) Info(_ context.Context) (ServiceInfo, error) {
 }
 
 func (m *detachedManager) Install(_ context.Context, opts InstallOptions) (ServiceInfo, error) {
+	if opts.Executable == "" {
+		return ServiceInfo{}, errors.New("executable path is required")
+	}
 	if opts.Home == "" {
 		opts.Home = m.home
 	}
