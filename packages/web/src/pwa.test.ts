@@ -4,11 +4,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   DEFAULT_VIEWPORT_CONTENT,
   STANDALONE_VIEWPORT_CONTENT,
+  buildDuoFrontViewportContent,
+  duoFrontViewportScript,
   isStandalonePwa,
   readNativeFoldInput,
   resolveDuoBackAction,
+  resolveDuoFrontWiden,
   resolveDuoRightRail,
   resolveFoldLayout,
+  sanitizeVisualScale,
   syncFoldCssState,
   syncStandaloneViewport,
   usePwaEnvironment,
@@ -79,6 +83,343 @@ describe('syncStandaloneViewport', () => {
     expect(syncStandaloneViewport(false, document)).toBe(DEFAULT_VIEWPORT_CONTENT)
     expect(meta.content).toBe(DEFAULT_VIEWPORT_CONTENT)
     expect(document.documentElement.dataset.pwaStandalone).toBeUndefined()
+  })
+
+  test('applies and clears iPhone Duo front-screen widened viewport cleanly', () => {
+    const widened = syncStandaloneViewport(true, document, {
+      duoFrontWiden: {
+        active: true,
+        posture: 'portrait',
+        targetWidth: 466,
+        rightInset: 84,
+        compactHeight: false,
+      },
+    })
+    expect(widened).toBe(buildDuoFrontViewportContent(466))
+    expect(meta.content).toBe(
+      'width=466, height=device-height, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover',
+    )
+    expect(document.documentElement.dataset.duoFrontWiden).toBe('portrait')
+
+    const restored = syncStandaloneViewport(true, document, {
+      duoFrontWiden: {
+        active: false,
+        posture: null,
+        targetWidth: null,
+        rightInset: 0,
+        compactHeight: false,
+      },
+    })
+    expect(restored).toBe(STANDALONE_VIEWPORT_CONTENT)
+    expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+    expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
+  })
+})
+
+describe('resolveDuoFrontWiden', () => {
+  test('activates for iPhone Duo outer display portrait and landscape-secondary in standalone PWA', () => {
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 382,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 594,
+        innerHeight: 466,
+        orientationType: 'landscape-secondary',
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'landscape-secondary',
+      targetWidth: 678,
+      rightInset: 84,
+      compactHeight: true,
+    })
+  })
+
+  test('stays inactive outside standalone, in landscape-primary, and when native safe-area insets exist', () => {
+    expect(
+      resolveDuoFrontWiden({
+        standalone: false,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 382,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+      }).active,
+    ).toBe(false)
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 594,
+        innerHeight: 466,
+        orientationType: 'landscape-primary',
+      }).active,
+    ).toBe(false)
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 466,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+        nativeRightInset: 84,
+      }).active,
+    ).toBe(false)
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 678,
+        innerHeight: 466,
+        orientationType: 'landscape-secondary',
+        nativeLeftInset: 84,
+      }).active,
+    ).toBe(false)
+  })
+
+  test('disables on unfolded inner display even when screen.width stays stale at 466', () => {
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 951,
+        innerHeight: 669,
+        orientationType: 'landscape-secondary',
+        alreadyWidened: true,
+      }).active,
+    ).toBe(false)
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 669,
+        innerHeight: 951,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }).active,
+    ).toBe(false)
+
+    // Unfolded inner portrait with virtual keyboard open and stale screen size must stay inactive.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 669,
+        innerHeight: 450,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }).active,
+    ).toBe(false)
+  })
+
+  test('stays active with virtual keyboard open and across landscape-secondary -> portrait rotation', () => {
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 466,
+        innerHeight: 350,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }).targetWidth,
+    ).toBe(466)
+
+    // Rotating from widened landscape-secondary (width=678) back to portrait transiently measures 678x678.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 466,
+        screenHeight: 678,
+        innerWidth: 678,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+        alreadyWidened: true,
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+  })
+
+  test('falls back to viewport geometry when screen size is spoofed without matching split view or other iPhones', () => {
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 390,
+        screenHeight: 844,
+        innerWidth: 382,
+        innerHeight: 678,
+        orientationType: 'portrait-primary',
+      }),
+    ).toEqual({
+      active: true,
+      posture: 'portrait',
+      targetWidth: 466,
+      rightInset: 84,
+      compactHeight: false,
+    })
+
+    // Inner display split view (385pt) and standard iPhones must not trigger the fallback.
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 951,
+        screenHeight: 669,
+        innerWidth: 385,
+        innerHeight: 609,
+        orientationType: 'portrait-primary',
+      }).active,
+    ).toBe(false)
+
+    expect(
+      resolveDuoFrontWiden({
+        standalone: true,
+        screenWidth: 393,
+        screenHeight: 852,
+        innerWidth: 393,
+        innerHeight: 852,
+        orientationType: 'portrait-primary',
+      }).active,
+    ).toBe(false)
+  })
+
+  test('sanitizes visualViewport.scale when building widened viewport content', () => {
+    expect(sanitizeVisualScale(1.25)).toBe(1.25)
+    expect(sanitizeVisualScale(-1)).toBe(1)
+    expect(sanitizeVisualScale(Number.NaN)).toBe(1)
+    expect(buildDuoFrontViewportContent(466, 1.25)).toContain('width=372.8, height=device-height')
+    expect(buildDuoFrontViewportContent(466, -33554432)).toContain(
+      'width=466, height=device-height',
+    )
+  })
+})
+
+function setDuoWindowGeometry(options: {
+  screenWidth: number
+  screenHeight: number
+  innerWidth: number
+  innerHeight: number
+  orientationType?: string
+}) {
+  Object.defineProperty(window, 'screen', {
+    configurable: true,
+    value: {
+      width: options.screenWidth,
+      height: options.screenHeight,
+      orientation: options.orientationType ? { type: options.orientationType } : undefined,
+    },
+  })
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    value: options.innerWidth,
+  })
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    value: options.innerHeight,
+  })
+}
+
+describe('duoFrontViewportScript', () => {
+  let meta: HTMLMetaElement
+  const originalScreen = Object.getOwnPropertyDescriptor(window, 'screen')
+  const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+
+  beforeEach(() => {
+    meta = document.createElement('meta')
+    meta.name = 'viewport'
+    meta.content = DEFAULT_VIEWPORT_CONTENT
+    document.head.appendChild(meta)
+  })
+
+  afterEach(() => {
+    meta.remove()
+    document.documentElement.removeAttribute('data-pwa-simulate-standalone')
+    delete document.documentElement.dataset.pwaStandalone
+    delete document.documentElement.dataset.duoFrontWiden
+    if (originalScreen) Object.defineProperty(window, 'screen', originalScreen)
+    if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
+    if (originalInnerHeight) Object.defineProperty(window, 'innerHeight', originalInnerHeight)
+  })
+
+  test('widens viewport before first layout on Duo outer standalone portrait and skips non-standalone or landscape-primary', () => {
+    setDuoWindowGeometry({
+      screenWidth: 466,
+      screenHeight: 678,
+      innerWidth: 382,
+      innerHeight: 678,
+      orientationType: 'portrait-primary',
+    })
+
+    // Non-standalone tab stays untouched.
+    document.documentElement.setAttribute('data-pwa-simulate-standalone', 'false')
+    new Function(duoFrontViewportScript())()
+    expect(meta.content).toBe(DEFAULT_VIEWPORT_CONTENT)
+    expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
+
+    // Standalone outer portrait widens immediately.
+    document.documentElement.setAttribute('data-pwa-simulate-standalone', 'true')
+    new Function(duoFrontViewportScript())()
+    expect(meta.content).toBe(buildDuoFrontViewportContent(466))
+    expect(document.documentElement.dataset.duoFrontWiden).toBe('portrait')
+
+    // Landscape-primary (left column) falls back to regular standalone viewport.
+    delete document.documentElement.dataset.duoFrontWiden
+    meta.content = DEFAULT_VIEWPORT_CONTENT
+    setDuoWindowGeometry({
+      screenWidth: 466,
+      screenHeight: 678,
+      innerWidth: 594,
+      innerHeight: 466,
+      orientationType: 'landscape-primary',
+    })
+    new Function(duoFrontViewportScript())()
+    expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+    expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
+
+    // Unfolded inner display with stale screen size stays regular standalone viewport.
+    setDuoWindowGeometry({
+      screenWidth: 466,
+      screenHeight: 678,
+      innerWidth: 951,
+      innerHeight: 669,
+      orientationType: 'landscape-secondary',
+    })
+    new Function(duoFrontViewportScript())()
+    expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+    expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
   })
 })
 
@@ -607,6 +948,7 @@ describe('usePwaEnvironment', () => {
     meta.remove()
     document.documentElement.removeAttribute('data-pwa-simulate-standalone')
     delete document.documentElement.dataset.pwaStandalone
+    delete document.documentElement.dataset.duoFrontWiden
   })
 
   test('prevents WebKit gesturestart zoom only while standalone is active and cleans up on dispose', () => {
@@ -751,6 +1093,159 @@ describe('usePwaEnvironment', () => {
       computedSpy.mockRestore()
       rafSpy.mockRestore()
       cancelSpy.mockRestore()
+    }
+  })
+
+  test('widens Duo outer standalone viewport, reacts to orientation/unfold, yields to native insets, and snaps scrollX back to 0', () => {
+    vi.useFakeTimers()
+    document.documentElement.setAttribute('data-pwa-simulate-standalone', 'true')
+
+    const originalScreen = Object.getOwnPropertyDescriptor(window, 'screen')
+    const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+    const originalScrollX = Object.getOwnPropertyDescriptor(window, 'scrollX')
+    const originalScrollTo = window.scrollTo
+
+    const orientationTarget = new EventTarget()
+    let orientationType = 'portrait-primary'
+    let screenWidth = 466
+    let screenHeight = 678
+    let innerWidth = 382
+    let innerHeight = 678
+    let currentScrollX = 0
+    let nativeEnvRight = '0px'
+
+    Object.defineProperty(window, 'screen', {
+      configurable: true,
+      get: () => ({
+        width: screenWidth,
+        height: screenHeight,
+        orientation: {
+          get type() {
+            return orientationType
+          },
+          addEventListener: orientationTarget.addEventListener.bind(orientationTarget),
+          removeEventListener: orientationTarget.removeEventListener.bind(orientationTarget),
+        },
+      }),
+    })
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      get: () => innerWidth,
+    })
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      get: () => innerHeight,
+    })
+    Object.defineProperty(window, 'scrollX', {
+      configurable: true,
+      get: () => currentScrollX,
+    })
+
+    const scrollToSpy = vi.fn((options?: ScrollToOptions | number) => {
+      if (typeof options === 'object' && options?.left !== undefined) {
+        currentScrollX = options.left
+      }
+    })
+    window.scrollTo = scrollToSpy as unknown as typeof window.scrollTo
+
+    const originalGetComputedStyle = window.getComputedStyle.bind(window)
+    const computedSpy = vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
+      const style = originalGetComputedStyle(el)
+      if (el instanceof HTMLElement && el.style.paddingRight.includes('--ariadne-safe-right')) {
+        return new Proxy(style, {
+          get(target, prop) {
+            if (prop === 'marginRight') return nativeEnvRight
+            if (prop === 'paddingRight') {
+              return document.documentElement.dataset.duoFrontWiden ? '84px' : nativeEnvRight
+            }
+            return Reflect.get(target, prop)
+          },
+        })
+      }
+      return style
+    })
+
+    const scope = effectScope()
+    try {
+      const env = scope.run(() => usePwaEnvironment())!
+      expect(env.duoFrontWiden.value.active).toBe(true)
+      expect(env.duoFrontWiden.value.targetWidth).toBe(466)
+      expect(meta.content).toBe(buildDuoFrontViewportContent(466))
+      expect(document.documentElement.dataset.duoFrontWiden).toBe('portrait')
+      expect(env.insets.right).toBe(84)
+      expect(env.duoRail.value).toEqual({ active: true, compactHeight: false })
+
+      // Sideways drag while finger is down waits until touchend + settle delay before gliding back.
+      currentScrollX = 48
+      const touchStart = new Event('touchstart')
+      Object.defineProperty(touchStart, 'touches', { value: [{}] })
+      window.dispatchEvent(touchStart)
+      window.dispatchEvent(new Event('scroll'))
+      vi.advanceTimersByTime(300)
+      expect(scrollToSpy).not.toHaveBeenCalled()
+
+      const touchEnd = new Event('touchend')
+      Object.defineProperty(touchEnd, 'touches', { value: [] })
+      window.dispatchEvent(touchEnd)
+      vi.advanceTimersByTime(250)
+      expect(scrollToSpy).toHaveBeenCalledWith({ left: 0, behavior: 'smooth' })
+      expect(currentScrollX).toBe(0)
+
+      // Rotate to landscape-secondary (right column): widen to 678 and enable compactHeight.
+      orientationType = 'landscape-secondary'
+      innerWidth = 594
+      innerHeight = 466
+      orientationTarget.dispatchEvent(new Event('change'))
+      expect(env.duoFrontWiden.value.targetWidth).toBe(678)
+      expect(meta.content).toBe(buildDuoFrontViewportContent(678))
+      expect(document.documentElement.dataset.duoFrontWiden).toBe('landscape-secondary')
+      expect(env.duoRail.value).toEqual({ active: true, compactHeight: true })
+
+      // Flip 180deg to landscape-primary (left column): disable widening cleanly.
+      orientationType = 'landscape-primary'
+      orientationTarget.dispatchEvent(new Event('change'))
+      expect(env.duoFrontWiden.value.active).toBe(false)
+      expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+      expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
+      expect(env.insets.right).toBe(0)
+      expect(env.duoRail.value.active).toBe(false)
+
+      // Return to outer portrait, then unfold to inner display with stale screen.width=466.
+      orientationType = 'portrait-primary'
+      innerWidth = 382
+      innerHeight = 678
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value.active).toBe(true)
+
+      innerWidth = 951
+      innerHeight = 669
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value.active).toBe(false)
+      expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+
+      // Fold back to outer portrait and simulate native WebKit exposing env(safe-area-inset-right)=84px.
+      innerWidth = 466
+      innerHeight = 678
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value.active).toBe(true)
+
+      nativeEnvRight = '84px'
+      window.dispatchEvent(new Event('resize'))
+      expect(env.duoFrontWiden.value.active).toBe(false)
+      expect(meta.content).toBe(STANDALONE_VIEWPORT_CONTENT)
+      expect(document.documentElement.dataset.duoFrontWiden).toBeUndefined()
+      expect(env.insets.right).toBe(84)
+      expect(env.duoRail.value.active).toBe(true)
+    } finally {
+      scope.stop()
+      computedSpy.mockRestore()
+      window.scrollTo = originalScrollTo
+      if (originalScreen) Object.defineProperty(window, 'screen', originalScreen)
+      if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth)
+      if (originalInnerHeight) Object.defineProperty(window, 'innerHeight', originalInnerHeight)
+      if (originalScrollX) Object.defineProperty(window, 'scrollX', originalScrollX)
+      vi.useRealTimers()
     }
   })
 })

@@ -12,6 +12,23 @@
   --ariadne-safe-left: env(safe-area-inset-left, 0px);
 }
 
+/*
+ * On iPhone Duo's outer display, WebKit lays standalone PWAs out beside the 84pt
+ * side column with safe-area-inset-right: 0px even though the WKWebView spans the
+ * full screen. When pwa.ts widens the layout viewport to 466/678pt, reserve the
+ * right 84pt strip for DuoSafeAreaRail, keep page panning vertical, and hide the
+ * resulting horizontal scrollbar.
+ */
+html[data-duo-front-widen] {
+  --ariadne-safe-right: max(env(safe-area-inset-right, 0px), 84px);
+  touch-action: pan-y;
+}
+
+html[data-duo-front-widen]::-webkit-scrollbar:horizontal,
+html[data-duo-front-widen] > body::-webkit-scrollbar:horizontal {
+  display: none !important;
+}
+
 html,
 body {
   background-color: var(--dou-color-bg-canvas);

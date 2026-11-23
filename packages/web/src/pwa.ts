@@ -1,6 +1,43 @@
 import { computed, onScopeDispose, reactive, ref, type ComputedRef, type InjectionKey } from 'vue'
+import {
+  DEFAULT_VIEWPORT_CONTENT,
+  DUO_COMPACT_HEIGHT_MAX,
+  DUO_FRONT_COLUMN_WIDTH,
+  DUO_FRONT_LONG_SIDE,
+  DUO_FRONT_MAX_SIDE,
+  DUO_FRONT_SHORT_SIDE,
+  DUO_RIGHT_ASYMMETRY_MIN,
+  DUO_RIGHT_INSET_MIN,
+  STANDALONE_VIEWPORT_CONTENT,
+  buildDuoFrontViewportContent,
+  duoFrontViewportScript,
+  resolveDuoFrontWiden,
+  sanitizeVisualScale,
+  type DuoFrontWidenInput,
+  type DuoFrontWidenPosture,
+  type DuoFrontWidenState,
+} from './pwa-viewport'
 import type { MainView, WorkspaceLevel } from './store'
 import type { WorkspaceLayoutMode } from './workspace-layout'
+
+export {
+  DEFAULT_VIEWPORT_CONTENT,
+  DUO_COMPACT_HEIGHT_MAX,
+  DUO_FRONT_COLUMN_WIDTH,
+  DUO_FRONT_LONG_SIDE,
+  DUO_FRONT_MAX_SIDE,
+  DUO_FRONT_SHORT_SIDE,
+  DUO_RIGHT_ASYMMETRY_MIN,
+  DUO_RIGHT_INSET_MIN,
+  STANDALONE_VIEWPORT_CONTENT,
+  buildDuoFrontViewportContent,
+  duoFrontViewportScript,
+  resolveDuoFrontWiden,
+  sanitizeVisualScale,
+  type DuoFrontWidenInput,
+  type DuoFrontWidenPosture,
+  type DuoFrontWidenState,
+}
 
 export interface SafeAreaInsets {
   top: number
@@ -53,18 +90,6 @@ export type DuoBackAction = 'main' | 'cancel-new' | 'to-coordinator' | 'to-proje
 
 export const foldLayoutKey: InjectionKey<ComputedRef<FoldLayoutState>> = Symbol('ariadne.fold')
 
-export const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, viewport-fit=cover'
-export const STANDALONE_VIEWPORT_CONTENT =
-  'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
-
-/**
- * iPhone Duo reserves ~84pt on one vertical edge when folded upright or unfolded sideways,
- * whereas standard iPhones in landscape report symmetric ~47-59pt left/right insets.
- */
-export const DUO_RIGHT_INSET_MIN = 64
-export const DUO_RIGHT_ASYMMETRY_MIN = 40
-export const DUO_COMPACT_HEIGHT_MAX = 520
-
 interface DevicePostureLike extends EventTarget {
   readonly type: DevicePostureType
 }
@@ -101,12 +126,29 @@ export function isStandalonePwa(
 export function syncStandaloneViewport(
   standalone: boolean,
   doc: Pick<Document, 'documentElement' | 'querySelector'> = document,
+  options?: {
+    duoFrontWiden?: DuoFrontWidenState | null
+    visualScale?: number | null
+  },
 ): string {
   const root = doc.documentElement
   if (standalone) root.dataset.pwaStandalone = 'true'
   else delete root.dataset.pwaStandalone
 
-  const next = standalone ? STANDALONE_VIEWPORT_CONTENT : DEFAULT_VIEWPORT_CONTENT
+  const widen = options?.duoFrontWiden
+  const useDuoWiden = Boolean(standalone && widen?.active && widen.targetWidth !== null)
+  if (useDuoWiden) {
+    const posture = widen?.posture ?? 'portrait'
+    if (root.dataset.duoFrontWiden !== posture) root.dataset.duoFrontWiden = posture
+  } else if ('duoFrontWiden' in root.dataset) {
+    delete root.dataset.duoFrontWiden
+  }
+
+  const next = useDuoWiden
+    ? buildDuoFrontViewportContent(widen!.targetWidth!, options?.visualScale)
+    : standalone
+      ? STANDALONE_VIEWPORT_CONTENT
+      : DEFAULT_VIEWPORT_CONTENT
   const meta = doc.querySelector<HTMLMetaElement>('meta[name="viewport"]')
   if (meta && meta.content !== next) {
     meta.content = next
@@ -367,10 +409,15 @@ function parsePixels(value: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
+interface ProbedSafeAreaInsets extends SafeAreaInsets {
+  /** Native right safe-area inset excluding Ariadne's synthetic Duo widen override. */
+  nativeRight: number
+}
+
 interface SafeAreaProbes {
   topRight: HTMLDivElement
   bottomLeft: HTMLDivElement
-  read(win: Window): SafeAreaInsets
+  read(win: Window): ProbedSafeAreaInsets
   remove(): void
 }
 
@@ -402,6 +449,7 @@ function createSafeAreaProbes(doc: Document): SafeAreaProbes | null {
   const topRight = createProbeElement(doc, [
     'padding-top:var(--ariadne-safe-top, env(safe-area-inset-top, 0px))',
     'padding-right:var(--ariadne-safe-right, env(safe-area-inset-right, 0px))',
+    'margin-right:env(safe-area-inset-right, 0px)',
   ])
   const bottomLeft = createProbeElement(doc, [
     'padding-bottom:var(--ariadne-safe-bottom, env(safe-area-inset-bottom, 0px))',
@@ -413,11 +461,16 @@ function createSafeAreaProbes(doc: Document): SafeAreaProbes | null {
     read(win) {
       const tr = win.getComputedStyle(topRight)
       const bl = win.getComputedStyle(bottomLeft)
+      const paddedRight = parsePixels(tr.paddingRight)
+      const envRight = parsePixels(tr.marginRight)
+      const widened = Boolean(doc.documentElement.dataset.duoFrontWiden)
+      const nativeRight = widened ? envRight : Math.max(paddedRight, envRight)
       return {
         top: parsePixels(tr.paddingTop),
-        right: parsePixels(tr.paddingRight),
+        right: widened ? Math.max(paddedRight, envRight) : paddedRight,
         bottom: parsePixels(bl.paddingBottom),
         left: parsePixels(bl.paddingLeft),
+        nativeRight,
       }
     },
     remove() {
@@ -437,6 +490,13 @@ export function usePwaEnvironment() {
   const insets = reactive<SafeAreaInsets>({ top: 0, right: 0, bottom: 0, left: 0 })
   const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0)
   const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0)
+  const duoFrontWiden = ref<DuoFrontWidenState>({
+    active: false,
+    posture: null,
+    targetWidth: null,
+    rightInset: 0,
+    compactHeight: false,
+  })
   const foldSupported = ref(false)
   const foldPosture = ref<DevicePostureType>('continuous')
   const foldSegments = ref<ViewportSegmentRect[]>([])
@@ -467,20 +527,86 @@ export function usePwaEnvironment() {
 
     let measuring = false
     let rafId: number | null = null
+    let activeTouches = 0
+    let scrollSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+    const alignDuoScroll = (smooth: boolean) => {
+      if (!duoFrontWiden.value.active || activeTouches > 0) return
+      if (Math.abs(win.scrollX) <= 0.5) return
+      win.scrollTo?.({ left: 0, behavior: smooth ? 'smooth' : 'instant' })
+    }
+
+    const scheduleScrollSettle = () => {
+      if (!duoFrontWiden.value.active) return
+      if (scrollSettleTimer !== null) clearTimeout(scrollSettleTimer)
+      scrollSettleTimer = setTimeout(() => {
+        scrollSettleTimer = null
+        if (!duoFrontWiden.value.active) return
+        if (activeTouches > 0) {
+          scheduleScrollSettle()
+          return
+        }
+        alignDuoScroll(true)
+      }, 250)
+    }
+
+    const trackTouches = (event: Event) => {
+      const touches = (event as TouchEvent).touches
+      activeTouches = touches ? touches.length : 0
+      if (activeTouches === 0 && duoFrontWiden.value.active && Math.abs(win.scrollX) > 0.5) {
+        scheduleScrollSettle()
+      }
+    }
+
     const measure = () => {
       if (measuring) return
       measuring = true
       try {
         const nextStandalone = isStandalonePwa(win, document)
         standalone.value = nextStandalone
-        syncStandaloneViewport(nextStandalone, document)
+
+        const probed = probes?.read(win) ?? {
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          nativeRight: 0,
+        }
+
+        const visualScale = win.visualViewport?.scale
+        const nextWiden = resolveDuoFrontWiden({
+          standalone: nextStandalone,
+          screenWidth: win.screen?.width ?? 0,
+          screenHeight: win.screen?.height ?? 0,
+          innerWidth: win.innerWidth,
+          innerHeight: win.innerHeight,
+          visualScale,
+          orientationType: win.screen?.orientation?.type,
+          nativeRightInset: probed.nativeRight,
+          nativeLeftInset: probed.left,
+          alreadyWidened: Boolean(document.documentElement.dataset.duoFrontWiden),
+        })
+        duoFrontWiden.value = nextWiden
+
+        syncStandaloneViewport(nextStandalone, document, {
+          duoFrontWiden: nextWiden,
+          visualScale,
+        })
 
         if (probes) {
-          const nextInsets = probes.read(win)
-          insets.top = nextInsets.top
-          insets.right = nextInsets.right
-          insets.bottom = nextInsets.bottom
-          insets.left = nextInsets.left
+          insets.top = probed.top
+          insets.right = Math.max(probed.nativeRight, nextWiden.active ? nextWiden.rightInset : 0)
+          insets.bottom = probed.bottom
+          insets.left = probed.left
+        } else {
+          insets.right = nextWiden.active ? nextWiden.rightInset : 0
+        }
+
+        if (nextWiden.active) {
+          alignDuoScroll(false)
+        } else if (scrollSettleTimer !== null) {
+          clearTimeout(scrollSettleTimer)
+          scrollSettleTimer = null
         }
 
         const foldInput = readNativeFoldInput(win)
@@ -542,9 +668,20 @@ export function usePwaEnvironment() {
     const postureApi = (win.navigator as NavigatorWithPwaApis | undefined)?.devicePosture
     postureApi?.addEventListener?.('change', measure)
 
+    const screenOrientation = win.screen?.orientation
+    screenOrientation?.addEventListener?.('change', onOrientationChange)
+
+    const visualViewport = win.visualViewport
+    visualViewport?.addEventListener?.('resize', measure)
+    visualViewport?.addEventListener?.('scroll', scheduleScrollSettle)
+
     win.addEventListener('resize', measure, { passive: true })
     win.addEventListener('orientationchange', onOrientationChange, { passive: true })
     win.addEventListener('pageshow', scheduleMeasure, { passive: true })
+    win.addEventListener('scroll', scheduleScrollSettle, { passive: true })
+    win.addEventListener('touchstart', trackTouches, { passive: true, capture: true })
+    win.addEventListener('touchend', trackTouches, { passive: true, capture: true })
+    win.addEventListener('touchcancel', trackTouches, { passive: true, capture: true })
     document.addEventListener('visibilitychange', onVisibilityChange)
     document.addEventListener('gesturestart', blockStandaloneGestureZoom, { passive: false })
 
@@ -575,13 +712,24 @@ export function usePwaEnvironment() {
         win.cancelAnimationFrame?.(rafId)
         rafId = null
       }
+      if (scrollSettleTimer !== null) {
+        clearTimeout(scrollSettleTimer)
+        scrollSettleTimer = null
+      }
       for (const query of mediaQueries) {
         query.removeEventListener?.('change', measure)
       }
       postureApi?.removeEventListener?.('change', measure)
+      screenOrientation?.removeEventListener?.('change', onOrientationChange)
+      visualViewport?.removeEventListener?.('resize', measure)
+      visualViewport?.removeEventListener?.('scroll', scheduleScrollSettle)
       win.removeEventListener('resize', measure)
       win.removeEventListener('orientationchange', onOrientationChange)
       win.removeEventListener('pageshow', scheduleMeasure)
+      win.removeEventListener('scroll', scheduleScrollSettle)
+      win.removeEventListener('touchstart', trackTouches, true)
+      win.removeEventListener('touchend', trackTouches, true)
+      win.removeEventListener('touchcancel', trackTouches, true)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       document.removeEventListener('gesturestart', blockStandaloneGestureZoom)
       resizeObserver?.disconnect()
@@ -594,6 +742,7 @@ export function usePwaEnvironment() {
     standalone,
     insets,
     duoRail,
+    duoFrontWiden,
     fold,
   }
 }

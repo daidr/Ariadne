@@ -3,12 +3,14 @@ import { colorModeScript } from 'dou-ui'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { COLOR_MODE_KEY, THEME_COLORS, themeColorScript } from './src/color-mode'
+import { duoFrontViewportScript } from './src/pwa-viewport'
 
 export default defineConfig({
   plugins: [
     vue(),
     {
-      // Write data-dou-theme before the first paint, so dark mode does not flash light.
+      // Write data-dou-theme before the first paint, so dark mode does not flash light,
+      // and widen iPhone Duo's outer-screen standalone viewport before first layout.
       name: 'ariadne-color-mode',
       transformIndexHtml: () => [
         {
@@ -19,6 +21,11 @@ export default defineConfig({
         {
           tag: 'script',
           children: themeColorScript(),
+          injectTo: 'head',
+        },
+        {
+          tag: 'script',
+          children: duoFrontViewportScript(),
           injectTo: 'head',
         },
       ],
