@@ -73,9 +73,136 @@ type turn struct {
 	mergeRequestID    string
 	quiet             bool
 	changes           *turnChanges
+	looks             coordinatorLookState
+	todo              todoHintState
+	reviewChecked     bool
+	isReview          bool
 }
 
-const maxToolResultChars = 200_000
+const (
+	maxToolResultChars = 200_000
+
+	coordinatorLookHint           = 6
+	coordinatorLookLimit          = 12
+	coordinatorResearchLookWeight = 3
+	coordinatorLookHintText       = "[Ariadne: you have looked at a lot this turn. Looking further is doing the work yourself, and work is a thread's: put what you found into a brief and open a thread with create_thread (or pass it to the thread that has it with message_thread). Answer yourself only if what you have already answers the user.]"
+	coordinatorLookRefusedText    = "[Ariadne: not run. You have looked as far as a coordinator does in one turn without handing anything to a thread. Open a thread with create_thread and put what you found into its brief, or message the thread that has the work; after that you may look again for the next one.]"
+
+	todoMissingAfter = 3
+	todoStaleAfter   = 10
+	todoMissingHint  = "[Ariadne: you are working without a todo list, so the user cannot see what you are doing or what comes next. Write your steps with update_todo now, before your next step, and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoFinishedHint = "[Ariadne: your todo list is the finished one of earlier work, so the user cannot see what you are doing now. Write the steps of this work with update_todo now, before your next step (keep the earlier ones as done if they still matter), and keep it current as you go. A rough outline is enough; change it as you learn more.]"
+	todoStaleHint    = "[Ariadne: your todo list has not changed for many steps. If it no longer shows where you are, bring it up to date with update_todo: mark finished steps done and the one you are on as doing.]"
+)
+
+type coordinatorLookState struct {
+	looks  int
+	hinted bool
+}
+
+type lookDecision struct {
+	refused bool
+	hint    bool
+}
+
+func coordinatorLookWeight(name string) int {
+	switch name {
+	case "research":
+		return coordinatorResearchLookWeight
+	case "list_dir", "read_file", "search", "find_files", "fetch_url", "web_search", "browser":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func coordinatorHandsOver(name string) bool {
+	return name == "create_thread" || name == "message_thread"
+}
+
+func (state *coordinatorLookState) reset() {
+	state.looks = 0
+	state.hinted = false
+}
+
+func (state *coordinatorLookState) reserve(name string) lookDecision {
+	weight := coordinatorLookWeight(name)
+	if weight == 0 {
+		return lookDecision{}
+	}
+	if state.looks+weight > coordinatorLookLimit {
+		return lookDecision{refused: true}
+	}
+	state.looks += weight
+	hint := !state.hinted && state.looks >= coordinatorLookHint
+	if hint {
+		state.hinted = true
+	}
+	return lookDecision{hint: hint}
+}
+
+type todoHintState struct {
+	workSteps     int
+	sinceTodo     int
+	todoThisTurn  bool
+	hintedMissing bool
+	hintedStale   bool
+}
+
+func appendHint(content, hint string) string {
+	if hint == "" {
+		return content
+	}
+	if content == "" {
+		return hint
+	}
+	return content + "\n\n" + hint
+}
+
+func (turn *turn) isReviewThread(ctx context.Context) bool {
+	if turn.conversation.Role != "thread" {
+		return false
+	}
+	if !turn.reviewChecked {
+		turn.reviewChecked = true
+		if thread, err := turn.Repository.GetThread(ctx, turn.conversation.ID); err == nil {
+			author, ok := thread.ReviewOf.(string)
+			turn.isReview = ok && author != ""
+		}
+	}
+	return turn.isReview
+}
+
+func (turn *turn) todoHint(ctx context.Context, state *todoHintState) (string, error) {
+	todo, err := turn.Repository.GetTodo(ctx, turn.conversation.ID)
+	if err != nil {
+		return "", err
+	}
+	items, _ := todo["items"].([]any)
+	finished := len(items) > 0
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if text(item, "status") != "done" {
+			finished = false
+			break
+		}
+	}
+	if len(items) == 0 || (finished && !state.todoThisTurn) {
+		if state.hintedMissing || state.workSteps < todoMissingAfter {
+			return "", nil
+		}
+		state.hintedMissing = true
+		if len(items) > 0 {
+			return todoFinishedHint, nil
+		}
+		return todoMissingHint, nil
+	}
+	if state.hintedStale || state.sinceTodo < todoStaleAfter || finished {
+		return "", nil
+	}
+	state.hintedStale = true
+	return todoStaleHint, nil
+}
 
 func (runner *Runner) Resolve(ctx context.Context, conversation core.ConversationView) (*settings.ResolvedModel, error) {
 	kinds := runner.Models.Kinds()
@@ -498,6 +625,20 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 	for _, entry := range tools {
 		byName[entry.spec.Name] = entry
 	}
+	var lookDecisions []lookDecision
+	if turn.conversation.Role == "coordinator" {
+		if slices.ContainsFunc(calls, func(call sdk.ToolCall) bool { return coordinatorHandsOver(call.Name) }) {
+			turn.looks.reset()
+		}
+		lookDecisions = make([]lookDecision, len(calls))
+		for index, call := range calls {
+			lookDecisions[index] = turn.looks.reserve(call.Name)
+		}
+	}
+	_, hasTodo := byName["update_todo"]
+	todoWatched := !turn.quiet && !turn.isReviewThread(ctx) && hasTodo
+	wroteTodo := false
+
 	hash := sha256.New()
 	progressed := false
 	allWaited := len(calls) > 0
@@ -512,55 +653,85 @@ func (turn *turn) execute(ctx context.Context, tools []tool, calls []sdk.ToolCal
 		var attachments []any
 		var effect repeatEffect
 		var err error
-		if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
-			err = errors.New("tool arguments must be a JSON object within 2 MiB")
-		} else if turn.quiet && coordinatorChatTool(call.Name) {
-			err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
-		} else if entry, available := byName[call.Name]; !available {
-			err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
+		isError := false
+		if turn.conversation.Role == "coordinator" && lookDecisions[index].refused {
+			content = coordinatorLookRefusedText
+			isError = true
+			allWaited = false
 		} else {
-			if turn.draft != nil && replyTool(call.Name) && (*turn.draftCall != index || turn.draftTool != call.Name) {
-				// A preview belongs to exactly one call in this response.
+			if len(call.Arguments) > 2<<20 || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
+				err = errors.New("tool arguments must be a JSON object within 2 MiB")
+			} else if turn.quiet && coordinatorChatTool(call.Name) {
+				err = errors.New("that discussion owns the user-facing reply. Use message_thread if it needs coordination or a correction, or end the turn silently")
+			} else if entry, available := byName[call.Name]; !available {
+				err = fmt.Errorf("tool %q is unavailable", textutil.HeadUnits(call.Name, 128))
+			} else {
+				if turn.draft != nil && replyTool(call.Name) && (*turn.draftCall != index || turn.draftTool != call.Name) {
+					// A preview belongs to exactly one call in this response.
+					turn.clearDraft()
+				}
+				if entry.withCallID != nil {
+					content, err = entry.withCallID(ctx, call.ID, args)
+				} else if entry.call != nil {
+					content, attachments, err = entry.call(ctx, args)
+				} else if entry.poll != nil {
+					content, effect, err = entry.poll(ctx, args)
+				} else {
+					content, err = entry.run(ctx, args)
+				}
+			}
+			if effect == repeatProgress {
+				progressed = true
+			}
+			if effect != repeatWait {
+				allWaited = false
+			}
+			if err != nil && turn.draft != nil && *turn.draftCall == index {
 				turn.clearDraft()
 			}
-			if entry.withCallID != nil {
-				content, err = entry.withCallID(ctx, call.ID, args)
-			} else if entry.call != nil {
-				content, attachments, err = entry.call(ctx, args)
-			} else if entry.poll != nil {
-				content, effect, err = entry.poll(ctx, args)
-			} else {
-				content, err = entry.run(ctx, args)
+			if draft := turn.artifactDrafts[index]; draft != nil {
+				draft.Close()
+				delete(turn.artifactDrafts, index)
 			}
-		}
-		if effect == repeatProgress {
-			progressed = true
-		}
-		if effect != repeatWait {
-			allWaited = false
-		}
-		if err != nil && turn.draft != nil && *turn.draftCall == index {
-			turn.clearDraft()
-		}
-		if draft := turn.artifactDrafts[index]; draft != nil {
-			draft.Close()
-			delete(turn.artifactDrafts, index)
-		}
-		if ctx.Err() != nil {
-			return batchDigest{}, ctx.Err()
-		}
-		if err != nil && content == "" {
-			hint := ""
-			if _, available := byName[fileSourceToolName]; available {
-				hint = referenceReadHint(call.Name, err)
+			if ctx.Err() != nil {
+				return batchDigest{}, ctx.Err()
 			}
-			content = textutil.HeadUnits(toolErrorText(err), 2000-len(hint)) + hint
+			if call.Name == "update_todo" && err == nil {
+				wroteTodo = true
+			}
+			isError = err != nil
+			if err != nil && content == "" {
+				hint := ""
+				if _, available := byName[fileSourceToolName]; available {
+					hint = referenceReadHint(call.Name, err)
+				}
+				content = textutil.HeadUnits(toolErrorText(err), 2000-len(hint)) + hint
+			}
+			content = strings.Clone(textutil.HeadUnits(content, maxToolResultChars))
 		}
-		content = strings.Clone(textutil.HeadUnits(content, maxToolResultChars))
-		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, err != nil, attachments})
+		encoded, _ := json.Marshal([]any{call.Name, call.Arguments, content, isError, attachments})
 		_, _ = hash.Write(encoded)
+		if turn.conversation.Role == "coordinator" && lookDecisions[index].hint {
+			content = appendHint(content, coordinatorLookHintText)
+		}
+		if index == len(calls)-1 {
+			turn.todo.workSteps++
+			if wroteTodo {
+				turn.todo.sinceTodo = 0
+				turn.todo.todoThisTurn = true
+			} else {
+				turn.todo.sinceTodo++
+			}
+			if todoWatched {
+				hint, hintErr := turn.todoHint(ctx, &turn.todo)
+				if hintErr != nil {
+					return batchDigest{}, hintErr
+				}
+				content = appendHint(content, hint)
+			}
+		}
 		if err := turn.Repository.RecordToolResult(ctx, turn.conversation.ID, turn.id, core.ToolResult{
-			ToolCallID: call.ID, Name: call.Name, Content: content, IsError: err != nil, Files: attachments,
+			ToolCallID: call.ID, Name: call.Name, Content: content, IsError: isError, Files: attachments,
 			Timing: map[string]int64{"startedAt": started, "finishedAt": time.Now().UnixMilli()},
 		}); err != nil {
 			return batchDigest{}, err
