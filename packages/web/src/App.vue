@@ -124,12 +124,14 @@ watch(split, (value) => {
   }
 })
 
-// Align the coordinator/side divider with the physical hinge when half-folded like a book,
+// Align the coordinator/side divider with the physical hinge when half-folded like a book
+// and the inner splitter spans the full safe width (no wide project sidebar beside it),
 // without overwriting the user's saved flat-screen split preference.
 const isHorizontalFold = computed(
   () =>
     !isNarrow.value &&
     !(isMedium.value && mediumSideCollapsed.value) &&
+    !(isWide.value && !projectsCollapsed.value) &&
     fold.value.mode === 'horizontal' &&
     fold.value.horizontalSplitPercent !== null,
 )
@@ -354,6 +356,7 @@ body,
 .workspace-split[data-single-pane] .start-panel {
   overflow: auto;
   align-items: safe center;
-  padding-block: 24px;
+  padding-top: 24px;
+  padding-bottom: calc(24px + var(--ariadne-safe-bottom));
 }
 </style>

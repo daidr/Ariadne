@@ -81,6 +81,8 @@ const totalNeedsMe = computed(() =>
   state.projects.reduce((sum, project) => sum + project.needsMe, 0),
 )
 
+const canActOnProjects = computed(() => isNarrow.value || state.main.kind !== 'trace')
+
 const projectsActionLabel = computed(() => {
   if (isNarrow.value) return t(atProjects.value ? 'nav.newProject' : 'nav.projects')
   if (isMedium.value) return t('nav.switchProject')
@@ -175,6 +177,7 @@ watch(
         <template #content>
           <div class="duo-rail-menu" role="menu">
             <DouButton
+              v-if="canActOnProjects"
               variant="ghost"
               size="sm"
               class="duo-rail-menu-item"

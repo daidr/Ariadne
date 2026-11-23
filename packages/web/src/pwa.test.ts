@@ -88,6 +88,7 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 0, right: 84, bottom: 34, left: 0 },
+        viewportWidth: 466,
         viewportHeight: 678,
       }),
     ).toEqual({ active: true, compactHeight: false })
@@ -96,19 +97,30 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 0, right: 84, bottom: 34, left: 0 },
+        viewportWidth: 951,
         viewportHeight: 669,
       }),
     ).toEqual({ active: true, compactHeight: false })
   })
 
-  test('flags compactHeight for folded landscape-left where the cutout sits at bottom-right', () => {
+  test('flags compactHeight only in short landscape postures, never in portrait', () => {
     expect(
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 0, right: 84, bottom: 34, left: 0 },
+        viewportWidth: 678,
         viewportHeight: 466,
       }),
     ).toEqual({ active: true, compactHeight: true })
+
+    expect(
+      resolveDuoRightRail({
+        standalone: true,
+        insets: { top: 0, right: 84, bottom: 34, left: 0 },
+        viewportWidth: 466,
+        viewportHeight: 480,
+      }),
+    ).toEqual({ active: true, compactHeight: false })
   })
 
   test('stays inactive outside standalone, on symmetric landscape phones, and on top/left insets', () => {
@@ -116,6 +128,7 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: false,
         insets: { top: 0, right: 84, bottom: 34, left: 0 },
+        viewportWidth: 466,
         viewportHeight: 678,
       }),
     ).toEqual({ active: false, compactHeight: false })
@@ -124,6 +137,7 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 0, right: 59, bottom: 21, left: 59 },
+        viewportWidth: 852,
         viewportHeight: 393,
       }),
     ).toEqual({ active: false, compactHeight: false })
@@ -132,6 +146,7 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 0, right: 0, bottom: 34, left: 84 },
+        viewportWidth: 678,
         viewportHeight: 466,
       }),
     ).toEqual({ active: false, compactHeight: false })
@@ -140,6 +155,7 @@ describe('resolveDuoRightRail', () => {
       resolveDuoRightRail({
         standalone: true,
         insets: { top: 82, right: 0, bottom: 34, left: 0 },
+        viewportWidth: 669,
         viewportHeight: 951,
       }),
     ).toEqual({ active: false, compactHeight: false })
@@ -147,7 +163,7 @@ describe('resolveDuoRightRail', () => {
 })
 
 describe('resolveDuoBackAction', () => {
-  test('prioritizes sub-views, new-project cancel, then narrow drill-down levels', () => {
+  test('matches App.vue rendering priority across narrow levels, trace, starting, and sub-views', () => {
     expect(
       resolveDuoBackAction({
         mainKind: 'trace',
@@ -158,6 +174,49 @@ describe('resolveDuoBackAction', () => {
       }),
     ).toBe('main')
 
+    // In narrow mode, projects list hides main views and has no higher level to go back to.
+    expect(
+      resolveDuoBackAction({
+        mainKind: 'plan',
+        starting: false,
+        hasCurrentProject: true,
+        layoutMode: 'narrow',
+        workspaceLevel: 'projects',
+      }),
+    ).toBeNull()
+
+    expect(
+      resolveDuoBackAction({
+        mainKind: 'trace',
+        starting: false,
+        hasCurrentProject: true,
+        layoutMode: 'narrow',
+        workspaceLevel: 'projects',
+      }),
+    ).toBeNull()
+
+    // In narrow mode, backing out of the side pane always returns to the coordinator first.
+    expect(
+      resolveDuoBackAction({
+        mainKind: 'artifacts',
+        starting: false,
+        hasCurrentProject: true,
+        layoutMode: 'narrow',
+        workspaceLevel: 'side',
+      }),
+    ).toBe('to-coordinator')
+
+    // StartScreen takes precedence over plan/artifacts when creating a new project.
+    expect(
+      resolveDuoBackAction({
+        mainKind: 'plan',
+        starting: true,
+        hasCurrentProject: true,
+        layoutMode: 'medium',
+        workspaceLevel: 'coordinator',
+      }),
+    ).toBe('cancel-new')
+
     expect(
       resolveDuoBackAction({
         mainKind: 'conversation',
@@ -167,6 +226,16 @@ describe('resolveDuoBackAction', () => {
         workspaceLevel: 'coordinator',
       }),
     ).toBe('cancel-new')
+
+    expect(
+      resolveDuoBackAction({
+        mainKind: 'artifacts',
+        starting: false,
+        hasCurrentProject: true,
+        layoutMode: 'narrow',
+        workspaceLevel: 'coordinator',
+      }),
+    ).toBe('main')
 
     expect(
       resolveDuoBackAction({
@@ -297,10 +366,12 @@ describe('readNativeFoldInput & syncFoldCssState', () => {
     document.documentElement.style.removeProperty('--ariadne-fold-bottom-height')
   })
 
-  test('reads navigator.devicePosture and window.viewport.segments when available', () => {
+  test('reads navigator.devicePosture and window.viewport.segments using layout viewport dimensions', () => {
     const input = readNativeFoldInput({
       innerWidth: 951,
       innerHeight: 669,
+      // Simulate an open virtual keyboard shrinking visualViewport without changing layout viewport.
+      visualViewport: { width: 951, height: 340 },
       matchMedia: vi.fn().mockReturnValue({ matches: false }),
       navigator: {
         devicePosture: { type: 'folded' },
@@ -325,11 +396,13 @@ describe('readNativeFoldInput & syncFoldCssState', () => {
           } as DOMRectReadOnly,
         ],
       },
-    })
+    } as Parameters<typeof readNativeFoldInput>[0])
 
     expect(input.supported).toBe(true)
     expect(input.posture).toBe('folded')
     expect(input.segments).toHaveLength(2)
+    expect(input.viewportWidth).toBe(951)
+    expect(input.viewportHeight).toBe(669)
   })
 
   test('falls back to viewport-segment media queries when JS segments are absent', () => {

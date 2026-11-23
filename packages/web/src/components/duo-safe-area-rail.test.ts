@@ -148,11 +148,38 @@ describe('DuoSafeAreaRail', () => {
 
   test('returns from main sub-views such as plan and trace before leaving the workspace level', async () => {
     openMain({ kind: 'trace', conversationId: 'crd_prj_1' })
-    const { wrapper } = mountRail({ layoutMode: 'medium' })
+    const { wrapper, layoutMode } = mountRail({ layoutMode: 'medium' })
 
     expect(wrapper.find('[data-duo-rail-side]').exists()).toBe(false)
     const backButton = wrapper.get('[data-duo-rail-back]')
     expect((backButton.element as HTMLButtonElement).disabled).toBe(false)
+
+    // In medium and wide trace views, WorkspaceHeader hides project controls so the rail menu should too.
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+    let menuTexts = [...document.querySelectorAll<HTMLButtonElement>('.duo-rail-menu-item')].map(
+      (button) => button.textContent?.trim() ?? '',
+    )
+    expect(menuTexts.some((text) => text.includes('切换项目'))).toBe(false)
+
+    layoutMode.value = 'wide'
+    await nextTick()
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+    menuTexts = [...document.querySelectorAll<HTMLButtonElement>('.duo-rail-menu-item')].map(
+      (button) => button.textContent?.trim() ?? '',
+    )
+    expect(menuTexts.some((text) => text.includes('项目列表'))).toBe(false)
+
+    // Narrow mode still allows jumping back to the project list from trace.
+    layoutMode.value = 'narrow'
+    await nextTick()
+    await wrapper.get('[data-duo-rail-menu]').trigger('click')
+    await flushPromises()
+    menuTexts = [...document.querySelectorAll<HTMLButtonElement>('.duo-rail-menu-item')].map(
+      (button) => button.textContent?.trim() ?? '',
+    )
+    expect(menuTexts.some((text) => text.includes('项目'))).toBe(true)
 
     await backButton.trigger('click')
     expect(state.main.kind).toBe('conversation')

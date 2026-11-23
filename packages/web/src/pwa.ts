@@ -117,16 +117,21 @@ export function syncStandaloneViewport(
 export function resolveDuoRightRail(options: {
   standalone: boolean
   insets: SafeAreaInsets
+  viewportWidth: number
   viewportHeight: number
 }): DuoRightRailState {
-  const { standalone, insets, viewportHeight } = options
+  const { standalone, insets, viewportWidth, viewportHeight } = options
   const active =
     standalone &&
     insets.right >= DUO_RIGHT_INSET_MIN &&
     insets.right - insets.left >= DUO_RIGHT_ASYMMETRY_MIN
   return {
     active,
-    compactHeight: active && viewportHeight > 0 && viewportHeight < DUO_COMPACT_HEIGHT_MAX,
+    compactHeight:
+      active &&
+      viewportWidth > viewportHeight &&
+      viewportHeight > 0 &&
+      viewportHeight < DUO_COMPACT_HEIGHT_MAX,
   }
 }
 
@@ -203,7 +208,6 @@ export function resolveFoldLayout(options: {
 export function readNativeFoldInput(
   win: Pick<Window, 'matchMedia' | 'navigator' | 'innerWidth' | 'innerHeight'> & {
     viewport?: ViewportWithSegments
-    visualViewport?: Pick<VisualViewport, 'width' | 'height'> | null
   },
 ): {
   supported: boolean
@@ -213,8 +217,8 @@ export function readNativeFoldInput(
   viewportHeight: number
 } {
   const nav = win.navigator as NavigatorWithPwaApis | undefined
-  const viewportWidth = win.visualViewport?.width ?? win.innerWidth
-  const viewportHeight = win.visualViewport?.height ?? win.innerHeight
+  const viewportWidth = win.innerWidth
+  const viewportHeight = win.innerHeight
 
   const postureFromJs = nav?.devicePosture?.type
   const postureFoldedQuery = win.matchMedia?.('(device-posture: folded)')?.matches === true
@@ -339,12 +343,14 @@ export function resolveDuoBackAction(options: {
   workspaceLevel: WorkspaceLevel
 }): DuoBackAction {
   const { mainKind, starting, hasCurrentProject, layoutMode, workspaceLevel } = options
-  if (mainKind !== 'conversation') return 'main'
-  if (starting && hasCurrentProject) return 'cancel-new'
   if (layoutMode === 'narrow') {
+    if (workspaceLevel === 'projects') return null
     if (workspaceLevel === 'side') return 'to-coordinator'
-    if (workspaceLevel === 'coordinator') return 'to-projects'
   }
+  if (mainKind === 'trace') return 'main'
+  if (starting && hasCurrentProject) return 'cancel-new'
+  if (mainKind !== 'conversation') return 'main'
+  if (layoutMode === 'narrow') return 'to-projects'
   return null
 }
 
@@ -392,6 +398,7 @@ export function usePwaEnvironment() {
     resolveDuoRightRail({
       standalone: standalone.value,
       insets,
+      viewportWidth: viewportWidth.value,
       viewportHeight: viewportHeight.value,
     }),
   )
@@ -462,7 +469,6 @@ export function usePwaEnvironment() {
 
     win.addEventListener('resize', measure, { passive: true })
     win.addEventListener('orientationchange', measure, { passive: true })
-    win.visualViewport?.addEventListener('resize', measure, { passive: true })
     document.addEventListener('gesturestart', blockStandaloneGestureZoom, { passive: false })
 
     const observer =
@@ -483,7 +489,6 @@ export function usePwaEnvironment() {
       postureApi?.removeEventListener?.('change', measure)
       win.removeEventListener('resize', measure)
       win.removeEventListener('orientationchange', measure)
-      win.visualViewport?.removeEventListener('resize', measure)
       document.removeEventListener('gesturestart', blockStandaloneGestureZoom)
       observer?.disconnect()
       probe?.remove()
