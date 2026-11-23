@@ -67,7 +67,11 @@ const review = useReviewComments(
   () => props.file.path,
   () => versions.value?.after ?? null,
 )
-const gutters = computed(() => [line.gutter.value, review.gutter.value])
+const gutters = computed(() =>
+  [line.gutter.value, review.gutter.value].filter(
+    (gutter) => gutter.hoverMarker || (gutter.markers?.length ?? 0) > 0,
+  ),
+)
 const widgets = computed(() => [...line.widgets.value, ...review.widgets.value])
 const oneSided = computed(() => !versions.value?.before || !versions.value?.after)
 const { language } = useCodeLanguage(() => props.file.path)
